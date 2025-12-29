@@ -56,8 +56,8 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 RUN groupadd -g 1000 akmatori && \
     useradd -u 1000 -g akmatori -m -s /bin/bash akmatori
 
-# Install Codex CLI globally
-RUN npm install -g @openai/codex
+# Install Codex CLI globally (pinned version)
+RUN npm install -g @openai/codex@0.77.0
 
 # Create data directories and fix all permissions
 # Note: Codex CLI may create files in .codex during installation
