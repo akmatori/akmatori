@@ -45,7 +45,7 @@ export default function Login() {
           <img
             src="/akmatori.svg"
             alt="Akmatori"
-            className="w-16 h-16 mx-auto mb-4"
+            className="w-32 h-32 mx-auto mb-4"
           />
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Akmatori</h1>
           <p className="text-gray-500 dark:text-gray-400 mt-2">Sign in to access the dashboard</p>
