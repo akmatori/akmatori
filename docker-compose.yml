@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: akmatori-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-akmatori}
+      - POSTGRES_USER=${POSTGRES_USER:-akmatori}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-akmatori}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-akmatori}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  akmatori:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: akmatori
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-akmatori}:${POSTGRES_PASSWORD:-akmatori}@postgres:5432/${POSTGRES_DB:-akmatori}?sslmode=disable
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+    volumes:
+      - ./akmatori_data:/akmatori
+
+  frontend:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: akmatori-frontend
+    restart: unless-stopped
+    depends_on:
+      - akmatori
+
+  proxy:
+    image: nginx:alpine
+    container_name: akmatori-proxy
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - akmatori
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    volumes:
+      - ./proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+volumes:
+  postgres_data:
+  akmatori_data:

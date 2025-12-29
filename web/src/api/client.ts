@@ -1,0 +1,288 @@
+import type {
+  Skill,
+  ToolType,
+  ToolInstance,
+  IncidentManagerConfig,
+  Incident,
+  SlackSettings,
+  SlackSettingsUpdate,
+  OpenAISettings,
+  OpenAISettingsUpdate,
+  ContextFile,
+  ValidateReferencesResponse,
+  CreateIncidentRequest,
+  CreateIncidentResponse,
+  ScriptsListResponse,
+  ScriptInfo,
+} from '../types';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+const TOKEN_KEY = 'aiops_auth_token';
+
+class ApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = 'ApiError';
+  }
+}
+
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (token) {
+    return { Authorization: `Bearer ${token}` };
+  }
+  return {};
+}
+
+async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  let response: Response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+        ...options?.headers,
+      },
+    });
+  } catch (error) {
+    // Network errors (DNS, timeout, CORS, offline)
+    const message = error instanceof Error ? error.message : 'Network error';
+    throw new ApiError(0, `Connection failed: ${message}`);
+  }
+
+  // Handle 401 Unauthorized - redirect to login
+  if (response.status === 401) {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem('aiops_auth_user');
+    window.location.href = '/login';
+    throw new ApiError(401, 'Session expired. Please log in again.');
+  }
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new ApiError(response.status, text || response.statusText);
+  }
+
+  // Handle 204 No Content
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return response.json();
+}
+
+// Incident Manager API
+export const incidentManagerApi = {
+  getConfig: () => fetchApi<IncidentManagerConfig>('/api/incident-manager/prompt'),
+
+  updatePrompt: (prompt: string) =>
+    fetchApi<IncidentManagerConfig>('/api/incident-manager/prompt', {
+      method: 'PUT',
+      body: JSON.stringify({ prompt }),
+    }),
+};
+
+// Skills API (uses skill names in URLs, not IDs)
+export const skillsApi = {
+  list: () => fetchApi<Skill[]>('/api/skills'),
+
+  get: (name: string) => fetchApi<Skill>(`/api/skills/${encodeURIComponent(name)}`),
+
+  create: (skill: { name: string; description?: string; category?: string; prompt?: string }) =>
+    fetchApi<Skill>('/api/skills', {
+      method: 'POST',
+      body: JSON.stringify(skill),
+    }),
+
+  update: (name: string, skill: Partial<Skill>) =>
+    fetchApi<Skill>(`/api/skills/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(skill),
+    }),
+
+  delete: (name: string) =>
+    fetchApi<void>(`/api/skills/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
+
+  // Get skill prompt (SKILL.md body)
+  getPrompt: (name: string) =>
+    fetchApi<{ prompt: string }>(`/api/skills/${encodeURIComponent(name)}/prompt`),
+
+  // Update skill prompt
+  updatePrompt: (name: string, prompt: string) =>
+    fetchApi<{ status: string }>(`/api/skills/${encodeURIComponent(name)}/prompt`, {
+      method: 'PUT',
+      body: JSON.stringify({ prompt }),
+    }),
+
+  // Get tools assigned to a skill
+  getTools: (name: string) => fetchApi<ToolInstance[]>(`/api/skills/${encodeURIComponent(name)}/tools`),
+
+  // Update tools assigned to a skill (triggers symlink + tools.md generation)
+  updateTools: (name: string, toolInstanceIds: number[]) =>
+    fetchApi<Skill>(`/api/skills/${encodeURIComponent(name)}/tools`, {
+      method: 'PUT',
+      body: JSON.stringify({ tool_instance_ids: toolInstanceIds }),
+    }),
+
+  // Sync skills from filesystem to database
+  sync: () =>
+    fetchApi<{ status: string; message: string }>('/api/skills/sync', {
+      method: 'POST',
+    }),
+};
+
+// Tool Types API
+export const toolTypesApi = {
+  list: () => fetchApi<ToolType[]>('/api/tool-types'),
+};
+
+// Tool Instances API
+export const toolsApi = {
+  list: () => fetchApi<ToolInstance[]>('/api/tools'),
+
+  get: (id: number) => fetchApi<ToolInstance>(`/api/tools/${id}`),
+
+  create: (tool: { tool_type_id: number; name: string; settings: Record<string, any> }) =>
+    fetchApi<ToolInstance>('/api/tools', {
+      method: 'POST',
+      body: JSON.stringify(tool),
+    }),
+
+  update: (id: number, tool: { name: string; settings: Record<string, any>; enabled: boolean }) =>
+    fetchApi<ToolInstance>(`/api/tools/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(tool),
+    }),
+
+  delete: (id: number) =>
+    fetchApi<void>(`/api/tools/${id}`, {
+      method: 'DELETE',
+    }),
+};
+
+// Incidents API
+export const incidentsApi = {
+  list: () => fetchApi<Incident[]>('/api/incidents'),
+
+  get: (uuid: string) => fetchApi<Incident>(`/api/incidents/${uuid}`),
+
+  create: (request: CreateIncidentRequest) =>
+    fetchApi<CreateIncidentResponse>('/api/incidents', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    }),
+};
+
+// Slack Settings API
+export const slackSettingsApi = {
+  get: () => fetchApi<SlackSettings>('/api/settings/slack'),
+
+  update: (settings: SlackSettingsUpdate) =>
+    fetchApi<SlackSettings>('/api/settings/slack', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    }),
+};
+
+// OpenAI Settings API
+export const openaiSettingsApi = {
+  get: () => fetchApi<OpenAISettings>('/api/settings/openai'),
+
+  update: (settings: OpenAISettingsUpdate) =>
+    fetchApi<OpenAISettings>('/api/settings/openai', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    }),
+};
+
+// Context Files API
+export const contextApi = {
+  list: () => fetchApi<ContextFile[]>('/api/context'),
+
+  get: (id: number) => fetchApi<ContextFile>(`/api/context/${id}`),
+
+  upload: async (file: File, filename: string, description?: string): Promise<ContextFile> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('filename', filename);
+    if (description) {
+      formData.append('description', description);
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/context`, {
+      method: 'POST',
+      body: formData,
+      headers: {
+        ...getAuthHeaders(),
+        // Note: Don't set Content-Type header - browser will set it with boundary
+      },
+    });
+
+    // Handle 401 Unauthorized - redirect to login
+    if (response.status === 401) {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem('aiops_auth_user');
+      window.location.href = '/login';
+      throw new ApiError(401, 'Session expired. Please log in again.');
+    }
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new ApiError(response.status, text || response.statusText);
+    }
+
+    return response.json();
+  },
+
+  delete: (id: number) =>
+    fetchApi<void>(`/api/context/${id}`, {
+      method: 'DELETE',
+    }),
+
+  getDownloadUrl: (id: number) => `${API_BASE_URL}/api/context/${id}/download`,
+
+  validate: (text: string) =>
+    fetchApi<ValidateReferencesResponse>('/api/context/validate', {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    }),
+};
+
+// Skill Scripts API (uses skill names, not IDs)
+export const scriptsApi = {
+  // List all scripts for a skill
+  list: (skillName: string) =>
+    fetchApi<ScriptsListResponse>(`/api/skills/${encodeURIComponent(skillName)}/scripts`),
+
+  // Get script content
+  get: (skillName: string, filename: string) =>
+    fetchApi<ScriptInfo>(`/api/skills/${encodeURIComponent(skillName)}/scripts/${encodeURIComponent(filename)}`),
+
+  // Update script content
+  update: (skillName: string, filename: string, content: string) =>
+    fetchApi<{ success: boolean; filename: string }>(`/api/skills/${encodeURIComponent(skillName)}/scripts/${encodeURIComponent(filename)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    }),
+
+  // Delete single script
+  delete: (skillName: string, filename: string) =>
+    fetchApi<void>(`/api/skills/${encodeURIComponent(skillName)}/scripts/${encodeURIComponent(filename)}`, {
+      method: 'DELETE',
+    }),
+
+  // Delete all scripts
+  deleteAll: (skillName: string) =>
+    fetchApi<{ message: string; skill_name: string }>(`/api/skills/${encodeURIComponent(skillName)}/scripts`, {
+      method: 'DELETE',
+    }),
+};
+
+export { ApiError };

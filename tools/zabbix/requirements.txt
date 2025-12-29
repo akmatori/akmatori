@@ -1,0 +1,11 @@
+# Zabbix Python Client Dependencies
+
+# HTTP requests library
+requests>=2.31.0
+
+# Optional: For async support (if you want to add async versions in the future)
+# httpx>=0.24.0
+# aiohttp>=3.8.0
+
+# Optional: For environment variable loading
+# python-dotenv>=1.0.0

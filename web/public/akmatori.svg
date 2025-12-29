@@ -1,0 +1,22 @@
+<svg xml:space="preserve" style="max-height: 500px" viewBox="318 252 362 348" y="0px" x="0px" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg" id="Layer_1" version="1.1" width="362" height="348">
+<style type="text/css">
+	.st0{fill:#035BDA;}
+	.st1{fill:url(#SVGID_1_);}
+	.st2{fill:#FFFFFF;}
+</style>
+<g>
+	<g>
+		<radialGradient gradientUnits="userSpaceOnUse" r="149.3459" cy="425.1401" cx="500" id="SVGID_1_">
+			<stop style="stop-color:#00E0E7" offset="0"/>
+			<stop style="stop-color:#035BDA" offset="1"/>
+		</radialGradient>
+		<circle r="149.3" cy="425.1" cx="500" class="st1"/>
+		<g>
+			<path d="M489.4,373.3c3.5-1.4,7.3-2.2,11.2-2.2c3.9,0,7.7,0.7,11.2,2.1v-39.6h17.8l-28.9-29.3l-28.9,29.3h17.6V373.3&#10;&#9;&#9;&#9;&#9;z" class="st2"/>
+			<polygon points="525.8,384.7 538.6,403.6 573.5,368.6 586,381.2 586.3,340 545.1,340.3 557.6,352.8" class="st2"/>
+			<polygon points="427.5,368.4 462.6,403.6 475.4,384.7 443.4,352.6 455.8,340.1 414.7,339.8 414.9,381" class="st2"/>
+			<path d="M521.2,387.3c-4.6-6.8-12.3-10.9-20.5-10.9h0c-8.2,0-15.9,4.1-20.5,10.9l-77.8,114.5l58.3,0.1h0&#10;&#9;&#9;&#9;&#9;c2.8,0,5.5-0.4,8.2-1.1l21.6-31.7c0.3-0.4,0.5-0.7,0.8-1.1c0.2-0.3,0.4-0.5,0.7-0.8c2.4-2.4,5.6-3.8,9.1-3.8h0.1&#10;&#9;&#9;&#9;&#9;c3.1,0,6.1,1.2,8.4,3.2c0.2,0.2,0.5,0.4,0.7,0.6c0.6,0.6,1.1,1.2,1.5,1.9l21.2,31.7c2.5,0.7,5.1,1,7.8,1l58.3,0.1L521.2,387.3z" class="st2"/>
+		</g>
+	</g>
+</g>
+</svg>

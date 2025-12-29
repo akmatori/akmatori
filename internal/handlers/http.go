@@ -1,0 +1,45 @@
+package handlers
+
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+)
+
+// HTTPHandler handles HTTP endpoints
+type HTTPHandler struct {
+	zabbixHandler *ZabbixHandler
+}
+
+// NewHTTPHandler creates a new HTTP handler
+func NewHTTPHandler(zabbixHandler *ZabbixHandler) *HTTPHandler {
+	return &HTTPHandler{
+		zabbixHandler: zabbixHandler,
+	}
+}
+
+// SetupRoutes configures all HTTP routes
+func (h *HTTPHandler) SetupRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/health", h.handleHealth)
+	mux.HandleFunc("/webhook/zabbix", h.zabbixHandler.HandleWebhook)
+}
+
+// handleHealth returns a simple health check response
+func (h *HTTPHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	response := map[string]string{
+		"status":  "ok",
+		"version": "1.0.0",
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding health response: %v", err)
+	}
+}
