@@ -257,9 +257,6 @@ func (h *ZabbixHandler) triggerInvestigation(alert *models.ZabbixAlert, threadTS
 
 	taskWithGuidance := executor.PrependGuidance(investigationPrompt)
 
-	// Track last update time for rate limiting
-	lastUpdate := make(map[string]interface{})
-
 	// Progress update callback
 	onStderrUpdate := func(progressLog string) {
 		// Update progress message if Slack is enabled
@@ -345,9 +342,6 @@ Time: %s
 	}
 
 	log.Printf("Investigation complete for alert: event_id=%s", alert.EventID)
-
-	// Suppress unused variable warning
-	_ = lastUpdate
 }
 
 // buildInvestigationPrompt creates an investigation prompt for the alert

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/utils"
 )
 
 // CodexJSONEvent represents a JSON event from codex --json output
@@ -504,22 +505,14 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 		log.Printf("WARNING: stdout is empty! No output from codex.")
 		log.Printf("DEBUG: Stderr lines count: %d", len(stderrLines))
 		if len(stderrLines) > 0 {
-			log.Printf("DEBUG: Last 10 stderr lines:\n%s", strings.Join(stderrLines[max(0, len(stderrLines)-10):], "\n"))
+			log.Printf("DEBUG: Last 10 stderr lines:\n%s", strings.Join(stderrLines[utils.Max(0, len(stderrLines)-10):], "\n"))
 		}
 		log.Printf("DEBUG: Progress messages count: %d", len(progressMessages))
 		if len(progressMessages) > 0 {
-			log.Printf("DEBUG: Last 5 progress messages:\n%s", strings.Join(progressMessages[max(0, len(progressMessages)-5):], "\n"))
+			log.Printf("DEBUG: Last 5 progress messages:\n%s", strings.Join(progressMessages[utils.Max(0, len(progressMessages)-5):], "\n"))
 		}
 	}
 	return result, nil
-}
-
-// max returns the maximum of two integers
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // ExecuteForSlackInDirectory is a wrapper around ExecuteInDirectory that formats the result for Slack
@@ -583,7 +576,7 @@ func (e *Executor) ExecuteForSlackInDirectory(ctx context.Context, task string, 
 	}
 
 	// Append metrics to the response
-	metricsLine := appendMetrics(response, result.ExecutionTime, result.TokensUsed)
+	metricsLine := utils.AppendMetrics(response, result.ExecutionTime, result.TokensUsed)
 	log.Printf("Final response length before metrics: %d, after metrics: %d", len(response), len(metricsLine))
 
 	slackResult := &SlackResult{
@@ -596,83 +589,5 @@ func (e *Executor) ExecuteForSlackInDirectory(ctx context.Context, task string, 
 	}
 	log.Printf("Returning SlackResult with response length: %d, full log length: %d", len(slackResult.Response), len(slackResult.FullLog))
 	return slackResult
-}
-
-// appendMetrics adds execution metrics to the end of the response
-func appendMetrics(response string, executionTime time.Duration, tokensUsed int) string {
-	// Format execution time (e.g., "1m 23s" or "45s")
-	timeStr := formatDuration(executionTime)
-
-	// Build metrics line
-	var metricsLine string
-	if tokensUsed > 0 {
-		metricsLine = fmt.Sprintf("\n\n---\n⏱️ Time: %s | 🎯 Tokens: %s", timeStr, formatNumber(tokensUsed))
-	} else {
-		metricsLine = fmt.Sprintf("\n\n---\n⏱️ Time: %s", timeStr)
-	}
-
-	return response + metricsLine
-}
-
-// formatDuration formats a duration in a human-readable format
-func formatDuration(d time.Duration) string {
-	if d < time.Second {
-		return fmt.Sprintf("%dms", d.Milliseconds())
-	}
-	if d < time.Minute {
-		return fmt.Sprintf("%.1fs", d.Seconds())
-	}
-	minutes := int(d.Minutes())
-	seconds := int(d.Seconds()) % 60
-	if minutes < 60 {
-		if seconds > 0 {
-			return fmt.Sprintf("%dm %ds", minutes, seconds)
-		}
-		return fmt.Sprintf("%dm", minutes)
-	}
-	hours := minutes / 60
-	minutes = minutes % 60
-	if minutes > 0 {
-		return fmt.Sprintf("%dh %dm", hours, minutes)
-	}
-	return fmt.Sprintf("%dh", hours)
-}
-
-// formatNumber formats a number with comma separators (e.g., 123456 -> "123,456")
-func formatNumber(n int) string {
-	if n < 1000 {
-		return fmt.Sprintf("%d", n)
-	}
-
-	str := fmt.Sprintf("%d", n)
-	var result []rune
-	for i, c := range str {
-		if i > 0 && (len(str)-i)%3 == 0 {
-			result = append(result, ',')
-		}
-		result = append(result, c)
-	}
-	return string(result)
-}
-
-// GetLastNLines returns the last N lines from a multi-line string
-func GetLastNLines(text string, n int) string {
-	lines := strings.Split(text, "\n")
-	if len(lines) <= n {
-		return text
-	}
-	return strings.Join(lines[len(lines)-n:], "\n")
-}
-
-// truncateText truncates text to maxLen characters, adding "..." if truncated
-func truncateText(text string, maxLen int) string {
-	// Remove newlines for single-line display
-	text = strings.ReplaceAll(text, "\n", " ")
-	text = strings.TrimSpace(text)
-
-	if len(text) <= maxLen {
-		return text
-	}
-	return text[:maxLen-3] + "..."
 }
 

@@ -1,7 +1,7 @@
 .PHONY: build run clean test deps help install
 
 # Binary name
-BINARY_NAME=aiops-bot
+BINARY_NAME=akmatori
 
 # Build directory
 BUILD_DIR=./bin
@@ -22,22 +22,22 @@ deps: ## Download dependencies
 	$(GOMOD) tidy
 
 build: ## Build the application
-	$(GOBUILD) -o $(BINARY_NAME) -v ./cmd/aiops-bot
+	$(GOBUILD) -o $(BINARY_NAME) -v ./cmd/akmatori
 
 build-linux: ## Build for Linux
-	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BINARY_NAME)-linux-amd64 -v ./cmd/aiops-bot
+	GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BINARY_NAME)-linux-amd64 -v ./cmd/akmatori
 
 build-mac: ## Build for macOS
-	GOOS=darwin GOARCH=amd64 $(GOBUILD) -o $(BINARY_NAME)-darwin-amd64 -v ./cmd/aiops-bot
-	GOOS=darwin GOARCH=arm64 $(GOBUILD) -o $(BINARY_NAME)-darwin-arm64 -v ./cmd/aiops-bot
+	GOOS=darwin GOARCH=amd64 $(GOBUILD) -o $(BINARY_NAME)-darwin-amd64 -v ./cmd/akmatori
+	GOOS=darwin GOARCH=arm64 $(GOBUILD) -o $(BINARY_NAME)-darwin-arm64 -v ./cmd/akmatori
 
 build-windows: ## Build for Windows
-	GOOS=windows GOARCH=amd64 $(GOBUILD) -o $(BINARY_NAME)-windows-amd64.exe -v ./cmd/aiops-bot
+	GOOS=windows GOARCH=amd64 $(GOBUILD) -o $(BINARY_NAME)-windows-amd64.exe -v ./cmd/akmatori
 
 build-all: build-linux build-mac build-windows ## Build for all platforms
 
 run: ## Run the application
-	$(GOBUILD) -o $(BINARY_NAME) -v ./cmd/aiops-bot && ./$(BINARY_NAME)
+	$(GOBUILD) -o $(BINARY_NAME) -v ./cmd/akmatori && ./$(BINARY_NAME)
 
 test: ## Run tests
 	$(GOTEST) -v ./...
@@ -53,7 +53,7 @@ clean: ## Clean build artifacts
 	rm -f coverage.out coverage.html
 
 install: ## Install the binary to GOPATH/bin
-	$(GOCMD) install ./cmd/aiops-bot
+	$(GOCMD) install ./cmd/akmatori
 
 fmt: ## Format code
 	$(GOCMD) fmt ./...
@@ -65,7 +65,7 @@ lint: ## Run golangci-lint (requires golangci-lint installed)
 	golangci-lint run
 
 docker-build: ## Build Docker image
-	docker build -t aiops-bot:latest .
+	docker build -t akmatori:latest .
 
 docker-run: ## Run Docker container
-	docker run --env-file .env aiops-bot:latest
+	docker run --env-file .env akmatori:latest
