@@ -6,7 +6,7 @@ Akmatori is an AI-powered AIOps agent that integrates with monitoring systems an
 
 - **Integrations**: Receive alerts via webhooks
 - **Slack Integration**: Post incidents to channels, receive commands, and provide real-time updates
-- **LLM-Powered Automation**: Use OpenAI's models to analyze incidents and execute remediation skills
+- **LLM-Powered Automation**: Use OpenAI's models via [Codex CLI](https://github.com/openai/codex) to analyze incidents and execute remediation skills
 - **Skills System**: Define custom automation skills with prompts and attached tools
 - **Tools Management**: Configure reusable tools (Python scripts, API clients) for skills
 - **Web Dashboard**: Manage incidents, skills, tools, and settings through a modern UI
@@ -200,6 +200,13 @@ akmatori/
 **Infrastructure:**
 - Docker & Docker Compose
 - Nginx reverse proxy
+
+**AI Execution:**
+- [Codex CLI](https://github.com/openai/codex) - OpenAI's open-source AI coding agent that powers the LLM execution engine
+
+## How It Works
+
+Akmatori uses [OpenAI Codex CLI](https://github.com/openai/codex) under the hood to execute AI-powered automation tasks. When a skill is triggered, Akmatori invokes Codex with the skill's prompt and attached tools, allowing the AI agent to analyze incidents, run commands, and perform remediation actions in a sandboxed environment.
 
 ## License
 
