@@ -400,7 +400,6 @@ func TestTableNames(t *testing.T) {
 		model     interface{ TableName() string }
 		tableName string
 	}{
-		{IncidentManagerConfig{}, "incident_manager_configs"},
 		{Skill{}, "skills"},
 		{ToolType{}, "tool_types"},
 		{ToolInstance{}, "tool_instances"},

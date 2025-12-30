@@ -1,13 +1,298 @@
 import { useEffect, useState } from 'react';
-import { Plus, Edit2, Trash2, Save, X, Bot, Wrench, Power, PowerOff, FileCode, ChevronDown, ChevronRight, Eye, Loader2, RefreshCw } from 'lucide-react';
+import { Plus, Edit2, Trash2, Save, X, Bot, Wrench, Power, PowerOff, Shield, RefreshCw, Eye } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { SuccessMessage } from '../components/ErrorMessage';
 import PromptEditor from '../components/PromptEditor';
-import ScriptViewerModal from '../components/ScriptViewerModal';
-import { skillsApi, toolsApi, scriptsApi } from '../api/client';
-import type { Skill, ToolInstance, ScriptInfo } from '../types';
+import { skillsApi, toolsApi } from '../api/client';
+import type { Skill, ToolInstance } from '../types';
+
+// Modal component for creating/editing skills
+interface SkillModalProps {
+  isOpen: boolean;
+  skill: Skill | null;
+  isCreating: boolean;
+  isViewOnly: boolean;
+  toolInstances: ToolInstance[];
+  onClose: () => void;
+  onSave: (data: SkillFormData) => Promise<void>;
+}
+
+interface SkillFormData {
+  name: string;
+  description: string;
+  prompt: string;
+  enabled: boolean;
+  toolIds: number[];
+}
+
+function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onClose, onSave }: SkillModalProps) {
+  const [formData, setFormData] = useState<SkillFormData>({
+    name: '',
+    description: '',
+    prompt: '',
+    enabled: true,
+    toolIds: [],
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (skill) {
+      setFormData({
+        name: skill.name,
+        description: skill.description || '',
+        prompt: skill.prompt || '',
+        enabled: skill.enabled,
+        toolIds: skill.tools?.map(t => t.id) || [],
+      });
+    } else {
+      setFormData({
+        name: '',
+        description: '',
+        prompt: '',
+        enabled: true,
+        toolIds: [],
+      });
+    }
+    setError('');
+  }, [skill, isOpen]);
+
+  const handleSave = async () => {
+    if (isViewOnly) return;
+
+    try {
+      setError('');
+      setSaving(true);
+
+      if (!formData.name.trim() || !formData.description.trim() || !formData.prompt.trim()) {
+        setError('Name, description, and prompt are required');
+        return;
+      }
+
+      if (isCreating && (!/^[a-z][a-z0-9-]*[a-z0-9]$/.test(formData.name) && !/^[a-z]$/.test(formData.name))) {
+        setError('Name must be in kebab-case (lowercase letters, numbers, and hyphens; must start with a letter)');
+        return;
+      }
+
+      await onSave(formData);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save skill');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleToolSelection = (toolId: number) => {
+    if (isViewOnly) return;
+    setFormData(prev => ({
+      ...prev,
+      toolIds: prev.toolIds.includes(toolId)
+        ? prev.toolIds.filter(id => id !== toolId)
+        : [...prev.toolIds, toolId]
+    }));
+  };
+
+  if (!isOpen) return null;
+
+  const isSystemSkill = skill?.is_system;
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      <div className="flex min-h-full items-center justify-center p-4">
+        {/* Backdrop */}
+        <div className="fixed inset-0 bg-black/50 transition-opacity" onClick={onClose} />
+
+        {/* Modal */}
+        <div className="relative w-full max-w-2xl bg-white dark:bg-gray-800 rounded-xl shadow-2xl transform transition-all">
+          {/* Header */}
+          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+            <div className="flex items-center gap-3">
+              {isSystemSkill && <Shield className="w-5 h-5 text-primary-500" />}
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                {isCreating ? 'Create Skill' : isViewOnly ? `View: ${skill?.name}` : `Edit: ${skill?.name}`}
+              </h2>
+              {isSystemSkill && (
+                <span className="badge badge-primary text-xs">System</span>
+              )}
+            </div>
+            <button
+              onClick={onClose}
+              className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
+            {error && (
+              <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm">
+                {error}
+              </div>
+            )}
+
+            {/* System skill notice */}
+            {isViewOnly && isSystemSkill && (
+              <div className="p-3 rounded-lg bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800">
+                <div className="flex items-start gap-2">
+                  <Shield className="w-4 h-4 text-primary-600 dark:text-primary-400 mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-primary-800 dark:text-primary-200">
+                    <p className="font-medium">System Skill (Read-Only)</p>
+                    <p className="mt-1 text-primary-600 dark:text-primary-300">
+                      This is the core incident manager. Its prompt is defined in the system configuration and cannot be modified here.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Skill Name */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Skill Name {!isViewOnly && <span className="text-red-500">*</span>}
+              </label>
+              <input
+                type="text"
+                className="input-field"
+                placeholder="e.g., zabbix-analyst"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                disabled={!isCreating || isViewOnly}
+              />
+              {isCreating && !isViewOnly && (
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Must be in kebab-case (lowercase with hyphens)
+                </p>
+              )}
+            </div>
+
+            {/* Description */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Description {!isViewOnly && <span className="text-red-500">*</span>}
+              </label>
+              <textarea
+                className="input-field"
+                rows={2}
+                placeholder="Short description of what this skill does"
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                disabled={isViewOnly}
+              />
+            </div>
+
+            {/* Prompt */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Prompt {!isViewOnly && <span className="text-red-500">*</span>}
+              </label>
+              {isViewOnly ? (
+                <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4 max-h-64 overflow-y-auto">
+                  <pre className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap font-mono">
+                    {formData.prompt}
+                  </pre>
+                </div>
+              ) : (
+                <PromptEditor
+                  value={formData.prompt}
+                  onChange={(value) => setFormData({ ...formData, prompt: value })}
+                  placeholder="Define the skill's role, expertise, and behavior..."
+                  rows={8}
+                />
+              )}
+            </div>
+
+            {/* Enabled Toggle - not for view only */}
+            {!isViewOnly && (
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-900/50">
+                <input
+                  type="checkbox"
+                  id="enabled"
+                  checked={formData.enabled}
+                  onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
+                  className="w-4 h-4"
+                />
+                <label htmlFor="enabled" className="flex items-center gap-2 cursor-pointer">
+                  {formData.enabled ? (
+                    <Power className="w-4 h-4 text-green-500" />
+                  ) : (
+                    <PowerOff className="w-4 h-4 text-gray-400" />
+                  )}
+                  <span className="text-sm text-gray-700 dark:text-gray-300">
+                    {formData.enabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                </label>
+              </div>
+            )}
+
+            {/* Tool Assignments - only for non-system, non-view-only skills */}
+            {!isSystemSkill && !isViewOnly && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Tool Connections
+                </label>
+                <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 max-h-48 overflow-y-auto bg-gray-50 dark:bg-gray-900/50">
+                  {toolInstances.length === 0 ? (
+                    <div className="text-center py-4">
+                      <Wrench className="w-6 h-6 mx-auto text-gray-400 mb-1" />
+                      <p className="text-gray-500 dark:text-gray-400 text-sm">No tools available</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {toolInstances.filter(tool => tool.enabled).map((tool) => (
+                        <div
+                          key={tool.id}
+                          className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-all ${
+                            formData.toolIds.includes(tool.id)
+                              ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
+                          }`}
+                          onClick={() => toggleToolSelection(tool.id)}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={formData.toolIds.includes(tool.id)}
+                            onChange={() => toggleToolSelection(tool.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-4 h-4"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-gray-900 dark:text-white text-sm truncate">
+                              {tool.name}
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                              {tool.tool_type?.description}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 rounded-b-xl">
+            <button onClick={onClose} disabled={saving} className="btn btn-secondary">
+              {isViewOnly ? 'Close' : 'Cancel'}
+            </button>
+            {!isViewOnly && (
+              <button onClick={handleSave} disabled={saving} className="btn btn-primary">
+                <Save className="w-4 h-4" />
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Skills() {
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -15,20 +300,13 @@ export default function Skills() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [editingSkill, setEditingSkill] = useState<Skill | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
-  const [formData, setFormData] = useState({ name: '', description: '', category: '', prompt: '', enabled: true });
-  const [selectedToolIds, setSelectedToolIds] = useState<number[]>([]);
   const [syncing, setSyncing] = useState(false);
 
-  // Scripts state (keyed by skill name instead of ID)
-  const [expandedScripts, setExpandedScripts] = useState<Set<string>>(new Set());
-  const [skillScripts, setSkillScripts] = useState<Record<string, string[]>>({});
-  const [scriptsLoading, setScriptsLoading] = useState<Set<string>>(new Set());
-  const [scriptModalOpen, setScriptModalOpen] = useState(false);
-  const [selectedScript, setSelectedScript] = useState<ScriptInfo | null>(null);
-  const [scriptLoading, setScriptLoading] = useState(false);
-  const [currentSkillName, setCurrentSkillName] = useState<string | null>(null);
+  // Modal state
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingSkill, setEditingSkill] = useState<Skill | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [isViewOnly, setIsViewOnly] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -67,183 +345,85 @@ export default function Skills() {
   };
 
   const handleCreate = () => {
-    setIsCreating(true);
-    setFormData({ name: '', description: '', category: '', prompt: '', enabled: true });
-    setSelectedToolIds([]);
     setEditingSkill(null);
+    setIsCreating(true);
+    setIsViewOnly(false);
+    setModalOpen(true);
+  };
+
+  const handleView = (skill: Skill) => {
+    setEditingSkill(skill);
+    setIsCreating(false);
+    setIsViewOnly(true);
+    setModalOpen(true);
   };
 
   const handleEdit = (skill: Skill) => {
     setEditingSkill(skill);
-    setFormData({
-      name: skill.name,
-      description: skill.description || '',
-      category: skill.category || '',
-      prompt: skill.prompt,
-      enabled: skill.enabled
-    });
-    setSelectedToolIds(skill.tools?.map(t => t.id) || []);
     setIsCreating(false);
+    setIsViewOnly(skill.is_system); // System skills are view-only
+    setModalOpen(true);
   };
 
-  const handleSave = async () => {
-    try {
-      setError('');
+  const handleSave = async (data: SkillFormData) => {
+    let skillName: string;
 
-      if (!formData.name.trim() || !formData.description.trim() || !formData.prompt.trim()) {
-        setError('Name, description, and prompt are required');
-        return;
-      }
-
-      // Validate kebab-case format
-      if (!/^[a-z][a-z0-9-]*[a-z0-9]$/.test(formData.name) && !/^[a-z]$/.test(formData.name)) {
-        setError('Name must be in kebab-case (lowercase letters, numbers, and hyphens; must start with a letter)');
-        return;
-      }
-
-      let skillName: string;
-      if (isCreating) {
-        const newSkill = await skillsApi.create({
-          name: formData.name,
-          description: formData.description,
-          category: formData.category,
-          prompt: formData.prompt,
-        });
-        skillName = newSkill.name;
-      } else if (editingSkill) {
-        await skillsApi.update(editingSkill.name, {
-          description: formData.description,
-          category: formData.category,
-          enabled: formData.enabled,
-          prompt: formData.prompt,
-        });
-        skillName = editingSkill.name;
-      } else {
-        return;
-      }
-
-      // Update tools assignment (triggers symlinks + tools.md generation)
-      await skillsApi.updateTools(skillName, selectedToolIds);
-
-      setIsCreating(false);
-      setEditingSkill(null);
-      setFormData({ name: '', description: '', category: '', prompt: '', enabled: true });
-      setSelectedToolIds([]);
-      setSuccess('Skill saved successfully');
-      setTimeout(() => setSuccess(''), 3000);
-      loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save skill');
+    if (isCreating) {
+      const newSkill = await skillsApi.create({
+        name: data.name,
+        description: data.description,
+        prompt: data.prompt,
+      });
+      skillName = newSkill.name;
+    } else if (editingSkill) {
+      await skillsApi.update(editingSkill.name, {
+        description: data.description,
+        enabled: data.enabled,
+        prompt: data.prompt,
+      });
+      skillName = editingSkill.name;
+    } else {
+      return;
     }
+
+    // Update tools assignment (only for non-system skills)
+    if (!editingSkill?.is_system) {
+      await skillsApi.updateTools(skillName, data.toolIds);
+    }
+
+    setSuccess('Skill saved successfully');
+    setTimeout(() => setSuccess(''), 3000);
+    await loadData();
   };
 
-  const handleDelete = async (name: string) => {
-    if (!confirm('Are you sure you want to delete this skill?')) return;
+  const handleDelete = async (skill: Skill) => {
+    if (skill.is_system) return;
+    if (!confirm(`Delete skill "${skill.name}"? This cannot be undone.`)) return;
 
     try {
       setError('');
-      await skillsApi.delete(name);
-      loadData();
+      await skillsApi.delete(skill.name);
+      setSuccess('Skill deleted');
+      setTimeout(() => setSuccess(''), 3000);
+      await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete skill');
     }
   };
 
-  const handleCancel = () => {
-    setIsCreating(false);
+  const closeModal = () => {
+    setModalOpen(false);
     setEditingSkill(null);
-    setFormData({ name: '', description: '', category: '', prompt: '', enabled: true });
-    setSelectedToolIds([]);
+    setIsCreating(false);
+    setIsViewOnly(false);
   };
 
-  const toggleToolSelection = (toolId: number) => {
-    setSelectedToolIds(prev =>
-      prev.includes(toolId)
-        ? prev.filter(id => id !== toolId)
-        : [...prev, toolId]
-    );
-  };
-
-  // Scripts handlers (use skill name instead of ID)
-  const toggleScriptsExpanded = async (skillName: string) => {
-    const newExpanded = new Set(expandedScripts);
-    if (newExpanded.has(skillName)) {
-      newExpanded.delete(skillName);
-    } else {
-      newExpanded.add(skillName);
-      // Load scripts if not already loaded
-      if (!skillScripts[skillName]) {
-        await loadSkillScripts(skillName);
-      }
-    }
-    setExpandedScripts(newExpanded);
-  };
-
-  const loadSkillScripts = async (skillName: string) => {
-    try {
-      setScriptsLoading(prev => new Set(prev).add(skillName));
-      const response = await scriptsApi.list(skillName);
-      setSkillScripts(prev => ({ ...prev, [skillName]: response.scripts || [] }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load scripts');
-    } finally {
-      setScriptsLoading(prev => {
-        const next = new Set(prev);
-        next.delete(skillName);
-        return next;
-      });
-    }
-  };
-
-  const handleViewScript = async (skillName: string, filename: string) => {
-    try {
-      setCurrentSkillName(skillName);
-      setScriptModalOpen(true);
-      setScriptLoading(true);
-      setSelectedScript(null);
-      const scriptInfo = await scriptsApi.get(skillName, filename);
-      setSelectedScript(scriptInfo);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load script');
-      setScriptModalOpen(false);
-    } finally {
-      setScriptLoading(false);
-    }
-  };
-
-  const handleSaveScript = async (content: string) => {
-    if (!currentSkillName || !selectedScript) return;
-    await scriptsApi.update(currentSkillName, selectedScript.filename, content);
-    // Reload the script to get updated info
-    const updatedScript = await scriptsApi.get(currentSkillName, selectedScript.filename);
-    setSelectedScript(updatedScript);
-  };
-
-  const handleDeleteScript = async (skillName: string, filename: string) => {
-    if (!confirm(`Delete script "${filename}"? This cannot be undone.`)) return;
-
-    try {
-      setError('');
-      await scriptsApi.delete(skillName, filename);
-      // Refresh scripts list
-      await loadSkillScripts(skillName);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete script');
-    }
-  };
-
-  const handleClearAllScripts = async (skillName: string, scriptCount: number) => {
-    if (!confirm(`Delete all ${scriptCount} scripts from "${skillName}"? This cannot be undone.`)) return;
-
-    try {
-      setError('');
-      await scriptsApi.deleteAll(skillName);
-      // Refresh scripts list
-      await loadSkillScripts(skillName);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to clear scripts');
-    }
-  };
+  // Sort skills: system skills first, then alphabetically
+  const sortedSkills = [...skills].sort((a, b) => {
+    if (a.is_system && !b.is_system) return -1;
+    if (!a.is_system && b.is_system) return 1;
+    return a.name.localeCompare(b.name);
+  });
 
   return (
     <div>
@@ -251,18 +431,16 @@ export default function Skills() {
         title="Skills"
         description="Manage your AI skills and their tool assignments"
         action={
-          !isCreating && !editingSkill && (
-            <div className="flex gap-2">
-              <button onClick={handleSync} disabled={syncing} className="btn btn-secondary">
-                <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-                {syncing ? 'Syncing...' : 'Sync from Filesystem'}
-              </button>
-              <button onClick={handleCreate} className="btn btn-primary">
-                <Plus className="w-4 h-4" />
-                New Skill
-              </button>
-            </div>
-          )
+          <div className="flex gap-2">
+            <button onClick={handleSync} disabled={syncing} className="btn btn-secondary">
+              <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+              {syncing ? 'Syncing...' : 'Sync'}
+            </button>
+            <button onClick={handleCreate} className="btn btn-primary">
+              <Plus className="w-4 h-4" />
+              New Skill
+            </button>
+          </div>
         }
       />
 
@@ -272,349 +450,109 @@ export default function Skills() {
       {loading ? (
         <LoadingSpinner />
       ) : (
-        <>
-          {/* Create/Edit Form */}
-          {(isCreating || editingSkill) && (
-            <div className="card mb-8 animate-fade-in">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">
-                {isCreating ? 'Create Skill' : 'Edit Skill'}
-              </h3>
-
-              <div className="space-y-6">
-                {/* Skill Name */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Skill Name <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    className="input-field"
-                    placeholder="e.g., zabbix-analyst"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    disabled={!!editingSkill}
-                  />
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Must be in kebab-case (lowercase with hyphens, e.g., "my-skill")
-                  </p>
-                </div>
-
-                {/* Description */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Description <span className="text-red-500">*</span>
-                  </label>
-                  <textarea
-                    className="input-field"
-                    rows={3}
-                    placeholder="Short description of what this skill does (shown in AGENTS.md)"
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  />
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    This will be shown to the incident manager in the available agents table.
-                  </p>
-                </div>
-
-                {/* Category */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Category
-                  </label>
-                  <input
-                    type="text"
-                    className="input-field"
-                    placeholder="e.g., monitoring, database, kubernetes"
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  />
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Optional category for organizing skills
-                  </p>
-                </div>
-
-                {/* Prompt */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Prompt (SKILL.md body) <span className="text-red-500">*</span>
-                  </label>
-                  <PromptEditor
-                    value={formData.prompt}
-                    onChange={(value) => setFormData({ ...formData, prompt: value })}
-                    placeholder="Define the skill's role, expertise, and behavior..."
-                    rows={10}
-                  />
-                </div>
-
-                {/* Enabled Toggle */}
-                <div className="flex items-center gap-3 p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50">
-                  <input
-                    type="checkbox"
-                    id="enabled"
-                    checked={formData.enabled}
-                    onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
-                  />
-                  <label htmlFor="enabled" className="flex items-center gap-2 cursor-pointer">
-                    {formData.enabled ? (
-                      <Power className="w-4 h-4 text-green-500" />
-                    ) : (
-                      <PowerOff className="w-4 h-4 text-gray-400" />
-                    )}
-                    <span className="text-sm text-gray-700 dark:text-gray-300">
-                      {formData.enabled ? 'Enabled' : 'Disabled'}
-                    </span>
-                  </label>
-                </div>
-
-                {/* Tool Assignments */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Available Tools (symlinked to scripts/)
-                  </label>
-                  <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 max-h-64 overflow-y-auto bg-gray-50 dark:bg-gray-900/50">
-                    {toolInstances.length === 0 ? (
-                      <div className="text-center py-8">
-                        <Wrench className="w-8 h-8 mx-auto text-gray-400 mb-2" />
-                        <p className="text-gray-500 dark:text-gray-400 text-sm">No tool instances available.</p>
-                        <p className="text-gray-400 dark:text-gray-500 text-xs mt-1">Create some in the Tools page first.</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {toolInstances.filter(tool => tool.enabled).map((tool) => (
-                          <div
-                            key={tool.id}
-                            className={`flex items-start gap-3 p-3 rounded-lg border transition-all cursor-pointer ${
-                              selectedToolIds.includes(tool.id)
-                                ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                                : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
-                            }`}
-                            onClick={() => toggleToolSelection(tool.id)}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedToolIds.includes(tool.id)}
-                              onChange={() => toggleToolSelection(tool.id)}
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                            <div className="flex-1">
-                              <div className="font-medium text-gray-900 dark:text-white text-sm">
-                                {tool.name}
-                              </div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                Type: {tool.tool_type?.name} - {tool.tool_type?.description}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Selected tools are symlinked to the skill's scripts/ folder and documented in references/tools.md
-                  </p>
-                </div>
-
-                {/* Form Actions */}
-                <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
-                  <button onClick={handleSave} className="btn btn-primary">
-                    <Save className="w-4 h-4" />
-                    Save
-                  </button>
-                  <button onClick={handleCancel} className="btn btn-secondary">
-                    <X className="w-4 h-4" />
-                    Cancel
-                  </button>
-                </div>
-              </div>
+        <div className="card">
+          {sortedSkills.length === 0 ? (
+            <div className="py-16 text-center border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
+              <Bot className="w-12 h-12 mx-auto text-gray-400 mb-3" />
+              <p className="text-gray-500 dark:text-gray-400">No skills yet</p>
+              <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Create one or sync from filesystem</p>
             </div>
-          )}
+          ) : (
+            <div className="divide-y divide-gray-200 dark:divide-gray-700">
+              {sortedSkills.map((skill) => (
+                <div
+                  key={skill.id}
+                  onClick={() => handleEdit(skill)}
+                  className={`flex items-center justify-between p-4 cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-gray-800/50 ${
+                    !skill.enabled ? 'opacity-60' : ''
+                  } ${
+                    skill.is_system ? 'bg-primary-50/50 dark:bg-primary-900/10' : ''
+                  }`}
+                >
+                  <div className="flex items-center gap-4 min-w-0 flex-1">
+                    {/* Icon */}
+                    <div className={`p-2 rounded-lg flex-shrink-0 ${
+                      skill.is_system
+                        ? 'bg-primary-100 dark:bg-primary-900/30'
+                        : 'bg-gray-100 dark:bg-gray-700'
+                    }`}>
+                      {skill.is_system ? (
+                        <Shield className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                      ) : (
+                        <Bot className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                      )}
+                    </div>
 
-          {/* Skills List */}
-          <div className="card">
-            {skills.length === 0 ? (
-              <div className="py-16 text-center border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
-                <Bot className="w-12 h-12 mx-auto text-gray-400 mb-3" />
-                <p className="text-gray-500 dark:text-gray-400">No skills yet</p>
-                <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Create one or sync from filesystem</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {skills.map((skill) => (
-                  <div
-                    key={skill.id}
-                    className={`border rounded-lg p-6 transition-all ${
-                      skill.enabled
-                        ? 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
-                        : 'border-gray-100 dark:border-gray-800 opacity-60'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1 min-w-0">
-                        {/* Skill Header */}
-                        <div className="flex items-center gap-3 mb-2">
-                          <h3 className="font-semibold text-gray-900 dark:text-white font-mono">
-                            ${skill.name}
-                          </h3>
-                          {skill.category && (
-                            <span className="badge badge-info">
-                              {skill.category}
-                            </span>
-                          )}
-                          <span className={`badge ${skill.enabled ? 'badge-success' : 'badge-default'}`}>
-                            {skill.enabled ? 'Enabled' : 'Disabled'}
-                          </span>
-                        </div>
-
-                        {/* Description */}
-                        {skill.description && (
-                          <p className="text-gray-600 dark:text-gray-400 text-sm mb-3">
-                            {skill.description}
-                          </p>
+                    {/* Content */}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-semibold text-gray-900 dark:text-white font-mono">
+                          {skill.name}
+                        </h3>
+                        {skill.is_system && (
+                          <span className="badge badge-primary text-xs">System</span>
                         )}
-
-                        {/* Prompt Preview */}
-                        <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-3 mb-3 max-h-32 overflow-y-auto">
-                          <p className="text-gray-700 dark:text-gray-300 text-sm font-mono whitespace-pre-wrap">
-                            {skill.prompt}
-                          </p>
-                        </div>
-
-                        {/* Assigned Tools */}
+                        <span className={`badge text-xs ${skill.enabled ? 'badge-success' : 'badge-default'}`}>
+                          {skill.enabled ? 'Enabled' : 'Disabled'}
+                        </span>
                         {skill.tools && skill.tools.length > 0 && (
-                          <div className="flex flex-wrap items-center gap-2 mb-3">
-                            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Tools:</span>
-                            {skill.tools.map((tool) => (
-                              <span key={tool.id} className="badge badge-warning">
-                                <Wrench className="w-3 h-3" />
-                                {tool.name}
-                              </span>
-                            ))}
-                          </div>
+                          <span className="badge badge-warning text-xs">
+                            <Wrench className="w-3 h-3" />
+                            {skill.tools.length} tool{skill.tools.length > 1 ? 's' : ''}
+                          </span>
                         )}
-
-                        {/* Metadata */}
-                        <p className="text-xs text-gray-400 dark:text-gray-500">
-                          Created: {new Date(skill.created_at).toLocaleString()}
-                        </p>
-
-                        {/* Scripts Section */}
-                        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                          <button
-                            onClick={() => toggleScriptsExpanded(skill.name)}
-                            className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
-                          >
-                            {expandedScripts.has(skill.name) ? (
-                              <ChevronDown className="w-4 h-4" />
-                            ) : (
-                              <ChevronRight className="w-4 h-4" />
-                            )}
-                            <FileCode className="w-4 h-4" />
-                            <span>Scripts</span>
-                            {skillScripts[skill.name] && (
-                              <span className="px-1.5 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 rounded-full">
-                                {skillScripts[skill.name].length}
-                              </span>
-                            )}
-                          </button>
-
-                          {expandedScripts.has(skill.name) && (
-                            <div className="mt-3">
-                              {scriptsLoading.has(skill.name) ? (
-                                <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 py-2">
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                  Loading scripts...
-                                </div>
-                              ) : skillScripts[skill.name]?.length === 0 ? (
-                                <p className="text-sm text-gray-500 dark:text-gray-400 py-2">
-                                  No scripts stored for this skill
-                                </p>
-                              ) : (
-                                <>
-                                  {/* Clear All button */}
-                                  {skillScripts[skill.name]?.length > 0 && (
-                                    <div className="flex justify-end mb-2">
-                                      <button
-                                        onClick={() => handleClearAllScripts(skill.name, skillScripts[skill.name].length)}
-                                        className="text-xs text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
-                                      >
-                                        Clear All
-                                      </button>
-                                    </div>
-                                  )}
-
-                                  {/* Scripts list */}
-                                  <div className="space-y-1 max-h-48 overflow-y-auto">
-                                    {skillScripts[skill.name]?.map((filename) => (
-                                      <div
-                                        key={filename}
-                                        className="flex items-center justify-between py-1.5 px-2 bg-gray-50 dark:bg-gray-900/50 rounded group hover:bg-gray-100 dark:hover:bg-gray-800/50"
-                                      >
-                                        <span className="font-mono text-xs text-gray-700 dark:text-gray-300 truncate">
-                                          {filename}
-                                        </span>
-                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                          <button
-                                            onClick={() => handleViewScript(skill.name, filename)}
-                                            className="p-1 text-gray-500 hover:text-primary-600 dark:hover:text-primary-400"
-                                            title="View/Edit"
-                                          >
-                                            <Eye className="w-3.5 h-3.5" />
-                                          </button>
-                                          <button
-                                            onClick={() => handleDeleteScript(skill.name, filename)}
-                                            className="p-1 text-gray-500 hover:text-red-600 dark:hover:text-red-400"
-                                            title="Delete"
-                                          >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                          </button>
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </>
-                              )}
-                            </div>
-                          )}
-                        </div>
                       </div>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 truncate">
+                        {skill.description || 'No description'}
+                      </p>
+                    </div>
+                  </div>
 
-                      {/* Actions */}
-                      <div className="flex gap-2 ml-4 flex-shrink-0">
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 ml-4 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                    {skill.is_system ? (
+                      <button
+                        onClick={() => handleView(skill)}
+                        className="p-2 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                        title="View"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                    ) : (
+                      <>
                         <button
                           onClick={() => handleEdit(skill)}
-                          className="btn btn-ghost p-2 text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20"
+                          className="p-2 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                           title="Edit"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => handleDelete(skill.name)}
-                          className="btn btn-ghost p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                          onClick={() => handleDelete(skill)}
+                          className="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                           title="Delete"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
-                      </div>
-                    </div>
+                      </>
+                    )}
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
-      {/* Script Viewer Modal */}
-      <ScriptViewerModal
-        isOpen={scriptModalOpen}
-        onClose={() => {
-          setScriptModalOpen(false);
-          setSelectedScript(null);
-          setCurrentSkillName(null);
-        }}
-        scriptInfo={selectedScript}
-        loading={scriptLoading}
-        onSave={handleSaveScript}
+      {/* Skill Modal */}
+      <SkillModal
+        isOpen={modalOpen}
+        skill={editingSkill}
+        isCreating={isCreating}
+        isViewOnly={isViewOnly}
+        toolInstances={toolInstances}
+        onClose={closeModal}
+        onSave={handleSave}
       />
     </div>
   );

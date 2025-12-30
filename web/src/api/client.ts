@@ -2,7 +2,6 @@ import type {
   Skill,
   ToolType,
   ToolInstance,
-  IncidentManagerConfig,
   Incident,
   SlackSettings,
   SlackSettingsUpdate,
@@ -75,17 +74,6 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
 
   return response.json();
 }
-
-// Incident Manager API
-export const incidentManagerApi = {
-  getConfig: () => fetchApi<IncidentManagerConfig>('/api/incident-manager/prompt'),
-
-  updatePrompt: (prompt: string) =>
-    fetchApi<IncidentManagerConfig>('/api/incident-manager/prompt', {
-      method: 'PUT',
-      body: JSON.stringify({ prompt }),
-    }),
-};
 
 // Skills API (uses skill names in URLs, not IDs)
 export const skillsApi = {

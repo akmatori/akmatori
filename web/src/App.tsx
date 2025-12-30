@@ -9,7 +9,6 @@ import Incidents from './pages/Incidents';
 import Skills from './pages/Skills';
 import Tools from './pages/Tools';
 import ContextFiles from './pages/ContextFiles';
-import IncidentManager from './pages/IncidentManager';
 import Settings from './pages/Settings';
 
 function App() {
@@ -30,7 +29,6 @@ function App() {
                       <Route path="/skills" element={<Skills />} />
                       <Route path="/tools" element={<Tools />} />
                       <Route path="/context" element={<ContextFiles />} />
-                      <Route path="/incident-manager" element={<IncidentManager />} />
                       <Route path="/settings" element={<Settings />} />
                     </Routes>
                   </Layout>

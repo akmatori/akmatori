@@ -4,6 +4,7 @@ export interface Skill {
   description: string;
   category: string;
   prompt: string;
+  is_system: boolean;
   enabled: boolean;
   created_at: string;
   updated_at: string;
@@ -28,13 +29,6 @@ export interface ToolInstance {
   created_at: string;
   updated_at: string;
   tool_type?: ToolType;
-}
-
-export interface IncidentManagerConfig {
-  id: number;
-  prompt: string;
-  created_at: string;
-  updated_at: string;
 }
 
 export type IncidentStatus = 'pending' | 'running' | 'completed' | 'failed';
