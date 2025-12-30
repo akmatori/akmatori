@@ -11,6 +11,7 @@ import (
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/output"
 	"github.com/akmatori/akmatori/internal/services"
+	"github.com/akmatori/akmatori/internal/utils"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
@@ -292,9 +293,9 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		parsed := output.Parse(result.Output)
 		finalResponse = output.FormatForSlack(parsed)
 
-		finalResponse += fmt.Sprintf("\n\n---\n⏱️ Time: %s", formatSlackDuration(result.ExecutionTime))
+		finalResponse += fmt.Sprintf("\n\n---\n⏱️ Time: %s", utils.FormatDuration(result.ExecutionTime))
 		if result.TokensUsed > 0 {
-			finalResponse += fmt.Sprintf(" | 🎯 Tokens: %s", formatSlackNumber(result.TokensUsed))
+			finalResponse += fmt.Sprintf(" | 🎯 Tokens: %s", utils.FormatNumber(result.TokensUsed))
 		}
 	} else if result != nil && len(result.ErrorMessages) > 0 {
 		finalResponse = "❌ " + strings.Join(result.ErrorMessages, "\n❌ ")
@@ -323,58 +324,4 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 	if updateErr != nil {
 		log.Printf("Error updating final result: %v", updateErr)
 	}
-}
-
-// formatSlackDuration formats a duration for Slack display
-func formatSlackDuration(d time.Duration) string {
-	if d < time.Second {
-		return fmt.Sprintf("%dms", d.Milliseconds())
-	}
-	if d < time.Minute {
-		return fmt.Sprintf("%.1fs", d.Seconds())
-	}
-	minutes := int(d.Minutes())
-	seconds := int(d.Seconds()) % 60
-	if minutes < 60 {
-		if seconds > 0 {
-			return fmt.Sprintf("%dm %ds", minutes, seconds)
-		}
-		return fmt.Sprintf("%dm", minutes)
-	}
-	hours := minutes / 60
-	minutes = minutes % 60
-	if minutes > 0 {
-		return fmt.Sprintf("%dh %dm", hours, minutes)
-	}
-	return fmt.Sprintf("%dh", hours)
-}
-
-// formatSlackNumber formats a number with comma separators
-func formatSlackNumber(n int) string {
-	if n < 1000 {
-		return fmt.Sprintf("%d", n)
-	}
-
-	str := fmt.Sprintf("%d", n)
-	var result []rune
-	for i, c := range str {
-		if i > 0 && (len(str)-i)%3 == 0 {
-			result = append(result, ',')
-		}
-		result = append(result, c)
-	}
-	return string(result)
-}
-
-// GetThreadID extracts the thread ID from a message
-func GetThreadID(threadTS, messageTS string) string {
-	if threadTS != "" {
-		return threadTS
-	}
-	return messageTS
-}
-
-// IsNewThread checks if this is a new thread
-func IsNewThread(threadTS string) bool {
-	return threadTS == ""
 }
