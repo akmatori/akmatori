@@ -1,10 +1,10 @@
 # Akmatori
 
-Akmatori is an AI-powered AIOps bot that integrates with Zabbix monitoring and Slack to provide intelligent incident response and automated remediation.
+Akmatori is an AI-powered AIOps agent that integrates with monitoring systems and Slack to provide intelligent incident response and automated remediation.
 
 ## Features
 
-- **Zabbix Integration**: Receive alerts via webhooks and interact with Zabbix API
+- **Integrations**: Receive alerts via webhooks
 - **Slack Integration**: Post incidents to channels, receive commands, and provide real-time updates
 - **LLM-Powered Automation**: Use OpenAI's models to analyze incidents and execute remediation skills
 - **Skills System**: Define custom automation skills with prompts and attached tools
@@ -16,8 +16,8 @@ Akmatori is an AI-powered AIOps bot that integrates with Zabbix monitoring and S
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Zabbix    │────▶│  Akmatori   │◀────│    Slack    │
-│  Webhooks   │     │   Backend   │     │     Bot     │
+│   Alerts    │────▶│  Akmatori   │◀────│    Slack    │
+│             │     │   Backend   │     │     Bot     │
 └─────────────┘     └──────┬──────┘     └─────────────┘
                            │
                     ┌──────┴──────┐
@@ -35,7 +35,6 @@ Akmatori is an AI-powered AIOps bot that integrates with Zabbix monitoring and S
 - Docker and Docker Compose
 - OpenAI API key
 - Slack App (optional, for Slack integration)
-- Zabbix server (optional, for monitoring integration)
 
 ### Installation
 
@@ -85,16 +84,7 @@ Akmatori is an AI-powered AIOps bot that integrates with Zabbix monitoring and S
    - App Token (`xapp-...`)
    - Signing Secret
    - Alerts Channel
-
-### Zabbix Setup
-
-1. Navigate to **Settings > Zabbix** in the dashboard
-2. Generate a webhook secret
-3. Configure Zabbix to send webhooks to:
-   ```
-   POST http://your-akmatori-host/zabbix/webhook
-   ```
-4. Include the secret in the `X-Webhook-Secret` header
+     
 
 ## Skills
 
@@ -193,32 +183,6 @@ akmatori/
 ├── docker-compose.yml
 ├── Dockerfile
 └── Makefile
-```
-
-### Building from Source
-
-```bash
-# Build backend
-make build
-
-# Build for specific platform
-make build-linux
-make build-mac
-make build-windows
-
-# Run tests
-make test
-
-# Run with coverage
-make test-coverage
-```
-
-### Frontend Development
-
-```bash
-cd web
-npm install
-npm run dev
 ```
 
 ## Tech Stack
