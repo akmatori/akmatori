@@ -6,7 +6,6 @@ import {
   Wrench,
   Settings,
   Activity,
-  MessageSquare,
   FileText,
   ChevronLeft,
   Menu,
@@ -28,7 +27,6 @@ export const useSidebar = () => useContext(SidebarContext);
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Incidents', href: '/incidents', icon: Activity },
-  { name: 'Incident Manager', href: '/incident-manager', icon: MessageSquare },
   { name: 'Skills', href: '/skills', icon: Bot },
   { name: 'Tools', href: '/tools', icon: Wrench },
   { name: 'Context Files', href: '/context', icon: FileText },

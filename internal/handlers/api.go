@@ -49,9 +49,6 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/tools", h.handleTools)
 	mux.HandleFunc("/api/tools/", h.handleToolByID)
 
-	// Incident manager configuration
-	mux.HandleFunc("/api/incident-manager/prompt", h.handleIncidentManagerPrompt)
-
 	// Incidents
 	mux.HandleFunc("/api/incidents", h.handleIncidents)
 	mux.HandleFunc("/api/incidents/", h.handleIncidentByID)
@@ -242,6 +239,11 @@ func (h *APIHandler) handleSkillByName(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodDelete:
 		if err := h.skillService.DeleteSkill(skillName); err != nil {
+			// Check if it's a system skill deletion attempt
+			if strings.Contains(err.Error(), "cannot delete system skill") {
+				http.Error(w, err.Error(), http.StatusForbidden)
+				return
+			}
 			http.Error(w, fmt.Sprintf("Failed to delete skill: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -445,45 +447,6 @@ func (h *APIHandler) handleToolByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
-
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-// handleIncidentManagerPrompt handles GET /api/incident-manager/prompt and PUT /api/incident-manager/prompt
-func (h *APIHandler) handleIncidentManagerPrompt(w http.ResponseWriter, r *http.Request) {
-	db := database.GetDB()
-
-	switch r.Method {
-	case http.MethodGet:
-		var config database.IncidentManagerConfig
-		if err := db.First(&config).Error; err != nil {
-			http.Error(w, "Config not found", http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(config)
-
-	case http.MethodPut:
-		var req struct {
-			Prompt string `json:"prompt"`
-		}
-
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
-			return
-		}
-
-		if err := db.Model(&database.IncidentManagerConfig{}).Where("id = ?", 1).Update("prompt", req.Prompt).Error; err != nil {
-			http.Error(w, fmt.Sprintf("Failed to update prompt: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		var config database.IncidentManagerConfig
-		db.First(&config)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(config)
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

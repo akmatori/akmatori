@@ -329,7 +329,18 @@ func (s *SkillService) UpdateSkill(name string, description, category string, en
 }
 
 // DeleteSkill removes a skill from both filesystem and database
+// System skills cannot be deleted
 func (s *SkillService) DeleteSkill(name string) error {
+	// Check if skill is a system skill
+	var skill database.Skill
+	if err := s.db.Where("name = ?", name).First(&skill).Error; err != nil {
+		return fmt.Errorf("skill not found: %w", err)
+	}
+
+	if skill.IsSystem {
+		return fmt.Errorf("cannot delete system skill: %s", name)
+	}
+
 	// Delete from database
 	if err := s.db.Where("name = ?", name).Delete(&database.Skill{}).Error; err != nil {
 		return fmt.Errorf("failed to delete skill from database: %w", err)
@@ -343,6 +354,8 @@ func (s *SkillService) DeleteSkill(name string) error {
 
 	return nil
 }
+
+
 
 // ListSkills returns all skills from the database
 func (s *SkillService) ListSkills() ([]database.Skill, error) {
@@ -371,8 +384,16 @@ func (s *SkillService) GetSkill(name string) (*database.Skill, error) {
 	return &skill, nil
 }
 
-// GetSkillPrompt reads the body (instructions) from SKILL.md
+// GetSkillPrompt reads the prompt for a skill
+// For incident-manager system skill, returns the hardcoded default
+// For regular skills, reads from SKILL.md file
 func (s *SkillService) GetSkillPrompt(name string) (string, error) {
+	// Incident-manager uses hardcoded prompt (not editable)
+	if name == "incident-manager" {
+		return database.DefaultIncidentManagerPrompt, nil
+	}
+
+	// Regular skill - read from SKILL.md
 	skillPath := filepath.Join(s.GetSkillDir(name), "SKILL.md")
 	content, err := os.ReadFile(skillPath)
 	if err != nil {
@@ -387,9 +408,16 @@ func (s *SkillService) GetSkillPrompt(name string) (string, error) {
 	return string(content), nil
 }
 
-// UpdateSkillPrompt updates the body (instructions) in SKILL.md
+// UpdateSkillPrompt updates the prompt for a skill
+// For incident-manager system skill, this is a no-op (prompt is hardcoded)
+// For regular skills, writes to SKILL.md file
 func (s *SkillService) UpdateSkillPrompt(name, prompt string) error {
-	// Get current skill metadata
+	// Incident-manager prompt is hardcoded, can't be updated
+	if name == "incident-manager" {
+		return nil
+	}
+
+	// Regular skill - write to SKILL.md
 	skill, err := s.GetSkill(name)
 	if err != nil {
 		return err
@@ -689,17 +717,18 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 
 // generateIncidentAgentsMd generates the AGENTS.md file for incident manager
 func (s *SkillService) generateIncidentAgentsMd(path string) error {
-	// Get incident manager config from database
-	var config database.IncidentManagerConfig
-	if err := s.db.First(&config).Error; err != nil {
-		return fmt.Errorf("failed to get incident manager config: %w", err)
+	// Get incident manager prompt from the system skill
+	prompt, err := s.GetSkillPrompt("incident-manager")
+	if err != nil {
+		// Fallback to default if skill file doesn't exist yet
+		prompt = database.DefaultIncidentManagerPrompt
 	}
 
 	// Build AGENTS.md content
 	var sb strings.Builder
 
 	sb.WriteString("# Incident Manager\n\n")
-	sb.WriteString(config.Prompt)
+	sb.WriteString(prompt)
 	sb.WriteString("\n\n")
 
 	// Add tool environment files section

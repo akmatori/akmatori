@@ -32,7 +32,6 @@ func AutoMigrate() error {
 	log.Println("Running database migrations...")
 
 	err := DB.AutoMigrate(
-		&IncidentManagerConfig{},
 		&SlackSettings{},
 		&ZabbixSettings{},
 		&OpenAISettings{},
@@ -57,28 +56,8 @@ func AutoMigrate() error {
 func InitializeDefaults() error {
 	log.Println("Initializing default database records...")
 
-	// Create default incident manager config if it doesn't exist
-	var count int64
-	DB.Model(&IncidentManagerConfig{}).Count(&count)
-	if count == 0 {
-		defaultConfig := &IncidentManagerConfig{
-			Prompt: `You're a senior incident manager. Your responsibility is resolving incidents or answering questions related to infrastructure.
-
-When you receive an event (alert, message, or question), follow these steps:
-1. Analyze the situation and determine what information you need
-2. Call appropriate skills using the $ syntax (e.g., $skill-name task description)
-3. Synthesize the information gathered from skills
-4. Provide a clear resolution or answer
-
-Please invoke skills as needed. Each skill has specific expertise and tools at their disposal.`,
-		}
-		if err := DB.Create(defaultConfig).Error; err != nil {
-			return fmt.Errorf("failed to create default incident manager config: %w", err)
-		}
-		log.Println("Created default incident manager configuration")
-	}
-
 	// Create default Slack settings if they don't exist
+	var count int64
 	DB.Model(&SlackSettings{}).Count(&count)
 	if count == 0 {
 		defaultSlackSettings := &SlackSettings{
@@ -115,6 +94,83 @@ Please invoke skills as needed. Each skill has specific expertise and tools at t
 		}
 		log.Println("Created default OpenAI settings (disabled)")
 	}
+
+	// Initialize system skill (incident-manager)
+	if err := InitializeSystemSkill(); err != nil {
+		return fmt.Errorf("failed to initialize system skill: %w", err)
+	}
+
+	return nil
+}
+
+// DefaultIncidentManagerPrompt is the default prompt for the incident-manager system skill
+const DefaultIncidentManagerPrompt = `You are a Senior Incident Manager responsible for triaging, investigating, and resolving infrastructure incidents. You coordinate responses by delegating tasks to specialized skills.
+
+## Your Responsibilities
+
+1. **Triage**: Assess incident severity and impact when alerts or questions arrive
+2. **Investigate**: Gather relevant data by invoking appropriate skills
+3. **Coordinate**: Orchestrate multiple skills when complex investigation is needed
+4. **Resolve**: Provide clear findings, root cause analysis, and remediation steps
+5. **Communicate**: Deliver concise, actionable responses
+
+## Investigation Workflow
+
+1. **Understand the problem**: Read the alert/question carefully
+2. **Identify relevant skills**: Check available skills and their capabilities
+3. **Gather data**: Invoke skills to collect metrics, logs, or status information
+4. **Correlate findings**: Connect information from multiple sources
+5. **Determine root cause**: Identify what triggered the incident
+6. **Recommend actions**: Suggest specific remediation steps
+
+## Response Guidelines
+
+- Be concise but thorough
+- Include specific metrics and timestamps when available
+- Clearly state the root cause if identified
+- Provide actionable next steps
+- Escalate when the issue is beyond your capability to resolve
+
+## When to Escalate
+
+Escalate to human operators when:
+- The issue requires manual intervention you cannot perform
+- Security incidents are detected
+- Data loss or corruption is suspected
+- The problem persists after attempted remediation
+- You lack the necessary skills or access to resolve the issue`
+
+// InitializeSystemSkill creates the incident-manager system skill if it doesn't exist
+func InitializeSystemSkill() error {
+	log.Println("Checking for incident-manager system skill...")
+
+	var skill Skill
+	result := DB.Where("name = ?", "incident-manager").First(&skill)
+
+	if result.Error == nil {
+		// Skill exists, ensure it's marked as system
+		if !skill.IsSystem {
+			DB.Model(&skill).Update("is_system", true)
+			log.Println("Updated incident-manager skill to system skill")
+		}
+		return nil
+	}
+
+	// Skill doesn't exist, create it
+	// Create the system skill
+	skill = Skill{
+		Name:        "incident-manager",
+		Description: "Core system skill for managing incidents and orchestrating other skills",
+		Category:    "system",
+		IsSystem:    true,
+		Enabled:     true,
+	}
+
+	if err := DB.Create(&skill).Error; err != nil {
+		return fmt.Errorf("failed to create incident-manager skill: %w", err)
+	}
+
+	log.Printf("Created incident-manager system skill (ID: %d)", skill.ID)
 
 	return nil
 }

@@ -82,6 +82,13 @@ func main() {
 	toolService := services.NewToolService(cfg.ToolsDir)
 	log.Printf("Tool service initialized with tools dir: %s", cfg.ToolsDir)
 
+	// Load tool types from filesystem into database
+	if err := toolService.LoadToolTypes(); err != nil {
+		log.Printf("Warning: Failed to load tool types: %v", err)
+	} else {
+		log.Printf("Tool types loaded from filesystem")
+	}
+
 	// Data directory for skills and incidents (hardcoded)
 	const dataDir = "/akmatori"
 

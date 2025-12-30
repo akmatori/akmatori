@@ -33,14 +33,6 @@ func (j JSONB) Value() (driver.Value, error) {
 	return json.Marshal(j)
 }
 
-// IncidentManagerConfig stores the static prompt configuration for incident manager
-type IncidentManagerConfig struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	Prompt    string    `gorm:"type:text;not null" json:"prompt"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
 // SlackSettings stores Slack integration configuration
 type SlackSettings struct {
 	ID             uint      `gorm:"primaryKey" json:"id"`
@@ -94,6 +86,7 @@ type Skill struct {
 	Name        string    `gorm:"uniqueIndex;size:64;not null" json:"name"` // kebab-case name (e.g., "zabbix-analyst")
 	Description string    `gorm:"size:1024" json:"description"`             // Short description for skill discovery
 	Category    string    `gorm:"size:64" json:"category"`                  // Optional category (e.g., "monitoring", "database")
+	IsSystem    bool      `gorm:"default:false" json:"is_system"`           // System skills cannot be deleted and don't connect to tools
 	Enabled     bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -196,10 +189,6 @@ func (i *Incident) BeforeCreate(tx *gorm.DB) error {
 }
 
 // TableName overrides for explicit table naming
-func (IncidentManagerConfig) TableName() string {
-	return "incident_manager_configs"
-}
-
 func (Skill) TableName() string {
 	return "skills"
 }
