@@ -2,6 +2,9 @@
 
 Akmatori is an AI-powered AIOps agent that integrates with monitoring systems and Slack to provide intelligent incident response and automated remediation.
 
+<img width="1436" height="659" alt="image" src="https://github.com/user-attachments/assets/b2c78bf5-9e20-47da-8ec6-b841c6a0a3de" />
+
+
 ## Features
 
 - **Multi-Source Alert Ingestion**: Receive alerts from Alertmanager, Zabbix, PagerDuty, Grafana, and Datadog via webhooks
@@ -15,8 +18,8 @@ Akmatori is an AI-powered AIOps agent that integrates with monitoring systems an
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Alert Sources                          │
+┌──────────────────────────────────────────────────────────────┐
+│                      Alert Sources                           │
 │  Alertmanager  │  Zabbix  │  PagerDuty  │  Grafana  │ Datadog│
 └────────┬───────┴────┬─────┴──────┬──────┴─────┬─────┴───┬────┘
          │            │            │            │         │
