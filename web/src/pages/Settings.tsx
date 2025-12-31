@@ -1,13 +1,23 @@
 import { useState, useEffect } from 'react';
-import { Save, MessageSquare, Cpu, Power, PowerOff, Check, Info } from 'lucide-react';
-import PageHeader from '../components/PageHeader';
+import { Save, MessageSquare, Cpu, Power, PowerOff, Check, Info, Bell } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { SuccessMessage, WarningMessage } from '../components/ErrorMessage';
+import AlertSourcesManager from '../components/AlertSourcesManager';
 import { slackSettingsApi, openaiSettingsApi } from '../api/client';
 import type { SlackSettings, SlackSettingsUpdate, OpenAISettings, OpenAISettingsUpdate, OpenAIModel, ReasoningEffort } from '../types';
 
+type SettingsTab = 'slack' | 'openai' | 'alert-sources';
+
+const tabs: { id: SettingsTab; label: string; icon: React.ElementType; description: string }[] = [
+  { id: 'slack', label: 'Slack', icon: MessageSquare, description: 'Chat integration' },
+  { id: 'openai', label: 'OpenAI', icon: Cpu, description: 'AI configuration' },
+  { id: 'alert-sources', label: 'Alert Sources', icon: Bell, description: 'Webhook integrations' },
+];
+
 export default function Settings() {
+  const [activeTab, setActiveTab] = useState<SettingsTab>('slack');
+
   // Slack settings state
   const [settings, setSettings] = useState<SlackSettings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -156,54 +166,30 @@ export default function Settings() {
     }
   };
 
-  if (loading && openaiLoading) {
-    return (
-      <div>
-        <PageHeader
-          title="Settings"
-          description="Configure system-wide settings and preferences"
-        />
-        <LoadingSpinner />
+  const renderSlackTab = () => (
+    <div className="space-y-6">
+      {/* Status Badges */}
+      <div className="flex items-center gap-3">
+        <span className={`badge ${settings?.is_configured ? 'badge-success' : 'badge-warning'}`}>
+          <Check className="w-3 h-3" />
+          {settings?.is_configured ? 'Configured' : 'Not Configured'}
+        </span>
+        <span className={`badge ${settings?.enabled ? 'badge-success' : 'badge-default'}`}>
+          {settings?.enabled ? 'Enabled' : 'Disabled'}
+        </span>
       </div>
-    );
-  }
 
-  return (
-    <div>
-      <PageHeader
-        title="Settings"
-        description="Configure system-wide settings and integration preferences"
-      />
+      {error && <ErrorMessage message={error} />}
+      {success && <SuccessMessage message="Slack settings saved successfully!" />}
 
-      {/* Slack Integration Section */}
-      <div className="card mb-8 animate-fade-in">
-        {/* Section Header */}
-        <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-purple-50 dark:bg-purple-900/20">
-              <MessageSquare className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-            </div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Slack Integration</h2>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className={`badge ${settings?.is_configured ? 'badge-success' : 'badge-warning'}`}>
-              <Check className="w-3 h-3" />
-              {settings?.is_configured ? 'Configured' : 'Not Configured'}
-            </span>
-            <span className={`badge ${settings?.enabled ? 'badge-success' : 'badge-default'}`}>
-              {settings?.enabled ? 'Enabled' : 'Disabled'}
-            </span>
-          </div>
-        </div>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Configure Slack integration to receive alerts and interact with the bot via Slack.
+        The system can work without Slack - you can use the API or UI to create incidents directly.
+      </p>
 
-        {error && <ErrorMessage message={error} />}
-        {success && <SuccessMessage message="Slack settings saved successfully!" />}
-
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-          Configure Slack integration to receive alerts and interact with the bot via Slack.
-          The system can work without Slack - you can use the API or UI to create incidents directly.
-        </p>
-
+      {loading ? (
+        <LoadingSpinner />
+      ) : (
         <div className="space-y-4">
           {/* Bot Token */}
           <div>
@@ -259,7 +245,7 @@ export default function Settings() {
           {/* Alerts Channel */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Alerts Channel (for Zabbix alerts)
+              Alerts Channel
             </label>
             <input
               type="text"
@@ -269,7 +255,7 @@ export default function Settings() {
               className="input-field"
             />
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Channel name (without #) or Channel ID where Zabbix alerts will be posted
+              Channel name (without #) or Channel ID where alerts will be posted
             </p>
           </div>
 
@@ -297,127 +283,209 @@ export default function Settings() {
             <WarningMessage message="Please configure all three tokens (Bot Token, Signing Secret, App Token) to enable Slack integration." />
           )}
         </div>
+      )}
 
-        {/* Save Button */}
-        <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
-          <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
-            <Info className="w-3 h-3" />
-            Changes require a server restart to take effect
-          </p>
-          <button onClick={handleSave} disabled={saving} className="btn btn-primary">
-            <Save className="w-4 h-4" />
-            {saving ? 'Saving...' : 'Save Slack Settings'}
-          </button>
-        </div>
+      {/* Save Button */}
+      <div className="flex items-center justify-between pt-6 border-t border-gray-200 dark:border-gray-700">
+        <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+          <Info className="w-3 h-3" />
+          Changes require a server restart to take effect
+        </p>
+        <button onClick={handleSave} disabled={saving || loading} className="btn btn-primary">
+          <Save className="w-4 h-4" />
+          {saving ? 'Saving...' : 'Save Slack Settings'}
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderOpenAITab = () => (
+    <div className="space-y-6">
+      {/* Status Badge */}
+      <div className="flex items-center gap-3">
+        <span className={`badge ${openaiSettings?.is_configured ? 'badge-success' : 'badge-warning'}`}>
+          <Check className="w-3 h-3" />
+          {openaiSettings?.is_configured ? 'Configured' : 'Not Configured'}
+        </span>
       </div>
 
-      {/* OpenAI Configuration Section */}
-      <div className="card animate-fade-in" style={{ animationDelay: '100ms' }}>
-        {/* Section Header */}
-        <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20">
-              <Cpu className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-            </div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">OpenAI Configuration</h2>
+      {openaiError && <ErrorMessage message={openaiError} />}
+      {openaiSuccess && <SuccessMessage message="OpenAI settings saved successfully!" />}
+
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Configure the OpenAI API settings for Codex. Select the model and reasoning effort level.
+      </p>
+
+      {openaiLoading ? (
+        <LoadingSpinner />
+      ) : (
+        <div className="space-y-4">
+          {/* API Key */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              API Key
+            </label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder={openaiSettings?.api_key || 'Enter OpenAI API Key'}
+              className="input-field"
+            />
+            {openaiSettings?.api_key && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Current: {openaiSettings.api_key}</p>
+            )}
           </div>
-          <span className={`badge ${openaiSettings?.is_configured ? 'badge-success' : 'badge-warning'}`}>
-            <Check className="w-3 h-3" />
-            {openaiSettings?.is_configured ? 'Configured' : 'Not Configured'}
-          </span>
+
+          {/* Model Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Model
+            </label>
+            <select
+              value={model}
+              onChange={(e) => handleModelChange(e.target.value as OpenAIModel)}
+              className="input-field"
+            >
+              <option value="gpt-5.2">gpt-5.2 (Latest, extra high reasoning)</option>
+              <option value="gpt-5.2-codex">gpt-5.2-codex (Latest Codex, extra high reasoning)</option>
+              <option value="gpt-5.1-codex-max">gpt-5.1-codex-max (Most capable, extra high reasoning)</option>
+              <option value="gpt-5.1-codex">gpt-5.1-codex (Recommended)</option>
+              <option value="gpt-5.1-codex-mini">gpt-5.1-codex-mini (Fast, limited reasoning)</option>
+              <option value="gpt-5.1">gpt-5.1 (Standard)</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Select the OpenAI model to use for AI tasks
+            </p>
+          </div>
+
+          {/* Reasoning Effort */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Reasoning Effort
+            </label>
+            <select
+              value={reasoningEffort}
+              onChange={(e) => setReasoningEffort(e.target.value as ReasoningEffort)}
+              className="input-field"
+            >
+              {getValidReasoningEfforts(model).map((effort) => (
+                <option key={effort} value={effort}>
+                  {effort === 'extra_high' ? 'Extra High' : effort.charAt(0).toUpperCase() + effort.slice(1)}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Higher reasoning effort increases accuracy but uses more tokens and time
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Save Button */}
+      <div className="flex items-center justify-between pt-6 border-t border-gray-200 dark:border-gray-700">
+        <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+          <Info className="w-3 h-3" />
+          Settings take effect immediately for new executions
+        </p>
+        <button
+          onClick={handleOpenaiSave}
+          disabled={openaiSaving || openaiLoading}
+          className="btn btn-primary"
+        >
+          <Save className="w-4 h-4" />
+          {openaiSaving ? 'Saving...' : 'Save OpenAI Settings'}
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderAlertSourcesTab = () => <AlertSourcesManager />;
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'slack':
+        return renderSlackTab();
+      case 'openai':
+        return renderOpenAITab();
+      case 'alert-sources':
+        return renderAlertSourcesTab();
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="animate-fade-in">
+      {/* Page Header */}
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
+        <p className="mt-1 text-gray-600 dark:text-gray-400">
+          Configure system integrations and preferences
+        </p>
+      </div>
+
+      {/* Settings Layout: Vertical Tabs + Content */}
+      <div className="flex gap-8">
+        {/* Vertical Tab Navigation */}
+        <div className="w-56 flex-shrink-0">
+          <nav className="space-y-1">
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`
+                    w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-all
+                    ${isActive
+                      ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300 border-l-4 border-primary-500 pl-3'
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 border-l-4 border-transparent pl-3'
+                    }
+                  `}
+                >
+                  <Icon className={`w-5 h-5 ${isActive ? 'text-primary-500' : ''}`} />
+                  <div className="min-w-0">
+                    <div className={`font-medium ${isActive ? '' : 'text-gray-900 dark:text-white'}`}>
+                      {tab.label}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-500 truncate">
+                      {tab.description}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </nav>
         </div>
 
-        {openaiError && <ErrorMessage message={openaiError} />}
-        {openaiSuccess && <SuccessMessage message="OpenAI settings saved successfully!" />}
+        {/* Tab Content */}
+        <div className="flex-1 min-w-0">
+          <div className="card">
+            {/* Tab Header */}
+            <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-200 dark:border-gray-700">
+              {(() => {
+                const currentTab = tabs.find(t => t.id === activeTab);
+                if (!currentTab) return null;
+                const Icon = currentTab.icon;
+                return (
+                  <>
+                    <div className="p-2 rounded-lg bg-primary-50 dark:bg-primary-900/20">
+                      <Icon className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                    </div>
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                      {currentTab.label}
+                    </h2>
+                  </>
+                );
+              })()}
+            </div>
 
-        <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-          Configure the OpenAI API settings for Codex. Select the model and reasoning effort level.
-        </p>
-
-        {openaiLoading ? (
-          <div className="py-8 text-center">
-            <div className="inline-block w-8 h-8 rounded-full border-3 border-gray-200 dark:border-gray-700 border-t-primary-500 animate-spin" />
-            <p className="mt-4 text-gray-500 dark:text-gray-400 text-sm">Loading...</p>
+            {/* Tab Content */}
+            {renderTabContent()}
           </div>
-        ) : (
-          <div className="space-y-4">
-            {/* API Key */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                API Key
-              </label>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder={openaiSettings?.api_key || 'Enter OpenAI API Key'}
-                className="input-field"
-              />
-              {openaiSettings?.api_key && (
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Current: {openaiSettings.api_key}</p>
-              )}
-            </div>
-
-            {/* Model Selection */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Model
-              </label>
-              <select
-                value={model}
-                onChange={(e) => handleModelChange(e.target.value as OpenAIModel)}
-                className="input-field"
-              >
-                <option value="gpt-5.2">gpt-5.2 (Latest, extra high reasoning)</option>
-                <option value="gpt-5.2-codex">gpt-5.2-codex (Latest Codex, extra high reasoning)</option>
-                <option value="gpt-5.1-codex-max">gpt-5.1-codex-max (Most capable, extra high reasoning)</option>
-                <option value="gpt-5.1-codex">gpt-5.1-codex (Recommended)</option>
-                <option value="gpt-5.1-codex-mini">gpt-5.1-codex-mini (Fast, limited reasoning)</option>
-                <option value="gpt-5.1">gpt-5.1 (Standard)</option>
-              </select>
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Select the OpenAI model to use for AI tasks
-              </p>
-            </div>
-
-            {/* Reasoning Effort */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Reasoning Effort
-              </label>
-              <select
-                value={reasoningEffort}
-                onChange={(e) => setReasoningEffort(e.target.value as ReasoningEffort)}
-                className="input-field"
-              >
-                {getValidReasoningEfforts(model).map((effort) => (
-                  <option key={effort} value={effort}>
-                    {effort === 'extra_high' ? 'Extra High' : effort.charAt(0).toUpperCase() + effort.slice(1)}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Higher reasoning effort increases accuracy but uses more tokens and time
-              </p>
-            </div>
-
-          </div>
-        )}
-
-        {/* Save Button */}
-        <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
-          <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
-            <Info className="w-3 h-3" />
-            Settings take effect immediately for new executions
-          </p>
-          <button
-            onClick={handleOpenaiSave}
-            disabled={openaiSaving || openaiLoading}
-            className="btn btn-primary"
-          >
-            <Save className="w-4 h-4" />
-            {openaiSaving ? 'Saving...' : 'Save OpenAI Settings'}
-          </button>
         </div>
       </div>
     </div>

@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/akmatori/akmatori/internal/alerts/adapters"
 	"github.com/akmatori/akmatori/internal/config"
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
@@ -107,6 +108,15 @@ func main() {
 	codexExecutor := executor.NewExecutor()
 	log.Printf("Codex executor initialized")
 
+	// Initialize Alert service
+	alertService := services.NewAlertService()
+	log.Printf("Alert service initialized")
+
+	// Initialize default alert source types
+	if err := alertService.InitializeDefaultSourceTypes(); err != nil {
+		log.Printf("Warning: Failed to initialize alert source types: %v", err)
+	}
+
 	// Initialize Slack manager with hot-reload support
 	slackManager := slackutil.NewManager()
 
@@ -119,7 +129,6 @@ func main() {
 
 	// Initialize Slack handler (will be used when Slack is enabled)
 	var slackHandler *handlers.SlackHandler
-	var channelResolver *slackutil.ChannelResolver
 
 	// Set up event handler for when Slack connects
 	// Note: We receive the client directly to avoid deadlock (can't call GetClient while holding lock)
@@ -131,9 +140,6 @@ func main() {
 			skillService,
 		)
 		slackHandler.HandleSocketMode(socketClient)
-
-		// Initialize channel resolver for Zabbix integration
-		channelResolver = slackutil.NewChannelResolver(client)
 		log.Printf("Slack components initialized")
 	})
 
@@ -144,22 +150,33 @@ func main() {
 		log.Printf("Slack integration is DISABLED (configure in Settings)")
 	}
 
-	// Initialize Zabbix handler (works with or without Slack)
-	// Note: slackManager.GetClient() may return nil if Slack is disabled, which is handled
-	zabbixHandler := handlers.NewZabbixHandler(
+	// Initialize channel resolver (will be set when Slack connects)
+	var channelResolver *slackutil.ChannelResolver
+
+	// Initialize Alert handler
+	alertHandler := handlers.NewAlertHandler(
 		cfg,
 		slackManager.GetClient(), // Can be nil if Slack is disabled
 		codexExecutor,
 		skillService,
-		channelResolver, // Can be nil if Slack is disabled
+		alertService,
+		channelResolver,
 		slackSettings.AlertsChannel,
 	)
 
-	// Initialize HTTP handler for Zabbix webhooks
-	httpHandler := handlers.NewHTTPHandler(zabbixHandler)
+	// Register all alert adapters
+	alertHandler.RegisterAdapter(adapters.NewAlertmanagerAdapter())
+	alertHandler.RegisterAdapter(adapters.NewZabbixAdapter())
+	alertHandler.RegisterAdapter(adapters.NewPagerDutyAdapter())
+	alertHandler.RegisterAdapter(adapters.NewGrafanaAdapter())
+	alertHandler.RegisterAdapter(adapters.NewDatadogAdapter())
+	log.Printf("Alert adapters registered: alertmanager, zabbix, pagerduty, grafana, datadog")
+
+	// Initialize HTTP handler
+	httpHandler := handlers.NewHTTPHandler(alertHandler)
 
 	// Initialize API handler for skill communication and management
-	apiHandler := handlers.NewAPIHandler(skillService, toolService, contextService, codexExecutor, slackManager)
+	apiHandler := handlers.NewAPIHandler(skillService, toolService, contextService, alertService, codexExecutor, slackManager)
 
 	// Initialize auth handler
 	authHandler := handlers.NewAuthHandler(jwtAuthMiddleware)
@@ -207,7 +224,7 @@ func main() {
 	}()
 
 	log.Println("Bot is running! Press Ctrl+C to exit.")
-	log.Printf("HTTP webhook endpoint: http://localhost:%d/webhook/zabbix", cfg.HTTPPort)
+	log.Printf("Alert webhook endpoint: http://localhost:%d/webhook/alert/{instance_uuid}", cfg.HTTPPort)
 	log.Printf("Health check endpoint: http://localhost:%d/health", cfg.HTTPPort)
 	log.Printf("API base URL: http://localhost:%d/api", cfg.HTTPPort)
 

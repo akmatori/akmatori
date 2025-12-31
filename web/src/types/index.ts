@@ -167,3 +167,48 @@ export interface ScriptInfo {
   size: number;
   modified_at: string;
 }
+
+// Alert Source Types (for webhook configuration)
+export interface AlertSourceType {
+  id: number;
+  name: string;
+  display_name: string;
+  description: string;
+  default_field_mappings: Record<string, string>;
+  webhook_secret_header: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AlertSourceInstance {
+  id: number;
+  uuid: string;
+  alert_source_type_id: number;
+  name: string;
+  description: string;
+  webhook_secret: string;
+  field_mappings: Record<string, string>;
+  settings: Record<string, any>;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  alert_source_type?: AlertSourceType;
+}
+
+export interface CreateAlertSourceRequest {
+  source_type_name: string;
+  name: string;
+  description?: string;
+  webhook_secret?: string;
+  field_mappings?: Record<string, string>;
+  settings?: Record<string, any>;
+}
+
+export interface UpdateAlertSourceRequest {
+  name?: string;
+  description?: string;
+  webhook_secret?: string;
+  field_mappings?: Record<string, string>;
+  settings?: Record<string, any>;
+  enabled?: boolean;
+}

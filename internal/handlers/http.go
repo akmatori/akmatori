@@ -8,20 +8,23 @@ import (
 
 // HTTPHandler handles HTTP endpoints
 type HTTPHandler struct {
-	zabbixHandler *ZabbixHandler
+	alertHandler *AlertHandler
 }
 
 // NewHTTPHandler creates a new HTTP handler
-func NewHTTPHandler(zabbixHandler *ZabbixHandler) *HTTPHandler {
+func NewHTTPHandler(alertHandler *AlertHandler) *HTTPHandler {
 	return &HTTPHandler{
-		zabbixHandler: zabbixHandler,
+		alertHandler: alertHandler,
 	}
 }
 
 // SetupRoutes configures all HTTP routes
 func (h *HTTPHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/health", h.handleHealth)
-	mux.HandleFunc("/webhook/zabbix", h.zabbixHandler.HandleWebhook)
+	// Alert webhooks: /webhook/alert/{instance_uuid}
+	if h.alertHandler != nil {
+		mux.HandleFunc("/webhook/alert/", h.alertHandler.HandleWebhook)
+	}
 }
 
 // handleHealth returns a simple health check response

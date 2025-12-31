@@ -33,7 +33,6 @@ func AutoMigrate() error {
 
 	err := DB.AutoMigrate(
 		&SlackSettings{},
-		&ZabbixSettings{},
 		&OpenAISettings{},
 		&ContextFile{},
 		&Skill{},
@@ -43,6 +42,9 @@ func AutoMigrate() error {
 		&EventSource{},
 		&Incident{},
 		&APIKeySettings{},
+		// Alert source models
+		&AlertSourceType{},
+		&AlertSourceInstance{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
@@ -67,18 +69,6 @@ func InitializeDefaults() error {
 			return fmt.Errorf("failed to create default slack settings: %w", err)
 		}
 		log.Println("Created default Slack settings (disabled)")
-	}
-
-	// Create default Zabbix settings if they don't exist
-	DB.Model(&ZabbixSettings{}).Count(&count)
-	if count == 0 {
-		defaultZabbixSettings := &ZabbixSettings{
-			Enabled: false, // Disabled by default until configured
-		}
-		if err := DB.Create(defaultZabbixSettings).Error; err != nil {
-			return fmt.Errorf("failed to create default zabbix settings: %w", err)
-		}
-		log.Println("Created default Zabbix settings (disabled)")
 	}
 
 	// Create default OpenAI settings if they don't exist
@@ -187,20 +177,6 @@ func GetSlackSettings() (*SlackSettings, error) {
 // UpdateSlackSettings updates Slack settings in the database
 func UpdateSlackSettings(settings *SlackSettings) error {
 	return DB.Model(&SlackSettings{}).Where("id = ?", settings.ID).Updates(settings).Error
-}
-
-// GetZabbixSettings retrieves Zabbix settings from the database
-func GetZabbixSettings() (*ZabbixSettings, error) {
-	var settings ZabbixSettings
-	if err := DB.First(&settings).Error; err != nil {
-		return nil, err
-	}
-	return &settings, nil
-}
-
-// UpdateZabbixSettings updates Zabbix settings in the database
-func UpdateZabbixSettings(settings *ZabbixSettings) error {
-	return DB.Model(&ZabbixSettings{}).Where("id = ?", settings.ID).Updates(settings).Error
 }
 
 // GetOpenAISettings retrieves OpenAI settings from the database
