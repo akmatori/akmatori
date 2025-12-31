@@ -482,3 +482,308 @@ code {
 .dark .focus-ring:focus-visible {
   box-shadow: 0 0 0 2px #111827, 0 0 0 4px #60a5fa;
 }
+
+/* ============================================
+   ALERT SEVERITY SYSTEM
+   ============================================ */
+
+/* Severity Badges */
+.badge-critical {
+  background-color: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.dark .badge-critical {
+  background-color: rgb(239 68 68 / 0.15);
+  color: #fca5a5;
+  border-color: rgb(239 68 68 / 0.3);
+}
+
+.badge-high {
+  background-color: #ffedd5;
+  color: #c2410c;
+  border: 1px solid #fed7aa;
+}
+
+.dark .badge-high {
+  background-color: rgb(249 115 22 / 0.15);
+  color: #fdba74;
+  border-color: rgb(249 115 22 / 0.3);
+}
+
+.badge-warning {
+  background-color: #fef3c7;
+  color: #a16207;
+  border: 1px solid #fde68a;
+}
+
+.dark .badge-warning {
+  background-color: rgb(234 179 8 / 0.15);
+  color: #fcd34d;
+  border-color: rgb(234 179 8 / 0.3);
+}
+
+.badge-info {
+  background-color: #dbeafe;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.dark .badge-info {
+  background-color: rgb(59 130 246 / 0.15);
+  color: #93c5fd;
+  border-color: rgb(59 130 246 / 0.3);
+}
+
+/* Status Indicators */
+.status-firing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: #dc2626;
+}
+
+.dark .status-firing {
+  color: #f87171;
+}
+
+.status-firing::before {
+  content: '';
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background-color: #dc2626;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.dark .status-firing::before {
+  background-color: #f87171;
+}
+
+.status-resolved {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: #16a34a;
+}
+
+.dark .status-resolved {
+  color: #4ade80;
+}
+
+.status-resolved::before {
+  content: '';
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background-color: #16a34a;
+}
+
+.dark .status-resolved::before {
+  background-color: #4ade80;
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.2);
+  }
+}
+
+/* Severity Indicator Dots */
+.severity-dot {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.severity-dot-critical {
+  background-color: #dc2626;
+  box-shadow: 0 0 0 2px rgb(220 38 38 / 0.2);
+}
+
+.severity-dot-high {
+  background-color: #ea580c;
+  box-shadow: 0 0 0 2px rgb(234 88 12 / 0.2);
+}
+
+.severity-dot-warning {
+  background-color: #ca8a04;
+  box-shadow: 0 0 0 2px rgb(202 138 4 / 0.2);
+}
+
+.severity-dot-info {
+  background-color: #2563eb;
+  box-shadow: 0 0 0 2px rgb(37 99 235 / 0.2);
+}
+
+/* Alert Card Styles */
+.alert-card {
+  position: relative;
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  transition: all 0.15s ease;
+}
+
+.dark .alert-card {
+  background-color: #1f2937;
+  border-color: #374151;
+}
+
+.alert-card:hover {
+  border-color: #d1d5db;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
+}
+
+.dark .alert-card:hover {
+  border-color: #4b5563;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.3);
+}
+
+.alert-card-critical {
+  border-left: 3px solid #dc2626;
+}
+
+.alert-card-high {
+  border-left: 3px solid #ea580c;
+}
+
+.alert-card-warning {
+  border-left: 3px solid #ca8a04;
+}
+
+.alert-card-info {
+  border-left: 3px solid #2563eb;
+}
+
+/* Webhook URL Display */
+.webhook-url {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background-color: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.375rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+}
+
+.dark .webhook-url {
+  background-color: #111827;
+  border-color: #374151;
+}
+
+.webhook-url code {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  padding: 0;
+}
+
+/* Copy Button Animation */
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  color: #6b7280;
+  transition: all 0.15s ease;
+}
+
+.copy-btn:hover {
+  color: #3b82f6;
+  background-color: #eff6ff;
+}
+
+.dark .copy-btn:hover {
+  color: #60a5fa;
+  background-color: rgb(59 130 246 / 0.1);
+}
+
+.copy-btn.copied {
+  color: #16a34a;
+}
+
+.dark .copy-btn.copied {
+  color: #4ade80;
+}
+
+/* Alert Source Type Icons */
+.source-icon {
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  background-color: #f3f4f6;
+  color: #6b7280;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.dark .source-icon {
+  background-color: #374151;
+  color: #9ca3af;
+}
+
+.source-icon-alertmanager {
+  background-color: #fef3c7;
+  color: #d97706;
+}
+
+.dark .source-icon-alertmanager {
+  background-color: rgb(217 119 6 / 0.2);
+  color: #fbbf24;
+}
+
+.source-icon-grafana {
+  background-color: #ffedd5;
+  color: #ea580c;
+}
+
+.dark .source-icon-grafana {
+  background-color: rgb(234 88 12 / 0.2);
+  color: #fb923c;
+}
+
+.source-icon-pagerduty {
+  background-color: #dcfce7;
+  color: #16a34a;
+}
+
+.dark .source-icon-pagerduty {
+  background-color: rgb(22 163 74 / 0.2);
+  color: #4ade80;
+}
+
+.source-icon-datadog {
+  background-color: #f3e8ff;
+  color: #9333ea;
+}
+
+.dark .source-icon-datadog {
+  background-color: rgb(147 51 234 / 0.2);
+  color: #c084fc;
+}
+
+.source-icon-zabbix {
+  background-color: #fee2e2;
+  color: #dc2626;
+}
+
+.dark .source-icon-zabbix {
+  background-color: rgb(220 38 38 / 0.2);
+  color: #f87171;
+}

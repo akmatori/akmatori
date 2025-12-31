@@ -4,10 +4,10 @@ Akmatori is an AI-powered AIOps agent that integrates with monitoring systems an
 
 ## Features
 
-- **Integrations**: Receive alerts via webhooks
+- **Multi-Source Alert Ingestion**: Receive alerts from Alertmanager, Zabbix, PagerDuty, Grafana, and Datadog via webhooks
 - **Slack Integration**: Post incidents to channels, receive commands, and provide real-time updates
 - **LLM-Powered Automation**: Use OpenAI's models via [Codex CLI](https://github.com/openai/codex) to analyze incidents and execute remediation skills
-- **Skills System**: Define custom automation skills with prompts and attached tools
+- **[Agent Skills](https://github.com/agentskills/agentskills) Format**: Skills follow the open Agent Skills specification for portability across AI agents
 - **Tools Management**: Configure reusable tools (Python scripts, API clients) for skills
 - **Web Dashboard**: Manage incidents, skills, tools, and settings through a modern UI
 - **Context Files**: Upload reference documents for the AI to use during incident analysis
@@ -15,17 +15,26 @@ Akmatori is an AI-powered AIOps agent that integrates with monitoring systems an
 ## Architecture
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Alerts    │────▶│  Akmatori   │◀────│    Slack    │
-│             │     │   Backend   │     │     Bot     │
-└─────────────┘     └──────┬──────┘     └─────────────┘
-                           │
-                    ┌──────┴──────┐
-                    │             │
-              ┌─────▼─────┐ ┌─────▼─────┐
-              │ PostgreSQL│ │  OpenAI   │
-              │    DB     │ │    API    │
-              └───────────┘ └───────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                      Alert Sources                          │
+│  Alertmanager  │  Zabbix  │  PagerDuty  │  Grafana  │ Datadog│
+└────────┬───────┴────┬─────┴──────┬──────┴─────┬─────┴───┬────┘
+         │            │            │            │         │
+         └────────────┴────────────┼────────────┴─────────┘
+                                   │
+                                   ▼
+                    ┌──────────────────────────┐
+                    │   /webhook/alert/{uuid}  │
+                    └────────────┬─────────────┘
+                                 │
+┌─────────────┐     ┌────────────▼─────────────┐     ┌─────────────┐
+│    Slack    │◀───▶│       Akmatori           │◀───▶│   OpenAI    │
+│     Bot     │     │        Backend           │     │     API     │
+└─────────────┘     └────────────┬─────────────┘     └─────────────┘
+                                 │
+                          ┌──────┴──────┐
+                          │  PostgreSQL │
+                          └─────────────┘
 ```
 
 ## Quick Start
@@ -84,14 +93,58 @@ Akmatori is an AI-powered AIOps agent that integrates with monitoring systems an
    - App Token (`xapp-...`)
    - Signing Secret
    - Alerts Channel
-     
+
+### Alert Sources Setup
+
+Akmatori can receive alerts from multiple monitoring systems. Each alert source instance gets a unique webhook URL.
+
+1. Navigate to **Settings > Alert Sources** in the dashboard
+2. Click **New Source**
+3. Select the source type:
+   - **Alertmanager** - Prometheus Alertmanager
+   - **Zabbix** - Zabbix monitoring
+   - **PagerDuty** - PagerDuty incident management
+   - **Grafana** - Grafana alerting
+   - **Datadog** - Datadog monitoring
+4. Provide an instance name and optional webhook secret
+5. Copy the generated webhook URL and configure it in your monitoring system
+
+Each incoming alert automatically creates an incident and triggers AI-powered investigation.
 
 ## Skills
 
-Skills are AI-powered automation units that can be triggered to handle specific tasks.
+Skills are AI-powered automation units that can be triggered to handle specific tasks. Akmatori implements the [Agent Skills](https://github.com/agentskills/agentskills) open format, making skills portable and reusable across different AI agents.
+
+### Agent Skills Format
+
+Each skill is stored as a directory with a `SKILL.md` file following the [Agent Skills specification](https://agentskills.io/specification):
+
+```
+skills/
+└── disk-cleanup/
+    ├── SKILL.md          # Skill definition (YAML frontmatter + instructions)
+    ├── scripts/          # Optional executable scripts
+    └── references/       # Optional additional documentation
+```
+
+**SKILL.md structure:**
+```markdown
+---
+name: disk-cleanup
+description: Analyzes disk usage and cleans up temporary files
+---
+
+You are a disk cleanup specialist. When triggered:
+
+1. Check disk usage on the target host
+2. Identify large files and directories
+3. Suggest safe cleanup actions
+4. Execute cleanup with user approval
+```
 
 ### Creating a Skill
 
+**Via Dashboard:**
 1. Navigate to **Skills** in the dashboard
 2. Click **Create Skill**
 3. Provide:
@@ -100,6 +153,11 @@ Skills are AI-powered automation units that can be triggered to handle specific 
    - **Category**: Grouping (e.g., `infrastructure`, `database`)
    - **Prompt**: Instructions for the AI
 
+**Via Filesystem:**
+1. Create a directory in `/akmatori/skills/{skill-name}/`
+2. Add a `SKILL.md` file with YAML frontmatter and instructions
+3. Run skill sync via API or restart the service
+
 ### Attaching Tools
 
 Tools provide skills with capabilities like API access or script execution:
@@ -107,6 +165,8 @@ Tools provide skills with capabilities like API access or script execution:
 1. Navigate to **Tools** to create tool instances
 2. Configure tool settings (API endpoints, credentials)
 3. Attach tools to skills via the skill edit page
+
+Tools are symlinked into the skill's directory, making them available during execution.
 
 ## Tools
 
@@ -153,6 +213,38 @@ curl -X POST http://localhost:8080/api/skills/sync \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+### Alert Sources
+
+```bash
+# List available source types
+curl http://localhost:8080/api/alert-source-types \
+  -H "Authorization: Bearer $TOKEN"
+
+# List configured alert sources
+curl http://localhost:8080/api/alert-sources \
+  -H "Authorization: Bearer $TOKEN"
+
+# Create an alert source
+curl -X POST http://localhost:8080/api/alert-sources \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "source_type_name": "alertmanager",
+    "name": "Production Alertmanager",
+    "webhook_secret": "optional-secret"
+  }'
+```
+
+### Webhook Endpoints
+
+Each alert source instance gets a unique webhook URL:
+
+```
+POST /webhook/alert/{instance_uuid}
+```
+
+Configure this URL in your monitoring system. The webhook automatically normalizes incoming alerts and creates incidents.
+
 ## Development
 
 ### Project Structure
@@ -161,6 +253,8 @@ curl -X POST http://localhost:8080/api/skills/sync \
 akmatori/
 ├── cmd/akmatori/          # Application entrypoint
 ├── internal/
+│   ├── alerts/            # Alert adapters for each source type
+│   │   └── adapters/      # Alertmanager, Zabbix, PagerDuty, etc.
 │   ├── config/            # Configuration loading
 │   ├── database/          # GORM models and database logic
 │   ├── executor/          # LLM execution engine
@@ -203,10 +297,28 @@ akmatori/
 
 **AI Execution:**
 - [Codex CLI](https://github.com/openai/codex) - OpenAI's open-source AI coding agent that powers the LLM execution engine
+- [Agent Skills](https://github.com/agentskills/agentskills) - Open format for portable AI agent capabilities
 
 ## How It Works
 
-Akmatori uses [OpenAI Codex CLI](https://github.com/openai/codex) under the hood to execute AI-powered automation tasks. When a skill is triggered, Akmatori invokes Codex with the skill's prompt and attached tools, allowing the AI agent to analyze incidents, run commands, and perform remediation actions in a sandboxed environment.
+Akmatori uses [OpenAI Codex CLI](https://github.com/openai/codex) under the hood to execute AI-powered automation tasks. When an alert is received or a skill is triggered, Akmatori:
+
+1. **Normalizes the alert** - Extracts key fields (severity, host, service, summary) using source-specific adapters
+2. **Creates an incident** - Records the alert context and spawns an investigation
+3. **Invokes Codex** - Runs the AI agent with the incident-manager skill and available tools
+4. **Reports results** - Posts findings to Slack (if configured) and updates the incident status
+
+## Supported Alert Sources
+
+| Source | Field Mappings | Notes |
+|--------|----------------|-------|
+| Alertmanager | labels.alertname, labels.severity, annotations.* | Prometheus-style alerts |
+| Zabbix | alert_name, priority, hardware, event_status | Native Zabbix webhooks |
+| PagerDuty | event.data.title, event.data.priority | PagerDuty Events API v2 |
+| Grafana | ruleName, state, message | Grafana Alerting webhooks |
+| Datadog | title, priority, alert_type | Datadog webhooks |
+
+Each adapter normalizes alerts to a common format with configurable field mappings.
 
 ## License
 

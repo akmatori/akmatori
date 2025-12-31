@@ -13,6 +13,10 @@ import type {
   CreateIncidentResponse,
   ScriptsListResponse,
   ScriptInfo,
+  AlertSourceType,
+  AlertSourceInstance,
+  CreateAlertSourceRequest,
+  UpdateAlertSourceRequest,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
@@ -271,6 +275,40 @@ export const scriptsApi = {
     fetchApi<{ message: string; skill_name: string }>(`/api/skills/${encodeURIComponent(skillName)}/scripts`, {
       method: 'DELETE',
     }),
+};
+
+// Alert Source Types API
+export const alertSourceTypesApi = {
+  list: () => fetchApi<AlertSourceType[]>('/api/alert-source-types'),
+};
+
+// Alert Sources API (instances)
+export const alertSourcesApi = {
+  list: () => fetchApi<AlertSourceInstance[]>('/api/alert-sources'),
+
+  get: (uuid: string) => fetchApi<AlertSourceInstance>(`/api/alert-sources/${uuid}`),
+
+  create: (data: CreateAlertSourceRequest) =>
+    fetchApi<AlertSourceInstance>('/api/alert-sources', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (uuid: string, data: UpdateAlertSourceRequest) =>
+    fetchApi<AlertSourceInstance>(`/api/alert-sources/${uuid}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (uuid: string) =>
+    fetchApi<void>(`/api/alert-sources/${uuid}`, {
+      method: 'DELETE',
+    }),
+
+  getWebhookUrl: (uuid: string) => {
+    const baseUrl = API_BASE_URL || window.location.origin;
+    return `${baseUrl}/webhook/alert/${uuid}`;
+  },
 };
 
 export { ApiError };

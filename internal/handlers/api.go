@@ -22,16 +22,18 @@ type APIHandler struct {
 	skillService   *services.SkillService
 	toolService    *services.ToolService
 	contextService *services.ContextService
+	alertService   *services.AlertService
 	codexExecutor  *executor.Executor
 	slackManager   *slackutil.Manager
 }
 
 // NewAPIHandler creates a new API handler
-func NewAPIHandler(skillService *services.SkillService, toolService *services.ToolService, contextService *services.ContextService, codexExecutor *executor.Executor, slackManager *slackutil.Manager) *APIHandler {
+func NewAPIHandler(skillService *services.SkillService, toolService *services.ToolService, contextService *services.ContextService, alertService *services.AlertService, codexExecutor *executor.Executor, slackManager *slackutil.Manager) *APIHandler {
 	return &APIHandler{
 		skillService:   skillService,
 		toolService:    toolService,
 		contextService: contextService,
+		alertService:   alertService,
 		codexExecutor:  codexExecutor,
 		slackManager:   slackManager,
 	}
@@ -56,9 +58,6 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	// Slack settings
 	mux.HandleFunc("/api/settings/slack", h.handleSlackSettings)
 
-	// Zabbix settings
-	mux.HandleFunc("/api/settings/zabbix", h.handleZabbixSettings)
-
 	// OpenAI settings
 	mux.HandleFunc("/api/settings/openai", h.handleOpenAISettings)
 
@@ -66,6 +65,11 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/context", h.handleContext)
 	mux.HandleFunc("/api/context/", h.handleContextByID)
 	mux.HandleFunc("/api/context/validate", h.handleContextValidate)
+
+	// Alert source types and instances
+	mux.HandleFunc("/api/alert-source-types", h.handleAlertSourceTypes)
+	mux.HandleFunc("/api/alert-sources", h.handleAlertSources)
+	mux.HandleFunc("/api/alert-sources/", h.handleAlertSourceByUUID)
 }
 
 // handleSkills handles GET /api/skills and POST /api/skills
@@ -797,75 +801,6 @@ func maskToken(token string) string {
 	return "****" + token[len(token)-4:]
 }
 
-// handleZabbixSettings handles GET /api/settings/zabbix and PUT /api/settings/zabbix
-func (h *APIHandler) handleZabbixSettings(w http.ResponseWriter, r *http.Request) {
-	db := database.GetDB()
-
-	switch r.Method {
-	case http.MethodGet:
-		var settings database.ZabbixSettings
-		if err := db.First(&settings).Error; err != nil {
-			http.Error(w, "Settings not found", http.StatusNotFound)
-			return
-		}
-		response := map[string]interface{}{
-			"id":             settings.ID,
-			"webhook_secret": maskToken(settings.WebhookSecret),
-			"enabled":        settings.Enabled,
-			"is_configured":  settings.IsConfigured(),
-			"created_at":     settings.CreatedAt,
-			"updated_at":     settings.UpdatedAt,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-
-	case http.MethodPut:
-		var req struct {
-			WebhookSecret *string `json:"webhook_secret"`
-			Enabled       *bool   `json:"enabled"`
-		}
-
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
-			return
-		}
-
-		var settings database.ZabbixSettings
-		if err := db.First(&settings).Error; err != nil {
-			http.Error(w, "Settings not found", http.StatusNotFound)
-			return
-		}
-
-		updates := make(map[string]interface{})
-		if req.WebhookSecret != nil {
-			updates["webhook_secret"] = *req.WebhookSecret
-		}
-		if req.Enabled != nil {
-			updates["enabled"] = *req.Enabled
-		}
-
-		if err := db.Model(&settings).Updates(updates).Error; err != nil {
-			http.Error(w, fmt.Sprintf("Failed to update settings: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		db.First(&settings)
-		response := map[string]interface{}{
-			"id":             settings.ID,
-			"webhook_secret": maskToken(settings.WebhookSecret),
-			"enabled":        settings.Enabled,
-			"is_configured":  settings.IsConfigured(),
-			"created_at":     settings.CreatedAt,
-			"updated_at":     settings.UpdatedAt,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
 // ModelConfig defines the available models and their valid reasoning effort options
 var ModelConfigs = map[string][]string{
 	"gpt-5.2":            {"low", "medium", "high", "extra_high"},
@@ -1183,3 +1118,144 @@ func (h *APIHandler) updateIncidentProgress(incidentUUID, progressLog string) {
 		log.Printf("Warning: Failed to post progress to Slack: %v", err)
 	}
 }
+
+// ========== Alert Source Management ==========
+
+// handleAlertSourceTypes handles GET /api/alert-source-types
+func (h *APIHandler) handleAlertSourceTypes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	sourceTypes, err := h.alertService.ListSourceTypes()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to list source types: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(sourceTypes)
+}
+
+// handleAlertSources handles GET /api/alert-sources and POST /api/alert-sources
+func (h *APIHandler) handleAlertSources(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		instances, err := h.alertService.ListInstances()
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to list alert sources: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(instances)
+
+	case http.MethodPost:
+		var req struct {
+			SourceTypeName string         `json:"source_type_name"`
+			Name           string         `json:"name"`
+			Description    string         `json:"description"`
+			WebhookSecret  string         `json:"webhook_secret"`
+			FieldMappings  database.JSONB `json:"field_mappings"`
+			Settings       database.JSONB `json:"settings"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		if req.SourceTypeName == "" || req.Name == "" {
+			http.Error(w, "source_type_name and name are required", http.StatusBadRequest)
+			return
+		}
+
+		instance, err := h.alertService.CreateInstance(req.SourceTypeName, req.Name, req.Description, req.WebhookSecret, req.FieldMappings, req.Settings)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to create alert source: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(instance)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleAlertSourceByUUID handles GET/PUT/DELETE /api/alert-sources/{uuid}
+func (h *APIHandler) handleAlertSourceByUUID(w http.ResponseWriter, r *http.Request) {
+	uuid := r.URL.Path[len("/api/alert-sources/"):]
+	if uuid == "" {
+		http.Error(w, "UUID is required", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		instance, err := h.alertService.GetInstanceByUUID(uuid)
+		if err != nil {
+			http.Error(w, "Alert source not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(instance)
+
+	case http.MethodPut:
+		var req struct {
+			Name          *string         `json:"name"`
+			Description   *string         `json:"description"`
+			WebhookSecret *string         `json:"webhook_secret"`
+			FieldMappings *database.JSONB `json:"field_mappings"`
+			Settings      *database.JSONB `json:"settings"`
+			Enabled       *bool           `json:"enabled"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		updates := make(map[string]interface{})
+		if req.Name != nil {
+			updates["name"] = *req.Name
+		}
+		if req.Description != nil {
+			updates["description"] = *req.Description
+		}
+		if req.WebhookSecret != nil {
+			updates["webhook_secret"] = *req.WebhookSecret
+		}
+		if req.FieldMappings != nil {
+			updates["field_mappings"] = *req.FieldMappings
+		}
+		if req.Settings != nil {
+			updates["settings"] = *req.Settings
+		}
+		if req.Enabled != nil {
+			updates["enabled"] = *req.Enabled
+		}
+
+		if err := h.alertService.UpdateInstance(uuid, updates); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to update alert source: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		instance, _ := h.alertService.GetInstanceByUUID(uuid)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(instance)
+
+	case http.MethodDelete:
+		if err := h.alertService.DeleteInstance(uuid); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to delete alert source: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
