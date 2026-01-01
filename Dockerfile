@@ -45,12 +45,15 @@ RUN apt-get update && apt-get install -y \
 # Create symlink for python command (python3 -> python)
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
-# Install Python packages required by skills
+# Install Python packages required by skills and tools
+# Tool-specific dependencies:
+#   - paramiko: SSH tool (remote command execution)
 RUN pip3 install --no-cache-dir --break-system-packages \
     requests \
     pyyaml \
     python-dotenv \
-    PyPDF2
+    PyPDF2 \
+    paramiko>=3.3.0
 
 # Create non-root user first
 RUN groupadd -g 1000 akmatori && \

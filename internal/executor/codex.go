@@ -301,15 +301,7 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 						}
 					}
 
-					// Send progress update (last 15 lines)
-					if onStderrUpdate != nil {
-						start := 0
-						if len(stderrLines) > 15 {
-							start = len(stderrLines) - 15
-						}
-						progressLog := strings.Join(stderrLines[start:], "\n")
-						onStderrUpdate(progressLog)
-					}
+					// Raw stderr not sent to UI - use JSON events for output
 				}
 			}
 
@@ -333,15 +325,7 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 				log.Printf("Extracted Codex session ID from final line: %s", extractedSessionID)
 			}
 
-			// Send final progress update
-			if onStderrUpdate != nil {
-				start := 0
-				if len(stderrLines) > 15 {
-					start = len(stderrLines) - 15
-				}
-				progressLog := strings.Join(stderrLines[start:], "\n")
-				onStderrUpdate(progressLog)
-			}
+			// Raw stderr not sent to UI - use JSON events for output
 		}
 
 		log.Printf("Codex stderr reading complete. Total lines: %d", len(stderrLines))
@@ -425,9 +409,17 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 					lastReasoningText = event.Item.Text
 				case "command_execution":
 					if event.Item.Status == "completed" {
-						progressLine = fmt.Sprintf("✅ Ran: %s", event.Item.Command)
+						if event.Item.AggregatedOutput != "" {
+							progressLine = fmt.Sprintf("✅ Ran: %s\nOutput:\n%s", event.Item.Command, event.Item.AggregatedOutput)
+						} else {
+							progressLine = fmt.Sprintf("✅ Ran: %s", event.Item.Command)
+						}
 					} else {
-						progressLine = fmt.Sprintf("❌ Failed: %s", event.Item.Command)
+						if event.Item.AggregatedOutput != "" {
+							progressLine = fmt.Sprintf("❌ Failed: %s\nOutput:\n%s", event.Item.Command, event.Item.AggregatedOutput)
+						} else {
+							progressLine = fmt.Sprintf("❌ Failed: %s", event.Item.Command)
+						}
 					}
 				case "agent_message":
 					progressLine = fmt.Sprintf("📝 Response ready (%d chars)", len(event.Item.Text))
@@ -435,7 +427,7 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 				if progressLine != "" {
 					progressMessages = append(progressMessages, progressLine)
 
-					// Send progress update with all lines (UI will scroll to bottom)
+					// Send progress update with all lines
 					if onStderrUpdate != nil {
 						progressLog := strings.Join(progressMessages, "\n")
 						onStderrUpdate(progressLog)
