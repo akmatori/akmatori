@@ -2,17 +2,19 @@
 Zabbix API Configuration
 
 This module manages configuration for direct Zabbix API connections.
-Configuration can be set via:
-1. Environment variables (.env file)
-2. Direct configuration via set_config()
+Configuration is loaded from environment variables, typically set via .env.zabbix file.
 
-Example using environment variables:
-    # Create .env file
-    ZABBIX_URL=https://zabbix.example.com
-    ZABBIX_TOKEN=your-api-token
+Environment Variables:
+    ZABBIX_URL: Zabbix server URL (e.g., https://zabbix.example.com)
+    ZABBIX_TOKEN: API token for authentication
+    ZABBIX_USER: Username for user/password authentication
+    ZABBIX_PASSWORD: Password for user/password authentication
+    ZABBIX_TIMEOUT: Request timeout in seconds (default: 30)
+    ZABBIX_VERIFY_SSL: Verify SSL certificates (default: true)
+    ZABBIX_DEBUG: Enable debug logging (default: false)
 
 Example direct configuration:
-    from lib.zabbix_py.config import set_config
+    from scripts.zabbix.config import set_config
 
     set_config({
         'zabbix_url': 'https://zabbix.example.com',
@@ -20,20 +22,32 @@ Example direct configuration:
     })
 """
 
+import base64
 import os
 from typing import Optional, Dict, Any
 from copy import deepcopy
 from pathlib import Path
 
 
-def _load_config_env():
-    """Load environment variables from config.env file if it exists."""
-    # Look for config.env in the same directory as this file
-    config_file = Path(__file__).parent / "config.env"
-    if not config_file.exists():
+def _decode_env_value(value: str) -> str:
+    """
+    Decode environment variable value.
+    Values prefixed with 'base64:' are base64-decoded to support multi-line secrets.
+    """
+    if value.startswith('base64:'):
+        try:
+            return base64.b64decode(value[7:]).decode('utf-8')
+        except Exception:
+            return value
+    return value
+
+
+def _load_env_file(file_path: Path) -> None:
+    """Load environment variables from a .env file."""
+    if not file_path.exists():
         return
 
-    with config_file.open("r", encoding="utf-8") as f:
+    with file_path.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -42,7 +56,24 @@ def _load_config_env():
                 continue
             key, value = line.split("=", 1)
             # Only set if not already in environment (don't override existing vars)
-            os.environ.setdefault(key, value)
+            os.environ.setdefault(key, _decode_env_value(value))
+
+
+def _load_config_env():
+    """
+    Load environment variables from config files.
+
+    Search order (first found wins for each variable):
+    1. Current working directory .env.zabbix (incident directory)
+    2. Tool's own config.env (tool directory)
+    """
+    # Try loading from incident directory first (.env.zabbix)
+    cwd_env = Path.cwd() / ".env.zabbix"
+    _load_env_file(cwd_env)
+
+    # Then try tool's own config.env
+    tool_env = Path(__file__).parent / "config.env"
+    _load_env_file(tool_env)
 
 
 # Auto-load config.env when module is imported
@@ -57,9 +88,9 @@ class ZabbixConfig:
         self.zabbix_token: Optional[str] = os.getenv('ZABBIX_TOKEN')
         self.zabbix_user: Optional[str] = os.getenv('ZABBIX_USER')
         self.zabbix_password: Optional[str] = os.getenv('ZABBIX_PASSWORD')
-        self.timeout: int = int(os.getenv('REQUEST_TIMEOUT', '30'))
-        self.debug: bool = os.getenv('DEBUG', '').lower() == 'true'
-        self.verify_ssl: bool = os.getenv('VERIFY_SSL', 'true').lower() == 'true'
+        self.timeout: int = int(os.getenv('ZABBIX_TIMEOUT', '30'))
+        self.debug: bool = os.getenv('ZABBIX_DEBUG', '').lower() == 'true'
+        self.verify_ssl: bool = os.getenv('ZABBIX_VERIFY_SSL', 'true').lower() == 'true'
 
 
 # Global configuration instance

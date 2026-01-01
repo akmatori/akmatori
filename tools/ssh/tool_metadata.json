@@ -1,0 +1,88 @@
+{
+  "name": "ssh",
+  "description": "SSH remote command execution tool. Execute commands across multiple servers in parallel with aggregated results.",
+  "version": "1.0.0",
+  "settings_schema": {
+    "type": "object",
+    "required": ["ssh_private_key", "ssh_servers", "ssh_username"],
+    "properties": {
+      "ssh_private_key": {
+        "type": "string",
+        "description": "SSH private key content (PEM format)",
+        "secret": true,
+        "format": "textarea"
+      },
+      "ssh_servers": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "List of server hostnames or IP addresses",
+        "example": ["192.168.1.10", "192.168.1.11", "web-server.example.com"]
+      },
+      "ssh_username": {
+        "type": "string",
+        "description": "SSH username for authentication",
+        "example": "admin"
+      },
+      "ssh_port": {
+        "type": "integer",
+        "description": "SSH port number",
+        "default": 22,
+        "minimum": 1,
+        "maximum": 65535
+      },
+      "ssh_command_timeout": {
+        "type": "integer",
+        "description": "Timeout in seconds for each command execution",
+        "default": 30,
+        "minimum": 5,
+        "maximum": 600
+      },
+      "ssh_connection_timeout": {
+        "type": "integer",
+        "description": "Timeout in seconds for SSH connection establishment",
+        "default": 10,
+        "minimum": 5,
+        "maximum": 60
+      },
+      "ssh_known_hosts_policy": {
+        "type": "string",
+        "enum": ["strict", "auto_add", "ignore"],
+        "description": "SSH known hosts verification policy. 'strict' requires pre-verified hosts, 'auto_add' accepts new hosts, 'ignore' disables verification.",
+        "default": "auto_add"
+      },
+      "ssh_debug": {
+        "type": "boolean",
+        "description": "Enable debug logging",
+        "default": false
+      }
+    }
+  },
+  "functions": [
+    {
+      "name": "execute_command",
+      "description": "Execute a command on all configured servers in parallel. Returns aggregated results from all servers.",
+      "parameters": "command: str - The shell command to execute on remote servers",
+      "returns": "JSON string with per-server results: {results: [{server, success, stdout, stderr, exit_code, duration_ms}], summary: {total, succeeded, failed}}"
+    },
+    {
+      "name": "execute_on_servers",
+      "description": "Execute a command on a specific subset of servers",
+      "parameters": "command: str - Command to execute; servers: list[str] - Subset of server hostnames/IPs to target",
+      "returns": "JSON string with per-server results: {results: [{server, success, stdout, stderr, exit_code, duration_ms}], summary: {total, succeeded, failed}}"
+    },
+    {
+      "name": "test_connectivity",
+      "description": "Test SSH connectivity to all configured servers without executing commands",
+      "parameters": "None",
+      "returns": "JSON string with connectivity status: {results: [{server, reachable, error}], summary: {total, reachable, unreachable}}"
+    },
+    {
+      "name": "get_server_info",
+      "description": "Get basic system information from all servers (hostname, OS, uptime)",
+      "parameters": "None",
+      "returns": "JSON string with server info: {results: [{server, hostname, os, uptime, error}]}"
+    }
+  ]
+}

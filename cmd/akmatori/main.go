@@ -104,6 +104,11 @@ func main() {
 	skillService := services.NewSkillService(dataDir, toolService, contextService)
 	log.Printf("Skill service initialized with data dir: %s", dataDir)
 
+	// Regenerate all SKILL.md files to ensure they have latest template
+	if err := skillService.RegenerateAllSkillMds(); err != nil {
+		log.Printf("Warning: Failed to regenerate SKILL.md files: %v", err)
+	}
+
 	// Initialize Codex executor
 	codexExecutor := executor.NewExecutor()
 	log.Printf("Codex executor initialized")

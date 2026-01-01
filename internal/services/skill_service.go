@@ -1,6 +1,7 @@
 package services
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
@@ -403,9 +404,32 @@ func (s *SkillService) GetSkillPrompt(name string) (string, error) {
 	// Parse and extract body (after frontmatter)
 	parts := strings.SplitN(string(content), "---", 3)
 	if len(parts) >= 3 {
-		return strings.TrimSpace(parts[2]), nil
+		body := strings.TrimSpace(parts[2])
+		// Strip auto-generated resource instructions section if present
+		body = stripResourceInstructions(body)
+		return body, nil
 	}
 	return string(content), nil
+}
+
+// stripResourceInstructions removes the auto-generated "Quick Start" section
+// from the skill body to get only the user-defined prompt
+func stripResourceInstructions(body string) string {
+	const marker = "## Quick Start"
+	const endMarker = "---\n"
+
+	if strings.HasPrefix(body, marker) {
+		// Find where the auto-generated section ends
+		idx := strings.Index(body, endMarker)
+		if idx == -1 {
+			return body
+		}
+		// Return everything after the end marker, trimmed
+		body = strings.TrimSpace(body[idx+len(endMarker):])
+		// Check again in case there are multiple sections (from bug)
+		return stripResourceInstructions(body)
+	}
+	return body
 }
 
 // UpdateSkillPrompt updates the prompt for a skill
@@ -446,7 +470,17 @@ func (s *SkillService) generateSkillMd(name, description, body string) string {
 
 	yamlBytes, _ := yaml.Marshal(frontmatter)
 
-	return fmt.Sprintf("---\n%s---\n\n%s\n", string(yamlBytes), body)
+	// Add minimal instructions pointing to tools.md for Quick Start
+	// tools.md has tool-specific examples based on which tools are actually assigned
+	resourceInstructions := fmt.Sprintf(`## Quick Start
+
+See **.codex/skills/%s/references/tools.md** for ready-to-run code examples.
+
+---
+
+`, name)
+
+	return fmt.Sprintf("---\n%s---\n\n%s%s\n", string(yamlBytes), resourceInstructions, body)
 }
 
 // AssignTools assigns tools to a skill - creates symlinks in scripts/ and generates tools.md
@@ -493,7 +527,7 @@ func (s *SkillService) AssignTools(skillName string, toolIDs []uint) error {
 	}
 
 	// 4. Generate references/tools.md
-	toolsMd := s.generateToolsDocumentation(tools)
+	toolsMd := s.generateToolsDocumentation(skillName, tools)
 	toolsMdPath := filepath.Join(referencesDir, "tools.md")
 	if err := os.WriteFile(toolsMdPath, []byte(toolsMd), 0644); err != nil {
 		return fmt.Errorf("failed to write tools.md: %w", err)
@@ -527,46 +561,75 @@ func (s *SkillService) cleanToolSymlinks(scriptsDir string) {
 }
 
 // generateToolsDocumentation generates markdown documentation for assigned tools
-func (s *SkillService) generateToolsDocumentation(tools []database.ToolInstance) string {
+// skillName is used to generate correct paths from incident directory context
+func (s *SkillService) generateToolsDocumentation(skillName string, tools []database.ToolInstance) string {
 	if len(tools) == 0 {
 		return "# Available Tools\n\nNo tools assigned to this skill.\n"
 	}
 
 	var sb strings.Builder
 	sb.WriteString("# Available Tools\n\n")
-	sb.WriteString("This document describes the tools available to this skill.\n\n")
+
+	// Strong warning to prevent unnecessary exploration
+	sb.WriteString("---\n")
+	sb.WriteString("## ⚠️ READ THIS FIRST\n\n")
+	sb.WriteString("**This documentation is COMPLETE.** All functions, parameters, and usage examples are below.\n\n")
+	sb.WriteString("**DO NOT:**\n")
+	sb.WriteString("- Read source files (ssh.py, config.py, zabbix.py, etc.)\n")
+	sb.WriteString("- List directories with `ls`\n")
+	sb.WriteString("- Read .env files\n")
+	sb.WriteString("- Explore scripts/ folder\n\n")
+	sb.WriteString("**JUST DO:** Copy the Quick Start code below and run it. Configuration auto-loads.\n\n")
+	sb.WriteString("---\n\n")
 
 	for _, tool := range tools {
 		if !tool.Enabled {
 			continue
 		}
 
-		sb.WriteString(fmt.Sprintf("## %s\n\n", tool.ToolType.Name))
+		toolName := tool.ToolType.Name
+
+		sb.WriteString(fmt.Sprintf("## %s\n\n", toolName))
 		sb.WriteString(fmt.Sprintf("%s\n\n", tool.ToolType.Description))
 
-		// Get detailed tool description if available
+		// Quick Start Example FIRST (so it's visible even if output is truncated)
+		sb.WriteString("### Quick Start (copy & run)\n\n")
+		sb.WriteString("```python\n")
+		sb.WriteString("import sys\n")
+		sb.WriteString(fmt.Sprintf("sys.path.insert(0, '.codex/skills/%s')\n", skillName))
+		sb.WriteString(fmt.Sprintf("from scripts.%s import *\n\n", toolName))
+
+		// Add specific function call examples based on tool type
+		switch toolName {
+		case "ssh":
+			sb.WriteString("print(test_connectivity())\n")
+			sb.WriteString("print(execute_command('uptime'))\n")
+			sb.WriteString("```\n\n")
+			// Add batch pattern tip for SSH
+			sb.WriteString("**Tip: Run multiple commands efficiently:**\n")
+			sb.WriteString("```python\n")
+			sb.WriteString("for cmd in ['uptime', 'ps -eo pid,cmd,%cpu --sort=-%cpu | head -10', 'free -h']:\n")
+			sb.WriteString("    print(f'=== {cmd} ==='); print(execute_command(cmd))\n")
+			sb.WriteString("```\n\n")
+		case "zabbix":
+			sb.WriteString("print(get_hosts())\n")
+			sb.WriteString("print(get_problems())\n")
+			sb.WriteString("```\n\n")
+		default:
+			sb.WriteString("# result = function_name(...)\n")
+			sb.WriteString("```\n\n")
+		}
+
+		// Detailed function documentation AFTER the quick start
 		if s.toolService != nil {
-			toolDesc, err := s.toolService.GenerateToolDescription(tool.ToolType.Name)
+			toolDesc, err := s.toolService.GenerateToolDescription(toolName)
 			if err == nil && toolDesc != "" {
-				sb.WriteString("### Functions\n\n")
+				sb.WriteString("### Functions (detailed)\n\n")
 				sb.WriteString(toolDesc)
 				sb.WriteString("\n\n")
 			}
 		}
 
-		// Add usage example
-		sb.WriteString("### Usage\n\n")
-		sb.WriteString("```python\n")
-		sb.WriteString("#!/usr/bin/env python3\n")
-		sb.WriteString("import sys\n")
-		sb.WriteString("from pathlib import Path\n\n")
-		sb.WriteString("# Setup path to scripts directory\n")
-		sb.WriteString("ROOT = Path(__file__).resolve().parent\n")
-		sb.WriteString("sys.path.insert(0, str(ROOT))\n\n")
-		sb.WriteString(fmt.Sprintf("# Import from the %s tool\n", tool.ToolType.Name))
-		sb.WriteString(fmt.Sprintf("from scripts.%s import *  # Import available functions\n\n", tool.ToolType.Name))
-		sb.WriteString("# Use the functions...\n")
-		sb.WriteString("```\n\n")
 		sb.WriteString("---\n\n")
 	}
 
@@ -627,6 +690,89 @@ func (s *SkillService) SyncSkillsFromFilesystem() error {
 			log.Printf("Warning: failed to sync skill %s: %v", name, err)
 		} else {
 			log.Printf("Synced skill from filesystem: %s", name)
+		}
+	}
+
+	return nil
+}
+
+// RegenerateAllSkillMds regenerates SKILL.md files for all skills
+// This updates existing skills with the latest template (e.g., resource instructions)
+func (s *SkillService) RegenerateAllSkillMds() error {
+	entries, err := os.ReadDir(s.skillsDir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read skills directory: %w", err)
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+
+		// Skip incident-manager (system skill)
+		if name == "incident-manager" {
+			continue
+		}
+
+		// Get skill from database to get description
+		var skill database.Skill
+		if err := s.db.Where("name = ?", name).First(&skill).Error; err != nil {
+			continue // Skip skills not in database
+		}
+
+		// Get current prompt (strips auto-generated sections)
+		prompt, err := s.GetSkillPrompt(name)
+		if err != nil {
+			log.Printf("Warning: failed to get prompt for skill %s: %v", name, err)
+			continue
+		}
+
+		// Regenerate SKILL.md with latest template
+		skillMd := s.generateSkillMd(name, skill.Description, prompt)
+		skillPath := filepath.Join(s.GetSkillDir(name), "SKILL.md")
+
+		if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
+			log.Printf("Warning: failed to regenerate SKILL.md for %s: %v", name, err)
+			continue
+		}
+
+		log.Printf("Regenerated SKILL.md for skill: %s", name)
+
+		// Regenerate tools.md with latest template
+		var skillTools []database.SkillTool
+		if err := s.db.Where("skill_id = ?", skill.ID).Find(&skillTools).Error; err != nil {
+			log.Printf("Warning: failed to get tools for skill %s: %v", name, err)
+			continue
+		}
+
+		if len(skillTools) > 0 {
+			var tools []database.ToolInstance
+			for _, st := range skillTools {
+				var tool database.ToolInstance
+				if err := s.db.Preload("ToolType").First(&tool, st.ToolInstanceID).Error; err != nil {
+					continue
+				}
+				if tool.Enabled && tool.ToolType.ID != 0 {
+					tools = append(tools, tool)
+				}
+			}
+
+			if len(tools) > 0 {
+				toolsMd := s.generateToolsDocumentation(name, tools)
+				referencesDir := s.GetSkillReferencesDir(name)
+				os.MkdirAll(referencesDir, 0755)
+				toolsPath := filepath.Join(referencesDir, "tools.md")
+
+				if err := os.WriteFile(toolsPath, []byte(toolsMd), 0644); err != nil {
+					log.Printf("Warning: failed to regenerate tools.md for %s: %v", name, err)
+				} else {
+					log.Printf("Regenerated tools.md for skill: %s", name)
+				}
+			}
 		}
 	}
 
@@ -734,25 +880,25 @@ func (s *SkillService) generateIncidentAgentsMd(path string) error {
 	// Add tool environment files section
 	toolEnvFiles := s.getAvailableToolEnvFiles()
 	if len(toolEnvFiles) > 0 {
-		sb.WriteString("## Tool Configuration Files\n\n")
-		sb.WriteString("The following environment files contain credentials and settings for available tools:\n\n")
-		sb.WriteString("| File | Tool | Description |\n")
-		sb.WriteString("|------|------|-------------|\n")
+		sb.WriteString("## Available Tools\n\n")
+
+		sb.WriteString("### ⚠️ CRITICAL: How to Use Tools\n\n")
+		sb.WriteString("**Follow these steps EXACTLY:**\n\n")
+		sb.WriteString("1. Read `.codex/skills/{skill-name}/references/tools.md`\n")
+		sb.WriteString("2. Copy the Quick Start code from that file\n")
+		sb.WriteString("3. Run it - configuration auto-loads\n\n")
+		sb.WriteString("**DO NOT:**\n")
+		sb.WriteString("- Read source files (ssh.py, config.py, etc.) - tools.md has all you need\n")
+		sb.WriteString("- Run `ls` commands to explore directories\n")
+		sb.WriteString("- Read .env files - they auto-load\n\n")
+
+		sb.WriteString("### Available Tools\n\n")
+		sb.WriteString("| Tool | Description |\n")
+		sb.WriteString("|------|-------------|\n")
 		for _, envFile := range toolEnvFiles {
-			sb.WriteString(fmt.Sprintf("| `.env.%s` | %s | %s |\n", envFile.Name, envFile.Name, envFile.Description))
+			sb.WriteString(fmt.Sprintf("| %s | %s |\n", envFile.Name, envFile.Description))
 		}
 		sb.WriteString("\n")
-		sb.WriteString("### Usage\n\n")
-		sb.WriteString("Load tool credentials in Python scripts:\n\n")
-		sb.WriteString("```python\n")
-		sb.WriteString("from dotenv import load_dotenv\n")
-		sb.WriteString("import os\n\n")
-		sb.WriteString("# Load specific tool configuration\n")
-		sb.WriteString("load_dotenv('.env.zabbix')  # For Zabbix tool\n\n")
-		sb.WriteString("# Access variables as defined in tool settings\n")
-		sb.WriteString("zabbix_url = os.getenv('ZABBIX_URL')\n")
-		sb.WriteString("zabbix_token = os.getenv('ZABBIX_TOKEN')\n")
-		sb.WriteString("```\n\n")
 	}
 
 	// Add structured output protocol
@@ -832,6 +978,105 @@ func (s *SkillService) getAvailableToolEnvFiles() []toolEnvInfo {
 	return envFiles
 }
 
+// formatEnvValue formats a value for .env file output.
+// - Arrays are converted to comma-separated strings
+// - Multi-line values (containing newlines) are base64-encoded with a "base64:" prefix
+func formatEnvValue(value interface{}) string {
+	var str string
+
+	// Handle arrays/slices - convert to comma-separated string
+	switch v := value.(type) {
+	case []interface{}:
+		parts := make([]string, len(v))
+		for i, item := range v {
+			parts[i] = fmt.Sprintf("%v", item)
+		}
+		str = strings.Join(parts, ",")
+	case []string:
+		str = strings.Join(v, ",")
+	default:
+		str = fmt.Sprintf("%v", value)
+	}
+
+	// Handle PEM/SSH keys that might have spaces instead of newlines
+	// (happens when pasted through HTML textarea or JSON parsing issues)
+	if strings.Contains(str, "-----BEGIN") && strings.Contains(str, "-----END") {
+		str = fixPEMKey(str)
+	}
+
+	// Base64 encode if contains newlines
+	if strings.Contains(str, "\n") {
+		return "base64:" + base64.StdEncoding.EncodeToString([]byte(str))
+	}
+	return str
+}
+
+// fixPEMKey reconstructs a PEM key that may have spaces instead of newlines
+func fixPEMKey(key string) string {
+	// If already has newlines, return as-is
+	if strings.Contains(key, "\n") {
+		return key
+	}
+
+	// Check for valid PEM markers
+	if !strings.Contains(key, "-----BEGIN") || !strings.Contains(key, "-----END") {
+		return key
+	}
+
+	// Parse by splitting on whitespace
+	// Format: "-----BEGIN TYPE-----" content "-----END TYPE-----"
+	parts := strings.Fields(key)
+
+	if len(parts) < 4 {
+		return key
+	}
+
+	// Reconstruct: find BEGIN...END markers and body
+	var header, footer string
+	var bodyParts []string
+
+	// Use index-based loop so we can skip parts already processed
+	for i := 0; i < len(parts); i++ {
+		part := parts[i]
+
+		if strings.HasPrefix(part, "-----BEGIN") {
+			// Header spans from here to next "-----"
+			headerParts := []string{part}
+			for j := i + 1; j < len(parts); j++ {
+				headerParts = append(headerParts, parts[j])
+				if strings.HasSuffix(parts[j], "-----") {
+					header = strings.Join(headerParts, " ")
+					i = j // Skip to after header
+					break
+				}
+			}
+		} else if strings.HasPrefix(part, "-----END") {
+			// Footer spans from here to end marker
+			footerParts := []string{part}
+			for j := i + 1; j < len(parts); j++ {
+				footerParts = append(footerParts, parts[j])
+				if strings.HasSuffix(parts[j], "-----") {
+					break
+				}
+			}
+			footer = strings.Join(footerParts, " ")
+			break // Done processing
+		} else if header != "" && !strings.HasSuffix(part, "-----") {
+			// We're in the body (after header, before footer)
+			bodyParts = append(bodyParts, part)
+		}
+	}
+
+	if header == "" || footer == "" {
+		return key
+	}
+
+	// Join body parts (base64 content) - PEM keys have no spaces in the body
+	body := strings.Join(bodyParts, "")
+
+	return header + "\n" + body + "\n" + footer + "\n"
+}
+
 // generateToolConfig generates a configuration file for a tool in its lib directory
 func (s *SkillService) generateToolConfig(libDir, toolName string, settings database.JSONB) error {
 	configPath := filepath.Join(libDir, toolName, "config.env")
@@ -841,7 +1086,7 @@ func (s *SkillService) generateToolConfig(libDir, toolName string, settings data
 	for key, value := range settings {
 		// Convert to uppercase and snake_case
 		envKey := strings.ToUpper(strings.ReplaceAll(key, "-", "_"))
-		lines = append(lines, fmt.Sprintf("%s=%v", envKey, value))
+		lines = append(lines, fmt.Sprintf("%s=%s", envKey, formatEnvValue(value)))
 	}
 
 	content := strings.Join(lines, "\n")
@@ -878,7 +1123,7 @@ func (s *SkillService) generateSkillEnvFile(skillDir string, tools []database.To
 
 		// Write settings with uppercase keys
 		for key, value := range tool.Settings {
-			lines = append(lines, fmt.Sprintf("%s=%v", strings.ToUpper(key), value))
+			lines = append(lines, fmt.Sprintf("%s=%s", strings.ToUpper(key), formatEnvValue(value)))
 		}
 		lines = append(lines, "")
 	}
@@ -928,16 +1173,23 @@ func (s *SkillService) generateIncidentEnvFiles(incidentDir string) error {
 
 			// Generate .env.{tool_name} file
 			toolName := tool.ToolType.Name
+			toolNameUpper := strings.ToUpper(toolName)
 			envPath := filepath.Join(incidentDir, ".env."+toolName)
 
 			var lines []string
-			lines = append(lines, fmt.Sprintf("# %s Configuration", strings.ToUpper(toolName)))
+			lines = append(lines, fmt.Sprintf("# %s Configuration", toolNameUpper))
 			lines = append(lines, "# Auto-generated - do not edit")
 			lines = append(lines, "")
 
-			// Write settings with uppercase keys
+			// Write settings with tool-prefixed uppercase keys
+			// e.g., ssh tool's "servers" becomes "SSH_SERVERS"
 			for key, value := range tool.Settings {
-				lines = append(lines, fmt.Sprintf("%s=%v", strings.ToUpper(key), value))
+				envKey := strings.ToUpper(key)
+				// Ensure key has tool prefix (e.g., SSH_SERVERS, not just SERVERS)
+				if !strings.HasPrefix(envKey, toolNameUpper+"_") {
+					envKey = toolNameUpper + "_" + envKey
+				}
+				lines = append(lines, fmt.Sprintf("%s=%s", envKey, formatEnvValue(value)))
 			}
 
 			content := strings.Join(lines, "\n")

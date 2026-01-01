@@ -104,39 +104,84 @@ export default function Incidents() {
     if (!selectedIncident?.full_log) return null;
 
     const lines = selectedIncident.full_log.split('\n');
-    const entries: Array<{ type: 'regular' | 'tool_call'; content: string; isMultiline?: boolean }> = [];
+    const entries: Array<{
+      type: 'regular' | 'tool_call';
+      content: string;
+      output?: string;
+      isMultiline?: boolean
+    }> = [];
 
     let inToolCall = false;
+    let inOutput = false;
     let heredocDelimiter: string | null = null;
     let toolCallLines: string[] = [];
+    let outputLines: string[] = [];
 
     const flushToolCall = () => {
       if (toolCallLines.length > 0) {
-        entries.push({ type: 'tool_call', content: toolCallLines.join('\n'), isMultiline: toolCallLines.length > 1 });
+        const fullContent = toolCallLines.join('\n');
+        const fullOutput = outputLines.length > 0 ? outputLines.join('\n') : undefined;
+        entries.push({
+          type: 'tool_call',
+          content: fullContent,
+          output: fullOutput,
+          isMultiline: toolCallLines.length > 1
+        });
         toolCallLines = [];
+        outputLines = [];
       }
       inToolCall = false;
+      inOutput = false;
       heredocDelimiter = null;
     };
 
+    // Markers that indicate a new section (end current tool call)
+    const isNewSection = (line: string) =>
+      line.startsWith('✅ Ran:') ||
+      line.startsWith('❌ Failed:') ||
+      line.startsWith('🤔 ') ||
+      line.startsWith('📝 ');
+
     for (const line of lines) {
       if (inToolCall) {
-        toolCallLines.push(line);
-        // Check if this line ends the heredoc (line starts with delimiter or contains delimiter followed by closing chars)
-        if (heredocDelimiter && (line.startsWith(heredocDelimiter) || line.match(new RegExp(`^${heredocDelimiter}["']?\\)?$`)))) {
+        // Check if this is a new section (flush current tool call first)
+        if (isNewSection(line)) {
           flushToolCall();
+          // Fall through to process this line as new tool call or regular
+        } else if (inOutput) {
+          // Collecting output lines
+          outputLines.push(line);
+          continue;
+        } else if (line === 'Output:') {
+          // Start of output section
+          inOutput = true;
+          continue;
+        } else if (heredocDelimiter) {
+          // In heredoc mode - check for termination
+          toolCallLines.push(line);
+          if (line.startsWith(heredocDelimiter) || line.match(new RegExp(`^${heredocDelimiter}["']?\\)?$`))) {
+            // Heredoc ended, now wait for Output:
+            heredocDelimiter = null;
+          }
+          continue;
+        } else {
+          // Collecting additional lines for this tool call (command continuation)
+          toolCallLines.push(line);
+          continue;
         }
-      } else if (line.startsWith('✅ Ran:') || line.startsWith('❌ Failed:')) {
-        // Check for heredoc pattern: <<'DELIM', <<"DELIM", <<DELIM, or complex quoting like <<'"'DELIM'
+      }
+
+      // Not in tool call (or just flushed) - check for new tool call
+      if (line.startsWith('✅ Ran:') || line.startsWith('❌ Failed:')) {
+        // Check for heredoc pattern
         const heredocMatch = line.match(/<<[-'"\\]*(\w+)/);
         if (heredocMatch) {
           heredocDelimiter = heredocMatch[1];
-          inToolCall = true;
-          toolCallLines = [line];
-        } else {
-          // Single-line tool call
-          entries.push({ type: 'tool_call', content: line });
         }
+        inToolCall = true;
+        inOutput = false;
+        toolCallLines = [line];
+        outputLines = [];
       } else {
         entries.push({ type: 'regular', content: line });
       }
@@ -346,8 +391,18 @@ export default function Incidents() {
                         if (entry.type === 'tool_call') {
                           if (!showToolCalls) return null;
                           return (
-                            <div key={index} className="text-gray-400 bg-gray-800/50 px-2 py-1 my-1 rounded border-l-2 border-gray-600">
-                              {entry.content}
+                            <div key={index} className="my-3">
+                              {/* Command box */}
+                              <div className="text-gray-300 bg-gray-800/70 px-3 py-2 rounded border-l-2 border-blue-500">
+                                {entry.content}
+                              </div>
+                              {/* Output box */}
+                              {entry.output && (
+                                <div className="mt-1 text-gray-400 bg-gray-800/40 px-3 py-2 rounded border-l-2 border-gray-600 text-xs">
+                                  <div className="text-gray-500 text-[10px] uppercase tracking-wide mb-1">Output:</div>
+                                  {entry.output}
+                                </div>
+                              )}
                             </div>
                           );
                         }

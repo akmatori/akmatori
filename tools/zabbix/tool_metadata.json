@@ -32,15 +32,20 @@
         "description": "Zabbix password (required if auth_method is 'credentials')",
         "secret": true
       },
-      "verify_ssl": {
+      "zabbix_verify_ssl": {
         "type": "boolean",
         "description": "Verify SSL certificates",
         "default": true
       },
-      "debug": {
+      "zabbix_debug": {
         "type": "boolean",
         "description": "Enable debug logging",
         "default": false
+      },
+      "zabbix_timeout": {
+        "type": "integer",
+        "description": "Request timeout in seconds",
+        "default": 30
       }
     }
   },
