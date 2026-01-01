@@ -175,6 +175,7 @@ Tools are symlinked into the skill's directory, making them available during exe
 
 ### Built-in Tool Types
 
+- **SSH**: Execute commands on remote servers via SSH (parallel execution, connectivity testing)
 - **Zabbix**: Interact with Zabbix API (get hosts, problems, triggers)
 
 ### Creating Custom Tools
@@ -268,6 +269,7 @@ akmatori/
 │   ├── slack/             # Slack integration
 │   └── utils/             # Utility functions
 ├── tools/                 # Python tools
+│   ├── ssh/               # SSH remote execution
 │   └── zabbix/            # Zabbix API client
 ├── web/                   # React frontend
 │   ├── src/
