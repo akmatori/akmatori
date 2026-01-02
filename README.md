@@ -17,28 +17,59 @@ Akmatori is an AI-powered AIOps agent that integrates with monitoring systems an
 
 ## Architecture
 
+Akmatori uses a secure 4-container architecture with network isolation:
+
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                      Alert Sources                           │
-│  Alertmanager  │  Zabbix  │  PagerDuty  │  Grafana  │ Datadog│
-└────────┬───────┴────┬─────┴──────┬──────┴─────┬─────┴───┬────┘
-         │            │            │            │         │
-         └────────────┴────────────┼────────────┴─────────┘
-                                   │
-                                   ▼
-                    ┌──────────────────────────┐
-                    │   /webhook/alert/{uuid}  │
-                    └────────────┬─────────────┘
-                                 │
-┌─────────────┐     ┌────────────▼─────────────┐     ┌─────────────┐
-│    Slack    │◀───▶│       Akmatori           │◀───▶│   OpenAI    │
-│     Bot     │     │        Backend           │     │     API     │
-└─────────────┘     └────────────┬─────────────┘     └─────────────┘
-                                 │
-                          ┌──────┴──────┐
-                          │  PostgreSQL │
-                          └─────────────┘
+                         ┌──────────────────────────────────────────────┐
+                         │              Alert Sources                    │
+                         │  Alertmanager │ Zabbix │ PagerDuty │ Grafana  │
+                         └───────────────────────┬──────────────────────┘
+                                                 │
+                                                 ▼
+┌─────────────┐         ┌────────────────────────────────────────────────────────┐
+│    Slack    │◀───────▶│                    API Container                       │
+│     Bot     │         │  • Incident management    • Skill orchestration        │
+└─────────────┘         │  • Alert ingestion        • WebSocket to Codex Worker  │
+                        └──────────┬──────────────────────────┬──────────────────┘
+                                   │                          │
+                    ┌──────────────┴──────────────┐           │ WebSocket
+                    │         PostgreSQL          │           │
+                    │  • Incidents, Skills, Tools │           │
+                    │  • Credentials (encrypted)  │           │
+                    └──────────────┬──────────────┘           │
+                                   │                          │
+                    ┌──────────────┴──────────────┐           │
+                    │        MCP Gateway          │◀──────────┼───────────────┐
+                    │  • Fetches credentials      │           │               │
+                    │  • SSH/Zabbix execution     │           │               │
+                    └──────────────┬──────────────┘           │               │
+                                   │                          │               │
+                                   │              ┌───────────▼───────────┐   │
+                                   │              │    Codex Worker       │   │
+                                   │              │  • Runs Codex CLI     │───┘
+                                   └─────────────▶│  • NO database access │  MCP calls
+                                    Tool calls    │  • NO direct secrets  │
+                                                  └───────────┬───────────┘
+                                                              │
+                                                  ┌───────────▼───────────┐
+                                                  │       OpenAI API      │
+                                                  └───────────────────────┘
 ```
+
+### Security Design
+
+| Container | Database Access | Secrets Access | External Network |
+|-----------|----------------|----------------|------------------|
+| API | ✅ Full | ✅ All | ✅ Slack |
+| MCP Gateway | ✅ Read-only | ✅ Tool credentials | ✅ SSH, APIs |
+| Codex Worker | ❌ None | ❌ None (passed per-incident) | ✅ OpenAI only |
+| PostgreSQL | N/A | N/A | ❌ Internal only |
+
+**Key security features:**
+- **Credential isolation**: Codex container never sees database credentials
+- **Per-incident auth**: OpenAI API key passed via WebSocket for each task
+- **Network segmentation**: Three isolated Docker networks
+- **UID separation**: API (UID 1000) and Codex (UID 1001) for file permission control
 
 ## Quick Start
 
@@ -255,41 +286,56 @@ Configure this URL in your monitoring system. The webhook automatically normaliz
 
 ```
 akmatori/
-├── cmd/akmatori/          # Application entrypoint
+├── cmd/akmatori/          # API server entrypoint
 ├── internal/
 │   ├── alerts/            # Alert adapters for each source type
 │   │   └── adapters/      # Alertmanager, Zabbix, PagerDuty, etc.
 │   ├── config/            # Configuration loading
 │   ├── database/          # GORM models and database logic
-│   ├── executor/          # LLM execution engine
-│   ├── handlers/          # HTTP request handlers
+│   ├── executor/          # LLM execution engine (legacy)
+│   ├── handlers/          # HTTP & WebSocket handlers
 │   ├── middleware/        # Auth, CORS middleware
-│   ├── models/            # Data structures
 │   ├── services/          # Business logic
-│   ├── slack/             # Slack integration
-│   └── utils/             # Utility functions
-├── tools/                 # Python tools
-│   ├── ssh/               # SSH remote execution
-│   └── zabbix/            # Zabbix API client
+│   └── slack/             # Slack integration
+│
+├── codex-worker/          # Codex Worker container (Go)
+│   ├── cmd/worker/        # Worker entrypoint
+│   └── internal/
+│       ├── codex/         # Codex CLI runner
+│       ├── orchestrator/  # Task orchestration
+│       └── ws/            # WebSocket client
+│
+├── mcp-gateway/           # MCP Gateway container (Go)
+│   ├── cmd/gateway/       # Gateway entrypoint
+│   └── internal/
+│       ├── database/      # Credential fetching
+│       ├── mcp/           # MCP protocol server
+│       └── tools/         # SSH, Zabbix implementations
+│
+├── codex-tools/           # Python tool wrappers for Codex
+│   ├── mcp_client.py      # MCP client library
+│   ├── ssh/               # SSH tool (calls MCP Gateway)
+│   └── zabbix/            # Zabbix tool (calls MCP Gateway)
+│
 ├── web/                   # React frontend
-│   ├── src/
-│   │   ├── components/    # Reusable UI components
-│   │   ├── pages/         # Page components
-│   │   ├── api/           # API client
-│   │   └── context/       # React context providers
-│   └── ...
+│   └── src/
+│       ├── components/    # Reusable UI components
+│       ├── pages/         # Page components
+│       └── api/           # API client
+│
 ├── proxy/                 # Nginx configuration
-├── docker-compose.yml
-├── Dockerfile
-└── Makefile
+├── docker-compose.yml     # 4-container orchestration
+├── Dockerfile.api         # API container
+└── Dockerfile.codex       # Codex Worker container
 ```
 
 ## Tech Stack
 
-**Backend:**
-- Go 1.24+
-- PostgreSQL with GORM
-- JWT authentication
+**Backend Services (Go 1.24+):**
+- **API Container**: Incident management, skill orchestration, WebSocket server
+- **Codex Worker**: Codex CLI execution, task streaming
+- **MCP Gateway**: Tool credential management, SSH/Zabbix execution
+- PostgreSQL with GORM, JWT authentication
 
 **Frontend:**
 - React 19 with TypeScript
@@ -297,21 +343,29 @@ akmatori/
 - Tailwind CSS
 
 **Infrastructure:**
-- Docker & Docker Compose
+- Docker & Docker Compose (4-container architecture)
 - Nginx reverse proxy
+- Network isolation (frontend, api-internal, codex-network)
 
 **AI Execution:**
-- [Codex CLI](https://github.com/openai/codex) - OpenAI's open-source AI coding agent that powers the LLM execution engine
+- [Codex CLI](https://github.com/openai/codex) - OpenAI's open-source AI coding agent
 - [Agent Skills](https://github.com/agentskills/agentskills) - Open format for portable AI agent capabilities
+- MCP (Model Context Protocol) for secure tool access
 
 ## How It Works
 
-Akmatori uses [OpenAI Codex CLI](https://github.com/openai/codex) under the hood to execute AI-powered automation tasks. When an alert is received or a skill is triggered, Akmatori:
+Akmatori uses [OpenAI Codex CLI](https://github.com/openai/codex) in an isolated container to execute AI-powered automation tasks. When an alert is received or a skill is triggered:
 
-1. **Normalizes the alert** - Extracts key fields (severity, host, service, summary) using source-specific adapters
-2. **Creates an incident** - Records the alert context and spawns an investigation
-3. **Invokes Codex** - Runs the AI agent with the incident-manager skill and available tools
-4. **Reports results** - Posts findings to Slack (if configured) and updates the incident status
+1. **Alert normalization** - API container extracts key fields using source-specific adapters
+2. **Incident creation** - Records context, creates workspace with skill files and symlinks
+3. **Task dispatch** - API sends task + OpenAI credentials to Codex Worker via WebSocket
+4. **AI execution** - Codex Worker runs Codex CLI in the incident workspace
+5. **Tool calls** - When Codex needs SSH/Zabbix access, Python wrappers call MCP Gateway
+6. **Credential fetch** - MCP Gateway retrieves credentials from database and executes the operation
+7. **Result streaming** - Output streams back through WebSocket to API for real-time updates
+8. **Completion** - Results posted to Slack (if configured) and incident status updated
+
+This architecture ensures the AI agent never has direct access to sensitive credentials.
 
 ## Supported Alert Sources
 
