@@ -511,18 +511,25 @@ func (s *SkillService) AssignTools(skillName string, toolIDs []uint) error {
 	}
 
 	// 3. Create symlinks for each assigned tool
+	// Symlinks target /tools/ which is where tools are in the codex container
+	const codexToolsDir = "/tools"
 	for _, tool := range tools {
 		if !tool.Enabled {
 			continue
 		}
-		toolPath := filepath.Join(s.toolsDir, tool.ToolType.Name)
+		// Check if tool exists in API container's tools directory
+		apiToolPath := filepath.Join(s.toolsDir, tool.ToolType.Name)
+		if _, err := os.Stat(apiToolPath); err != nil {
+			log.Printf("Warning: tool %s not found at %s", tool.ToolType.Name, apiToolPath)
+			continue
+		}
+
+		// Create symlink pointing to /tools/ (codex container path)
+		codexToolPath := filepath.Join(codexToolsDir, tool.ToolType.Name)
 		symlinkPath := filepath.Join(scriptsDir, tool.ToolType.Name)
 
-		// Only create symlink if tool directory exists
-		if _, err := os.Stat(toolPath); err == nil {
-			if err := os.Symlink(toolPath, symlinkPath); err != nil && !os.IsExist(err) {
-				log.Printf("Warning: failed to symlink tool %s: %v", tool.ToolType.Name, err)
-			}
+		if err := os.Symlink(codexToolPath, symlinkPath); err != nil && !os.IsExist(err) {
+			log.Printf("Warning: failed to symlink tool %s: %v", tool.ToolType.Name, err)
 		}
 	}
 
@@ -801,13 +808,15 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 	// Generate UUID for this incident
 	incidentUUID := uuid.New().String()
 
-	// Create incident directory
+	// Create incident directory with 0777 permissions so codex (UID 1001) can create files
 	incidentDir := filepath.Join(s.incidentsDir, incidentUUID)
-	if err := os.MkdirAll(incidentDir, 0755); err != nil {
+	if err := os.MkdirAll(incidentDir, 0777); err != nil {
 		return "", "", fmt.Errorf("failed to create incident directory: %w", err)
 	}
+	// Ensure directory has correct permissions even if parent existed
+	os.Chmod(incidentDir, 0777)
 
-	// Create .codex directory
+	// Create .codex directory with 0755 (codex can read but not modify)
 	codexDir := filepath.Join(incidentDir, ".codex")
 	if err := os.MkdirAll(codexDir, 0755); err != nil {
 		return "", "", fmt.Errorf("failed to create .codex directory: %w", err)
@@ -825,10 +834,8 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 		return "", "", fmt.Errorf("failed to generate AGENTS.md: %w", err)
 	}
 
-	// Generate separate .env.{tool_name} files for each tool
-	if err := s.generateIncidentEnvFiles(incidentDir); err != nil {
-		log.Printf("Warning: failed to generate incident env files: %v", err)
-	}
+	// NOTE: Tool credentials are NOT written to incident directory
+	// They are fetched by MCP Gateway at execution time for security
 
 	// Generate title using LLM
 	var title string

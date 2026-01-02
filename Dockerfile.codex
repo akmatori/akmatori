@@ -1,0 +1,95 @@
+# Dockerfile.codex - Codex execution container
+# This container runs:
+# - Go orchestrator (codex-worker) that connects to API via WebSocket
+# - Codex CLI for AI-powered task execution
+# - Python wrappers that call MCP Gateway for tool execution
+#
+# Security: This container has NO database access and NO direct secrets.
+# Tool credentials are fetched by MCP Gateway at execution time.
+
+# Build stage for Go orchestrator
+FROM golang:1.25 AS builder
+
+WORKDIR /app
+
+# Copy codex-worker module files
+COPY codex-worker/go.mod codex-worker/go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY codex-worker/ .
+
+# Build the orchestrator
+RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-s -w" -o codex-worker ./cmd/worker
+
+# Runtime stage
+FROM golang:1.25
+
+# Install Node.js, Python 3, and dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    python3 \
+    python3-pip \
+    python3-venv \
+    ripgrep \
+    httpie \
+    git \
+    jq \
+    tree \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create symlink for python command
+RUN ln -s /usr/bin/python3 /usr/bin/python
+
+# Install Python packages required by wrappers
+RUN pip3 install --no-cache-dir --break-system-packages \
+    requests \
+    pyyaml
+
+# Create non-root user (UID 1001 to differ from API's UID 1000)
+# This ensures codex cannot modify files created by API
+RUN groupadd -g 1001 codex && \
+    useradd -u 1001 -g codex -m -s /bin/bash codex
+
+# Install Codex CLI globally (pinned version)
+RUN npm install -g @openai/codex@0.77.0
+
+# Create directories
+RUN mkdir -p /home/codex/.codex /workspaces /tools && \
+    chown -R codex:codex /home/codex /workspaces /tools && \
+    chmod -R 755 /home/codex/.codex
+
+WORKDIR /home/codex
+
+# Copy orchestrator binary from builder
+COPY --from=builder /app/codex-worker .
+
+# Copy Python wrappers (thin MCP client calls)
+COPY codex-tools/ /tools/
+
+# Change ownership
+RUN chown -R codex:codex /home/codex /tools
+
+# Switch to non-root user
+USER codex
+
+# Environment variables (defaults, can be overridden)
+ENV API_WS_URL=ws://akmatori-api:3000/ws/codex
+ENV MCP_GATEWAY_URL=http://mcp-gateway:8080
+ENV WORKSPACE_DIR=/workspaces
+ENV SESSIONS_FILE=/home/codex/.codex/sessions.json
+
+# Expose nothing - this container only makes outbound connections
+
+# Health check - verify orchestrator is running
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD pgrep codex-worker || exit 1
+
+# Run the orchestrator
+CMD ["./codex-worker"]

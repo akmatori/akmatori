@@ -22,6 +22,7 @@ type AlertHandler struct {
 	config          *config.Config
 	slackClient     *slack.Client
 	codexExecutor   *executor.Executor
+	codexWSHandler  *CodexWSHandler
 	skillService    *services.SkillService
 	alertService    *services.AlertService
 	channelResolver *slackutil.ChannelResolver
@@ -36,6 +37,7 @@ func NewAlertHandler(
 	cfg *config.Config,
 	slackClient *slack.Client,
 	codexExecutor *executor.Executor,
+	codexWSHandler *CodexWSHandler,
 	skillService *services.SkillService,
 	alertService *services.AlertService,
 	channelResolver *slackutil.ChannelResolver,
@@ -45,6 +47,7 @@ func NewAlertHandler(
 		config:          cfg,
 		slackClient:     slackClient,
 		codexExecutor:   codexExecutor,
+		codexWSHandler:  codexWSHandler,
 		skillService:    skillService,
 		alertService:    alertService,
 		channelResolver: channelResolver,
@@ -274,10 +277,90 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 
 	// Build investigation prompt
 	investigationPrompt := h.buildInvestigationPrompt(alert, instance)
-
-	// Execute investigation
 	taskWithGuidance := executor.PrependGuidance(investigationPrompt)
 
+	// Try WebSocket-based execution first (new architecture)
+	if h.codexWSHandler != nil && h.codexWSHandler.IsWorkerConnected() {
+		log.Printf("Using WebSocket-based Codex worker for incident %s", incidentUUID)
+
+		// Fetch OpenAI settings from database
+		var openaiSettings *OpenAISettings
+		if dbSettings, err := database.GetOpenAISettings(); err == nil && dbSettings != nil {
+			openaiSettings = &OpenAISettings{
+				APIKey:          dbSettings.APIKey,
+				Model:           dbSettings.Model,
+				ReasoningEffort: dbSettings.ModelReasoningEffort,
+			}
+			log.Printf("Using OpenAI model: %s", dbSettings.Model)
+		} else {
+			log.Printf("Warning: Could not fetch OpenAI settings: %v", err)
+		}
+
+		// Create channels for async result handling
+		done := make(chan struct{})
+		var response string
+		var sessionID string
+		var hasError bool
+		var lastStreamedLog string
+
+		// Build task header for logging
+		taskHeader := fmt.Sprintf("📋 Alert Investigation: %s\n🖥️ Host: %s\n⚠️ Severity: %s\n\n--- Execution Log ---\n\n",
+			alert.AlertName, alert.TargetHost, alert.Severity)
+
+		callback := IncidentCallback{
+			OnOutput: func(output string) {
+				lastStreamedLog = output
+				// Update database with streamed log
+				h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+output)
+			},
+			OnCompleted: func(sid, output string) {
+				sessionID = sid
+				response = output
+				close(done)
+			},
+			OnError: func(errorMsg string) {
+				response = fmt.Sprintf("❌ Error: %s", errorMsg)
+				hasError = true
+				close(done)
+			},
+		}
+
+		if err := h.codexWSHandler.StartIncident(incidentUUID, taskWithGuidance, openaiSettings, callback); err != nil {
+			log.Printf("Failed to start incident via WebSocket: %v, falling back to local execution", err)
+			h.runInvestigationLocal(incidentUUID, workingDir, alert, instance, threadTS, taskWithGuidance)
+			return
+		}
+
+		// Wait for completion
+		<-done
+
+		// Build full log: task header + streamed log + final response
+		fullLog := taskHeader + lastStreamedLog
+		if response != "" {
+			fullLog += "\n\n--- Final Response ---\n\n" + response
+		}
+
+		// Update incident with full results
+		finalStatus := database.IncidentStatusCompleted
+		if hasError {
+			finalStatus = database.IncidentStatusFailed
+		}
+		h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response)
+
+		// Update Slack if enabled
+		h.updateSlackWithResult(threadTS, response, hasError)
+
+		log.Printf("Investigation completed for alert: %s (via WebSocket)", alert.AlertName)
+		return
+	}
+
+	// Fall back to local execution (legacy)
+	log.Printf("WebSocket worker not available, using local execution for incident %s", incidentUUID)
+	h.runInvestigationLocal(incidentUUID, workingDir, alert, instance, threadTS, taskWithGuidance)
+}
+
+// runInvestigationLocal runs investigation using the local executor (legacy fallback)
+func (h *AlertHandler) runInvestigationLocal(incidentUUID, workingDir string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, threadTS string, taskWithGuidance string) {
 	ctx := context.Background()
 
 	result := h.codexExecutor.ExecuteForSlackInDirectory(
@@ -316,35 +399,42 @@ Summary: %s
 		log.Printf("Warning: Failed to update incident: %v", err)
 	}
 
-	// Update Slack if enabled
-	if h.slackClient != nil && threadTS != "" && h.alertsChannel != "" {
-		channelID := h.alertsChannel
-		if h.channelResolver != nil {
-			resolved, _ := h.channelResolver.ResolveChannel(h.alertsChannel)
-			if resolved != "" {
-				channelID = resolved
-			}
-		}
+	// Update Slack
+	h.updateSlackWithResult(threadTS, result.Response, result.Error != nil)
 
-		// Add result reaction
-		reactionName := "white_check_mark"
-		if result.Error != nil {
-			reactionName = "x"
-		}
-		h.slackClient.AddReaction(reactionName, slack.ItemRef{
-			Channel:   channelID,
-			Timestamp: threadTS,
-		})
+	log.Printf("Investigation completed for alert: %s (status: %s, local)", alert.AlertName, finalStatus)
+}
 
-		// Post result summary
-		h.slackClient.PostMessage(
-			channelID,
-			slack.MsgOptionText(result.Response, false),
-			slack.MsgOptionTS(threadTS),
-		)
+// updateSlackWithResult posts results to Slack thread
+func (h *AlertHandler) updateSlackWithResult(threadTS, response string, hasError bool) {
+	if h.slackClient == nil || threadTS == "" || h.alertsChannel == "" {
+		return
 	}
 
-	log.Printf("Investigation completed for alert: %s (status: %s)", alert.AlertName, finalStatus)
+	channelID := h.alertsChannel
+	if h.channelResolver != nil {
+		resolved, _ := h.channelResolver.ResolveChannel(h.alertsChannel)
+		if resolved != "" {
+			channelID = resolved
+		}
+	}
+
+	// Add result reaction
+	reactionName := "white_check_mark"
+	if hasError {
+		reactionName = "x"
+	}
+	h.slackClient.AddReaction(reactionName, slack.ItemRef{
+		Channel:   channelID,
+		Timestamp: threadTS,
+	})
+
+	// Post result summary
+	h.slackClient.PostMessage(
+		channelID,
+		slack.MsgOptionText(response, false),
+		slack.MsgOptionTS(threadTS),
+	)
 }
 
 func (h *AlertHandler) buildInvestigationPrompt(alert alerts.NormalizedAlert, instance *database.AlertSourceInstance) string {
