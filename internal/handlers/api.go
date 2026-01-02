@@ -24,17 +24,19 @@ type APIHandler struct {
 	contextService *services.ContextService
 	alertService   *services.AlertService
 	codexExecutor  *executor.Executor
+	codexWSHandler *CodexWSHandler
 	slackManager   *slackutil.Manager
 }
 
 // NewAPIHandler creates a new API handler
-func NewAPIHandler(skillService *services.SkillService, toolService *services.ToolService, contextService *services.ContextService, alertService *services.AlertService, codexExecutor *executor.Executor, slackManager *slackutil.Manager) *APIHandler {
+func NewAPIHandler(skillService *services.SkillService, toolService *services.ToolService, contextService *services.ContextService, alertService *services.AlertService, codexExecutor *executor.Executor, codexWSHandler *CodexWSHandler, slackManager *slackutil.Manager) *APIHandler {
 	return &APIHandler{
 		skillService:   skillService,
 		toolService:    toolService,
 		contextService: contextService,
 		alertService:   alertService,
 		codexExecutor:  codexExecutor,
+		codexWSHandler: codexWSHandler,
 		slackManager:   slackManager,
 	}
 }
@@ -521,30 +523,76 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 			taskHeader := fmt.Sprintf("📝 API Incident Task:\n%s\n\n--- Execution Log ---\n\n", req.Task)
 			h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", taskHeader+"Starting execution...")
 
-			// Use background context since r.Context() may be cancelled
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
-			defer cancel()
-
-			progressCallback := func(progressLog string) {
-				h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+progressLog)
-			}
-
 			taskWithGuidance := executor.PrependGuidance(req.Task)
 
-			// Execute Codex - it handles skill invocation natively
-			result, err := h.codexExecutor.ExecuteInDirectory(ctx, taskWithGuidance, "", workingDir, progressCallback)
+			// Try WebSocket-based execution first (new architecture)
+			if h.codexWSHandler != nil && h.codexWSHandler.IsWorkerConnected() {
+				log.Printf("Using WebSocket-based Codex worker for API incident %s", incidentUUID)
 
-			fullLogWithContext := taskHeader + result.FullLog
+				// Fetch OpenAI settings from database
+				var openaiSettings *OpenAISettings
+				if dbSettings, err := database.GetOpenAISettings(); err == nil && dbSettings != nil {
+					openaiSettings = &OpenAISettings{
+						APIKey:          dbSettings.APIKey,
+						Model:           dbSettings.Model,
+						ReasoningEffort: dbSettings.ModelReasoningEffort,
+					}
+					log.Printf("Using OpenAI model: %s", dbSettings.Model)
+				}
 
-			if err != nil {
-				log.Printf("Incident %s failed: %v", incidentUUID, err)
-				h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, result.SessionID, fullLogWithContext+"\n\nError: "+err.Error(), "Error: "+err.Error())
+				// Create channels for async result handling
+				done := make(chan struct{})
+				var response string
+				var sessionID string
+				var hasError bool
+				var lastStreamedLog string // Keep track of the accumulated log
+
+				callback := IncidentCallback{
+					OnOutput: func(output string) {
+						lastStreamedLog = output // Save the accumulated log
+						h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+output)
+					},
+					OnCompleted: func(sid, output string) {
+						sessionID = sid
+						response = output
+						close(done)
+					},
+					OnError: func(errorMsg string) {
+						response = fmt.Sprintf("❌ Error: %s", errorMsg)
+						hasError = true
+						close(done)
+					},
+				}
+
+				if err := h.codexWSHandler.StartIncident(incidentUUID, taskWithGuidance, openaiSettings, callback); err != nil {
+					log.Printf("Failed to start incident via WebSocket: %v, falling back to local execution", err)
+					h.runIncidentLocal(incidentUUID, workingDir, taskHeader, taskWithGuidance)
+					return
+				}
+
+				// Wait for completion
+				<-done
+
+				// Build full log: task header + streamed log + final response
+				fullLog := taskHeader + lastStreamedLog
+				if response != "" {
+					fullLog += "\n\n--- Final Response ---\n\n" + response
+				}
+
+				// Update incident status
+				if hasError {
+					h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, sessionID, fullLog, response)
+				} else {
+					h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, sessionID, fullLog, response)
+				}
+
+				log.Printf("API incident %s completed (via WebSocket)", incidentUUID)
 				return
 			}
 
-			log.Printf("Incident %s completed. Output: %d bytes, Tokens: %d, Session: %s",
-				incidentUUID, len(result.Output), result.TokensUsed, result.SessionID)
-			h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, result.SessionID, fullLogWithContext, result.Output)
+			// Fall back to local execution (legacy)
+			log.Printf("WebSocket worker not available, using local execution for API incident %s", incidentUUID)
+			h.runIncidentLocal(incidentUUID, workingDir, taskHeader, taskWithGuidance)
 		}()
 
 		response := map[string]interface{}{
@@ -561,6 +609,30 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// runIncidentLocal runs incident using the local executor (legacy fallback)
+func (h *APIHandler) runIncidentLocal(incidentUUID, workingDir, taskHeader, taskWithGuidance string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+	defer cancel()
+
+	progressCallback := func(progressLog string) {
+		h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+progressLog)
+	}
+
+	result, err := h.codexExecutor.ExecuteInDirectory(ctx, taskWithGuidance, "", workingDir, progressCallback)
+
+	fullLogWithContext := taskHeader + result.FullLog
+
+	if err != nil {
+		log.Printf("Incident %s failed: %v", incidentUUID, err)
+		h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, result.SessionID, fullLogWithContext+"\n\nError: "+err.Error(), "Error: "+err.Error())
+		return
+	}
+
+	log.Printf("Incident %s completed. Output: %d bytes, Tokens: %d, Session: %s",
+		incidentUUID, len(result.Output), result.TokensUsed, result.SessionID)
+	h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, result.SessionID, fullLogWithContext, result.Output)
 }
 
 // handleIncidentByID handles GET /api/incidents/:uuid

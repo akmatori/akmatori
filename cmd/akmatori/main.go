@@ -59,6 +59,7 @@ func main() {
 			"/health",
 			"/webhook/*",
 			"/auth/login",
+			"/ws/codex", // WebSocket endpoint for Codex worker (internal)
 		},
 	})
 	log.Printf("JWT authentication enabled for user: %s", cfg.AdminUsername)
@@ -158,11 +159,16 @@ func main() {
 	// Initialize channel resolver (will be set when Slack connects)
 	var channelResolver *slackutil.ChannelResolver
 
+	// Initialize Codex WebSocket handler for orchestrator communication
+	codexWSHandler := handlers.NewCodexWSHandler()
+	log.Printf("Codex WebSocket handler initialized")
+
 	// Initialize Alert handler
 	alertHandler := handlers.NewAlertHandler(
 		cfg,
 		slackManager.GetClient(), // Can be nil if Slack is disabled
 		codexExecutor,
+		codexWSHandler,
 		skillService,
 		alertService,
 		channelResolver,
@@ -181,7 +187,7 @@ func main() {
 	httpHandler := handlers.NewHTTPHandler(alertHandler)
 
 	// Initialize API handler for skill communication and management
-	apiHandler := handlers.NewAPIHandler(skillService, toolService, contextService, alertService, codexExecutor, slackManager)
+	apiHandler := handlers.NewAPIHandler(skillService, toolService, contextService, alertService, codexExecutor, codexWSHandler, slackManager)
 
 	// Initialize auth handler
 	authHandler := handlers.NewAuthHandler(jwtAuthMiddleware)
@@ -191,6 +197,7 @@ func main() {
 	httpHandler.SetupRoutes(mux)
 	apiHandler.SetupRoutes(mux)
 	authHandler.SetupRoutes(mux)
+	codexWSHandler.SetupRoutes(mux)
 
 	// Wrap all routes with CORS middleware first, then JWT authentication
 	corsMiddleware := middleware.NewCORSMiddleware() // Allow all origins
@@ -232,6 +239,7 @@ func main() {
 	log.Printf("Alert webhook endpoint: http://localhost:%d/webhook/alert/{instance_uuid}", cfg.HTTPPort)
 	log.Printf("Health check endpoint: http://localhost:%d/health", cfg.HTTPPort)
 	log.Printf("API base URL: http://localhost:%d/api", cfg.HTTPPort)
+	log.Printf("Codex WebSocket endpoint: ws://localhost:%d/ws/codex", cfg.HTTPPort)
 
 	// Create a context for the Slack manager
 	ctx, ctxCancel := context.WithCancel(context.Background())

@@ -1,10 +1,24 @@
 version: '3.8'
 
+# Secure 4-Container Architecture
+# ================================
+# Network Isolation:
+# - frontend: nginx, frontend (external access)
+# - api-internal: API <-> DB, MCP Gateway <-> DB, API <-> Codex (WebSocket)
+# - codex-network: Codex <-> MCP Gateway ONLY (internal)
+#
+# Security:
+# - Codex container has NO database access
+# - Codex container has NO direct secrets
+# - Tool credentials fetched by MCP Gateway at execution time
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: akmatori-postgres
     restart: unless-stopped
+    networks:
+      - api-internal
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-akmatori}
       - POSTGRES_USER=${POSTGRES_USER:-akmatori}
@@ -17,20 +31,81 @@ services:
       timeout: 5s
       retries: 5
 
-  akmatori:
+  akmatori-api:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: akmatori
+      dockerfile: Dockerfile.api
+    container_name: akmatori-api
     restart: unless-stopped
+    networks:
+      - frontend
+      - api-internal
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       - DATABASE_URL=postgres://${POSTGRES_USER:-akmatori}:${POSTGRES_PASSWORD:-akmatori}@postgres:5432/${POSTGRES_DB:-akmatori}?sslmode=disable
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
     volumes:
       - ./akmatori_data:/akmatori
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  mcp-gateway:
+    build:
+      context: ./mcp-gateway
+      dockerfile: Dockerfile
+    container_name: mcp-gateway
+    restart: unless-stopped
+    networks:
+      - frontend        # For external access (SSH to remote servers, Zabbix API)
+      - api-internal    # For database access
+      - codex-network   # For MCP calls from Codex
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-akmatori}:${POSTGRES_PASSWORD:-akmatori}@postgres:5432/${POSTGRES_DB:-akmatori}?sslmode=disable
+      - PORT=8080
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  akmatori-codex:
+    build:
+      context: .
+      dockerfile: Dockerfile.codex
+    container_name: akmatori-codex
+    restart: unless-stopped
+    networks:
+      - frontend        # For external access (OpenAI API)
+      - api-internal    # For WebSocket to API
+      - codex-network   # For MCP calls to gateway
+    depends_on:
+      - akmatori-api
+      - mcp-gateway
+    environment:
+      - API_WS_URL=ws://akmatori-api:3000/ws/codex
+      - MCP_GATEWAY_URL=http://mcp-gateway:8080
+      - WORKSPACE_DIR=/akmatori/incidents
+      - SESSIONS_FILE=/home/codex/.codex/sessions.json
+    volumes:
+      - codex_sessions:/home/codex/.codex      # Persistent session data
+      - ./akmatori_data:/akmatori:rw           # Shared workspace (API creates, Codex executes)
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "codex-worker"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    # NO database access
+    # Credentials passed via WebSocket from API
+    # Codex runs as UID 1001, can read API files (UID 1000) but not modify them
 
   frontend:
     build:
@@ -38,21 +113,37 @@ services:
       dockerfile: Dockerfile
     container_name: akmatori-frontend
     restart: unless-stopped
+    networks:
+      - frontend
     depends_on:
-      - akmatori
+      - akmatori-api
 
   proxy:
     image: nginx:alpine
     container_name: akmatori-proxy
     restart: unless-stopped
+    networks:
+      - frontend
     depends_on:
       - frontend
-      - akmatori
+      - akmatori-api
     ports:
       - "${HTTP_PORT:-8080}:80"
     volumes:
       - ./proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
 
+networks:
+  frontend:
+    driver: bridge
+  api-internal:
+    driver: bridge
+    internal: true
+  codex-network:
+    driver: bridge
+    internal: true
+
 volumes:
   postgres_data:
   akmatori_data:
+  codex_sessions:
+  codex_workspaces:
