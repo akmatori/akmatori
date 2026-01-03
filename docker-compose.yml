@@ -59,7 +59,7 @@ services:
     build:
       context: ./mcp-gateway
       dockerfile: Dockerfile
-    container_name: mcp-gateway
+    container_name: akmatori-mcp-gateway
     restart: unless-stopped
     networks:
       - frontend        # For external access (SSH to remote servers, Zabbix API)
