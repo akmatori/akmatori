@@ -540,13 +540,9 @@ func (s *SkillService) AssignTools(skillName string, toolIDs []uint) error {
 		return fmt.Errorf("failed to write tools.md: %w", err)
 	}
 
-	// 5. Generate .env file with tool settings
-	skillDir := s.GetSkillDir(skillName)
-	if err := s.generateSkillEnvFile(skillDir, tools); err != nil {
-		log.Printf("Warning: failed to generate .env file: %v", err)
-	}
-
-	// 6. Update database association
+	// 5. Update database association
+	// NOTE: Tool credentials are NOT written to skill directories
+	// They are fetched by MCP Gateway at execution time for security
 	if err := s.db.Model(skill).Association("Tools").Replace(tools); err != nil {
 		return fmt.Errorf("failed to update tool associations: %w", err)
 	}
@@ -1082,133 +1078,6 @@ func fixPEMKey(key string) string {
 	body := strings.Join(bodyParts, "")
 
 	return header + "\n" + body + "\n" + footer + "\n"
-}
-
-// generateToolConfig generates a configuration file for a tool in its lib directory
-func (s *SkillService) generateToolConfig(libDir, toolName string, settings database.JSONB) error {
-	configPath := filepath.Join(libDir, toolName, "config.env")
-
-	// Convert settings to environment variable format
-	var lines []string
-	for key, value := range settings {
-		// Convert to uppercase and snake_case
-		envKey := strings.ToUpper(strings.ReplaceAll(key, "-", "_"))
-		lines = append(lines, fmt.Sprintf("%s=%s", envKey, formatEnvValue(value)))
-	}
-
-	content := strings.Join(lines, "\n")
-
-	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
-	}
-
-	return nil
-}
-
-// generateSkillEnvFile generates a .env file at the skill root directory with all tool settings
-func (s *SkillService) generateSkillEnvFile(skillDir string, tools []database.ToolInstance) error {
-	envPath := filepath.Join(skillDir, ".env")
-
-	var lines []string
-	lines = append(lines, "# Auto-generated environment file for skill tools")
-	lines = append(lines, "# This file contains settings for all connected tools")
-	lines = append(lines, "")
-
-	for _, tool := range tools {
-		if !tool.Enabled {
-			continue
-		}
-
-		// Get tool type for the name
-		var toolType database.ToolType
-		if err := s.db.First(&toolType, tool.ToolTypeID).Error; err != nil {
-			continue
-		}
-
-		// Add section header for this tool
-		lines = append(lines, fmt.Sprintf("# %s Configuration", strings.ToUpper(toolType.Name)))
-
-		// Write settings with uppercase keys
-		for key, value := range tool.Settings {
-			lines = append(lines, fmt.Sprintf("%s=%s", strings.ToUpper(key), formatEnvValue(value)))
-		}
-		lines = append(lines, "")
-	}
-
-	content := strings.Join(lines, "\n")
-
-	if err := os.WriteFile(envPath, []byte(content), 0600); err != nil {
-		return fmt.Errorf("failed to write .env file: %w", err)
-	}
-
-	return nil
-}
-
-// generateIncidentEnvFiles generates separate .env.{tool_name} files in the incident directory
-// for each tool used by enabled skills (e.g., .env.zabbix, .env.proxmox)
-func (s *SkillService) generateIncidentEnvFiles(incidentDir string) error {
-	// Get all enabled skills with their tools
-	skills, err := s.ListEnabledSkills()
-	if err != nil {
-		return fmt.Errorf("failed to get skills: %w", err)
-	}
-
-	seenTools := make(map[uint]bool) // Avoid duplicate tool files
-
-	for _, skill := range skills {
-		// Get tools for this skill
-		var skillTools []database.SkillTool
-		if err := s.db.Where("skill_id = ?", skill.ID).Find(&skillTools).Error; err != nil {
-			continue
-		}
-
-		for _, st := range skillTools {
-			if seenTools[st.ToolInstanceID] {
-				continue
-			}
-			seenTools[st.ToolInstanceID] = true
-
-			// Get tool instance with type
-			var tool database.ToolInstance
-			if err := s.db.Preload("ToolType").First(&tool, st.ToolInstanceID).Error; err != nil {
-				continue
-			}
-
-			if !tool.Enabled || tool.ToolType.ID == 0 {
-				continue
-			}
-
-			// Generate .env.{tool_name} file
-			toolName := tool.ToolType.Name
-			toolNameUpper := strings.ToUpper(toolName)
-			envPath := filepath.Join(incidentDir, ".env."+toolName)
-
-			var lines []string
-			lines = append(lines, fmt.Sprintf("# %s Configuration", toolNameUpper))
-			lines = append(lines, "# Auto-generated - do not edit")
-			lines = append(lines, "")
-
-			// Write settings with tool-prefixed uppercase keys
-			// e.g., ssh tool's "servers" becomes "SSH_SERVERS"
-			for key, value := range tool.Settings {
-				envKey := strings.ToUpper(key)
-				// Ensure key has tool prefix (e.g., SSH_SERVERS, not just SERVERS)
-				if !strings.HasPrefix(envKey, toolNameUpper+"_") {
-					envKey = toolNameUpper + "_" + envKey
-				}
-				lines = append(lines, fmt.Sprintf("%s=%s", envKey, formatEnvValue(value)))
-			}
-
-			content := strings.Join(lines, "\n")
-
-			if err := os.WriteFile(envPath, []byte(content), 0600); err != nil {
-				log.Printf("Warning: failed to write %s: %v", envPath, err)
-				continue
-			}
-		}
-	}
-
-	return nil
 }
 
 // UpdateIncidentStatus updates the status of an incident
