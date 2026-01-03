@@ -1,0 +1,41 @@
+{
+  "version": "4",
+  "groupKey": "{}:{alertname=\"HighMemoryUsage\"}",
+  "status": "firing",
+  "receiver": "akmatori",
+  "groupLabels": {
+    "alertname": "HighMemoryUsage"
+  },
+  "commonLabels": {
+    "alertname": "HighMemoryUsage",
+    "severity": "critical",
+    "instance": "web-server-01:9090",
+    "job": "node-exporter"
+  },
+  "commonAnnotations": {
+    "summary": "Memory usage is above 90%",
+    "description": "Instance web-server-01 has memory usage of 95%",
+    "runbook_url": "https://runbooks.example.com/memory"
+  },
+  "externalURL": "http://alertmanager:9093",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "HighMemoryUsage",
+        "severity": "critical",
+        "instance": "web-server-01:9090",
+        "job": "node-exporter"
+      },
+      "annotations": {
+        "summary": "Memory usage is above 90%",
+        "description": "Instance web-server-01 has memory usage of 95%",
+        "runbook_url": "https://runbooks.example.com/memory"
+      },
+      "startsAt": "2024-01-15T10:30:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus:9090/graph?g0.expr=node_memory_usage%3E90",
+      "fingerprint": "abc123def456"
+    }
+  ]
+}

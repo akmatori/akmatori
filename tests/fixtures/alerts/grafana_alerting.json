@@ -1,0 +1,25 @@
+{
+  "receiver": "akmatori",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "DiskSpaceLow",
+        "severity": "warning",
+        "instance": "storage-01:9100",
+        "job": "node-exporter",
+        "disk": "/dev/sda1"
+      },
+      "annotations": {
+        "summary": "Disk space is below 10%",
+        "description": "Disk /dev/sda1 on storage-01 has only 8% free space remaining",
+        "runbook_url": "https://runbooks.example.com/disk-space"
+      },
+      "startsAt": "2024-01-15T10:30:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "fingerprint": "gra123fin456",
+      "generatorURL": "http://grafana:3000/alerting/grafana/abc123/view"
+    }
+  ]
+}

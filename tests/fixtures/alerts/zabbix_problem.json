@@ -1,0 +1,14 @@
+{
+  "event_time": "2024-01-15 10:30:00",
+  "alert_name": "CPU Load High",
+  "severity": "High",
+  "priority": "4",
+  "metric_name": "system.cpu.load[percpu,avg1]",
+  "metric_value": "8.5",
+  "trigger_expression": "{host:system.cpu.load[percpu,avg1].avg(5m)}>5",
+  "pending_duration": "5m",
+  "event_id": "12345",
+  "hardware": "db-server-01",
+  "event_status": "PROBLEM",
+  "runbook_url": "https://runbooks.example.com/cpu-load"
+}

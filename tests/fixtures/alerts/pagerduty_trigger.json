@@ -1,0 +1,30 @@
+{
+  "event": {
+    "id": "event-abc123",
+    "event_type": "incident.triggered",
+    "data": {
+      "id": "incident-xyz789",
+      "type": "incident",
+      "title": "Database Connection Pool Exhausted",
+      "description": "The connection pool for the main database has been exhausted. Application requests are failing.",
+      "status": "triggered",
+      "urgency": "high",
+      "priority": {
+        "id": "priority-001",
+        "summary": "P1 - Critical"
+      },
+      "service": {
+        "id": "service-db-001",
+        "name": "Database Service",
+        "summary": "Main Database Service"
+      },
+      "source": "db-primary.example.com",
+      "body": {
+        "type": "incident.body",
+        "details": {
+          "runbook": "https://runbooks.example.com/db-pool"
+        }
+      }
+    }
+  }
+}

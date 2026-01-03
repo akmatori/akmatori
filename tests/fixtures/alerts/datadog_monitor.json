@@ -1,0 +1,37 @@
+{
+  "id": "event-dd-123",
+  "title": "API Latency Alert",
+  "body": "API response time has exceeded 500ms threshold. Current value: 750ms",
+  "alert_type": "error",
+  "event_type": "monitor.alert",
+  "priority": "normal",
+  "alert_id": "alert-dd-456",
+  "alert_title": "High API Latency Detected",
+  "alert_status": "Triggered",
+  "hostname": "api-gateway-01",
+  "org_id": "org-123",
+  "org_name": "AcmeCorp",
+  "snapshot": "https://app.datadoghq.com/snapshot/123",
+  "date": 1705315800,
+  "tags": [
+    "service:api-gateway",
+    "env:production",
+    "team:platform",
+    "host:api-gateway-01"
+  ],
+  "event_links": [
+    {
+      "url": "https://runbooks.example.com/api-latency",
+      "name": "Runbook"
+    },
+    {
+      "url": "https://app.datadoghq.com/monitors/123",
+      "name": "Monitor"
+    }
+  ],
+  "alert_cycle_key": "cycle-abc123",
+  "alert_metric": "trace.api.request.duration",
+  "alert_query": "avg:trace.api.request.duration{service:api-gateway} > 500",
+  "alert_scope": "service:api-gateway",
+  "last_updated": 1705315800
+}

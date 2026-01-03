@@ -1,4 +1,4 @@
-.PHONY: build run clean test deps help install
+.PHONY: build run clean test test-all test-adapters test-mcp test-coverage verify deps help install
 
 # Binary name
 BINARY_NAME=akmatori
@@ -39,12 +39,29 @@ build-all: build-linux build-mac build-windows ## Build for all platforms
 run: ## Run the application
 	$(GOBUILD) -o $(BINARY_NAME) -v ./cmd/akmatori && ./$(BINARY_NAME)
 
-test: ## Run tests
+test: ## Run all Go tests
 	$(GOTEST) -v ./...
+
+test-all: ## Run all tests including MCP gateway
+	$(GOTEST) -v ./...
+	cd mcp-gateway && $(GOTEST) -v ./...
+
+test-adapters: ## Run alert adapter tests only (fast)
+	$(GOTEST) -v ./internal/alerts/adapters/...
+
+test-mcp: ## Run MCP gateway tests only (fast)
+	cd mcp-gateway && $(GOTEST) -v ./internal/tools/...
 
 test-coverage: ## Run tests with coverage
 	$(GOTEST) -v -coverprofile=coverage.out ./...
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report: coverage.html"
+
+verify: ## Run pre-commit verification (vet + tests)
+	$(GOCMD) vet ./...
+	$(GOTEST) ./...
+	cd mcp-gateway && $(GOCMD) vet ./...
+	cd mcp-gateway && $(GOTEST) ./...
 
 clean: ## Clean build artifacts
 	$(GOCLEAN)

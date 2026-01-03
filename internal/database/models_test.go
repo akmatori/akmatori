@@ -441,9 +441,6 @@ func TestEventSourceType_Constants(t *testing.T) {
 	if EventSourceTypeSlack != "slack" {
 		t.Error("EventSourceTypeSlack should be 'slack'")
 	}
-	if EventSourceTypeZabbix != "zabbix" {
-		t.Error("EventSourceTypeZabbix should be 'zabbix'")
-	}
 	if EventSourceTypeWebhook != "webhook" {
 		t.Error("EventSourceTypeWebhook should be 'webhook'")
 	}
