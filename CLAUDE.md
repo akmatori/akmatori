@@ -72,6 +72,50 @@ make verify           # go vet + all tests
 3. **If tests fail**: Fix the issue before moving on
 4. **Before committing**: Run `make verify` to ensure everything passes
 
+## CRITICAL: Rebuild Docker Containers After Changes
+
+**After making code changes, you MUST rebuild and restart the affected Docker containers.**
+
+### Container Rebuild Commands by Area
+
+| After changing... | Rebuild command |
+|-------------------|-----------------|
+| API server (`cmd/akmatori/`, `internal/`) | `docker-compose build akmatori-api && docker-compose up -d akmatori-api` |
+| MCP Gateway (`mcp-gateway/`) | `docker-compose build mcp-gateway && docker-compose up -d mcp-gateway` |
+| Frontend (`web/`) | `docker-compose build frontend && docker-compose up -d frontend` |
+| Codex worker (`Dockerfile.codex`, skills) | `docker-compose build akmatori-codex && docker-compose up -d akmatori-codex` |
+| Multiple components | `docker-compose build <service1> <service2> && docker-compose up -d <service1> <service2>` |
+
+### Quick Reference
+
+```bash
+# Rebuild and restart specific services
+docker-compose build mcp-gateway frontend
+docker-compose up -d mcp-gateway frontend
+
+# Rebuild all services (slower, use when needed)
+docker-compose build
+docker-compose up -d
+
+# View logs after restart to verify
+docker-compose logs -f mcp-gateway
+docker-compose logs -f frontend
+
+# Check container health
+docker-compose ps
+```
+
+### Container-to-Code Mapping
+
+| Container | Source Code |
+|-----------|-------------|
+| `akmatori-api` | `cmd/akmatori/`, `internal/`, `Dockerfile.api` |
+| `mcp-gateway` | `mcp-gateway/`, `mcp-gateway/Dockerfile` |
+| `frontend` | `web/`, `web/Dockerfile` |
+| `akmatori-codex` | `Dockerfile.codex`, `.codex/skills/` |
+| `postgres` | N/A (uses official image) |
+| `proxy` | `proxy/nginx.conf` (config only, no rebuild needed) |
+
 ## CRITICAL: Write Tests for New Code
 
 **When adding ANY new functionality, you MUST write corresponding tests.**

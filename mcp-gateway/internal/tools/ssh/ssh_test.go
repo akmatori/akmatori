@@ -232,17 +232,24 @@ func TestConnectivityResult_JSONSerialization(t *testing.T) {
 func TestSSHConfig_Defaults(t *testing.T) {
 	// Test that default values are sensible
 	config := &SSHConfig{
-		Servers:           []string{"server1", "server2"},
-		Username:          "admin",
+		Hosts: []SSHHostConfig{
+			{Hostname: "server1", Address: "192.168.1.1", User: "root", Port: 22},
+			{Hostname: "server2", Address: "192.168.1.2", User: "admin", Port: 2222},
+		},
 		PrivateKey:        "key-data",
-		Port:              22,
 		CommandTimeout:    120,
 		ConnectionTimeout: 30,
 		KnownHostsPolicy:  "auto_add",
 	}
 
-	if config.Port != 22 {
-		t.Errorf("Expected default port 22, got %d", config.Port)
+	if len(config.Hosts) != 2 {
+		t.Errorf("Expected 2 hosts, got %d", len(config.Hosts))
+	}
+	if config.Hosts[0].Port != 22 {
+		t.Errorf("Expected first host port 22, got %d", config.Hosts[0].Port)
+	}
+	if config.Hosts[1].Port != 2222 {
+		t.Errorf("Expected second host port 2222, got %d", config.Hosts[1].Port)
 	}
 	if config.CommandTimeout != 120 {
 		t.Errorf("Expected default command timeout 120, got %d", config.CommandTimeout)

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
 	"strings"
 	"sync"
 	"time"
@@ -25,12 +24,25 @@ func NewSSHTool(logger *log.Logger) *SSHTool {
 	return &SSHTool{logger: logger}
 }
 
+// SSHHostConfig holds per-host SSH connection configuration
+type SSHHostConfig struct {
+	Hostname           string `json:"hostname"`                       // Display name (e.g., "web-prod-1")
+	Address            string `json:"address"`                        // Real connection address (IP or FQDN)
+	User               string `json:"user,omitempty"`                 // SSH username (default: "root")
+	Port               int    `json:"port,omitempty"`                 // SSH port (default: 22)
+	JumphostAddress    string `json:"jumphost_address,omitempty"`     // Bastion/jumphost address
+	JumphostUser       string `json:"jumphost_user,omitempty"`        // Jumphost username
+	JumphostPort       int    `json:"jumphost_port,omitempty"`        // Jumphost port (default: 22)
+	AllowWriteCommands bool   `json:"allow_write_commands,omitempty"` // Allow write/destructive commands (default: false)
+}
+
 // SSHConfig holds SSH connection configuration
 type SSHConfig struct {
-	Servers           []string
-	Username          string
+	// Per-host configurations
+	Hosts []SSHHostConfig
+
+	// Global settings
 	PrivateKey        string
-	Port              int
 	CommandTimeout    int
 	ConnectionTimeout int
 	KnownHostsPolicy  string
@@ -81,16 +93,14 @@ func (t *SSHTool) getConfig(ctx context.Context, incidentID string) (*SSHConfig,
 	}
 
 	config := &SSHConfig{
-		Port:              22,
 		CommandTimeout:    120,
 		ConnectionTimeout: 30,
 		KnownHostsPolicy:  "auto_add",
 	}
 
-	// Parse settings
 	settings := creds.Settings
 
-	// Helper to get string setting with fallback key (handles both "ssh_servers" and "servers")
+	// Helper functions
 	getString := func(primaryKey, fallbackKey string) string {
 		if val, ok := settings[primaryKey].(string); ok && val != "" {
 			return val
@@ -101,18 +111,14 @@ func (t *SSHTool) getConfig(ctx context.Context, incidentID string) (*SSHConfig,
 		return ""
 	}
 
-	// Get servers (try ssh_servers first, then servers)
-	if servers := getString("ssh_servers", "servers"); servers != "" {
-		config.Servers = strings.Split(servers, ",")
-		for i, s := range config.Servers {
-			config.Servers[i] = strings.TrimSpace(s)
+	getInt := func(key string, defaultVal int) int {
+		if val, ok := settings[key].(float64); ok {
+			return int(val)
 		}
+		return defaultVal
 	}
 
-	// Get username (try ssh_username first, then username)
-	config.Username = getString("ssh_username", "username")
-
-	// Get private key (may be base64 encoded) - try ssh_private_key first, then private_key
+	// Get private key (shared across all hosts)
 	if privateKey := getString("ssh_private_key", "private_key"); privateKey != "" {
 		if strings.HasPrefix(privateKey, "base64:") {
 			decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(privateKey, "base64:"))
@@ -126,25 +132,192 @@ func (t *SSHTool) getConfig(ctx context.Context, incidentID string) (*SSHConfig,
 		}
 	}
 
-	// Get port
-	if port, ok := settings["ssh_port"].(float64); ok {
-		config.Port = int(port)
-	}
+	// Get global timeouts
+	config.CommandTimeout = getInt("ssh_command_timeout", 120)
+	config.ConnectionTimeout = getInt("ssh_connection_timeout", 30)
 
-	// Get timeouts
-	if timeout, ok := settings["ssh_command_timeout"].(float64); ok {
-		config.CommandTimeout = int(timeout)
-	}
-	if timeout, ok := settings["ssh_connection_timeout"].(float64); ok {
-		config.ConnectionTimeout = int(timeout)
-	}
-
-	// Get known hosts policy
 	if policy, ok := settings["ssh_known_hosts_policy"].(string); ok {
 		config.KnownHostsPolicy = policy
 	}
 
+	// Parse ssh_hosts array
+	hostsData, ok := settings["ssh_hosts"].([]interface{})
+	if !ok || len(hostsData) == 0 {
+		return nil, fmt.Errorf("ssh_hosts must be configured with at least one host")
+	}
+
+	for _, hostData := range hostsData {
+		hostMap, ok := hostData.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		host := SSHHostConfig{
+			AllowWriteCommands: false, // Default to read-only
+		}
+
+		// Required fields
+		if hostname, ok := hostMap["hostname"].(string); ok {
+			host.Hostname = hostname
+		}
+		if address, ok := hostMap["address"].(string); ok {
+			host.Address = address
+		}
+
+		// Optional fields with defaults
+		if user, ok := hostMap["user"].(string); ok && user != "" {
+			host.User = user
+		} else {
+			host.User = "root"
+		}
+
+		if port, ok := hostMap["port"].(float64); ok && port > 0 {
+			host.Port = int(port)
+		} else {
+			host.Port = 22
+		}
+
+		// Jumphost configuration
+		if addr, ok := hostMap["jumphost_address"].(string); ok {
+			host.JumphostAddress = addr
+		}
+		if user, ok := hostMap["jumphost_user"].(string); ok {
+			host.JumphostUser = user
+		}
+		if port, ok := hostMap["jumphost_port"].(float64); ok && port > 0 {
+			host.JumphostPort = int(port)
+		} else if host.JumphostAddress != "" {
+			host.JumphostPort = 22
+		}
+
+		// Security settings
+		if allow, ok := hostMap["allow_write_commands"].(bool); ok {
+			host.AllowWriteCommands = allow
+		}
+
+		config.Hosts = append(config.Hosts, host)
+	}
+
 	return config, nil
+}
+
+// connect establishes SSH connection (direct or via jumphost)
+func (t *SSHTool) connect(ctx context.Context, hostConfig *SSHHostConfig, config *SSHConfig) (*ssh.Client, error) {
+	if hostConfig.JumphostAddress != "" {
+		return t.connectViaJumphost(ctx, hostConfig, config)
+	}
+	return t.connectDirect(ctx, hostConfig, config)
+}
+
+// connectDirect establishes a direct SSH connection
+func (t *SSHTool) connectDirect(ctx context.Context, hostConfig *SSHHostConfig, config *SSHConfig) (*ssh.Client, error) {
+	signer, err := parsePrivateKey(config.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse private key: %w", err)
+	}
+
+	user := hostConfig.User
+	if user == "" {
+		user = "root"
+	}
+
+	port := hostConfig.Port
+	if port == 0 {
+		port = 22
+	}
+
+	clientConfig := &ssh.ClientConfig{
+		User: user,
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeys(signer),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: implement proper host key checking
+		Timeout:         time.Duration(config.ConnectionTimeout) * time.Second,
+	}
+
+	addr := fmt.Sprintf("%s:%d", hostConfig.Address, port)
+	t.logger.Printf("Connecting directly to %s as %s", addr, user)
+
+	return ssh.Dial("tcp", addr, clientConfig)
+}
+
+// connectViaJumphost establishes SSH connection through a bastion host
+func (t *SSHTool) connectViaJumphost(ctx context.Context, hostConfig *SSHHostConfig, config *SSHConfig) (*ssh.Client, error) {
+	signer, err := parsePrivateKey(config.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse private key: %w", err)
+	}
+
+	// Jumphost connection config
+	jumphostUser := hostConfig.JumphostUser
+	if jumphostUser == "" {
+		jumphostUser = hostConfig.User // Fallback to target user
+	}
+	if jumphostUser == "" {
+		jumphostUser = "root"
+	}
+
+	jumphostPort := hostConfig.JumphostPort
+	if jumphostPort == 0 {
+		jumphostPort = 22
+	}
+
+	jumphostConfig := &ssh.ClientConfig{
+		User: jumphostUser,
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeys(signer),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: proper host key checking
+		Timeout:         time.Duration(config.ConnectionTimeout) * time.Second,
+	}
+
+	// Step 1: Connect to jumphost
+	jumphostAddr := fmt.Sprintf("%s:%d", hostConfig.JumphostAddress, jumphostPort)
+	t.logger.Printf("Connecting to jumphost %s as %s", jumphostAddr, jumphostUser)
+
+	jumphostConn, err := ssh.Dial("tcp", jumphostAddr, jumphostConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to jumphost: %w", err)
+	}
+
+	// Step 2: Dial through jumphost to target
+	targetUser := hostConfig.User
+	if targetUser == "" {
+		targetUser = "root"
+	}
+
+	targetPort := hostConfig.Port
+	if targetPort == 0 {
+		targetPort = 22
+	}
+
+	targetAddr := fmt.Sprintf("%s:%d", hostConfig.Address, targetPort)
+	t.logger.Printf("Dialing target %s through jumphost", targetAddr)
+
+	targetNetConn, err := jumphostConn.Dial("tcp", targetAddr)
+	if err != nil {
+		jumphostConn.Close()
+		return nil, fmt.Errorf("failed to dial target through jumphost: %w", err)
+	}
+
+	// Step 3: Establish SSH client connection over the tunnel
+	targetConfig := &ssh.ClientConfig{
+		User: targetUser,
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeys(signer),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         time.Duration(config.ConnectionTimeout) * time.Second,
+	}
+
+	ncc, chans, reqs, err := ssh.NewClientConn(targetNetConn, targetAddr, targetConfig)
+	if err != nil {
+		targetNetConn.Close()
+		jumphostConn.Close()
+		return nil, fmt.Errorf("failed to establish SSH connection through jumphost: %w", err)
+	}
+
+	return ssh.NewClient(ncc, chans, reqs), nil
 }
 
 // fixPEMKey reconstructs a PEM key that may have spaces instead of newlines
@@ -220,38 +393,25 @@ func parsePrivateKey(keyData string) (ssh.Signer, error) {
 	return signer, nil
 }
 
-// executeOnServer executes a command on a single server
-func (t *SSHTool) executeOnServer(ctx context.Context, server, command string, config *SSHConfig) ServerResult {
+// executeOnServer executes a command on a single server using per-host config
+func (t *SSHTool) executeOnServer(ctx context.Context, hostConfig *SSHHostConfig, command string, config *SSHConfig) ServerResult {
 	startTime := time.Now()
 
 	result := ServerResult{
-		Server:   server,
+		Server:   hostConfig.Hostname,
 		ExitCode: -1,
 	}
 
-	// Parse private key
-	signer, err := parsePrivateKey(config.PrivateKey)
-	if err != nil {
-		result.Error = fmt.Sprintf("Failed to parse private key: %v", err)
+	// Validate command against read-only mode
+	validator := NewCommandValidator()
+	if err := validator.ValidateCommand(command, hostConfig.AllowWriteCommands); err != nil {
+		result.Error = err.Error()
 		result.DurationMs = time.Since(startTime).Milliseconds()
 		return result
 	}
 
-	// Create SSH client config
-	clientConfig := &ssh.ClientConfig{
-		User: config.Username,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(signer),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: implement proper host key checking
-		Timeout:         time.Duration(config.ConnectionTimeout) * time.Second,
-	}
-
-	// Connect to server
-	addr := fmt.Sprintf("%s:%d", server, config.Port)
-	t.logger.Printf("Connecting to %s as %s", addr, config.Username)
-
-	conn, err := ssh.Dial("tcp", addr, clientConfig)
+	// Connect to server (direct or via jumphost)
+	conn, err := t.connect(ctx, hostConfig, config)
 	if err != nil {
 		result.Error = fmt.Sprintf("Connection failed: %v", err)
 		result.DurationMs = time.Since(startTime).Milliseconds()
@@ -332,42 +492,46 @@ func (t *SSHTool) ExecuteCommand(ctx context.Context, incidentID string, command
 	}
 
 	// Validate configuration
-	if len(config.Servers) == 0 {
+	if len(config.Hosts) == 0 {
 		return t.jsonResult(ExecuteResult{Error: "No servers configured"})
 	}
 	if config.PrivateKey == "" {
 		return t.jsonResult(ExecuteResult{Error: "SSH private key not configured"})
 	}
-	if config.Username == "" {
-		return t.jsonResult(ExecuteResult{Error: "SSH username not configured"})
-	}
 
-	// Determine target servers
-	targetServers := config.Servers
+	// Determine target hosts
+	var targetHosts []SSHHostConfig
 	if len(servers) > 0 {
-		// Validate that all specified servers are configured
-		configuredSet := make(map[string]bool)
-		for _, s := range config.Servers {
-			configuredSet[s] = true
+		// Build a map of configured hostnames for validation
+		hostMap := make(map[string]*SSHHostConfig)
+		for i := range config.Hosts {
+			hostMap[config.Hosts[i].Hostname] = &config.Hosts[i]
+			// Also map by address for backward compatibility
+			hostMap[config.Hosts[i].Address] = &config.Hosts[i]
 		}
+
+		// Validate and collect specified hosts
 		for _, s := range servers {
-			if !configuredSet[s] {
+			if host, ok := hostMap[s]; ok {
+				targetHosts = append(targetHosts, *host)
+			} else {
 				return t.jsonResult(ExecuteResult{Error: fmt.Sprintf("Server not configured: %s", s)})
 			}
 		}
-		targetServers = servers
+	} else {
+		targetHosts = config.Hosts
 	}
 
 	// Execute in parallel
 	var wg sync.WaitGroup
-	results := make([]ServerResult, len(targetServers))
+	results := make([]ServerResult, len(targetHosts))
 
-	for i, server := range targetServers {
+	for i := range targetHosts {
 		wg.Add(1)
-		go func(idx int, srv string) {
+		go func(idx int, host *SSHHostConfig) {
 			defer wg.Done()
-			results[idx] = t.executeOnServer(ctx, srv, command, config)
-		}(i, server)
+			results[idx] = t.executeOnServer(ctx, host, command, config)
+		}(i, &targetHosts[i])
 	}
 
 	wg.Wait()
@@ -393,57 +557,28 @@ func (t *SSHTool) TestConnectivity(ctx context.Context, incidentID string) (stri
 		return "", err
 	}
 
-	if len(config.Servers) == 0 {
+	if len(config.Hosts) == 0 {
 		return t.jsonResult(ConnectivityResult{Error: "No servers configured"})
 	}
 	if config.PrivateKey == "" {
 		return t.jsonResult(ConnectivityResult{Error: "SSH private key not configured"})
 	}
 
-	signer, err := parsePrivateKey(config.PrivateKey)
-	if err != nil {
-		return t.jsonResult(ConnectivityResult{Error: fmt.Sprintf("Failed to parse private key: %v", err)})
-	}
-
-	clientConfig := &ssh.ClientConfig{
-		User: config.Username,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(signer),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         time.Duration(config.ConnectionTimeout) * time.Second,
-	}
-
 	var result ConnectivityResult
-	for _, server := range config.Servers {
-		addr := fmt.Sprintf("%s:%d", server, config.Port)
+	for i := range config.Hosts {
+		host := &config.Hosts[i]
 
-		conn, err := net.DialTimeout("tcp", addr, time.Duration(config.ConnectionTimeout)*time.Second)
+		// Try to establish connection (handles both direct and jumphost)
+		sshConn, err := t.connect(ctx, host, config)
 		if err != nil {
 			result.Results = append(result.Results, struct {
 				Server    string `json:"server"`
 				Reachable bool   `json:"reachable"`
 				Error     string `json:"error,omitempty"`
 			}{
-				Server:    server,
+				Server:    host.Hostname,
 				Reachable: false,
-				Error:     fmt.Sprintf("TCP connection failed: %v", err),
-			})
-			continue
-		}
-		conn.Close()
-
-		// Try SSH connection
-		sshConn, err := ssh.Dial("tcp", addr, clientConfig)
-		if err != nil {
-			result.Results = append(result.Results, struct {
-				Server    string `json:"server"`
-				Reachable bool   `json:"reachable"`
-				Error     string `json:"error,omitempty"`
-			}{
-				Server:    server,
-				Reachable: false,
-				Error:     fmt.Sprintf("SSH connection failed: %v", err),
+				Error:     err.Error(),
 			})
 			continue
 		}
@@ -454,7 +589,7 @@ func (t *SSHTool) TestConnectivity(ctx context.Context, incidentID string) (stri
 			Reachable bool   `json:"reachable"`
 			Error     string `json:"error,omitempty"`
 		}{
-			Server:    server,
+			Server:    host.Hostname,
 			Reachable: true,
 		})
 	}

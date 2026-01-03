@@ -24,7 +24,6 @@ type SkillService struct {
 	dataDir        string // /akmatori - base data directory
 	incidentsDir   string // /akmatori/incidents - incident working directories
 	skillsDir      string // /akmatori/skills - skill definitions with SKILL.md
-	toolsDir       string // /akmatori/tools - tool implementations
 	toolService    *ToolService
 	contextService *ContextService
 }
@@ -36,7 +35,6 @@ func NewSkillService(dataDir string, toolService *ToolService, contextService *C
 		dataDir:        dataDir,
 		incidentsDir:   filepath.Join(dataDir, "incidents"),
 		skillsDir:      filepath.Join(dataDir, "skills"),
-		toolsDir:       toolService.GetToolsDir(), // Use actual tools directory from config
 		toolService:    toolService,
 		contextService: contextService,
 	}
@@ -484,7 +482,8 @@ See **./.codex/skills/%s/references/tools.md** for ready-to-run code examples.
 	return fmt.Sprintf("---\n%s---\n\n%s%s\n", string(yamlBytes), resourceInstructions, body)
 }
 
-// AssignTools assigns tools to a skill - creates symlinks in scripts/ and generates tools.md
+// AssignTools assigns tools to a skill and generates tools.md documentation
+// NOTE: Tools are executed via MCP Gateway, not as local scripts
 func (s *SkillService) AssignTools(skillName string, toolIDs []uint) error {
 	// Verify skill exists
 	skill, err := s.GetSkill(skillName)
@@ -492,7 +491,6 @@ func (s *SkillService) AssignTools(skillName string, toolIDs []uint) error {
 		return err
 	}
 
-	scriptsDir := s.GetSkillScriptsDir(skillName)
 	referencesDir := s.GetSkillReferencesDir(skillName)
 
 	// Ensure directories exist
@@ -500,10 +498,7 @@ func (s *SkillService) AssignTools(skillName string, toolIDs []uint) error {
 		return fmt.Errorf("failed to ensure directories: %w", err)
 	}
 
-	// 1. Remove old tool symlinks (keep skill's own scripts)
-	s.cleanToolSymlinks(scriptsDir)
-
-	// 2. Get tool instances
+	// Get tool instances
 	var tools []database.ToolInstance
 	if len(toolIDs) > 0 {
 		if err := s.db.Preload("ToolType").Where("id IN ?", toolIDs).Find(&tools).Error; err != nil {
@@ -511,37 +506,14 @@ func (s *SkillService) AssignTools(skillName string, toolIDs []uint) error {
 		}
 	}
 
-	// 3. Create symlinks for each assigned tool
-	// Symlinks target /tools/ which is where tools are in the codex container
-	const codexToolsDir = "/tools"
-	for _, tool := range tools {
-		if !tool.Enabled {
-			continue
-		}
-		// Check if tool exists in API container's tools directory
-		apiToolPath := filepath.Join(s.toolsDir, tool.ToolType.Name)
-		if _, err := os.Stat(apiToolPath); err != nil {
-			log.Printf("Warning: tool %s not found at %s", tool.ToolType.Name, apiToolPath)
-			continue
-		}
-
-		// Create symlink pointing to /tools/ (codex container path)
-		codexToolPath := filepath.Join(codexToolsDir, tool.ToolType.Name)
-		symlinkPath := filepath.Join(scriptsDir, tool.ToolType.Name)
-
-		if err := os.Symlink(codexToolPath, symlinkPath); err != nil && !os.IsExist(err) {
-			log.Printf("Warning: failed to symlink tool %s: %v", tool.ToolType.Name, err)
-		}
-	}
-
-	// 4. Generate references/tools.md
+	// Generate references/tools.md
 	toolsMd := s.generateToolsDocumentation(skillName, tools)
 	toolsMdPath := filepath.Join(referencesDir, "tools.md")
 	if err := os.WriteFile(toolsMdPath, []byte(toolsMd), 0644); err != nil {
 		return fmt.Errorf("failed to write tools.md: %w", err)
 	}
 
-	// 5. Update database association
+	// Update database association
 	// NOTE: Tool credentials are NOT written to skill directories
 	// They are fetched by MCP Gateway at execution time for security
 	if err := s.db.Model(skill).Association("Tools").Replace(tools); err != nil {
@@ -551,21 +523,8 @@ func (s *SkillService) AssignTools(skillName string, toolIDs []uint) error {
 	return nil
 }
 
-// cleanToolSymlinks removes tool symlinks from scripts directory (keeps regular files)
-func (s *SkillService) cleanToolSymlinks(scriptsDir string) {
-	entries, err := os.ReadDir(scriptsDir)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		if e.Type()&os.ModeSymlink != 0 {
-			os.Remove(filepath.Join(scriptsDir, e.Name()))
-		}
-	}
-}
-
 // generateToolsDocumentation generates markdown documentation for assigned tools
-// Tools are symlinked per-skill in scripts/ for security isolation
+// Tools are executed via MCP Gateway
 func (s *SkillService) generateToolsDocumentation(skillName string, tools []database.ToolInstance) string {
 	if len(tools) == 0 {
 		return "# Tools\n\nNo tools assigned.\n"
