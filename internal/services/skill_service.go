@@ -564,26 +564,14 @@ func (s *SkillService) cleanToolSymlinks(scriptsDir string) {
 }
 
 // generateToolsDocumentation generates markdown documentation for assigned tools
-// skillName is used to generate correct paths from incident directory context
+// Tools are symlinked per-skill in scripts/ for security isolation
 func (s *SkillService) generateToolsDocumentation(skillName string, tools []database.ToolInstance) string {
 	if len(tools) == 0 {
-		return "# Available Tools\n\nNo tools assigned to this skill.\n"
+		return "# Tools\n\nNo tools assigned.\n"
 	}
 
 	var sb strings.Builder
-	sb.WriteString("# Available Tools\n\n")
-
-	// Strong warning to prevent unnecessary exploration
-	sb.WriteString("---\n")
-	sb.WriteString("## ⚠️ READ THIS FIRST\n\n")
-	sb.WriteString("**This documentation is COMPLETE.** All functions, parameters, and usage examples are below.\n\n")
-	sb.WriteString("**DO NOT:**\n")
-	sb.WriteString("- Read source files (ssh.py, config.py, zabbix.py, etc.)\n")
-	sb.WriteString("- List directories with `ls`\n")
-	sb.WriteString("- Read .env files\n")
-	sb.WriteString("- Explore scripts/ folder\n\n")
-	sb.WriteString("**JUST DO:** Copy the Quick Start code below and run it. Configuration auto-loads.\n\n")
-	sb.WriteString("---\n\n")
+	sb.WriteString("# Tools\n\n")
 
 	for _, tool := range tools {
 		if !tool.Enabled {
@@ -594,46 +582,29 @@ func (s *SkillService) generateToolsDocumentation(skillName string, tools []data
 
 		sb.WriteString(fmt.Sprintf("## %s\n\n", toolName))
 		sb.WriteString(fmt.Sprintf("%s\n\n", tool.ToolType.Description))
-
-		// Quick Start Example FIRST (so it's visible even if output is truncated)
-		sb.WriteString("### Quick Start (copy & run)\n\n")
 		sb.WriteString("```python\n")
-		sb.WriteString("import sys\n")
-		sb.WriteString(fmt.Sprintf("sys.path.insert(0, '.codex/skills/%s')\n", skillName))
-		sb.WriteString(fmt.Sprintf("from scripts.%s import *\n\n", toolName))
 
-		// Add specific function call examples based on tool type
+		// Import line (required for skill-specific tool access)
+		sb.WriteString(fmt.Sprintf("import sys; sys.path.insert(0, '.codex/skills/%s')\n", skillName))
+
+		// Tool-specific examples
 		switch toolName {
 		case "ssh":
-			sb.WriteString("print(test_connectivity())\n")
-			sb.WriteString("print(execute_command('uptime'))\n")
-			sb.WriteString("```\n\n")
-			// Add batch pattern tip for SSH
-			sb.WriteString("**Tip: Run multiple commands efficiently:**\n")
-			sb.WriteString("```python\n")
-			sb.WriteString("for cmd in ['uptime', 'ps -eo pid,cmd,%cpu --sort=-%cpu | head -10', 'free -h']:\n")
-			sb.WriteString("    print(f'=== {cmd} ==='); print(execute_command(cmd))\n")
-			sb.WriteString("```\n\n")
+			sb.WriteString("from scripts.ssh import execute_command, test_connectivity\n\n")
+			sb.WriteString("print(execute_command('uptime'))  # Run on all servers\n")
+			sb.WriteString("print(test_connectivity())        # Check SSH access\n")
+			sb.WriteString("# Full docs: help(execute_command)\n")
 		case "zabbix":
-			sb.WriteString("print(get_hosts())\n")
-			sb.WriteString("print(get_problems())\n")
-			sb.WriteString("```\n\n")
+			sb.WriteString("from scripts.zabbix import get_hosts, get_problems, get_history\n\n")
+			sb.WriteString("print(get_problems(severity_min=3))  # Current problems\n")
+			sb.WriteString("print(get_hosts())                    # All hosts\n")
+			sb.WriteString("# Full docs: help(get_problems)\n")
 		default:
-			sb.WriteString("# result = function_name(...)\n")
-			sb.WriteString("```\n\n")
+			sb.WriteString(fmt.Sprintf("from scripts.%s import *\n\n", toolName))
+			sb.WriteString("# See help() for available functions\n")
 		}
 
-		// Detailed function documentation AFTER the quick start
-		if s.toolService != nil {
-			toolDesc, err := s.toolService.GenerateToolDescription(toolName)
-			if err == nil && toolDesc != "" {
-				sb.WriteString("### Functions (detailed)\n\n")
-				sb.WriteString(toolDesc)
-				sb.WriteString("\n\n")
-			}
-		}
-
-		sb.WriteString("---\n\n")
+		sb.WriteString("```\n\n")
 	}
 
 	return sb.String()
