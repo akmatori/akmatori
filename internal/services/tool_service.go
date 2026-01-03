@@ -1,208 +1,22 @@
 package services
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"regexp"
 
 	"github.com/akmatori/akmatori/internal/database"
 	"gorm.io/gorm"
 )
 
-// isValidToolName validates that a tool name is in snake_case format
-func isValidToolName(name string) bool {
-	// Must be lowercase letters, numbers, and underscores only
-	// Must start with a letter
-	// Must not end with an underscore
-	matched, _ := regexp.MatchString(`^[a-z][a-z0-9_]*[a-z0-9]$`, name)
-	return matched
-}
-
-// ToolMetadata represents the metadata for a tool type
-type ToolMetadata struct {
-	Name            string              `json:"name"`
-	Description     string              `json:"description"`
-	Version         string              `json:"version"`
-	SettingsSchema  database.JSONB      `json:"settings_schema"`
-	Functions       []ToolFunction      `json:"functions"`
-}
-
-// ToolFunction represents a function provided by a tool
-type ToolFunction struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Parameters  string `json:"parameters"`
-	Returns     string `json:"returns"`
-}
-
 // ToolService manages tool types and instances
 type ToolService struct {
-	toolsDir string
-	db       *gorm.DB
+	db *gorm.DB
 }
 
 // NewToolService creates a new tool service
-func NewToolService(toolsDir string) *ToolService {
+func NewToolService() *ToolService {
 	return &ToolService{
-		toolsDir: toolsDir,
-		db:       database.GetDB(),
+		db: database.GetDB(),
 	}
-}
-
-// GetToolsDir returns the tools directory path
-func (s *ToolService) GetToolsDir() string {
-	return s.toolsDir
-}
-
-// LoadToolTypes loads all tool types from the tools directory
-func (s *ToolService) LoadToolTypes() error {
-	// Get all subdirectories in tools directory
-	entries, err := os.ReadDir(s.toolsDir)
-	if err != nil {
-		return fmt.Errorf("failed to read tools directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		// Tool name is the directory name (must be snake_case)
-		toolName := entry.Name()
-
-		// Validate tool name format
-		if !isValidToolName(toolName) {
-			return fmt.Errorf("invalid tool name '%s': must be snake_case (lowercase letters, numbers, underscores; start with letter, not end with underscore)", toolName)
-		}
-
-		metadataPath := filepath.Join(s.toolsDir, toolName, "tool_metadata.json")
-
-		// Check if metadata file exists
-		if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
-			continue
-		}
-
-		// Read metadata file
-		data, err := os.ReadFile(metadataPath)
-		if err != nil {
-			return fmt.Errorf("failed to read metadata for tool %s: %w", toolName, err)
-		}
-
-		var metadata ToolMetadata
-		if err := json.Unmarshal(data, &metadata); err != nil {
-			return fmt.Errorf("failed to parse metadata for tool %s: %w", toolName, err)
-		}
-
-		// Check if tool type already exists in database (lookup by name)
-		var existing database.ToolType
-		result := s.db.Where("name = ?", toolName).First(&existing)
-
-		if result.Error == nil {
-			// Update existing (name stays the same, update other fields)
-			existing.Description = metadata.Description
-			existing.Schema = metadata.SettingsSchema
-			if err := s.db.Save(&existing).Error; err != nil {
-				return fmt.Errorf("failed to update tool type %s: %w", toolName, err)
-			}
-		} else {
-			// Create new (use directory name, not metadata.Name)
-			toolType := database.ToolType{
-				Name:        toolName, // Use directory name (snake_case)
-				Description: metadata.Description,
-				Schema:      metadata.SettingsSchema,
-			}
-			if err := s.db.Create(&toolType).Error; err != nil {
-				return fmt.Errorf("failed to create tool type %s: %w", toolName, err)
-			}
-		}
-	}
-
-	return nil
-}
-
-// GetToolMetadata reads and returns the metadata for a specific tool type
-func (s *ToolService) GetToolMetadata(toolName string) (*ToolMetadata, error) {
-	metadataPath := filepath.Join(s.toolsDir, toolName, "tool_metadata.json")
-
-	data, err := os.ReadFile(metadataPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read metadata: %w", err)
-	}
-
-	var metadata ToolMetadata
-	if err := json.Unmarshal(data, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse metadata: %w", err)
-	}
-
-	return &metadata, nil
-}
-
-// CopyToolToSkillLib copies a tool's files to a skill's lib directory
-func (s *ToolService) CopyToolToSkillLib(toolName, skillLibDir string) error {
-	srcDir := filepath.Join(s.toolsDir, toolName)
-	dstDir := filepath.Join(skillLibDir, toolName)
-
-	// Create destination directory
-	if err := os.MkdirAll(dstDir, 0755); err != nil {
-		return fmt.Errorf("failed to create destination directory: %w", err)
-	}
-
-	// Copy all files except tool_metadata.json
-	entries, err := os.ReadDir(srcDir)
-	if err != nil {
-		return fmt.Errorf("failed to read source directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if entry.Name() == "tool_metadata.json" || entry.Name() == "__pycache__" {
-			continue
-		}
-
-		srcPath := filepath.Join(srcDir, entry.Name())
-		dstPath := filepath.Join(dstDir, entry.Name())
-
-		if entry.IsDir() {
-			// Skip directories for now (can be enhanced if needed)
-			continue
-		}
-
-		// Copy file
-		data, err := os.ReadFile(srcPath)
-		if err != nil {
-			return fmt.Errorf("failed to read file %s: %w", entry.Name(), err)
-		}
-
-		if err := os.WriteFile(dstPath, data, 0644); err != nil {
-			return fmt.Errorf("failed to write file %s: %w", entry.Name(), err)
-		}
-	}
-
-	return nil
-}
-
-// GenerateToolDescription generates a description of tool functions for AGENTS.md
-func (s *ToolService) GenerateToolDescription(toolName string) (string, error) {
-	metadata, err := s.GetToolMetadata(toolName)
-	if err != nil {
-		return "", err
-	}
-
-	description := fmt.Sprintf("### %s\n\n%s\n\n**Available Functions:**\n\n", metadata.Name, metadata.Description)
-
-	for _, fn := range metadata.Functions {
-		description += fmt.Sprintf("- **%s**: %s\n", fn.Name, fn.Description)
-		if fn.Parameters != "" {
-			description += fmt.Sprintf("  - Parameters: %s\n", fn.Parameters)
-		}
-		if fn.Returns != "" {
-			description += fmt.Sprintf("  - Returns: %s\n", fn.Returns)
-		}
-		description += "\n"
-	}
-
-	return description, nil
 }
 
 // CreateToolInstance creates a new tool instance
@@ -269,4 +83,25 @@ func (s *ToolService) ListToolInstances() ([]database.ToolInstance, error) {
 		return nil, fmt.Errorf("failed to list tool instances: %w", err)
 	}
 	return instances, nil
+}
+
+// EnsureToolTypes ensures the basic tool types exist in the database
+func (s *ToolService) EnsureToolTypes() error {
+	toolTypes := []database.ToolType{
+		{Name: "ssh", Description: "SSH remote command execution tool"},
+		{Name: "zabbix", Description: "Zabbix monitoring integration"},
+	}
+
+	for _, tt := range toolTypes {
+		var existing database.ToolType
+		result := s.db.Where("name = ?", tt.Name).First(&existing)
+		if result.Error != nil {
+			// Create if not exists
+			if err := s.db.Create(&tt).Error; err != nil {
+				return fmt.Errorf("failed to create tool type %s: %w", tt.Name, err)
+			}
+		}
+	}
+
+	return nil
 }

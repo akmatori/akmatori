@@ -81,14 +81,14 @@ func main() {
 	}
 
 	// Initialize tool service
-	toolService := services.NewToolService(cfg.ToolsDir)
-	log.Printf("Tool service initialized with tools dir: %s", cfg.ToolsDir)
+	toolService := services.NewToolService()
+	log.Println("Tool service initialized")
 
-	// Load tool types from filesystem into database
-	if err := toolService.LoadToolTypes(); err != nil {
-		log.Printf("Warning: Failed to load tool types: %v", err)
+	// Ensure tool types exist in database
+	if err := toolService.EnsureToolTypes(); err != nil {
+		log.Printf("Warning: Failed to ensure tool types: %v", err)
 	} else {
-		log.Printf("Tool types loaded from filesystem")
+		log.Println("Tool types ready")
 	}
 
 	// Data directory for skills and incidents (hardcoded)

@@ -18,13 +18,10 @@ type Config struct {
 	// Database Configuration
 	DatabaseURL string
 
-	// Tools Directory
-	ToolsDir string
-
 	// Authentication Configuration
-	AdminUsername string
-	AdminPassword string
-	JWTSecret     string
+	AdminUsername  string
+	AdminPassword  string
+	JWTSecret      string
 	JWTExpiryHours int
 }
 
@@ -37,9 +34,6 @@ func Load() (*Config, error) {
 
 	// Database configuration
 	cfg.DatabaseURL = getEnvOrDefault("DATABASE_URL", "postgres://akmatori:akmatori@localhost:5432/akmatori?sslmode=disable")
-
-	// Tools directory configuration
-	cfg.ToolsDir = getEnvOrDefault("TOOLS_DIR", "/home/akmatori/tools")
 
 	// Authentication configuration
 	cfg.AdminUsername = getEnvOrDefault("ADMIN_USERNAME", "admin")

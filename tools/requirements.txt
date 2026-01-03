@@ -1,9 +1,0 @@
-# Aggregated tool dependencies
-# This file is installed during container build to ensure all tools work out-of-the-box.
-# Individual tools may have their own requirements.txt for documentation purposes.
-
-# SSH tool - SSH remote command execution
-paramiko>=3.3.0
-
-# Zabbix tool - API integration (already in global deps but explicit)
-requests>=2.31.0

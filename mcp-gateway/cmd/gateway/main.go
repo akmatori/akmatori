@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/akmatori/mcp-gateway/internal/database"
@@ -63,6 +65,53 @@ func main() {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"healthy"}`))
+	})
+
+	// Tool schemas endpoint
+	mux.HandleFunc("/tools", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		if r.Method == "OPTIONS" {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		schemas := tools.GetToolSchemas()
+		json.NewEncoder(w).Encode(schemas)
+	})
+
+	mux.HandleFunc("/tools/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		if r.Method == "OPTIONS" {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// Extract tool name from path: /tools/{name}
+		toolName := strings.TrimPrefix(r.URL.Path, "/tools/")
+		toolName = strings.TrimSuffix(toolName, "/")
+
+		if toolName == "" {
+			schemas := tools.GetToolSchemas()
+			json.NewEncoder(w).Encode(schemas)
+			return
+		}
+
+		schema, ok := tools.GetToolSchema(toolName)
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "tool not found"})
+			return
+		}
+
+		json.NewEncoder(w).Encode(schema)
 	})
 
 	// Start server
