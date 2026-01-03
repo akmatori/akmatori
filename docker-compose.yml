@@ -93,11 +93,11 @@ services:
     environment:
       - API_WS_URL=ws://akmatori-api:3000/ws/codex
       - MCP_GATEWAY_URL=http://mcp-gateway:8080
-      - WORKSPACE_DIR=/akmatori/incidents
+      - WORKSPACE_DIR=/workspaces
       - SESSIONS_FILE=/home/codex/.codex/sessions.json
     volumes:
-      - codex_sessions:/home/codex/.codex      # Persistent session data
-      - ./akmatori_data:/akmatori:rw           # Shared workspace (API creates, Codex executes)
+      - codex_sessions:/home/codex/.codex              # Persistent session data
+      - ./akmatori_data/incidents:/workspaces:rw       # ONLY incidents - no access to skills/tools source
     healthcheck:
       test: ["CMD", "pgrep", "-f", "codex-worker"]
       interval: 30s

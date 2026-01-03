@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/base64"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -471,7 +472,7 @@ func (s *SkillService) generateSkillMd(name, description, body string) string {
 	yamlBytes, _ := yaml.Marshal(frontmatter)
 
 	// Add minimal instructions pointing to tools.md for Quick Start
-	// Use ./ prefix to ensure relative path from working directory (not ~/.codex/)
+	// Path is relative to working directory (incident directory)
 	resourceInstructions := fmt.Sprintf(`## Quick Start
 
 See **./.codex/skills/%s/references/tools.md** for ready-to-run code examples.
@@ -761,6 +762,90 @@ func truncateString(s string, max int) string {
 	return s[:max-3] + "..."
 }
 
+// copyDirPreserveSymlinks copies a directory recursively, preserving symlinks
+// (symlinks are recreated as symlinks, not dereferenced)
+func copyDirPreserveSymlinks(src, dst string) error {
+	// Get source directory info
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("failed to stat source: %w", err)
+	}
+	if !srcInfo.IsDir() {
+		return fmt.Errorf("source is not a directory: %s", src)
+	}
+
+	// Create destination directory
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return fmt.Errorf("failed to create destination: %w", err)
+	}
+
+	// Read source directory entries
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return fmt.Errorf("failed to read source directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		// Check if entry is a symlink (must use Lstat, not Stat)
+		fileInfo, err := os.Lstat(srcPath)
+		if err != nil {
+			return fmt.Errorf("failed to lstat %s: %w", srcPath, err)
+		}
+
+		if fileInfo.Mode()&os.ModeSymlink != 0 {
+			// It's a symlink - recreate it
+			linkTarget, err := os.Readlink(srcPath)
+			if err != nil {
+				return fmt.Errorf("failed to read symlink %s: %w", srcPath, err)
+			}
+			if err := os.Symlink(linkTarget, dstPath); err != nil {
+				return fmt.Errorf("failed to create symlink %s: %w", dstPath, err)
+			}
+		} else if fileInfo.IsDir() {
+			// It's a directory - recurse
+			if err := copyDirPreserveSymlinks(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			// It's a regular file - copy it
+			if err := copyFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// copyFile copies a single file
+func copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("failed to open source file: %w", err)
+	}
+	defer srcFile.Close()
+
+	srcInfo, err := srcFile.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat source file: %w", err)
+	}
+
+	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode())
+	if err != nil {
+		return fmt.Errorf("failed to create destination file: %w", err)
+	}
+	defer dstFile.Close()
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return fmt.Errorf("failed to copy file content: %w", err)
+	}
+
+	return nil
+}
+
 // IncidentContext contains context for spawning an incident manager
 type IncidentContext struct {
 	Source   string         // e.g., "slack", "zabbix"
@@ -770,7 +855,7 @@ type IncidentContext struct {
 }
 
 // SpawnIncidentManager creates a new incident manager instance
-// Creates AGENTS.md in .codex/ directory and .codex/skills symlink to skills directory
+// Creates AGENTS.md in .codex/ directory and copies skills into .codex/skills/
 func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, string, error) {
 	// Generate UUID for this incident
 	incidentUUID := uuid.New().String()
@@ -789,10 +874,11 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 		return "", "", fmt.Errorf("failed to create .codex directory: %w", err)
 	}
 
-	// Create .codex/skills symlink to skills directory for Codex skill discovery
+	// Copy skills directory into .codex/skills/ (full copy, preserving symlinks)
+	// This ensures Codex sees local paths only, not resolved symlink targets
 	codexSkillsDir := filepath.Join(codexDir, "skills")
-	if err := os.Symlink(s.skillsDir, codexSkillsDir); err != nil {
-		return "", "", fmt.Errorf("failed to symlink skills dir: %w", err)
+	if err := copyDirPreserveSymlinks(s.skillsDir, codexSkillsDir); err != nil {
+		return "", "", fmt.Errorf("failed to copy skills dir: %w", err)
 	}
 
 	// Generate AGENTS.md in .codex/ directory
