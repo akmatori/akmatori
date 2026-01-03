@@ -6,6 +6,7 @@ akmatori_data
 *.so
 *.dylib
 /akmatori
+/mcp-gateway/mcp-gateway
 
 # Test binary, built with `go test -c`
 *.test
