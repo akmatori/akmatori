@@ -471,10 +471,10 @@ func (s *SkillService) generateSkillMd(name, description, body string) string {
 	yamlBytes, _ := yaml.Marshal(frontmatter)
 
 	// Add minimal instructions pointing to tools.md for Quick Start
-	// tools.md has tool-specific examples based on which tools are actually assigned
+	// Use ./ prefix to ensure relative path from working directory (not ~/.codex/)
 	resourceInstructions := fmt.Sprintf(`## Quick Start
 
-See **.codex/skills/%s/references/tools.md** for ready-to-run code examples.
+See **./.codex/skills/%s/references/tools.md** for ready-to-run code examples.
 
 ---
 
@@ -584,8 +584,8 @@ func (s *SkillService) generateToolsDocumentation(skillName string, tools []data
 		sb.WriteString(fmt.Sprintf("%s\n\n", tool.ToolType.Description))
 		sb.WriteString("```python\n")
 
-		// Import line (required for skill-specific tool access)
-		sb.WriteString(fmt.Sprintf("import sys; sys.path.insert(0, '.codex/skills/%s')\n", skillName))
+		// Import line - use ./ prefix for explicit relative path from working directory
+		sb.WriteString(fmt.Sprintf("import sys; sys.path.insert(0, './.codex/skills/%s')\n", skillName))
 
 		// Tool-specific examples
 		switch toolName {
@@ -858,7 +858,7 @@ func (s *SkillService) generateIncidentAgentsMd(path string) error {
 
 		sb.WriteString("### ⚠️ CRITICAL: How to Use Tools\n\n")
 		sb.WriteString("**Follow these steps EXACTLY:**\n\n")
-		sb.WriteString("1. Read `.codex/skills/{skill-name}/references/tools.md`\n")
+		sb.WriteString("1. Read `./.codex/skills/{skill-name}/references/tools.md`\n")
 		sb.WriteString("2. Copy the Quick Start code from that file\n")
 		sb.WriteString("3. Run it - configuration auto-loads\n\n")
 		sb.WriteString("**DO NOT:**\n")
