@@ -162,7 +162,7 @@ case "your_tool":
 1. Restart the container: `docker-compose restart akmatori`
 2. Create a new tool instance in the UI
 3. Assign it to a skill
-4. Verify tools.md is generated with correct Quick Start code
+4. Verify SKILL.md is regenerated with correct Quick Start imports
 5. Test the Quick Start code in an incident
 
 ## Key Code Locations
@@ -171,10 +171,9 @@ case "your_tool":
 
 | File | Function | Purpose |
 |------|----------|---------|
-| `skill_service.go` | `generateToolsDocumentation()` | Generates tools.md with Quick Start |
+| `skill_service.go` | `generateSkillMd()` | Generates SKILL.md with embedded imports |
 | `skill_service.go` | `generateIncidentAgentsMd()` | Generates AGENTS.md for incidents |
-| `skill_service.go` | `generateSkillMd()` | Generates SKILL.md for skills |
-| `skill_service.go` | `RegenerateAllSkillMds()` | Regenerates all on startup |
+| `skill_service.go` | `RegenerateAllSkillMds()` | Regenerates all SKILL.md on startup |
 
 ### Tool Loading
 
@@ -196,9 +195,9 @@ case "your_tool":
 ## Documentation Architecture
 
 See [TOOL_ARCHITECTURE.md](./TOOL_ARCHITECTURE.md) for detailed documentation on:
-- How AGENTS.md, SKILL.md, and tools.md work together
-- The "Single Source of Truth" principle
-- Why tools.md has the authoritative warning box
+- How AGENTS.md and SKILL.md work together
+- Embedded import paths in SKILL.md's Quick Start section
+- Full API documentation via `help()` on tool functions
 
 ## Testing Changes
 
@@ -255,14 +254,14 @@ docker-compose up -d frontend
 ### 2. Quick Start Code Doesn't Work
 
 - Ensure function names match `__init__.py` exports
-- Test the exact code you put in `generateToolsDocumentation()`
+- Test the exact code you put in `generateSkillMd()`
 - Check .env file is being generated with correct keys
 
 ### 3. Agent Ignores Documentation
 
-- Ensure tools.md has the warning box at the top
-- Verify the symlink from incident's .codex/skills/ to /akmatori/skills/
-- Check AGENTS.md has the "DO NOT read source files" instruction
+- Ensure SKILL.md has the Quick Start section with imports
+- Verify the copy from incident's .codex/skills/ to /akmatori/skills/
+- Check AGENTS.md has the instruction to read SKILL.md
 
 ### 4. Environment Variables Wrong
 

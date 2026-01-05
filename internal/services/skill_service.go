@@ -275,8 +275,8 @@ func (s *SkillService) CreateSkill(name, description, category, prompt string) (
 		return nil, fmt.Errorf("failed to create skill directories: %w", err)
 	}
 
-	// Generate and write SKILL.md
-	skillMd := s.generateSkillMd(name, description, prompt)
+	// Generate and write SKILL.md (no tools yet for new skill)
+	skillMd := s.generateSkillMd(name, description, prompt, nil)
 	skillPath := filepath.Join(skillDir, "SKILL.md")
 	if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write SKILL.md: %w", err)
@@ -319,7 +319,8 @@ func (s *SkillService) UpdateSkill(name string, description, category string, en
 	skillPath := filepath.Join(s.GetSkillDir(name), "SKILL.md")
 	if _, err := os.Stat(skillPath); err == nil {
 		body, _ := s.GetSkillPrompt(name)
-		skillMd := s.generateSkillMd(name, description, body)
+		tools := s.getSkillTools(name)
+		skillMd := s.generateSkillMd(name, description, body, tools)
 		if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
 			log.Printf("Warning: failed to update SKILL.md: %v", err)
 		}
@@ -446,8 +447,9 @@ func (s *SkillService) UpdateSkillPrompt(name, prompt string) error {
 		return err
 	}
 
-	// Generate new SKILL.md with updated body
-	skillMd := s.generateSkillMd(name, skill.Description, prompt)
+	// Generate new SKILL.md with updated body and current tools
+	tools := s.getSkillTools(name)
+	skillMd := s.generateSkillMd(name, skill.Description, prompt, tools)
 	skillPath := filepath.Join(s.GetSkillDir(name), "SKILL.md")
 
 	if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
@@ -458,7 +460,8 @@ func (s *SkillService) UpdateSkillPrompt(name, prompt string) error {
 }
 
 // generateSkillMd generates a SKILL.md file with YAML frontmatter
-func (s *SkillService) generateSkillMd(name, description, body string) string {
+// Tools parameter embeds import paths directly in Quick Start section
+func (s *SkillService) generateSkillMd(name, description, body string, tools []database.ToolInstance) string {
 	frontmatter := SkillFrontmatter{
 		Name:        name,
 		Description: description,
@@ -469,20 +472,70 @@ func (s *SkillService) generateSkillMd(name, description, body string) string {
 
 	yamlBytes, _ := yaml.Marshal(frontmatter)
 
-	// Add minimal instructions pointing to tools.md for Quick Start
-	// Path is relative to working directory (incident directory)
-	resourceInstructions := fmt.Sprintf(`## Quick Start
+	// Generate Quick Start with embedded imports (no tools.md reference)
+	var quickStart strings.Builder
+	quickStart.WriteString("## Quick Start\n\n")
 
-See **./.codex/skills/%s/references/tools.md** for ready-to-run code examples.
+	// Filter enabled tools
+	var enabledTools []database.ToolInstance
+	for _, tool := range tools {
+		if tool.Enabled && tool.ToolType.ID != 0 {
+			enabledTools = append(enabledTools, tool)
+		}
+	}
 
----
+	if len(enabledTools) > 0 {
+		quickStart.WriteString("```python\n")
+		quickStart.WriteString(fmt.Sprintf("import sys; sys.path.insert(0, './.codex/skills/%s')\n", name))
 
-`, name)
+		for _, tool := range enabledTools {
+			toolName := tool.ToolType.Name
+			switch toolName {
+			case "ssh":
+				quickStart.WriteString("from scripts.ssh import execute_command, test_connectivity\n")
+			case "zabbix":
+				quickStart.WriteString("from scripts.zabbix import get_hosts, get_problems, get_history\n")
+			default:
+				quickStart.WriteString(fmt.Sprintf("from scripts.%s import *\n", toolName))
+			}
+		}
 
-	return fmt.Sprintf("---\n%s---\n\n%s%s\n", string(yamlBytes), resourceInstructions, body)
+		quickStart.WriteString("\n# Full API docs: help(execute_command)\n")
+		quickStart.WriteString("```\n")
+	} else {
+		quickStart.WriteString("No tools assigned.\n")
+	}
+	quickStart.WriteString("\n---\n\n")
+
+	return fmt.Sprintf("---\n%s---\n\n%s%s\n", string(yamlBytes), quickStart.String(), body)
 }
 
-// AssignTools assigns tools to a skill and generates tools.md documentation
+// getSkillTools fetches tool instances for a skill from the database
+func (s *SkillService) getSkillTools(skillName string) []database.ToolInstance {
+	skill, err := s.GetSkill(skillName)
+	if err != nil {
+		return nil
+	}
+
+	var skillTools []database.SkillTool
+	if err := s.db.Where("skill_id = ?", skill.ID).Find(&skillTools).Error; err != nil {
+		return nil
+	}
+
+	var tools []database.ToolInstance
+	for _, st := range skillTools {
+		var tool database.ToolInstance
+		if err := s.db.Preload("ToolType").First(&tool, st.ToolInstanceID).Error; err != nil {
+			continue
+		}
+		if tool.Enabled && tool.ToolType.ID != 0 {
+			tools = append(tools, tool)
+		}
+	}
+	return tools
+}
+
+// AssignTools assigns tools to a skill and regenerates SKILL.md with embedded imports
 // NOTE: Tools are executed via MCP Gateway, not as local scripts
 func (s *SkillService) AssignTools(skillName string, toolIDs []uint) error {
 	// Verify skill exists
@@ -490,8 +543,6 @@ func (s *SkillService) AssignTools(skillName string, toolIDs []uint) error {
 	if err != nil {
 		return err
 	}
-
-	referencesDir := s.GetSkillReferencesDir(skillName)
 
 	// Ensure directories exist
 	if err := s.EnsureSkillDirectories(skillName); err != nil {
@@ -506,68 +557,22 @@ func (s *SkillService) AssignTools(skillName string, toolIDs []uint) error {
 		}
 	}
 
-	// Generate references/tools.md
-	toolsMd := s.generateToolsDocumentation(skillName, tools)
-	toolsMdPath := filepath.Join(referencesDir, "tools.md")
-	if err := os.WriteFile(toolsMdPath, []byte(toolsMd), 0644); err != nil {
-		return fmt.Errorf("failed to write tools.md: %w", err)
-	}
-
-	// Update database association
+	// Update database association first
 	// NOTE: Tool credentials are NOT written to skill directories
 	// They are fetched by MCP Gateway at execution time for security
 	if err := s.db.Model(skill).Association("Tools").Replace(tools); err != nil {
 		return fmt.Errorf("failed to update tool associations: %w", err)
 	}
 
+	// Regenerate SKILL.md with embedded tool imports
+	prompt, _ := s.GetSkillPrompt(skillName)
+	skillMd := s.generateSkillMd(skillName, skill.Description, prompt, tools)
+	skillPath := filepath.Join(s.GetSkillDir(skillName), "SKILL.md")
+	if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
+		return fmt.Errorf("failed to regenerate SKILL.md: %w", err)
+	}
+
 	return nil
-}
-
-// generateToolsDocumentation generates markdown documentation for assigned tools
-// Tools are executed via MCP Gateway
-func (s *SkillService) generateToolsDocumentation(skillName string, tools []database.ToolInstance) string {
-	if len(tools) == 0 {
-		return "# Tools\n\nNo tools assigned.\n"
-	}
-
-	var sb strings.Builder
-	sb.WriteString("# Tools\n\n")
-
-	for _, tool := range tools {
-		if !tool.Enabled {
-			continue
-		}
-
-		toolName := tool.ToolType.Name
-
-		sb.WriteString(fmt.Sprintf("## %s\n\n", toolName))
-		sb.WriteString(fmt.Sprintf("%s\n\n", tool.ToolType.Description))
-		sb.WriteString("```python\n")
-
-		// Import line - use ./ prefix for explicit relative path from working directory
-		sb.WriteString(fmt.Sprintf("import sys; sys.path.insert(0, './.codex/skills/%s')\n", skillName))
-
-		// Tool-specific examples
-		switch toolName {
-		case "ssh":
-			sb.WriteString("from scripts.ssh import execute_command, test_connectivity\n\n")
-			sb.WriteString("print(execute_command('uptime'))  # Run on all servers\n")
-			sb.WriteString("print(test_connectivity())        # Check SSH access\n")
-			sb.WriteString("# Full docs: help(execute_command)\n")
-		case "zabbix":
-			sb.WriteString("from scripts.zabbix import get_hosts, get_problems, get_history\n\n")
-			sb.WriteString("print(get_problems(severity_min=3))  # Current problems\n")
-			sb.WriteString("print(get_hosts())                    # All hosts\n")
-			sb.WriteString("# Full docs: help(get_problems)\n")
-		default:
-			sb.WriteString(fmt.Sprintf("from scripts.%s import *\n\n", toolName))
-			sb.WriteString("# See help() for available functions\n")
-		}
-
-		sb.WriteString("```\n\n")
-	}
-
-	return sb.String()
 }
 
 // SyncSkillsFromFilesystem scans the skills directory and syncs to database
@@ -665,8 +670,11 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 			continue
 		}
 
-		// Regenerate SKILL.md with latest template
-		skillMd := s.generateSkillMd(name, skill.Description, prompt)
+		// Get tools for this skill
+		tools := s.getSkillTools(name)
+
+		// Regenerate SKILL.md with embedded tool imports
+		skillMd := s.generateSkillMd(name, skill.Description, prompt, tools)
 		skillPath := filepath.Join(s.GetSkillDir(name), "SKILL.md")
 
 		if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
@@ -676,37 +684,10 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 
 		log.Printf("Regenerated SKILL.md for skill: %s", name)
 
-		// Regenerate tools.md with latest template
-		var skillTools []database.SkillTool
-		if err := s.db.Where("skill_id = ?", skill.ID).Find(&skillTools).Error; err != nil {
-			log.Printf("Warning: failed to get tools for skill %s: %v", name, err)
-			continue
-		}
-
-		if len(skillTools) > 0 {
-			var tools []database.ToolInstance
-			for _, st := range skillTools {
-				var tool database.ToolInstance
-				if err := s.db.Preload("ToolType").First(&tool, st.ToolInstanceID).Error; err != nil {
-					continue
-				}
-				if tool.Enabled && tool.ToolType.ID != 0 {
-					tools = append(tools, tool)
-				}
-			}
-
-			if len(tools) > 0 {
-				toolsMd := s.generateToolsDocumentation(name, tools)
-				referencesDir := s.GetSkillReferencesDir(name)
-				os.MkdirAll(referencesDir, 0755)
-				toolsPath := filepath.Join(referencesDir, "tools.md")
-
-				if err := os.WriteFile(toolsPath, []byte(toolsMd), 0644); err != nil {
-					log.Printf("Warning: failed to regenerate tools.md for %s: %v", name, err)
-				} else {
-					log.Printf("Regenerated tools.md for skill: %s", name)
-				}
-			}
+		// Clean up legacy tools.md files (no longer needed)
+		toolsPath := filepath.Join(s.GetSkillReferencesDir(name), "tools.md")
+		if err := os.Remove(toolsPath); err == nil {
+			log.Printf("Removed legacy tools.md for skill: %s", name)
 		}
 	}
 
@@ -903,11 +884,10 @@ func (s *SkillService) generateIncidentAgentsMd(path string) error {
 
 		sb.WriteString("### ⚠️ CRITICAL: How to Use Tools\n\n")
 		sb.WriteString("**Follow these steps EXACTLY:**\n\n")
-		sb.WriteString("1. Read `./.codex/skills/{skill-name}/references/tools.md`\n")
+		sb.WriteString("1. Read `./.codex/skills/{skill-name}/SKILL.md`\n")
 		sb.WriteString("2. Copy the Quick Start code from that file\n")
 		sb.WriteString("3. Run it - configuration auto-loads\n\n")
 		sb.WriteString("**DO NOT:**\n")
-		sb.WriteString("- Read source files (ssh.py, config.py, etc.) - tools.md has all you need\n")
 		sb.WriteString("- Run `ls` commands to explore directories\n")
 		sb.WriteString("- Read .env files - they auto-load\n\n")
 
