@@ -186,7 +186,13 @@ export const sshKeysApi = {
 
 // Incidents API
 export const incidentsApi = {
-  list: () => fetchApi<Incident[]>('/api/incidents'),
+  list: (from?: number, to?: number) => {
+    const params = new URLSearchParams();
+    if (from !== undefined) params.set('from', String(from));
+    if (to !== undefined) params.set('to', String(to));
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return fetchApi<Incident[]>(`/api/incidents${query}`);
+  },
 
   get: (uuid: string) => fetchApi<Incident>(`/api/incidents/${uuid}`),
 

@@ -4,8 +4,14 @@ import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { SuccessMessage } from '../components/ErrorMessage';
+import TimeRangePicker from '../components/TimeRangePicker';
 import { incidentsApi } from '../api/client';
 import type { Incident } from '../types';
+
+// Default: last 30 minutes
+const DEFAULT_TIME_RANGE = 30 * 60;
+// Default: refresh every 1 minute
+const DEFAULT_REFRESH_INTERVAL = 60000;
 
 type ModalType = 'reasoning' | 'response';
 
@@ -25,8 +31,66 @@ export default function Incidents() {
   const refreshIntervalRef = useRef<number | null>(null);
   const logContainerRef = useRef<HTMLDivElement | null>(null);
 
+  // Time range picker state
+  const now = Math.floor(Date.now() / 1000);
+  const [timeFrom, setTimeFrom] = useState(now - DEFAULT_TIME_RANGE);
+  const [timeTo, setTimeTo] = useState(now);
+  const [listRefreshInterval, setListRefreshInterval] = useState(DEFAULT_REFRESH_INTERVAL);
+  const listRefreshRef = useRef<number | null>(null);
+
+  // Load incidents with current time range
+  const loadIncidents = useCallback(async (from?: number, to?: number) => {
+    try {
+      setLoading(true);
+      setError('');
+      // For relative time ranges, recalculate "to" as now
+      const currentNow = Math.floor(Date.now() / 1000);
+      const effectiveFrom = from ?? timeFrom;
+      const effectiveTo = to ?? currentNow;
+      const data = await incidentsApi.list(effectiveFrom, effectiveTo);
+      setIncidents(data);
+      // Update timeTo to current time for relative ranges
+      if (!to) {
+        setTimeTo(currentNow);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load incidents');
+    } finally {
+      setLoading(false);
+    }
+  }, [timeFrom]);
+
+  // Initial load
   useEffect(() => {
     loadIncidents();
+  }, []);
+
+  // Auto-refresh for incidents list
+  useEffect(() => {
+    if (listRefreshInterval > 0) {
+      listRefreshRef.current = window.setInterval(() => {
+        loadIncidents();
+      }, listRefreshInterval);
+    }
+
+    return () => {
+      if (listRefreshRef.current) {
+        clearInterval(listRefreshRef.current);
+        listRefreshRef.current = null;
+      }
+    };
+  }, [listRefreshInterval, loadIncidents]);
+
+  // Handle time range change
+  const handleTimeRangeChange = useCallback((from: number, to: number) => {
+    setTimeFrom(from);
+    setTimeTo(to);
+    loadIncidents(from, to);
+  }, [loadIncidents]);
+
+  // Handle refresh interval change
+  const handleRefreshIntervalChange = useCallback((interval: number) => {
+    setListRefreshInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -56,19 +120,6 @@ export default function Incidents() {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
   }, [selectedIncident?.full_log, modalType]);
-
-  const loadIncidents = async () => {
-    try {
-      setLoading(true);
-      setError('');
-      const data = await incidentsApi.list();
-      setIncidents(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load incidents');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const getStatusConfig = (status: string) => {
     switch (status) {
@@ -220,11 +271,18 @@ export default function Incidents() {
         description="Monitor all incident manager sessions and execution logs"
         action={
           <div className="flex items-center gap-3">
+            <TimeRangePicker
+              from={timeFrom}
+              to={timeTo}
+              refreshInterval={listRefreshInterval}
+              onChange={handleTimeRangeChange}
+              onRefreshIntervalChange={handleRefreshIntervalChange}
+            />
             <button onClick={() => setShowCreateModal(true)} className="btn btn-primary">
               <Plus className="w-4 h-4" />
               New Incident
             </button>
-            <button onClick={loadIncidents} className="btn btn-secondary" disabled={loading}>
+            <button onClick={() => loadIncidents()} className="btn btn-secondary" disabled={loading}>
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
