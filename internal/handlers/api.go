@@ -605,7 +605,26 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		var incidents []database.Incident
-		if err := db.Order("created_at DESC").Limit(100).Find(&incidents).Error; err != nil {
+		query := db.Order("created_at DESC")
+
+		// Parse time range filters (unix timestamps in seconds)
+		fromParam := r.URL.Query().Get("from")
+		toParam := r.URL.Query().Get("to")
+
+		if fromParam != "" {
+			from, err := strconv.ParseInt(fromParam, 10, 64)
+			if err == nil {
+				query = query.Where("created_at >= ?", time.Unix(from, 0))
+			}
+		}
+		if toParam != "" {
+			to, err := strconv.ParseInt(toParam, 10, 64)
+			if err == nil {
+				query = query.Where("created_at <= ?", time.Unix(to, 0))
+			}
+		}
+
+		if err := query.Limit(500).Find(&incidents).Error; err != nil {
 			http.Error(w, fmt.Sprintf("Failed to get incidents: %v", err), http.StatusInternalServerError)
 			return
 		}
