@@ -236,7 +236,10 @@ func TestSSHConfig_Defaults(t *testing.T) {
 			{Hostname: "server1", Address: "192.168.1.1", User: "root", Port: 22},
 			{Hostname: "server2", Address: "192.168.1.2", User: "admin", Port: 2222},
 		},
-		PrivateKey:        "key-data",
+		Keys: map[string]*SSHKey{
+			"key-1": {ID: "key-1", Name: "default-key", PrivateKey: "key-data", IsDefault: true},
+		},
+		DefaultKeyID:      "key-1",
 		CommandTimeout:    120,
 		ConnectionTimeout: 30,
 		KnownHostsPolicy:  "auto_add",

@@ -407,12 +407,26 @@ func (h *APIHandler) handleTools(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleToolByID handles GET /api/tools/:id, PUT /api/tools/:id, DELETE /api/tools/:id
+// Also handles /api/tools/:id/ssh-keys routes
 func (h *APIHandler) handleToolByID(w http.ResponseWriter, r *http.Request) {
-	// Extract ID from path
-	idStr := r.URL.Path[len("/api/tools/"):]
-	id, err := strconv.ParseUint(idStr, 10, 32)
+	// Extract path after /api/tools/
+	path := r.URL.Path[len("/api/tools/"):]
+	parts := strings.Split(path, "/")
+
+	// Parse tool ID
+	id, err := strconv.ParseUint(parts[0], 10, 32)
 	if err != nil {
 		http.Error(w, "Invalid tool ID", http.StatusBadRequest)
+		return
+	}
+
+	// Check for sub-routes like /api/tools/:id/ssh-keys
+	if len(parts) >= 2 && parts[1] == "ssh-keys" {
+		if len(parts) == 2 {
+			h.handleSSHKeys(w, r, uint(id))
+		} else if len(parts) == 3 {
+			h.handleSSHKeyByID(w, r, uint(id), parts[2])
+		}
 		return
 	}
 
@@ -423,6 +437,10 @@ func (h *APIHandler) handleToolByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Tool not found", http.StatusNotFound)
 			return
 		}
+
+		// Mask SSH keys (remove private_key from response)
+		h.maskSSHKeys(instance)
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(instance)
 
@@ -444,12 +462,127 @@ func (h *APIHandler) handleToolByID(w http.ResponseWriter, r *http.Request) {
 		}
 
 		instance, _ := h.toolService.GetToolInstance(uint(id))
+		h.maskSSHKeys(instance)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(instance)
 
 	case http.MethodDelete:
 		if err := h.toolService.DeleteToolInstance(uint(id)); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to delete tool: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// maskSSHKeys removes private_key from SSH keys in the response
+func (h *APIHandler) maskSSHKeys(instance *database.ToolInstance) {
+	if instance == nil || instance.Settings == nil {
+		return
+	}
+
+	if keys, ok := instance.Settings["ssh_keys"].([]interface{}); ok {
+		for _, keyData := range keys {
+			if keyMap, ok := keyData.(map[string]interface{}); ok {
+				delete(keyMap, "private_key")
+			}
+		}
+	}
+}
+
+// handleSSHKeys handles GET/POST /api/tools/:id/ssh-keys
+func (h *APIHandler) handleSSHKeys(w http.ResponseWriter, r *http.Request, toolID uint) {
+	switch r.Method {
+	case http.MethodGet:
+		keys, err := h.toolService.GetSSHKeys(toolID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get SSH keys: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(keys)
+
+	case http.MethodPost:
+		var req struct {
+			Name       string `json:"name"`
+			PrivateKey string `json:"private_key"`
+			IsDefault  bool   `json:"is_default"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		if req.Name == "" {
+			http.Error(w, "name is required", http.StatusBadRequest)
+			return
+		}
+		if req.PrivateKey == "" {
+			http.Error(w, "private_key is required", http.StatusBadRequest)
+			return
+		}
+
+		key, err := h.toolService.AddSSHKey(toolID, req.Name, req.PrivateKey, req.IsDefault)
+		if err != nil {
+			if strings.Contains(err.Error(), "already exists") {
+				http.Error(w, err.Error(), http.StatusConflict)
+			} else {
+				http.Error(w, fmt.Sprintf("Failed to add SSH key: %v", err), http.StatusInternalServerError)
+			}
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(key)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleSSHKeyByID handles PUT/DELETE /api/tools/:id/ssh-keys/:keyID
+func (h *APIHandler) handleSSHKeyByID(w http.ResponseWriter, r *http.Request, toolID uint, keyID string) {
+	switch r.Method {
+	case http.MethodPut:
+		var req struct {
+			Name      *string `json:"name"`
+			IsDefault *bool   `json:"is_default"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		key, err := h.toolService.UpdateSSHKey(toolID, keyID, req.Name, req.IsDefault)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				http.Error(w, err.Error(), http.StatusNotFound)
+			} else if strings.Contains(err.Error(), "already exists") {
+				http.Error(w, err.Error(), http.StatusConflict)
+			} else {
+				http.Error(w, fmt.Sprintf("Failed to update SSH key: %v", err), http.StatusInternalServerError)
+			}
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(key)
+
+	case http.MethodDelete:
+		if err := h.toolService.DeleteSSHKey(toolID, keyID); err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				http.Error(w, err.Error(), http.StatusNotFound)
+			} else if strings.Contains(err.Error(), "cannot delete") {
+				http.Error(w, err.Error(), http.StatusConflict)
+			} else {
+				http.Error(w, fmt.Sprintf("Failed to delete SSH key: %v", err), http.StatusInternalServerError)
+			}
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

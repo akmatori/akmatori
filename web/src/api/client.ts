@@ -17,6 +17,9 @@ import type {
   AlertSourceInstance,
   CreateAlertSourceRequest,
   UpdateAlertSourceRequest,
+  SSHKey,
+  SSHKeyCreateRequest,
+  SSHKeyUpdateRequest,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
@@ -155,6 +158,28 @@ export const toolsApi = {
 
   delete: (id: number) =>
     fetchApi<void>(`/api/tools/${id}`, {
+      method: 'DELETE',
+    }),
+};
+
+// SSH Keys API (for SSH tool instances)
+export const sshKeysApi = {
+  list: (toolId: number) => fetchApi<SSHKey[]>(`/api/tools/${toolId}/ssh-keys`),
+
+  create: (toolId: number, data: SSHKeyCreateRequest) =>
+    fetchApi<SSHKey>(`/api/tools/${toolId}/ssh-keys`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (toolId: number, keyId: string, data: SSHKeyUpdateRequest) =>
+    fetchApi<SSHKey>(`/api/tools/${toolId}/ssh-keys/${keyId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (toolId: number, keyId: string) =>
+    fetchApi<void>(`/api/tools/${toolId}/ssh-keys/${keyId}`, {
       method: 'DELETE',
     }),
 };

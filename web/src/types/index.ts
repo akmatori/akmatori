@@ -212,3 +212,34 @@ export interface UpdateAlertSourceRequest {
   settings?: Record<string, any>;
   enabled?: boolean;
 }
+
+// SSH Keys (for SSH tool management)
+export interface SSHKey {
+  id: string;
+  name: string;
+  is_default: boolean;
+  created_at: string;
+}
+
+export interface SSHKeyCreateRequest {
+  name: string;
+  private_key: string;
+  is_default?: boolean;
+}
+
+export interface SSHKeyUpdateRequest {
+  name?: string;
+  is_default?: boolean;
+}
+
+export interface SSHHostConfig {
+  hostname: string;
+  address: string;
+  user?: string;
+  port?: number;
+  key_id?: string;  // Override key for this host
+  jumphost_address?: string;
+  jumphost_user?: string;
+  jumphost_port?: number;
+  allow_write_commands?: boolean;
+}
