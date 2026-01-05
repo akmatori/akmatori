@@ -877,29 +877,6 @@ func (s *SkillService) generateIncidentAgentsMd(path string) error {
 	sb.WriteString(prompt)
 	sb.WriteString("\n\n")
 
-	// Add tool environment files section
-	toolEnvFiles := s.getAvailableToolEnvFiles()
-	if len(toolEnvFiles) > 0 {
-		sb.WriteString("## Available Tools\n\n")
-
-		sb.WriteString("### ⚠️ CRITICAL: How to Use Tools\n\n")
-		sb.WriteString("**Follow these steps EXACTLY:**\n\n")
-		sb.WriteString("1. Read `./.codex/skills/{skill-name}/SKILL.md`\n")
-		sb.WriteString("2. Copy the Quick Start code from that file\n")
-		sb.WriteString("3. Run it - configuration auto-loads\n\n")
-		sb.WriteString("**DO NOT:**\n")
-		sb.WriteString("- Run `ls` commands to explore directories\n")
-		sb.WriteString("- Read .env files - they auto-load\n\n")
-
-		sb.WriteString("### Available Tools\n\n")
-		sb.WriteString("| Tool | Description |\n")
-		sb.WriteString("|------|-------------|\n")
-		for _, envFile := range toolEnvFiles {
-			sb.WriteString(fmt.Sprintf("| %s | %s |\n", envFile.Name, envFile.Description))
-		}
-		sb.WriteString("\n")
-	}
-
 	// Add structured output protocol
 	sb.WriteString("## Structured Output Protocol\n\n")
 	sb.WriteString("Use these structured blocks to communicate clearly:\n\n")
@@ -928,53 +905,6 @@ func (s *SkillService) generateIncidentAgentsMd(path string) error {
 	}
 
 	return nil
-}
-
-// toolEnvInfo contains metadata about a tool's env file
-type toolEnvInfo struct {
-	Name        string
-	Description string
-}
-
-// getAvailableToolEnvFiles returns list of tool env files that will be generated
-func (s *SkillService) getAvailableToolEnvFiles() []toolEnvInfo {
-	skills, err := s.ListEnabledSkills()
-	if err != nil {
-		return nil
-	}
-
-	seenTools := make(map[uint]bool)
-	var envFiles []toolEnvInfo
-
-	for _, skill := range skills {
-		var skillTools []database.SkillTool
-		if err := s.db.Where("skill_id = ?", skill.ID).Find(&skillTools).Error; err != nil {
-			continue
-		}
-
-		for _, st := range skillTools {
-			if seenTools[st.ToolInstanceID] {
-				continue
-			}
-			seenTools[st.ToolInstanceID] = true
-
-			var tool database.ToolInstance
-			if err := s.db.Preload("ToolType").First(&tool, st.ToolInstanceID).Error; err != nil {
-				continue
-			}
-
-			if !tool.Enabled || tool.ToolType.ID == 0 {
-				continue
-			}
-
-			envFiles = append(envFiles, toolEnvInfo{
-				Name:        tool.ToolType.Name,
-				Description: tool.ToolType.Description,
-			})
-		}
-	}
-
-	return envFiles
 }
 
 // formatEnvValue formats a value for .env file output.
