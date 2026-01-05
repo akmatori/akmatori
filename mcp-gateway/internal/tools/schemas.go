@@ -72,16 +72,43 @@ func getSSHSchema() ToolTypeSchema {
 	return ToolTypeSchema{
 		Name:        "ssh",
 		Description: "SSH remote command execution tool. Execute commands across multiple servers in parallel with per-host configuration, jumphost support, and read-only mode for security.",
-		Version:     "2.0.0",
+		Version:     "3.0.0",
 		SettingsSchema: SettingsSchema{
 			Type:     "object",
-			Required: []string{"ssh_private_key", "ssh_hosts"},
+			Required: []string{"ssh_hosts"},
 			Properties: map[string]PropertySchema{
-				"ssh_private_key": {
-					Type:        "string",
-					Description: "SSH private key content (PEM format, shared across all hosts)",
-					Secret:      true,
-					Format:      "textarea",
+				"ssh_keys": {
+					Type:        "array",
+					Description: "SSH private keys with unique names. Keys are managed via the SSH Keys API.",
+					Items: &ItemSchema{
+						Type:     "object",
+						Required: []string{"id", "name", "private_key"},
+						Properties: map[string]PropertySchema{
+							"id": {
+								Type:        "string",
+								Description: "Unique identifier for the key (UUID)",
+							},
+							"name": {
+								Type:        "string",
+								Description: "Unique display name for the key",
+							},
+							"private_key": {
+								Type:        "string",
+								Description: "SSH private key content (PEM format)",
+								Secret:      true,
+								Format:      "textarea",
+							},
+							"is_default": {
+								Type:        "boolean",
+								Description: "Whether this is the default key for all hosts",
+								Default:     false,
+							},
+							"created_at": {
+								Type:        "string",
+								Description: "Timestamp when key was created",
+							},
+						},
+					},
 				},
 				"ssh_hosts": {
 					Type:        "array",
@@ -113,6 +140,11 @@ func getSSHSchema() ToolTypeSchema {
 								Default:     22,
 								Minimum:     intPtr(1),
 								Maximum:     intPtr(65535),
+								Advanced:    true,
+							},
+							"key_id": {
+								Type:        "string",
+								Description: "ID of the SSH key to use for this host (uses default key if empty)",
 								Advanced:    true,
 							},
 							"jumphost_address": {

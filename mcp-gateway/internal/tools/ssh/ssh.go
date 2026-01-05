@@ -24,12 +24,22 @@ func NewSSHTool(logger *log.Logger) *SSHTool {
 	return &SSHTool{logger: logger}
 }
 
+// SSHKey holds an SSH private key with metadata
+type SSHKey struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	PrivateKey string `json:"private_key"`
+	IsDefault  bool   `json:"is_default"`
+	CreatedAt  string `json:"created_at"`
+}
+
 // SSHHostConfig holds per-host SSH connection configuration
 type SSHHostConfig struct {
 	Hostname           string `json:"hostname"`                       // Display name (e.g., "web-prod-1")
 	Address            string `json:"address"`                        // Real connection address (IP or FQDN)
 	User               string `json:"user,omitempty"`                 // SSH username (default: "root")
 	Port               int    `json:"port,omitempty"`                 // SSH port (default: 22)
+	KeyID              string `json:"key_id,omitempty"`               // Override key for this host (uses default if empty)
 	JumphostAddress    string `json:"jumphost_address,omitempty"`     // Bastion/jumphost address
 	JumphostUser       string `json:"jumphost_user,omitempty"`        // Jumphost username
 	JumphostPort       int    `json:"jumphost_port,omitempty"`        // Jumphost port (default: 22)
@@ -41,8 +51,11 @@ type SSHConfig struct {
 	// Per-host configurations
 	Hosts []SSHHostConfig
 
+	// SSH keys (new multi-key support)
+	Keys         map[string]*SSHKey // key_id -> SSHKey
+	DefaultKeyID string             // ID of the default key
+
 	// Global settings
-	PrivateKey        string
 	CommandTimeout    int
 	ConnectionTimeout int
 	KnownHostsPolicy  string
@@ -96,21 +109,12 @@ func (t *SSHTool) getConfig(ctx context.Context, incidentID string) (*SSHConfig,
 		CommandTimeout:    120,
 		ConnectionTimeout: 30,
 		KnownHostsPolicy:  "auto_add",
+		Keys:              make(map[string]*SSHKey),
 	}
 
 	settings := creds.Settings
 
 	// Helper functions
-	getString := func(primaryKey, fallbackKey string) string {
-		if val, ok := settings[primaryKey].(string); ok && val != "" {
-			return val
-		}
-		if val, ok := settings[fallbackKey].(string); ok && val != "" {
-			return val
-		}
-		return ""
-	}
-
 	getInt := func(key string, defaultVal int) int {
 		if val, ok := settings[key].(float64); ok {
 			return int(val)
@@ -118,17 +122,47 @@ func (t *SSHTool) getConfig(ctx context.Context, incidentID string) (*SSHConfig,
 		return defaultVal
 	}
 
-	// Get private key (shared across all hosts)
-	if privateKey := getString("ssh_private_key", "private_key"); privateKey != "" {
-		if strings.HasPrefix(privateKey, "base64:") {
-			decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(privateKey, "base64:"))
-			if err == nil {
-				config.PrivateKey = string(decoded)
-			} else {
-				config.PrivateKey = privateKey
+	// Parse SSH keys (new format)
+	if keysData, ok := settings["ssh_keys"].([]interface{}); ok && len(keysData) > 0 {
+		for _, keyData := range keysData {
+			keyMap, ok := keyData.(map[string]interface{})
+			if !ok {
+				continue
 			}
-		} else {
-			config.PrivateKey = privateKey
+
+			key := &SSHKey{}
+			if id, ok := keyMap["id"].(string); ok {
+				key.ID = id
+			}
+			if name, ok := keyMap["name"].(string); ok {
+				key.Name = name
+			}
+			if privateKey, ok := keyMap["private_key"].(string); ok {
+				// Handle base64 encoded keys
+				if strings.HasPrefix(privateKey, "base64:") {
+					decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(privateKey, "base64:"))
+					if err == nil {
+						key.PrivateKey = string(decoded)
+					} else {
+						key.PrivateKey = privateKey
+					}
+				} else {
+					key.PrivateKey = privateKey
+				}
+			}
+			if isDefault, ok := keyMap["is_default"].(bool); ok {
+				key.IsDefault = isDefault
+			}
+			if createdAt, ok := keyMap["created_at"].(string); ok {
+				key.CreatedAt = createdAt
+			}
+
+			if key.ID != "" && key.PrivateKey != "" {
+				config.Keys[key.ID] = key
+				if key.IsDefault {
+					config.DefaultKeyID = key.ID
+				}
+			}
 		}
 	}
 
@@ -177,6 +211,11 @@ func (t *SSHTool) getConfig(ctx context.Context, incidentID string) (*SSHConfig,
 			host.Port = 22
 		}
 
+		// Per-host key override
+		if keyID, ok := hostMap["key_id"].(string); ok {
+			host.KeyID = keyID
+		}
+
 		// Jumphost configuration
 		if addr, ok := hostMap["jumphost_address"].(string); ok {
 			host.JumphostAddress = addr
@@ -201,6 +240,36 @@ func (t *SSHTool) getConfig(ctx context.Context, incidentID string) (*SSHConfig,
 	return config, nil
 }
 
+// getKeyForHost returns the private key to use for a specific host
+func (t *SSHTool) getKeyForHost(hostConfig *SSHHostConfig, config *SSHConfig) (string, error) {
+	// If using new multi-key format
+	if len(config.Keys) > 0 {
+		// Check for per-host key override
+		if hostConfig.KeyID != "" {
+			if key, ok := config.Keys[hostConfig.KeyID]; ok {
+				return key.PrivateKey, nil
+			}
+			return "", fmt.Errorf("SSH key with ID '%s' not found for host '%s'", hostConfig.KeyID, hostConfig.Hostname)
+		}
+
+		// Use default key
+		if config.DefaultKeyID != "" {
+			if key, ok := config.Keys[config.DefaultKeyID]; ok {
+				return key.PrivateKey, nil
+			}
+		}
+
+		// If no default set, use the first key
+		for _, key := range config.Keys {
+			return key.PrivateKey, nil
+		}
+
+		return "", fmt.Errorf("no SSH keys configured")
+	}
+
+	return "", fmt.Errorf("SSH private key not configured")
+}
+
 // connect establishes SSH connection (direct or via jumphost)
 func (t *SSHTool) connect(ctx context.Context, hostConfig *SSHHostConfig, config *SSHConfig) (*ssh.Client, error) {
 	if hostConfig.JumphostAddress != "" {
@@ -211,7 +280,13 @@ func (t *SSHTool) connect(ctx context.Context, hostConfig *SSHHostConfig, config
 
 // connectDirect establishes a direct SSH connection
 func (t *SSHTool) connectDirect(ctx context.Context, hostConfig *SSHHostConfig, config *SSHConfig) (*ssh.Client, error) {
-	signer, err := parsePrivateKey(config.PrivateKey)
+	// Get the appropriate key for this host
+	privateKey, err := t.getKeyForHost(hostConfig, config)
+	if err != nil {
+		return nil, err
+	}
+
+	signer, err := parsePrivateKey(privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key: %w", err)
 	}
@@ -243,7 +318,13 @@ func (t *SSHTool) connectDirect(ctx context.Context, hostConfig *SSHHostConfig, 
 
 // connectViaJumphost establishes SSH connection through a bastion host
 func (t *SSHTool) connectViaJumphost(ctx context.Context, hostConfig *SSHHostConfig, config *SSHConfig) (*ssh.Client, error) {
-	signer, err := parsePrivateKey(config.PrivateKey)
+	// Get the appropriate key for this host
+	privateKey, err := t.getKeyForHost(hostConfig, config)
+	if err != nil {
+		return nil, err
+	}
+
+	signer, err := parsePrivateKey(privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key: %w", err)
 	}
@@ -495,7 +576,7 @@ func (t *SSHTool) ExecuteCommand(ctx context.Context, incidentID string, command
 	if len(config.Hosts) == 0 {
 		return t.jsonResult(ExecuteResult{Error: "No servers configured"})
 	}
-	if config.PrivateKey == "" {
+	if len(config.Keys) == 0 {
 		return t.jsonResult(ExecuteResult{Error: "SSH private key not configured"})
 	}
 
@@ -560,7 +641,7 @@ func (t *SSHTool) TestConnectivity(ctx context.Context, incidentID string) (stri
 	if len(config.Hosts) == 0 {
 		return t.jsonResult(ConnectivityResult{Error: "No servers configured"})
 	}
-	if config.PrivateKey == "" {
+	if len(config.Keys) == 0 {
 		return t.jsonResult(ConnectivityResult{Error: "SSH private key not configured"})
 	}
 
