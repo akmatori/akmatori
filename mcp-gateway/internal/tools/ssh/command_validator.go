@@ -32,7 +32,7 @@ func NewCommandValidator() *CommandValidator {
 			"whoami": true, "uname": true, "hostname": true, "date": true, "id": true,
 			"uptime": true, "w": true, "who": true, "last": true,
 			// Process info
-			"ps": true, "top": true, "htop": true, "pgrep": true,
+			"ps": true, "top": true, "htop": true, "pgrep": true, "pstree": true,
 			// Performance monitoring
 			"mpstat": true, "sar": true, "iostat": true, "vmstat": true,
 			"nmon": true, "iotop": true, "pidstat": true,
@@ -185,7 +185,7 @@ Allowed commands in read-only mode:
   Search: grep, find, locate, which
   Directory: ls, pwd, tree
   System info: whoami, uname, hostname, date, id, uptime
-  Processes: ps, top, htop, pgrep
+  Processes: ps, top, htop, pgrep, pstree
   Performance: mpstat, sar, iostat, vmstat, pidstat, nmon, iotop
   Resources: df, du, free, lsblk
   Network: netstat, ss, ip, ping, dig, traceroute

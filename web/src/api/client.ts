@@ -119,7 +119,7 @@ export const skillsApi = {
   // Get tools assigned to a skill
   getTools: (name: string) => fetchApi<ToolInstance[]>(`/api/skills/${encodeURIComponent(name)}/tools`),
 
-  // Update tools assigned to a skill (triggers symlink + tools.md generation)
+  // Update tools assigned to a skill (triggers symlink + SKILL.md regeneration)
   updateTools: (name: string, toolInstanceIds: number[]) =>
     fetchApi<Skill>(`/api/skills/${encodeURIComponent(name)}/tools`, {
       method: 'PUT',

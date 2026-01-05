@@ -67,7 +67,7 @@ type Skill struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 
-	// Relationships - tools are symlinked to skills/{name}/scripts/ and documented in references/tools.md
+	// Relationships - tools are symlinked to skills/{name}/scripts/ with imports embedded in SKILL.md
 	Tools []ToolInstance `gorm:"many2many:skill_tools;" json:"tools,omitempty"`
 }
 
