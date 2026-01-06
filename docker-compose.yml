@@ -98,6 +98,7 @@ services:
     volumes:
       - codex_sessions:/home/codex/.codex              # Persistent session data
       - ./akmatori_data/incidents:/workspaces:rw       # ONLY incidents - no access to skills/tools source
+      - ./akmatori_data/context:/akmatori/context:ro   # Shared context files (read-only)
     healthcheck:
       test: ["CMD", "pgrep", "-f", "codex-worker"]
       interval: 30s

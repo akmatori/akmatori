@@ -133,6 +133,11 @@ func main() {
 		slackSettings = &database.SlackSettings{Enabled: false}
 	}
 
+	// Initialize Codex WebSocket handler for orchestrator communication
+	// This must be created before Slack event handler so it can be captured in closure
+	codexWSHandler := handlers.NewCodexWSHandler()
+	log.Printf("Codex WebSocket handler initialized")
+
 	// Initialize Slack handler (will be used when Slack is enabled)
 	var slackHandler *handlers.SlackHandler
 
@@ -143,6 +148,7 @@ func main() {
 		slackHandler = handlers.NewSlackHandler(
 			client,
 			codexExecutor,
+			codexWSHandler,
 			skillService,
 		)
 		slackHandler.HandleSocketMode(socketClient)
@@ -158,10 +164,6 @@ func main() {
 
 	// Initialize channel resolver (will be set when Slack connects)
 	var channelResolver *slackutil.ChannelResolver
-
-	// Initialize Codex WebSocket handler for orchestrator communication
-	codexWSHandler := handlers.NewCodexWSHandler()
-	log.Printf("Codex WebSocket handler initialized")
 
 	// Initialize Alert handler
 	alertHandler := handlers.NewAlertHandler(

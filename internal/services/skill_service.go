@@ -66,16 +66,16 @@ func (s *SkillService) GetSkillScriptsDir(skillName string) string {
 	return filepath.Join(s.skillsDir, skillName, "scripts")
 }
 
-// GetSkillReferencesDir returns the path to the skill's references directory
-func (s *SkillService) GetSkillReferencesDir(skillName string) string {
-	return filepath.Join(s.skillsDir, skillName, "references")
+// GetSkillAssetsDir returns the path to the skill's assets directory
+func (s *SkillService) GetSkillAssetsDir(skillName string) string {
+	return filepath.Join(s.skillsDir, skillName, "assets")
 }
 
 // EnsureSkillDirectories creates the skill's directory structure
 func (s *SkillService) EnsureSkillDirectories(skillName string) error {
 	skillDir := s.GetSkillDir(skillName)
 	scriptsDir := s.GetSkillScriptsDir(skillName)
-	referencesDir := s.GetSkillReferencesDir(skillName)
+	assetsDir := s.GetSkillAssetsDir(skillName)
 
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		return err
@@ -83,7 +83,7 @@ func (s *SkillService) EnsureSkillDirectories(skillName string) error {
 	if err := os.MkdirAll(scriptsDir, 0755); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(referencesDir, 0755); err != nil {
+	if err := os.MkdirAll(assetsDir, 0755); err != nil {
 		return err
 	}
 	return nil
@@ -93,6 +93,64 @@ func (s *SkillService) EnsureSkillDirectories(skillName string) error {
 func (s *SkillService) EnsureSkillScriptsDir(skillName string) error {
 	scriptsDir := s.GetSkillScriptsDir(skillName)
 	return os.MkdirAll(scriptsDir, 0755)
+}
+
+// SyncSkillAssets creates symlinks in the skill's assets directory for [[filename]] references
+// Symlinks point to /akmatori/context/{filename} which is shared between API and codex containers
+// It removes stale symlinks and adds new ones based on the current prompt
+func (s *SkillService) SyncSkillAssets(skillName string, prompt string) error {
+	assetsDir := s.GetSkillAssetsDir(skillName)
+
+	// Ensure assets directory exists
+	if err := os.MkdirAll(assetsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create assets directory: %w", err)
+	}
+
+	// Get current references from prompt
+	currentRefs := s.contextService.ParseReferences(prompt)
+	currentRefSet := make(map[string]bool)
+	for _, ref := range currentRefs {
+		currentRefSet[ref] = true
+	}
+
+	// Clean up stale entries (files or symlinks no longer referenced)
+	entries, err := os.ReadDir(assetsDir)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read assets directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if !currentRefSet[entry.Name()] {
+			entryPath := filepath.Join(assetsDir, entry.Name())
+			os.Remove(entryPath)
+		}
+	}
+
+	// Create symlinks for current references
+	for _, filename := range currentRefs {
+		srcPath := s.contextService.GetFilePath(filename)
+		dstPath := filepath.Join(assetsDir, filename)
+
+		// Check if source file exists
+		if _, err := os.Stat(srcPath); os.IsNotExist(err) {
+			log.Printf("Warning: referenced file %s does not exist, skipping", filename)
+			continue
+		}
+
+		// Remove existing entry (file or symlink) to ensure fresh symlink
+		if _, err := os.Lstat(dstPath); err == nil {
+			os.Remove(dstPath)
+		}
+
+		// Create symlink pointing to /akmatori/context/{filename}
+		// This path is shared between API and codex containers
+		symlinkTarget := filepath.Join("/akmatori/context", filename)
+		if err := os.Symlink(symlinkTarget, dstPath); err != nil {
+			return fmt.Errorf("failed to create symlink for %s: %w", filename, err)
+		}
+	}
+
+	return nil
 }
 
 // ClearSkillScripts removes all scripts from the skill's scripts directory (keeps tool symlinks)
@@ -275,6 +333,12 @@ func (s *SkillService) CreateSkill(name, description, category, prompt string) (
 		return nil, fmt.Errorf("failed to create skill directories: %w", err)
 	}
 
+	// Sync asset symlinks for [[filename]] references in prompt
+	if err := s.SyncSkillAssets(name, prompt); err != nil {
+		log.Printf("Warning: failed to sync skill assets: %v", err)
+		// Continue even if asset sync fails - it's not critical
+	}
+
 	// Generate and write SKILL.md (no tools yet for new skill)
 	skillMd := s.generateSkillMd(name, description, prompt, nil)
 	skillPath := filepath.Join(skillDir, "SKILL.md")
@@ -447,6 +511,12 @@ func (s *SkillService) UpdateSkillPrompt(name, prompt string) error {
 		return err
 	}
 
+	// Sync asset symlinks for [[filename]] references in prompt
+	if err := s.SyncSkillAssets(name, prompt); err != nil {
+		log.Printf("Warning: failed to sync skill assets: %v", err)
+		// Continue even if asset sync fails - it's not critical
+	}
+
 	// Generate new SKILL.md with updated body and current tools
 	tools := s.getSkillTools(name)
 	skillMd := s.generateSkillMd(name, skill.Description, prompt, tools)
@@ -507,7 +577,10 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 	}
 	quickStart.WriteString("\n---\n\n")
 
-	return fmt.Sprintf("---\n%s---\n\n%s%s\n", string(yamlBytes), quickStart.String(), body)
+	// Transform [[filename]] references to markdown links [filename](assets/filename)
+	resolvedBody := s.contextService.ResolveReferencesToMarkdownLinks(body)
+
+	return fmt.Sprintf("---\n%s---\n\n%s%s\n", string(yamlBytes), quickStart.String(), resolvedBody)
 }
 
 // getSkillTools fetches tool instances for a skill from the database
@@ -699,6 +772,11 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 			continue
 		}
 
+		// Sync asset symlinks for [[filename]] references in prompt
+		if err := s.SyncSkillAssets(name, prompt); err != nil {
+			log.Printf("Warning: failed to sync assets for skill %s: %v", name, err)
+		}
+
 		// Get tools for this skill
 		tools := s.getSkillTools(name)
 
@@ -737,12 +815,6 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 			if err := os.Symlink(targetPath, linkPath); err != nil {
 				log.Printf("Warning: failed to create symlink for tool %s in skill %s: %v", toolName, name, err)
 			}
-		}
-
-		// Clean up legacy tools.md files (no longer needed)
-		toolsPath := filepath.Join(s.GetSkillReferencesDir(name), "tools.md")
-		if err := os.Remove(toolsPath); err == nil {
-			log.Printf("Removed legacy tools.md for skill: %s", name)
 		}
 	}
 

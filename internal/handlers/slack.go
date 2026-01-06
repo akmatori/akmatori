@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"strings"
@@ -11,7 +10,6 @@ import (
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/output"
 	"github.com/akmatori/akmatori/internal/services"
-	"github.com/akmatori/akmatori/internal/utils"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
@@ -19,9 +17,10 @@ import (
 
 // SlackHandler handles Slack events and commands
 type SlackHandler struct {
-	client        *slack.Client
-	codexExecutor *executor.Executor
-	skillService  *services.SkillService
+	client         *slack.Client
+	codexExecutor  *executor.Executor
+	codexWSHandler *CodexWSHandler
+	skillService   *services.SkillService
 }
 
 // Progress update interval for Slack messages (rate limiting)
@@ -31,12 +30,14 @@ const progressUpdateInterval = 2 * time.Second
 func NewSlackHandler(
 	client *slack.Client,
 	codexExecutor *executor.Executor,
+	codexWSHandler *CodexWSHandler,
 	skillService *services.SkillService,
 ) *SlackHandler {
 	return &SlackHandler{
-		client:        client,
-		codexExecutor: codexExecutor,
-		skillService:  skillService,
+		client:         client,
+		codexExecutor:  codexExecutor,
+		codexWSHandler: codexWSHandler,
+		skillService:   skillService,
 	}
 }
 
@@ -227,15 +228,111 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		}
 	}
 
-	// Execute Codex task - Codex handles agent/skill invocation natively
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
-	defer cancel()
-
 	taskWithGuidance := executor.PrependGuidance(text)
 
-	log.Printf("Executing incident manager in: %s", workingDir)
-	result, err := h.codexExecutor.ExecuteInDirectory(ctx, taskWithGuidance, sessionID, workingDir, onStderrUpdate)
+	// Execute via WebSocket-based Codex worker
+	if h.codexWSHandler != nil && h.codexWSHandler.IsWorkerConnected() {
+		log.Printf("Using WebSocket-based Codex worker for incident %s", incidentUUID)
 
+		// Fetch OpenAI settings from database
+		var openaiSettings *OpenAISettings
+		if dbSettings, err := database.GetOpenAISettings(); err == nil && dbSettings != nil {
+			openaiSettings = &OpenAISettings{
+				APIKey:          dbSettings.APIKey,
+				Model:           dbSettings.Model,
+				ReasoningEffort: dbSettings.ModelReasoningEffort,
+			}
+			log.Printf("Using OpenAI model: %s", dbSettings.Model)
+		} else {
+			log.Printf("Warning: Could not fetch OpenAI settings: %v", err)
+		}
+
+		// Create channels for async result handling
+		done := make(chan struct{})
+		var response string
+		var finalSessionID string
+		var hasError bool
+		var lastStreamedLog string
+
+		// Build task header for logging
+		taskHeader := fmt.Sprintf("📨 Slack Message from User <%s>:\n%s\n\n--- Execution Log ---\n\n", user, text)
+
+		callback := IncidentCallback{
+			OnOutput: func(outputLog string) {
+				lastStreamedLog = outputLog
+				// Update database with streamed log
+				h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+outputLog)
+
+				// Also update Slack progress message
+				onStderrUpdate(outputLog)
+			},
+			OnCompleted: func(sid, output string) {
+				finalSessionID = sid
+				response = output
+				close(done)
+			},
+			OnError: func(errorMsg string) {
+				response = fmt.Sprintf("❌ Error: %s", errorMsg)
+				hasError = true
+				close(done)
+			},
+		}
+
+		// Start or continue incident based on whether we have a session
+		var wsErr error
+		if sessionID != "" {
+			log.Printf("Continuing session %s for incident %s", sessionID, incidentUUID)
+			wsErr = h.codexWSHandler.ContinueIncident(incidentUUID, sessionID, taskWithGuidance, callback)
+		} else {
+			log.Printf("Starting new Codex session for incident %s", incidentUUID)
+			wsErr = h.codexWSHandler.StartIncident(incidentUUID, taskWithGuidance, openaiSettings, callback)
+		}
+
+		if wsErr != nil {
+			log.Printf("Failed to start/continue incident via WebSocket: %v", wsErr)
+			h.finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text,
+				fmt.Sprintf("❌ Codex worker error: %v", wsErr), "", true, "")
+			return
+		}
+
+		// Wait for completion
+		<-done
+
+		// Use original sessionID if finalSessionID is empty (for resume cases)
+		if finalSessionID == "" {
+			finalSessionID = sessionID
+		}
+
+		// Build full log
+		fullLog := taskHeader + lastStreamedLog
+		if response != "" {
+			fullLog += "\n\n--- Final Response ---\n\n" + response
+		}
+
+		// Format response for Slack
+		var finalResponse string
+		if hasError {
+			finalResponse = response
+		} else if response != "" {
+			parsed := output.Parse(response)
+			finalResponse = output.FormatForSlack(parsed)
+		} else {
+			finalResponse = "✅ Task completed (no output)"
+		}
+
+		h.finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text,
+			finalResponse, fullLog, hasError, finalSessionID)
+		return
+	}
+
+	// No WebSocket worker available
+	log.Printf("ERROR: Codex worker not connected for incident %s", incidentUUID)
+	h.finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text,
+		"❌ Codex worker not connected. Please check that the akmatori-codex container is running.", "", true, "")
+}
+
+// finishSlackMessage handles the final steps of Slack message processing
+func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text, finalResponse, fullLog string, hasError bool, sessionID string) {
 	// Remove processing reaction
 	if removeErr := h.client.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
 		Channel:   channel,
@@ -245,7 +342,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 	}
 
 	// Add result reaction
-	if err != nil {
+	if hasError {
 		if addErr := h.client.AddReaction("x", slack.ItemRef{
 			Channel:   channel,
 			Timestamp: threadID,
@@ -261,57 +358,24 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		}
 	}
 
-	// Determine final status and session ID for incident update
-	finalStatus := database.IncidentStatusCompleted
-	if err != nil {
-		finalStatus = database.IncidentStatusFailed
-	}
-	finalSessionID := ""
-	if result != nil {
-		finalSessionID = result.SessionID
-	}
-	if finalSessionID == "" {
-		finalSessionID = sessionID
-	}
-
-	// Prepend the original user message to the full log for context
-	fullLog := ""
-	if result != nil {
-		fullLog = result.FullLog
-	}
-	fullLogWithContext := fmt.Sprintf("📨 Original Message from User <%s>:\n%s\n\n--- Execution Log ---\n\n%s",
-		user, text, fullLog)
-
-	// Build final response for Slack
-	var finalResponse string
-	var rawOutput string
-	if err != nil {
-		finalResponse = fmt.Sprintf("❌ Error executing task: %v", err)
-		rawOutput = finalResponse
-	} else if result != nil && result.Output != "" {
-		rawOutput = result.Output
-		parsed := output.Parse(result.Output)
-		finalResponse = output.FormatForSlack(parsed)
-
-		finalResponse += fmt.Sprintf("\n\n---\n⏱️ Time: %s", utils.FormatDuration(result.ExecutionTime))
-		if result.TokensUsed > 0 {
-			finalResponse += fmt.Sprintf(" | 🎯 Tokens: %s", utils.FormatNumber(result.TokensUsed))
-		}
-	} else if result != nil && len(result.ErrorMessages) > 0 {
-		finalResponse = "❌ " + strings.Join(result.ErrorMessages, "\n❌ ")
-		rawOutput = finalResponse
-	} else {
-		finalResponse = "✅ Task completed (no output)"
-		rawOutput = ""
-	}
-
 	// Update incident with status, log, and response
 	if incidentUUID != "" {
-		if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, finalSessionID, fullLogWithContext, rawOutput); updateErr != nil {
+		finalStatus := database.IncidentStatusCompleted
+		if hasError {
+			finalStatus = database.IncidentStatusFailed
+		}
+
+		// Build full log with context if not already built
+		fullLogWithContext := fullLog
+		if fullLogWithContext == "" {
+			fullLogWithContext = fmt.Sprintf("📨 Original Message from User <%s>:\n%s\n\n--- Execution Log ---\n\n%s",
+				user, text, "")
+		}
+
+		if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLogWithContext, finalResponse); updateErr != nil {
 			log.Printf("Warning: Failed to update incident: %v", updateErr)
 		} else {
-			log.Printf("Updated incident %s to status: %s, session: %s, log length: %d, response length: %d",
-				incidentUUID, finalStatus, finalSessionID, len(fullLogWithContext), len(rawOutput))
+			log.Printf("Updated incident %s to status: %s, session: %s", incidentUUID, finalStatus, sessionID)
 		}
 	}
 

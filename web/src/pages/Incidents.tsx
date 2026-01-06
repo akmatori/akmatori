@@ -35,30 +35,44 @@ export default function Incidents() {
   const now = Math.floor(Date.now() / 1000);
   const [timeFrom, setTimeFrom] = useState(now - DEFAULT_TIME_RANGE);
   const [timeTo, setTimeTo] = useState(now);
+  // Track relative time range duration (null = absolute range)
+  const [relativeRange, setRelativeRange] = useState<number | null>(DEFAULT_TIME_RANGE);
   const [listRefreshInterval, setListRefreshInterval] = useState(DEFAULT_REFRESH_INTERVAL);
   const listRefreshRef = useRef<number | null>(null);
 
   // Load incidents with current time range
-  const loadIncidents = useCallback(async (from?: number, to?: number) => {
+  const loadIncidents = useCallback(async (from?: number, to?: number, isRefresh?: boolean) => {
     try {
       setLoading(true);
       setError('');
-      // For relative time ranges, recalculate "to" as now
       const currentNow = Math.floor(Date.now() / 1000);
-      const effectiveFrom = from ?? timeFrom;
-      const effectiveTo = to ?? currentNow;
+
+      let effectiveFrom: number;
+      let effectiveTo: number;
+
+      if (isRefresh && relativeRange !== null) {
+        // For relative ranges on refresh, recalculate both from and to
+        effectiveFrom = currentNow - relativeRange;
+        effectiveTo = currentNow;
+      } else {
+        effectiveFrom = from ?? timeFrom;
+        effectiveTo = to ?? currentNow;
+      }
+
       const data = await incidentsApi.list(effectiveFrom, effectiveTo);
       setIncidents(data);
-      // Update timeTo to current time for relative ranges
-      if (!to) {
-        setTimeTo(currentNow);
+
+      // Update time state for display
+      if (isRefresh && relativeRange !== null) {
+        setTimeFrom(effectiveFrom);
+        setTimeTo(effectiveTo);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load incidents');
     } finally {
       setLoading(false);
     }
-  }, [timeFrom]);
+  }, [timeFrom, relativeRange]);
 
   // Initial load
   useEffect(() => {
@@ -69,7 +83,7 @@ export default function Incidents() {
   useEffect(() => {
     if (listRefreshInterval > 0) {
       listRefreshRef.current = window.setInterval(() => {
-        loadIncidents();
+        loadIncidents(undefined, undefined, true);
       }, listRefreshInterval);
     }
 
@@ -82,9 +96,11 @@ export default function Incidents() {
   }, [listRefreshInterval, loadIncidents]);
 
   // Handle time range change
-  const handleTimeRangeChange = useCallback((from: number, to: number) => {
+  const handleTimeRangeChange = useCallback((from: number, to: number, relativeDuration?: number | null) => {
     setTimeFrom(from);
     setTimeTo(to);
+    // Track if this is a relative range (for auto-refresh recalculation)
+    setRelativeRange(relativeDuration ?? null);
     loadIncidents(from, to);
   }, [loadIncidents]);
 

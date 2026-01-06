@@ -5,7 +5,7 @@ interface TimeRangePickerProps {
   from: number;
   to: number;
   refreshInterval: number;
-  onChange: (from: number, to: number) => void;
+  onChange: (from: number, to: number, relativeDuration?: number | null) => void;
   onRefreshIntervalChange: (interval: number) => void;
 }
 
@@ -126,7 +126,7 @@ export default function TimeRangePicker({
   const handlePresetClick = useCallback(
     (preset: TimePreset) => {
       const now = Math.floor(Date.now() / 1000);
-      onChange(now - preset.value, now);
+      onChange(now - preset.value, now, preset.value);
       setIsOpen(false);
     },
     [onChange]
@@ -137,7 +137,7 @@ export default function TimeRangePicker({
       const fromTs = fromLocalDateTimeString(customFrom);
       const toTs = fromLocalDateTimeString(customTo);
       if (fromTs < toTs) {
-        onChange(fromTs, toTs);
+        onChange(fromTs, toTs, null); // null = absolute range
         setIsOpen(false);
       }
     }

@@ -30,6 +30,9 @@ var FilenamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*\.[a-zA-Z0-9
 // ReferencePattern matches [[filename]] patterns in text
 var ReferencePattern = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 
+// AssetLinkPattern matches [filename](assets/filename) patterns (already transformed references)
+var AssetLinkPattern = regexp.MustCompile(`\[[^\]]+\]\(assets/([^)]+)\)`)
+
 // ContextService manages context files
 type ContextService struct {
 	db         *gorm.DB
@@ -203,15 +206,27 @@ func (s *ContextService) GetFilePath(filename string) string {
 	return filepath.Join(s.contextDir, filename)
 }
 
-// ParseReferences extracts [[filename]] patterns from text
+// ParseReferences extracts [[filename]] patterns and [filename](assets/filename) patterns from text
 func (s *ContextService) ParseReferences(text string) []string {
-	matches := ReferencePattern.FindAllStringSubmatch(text, -1)
-
 	// Use map to deduplicate
 	seen := make(map[string]bool)
 	var references []string
 
+	// Match [[filename]] patterns
+	matches := ReferencePattern.FindAllStringSubmatch(text, -1)
 	for _, match := range matches {
+		if len(match) > 1 {
+			filename := strings.TrimSpace(match[1])
+			if filename != "" && !seen[filename] {
+				seen[filename] = true
+				references = append(references, filename)
+			}
+		}
+	}
+
+	// Also match [filename](assets/filename) patterns (already transformed references)
+	assetMatches := AssetLinkPattern.FindAllStringSubmatch(text, -1)
+	for _, match := range assetMatches {
 		if len(match) > 1 {
 			filename := strings.TrimSpace(match[1])
 			if filename != "" && !seen[filename] {
@@ -243,6 +258,11 @@ func (s *ContextService) ValidateReferences(text string) (valid bool, missing []
 // ResolveReferences replaces [[filename]] with ./context/filename
 func (s *ContextService) ResolveReferences(text string) string {
 	return ReferencePattern.ReplaceAllString(text, "./context/$1")
+}
+
+// ResolveReferencesToMarkdownLinks replaces [[filename]] with [filename](assets/filename)
+func (s *ContextService) ResolveReferencesToMarkdownLinks(text string) string {
+	return ReferencePattern.ReplaceAllString(text, "[$1](assets/$1)")
 }
 
 // CopyReferencedFilesToDir creates symlinks for referenced files in the target directory

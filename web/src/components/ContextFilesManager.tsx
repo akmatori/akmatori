@@ -21,9 +21,9 @@ export default function ContextFilesManager({ onFilesChange }: ContextFilesManag
   const [success, setSuccess] = useState<string | null>(null);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [filename, setFilename] = useState('');
+  const [sanitizedFilename, setSanitizedFilename] = useState('');
   const [description, setDescription] = useState('');
-  const [filenameError, setFilenameError] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -62,18 +62,13 @@ export default function ContextFilesManager({ onFilesChange }: ContextFilesManag
   };
 
   const processFile = (file: File) => {
-    setSelectedFile(file);
-    if (!filename) {
-      const sanitized = file.name.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/--+/g, '-').replace(/^-|-$/g, '');
-      setFilename(sanitized);
-      setFilenameError(validateFilename(sanitized));
-    }
-  };
+    // Sanitize the original filename
+    const sanitized = file.name.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/--+/g, '-').replace(/^-|-$/g, '');
+    const validationError = validateFilename(sanitized);
 
-  const handleFilenameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setFilename(value);
-    setFilenameError(validateFilename(value));
+    setSelectedFile(file);
+    setSanitizedFilename(sanitized);
+    setFileError(validationError);
   };
 
   const handleDrag = (e: React.DragEvent) => {
@@ -91,13 +86,7 @@ export default function ContextFilesManager({ onFilesChange }: ContextFilesManag
   };
 
   const handleUpload = async () => {
-    if (!selectedFile || !filename) return;
-
-    const validationError = validateFilename(filename);
-    if (validationError) {
-      setFilenameError(validationError);
-      return;
-    }
+    if (!selectedFile || !sanitizedFilename || fileError) return;
 
     if (selectedFile.size > MAX_FILE_SIZE) {
       setError(`File too large. Maximum size is ${MAX_FILE_SIZE / 1024 / 1024} MB`);
@@ -107,14 +96,14 @@ export default function ContextFilesManager({ onFilesChange }: ContextFilesManag
     try {
       setUploading(true);
       setError(null);
-      await contextApi.upload(selectedFile, filename, description || undefined);
-      setSuccess(`File "${filename}" uploaded successfully`);
+      await contextApi.upload(selectedFile, sanitizedFilename, description || undefined);
+      setSuccess(`File "${sanitizedFilename}" uploaded successfully`);
       setTimeout(() => setSuccess(null), 3000);
 
       setSelectedFile(null);
-      setFilename('');
+      setSanitizedFilename('');
       setDescription('');
-      setFilenameError(null);
+      setFileError(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
 
       await loadFiles();
@@ -185,16 +174,28 @@ export default function ContextFilesManager({ onFilesChange }: ContextFilesManag
             />
             {selectedFile ? (
               <div className="flex items-center justify-center gap-3">
-                <Check size={24} className="text-green-500" />
+                <Check size={24} className={fileError ? 'text-yellow-500' : 'text-green-500'} />
                 <div className="text-left">
-                  <p className="font-medium text-gray-900 dark:text-white">{selectedFile.name}</p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">{formatFileSize(selectedFile.size)}</p>
+                  <p className="font-medium text-gray-900 dark:text-white">{sanitizedFilename}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {formatFileSize(selectedFile.size)}
+                    {selectedFile.name !== sanitizedFilename && (
+                      <span className="ml-2 text-xs">(from {selectedFile.name})</span>
+                    )}
+                  </p>
+                  {fileError && (
+                    <p className="text-sm text-red-600 dark:text-red-400 flex items-center gap-1 mt-1">
+                      <AlertCircle size={14} />
+                      {fileError}
+                    </p>
+                  )}
                 </div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     setSelectedFile(null);
-                    setFilename('');
+                    setSanitizedFilename('');
+                    setFileError(null);
                     if (fileInputRef.current) fileInputRef.current.value = '';
                   }}
                   className="ml-4 p-1 text-gray-400 hover:text-red-500 transition-colors"
@@ -212,27 +213,6 @@ export default function ContextFilesManager({ onFilesChange }: ContextFilesManag
                   Allowed: {ALLOWED_EXTENSIONS.join(', ')} | Max: 10 MB
                 </p>
               </>
-            )}
-          </div>
-
-          {/* Filename Input */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Filename <span className="text-red-500">*</span>
-              <span className="ml-2 font-normal text-gray-500">(used in [[filename]] references)</span>
-            </label>
-            <input
-              type="text"
-              value={filename}
-              onChange={handleFilenameChange}
-              placeholder="e.g., runbook.md"
-              className={`input-field ${filenameError ? 'border-red-500 focus:border-red-500' : ''}`}
-            />
-            {filenameError && (
-              <p className="mt-1 text-sm text-red-600 dark:text-red-400 flex items-center gap-1">
-                <AlertCircle size={14} />
-                {filenameError}
-              </p>
             )}
           </div>
 
@@ -255,7 +235,7 @@ export default function ContextFilesManager({ onFilesChange }: ContextFilesManag
           <div className="flex justify-end pt-2">
             <button
               onClick={handleUpload}
-              disabled={uploading || !selectedFile || !filename || !!filenameError}
+              disabled={uploading || !selectedFile || !sanitizedFilename || !!fileError}
               className="btn btn-primary"
             >
               <Upload size={16} />
