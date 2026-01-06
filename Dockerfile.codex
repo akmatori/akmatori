@@ -58,7 +58,7 @@ RUN groupadd -g 1001 codex && \
     useradd -u 1001 -g codex -m -s /bin/bash codex
 
 # Install Codex CLI globally (pinned version)
-RUN npm install -g @openai/codex@0.77.0
+RUN npm install -g @openai/codex@0.78.0
 
 # Create directories
 RUN mkdir -p /home/codex/.codex /workspaces /tools && \
