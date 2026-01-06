@@ -535,7 +535,7 @@ func (s *SkillService) getSkillTools(skillName string) []database.ToolInstance {
 	return tools
 }
 
-// AssignTools assigns tools to a skill and regenerates SKILL.md with embedded imports
+// AssignTools assigns tools to a skill, creates symlinks, and regenerates SKILL.md
 // NOTE: Tools are executed via MCP Gateway, not as local scripts
 func (s *SkillService) AssignTools(skillName string, toolIDs []uint) error {
 	// Verify skill exists
@@ -562,6 +562,35 @@ func (s *SkillService) AssignTools(skillName string, toolIDs []uint) error {
 	// They are fetched by MCP Gateway at execution time for security
 	if err := s.db.Model(skill).Association("Tools").Replace(tools); err != nil {
 		return fmt.Errorf("failed to update tool associations: %w", err)
+	}
+
+	// Create symlinks for tools in the scripts directory
+	scriptsDir := filepath.Join(s.GetSkillDir(skillName), "scripts")
+
+	// Clear existing symlinks
+	entries, err := os.ReadDir(scriptsDir)
+	if err == nil {
+		for _, entry := range entries {
+			entryPath := filepath.Join(scriptsDir, entry.Name())
+			if info, err := os.Lstat(entryPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				os.Remove(entryPath)
+			}
+		}
+	}
+
+	// Create new symlinks for assigned tools
+	for _, tool := range tools {
+		if tool.ToolType.Name == "" {
+			continue
+		}
+		toolName := tool.ToolType.Name
+		linkPath := filepath.Join(scriptsDir, toolName)
+		targetPath := filepath.Join("/tools", toolName)
+
+		// Create symlink
+		if err := os.Symlink(targetPath, linkPath); err != nil {
+			log.Printf("Warning: failed to create symlink for tool %s: %v", toolName, err)
+		}
 	}
 
 	// Regenerate SKILL.md with embedded tool imports
@@ -683,6 +712,32 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 		}
 
 		log.Printf("Regenerated SKILL.md for skill: %s", name)
+
+		// Ensure scripts directory exists and create tool symlinks
+		scriptsDir := filepath.Join(s.GetSkillDir(name), "scripts")
+		os.MkdirAll(scriptsDir, 0755)
+
+		// Clear existing symlinks
+		dirEntries, _ := os.ReadDir(scriptsDir)
+		for _, de := range dirEntries {
+			entryPath := filepath.Join(scriptsDir, de.Name())
+			if info, err := os.Lstat(entryPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				os.Remove(entryPath)
+			}
+		}
+
+		// Create symlinks for assigned tools
+		for _, tool := range tools {
+			if tool.ToolType.Name == "" {
+				continue
+			}
+			toolName := tool.ToolType.Name
+			linkPath := filepath.Join(scriptsDir, toolName)
+			targetPath := filepath.Join("/tools", toolName)
+			if err := os.Symlink(targetPath, linkPath); err != nil {
+				log.Printf("Warning: failed to create symlink for tool %s in skill %s: %v", toolName, name, err)
+			}
+		}
 
 		// Clean up legacy tools.md files (no longer needed)
 		toolsPath := filepath.Join(s.GetSkillReferencesDir(name), "tools.md")
