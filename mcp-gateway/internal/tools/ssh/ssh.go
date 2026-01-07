@@ -688,13 +688,13 @@ func (t *SSHTool) TestConnectivity(ctx context.Context, incidentID string) (stri
 	return t.jsonResult(result)
 }
 
-// GetServerInfo gets basic system info from all servers
-func (t *SSHTool) GetServerInfo(ctx context.Context, incidentID string) (string, error) {
+// GetServerInfo gets basic system info from specified servers (or all if none specified)
+func (t *SSHTool) GetServerInfo(ctx context.Context, incidentID string, servers []string) (string, error) {
 	infoCommand := `echo "HOSTNAME=$(hostname)" && ` +
 		`echo "OS=$(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d'"' -f2 || uname -s)" && ` +
 		`echo "UPTIME=$(uptime -p 2>/dev/null || uptime | awk -F'up ' '{print $2}' | awk -F',' '{print $1}')"`
 
-	return t.ExecuteCommand(ctx, incidentID, infoCommand, nil)
+	return t.ExecuteCommand(ctx, incidentID, infoCommand, servers)
 }
 
 // jsonResult converts a result to JSON string

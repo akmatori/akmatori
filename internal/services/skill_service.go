@@ -666,6 +666,17 @@ func (s *SkillService) AssignTools(skillName string, toolIDs []uint) error {
 		}
 	}
 
+	// Create symlink for mcp_client.py (required by all tools)
+	if len(tools) > 0 {
+		mcpClientLink := filepath.Join(scriptsDir, "mcp_client.py")
+		mcpClientTarget := "/tools/mcp_client.py"
+		// Remove existing to avoid errors
+		os.Remove(mcpClientLink)
+		if err := os.Symlink(mcpClientTarget, mcpClientLink); err != nil {
+			log.Printf("Warning: failed to create symlink for mcp_client.py: %v", err)
+		}
+	}
+
 	// Regenerate SKILL.md with embedded tool imports
 	prompt, _ := s.GetSkillPrompt(skillName)
 	skillMd := s.generateSkillMd(skillName, skill.Description, prompt, tools)
@@ -814,6 +825,15 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 			targetPath := filepath.Join("/tools", toolName)
 			if err := os.Symlink(targetPath, linkPath); err != nil {
 				log.Printf("Warning: failed to create symlink for tool %s in skill %s: %v", toolName, name, err)
+			}
+		}
+
+		// Create symlink for mcp_client.py (required by all tools)
+		if len(tools) > 0 {
+			mcpClientLink := filepath.Join(scriptsDir, "mcp_client.py")
+			mcpClientTarget := "/tools/mcp_client.py"
+			if err := os.Symlink(mcpClientTarget, mcpClientLink); err != nil {
+				log.Printf("Warning: failed to create symlink for mcp_client.py in skill %s: %v", name, err)
 			}
 		}
 	}

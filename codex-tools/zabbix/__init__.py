@@ -5,7 +5,7 @@ This module provides access to Zabbix monitoring data.
 All credentials are handled by the MCP Gateway.
 
 Example usage:
-    from tools.zabbix import get_hosts, get_problems, get_history
+    from zabbix import get_hosts, get_problems, get_history
 
     # Get all hosts
     hosts = get_hosts()

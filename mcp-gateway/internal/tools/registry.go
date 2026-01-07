@@ -95,14 +95,28 @@ func (r *Registry) registerSSHTools() {
 	r.server.RegisterTool(
 		mcp.Tool{
 			Name:        "ssh.get_server_info",
-			Description: "Get basic system information (hostname, OS, uptime) from all configured servers",
+			Description: "Get basic system information (hostname, OS, uptime) from specified servers",
 			InputSchema: mcp.InputSchema{
-				Type:       "object",
-				Properties: map[string]mcp.Property{},
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"servers": {
+						Type:        "array",
+						Description: "List of server hostnames/IPs to query (optional, defaults to all)",
+						Items:       &mcp.Items{Type: "string"},
+					},
+				},
 			},
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
-			return sshTool.GetServerInfo(ctx, incidentID)
+			var servers []string
+			if serversArg, ok := args["servers"].([]interface{}); ok {
+				for _, s := range serversArg {
+					if str, ok := s.(string); ok {
+						servers = append(servers, str)
+					}
+				}
+			}
+			return sshTool.GetServerInfo(ctx, incidentID, servers)
 		},
 	)
 }

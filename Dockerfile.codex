@@ -84,6 +84,7 @@ ENV API_WS_URL=ws://akmatori-api:3000/ws/codex
 ENV MCP_GATEWAY_URL=http://mcp-gateway:8080
 ENV WORKSPACE_DIR=/workspaces
 ENV SESSIONS_FILE=/home/codex/.codex/sessions.json
+ENV PYTHONPATH=/tools
 
 # Expose nothing - this container only makes outbound connections
 

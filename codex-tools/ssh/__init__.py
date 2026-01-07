@@ -5,7 +5,7 @@ This module provides SSH command execution on remote servers.
 All credentials are handled by the MCP Gateway.
 
 Example usage:
-    from tools.ssh import execute_command, test_connectivity, get_server_info
+    from ssh import execute_command, test_connectivity, get_server_info
 
     # Execute a command on all configured servers
     result = execute_command("uptime")
@@ -103,11 +103,14 @@ def test_connectivity() -> dict:
     return call("ssh.test_connectivity")
 
 
-def get_server_info() -> dict:
+def get_server_info(servers: list = None) -> dict:
     """
-    Get basic system information from all configured servers.
+    Get basic system information from specified servers (or all if not specified).
 
     Retrieves hostname, OS, and uptime from each server.
+
+    Args:
+        servers: Optional list of server hostnames/IPs to query (defaults to all)
 
     Returns:
         Dictionary with:
@@ -119,9 +122,16 @@ def get_server_info() -> dict:
                 - error: Error message if failed
 
     Example:
-        result = get_server_info()
+        # Get info from specific server
+        result = get_server_info(servers=["server1"])
         for r in result['results']:
             if not r.get('error'):
                 print(f"{r['server']}: {r['os']} - up {r['uptime']}")
+
+        # Get info from all servers
+        result = get_server_info()
     """
-    return call("ssh.get_server_info")
+    args = {}
+    if servers:
+        args["servers"] = servers
+    return call("ssh.get_server_info", args)
