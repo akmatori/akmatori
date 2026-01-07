@@ -62,8 +62,7 @@ func NewCommandValidator() *CommandValidator {
 			// File modification
 			"mv ", "mv\t", "cp ", "cp\t",
 			"chmod ", "chown ", "chgrp ",
-			// Output redirects
-			">", ">>",
+			// Note: Output redirects handled by containsWriteRedirect() for smarter detection
 			// Process control
 			"kill ", "killall ", "pkill ",
 			// System control
@@ -122,6 +121,11 @@ func (v *CommandValidator) ValidateCommand(command string, allowWriteCommands bo
 		if strings.Contains(cmd, pattern) {
 			return v.blockedError(fmt.Sprintf("contains dangerous pattern '%s'", strings.TrimSpace(pattern)))
 		}
+	}
+
+	// Check for dangerous output redirects (> but not 2> or >&)
+	if containsWriteRedirect(cmd) {
+		return v.blockedError("contains file output redirect '>'")
 	}
 
 	// Split on command separators: ; && || |
