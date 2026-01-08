@@ -41,6 +41,9 @@ type Message struct {
 	OpenAIAPIKey    string `json:"openai_api_key,omitempty"`
 	Model           string `json:"model,omitempty"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	BaseURL         string `json:"base_url,omitempty"`
+	ProxyURL        string `json:"proxy_url,omitempty"`
+	NoProxy         string `json:"no_proxy,omitempty"`
 }
 
 // OpenAISettings holds OpenAI configuration for Codex execution
@@ -48,6 +51,9 @@ type OpenAISettings struct {
 	APIKey          string
 	Model           string
 	ReasoningEffort string
+	BaseURL         string
+	ProxyURL        string
+	NoProxy         string
 }
 
 // Client represents a WebSocket client

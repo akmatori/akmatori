@@ -40,9 +40,12 @@ type CodexMessage struct {
 	Data       map[string]interface{} `json:"data,omitempty"`
 
 	// OpenAI settings (sent with new_incident)
-	OpenAIAPIKey     string `json:"openai_api_key,omitempty"`
-	Model            string `json:"model,omitempty"`
-	ReasoningEffort  string `json:"reasoning_effort,omitempty"`
+	OpenAIAPIKey    string `json:"openai_api_key,omitempty"`
+	Model           string `json:"model,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	BaseURL         string `json:"base_url,omitempty"`
+	ProxyURL        string `json:"proxy_url,omitempty"`
+	NoProxy         string `json:"no_proxy,omitempty"`
 }
 
 // OpenAISettings holds OpenAI configuration for Codex execution
@@ -50,6 +53,9 @@ type OpenAISettings struct {
 	APIKey          string
 	Model           string
 	ReasoningEffort string
+	BaseURL         string
+	ProxyURL        string
+	NoProxy         string
 }
 
 // CodexWSHandler handles WebSocket connections from the Codex worker
@@ -297,6 +303,9 @@ func (h *CodexWSHandler) StartIncident(incidentID, task string, openai *OpenAISe
 		msg.OpenAIAPIKey = openai.APIKey
 		msg.Model = openai.Model
 		msg.ReasoningEffort = openai.ReasoningEffort
+		msg.BaseURL = openai.BaseURL
+		msg.ProxyURL = openai.ProxyURL
+		msg.NoProxy = openai.NoProxy
 	}
 
 	if err := h.SendToWorker(msg); err != nil {

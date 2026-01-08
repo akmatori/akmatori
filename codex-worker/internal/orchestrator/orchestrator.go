@@ -104,6 +104,9 @@ func (o *Orchestrator) handleMessage(msg ws.Message) {
 				APIKey:          msg.OpenAIAPIKey,
 				Model:           msg.Model,
 				ReasoningEffort: msg.ReasoningEffort,
+				BaseURL:         msg.BaseURL,
+				ProxyURL:        msg.ProxyURL,
+				NoProxy:         msg.NoProxy,
 			}
 		}
 		go o.handleNewIncident(msg.IncidentID, msg.Task, openaiSettings)
@@ -116,6 +119,9 @@ func (o *Orchestrator) handleMessage(msg ws.Message) {
 				APIKey:          msg.OpenAIAPIKey,
 				Model:           msg.Model,
 				ReasoningEffort: msg.ReasoningEffort,
+				BaseURL:         msg.BaseURL,
+				ProxyURL:        msg.ProxyURL,
+				NoProxy:         msg.NoProxy,
 			}
 		}
 		go o.handleContinueIncident(msg.IncidentID, msg.Message, openaiSettings)
@@ -142,6 +148,9 @@ func (o *Orchestrator) handleNewIncident(incidentID, task string, openaiSettings
 			APIKey:          openaiSettings.APIKey,
 			Model:           openaiSettings.Model,
 			ReasoningEffort: openaiSettings.ReasoningEffort,
+			BaseURL:         openaiSettings.BaseURL,
+			ProxyURL:        openaiSettings.ProxyURL,
+			NoProxy:         openaiSettings.NoProxy,
 		}
 	}
 
@@ -192,6 +201,9 @@ func (o *Orchestrator) handleContinueIncident(incidentID, message string, openai
 			APIKey:          openaiSettings.APIKey,
 			Model:           openaiSettings.Model,
 			ReasoningEffort: openaiSettings.ReasoningEffort,
+			BaseURL:         openaiSettings.BaseURL,
+			ProxyURL:        openaiSettings.ProxyURL,
+			NoProxy:         openaiSettings.NoProxy,
 		}
 	}
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -688,6 +689,9 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 						APIKey:          dbSettings.APIKey,
 						Model:           dbSettings.Model,
 						ReasoningEffort: dbSettings.ModelReasoningEffort,
+						BaseURL:         dbSettings.BaseURL,
+						ProxyURL:        dbSettings.ProxyURL,
+						NoProxy:         dbSettings.NoProxy,
 					}
 					log.Printf("Using OpenAI model: %s", dbSettings.Model)
 				}
@@ -1025,6 +1029,36 @@ func maskToken(token string) string {
 	return "****" + token[len(token)-4:]
 }
 
+// maskProxyURL masks the password in a proxy URL if present
+// e.g., "http://user:secret@proxy:8080" -> "http://user:****@proxy:8080"
+func maskProxyURL(proxyURL string) string {
+	if proxyURL == "" {
+		return ""
+	}
+	parsed, err := url.Parse(proxyURL)
+	if err != nil {
+		return proxyURL
+	}
+	if parsed.User != nil {
+		if _, hasPassword := parsed.User.Password(); hasPassword {
+			parsed.User = url.UserPassword(parsed.User.Username(), "****")
+		}
+	}
+	return parsed.String()
+}
+
+// isValidURL validates that a string is a valid HTTP or HTTPS URL
+func isValidURL(rawURL string) bool {
+	if rawURL == "" {
+		return true // Empty is valid (optional field)
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return parsed.Scheme == "http" || parsed.Scheme == "https"
+}
+
 // ModelConfig defines the available models and their valid reasoning effort options
 var ModelConfigs = map[string][]string{
 	"gpt-5.2":            {"low", "medium", "high", "extra_high"},
@@ -1051,6 +1085,9 @@ func (h *APIHandler) handleOpenAISettings(w http.ResponseWriter, r *http.Request
 			"api_key":                 maskToken(settings.APIKey),
 			"model":                   settings.Model,
 			"model_reasoning_effort":  settings.ModelReasoningEffort,
+			"base_url":                settings.BaseURL,
+			"proxy_url":               maskProxyURL(settings.ProxyURL),
+			"no_proxy":                settings.NoProxy,
 			"is_configured":           settings.IsConfigured(),
 			"valid_reasoning_efforts": settings.GetValidReasoningEfforts(),
 			"available_models":        ModelConfigs,
@@ -1065,6 +1102,9 @@ func (h *APIHandler) handleOpenAISettings(w http.ResponseWriter, r *http.Request
 			APIKey               *string `json:"api_key"`
 			Model                *string `json:"model"`
 			ModelReasoningEffort *string `json:"model_reasoning_effort"`
+			BaseURL              *string `json:"base_url"`
+			ProxyURL             *string `json:"proxy_url"`
+			NoProxy              *string `json:"no_proxy"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1075,6 +1115,16 @@ func (h *APIHandler) handleOpenAISettings(w http.ResponseWriter, r *http.Request
 		var settings database.OpenAISettings
 		if err := db.First(&settings).Error; err != nil {
 			http.Error(w, "Settings not found", http.StatusNotFound)
+			return
+		}
+
+		// Validate URLs if provided
+		if req.BaseURL != nil && !isValidURL(*req.BaseURL) {
+			http.Error(w, "Invalid base_url: must be a valid HTTP or HTTPS URL", http.StatusBadRequest)
+			return
+		}
+		if req.ProxyURL != nil && !isValidURL(*req.ProxyURL) {
+			http.Error(w, "Invalid proxy_url: must be a valid HTTP or HTTPS URL", http.StatusBadRequest)
 			return
 		}
 
@@ -1135,6 +1185,15 @@ func (h *APIHandler) handleOpenAISettings(w http.ResponseWriter, r *http.Request
 		if req.ModelReasoningEffort != nil {
 			updates["model_reasoning_effort"] = *req.ModelReasoningEffort
 		}
+		if req.BaseURL != nil {
+			updates["base_url"] = *req.BaseURL
+		}
+		if req.ProxyURL != nil {
+			updates["proxy_url"] = *req.ProxyURL
+		}
+		if req.NoProxy != nil {
+			updates["no_proxy"] = *req.NoProxy
+		}
 
 		if err := db.Model(&settings).Updates(updates).Error; err != nil {
 			http.Error(w, fmt.Sprintf("Failed to update settings: %v", err), http.StatusInternalServerError)
@@ -1147,6 +1206,9 @@ func (h *APIHandler) handleOpenAISettings(w http.ResponseWriter, r *http.Request
 			"api_key":                 maskToken(settings.APIKey),
 			"model":                   settings.Model,
 			"model_reasoning_effort":  settings.ModelReasoningEffort,
+			"base_url":                settings.BaseURL,
+			"proxy_url":               maskProxyURL(settings.ProxyURL),
+			"no_proxy":                settings.NoProxy,
 			"is_configured":           settings.IsConfigured(),
 			"valid_reasoning_efforts": settings.GetValidReasoningEfforts(),
 			"available_models":        ModelConfigs,

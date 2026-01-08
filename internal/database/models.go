@@ -194,13 +194,16 @@ func (SlackSettings) TableName() string {
 
 // OpenAISettings stores OpenAI API configuration
 type OpenAISettings struct {
-	ID                    uint      `gorm:"primaryKey" json:"id"`
-	APIKey                string    `gorm:"type:text" json:"api_key"`
-	Model                 string    `gorm:"type:varchar(100);default:'gpt-5.1-codex'" json:"model"`
-	ModelReasoningEffort  string    `gorm:"type:varchar(50);default:'medium'" json:"model_reasoning_effort"`
-	Enabled               bool      `gorm:"default:false" json:"enabled"`
-	CreatedAt             time.Time `json:"created_at"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	ID                   uint      `gorm:"primaryKey" json:"id"`
+	APIKey               string    `gorm:"type:text" json:"api_key"`
+	Model                string    `gorm:"type:varchar(100);default:'gpt-5.1-codex'" json:"model"`
+	ModelReasoningEffort string    `gorm:"type:varchar(50);default:'medium'" json:"model_reasoning_effort"`
+	BaseURL              string    `gorm:"type:text" json:"base_url"`  // Custom OpenAI API base URL (for Azure, local LLMs, etc.)
+	ProxyURL             string    `gorm:"type:text" json:"proxy_url"` // HTTP/HTTPS proxy URL
+	NoProxy              string    `gorm:"type:text" json:"no_proxy"`  // Comma-separated hosts to bypass proxy
+	Enabled              bool      `gorm:"default:false" json:"enabled"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 // IsConfigured returns true if API key is set

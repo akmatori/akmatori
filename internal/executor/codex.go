@@ -225,6 +225,20 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 			cmd.Env = append(cmd.Env, "CODEX_REASONING_EFFORT="+openaiSettings.ModelReasoningEffort)
 			log.Printf("Using reasoning effort: %s", openaiSettings.ModelReasoningEffort)
 		}
+		// Set custom base URL if configured (for Azure OpenAI, local LLMs, etc.)
+		if openaiSettings.BaseURL != "" {
+			cmd.Env = append(cmd.Env, "OPENAI_BASE_URL="+openaiSettings.BaseURL)
+			log.Printf("Using custom base URL: %s", openaiSettings.BaseURL)
+		}
+		// Set proxy settings if configured
+		if openaiSettings.ProxyURL != "" {
+			cmd.Env = append(cmd.Env, "HTTP_PROXY="+openaiSettings.ProxyURL)
+			cmd.Env = append(cmd.Env, "HTTPS_PROXY="+openaiSettings.ProxyURL)
+			log.Printf("Using proxy: %s", openaiSettings.ProxyURL)
+		}
+		if openaiSettings.NoProxy != "" {
+			cmd.Env = append(cmd.Env, "NO_PROXY="+openaiSettings.NoProxy)
+		}
 	}
 
 	// Log the exact command being executed

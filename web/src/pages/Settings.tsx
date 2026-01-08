@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, MessageSquare, Cpu, Power, PowerOff, Check, Info, Bell } from 'lucide-react';
+import { Save, MessageSquare, Cpu, Power, PowerOff, Check, Info, Bell, ChevronDown, ChevronRight } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { SuccessMessage, WarningMessage } from '../components/ErrorMessage';
@@ -43,6 +43,10 @@ export default function Settings() {
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState<OpenAIModel>('gpt-5.1-codex');
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('medium');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [proxyUrl, setProxyUrl] = useState('');
+  const [noProxy, setNoProxy] = useState('');
+  const [advancedExpanded, setAdvancedExpanded] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -72,6 +76,13 @@ export default function Settings() {
       setOpenaiSettings(data);
       setModel(data.model);
       setReasoningEffort(data.model_reasoning_effort);
+      setBaseUrl(data.base_url || '');
+      setProxyUrl(data.proxy_url || '');
+      setNoProxy(data.no_proxy || '');
+      // Auto-expand advanced section if any advanced settings are configured
+      if (data.base_url || data.proxy_url || data.no_proxy) {
+        setAdvancedExpanded(true);
+      }
       setOpenaiError(null);
     } catch (err) {
       setOpenaiError('Failed to load OpenAI settings');
@@ -132,10 +143,18 @@ export default function Settings() {
         updates.api_key = apiKey;
       }
 
+      // Include proxy settings (they can be set to empty to clear them)
+      updates.base_url = baseUrl;
+      updates.proxy_url = proxyUrl;
+      updates.no_proxy = noProxy;
+
       const updated = await openaiSettingsApi.update(updates);
       setOpenaiSettings(updated);
       setApiKey('');
       setReasoningEffort(updated.model_reasoning_effort);
+      setBaseUrl(updated.base_url || '');
+      setProxyUrl(updated.proxy_url || '');
+      setNoProxy(updated.no_proxy || '');
       setOpenaiSuccess(true);
       setTimeout(() => setOpenaiSuccess(false), 3000);
     } catch (err) {
@@ -378,6 +397,80 @@ export default function Settings() {
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               Higher reasoning effort increases accuracy but uses more tokens and time
             </p>
+          </div>
+
+          {/* Advanced Settings (Collapsible) */}
+          <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
+            <button
+              type="button"
+              onClick={() => setAdvancedExpanded(!advancedExpanded)}
+              className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+            >
+              {advancedExpanded ? (
+                <ChevronDown className="w-4 h-4" />
+              ) : (
+                <ChevronRight className="w-4 h-4" />
+              )}
+              Advanced Settings
+              {(baseUrl || proxyUrl || noProxy) && (
+                <span className="badge badge-default text-xs">Configured</span>
+              )}
+            </button>
+
+            {advancedExpanded && (
+              <div className="mt-4 space-y-4 pl-6 border-l-2 border-gray-200 dark:border-gray-700">
+                {/* Base URL */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Base URL
+                  </label>
+                  <input
+                    type="text"
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                    placeholder="https://api.openai.com/v1"
+                    className="input-field"
+                  />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Custom API endpoint for Azure OpenAI, local LLMs, or API gateways. Leave empty for default OpenAI.
+                  </p>
+                </div>
+
+                {/* Proxy URL */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Proxy URL
+                  </label>
+                  <input
+                    type="text"
+                    value={proxyUrl}
+                    onChange={(e) => setProxyUrl(e.target.value)}
+                    placeholder="http://proxy.example.com:8080"
+                    className="input-field"
+                  />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    HTTP/HTTPS proxy for corporate networks. Supports authentication: http://user:pass@proxy:port
+                  </p>
+                </div>
+
+                {/* No Proxy */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    No Proxy
+                  </label>
+                  <input
+                    type="text"
+                    value={noProxy}
+                    onChange={(e) => setNoProxy(e.target.value)}
+                    placeholder="localhost,127.0.0.1,.internal.example.com"
+                    className="input-field"
+                  />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Comma-separated list of hosts to bypass the proxy
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

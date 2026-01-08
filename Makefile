@@ -86,3 +86,19 @@ docker-build: ## Build Docker image
 
 docker-run: ## Run Docker container
 	docker run --env-file .env akmatori:latest
+
+docker-up: ## Start all containers with docker-compose (includes directory init)
+	docker-compose up -d
+
+docker-down: ## Stop all containers
+	docker-compose down
+
+docker-logs: ## Show logs from all containers
+	docker-compose logs -f
+
+docker-restart: ## Restart all containers
+	docker-compose restart
+
+docker-clean: ## Stop containers and remove volumes (WARNING: destroys data)
+	docker-compose down -v
+	rm -rf ./akmatori_data
