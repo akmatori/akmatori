@@ -4,6 +4,63 @@ Akmatori is an AI-powered AIOps agent that integrates with monitoring systems an
 
 <img width="1436" height="659" alt="image" src="https://github.com/user-attachments/assets/b2c78bf5-9e20-47da-8ec6-b841c6a0a3de" />
 
+## Quick Start
+
+### Prerequisites
+
+- Docker and Docker Compose v2+
+- OpenAI API key ([get one here](https://platform.openai.com/api-keys))
+- Slack App (optional, for Slack integration)
+
+### Installation
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/akmatori/akmatori.git
+   cd akmatori
+   ```
+
+2. Create and configure environment file:
+   ```bash
+   cp .env.example .env
+   ```
+
+   Edit `.env` and set secure passwords:
+   ```bash
+   ADMIN_PASSWORD=your-secure-password
+   POSTGRES_PASSWORD=your-db-password
+   ```
+
+3. Start the services (first run builds containers, takes 3-5 minutes):
+   ```bash
+   docker-compose up -d
+   ```
+
+4. Verify all containers are running:
+   ```bash
+   docker-compose ps
+   ```
+   All 5 services should show "Up" status.
+
+5. Access the web dashboard at `http://localhost:8080`
+   - **Username:** `admin`
+   - **Password:** the `ADMIN_PASSWORD` you set in `.env`
+
+### First Steps After Installation
+
+1. **Configure OpenAI** — Go to **Settings > OpenAI** and enter your API key
+2. **Create a test incident** — Go to **Incidents > New** and enter a task like "List the files in the current directory"
+3. **Set up alert sources** — Go to **Settings > Alert Sources** to connect your monitoring systems
+4. (Optional) **Configure Slack** — Go to **Settings > Slack** for alert notifications
+
+### Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| Port 8080 already in use | Change `HTTP_PORT` in `.env` and restart |
+| Container won't start | Check logs: `docker-compose logs -f akmatori-api` |
+| Can't log in | Verify `ADMIN_PASSWORD` is set in `.env` and restart |
+| Services unhealthy | Run `docker-compose restart` |
 
 ## Features
 
@@ -70,43 +127,6 @@ Akmatori uses a secure 4-container architecture with network isolation:
 - **Per-incident auth**: OpenAI API key passed via WebSocket for each task
 - **Network segmentation**: Three isolated Docker networks
 - **UID separation**: API (UID 1000) and Codex (UID 1001) for file permission control
-
-## Quick Start
-
-### Prerequisites
-
-- Docker and Docker Compose
-- OpenAI API key
-- Slack App (optional, for Slack integration)
-
-### Installation
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/akmatori/akmatori.git
-   cd akmatori
-   ```
-
-2. Create environment file:
-   ```bash
-   cp .env.example .env
-   ```
-
-3. Edit `.env` with your configuration:
-   ```bash
-   ADMIN_PASSWORD=your-secure-password
-   HTTP_PORT=8080
-   POSTGRES_USER=akmatori
-   POSTGRES_PASSWORD=your-db-password
-   POSTGRES_DB=akmatori
-   ```
-
-4. Start the services:
-   ```bash
-   docker-compose up -d
-   ```
-
-5. Access the web dashboard at `http://localhost:8080`
 
 ## Configuration
 
