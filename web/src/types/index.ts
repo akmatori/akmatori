@@ -101,6 +101,9 @@ export interface OpenAISettings {
   api_key: string;  // Masked for display
   model: OpenAIModel;
   model_reasoning_effort: ReasoningEffort;
+  base_url: string;   // Custom API endpoint (Azure OpenAI, local LLMs, etc.)
+  proxy_url: string;  // HTTP/HTTPS proxy URL (masked if has credentials)
+  no_proxy: string;   // Comma-separated hosts to bypass proxy
   is_configured: boolean;
   valid_reasoning_efforts: ReasoningEffort[];
   available_models: Record<OpenAIModel, ReasoningEffort[]>;
@@ -112,6 +115,9 @@ export interface OpenAISettingsUpdate {
   api_key?: string;
   model?: OpenAIModel;
   model_reasoning_effort?: ReasoningEffort;
+  base_url?: string;
+  proxy_url?: string;
+  no_proxy?: string;
 }
 
 // Context Files

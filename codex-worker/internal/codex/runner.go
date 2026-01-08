@@ -54,6 +54,9 @@ type OpenAISettings struct {
 	APIKey          string
 	Model           string
 	ReasoningEffort string
+	BaseURL         string
+	ProxyURL        string
+	NoProxy         string
 }
 
 // OutputCallback is called for each output line from Codex
@@ -294,6 +297,20 @@ func (r *Runner) buildEnvironment(incidentID string, openai *OpenAISettings) []s
 		if openai.ReasoningEffort != "" {
 			env = append(env, fmt.Sprintf("CODEX_REASONING_EFFORT=%s", openai.ReasoningEffort))
 			r.logger.Printf("Using reasoning effort: %s", openai.ReasoningEffort)
+		}
+		// Set custom base URL if configured (for Azure OpenAI, local LLMs, etc.)
+		if openai.BaseURL != "" {
+			env = append(env, fmt.Sprintf("OPENAI_BASE_URL=%s", openai.BaseURL))
+			r.logger.Printf("Using custom base URL: %s", openai.BaseURL)
+		}
+		// Set proxy settings if configured
+		if openai.ProxyURL != "" {
+			env = append(env, fmt.Sprintf("HTTP_PROXY=%s", openai.ProxyURL))
+			env = append(env, fmt.Sprintf("HTTPS_PROXY=%s", openai.ProxyURL))
+			r.logger.Printf("Using proxy: %s", openai.ProxyURL)
+		}
+		if openai.NoProxy != "" {
+			env = append(env, fmt.Sprintf("NO_PROXY=%s", openai.NoProxy))
 		}
 	}
 

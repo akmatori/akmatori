@@ -241,6 +241,9 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 				APIKey:          dbSettings.APIKey,
 				Model:           dbSettings.Model,
 				ReasoningEffort: dbSettings.ModelReasoningEffort,
+				BaseURL:         dbSettings.BaseURL,
+				ProxyURL:        dbSettings.ProxyURL,
+				NoProxy:         dbSettings.NoProxy,
 			}
 			log.Printf("Using OpenAI model: %s", dbSettings.Model)
 		} else {
