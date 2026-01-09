@@ -179,6 +179,10 @@ go test -v -run TestNewRelicAdapter ./internal/alerts/adapters/...
 make test-all
 ```
 
+## Code Cleanup
+
+Use the **code simplifier agent** at the end of a long coding session, or to clean up complex PRs. This helps reduce unnecessary complexity and ensures code remains maintainable.
+
 ## Do NOT
 
 - Skip running tests after changes

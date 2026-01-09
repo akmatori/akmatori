@@ -177,10 +177,10 @@ func (o *Orchestrator) handleNewIncident(incidentID, task string, openaiSettings
 	// Mark as completed
 	o.sessionStore.SetCompleted(incidentID, result.Response, result.FullLog)
 
-	// Send completion
-	o.wsClient.SendCompleted(incidentID, result.SessionID, result.Response)
+	// Send completion with metrics
+	o.wsClient.SendCompleted(incidentID, result.SessionID, result.Response, result.TokensUsed, result.ExecutionTimeMs)
 
-	o.logger.Printf("Incident %s completed", incidentID)
+	o.logger.Printf("Incident %s completed (tokens: %d, time: %dms)", incidentID, result.TokensUsed, result.ExecutionTimeMs)
 }
 
 // handleContinueIncident handles continuing an existing incident
@@ -224,10 +224,10 @@ func (o *Orchestrator) handleContinueIncident(incidentID, message string, openai
 	// Update session
 	o.sessionStore.SetCompleted(incidentID, result.Response, result.FullLog)
 
-	// Send completion
-	o.wsClient.SendCompleted(incidentID, result.SessionID, result.Response)
+	// Send completion with metrics
+	o.wsClient.SendCompleted(incidentID, result.SessionID, result.Response, result.TokensUsed, result.ExecutionTimeMs)
 
-	o.logger.Printf("Continue incident %s completed", incidentID)
+	o.logger.Printf("Continue incident %s completed (tokens: %d, time: %dms)", incidentID, result.TokensUsed, result.ExecutionTimeMs)
 }
 
 // handleCancelIncident handles cancelling an incident

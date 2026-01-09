@@ -37,6 +37,10 @@ type Message struct {
 	Error      string                 `json:"error,omitempty"`
 	Data       map[string]interface{} `json:"data,omitempty"`
 
+	// Execution metrics (sent with codex_completed)
+	TokensUsed      int   `json:"tokens_used,omitempty"`
+	ExecutionTimeMs int64 `json:"execution_time_ms,omitempty"`
+
 	// OpenAI settings (received with new_incident)
 	OpenAIAPIKey    string `json:"openai_api_key,omitempty"`
 	Model           string `json:"model,omitempty"`
@@ -165,13 +169,15 @@ func (c *Client) SendOutput(incidentID, output string) error {
 	})
 }
 
-// SendCompleted sends completion notification
-func (c *Client) SendCompleted(incidentID, sessionID, response string) error {
+// SendCompleted sends completion notification with metrics
+func (c *Client) SendCompleted(incidentID, sessionID, response string, tokensUsed int, executionTimeMs int64) error {
 	return c.Send(Message{
-		Type:       MessageTypeCodexCompleted,
-		IncidentID: incidentID,
-		SessionID:  sessionID,
-		Output:     response,
+		Type:            MessageTypeCodexCompleted,
+		IncidentID:      incidentID,
+		SessionID:       sessionID,
+		Output:          response,
+		TokensUsed:      tokensUsed,
+		ExecutionTimeMs: executionTimeMs,
 	})
 }
 

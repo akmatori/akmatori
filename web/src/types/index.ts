@@ -45,6 +45,8 @@ export interface Incident {
   working_dir: string;
   full_log: string;
   response: string;  // Final response/output to user
+  tokens_used: number;  // Total tokens used (input + output)
+  execution_time_ms: number;  // Execution time in milliseconds
   started_at: string;
   completed_at?: string;
   created_at: string;

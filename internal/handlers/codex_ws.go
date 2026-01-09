@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/utils"
 	"github.com/gorilla/websocket"
 )
 
@@ -38,6 +39,10 @@ type CodexMessage struct {
 	SessionID  string                 `json:"session_id,omitempty"`
 	Error      string                 `json:"error,omitempty"`
 	Data       map[string]interface{} `json:"data,omitempty"`
+
+	// Execution metrics (sent with codex_completed)
+	TokensUsed      int   `json:"tokens_used,omitempty"`
+	ExecutionTimeMs int64 `json:"execution_time_ms,omitempty"`
 
 	// OpenAI settings (sent with new_incident)
 	OpenAIAPIKey    string `json:"openai_api_key,omitempty"`
@@ -196,7 +201,12 @@ func (h *CodexWSHandler) handleCodexOutput(msg CodexMessage) {
 
 // handleCodexCompleted handles completion notification from Codex
 func (h *CodexWSHandler) handleCodexCompleted(msg CodexMessage) {
-	log.Printf("Incident %s completed with session %s", msg.IncidentID, msg.SessionID)
+	log.Printf("Incident %s completed with session %s, tokens: %d, time: %dms",
+		msg.IncidentID, msg.SessionID, msg.TokensUsed, msg.ExecutionTimeMs)
+
+	// Append metrics to response (for display in reasoning log and Slack)
+	executionTime := time.Duration(msg.ExecutionTimeMs) * time.Millisecond
+	responseWithMetrics := utils.AppendMetrics(msg.Output, executionTime, msg.TokensUsed)
 
 	// Call callback if registered
 	h.callbackMu.RLock()
@@ -204,7 +214,7 @@ func (h *CodexWSHandler) handleCodexCompleted(msg CodexMessage) {
 	h.callbackMu.RUnlock()
 
 	if exists && callback.OnCompleted != nil {
-		callback.OnCompleted(msg.SessionID, msg.Output)
+		callback.OnCompleted(msg.SessionID, responseWithMetrics)
 	}
 
 	// Remove callback
@@ -217,10 +227,12 @@ func (h *CodexWSHandler) handleCodexCompleted(msg CodexMessage) {
 	if err := database.GetDB().Model(&database.Incident{}).
 		Where("uuid = ?", msg.IncidentID).
 		Updates(map[string]interface{}{
-			"status":       database.IncidentStatusCompleted,
-			"session_id":   msg.SessionID,
-			"response":     msg.Output,
-			"completed_at": &now,
+			"status":            database.IncidentStatusCompleted,
+			"session_id":        msg.SessionID,
+			"response":          responseWithMetrics,
+			"tokens_used":       msg.TokensUsed,
+			"execution_time_ms": msg.ExecutionTimeMs,
+			"completed_at":      &now,
 		}).Error; err != nil {
 		log.Printf("Failed to update incident completion: %v", err)
 	}

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { RefreshCw, X, Plus, MessageSquare, Activity, Clock, CheckCircle, AlertCircle, Terminal, ChevronDown, ChevronRight } from 'lucide-react';
+import { RefreshCw, X, Plus, MessageSquare, Activity, Clock, CheckCircle, AlertCircle, Terminal, ChevronDown, ChevronRight, Zap, Timer } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
@@ -148,6 +148,26 @@ export default function Incidents() {
       default:
         return { class: 'badge-default', icon: Clock, label: 'Pending' };
     }
+  };
+
+  // Format execution time in human-readable format
+  const formatExecutionTime = (ms: number): string => {
+    if (!ms || ms <= 0) return '-';
+    if (ms < 1000) return `${ms}ms`;
+    const seconds = ms / 1000;
+    if (seconds < 60) return `${seconds.toFixed(1)}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    if (minutes < 60) return `${minutes}m ${Math.round(remainingSeconds)}s`;
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return `${hours}h ${remainingMinutes}m`;
+  };
+
+  // Format token count with thousands separator
+  const formatTokens = (tokens: number): string => {
+    if (!tokens || tokens <= 0) return '-';
+    return tokens.toLocaleString();
   };
 
   const openModal = useCallback(async (incident: Incident, type: ModalType) => {
@@ -521,6 +541,23 @@ export default function Incidents() {
                     />
                     <span className="text-sm text-gray-600 dark:text-gray-400">Auto-refresh (2s)</span>
                   </label>
+                )}
+                {/* Execution metrics - show when completed or failed */}
+                {(selectedIncident.status === 'completed' || selectedIncident.status === 'failed') && (
+                  <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
+                    {selectedIncident.execution_time_ms > 0 && (
+                      <span className="flex items-center gap-1.5">
+                        <Timer className="w-4 h-4" />
+                        {formatExecutionTime(selectedIncident.execution_time_ms)}
+                      </span>
+                    )}
+                    {selectedIncident.tokens_used > 0 && (
+                      <span className="flex items-center gap-1.5">
+                        <Zap className="w-4 h-4" />
+                        {formatTokens(selectedIncident.tokens_used)} tokens
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
               <div className="flex items-center gap-3">

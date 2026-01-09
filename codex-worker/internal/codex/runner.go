@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Runner executes Codex CLI commands
@@ -43,10 +44,12 @@ type CodexEvent struct {
 
 // ExecuteResult holds the result of a Codex execution
 type ExecuteResult struct {
-	SessionID string
-	Response  string
-	FullLog   string
-	Error     error
+	SessionID       string
+	Response        string
+	FullLog         string
+	Error           error
+	TokensUsed      int   // Total tokens used (input + output)
+	ExecutionTimeMs int64 // Execution time in milliseconds
 }
 
 // OpenAISettings holds OpenAI configuration for Codex execution
@@ -64,6 +67,8 @@ type OutputCallback func(output string)
 
 // Execute runs Codex with the given task
 func (r *Runner) Execute(ctx context.Context, incidentID, task string, openai *OpenAISettings, onOutput OutputCallback) (*ExecuteResult, error) {
+	startTime := time.Now()
+
 	// Workspace directory is created by API with .codex/AGENTS.md and .codex/skills
 	workDir := filepath.Join(r.workspaceDir, incidentID)
 
@@ -129,6 +134,7 @@ func (r *Runner) Execute(ctx context.Context, incidentID, task string, openai *O
 
 	result := &ExecuteResult{}
 	var fullLog strings.Builder
+	var tokensUsed int
 
 	// Use WaitGroup to ensure goroutines complete before returning
 	var wg sync.WaitGroup
@@ -137,7 +143,7 @@ func (r *Runner) Execute(ctx context.Context, incidentID, task string, openai *O
 	// Process stdout (JSON events)
 	go func() {
 		defer wg.Done()
-		r.processStdout(stdout, &fullLog, result, onOutput)
+		tokensUsed = r.processStdout(stdout, &fullLog, result, onOutput)
 	}()
 
 	// Process stderr (for session ID extraction)
@@ -159,12 +165,17 @@ func (r *Runner) Execute(ctx context.Context, incidentID, task string, openai *O
 	wg.Wait()
 
 	result.FullLog = fullLog.String()
-	r.logger.Printf("Execution complete, response: %d chars, session: %s", len(result.Response), result.SessionID)
+	result.TokensUsed = tokensUsed
+	result.ExecutionTimeMs = time.Since(startTime).Milliseconds()
+
+	r.logger.Printf("Execution complete, response: %d chars, session: %s, tokens: %d, time: %dms",
+		len(result.Response), result.SessionID, result.TokensUsed, result.ExecutionTimeMs)
 	return result, nil
 }
 
 // Resume resumes an existing Codex session
 func (r *Runner) Resume(ctx context.Context, incidentID, sessionID, message string, openai *OpenAISettings, onOutput OutputCallback) (*ExecuteResult, error) {
+	startTime := time.Now()
 	workDir := filepath.Join(r.workspaceDir, incidentID)
 
 	// Authenticate Codex CLI if API key provided
@@ -221,6 +232,7 @@ func (r *Runner) Resume(ctx context.Context, incidentID, sessionID, message stri
 
 	result := &ExecuteResult{SessionID: sessionID}
 	var fullLog strings.Builder
+	var tokensUsed int
 
 	// Use WaitGroup to ensure goroutines complete before returning
 	var wg sync.WaitGroup
@@ -228,7 +240,7 @@ func (r *Runner) Resume(ctx context.Context, incidentID, sessionID, message stri
 
 	go func() {
 		defer wg.Done()
-		r.processStdout(stdout, &fullLog, result, onOutput)
+		tokensUsed = r.processStdout(stdout, &fullLog, result, onOutput)
 	}()
 
 	go func() {
@@ -248,7 +260,11 @@ func (r *Runner) Resume(ctx context.Context, incidentID, sessionID, message stri
 	wg.Wait()
 
 	result.FullLog = fullLog.String()
-	r.logger.Printf("Resume complete, response: %d chars, session: %s", len(result.Response), result.SessionID)
+	result.TokensUsed = tokensUsed
+	result.ExecutionTimeMs = time.Since(startTime).Milliseconds()
+
+	r.logger.Printf("Resume complete, response: %d chars, session: %s, tokens: %d, time: %dms",
+		len(result.Response), result.SessionID, result.TokensUsed, result.ExecutionTimeMs)
 	return result, nil
 }
 
@@ -317,11 +333,12 @@ func (r *Runner) buildEnvironment(incidentID string, openai *OpenAISettings) []s
 	return env
 }
 
-// processStdout processes Codex JSON output
-func (r *Runner) processStdout(stdout io.Reader, fullLog *strings.Builder, result *ExecuteResult, onOutput OutputCallback) {
+// processStdout processes Codex JSON output and returns token usage
+func (r *Runner) processStdout(stdout io.Reader, fullLog *strings.Builder, result *ExecuteResult, onOutput OutputCallback) int {
 	decoder := json.NewDecoder(stdout)
 	var lastAgentMessage string
 	var streamLog strings.Builder // Accumulated human-readable log for streaming
+	var tokensUsed int
 
 	for {
 		var event map[string]interface{}
@@ -341,6 +358,22 @@ func (r *Runner) processStdout(stdout io.Reader, fullLog *strings.Builder, resul
 
 		// Extract useful information
 		eventType, _ := event["type"].(string)
+
+		// Extract token usage from any event that has it
+		if usage, ok := event["usage"].(map[string]interface{}); ok {
+			inputTokens := 0
+			outputTokens := 0
+			if it, ok := usage["input_tokens"].(float64); ok {
+				inputTokens = int(it)
+			}
+			if ot, ok := usage["output_tokens"].(float64); ok {
+				outputTokens = int(ot)
+			}
+			if inputTokens > 0 || outputTokens > 0 {
+				tokensUsed = inputTokens + outputTokens
+				r.logger.Printf("Got token usage: input=%d, output=%d, total=%d", inputTokens, outputTokens, tokensUsed)
+			}
+		}
 
 		switch eventType {
 		case "thread.started":
@@ -415,6 +448,23 @@ func (r *Runner) processStdout(stdout io.Reader, fullLog *strings.Builder, resul
 				}
 			}
 
+		case "turn.completed":
+			// Extract token usage from turn.completed event (most reliable source)
+			if usage, ok := event["usage"].(map[string]interface{}); ok {
+				inputTokens := 0
+				outputTokens := 0
+				if it, ok := usage["input_tokens"].(float64); ok {
+					inputTokens = int(it)
+				}
+				if ot, ok := usage["output_tokens"].(float64); ok {
+					outputTokens = int(ot)
+				}
+				if inputTokens > 0 || outputTokens > 0 {
+					tokensUsed = inputTokens + outputTokens
+					r.logger.Printf("Got final token usage from turn.completed: input=%d, output=%d, total=%d", inputTokens, outputTokens, tokensUsed)
+				}
+			}
+
 		case "assistant.reasoning":
 			// Stream reasoning output (legacy format)
 			if text, ok := event["text"].(string); ok {
@@ -430,7 +480,8 @@ func (r *Runner) processStdout(stdout io.Reader, fullLog *strings.Builder, resul
 	if lastAgentMessage != "" {
 		result.Response = lastAgentMessage
 	}
-	r.logger.Printf("Stdout processing complete, response: %d chars", len(result.Response))
+	r.logger.Printf("Stdout processing complete, response: %d chars, tokens: %d", len(result.Response), tokensUsed)
+	return tokensUsed
 }
 
 // processStderr processes Codex stderr for session ID
