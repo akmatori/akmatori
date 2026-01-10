@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useSetupStatus } from '../hooks/useSetupStatus';
+import OnboardingWizard from './OnboardingWizard';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -38,9 +40,18 @@ export default function Layout({ children }: LayoutProps) {
   const { user, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
+  const { showOnboarding, dismissOnboarding, markComplete } = useSetupStatus();
 
   return (
     <SidebarContext.Provider value={{ collapsed }}>
+      {/* Onboarding Wizard */}
+      {showOnboarding && (
+        <OnboardingWizard
+          onComplete={markComplete}
+          onSkip={dismissOnboarding}
+        />
+      )}
+
       <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
           {/* Sidebar */}
           <aside

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, MessageSquare, Cpu, Power, PowerOff, Check, Info, Bell, ChevronDown, ChevronRight } from 'lucide-react';
+import { Save, MessageSquare, Cpu, Power, PowerOff, Info, Bell, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { SuccessMessage, WarningMessage } from '../components/ErrorMessage';
@@ -7,30 +7,85 @@ import AlertSourcesManager from '../components/AlertSourcesManager';
 import { slackSettingsApi, openaiSettingsApi } from '../api/client';
 import type { SlackSettings, SlackSettingsUpdate, OpenAISettings, OpenAISettingsUpdate, OpenAIModel, ReasoningEffort } from '../types';
 
-type SettingsTab = 'slack' | 'openai' | 'alert-sources';
+// Collapsible Section Component
+function SettingsSection({
+  title,
+  description,
+  icon: Icon,
+  status,
+  children,
+  defaultExpanded = false,
+}: {
+  title: string;
+  description: string;
+  icon: React.ElementType;
+  status?: 'configured' | 'not-configured' | 'disabled';
+  children: React.ReactNode;
+  defaultExpanded?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
 
-const tabs: { id: SettingsTab; label: string; icon: React.ElementType; description: string }[] = [
-  { id: 'slack', label: 'Slack', icon: MessageSquare, description: 'Chat integration' },
-  { id: 'openai', label: 'OpenAI', icon: Cpu, description: 'AI configuration' },
-  { id: 'alert-sources', label: 'Alert Sources', icon: Bell, description: 'Webhook integrations' },
-];
+  return (
+    <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between p-5 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors text-left"
+      >
+        <div className="flex items-center gap-4">
+          <div className="p-2.5 rounded-lg bg-gray-100 dark:bg-gray-800">
+            <Icon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-gray-900 dark:text-white">{title}</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400">{description}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {status === 'configured' && (
+            <span className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400">
+              <CheckCircle2 className="w-4 h-4" />
+              Configured
+            </span>
+          )}
+          {status === 'not-configured' && (
+            <span className="flex items-center gap-1.5 text-sm text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="w-4 h-4" />
+              Setup required
+            </span>
+          )}
+          {status === 'disabled' && (
+            <span className="text-sm text-gray-400 dark:text-gray-500">Disabled</span>
+          )}
+          {expanded ? (
+            <ChevronDown className="w-5 h-5 text-gray-400" />
+          ) : (
+            <ChevronRight className="w-5 h-5 text-gray-400" />
+          )}
+        </div>
+      </button>
+      {expanded && (
+        <div className="border-t border-gray-200 dark:border-gray-700 p-6 bg-gray-50/50 dark:bg-gray-900/30">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Settings() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('slack');
-
   // Slack settings state
   const [settings, setSettings] = useState<SlackSettings | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  const [slackLoading, setSlackLoading] = useState(true);
+  const [slackSaving, setSlackSaving] = useState(false);
+  const [slackError, setSlackError] = useState<string | null>(null);
+  const [slackSuccess, setSlackSuccess] = useState(false);
 
   // Slack form state
   const [botToken, setBotToken] = useState('');
   const [signingSecret, setSigningSecret] = useState('');
   const [appToken, setAppToken] = useState('');
   const [alertsChannel, setAlertsChannel] = useState('');
-  const [enabled, setEnabled] = useState(false);
+  const [slackEnabled, setSlackEnabled] = useState(false);
 
   // OpenAI settings state
   const [openaiSettings, setOpenaiSettings] = useState<OpenAISettings | null>(null);
@@ -46,26 +101,26 @@ export default function Settings() {
   const [baseUrl, setBaseUrl] = useState('');
   const [proxyUrl, setProxyUrl] = useState('');
   const [noProxy, setNoProxy] = useState('');
-  const [advancedExpanded, setAdvancedExpanded] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
-    loadSettings();
+    loadSlackSettings();
     loadOpenaiSettings();
   }, []);
 
-  const loadSettings = async () => {
+  const loadSlackSettings = async () => {
     try {
-      setLoading(true);
+      setSlackLoading(true);
       const data = await slackSettingsApi.get();
       setSettings(data);
       setAlertsChannel(data.alerts_channel || '');
-      setEnabled(data.enabled);
-      setError(null);
+      setSlackEnabled(data.enabled);
+      setSlackError(null);
     } catch (err) {
-      setError('Failed to load Slack settings');
+      setSlackError('Failed to load Slack settings');
       console.error(err);
     } finally {
-      setLoading(false);
+      setSlackLoading(false);
     }
   };
 
@@ -79,9 +134,9 @@ export default function Settings() {
       setBaseUrl(data.base_url || '');
       setProxyUrl(data.proxy_url || '');
       setNoProxy(data.no_proxy || '');
-      // Auto-expand advanced section if any advanced settings are configured
-      if (data.base_url || data.proxy_url || data.no_proxy) {
-        setAdvancedExpanded(true);
+      // Auto-expand advanced if any advanced settings are configured
+      if (data.base_url || data.proxy_url || data.no_proxy || data.model !== 'gpt-5.1-codex' || data.model_reasoning_effort !== 'medium') {
+        setShowAdvanced(true);
       }
       setOpenaiError(null);
     } catch (err) {
@@ -92,15 +147,15 @@ export default function Settings() {
     }
   };
 
-  const handleSave = async () => {
+  const handleSlackSave = async () => {
     try {
-      setSaving(true);
-      setError(null);
-      setSuccess(false);
+      setSlackSaving(true);
+      setSlackError(null);
+      setSlackSuccess(false);
 
       const updates: SlackSettingsUpdate = {
         alerts_channel: alertsChannel,
-        enabled,
+        enabled: slackEnabled,
       };
 
       if (botToken && !botToken.startsWith('****')) {
@@ -118,13 +173,13 @@ export default function Settings() {
       setBotToken('');
       setSigningSecret('');
       setAppToken('');
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
+      setSlackSuccess(true);
+      setTimeout(() => setSlackSuccess(false), 3000);
     } catch (err) {
-      setError('Failed to save settings');
+      setSlackError('Failed to save settings');
       console.error(err);
     } finally {
-      setSaving(false);
+      setSlackSaving(false);
     }
   };
 
@@ -143,7 +198,6 @@ export default function Settings() {
         updates.api_key = apiKey;
       }
 
-      // Include proxy settings (they can be set to empty to clear them)
       updates.base_url = baseUrl;
       updates.proxy_url = proxyUrl;
       updates.no_proxy = noProxy;
@@ -185,401 +239,317 @@ export default function Settings() {
     }
   };
 
-  const renderSlackTab = () => (
-    <div className="space-y-6">
-      {/* Status Badges */}
-      <div className="flex items-center gap-3">
-        <span className={`badge ${settings?.is_configured ? 'badge-success' : 'badge-warning'}`}>
-          <Check className="w-3 h-3" />
-          {settings?.is_configured ? 'Configured' : 'Not Configured'}
-        </span>
-        <span className={`badge ${settings?.enabled ? 'badge-success' : 'badge-default'}`}>
-          {settings?.enabled ? 'Enabled' : 'Disabled'}
-        </span>
-      </div>
+  // Determine OpenAI status
+  const openaiStatus = openaiSettings?.is_configured ? 'configured' : 'not-configured';
 
-      {error && <ErrorMessage message={error} />}
-      {success && <SuccessMessage message="Slack settings saved successfully!" />}
-
-      <p className="text-sm text-gray-600 dark:text-gray-400">
-        Configure Slack integration to receive alerts and interact with the bot via Slack.
-        The system can work without Slack - you can use the API or UI to create incidents directly.
-      </p>
-
-      {loading ? (
-        <LoadingSpinner />
-      ) : (
-        <div className="space-y-4">
-          {/* Bot Token */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Bot Token (xoxb-...)
-            </label>
-            <input
-              type="password"
-              value={botToken}
-              onChange={(e) => setBotToken(e.target.value)}
-              placeholder={settings?.bot_token || 'Enter Bot Token'}
-              className="input-field"
-            />
-            {settings?.bot_token && (
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Current: {settings.bot_token}</p>
-            )}
-          </div>
-
-          {/* Signing Secret */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Signing Secret
-            </label>
-            <input
-              type="password"
-              value={signingSecret}
-              onChange={(e) => setSigningSecret(e.target.value)}
-              placeholder={settings?.signing_secret || 'Enter Signing Secret'}
-              className="input-field"
-            />
-            {settings?.signing_secret && (
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Current: {settings.signing_secret}</p>
-            )}
-          </div>
-
-          {/* App Token */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              App Token (xapp-...)
-            </label>
-            <input
-              type="password"
-              value={appToken}
-              onChange={(e) => setAppToken(e.target.value)}
-              placeholder={settings?.app_token || 'Enter App Token'}
-              className="input-field"
-            />
-            {settings?.app_token && (
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Current: {settings.app_token}</p>
-            )}
-          </div>
-
-          {/* Alerts Channel */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Alerts Channel
-            </label>
-            <input
-              type="text"
-              value={alertsChannel}
-              onChange={(e) => setAlertsChannel(e.target.value)}
-              placeholder="e.g., #alerts or C01234567890"
-              className="input-field"
-            />
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Channel name (without #) or Channel ID where alerts will be posted
-            </p>
-          </div>
-
-          {/* Enabled Toggle */}
-          <div className="flex items-center gap-3 p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50">
-            <input
-              type="checkbox"
-              id="slackEnabled"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-            />
-            <label htmlFor="slackEnabled" className="flex items-center gap-2 cursor-pointer">
-              {enabled ? (
-                <Power className="w-4 h-4 text-green-500" />
-              ) : (
-                <PowerOff className="w-4 h-4 text-gray-400" />
-              )}
-              <span className="text-sm text-gray-700 dark:text-gray-300">
-                Enable Slack Integration
-              </span>
-            </label>
-          </div>
-
-          {enabled && !settings?.is_configured && (
-            <WarningMessage message="Please configure all three tokens (Bot Token, Signing Secret, App Token) to enable Slack integration." />
-          )}
-        </div>
-      )}
-
-      {/* Save Button */}
-      <div className="flex items-center justify-between pt-6 border-t border-gray-200 dark:border-gray-700">
-        <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
-          <Info className="w-3 h-3" />
-          Changes require a server restart to take effect
-        </p>
-        <button onClick={handleSave} disabled={saving || loading} className="btn btn-primary">
-          <Save className="w-4 h-4" />
-          {saving ? 'Saving...' : 'Save Slack Settings'}
-        </button>
-      </div>
-    </div>
-  );
-
-  const renderOpenAITab = () => (
-    <div className="space-y-6">
-      {/* Status Badge */}
-      <div className="flex items-center gap-3">
-        <span className={`badge ${openaiSettings?.is_configured ? 'badge-success' : 'badge-warning'}`}>
-          <Check className="w-3 h-3" />
-          {openaiSettings?.is_configured ? 'Configured' : 'Not Configured'}
-        </span>
-      </div>
-
-      {openaiError && <ErrorMessage message={openaiError} />}
-      {openaiSuccess && <SuccessMessage message="OpenAI settings saved successfully!" />}
-
-      <p className="text-sm text-gray-600 dark:text-gray-400">
-        Configure the OpenAI API settings for Codex. Select the model and reasoning effort level.
-      </p>
-
-      {openaiLoading ? (
-        <LoadingSpinner />
-      ) : (
-        <div className="space-y-4">
-          {/* API Key */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              API Key
-            </label>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder={openaiSettings?.api_key || 'Enter OpenAI API Key'}
-              className="input-field"
-            />
-            {openaiSettings?.api_key && (
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Current: {openaiSettings.api_key}</p>
-            )}
-          </div>
-
-          {/* Model Selection */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Model
-            </label>
-            <select
-              value={model}
-              onChange={(e) => handleModelChange(e.target.value as OpenAIModel)}
-              className="input-field"
-            >
-              <option value="gpt-5.2">gpt-5.2 (Latest, extra high reasoning)</option>
-              <option value="gpt-5.2-codex">gpt-5.2-codex (Latest Codex, extra high reasoning)</option>
-              <option value="gpt-5.1-codex-max">gpt-5.1-codex-max (Most capable, extra high reasoning)</option>
-              <option value="gpt-5.1-codex">gpt-5.1-codex (Recommended)</option>
-              <option value="gpt-5.1-codex-mini">gpt-5.1-codex-mini (Fast, limited reasoning)</option>
-              <option value="gpt-5.1">gpt-5.1 (Standard)</option>
-            </select>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Select the OpenAI model to use for AI tasks
-            </p>
-          </div>
-
-          {/* Reasoning Effort */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Reasoning Effort
-            </label>
-            <select
-              value={reasoningEffort}
-              onChange={(e) => setReasoningEffort(e.target.value as ReasoningEffort)}
-              className="input-field"
-            >
-              {getValidReasoningEfforts(model).map((effort) => (
-                <option key={effort} value={effort}>
-                  {effort === 'extra_high' ? 'Extra High' : effort.charAt(0).toUpperCase() + effort.slice(1)}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Higher reasoning effort increases accuracy but uses more tokens and time
-            </p>
-          </div>
-
-          {/* Advanced Settings (Collapsible) */}
-          <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
-            <button
-              type="button"
-              onClick={() => setAdvancedExpanded(!advancedExpanded)}
-              className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
-            >
-              {advancedExpanded ? (
-                <ChevronDown className="w-4 h-4" />
-              ) : (
-                <ChevronRight className="w-4 h-4" />
-              )}
-              Advanced Settings
-              {(baseUrl || proxyUrl || noProxy) && (
-                <span className="badge badge-default text-xs">Configured</span>
-              )}
-            </button>
-
-            {advancedExpanded && (
-              <div className="mt-4 space-y-4 pl-6 border-l-2 border-gray-200 dark:border-gray-700">
-                {/* Base URL */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Base URL
-                  </label>
-                  <input
-                    type="text"
-                    value={baseUrl}
-                    onChange={(e) => setBaseUrl(e.target.value)}
-                    placeholder="https://api.openai.com/v1"
-                    className="input-field"
-                  />
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Custom API endpoint for Azure OpenAI, local LLMs, or API gateways. Leave empty for default OpenAI.
-                  </p>
-                </div>
-
-                {/* Proxy URL */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Proxy URL
-                  </label>
-                  <input
-                    type="text"
-                    value={proxyUrl}
-                    onChange={(e) => setProxyUrl(e.target.value)}
-                    placeholder="http://proxy.example.com:8080"
-                    className="input-field"
-                  />
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    HTTP/HTTPS proxy for corporate networks. Supports authentication: http://user:pass@proxy:port
-                  </p>
-                </div>
-
-                {/* No Proxy */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    No Proxy
-                  </label>
-                  <input
-                    type="text"
-                    value={noProxy}
-                    onChange={(e) => setNoProxy(e.target.value)}
-                    placeholder="localhost,127.0.0.1,.internal.example.com"
-                    className="input-field"
-                  />
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Comma-separated list of hosts to bypass the proxy
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Save Button */}
-      <div className="flex items-center justify-between pt-6 border-t border-gray-200 dark:border-gray-700">
-        <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
-          <Info className="w-3 h-3" />
-          Settings take effect immediately for new executions
-        </p>
-        <button
-          onClick={handleOpenaiSave}
-          disabled={openaiSaving || openaiLoading}
-          className="btn btn-primary"
-        >
-          <Save className="w-4 h-4" />
-          {openaiSaving ? 'Saving...' : 'Save OpenAI Settings'}
-        </button>
-      </div>
-    </div>
-  );
-
-  const renderAlertSourcesTab = () => <AlertSourcesManager />;
-
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case 'slack':
-        return renderSlackTab();
-      case 'openai':
-        return renderOpenAITab();
-      case 'alert-sources':
-        return renderAlertSourcesTab();
-      default:
-        return null;
-    }
-  };
+  // Determine Slack status
+  const slackStatus = !settings ? undefined :
+    settings.is_configured && settings.enabled ? 'configured' :
+    settings.is_configured && !settings.enabled ? 'disabled' : 'not-configured';
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in max-w-3xl mx-auto">
       {/* Page Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
         <p className="mt-1 text-gray-600 dark:text-gray-400">
-          Configure system integrations and preferences
+          Configure your Akmatori instance
         </p>
       </div>
 
-      {/* Settings Layout: Vertical Tabs + Content */}
-      <div className="flex gap-8">
-        {/* Vertical Tab Navigation */}
-        <div className="w-56 flex-shrink-0">
-          <nav className="space-y-1">
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
+      {/* Settings Sections */}
+      <div className="space-y-4">
+        {/* OpenAI Section - Most Important, Default Expanded */}
+        <SettingsSection
+          title="AI Configuration"
+          description="OpenAI API settings for incident analysis"
+          icon={Cpu}
+          status={openaiStatus}
+          defaultExpanded={!openaiSettings?.is_configured}
+        >
+          {openaiLoading ? (
+            <LoadingSpinner />
+          ) : (
+            <div className="space-y-5">
+              {openaiError && <ErrorMessage message={openaiError} />}
+              {openaiSuccess && <SuccessMessage message="Settings saved" />}
 
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`
-                    w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-all
-                    ${isActive
-                      ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300 border-l-4 border-primary-500 pl-3'
-                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 border-l-4 border-transparent pl-3'
-                    }
-                  `}
-                >
-                  <Icon className={`w-5 h-5 ${isActive ? 'text-primary-500' : ''}`} />
-                  <div className="min-w-0">
-                    <div className={`font-medium ${isActive ? '' : 'text-gray-900 dark:text-white'}`}>
-                      {tab.label}
-                    </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-500 truncate">
-                      {tab.description}
-                    </div>
+              {/* API Key - Always Visible */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  OpenAI API Key <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder={openaiSettings?.api_key || 'sk-...'}
+                  className="input-field"
+                />
+                {openaiSettings?.api_key && (
+                  <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    Current: {openaiSettings.api_key}
+                  </p>
+                )}
+              </div>
+
+              {/* Advanced Settings Toggle */}
+              <button
+                type="button"
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
+              >
+                {showAdvanced ? (
+                  <ChevronDown className="w-4 h-4" />
+                ) : (
+                  <ChevronRight className="w-4 h-4" />
+                )}
+                Advanced settings
+                {(model !== 'gpt-5.1-codex' || reasoningEffort !== 'medium' || baseUrl || proxyUrl) && (
+                  <span className="text-xs text-primary-600 dark:text-primary-400">(customized)</span>
+                )}
+              </button>
+
+              {/* Advanced Settings */}
+              {showAdvanced && (
+                <div className="space-y-4 pl-4 border-l-2 border-gray-200 dark:border-gray-700">
+                  {/* Model Selection */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                      Model
+                    </label>
+                    <select
+                      value={model}
+                      onChange={(e) => handleModelChange(e.target.value as OpenAIModel)}
+                      className="input-field"
+                    >
+                      <option value="gpt-5.1-codex">gpt-5.1-codex (Recommended)</option>
+                      <option value="gpt-5.2-codex">gpt-5.2-codex (Latest)</option>
+                      <option value="gpt-5.2">gpt-5.2</option>
+                      <option value="gpt-5.1-codex-max">gpt-5.1-codex-max</option>
+                      <option value="gpt-5.1-codex-mini">gpt-5.1-codex-mini (Fast)</option>
+                      <option value="gpt-5.1">gpt-5.1</option>
+                    </select>
                   </div>
+
+                  {/* Reasoning Effort */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                      Reasoning Effort
+                    </label>
+                    <select
+                      value={reasoningEffort}
+                      onChange={(e) => setReasoningEffort(e.target.value as ReasoningEffort)}
+                      className="input-field"
+                    >
+                      {getValidReasoningEfforts(model).map((effort) => (
+                        <option key={effort} value={effort}>
+                          {effort === 'extra_high' ? 'Extra High' : effort.charAt(0).toUpperCase() + effort.slice(1)}
+                          {effort === 'medium' ? ' (Default)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Base URL */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                      Custom Base URL
+                    </label>
+                    <input
+                      type="text"
+                      value={baseUrl}
+                      onChange={(e) => setBaseUrl(e.target.value)}
+                      placeholder="https://api.openai.com/v1 (default)"
+                      className="input-field"
+                    />
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      For Azure OpenAI, local LLMs, or API gateways
+                    </p>
+                  </div>
+
+                  {/* Proxy URL */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                      HTTP Proxy
+                    </label>
+                    <input
+                      type="text"
+                      value={proxyUrl}
+                      onChange={(e) => setProxyUrl(e.target.value)}
+                      placeholder="http://proxy:8080"
+                      className="input-field"
+                    />
+                  </div>
+
+                  {/* No Proxy */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                      No Proxy
+                    </label>
+                    <input
+                      type="text"
+                      value={noProxy}
+                      onChange={(e) => setNoProxy(e.target.value)}
+                      placeholder="localhost,127.0.0.1"
+                      className="input-field"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Save Button */}
+              <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5" />
+                  Takes effect immediately
+                </p>
+                <button
+                  onClick={handleOpenaiSave}
+                  disabled={openaiSaving}
+                  className="btn btn-primary"
+                >
+                  <Save className="w-4 h-4" />
+                  {openaiSaving ? 'Saving...' : 'Save'}
                 </button>
-              );
-            })}
-          </nav>
-        </div>
-
-        {/* Tab Content */}
-        <div className="flex-1 min-w-0">
-          <div className="card">
-            {/* Tab Header */}
-            <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-200 dark:border-gray-700">
-              {(() => {
-                const currentTab = tabs.find(t => t.id === activeTab);
-                if (!currentTab) return null;
-                const Icon = currentTab.icon;
-                return (
-                  <>
-                    <div className="p-2 rounded-lg bg-primary-50 dark:bg-primary-900/20">
-                      <Icon className="w-5 h-5 text-primary-600 dark:text-primary-400" />
-                    </div>
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                      {currentTab.label}
-                    </h2>
-                  </>
-                );
-              })()}
+              </div>
             </div>
+          )}
+        </SettingsSection>
 
-            {/* Tab Content */}
-            {renderTabContent()}
-          </div>
-        </div>
+        {/* Slack Section */}
+        <SettingsSection
+          title="Slack Integration"
+          description="Receive alerts and interact via Slack"
+          icon={MessageSquare}
+          status={slackStatus}
+        >
+          {slackLoading ? (
+            <LoadingSpinner />
+          ) : (
+            <div className="space-y-5">
+              {slackError && <ErrorMessage message={slackError} />}
+              {slackSuccess && <SuccessMessage message="Settings saved" />}
+
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Optional. The system works without Slack - you can use the dashboard to create incidents directly.
+              </p>
+
+              {/* Bot Token */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  Bot Token
+                </label>
+                <input
+                  type="password"
+                  value={botToken}
+                  onChange={(e) => setBotToken(e.target.value)}
+                  placeholder={settings?.bot_token || 'xoxb-...'}
+                  className="input-field"
+                />
+                {settings?.bot_token && (
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Current: {settings.bot_token}</p>
+                )}
+              </div>
+
+              {/* Signing Secret */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  Signing Secret
+                </label>
+                <input
+                  type="password"
+                  value={signingSecret}
+                  onChange={(e) => setSigningSecret(e.target.value)}
+                  placeholder={settings?.signing_secret || 'Enter signing secret'}
+                  className="input-field"
+                />
+                {settings?.signing_secret && (
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Current: {settings.signing_secret}</p>
+                )}
+              </div>
+
+              {/* App Token */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  App Token
+                </label>
+                <input
+                  type="password"
+                  value={appToken}
+                  onChange={(e) => setAppToken(e.target.value)}
+                  placeholder={settings?.app_token || 'xapp-...'}
+                  className="input-field"
+                />
+                {settings?.app_token && (
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Current: {settings.app_token}</p>
+                )}
+              </div>
+
+              {/* Alerts Channel */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  Alerts Channel
+                </label>
+                <input
+                  type="text"
+                  value={alertsChannel}
+                  onChange={(e) => setAlertsChannel(e.target.value)}
+                  placeholder="alerts"
+                  className="input-field"
+                />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Channel name (without #) or Channel ID
+                </p>
+              </div>
+
+              {/* Enabled Toggle */}
+              <div className="flex items-center gap-3 p-4 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                <input
+                  type="checkbox"
+                  id="slackEnabled"
+                  checked={slackEnabled}
+                  onChange={(e) => setSlackEnabled(e.target.checked)}
+                />
+                <label htmlFor="slackEnabled" className="flex items-center gap-2 cursor-pointer">
+                  {slackEnabled ? (
+                    <Power className="w-4 h-4 text-green-500" />
+                  ) : (
+                    <PowerOff className="w-4 h-4 text-gray-400" />
+                  )}
+                  <span className="text-sm text-gray-700 dark:text-gray-300">
+                    Enable Slack Integration
+                  </span>
+                </label>
+              </div>
+
+              {slackEnabled && !settings?.is_configured && (
+                <WarningMessage message="Configure all three tokens to enable Slack." />
+              )}
+
+              {/* Save Button */}
+              <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5" />
+                  Requires server restart
+                </p>
+                <button onClick={handleSlackSave} disabled={slackSaving} className="btn btn-primary">
+                  <Save className="w-4 h-4" />
+                  {slackSaving ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            </div>
+          )}
+        </SettingsSection>
+
+        {/* Alert Sources Section */}
+        <SettingsSection
+          title="Alert Sources"
+          description="Webhook integrations for monitoring systems"
+          icon={Bell}
+        >
+          <AlertSourcesManager />
+        </SettingsSection>
       </div>
     </div>
   );
