@@ -48,8 +48,9 @@ type ExecuteResult struct {
 	Response        string
 	FullLog         string
 	Error           error
-	TokensUsed      int   // Total tokens used (input + output)
-	ExecutionTimeMs int64 // Execution time in milliseconds
+	ErrorMessage    string // Captured error message from Codex JSON events
+	TokensUsed      int    // Total tokens used (input + output)
+	ExecutionTimeMs int64  // Execution time in milliseconds
 }
 
 // OpenAISettings holds OpenAI configuration for Codex execution
@@ -135,6 +136,7 @@ func (r *Runner) Execute(ctx context.Context, incidentID, task string, openai *O
 	result := &ExecuteResult{}
 	var fullLog strings.Builder
 	var tokensUsed int
+	var stderrOutput string
 
 	// Use WaitGroup to ensure goroutines complete before returning
 	var wg sync.WaitGroup
@@ -146,27 +148,52 @@ func (r *Runner) Execute(ctx context.Context, incidentID, task string, openai *O
 		tokensUsed = r.processStdout(stdout, &fullLog, result, onOutput)
 	}()
 
-	// Process stderr (for session ID extraction)
+	// Process stderr (for session ID extraction and error capture)
 	go func() {
 		defer wg.Done()
-		r.processStderr(stderr, result, onOutput)
+		stderrOutput = r.processStderr(stderr, result, onOutput)
 	}()
 
 	// Wait for command to complete
 	err = cmd.Wait()
-	if err != nil {
-		if ctx.Err() == context.Canceled {
-			return nil, fmt.Errorf("execution cancelled")
-		}
-		result.Error = err
-	}
 
-	// Wait for output processing to complete
+	// Wait for output processing to complete before checking results
 	wg.Wait()
 
 	result.FullLog = fullLog.String()
 	result.TokensUsed = tokensUsed
 	result.ExecutionTimeMs = time.Since(startTime).Milliseconds()
+
+	// Handle errors - return meaningful error messages
+	if err != nil {
+		if ctx.Err() == context.Canceled {
+			return nil, fmt.Errorf("execution cancelled")
+		}
+		// Build error message with all available information
+		errMsg := err.Error()
+		// Prefer ErrorMessage from JSON events (most descriptive)
+		if result.ErrorMessage != "" {
+			errMsg = result.ErrorMessage
+		} else if stderrOutput != "" {
+			errMsg = fmt.Sprintf("%s: %s", err.Error(), strings.TrimSpace(stderrOutput))
+		}
+		r.logger.Printf("Execution failed: %s", errMsg)
+		return result, fmt.Errorf("codex execution failed: %s", errMsg)
+	}
+
+	// Check if we got an empty response - might indicate an API error
+	if result.Response == "" && result.TokensUsed == 0 {
+		// Prefer ErrorMessage from JSON events
+		if result.ErrorMessage != "" {
+			r.logger.Printf("Execution returned empty response with error: %s", result.ErrorMessage)
+			return result, fmt.Errorf("codex error: %s", result.ErrorMessage)
+		}
+		if stderrOutput != "" {
+			errMsg := strings.TrimSpace(stderrOutput)
+			r.logger.Printf("Execution returned empty response with stderr: %s", errMsg)
+			return result, fmt.Errorf("codex returned empty response: %s", errMsg)
+		}
+	}
 
 	r.logger.Printf("Execution complete, response: %d chars, session: %s, tokens: %d, time: %dms",
 		len(result.Response), result.SessionID, result.TokensUsed, result.ExecutionTimeMs)
@@ -233,6 +260,7 @@ func (r *Runner) Resume(ctx context.Context, incidentID, sessionID, message stri
 	result := &ExecuteResult{SessionID: sessionID}
 	var fullLog strings.Builder
 	var tokensUsed int
+	var stderrOutput string
 
 	// Use WaitGroup to ensure goroutines complete before returning
 	var wg sync.WaitGroup
@@ -245,23 +273,48 @@ func (r *Runner) Resume(ctx context.Context, incidentID, sessionID, message stri
 
 	go func() {
 		defer wg.Done()
-		r.processStderr(stderr, result, onOutput)
+		stderrOutput = r.processStderr(stderr, result, onOutput)
 	}()
 
 	err = cmd.Wait()
-	if err != nil {
-		if ctx.Err() == context.Canceled {
-			return nil, fmt.Errorf("execution cancelled")
-		}
-		result.Error = err
-	}
 
-	// Wait for output processing to complete
+	// Wait for output processing to complete before checking results
 	wg.Wait()
 
 	result.FullLog = fullLog.String()
 	result.TokensUsed = tokensUsed
 	result.ExecutionTimeMs = time.Since(startTime).Milliseconds()
+
+	// Handle errors - return meaningful error messages
+	if err != nil {
+		if ctx.Err() == context.Canceled {
+			return nil, fmt.Errorf("execution cancelled")
+		}
+		// Build error message with all available information
+		errMsg := err.Error()
+		// Prefer ErrorMessage from JSON events (most descriptive)
+		if result.ErrorMessage != "" {
+			errMsg = result.ErrorMessage
+		} else if stderrOutput != "" {
+			errMsg = fmt.Sprintf("%s: %s", err.Error(), strings.TrimSpace(stderrOutput))
+		}
+		r.logger.Printf("Resume failed: %s", errMsg)
+		return result, fmt.Errorf("codex resume failed: %s", errMsg)
+	}
+
+	// Check if we got an empty response - might indicate an API error
+	if result.Response == "" && result.TokensUsed == 0 {
+		// Prefer ErrorMessage from JSON events
+		if result.ErrorMessage != "" {
+			r.logger.Printf("Resume returned empty response with error: %s", result.ErrorMessage)
+			return result, fmt.Errorf("codex error: %s", result.ErrorMessage)
+		}
+		if stderrOutput != "" {
+			errMsg := strings.TrimSpace(stderrOutput)
+			r.logger.Printf("Resume returned empty response with stderr: %s", errMsg)
+			return result, fmt.Errorf("codex returned empty response: %s", errMsg)
+		}
+	}
 
 	r.logger.Printf("Resume complete, response: %d chars, session: %s, tokens: %d, time: %dms",
 		len(result.Response), result.SessionID, result.TokensUsed, result.ExecutionTimeMs)
@@ -359,6 +412,30 @@ func (r *Runner) processStdout(stdout io.Reader, fullLog *strings.Builder, resul
 		// Extract useful information
 		eventType, _ := event["type"].(string)
 
+		// Log all event types for debugging
+		r.logger.Printf("Received event type: %s", eventType)
+
+		// Check for error in any event (some events have inline errors)
+		if errMsg, ok := event["error"].(string); ok && errMsg != "" {
+			r.logger.Printf("Got error in event: %s", errMsg)
+			result.ErrorMessage = errMsg
+			streamLog.WriteString(fmt.Sprintf("❌ Error: %s\n", errMsg))
+			if onOutput != nil {
+				onOutput(streamLog.String())
+			}
+		}
+		// Also check for error object with message field
+		if errObj, ok := event["error"].(map[string]interface{}); ok {
+			if errMsg, ok := errObj["message"].(string); ok && errMsg != "" {
+				r.logger.Printf("Got error object: %s", errMsg)
+				result.ErrorMessage = errMsg
+				streamLog.WriteString(fmt.Sprintf("❌ Error: %s\n", errMsg))
+				if onOutput != nil {
+					onOutput(streamLog.String())
+				}
+			}
+		}
+
 		// Extract token usage from any event that has it
 		if usage, ok := event["usage"].(map[string]interface{}); ok {
 			inputTokens := 0
@@ -376,6 +453,25 @@ func (r *Runner) processStdout(stdout io.Reader, fullLog *strings.Builder, resul
 		}
 
 		switch eventType {
+		case "error":
+			// Handle explicit error events
+			if msg, ok := event["message"].(string); ok && msg != "" {
+				r.logger.Printf("Got error event: %s", msg)
+				result.ErrorMessage = msg
+				streamLog.WriteString(fmt.Sprintf("❌ Error: %s\n", msg))
+				if onOutput != nil {
+					onOutput(streamLog.String())
+				}
+			}
+			// Also check for error field with code
+			if code, ok := event["code"].(string); ok {
+				if result.ErrorMessage == "" {
+					result.ErrorMessage = fmt.Sprintf("Error code: %s", code)
+				} else {
+					result.ErrorMessage = fmt.Sprintf("%s (code: %s)", result.ErrorMessage, code)
+				}
+			}
+
 		case "thread.started":
 			// Extract thread_id as session ID
 			if threadID, ok := event["thread_id"].(string); ok && threadID != "" {
@@ -484,13 +580,16 @@ func (r *Runner) processStdout(stdout io.Reader, fullLog *strings.Builder, resul
 	return tokensUsed
 }
 
-// processStderr processes Codex stderr for session ID
-func (r *Runner) processStderr(stderr io.Reader, result *ExecuteResult, onOutput OutputCallback) {
+// processStderr processes Codex stderr for session ID and captures error messages
+func (r *Runner) processStderr(stderr io.Reader, result *ExecuteResult, onOutput OutputCallback) string {
 	scanner := bufio.NewScanner(stderr)
 	sessionRegex := regexp.MustCompile(`session[_\s]*(?:id)?[:\s]*([a-zA-Z0-9-]+)`)
+	var stderrOutput strings.Builder
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		stderrOutput.WriteString(line)
+		stderrOutput.WriteString("\n")
 
 		// Try to extract session ID
 		if matches := sessionRegex.FindStringSubmatch(strings.ToLower(line)); len(matches) > 1 {
@@ -502,6 +601,7 @@ func (r *Runner) processStderr(stderr io.Reader, result *ExecuteResult, onOutput
 			onOutput(line)
 		}
 	}
+	return stderrOutput.String()
 }
 
 // CleanupWorkspace removes the workspace for an incident
