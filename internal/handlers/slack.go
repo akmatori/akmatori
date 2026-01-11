@@ -244,8 +244,16 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 				BaseURL:         dbSettings.BaseURL,
 				ProxyURL:        dbSettings.ProxyURL,
 				NoProxy:         dbSettings.NoProxy,
+				// ChatGPT subscription auth fields
+				AuthMethod:          string(dbSettings.AuthMethod),
+				ChatGPTAccessToken:  dbSettings.ChatGPTAccessToken,
+				ChatGPTRefreshToken: dbSettings.ChatGPTRefreshToken,
 			}
-			log.Printf("Using OpenAI model: %s", dbSettings.Model)
+			// Add expiry timestamp if set
+			if dbSettings.ChatGPTExpiresAt != nil {
+				openaiSettings.ChatGPTExpiresAt = dbSettings.ChatGPTExpiresAt.Format(time.RFC3339)
+			}
+			log.Printf("Using OpenAI model: %s, auth method: %s", dbSettings.Model, dbSettings.AuthMethod)
 		} else {
 			log.Printf("Warning: Could not fetch OpenAI settings: %v", err)
 		}

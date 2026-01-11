@@ -194,6 +194,14 @@ func (SlackSettings) TableName() string {
 	return "slack_settings"
 }
 
+// AuthMethod represents the OpenAI authentication method
+type AuthMethod string
+
+const (
+	AuthMethodAPIKey              AuthMethod = "api_key"
+	AuthMethodChatGPTSubscription AuthMethod = "chatgpt_subscription"
+)
+
 // OpenAISettings stores OpenAI API configuration
 type OpenAISettings struct {
 	ID                   uint      `gorm:"primaryKey" json:"id"`
@@ -206,17 +214,42 @@ type OpenAISettings struct {
 	Enabled              bool      `gorm:"default:false" json:"enabled"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
+
+	// Authentication method selection
+	AuthMethod AuthMethod `gorm:"type:varchar(50);default:'api_key'" json:"auth_method"`
+
+	// ChatGPT subscription OAuth tokens (encrypted at rest)
+	ChatGPTAccessToken  string     `gorm:"type:text" json:"-"`                    // Not exposed in JSON responses
+	ChatGPTRefreshToken string     `gorm:"type:text" json:"-"`                    // Not exposed in JSON responses
+	ChatGPTExpiresAt    *time.Time `json:"chatgpt_expires_at,omitempty"`          // Token expiration timestamp
+	ChatGPTUserEmail    string     `gorm:"type:varchar(255)" json:"chatgpt_email"` // Display only - shows who authenticated
 }
 
-// IsConfigured returns true if API key is set
+// IsConfigured returns true if the selected auth method is properly configured
 func (o *OpenAISettings) IsConfigured() bool {
-	return o.APIKey != ""
+	switch o.AuthMethod {
+	case AuthMethodChatGPTSubscription:
+		return o.ChatGPTAccessToken != "" && o.ChatGPTRefreshToken != ""
+	case AuthMethodAPIKey, "":
+		// Default to API key for backward compatibility
+		return o.APIKey != ""
+	default:
+		return o.APIKey != ""
+	}
 }
 
-// IsActive returns true if OpenAI is configured (API key is set)
+// IsActive returns true if OpenAI is configured with the selected auth method
 // Note: The "enabled" flag was removed from the UI, so we only check if configured
 func (o *OpenAISettings) IsActive() bool {
 	return o.IsConfigured()
+}
+
+// IsChatGPTTokenExpired returns true if ChatGPT tokens are expired
+func (o *OpenAISettings) IsChatGPTTokenExpired() bool {
+	if o.ChatGPTExpiresAt == nil {
+		return false // No expiry set, assume valid
+	}
+	return time.Now().After(*o.ChatGPTExpiresAt)
 }
 
 // GetValidReasoningEfforts returns valid reasoning effort values for the current model

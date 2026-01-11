@@ -3,6 +3,7 @@ package codex
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -51,6 +52,15 @@ type ExecuteResult struct {
 	ErrorMessage    string // Captured error message from Codex JSON events
 	TokensUsed      int    // Total tokens used (input + output)
 	ExecutionTimeMs int64  // Execution time in milliseconds
+	UpdatedTokens   *AuthTokens // Potentially refreshed OAuth tokens (for ChatGPT subscription)
+}
+
+// AuthTokens represents OAuth tokens for ChatGPT subscription auth
+type AuthTokens struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresAt    string `json:"expires_at,omitempty"`
+	Email        string `json:"email,omitempty"`
 }
 
 // OpenAISettings holds OpenAI configuration for Codex execution
@@ -61,6 +71,11 @@ type OpenAISettings struct {
 	BaseURL         string
 	ProxyURL        string
 	NoProxy         string
+	// ChatGPT subscription auth fields
+	AuthMethod          string // "api_key" or "chatgpt_subscription"
+	ChatGPTAccessToken  string
+	ChatGPTRefreshToken string
+	ChatGPTExpiresAt    string
 }
 
 // OutputCallback is called for each output line from Codex
@@ -78,9 +93,9 @@ func (r *Runner) Execute(ctx context.Context, incidentID, task string, openai *O
 		return nil, fmt.Errorf("workspace not found: %s (API should create it)", workDir)
 	}
 
-	// Authenticate Codex CLI if API key provided
-	if openai != nil && openai.APIKey != "" {
-		if err := r.authenticateCodex(ctx, openai.APIKey); err != nil {
+	// Authenticate Codex CLI if credentials are provided
+	if openai != nil && (openai.APIKey != "" || openai.ChatGPTAccessToken != "") {
+		if err := r.authenticateCodex(ctx, openai); err != nil {
 			return nil, fmt.Errorf("failed to authenticate codex: %w", err)
 		}
 	}
@@ -164,6 +179,17 @@ func (r *Runner) Execute(ctx context.Context, incidentID, task string, openai *O
 	result.TokensUsed = tokensUsed
 	result.ExecutionTimeMs = time.Since(startTime).Milliseconds()
 
+	// Read back potentially refreshed tokens for ChatGPT subscription auth
+	if openai != nil && openai.AuthMethod == "chatgpt_subscription" {
+		if updatedTokens, err := r.readAuthTokens(); err == nil {
+			// Check if tokens were refreshed (access token changed)
+			if updatedTokens.AccessToken != "" && updatedTokens.AccessToken != openai.ChatGPTAccessToken {
+				result.UpdatedTokens = updatedTokens
+				r.logger.Printf("OAuth tokens were refreshed during execution")
+			}
+		}
+	}
+
 	// Handle errors - return meaningful error messages
 	if err != nil {
 		if ctx.Err() == context.Canceled {
@@ -205,9 +231,9 @@ func (r *Runner) Resume(ctx context.Context, incidentID, sessionID, message stri
 	startTime := time.Now()
 	workDir := filepath.Join(r.workspaceDir, incidentID)
 
-	// Authenticate Codex CLI if API key provided
-	if openai != nil && openai.APIKey != "" {
-		if err := r.authenticateCodex(ctx, openai.APIKey); err != nil {
+	// Authenticate Codex CLI if credentials are provided
+	if openai != nil && (openai.APIKey != "" || openai.ChatGPTAccessToken != "") {
+		if err := r.authenticateCodex(ctx, openai); err != nil {
 			return nil, fmt.Errorf("failed to authenticate codex: %w", err)
 		}
 	}
@@ -285,6 +311,17 @@ func (r *Runner) Resume(ctx context.Context, incidentID, sessionID, message stri
 	result.TokensUsed = tokensUsed
 	result.ExecutionTimeMs = time.Since(startTime).Milliseconds()
 
+	// Read back potentially refreshed tokens for ChatGPT subscription auth
+	if openai != nil && openai.AuthMethod == "chatgpt_subscription" {
+		if updatedTokens, err := r.readAuthTokens(); err == nil {
+			// Check if tokens were refreshed (access token changed)
+			if updatedTokens.AccessToken != "" && updatedTokens.AccessToken != openai.ChatGPTAccessToken {
+				result.UpdatedTokens = updatedTokens
+				r.logger.Printf("OAuth tokens were refreshed during resume")
+			}
+		}
+	}
+
 	// Handle errors - return meaningful error messages
 	if err != nil {
 		if ctx.Err() == context.Canceled {
@@ -333,9 +370,211 @@ func (r *Runner) Cancel(incidentID string) bool {
 	return false
 }
 
-// authenticateCodex runs codex login with the provided API key
-func (r *Runner) authenticateCodex(ctx context.Context, apiKey string) error {
-	r.logger.Printf("Authenticating Codex CLI...")
+// DeviceAuthResult holds the result of device auth
+type DeviceAuthResult struct {
+	DeviceCode      string
+	UserCode        string
+	VerificationURL string
+	ExpiresIn       int
+	Status          string // "pending", "complete", "expired", "failed"
+	Email           string
+	AccessToken     string
+	RefreshToken    string
+	ExpiresAt       string
+	Error           string
+}
+
+// DeviceAuthCallback is called with device auth status updates
+type DeviceAuthCallback func(result *DeviceAuthResult)
+
+// RunDeviceAuth runs device authentication and returns initial codes
+// It continues monitoring in the background and calls onComplete when tokens are obtained
+func (r *Runner) RunDeviceAuth(ctx context.Context, onUpdate DeviceAuthCallback) error {
+	r.logger.Printf("Starting device auth...")
+
+	// Create a cancelable context with timeout (device auth can take up to 15 minutes)
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+
+	// Store cancel function for potential cancellation
+	r.mu.Lock()
+	r.activeRuns["device_auth"] = cancel
+	r.mu.Unlock()
+
+	go func() {
+		defer cancel()
+		defer func() {
+			r.mu.Lock()
+			delete(r.activeRuns, "device_auth")
+			r.mu.Unlock()
+		}()
+
+		// Execute codex login --device-auth
+		cmd := exec.CommandContext(ctx, "codex", "login", "--device-auth")
+
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			r.logger.Printf("Failed to create stdout pipe: %v", err)
+			onUpdate(&DeviceAuthResult{Status: "failed", Error: err.Error()})
+			return
+		}
+
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			r.logger.Printf("Failed to create stderr pipe: %v", err)
+			onUpdate(&DeviceAuthResult{Status: "failed", Error: err.Error()})
+			return
+		}
+
+		if err := cmd.Start(); err != nil {
+			r.logger.Printf("Failed to start codex login: %v", err)
+			onUpdate(&DeviceAuthResult{Status: "failed", Error: err.Error()})
+			return
+		}
+
+		result := &DeviceAuthResult{Status: "pending"}
+		var stderrOutput strings.Builder
+		var sentPending bool
+
+		// Regex to strip ANSI escape codes
+		ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+		// Parse stdout for device code info
+		// Expected format from codex login --device-auth:
+		// 1. Open this link in your browser...
+		//    https://auth.openai.com/codex/device
+		// 2. Enter this one-time code...
+		//    XXXX-XXXXX
+		scanner := bufio.NewScanner(stdout)
+		urlRegex := regexp.MustCompile(`https?://[^\s\x1b]+`)
+		codeRegex := regexp.MustCompile(`\b([A-Z0-9]{4,}-[A-Z0-9]{4,})\b`)
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			r.logger.Printf("Device auth stdout: %s", line)
+
+			// Strip ANSI codes for parsing
+			cleanLine := ansiRegex.ReplaceAllString(line, "")
+			cleanLine = strings.TrimSpace(cleanLine)
+
+			// Extract verification URL (look for any https URL)
+			if result.VerificationURL == "" {
+				if matches := urlRegex.FindString(cleanLine); matches != "" {
+					result.VerificationURL = matches
+					// Generate a device code from timestamp since it's not in the URL
+					result.DeviceCode = fmt.Sprintf("%d", time.Now().UnixNano())
+					r.logger.Printf("Found URL: %s", result.VerificationURL)
+				}
+			}
+
+			// Extract user code (format like XXXX-XXXXX)
+			if result.UserCode == "" {
+				if matches := codeRegex.FindStringSubmatch(cleanLine); len(matches) > 1 {
+					result.UserCode = matches[1]
+					r.logger.Printf("Found user code: %s", result.UserCode)
+				}
+			}
+
+			// Once we have both URL and code, send the initial pending status (only once)
+			if result.VerificationURL != "" && result.UserCode != "" && !sentPending {
+				result.ExpiresIn = 900 // 15 minutes default
+				r.logger.Printf("Got device auth codes: URL=%s, UserCode=%s", result.VerificationURL, result.UserCode)
+				onUpdate(result)
+				sentPending = true
+			}
+		}
+
+		// Also read stderr for any error messages
+		go func() {
+			stderrScanner := bufio.NewScanner(stderr)
+			for stderrScanner.Scan() {
+				line := stderrScanner.Text()
+				r.logger.Printf("Device auth stderr: %s", line)
+				stderrOutput.WriteString(line)
+				stderrOutput.WriteString("\n")
+			}
+		}()
+
+		// Wait for command to complete (user approved or timeout)
+		err = cmd.Wait()
+
+		if err != nil {
+			if ctx.Err() == context.Canceled {
+				r.logger.Printf("Device auth cancelled")
+				onUpdate(&DeviceAuthResult{Status: "failed", Error: "cancelled"})
+				return
+			}
+			if ctx.Err() == context.DeadlineExceeded {
+				r.logger.Printf("Device auth expired")
+				onUpdate(&DeviceAuthResult{Status: "expired", Error: "authentication timeout"})
+				return
+			}
+			errMsg := err.Error()
+			if stderrOutput.Len() > 0 {
+				errMsg = strings.TrimSpace(stderrOutput.String())
+			}
+			r.logger.Printf("Device auth failed: %s", errMsg)
+			onUpdate(&DeviceAuthResult{Status: "failed", Error: errMsg})
+			return
+		}
+
+		// Success - read auth tokens from auth.json
+		tokens, err := r.readAuthTokens()
+		if err != nil {
+			r.logger.Printf("Failed to read auth tokens after device auth: %v", err)
+			onUpdate(&DeviceAuthResult{Status: "failed", Error: "failed to read tokens after authentication"})
+			return
+		}
+
+		completeResult := &DeviceAuthResult{
+			Status:       "complete",
+			DeviceCode:   result.DeviceCode,
+			UserCode:     result.UserCode,
+			AccessToken:  tokens.AccessToken,
+			RefreshToken: tokens.RefreshToken,
+			ExpiresAt:    tokens.ExpiresAt,
+			Email:        tokens.Email,
+		}
+		r.logger.Printf("Device auth completed successfully for email: %s", tokens.Email)
+		onUpdate(completeResult)
+	}()
+
+	return nil
+}
+
+// CancelDeviceAuth cancels an ongoing device auth
+func (r *Runner) CancelDeviceAuth() bool {
+	return r.Cancel("device_auth")
+}
+
+// authenticateCodex authenticates Codex CLI using the configured auth method
+func (r *Runner) authenticateCodex(ctx context.Context, openai *OpenAISettings) error {
+	if openai == nil {
+		return fmt.Errorf("no OpenAI settings provided")
+	}
+
+	// Determine auth method (default to api_key for backward compatibility)
+	authMethod := openai.AuthMethod
+	if authMethod == "" {
+		authMethod = "api_key"
+	}
+
+	switch authMethod {
+	case "chatgpt_subscription":
+		return r.authenticateWithChatGPTTokens(openai)
+	case "api_key":
+		return r.authenticateWithAPIKey(ctx, openai.APIKey)
+	default:
+		return r.authenticateWithAPIKey(ctx, openai.APIKey)
+	}
+}
+
+// authenticateWithAPIKey runs codex login with the provided API key
+func (r *Runner) authenticateWithAPIKey(ctx context.Context, apiKey string) error {
+	if apiKey == "" {
+		return fmt.Errorf("API key is empty")
+	}
+
+	r.logger.Printf("Authenticating Codex CLI with API key...")
 
 	cmd := exec.CommandContext(ctx, "codex", "login", "--with-api-key")
 	cmd.Stdin = strings.NewReader(apiKey)
@@ -345,8 +584,169 @@ func (r *Runner) authenticateCodex(ctx context.Context, apiKey string) error {
 		return fmt.Errorf("codex login failed: %w (output: %s)", err, string(output))
 	}
 
-	r.logger.Printf("Codex CLI authenticated successfully")
+	r.logger.Printf("Codex CLI authenticated successfully with API key")
 	return nil
+}
+
+// authenticateWithChatGPTTokens ensures valid auth.json exists for ChatGPT subscription auth
+func (r *Runner) authenticateWithChatGPTTokens(openai *OpenAISettings) error {
+	// Get the auth file path (codex user's home directory)
+	homeDir := os.Getenv("HOME")
+	if homeDir == "" {
+		homeDir = "/home/codex"
+	}
+	authPath := filepath.Join(homeDir, ".codex", "auth.json")
+
+	// First, check if auth.json already exists with valid tokens
+	if existingTokens, err := r.readAuthTokens(); err == nil {
+		if existingTokens.AccessToken != "" && existingTokens.RefreshToken != "" {
+			r.logger.Printf("Using existing auth.json with valid tokens (email: %s)", existingTokens.Email)
+			return nil
+		}
+	}
+
+	// No valid existing auth.json, check if we have tokens from database
+	if openai.ChatGPTAccessToken == "" || openai.ChatGPTRefreshToken == "" {
+		return fmt.Errorf("ChatGPT tokens are empty")
+	}
+
+	r.logger.Printf("Authenticating Codex CLI with ChatGPT subscription tokens from database...")
+
+	// Ensure the directory exists
+	authDir := filepath.Dir(authPath)
+	if err := os.MkdirAll(authDir, 0700); err != nil {
+		return fmt.Errorf("failed to create auth directory: %w", err)
+	}
+
+	// Build auth.json content in codex CLI format
+	authData := map[string]interface{}{
+		"OPENAI_API_KEY": nil,
+		"tokens": map[string]interface{}{
+			"access_token":  openai.ChatGPTAccessToken,
+			"refresh_token": openai.ChatGPTRefreshToken,
+		},
+		"last_refresh": time.Now().UTC().Format(time.RFC3339Nano),
+	}
+
+	// Write auth.json
+	data, err := json.MarshalIndent(authData, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal auth data: %w", err)
+	}
+
+	if err := os.WriteFile(authPath, data, 0600); err != nil {
+		return fmt.Errorf("failed to write auth.json: %w", err)
+	}
+
+	r.logger.Printf("Codex CLI authenticated successfully with ChatGPT tokens")
+	return nil
+}
+
+// readAuthTokens reads the current auth.json file and returns any updated tokens
+func (r *Runner) readAuthTokens() (*AuthTokens, error) {
+	homeDir := os.Getenv("HOME")
+	if homeDir == "" {
+		homeDir = "/home/codex"
+	}
+	authPath := filepath.Join(homeDir, ".codex", "auth.json")
+
+	data, err := os.ReadFile(authPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read auth.json: %w", err)
+	}
+
+	var rawAuth map[string]interface{}
+	if err := json.Unmarshal(data, &rawAuth); err != nil {
+		return nil, fmt.Errorf("failed to parse auth.json: %w", err)
+	}
+
+	tokens := &AuthTokens{}
+
+	// Check if tokens are nested under "tokens" key (codex CLI format)
+	tokenData := rawAuth
+	if nestedTokens, ok := rawAuth["tokens"].(map[string]interface{}); ok {
+		tokenData = nestedTokens
+	}
+
+	// Extract tokens - handle different possible field names
+	if at, ok := tokenData["access_token"].(string); ok {
+		tokens.AccessToken = at
+	} else if at, ok := tokenData["accessToken"].(string); ok {
+		tokens.AccessToken = at
+	}
+
+	if rt, ok := tokenData["refresh_token"].(string); ok {
+		tokens.RefreshToken = rt
+	} else if rt, ok := tokenData["refreshToken"].(string); ok {
+		tokens.RefreshToken = rt
+	}
+
+	if exp, ok := tokenData["expires_at"].(string); ok {
+		tokens.ExpiresAt = exp
+	} else if exp, ok := tokenData["expiresAt"].(string); ok {
+		tokens.ExpiresAt = exp
+	}
+
+	// Try to get email from tokenData first
+	if email, ok := tokenData["email"].(string); ok {
+		tokens.Email = email
+	} else if email, ok := rawAuth["email"].(string); ok {
+		tokens.Email = email
+	}
+
+	// If no email found, try to extract from JWT access_token
+	if tokens.Email == "" && tokens.AccessToken != "" {
+		tokens.Email = extractEmailFromJWT(tokens.AccessToken)
+	}
+
+	return tokens, nil
+}
+
+// extractEmailFromJWT extracts email from JWT claims without validation
+func extractEmailFromJWT(tokenString string) string {
+	// JWT format: header.payload.signature
+	parts := strings.Split(tokenString, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+
+	// Decode payload (base64url encoded)
+	payload := parts[1]
+	// Add padding if needed
+	switch len(payload) % 4 {
+	case 2:
+		payload += "=="
+	case 3:
+		payload += "="
+	}
+
+	decoded, err := base64.URLEncoding.DecodeString(payload)
+	if err != nil {
+		// Try standard encoding
+		decoded, err = base64.StdEncoding.DecodeString(payload)
+		if err != nil {
+			return ""
+		}
+	}
+
+	var claims map[string]interface{}
+	if err := json.Unmarshal(decoded, &claims); err != nil {
+		return ""
+	}
+
+	// Try different claim locations for email
+	if email, ok := claims["email"].(string); ok {
+		return email
+	}
+
+	// Check nested profile claims (OpenAI format)
+	if profile, ok := claims["https://api.openai.com/profile"].(map[string]interface{}); ok {
+		if email, ok := profile["email"].(string); ok {
+			return email
+		}
+	}
+
+	return ""
 }
 
 // buildEnvironment builds the environment for Codex

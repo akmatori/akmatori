@@ -99,14 +99,18 @@ func (o *Orchestrator) handleMessage(msg ws.Message) {
 	case ws.MessageTypeNewIncident:
 		// Extract OpenAI settings from message
 		var openaiSettings *ws.OpenAISettings
-		if msg.OpenAIAPIKey != "" {
+		if msg.OpenAIAPIKey != "" || msg.ChatGPTAccessToken != "" {
 			openaiSettings = &ws.OpenAISettings{
-				APIKey:          msg.OpenAIAPIKey,
-				Model:           msg.Model,
-				ReasoningEffort: msg.ReasoningEffort,
-				BaseURL:         msg.BaseURL,
-				ProxyURL:        msg.ProxyURL,
-				NoProxy:         msg.NoProxy,
+				APIKey:              msg.OpenAIAPIKey,
+				Model:               msg.Model,
+				ReasoningEffort:     msg.ReasoningEffort,
+				BaseURL:             msg.BaseURL,
+				ProxyURL:            msg.ProxyURL,
+				NoProxy:             msg.NoProxy,
+				AuthMethod:          msg.AuthMethod,
+				ChatGPTAccessToken:  msg.ChatGPTAccessToken,
+				ChatGPTRefreshToken: msg.ChatGPTRefreshToken,
+				ChatGPTExpiresAt:    msg.ChatGPTExpiresAt,
 			}
 		}
 		go o.handleNewIncident(msg.IncidentID, msg.Task, openaiSettings)
@@ -114,20 +118,30 @@ func (o *Orchestrator) handleMessage(msg ws.Message) {
 	case ws.MessageTypeContinueIncident:
 		// Extract OpenAI settings from message (for re-authentication)
 		var openaiSettings *ws.OpenAISettings
-		if msg.OpenAIAPIKey != "" {
+		if msg.OpenAIAPIKey != "" || msg.ChatGPTAccessToken != "" {
 			openaiSettings = &ws.OpenAISettings{
-				APIKey:          msg.OpenAIAPIKey,
-				Model:           msg.Model,
-				ReasoningEffort: msg.ReasoningEffort,
-				BaseURL:         msg.BaseURL,
-				ProxyURL:        msg.ProxyURL,
-				NoProxy:         msg.NoProxy,
+				APIKey:              msg.OpenAIAPIKey,
+				Model:               msg.Model,
+				ReasoningEffort:     msg.ReasoningEffort,
+				BaseURL:             msg.BaseURL,
+				ProxyURL:            msg.ProxyURL,
+				NoProxy:             msg.NoProxy,
+				AuthMethod:          msg.AuthMethod,
+				ChatGPTAccessToken:  msg.ChatGPTAccessToken,
+				ChatGPTRefreshToken: msg.ChatGPTRefreshToken,
+				ChatGPTExpiresAt:    msg.ChatGPTExpiresAt,
 			}
 		}
 		go o.handleContinueIncident(msg.IncidentID, msg.Message, openaiSettings)
 
 	case ws.MessageTypeCancelIncident:
 		o.handleCancelIncident(msg.IncidentID)
+
+	case ws.MessageTypeDeviceAuthStart:
+		go o.handleDeviceAuthStart()
+
+	case ws.MessageTypeDeviceAuthCancel:
+		o.handleDeviceAuthCancel()
 
 	default:
 		o.logger.Printf("Unknown message type: %s", msg.Type)
@@ -145,12 +159,16 @@ func (o *Orchestrator) handleNewIncident(incidentID, task string, openaiSettings
 	var runnerSettings *codex.OpenAISettings
 	if openaiSettings != nil {
 		runnerSettings = &codex.OpenAISettings{
-			APIKey:          openaiSettings.APIKey,
-			Model:           openaiSettings.Model,
-			ReasoningEffort: openaiSettings.ReasoningEffort,
-			BaseURL:         openaiSettings.BaseURL,
-			ProxyURL:        openaiSettings.ProxyURL,
-			NoProxy:         openaiSettings.NoProxy,
+			APIKey:              openaiSettings.APIKey,
+			Model:               openaiSettings.Model,
+			ReasoningEffort:     openaiSettings.ReasoningEffort,
+			BaseURL:             openaiSettings.BaseURL,
+			ProxyURL:            openaiSettings.ProxyURL,
+			NoProxy:             openaiSettings.NoProxy,
+			AuthMethod:          openaiSettings.AuthMethod,
+			ChatGPTAccessToken:  openaiSettings.ChatGPTAccessToken,
+			ChatGPTRefreshToken: openaiSettings.ChatGPTRefreshToken,
+			ChatGPTExpiresAt:    openaiSettings.ChatGPTExpiresAt,
 		}
 	}
 
@@ -177,8 +195,17 @@ func (o *Orchestrator) handleNewIncident(incidentID, task string, openaiSettings
 	// Mark as completed
 	o.sessionStore.SetCompleted(incidentID, result.Response, result.FullLog)
 
-	// Send completion with metrics
-	o.wsClient.SendCompleted(incidentID, result.SessionID, result.Response, result.TokensUsed, result.ExecutionTimeMs)
+	// Send completion with metrics (including any updated tokens)
+	var updatedTokens *ws.UpdatedTokens
+	if result.UpdatedTokens != nil {
+		updatedTokens = &ws.UpdatedTokens{
+			AccessToken:  result.UpdatedTokens.AccessToken,
+			RefreshToken: result.UpdatedTokens.RefreshToken,
+			ExpiresAt:    result.UpdatedTokens.ExpiresAt,
+		}
+		o.logger.Printf("Incident %s completed with refreshed OAuth tokens", incidentID)
+	}
+	o.wsClient.SendCompletedWithTokens(incidentID, result.SessionID, result.Response, result.TokensUsed, result.ExecutionTimeMs, updatedTokens)
 
 	o.logger.Printf("Incident %s completed (tokens: %d, time: %dms)", incidentID, result.TokensUsed, result.ExecutionTimeMs)
 }
@@ -198,12 +225,16 @@ func (o *Orchestrator) handleContinueIncident(incidentID, message string, openai
 	var runnerSettings *codex.OpenAISettings
 	if openaiSettings != nil {
 		runnerSettings = &codex.OpenAISettings{
-			APIKey:          openaiSettings.APIKey,
-			Model:           openaiSettings.Model,
-			ReasoningEffort: openaiSettings.ReasoningEffort,
-			BaseURL:         openaiSettings.BaseURL,
-			ProxyURL:        openaiSettings.ProxyURL,
-			NoProxy:         openaiSettings.NoProxy,
+			APIKey:              openaiSettings.APIKey,
+			Model:               openaiSettings.Model,
+			ReasoningEffort:     openaiSettings.ReasoningEffort,
+			BaseURL:             openaiSettings.BaseURL,
+			ProxyURL:            openaiSettings.ProxyURL,
+			NoProxy:             openaiSettings.NoProxy,
+			AuthMethod:          openaiSettings.AuthMethod,
+			ChatGPTAccessToken:  openaiSettings.ChatGPTAccessToken,
+			ChatGPTRefreshToken: openaiSettings.ChatGPTRefreshToken,
+			ChatGPTExpiresAt:    openaiSettings.ChatGPTExpiresAt,
 		}
 	}
 
@@ -224,8 +255,17 @@ func (o *Orchestrator) handleContinueIncident(incidentID, message string, openai
 	// Update session
 	o.sessionStore.SetCompleted(incidentID, result.Response, result.FullLog)
 
-	// Send completion with metrics
-	o.wsClient.SendCompleted(incidentID, result.SessionID, result.Response, result.TokensUsed, result.ExecutionTimeMs)
+	// Send completion with metrics (including any updated tokens)
+	var updatedTokens *ws.UpdatedTokens
+	if result.UpdatedTokens != nil {
+		updatedTokens = &ws.UpdatedTokens{
+			AccessToken:  result.UpdatedTokens.AccessToken,
+			RefreshToken: result.UpdatedTokens.RefreshToken,
+			ExpiresAt:    result.UpdatedTokens.ExpiresAt,
+		}
+		o.logger.Printf("Continue incident %s completed with refreshed OAuth tokens", incidentID)
+	}
+	o.wsClient.SendCompletedWithTokens(incidentID, result.SessionID, result.Response, result.TokensUsed, result.ExecutionTimeMs, updatedTokens)
 
 	o.logger.Printf("Continue incident %s completed (tokens: %d, time: %dms)", incidentID, result.TokensUsed, result.ExecutionTimeMs)
 }
@@ -238,6 +278,46 @@ func (o *Orchestrator) handleCancelIncident(incidentID string) {
 		o.sessionStore.SetFailed(incidentID, "Cancelled by user")
 		o.wsClient.SendError(incidentID, "Execution cancelled")
 	}
+}
+
+// handleDeviceAuthStart handles starting device authentication
+func (o *Orchestrator) handleDeviceAuthStart() {
+	o.logger.Printf("Starting device authentication")
+
+	err := o.runner.RunDeviceAuth(o.ctx, func(result *codex.DeviceAuthResult) {
+		// Convert runner result to ws result
+		wsResult := &ws.DeviceAuthResult{
+			DeviceCode:      result.DeviceCode,
+			UserCode:        result.UserCode,
+			VerificationURL: result.VerificationURL,
+			ExpiresIn:       result.ExpiresIn,
+			Status:          result.Status,
+			Email:           result.Email,
+			AccessToken:     result.AccessToken,
+			RefreshToken:    result.RefreshToken,
+			ExpiresAt:       result.ExpiresAt,
+			Error:           result.Error,
+		}
+
+		// Send update to API
+		if err := o.wsClient.SendDeviceAuthResponse(wsResult); err != nil {
+			o.logger.Printf("Failed to send device auth response: %v", err)
+		}
+	})
+
+	if err != nil {
+		o.logger.Printf("Failed to start device auth: %v", err)
+		o.wsClient.SendDeviceAuthResponse(&ws.DeviceAuthResult{
+			Status: "failed",
+			Error:  err.Error(),
+		})
+	}
+}
+
+// handleDeviceAuthCancel handles cancelling device authentication
+func (o *Orchestrator) handleDeviceAuthCancel() {
+	o.logger.Printf("Cancelling device authentication")
+	o.runner.CancelDeviceAuth()
 }
 
 // Reconnect attempts to reconnect to the API

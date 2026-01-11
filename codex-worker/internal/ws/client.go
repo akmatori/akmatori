@@ -17,13 +17,16 @@ const (
 	MessageTypeNewIncident      MessageType = "new_incident"
 	MessageTypeContinueIncident MessageType = "continue_incident"
 	MessageTypeCancelIncident   MessageType = "cancel_incident"
+	MessageTypeDeviceAuthStart  MessageType = "device_auth_start"
+	MessageTypeDeviceAuthCancel MessageType = "device_auth_cancel"
 
 	// Messages from Codex Worker to API
-	MessageTypeCodexOutput    MessageType = "codex_output"
-	MessageTypeCodexCompleted MessageType = "codex_completed"
-	MessageTypeCodexError     MessageType = "codex_error"
-	MessageTypeHeartbeat      MessageType = "heartbeat"
-	MessageTypeStatus         MessageType = "status"
+	MessageTypeCodexOutput        MessageType = "codex_output"
+	MessageTypeCodexCompleted     MessageType = "codex_completed"
+	MessageTypeCodexError         MessageType = "codex_error"
+	MessageTypeHeartbeat          MessageType = "heartbeat"
+	MessageTypeStatus             MessageType = "status"
+	MessageTypeDeviceAuthResponse MessageType = "device_auth_response"
 )
 
 // Message represents a WebSocket message
@@ -48,6 +51,29 @@ type Message struct {
 	BaseURL         string `json:"base_url,omitempty"`
 	ProxyURL        string `json:"proxy_url,omitempty"`
 	NoProxy         string `json:"no_proxy,omitempty"`
+
+	// ChatGPT subscription auth fields (received with new_incident)
+	AuthMethod          string `json:"auth_method,omitempty"`
+	ChatGPTAccessToken  string `json:"chatgpt_access_token,omitempty"`
+	ChatGPTRefreshToken string `json:"chatgpt_refresh_token,omitempty"`
+	ChatGPTExpiresAt    string `json:"chatgpt_expires_at,omitempty"`
+
+	// Updated tokens (sent with codex_completed if tokens were refreshed)
+	UpdatedAccessToken  string `json:"updated_access_token,omitempty"`
+	UpdatedRefreshToken string `json:"updated_refresh_token,omitempty"`
+	UpdatedExpiresAt    string `json:"updated_expires_at,omitempty"`
+
+	// Device auth fields (sent with device_auth_response)
+	DeviceCode      string `json:"device_code,omitempty"`
+	UserCode        string `json:"user_code,omitempty"`
+	VerificationURL string `json:"verification_url,omitempty"`
+	ExpiresIn       int    `json:"expires_in,omitempty"`
+	AuthStatus      string `json:"auth_status,omitempty"` // "pending", "complete", "expired", "failed"
+	AuthEmail       string `json:"auth_email,omitempty"`
+	// Tokens returned when auth is complete
+	AuthAccessToken  string `json:"auth_access_token,omitempty"`
+	AuthRefreshToken string `json:"auth_refresh_token,omitempty"`
+	AuthExpiresAt    string `json:"auth_expires_at,omitempty"`
 }
 
 // OpenAISettings holds OpenAI configuration for Codex execution
@@ -58,6 +84,32 @@ type OpenAISettings struct {
 	BaseURL         string
 	ProxyURL        string
 	NoProxy         string
+	// ChatGPT subscription auth fields
+	AuthMethod          string
+	ChatGPTAccessToken  string
+	ChatGPTRefreshToken string
+	ChatGPTExpiresAt    string
+}
+
+// UpdatedTokens holds refreshed OAuth tokens
+type UpdatedTokens struct {
+	AccessToken  string
+	RefreshToken string
+	ExpiresAt    string
+}
+
+// DeviceAuthResult holds the result of a device auth operation
+type DeviceAuthResult struct {
+	DeviceCode      string
+	UserCode        string
+	VerificationURL string
+	ExpiresIn       int
+	Status          string // "pending", "complete", "expired", "failed"
+	Email           string
+	AccessToken     string
+	RefreshToken    string
+	ExpiresAt       string
+	Error           string
 }
 
 // Client represents a WebSocket client
@@ -171,14 +223,28 @@ func (c *Client) SendOutput(incidentID, output string) error {
 
 // SendCompleted sends completion notification with metrics
 func (c *Client) SendCompleted(incidentID, sessionID, response string, tokensUsed int, executionTimeMs int64) error {
-	return c.Send(Message{
+	return c.SendCompletedWithTokens(incidentID, sessionID, response, tokensUsed, executionTimeMs, nil)
+}
+
+// SendCompletedWithTokens sends completion notification with metrics and optionally updated tokens
+func (c *Client) SendCompletedWithTokens(incidentID, sessionID, response string, tokensUsed int, executionTimeMs int64, updatedTokens *UpdatedTokens) error {
+	msg := Message{
 		Type:            MessageTypeCodexCompleted,
 		IncidentID:      incidentID,
 		SessionID:       sessionID,
 		Output:          response,
 		TokensUsed:      tokensUsed,
 		ExecutionTimeMs: executionTimeMs,
-	})
+	}
+
+	// Include updated tokens if they were refreshed
+	if updatedTokens != nil {
+		msg.UpdatedAccessToken = updatedTokens.AccessToken
+		msg.UpdatedRefreshToken = updatedTokens.RefreshToken
+		msg.UpdatedExpiresAt = updatedTokens.ExpiresAt
+	}
+
+	return c.Send(msg)
 }
 
 // SendError sends an error notification
@@ -195,6 +261,24 @@ func (c *Client) SendHeartbeat() error {
 	return c.Send(Message{
 		Type: MessageTypeHeartbeat,
 	})
+}
+
+// SendDeviceAuthResponse sends a device auth response to the API
+func (c *Client) SendDeviceAuthResponse(result *DeviceAuthResult) error {
+	msg := Message{
+		Type:             MessageTypeDeviceAuthResponse,
+		DeviceCode:       result.DeviceCode,
+		UserCode:         result.UserCode,
+		VerificationURL:  result.VerificationURL,
+		ExpiresIn:        result.ExpiresIn,
+		AuthStatus:       result.Status,
+		AuthEmail:        result.Email,
+		AuthAccessToken:  result.AccessToken,
+		AuthRefreshToken: result.RefreshToken,
+		AuthExpiresAt:    result.ExpiresAt,
+		Error:            result.Error,
+	}
+	return c.Send(msg)
 }
 
 // Close closes the WebSocket connection
