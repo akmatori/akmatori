@@ -499,15 +499,23 @@ func (h *CodexWSHandler) CancelIncident(incidentID string) error {
 }
 
 // StartDeviceAuth initiates device authentication via the codex worker
-func (h *CodexWSHandler) StartDeviceAuth(callback DeviceAuthCallback) error {
+// Accepts optional OpenAI settings for proxy configuration
+func (h *CodexWSHandler) StartDeviceAuth(callback DeviceAuthCallback, settings *OpenAISettings) error {
 	// Store callback
 	h.deviceAuthMu.Lock()
 	h.deviceAuthCallback = callback
 	h.deviceAuthMu.Unlock()
 
-	// Send to worker
+	// Send to worker with proxy settings if configured
 	msg := CodexMessage{
 		Type: CodexMessageTypeDeviceAuthStart,
+	}
+
+	// Include proxy settings if available
+	if settings != nil {
+		msg.BaseURL = settings.BaseURL
+		msg.ProxyURL = settings.ProxyURL
+		msg.NoProxy = settings.NoProxy
 	}
 
 	if err := h.SendToWorker(msg); err != nil {
