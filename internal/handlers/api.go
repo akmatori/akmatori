@@ -20,25 +20,27 @@ import (
 
 // APIHandler handles API endpoints for the UI and skill communication
 type APIHandler struct {
-	skillService   *services.SkillService
-	toolService    *services.ToolService
-	contextService *services.ContextService
-	alertService   *services.AlertService
-	codexExecutor  *executor.Executor
-	codexWSHandler *CodexWSHandler
-	slackManager   *slackutil.Manager
+	skillService      *services.SkillService
+	toolService       *services.ToolService
+	contextService    *services.ContextService
+	alertService      *services.AlertService
+	codexExecutor     *executor.Executor
+	codexWSHandler    *CodexWSHandler
+	slackManager      *slackutil.Manager
+	deviceAuthService *services.DeviceAuthService
 }
 
 // NewAPIHandler creates a new API handler
 func NewAPIHandler(skillService *services.SkillService, toolService *services.ToolService, contextService *services.ContextService, alertService *services.AlertService, codexExecutor *executor.Executor, codexWSHandler *CodexWSHandler, slackManager *slackutil.Manager) *APIHandler {
 	return &APIHandler{
-		skillService:   skillService,
-		toolService:    toolService,
-		contextService: contextService,
-		alertService:   alertService,
-		codexExecutor:  codexExecutor,
-		codexWSHandler: codexWSHandler,
-		slackManager:   slackManager,
+		skillService:      skillService,
+		toolService:       toolService,
+		contextService:    contextService,
+		alertService:      alertService,
+		codexExecutor:     codexExecutor,
+		codexWSHandler:    codexWSHandler,
+		slackManager:      slackManager,
+		deviceAuthService: services.NewDeviceAuthService(),
 	}
 }
 
@@ -63,6 +65,10 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 
 	// OpenAI settings
 	mux.HandleFunc("/api/settings/openai", h.handleOpenAISettings)
+	mux.HandleFunc("/api/settings/openai/device-auth/start", h.handleDeviceAuthStart)
+	mux.HandleFunc("/api/settings/openai/device-auth/status", h.handleDeviceAuthStatus)
+	mux.HandleFunc("/api/settings/openai/device-auth/cancel", h.handleDeviceAuthCancel)
+	mux.HandleFunc("/api/settings/openai/chatgpt/disconnect", h.handleChatGPTDisconnect)
 
 	// Context files
 	mux.HandleFunc("/api/context", h.handleContext)
@@ -692,8 +698,16 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 						BaseURL:         dbSettings.BaseURL,
 						ProxyURL:        dbSettings.ProxyURL,
 						NoProxy:         dbSettings.NoProxy,
+						// ChatGPT subscription auth fields
+						AuthMethod:          string(dbSettings.AuthMethod),
+						ChatGPTAccessToken:  dbSettings.ChatGPTAccessToken,
+						ChatGPTRefreshToken: dbSettings.ChatGPTRefreshToken,
 					}
-					log.Printf("Using OpenAI model: %s", dbSettings.Model)
+					// Add expiry timestamp if set
+					if dbSettings.ChatGPTExpiresAt != nil {
+						openaiSettings.ChatGPTExpiresAt = dbSettings.ChatGPTExpiresAt.Format(time.RFC3339)
+					}
+					log.Printf("Using OpenAI model: %s, auth method: %s", dbSettings.Model, dbSettings.AuthMethod)
 				}
 
 				// Create channels for async result handling
@@ -1080,6 +1094,13 @@ func (h *APIHandler) handleOpenAISettings(w http.ResponseWriter, r *http.Request
 			http.Error(w, "Settings not found", http.StatusNotFound)
 			return
 		}
+
+		// Determine auth method (default to api_key for backward compatibility)
+		authMethod := string(settings.AuthMethod)
+		if authMethod == "" {
+			authMethod = string(database.AuthMethodAPIKey)
+		}
+
 		response := map[string]interface{}{
 			"id":                      settings.ID,
 			"api_key":                 maskToken(settings.APIKey),
@@ -1093,6 +1114,12 @@ func (h *APIHandler) handleOpenAISettings(w http.ResponseWriter, r *http.Request
 			"available_models":        ModelConfigs,
 			"created_at":              settings.CreatedAt,
 			"updated_at":              settings.UpdatedAt,
+			// New auth method fields
+			"auth_method":             authMethod,
+			"chatgpt_email":           settings.ChatGPTUserEmail,
+			"chatgpt_expires_at":      settings.ChatGPTExpiresAt,
+			"chatgpt_expired":         settings.IsChatGPTTokenExpired(),
+			"chatgpt_connected":       settings.ChatGPTAccessToken != "" && settings.ChatGPTRefreshToken != "",
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
@@ -1105,6 +1132,7 @@ func (h *APIHandler) handleOpenAISettings(w http.ResponseWriter, r *http.Request
 			BaseURL              *string `json:"base_url"`
 			ProxyURL             *string `json:"proxy_url"`
 			NoProxy              *string `json:"no_proxy"`
+			AuthMethod           *string `json:"auth_method"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1194,6 +1222,14 @@ func (h *APIHandler) handleOpenAISettings(w http.ResponseWriter, r *http.Request
 		if req.NoProxy != nil {
 			updates["no_proxy"] = *req.NoProxy
 		}
+		if req.AuthMethod != nil {
+			// Validate auth method
+			if *req.AuthMethod != string(database.AuthMethodAPIKey) && *req.AuthMethod != string(database.AuthMethodChatGPTSubscription) {
+				http.Error(w, fmt.Sprintf("Invalid auth_method: %s. Valid options: api_key, chatgpt_subscription", *req.AuthMethod), http.StatusBadRequest)
+				return
+			}
+			updates["auth_method"] = *req.AuthMethod
+		}
 
 		if err := db.Model(&settings).Updates(updates).Error; err != nil {
 			http.Error(w, fmt.Sprintf("Failed to update settings: %v", err), http.StatusInternalServerError)
@@ -1201,6 +1237,13 @@ func (h *APIHandler) handleOpenAISettings(w http.ResponseWriter, r *http.Request
 		}
 
 		db.First(&settings)
+
+		// Determine auth method for response
+		respAuthMethod := string(settings.AuthMethod)
+		if respAuthMethod == "" {
+			respAuthMethod = string(database.AuthMethodAPIKey)
+		}
+
 		response := map[string]interface{}{
 			"id":                      settings.ID,
 			"api_key":                 maskToken(settings.APIKey),
@@ -1214,6 +1257,12 @@ func (h *APIHandler) handleOpenAISettings(w http.ResponseWriter, r *http.Request
 			"available_models":        ModelConfigs,
 			"created_at":              settings.CreatedAt,
 			"updated_at":              settings.UpdatedAt,
+			// New auth method fields
+			"auth_method":             respAuthMethod,
+			"chatgpt_email":           settings.ChatGPTUserEmail,
+			"chatgpt_expires_at":      settings.ChatGPTExpiresAt,
+			"chatgpt_expired":         settings.IsChatGPTTokenExpired(),
+			"chatgpt_connected":       settings.ChatGPTAccessToken != "" && settings.ChatGPTRefreshToken != "",
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
@@ -1221,6 +1270,144 @@ func (h *APIHandler) handleOpenAISettings(w http.ResponseWriter, r *http.Request
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleDeviceAuthStart handles POST /api/settings/openai/device-auth/start
+func (h *APIHandler) handleDeviceAuthStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if worker is connected
+	if h.codexWSHandler == nil || !h.codexWSHandler.IsWorkerConnected() {
+		http.Error(w, "Codex worker not connected", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Clear any existing flow
+	h.deviceAuthService.ClearFlow()
+
+	// Start device auth via WebSocket to codex worker
+	err := h.codexWSHandler.StartDeviceAuth(func(result *DeviceAuthResult) {
+		// Forward result to device auth service
+		h.deviceAuthService.HandleDeviceAuthResult(&services.DeviceAuthResult{
+			DeviceCode:      result.DeviceCode,
+			UserCode:        result.UserCode,
+			VerificationURL: result.VerificationURL,
+			ExpiresIn:       result.ExpiresIn,
+			Status:          result.Status,
+			Email:           result.Email,
+			AccessToken:     result.AccessToken,
+			RefreshToken:    result.RefreshToken,
+			ExpiresAt:       result.ExpiresAt,
+			Error:           result.Error,
+		})
+	})
+	if err != nil {
+		log.Printf("Failed to start device auth: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to start device authentication: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Wait for initial response (with device code and URL)
+	response, err := h.deviceAuthService.WaitForInitialResponse(30 * time.Second)
+	if err != nil {
+		log.Printf("Failed to get device auth codes: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to start device authentication: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// handleDeviceAuthStatus handles GET /api/settings/openai/device-auth/status
+func (h *APIHandler) handleDeviceAuthStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	deviceCode := r.URL.Query().Get("device_code")
+	if deviceCode == "" {
+		http.Error(w, "device_code query parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	status, err := h.deviceAuthService.GetDeviceAuthStatus(deviceCode)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get device auth status: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// If authentication completed, save tokens to database
+	if status.Status == services.DeviceAuthStatusComplete {
+		tokens, err := h.deviceAuthService.GetAuthTokens()
+		if err == nil && tokens != nil {
+			if err := h.deviceAuthService.SaveTokensToDatabase(tokens); err != nil {
+				log.Printf("Failed to save tokens to database: %v", err)
+				status.Error = "Authentication succeeded but failed to save tokens"
+				status.Status = services.DeviceAuthStatusFailed
+			} else {
+				status.Email = tokens.Email
+				log.Printf("ChatGPT authentication completed for: %s", tokens.Email)
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
+// handleDeviceAuthCancel handles POST /api/settings/openai/device-auth/cancel
+func (h *APIHandler) handleDeviceAuthCancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Cancel via WebSocket if worker is connected
+	if h.codexWSHandler != nil && h.codexWSHandler.IsWorkerConnected() {
+		h.codexWSHandler.CancelDeviceAuth()
+	}
+
+	// Also clear local state
+	h.deviceAuthService.CancelDeviceAuth()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Device authentication cancelled",
+	})
+}
+
+// handleChatGPTDisconnect handles POST /api/settings/openai/chatgpt/disconnect
+func (h *APIHandler) handleChatGPTDisconnect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	settings, err := database.GetOpenAISettings()
+	if err != nil {
+		http.Error(w, "Settings not found", http.StatusNotFound)
+		return
+	}
+
+	// Clear ChatGPT tokens
+	if err := database.ClearOpenAIChatGPTTokens(settings.ID); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to disconnect: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("ChatGPT subscription disconnected")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "ChatGPT subscription disconnected",
+	})
 }
 
 // handleContext handles GET /api/context and POST /api/context

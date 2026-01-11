@@ -97,6 +97,7 @@ export interface CreateIncidentResponse {
 
 export type OpenAIModel = 'gpt-5.2' | 'gpt-5.2-codex' | 'gpt-5.1-codex-max' | 'gpt-5.1-codex' | 'gpt-5.1-codex-mini' | 'gpt-5.1';
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'extra_high';
+export type AuthMethod = 'api_key' | 'chatgpt_subscription';
 
 export interface OpenAISettings {
   id: number;
@@ -111,6 +112,12 @@ export interface OpenAISettings {
   available_models: Record<OpenAIModel, ReasoningEffort[]>;
   created_at: string;
   updated_at: string;
+  // ChatGPT subscription auth fields
+  auth_method: AuthMethod;
+  chatgpt_email?: string;      // Email of authenticated user
+  chatgpt_expires_at?: string; // Token expiration timestamp
+  chatgpt_expired?: boolean;   // Whether tokens are expired
+  chatgpt_connected?: boolean; // Whether ChatGPT is connected
 }
 
 export interface OpenAISettingsUpdate {
@@ -120,6 +127,21 @@ export interface OpenAISettingsUpdate {
   base_url?: string;
   proxy_url?: string;
   no_proxy?: string;
+  auth_method?: AuthMethod;
+}
+
+// Device Auth types
+export interface DeviceAuthStartResponse {
+  device_code: string;
+  user_code: string;
+  verification_url: string;
+  expires_in: number;
+}
+
+export interface DeviceAuthStatusResponse {
+  status: 'pending' | 'complete' | 'expired' | 'failed';
+  email?: string;
+  error?: string;
 }
 
 // Context Files

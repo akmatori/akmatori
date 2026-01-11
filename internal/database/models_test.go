@@ -3,6 +3,7 @@ package database
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestJSONB_Scan(t *testing.T) {
@@ -188,16 +189,64 @@ func TestOpenAISettings_IsConfigured(t *testing.T) {
 		expected bool
 	}{
 		{
-			name:     "no API key",
+			name:     "no API key, default auth method",
 			settings: OpenAISettings{},
 			expected: false,
 		},
 		{
-			name: "with API key",
+			name: "with API key, default auth method",
 			settings: OpenAISettings{
 				APIKey: "sk-test",
 			},
 			expected: true,
+		},
+		{
+			name: "with API key, explicit api_key auth method",
+			settings: OpenAISettings{
+				AuthMethod: AuthMethodAPIKey,
+				APIKey:     "sk-test",
+			},
+			expected: true,
+		},
+		{
+			name: "chatgpt_subscription with no tokens",
+			settings: OpenAISettings{
+				AuthMethod: AuthMethodChatGPTSubscription,
+			},
+			expected: false,
+		},
+		{
+			name: "chatgpt_subscription with only access token",
+			settings: OpenAISettings{
+				AuthMethod:         AuthMethodChatGPTSubscription,
+				ChatGPTAccessToken: "access-token",
+			},
+			expected: false,
+		},
+		{
+			name: "chatgpt_subscription with only refresh token",
+			settings: OpenAISettings{
+				AuthMethod:          AuthMethodChatGPTSubscription,
+				ChatGPTRefreshToken: "refresh-token",
+			},
+			expected: false,
+		},
+		{
+			name: "chatgpt_subscription with both tokens",
+			settings: OpenAISettings{
+				AuthMethod:          AuthMethodChatGPTSubscription,
+				ChatGPTAccessToken:  "access-token",
+				ChatGPTRefreshToken: "refresh-token",
+			},
+			expected: true,
+		},
+		{
+			name: "chatgpt_subscription ignores API key",
+			settings: OpenAISettings{
+				AuthMethod: AuthMethodChatGPTSubscription,
+				APIKey:     "sk-test",
+			},
+			expected: false,
 		},
 	}
 
@@ -208,6 +257,56 @@ func TestOpenAISettings_IsConfigured(t *testing.T) {
 				t.Errorf("IsConfigured() = %v, want %v", result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestOpenAISettings_IsChatGPTTokenExpired(t *testing.T) {
+	now := time.Now()
+	past := now.Add(-1 * time.Hour)
+	future := now.Add(1 * time.Hour)
+
+	tests := []struct {
+		name     string
+		settings OpenAISettings
+		expected bool
+	}{
+		{
+			name:     "no expiry set",
+			settings: OpenAISettings{},
+			expected: false,
+		},
+		{
+			name: "expired token",
+			settings: OpenAISettings{
+				ChatGPTExpiresAt: &past,
+			},
+			expected: true,
+		},
+		{
+			name: "valid token",
+			settings: OpenAISettings{
+				ChatGPTExpiresAt: &future,
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.settings.IsChatGPTTokenExpired()
+			if result != tt.expected {
+				t.Errorf("IsChatGPTTokenExpired() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestAuthMethod_Constants(t *testing.T) {
+	if AuthMethodAPIKey != "api_key" {
+		t.Error("AuthMethodAPIKey should be 'api_key'")
+	}
+	if AuthMethodChatGPTSubscription != "chatgpt_subscription" {
+		t.Error("AuthMethodChatGPTSubscription should be 'chatgpt_subscription'")
 	}
 }
 

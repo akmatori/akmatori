@@ -77,7 +77,8 @@ func InitializeDefaults() error {
 		defaultOpenAISettings := &OpenAISettings{
 			Model:                "gpt-5.1-codex",
 			ModelReasoningEffort: "medium",
-			Enabled:              false, // Disabled by default until API key is configured
+			AuthMethod:           AuthMethodAPIKey, // Default to API key authentication
+			Enabled:              false,            // Disabled by default until API key is configured
 		}
 		if err := DB.Create(defaultOpenAISettings).Error; err != nil {
 			return fmt.Errorf("failed to create default openai settings: %w", err)
@@ -219,4 +220,23 @@ func Close() error {
 		return err
 	}
 	return sqlDB.Close()
+}
+
+// UpdateOpenAIChatGPTTokens updates the ChatGPT OAuth tokens in the database
+// Uses Select to explicitly update all token-related fields including empty values
+func UpdateOpenAIChatGPTTokens(settings *OpenAISettings) error {
+	return DB.Model(&OpenAISettings{}).Where("id = ?", settings.ID).
+		Select("chat_gpt_access_token", "chat_gpt_refresh_token", "chat_gpt_expires_at", "chat_gpt_user_email", "auth_method").
+		Updates(settings).Error
+}
+
+// ClearOpenAIChatGPTTokens clears all ChatGPT OAuth tokens (for disconnect)
+func ClearOpenAIChatGPTTokens(id uint) error {
+	return DB.Model(&OpenAISettings{}).Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"chat_gpt_access_token":  "",
+			"chat_gpt_refresh_token": "",
+			"chat_gpt_expires_at":    nil,
+			"chat_gpt_user_email":    "",
+		}).Error
 }

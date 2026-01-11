@@ -7,6 +7,8 @@ import type {
   SlackSettingsUpdate,
   OpenAISettings,
   OpenAISettingsUpdate,
+  DeviceAuthStartResponse,
+  DeviceAuthStatusResponse,
   ContextFile,
   ValidateReferencesResponse,
   CreateIncidentRequest,
@@ -222,6 +224,25 @@ export const openaiSettingsApi = {
     fetchApi<OpenAISettings>('/api/settings/openai', {
       method: 'PUT',
       body: JSON.stringify(settings),
+    }),
+
+  // Device Auth for ChatGPT Subscription
+  startDeviceAuth: () =>
+    fetchApi<DeviceAuthStartResponse>('/api/settings/openai/device-auth/start', {
+      method: 'POST',
+    }),
+
+  getDeviceAuthStatus: (deviceCode: string) =>
+    fetchApi<DeviceAuthStatusResponse>(`/api/settings/openai/device-auth/status?device_code=${encodeURIComponent(deviceCode)}`),
+
+  cancelDeviceAuth: () =>
+    fetchApi<{ success: boolean; message: string }>('/api/settings/openai/device-auth/cancel', {
+      method: 'POST',
+    }),
+
+  disconnectChatGPT: () =>
+    fetchApi<{ success: boolean; message: string }>('/api/settings/openai/chatgpt/disconnect', {
+      method: 'POST',
     }),
 };
 
