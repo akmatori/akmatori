@@ -138,7 +138,16 @@ func (o *Orchestrator) handleMessage(msg ws.Message) {
 		o.handleCancelIncident(msg.IncidentID)
 
 	case ws.MessageTypeDeviceAuthStart:
-		go o.handleDeviceAuthStart()
+		// Extract proxy settings from message for device auth
+		var proxySettings *codex.OpenAISettings
+		if msg.ProxyURL != "" || msg.BaseURL != "" {
+			proxySettings = &codex.OpenAISettings{
+				BaseURL:  msg.BaseURL,
+				ProxyURL: msg.ProxyURL,
+				NoProxy:  msg.NoProxy,
+			}
+		}
+		go o.handleDeviceAuthStart(proxySettings)
 
 	case ws.MessageTypeDeviceAuthCancel:
 		o.handleDeviceAuthCancel()
@@ -281,10 +290,10 @@ func (o *Orchestrator) handleCancelIncident(incidentID string) {
 }
 
 // handleDeviceAuthStart handles starting device authentication
-func (o *Orchestrator) handleDeviceAuthStart() {
+func (o *Orchestrator) handleDeviceAuthStart(proxySettings *codex.OpenAISettings) {
 	o.logger.Printf("Starting device authentication")
 
-	err := o.runner.RunDeviceAuth(o.ctx, func(result *codex.DeviceAuthResult) {
+	err := o.runner.RunDeviceAuth(o.ctx, proxySettings, func(result *codex.DeviceAuthResult) {
 		// Convert runner result to ws result
 		wsResult := &ws.DeviceAuthResult{
 			DeviceCode:      result.DeviceCode,

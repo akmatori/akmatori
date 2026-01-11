@@ -1285,10 +1285,20 @@ func (h *APIHandler) handleDeviceAuthStart(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Fetch OpenAI settings from database for proxy configuration
+	var openaiSettings *OpenAISettings
+	if dbSettings, err := database.GetOpenAISettings(); err == nil && dbSettings != nil {
+		openaiSettings = &OpenAISettings{
+			BaseURL:  dbSettings.BaseURL,
+			ProxyURL: dbSettings.ProxyURL,
+			NoProxy:  dbSettings.NoProxy,
+		}
+	}
+
 	// Clear any existing flow
 	h.deviceAuthService.ClearFlow()
 
-	// Start device auth via WebSocket to codex worker
+	// Start device auth via WebSocket to codex worker (with proxy settings)
 	err := h.codexWSHandler.StartDeviceAuth(func(result *DeviceAuthResult) {
 		// Forward result to device auth service
 		h.deviceAuthService.HandleDeviceAuthResult(&services.DeviceAuthResult{
@@ -1303,7 +1313,7 @@ func (h *APIHandler) handleDeviceAuthStart(w http.ResponseWriter, r *http.Reques
 			ExpiresAt:       result.ExpiresAt,
 			Error:           result.Error,
 		})
-	})
+	}, openaiSettings)
 	if err != nil {
 		log.Printf("Failed to start device auth: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to start device authentication: %v", err), http.StatusInternalServerError)

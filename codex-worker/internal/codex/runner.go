@@ -389,7 +389,8 @@ type DeviceAuthCallback func(result *DeviceAuthResult)
 
 // RunDeviceAuth runs device authentication and returns initial codes
 // It continues monitoring in the background and calls onComplete when tokens are obtained
-func (r *Runner) RunDeviceAuth(ctx context.Context, onUpdate DeviceAuthCallback) error {
+// Accepts optional proxy settings for environments that require proxy configuration
+func (r *Runner) RunDeviceAuth(ctx context.Context, proxySettings *OpenAISettings, onUpdate DeviceAuthCallback) error {
 	r.logger.Printf("Starting device auth...")
 
 	// Create a cancelable context with timeout (device auth can take up to 15 minutes)
@@ -410,6 +411,24 @@ func (r *Runner) RunDeviceAuth(ctx context.Context, onUpdate DeviceAuthCallback)
 
 		// Execute codex login --device-auth
 		cmd := exec.CommandContext(ctx, "codex", "login", "--device-auth")
+
+		// Set environment with proxy settings if configured
+		env := os.Environ()
+		if proxySettings != nil {
+			if proxySettings.BaseURL != "" {
+				env = append(env, fmt.Sprintf("OPENAI_BASE_URL=%s", proxySettings.BaseURL))
+				r.logger.Printf("Device auth using custom base URL: %s", proxySettings.BaseURL)
+			}
+			if proxySettings.ProxyURL != "" {
+				env = append(env, fmt.Sprintf("HTTP_PROXY=%s", proxySettings.ProxyURL))
+				env = append(env, fmt.Sprintf("HTTPS_PROXY=%s", proxySettings.ProxyURL))
+				r.logger.Printf("Device auth using proxy: %s", proxySettings.ProxyURL)
+			}
+			if proxySettings.NoProxy != "" {
+				env = append(env, fmt.Sprintf("NO_PROXY=%s", proxySettings.NoProxy))
+			}
+		}
+		cmd.Env = env
 
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
