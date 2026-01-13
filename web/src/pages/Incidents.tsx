@@ -288,10 +288,14 @@ export default function Incidents() {
       setCreating(true);
       setError('');
       const response = await incidentsApi.create({ task: newTask.trim() });
+
+      // Fetch the full incident and add to list immediately
+      const newIncident = await incidentsApi.get(response.uuid);
+      setIncidents(prev => [newIncident, ...prev]);
+
       setCreateSuccess(`Incident created: ${response.uuid.slice(0, 8)}...`);
       setNewTask('');
       setShowCreateModal(false);
-      loadIncidents();
       setTimeout(() => setCreateSuccess(null), 5000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create incident');
