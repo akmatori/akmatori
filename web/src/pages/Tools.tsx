@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Edit2, Trash2, Save, X, Wrench, Power, PowerOff, ChevronDown, ChevronUp, Settings, AlertTriangle, Server, Key, Star } from 'lucide-react';
+import { Plus, Edit2, Trash2, Save, X, Wrench, Power, PowerOff, ChevronDown, ChevronUp, AlertTriangle, Server, Key, Star } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
@@ -37,6 +37,9 @@ interface ToolSchema {
   }>;
 }
 
+// Fields managed via dedicated endpoints, excluded from tool update
+const MANAGED_SETTINGS_FIELDS = ['ssh_keys'];
+
 export default function Tools() {
   const [tools, setTools] = useState<ToolInstance[]>([]);
   const [toolTypes, setToolTypes] = useState<ToolType[]>([]);
@@ -45,7 +48,6 @@ export default function Tools() {
   const [error, setError] = useState('');
   const [editingTool, setEditingTool] = useState<ToolInstance | null>(null);
   const [isCreating, setIsCreating] = useState(false);
-  const [expandedSettings, setExpandedSettings] = useState<number | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [expandedHosts, setExpandedHosts] = useState<number[]>([]);
   const [formData, setFormData] = useState<any>({
@@ -137,9 +139,13 @@ export default function Tools() {
           settings: formData.settings,
         });
       } else if (editingTool) {
+        // Exclude managed fields from settings update
+        const cleanSettings = { ...formData.settings };
+        MANAGED_SETTINGS_FIELDS.forEach(field => delete cleanSettings[field]);
+
         await toolsApi.update(editingTool.id, {
           name: formData.name,
-          settings: formData.settings,
+          settings: cleanSettings,
           enabled: formData.enabled,
         });
       }
@@ -185,10 +191,6 @@ export default function Tools() {
 
   const selectedType = toolTypes.find((t) => t.id === formData.tool_type_id);
   const selectedSchema = selectedType ? toolSchemas[selectedType.name] : null;
-
-  const toggleSettings = (toolId: number) => {
-    setExpandedSettings(expandedSettings === toolId ? null : toolId);
-  };
 
   // SSH Host Management Functions
   const addHost = () => {
@@ -978,29 +980,7 @@ export default function Tools() {
                         </div>
                       </div>
 
-                      {/* Settings Toggle */}
-                      <button
-                        onClick={() => toggleSettings(tool.id)}
-                        className="mt-4 flex items-center gap-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-                      >
-                        <Settings className="w-4 h-4" />
-                        <span className="text-sm">View Settings</span>
-                        {expandedSettings === tool.id ? (
-                          <ChevronUp className="w-4 h-4" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4" />
-                        )}
-                      </button>
                     </div>
-
-                    {/* Expanded Settings */}
-                    {expandedSettings === tool.id && (
-                      <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 p-4">
-                        <pre className="font-mono text-xs text-primary-600 dark:text-primary-400 overflow-x-auto">
-                          {JSON.stringify(tool.settings, null, 2)}
-                        </pre>
-                      </div>
-                    )}
                   </div>
                 ))}
               </div>

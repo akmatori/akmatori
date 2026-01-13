@@ -65,6 +65,21 @@ func (s *ToolService) GetToolInstance(id uint) (*database.ToolInstance, error) {
 
 // UpdateToolInstance updates a tool instance
 func (s *ToolService) UpdateToolInstance(id uint, name string, settings database.JSONB, enabled bool) error {
+	// Get existing instance to preserve ssh_keys
+	var existing database.ToolInstance
+	if err := s.db.First(&existing, id).Error; err != nil {
+		return fmt.Errorf("failed to find tool instance: %w", err)
+	}
+
+	// Always preserve ssh_keys from existing settings - they are managed via dedicated SSH key endpoints
+	if settings != nil {
+		if existingKeys, ok := existing.Settings["ssh_keys"]; ok {
+			settings["ssh_keys"] = existingKeys
+		} else {
+			delete(settings, "ssh_keys")
+		}
+	}
+
 	updates := map[string]interface{}{
 		"name":     name,
 		"settings": settings,
