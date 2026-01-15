@@ -25,7 +25,7 @@ func NewCommandValidator() *CommandValidator {
 			// File viewing
 			"cat": true, "head": true, "tail": true, "less": true, "more": true,
 			// Search and find
-			"grep": true, "find": true, "locate": true, "which": true, "type": true,
+			"grep": true, "rg": true, "fzf": true, "find": true, "locate": true, "which": true, "type": true,
 			// Directory listing
 			"ls": true, "pwd": true, "tree": true,
 			// System info
@@ -186,7 +186,7 @@ func (v *CommandValidator) blockedError(reason string) error {
 
 Allowed commands in read-only mode:
   File viewing: cat, head, tail, less, more
-  Search: grep, find, locate, which
+  Search: grep, rg, fzf, find, locate, which
   Directory: ls, pwd, tree
   System info: whoami, uname, hostname, date, id, uptime
   Processes: ps, top, htop, pgrep, pstree

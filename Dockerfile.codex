@@ -52,7 +52,8 @@ RUN ln -s /usr/bin/python3 /usr/bin/python
 # Install Python packages required by wrappers
 RUN pip3 install --no-cache-dir --break-system-packages \
     requests \
-    pyyaml
+    pyyaml \
+    PyPDF2
 
 # Create non-root user (UID 1001 to differ from API's UID 1000)
 # This ensures codex cannot modify files created by API
@@ -60,7 +61,7 @@ RUN groupadd -g 1001 codex && \
     useradd -u 1001 -g codex -m -s /bin/bash codex
 
 # Install Codex CLI globally (pinned version)
-RUN npm install -g @openai/codex@0.81.0
+RUN npm install -g @openai/codex@0.80.0
 
 # Create directories
 RUN mkdir -p /home/codex/.codex /workspaces /tools && \
