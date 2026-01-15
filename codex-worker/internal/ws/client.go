@@ -52,6 +52,9 @@ type Message struct {
 	ProxyURL        string `json:"proxy_url,omitempty"`
 	NoProxy         string `json:"no_proxy,omitempty"`
 
+	// Proxy configuration with toggles (received with new_incident)
+	ProxyConfig *ProxyConfig `json:"proxy_config,omitempty"`
+
 	// ChatGPT subscription auth fields (received with new_incident)
 	AuthMethod          string `json:"auth_method,omitempty"`
 	ChatGPTAccessToken  string `json:"chatgpt_access_token,omitempty"`
@@ -89,6 +92,15 @@ type OpenAISettings struct {
 	ChatGPTAccessToken  string
 	ChatGPTRefreshToken string
 	ChatGPTExpiresAt    string
+}
+
+// ProxyConfig holds proxy configuration with per-service toggles
+type ProxyConfig struct {
+	URL           string `json:"url"`
+	NoProxy       string `json:"no_proxy"`
+	OpenAIEnabled bool   `json:"openai_enabled"`
+	SlackEnabled  bool   `json:"slack_enabled"`
+	ZabbixEnabled bool   `json:"zabbix_enabled"`
 }
 
 // UpdatedTokens holds refreshed OAuth tokens

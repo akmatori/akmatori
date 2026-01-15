@@ -78,11 +78,20 @@ type OpenAISettings struct {
 	ChatGPTExpiresAt    string
 }
 
+// ProxyConfig holds proxy configuration with per-service toggles
+type ProxyConfig struct {
+	URL           string `json:"url"`
+	NoProxy       string `json:"no_proxy"`
+	OpenAIEnabled bool   `json:"openai_enabled"`
+	SlackEnabled  bool   `json:"slack_enabled"`
+	ZabbixEnabled bool   `json:"zabbix_enabled"`
+}
+
 // OutputCallback is called for each output line from Codex
 type OutputCallback func(output string)
 
 // Execute runs Codex with the given task
-func (r *Runner) Execute(ctx context.Context, incidentID, task string, openai *OpenAISettings, onOutput OutputCallback) (*ExecuteResult, error) {
+func (r *Runner) Execute(ctx context.Context, incidentID, task string, openai *OpenAISettings, proxy *ProxyConfig, onOutput OutputCallback) (*ExecuteResult, error) {
 	startTime := time.Now()
 
 	// Workspace directory is created by API with .codex/AGENTS.md and .codex/skills
@@ -129,8 +138,8 @@ func (r *Runner) Execute(ctx context.Context, incidentID, task string, openai *O
 	cmd := exec.CommandContext(ctx, "codex", args...)
 	cmd.Dir = workDir
 
-	// Set environment with OpenAI settings
-	cmd.Env = r.buildEnvironment(incidentID, openai)
+	// Set environment with OpenAI settings and proxy config
+	cmd.Env = r.buildEnvironment(incidentID, openai, proxy)
 
 	// Capture stdout and stderr
 	stdout, err := cmd.StdoutPipe()
@@ -227,7 +236,7 @@ func (r *Runner) Execute(ctx context.Context, incidentID, task string, openai *O
 }
 
 // Resume resumes an existing Codex session
-func (r *Runner) Resume(ctx context.Context, incidentID, sessionID, message string, openai *OpenAISettings, onOutput OutputCallback) (*ExecuteResult, error) {
+func (r *Runner) Resume(ctx context.Context, incidentID, sessionID, message string, openai *OpenAISettings, proxy *ProxyConfig, onOutput OutputCallback) (*ExecuteResult, error) {
 	startTime := time.Now()
 	workDir := filepath.Join(r.workspaceDir, incidentID)
 
@@ -267,7 +276,7 @@ func (r *Runner) Resume(ctx context.Context, incidentID, sessionID, message stri
 
 	cmd := exec.CommandContext(ctx, "codex", args...)
 	cmd.Dir = workDir
-	cmd.Env = r.buildEnvironment(incidentID, openai)
+	cmd.Env = r.buildEnvironment(incidentID, openai, proxy)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -769,7 +778,7 @@ func extractEmailFromJWT(tokenString string) string {
 }
 
 // buildEnvironment builds the environment for Codex
-func (r *Runner) buildEnvironment(incidentID string, openai *OpenAISettings) []string {
+func (r *Runner) buildEnvironment(incidentID string, openai *OpenAISettings, proxy *ProxyConfig) []string {
 	env := os.Environ()
 
 	// Add MCP Gateway URL
@@ -791,15 +800,16 @@ func (r *Runner) buildEnvironment(incidentID string, openai *OpenAISettings) []s
 			env = append(env, fmt.Sprintf("OPENAI_BASE_URL=%s", openai.BaseURL))
 			r.logger.Printf("Using custom base URL: %s", openai.BaseURL)
 		}
-		// Set proxy settings if configured
-		if openai.ProxyURL != "" {
-			env = append(env, fmt.Sprintf("HTTP_PROXY=%s", openai.ProxyURL))
-			env = append(env, fmt.Sprintf("HTTPS_PROXY=%s", openai.ProxyURL))
-			r.logger.Printf("Using proxy: %s", openai.ProxyURL)
-		}
-		if openai.NoProxy != "" {
-			env = append(env, fmt.Sprintf("NO_PROXY=%s", openai.NoProxy))
-		}
+	}
+
+	// Set proxy settings if configured AND enabled for OpenAI
+	if proxy != nil && proxy.URL != "" && proxy.OpenAIEnabled {
+		env = append(env, fmt.Sprintf("HTTP_PROXY=%s", proxy.URL))
+		env = append(env, fmt.Sprintf("HTTPS_PROXY=%s", proxy.URL))
+		r.logger.Printf("Using proxy for OpenAI: %s", proxy.URL)
+	}
+	if proxy != nil && proxy.NoProxy != "" {
+		env = append(env, fmt.Sprintf("NO_PROXY=%s", proxy.NoProxy))
 	}
 
 	return env

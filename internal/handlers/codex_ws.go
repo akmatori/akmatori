@@ -17,11 +17,12 @@ type CodexMessageType string
 
 const (
 	// Messages from API to Codex Worker
-	CodexMessageTypeNewIncident      CodexMessageType = "new_incident"
-	CodexMessageTypeContinueIncident CodexMessageType = "continue_incident"
-	CodexMessageTypeCancelIncident   CodexMessageType = "cancel_incident"
-	CodexMessageTypeDeviceAuthStart  CodexMessageType = "device_auth_start"
-	CodexMessageTypeDeviceAuthCancel CodexMessageType = "device_auth_cancel"
+	CodexMessageTypeNewIncident       CodexMessageType = "new_incident"
+	CodexMessageTypeContinueIncident  CodexMessageType = "continue_incident"
+	CodexMessageTypeCancelIncident    CodexMessageType = "cancel_incident"
+	CodexMessageTypeDeviceAuthStart   CodexMessageType = "device_auth_start"
+	CodexMessageTypeDeviceAuthCancel  CodexMessageType = "device_auth_cancel"
+	CodexMessageTypeProxyConfigUpdate CodexMessageType = "proxy_config_update"
 
 	// Messages from Codex Worker to API
 	CodexMessageTypeCodexOutput        CodexMessageType = "codex_output"
@@ -31,6 +32,15 @@ const (
 	CodexMessageTypeStatus             CodexMessageType = "status"
 	CodexMessageTypeDeviceAuthResponse CodexMessageType = "device_auth_response"
 )
+
+// ProxyConfig holds proxy configuration with per-service toggles
+type ProxyConfig struct {
+	URL           string `json:"url"`
+	NoProxy       string `json:"no_proxy"`
+	OpenAIEnabled bool   `json:"openai_enabled"`
+	SlackEnabled  bool   `json:"slack_enabled"`
+	ZabbixEnabled bool   `json:"zabbix_enabled"`
+}
 
 // CodexMessage represents a WebSocket message between API and Codex worker
 type CodexMessage struct {
@@ -54,6 +64,9 @@ type CodexMessage struct {
 	BaseURL         string `json:"base_url,omitempty"`
 	ProxyURL        string `json:"proxy_url,omitempty"`
 	NoProxy         string `json:"no_proxy,omitempty"`
+
+	// Proxy configuration with toggles (sent with new_incident)
+	ProxyConfig *ProxyConfig `json:"proxy_config,omitempty"`
 
 	// ChatGPT subscription auth fields (sent with new_incident)
 	AuthMethod          string `json:"auth_method,omitempty"`
@@ -451,6 +464,17 @@ func (h *CodexWSHandler) StartIncident(incidentID, task string, openai *OpenAISe
 		msg.ChatGPTExpiresAt = openai.ChatGPTExpiresAt
 	}
 
+	// Fetch proxy settings from database and include in message
+	if proxySettings, err := database.GetOrCreateProxySettings(); err == nil && proxySettings != nil {
+		msg.ProxyConfig = &ProxyConfig{
+			URL:           proxySettings.ProxyURL,
+			NoProxy:       proxySettings.NoProxy,
+			OpenAIEnabled: proxySettings.OpenAIEnabled,
+			SlackEnabled:  proxySettings.SlackEnabled,
+			ZabbixEnabled: proxySettings.ZabbixEnabled,
+		}
+	}
+
 	if err := h.SendToWorker(msg); err != nil {
 		// Remove callback on error
 		h.callbackMu.Lock()
@@ -539,6 +563,30 @@ func (h *CodexWSHandler) CancelDeviceAuth() error {
 	// Send cancel to worker
 	msg := CodexMessage{
 		Type: CodexMessageTypeDeviceAuthCancel,
+	}
+
+	return h.SendToWorker(msg)
+}
+
+// BroadcastProxyConfig sends proxy configuration to the connected worker
+func (h *CodexWSHandler) BroadcastProxyConfig(settings *database.ProxySettings) error {
+	h.mu.RLock()
+	conn := h.workerConn
+	h.mu.RUnlock()
+
+	if conn == nil {
+		return ErrWorkerNotConnected
+	}
+
+	msg := CodexMessage{
+		Type: CodexMessageTypeProxyConfigUpdate,
+		ProxyConfig: &ProxyConfig{
+			URL:           settings.ProxyURL,
+			NoProxy:       settings.NoProxy,
+			OpenAIEnabled: settings.OpenAIEnabled,
+			SlackEnabled:  settings.SlackEnabled,
+			ZabbixEnabled: settings.ZabbixEnabled,
+		},
 	}
 
 	return h.SendToWorker(msg)

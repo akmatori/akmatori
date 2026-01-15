@@ -7,6 +7,8 @@ import type {
   SlackSettingsUpdate,
   OpenAISettings,
   OpenAISettingsUpdate,
+  ProxySettings,
+  ProxySettingsUpdate,
   DeviceAuthStartResponse,
   DeviceAuthStatusResponse,
   ContextFile,
@@ -243,6 +245,17 @@ export const openaiSettingsApi = {
   disconnectChatGPT: () =>
     fetchApi<{ success: boolean; message: string }>('/api/settings/openai/chatgpt/disconnect', {
       method: 'POST',
+    }),
+};
+
+// Proxy Settings API
+export const proxySettingsApi = {
+  get: () => fetchApi<ProxySettings>('/api/settings/proxy'),
+
+  update: (settings: ProxySettingsUpdate) =>
+    fetchApi<ProxySettings>('/api/settings/proxy', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
     }),
 };
 

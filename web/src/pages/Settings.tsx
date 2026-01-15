@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Save, MessageSquare, Cpu, Power, PowerOff, Info, Bell, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, LogIn, LogOut, Key, Users, ExternalLink, Copy, Loader2 } from 'lucide-react';
+import { Save, MessageSquare, Cpu, Power, PowerOff, Info, Bell, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, LogIn, LogOut, Key, Users, ExternalLink, Copy, Loader2, Globe } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { SuccessMessage, WarningMessage } from '../components/ErrorMessage';
 import AlertSourcesManager from '../components/AlertSourcesManager';
+import ProxySettings from '../components/ProxySettings';
 import { slackSettingsApi, openaiSettingsApi } from '../api/client';
 import type { SlackSettings, SlackSettingsUpdate, OpenAISettings, OpenAISettingsUpdate, OpenAIModel, ReasoningEffort, AuthMethod, DeviceAuthStartResponse } from '../types';
 
@@ -99,8 +100,6 @@ export default function Settings() {
   const [model, setModel] = useState<OpenAIModel>('gpt-5.1-codex');
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('medium');
   const [baseUrl, setBaseUrl] = useState('');
-  const [proxyUrl, setProxyUrl] = useState('');
-  const [noProxy, setNoProxy] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [authMethod, setAuthMethod] = useState<AuthMethod>('api_key');
 
@@ -140,11 +139,9 @@ export default function Settings() {
       setModel(data.model);
       setReasoningEffort(data.model_reasoning_effort);
       setBaseUrl(data.base_url || '');
-      setProxyUrl(data.proxy_url || '');
-      setNoProxy(data.no_proxy || '');
       setAuthMethod(data.auth_method || 'api_key');
       // Auto-expand advanced if any advanced settings are configured
-      if (data.base_url || data.proxy_url || data.no_proxy || data.model !== 'gpt-5.1-codex' || data.model_reasoning_effort !== 'medium') {
+      if (data.base_url || data.model !== 'gpt-5.1-codex' || data.model_reasoning_effort !== 'medium') {
         setShowAdvanced(true);
       }
       setOpenaiError(null);
@@ -299,16 +296,12 @@ export default function Settings() {
       }
 
       updates.base_url = baseUrl;
-      updates.proxy_url = proxyUrl;
-      updates.no_proxy = noProxy;
 
       const updated = await openaiSettingsApi.update(updates);
       setOpenaiSettings(updated);
       setApiKey('');
       setReasoningEffort(updated.model_reasoning_effort);
       setBaseUrl(updated.base_url || '');
-      setProxyUrl(updated.proxy_url || '');
-      setNoProxy(updated.no_proxy || '');
       setOpenaiSuccess(true);
       setTimeout(() => setOpenaiSuccess(false), 3000);
     } catch (err) {
@@ -501,7 +494,7 @@ export default function Settings() {
                   <ChevronRight className="w-4 h-4" />
                 )}
                 Advanced settings
-                {(model !== 'gpt-5.1-codex' || reasoningEffort !== 'medium' || baseUrl || proxyUrl) && (
+                {(model !== 'gpt-5.1-codex' || reasoningEffort !== 'medium' || baseUrl) && (
                   <span className="text-xs text-primary-600 dark:text-primary-400">(customized)</span>
                 )}
               </button>
@@ -562,34 +555,6 @@ export default function Settings() {
                     <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                       For Azure OpenAI, local LLMs, or API gateways
                     </p>
-                  </div>
-
-                  {/* Proxy URL */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                      HTTP Proxy
-                    </label>
-                    <input
-                      type="text"
-                      value={proxyUrl}
-                      onChange={(e) => setProxyUrl(e.target.value)}
-                      placeholder="http://proxy:8080"
-                      className="input-field"
-                    />
-                  </div>
-
-                  {/* No Proxy */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                      No Proxy
-                    </label>
-                    <input
-                      type="text"
-                      value={noProxy}
-                      onChange={(e) => setNoProxy(e.target.value)}
-                      placeholder="localhost,127.0.0.1"
-                      className="input-field"
-                    />
                   </div>
                 </div>
               )}
@@ -736,6 +701,16 @@ export default function Settings() {
               </div>
             </div>
           )}
+        </SettingsSection>
+
+        {/* Proxy Settings */}
+        <SettingsSection
+          title="Proxy"
+          description="HTTP proxy configuration for outbound connections"
+          icon={Globe}
+          defaultExpanded={false}
+        >
+          <ProxySettings />
         </SettingsSection>
 
         {/* Alert Sources Section */}

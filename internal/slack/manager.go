@@ -3,6 +3,8 @@ package slack
 import (
 	"context"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"sync"
 
@@ -93,12 +95,31 @@ func (m *Manager) startWithSettings(ctx context.Context, settings *database.Slac
 		m.stopLocked()
 	}
 
-	// Create new Slack client
-	m.client = slack.New(
-		settings.BotToken,
+	// Create HTTP client with proxy if configured
+	var options []slack.Option
+	options = append(options,
 		slack.OptionDebug(false),
 		slack.OptionAppLevelToken(settings.AppToken),
 	)
+
+	// Check proxy settings for Slack
+	if proxySettings, err := database.GetOrCreateProxySettings(); err == nil && proxySettings != nil {
+		if proxySettings.ProxyURL != "" && proxySettings.SlackEnabled {
+			proxyURL, parseErr := url.Parse(proxySettings.ProxyURL)
+			if parseErr == nil {
+				httpClient := &http.Client{
+					Transport: &http.Transport{
+						Proxy: http.ProxyURL(proxyURL),
+					},
+				}
+				options = append(options, slack.OptionHTTPClient(httpClient))
+				log.Printf("SlackManager: Using proxy: %s", proxySettings.ProxyURL)
+			}
+		}
+	}
+
+	// Create new Slack client
+	m.client = slack.New(settings.BotToken, options...)
 
 	// Create Socket Mode client
 	m.socketClient = socketmode.New(

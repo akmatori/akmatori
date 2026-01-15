@@ -113,7 +113,12 @@ func (o *Orchestrator) handleMessage(msg ws.Message) {
 				ChatGPTExpiresAt:    msg.ChatGPTExpiresAt,
 			}
 		}
-		go o.handleNewIncident(msg.IncidentID, msg.Task, openaiSettings)
+		// Extract proxy config from message
+		var proxyConfig *ws.ProxyConfig
+		if msg.ProxyConfig != nil {
+			proxyConfig = msg.ProxyConfig
+		}
+		go o.handleNewIncident(msg.IncidentID, msg.Task, openaiSettings, proxyConfig)
 
 	case ws.MessageTypeContinueIncident:
 		// Extract OpenAI settings from message (for re-authentication)
@@ -132,7 +137,12 @@ func (o *Orchestrator) handleMessage(msg ws.Message) {
 				ChatGPTExpiresAt:    msg.ChatGPTExpiresAt,
 			}
 		}
-		go o.handleContinueIncident(msg.IncidentID, msg.Message, openaiSettings)
+		// Extract proxy config from message
+		var proxyConfig *ws.ProxyConfig
+		if msg.ProxyConfig != nil {
+			proxyConfig = msg.ProxyConfig
+		}
+		go o.handleContinueIncident(msg.IncidentID, msg.Message, openaiSettings, proxyConfig)
 
 	case ws.MessageTypeCancelIncident:
 		o.handleCancelIncident(msg.IncidentID)
@@ -158,7 +168,7 @@ func (o *Orchestrator) handleMessage(msg ws.Message) {
 }
 
 // handleNewIncident handles a new incident execution request
-func (o *Orchestrator) handleNewIncident(incidentID, task string, openaiSettings *ws.OpenAISettings) {
+func (o *Orchestrator) handleNewIncident(incidentID, task string, openaiSettings *ws.OpenAISettings, proxyConfig *ws.ProxyConfig) {
 	o.logger.Printf("Starting new incident: %s", incidentID)
 
 	// Create session
@@ -181,8 +191,20 @@ func (o *Orchestrator) handleNewIncident(incidentID, task string, openaiSettings
 		}
 	}
 
+	// Convert proxy config to runner format
+	var runnerProxyConfig *codex.ProxyConfig
+	if proxyConfig != nil {
+		runnerProxyConfig = &codex.ProxyConfig{
+			URL:           proxyConfig.URL,
+			NoProxy:       proxyConfig.NoProxy,
+			OpenAIEnabled: proxyConfig.OpenAIEnabled,
+			SlackEnabled:  proxyConfig.SlackEnabled,
+			ZabbixEnabled: proxyConfig.ZabbixEnabled,
+		}
+	}
+
 	// Execute Codex
-	result, err := o.runner.Execute(o.ctx, incidentID, task, runnerSettings, func(output string) {
+	result, err := o.runner.Execute(o.ctx, incidentID, task, runnerSettings, runnerProxyConfig, func(output string) {
 		// Stream output to API
 		if err := o.wsClient.SendOutput(incidentID, output); err != nil {
 			o.logger.Printf("Failed to send output: %v", err)
@@ -220,7 +242,7 @@ func (o *Orchestrator) handleNewIncident(incidentID, task string, openaiSettings
 }
 
 // handleContinueIncident handles continuing an existing incident
-func (o *Orchestrator) handleContinueIncident(incidentID, message string, openaiSettings *ws.OpenAISettings) {
+func (o *Orchestrator) handleContinueIncident(incidentID, message string, openaiSettings *ws.OpenAISettings, proxyConfig *ws.ProxyConfig) {
 	o.logger.Printf("Continuing incident: %s", incidentID)
 
 	// Get existing session
@@ -247,8 +269,20 @@ func (o *Orchestrator) handleContinueIncident(incidentID, message string, openai
 		}
 	}
 
+	// Convert proxy config to runner format
+	var runnerProxyConfig *codex.ProxyConfig
+	if proxyConfig != nil {
+		runnerProxyConfig = &codex.ProxyConfig{
+			URL:           proxyConfig.URL,
+			NoProxy:       proxyConfig.NoProxy,
+			OpenAIEnabled: proxyConfig.OpenAIEnabled,
+			SlackEnabled:  proxyConfig.SlackEnabled,
+			ZabbixEnabled: proxyConfig.ZabbixEnabled,
+		}
+	}
+
 	// Resume Codex session
-	result, err := o.runner.Resume(o.ctx, incidentID, sess.SessionID, message, runnerSettings, func(output string) {
+	result, err := o.runner.Resume(o.ctx, incidentID, sess.SessionID, message, runnerSettings, runnerProxyConfig, func(output string) {
 		if err := o.wsClient.SendOutput(incidentID, output); err != nil {
 			o.logger.Printf("Failed to send output: %v", err)
 		}

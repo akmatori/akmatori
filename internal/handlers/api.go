@@ -70,6 +70,9 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/settings/openai/device-auth/cancel", h.handleDeviceAuthCancel)
 	mux.HandleFunc("/api/settings/openai/chatgpt/disconnect", h.handleChatGPTDisconnect)
 
+	// Proxy settings
+	mux.HandleFunc("/api/settings/proxy", h.handleProxySettings)
+
 	// Context files
 	mux.HandleFunc("/api/context", h.handleContext)
 	mux.HandleFunc("/api/context/", h.handleContextByID)
@@ -1418,6 +1421,112 @@ func (h *APIHandler) handleChatGPTDisconnect(w http.ResponseWriter, r *http.Requ
 		"success": true,
 		"message": "ChatGPT subscription disconnected",
 	})
+}
+
+// handleProxySettings handles GET /api/settings/proxy and PUT /api/settings/proxy
+func (h *APIHandler) handleProxySettings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		h.GetProxySettings(w, r)
+	case http.MethodPut:
+		h.UpdateProxySettings(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// GetProxySettings returns the current proxy configuration
+func (h *APIHandler) GetProxySettings(w http.ResponseWriter, r *http.Request) {
+	settings, err := database.GetOrCreateProxySettings()
+	if err != nil {
+		http.Error(w, "Failed to get proxy settings", http.StatusInternalServerError)
+		return
+	}
+
+	// Mask proxy URL password if present
+	maskedURL := maskProxyURL(settings.ProxyURL)
+
+	response := map[string]interface{}{
+		"proxy_url": maskedURL,
+		"no_proxy":  settings.NoProxy,
+		"services": map[string]interface{}{
+			"openai": map[string]interface{}{
+				"enabled":   settings.OpenAIEnabled,
+				"supported": true,
+			},
+			"slack": map[string]interface{}{
+				"enabled":   settings.SlackEnabled,
+				"supported": true,
+			},
+			"zabbix": map[string]interface{}{
+				"enabled":   settings.ZabbixEnabled,
+				"supported": true,
+			},
+			"ssh": map[string]interface{}{
+				"enabled":   false,
+				"supported": false,
+			},
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// UpdateProxySettings updates proxy configuration
+func (h *APIHandler) UpdateProxySettings(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		ProxyURL string `json:"proxy_url"`
+		NoProxy  string `json:"no_proxy"`
+		Services struct {
+			OpenAI struct {
+				Enabled bool `json:"enabled"`
+			} `json:"openai"`
+			Slack struct {
+				Enabled bool `json:"enabled"`
+			} `json:"slack"`
+			Zabbix struct {
+				Enabled bool `json:"enabled"`
+			} `json:"zabbix"`
+		} `json:"services"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Validate proxy URL if provided
+	if input.ProxyURL != "" && !isValidURL(input.ProxyURL) {
+		http.Error(w, "Invalid proxy URL format", http.StatusBadRequest)
+		return
+	}
+
+	settings, err := database.GetOrCreateProxySettings()
+	if err != nil {
+		http.Error(w, "Failed to get proxy settings", http.StatusInternalServerError)
+		return
+	}
+
+	// Update fields
+	settings.ProxyURL = input.ProxyURL
+	settings.NoProxy = input.NoProxy
+	settings.OpenAIEnabled = input.Services.OpenAI.Enabled
+	settings.SlackEnabled = input.Services.Slack.Enabled
+	settings.ZabbixEnabled = input.Services.Zabbix.Enabled
+
+	if err := database.UpdateProxySettings(settings); err != nil {
+		http.Error(w, "Failed to update proxy settings", http.StatusInternalServerError)
+		return
+	}
+
+	// Notify MCP gateway of config change (skip BroadcastProxyConfig for now - will be added later)
+	// if h.codexWSHandler != nil {
+	// 	h.codexWSHandler.BroadcastProxyConfig(settings)
+	// }
+
+	// Return updated settings
+	h.GetProxySettings(w, r)
 }
 
 // handleContext handles GET /api/context and POST /api/context

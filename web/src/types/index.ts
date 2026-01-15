@@ -130,6 +130,33 @@ export interface OpenAISettingsUpdate {
   auth_method?: AuthMethod;
 }
 
+// Proxy Settings types
+export interface ProxyServiceConfig {
+  enabled: boolean;
+  supported: boolean;
+}
+
+export interface ProxySettings {
+  proxy_url: string;
+  no_proxy: string;
+  services: {
+    openai: ProxyServiceConfig;
+    slack: ProxyServiceConfig;
+    zabbix: ProxyServiceConfig;
+    ssh: ProxyServiceConfig;
+  };
+}
+
+export interface ProxySettingsUpdate {
+  proxy_url: string;
+  no_proxy: string;
+  services: {
+    openai: { enabled: boolean };
+    slack: { enabled: boolean };
+    zabbix: { enabled: boolean };
+  };
+}
+
 // Device Auth types
 export interface DeviceAuthStartResponse {
   device_code: string;

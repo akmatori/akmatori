@@ -34,6 +34,7 @@ func AutoMigrate() error {
 	err := DB.AutoMigrate(
 		&SlackSettings{},
 		&OpenAISettings{},
+		&ProxySettings{},
 		&ContextFile{},
 		&Skill{},
 		&ToolType{},
@@ -48,6 +49,11 @@ func AutoMigrate() error {
 	)
 	if err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	// Migrate proxy settings from OpenAI settings if they exist
+	if err := migrateProxySettings(DB); err != nil {
+		log.Printf("Warning: proxy settings migration failed: %v", err)
 	}
 
 	log.Println("Database migrations completed successfully")
@@ -239,4 +245,75 @@ func ClearOpenAIChatGPTTokens(id uint) error {
 			"chat_gpt_expires_at":    nil,
 			"chat_gpt_user_email":    "",
 		}).Error
+}
+
+// GetProxySettings retrieves proxy settings from the database
+func GetProxySettings() (*ProxySettings, error) {
+	var settings ProxySettings
+	if err := DB.First(&settings).Error; err != nil {
+		return nil, err
+	}
+	return &settings, nil
+}
+
+// UpdateProxySettings updates proxy settings in the database
+func UpdateProxySettings(settings *ProxySettings) error {
+	return DB.Model(&ProxySettings{}).Where("id = ?", settings.ID).Updates(settings).Error
+}
+
+// GetOrCreateProxySettings gets existing settings or creates default
+func GetOrCreateProxySettings() (*ProxySettings, error) {
+	var settings ProxySettings
+	err := DB.First(&settings).Error
+	if err == gorm.ErrRecordNotFound {
+		settings = ProxySettings{
+			OpenAIEnabled: true,
+			SlackEnabled:  true,
+			ZabbixEnabled: false,
+		}
+		if err := DB.Create(&settings).Error; err != nil {
+			return nil, err
+		}
+		return &settings, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &settings, nil
+}
+
+// migrateProxySettings copies proxy settings from openai_settings to proxy_settings (one-time migration)
+func migrateProxySettings(db *gorm.DB) error {
+	// Check if proxy_settings already has data
+	var count int64
+	db.Model(&ProxySettings{}).Count(&count)
+	if count > 0 {
+		return nil // Already migrated
+	}
+
+	// Check if openai_settings has proxy configured
+	var openai OpenAISettings
+	if err := db.First(&openai).Error; err != nil {
+		return nil // No OpenAI settings, nothing to migrate
+	}
+
+	if openai.ProxyURL == "" {
+		return nil // No proxy configured, nothing to migrate
+	}
+
+	// Create proxy settings with migrated values
+	proxy := ProxySettings{
+		ProxyURL:      openai.ProxyURL,
+		NoProxy:       openai.NoProxy,
+		OpenAIEnabled: true,  // Was being used for OpenAI
+		SlackEnabled:  true,  // Was being used for Slack
+		ZabbixEnabled: false, // New feature, disabled by default
+	}
+
+	if err := db.Create(&proxy).Error; err != nil {
+		return fmt.Errorf("failed to create proxy settings: %w", err)
+	}
+
+	log.Printf("Migrated proxy settings from OpenAI settings: %s", openai.ProxyURL)
+	return nil
 }
