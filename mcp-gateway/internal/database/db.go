@@ -188,3 +188,29 @@ func GetToolInstanceByType(ctx context.Context, typeName string) (*ToolInstance,
 	}
 	return &instance, nil
 }
+
+// ProxySettings stores HTTP proxy configuration with per-service toggles
+type ProxySettings struct {
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	ProxyURL      string    `gorm:"type:text" json:"proxy_url"`
+	NoProxy       string    `gorm:"type:text" json:"no_proxy"`
+	OpenAIEnabled bool      `gorm:"default:true" json:"openai_enabled"`
+	SlackEnabled  bool      `gorm:"default:true" json:"slack_enabled"`
+	ZabbixEnabled bool      `gorm:"default:false" json:"zabbix_enabled"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+func (ProxySettings) TableName() string {
+	return "proxy_settings"
+}
+
+// GetProxySettings retrieves proxy settings from the database
+func GetProxySettings(ctx context.Context) (*ProxySettings, error) {
+	var settings ProxySettings
+	err := DB.WithContext(ctx).First(&settings).Error
+	if err != nil {
+		return nil, err
+	}
+	return &settings, nil
+}

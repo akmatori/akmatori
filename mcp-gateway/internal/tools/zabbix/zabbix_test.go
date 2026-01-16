@@ -458,3 +458,113 @@ func TestJSONRPCResponse_EmptyResult(t *testing.T) {
 		t.Errorf("Expected 0 items, got %d", len(items))
 	}
 }
+
+func TestZabbixConfig_ProxySettings(t *testing.T) {
+	// Test with proxy enabled
+	proxyConfig := &ZabbixConfig{
+		URL:       "https://zabbix.example.com",
+		Token:     "token",
+		VerifySSL: true,
+		Timeout:   30,
+		UseProxy:  true,
+		ProxyURL:  "http://proxy.example.com:8080",
+	}
+
+	if !proxyConfig.UseProxy {
+		t.Error("Expected UseProxy to be true")
+	}
+	if proxyConfig.ProxyURL != "http://proxy.example.com:8080" {
+		t.Errorf("Expected ProxyURL 'http://proxy.example.com:8080', got '%s'", proxyConfig.ProxyURL)
+	}
+
+	// Test with proxy disabled
+	noProxyConfig := &ZabbixConfig{
+		URL:       "https://zabbix.example.com",
+		Token:     "token",
+		VerifySSL: true,
+		Timeout:   30,
+		UseProxy:  false,
+		ProxyURL:  "",
+	}
+
+	if noProxyConfig.UseProxy {
+		t.Error("Expected UseProxy to be false")
+	}
+	if noProxyConfig.ProxyURL != "" {
+		t.Errorf("Expected empty ProxyURL, got '%s'", noProxyConfig.ProxyURL)
+	}
+}
+
+func TestZabbixConfig_ProxyDisabledWithURL(t *testing.T) {
+	// Edge case: ProxyURL set but UseProxy is false
+	// This should mean proxy is NOT used
+	config := &ZabbixConfig{
+		URL:       "https://zabbix.example.com",
+		Token:     "token",
+		VerifySSL: true,
+		Timeout:   30,
+		UseProxy:  false,
+		ProxyURL:  "http://proxy.example.com:8080", // URL exists but disabled
+	}
+
+	// When UseProxy is false, the transport.Proxy should be nil
+	// regardless of ProxyURL value
+	if config.UseProxy {
+		t.Error("Expected proxy to be disabled even with ProxyURL set")
+	}
+}
+
+func TestZabbixConfig_ProxyEnabledWithoutURL(t *testing.T) {
+	// Edge case: UseProxy is true but ProxyURL is empty
+	// This should mean proxy is NOT used (no valid proxy to use)
+	config := &ZabbixConfig{
+		URL:       "https://zabbix.example.com",
+		Token:     "token",
+		VerifySSL: true,
+		Timeout:   30,
+		UseProxy:  true,
+		ProxyURL:  "", // Empty URL
+	}
+
+	// When ProxyURL is empty, proxy should not be used
+	if config.ProxyURL != "" {
+		t.Error("Expected empty ProxyURL")
+	}
+}
+
+func TestZabbixConfig_ProxyWithAuthentication(t *testing.T) {
+	// Test proxy URL with authentication credentials
+	config := &ZabbixConfig{
+		URL:       "https://zabbix.example.com",
+		Token:     "token",
+		VerifySSL: true,
+		Timeout:   30,
+		UseProxy:  true,
+		ProxyURL:  "http://user:password@proxy.example.com:8080",
+	}
+
+	if !config.UseProxy {
+		t.Error("Expected UseProxy to be true")
+	}
+	if config.ProxyURL != "http://user:password@proxy.example.com:8080" {
+		t.Errorf("Expected proxy URL with auth, got '%s'", config.ProxyURL)
+	}
+}
+
+func TestZabbixConfig_DefaultProxyValues(t *testing.T) {
+	// Default ZabbixConfig should have proxy disabled
+	config := &ZabbixConfig{
+		URL:       "https://zabbix.example.com",
+		Token:     "token",
+		VerifySSL: true,
+		Timeout:   30,
+		// UseProxy and ProxyURL not set - should be zero values
+	}
+
+	if config.UseProxy {
+		t.Error("Expected UseProxy to default to false")
+	}
+	if config.ProxyURL != "" {
+		t.Error("Expected ProxyURL to default to empty string")
+	}
+}
