@@ -37,6 +37,11 @@ class MCPClient:
         self.incident_id = incident_id or os.environ.get("INCIDENT_ID", "")
         self._request_id = 0
 
+        # Create an opener that bypasses proxy for internal MCP gateway connections
+        # This prevents HTTP_PROXY/HTTPS_PROXY env vars from affecting internal traffic
+        no_proxy_handler = urllib.request.ProxyHandler({})
+        self._opener = urllib.request.build_opener(no_proxy_handler)
+
     def _next_request_id(self) -> int:
         """Get the next request ID"""
         self._request_id += 1
@@ -84,7 +89,8 @@ class MCPClient:
         req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
 
         try:
-            with urllib.request.urlopen(req, timeout=300) as response:
+            # Use our custom opener that bypasses proxy for internal connections
+            with self._opener.open(req, timeout=300) as response:
                 resp_data = response.read()
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="ignore")
@@ -152,7 +158,8 @@ class MCPClient:
         req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
 
         try:
-            with urllib.request.urlopen(req, timeout=30) as response:
+            # Use our custom opener that bypasses proxy for internal connections
+            with self._opener.open(req, timeout=30) as response:
                 resp_data = response.read()
         except Exception as exc:
             raise MCPError(-32000, f"Failed to list tools: {exc}")
