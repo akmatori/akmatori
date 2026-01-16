@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -35,6 +36,8 @@ type ZabbixConfig struct {
 	Password  string
 	VerifySSL bool
 	Timeout   int
+	UseProxy  bool   // Whether to use proxy (from ZabbixEnabled setting)
+	ProxyURL  string // Proxy URL if enabled
 }
 
 // JSONRPCRequest represents a Zabbix JSON-RPC request
@@ -106,6 +109,16 @@ func (t *ZabbixTool) getConfig(ctx context.Context, incidentID string) (*ZabbixC
 		config.Timeout = int(timeout)
 	}
 
+	// Fetch proxy settings from database
+	proxySettings, err := database.GetProxySettings(ctx)
+	if err == nil && proxySettings != nil {
+		if proxySettings.ProxyURL != "" && proxySettings.ZabbixEnabled {
+			config.UseProxy = true
+			config.ProxyURL = proxySettings.ProxyURL
+		}
+	}
+	// If fetch fails, continue without proxy (fail-open)
+
 	return config, nil
 }
 
@@ -161,15 +174,32 @@ func (t *ZabbixTool) doRequest(ctx context.Context, config *ZabbixConfig, method
 
 	t.logger.Printf("Zabbix API call: %s", method)
 
-	// Create HTTP client with SSL configuration
-	client := &http.Client{
-		Timeout: time.Duration(config.Timeout) * time.Second,
+	// Create HTTP transport with explicit proxy configuration
+	transport := &http.Transport{}
+
+	// Handle proxy settings - MUST explicitly set Proxy to prevent env var usage
+	if config.UseProxy && config.ProxyURL != "" {
+		proxyURL, err := url.Parse(config.ProxyURL)
+		if err != nil {
+			t.logger.Printf("Invalid proxy URL %s: %v, proceeding without proxy", config.ProxyURL, err)
+			transport.Proxy = nil
+		} else {
+			transport.Proxy = http.ProxyURL(proxyURL)
+			t.logger.Printf("Zabbix using proxy: %s", config.ProxyURL)
+		}
+	} else {
+		// Explicitly disable proxy (ignore HTTP_PROXY env vars)
+		transport.Proxy = nil
 	}
 
+	// Apply SSL verification setting
 	if !config.VerifySSL {
-		client.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+
+	client := &http.Client{
+		Timeout:   time.Duration(config.Timeout) * time.Second,
+		Transport: transport,
 	}
 
 	// Ensure URL ends with /api_jsonrpc.php
