@@ -491,5 +491,15 @@ Be specific and actionable. Reference any relevant data sources or scripts you u
 
 // isSlackEnabled checks if Slack integration is active
 func (h *AlertHandler) isSlackEnabled() bool {
-	return h.slackClient != nil && h.alertsChannel != ""
+	if h.slackClient == nil || h.alertsChannel == "" {
+		return false
+	}
+
+	// Check database setting - user may have disabled Slack in UI
+	settings, err := database.GetSlackSettings()
+	if err != nil {
+		return false
+	}
+
+	return settings.IsActive()
 }
