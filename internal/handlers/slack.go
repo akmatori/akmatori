@@ -111,6 +111,14 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 
 // processMessage is the core message processing logic
 func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user string) {
+	// Check if Slack is still enabled before processing
+	// This catches messages queued before Slack was disabled
+	settings, err := database.GetSlackSettings()
+	if err != nil || !settings.IsActive() {
+		log.Printf("Slack is disabled, ignoring message from channel %s", channel)
+		return
+	}
+
 	// Determine thread ID
 	threadID := messageTS
 	if threadTS != "" {
