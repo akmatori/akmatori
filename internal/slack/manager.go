@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/gorilla/websocket"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
 )
@@ -121,12 +122,29 @@ func (m *Manager) startWithSettings(ctx context.Context, settings *database.Slac
 	// Create new Slack client
 	m.client = slack.New(settings.BotToken, options...)
 
-	// Create Socket Mode client
-	m.socketClient = socketmode.New(
-		m.client,
+	// Build Socket Mode options
+	socketOptions := []socketmode.Option{
 		socketmode.OptionDebug(false),
 		socketmode.OptionLog(log.New(os.Stdout, "socketmode: ", log.Lshortfile|log.LstdFlags)),
-	)
+	}
+
+	// If proxy is configured for Slack, create a custom WebSocket dialer
+	if proxySettings, err := database.GetOrCreateProxySettings(); err == nil && proxySettings != nil {
+		if proxySettings.ProxyURL != "" && proxySettings.SlackEnabled {
+			proxyURL, parseErr := url.Parse(proxySettings.ProxyURL)
+			if parseErr == nil {
+				dialer := &websocket.Dialer{
+					Proxy:            http.ProxyURL(proxyURL),
+					HandshakeTimeout: websocket.DefaultDialer.HandshakeTimeout,
+				}
+				socketOptions = append(socketOptions, socketmode.OptionDialer(dialer))
+				log.Printf("SlackManager: Using proxy for WebSocket: %s", proxySettings.ProxyURL)
+			}
+		}
+	}
+
+	// Create Socket Mode client
+	m.socketClient = socketmode.New(m.client, socketOptions...)
 
 	// Initialize control channels
 	m.stopChan = make(chan struct{})

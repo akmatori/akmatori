@@ -13,6 +13,22 @@ version: '3.8'
 # - Tool credentials fetched by MCP Gateway at execution time
 
 services:
+  # Init service to create data directories with correct permissions
+  # This runs as root, creates directories owned by UID 1000, then exits
+  init-dirs:
+    image: alpine:3.19
+    container_name: akmatori-init
+    user: root
+    volumes:
+      - ./akmatori_data:/akmatori
+    command: >
+      sh -c "
+        mkdir -p /akmatori/incidents /akmatori/context /akmatori/skills &&
+        chown -R 1000:1000 /akmatori &&
+        echo 'Data directories initialized with correct permissions'
+      "
+    restart: "no"
+
   postgres:
     image: postgres:16-alpine
     container_name: akmatori-postgres
@@ -35,12 +51,21 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
+      args:
+        http_proxy:  ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy:    ${no_proxy}
+        HTTP_PROXY:  ${HTTP_PROXY}
+        HTTPS_PROXY: ${HTTPS_PROXY}
+        NO_PROXY:    ${NO_PROXY}
     container_name: akmatori-api
     restart: unless-stopped
     networks:
       - frontend
       - api-internal
     depends_on:
+      init-dirs:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     environment:
@@ -59,6 +84,13 @@ services:
     build:
       context: ./mcp-gateway
       dockerfile: Dockerfile
+      args:
+        http_proxy:  ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy:    ${no_proxy}
+        HTTP_PROXY:  ${HTTP_PROXY}
+        HTTPS_PROXY: ${HTTPS_PROXY}
+        NO_PROXY:    ${NO_PROXY}
     container_name: akmatori-mcp-gateway
     restart: unless-stopped
     networks:
@@ -81,6 +113,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.codex
+      args:
+        http_proxy:  ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy:    ${no_proxy}
+        HTTP_PROXY:  ${HTTP_PROXY}
+        HTTPS_PROXY: ${HTTPS_PROXY}
+        NO_PROXY:    ${NO_PROXY}
     container_name: akmatori-codex
     restart: unless-stopped
     networks:
@@ -112,6 +151,13 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+      args:
+        http_proxy:  ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy:    ${no_proxy}
+        HTTP_PROXY:  ${HTTP_PROXY}
+        HTTPS_PROXY: ${HTTPS_PROXY}
+        NO_PROXY:    ${NO_PROXY}
     container_name: akmatori-frontend
     restart: unless-stopped
     networks:
