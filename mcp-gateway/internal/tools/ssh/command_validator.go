@@ -55,6 +55,8 @@ func NewCommandValidator() *CommandValidator {
 			// Commands that need subcommand validation
 			"docker": true, "kubectl": true, "systemctl": true,
 			"dpkg": true, "rpm": true, "apt": true, "yum": true,
+			// Sudo - allows running read-only commands with elevated privileges
+			"sudo": true,
 		},
 		DangerousPatterns: []string{
 			// Destructive file operations
@@ -87,7 +89,7 @@ func NewCommandValidator() *CommandValidator {
 			":(){ :|:& };:", // fork bomb
 			"mkfifo", "mknod",
 			// Privilege escalation
-			"sudo ", "su ",
+			"su ",
 			// Docker dangerous operations
 			"docker rm", "docker rmi", "docker stop", "docker kill",
 			"docker exec", "docker run", "docker start",
@@ -155,6 +157,15 @@ func (v *CommandValidator) validateSingleCommand(cmd string) error {
 	// Check if base command is in allowed list
 	if !v.ReadOnlyCommands[baseCmd] {
 		return v.blockedError(fmt.Sprintf("'%s' is not in the allowed command list", baseCmd))
+	}
+
+	// Special handling for sudo - recursively validate the command after sudo
+	if baseCmd == "sudo" {
+		innerCmd := extractCommandAfterSudo(cmd)
+		if innerCmd == "" {
+			return v.blockedError("sudo requires a command")
+		}
+		return v.validateSingleCommand(innerCmd)
 	}
 
 	// For commands with subcommand restrictions, check subcommands
@@ -234,6 +245,43 @@ func extractBaseCommand(cmd string) string {
 	}
 
 	return base
+}
+
+// extractCommandAfterSudo extracts the actual command from a sudo invocation
+// It skips sudo flags like -u, -i, -E, etc.
+func extractCommandAfterSudo(cmd string) string {
+	parts := strings.Fields(cmd)
+	if len(parts) == 0 || parts[0] != "sudo" {
+		return ""
+	}
+
+	// Skip "sudo" and any flags
+	i := 1
+	for i < len(parts) {
+		part := parts[i]
+		if !strings.HasPrefix(part, "-") {
+			// Found the actual command
+			break
+		}
+		// Skip flag and its argument if needed
+		// Flags that take arguments: -u, -g, -C, -h, -p, -r, -t, -U
+		flagsWithArgs := map[string]bool{
+			"-u": true, "-g": true, "-C": true, "-h": true,
+			"-p": true, "-r": true, "-t": true, "-U": true,
+		}
+		if flagsWithArgs[part] {
+			i += 2 // Skip flag and its argument
+		} else {
+			i++ // Just skip the flag
+		}
+	}
+
+	if i >= len(parts) {
+		return ""
+	}
+
+	// Return the rest of the command
+	return strings.Join(parts[i:], " ")
 }
 
 // containsWriteRedirect checks for output redirects
