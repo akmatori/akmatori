@@ -271,7 +271,7 @@ func TestCommandValidator_PipeChains(t *testing.T) {
 	// Blocked pipe chains (contains dangerous command)
 	blocked := []string{
 		"cat /etc/passwd | rm /tmp/file",
-		"ls | sudo cat /etc/shadow",
+		"ls | su - root",
 	}
 
 	for _, cmd := range blocked {
@@ -467,5 +467,87 @@ func TestCommandValidator_ComplexRealWorldCommand(t *testing.T) {
 	err := v.ValidateCommand(cmd, false)
 	if err != nil {
 		t.Errorf("Real-world command '%s' should be allowed, got error: %v", cmd, err)
+	}
+}
+
+func TestCommandValidator_SudoCommands(t *testing.T) {
+	v := NewCommandValidator()
+
+	// Allowed sudo commands (read-only operations with elevated privileges)
+	allowed := []string{
+		"sudo cat /var/log/secure",
+		"sudo cat /etc/shadow",
+		"sudo tail -f /var/log/auth.log",
+		"sudo head -n 100 /var/log/messages",
+		"sudo journalctl -u nginx",
+		"sudo dmesg",
+		"sudo ls -la /root",
+		"sudo ps aux",
+		"sudo netstat -tlnp",
+		"sudo ss -tlnp",
+		"sudo docker ps",
+		"sudo kubectl get pods",
+		"sudo systemctl status nginx",
+		// Sudo with flags
+		"sudo -u www-data cat /var/log/app.log",
+		"sudo -i cat /etc/shadow",
+		"sudo -E env",
+	}
+
+	for _, cmd := range allowed {
+		err := v.ValidateCommand(cmd, false)
+		if err != nil {
+			t.Errorf("Sudo command '%s' should be allowed, got error: %v", cmd, err)
+		}
+	}
+
+	// Blocked sudo commands (dangerous operations)
+	blocked := []string{
+		"sudo rm -rf /tmp",
+		"sudo reboot",
+		"sudo shutdown -h now",
+		"sudo kill 1234",
+		"sudo apt install nginx",
+		"sudo yum remove httpd",
+		"sudo systemctl restart nginx",
+		"sudo docker rm container",
+		"sudo kubectl delete pod my-pod",
+		"sudo chmod 777 /etc/passwd",
+		"sudo chown root:root /tmp/file",
+		"sudo mv /etc/hosts /etc/hosts.bak",
+		// Nested sudo (should still validate inner command)
+		"sudo unknowncommand",
+	}
+
+	for _, cmd := range blocked {
+		err := v.ValidateCommand(cmd, false)
+		if err == nil {
+			t.Errorf("Sudo command '%s' should be blocked in read-only mode", cmd)
+		}
+	}
+}
+
+func TestExtractCommandAfterSudo(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"sudo cat /etc/shadow", "cat /etc/shadow"},
+		{"sudo -u www-data cat /var/log/app.log", "cat /var/log/app.log"},
+		{"sudo -i cat /etc/shadow", "cat /etc/shadow"},
+		{"sudo -E env", "env"},
+		{"sudo -u root -g wheel ls /root", "ls /root"},
+		{"sudo --preserve-env cat /etc/shadow", "cat /etc/shadow"},
+		{"sudo", ""},               // No command after sudo
+		{"sudo -u user", ""},       // Only flag with argument
+		{"notasudo cat", ""},       // Not a sudo command
+		{"cat /etc/passwd", ""},    // Not a sudo command
+	}
+
+	for _, test := range tests {
+		result := extractCommandAfterSudo(test.input)
+		if result != test.expected {
+			t.Errorf("extractCommandAfterSudo(%q) = %q, expected %q", test.input, result, test.expected)
+		}
 	}
 }
