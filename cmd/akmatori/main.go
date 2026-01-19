@@ -168,13 +168,12 @@ func main() {
 	// Initialize Alert handler
 	alertHandler := handlers.NewAlertHandler(
 		cfg,
-		slackManager.GetClient(), // Can be nil if Slack is disabled
+		slackManager, // Pass manager for dynamic client access
 		codexExecutor,
 		codexWSHandler,
 		skillService,
 		alertService,
 		channelResolver,
-		slackSettings.AlertsChannel,
 	)
 
 	// Register all alert adapters

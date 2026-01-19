@@ -21,13 +21,12 @@ import (
 // AlertHandler handles webhook requests from multiple alert sources
 type AlertHandler struct {
 	config          *config.Config
-	slackClient     *slack.Client
+	slackManager    *slackutil.Manager
 	codexExecutor   *executor.Executor
 	codexWSHandler  *CodexWSHandler
 	skillService    *services.SkillService
 	alertService    *services.AlertService
 	channelResolver *slackutil.ChannelResolver
-	alertsChannel   string
 
 	// Registered adapters by source type
 	adapters map[string]alerts.AlertAdapter
@@ -36,23 +35,21 @@ type AlertHandler struct {
 // NewAlertHandler creates a new alert handler
 func NewAlertHandler(
 	cfg *config.Config,
-	slackClient *slack.Client,
+	slackManager *slackutil.Manager,
 	codexExecutor *executor.Executor,
 	codexWSHandler *CodexWSHandler,
 	skillService *services.SkillService,
 	alertService *services.AlertService,
 	channelResolver *slackutil.ChannelResolver,
-	alertsChannel string,
 ) *AlertHandler {
 	h := &AlertHandler{
 		config:          cfg,
-		slackClient:     slackClient,
+		slackManager:    slackManager,
 		codexExecutor:   codexExecutor,
 		codexWSHandler:  codexWSHandler,
 		skillService:    skillService,
 		alertService:    alertService,
 		channelResolver: channelResolver,
-		alertsChannel:   alertsChannel,
 		adapters:        make(map[string]alerts.AlertAdapter),
 	}
 
@@ -198,7 +195,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 
 	// Post to Slack if enabled
 	var threadTS string
-	if h.slackClient != nil && h.alertsChannel != "" {
+	if h.isSlackEnabled() {
 		var err error
 		threadTS, err = h.postAlertToSlack(normalized, instance)
 		if err != nil {
@@ -216,20 +213,28 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 }
 
 func (h *AlertHandler) postAlertToSlack(alert alerts.NormalizedAlert, instance *database.AlertSourceInstance) (string, error) {
-	if h.slackClient == nil || h.alertsChannel == "" {
+	slackClient := h.slackManager.GetClient()
+	if slackClient == nil {
 		return "", nil
 	}
+
+	// Get alerts channel from database settings
+	settings, err := database.GetSlackSettings()
+	if err != nil || settings == nil || settings.AlertsChannel == "" {
+		return "", nil
+	}
+	alertsChannel := settings.AlertsChannel
 
 	// Resolve channel ID
 	var channelID string
 	if h.channelResolver != nil {
 		var err error
-		channelID, err = h.channelResolver.ResolveChannel(h.alertsChannel)
+		channelID, err = h.channelResolver.ResolveChannel(alertsChannel)
 		if err != nil {
 			return "", fmt.Errorf("failed to resolve channel: %w", err)
 		}
 	} else {
-		channelID = h.alertsChannel
+		channelID = alertsChannel
 	}
 
 	// Format alert message
@@ -256,7 +261,7 @@ func (h *AlertHandler) postAlertToSlack(alert alerts.NormalizedAlert, instance *
 	}
 
 	// Post message
-	_, ts, err := h.slackClient.PostMessage(
+	_, ts, err := slackClient.PostMessage(
 		channelID,
 		slack.MsgOptionText(message, false),
 	)
@@ -265,7 +270,7 @@ func (h *AlertHandler) postAlertToSlack(alert alerts.NormalizedAlert, instance *
 	}
 
 	// Add reaction
-	h.slackClient.AddReaction("rotating_light", slack.ItemRef{
+	slackClient.AddReaction("rotating_light", slack.ItemRef{
 		Channel:   channelID,
 		Timestamp: ts,
 	})
@@ -419,13 +424,25 @@ Summary: %s
 
 // updateSlackWithResult posts results to Slack thread
 func (h *AlertHandler) updateSlackWithResult(threadTS, response string, hasError bool) {
-	if h.slackClient == nil || threadTS == "" || h.alertsChannel == "" {
+	if threadTS == "" {
 		return
 	}
 
-	channelID := h.alertsChannel
+	slackClient := h.slackManager.GetClient()
+	if slackClient == nil {
+		return
+	}
+
+	// Get alerts channel from database settings
+	settings, err := database.GetSlackSettings()
+	if err != nil || settings == nil || settings.AlertsChannel == "" {
+		return
+	}
+	alertsChannel := settings.AlertsChannel
+
+	channelID := alertsChannel
 	if h.channelResolver != nil {
-		resolved, _ := h.channelResolver.ResolveChannel(h.alertsChannel)
+		resolved, _ := h.channelResolver.ResolveChannel(alertsChannel)
 		if resolved != "" {
 			channelID = resolved
 		}
@@ -436,13 +453,13 @@ func (h *AlertHandler) updateSlackWithResult(threadTS, response string, hasError
 	if hasError {
 		reactionName = "x"
 	}
-	h.slackClient.AddReaction(reactionName, slack.ItemRef{
+	slackClient.AddReaction(reactionName, slack.ItemRef{
 		Channel:   channelID,
 		Timestamp: threadTS,
 	})
 
 	// Post result summary
-	h.slackClient.PostMessage(
+	slackClient.PostMessage(
 		channelID,
 		slack.MsgOptionText(response, false),
 		slack.MsgOptionTS(threadTS),
@@ -491,15 +508,16 @@ Be specific and actionable. Reference any relevant data sources or scripts you u
 
 // isSlackEnabled checks if Slack integration is active
 func (h *AlertHandler) isSlackEnabled() bool {
-	if h.slackClient == nil || h.alertsChannel == "" {
-		return false
-	}
-
 	// Check database setting - user may have disabled Slack in UI
 	settings, err := database.GetSlackSettings()
 	if err != nil {
 		return false
 	}
 
-	return settings.IsActive()
+	if !settings.IsActive() || settings.AlertsChannel == "" {
+		return false
+	}
+
+	// Check that we have a valid client
+	return h.slackManager.GetClient() != nil
 }
