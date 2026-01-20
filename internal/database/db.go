@@ -46,6 +46,10 @@ func AutoMigrate() error {
 		// Alert source models
 		&AlertSourceType{},
 		&AlertSourceInstance{},
+		// Alert aggregation models
+		&IncidentAlert{},
+		&IncidentMerge{},
+		&AggregationSettings{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
