@@ -118,6 +118,10 @@ func main() {
 	alertService := services.NewAlertService()
 	log.Printf("Alert service initialized")
 
+	// Initialize Aggregation service
+	aggregationService := services.NewAggregationService(database.GetDB())
+	log.Printf("Aggregation service initialized")
+
 	// Initialize default alert source types
 	if err := alertService.InitializeDefaultSourceTypes(); err != nil {
 		log.Printf("Warning: Failed to initialize alert source types: %v", err)
@@ -174,6 +178,7 @@ func main() {
 		skillService,
 		alertService,
 		channelResolver,
+		aggregationService,
 	)
 
 	// Register all alert adapters

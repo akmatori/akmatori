@@ -20,13 +20,14 @@ import (
 
 // AlertHandler handles webhook requests from multiple alert sources
 type AlertHandler struct {
-	config          *config.Config
-	slackManager    *slackutil.Manager
-	codexExecutor   *executor.Executor
-	codexWSHandler  *CodexWSHandler
-	skillService    *services.SkillService
-	alertService    *services.AlertService
-	channelResolver *slackutil.ChannelResolver
+	config             *config.Config
+	slackManager       *slackutil.Manager
+	codexExecutor      *executor.Executor
+	codexWSHandler     *CodexWSHandler
+	skillService       *services.SkillService
+	alertService       *services.AlertService
+	channelResolver    *slackutil.ChannelResolver
+	aggregationService *services.AggregationService
 
 	// Registered adapters by source type
 	adapters map[string]alerts.AlertAdapter
@@ -41,16 +42,18 @@ func NewAlertHandler(
 	skillService *services.SkillService,
 	alertService *services.AlertService,
 	channelResolver *slackutil.ChannelResolver,
+	aggregationService *services.AggregationService,
 ) *AlertHandler {
 	h := &AlertHandler{
-		config:          cfg,
-		slackManager:    slackManager,
-		codexExecutor:   codexExecutor,
-		codexWSHandler:  codexWSHandler,
-		skillService:    skillService,
-		alertService:    alertService,
-		channelResolver: channelResolver,
-		adapters:        make(map[string]alerts.AlertAdapter),
+		config:             cfg,
+		slackManager:       slackManager,
+		codexExecutor:      codexExecutor,
+		codexWSHandler:     codexWSHandler,
+		skillService:       skillService,
+		alertService:       alertService,
+		channelResolver:    channelResolver,
+		aggregationService: aggregationService,
+		adapters:           make(map[string]alerts.AlertAdapter),
 	}
 
 	return h
@@ -137,65 +140,207 @@ func (h *AlertHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Received %d alerts", len(normalizedAlerts))
 }
 
+// evaluateAlertAggregation uses Codex to decide if alert should attach to existing incident
+func (h *AlertHandler) evaluateAlertAggregation(
+	instance *database.AlertSourceInstance,
+	normalized alerts.NormalizedAlert,
+) (*services.CorrelatorOutput, error) {
+	// Check if aggregation service is available
+	if h.aggregationService == nil {
+		return &services.CorrelatorOutput{Decision: "new", Reason: "Aggregation service not configured"}, nil
+	}
+
+	// Check if aggregation is enabled
+	settings, err := h.aggregationService.GetSettings()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get aggregation settings: %w", err)
+	}
+	if !settings.Enabled {
+		return &services.CorrelatorOutput{Decision: "new", Reason: "Aggregation disabled"}, nil
+	}
+
+	// Build alert context
+	alertContext := services.AlertContext{
+		AlertName:         normalized.AlertName,
+		Severity:          string(normalized.Severity),
+		TargetHost:        normalized.TargetHost,
+		TargetService:     normalized.TargetService,
+		Summary:           normalized.Summary,
+		Description:       normalized.Description,
+		SourceType:        instance.AlertSourceType.Name,
+		SourceFingerprint: normalized.SourceFingerprint,
+		TargetLabels:      normalized.TargetLabels,
+		ReceivedAt:        time.Now(),
+	}
+
+	// Build correlator input
+	input, err := h.aggregationService.BuildCorrelatorInput(alertContext)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build correlator input: %w", err)
+	}
+
+	// If no open incidents, create new
+	if len(input.OpenIncidents) == 0 {
+		return &services.CorrelatorOutput{Decision: "new", Reason: "No open incidents"}, nil
+	}
+
+	// TODO: Call Codex correlator (will be implemented in a future task)
+	// For now, return "new" as default
+	return &services.CorrelatorOutput{Decision: "new", Reason: "Correlator not yet implemented"}, nil
+}
+
 func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, normalized alerts.NormalizedAlert) {
-	// Skip resolved alerts - log only
 	if normalized.Status == database.AlertStatusResolved {
-		log.Printf("Skipping resolved alert (log only): %s", normalized.AlertName)
+		log.Printf("Processing resolved alert: %s", normalized.AlertName)
+		// TODO: Handle resolved alerts (update incident_alerts status)
 		return
 	}
 
 	log.Printf("Processing firing alert: %s (severity: %s)", normalized.AlertName, normalized.Severity)
 
-	// Convert target labels to JSONB
-	targetLabels := database.JSONB{}
-	for k, v := range normalized.TargetLabels {
-		targetLabels[k] = v
-	}
-
-	// Convert raw payload to JSONB
-	rawPayload := database.JSONB{}
-	for k, v := range normalized.RawPayload {
-		rawPayload[k] = v
-	}
-
-	// Create incident context from alert data
-	incidentCtx := &services.IncidentContext{
-		Source:   instance.AlertSourceType.Name,
-		SourceID: normalized.SourceFingerprint,
-		Context: database.JSONB{
-			"alert_name":         normalized.AlertName,
-			"severity":           string(normalized.Severity),
-			"status":             string(normalized.Status),
-			"summary":            normalized.Summary,
-			"description":        normalized.Description,
-			"target_host":        normalized.TargetHost,
-			"target_service":     normalized.TargetService,
-			"target_labels":      targetLabels,
-			"metric_name":        normalized.MetricName,
-			"metric_value":       normalized.MetricValue,
-			"threshold_value":    normalized.ThresholdValue,
-			"runbook_url":        normalized.RunbookURL,
-			"source_alert_id":    normalized.SourceAlertID,
-			"source_fingerprint": normalized.SourceFingerprint,
-			"source_type":        instance.AlertSourceType.Name,
-			"source_instance":    instance.Name,
-			"raw_payload":        rawPayload,
-		},
-		Message: fmt.Sprintf("%s - %s: %s", normalized.AlertName, normalized.TargetHost, normalized.Summary),
-	}
-
-	// Spawn incident manager
-	incidentUUID, workingDir, err := h.skillService.SpawnIncidentManager(incidentCtx)
+	// Evaluate aggregation
+	aggregationResult, err := h.evaluateAlertAggregation(instance, normalized)
 	if err != nil {
-		log.Printf("Error spawning incident manager: %v", err)
-		return
+		log.Printf("Warning: Aggregation evaluation failed, creating new incident: %v", err)
+		aggregationResult = &services.CorrelatorOutput{
+			Decision: "new",
+			Reason:   err.Error(),
+		}
 	}
 
-	log.Printf("Created incident for alert: UUID=%s, WorkingDir=%s", incidentUUID, workingDir)
+	log.Printf("Aggregation decision: %s (confidence: %.2f, reason: %s)",
+		aggregationResult.Decision, aggregationResult.Confidence, aggregationResult.Reason)
 
-	// Post to Slack if enabled
+	var incidentUUID string
+	var workingDir string
+	var isNewIncident bool
+
+	// Try to attach to existing incident if aggregation says so
+	attached := false
+	if aggregationResult.Decision == "attach" && aggregationResult.IncidentUUID != "" {
+		incidentUUID = aggregationResult.IncidentUUID
+		existing, err := h.skillService.GetIncident(incidentUUID)
+		if err == nil {
+			workingDir = existing.WorkingDir
+
+			// Attach alert to incident
+			incidentAlert := &database.IncidentAlert{
+				SourceType:            instance.AlertSourceType.Name,
+				SourceFingerprint:     normalized.SourceFingerprint,
+				AlertName:             normalized.AlertName,
+				Severity:              string(normalized.Severity),
+				TargetHost:            normalized.TargetHost,
+				TargetService:         normalized.TargetService,
+				Summary:               normalized.Summary,
+				Description:           normalized.Description,
+				TargetLabels:          database.JSONB(convertLabels(normalized.TargetLabels)),
+				Status:                string(normalized.Status),
+				AlertPayload:          database.JSONB(normalized.RawPayload),
+				CorrelationConfidence: aggregationResult.Confidence,
+				CorrelationReason:     aggregationResult.Reason,
+				AttachedAt:            time.Now(),
+			}
+
+			if err := h.aggregationService.AttachAlertToIncident(existing.ID, incidentAlert); err == nil {
+				// If incident was in observing state, move back to diagnosed
+				if existing.Status == database.IncidentStatusObserving {
+					h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusDiagnosed, "", "")
+				}
+				attached = true
+				isNewIncident = false
+				log.Printf("Attached alert to existing incident: %s", incidentUUID)
+			} else {
+				log.Printf("Failed to attach alert to incident %s: %v", incidentUUID, err)
+			}
+		} else {
+			log.Printf("Failed to get incident %s, creating new: %v", incidentUUID, err)
+		}
+	}
+
+	// CREATE NEW incident if not attached
+	if !attached {
+		// Convert target labels to JSONB
+		targetLabels := database.JSONB{}
+		for k, v := range normalized.TargetLabels {
+			targetLabels[k] = v
+		}
+
+		// Convert raw payload to JSONB
+		rawPayload := database.JSONB{}
+		for k, v := range normalized.RawPayload {
+			rawPayload[k] = v
+		}
+
+		// Create incident context from alert data
+		incidentCtx := &services.IncidentContext{
+			Source:   instance.AlertSourceType.Name,
+			SourceID: normalized.SourceFingerprint,
+			Context: database.JSONB{
+				"alert_name":         normalized.AlertName,
+				"severity":           string(normalized.Severity),
+				"status":             string(normalized.Status),
+				"summary":            normalized.Summary,
+				"description":        normalized.Description,
+				"target_host":        normalized.TargetHost,
+				"target_service":     normalized.TargetService,
+				"target_labels":      targetLabels,
+				"metric_name":        normalized.MetricName,
+				"metric_value":       normalized.MetricValue,
+				"threshold_value":    normalized.ThresholdValue,
+				"runbook_url":        normalized.RunbookURL,
+				"source_alert_id":    normalized.SourceAlertID,
+				"source_fingerprint": normalized.SourceFingerprint,
+				"source_type":        instance.AlertSourceType.Name,
+				"source_instance":    instance.Name,
+				"raw_payload":        rawPayload,
+			},
+			Message: fmt.Sprintf("%s - %s: %s", normalized.AlertName, normalized.TargetHost, normalized.Summary),
+		}
+
+		// Spawn incident manager
+		var err error
+		incidentUUID, workingDir, err = h.skillService.SpawnIncidentManager(incidentCtx)
+		if err != nil {
+			log.Printf("Error spawning incident manager: %v", err)
+			return
+		}
+
+		log.Printf("Created incident for alert: UUID=%s, WorkingDir=%s", incidentUUID, workingDir)
+
+		// Create IncidentAlert record for the initial alert
+		if h.aggregationService != nil {
+			incident, err := h.skillService.GetIncident(incidentUUID)
+			if err == nil {
+				incidentAlert := &database.IncidentAlert{
+					SourceType:            instance.AlertSourceType.Name,
+					SourceFingerprint:     normalized.SourceFingerprint,
+					AlertName:             normalized.AlertName,
+					Severity:              string(normalized.Severity),
+					TargetHost:            normalized.TargetHost,
+					TargetService:         normalized.TargetService,
+					Summary:               normalized.Summary,
+					Description:           normalized.Description,
+					TargetLabels:          database.JSONB(convertLabels(normalized.TargetLabels)),
+					Status:                string(normalized.Status),
+					AlertPayload:          rawPayload,
+					CorrelationConfidence: 1.0,
+					CorrelationReason:     "Initial alert - created incident",
+					AttachedAt:            time.Now(),
+				}
+				if err := h.aggregationService.AttachAlertToIncident(incident.ID, incidentAlert); err != nil {
+					log.Printf("Warning: Failed to create IncidentAlert record: %v", err)
+				}
+			} else {
+				log.Printf("Warning: Failed to get incident for IncidentAlert record: %v", err)
+			}
+		}
+
+		isNewIncident = true
+	}
+
+	// Post to Slack (only for new incidents)
 	var threadTS string
-	if h.isSlackEnabled() {
+	if h.isSlackEnabled() && isNewIncident {
 		var err error
 		threadTS, err = h.postAlertToSlack(normalized, instance)
 		if err != nil {
@@ -203,13 +348,22 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		}
 	}
 
-	// Update incident status
-	if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
-		log.Printf("Warning: Failed to update incident status: %v", err)
+	// Update incident status and run investigation (only for new incidents)
+	if isNewIncident {
+		if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
+			log.Printf("Warning: Failed to update incident status: %v", err)
+		}
+		go h.runInvestigation(incidentUUID, workingDir, normalized, instance, threadTS)
 	}
+}
 
-	// Trigger investigation asynchronously
-	go h.runInvestigation(incidentUUID, workingDir, normalized, instance, threadTS)
+// convertLabels converts map[string]string to map[string]interface{}
+func convertLabels(labels map[string]string) map[string]interface{} {
+	result := make(map[string]interface{})
+	for k, v := range labels {
+		result[k] = v
+	}
+	return result
 }
 
 func (h *AlertHandler) postAlertToSlack(alert alerts.NormalizedAlert, instance *database.AlertSourceInstance) (string, error) {
