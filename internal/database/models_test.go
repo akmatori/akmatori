@@ -585,3 +585,27 @@ func TestJSONB_RoundTrip(t *testing.T) {
 		t.Error("bool field mismatch")
 	}
 }
+
+func TestIncident_AggregationFields(t *testing.T) {
+	now := time.Now()
+	incident := Incident{
+		UUID:                     "test-uuid",
+		AlertCount:               5,
+		LastAlertAt:              &now,
+		ObservingStartedAt:       &now,
+		ObservingDurationMinutes: 30,
+	}
+
+	if incident.AlertCount != 5 {
+		t.Errorf("expected AlertCount 5, got %d", incident.AlertCount)
+	}
+	if incident.LastAlertAt == nil {
+		t.Error("expected LastAlertAt to be set")
+	}
+	if incident.ObservingStartedAt == nil {
+		t.Error("expected ObservingStartedAt to be set")
+	}
+	if incident.ObservingDurationMinutes != 30 {
+		t.Errorf("expected ObservingDurationMinutes 30, got %d", incident.ObservingDurationMinutes)
+	}
+}
