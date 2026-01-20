@@ -1,6 +1,10 @@
 package services
 
 import (
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -171,4 +175,49 @@ func (s *AggregationService) BuildCorrelatorInput(incomingAlert AlertContext) (*
 		IncomingAlert: incomingAlert,
 		OpenIncidents: incidentSummaries,
 	}, nil
+}
+
+// ParseCorrelatorOutput parses the JSON output from the correlator
+func ParseCorrelatorOutput(output string) (*CorrelatorOutput, error) {
+	// Try to extract JSON from the output (in case there's extra text)
+	jsonStr := extractJSON(output)
+	if jsonStr == "" {
+		jsonStr = output
+	}
+
+	var result CorrelatorOutput
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse correlator output: %w", err)
+	}
+
+	// Validate decision
+	if result.Decision != "attach" && result.Decision != "new" {
+		return nil, fmt.Errorf("invalid decision: %s (must be 'attach' or 'new')", result.Decision)
+	}
+
+	// Validate attach has incident_uuid
+	if result.Decision == "attach" && result.IncidentUUID == "" {
+		return nil, fmt.Errorf("attach decision requires incident_uuid")
+	}
+
+	return &result, nil
+}
+
+// extractJSON attempts to extract a JSON object from text
+func extractJSON(text string) string {
+	// Find JSON object pattern
+	re := regexp.MustCompile(`\{[^{}]*\}`)
+	match := re.FindString(text)
+	if match != "" {
+		return match
+	}
+
+	// Try to find multiline JSON
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start != -1 && end != -1 && end > start {
+		return text[start : end+1]
+	}
+
+	return ""
 }

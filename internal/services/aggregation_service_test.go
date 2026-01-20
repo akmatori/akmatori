@@ -336,3 +336,58 @@ func TestAggregationService_BuildCorrelatorInput(t *testing.T) {
 		t.Errorf("expected 1 alert in incident, got %d", len(input.OpenIncidents[0].Alerts))
 	}
 }
+
+func TestAggregationService_ParseCorrelatorOutput(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected CorrelatorOutput
+		wantErr  bool
+	}{
+		{
+			name:  "valid attach decision",
+			input: `{"decision": "attach", "incident_uuid": "inc-1", "confidence": 0.89, "reason": "Same host"}`,
+			expected: CorrelatorOutput{
+				Decision:     "attach",
+				IncidentUUID: "inc-1",
+				Confidence:   0.89,
+				Reason:       "Same host",
+			},
+		},
+		{
+			name:  "valid new decision",
+			input: `{"decision": "new", "confidence": 0.75, "reason": "Different host"}`,
+			expected: CorrelatorOutput{
+				Decision:   "new",
+				Confidence: 0.75,
+				Reason:     "Different host",
+			},
+		},
+		{
+			name:    "invalid JSON",
+			input:   `not json`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output, err := ParseCorrelatorOutput(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if output.Decision != tt.expected.Decision {
+				t.Errorf("expected Decision '%s', got '%s'", tt.expected.Decision, output.Decision)
+			}
+			if output.IncidentUUID != tt.expected.IncidentUUID {
+				t.Errorf("expected IncidentUUID '%s', got '%s'", tt.expected.IncidentUUID, output.IncidentUUID)
+			}
+		})
+	}
+}
