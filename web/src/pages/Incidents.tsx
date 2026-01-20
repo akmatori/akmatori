@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { RefreshCw, X, Plus, MessageSquare, Activity, Clock, CheckCircle, AlertCircle, Terminal, ChevronDown, ChevronRight, Zap, Timer } from 'lucide-react';
+import { RefreshCw, X, Plus, MessageSquare, Activity, Clock, CheckCircle, AlertCircle, Terminal, ChevronDown, ChevronRight, Zap, Timer, FileCode } from 'lucide-react';
+import { JsonView, darkStyles } from 'react-json-view-lite';
+import 'react-json-view-lite/dist/index.css';
 import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
@@ -13,7 +15,57 @@ const DEFAULT_TIME_RANGE = 30 * 60;
 // Default: refresh every 1 minute
 const DEFAULT_REFRESH_INTERVAL = 60000;
 
-type ModalType = 'reasoning' | 'response';
+type ModalType = 'reasoning' | 'response' | 'raw';
+
+// Custom styles for JSON viewer to match dark theme
+const jsonViewerStyles = {
+  ...darkStyles,
+  container: 'bg-transparent font-mono text-sm',
+  basicChildStyle: 'pl-4',
+  label: 'text-purple-400 mr-1',
+  nullValue: 'text-gray-500',
+  undefinedValue: 'text-gray-500',
+  stringValue: 'text-green-400',
+  booleanValue: 'text-red-400',
+  numberValue: 'text-orange-400',
+  otherValue: 'text-gray-300',
+  punctuation: 'text-gray-500',
+  expandIcon: 'text-gray-400 cursor-pointer select-none',
+  collapseIcon: 'text-gray-400 cursor-pointer select-none',
+};
+
+interface RawPayloadViewerProps {
+  payload: unknown;
+}
+
+function RawPayloadViewer({ payload }: RawPayloadViewerProps) {
+  // Handle empty/null payload
+  if (payload === null || payload === undefined) {
+    return (
+      <p className="text-gray-500 text-center py-8">
+        No raw payload available for this incident
+      </p>
+    );
+  }
+
+  // Check if payload is a valid object/array for JSON viewer
+  if (typeof payload === 'object') {
+    return (
+      <JsonView
+        data={payload}
+        style={jsonViewerStyles}
+        shouldExpandNode={() => true}
+      />
+    );
+  }
+
+  // Fallback: display as plain text for non-JSON payloads
+  return (
+    <pre className="whitespace-pre-wrap text-gray-300 font-mono text-sm">
+      {String(payload)}
+    </pre>
+  );
+}
 
 export default function Incidents() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -437,7 +489,7 @@ export default function Incidents() {
               <div>
                 <div className="flex items-center gap-3">
                   <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-                    {modalType === 'reasoning' ? 'Reasoning Log' : 'Response'}
+                    {modalType === 'reasoning' ? 'Reasoning Log' : modalType === 'response' ? 'Response' : 'Raw Alert'}
                   </h2>
                   <span className={`badge ${getStatusConfig(selectedIncident.status).class}`}>
                     {selectedIncident.status}
@@ -453,6 +505,51 @@ export default function Incidents() {
               </div>
               <button onClick={closeModal} className="btn btn-ghost p-2" title="Close">
                 <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Tab Navigation */}
+            <div className="flex border-b border-gray-200 dark:border-gray-700 px-6">
+              <button
+                onClick={() => setModalType('reasoning')}
+                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                  modalType === 'reasoning'
+                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                }`}
+                disabled={selectedIncident.status === 'pending'}
+              >
+                <span className="flex items-center gap-2">
+                  <Terminal className="w-4 h-4" />
+                  Reasoning
+                </span>
+              </button>
+              <button
+                onClick={() => setModalType('response')}
+                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                  modalType === 'response'
+                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                }`}
+                disabled={selectedIncident.status === 'pending' || selectedIncident.status === 'running'}
+              >
+                <span className="flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4" />
+                  Response
+                </span>
+              </button>
+              <button
+                onClick={() => setModalType('raw')}
+                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                  modalType === 'raw'
+                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <FileCode className="w-4 h-4" />
+                  Raw Alert
+                </span>
               </button>
             </div>
 
@@ -513,7 +610,7 @@ export default function Incidents() {
                       : '> No log available yet'
                   )}
                 </div>
-              ) : (
+              ) : modalType === 'response' ? (
                 <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-6 min-h-[200px]">
                   {selectedIncident.response ? (
                     <div className="whitespace-pre-wrap text-gray-700 dark:text-gray-300 font-mono text-sm">
@@ -529,6 +626,15 @@ export default function Incidents() {
                         : 'No response available'}
                     </p>
                   )}
+                </div>
+              ) : (
+                /* Raw Alert Tab */
+                <div className="bg-gray-900 rounded-lg p-6 min-h-[200px] overflow-x-auto">
+                  <div className="flex items-center gap-2 text-gray-500 mb-4 pb-4 border-b border-gray-700">
+                    <FileCode className="w-4 h-4" />
+                    <span className="text-xs font-medium uppercase tracking-wide">Original Webhook Payload</span>
+                  </div>
+                  <RawPayloadViewer payload={selectedIncident.context?.raw_payload} />
                 </div>
               )}
             </div>
@@ -564,29 +670,9 @@ export default function Incidents() {
                   </div>
                 )}
               </div>
-              <div className="flex items-center gap-3">
-                {(selectedIncident.status === 'completed' || selectedIncident.status === 'failed') && (
-                  <button
-                    onClick={() => setModalType(modalType === 'reasoning' ? 'response' : 'reasoning')}
-                    className="btn btn-secondary"
-                  >
-                    {modalType === 'reasoning' ? (
-                      <>
-                        <MessageSquare className="w-4 h-4" />
-                        View Response
-                      </>
-                    ) : (
-                      <>
-                        <Terminal className="w-4 h-4" />
-                        View Log
-                      </>
-                    )}
-                  </button>
-                )}
-                <button onClick={closeModal} className="btn btn-secondary">
-                  Close
-                </button>
-              </div>
+              <button onClick={closeModal} className="btn btn-secondary">
+                Close
+              </button>
             </div>
           </div>
         </div>
