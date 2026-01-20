@@ -286,6 +286,30 @@ func GetOrCreateProxySettings() (*ProxySettings, error) {
 	return &settings, nil
 }
 
+// GetOrCreateAggregationSettings retrieves or creates aggregation settings (singleton).
+// This function accepts a db parameter (rather than using the global DB) to support
+// dependency injection, transaction contexts, and easier testing.
+func GetOrCreateAggregationSettings(db *gorm.DB) (*AggregationSettings, error) {
+	var settings AggregationSettings
+	result := db.First(&settings)
+	if result.Error == gorm.ErrRecordNotFound {
+		settings = *NewDefaultAggregationSettings()
+		if err := db.Create(&settings).Error; err != nil {
+			return nil, err
+		}
+	} else if result.Error != nil {
+		return nil, result.Error
+	}
+	return &settings, nil
+}
+
+// UpdateAggregationSettings updates aggregation settings.
+// Uses Save() which handles both insert and update operations.
+// Accepts a db parameter for dependency injection, transaction support, and testing.
+func UpdateAggregationSettings(db *gorm.DB, settings *AggregationSettings) error {
+	return db.Save(settings).Error
+}
+
 // migrateProxySettings copies proxy settings from openai_settings to proxy_settings (one-time migration)
 func migrateProxySettings(db *gorm.DB) error {
 	// Check if proxy_settings already has data
