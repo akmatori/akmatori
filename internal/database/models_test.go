@@ -522,17 +522,24 @@ func TestTableNames(t *testing.T) {
 }
 
 func TestIncidentStatus_Constants(t *testing.T) {
-	if IncidentStatusPending != "pending" {
-		t.Error("IncidentStatusPending should be 'pending'")
+	tests := []struct {
+		status   IncidentStatus
+		expected string
+	}{
+		{IncidentStatusPending, "pending"},
+		{IncidentStatusRunning, "running"},
+		{IncidentStatusDiagnosed, "diagnosed"},
+		{IncidentStatusObserving, "observing"},
+		{IncidentStatusCompleted, "completed"},
+		{IncidentStatusFailed, "failed"},
 	}
-	if IncidentStatusRunning != "running" {
-		t.Error("IncidentStatusRunning should be 'running'")
-	}
-	if IncidentStatusCompleted != "completed" {
-		t.Error("IncidentStatusCompleted should be 'completed'")
-	}
-	if IncidentStatusFailed != "failed" {
-		t.Error("IncidentStatusFailed should be 'failed'")
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			if string(tt.status) != tt.expected {
+				t.Errorf("expected %s, got %s", tt.expected, string(tt.status))
+			}
+		})
 	}
 }
 
