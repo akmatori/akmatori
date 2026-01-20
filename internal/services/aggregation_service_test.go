@@ -286,3 +286,53 @@ func TestAggregationService_RecordMerge(t *testing.T) {
 		t.Errorf("expected merged_by 'system', got '%s'", merge.MergedBy)
 	}
 }
+
+func TestAggregationService_BuildCorrelatorInput(t *testing.T) {
+	db := setupTestDB(t)
+	svc := NewAggregationService(db)
+
+	// Create an incident with alerts
+	incident := &database.Incident{
+		UUID:   "inc-1",
+		Title:  "Test Incident",
+		Status: database.IncidentStatusRunning,
+		Source: "test",
+	}
+	db.Create(incident)
+
+	alert := &database.IncidentAlert{
+		IncidentID:        incident.ID,
+		SourceType:        "alertmanager",
+		SourceFingerprint: "fp-1",
+		AlertName:         "HighCPU",
+		Severity:          "critical",
+		TargetHost:        "prod-db-01",
+		Status:            "firing",
+		AttachedAt:        time.Now(),
+	}
+	db.Create(alert)
+
+	// Build correlator input
+	incomingAlert := AlertContext{
+		AlertName:         "HighMemory",
+		Severity:          "high",
+		TargetHost:        "prod-db-01",
+		SourceType:        "alertmanager",
+		SourceFingerprint: "fp-2",
+	}
+
+	input, err := svc.BuildCorrelatorInput(incomingAlert)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if input.IncomingAlert.AlertName != "HighMemory" {
+		t.Errorf("expected AlertName 'HighMemory', got '%s'", input.IncomingAlert.AlertName)
+	}
+	if len(input.OpenIncidents) != 1 {
+		t.Errorf("expected 1 open incident, got %d", len(input.OpenIncidents))
+	}
+	if len(input.OpenIncidents[0].Alerts) != 1 {
+		t.Errorf("expected 1 alert in incident, got %d", len(input.OpenIncidents[0].Alerts))
+	}
+}
