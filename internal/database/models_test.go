@@ -509,6 +509,7 @@ func TestTableNames(t *testing.T) {
 		{OpenAISettings{}, "openai_settings"},
 		{ContextFile{}, "context_files"},
 		{APIKeySettings{}, "api_key_settings"},
+		{IncidentAlert{}, "incident_alerts"},
 	}
 
 	for _, tt := range tests {
