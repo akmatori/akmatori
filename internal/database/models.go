@@ -157,6 +157,12 @@ type Incident struct {
 	CompletedAt     *time.Time     `json:"completed_at,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
+
+	// Aggregation fields
+	AlertCount               int        `gorm:"default:1" json:"alert_count"`                // Number of alerts aggregated into this incident
+	LastAlertAt              *time.Time `json:"last_alert_at"`                               // Timestamp of when the last alert was attached
+	ObservingStartedAt       *time.Time `json:"observing_started_at"`                        // When the incident entered the "observing" state
+	ObservingDurationMinutes int        `gorm:"default:30" json:"observing_duration_minutes"` // How long to wait in observing state before closing
 }
 
 // BeforeCreate hook to set StartedAt
