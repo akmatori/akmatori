@@ -132,6 +132,8 @@ type IncidentStatus string
 const (
 	IncidentStatusPending   IncidentStatus = "pending"
 	IncidentStatusRunning   IncidentStatus = "running"
+	IncidentStatusDiagnosed IncidentStatus = "diagnosed"
+	IncidentStatusObserving IncidentStatus = "observing"
 	IncidentStatusCompleted IncidentStatus = "completed"
 	IncidentStatusFailed    IncidentStatus = "failed"
 )
