@@ -15,6 +15,7 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/handlers"
+	"github.com/akmatori/akmatori/internal/jobs"
 	"github.com/akmatori/akmatori/internal/middleware"
 	"github.com/akmatori/akmatori/internal/services"
 	slackutil "github.com/akmatori/akmatori/internal/slack"
@@ -121,6 +122,22 @@ func main() {
 	// Initialize Aggregation service
 	aggregationService := services.NewAggregationService(database.GetDB())
 	log.Printf("Aggregation service initialized")
+
+	// Create stop channel for background jobs
+	jobStopChan := make(chan struct{})
+
+	// Start background jobs for alert aggregation
+
+	// Start observing monitor (checks incidents in "observing" status and transitions them to "resolved")
+	observingMonitor := jobs.NewObservingMonitor(database.GetDB())
+	go observingMonitor.Start(time.Minute, jobStopChan)
+	log.Printf("Observing monitor started (runs every minute)")
+
+	// Start recorrelation job (analyzes open incidents for merge opportunities)
+	// Note: CodexExecutor is nil until RunMergeAnalyzer is implemented - job handles this gracefully
+	recorrelationJob := jobs.NewRecorrelationJob(database.GetDB(), aggregationService, nil)
+	go recorrelationJob.Start(jobStopChan)
+	log.Printf("Recorrelation job started (interval from settings)")
 
 	// Initialize default alert source types
 	if err := alertService.InitializeDefaultSourceTypes(); err != nil {
@@ -230,6 +247,10 @@ func main() {
 	go func() {
 		<-sigChan
 		log.Println("\nReceived shutdown signal, cleaning up...")
+
+		// Stop background jobs
+		log.Println("Stopping background jobs...")
+		close(jobStopChan)
 
 		// Shutdown HTTP server
 		log.Println("Shutting down HTTP server...")
