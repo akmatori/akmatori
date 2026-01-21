@@ -73,6 +73,10 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	// Proxy settings
 	mux.HandleFunc("/api/settings/proxy", h.handleProxySettings)
 
+	// Aggregation settings
+	mux.HandleFunc("GET /api/settings/aggregation", h.handleGetAggregationSettings)
+	mux.HandleFunc("PUT /api/settings/aggregation", h.handleUpdateAggregationSettings)
+
 	// Context files
 	mux.HandleFunc("/api/context", h.handleContext)
 	mux.HandleFunc("/api/context/", h.handleContextByID)
@@ -1527,6 +1531,45 @@ func (h *APIHandler) UpdateProxySettings(w http.ResponseWriter, r *http.Request)
 
 	// Return updated settings
 	h.GetProxySettings(w, r)
+}
+
+// handleGetAggregationSettings handles GET /api/settings/aggregation
+func (h *APIHandler) handleGetAggregationSettings(w http.ResponseWriter, r *http.Request) {
+	db := database.GetDB()
+	settings, err := database.GetOrCreateAggregationSettings(db)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(settings)
+}
+
+// handleUpdateAggregationSettings handles PUT /api/settings/aggregation
+func (h *APIHandler) handleUpdateAggregationSettings(w http.ResponseWriter, r *http.Request) {
+	db := database.GetDB()
+	var settings database.AggregationSettings
+	if err := json.NewDecoder(r.Body).Decode(&settings); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Ensure we update existing record
+	existing, err := database.GetOrCreateAggregationSettings(db)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	settings.ID = existing.ID
+
+	if err := database.UpdateAggregationSettings(db, &settings); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(settings)
 }
 
 // handleContext handles GET /api/context and POST /api/context
