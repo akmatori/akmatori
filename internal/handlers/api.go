@@ -16,6 +16,7 @@ import (
 	"github.com/akmatori/akmatori/internal/services"
 	slackutil "github.com/akmatori/akmatori/internal/slack"
 	"github.com/slack-go/slack"
+	"gorm.io/gorm"
 )
 
 // APIHandler handles API endpoints for the UI and skill communication
@@ -59,6 +60,12 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	// Incidents
 	mux.HandleFunc("/api/incidents", h.handleIncidents)
 	mux.HandleFunc("/api/incidents/", h.handleIncidentByID)
+
+	// Incident alerts management
+	mux.HandleFunc("GET /api/incidents/{uuid}/alerts", h.handleGetIncidentAlerts)
+	mux.HandleFunc("POST /api/incidents/{uuid}/alerts", h.handleAttachAlert)
+	mux.HandleFunc("DELETE /api/incidents/{uuid}/alerts/{alertId}", h.handleDetachAlert)
+	mux.HandleFunc("POST /api/incidents/{uuid}/merge", h.handleMergeIncident)
 
 	// Slack settings
 	mux.HandleFunc("/api/settings/slack", h.handleSlackSettings)
@@ -1894,3 +1901,172 @@ func (h *APIHandler) handleAlertSourceByUUID(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+// ========== Incident Alerts Management ==========
+
+// handleGetIncidentAlerts handles GET /api/incidents/{uuid}/alerts
+func (h *APIHandler) handleGetIncidentAlerts(w http.ResponseWriter, r *http.Request) {
+	db := database.GetDB()
+	uuid := r.PathValue("uuid")
+
+	// Check if incident exists
+	var incident database.Incident
+	if err := db.Where("uuid = ?", uuid).First(&incident).Error; err != nil {
+		http.Error(w, "Incident not found", http.StatusNotFound)
+		return
+	}
+
+	// Get all alerts for this incident
+	var alerts []database.IncidentAlert
+	if err := db.Where("incident_id = ?", incident.ID).Order("attached_at DESC").Find(&alerts).Error; err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(alerts)
+}
+
+// handleAttachAlert handles POST /api/incidents/{uuid}/alerts
+func (h *APIHandler) handleAttachAlert(w http.ResponseWriter, r *http.Request) {
+	db := database.GetDB()
+	uuid := r.PathValue("uuid")
+
+	// Check if incident exists
+	var incident database.Incident
+	if err := db.Where("uuid = ?", uuid).First(&incident).Error; err != nil {
+		http.Error(w, "Incident not found", http.StatusNotFound)
+		return
+	}
+
+	// Parse request body
+	var alert database.IncidentAlert
+	if err := json.NewDecoder(r.Body).Decode(&alert); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Set incident ID and timestamp
+	alert.IncidentID = incident.ID
+	alert.AttachedAt = time.Now()
+
+	// Create the alert
+	if err := db.Create(&alert).Error; err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Update incident alert count
+	if err := db.Model(&incident).Update("alert_count", gorm.Expr("alert_count + 1")).Error; err != nil {
+		log.Printf("Warning: Failed to update alert count for incident %s: %v", uuid, err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(alert)
+}
+
+// handleDetachAlert handles DELETE /api/incidents/{uuid}/alerts/{alertId}
+func (h *APIHandler) handleDetachAlert(w http.ResponseWriter, r *http.Request) {
+	db := database.GetDB()
+	uuid := r.PathValue("uuid")
+	alertIdStr := r.PathValue("alertId")
+
+	alertId, err := strconv.ParseUint(alertIdStr, 10, 32)
+	if err != nil {
+		http.Error(w, "Invalid alert ID", http.StatusBadRequest)
+		return
+	}
+
+	// Check if incident exists
+	var incident database.Incident
+	if err := db.Where("uuid = ?", uuid).First(&incident).Error; err != nil {
+		http.Error(w, "Incident not found", http.StatusNotFound)
+		return
+	}
+
+	// Check if alert exists and belongs to this incident
+	var alert database.IncidentAlert
+	if err := db.Where("id = ? AND incident_id = ?", alertId, incident.ID).First(&alert).Error; err != nil {
+		http.Error(w, "Alert not found in this incident", http.StatusNotFound)
+		return
+	}
+
+	// Delete the alert
+	if err := db.Delete(&alert).Error; err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Update incident alert count
+	if err := db.Model(&incident).Update("alert_count", gorm.Expr("GREATEST(alert_count - 1, 0)")).Error; err != nil {
+		log.Printf("Warning: Failed to update alert count for incident %s: %v", uuid, err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleMergeIncident handles POST /api/incidents/{uuid}/merge
+func (h *APIHandler) handleMergeIncident(w http.ResponseWriter, r *http.Request) {
+	db := database.GetDB()
+	uuid := r.PathValue("uuid")
+
+	// Check if target incident exists
+	var targetIncident database.Incident
+	if err := db.Where("uuid = ?", uuid).First(&targetIncident).Error; err != nil {
+		http.Error(w, "Target incident not found", http.StatusNotFound)
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		SourceIncidentUUID string `json:"source_incident_uuid"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.SourceIncidentUUID == "" {
+		http.Error(w, "source_incident_uuid is required", http.StatusBadRequest)
+		return
+	}
+
+	// Check if source incident exists
+	var sourceIncident database.Incident
+	if err := db.Where("uuid = ?", req.SourceIncidentUUID).First(&sourceIncident).Error; err != nil {
+		http.Error(w, "Source incident not found", http.StatusNotFound)
+		return
+	}
+
+	// Move all alerts from source to target
+	if err := db.Model(&database.IncidentAlert{}).Where("incident_id = ?", sourceIncident.ID).Update("incident_id", targetIncident.ID).Error; err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Update target incident alert count
+	var newAlertCount int64
+	db.Model(&database.IncidentAlert{}).Where("incident_id = ?", targetIncident.ID).Count(&newAlertCount)
+	if err := db.Model(&targetIncident).Update("alert_count", newAlertCount).Error; err != nil {
+		log.Printf("Warning: Failed to update alert count for incident %s: %v", uuid, err)
+	}
+
+	// Mark source incident as merged (using completed status with a note in the response)
+	if err := db.Model(&sourceIncident).Updates(map[string]interface{}{
+		"status":      database.IncidentStatusCompleted,
+		"alert_count": 0,
+		"response":    fmt.Sprintf("Merged into incident %s", uuid),
+	}).Error; err != nil {
+		log.Printf("Warning: Failed to update source incident %s after merge: %v", req.SourceIncidentUUID, err)
+	}
+
+	// Return updated target incident
+	db.First(&targetIncident, targetIncident.ID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":         "Incidents merged successfully",
+		"target_incident": targetIncident,
+		"alerts_moved":    sourceIncident.AlertCount,
+	})
+}
