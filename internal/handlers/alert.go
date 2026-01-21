@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -674,4 +675,27 @@ func (h *AlertHandler) isSlackEnabled() bool {
 
 	// Check that we have a valid client
 	return h.slackManager.GetClient() != nil
+}
+
+// formatAggregationFooter generates a footer for Slack messages showing
+// how many alerts are aggregated into an incident with a link to view it
+func (h *AlertHandler) formatAggregationFooter(incidentUUID string, alertCount int) string {
+	baseURL := os.Getenv("AKMATORI_BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:3000"
+	}
+	return fmt.Sprintf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n:link: %d alert%s aggregated • <%s/incidents/%s|View incident>",
+		alertCount,
+		pluralize(alertCount),
+		baseURL,
+		incidentUUID,
+	)
+}
+
+// pluralize returns "s" for counts other than 1
+func pluralize(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
 }
