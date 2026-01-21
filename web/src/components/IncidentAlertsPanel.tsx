@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { incidentAlertsApi } from '../api/client';
-import { IncidentAlert } from '../types';
+import type { IncidentAlert } from '../types';
 
 interface Props {
   incidentUuid: string;

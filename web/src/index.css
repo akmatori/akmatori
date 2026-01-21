@@ -359,6 +359,16 @@ input[type="checkbox"]:focus {
   color: #fca5a5;
 }
 
+.badge-purple {
+  background-color: #f3e8ff;
+  color: #7c3aed;
+}
+
+.dark .badge-purple {
+  background-color: rgb(139 92 246 / 0.2);
+  color: #c4b5fd;
+}
+
 /* ============================================
    TABLES
    ============================================ */

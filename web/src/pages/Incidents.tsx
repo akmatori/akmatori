@@ -7,6 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { SuccessMessage } from '../components/ErrorMessage';
 import TimeRangePicker from '../components/TimeRangePicker';
+import { IncidentAlertsPanel } from '../components/IncidentAlertsPanel';
 import { incidentsApi } from '../api/client';
 import type { Incident } from '../types';
 
@@ -195,6 +196,10 @@ export default function Incidents() {
         return { class: 'badge-success', icon: CheckCircle, label: 'Completed' };
       case 'running':
         return { class: 'badge-primary', icon: Activity, label: 'Running' };
+      case 'diagnosed':
+        return { class: 'badge-purple', icon: CheckCircle, label: 'Diagnosed' };
+      case 'observing':
+        return { class: 'badge-warning', icon: Clock, label: 'Observing' };
       case 'failed':
         return { class: 'badge-error', icon: AlertCircle, label: 'Failed' };
       default:
@@ -431,6 +436,11 @@ export default function Incidents() {
                           <span className="text-gray-700 dark:text-gray-200 text-sm truncate block" title={incident.title || '-'}>
                             {incident.title || <span className="text-gray-400 italic">No title</span>}
                           </span>
+                          {incident.alert_count > 0 && (
+                            <span className="text-sm text-gray-500">
+                              {incident.alert_count} alert{incident.alert_count !== 1 ? 's' : ''}
+                            </span>
+                          )}
                         </td>
                         <td>
                           <span className={`badge ${statusConfig.class} inline-flex items-center gap-1`}>
@@ -635,6 +645,13 @@ export default function Incidents() {
                     <span className="text-xs font-medium uppercase tracking-wide">Original Webhook Payload</span>
                   </div>
                   <RawPayloadViewer payload={selectedIncident.context?.raw_payload} />
+                </div>
+              )}
+
+              {/* Aggregated Alerts Panel */}
+              {selectedIncident.alert_count > 0 && (
+                <div className="mt-6">
+                  <IncidentAlertsPanel incidentUuid={selectedIncident.uuid} />
                 </div>
               )}
             </div>
