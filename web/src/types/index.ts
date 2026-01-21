@@ -31,7 +31,44 @@ export interface ToolInstance {
   tool_type?: ToolType;
 }
 
-export type IncidentStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type IncidentStatus = 'pending' | 'running' | 'diagnosed' | 'observing' | 'completed' | 'failed';
+
+export interface IncidentAlert {
+  id: number;
+  incident_id: number;
+  source_type: string;
+  source_fingerprint: string;
+  alert_name: string;
+  severity: string;
+  target_host: string;
+  target_service: string;
+  summary: string;
+  description: string;
+  target_labels: Record<string, string>;
+  status: 'firing' | 'resolved';
+  alert_payload: Record<string, unknown>;
+  correlation_confidence: number;
+  correlation_reason: string;
+  attached_at: string;
+  resolved_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AggregationSettings {
+  id: number;
+  enabled: boolean;
+  correlation_confidence_threshold: number;
+  merge_confidence_threshold: number;
+  recorrelation_enabled: boolean;
+  recorrelation_interval_minutes: number;
+  max_incidents_to_analyze: number;
+  observing_duration_minutes: number;
+  correlator_timeout_seconds: number;
+  merge_analyzer_timeout_seconds: number;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface Incident {
   id: number;
@@ -51,6 +88,11 @@ export interface Incident {
   completed_at?: string;
   created_at: string;
   updated_at: string;
+  // Aggregation fields
+  alert_count: number;
+  last_alert_at?: string;
+  observing_started_at?: string;
+  observing_duration_minutes: number;
 }
 
 export interface EventSource {
