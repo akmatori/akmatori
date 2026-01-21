@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Save, MessageSquare, Cpu, Power, PowerOff, Info, Bell, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, LogIn, LogOut, Key, Users, ExternalLink, Copy, Loader2, Globe } from 'lucide-react';
+import { Save, MessageSquare, Cpu, Power, PowerOff, Info, Bell, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, LogIn, LogOut, Key, Users, ExternalLink, Copy, Loader2, Globe, Layers } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { SuccessMessage, WarningMessage } from '../components/ErrorMessage';
 import AlertSourcesManager from '../components/AlertSourcesManager';
 import ProxySettings from '../components/ProxySettings';
+import AggregationSettings from '../components/AggregationSettings';
 import { slackSettingsApi, openaiSettingsApi } from '../api/client';
 import type { SlackSettings, SlackSettingsUpdate, OpenAISettings, OpenAISettingsUpdate, OpenAIModel, ReasoningEffort, AuthMethod, DeviceAuthStartResponse } from '../types';
 
@@ -711,6 +712,16 @@ export default function Settings() {
           defaultExpanded={false}
         >
           <ProxySettings />
+        </SettingsSection>
+
+        {/* Alert Aggregation Settings */}
+        <SettingsSection
+          title="Alert Aggregation"
+          description="Automatically group related alerts into incidents"
+          icon={Layers}
+          defaultExpanded={false}
+        >
+          <AggregationSettings />
         </SettingsSection>
 
         {/* Alert Sources Section */}
