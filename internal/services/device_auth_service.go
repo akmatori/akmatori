@@ -37,6 +37,7 @@ type DeviceAuthStatusResponse struct {
 type AuthTokens struct {
 	AccessToken  string     `json:"access_token"`
 	RefreshToken string     `json:"refresh_token"`
+	IDToken      string     `json:"id_token,omitempty"`
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
 	Email        string     `json:"email,omitempty"`
 }
@@ -72,6 +73,7 @@ type DeviceAuthResult struct {
 	Email           string
 	AccessToken     string
 	RefreshToken    string
+	IDToken         string
 	ExpiresAt       string
 	Error           string
 }
@@ -135,6 +137,7 @@ func (s *DeviceAuthService) HandleDeviceAuthResult(result *DeviceAuthResult) {
 		s.activeFlow.tokens = &AuthTokens{
 			AccessToken:  result.AccessToken,
 			RefreshToken: result.RefreshToken,
+			IDToken:      result.IDToken,
 			ExpiresAt:    expiresAt,
 			Email:        result.Email,
 		}
@@ -265,6 +268,7 @@ func (s *DeviceAuthService) saveTokensToDatabase(tokens *AuthTokens) error {
 	settings.AuthMethod = database.AuthMethodChatGPTSubscription
 	settings.ChatGPTAccessToken = tokens.AccessToken
 	settings.ChatGPTRefreshToken = tokens.RefreshToken
+	settings.ChatGPTIDToken = tokens.IDToken
 	settings.ChatGPTExpiresAt = tokens.ExpiresAt
 	settings.ChatGPTUserEmail = tokens.Email
 

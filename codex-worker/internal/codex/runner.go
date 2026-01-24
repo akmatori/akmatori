@@ -59,6 +59,7 @@ type ExecuteResult struct {
 type AuthTokens struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
+	IDToken      string `json:"id_token,omitempty"`
 	ExpiresAt    string `json:"expires_at,omitempty"`
 	Email        string `json:"email,omitempty"`
 }
@@ -75,6 +76,7 @@ type OpenAISettings struct {
 	AuthMethod          string // "api_key" or "chatgpt_subscription"
 	ChatGPTAccessToken  string
 	ChatGPTRefreshToken string
+	ChatGPTIDToken      string
 	ChatGPTExpiresAt    string
 }
 
@@ -389,6 +391,7 @@ type DeviceAuthResult struct {
 	Email           string
 	AccessToken     string
 	RefreshToken    string
+	IDToken         string
 	ExpiresAt       string
 	Error           string
 }
@@ -559,6 +562,7 @@ func (r *Runner) RunDeviceAuth(ctx context.Context, proxySettings *OpenAISetting
 			UserCode:     result.UserCode,
 			AccessToken:  tokens.AccessToken,
 			RefreshToken: tokens.RefreshToken,
+			IDToken:      tokens.IDToken,
 			ExpiresAt:    tokens.ExpiresAt,
 			Email:        tokens.Email,
 		}
@@ -625,17 +629,27 @@ func (r *Runner) authenticateWithChatGPTTokens(openai *OpenAISettings) error {
 	}
 	authPath := filepath.Join(homeDir, ".codex", "auth.json")
 
-	// First, check if auth.json already exists with valid tokens
+	// First, check if auth.json already exists with valid tokens (including id_token required by Codex CLI v0.87+)
 	if existingTokens, err := r.readAuthTokens(); err == nil {
-		if existingTokens.AccessToken != "" && existingTokens.RefreshToken != "" {
+		if existingTokens.AccessToken != "" && existingTokens.RefreshToken != "" && existingTokens.IDToken != "" {
 			r.logger.Printf("Using existing auth.json with valid tokens (email: %s)", existingTokens.Email)
 			return nil
+		}
+		// Existing auth.json is incomplete (missing id_token), will regenerate
+		if existingTokens.IDToken == "" {
+			r.logger.Printf("Existing auth.json is missing id_token, will regenerate")
 		}
 	}
 
 	// No valid existing auth.json, check if we have tokens from database
 	if openai.ChatGPTAccessToken == "" || openai.ChatGPTRefreshToken == "" {
 		return fmt.Errorf("ChatGPT tokens are empty")
+	}
+
+	// id_token is required by Codex CLI v0.87+
+	// If it's missing, the user needs to re-authenticate
+	if openai.ChatGPTIDToken == "" {
+		return fmt.Errorf("ChatGPT id_token is missing. Please re-authenticate by going to Settings > OpenAI and clicking 'Authenticate with ChatGPT'")
 	}
 
 	r.logger.Printf("Authenticating Codex CLI with ChatGPT subscription tokens from database...")
@@ -647,13 +661,16 @@ func (r *Runner) authenticateWithChatGPTTokens(openai *OpenAISettings) error {
 	}
 
 	// Build auth.json content in codex CLI format
+	tokensMap := map[string]interface{}{
+		"access_token":  openai.ChatGPTAccessToken,
+		"refresh_token": openai.ChatGPTRefreshToken,
+		"id_token":      openai.ChatGPTIDToken,
+	}
+
 	authData := map[string]interface{}{
 		"OPENAI_API_KEY": nil,
-		"tokens": map[string]interface{}{
-			"access_token":  openai.ChatGPTAccessToken,
-			"refresh_token": openai.ChatGPTRefreshToken,
-		},
-		"last_refresh": time.Now().UTC().Format(time.RFC3339Nano),
+		"tokens":         tokensMap,
+		"last_refresh":   time.Now().UTC().Format(time.RFC3339Nano),
 	}
 
 	// Write auth.json
@@ -707,6 +724,13 @@ func (r *Runner) readAuthTokens() (*AuthTokens, error) {
 		tokens.RefreshToken = rt
 	} else if rt, ok := tokenData["refreshToken"].(string); ok {
 		tokens.RefreshToken = rt
+	}
+
+	// Extract id_token (required by Codex CLI v0.87+)
+	if it, ok := tokenData["id_token"].(string); ok {
+		tokens.IDToken = it
+	} else if it, ok := tokenData["idToken"].(string); ok {
+		tokens.IDToken = it
 	}
 
 	if exp, ok := tokenData["expires_at"].(string); ok {

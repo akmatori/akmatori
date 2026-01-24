@@ -227,9 +227,10 @@ type OpenAISettings struct {
 	AuthMethod AuthMethod `gorm:"type:varchar(50);default:'api_key'" json:"auth_method"`
 
 	// ChatGPT subscription OAuth tokens (encrypted at rest)
-	ChatGPTAccessToken  string     `gorm:"type:text" json:"-"`                    // Not exposed in JSON responses
-	ChatGPTRefreshToken string     `gorm:"type:text" json:"-"`                    // Not exposed in JSON responses
-	ChatGPTExpiresAt    *time.Time `json:"chatgpt_expires_at,omitempty"`          // Token expiration timestamp
+	ChatGPTAccessToken  string     `gorm:"type:text" json:"-"`                     // Not exposed in JSON responses
+	ChatGPTRefreshToken string     `gorm:"type:text" json:"-"`                     // Not exposed in JSON responses
+	ChatGPTIDToken      string     `gorm:"type:text" json:"-"`                     // ID token required by Codex CLI v0.87+
+	ChatGPTExpiresAt    *time.Time `json:"chatgpt_expires_at,omitempty"`           // Token expiration timestamp
 	ChatGPTUserEmail    string     `gorm:"type:varchar(255)" json:"chatgpt_email"` // Display only - shows who authenticated
 }
 

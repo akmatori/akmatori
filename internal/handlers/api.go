@@ -716,6 +716,7 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 						AuthMethod:          string(dbSettings.AuthMethod),
 						ChatGPTAccessToken:  dbSettings.ChatGPTAccessToken,
 						ChatGPTRefreshToken: dbSettings.ChatGPTRefreshToken,
+						ChatGPTIDToken:      dbSettings.ChatGPTIDToken,
 					}
 					// Add expiry timestamp if set
 					if dbSettings.ChatGPTExpiresAt != nil {
@@ -1324,6 +1325,7 @@ func (h *APIHandler) handleDeviceAuthStart(w http.ResponseWriter, r *http.Reques
 			Email:           result.Email,
 			AccessToken:     result.AccessToken,
 			RefreshToken:    result.RefreshToken,
+			IDToken:         result.IDToken,
 			ExpiresAt:       result.ExpiresAt,
 			Error:           result.Error,
 		})
