@@ -72,6 +72,7 @@ type CodexMessage struct {
 	AuthMethod          string `json:"auth_method,omitempty"`
 	ChatGPTAccessToken  string `json:"chatgpt_access_token,omitempty"`
 	ChatGPTRefreshToken string `json:"chatgpt_refresh_token,omitempty"`
+	ChatGPTIDToken      string `json:"chatgpt_id_token,omitempty"`
 	ChatGPTExpiresAt    string `json:"chatgpt_expires_at,omitempty"`
 
 	// Updated tokens (returned from worker if tokens were refreshed)
@@ -89,6 +90,7 @@ type CodexMessage struct {
 	// Tokens returned when auth is complete
 	AuthAccessToken  string `json:"auth_access_token,omitempty"`
 	AuthRefreshToken string `json:"auth_refresh_token,omitempty"`
+	AuthIDToken      string `json:"auth_id_token,omitempty"`
 	AuthExpiresAt    string `json:"auth_expires_at,omitempty"`
 }
 
@@ -104,6 +106,7 @@ type OpenAISettings struct {
 	AuthMethod          string
 	ChatGPTAccessToken  string
 	ChatGPTRefreshToken string
+	ChatGPTIDToken      string
 	ChatGPTExpiresAt    string
 }
 
@@ -136,6 +139,7 @@ type DeviceAuthResult struct {
 	Email           string
 	AccessToken     string
 	RefreshToken    string
+	IDToken         string
 	ExpiresAt       string
 	Error           string
 }
@@ -363,6 +367,7 @@ func (h *CodexWSHandler) handleDeviceAuthResponse(msg CodexMessage) {
 			Email:           msg.AuthEmail,
 			AccessToken:     msg.AuthAccessToken,
 			RefreshToken:    msg.AuthRefreshToken,
+			IDToken:         msg.AuthIDToken,
 			ExpiresAt:       msg.AuthExpiresAt,
 			Error:           msg.Error,
 		}
@@ -461,6 +466,7 @@ func (h *CodexWSHandler) StartIncident(incidentID, task string, openai *OpenAISe
 		msg.AuthMethod = openai.AuthMethod
 		msg.ChatGPTAccessToken = openai.ChatGPTAccessToken
 		msg.ChatGPTRefreshToken = openai.ChatGPTRefreshToken
+		msg.ChatGPTIDToken = openai.ChatGPTIDToken
 		msg.ChatGPTExpiresAt = openai.ChatGPTExpiresAt
 	}
 

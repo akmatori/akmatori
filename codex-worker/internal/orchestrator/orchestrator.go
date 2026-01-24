@@ -110,6 +110,7 @@ func (o *Orchestrator) handleMessage(msg ws.Message) {
 				AuthMethod:          msg.AuthMethod,
 				ChatGPTAccessToken:  msg.ChatGPTAccessToken,
 				ChatGPTRefreshToken: msg.ChatGPTRefreshToken,
+				ChatGPTIDToken:      msg.ChatGPTIDToken,
 				ChatGPTExpiresAt:    msg.ChatGPTExpiresAt,
 			}
 		}
@@ -134,6 +135,7 @@ func (o *Orchestrator) handleMessage(msg ws.Message) {
 				AuthMethod:          msg.AuthMethod,
 				ChatGPTAccessToken:  msg.ChatGPTAccessToken,
 				ChatGPTRefreshToken: msg.ChatGPTRefreshToken,
+				ChatGPTIDToken:      msg.ChatGPTIDToken,
 				ChatGPTExpiresAt:    msg.ChatGPTExpiresAt,
 			}
 		}
@@ -187,6 +189,7 @@ func (o *Orchestrator) handleNewIncident(incidentID, task string, openaiSettings
 			AuthMethod:          openaiSettings.AuthMethod,
 			ChatGPTAccessToken:  openaiSettings.ChatGPTAccessToken,
 			ChatGPTRefreshToken: openaiSettings.ChatGPTRefreshToken,
+			ChatGPTIDToken:      openaiSettings.ChatGPTIDToken,
 			ChatGPTExpiresAt:    openaiSettings.ChatGPTExpiresAt,
 		}
 	}
@@ -265,6 +268,7 @@ func (o *Orchestrator) handleContinueIncident(incidentID, message string, openai
 			AuthMethod:          openaiSettings.AuthMethod,
 			ChatGPTAccessToken:  openaiSettings.ChatGPTAccessToken,
 			ChatGPTRefreshToken: openaiSettings.ChatGPTRefreshToken,
+			ChatGPTIDToken:      openaiSettings.ChatGPTIDToken,
 			ChatGPTExpiresAt:    openaiSettings.ChatGPTExpiresAt,
 		}
 	}
@@ -338,6 +342,7 @@ func (o *Orchestrator) handleDeviceAuthStart(proxySettings *codex.OpenAISettings
 			Email:           result.Email,
 			AccessToken:     result.AccessToken,
 			RefreshToken:    result.RefreshToken,
+			IDToken:         result.IDToken,
 			ExpiresAt:       result.ExpiresAt,
 			Error:           result.Error,
 		}
