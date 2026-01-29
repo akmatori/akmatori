@@ -320,6 +320,37 @@ func TestZabbixAdapter_ParsePayload_TargetLabels(t *testing.T) {
 	}
 }
 
+func TestZabbixAdapter_ParsePayload_ExtraFieldsPreserved(t *testing.T) {
+	adapter := NewZabbixAdapter()
+	instance := &database.AlertSourceInstance{}
+
+	// Payload includes fields not in ZabbixPayload struct (event_tags, custom_field)
+	payload := []byte(`{
+		"alert_name": "Test",
+		"event_id": "123",
+		"hardware": "test-host",
+		"event_status": "PROBLEM",
+		"event_tags": "[{\"tag\":\"scope\",\"value\":\"availability\"}]",
+		"custom_field": "custom_value"
+	}`)
+
+	alerts, err := adapter.ParsePayload(payload, instance)
+	if err != nil {
+		t.Fatalf("ParsePayload returned error: %v", err)
+	}
+
+	raw := alerts[0].RawPayload
+	if raw["event_tags"] == nil {
+		t.Error("Expected event_tags to be preserved in RawPayload")
+	}
+	if raw["custom_field"] == nil {
+		t.Error("Expected custom_field to be preserved in RawPayload")
+	}
+	if raw["custom_field"] != "custom_value" {
+		t.Errorf("Expected custom_field 'custom_value', got '%v'", raw["custom_field"])
+	}
+}
+
 func TestZabbixAdapter_ParsePayload_Description(t *testing.T) {
 	adapter := NewZabbixAdapter()
 	instance := &database.AlertSourceInstance{}

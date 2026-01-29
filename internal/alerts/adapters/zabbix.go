@@ -59,29 +59,39 @@ func (a *ZabbixAdapter) ParsePayload(body []byte, instance *database.AlertSource
 		return nil, fmt.Errorf("failed to parse zabbix payload: %w", err)
 	}
 
+	// Capture all raw fields including ones not in ZabbixPayload struct
+	var rawFields map[string]interface{}
+	if err := json.Unmarshal(body, &rawFields); err != nil {
+		rawFields = nil
+	}
+
 	// Get field mappings (use instance override or defaults)
 	mappings := alerts.MergeMappings(a.GetDefaultMappings(), instance.FieldMappings)
 
-	n := a.parseAlert(payload, mappings)
+	n := a.parseAlert(payload, rawFields, mappings)
 	return []alerts.NormalizedAlert{n}, nil
 }
 
-func (a *ZabbixAdapter) parseAlert(payload ZabbixPayload, mappings database.JSONB) alerts.NormalizedAlert {
-	// Convert payload to map for field extraction
-	payloadMap := map[string]interface{}{
-		"event_time":         payload.EventTime,
-		"alert_name":         payload.AlertName,
-		"severity":           payload.Severity,
-		"priority":           payload.Priority,
-		"metric_name":        payload.MetricName,
-		"metric_value":       payload.MetricValue,
-		"trigger_expression": payload.TriggerExpression,
-		"pending_duration":   payload.PendingDuration,
-		"event_id":           payload.EventID,
-		"hardware":           payload.Hardware,
-		"event_status":       payload.EventStatus,
-		"runbook_url":        payload.RunbookURL,
+func (a *ZabbixAdapter) parseAlert(payload ZabbixPayload, rawFields map[string]interface{}, mappings database.JSONB) alerts.NormalizedAlert {
+	// Start with all raw fields from the original webhook payload
+	// This preserves any extra fields not defined in ZabbixPayload struct
+	payloadMap := make(map[string]interface{})
+	for k, v := range rawFields {
+		payloadMap[k] = v
 	}
+	// Overlay known struct fields to ensure consistent types
+	payloadMap["event_time"] = payload.EventTime
+	payloadMap["alert_name"] = payload.AlertName
+	payloadMap["severity"] = payload.Severity
+	payloadMap["priority"] = payload.Priority
+	payloadMap["metric_name"] = payload.MetricName
+	payloadMap["metric_value"] = payload.MetricValue
+	payloadMap["trigger_expression"] = payload.TriggerExpression
+	payloadMap["pending_duration"] = payload.PendingDuration
+	payloadMap["event_id"] = payload.EventID
+	payloadMap["hardware"] = payload.Hardware
+	payloadMap["event_status"] = payload.EventStatus
+	payloadMap["runbook_url"] = payload.RunbookURL
 
 	// Map Zabbix priority to severity
 	severity := a.mapPriorityToSeverity(payload.Priority)
