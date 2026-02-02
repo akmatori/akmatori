@@ -339,11 +339,20 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		isNewIncident = true
 	}
 
-	// Post to Slack (only for new incidents)
+	// Determine Slack channel and thread for posting results
 	var threadTS string
-	if h.isSlackEnabled() && isNewIncident {
+	var channelID string
+
+	// Check if alert has Slack thread context from source (e.g., Zabbix event_tags)
+	if normalized.SlackChannelID != "" && normalized.SlackThreadTS != "" {
+		// Use existing Slack thread - skip posting initial alert message
+		channelID = normalized.SlackChannelID
+		threadTS = normalized.SlackThreadTS
+		log.Printf("Using existing Slack thread: channel=%s thread=%s", channelID, threadTS)
+	} else if h.isSlackEnabled() && isNewIncident {
+		// Post new alert to configured alerts channel
 		var err error
-		threadTS, err = h.postAlertToSlack(normalized, instance)
+		threadTS, channelID, err = h.postAlertToSlack(normalized, instance)
 		if err != nil {
 			log.Printf("Warning: Failed to post alert to Slack: %v", err)
 		}
@@ -354,7 +363,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
 			log.Printf("Warning: Failed to update incident status: %v", err)
 		}
-		go h.runInvestigation(incidentUUID, workingDir, normalized, instance, threadTS)
+		go h.runInvestigation(incidentUUID, workingDir, normalized, instance, threadTS, channelID)
 	}
 }
 
@@ -367,26 +376,24 @@ func convertLabels(labels map[string]string) map[string]interface{} {
 	return result
 }
 
-func (h *AlertHandler) postAlertToSlack(alert alerts.NormalizedAlert, instance *database.AlertSourceInstance) (string, error) {
+func (h *AlertHandler) postAlertToSlack(alert alerts.NormalizedAlert, instance *database.AlertSourceInstance) (threadTS string, channelID string, err error) {
 	slackClient := h.slackManager.GetClient()
 	if slackClient == nil {
-		return "", nil
+		return "", "", nil
 	}
 
 	// Get alerts channel from database settings
 	settings, err := database.GetSlackSettings()
 	if err != nil || settings == nil || settings.AlertsChannel == "" {
-		return "", nil
+		return "", "", nil
 	}
 	alertsChannel := settings.AlertsChannel
 
 	// Resolve channel ID
-	var channelID string
 	if h.channelResolver != nil {
-		var err error
 		channelID, err = h.channelResolver.ResolveChannel(alertsChannel)
 		if err != nil {
-			return "", fmt.Errorf("failed to resolve channel: %w", err)
+			return "", "", fmt.Errorf("failed to resolve channel: %w", err)
 		}
 	} else {
 		channelID = alertsChannel
@@ -421,7 +428,7 @@ func (h *AlertHandler) postAlertToSlack(alert alerts.NormalizedAlert, instance *
 		slack.MsgOptionText(message, false),
 	)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	// Add reaction
@@ -430,10 +437,10 @@ func (h *AlertHandler) postAlertToSlack(alert alerts.NormalizedAlert, instance *
 		Timestamp: ts,
 	})
 
-	return ts, nil
+	return ts, channelID, nil
 }
 
-func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, threadTS string) {
+func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, threadTS, channelID string) {
 	log.Printf("Starting investigation for alert: %s (incident: %s)", alert.AlertName, incidentUUID)
 
 	// Build investigation prompt
@@ -499,7 +506,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 
 		if err := h.codexWSHandler.StartIncident(incidentUUID, taskWithGuidance, openaiSettings, callback); err != nil {
 			log.Printf("Failed to start incident via WebSocket: %v, falling back to local execution", err)
-			h.runInvestigationLocal(incidentUUID, workingDir, alert, instance, threadTS, taskWithGuidance)
+			h.runInvestigationLocal(incidentUUID, workingDir, alert, instance, threadTS, channelID, taskWithGuidance)
 			return
 		}
 
@@ -520,7 +527,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 		h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response)
 
 		// Update Slack if enabled
-		h.updateSlackWithResult(threadTS, response, hasError)
+		h.updateSlackWithResult(threadTS, channelID, response, hasError)
 
 		log.Printf("Investigation completed for alert: %s (via WebSocket)", alert.AlertName)
 		return
@@ -528,11 +535,11 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 
 	// Fall back to local execution (legacy)
 	log.Printf("WebSocket worker not available, using local execution for incident %s", incidentUUID)
-	h.runInvestigationLocal(incidentUUID, workingDir, alert, instance, threadTS, taskWithGuidance)
+	h.runInvestigationLocal(incidentUUID, workingDir, alert, instance, threadTS, channelID, taskWithGuidance)
 }
 
 // runInvestigationLocal runs investigation using the local executor (legacy fallback)
-func (h *AlertHandler) runInvestigationLocal(incidentUUID, workingDir string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, threadTS string, taskWithGuidance string) {
+func (h *AlertHandler) runInvestigationLocal(incidentUUID, workingDir string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, threadTS, channelID, taskWithGuidance string) {
 	ctx := context.Background()
 
 	result := h.codexExecutor.ExecuteForSlackInDirectory(
@@ -572,13 +579,13 @@ Summary: %s
 	}
 
 	// Update Slack
-	h.updateSlackWithResult(threadTS, result.Response, result.Error != nil)
+	h.updateSlackWithResult(threadTS, channelID, result.Response, result.Error != nil)
 
 	log.Printf("Investigation completed for alert: %s (status: %s, local)", alert.AlertName, finalStatus)
 }
 
 // updateSlackWithResult posts results to Slack thread
-func (h *AlertHandler) updateSlackWithResult(threadTS, response string, hasError bool) {
+func (h *AlertHandler) updateSlackWithResult(threadTS, channelID, response string, hasError bool) {
 	if threadTS == "" {
 		return
 	}
@@ -588,18 +595,18 @@ func (h *AlertHandler) updateSlackWithResult(threadTS, response string, hasError
 		return
 	}
 
-	// Get alerts channel from database settings
-	settings, err := database.GetSlackSettings()
-	if err != nil || settings == nil || settings.AlertsChannel == "" {
-		return
-	}
-	alertsChannel := settings.AlertsChannel
-
-	channelID := alertsChannel
-	if h.channelResolver != nil {
-		resolved, _ := h.channelResolver.ResolveChannel(alertsChannel)
-		if resolved != "" {
-			channelID = resolved
+	// Use provided channelID, or fall back to alerts channel from settings
+	if channelID == "" {
+		settings, err := database.GetSlackSettings()
+		if err != nil || settings == nil || settings.AlertsChannel == "" {
+			return
+		}
+		channelID = settings.AlertsChannel
+		if h.channelResolver != nil {
+			resolved, _ := h.channelResolver.ResolveChannel(channelID)
+			if resolved != "" {
+				channelID = resolved
+			}
 		}
 	}
 

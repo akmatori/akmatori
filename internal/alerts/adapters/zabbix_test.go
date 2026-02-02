@@ -380,3 +380,142 @@ func TestZabbixAdapter_ParsePayload_Description(t *testing.T) {
 		t.Errorf("Expected detailed description, got '%s'", desc)
 	}
 }
+
+func TestExtractSlackThreadFromTags_SingleMatch(t *testing.T) {
+	eventTags := `[{"tag":"__message_ts_#alerts","value":"1770068440.413829"},{"tag":"__channel_id_#alerts","value":"C09M80VV7V2"}]`
+	channelID, threadTS := extractSlackThreadFromTags(eventTags)
+
+	if channelID != "C09M80VV7V2" {
+		t.Errorf("Expected channelID 'C09M80VV7V2', got '%s'", channelID)
+	}
+	if threadTS != "1770068440.413829" {
+		t.Errorf("Expected threadTS '1770068440.413829', got '%s'", threadTS)
+	}
+}
+
+func TestExtractSlackThreadFromTags_MultipleChannels_UsesFirst(t *testing.T) {
+	// Tags for two channels; function should return first complete pair found
+	eventTags := `[
+		{"tag":"__message_ts_#alerts","value":"1111111111.111111"},
+		{"tag":"__channel_id_#alerts","value":"C111111111"},
+		{"tag":"__message_ts_#urgent","value":"2222222222.222222"},
+		{"tag":"__channel_id_#urgent","value":"C222222222"}
+	]`
+	channelID, threadTS := extractSlackThreadFromTags(eventTags)
+
+	// Should get one of the complete pairs (map iteration order is random)
+	if channelID == "" || threadTS == "" {
+		t.Error("Expected non-empty channelID and threadTS")
+	}
+	// Verify the pair matches (either alerts or urgent)
+	if (channelID == "C111111111" && threadTS != "1111111111.111111") ||
+		(channelID == "C222222222" && threadTS != "2222222222.222222") {
+		t.Errorf("Mismatched pair: channelID=%s, threadTS=%s", channelID, threadTS)
+	}
+}
+
+func TestExtractSlackThreadFromTags_NoSlackTags(t *testing.T) {
+	eventTags := `[{"tag":"scope","value":"availability"},{"tag":"environment","value":"production"}]`
+	channelID, threadTS := extractSlackThreadFromTags(eventTags)
+
+	if channelID != "" {
+		t.Errorf("Expected empty channelID, got '%s'", channelID)
+	}
+	if threadTS != "" {
+		t.Errorf("Expected empty threadTS, got '%s'", threadTS)
+	}
+}
+
+func TestExtractSlackThreadFromTags_MalformedJSON(t *testing.T) {
+	eventTags := `{invalid json}`
+	channelID, threadTS := extractSlackThreadFromTags(eventTags)
+
+	if channelID != "" || threadTS != "" {
+		t.Error("Expected empty results for malformed JSON")
+	}
+}
+
+func TestExtractSlackThreadFromTags_EmptyString(t *testing.T) {
+	channelID, threadTS := extractSlackThreadFromTags("")
+
+	if channelID != "" || threadTS != "" {
+		t.Error("Expected empty results for empty string")
+	}
+}
+
+func TestExtractSlackThreadFromTags_PartialMatch(t *testing.T) {
+	// Only message_ts, no channel_id
+	eventTags := `[{"tag":"__message_ts_#alerts","value":"1770068440.413829"}]`
+	channelID, threadTS := extractSlackThreadFromTags(eventTags)
+
+	if channelID != "" || threadTS != "" {
+		t.Error("Expected empty results when only one tag is present")
+	}
+}
+
+func TestZabbixAdapter_ParsePayload_WithSlackMetadata(t *testing.T) {
+	adapter := NewZabbixAdapter()
+	instance := &database.AlertSourceInstance{}
+
+	payload := []byte(`{
+		"event_time": "2024-01-15 10:30:00",
+		"alert_name": "CPU Load High",
+		"priority": "4",
+		"event_id": "12345",
+		"hardware": "db-server-01",
+		"event_status": "PROBLEM",
+		"event_tags": "[{\"tag\":\"__message_ts_#business-downtime-urgent\",\"value\":\"1770068440.413829\"},{\"tag\":\"__channel_id_#business-downtime-urgent\",\"value\":\"C09M80VV7V2\"}]"
+	}`)
+
+	alerts, err := adapter.ParsePayload(payload, instance)
+	if err != nil {
+		t.Fatalf("ParsePayload returned error: %v", err)
+	}
+
+	if len(alerts) != 1 {
+		t.Fatalf("Expected 1 alert, got %d", len(alerts))
+	}
+
+	alert := alerts[0]
+
+	// Verify Slack metadata was extracted
+	if alert.SlackChannelID != "C09M80VV7V2" {
+		t.Errorf("Expected SlackChannelID 'C09M80VV7V2', got '%s'", alert.SlackChannelID)
+	}
+	if alert.SlackThreadTS != "1770068440.413829" {
+		t.Errorf("Expected SlackThreadTS '1770068440.413829', got '%s'", alert.SlackThreadTS)
+	}
+
+	// Verify other fields still work
+	if alert.AlertName != "CPU Load High" {
+		t.Errorf("Expected AlertName 'CPU Load High', got '%s'", alert.AlertName)
+	}
+	if alert.TargetHost != "db-server-01" {
+		t.Errorf("Expected TargetHost 'db-server-01', got '%s'", alert.TargetHost)
+	}
+}
+
+func TestZabbixAdapter_ParsePayload_WithoutSlackMetadata(t *testing.T) {
+	adapter := NewZabbixAdapter()
+	instance := &database.AlertSourceInstance{}
+
+	payload := []byte(`{
+		"alert_name": "Test Alert",
+		"event_id": "99999",
+		"hardware": "test-host",
+		"event_status": "PROBLEM"
+	}`)
+
+	alerts, err := adapter.ParsePayload(payload, instance)
+	if err != nil {
+		t.Fatalf("ParsePayload returned error: %v", err)
+	}
+
+	// Without Slack tags, fields should be empty
+	if alerts[0].SlackChannelID != "" {
+		t.Errorf("Expected empty SlackChannelID, got '%s'", alerts[0].SlackChannelID)
+	}
+	if alerts[0].SlackThreadTS != "" {
+		t.Errorf("Expected empty SlackThreadTS, got '%s'", alerts[0].SlackThreadTS)
+	}
+}

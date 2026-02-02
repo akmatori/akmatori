@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/alerts"
@@ -119,6 +120,12 @@ func (a *ZabbixAdapter) parseAlert(payload ZabbixPayload, rawFields map[string]i
 		"pending_duration":   payload.PendingDuration,
 	}
 
+	// Extract Slack thread metadata from event_tags if present
+	var slackChannelID, slackThreadTS string
+	if eventTags, ok := rawFields["event_tags"].(string); ok {
+		slackChannelID, slackThreadTS = extractSlackThreadFromTags(eventTags)
+	}
+
 	return alerts.NormalizedAlert{
 		AlertName:         payload.AlertName,
 		Severity:          severity,
@@ -135,6 +142,8 @@ func (a *ZabbixAdapter) parseAlert(payload ZabbixPayload, rawFields map[string]i
 		SourceAlertID:     payload.EventID,
 		SourceFingerprint: payload.EventID,
 		RawPayload:        payloadMap,
+		SlackChannelID:    slackChannelID,
+		SlackThreadTS:     slackThreadTS,
 	}
 }
 
@@ -168,4 +177,52 @@ func (a *ZabbixAdapter) GetDefaultMappings() database.JSONB {
 		"source_alert_id": "event_id",
 		"started_at":      "event_time",
 	}
+}
+
+// slackTagEntry represents a single tag entry from Zabbix event_tags
+type slackTagEntry struct {
+	Tag   string `json:"tag"`
+	Value string `json:"value"`
+}
+
+// extractSlackThreadFromTags parses Zabbix event_tags JSON array and extracts
+// Slack thread metadata if present. Returns first complete match found.
+// Tags format: [{"tag":"__message_ts_#channel","value":"timestamp"}, {"tag":"__channel_id_#channel","value":"C123..."}]
+func extractSlackThreadFromTags(eventTags string) (channelID, threadTS string) {
+	if eventTags == "" {
+		return "", ""
+	}
+
+	var tags []slackTagEntry
+	if err := json.Unmarshal([]byte(eventTags), &tags); err != nil {
+		return "", ""
+	}
+
+	// Build maps of channel -> threadTS and channel -> channelID
+	threadTSByChannel := make(map[string]string)
+	channelIDByChannel := make(map[string]string)
+
+	const (
+		messageTSPrefix = "__message_ts_"
+		channelIDPrefix = "__channel_id_"
+	)
+
+	for _, tag := range tags {
+		if strings.HasPrefix(tag.Tag, messageTSPrefix) {
+			channel := strings.TrimPrefix(tag.Tag, messageTSPrefix)
+			threadTSByChannel[channel] = tag.Value
+		} else if strings.HasPrefix(tag.Tag, channelIDPrefix) {
+			channel := strings.TrimPrefix(tag.Tag, channelIDPrefix)
+			channelIDByChannel[channel] = tag.Value
+		}
+	}
+
+	// Find first channel that has both threadTS and channelID
+	for channel, ts := range threadTSByChannel {
+		if id, ok := channelIDByChannel[channel]; ok {
+			return id, ts
+		}
+	}
+
+	return "", ""
 }

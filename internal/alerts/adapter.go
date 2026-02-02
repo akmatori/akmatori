@@ -32,6 +32,10 @@ type NormalizedAlert struct {
 	SourceAlertID     string
 	SourceFingerprint string
 	RawPayload        map[string]interface{}
+
+	// Slack thread context (extracted from source-specific tags)
+	SlackChannelID string // e.g., "C09M80VV7V2"
+	SlackThreadTS  string // e.g., "1770068440.413829"
 }
 
 // AlertAdapter defines the interface for source-specific alert parsing
