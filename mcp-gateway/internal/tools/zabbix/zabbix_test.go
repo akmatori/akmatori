@@ -5,11 +5,16 @@ import (
 	"log"
 	"os"
 	"testing"
+	"time"
+
+	"github.com/akmatori/mcp-gateway/internal/ratelimit"
 )
 
 func TestNewZabbixTool(t *testing.T) {
 	logger := log.New(os.Stdout, "test: ", log.LstdFlags)
-	tool := NewZabbixTool(logger)
+	limiter := ratelimit.New(10, 20)
+	tool := NewZabbixTool(logger, limiter)
+	defer tool.Stop()
 
 	if tool == nil {
 		t.Fatal("Expected tool to not be nil")
@@ -19,6 +24,31 @@ func TestNewZabbixTool(t *testing.T) {
 	}
 	if tool.requestID != 0 {
 		t.Errorf("Expected initial requestID to be 0, got %d", tool.requestID)
+	}
+	if tool.configCache == nil {
+		t.Error("Expected configCache to be initialized")
+	}
+	if tool.responseCache == nil {
+		t.Error("Expected responseCache to be initialized")
+	}
+	if tool.authCache == nil {
+		t.Error("Expected authCache to be initialized")
+	}
+	if tool.rateLimiter == nil {
+		t.Error("Expected rateLimiter to be set")
+	}
+}
+
+func TestNewZabbixTool_NilLimiter(t *testing.T) {
+	logger := log.New(os.Stdout, "test: ", log.LstdFlags)
+	tool := NewZabbixTool(logger, nil)
+	defer tool.Stop()
+
+	if tool == nil {
+		t.Fatal("Expected tool to not be nil")
+	}
+	if tool.rateLimiter != nil {
+		t.Error("Expected rateLimiter to be nil")
 	}
 }
 
@@ -401,7 +431,8 @@ func TestZabbixConfig_TimeoutOptions(t *testing.T) {
 
 func TestJSONRPCRequest_IDIncrement(t *testing.T) {
 	logger := log.New(os.Stdout, "test: ", log.LstdFlags)
-	tool := NewZabbixTool(logger)
+	tool := NewZabbixTool(logger, nil)
+	defer tool.Stop()
 
 	// Initial ID should be 0
 	if tool.requestID != 0 {
@@ -566,5 +597,216 @@ func TestZabbixConfig_DefaultProxyValues(t *testing.T) {
 	}
 	if config.ProxyURL != "" {
 		t.Error("Expected ProxyURL to default to empty string")
+	}
+}
+
+// Cache key tests
+func TestConfigCacheKey(t *testing.T) {
+	key := configCacheKey("incident-123", "zabbix")
+	expected := "creds:incident-123:zabbix"
+	if key != expected {
+		t.Errorf("Expected cache key '%s', got '%s'", expected, key)
+	}
+}
+
+func TestAuthCacheKey(t *testing.T) {
+	key := authCacheKey("https://zabbix.example.com", "admin")
+	expected := "https://zabbix.example.com:admin"
+	if key != expected {
+		t.Errorf("Expected auth cache key '%s', got '%s'", expected, key)
+	}
+}
+
+func TestResponseCacheKey(t *testing.T) {
+	params1 := map[string]interface{}{"output": "extend", "limit": 10}
+	params2 := map[string]interface{}{"output": "extend", "limit": 10}
+	params3 := map[string]interface{}{"output": "extend", "limit": 20}
+
+	key1 := responseCacheKey("host.get", params1)
+	key2 := responseCacheKey("host.get", params2)
+	key3 := responseCacheKey("host.get", params3)
+
+	// Same params should produce same key
+	if key1 != key2 {
+		t.Errorf("Same params should produce same key: '%s' vs '%s'", key1, key2)
+	}
+
+	// Different params should produce different key
+	if key1 == key3 {
+		t.Error("Different params should produce different key")
+	}
+
+	// Key should start with method name
+	if key1[:8] != "host.get" {
+		t.Errorf("Key should start with method name, got '%s'", key1)
+	}
+}
+
+func TestCacheTTLConstants(t *testing.T) {
+	// Verify cache TTL constants are reasonable
+	if ConfigCacheTTL != 5*time.Minute {
+		t.Errorf("Expected ConfigCacheTTL to be 5 minutes, got %v", ConfigCacheTTL)
+	}
+	if ResponseCacheTTL != 30*time.Second {
+		t.Errorf("Expected ResponseCacheTTL to be 30 seconds, got %v", ResponseCacheTTL)
+	}
+	if AuthCacheTTL != 30*time.Minute {
+		t.Errorf("Expected AuthCacheTTL to be 30 minutes, got %v", AuthCacheTTL)
+	}
+	if CacheCleanupTick != time.Minute {
+		t.Errorf("Expected CacheCleanupTick to be 1 minute, got %v", CacheCleanupTick)
+	}
+}
+
+func TestZabbixTool_ClearCache(t *testing.T) {
+	logger := log.New(os.Stdout, "test: ", log.LstdFlags)
+	tool := NewZabbixTool(logger, nil)
+	defer tool.Stop()
+
+	// Add some items to caches
+	tool.configCache.Set("test-key", "test-value")
+	tool.responseCache.Set("test-key", "test-value")
+	tool.authMu.Lock()
+	tool.authCache["test-key"] = authEntry{
+		token:     "test-token",
+		expiresAt: time.Now().Add(time.Hour),
+	}
+	tool.authMu.Unlock()
+
+	// Verify items are in cache
+	if _, ok := tool.configCache.Get("test-key"); !ok {
+		t.Error("Expected item in configCache")
+	}
+	if _, ok := tool.responseCache.Get("test-key"); !ok {
+		t.Error("Expected item in responseCache")
+	}
+	tool.authMu.RLock()
+	if _, ok := tool.authCache["test-key"]; !ok {
+		t.Error("Expected item in authCache")
+	}
+	tool.authMu.RUnlock()
+
+	// Clear caches
+	tool.ClearCache()
+
+	// Verify caches are empty
+	if _, ok := tool.configCache.Get("test-key"); ok {
+		t.Error("Expected configCache to be cleared")
+	}
+	if _, ok := tool.responseCache.Get("test-key"); ok {
+		t.Error("Expected responseCache to be cleared")
+	}
+	tool.authMu.RLock()
+	if _, ok := tool.authCache["test-key"]; ok {
+		t.Error("Expected authCache to be cleared")
+	}
+	tool.authMu.RUnlock()
+}
+
+func TestZabbixTool_InvalidateConfigCache(t *testing.T) {
+	logger := log.New(os.Stdout, "test: ", log.LstdFlags)
+	tool := NewZabbixTool(logger, nil)
+	defer tool.Stop()
+
+	// Add config items for different incidents
+	tool.configCache.Set("creds:incident-1:zabbix", "config1")
+	tool.configCache.Set("creds:incident-1:ssh", "config2")
+	tool.configCache.Set("creds:incident-2:zabbix", "config3")
+
+	// Invalidate for incident-1
+	tool.InvalidateConfigCache("incident-1")
+
+	// incident-1 configs should be gone
+	if _, ok := tool.configCache.Get("creds:incident-1:zabbix"); ok {
+		t.Error("Expected incident-1 zabbix config to be invalidated")
+	}
+	if _, ok := tool.configCache.Get("creds:incident-1:ssh"); ok {
+		t.Error("Expected incident-1 ssh config to be invalidated")
+	}
+
+	// incident-2 config should remain
+	if _, ok := tool.configCache.Get("creds:incident-2:zabbix"); !ok {
+		t.Error("Expected incident-2 config to remain")
+	}
+}
+
+func TestAuthEntry_Expiration(t *testing.T) {
+	// Test unexpired entry
+	futureEntry := authEntry{
+		token:     "token",
+		expiresAt: time.Now().Add(time.Hour),
+	}
+	if time.Now().After(futureEntry.expiresAt) {
+		t.Error("Future entry should not be expired")
+	}
+
+	// Test expired entry
+	pastEntry := authEntry{
+		token:     "token",
+		expiresAt: time.Now().Add(-time.Hour),
+	}
+	if !time.Now().After(pastEntry.expiresAt) {
+		t.Error("Past entry should be expired")
+	}
+}
+
+// Batch tests
+func TestBatchItem_Serialization(t *testing.T) {
+	item := BatchItem{
+		ItemID:    "12345",
+		HostID:    "10084",
+		Name:      "CPU utilization",
+		Key:       "system.cpu.util",
+		ValueType: "0",
+		LastValue: "45.5",
+		Units:     "%",
+	}
+
+	data, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("Failed to marshal BatchItem: %v", err)
+	}
+
+	var decoded BatchItem
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal BatchItem: %v", err)
+	}
+
+	if decoded.ItemID != item.ItemID {
+		t.Errorf("ItemID mismatch: expected '%s', got '%s'", item.ItemID, decoded.ItemID)
+	}
+	if decoded.Name != item.Name {
+		t.Errorf("Name mismatch: expected '%s', got '%s'", item.Name, decoded.Name)
+	}
+}
+
+func TestBatchResult_Serialization(t *testing.T) {
+	result := BatchResult{
+		Pattern: "cpu",
+		Items: []BatchItem{
+			{ItemID: "1", Name: "CPU 1"},
+			{ItemID: "2", Name: "CPU 2"},
+		},
+		Count: 2,
+	}
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("Failed to marshal BatchResult: %v", err)
+	}
+
+	var decoded BatchResult
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal BatchResult: %v", err)
+	}
+
+	if decoded.Pattern != result.Pattern {
+		t.Errorf("Pattern mismatch: expected '%s', got '%s'", result.Pattern, decoded.Pattern)
+	}
+	if decoded.Count != result.Count {
+		t.Errorf("Count mismatch: expected %d, got %d", result.Count, decoded.Count)
+	}
+	if len(decoded.Items) != len(result.Items) {
+		t.Errorf("Items count mismatch: expected %d, got %d", len(result.Items), len(decoded.Items))
 	}
 }

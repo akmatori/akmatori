@@ -183,6 +183,81 @@ make test-all
 
 Use the **code simplifier agent** at the end of a long coding session, or to clean up complex PRs. This helps reduce unnecessary complexity and ensures code remains maintainable.
 
+## CRITICAL: External API Integration - Rate Limiting & Caching
+
+**Akmatori integrates with enterprise monitoring systems (Zabbix, Datadog, PagerDuty, etc.). Flooding these systems with requests will destroy customer trust and can cause outages.**
+
+### Mandatory Requirements for External API Calls
+
+When adding or modifying code that calls external APIs (Zabbix, monitoring systems, customer infrastructure):
+
+1. **Always implement rate limiting**
+   - Use token bucket or similar algorithm
+   - Default: 10 requests/second with burst of 20
+   - Make limits configurable per integration
+
+2. **Always implement caching for read operations**
+   - Cache credentials/config: 5 minute TTL
+   - Cache API responses: 15-60 second TTL (shorter for frequently changing data)
+   - Cache auth tokens: 30 minute TTL
+   - Use cache keys that include all relevant parameters
+
+3. **Batch requests when possible**
+   - Combine multiple similar queries into single API calls
+   - Deduplicate repeated requests within an investigation
+   - Example: `get_items_batch()` instead of multiple `get_items()` calls
+
+4. **Log cache hits/misses for observability**
+   - Helps identify if caching is working
+   - Enables tuning of TTL values
+
+### Current Implementation Reference
+
+See `mcp-gateway/internal/` for examples:
+- `cache/cache.go` - Generic TTL cache with background cleanup
+- `ratelimit/limiter.go` - Token bucket rate limiter
+- `tools/zabbix/zabbix.go` - Integration with caching and rate limiting
+
+### Rate Limit Configuration
+
+| External System | Rate Limit | Burst | Notes |
+|-----------------|------------|-------|-------|
+| Zabbix API | 10/sec | 20 | Configured in `registry.go` |
+| SSH commands | 5/sec | 10 | Per-server limit |
+| Future APIs | 10/sec | 20 | Default, adjust as needed |
+
+### Cache TTL Guidelines
+
+| Data Type | TTL | Rationale |
+|-----------|-----|-----------|
+| Credentials/Config | 5 min | Rarely changes, reduces DB load |
+| Auth tokens | 30 min | Session tokens are long-lived |
+| Host/inventory data | 30-60 sec | Changes infrequently |
+| Problems/alerts | 15 sec | Changes frequently, needs freshness |
+| Metrics/history | 30 sec | Point-in-time data, cacheable |
+
+### Before Adding New External Integrations
+
+Ask yourself:
+- [ ] Does this code have rate limiting?
+- [ ] Are read operations cached?
+- [ ] Can multiple requests be batched?
+- [ ] What happens if this runs in a loop or gets called 100x?
+- [ ] Would I be comfortable if a customer saw these API logs?
+
+### What NOT To Do
+
+```go
+// BAD: Unbounded API calls in a loop
+for _, host := range hosts {
+    items, _ := zabbix.GetItems(ctx, host.ID)  // N API calls!
+    history, _ := zabbix.GetHistory(ctx, items) // N more API calls!
+}
+
+// GOOD: Batched with caching
+items, _ := zabbix.GetItemsBatch(ctx, hostIDs, patterns) // 1 cached call
+```
+
 ## Do NOT
 
 - Skip running tests after changes
@@ -190,3 +265,7 @@ Use the **code simplifier agent** at the end of a long coding session, or to cle
 - Add new functionality without writing tests first or immediately after
 - Modify test fixtures without updating related tests
 - Write tests that depend on external services (use mocks instead)
+- **Call external APIs without rate limiting** - This can flood customer systems
+- **Make unbounded API calls in loops** - Always batch or cache
+- **Skip caching for read-only external API calls** - Reduces load on customer systems
+- **Assume external systems can handle unlimited requests** - They can't, and we'll lose trust
