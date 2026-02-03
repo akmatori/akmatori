@@ -587,11 +587,13 @@ Summary: %s
 // updateSlackWithResult posts results to Slack thread
 func (h *AlertHandler) updateSlackWithResult(threadTS, channelID, response string, hasError bool) {
 	if threadTS == "" {
+		log.Printf("updateSlackWithResult: no threadTS provided, skipping Slack update")
 		return
 	}
 
 	slackClient := h.slackManager.GetClient()
 	if slackClient == nil {
+		log.Printf("updateSlackWithResult: no Slack client available, skipping Slack update")
 		return
 	}
 
@@ -599,6 +601,7 @@ func (h *AlertHandler) updateSlackWithResult(threadTS, channelID, response strin
 	if channelID == "" {
 		settings, err := database.GetSlackSettings()
 		if err != nil || settings == nil || settings.AlertsChannel == "" {
+			log.Printf("updateSlackWithResult: no channelID provided and no alerts channel configured")
 			return
 		}
 		channelID = settings.AlertsChannel
@@ -610,22 +613,31 @@ func (h *AlertHandler) updateSlackWithResult(threadTS, channelID, response strin
 		}
 	}
 
+	log.Printf("updateSlackWithResult: posting to channel=%s thread=%s (response length=%d)", channelID, threadTS, len(response))
+
 	// Add result reaction
 	reactionName := "white_check_mark"
 	if hasError {
 		reactionName = "x"
 	}
-	slackClient.AddReaction(reactionName, slack.ItemRef{
+	if err := slackClient.AddReaction(reactionName, slack.ItemRef{
 		Channel:   channelID,
 		Timestamp: threadTS,
-	})
+	}); err != nil {
+		log.Printf("Warning: Failed to add reaction to Slack thread: %v", err)
+	}
 
 	// Post result summary
-	slackClient.PostMessage(
+	_, _, err := slackClient.PostMessage(
 		channelID,
 		slack.MsgOptionText(response, false),
 		slack.MsgOptionTS(threadTS),
 	)
+	if err != nil {
+		log.Printf("Error: Failed to post result to Slack thread (channel=%s, thread=%s): %v", channelID, threadTS, err)
+	} else {
+		log.Printf("Successfully posted result to Slack thread: channel=%s thread=%s", channelID, threadTS)
+	}
 }
 
 func (h *AlertHandler) buildInvestigationPrompt(alert alerts.NormalizedAlert, instance *database.AlertSourceInstance) string {
