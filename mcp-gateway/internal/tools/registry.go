@@ -6,14 +6,23 @@ import (
 
 	"github.com/akmatori/mcp-gateway/internal/database"
 	"github.com/akmatori/mcp-gateway/internal/mcp"
+	"github.com/akmatori/mcp-gateway/internal/ratelimit"
 	"github.com/akmatori/mcp-gateway/internal/tools/ssh"
 	"github.com/akmatori/mcp-gateway/internal/tools/zabbix"
 )
 
+// Rate limit configuration for Zabbix API
+const (
+	ZabbixRatePerSecond = 10 // requests per second
+	ZabbixBurstCapacity = 20 // burst capacity
+)
+
 // Registry manages tool registration
 type Registry struct {
-	server *mcp.Server
-	logger *log.Logger
+	server      *mcp.Server
+	logger      *log.Logger
+	zabbixTool  *zabbix.ZabbixTool
+	zabbixLimit *ratelimit.Limiter
 }
 
 // NewRegistry creates a new tool registry
@@ -28,13 +37,24 @@ func NewRegistry(server *mcp.Server, logger *log.Logger) *Registry {
 func (r *Registry) RegisterAllTools() {
 	r.logger.Println("Registering tools...")
 
+	// Create rate limiter for Zabbix: 10 req/sec, burst 20
+	r.zabbixLimit = ratelimit.New(ZabbixRatePerSecond, ZabbixBurstCapacity)
+	r.logger.Printf("Zabbix rate limiter created: %d req/sec, burst %d", ZabbixRatePerSecond, ZabbixBurstCapacity)
+
 	// Register SSH tools
 	r.registerSSHTools()
 
-	// Register Zabbix tools
+	// Register Zabbix tools with rate limiter
 	r.registerZabbixTools()
 
 	r.logger.Println("All tools registered")
+}
+
+// Stop cleans up resources
+func (r *Registry) Stop() {
+	if r.zabbixTool != nil {
+		r.zabbixTool.Stop()
+	}
 }
 
 // registerSSHTools registers SSH-related tools
@@ -123,7 +143,7 @@ func (r *Registry) registerSSHTools() {
 
 // registerZabbixTools registers Zabbix-related tools
 func (r *Registry) registerZabbixTools() {
-	zabbixTool := zabbix.NewZabbixTool(r.logger)
+	r.zabbixTool = zabbix.NewZabbixTool(r.logger, r.zabbixLimit)
 
 	// zabbix.get_hosts
 	r.server.RegisterTool(
@@ -154,7 +174,7 @@ func (r *Registry) registerZabbixTools() {
 			},
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
-			return zabbixTool.GetHosts(ctx, incidentID, args)
+			return r.zabbixTool.GetHosts(ctx, incidentID, args)
 		},
 	)
 
@@ -189,7 +209,7 @@ func (r *Registry) registerZabbixTools() {
 			},
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
-			return zabbixTool.GetProblems(ctx, incidentID, args)
+			return r.zabbixTool.GetProblems(ctx, incidentID, args)
 		},
 	)
 
@@ -238,7 +258,7 @@ func (r *Registry) registerZabbixTools() {
 			},
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
-			return zabbixTool.GetHistory(ctx, incidentID, args)
+			return r.zabbixTool.GetHistory(ctx, incidentID, args)
 		},
 	)
 
@@ -272,7 +292,44 @@ func (r *Registry) registerZabbixTools() {
 			},
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
-			return zabbixTool.GetItems(ctx, incidentID, args)
+			return r.zabbixTool.GetItems(ctx, incidentID, args)
+		},
+	)
+
+	// zabbix.get_items_batch - Batch item search with deduplication
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "zabbix.get_items_batch",
+			Description: "Get multiple items in a single request with deduplication. More efficient than multiple get_items calls.",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"hostids": {
+						Type:        "array",
+						Description: "Filter by host IDs",
+						Items:       &mcp.Items{Type: "string"},
+					},
+					"searches": {
+						Type:        "array",
+						Description: "List of search patterns to find items for (e.g., [\"cpu\", \"memory\", \"disk\"])",
+						Items:       &mcp.Items{Type: "string"},
+					},
+					"output": {
+						Type:        "string",
+						Description: "Output format",
+						Default:     "extend",
+					},
+					"limit_per_search": {
+						Type:        "integer",
+						Description: "Maximum items per search pattern",
+						Default:     10,
+					},
+				},
+				Required: []string{"searches"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.zabbixTool.GetItemsBatch(ctx, incidentID, args)
 		},
 	)
 
@@ -308,7 +365,7 @@ func (r *Registry) registerZabbixTools() {
 			},
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
-			return zabbixTool.GetTriggers(ctx, incidentID, args)
+			return r.zabbixTool.GetTriggers(ctx, incidentID, args)
 		},
 	)
 
@@ -335,7 +392,7 @@ func (r *Registry) registerZabbixTools() {
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
 			method, _ := args["method"].(string)
 			params, _ := args["params"].(map[string]interface{})
-			return zabbixTool.APIRequest(ctx, incidentID, method, params)
+			return r.zabbixTool.APIRequest(ctx, incidentID, method, params)
 		},
 	)
 }

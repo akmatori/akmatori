@@ -243,6 +243,58 @@ def get_triggers(hostids: list = None, only_true: bool = False, min_severity: in
     return call("zabbix.get_triggers", args)
 
 
+def get_items_batch(searches: list, hostids: list = None, output: str = "extend",
+                    limit_per_search: int = 10) -> dict:
+    """
+    Get multiple items in a single request with deduplication.
+
+    This function is more efficient than multiple get_items() calls when you need
+    to search for items matching multiple patterns (e.g., cpu, memory, disk).
+    Results are cached and deduplicated to reduce API load.
+
+    Args:
+        searches: List of search patterns to find items for (e.g., ["cpu", "memory", "disk"])
+        hostids: Filter by host IDs
+        output: Output format (default: "extend")
+        limit_per_search: Maximum items per search pattern (default: 10)
+
+    Returns:
+        Dictionary with:
+            - results: List of BatchResult objects, each containing:
+                - pattern: The search pattern
+                - items: List of matching items
+                - count: Number of items found
+            - total_items: Total unique items found
+            - total_unique: Same as total_items (for clarity)
+            - pattern_count: Number of search patterns processed
+
+    Example:
+        # Get CPU, memory, and disk items for investigation
+        result = get_items_batch(
+            searches=["cpu", "memory", "disk"],
+            hostids=["10084"]
+        )
+
+        for r in result['results']:
+            print(f"Pattern '{r['pattern']}': {r['count']} items")
+            for item in r['items']:
+                print(f"  - {item['name']}: {item['lastvalue']}")
+
+        # More efficient than:
+        # cpu_items = get_items(hostids=["10084"], search={"key_": "cpu"})
+        # mem_items = get_items(hostids=["10084"], search={"key_": "memory"})
+        # disk_items = get_items(hostids=["10084"], search={"key_": "disk"})
+    """
+    args = {
+        "searches": searches,
+        "output": output,
+        "limit_per_search": limit_per_search
+    }
+    if hostids:
+        args["hostids"] = hostids
+    return call("zabbix.get_items_batch", args)
+
+
 def api_request(method: str, params: dict = None) -> any:
     """
     Make a raw Zabbix API request.
