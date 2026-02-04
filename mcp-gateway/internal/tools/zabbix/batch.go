@@ -49,7 +49,8 @@ func (t *ZabbixTool) GetItemsBatch(ctx context.Context, incidentID string, args 
 		hostids, _ = h.([]interface{})
 	}
 
-	output := "extend"
+	// Default to explicit field list to reduce Zabbix DB load
+	var output interface{} = []string{"itemid", "hostid", "name", "key_", "value_type", "lastvalue", "units"}
 	if o, ok := args["output"].(string); ok {
 		output = o
 	}
@@ -63,6 +64,12 @@ func (t *ZabbixTool) GetItemsBatch(ctx context.Context, incidentID string, args 
 	seenItems := make(map[string]bool)
 	results := make([]BatchResult, 0, len(searches))
 
+	// Determine startSearch setting (default true for prefix matching performance)
+	startSearch := true
+	if ss, ok := args["start_search"].(bool); ok {
+		startSearch = ss
+	}
+
 	// Process each search pattern
 	for _, pattern := range searches {
 		params := map[string]interface{}{
@@ -71,6 +78,7 @@ func (t *ZabbixTool) GetItemsBatch(ctx context.Context, incidentID string, args 
 				"key_": pattern,
 			},
 			"searchWildcardsEnabled": true,
+			"startSearch":            startSearch,
 			"limit":                  limitPerSearch * 2, // Fetch extra to account for duplicates
 		}
 

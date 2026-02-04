@@ -416,11 +416,11 @@ func (t *ZabbixTool) request(ctx context.Context, incidentID string, method stri
 func (t *ZabbixTool) GetHosts(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
 	params := make(map[string]interface{})
 
-	// Copy relevant parameters
+	// Copy relevant parameters - use explicit field list to reduce Zabbix DB load
 	if output, ok := args["output"]; ok {
 		params["output"] = output
 	} else {
-		params["output"] = "extend"
+		params["output"] = []string{"hostid", "host", "name", "status", "available"}
 	}
 
 	if filter, ok := args["filter"]; ok {
@@ -429,6 +429,14 @@ func (t *ZabbixTool) GetHosts(ctx context.Context, incidentID string, args map[s
 
 	if search, ok := args["search"]; ok {
 		params["search"] = search
+		// Use startSearch (prefix match) by default for better DB performance
+		if startSearch, ok := args["start_search"].(bool); ok {
+			if startSearch {
+				params["startSearch"] = true
+			}
+		} else {
+			params["startSearch"] = true
+		}
 	}
 
 	if limit, ok := args["limit"]; ok {
@@ -447,9 +455,9 @@ func (t *ZabbixTool) GetHosts(ctx context.Context, incidentID string, args map[s
 func (t *ZabbixTool) GetProblems(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
 	params := make(map[string]interface{})
 
-	// Set defaults
+	// Set defaults - use explicit selectHosts fields to reduce Zabbix DB load
 	params["output"] = "extend"
-	params["selectHosts"] = "extend"
+	params["selectHosts"] = []string{"hostid", "host", "name"}
 	params["selectTags"] = "extend"
 	params["sortfield"] = []string{"eventid"}
 	params["sortorder"] = "DESC"
@@ -539,18 +547,31 @@ func (t *ZabbixTool) GetHistory(ctx context.Context, incidentID string, args map
 func (t *ZabbixTool) GetItems(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
 	params := make(map[string]interface{})
 
+	// Use explicit field list to reduce Zabbix DB load
 	if output, ok := args["output"]; ok {
 		params["output"] = output
 	} else {
-		params["output"] = "extend"
+		params["output"] = []string{"itemid", "hostid", "name", "key_", "value_type", "lastvalue", "units", "state", "status"}
 	}
 
 	if hostids, ok := args["hostids"]; ok {
 		params["hostids"] = hostids
 	}
 
+	if filter, ok := args["filter"]; ok {
+		params["filter"] = filter
+	}
+
 	if search, ok := args["search"]; ok {
 		params["search"] = search
+		// Use startSearch (prefix match) by default for better DB performance
+		if startSearch, ok := args["start_search"].(bool); ok {
+			if startSearch {
+				params["startSearch"] = true
+			}
+		} else {
+			params["startSearch"] = true
+		}
 	}
 
 	if limit, ok := args["limit"]; ok {
@@ -569,10 +590,11 @@ func (t *ZabbixTool) GetItems(ctx context.Context, incidentID string, args map[s
 func (t *ZabbixTool) GetTriggers(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
 	params := make(map[string]interface{})
 
+	// Use explicit field lists to reduce Zabbix DB load
 	if output, ok := args["output"]; ok {
 		params["output"] = output
 	} else {
-		params["output"] = "extend"
+		params["output"] = []string{"triggerid", "description", "priority", "status", "value", "state"}
 	}
 
 	if hostids, ok := args["hostids"]; ok {
@@ -587,7 +609,7 @@ func (t *ZabbixTool) GetTriggers(ctx context.Context, incidentID string, args ma
 		params["min_severity"] = int(minSeverity)
 	}
 
-	params["selectHosts"] = "extend"
+	params["selectHosts"] = []string{"hostid", "host", "name"}
 	params["expandDescription"] = true
 
 	result, err := t.cachedRequest(ctx, incidentID, "trigger.get", params, ResponseCacheTTL)
