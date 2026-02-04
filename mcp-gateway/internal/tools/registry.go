@@ -155,16 +155,20 @@ func (r *Registry) registerZabbixTools() {
 				Properties: map[string]mcp.Property{
 					"output": {
 						Type:        "string",
-						Description: "Output format: extend, shorten, or list of fields",
-						Default:     "extend",
+						Description: "Output fields. Server defaults to [hostid, host, name, status, available] if omitted.",
 					},
 					"filter": {
 						Type:        "object",
-						Description: "Filter conditions (e.g., {\"host\": [\"server1\", \"server2\"]})",
+						Description: "Exact-match filter (e.g., {\"host\": [\"server1\", \"server2\"]}). Prefer over search when exact hostnames are known.",
 					},
 					"search": {
 						Type:        "object",
-						Description: "Search conditions for partial matching",
+						Description: "Substring/prefix search conditions (e.g., {\"name\": \"web\"})",
+					},
+					"start_search": {
+						Type:        "boolean",
+						Description: "When true, search matches from the beginning of fields only (prefix match). Faster on large Zabbix databases.",
+						Default:     true,
 					},
 					"limit": {
 						Type:        "integer",
@@ -275,14 +279,22 @@ func (r *Registry) registerZabbixTools() {
 						Description: "Filter by host IDs",
 						Items:       &mcp.Items{Type: "string"},
 					},
+					"filter": {
+						Type:        "object",
+						Description: "Exact-match filter (e.g., {\"key_\": \"system.cpu.util\"}). Prefer over search for exact key matches.",
+					},
 					"search": {
 						Type:        "object",
-						Description: "Search conditions (e.g., {\"key_\": \"cpu\"})",
+						Description: "Substring/prefix search conditions (e.g., {\"key_\": \"cpu\"})",
+					},
+					"start_search": {
+						Type:        "boolean",
+						Description: "When true, search matches from the beginning of fields only (prefix match). Faster on large Zabbix databases.",
+						Default:     true,
 					},
 					"output": {
 						Type:        "string",
-						Description: "Output format",
-						Default:     "extend",
+						Description: "Output fields. Server defaults to [itemid, hostid, name, key_, value_type, lastvalue, units, state, status] if omitted.",
 					},
 					"limit": {
 						Type:        "integer",
@@ -314,10 +326,14 @@ func (r *Registry) registerZabbixTools() {
 						Description: "List of search patterns to find items for (e.g., [\"cpu\", \"memory\", \"disk\"])",
 						Items:       &mcp.Items{Type: "string"},
 					},
+					"start_search": {
+						Type:        "boolean",
+						Description: "When true, search matches from the beginning of key_ only (prefix match). Faster on large Zabbix databases.",
+						Default:     true,
+					},
 					"output": {
 						Type:        "string",
-						Description: "Output format",
-						Default:     "extend",
+						Description: "Output fields. Server defaults to [itemid, hostid, name, key_, value_type, lastvalue, units] if omitted.",
 					},
 					"limit_per_search": {
 						Type:        "integer",
@@ -358,8 +374,7 @@ func (r *Registry) registerZabbixTools() {
 					},
 					"output": {
 						Type:        "string",
-						Description: "Output format",
-						Default:     "extend",
+						Description: "Output fields. Server defaults to [triggerid, description, priority, status, value, state] if omitted.",
 					},
 				},
 			},

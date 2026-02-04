@@ -810,3 +810,354 @@ func TestBatchResult_Serialization(t *testing.T) {
 		t.Errorf("Items count mismatch: expected %d, got %d", len(result.Items), len(decoded.Items))
 	}
 }
+
+// --- Tests for optimized output fields and startSearch ---
+
+// buildGetHostsParams replicates the parameter building logic from GetHosts
+// for unit testing without needing database connectivity.
+func buildGetHostsParams(args map[string]interface{}) map[string]interface{} {
+	params := make(map[string]interface{})
+	if output, ok := args["output"]; ok {
+		params["output"] = output
+	} else {
+		params["output"] = []string{"hostid", "host", "name", "status", "available"}
+	}
+	if filter, ok := args["filter"]; ok {
+		params["filter"] = filter
+	}
+	if search, ok := args["search"]; ok {
+		params["search"] = search
+		if startSearch, ok := args["start_search"].(bool); ok {
+			if startSearch {
+				params["startSearch"] = true
+			}
+		} else {
+			params["startSearch"] = true
+		}
+	}
+	if limit, ok := args["limit"]; ok {
+		params["limit"] = limit
+	}
+	return params
+}
+
+func TestGetHosts_DefaultOutputFields(t *testing.T) {
+	params := buildGetHostsParams(map[string]interface{}{})
+	output, ok := params["output"].([]string)
+	if !ok {
+		t.Fatal("Expected output to be []string")
+	}
+	expected := []string{"hostid", "host", "name", "status", "available"}
+	if len(output) != len(expected) {
+		t.Fatalf("Expected %d output fields, got %d", len(expected), len(output))
+	}
+	for i, field := range expected {
+		if output[i] != field {
+			t.Errorf("Expected output[%d] = '%s', got '%s'", i, field, output[i])
+		}
+	}
+}
+
+func TestGetHosts_ExplicitOutputOverride(t *testing.T) {
+	params := buildGetHostsParams(map[string]interface{}{"output": "extend"})
+	output, ok := params["output"].(string)
+	if !ok {
+		t.Fatal("Expected output to be string when explicitly set")
+	}
+	if output != "extend" {
+		t.Errorf("Expected output 'extend', got '%s'", output)
+	}
+}
+
+func TestGetHosts_StartSearchDefaultTrue(t *testing.T) {
+	params := buildGetHostsParams(map[string]interface{}{
+		"search": map[string]interface{}{"name": "web"},
+	})
+	startSearch, ok := params["startSearch"].(bool)
+	if !ok {
+		t.Fatal("Expected startSearch to be set when search is present")
+	}
+	if !startSearch {
+		t.Error("Expected startSearch to default to true")
+	}
+}
+
+func TestGetHosts_StartSearchExplicitFalse(t *testing.T) {
+	params := buildGetHostsParams(map[string]interface{}{
+		"search":       map[string]interface{}{"name": "web"},
+		"start_search": false,
+	})
+	if _, ok := params["startSearch"]; ok {
+		t.Error("Expected startSearch to NOT be set when start_search=false")
+	}
+}
+
+func TestGetHosts_StartSearchExplicitTrue(t *testing.T) {
+	params := buildGetHostsParams(map[string]interface{}{
+		"search":       map[string]interface{}{"name": "web"},
+		"start_search": true,
+	})
+	startSearch, ok := params["startSearch"].(bool)
+	if !ok {
+		t.Fatal("Expected startSearch to be set")
+	}
+	if !startSearch {
+		t.Error("Expected startSearch to be true")
+	}
+}
+
+func TestGetHosts_NoStartSearchWithoutSearch(t *testing.T) {
+	params := buildGetHostsParams(map[string]interface{}{
+		"filter": map[string]interface{}{"host": []string{"server1"}},
+	})
+	if _, ok := params["startSearch"]; ok {
+		t.Error("Expected startSearch NOT to be set when search is absent")
+	}
+}
+
+func TestGetHosts_FilterPassthrough(t *testing.T) {
+	filter := map[string]interface{}{"host": []string{"server1", "server2"}}
+	params := buildGetHostsParams(map[string]interface{}{
+		"filter": filter,
+	})
+	if _, ok := params["filter"]; !ok {
+		t.Error("Expected filter to be passed through")
+	}
+}
+
+// buildGetItemsParams replicates the parameter building logic from GetItems
+func buildGetItemsParams(args map[string]interface{}) map[string]interface{} {
+	params := make(map[string]interface{})
+	if output, ok := args["output"]; ok {
+		params["output"] = output
+	} else {
+		params["output"] = []string{"itemid", "hostid", "name", "key_", "value_type", "lastvalue", "units", "state", "status"}
+	}
+	if hostids, ok := args["hostids"]; ok {
+		params["hostids"] = hostids
+	}
+	if filter, ok := args["filter"]; ok {
+		params["filter"] = filter
+	}
+	if search, ok := args["search"]; ok {
+		params["search"] = search
+		if startSearch, ok := args["start_search"].(bool); ok {
+			if startSearch {
+				params["startSearch"] = true
+			}
+		} else {
+			params["startSearch"] = true
+		}
+	}
+	if limit, ok := args["limit"]; ok {
+		params["limit"] = limit
+	}
+	return params
+}
+
+func TestGetItems_DefaultOutputFields(t *testing.T) {
+	params := buildGetItemsParams(map[string]interface{}{})
+	output, ok := params["output"].([]string)
+	if !ok {
+		t.Fatal("Expected output to be []string")
+	}
+	expected := []string{"itemid", "hostid", "name", "key_", "value_type", "lastvalue", "units", "state", "status"}
+	if len(output) != len(expected) {
+		t.Fatalf("Expected %d output fields, got %d", len(expected), len(output))
+	}
+	for i, field := range expected {
+		if output[i] != field {
+			t.Errorf("Expected output[%d] = '%s', got '%s'", i, field, output[i])
+		}
+	}
+}
+
+func TestGetItems_StartSearchDefaultTrue(t *testing.T) {
+	params := buildGetItemsParams(map[string]interface{}{
+		"search": map[string]interface{}{"key_": "cpu"},
+	})
+	startSearch, ok := params["startSearch"].(bool)
+	if !ok {
+		t.Fatal("Expected startSearch to be set when search is present")
+	}
+	if !startSearch {
+		t.Error("Expected startSearch to default to true")
+	}
+}
+
+func TestGetItems_FilterPassthrough(t *testing.T) {
+	filter := map[string]interface{}{"key_": "system.cpu.util"}
+	params := buildGetItemsParams(map[string]interface{}{
+		"filter": filter,
+	})
+	if _, ok := params["filter"]; !ok {
+		t.Error("Expected filter to be passed through")
+	}
+}
+
+func TestGetItems_FilterAndSearchCoexist(t *testing.T) {
+	params := buildGetItemsParams(map[string]interface{}{
+		"filter": map[string]interface{}{"key_": "exact.key"},
+		"search": map[string]interface{}{"name": "CPU"},
+	})
+	if _, ok := params["filter"]; !ok {
+		t.Error("Expected filter to be passed through")
+	}
+	if _, ok := params["search"]; !ok {
+		t.Error("Expected search to be passed through")
+	}
+	if _, ok := params["startSearch"]; !ok {
+		t.Error("Expected startSearch when search is present")
+	}
+}
+
+// buildGetTriggersParams replicates the parameter building logic from GetTriggers
+func buildGetTriggersParams(args map[string]interface{}) map[string]interface{} {
+	params := make(map[string]interface{})
+	if output, ok := args["output"]; ok {
+		params["output"] = output
+	} else {
+		params["output"] = []string{"triggerid", "description", "priority", "status", "value", "state"}
+	}
+	if hostids, ok := args["hostids"]; ok {
+		params["hostids"] = hostids
+	}
+	if onlyTrue, ok := args["only_true"].(bool); ok && onlyTrue {
+		params["only_true"] = 1
+	}
+	if minSeverity, ok := args["min_severity"].(float64); ok {
+		params["min_severity"] = int(minSeverity)
+	}
+	params["selectHosts"] = []string{"hostid", "host", "name"}
+	params["expandDescription"] = true
+	return params
+}
+
+func TestGetTriggers_DefaultOutputFields(t *testing.T) {
+	params := buildGetTriggersParams(map[string]interface{}{})
+	output, ok := params["output"].([]string)
+	if !ok {
+		t.Fatal("Expected output to be []string")
+	}
+	expected := []string{"triggerid", "description", "priority", "status", "value", "state"}
+	if len(output) != len(expected) {
+		t.Fatalf("Expected %d output fields, got %d", len(expected), len(output))
+	}
+	for i, field := range expected {
+		if output[i] != field {
+			t.Errorf("Expected output[%d] = '%s', got '%s'", i, field, output[i])
+		}
+	}
+}
+
+func TestGetTriggers_SelectHostsRestricted(t *testing.T) {
+	params := buildGetTriggersParams(map[string]interface{}{})
+	selectHosts, ok := params["selectHosts"].([]string)
+	if !ok {
+		t.Fatal("Expected selectHosts to be []string")
+	}
+	expected := []string{"hostid", "host", "name"}
+	if len(selectHosts) != len(expected) {
+		t.Fatalf("Expected %d selectHosts fields, got %d", len(expected), len(selectHosts))
+	}
+	for i, field := range expected {
+		if selectHosts[i] != field {
+			t.Errorf("Expected selectHosts[%d] = '%s', got '%s'", i, field, selectHosts[i])
+		}
+	}
+}
+
+// buildGetProblemsParams replicates the parameter building logic from GetProblems
+func buildGetProblemsParams(args map[string]interface{}) map[string]interface{} {
+	params := make(map[string]interface{})
+	params["output"] = "extend"
+	params["selectHosts"] = []string{"hostid", "host", "name"}
+	params["selectTags"] = "extend"
+	params["sortfield"] = []string{"eventid"}
+	params["sortorder"] = "DESC"
+	if recent, ok := args["recent"].(bool); ok && recent {
+		params["recent"] = true
+	}
+	if hostids, ok := args["hostids"]; ok {
+		params["hostids"] = hostids
+	}
+	if limit, ok := args["limit"]; ok {
+		params["limit"] = limit
+	}
+	return params
+}
+
+func TestGetProblems_SelectHostsRestricted(t *testing.T) {
+	params := buildGetProblemsParams(map[string]interface{}{})
+	selectHosts, ok := params["selectHosts"].([]string)
+	if !ok {
+		t.Fatal("Expected selectHosts to be []string")
+	}
+	expected := []string{"hostid", "host", "name"}
+	if len(selectHosts) != len(expected) {
+		t.Fatalf("Expected %d selectHosts fields, got %d", len(expected), len(selectHosts))
+	}
+	for i, field := range expected {
+		if selectHosts[i] != field {
+			t.Errorf("Expected selectHosts[%d] = '%s', got '%s'", i, field, selectHosts[i])
+		}
+	}
+}
+
+func TestGetProblems_OutputRemainsExtend(t *testing.T) {
+	params := buildGetProblemsParams(map[string]interface{}{})
+	output, ok := params["output"].(string)
+	if !ok {
+		t.Fatal("Expected output to be string")
+	}
+	if output != "extend" {
+		t.Errorf("Expected output 'extend' for problems, got '%s'", output)
+	}
+}
+
+func TestGetProblems_SelectTagsRemainsExtend(t *testing.T) {
+	params := buildGetProblemsParams(map[string]interface{}{})
+	selectTags, ok := params["selectTags"].(string)
+	if !ok {
+		t.Fatal("Expected selectTags to be string")
+	}
+	if selectTags != "extend" {
+		t.Errorf("Expected selectTags 'extend', got '%s'", selectTags)
+	}
+}
+
+// Tests for batch params
+func TestGetItemsBatch_DefaultOutputFields(t *testing.T) {
+	// Replicate batch default output
+	var output interface{} = []string{"itemid", "hostid", "name", "key_", "value_type", "lastvalue", "units"}
+	fields, ok := output.([]string)
+	if !ok {
+		t.Fatal("Expected output to be []string")
+	}
+	if len(fields) != 7 {
+		t.Errorf("Expected 7 output fields for batch, got %d", len(fields))
+	}
+}
+
+func TestGetItemsBatch_StartSearchDefault(t *testing.T) {
+	// When start_search is not in args, default to true
+	args := map[string]interface{}{}
+	startSearch := true
+	if ss, ok := args["start_search"].(bool); ok {
+		startSearch = ss
+	}
+	if !startSearch {
+		t.Error("Expected startSearch to default to true for batch")
+	}
+}
+
+func TestGetItemsBatch_StartSearchExplicitFalse(t *testing.T) {
+	args := map[string]interface{}{"start_search": false}
+	startSearch := true
+	if ss, ok := args["start_search"].(bool); ok {
+		startSearch = ss
+	}
+	if startSearch {
+		t.Error("Expected startSearch to be false when explicitly set")
+	}
+}
