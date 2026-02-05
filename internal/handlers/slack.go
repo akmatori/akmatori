@@ -1,11 +1,15 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/akmatori/akmatori/internal/alerts"
+	"github.com/akmatori/akmatori/internal/alerts/extraction"
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/output"
@@ -21,6 +25,14 @@ type SlackHandler struct {
 	codexExecutor  *executor.Executor
 	codexWSHandler *CodexWSHandler
 	skillService   *services.SkillService
+
+	// Alert channel support
+	alertChannels    map[string]*database.AlertSourceInstance // channel_id -> instance
+	alertChannelsMu  sync.RWMutex
+	alertExtractor   *extraction.AlertExtractor
+	alertHandler     *AlertHandler
+	alertService     *services.AlertService
+	botUserID        string // Bot's user ID for self-message filtering
 }
 
 // Progress update interval for Slack messages (rate limiting)
@@ -38,7 +50,80 @@ func NewSlackHandler(
 		codexExecutor:  codexExecutor,
 		codexWSHandler: codexWSHandler,
 		skillService:   skillService,
+		alertChannels:  make(map[string]*database.AlertSourceInstance),
+		alertExtractor: extraction.NewAlertExtractor(),
 	}
+}
+
+// SetAlertHandler sets the alert handler for processing Slack channel alerts
+func (h *SlackHandler) SetAlertHandler(alertHandler *AlertHandler) {
+	h.alertHandler = alertHandler
+}
+
+// SetAlertService sets the alert service for loading alert channel configs
+func (h *SlackHandler) SetAlertService(alertService *services.AlertService) {
+	h.alertService = alertService
+}
+
+// SetBotUserID sets the bot's user ID for self-message filtering
+func (h *SlackHandler) SetBotUserID(botUserID string) {
+	h.botUserID = botUserID
+}
+
+// LoadAlertChannels loads alert channel configurations from the database
+func (h *SlackHandler) LoadAlertChannels() error {
+	if h.alertService == nil {
+		log.Printf("Alert service not configured, skipping alert channel loading")
+		return nil
+	}
+
+	instances, err := h.alertService.ListInstances()
+	if err != nil {
+		return fmt.Errorf("failed to list alert source instances: %w", err)
+	}
+
+	h.alertChannelsMu.Lock()
+	defer h.alertChannelsMu.Unlock()
+
+	// Clear existing channels
+	h.alertChannels = make(map[string]*database.AlertSourceInstance)
+
+	// Load slack_channel instances
+	for i := range instances {
+		instance := &instances[i]
+		if instance.AlertSourceType.Name != "slack_channel" || !instance.Enabled {
+			continue
+		}
+
+		// Extract channel ID from settings
+		channelID, ok := instance.Settings["slack_channel_id"].(string)
+		if !ok || channelID == "" {
+			log.Printf("Slack channel instance %s has no channel ID configured", instance.Name)
+			continue
+		}
+
+		h.alertChannels[channelID] = instance
+		log.Printf("Loaded alert channel: %s -> %s", channelID, instance.Name)
+	}
+
+	log.Printf("Loaded %d alert channel(s)", len(h.alertChannels))
+	return nil
+}
+
+// ReloadAlertChannels reloads alert channel configurations (called when settings change)
+func (h *SlackHandler) ReloadAlertChannels() {
+	if err := h.LoadAlertChannels(); err != nil {
+		log.Printf("Warning: Failed to reload alert channels: %v", err)
+	}
+}
+
+// isAlertChannel checks if a channel is configured as an alert channel
+func (h *SlackHandler) isAlertChannel(channelID string) (*database.AlertSourceInstance, bool) {
+	h.alertChannelsMu.RLock()
+	defer h.alertChannelsMu.RUnlock()
+
+	instance, ok := h.alertChannels[channelID]
+	return instance, ok
 }
 
 // HandleSocketMode starts the Socket Mode handler
@@ -94,14 +179,31 @@ func (h *SlackHandler) handleAppMention(event *slackevents.AppMentionEvent) {
 	h.processMessage(event.Channel, event.ThreadTimeStamp, event.TimeStamp, text, event.User)
 }
 
-// handleMessage processes message events (DMs)
+// handleMessage processes message events (DMs and alert channels)
 func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
-	// Ignore bot messages and threaded replies in channels
+	// Ignore bot messages and message subtypes (edits, deletes, etc.)
 	if event.BotID != "" || event.SubType != "" {
 		return
 	}
 
-	// Only process DMs (ChannelType == "im")
+	// Skip self-messages (by bot user ID)
+	if h.botUserID != "" && event.User == h.botUserID {
+		return
+	}
+
+	// Check if this is an alert channel
+	if instance, ok := h.isAlertChannel(event.Channel); ok {
+		// Skip thread replies - only process top-level messages
+		if event.ThreadTimeStamp != "" {
+			return
+		}
+
+		// Process as alert channel message
+		go h.handleAlertChannelMessage(event, instance)
+		return
+	}
+
+	// Only process DMs (ChannelType == "im") for conversational AI
 	if event.ChannelType != "im" {
 		return
 	}
@@ -407,4 +509,85 @@ func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS, inci
 	if updateErr != nil {
 		log.Printf("Error updating final result: %v", updateErr)
 	}
+}
+
+// handleAlertChannelMessage processes a message from a configured alert channel
+func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent, instance *database.AlertSourceInstance) {
+	log.Printf("Processing alert channel message from %s in channel %s", event.User, event.Channel)
+
+	// Extract message text (including text from blocks and attachments)
+	messageText := h.extractFullMessageText(event)
+	if messageText == "" {
+		log.Printf("Empty message text, skipping")
+		return
+	}
+
+	// Get custom extraction prompt if configured
+	var customPrompt string
+	if instance.Settings != nil {
+		if prompt, ok := instance.Settings["extraction_prompt"].(string); ok {
+			customPrompt = prompt
+		}
+	}
+
+	// Extract alert fields via AI
+	ctx := context.Background()
+	var normalized *alerts.NormalizedAlert
+	var err error
+
+	if customPrompt != "" {
+		normalized, err = h.alertExtractor.ExtractWithPrompt(ctx, messageText, customPrompt)
+	} else {
+		normalized, err = h.alertExtractor.Extract(ctx, messageText)
+	}
+
+	if err != nil {
+		log.Printf("Alert extraction failed: %v, using fallback", err)
+		// Fallback alert is created by the extractor
+	}
+
+	// Set fingerprint and source fields
+	normalized.SourceFingerprint = fmt.Sprintf("slack:%s:%s", event.Channel, event.TimeStamp)
+	normalized.SourceAlertID = event.TimeStamp
+
+	// Store Slack context for thread replies
+	if normalized.RawPayload == nil {
+		normalized.RawPayload = make(map[string]interface{})
+	}
+	normalized.RawPayload["slack_channel_id"] = event.Channel
+	normalized.RawPayload["slack_message_ts"] = event.TimeStamp
+	normalized.RawPayload["slack_user"] = event.User
+
+	// Add hourglass reaction to indicate processing
+	if err := h.client.AddReaction("hourglass_flowing_sand", slack.ItemRef{
+		Channel:   event.Channel,
+		Timestamp: event.TimeStamp,
+	}); err != nil {
+		log.Printf("Error adding reaction: %v", err)
+	}
+
+	// Process through AlertHandler if available
+	if h.alertHandler != nil {
+		h.alertHandler.ProcessAlertFromSlackChannel(instance, *normalized, event.Channel, event.TimeStamp)
+	} else {
+		log.Printf("AlertHandler not configured, cannot process Slack channel alert")
+		// Remove hourglass and add warning reaction
+		h.client.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
+			Channel:   event.Channel,
+			Timestamp: event.TimeStamp,
+		})
+		h.client.AddReaction("warning", slack.ItemRef{
+			Channel:   event.Channel,
+			Timestamp: event.TimeStamp,
+		})
+	}
+}
+
+// extractFullMessageText extracts the full text content from a Slack message event
+func (h *SlackHandler) extractFullMessageText(event *slackevents.MessageEvent) string {
+	// The Text field contains the rendered text from the message,
+	// including text from blocks. This is sufficient for most alert messages.
+	// Note: slackevents.MessageEvent doesn't expose Attachments directly,
+	// but the Text field should contain the main message content.
+	return event.Text
 }

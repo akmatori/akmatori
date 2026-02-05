@@ -162,31 +162,10 @@ func main() {
 	// Initialize Slack handler (will be used when Slack is enabled)
 	var slackHandler *handlers.SlackHandler
 
-	// Set up event handler for when Slack connects
-	// Note: We receive the client directly to avoid deadlock (can't call GetClient while holding lock)
-	slackManager.SetEventHandler(func(socketClient *socketmode.Client, client *slack.Client) {
-		// Create handler with current client
-		slackHandler = handlers.NewSlackHandler(
-			client,
-			codexExecutor,
-			codexWSHandler,
-			skillService,
-		)
-		slackHandler.HandleSocketMode(socketClient)
-		log.Printf("Slack components initialized")
-	})
-
-	slackEnabled := slackSettings.IsActive()
-	if slackEnabled {
-		log.Printf("Slack integration is ENABLED")
-	} else {
-		log.Printf("Slack integration is DISABLED (configure in Settings)")
-	}
-
+	// Initialize Alert handler (needed before Slack handler setup)
 	// Initialize channel resolver (will be set when Slack connects)
 	var channelResolver *slackutil.ChannelResolver
 
-	// Initialize Alert handler
 	alertHandler := handlers.NewAlertHandler(
 		cfg,
 		slackManager, // Pass manager for dynamic client access
@@ -197,6 +176,45 @@ func main() {
 		channelResolver,
 		aggregationService,
 	)
+
+	// Set up event handler for when Slack connects
+	// Note: We receive the client directly to avoid deadlock (can't call GetClient while holding lock)
+	slackManager.SetEventHandler(func(socketClient *socketmode.Client, client *slack.Client) {
+		// Create handler with current client
+		slackHandler = handlers.NewSlackHandler(
+			client,
+			codexExecutor,
+			codexWSHandler,
+			skillService,
+		)
+
+		// Wire up alert channel support
+		slackHandler.SetAlertHandler(alertHandler)
+		slackHandler.SetAlertService(alertService)
+
+		// Try to get bot user ID for self-message filtering
+		if authTest, err := client.AuthTest(); err == nil {
+			slackHandler.SetBotUserID(authTest.UserID)
+			log.Printf("Slack bot user ID: %s", authTest.UserID)
+		} else {
+			log.Printf("Warning: Could not get bot user ID: %v", err)
+		}
+
+		// Load alert channel configurations
+		if err := slackHandler.LoadAlertChannels(); err != nil {
+			log.Printf("Warning: Failed to load alert channels: %v", err)
+		}
+
+		slackHandler.HandleSocketMode(socketClient)
+		log.Printf("Slack components initialized (with alert channel support)")
+	})
+
+	slackEnabled := slackSettings.IsActive()
+	if slackEnabled {
+		log.Printf("Slack integration is ENABLED")
+	} else {
+		log.Printf("Slack integration is DISABLED (configure in Settings)")
+	}
 
 	// Register all alert adapters
 	alertHandler.RegisterAdapter(adapters.NewAlertmanagerAdapter())

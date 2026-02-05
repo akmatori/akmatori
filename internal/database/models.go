@@ -163,6 +163,10 @@ type Incident struct {
 	LastAlertAt              *time.Time `json:"last_alert_at"`                               // Timestamp of when the last alert was attached
 	ObservingStartedAt       *time.Time `json:"observing_started_at"`                        // When the incident entered the "observing" state
 	ObservingDurationMinutes int        `gorm:"default:30" json:"observing_duration_minutes"` // How long to wait in observing state before closing
+
+	// Slack context fields (for thread replies to source messages)
+	SlackChannelID string `gorm:"column:slack_channel_id" json:"slack_channel_id"` // Slack channel ID where alert originated
+	SlackMessageTS string `gorm:"column:slack_message_ts" json:"slack_message_ts"` // Slack message timestamp for thread replies
 }
 
 // BeforeCreate hook to set StartedAt

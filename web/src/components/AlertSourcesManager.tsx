@@ -28,6 +28,7 @@ const sourceTypeIcons: Record<string, string> = {
   pagerduty: 'PD',
   datadog: 'DD',
   zabbix: 'ZX',
+  slack_channel: 'SL',
 };
 
 export default function AlertSourcesManager() {
@@ -265,24 +266,77 @@ export default function AlertSourcesManager() {
               />
             </div>
 
-            {/* Webhook Secret */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Webhook Secret
-              </label>
-              <input
-                type="password"
-                className="input-field"
-                placeholder="Optional secret for webhook validation"
-                value={formData.webhook_secret}
-                onChange={(e) => setFormData({ ...formData, webhook_secret: e.target.value })}
-              />
-              {selectedType && (
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Header: <code>{selectedType.webhook_secret_header}</code>
-                </p>
-              )}
-            </div>
+            {/* Slack Channel specific fields */}
+            {formData.source_type_name === 'slack_channel' ? (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Slack Channel ID <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="C0123456789"
+                    value={(formData.settings?.slack_channel_id as string) || ''}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        settings: { ...formData.settings, slack_channel_id: e.target.value },
+                      })
+                    }
+                  />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Enter the Channel ID (not name). Find it in Slack channel details → About → Channel ID.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Custom Extraction Prompt (optional)
+                  </label>
+                  <textarea
+                    className="input-field min-h-[100px]"
+                    placeholder="Override the default AI extraction prompt for alert parsing..."
+                    value={(formData.settings?.extraction_prompt as string) || ''}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        settings: { ...formData.settings, extraction_prompt: e.target.value },
+                      })
+                    }
+                  />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Leave empty to use the default prompt. Use %s as a placeholder for the message text.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded text-sm">
+                  <p className="text-blue-700 dark:text-blue-300">
+                    <strong>Note:</strong> Messages posted to this channel will be treated as alerts.
+                    AI will extract alert details and trigger investigations. Thread replies are ignored.
+                  </p>
+                </div>
+              </>
+            ) : (
+              /* Webhook Secret - for non-Slack types */
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Webhook Secret
+                </label>
+                <input
+                  type="password"
+                  className="input-field"
+                  placeholder="Optional secret for webhook validation"
+                  value={formData.webhook_secret}
+                  onChange={(e) => setFormData({ ...formData, webhook_secret: e.target.value })}
+                />
+                {selectedType && (
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Header: <code>{selectedType.webhook_secret_header}</code>
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Enabled Toggle */}
             <div className="flex items-center gap-3 p-4 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
@@ -393,27 +447,41 @@ export default function AlertSourcesManager() {
                     </div>
                   </div>
 
-                  {/* Webhook URL */}
-                  <div className="mt-4">
-                    <label className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
-                      <Link2 className="w-3.5 h-3.5" />
-                      Webhook URL
-                    </label>
-                    <div className="webhook-url">
-                      <code className="text-gray-700 dark:text-gray-300">{webhookUrl}</code>
-                      <button
-                        onClick={() => copyWebhookUrl(source.uuid)}
-                        className={`copy-btn ${copiedUrl === source.uuid ? 'copied' : ''}`}
-                        title="Copy to clipboard"
-                      >
-                        {copiedUrl === source.uuid ? (
-                          <Check className="w-4 h-4" />
-                        ) : (
-                          <Copy className="w-4 h-4" />
-                        )}
-                      </button>
+                  {/* Webhook URL or Channel ID */}
+                  {typeName === 'slack_channel' ? (
+                    <div className="mt-4">
+                      <label className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
+                        <Link2 className="w-3.5 h-3.5" />
+                        Slack Channel ID
+                      </label>
+                      <div className="webhook-url">
+                        <code className="text-gray-700 dark:text-gray-300">
+                          {(source.settings?.slack_channel_id as string) || 'Not configured'}
+                        </code>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="mt-4">
+                      <label className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
+                        <Link2 className="w-3.5 h-3.5" />
+                        Webhook URL
+                      </label>
+                      <div className="webhook-url">
+                        <code className="text-gray-700 dark:text-gray-300">{webhookUrl}</code>
+                        <button
+                          onClick={() => copyWebhookUrl(source.uuid)}
+                          className={`copy-btn ${copiedUrl === source.uuid ? 'copied' : ''}`}
+                          title="Copy to clipboard"
+                        >
+                          {copiedUrl === source.uuid ? (
+                            <Check className="w-4 h-4" />
+                          ) : (
+                            <Copy className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Expand Toggle */}
                   <button
