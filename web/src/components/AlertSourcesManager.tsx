@@ -108,6 +108,14 @@ export default function AlertSourcesManager() {
         return;
       }
 
+      if (formData.source_type_name === 'slack_channel') {
+        const channelId = formData.settings?.slack_channel_id as string;
+        if (!channelId?.trim()) {
+          setError('Slack Channel ID is required');
+          return;
+        }
+      }
+
       if (isCreating) {
         await alertSourcesApi.create({
           source_type_name: formData.source_type_name,

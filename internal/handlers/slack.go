@@ -181,25 +181,32 @@ func (h *SlackHandler) handleAppMention(event *slackevents.AppMentionEvent) {
 
 // handleMessage processes message events (DMs and alert channels)
 func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
-	// Ignore bot messages and message subtypes (edits, deletes, etc.)
-	if event.BotID != "" || event.SubType != "" {
-		return
-	}
-
-	// Skip self-messages (by bot user ID)
+	// Always skip our own messages to prevent loops
 	if h.botUserID != "" && event.User == h.botUserID {
 		return
 	}
 
-	// Check if this is an alert channel
+	// Check if this is a configured alert channel BEFORE filtering bots,
+	// because monitoring integrations post as bots (bot_message subtype)
 	if instance, ok := h.isAlertChannel(event.Channel); ok {
 		// Skip thread replies - only process top-level messages
 		if event.ThreadTimeStamp != "" {
 			return
 		}
 
+		// Allow normal messages and bot_message subtype (monitoring integrations).
+		// Skip other subtypes (message_changed, message_deleted, channel_join, etc.)
+		if event.SubType != "" && event.SubType != "bot_message" {
+			return
+		}
+
 		// Process as alert channel message
 		go h.handleAlertChannelMessage(event, instance)
+		return
+	}
+
+	// For non-alert-channel messages, ignore bot messages and subtypes (edits, deletes, etc.)
+	if event.BotID != "" || event.SubType != "" {
 		return
 	}
 
