@@ -1831,7 +1831,7 @@ func (h *APIHandler) handleAlertSources(w http.ResponseWriter, r *http.Request) 
 		// Validate slack_channel sources have a channel ID configured
 		if req.SourceTypeName == "slack_channel" {
 			channelID, _ := req.Settings["slack_channel_id"].(string)
-			if channelID == "" {
+			if strings.TrimSpace(channelID) == "" {
 				http.Error(w, "slack_channel_id is required in settings for slack_channel source type", http.StatusBadRequest)
 				return
 			}
@@ -1904,6 +1904,18 @@ func (h *APIHandler) handleAlertSourceByUUID(w http.ResponseWriter, r *http.Requ
 		}
 		if req.Enabled != nil {
 			updates["enabled"] = *req.Enabled
+		}
+
+		// If settings are being updated on a slack_channel source, ensure channel ID is not cleared
+		if req.Settings != nil {
+			existing, err := h.alertService.GetInstanceByUUID(uuid)
+			if err == nil && existing.AlertSourceType.Name == "slack_channel" {
+				channelID, _ := (*req.Settings)["slack_channel_id"].(string)
+				if strings.TrimSpace(channelID) == "" {
+					http.Error(w, "slack_channel_id is required in settings for slack_channel source type", http.StatusBadRequest)
+					return
+				}
+			}
 		}
 
 		if err := h.alertService.UpdateInstance(uuid, updates); err != nil {
