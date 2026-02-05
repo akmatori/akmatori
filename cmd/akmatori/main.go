@@ -230,6 +230,14 @@ func main() {
 	// Initialize API handler for skill communication and management
 	apiHandler := handlers.NewAPIHandler(skillService, toolService, contextService, alertService, codexExecutor, codexWSHandler, slackManager)
 
+	// Wire alert channel reload: when alert sources are created/updated/deleted via API,
+	// reload the Slack handler's channel mappings so changes take effect immediately.
+	apiHandler.SetAlertChannelReloader(func() {
+		if slackHandler != nil {
+			slackHandler.ReloadAlertChannels()
+		}
+	})
+
 	// Initialize auth handler
 	authHandler := handlers.NewAuthHandler(jwtAuthMiddleware)
 

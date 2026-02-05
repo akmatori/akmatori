@@ -21,14 +21,15 @@ import (
 
 // APIHandler handles API endpoints for the UI and skill communication
 type APIHandler struct {
-	skillService      *services.SkillService
-	toolService       *services.ToolService
-	contextService    *services.ContextService
-	alertService      *services.AlertService
-	codexExecutor     *executor.Executor
-	codexWSHandler    *CodexWSHandler
-	slackManager      *slackutil.Manager
-	deviceAuthService *services.DeviceAuthService
+	skillService          *services.SkillService
+	toolService           *services.ToolService
+	contextService        *services.ContextService
+	alertService          *services.AlertService
+	codexExecutor         *executor.Executor
+	codexWSHandler        *CodexWSHandler
+	slackManager          *slackutil.Manager
+	deviceAuthService     *services.DeviceAuthService
+	alertChannelReloader  func() // called after alert source create/update/delete to reload Slack channel mappings
 }
 
 // NewAPIHandler creates a new API handler
@@ -42,6 +43,19 @@ func NewAPIHandler(skillService *services.SkillService, toolService *services.To
 		codexWSHandler:    codexWSHandler,
 		slackManager:      slackManager,
 		deviceAuthService: services.NewDeviceAuthService(),
+	}
+}
+
+// SetAlertChannelReloader sets the callback invoked after alert source create/update/delete
+// to reload Slack channel mappings at runtime.
+func (h *APIHandler) SetAlertChannelReloader(fn func()) {
+	h.alertChannelReloader = fn
+}
+
+// reloadAlertChannels triggers the alert channel reload callback if set
+func (h *APIHandler) reloadAlertChannels() {
+	if h.alertChannelReloader != nil {
+		go h.alertChannelReloader()
 	}
 }
 
@@ -1814,6 +1828,15 @@ func (h *APIHandler) handleAlertSources(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
+		// Validate slack_channel sources have a channel ID configured
+		if req.SourceTypeName == "slack_channel" {
+			channelID, _ := req.Settings["slack_channel_id"].(string)
+			if channelID == "" {
+				http.Error(w, "slack_channel_id is required in settings for slack_channel source type", http.StatusBadRequest)
+				return
+			}
+		}
+
 		instance, err := h.alertService.CreateInstance(req.SourceTypeName, req.Name, req.Description, req.WebhookSecret, req.FieldMappings, req.Settings)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to create alert source: %v", err), http.StatusInternalServerError)
@@ -1823,6 +1846,7 @@ func (h *APIHandler) handleAlertSources(w http.ResponseWriter, r *http.Request) 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(instance)
+		h.reloadAlertChannels()
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1890,6 +1914,7 @@ func (h *APIHandler) handleAlertSourceByUUID(w http.ResponseWriter, r *http.Requ
 		instance, _ := h.alertService.GetInstanceByUUID(uuid)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(instance)
+		h.reloadAlertChannels()
 
 	case http.MethodDelete:
 		if err := h.alertService.DeleteInstance(uuid); err != nil {
@@ -1897,6 +1922,7 @@ func (h *APIHandler) handleAlertSourceByUUID(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+		h.reloadAlertChannels()
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
