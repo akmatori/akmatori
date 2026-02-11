@@ -20,6 +20,10 @@ import (
 	"github.com/slack-go/slack"
 )
 
+// slackProgressInterval is the minimum time between Slack progress message updates
+// to avoid hitting Slack API rate limits during live investigation streaming.
+const slackProgressInterval = 5 * time.Second
+
 // AlertHandler handles webhook requests from multiple alert sources
 type AlertHandler struct {
 	config             *config.Config
@@ -927,6 +931,11 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 			}
 		}
 
+		// Post initial progress message in the Slack thread
+		progressMsgTS := h.postSlackThreadReplyGetTS(slackChannelID, slackMessageTS,
+			"🔍 *Investigating...*\n```\nWaiting for output...\n```")
+		lastSlackUpdate := time.Now()
+
 		// Create channels for async result handling
 		done := make(chan struct{})
 		var response string
@@ -941,6 +950,15 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 			OnOutput: func(output string) {
 				lastStreamedLog = output
 				h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+output)
+
+				// Throttled update of the Slack progress message
+				if progressMsgTS != "" && time.Since(lastSlackUpdate) >= slackProgressInterval {
+					lastSlackUpdate = time.Now()
+					progressLines := utils.GetLastNLines(strings.TrimSpace(output), 15)
+					progressLines = truncateLogForSlack(progressLines, 3000)
+					h.updateSlackThreadMessage(slackChannelID, progressMsgTS,
+						fmt.Sprintf("🔍 *Investigating...*\n```\n%s\n```", progressLines))
+				}
 			},
 			OnCompleted: func(sid, output string) {
 				sessionID = sid
@@ -976,10 +994,14 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		}
 		h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response)
 
-		// Update Slack thread - include reasoning context
+		// Update Slack thread - replace progress message with final result
 		h.updateSlackChannelReactions(slackChannelID, slackMessageTS, hasError)
 		slackResponse := buildSlackResponse(lastStreamedLog, response)
-		h.postSlackThreadReply(slackChannelID, slackMessageTS, slackResponse)
+		if progressMsgTS != "" {
+			h.updateSlackThreadMessage(slackChannelID, progressMsgTS, slackResponse)
+		} else {
+			h.postSlackThreadReply(slackChannelID, slackMessageTS, slackResponse)
+		}
 
 		log.Printf("Investigation completed for Slack channel alert: %s", alert.AlertName)
 		return
@@ -999,6 +1021,11 @@ func (h *AlertHandler) runSlackChannelInvestigationLocal(
 ) {
 	ctx := context.Background()
 
+	// Post initial progress message in the Slack thread
+	progressMsgTS := h.postSlackThreadReplyGetTS(slackChannelID, slackMessageTS,
+		"🔍 *Investigating...*\n```\nWaiting for output...\n```")
+	lastSlackUpdate := time.Now()
+
 	result := h.codexExecutor.ExecuteForSlackInDirectory(
 		ctx,
 		taskWithGuidance,
@@ -1006,6 +1033,14 @@ func (h *AlertHandler) runSlackChannelInvestigationLocal(
 		workingDir,
 		func(progress string) {
 			log.Printf("Investigation progress for %s: %s", alert.AlertName, progress)
+
+			// Throttled update of the Slack progress message
+			if progressMsgTS != "" && time.Since(lastSlackUpdate) >= slackProgressInterval {
+				lastSlackUpdate = time.Now()
+				progressLines := truncateLogForSlack(progress, 3000)
+				h.updateSlackThreadMessage(slackChannelID, progressMsgTS,
+					fmt.Sprintf("🔍 *Investigating...*\n```\n%s\n```", progressLines))
+			}
 		},
 	)
 
@@ -1032,10 +1067,14 @@ Summary: %s
 	fullLog := alertHeader + result.FullLog
 	h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, result.SessionID, fullLog, result.Response)
 
-	// Update Slack thread - include reasoning context
+	// Update Slack thread - replace progress message with final result
 	h.updateSlackChannelReactions(slackChannelID, slackMessageTS, result.Error != nil)
 	slackResponse := buildSlackResponse(result.FullLog, result.Response)
-	h.postSlackThreadReply(slackChannelID, slackMessageTS, slackResponse)
+	if progressMsgTS != "" {
+		h.updateSlackThreadMessage(slackChannelID, progressMsgTS, slackResponse)
+	} else {
+		h.postSlackThreadReply(slackChannelID, slackMessageTS, slackResponse)
+	}
 
 	log.Printf("Investigation completed for Slack channel alert: %s (local)", alert.AlertName)
 }
@@ -1079,6 +1118,56 @@ func (h *AlertHandler) postSlackThreadReply(channelID, threadTS, message string)
 	if err != nil {
 		log.Printf("Error posting thread reply: %v", err)
 	}
+}
+
+// postSlackThreadReplyGetTS posts a thread reply and returns the message timestamp
+func (h *AlertHandler) postSlackThreadReplyGetTS(channelID, threadTS, message string) string {
+	slackClient := h.slackManager.GetClient()
+	if slackClient == nil {
+		return ""
+	}
+
+	_, ts, err := slackClient.PostMessage(
+		channelID,
+		slack.MsgOptionText(message, false),
+		slack.MsgOptionTS(threadTS),
+	)
+	if err != nil {
+		log.Printf("Error posting thread reply: %v", err)
+		return ""
+	}
+	return ts
+}
+
+// updateSlackThreadMessage updates an existing Slack message in a channel
+func (h *AlertHandler) updateSlackThreadMessage(channelID, messageTS, message string) {
+	slackClient := h.slackManager.GetClient()
+	if slackClient == nil {
+		return
+	}
+
+	_, _, _, err := slackClient.UpdateMessage(
+		channelID,
+		messageTS,
+		slack.MsgOptionText(message, false),
+	)
+	if err != nil {
+		log.Printf("Error updating Slack message (ts=%s): %v", messageTS, err)
+	}
+}
+
+// truncateLogForSlack truncates a log string to fit within Slack's message limits.
+// It keeps the last maxLen characters and trims to a clean line boundary.
+func truncateLogForSlack(logText string, maxLen int) string {
+	if len(logText) <= maxLen {
+		return logText
+	}
+	truncated := logText[len(logText)-maxLen:]
+	// Find first newline to avoid partial lines
+	if idx := strings.Index(truncated, "\n"); idx > 0 && idx < 100 {
+		truncated = truncated[idx+1:]
+	}
+	return "...(truncated)\n" + truncated
 }
 
 // updateIncidentSlackContext updates the incident with Slack channel context

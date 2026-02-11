@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"os"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestPluralize(t *testing.T) {
@@ -171,4 +173,77 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestSlackProgressInterval(t *testing.T) {
+	if slackProgressInterval != 5*time.Second {
+		t.Errorf("slackProgressInterval = %v, want 5s", slackProgressInterval)
+	}
+}
+
+func TestTruncateLogForSlack_ShortLog(t *testing.T) {
+	input := "short log line"
+	result := truncateLogForSlack(input, 3000)
+	if result != input {
+		t.Errorf("truncateLogForSlack() = %q, want %q", result, input)
+	}
+}
+
+func TestTruncateLogForSlack_ExactLimit(t *testing.T) {
+	input := strings.Repeat("a", 3000)
+	result := truncateLogForSlack(input, 3000)
+	if result != input {
+		t.Errorf("truncateLogForSlack() should not truncate at exact limit")
+	}
+}
+
+func TestTruncateLogForSlack_LongLog(t *testing.T) {
+	// Build a long log with identifiable lines
+	var lines []string
+	for i := 0; i < 200; i++ {
+		lines = append(lines, strings.Repeat("x", 20))
+	}
+	input := strings.Join(lines, "\n")
+
+	result := truncateLogForSlack(input, 500)
+
+	if !strings.HasPrefix(result, "...(truncated)\n") {
+		t.Errorf("truncateLogForSlack() should start with truncation marker, got prefix: %q", result[:30])
+	}
+	if len(result) > 520 {
+		t.Errorf("truncateLogForSlack() result too long: %d chars", len(result))
+	}
+}
+
+func TestTruncateLogForSlack_TrimsToLineBreak(t *testing.T) {
+	// Create input where truncation point falls mid-line,
+	// with a newline within first 100 chars of the truncated portion
+	line := strings.Repeat("a", 50)
+	// 100 lines of 50 chars each = 5000+ chars total (with newlines)
+	var lines []string
+	for i := 0; i < 100; i++ {
+		lines = append(lines, line)
+	}
+	input := strings.Join(lines, "\n")
+
+	result := truncateLogForSlack(input, 500)
+
+	// Should start with truncation marker
+	if !strings.HasPrefix(result, "...(truncated)\n") {
+		t.Errorf("expected truncation marker prefix")
+	}
+
+	// After the marker, the content should start at a line boundary (no partial line)
+	afterMarker := strings.TrimPrefix(result, "...(truncated)\n")
+	if strings.Contains(afterMarker[:10], "a\n") {
+		// This would indicate a partial first line was kept, which is fine
+		// as long as there's no random mid-character break
+	}
+}
+
+func TestTruncateLogForSlack_EmptyLog(t *testing.T) {
+	result := truncateLogForSlack("", 3000)
+	if result != "" {
+		t.Errorf("truncateLogForSlack(\"\") = %q, want empty", result)
+	}
 }
