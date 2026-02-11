@@ -996,10 +996,12 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 
 		// Update Slack thread - replace progress message with final result
 		h.updateSlackChannelReactions(slackChannelID, slackMessageTS, hasError)
-		slackResponse := buildSlackResponse(lastStreamedLog, response)
 		if progressMsgTS != "" {
-			h.updateSlackThreadMessage(slackChannelID, progressMsgTS, slackResponse)
+			// Reasoning was already streamed live, so just show the final response
+			h.updateSlackThreadMessage(slackChannelID, progressMsgTS, response)
 		} else {
+			// No live progress was shown, include reasoning context
+			slackResponse := buildSlackResponse(lastStreamedLog, response)
 			h.postSlackThreadReply(slackChannelID, slackMessageTS, slackResponse)
 		}
 
@@ -1069,10 +1071,12 @@ Summary: %s
 
 	// Update Slack thread - replace progress message with final result
 	h.updateSlackChannelReactions(slackChannelID, slackMessageTS, result.Error != nil)
-	slackResponse := buildSlackResponse(result.FullLog, result.Response)
 	if progressMsgTS != "" {
-		h.updateSlackThreadMessage(slackChannelID, progressMsgTS, slackResponse)
+		// Reasoning was already streamed live, so just show the final response
+		h.updateSlackThreadMessage(slackChannelID, progressMsgTS, result.Response)
 	} else {
+		// No live progress was shown, include reasoning context
+		slackResponse := buildSlackResponse(result.FullLog, result.Response)
 		h.postSlackThreadReply(slackChannelID, slackMessageTS, slackResponse)
 	}
 
