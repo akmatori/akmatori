@@ -15,6 +15,7 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/services"
+	"github.com/akmatori/akmatori/internal/utils"
 	slackutil "github.com/akmatori/akmatori/internal/slack"
 	"github.com/slack-go/slack"
 )
@@ -519,8 +520,9 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 		}
 		h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response)
 
-		// Update Slack if enabled
-		h.updateSlackWithResult(threadTS, response, hasError)
+		// Update Slack if enabled - include reasoning context
+		slackResponse := buildSlackResponse(lastStreamedLog, response)
+		h.updateSlackWithResult(threadTS, slackResponse, hasError)
 
 		log.Printf("Investigation completed for alert: %s (via WebSocket)", alert.AlertName)
 		return
@@ -571,10 +573,24 @@ Summary: %s
 		log.Printf("Warning: Failed to update incident: %v", err)
 	}
 
-	// Update Slack
-	h.updateSlackWithResult(threadTS, result.Response, result.Error != nil)
+	// Update Slack - include reasoning context
+	slackResponse := buildSlackResponse(result.FullLog, result.Response)
+	h.updateSlackWithResult(threadTS, slackResponse, result.Error != nil)
 
 	log.Printf("Investigation completed for alert: %s (status: %s, local)", alert.AlertName, finalStatus)
+}
+
+// buildSlackResponse prepends the last N lines of the reasoning/execution log
+// to the final response so Slack readers can see investigation context.
+func buildSlackResponse(reasoningLog, response string) string {
+	if reasoningLog == "" {
+		return response
+	}
+	context := utils.GetLastNLines(strings.TrimSpace(reasoningLog), 15)
+	if context == "" {
+		return response
+	}
+	return context + "\n\n---\n\n" + response
 }
 
 // updateSlackWithResult posts results to Slack thread
@@ -960,9 +976,10 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		}
 		h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response)
 
-		// Update Slack thread
+		// Update Slack thread - include reasoning context
 		h.updateSlackChannelReactions(slackChannelID, slackMessageTS, hasError)
-		h.postSlackThreadReply(slackChannelID, slackMessageTS, response)
+		slackResponse := buildSlackResponse(lastStreamedLog, response)
+		h.postSlackThreadReply(slackChannelID, slackMessageTS, slackResponse)
 
 		log.Printf("Investigation completed for Slack channel alert: %s", alert.AlertName)
 		return
@@ -1015,9 +1032,10 @@ Summary: %s
 	fullLog := alertHeader + result.FullLog
 	h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, result.SessionID, fullLog, result.Response)
 
-	// Update Slack thread
+	// Update Slack thread - include reasoning context
 	h.updateSlackChannelReactions(slackChannelID, slackMessageTS, result.Error != nil)
-	h.postSlackThreadReply(slackChannelID, slackMessageTS, result.Response)
+	slackResponse := buildSlackResponse(result.FullLog, result.Response)
+	h.postSlackThreadReply(slackChannelID, slackMessageTS, slackResponse)
 
 	log.Printf("Investigation completed for Slack channel alert: %s (local)", alert.AlertName)
 }
