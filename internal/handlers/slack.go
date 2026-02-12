@@ -194,9 +194,9 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 			return
 		}
 
-		// Allow normal messages and bot_message subtype (monitoring integrations).
-		// Skip other subtypes (message_changed, message_deleted, channel_join, etc.)
-		if event.SubType != "" && event.SubType != "bot_message" {
+		// Only process bot messages (monitoring integrations post as bot_message).
+		// Skip human user messages and other subtypes (message_changed, message_deleted, etc.)
+		if event.SubType != "bot_message" {
 			return
 		}
 
