@@ -173,10 +173,47 @@ func (h *SlackHandler) handleEventsAPI(event slackevents.EventsAPIEvent) {
 
 // handleAppMention processes app mention events
 func (h *SlackHandler) handleAppMention(event *slackevents.AppMentionEvent) {
-	// Remove bot mention from text
-	text := strings.TrimSpace(strings.Replace(event.Text, fmt.Sprintf("<@%s>", event.BotID), "", 1))
+	// Remove bot mention from text.
+	// Use botUserID (the bot's User ID that appears in <@U...> mentions).
+	// Fall back to event.BotID for bot-triggered mentions.
+	text := event.Text
+	if h.botUserID != "" {
+		text = strings.Replace(text, fmt.Sprintf("<@%s>", h.botUserID), "", 1)
+	}
+	if event.BotID != "" {
+		text = strings.Replace(text, fmt.Sprintf("<@%s>", event.BotID), "", 1)
+	}
+	text = strings.TrimSpace(text)
+
+	// If this is a thread reply, fetch the parent message for context
+	// so the AI knows what "this alert" or "this message" refers to.
+	if event.ThreadTimeStamp != "" {
+		parentText := h.fetchThreadParentText(event.Channel, event.ThreadTimeStamp)
+		if parentText != "" {
+			text = fmt.Sprintf("Context — original message in this thread:\n---\n%s\n---\n\nUser request: %s", parentText, text)
+		}
+	}
 
 	h.processMessage(event.Channel, event.ThreadTimeStamp, event.TimeStamp, text, event.User)
+}
+
+// fetchThreadParentText fetches the parent (first) message of a Slack thread.
+// Returns the message text, or empty string on error.
+func (h *SlackHandler) fetchThreadParentText(channelID, threadTS string) string {
+	msgs, _, _, err := h.client.GetConversationReplies(&slack.GetConversationRepliesParameters{
+		ChannelID: channelID,
+		Timestamp: threadTS,
+		Limit:     1,
+		Inclusive: true,
+	})
+	if err != nil {
+		log.Printf("Error fetching thread parent message (channel=%s, ts=%s): %v", channelID, threadTS, err)
+		return ""
+	}
+	if len(msgs) > 0 {
+		return msgs[0].Text
+	}
+	return ""
 }
 
 // handleMessage processes message events (DMs and alert channels)
@@ -240,15 +277,28 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 	var incidentUUID string
 	var workingDir string
 
-	// Check if this is an existing incident (continuation) by looking up in database
+	// Check if this is an existing incident (continuation) by looking up in database.
+	// First try by source="slack" (DM-originated incidents), then fall back to
+	// slack_message_ts (alert channel incidents where users reply with @mention).
 	var incident database.Incident
 	if err := database.GetDB().Where("source = ? AND source_id = ?", "slack", threadID).First(&incident).Error; err == nil {
-		// Existing incident found - resume session
+		// Existing DM incident found - resume session
 		sessionID = incident.SessionID
 		incidentUUID = incident.UUID
 		workingDir = incident.WorkingDir
 		log.Printf("Resuming session %s for thread %s (incident: %s)", sessionID, threadID, incidentUUID)
-	} else {
+	} else if threadTS != "" {
+		// Try to find an alert channel incident by slack_message_ts
+		// (when user replies to an alert thread with @Akmatori)
+		if err := database.GetDB().Where("slack_message_ts = ?", threadID).First(&incident).Error; err == nil {
+			sessionID = incident.SessionID
+			incidentUUID = incident.UUID
+			workingDir = incident.WorkingDir
+			log.Printf("Resuming alert channel session %s for thread %s (incident: %s)", sessionID, threadID, incidentUUID)
+		}
+	}
+
+	if incidentUUID == "" {
 		// New thread - spawn incident manager
 		log.Printf("Starting new session for thread %s", threadID)
 
