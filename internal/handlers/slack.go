@@ -33,6 +33,9 @@ type SlackHandler struct {
 	alertHandler     *AlertHandler
 	alertService     *services.AlertService
 	botUserID        string // Bot's user ID for self-message filtering
+
+	// Dedup: prevent double processing when both app_mention and message events fire
+	processedMsgs sync.Map // key: "channel:messageTS" -> struct{}
 }
 
 // Progress update interval for Slack messages (rate limiting)
@@ -173,6 +176,17 @@ func (h *SlackHandler) handleEventsAPI(event slackevents.EventsAPIEvent) {
 
 // handleAppMention processes app mention events
 func (h *SlackHandler) handleAppMention(event *slackevents.AppMentionEvent) {
+	// Dedup: skip if already processed via handleMessage (both events can fire)
+	dedupeKey := event.Channel + ":" + event.TimeStamp
+	if _, loaded := h.processedMsgs.LoadOrStore(dedupeKey, struct{}{}); loaded {
+		log.Printf("Skipping duplicate app_mention processing for %s", dedupeKey)
+		return
+	}
+	go func() {
+		time.Sleep(60 * time.Second)
+		h.processedMsgs.Delete(dedupeKey)
+	}()
+
 	// Remove bot mention from text.
 	// Use botUserID (the bot's User ID that appears in <@U...> mentions).
 	// Fall back to event.BotID for bot-triggered mentions.
@@ -216,6 +230,33 @@ func (h *SlackHandler) fetchThreadParentText(channelID, threadTS string) string 
 	return ""
 }
 
+// handleBotMentionInThread processes a human @mention of the bot in an alert channel thread.
+// It strips the mention, fetches the parent message for context, and processes via processMessage.
+// Uses dedup to avoid double-processing when both app_mention and message events fire.
+func (h *SlackHandler) handleBotMentionInThread(channel, threadTS, messageTS, rawText, user string) {
+	// Dedup: skip if this message was already processed (e.g. via app_mention event)
+	dedupeKey := channel + ":" + messageTS
+	if _, loaded := h.processedMsgs.LoadOrStore(dedupeKey, struct{}{}); loaded {
+		log.Printf("Skipping duplicate bot mention processing for %s", dedupeKey)
+		return
+	}
+	// Clean up after 60 seconds
+	go func() {
+		time.Sleep(60 * time.Second)
+		h.processedMsgs.Delete(dedupeKey)
+	}()
+
+	// Strip bot mention
+	text := strings.TrimSpace(strings.Replace(rawText, fmt.Sprintf("<@%s>", h.botUserID), "", 1))
+
+	// Fetch the parent message (the alert) for context
+	if parentText := h.fetchThreadParentText(channel, threadTS); parentText != "" {
+		text = fmt.Sprintf("Context — original message in this thread:\n---\n%s\n---\n\nUser request: %s", parentText, text)
+	}
+
+	h.processMessage(channel, threadTS, messageTS, text, user)
+}
+
 // handleMessage processes message events (DMs and alert channels)
 func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 	// Always skip our own messages to prevent loops
@@ -226,8 +267,14 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 	// Check if this is a configured alert channel BEFORE filtering bots,
 	// because monitoring integrations post as bots (bot_message subtype)
 	if instance, ok := h.isAlertChannel(event.Channel); ok {
-		// Skip thread replies - only process top-level messages
 		if event.ThreadTimeStamp != "" {
+			// Thread reply in alert channel: only process if user @mentions the bot.
+			// This allows users to write "@Akmatori please check this alert" in a
+			// thread reply to a Zabbix/monitoring message.
+			if h.botUserID != "" && event.SubType == "" && event.User != "" &&
+				strings.Contains(event.Text, fmt.Sprintf("<@%s>", h.botUserID)) {
+				h.handleBotMentionInThread(event.Channel, event.ThreadTimeStamp, event.TimeStamp, event.Text, event.User)
+			}
 			return
 		}
 
