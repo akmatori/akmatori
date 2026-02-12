@@ -449,13 +449,15 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		}
 	}
 
-	// Add processing reaction
-	if err := h.client.AddReaction("hourglass_flowing_sand", slack.ItemRef{
-		Channel:   channel,
-		Timestamp: threadID,
-	}); err != nil {
-		log.Printf("Error adding reaction: %v", err)
-	}
+	// Add processing reaction (fire-and-forget, don't block execution)
+	go func() {
+		if err := h.client.AddReaction("hourglass_flowing_sand", slack.ItemRef{
+			Channel:   channel,
+			Timestamp: threadID,
+		}); err != nil {
+			log.Printf("Error adding reaction: %v", err)
+		}
+	}()
 
 	// Post initial progress message
 	_, progressMsgTS, _, err := h.client.SendMessage(
@@ -694,6 +696,15 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 		return
 	}
 
+	// Add hourglass reaction immediately so user sees acknowledgement
+	// BEFORE the slow OpenAI extraction call
+	if err := h.client.AddReaction("hourglass_flowing_sand", slack.ItemRef{
+		Channel:   event.Channel,
+		Timestamp: event.TimeStamp,
+	}); err != nil {
+		log.Printf("Error adding reaction: %v", err)
+	}
+
 	// Get custom extraction prompt if configured
 	var customPrompt string
 	if instance.Settings != nil {
@@ -729,14 +740,6 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 	normalized.RawPayload["slack_channel_id"] = event.Channel
 	normalized.RawPayload["slack_message_ts"] = event.TimeStamp
 	normalized.RawPayload["slack_user"] = event.User
-
-	// Add hourglass reaction to indicate processing
-	if err := h.client.AddReaction("hourglass_flowing_sand", slack.ItemRef{
-		Channel:   event.Channel,
-		Timestamp: event.TimeStamp,
-	}); err != nil {
-		log.Printf("Error adding reaction: %v", err)
-	}
 
 	// Process through AlertHandler if available
 	if h.alertHandler != nil {

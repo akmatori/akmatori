@@ -977,20 +977,12 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 	// NOTE: Tool credentials are NOT written to incident directory
 	// They are fetched by MCP Gateway at execution time for security
 
-	// Generate title using LLM
-	var title string
-	if ctx.Message != "" {
-		titleGen := NewTitleGenerator()
-		generatedTitle, err := titleGen.GenerateTitle(ctx.Message, ctx.Source)
-		if err != nil {
-			log.Printf("Warning: Failed to generate incident title: %v", err)
-			title = titleGen.GenerateFallbackTitle(ctx.Message, ctx.Source)
-		} else {
-			title = generatedTitle
-		}
-	}
+	// Use fast fallback title immediately to avoid blocking on LLM call.
+	// The LLM-generated title is updated asynchronously in the background.
+	titleGen := NewTitleGenerator()
+	title := titleGen.GenerateFallbackTitle(ctx.Message, ctx.Source)
 
-	// Create incident record in database
+	// Create incident record in database with fallback title
 	incident := &database.Incident{
 		UUID:       incidentUUID,
 		Source:     ctx.Source,
@@ -1003,6 +995,25 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 
 	if err := s.db.Create(incident).Error; err != nil {
 		return "", "", fmt.Errorf("failed to create incident record: %w", err)
+	}
+
+	// Generate LLM title in background and update DB when ready
+	if ctx.Message != "" && len(ctx.Message) >= 10 {
+		go func() {
+			generatedTitle, err := titleGen.GenerateTitle(ctx.Message, ctx.Source)
+			if err != nil {
+				log.Printf("Warning: Background title generation failed for %s: %v", incidentUUID, err)
+				return
+			}
+			if generatedTitle != "" && generatedTitle != title {
+				if err := s.db.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).
+					Update("title", generatedTitle).Error; err != nil {
+					log.Printf("Warning: Failed to update incident title for %s: %v", incidentUUID, err)
+				} else {
+					log.Printf("Updated incident %s title: %s", incidentUUID, generatedTitle)
+				}
+			}
+		}()
 	}
 
 	return incidentUUID, incidentDir, nil
