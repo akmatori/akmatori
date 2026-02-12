@@ -194,9 +194,11 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 			return
 		}
 
-		// Only process bot messages (monitoring integrations post as bot_message).
-		// Skip human user messages and other subtypes (message_changed, message_deleted, etc.)
-		if event.SubType != "bot_message" {
+		// Only process bot/integration messages in alert channels.
+		// Some integrations (e.g. Zabbix) set BotID without bot_message subtype,
+		// others use the bot_message subtype. Accept both, skip human users.
+		isBotMessage := event.SubType == "bot_message" || event.BotID != ""
+		if !isBotMessage {
 			return
 		}
 
