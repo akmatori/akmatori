@@ -764,11 +764,60 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 	}
 }
 
-// extractFullMessageText extracts the full text content from a Slack message event
+// extractFullMessageText extracts the full text content from a Slack message event.
+// The slackevents.MessageEvent struct doesn't expose Attachments or Blocks, but
+// monitoring tools (Zabbix, Datadog, etc.) typically send content in attachments.
+// When event.Text is empty, we fetch the full message via the Slack API to extract
+// text from attachments and blocks.
 func (h *SlackHandler) extractFullMessageText(event *slackevents.MessageEvent) string {
-	// The Text field contains the rendered text from the message,
-	// including text from blocks. This is sufficient for most alert messages.
-	// Note: slackevents.MessageEvent doesn't expose Attachments directly,
-	// but the Text field should contain the main message content.
-	return event.Text
+	if event.Text != "" {
+		return event.Text
+	}
+
+	// Text is empty — fetch the full message from the Slack API to get attachments/blocks.
+	log.Printf("Message text empty for channel=%s ts=%s, fetching full message via API", event.Channel, event.TimeStamp)
+
+	if event.ThreadTimeStamp != "" && event.ThreadTimeStamp != event.TimeStamp {
+		// Thread reply: use GetConversationReplies
+		msgs, _, _, err := h.client.GetConversationReplies(&slack.GetConversationRepliesParameters{
+			ChannelID: event.Channel,
+			Timestamp: event.ThreadTimeStamp,
+			Latest:    event.TimeStamp,
+			Oldest:    event.TimeStamp,
+			Limit:     1,
+			Inclusive: true,
+		})
+		if err != nil {
+			log.Printf("Error fetching full message via replies API (channel=%s, ts=%s): %v", event.Channel, event.TimeStamp, err)
+			return ""
+		}
+		// Find the specific message by timestamp
+		for _, msg := range msgs {
+			if msg.Timestamp == event.TimeStamp {
+				return extractSlackMessageText(msg)
+			}
+		}
+		if len(msgs) > 0 {
+			return extractSlackMessageText(msgs[len(msgs)-1])
+		}
+		return ""
+	}
+
+	// Top-level message: use GetConversationHistory
+	params := &slack.GetConversationHistoryParameters{
+		ChannelID: event.Channel,
+		Latest:    event.TimeStamp,
+		Oldest:    event.TimeStamp,
+		Limit:     1,
+		Inclusive: true,
+	}
+	history, err := h.client.GetConversationHistory(params)
+	if err != nil {
+		log.Printf("Error fetching full message via history API (channel=%s, ts=%s): %v", event.Channel, event.TimeStamp, err)
+		return ""
+	}
+	if len(history.Messages) == 0 {
+		return ""
+	}
+	return extractSlackMessageText(history.Messages[0])
 }
