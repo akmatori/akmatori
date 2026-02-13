@@ -333,21 +333,27 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 	// Check if this is a configured alert channel BEFORE filtering bots,
 	// because monitoring integrations post as bots (bot_message subtype)
 	if instance, ok := h.isAlertChannel(event.Channel); ok {
+		// Detect bot/integration messages (Zabbix, Alertmanager, etc.)
+		// Some integrations set BotID without bot_message subtype,
+		// others use the bot_message subtype. Accept both.
+		isBotMessage := event.SubType == "bot_message" || event.BotID != ""
+
 		if event.ThreadTimeStamp != "" {
-			// Thread reply in alert channel: only process if user @mentions the bot.
-			// This allows users to write "@Akmatori please check this alert" in a
-			// thread reply to a Zabbix/monitoring message.
-			if h.botUserID != "" && event.SubType == "" && event.User != "" &&
+			// Thread reply in alert channel.
+			if isBotMessage {
+				// Bot/integration thread reply (e.g. Zabbix follow-up alert):
+				// process as alert channel message.
+				go h.handleAlertChannelMessage(event, instance)
+			} else if h.botUserID != "" && event.SubType == "" && event.User != "" &&
 				strings.Contains(event.Text, fmt.Sprintf("<@%s>", h.botUserID)) {
+				// Human user @mentioning the bot in a thread reply.
 				h.handleBotMentionInThread(event.Channel, event.ThreadTimeStamp, event.TimeStamp, event.Text, event.User)
 			}
+			// Ignore other thread replies (regular human chat).
 			return
 		}
 
-		// Only process bot/integration messages in alert channels.
-		// Some integrations (e.g. Zabbix) set BotID without bot_message subtype,
-		// others use the bot_message subtype. Accept both, skip human users.
-		isBotMessage := event.SubType == "bot_message" || event.BotID != ""
+		// Top-level message: only process bot/integration messages.
 		if !isBotMessage {
 			return
 		}
