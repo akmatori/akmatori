@@ -702,6 +702,15 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 		return
 	}
 
+	// Determine the thread TS for incident storage and thread replies.
+	// For thread replies, use the parent/root TS so that later @mentions in the
+	// same thread can find and resume the incident. For top-level messages, the
+	// message itself becomes the thread root.
+	threadTS := event.TimeStamp
+	if event.ThreadTimeStamp != "" {
+		threadTS = event.ThreadTimeStamp
+	}
+
 	// Add hourglass reaction immediately so user sees acknowledgement
 	// BEFORE the slow OpenAI extraction call
 	if err := h.client.AddReaction("hourglass_flowing_sand", slack.ItemRef{
@@ -735,21 +744,23 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 		// Fallback alert is created by the extractor
 	}
 
-	// Set fingerprint and source fields
+	// Set fingerprint and source fields (use message TS for uniqueness)
 	normalized.SourceFingerprint = fmt.Sprintf("slack:%s:%s", event.Channel, event.TimeStamp)
 	normalized.SourceAlertID = event.TimeStamp
 
-	// Store Slack context for thread replies
+	// Store Slack context for thread replies.
+	// Use threadTS (root TS) so processMessage can find and resume this incident
+	// when a human @mentions the bot in the same thread.
 	if normalized.RawPayload == nil {
 		normalized.RawPayload = make(map[string]interface{})
 	}
 	normalized.RawPayload["slack_channel_id"] = event.Channel
-	normalized.RawPayload["slack_message_ts"] = event.TimeStamp
+	normalized.RawPayload["slack_message_ts"] = threadTS
 	normalized.RawPayload["slack_user"] = event.User
 
 	// Process through AlertHandler if available
 	if h.alertHandler != nil {
-		h.alertHandler.ProcessAlertFromSlackChannel(instance, *normalized, event.Channel, event.TimeStamp)
+		h.alertHandler.ProcessAlertFromSlackChannel(instance, *normalized, event.Channel, threadTS)
 	} else {
 		log.Printf("AlertHandler not configured, cannot process Slack channel alert")
 		// Remove hourglass and add warning reaction
