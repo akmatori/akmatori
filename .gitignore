@@ -43,3 +43,6 @@ Thumbs.db
 
 # Build output
 web/dist/assets/
+
+# ralphex progress logs
+progress*.txt
