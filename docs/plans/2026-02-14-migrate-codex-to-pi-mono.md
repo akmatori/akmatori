@@ -134,12 +134,12 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 - Create: `agent-worker/tests/tools.test.ts`
 
 **Steps:**
-- [ ] Create `mcp-client.ts` - HTTP client for the MCP Gateway (port of Python `mcp_client.py`):
+- [x] Create `mcp-client.ts` - HTTP client for the MCP Gateway (port of Python `mcp_client.py`):
   - `callTool(gatewayUrl, incidentId, toolName, arguments)` - JSON-RPC 2.0 call to `/mcp`
   - Sets `X-Incident-ID` header for credential resolution
   - Bypasses proxy for internal MCP calls (NO_PROXY)
   - Timeout and error handling
-- [ ] Create `mcp-tools.ts` - factory that returns pi-mono `ToolDefinition[]`:
+- [x] Create `mcp-tools.ts` - factory that returns pi-mono `ToolDefinition[]`:
   - SSH tool: `name: "ssh_execute_command"`, params: `{command: string, servers?: string[]}`
   - SSH connectivity: `name: "ssh_test_connectivity"`, no params
   - SSH server info: `name: "ssh_get_server_info"`, params: `{servers?: string[]}`
@@ -150,14 +150,14 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
   - Zabbix acknowledge_event: `name: "zabbix_acknowledge_event"`, params: `{eventids: string[], message: string}`
   - Each tool's `execute` calls `mcpClient.callTool()` and returns `{content: [{type: "text", text: result}]}`
   - Use `Type.Object()` from `@sinclair/typebox` for parameter schemas
-- [ ] Create `createMCPTools(gatewayUrl, incidentId)` factory function
-- [ ] Write tests with mocked HTTP responses:
+- [x] Create `createMCPTools(gatewayUrl, incidentId)` factory function
+- [x] Write tests with mocked HTTP responses:
   - SSH tool execute with successful command
   - SSH tool execute with connection error
   - Zabbix tool get_hosts with mock response
   - Tool parameter validation
   - MCP client error handling (timeout, network error)
-- [ ] Run `npm test` - must pass before task 4
+- [x] Run `npm test` - must pass before task 4
 
 ### Task 4: Implement agent runner (pi-mono SDK integration)
 
