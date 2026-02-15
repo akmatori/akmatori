@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/utils"
 	"github.com/gorilla/websocket"
+	"gorm.io/gorm"
 )
 
 // AgentMessageType represents the type of WebSocket message
@@ -201,10 +203,10 @@ func (h *AgentWSHandler) handleAgentOutput(msg AgentMessage) {
 	if exists && callback.OnOutput != nil {
 		callback.OnOutput(msg.Output)
 	} else {
-		// No callback registered, update database directly as fallback
+		// No callback registered, append to database directly as fallback
 		if err := database.GetDB().Model(&database.Incident{}).
 			Where("uuid = ?", msg.IncidentID).
-			Update("full_log", msg.Output).Error; err != nil {
+			Update("full_log", gorm.Expr("COALESCE(full_log, '') || ?", msg.Output)).Error; err != nil {
 			log.Printf("Failed to update incident log: %v", err)
 		}
 	}
@@ -226,27 +228,27 @@ func (h *AgentWSHandler) handleAgentCompleted(msg AgentMessage) {
 
 	if exists && callback.OnCompleted != nil {
 		callback.OnCompleted(msg.SessionID, responseWithMetrics)
+	} else {
+		// No callback registered, update database directly as fallback
+		now := time.Now()
+		if err := database.GetDB().Model(&database.Incident{}).
+			Where("uuid = ?", msg.IncidentID).
+			Updates(map[string]interface{}{
+				"status":            database.IncidentStatusCompleted,
+				"session_id":        msg.SessionID,
+				"response":          responseWithMetrics,
+				"tokens_used":       msg.TokensUsed,
+				"execution_time_ms": msg.ExecutionTimeMs,
+				"completed_at":      &now,
+			}).Error; err != nil {
+			log.Printf("Failed to update incident completion: %v", err)
+		}
 	}
 
 	// Remove callback
 	h.callbackMu.Lock()
 	delete(h.callbacks, msg.IncidentID)
 	h.callbackMu.Unlock()
-
-	// Update incident in database
-	now := time.Now()
-	if err := database.GetDB().Model(&database.Incident{}).
-		Where("uuid = ?", msg.IncidentID).
-		Updates(map[string]interface{}{
-			"status":            database.IncidentStatusCompleted,
-			"session_id":        msg.SessionID,
-			"response":          responseWithMetrics,
-			"tokens_used":       msg.TokensUsed,
-			"execution_time_ms": msg.ExecutionTimeMs,
-			"completed_at":      &now,
-		}).Error; err != nil {
-		log.Printf("Failed to update incident completion: %v", err)
-	}
 }
 
 // handleAgentError handles error notification from the agent
@@ -260,24 +262,24 @@ func (h *AgentWSHandler) handleAgentError(msg AgentMessage) {
 
 	if exists && callback.OnError != nil {
 		callback.OnError(msg.Error)
+	} else {
+		// No callback registered, update database directly as fallback
+		now := time.Now()
+		if err := database.GetDB().Model(&database.Incident{}).
+			Where("uuid = ?", msg.IncidentID).
+			Updates(map[string]interface{}{
+				"status":       database.IncidentStatusFailed,
+				"response":     msg.Error,
+				"completed_at": &now,
+			}).Error; err != nil {
+			log.Printf("Failed to update incident error: %v", err)
+		}
 	}
 
 	// Remove callback
 	h.callbackMu.Lock()
 	delete(h.callbacks, msg.IncidentID)
 	h.callbackMu.Unlock()
-
-	// Update incident in database
-	now := time.Now()
-	if err := database.GetDB().Model(&database.Incident{}).
-		Where("uuid = ?", msg.IncidentID).
-		Updates(map[string]interface{}{
-			"status":       database.IncidentStatusFailed,
-			"response":     msg.Error,
-			"completed_at": &now,
-		}).Error; err != nil {
-		log.Printf("Failed to update incident error: %v", err)
-	}
 }
 
 // IsWorkerConnected returns whether a worker is connected
@@ -353,7 +355,7 @@ func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettings
 }
 
 // ContinueIncident sends a follow-up message to an existing incident
-func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string, callback IncidentCallback) error {
+func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string, llm *LLMSettingsForWorker, callback IncidentCallback) error {
 	// Register/update callback
 	h.callbackMu.Lock()
 	h.callbacks[incidentID] = callback
@@ -365,6 +367,15 @@ func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string,
 		IncidentID: incidentID,
 		SessionID:  sessionID,
 		Message:    message,
+	}
+
+	// Include LLM settings so the worker can authenticate with the provider
+	if llm != nil {
+		msg.Provider = llm.Provider
+		msg.APIKey = llm.APIKey
+		msg.Model = llm.Model
+		msg.ThinkingLevel = llm.ThinkingLevel
+		msg.BaseURL = llm.BaseURL
 	}
 
 	if err := h.SendToWorker(msg); err != nil {
@@ -427,11 +438,4 @@ func BuildLLMSettingsForWorker(dbSettings *database.LLMSettings) *LLMSettingsFor
 }
 
 // ErrWorkerNotConnected is returned when no worker is connected
-var ErrWorkerNotConnected = &WorkerNotConnectedError{}
-
-// WorkerNotConnectedError represents a worker not connected error
-type WorkerNotConnectedError struct{}
-
-func (e *WorkerNotConnectedError) Error() string {
-	return "agent worker not connected"
-}
+var ErrWorkerNotConnected = errors.New("agent worker not connected")

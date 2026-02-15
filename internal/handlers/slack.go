@@ -545,9 +545,9 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 
 		callback := IncidentCallback{
 			OnOutput: func(outputLog string) {
-				lastStreamedLog = outputLog
+				lastStreamedLog += outputLog
 				// Update database with streamed log
-				h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+outputLog)
+				h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog)
 
 				// Also update Slack progress message
 				onStderrUpdate(outputLog)
@@ -568,7 +568,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		var wsErr error
 		if sessionID != "" {
 			log.Printf("Continuing session %s for incident %s", sessionID, incidentUUID)
-			wsErr = h.agentWSHandler.ContinueIncident(incidentUUID, sessionID, taskWithGuidance, callback)
+			wsErr = h.agentWSHandler.ContinueIncident(incidentUUID, sessionID, taskWithGuidance, llmSettings, callback)
 		} else {
 			log.Printf("Starting new agent session for incident %s", incidentUUID)
 			wsErr = h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, callback)

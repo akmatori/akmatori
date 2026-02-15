@@ -180,7 +180,7 @@ describe("WebSocketMessage serialization", () => {
     });
   });
 
-  it("omits zero-value fields matching Go omitempty behavior", () => {
+  it("preserves zero and empty string values in serialized output", () => {
     const msg: WebSocketMessage = {
       type: "codex_completed",
       incident_id: "inc-zero",
@@ -193,11 +193,12 @@ describe("WebSocketMessage serialization", () => {
     const json = serializeMessage(msg);
     const parsed = JSON.parse(json);
 
-    // Go omitempty strips zero-value int and empty string fields
-    expect(parsed).not.toHaveProperty("tokens_used");
-    expect(parsed).not.toHaveProperty("execution_time_ms");
-    expect(parsed).not.toHaveProperty("output");
-    expect(parsed).not.toHaveProperty("error");
+    // Zero and empty string values are preserved (not stripped)
+    // to avoid silently dropping meaningful values
+    expect(parsed.tokens_used).toBe(0);
+    expect(parsed.execution_time_ms).toBe(0);
+    expect(parsed.output).toBe("");
+    expect(parsed.error).toBe("");
     // type and incident_id should remain
     expect(parsed.type).toBe("codex_completed");
     expect(parsed.incident_id).toBe("inc-zero");
