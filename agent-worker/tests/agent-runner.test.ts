@@ -77,6 +77,7 @@ vi.mock("@mariozechner/pi-coding-agent", () => {
     SessionManager: {
       inMemory: vi.fn(() => ({})),
       create: vi.fn(() => ({})),
+      continueRecent: vi.fn(() => ({})),
       open: vi.fn(() => ({})),
     },
     SettingsManager: {

@@ -977,12 +977,17 @@ func fixPEMKey(key string) string {
 	return header + "\n" + body + "\n" + footer + "\n"
 }
 
-// UpdateIncidentStatus updates the status of an incident
+// UpdateIncidentStatus updates the status of an incident.
+// Only sets session_id and full_log when non-empty to avoid overwriting existing values.
 func (s *SkillService) UpdateIncidentStatus(incidentUUID string, status database.IncidentStatus, sessionID string, fullLog string) error {
 	updates := map[string]interface{}{
-		"status":     status,
-		"session_id": sessionID,
-		"full_log":   fullLog,
+		"status": status,
+	}
+	if sessionID != "" {
+		updates["session_id"] = sessionID
+	}
+	if fullLog != "" {
+		updates["full_log"] = fullLog
 	}
 
 	// Set completed_at timestamp when incident is completed or failed
