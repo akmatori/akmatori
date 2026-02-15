@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { openaiSettingsApi } from '../api/client';
+import { llmSettingsApi } from '../api/client';
 
 const ONBOARDING_DISMISSED_KEY = 'akmatori_onboarding_dismissed';
 
@@ -22,7 +22,7 @@ export function useSetupStatus(): SetupStatus {
   const checkStatus = useCallback(async () => {
     try {
       setIsLoading(true);
-      const settings = await openaiSettingsApi.get();
+      const settings = await llmSettingsApi.get();
       setIsConfigured(settings.is_configured);
     } catch (err) {
       // If we can't check, assume not configured

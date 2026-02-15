@@ -5,7 +5,7 @@ import QuickIncidentInput from '../components/QuickIncidentInput';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { SuccessMessage } from '../components/ErrorMessage';
-import { incidentsApi, openaiSettingsApi, alertSourcesApi } from '../api/client';
+import { incidentsApi, llmSettingsApi, alertSourcesApi } from '../api/client';
 import type { Incident } from '../types';
 
 export default function Dashboard() {
@@ -16,7 +16,7 @@ export default function Dashboard() {
   const [success, setSuccess] = useState('');
 
   // System health state
-  const [openaiConfigured, setOpenaiConfigured] = useState<boolean | null>(null);
+  const [llmConfigured, setLlmConfigured] = useState<boolean | null>(null);
   const [alertSourcesCount, setAlertSourcesCount] = useState<number>(0);
 
   useEffect(() => {
@@ -28,14 +28,14 @@ export default function Dashboard() {
       setLoading(true);
       setError('');
 
-      const [incidentsData, openaiSettings, alertSources] = await Promise.all([
+      const [incidentsData, llmSettings, alertSources] = await Promise.all([
         incidentsApi.list(),
-        openaiSettingsApi.get().catch(() => null),
+        llmSettingsApi.get().catch(() => null),
         alertSourcesApi.list().catch(() => []),
       ]);
 
       setIncidents(incidentsData?.slice(0, 5) ?? []);
-      setOpenaiConfigured(openaiSettings?.api_key ? true : false);
+      setLlmConfigured(llmSettings?.is_configured ?? false);
       setAlertSourcesCount(alertSources?.length ?? 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load dashboard');
@@ -165,12 +165,12 @@ export default function Dashboard() {
           <h2 className="font-semibold text-gray-900 dark:text-white mb-4">System Health</h2>
 
           <div className="space-y-3">
-            {/* OpenAI Status */}
+            {/* LLM Status */}
             <div className="flex items-center justify-between py-2">
-              <span className="text-sm text-gray-600 dark:text-gray-400">OpenAI</span>
-              {openaiConfigured === null ? (
+              <span className="text-sm text-gray-600 dark:text-gray-400">LLM Provider</span>
+              {llmConfigured === null ? (
                 <span className="text-sm text-gray-400">Checking...</span>
-              ) : openaiConfigured ? (
+              ) : llmConfigured ? (
                 <span className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400">
                   <CheckCircle2 className="w-4 h-4" />
                   Connected
@@ -221,7 +221,7 @@ export default function Dashboard() {
       </div>
 
       {/* Setup hint for new users */}
-      {!openaiConfigured && (
+      {!llmConfigured && (
         <div className="mt-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
           <div className="flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
@@ -230,7 +230,7 @@ export default function Dashboard() {
                 Setup Required
               </p>
               <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
-                Add your OpenAI API key in Settings to start using Akmatori.
+                Configure your LLM provider in Settings to start using Akmatori.
               </p>
               <Link
                 to="/settings"

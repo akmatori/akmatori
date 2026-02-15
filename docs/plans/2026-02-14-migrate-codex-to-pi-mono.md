@@ -365,24 +365,24 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 - Modify: `web/src/` - Settings page components
 
 **Steps:**
-- [ ] Replace the OpenAI settings page with a "LLM Provider" settings page:
+- [x] Replace the OpenAI settings page with a "LLM Provider" settings page:
   - Provider selector dropdown: OpenAI, Anthropic, Google, OpenRouter, Custom
   - API key input field (single field, context changes per provider)
   - Model input/selector (free text with suggestions per provider)
   - Thinking level selector: off, minimal, low, medium, high, xhigh
   - Base URL field (visible when provider is "custom" or "openrouter")
   - Keep existing proxy configuration section
-- [ ] Remove ChatGPT subscription auth UI:
+- [x] Remove ChatGPT subscription auth UI:
   - Remove device auth flow
   - Remove OAuth token display
   - Remove "ChatGPT Plus" auth method selector
-- [ ] Update API calls to use new LLM settings endpoints:
+- [x] Update API calls to use new LLM settings endpoints:
   - `GET/PUT /api/settings/llm` instead of `/api/settings/openai`
-- [ ] Update model suggestions per provider:
+- [x] Update model suggestions per provider:
   - OpenAI: gpt-4o, o3, o4-mini, etc.
   - Anthropic: claude-opus-4-6, claude-sonnet-4-5, claude-haiku-4-5
   - Google: gemini-2.5-pro, gemini-2.5-flash
-- [ ] Test the settings page renders and saves correctly
+- [x] Test the settings page renders and saves correctly
 
 ### Task 11: Delete old codex code and cleanup
 
