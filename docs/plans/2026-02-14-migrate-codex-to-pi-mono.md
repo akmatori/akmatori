@@ -166,7 +166,7 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 - Create: `agent-worker/tests/agent-runner.test.ts`
 
 **Steps:**
-- [ ] Create `AgentRunner` class wrapping pi-mono SDK:
+- [x] Create `AgentRunner` class wrapping pi-mono SDK:
   - `execute(params)` where params = `{incidentId, task, llmSettings, proxyConfig, workDir, onOutput, onEvent}`:
     - Create `AuthStorage` and set runtime API key via `authStorage.setRuntimeApiKey(provider, key)`
     - Create `ModelRegistry` from auth storage
@@ -187,24 +187,24 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
     - Call `session.abort()` on active session
   - `dispose()`:
     - Clean up all active sessions
-- [ ] Event mapping (pi-mono events -> WebSocket output):
+- [x] Event mapping (pi-mono events -> WebSocket output):
   - `message_update` (text_delta) -> accumulate response text, stream to `onOutput`
   - `tool_execution_start` -> format as `[Tool: toolName]` in output
   - `tool_execution_update` -> stream tool output
   - `tool_execution_end` -> format tool result summary
   - `turn_end` -> extract token usage from event data
   - `agent_end` -> mark completion
-- [ ] Handle proxy configuration:
+- [x] Handle proxy configuration:
   - Set `HTTP_PROXY`/`HTTPS_PROXY` env vars before creating session if proxy enabled for LLM calls
   - Respect per-service proxy toggles from `ProxyConfig`
-- [ ] Write tests (with mocked pi-mono SDK):
+- [x] Write tests (with mocked pi-mono SDK):
   - Execute with API key for different providers
   - Resume existing session
   - Cancel active execution
   - Event streaming to output callback
   - Error handling (auth failure, model not found, timeout)
   - Proxy configuration application
-- [ ] Run `npm test` - must pass before task 5
+- [x] Run `npm test` - must pass before task 5
 
 ### Task 5: Implement orchestrator and entry point
 
