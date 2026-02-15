@@ -337,27 +337,27 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 - Modify: `internal/services/skill_service.go`
 
 **Steps:**
-- [ ] Update `SpawnIncidentManager()`:
+- [x] Update `SpawnIncidentManager()`:
   - Instead of creating `.codex/AGENTS.md`, create `AGENTS.md` at workspace root (pi-mono reads it from cwd upward)
   - Instead of copying skills to `.codex/skills/`, embed skill instructions directly in `AGENTS.md`
   - Remove the `copyDirPreserveSymlinks()` call for skills (tools are now native pi-mono `ToolDefinition` objects, not Python scripts)
   - Remove `.codex/` directory creation entirely
-- [ ] Update `generateIncidentAgentsMd()`:
+- [x] Update `generateIncidentAgentsMd()`:
   - Write to workspace root (not `.codex/`)
   - Remove Codex-specific structured output protocol (pi-mono handles output natively)
   - Include skill instructions inline: for each enabled skill, append its SKILL.md body content
   - Remove Python import instructions from Quick Start sections
-- [ ] Update `generateSkillMd()`:
+- [x] Update `generateSkillMd()`:
   - Remove Python import code generation (no more `from scripts.ssh import ...`)
   - Tools are now pi-mono native `ToolDefinition` objects registered at session creation time
   - Keep YAML frontmatter format (useful for metadata)
   - Simplify to just frontmatter + user prompt body
-- [ ] Remove or simplify `AssignTools()`:
+- [x] Remove or simplify `AssignTools()`:
   - Remove symlink creation logic (no Python wrappers to symlink)
   - Keep database association for tracking which tools are assigned
   - Remove `mcp_client.py` symlink creation
-- [ ] Update tests
-- [ ] Run `go test ./internal/services/...` - must pass before task 10
+- [x] Update tests
+- [x] Run `go test ./internal/services/...` - must pass before task 10
 
 ### Task 10: Update frontend for multi-provider LLM settings
 
