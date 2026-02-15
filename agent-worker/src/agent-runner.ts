@@ -134,14 +134,14 @@ export class AgentRunner {
    * Execute a new agent session for an incident.
    */
   async execute(params: ExecuteParams): Promise<ExecuteResult> {
-    return this.runSession(params, params.task);
+    return this.runSession(params, params.task, false);
   }
 
   /**
    * Resume an existing session with a follow-up message.
    */
   async resume(params: ResumeParams): Promise<ExecuteResult> {
-    return this.runSession(params, params.message);
+    return this.runSession(params, params.message, true);
   }
 
   /**
@@ -150,6 +150,7 @@ export class AgentRunner {
   private async runSession(
     params: ExecuteParams | ResumeParams,
     promptText: string,
+    isResume: boolean,
   ): Promise<ExecuteResult> {
     const startTime = Date.now();
 
@@ -171,8 +172,12 @@ export class AgentRunner {
     // Tools
     const mcpTools = createMCPTools(this.mcpGatewayUrl, params.incidentId);
 
-    // Session management (in-memory since we don't need persistent sessions across restarts)
-    const sessionManager = SessionManager.inMemory(params.workDir);
+    // Session management: persist to disk so resume can restore conversation history.
+    // For resume, use continueRecent to load the most recent session from the
+    // incident's workspace directory. For new sessions, create a fresh one.
+    const sessionManager = isResume
+      ? SessionManager.continueRecent(params.workDir)
+      : SessionManager.create(params.workDir);
     const settingsManager = SettingsManager.inMemory();
     const modelRegistry = new ModelRegistry(authStorage);
 

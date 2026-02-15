@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -718,6 +719,7 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 
 				// Create channels for async result handling
 				done := make(chan struct{})
+				var closeOnce sync.Once
 				var response string
 				var sessionID string
 				var hasError bool
@@ -731,12 +733,12 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 					OnCompleted: func(sid, output string) {
 						sessionID = sid
 						response = output
-						close(done)
+						closeOnce.Do(func() { close(done) })
 					},
 					OnError: func(errorMsg string) {
 						response = fmt.Sprintf("❌ Error: %s", errorMsg)
 						hasError = true
-						close(done)
+						closeOnce.Do(func() { close(done) })
 					},
 				}
 

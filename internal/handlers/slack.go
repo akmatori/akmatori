@@ -535,6 +535,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 
 		// Create channels for async result handling
 		done := make(chan struct{})
+		var closeOnce sync.Once
 		var response string
 		var finalSessionID string
 		var hasError bool
@@ -556,12 +557,12 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			OnCompleted: func(sid, output string) {
 				finalSessionID = sid
 				response = output
-				close(done)
+				closeOnce.Do(func() { close(done) })
 			},
 			OnError: func(errorMsg string) {
 				response = fmt.Sprintf("❌ Error: %s", errorMsg)
 				hasError = true
-				close(done)
+				closeOnce.Do(func() { close(done) })
 			},
 		}
 
