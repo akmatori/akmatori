@@ -2,14 +2,16 @@
 
 ## Project Overview
 
-Akmatori is an AI-powered AIOps platform that receives alerts from monitoring systems (Zabbix, Alertmanager, PagerDuty, Grafana, Datadog), analyzes them using OpenAI's Codex CLI, and executes automated remediation.
+Akmatori is an AI-powered AIOps platform that receives alerts from monitoring systems (Zabbix, Alertmanager, PagerDuty, Grafana, Datadog), analyzes them using multi-provider LLM agents (via the pi-mono coding-agent SDK), and executes automated remediation.
 
 ## Architecture
 
-- **4-container Docker architecture**: API, Codex Worker, MCP Gateway, PostgreSQL
-- **Backend**: Go 1.24+ (API server, Codex worker, MCP gateway)
+- **4-container Docker architecture**: API, Agent Worker, MCP Gateway, PostgreSQL
+- **Backend**: Go 1.24+ (API server, MCP gateway)
+- **Agent Worker**: Node.js 22+ / TypeScript using `@mariozechner/pi-coding-agent` SDK
 - **Frontend**: React 19 + TypeScript + Vite + Tailwind
 - **Database**: PostgreSQL 16 with GORM
+- **LLM Providers**: Anthropic, OpenAI, Google, OpenRouter, Custom (configured via web UI)
 
 ## CRITICAL: Always Verify Changes with Tests
 
@@ -21,6 +23,7 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 |-------------------|------------------|
 | Alert adapters (`internal/alerts/adapters/`) | `make test-adapters` |
 | MCP Gateway tools (`mcp-gateway/internal/tools/`) | `make test-mcp` |
+| Agent worker (`agent-worker/`) | `make test-agent` |
 | Database models (`internal/database/`) | `go test ./internal/database/...` |
 | Middleware (`internal/middleware/`) | `go test ./internal/middleware/...` |
 | Utilities (`internal/utils/`) | `go test ./internal/utils/...` |
@@ -33,12 +36,13 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 # Fast feedback - test only what you changed
 make test-adapters    # Alert adapter tests (~0.01s)
 make test-mcp         # MCP gateway tests (~0.01s)
+make test-agent       # Agent worker tests
 
 # Full test suite
-make test-all         # All tests including MCP gateway
+make test-all         # All tests including MCP gateway and agent-worker
 
 # Pre-commit verification
-make verify           # go vet + all tests
+make verify           # go vet + all tests + agent-worker tests
 ```
 
 ## Code Style
@@ -59,6 +63,15 @@ make verify           # go vet + all tests
 │   ├── middleware/         # Auth, CORS middleware
 │   ├── services/           # Business logic layer
 │   └── utils/              # Utility functions
+├── agent-worker/           # Node.js/TypeScript agent worker (pi-mono SDK)
+│   ├── src/                # TypeScript source
+│   │   ├── index.ts        # Entry point
+│   │   ├── orchestrator.ts # Message routing
+│   │   ├── agent-runner.ts # pi-mono SDK integration
+│   │   ├── ws-client.ts    # WebSocket client
+│   │   ├── types.ts        # Shared types
+│   │   └── tools/          # MCP Gateway tool definitions
+│   └── tests/              # Vitest tests
 ├── mcp-gateway/            # MCP protocol gateway (separate Go module)
 │   └── internal/tools/     # SSH and Zabbix tool implementations
 ├── web/                    # React frontend
@@ -83,7 +96,7 @@ make verify           # go vet + all tests
 | API server (`cmd/akmatori/`, `internal/`) | `docker-compose build akmatori-api && docker-compose up -d akmatori-api` |
 | MCP Gateway (`mcp-gateway/`) | `docker-compose build mcp-gateway && docker-compose up -d mcp-gateway` |
 | Frontend (`web/`) | `docker-compose build frontend && docker-compose up -d frontend` |
-| Codex worker (`Dockerfile.codex`, skills) | `docker-compose build akmatori-codex && docker-compose up -d akmatori-codex` |
+| Agent worker (`agent-worker/`) | `docker-compose build akmatori-agent && docker-compose up -d akmatori-agent` |
 | Multiple components | `docker-compose build <service1> <service2> && docker-compose up -d <service1> <service2>` |
 
 ### Quick Reference
@@ -112,7 +125,7 @@ docker-compose ps
 | `akmatori-api` | `cmd/akmatori/`, `internal/`, `Dockerfile.api` |
 | `mcp-gateway` | `mcp-gateway/`, `mcp-gateway/Dockerfile` |
 | `frontend` | `web/`, `web/Dockerfile` |
-| `akmatori-codex` | `Dockerfile.codex`, `.codex/skills/` |
+| `akmatori-agent` | `agent-worker/`, `agent-worker/Dockerfile` |
 | `postgres` | N/A (uses official image) |
 | `proxy` | `proxy/nginx.conf` (config only, no rebuild needed) |
 
@@ -130,6 +143,7 @@ docker-compose ps
 | New service in `internal/services/` | Service tests with mocked dependencies |
 | New utility function | Unit tests covering edge cases |
 | New API endpoint | Integration test for request/response |
+| New agent-worker module in `agent-worker/src/` | Vitest test in `agent-worker/tests/` |
 
 ### Test Coverage Checklist
 
