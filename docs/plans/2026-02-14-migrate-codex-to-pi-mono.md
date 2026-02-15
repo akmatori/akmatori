@@ -247,7 +247,7 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 - Modify: `.env.example`
 
 **Steps:**
-- [ ] Create `agent-worker/Dockerfile`:
+- [x] Create `agent-worker/Dockerfile`:
   - Base: `node:22-bookworm`
   - Install system deps: `ripgrep`, `git`, `jq` (needed by pi-mono's bash tool)
   - Create non-root user (UID 1001, matching old codex user for volume permissions)
@@ -255,16 +255,16 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
   - Set environment defaults
   - Run as non-root user
   - Health check: `pgrep node`
-- [ ] Update `docker-compose.yml`:
+- [x] Update `docker-compose.yml`:
   - Replace `akmatori-codex` service with `akmatori-agent`
   - Point to `agent-worker/Dockerfile`
   - Keep same networks (frontend, api-internal, codex-network)
   - Keep same volume mounts (sessions, workspaces, context)
   - Update environment variables
-- [ ] Add new env vars to `.env.example`:
+- [x] Add new env vars to `.env.example`:
   - Document that LLM provider/key are configured in web UI, not env vars
-- [ ] Test Docker build: `docker build -t akmatori-agent ./agent-worker`
-- [ ] Test container starts and connects to API WebSocket
+- [x] Test Docker build: `docker build -t akmatori-agent ./agent-worker`
+- [x] Test container starts and connects to API WebSocket
 
 ### Task 7: Replace OpenAISettings with LLMSettings (database)
 
