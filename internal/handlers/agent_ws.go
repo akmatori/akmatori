@@ -291,14 +291,6 @@ func (h *AgentWSHandler) IsWorkerConnected() bool {
 
 // SendToWorker sends a message to the agent worker
 func (h *AgentWSHandler) SendToWorker(msg AgentMessage) error {
-	h.mu.RLock()
-	conn := h.workerConn
-	h.mu.RUnlock()
-
-	if conn == nil {
-		return ErrWorkerNotConnected
-	}
-
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -306,7 +298,10 @@ func (h *AgentWSHandler) SendToWorker(msg AgentMessage) error {
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return conn.WriteMessage(websocket.TextMessage, data)
+	if h.workerConn == nil {
+		return ErrWorkerNotConnected
+	}
+	return h.workerConn.WriteMessage(websocket.TextMessage, data)
 }
 
 // StartIncident sends a new incident to the agent worker

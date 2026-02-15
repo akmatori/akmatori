@@ -12,6 +12,7 @@ import type {
   WebSocketMessage,
   LLMSettings,
   ProxyConfig,
+  ExecuteResult,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -154,6 +155,11 @@ export class Orchestrator {
       return;
     }
 
+    if (!this.isValidIncidentId(incidentId)) {
+      this.log(`new_incident has invalid incident_id: ${incidentId}, ignoring`);
+      return;
+    }
+
     const llmSettings = this.extractLLMSettings(msg);
     if (!llmSettings) {
       this.wsClient.sendError(incidentId, "Missing LLM settings (no API key or provider)");
@@ -174,13 +180,20 @@ export class Orchestrator {
     };
 
     // Run asynchronously (like Go's goroutine)
-    this.runExecution(incidentId, params);
+    this.runExecution(incidentId, params).catch((err) => {
+      this.log(`Unhandled error in runExecution for ${incidentId}: ${err}`);
+    });
   }
 
   private handleContinueIncident(msg: WebSocketMessage): void {
     const incidentId = msg.incident_id;
     if (!incidentId) {
       this.log("continue_incident missing incident_id, ignoring");
+      return;
+    }
+
+    if (!this.isValidIncidentId(incidentId)) {
+      this.log(`continue_incident has invalid incident_id: ${incidentId}, ignoring`);
       return;
     }
 
@@ -205,7 +218,9 @@ export class Orchestrator {
     };
 
     // Run asynchronously
-    this.runResume(incidentId, params);
+    this.runResume(incidentId, params).catch((err) => {
+      this.log(`Unhandled error in runResume for ${incidentId}: ${err}`);
+    });
   }
 
   private handleCancelIncident(msg: WebSocketMessage): void {
@@ -231,14 +246,35 @@ export class Orchestrator {
   }
 
   // -------------------------------------------------------------------------
+  // Validation helpers
+  // -------------------------------------------------------------------------
+
+  /** Validate incident ID contains only safe characters (prevents path traversal). */
+  private isValidIncidentId(id: string): boolean {
+    return /^[a-zA-Z0-9_-]+$/.test(id);
+  }
+
+  // -------------------------------------------------------------------------
   // Async execution helpers
   // -------------------------------------------------------------------------
 
   private async runExecution(incidentId: string, params: ExecuteParams): Promise<void> {
-    this.log(`Starting new incident: ${incidentId}`);
+    return this.runWithResultHandling("Starting", incidentId, () => this.runner.execute(params));
+  }
+
+  private async runResume(incidentId: string, params: ResumeParams): Promise<void> {
+    return this.runWithResultHandling("Continuing", incidentId, () => this.runner.resume(params));
+  }
+
+  private async runWithResultHandling(
+    label: string,
+    incidentId: string,
+    fn: () => Promise<ExecuteResult>,
+  ): Promise<void> {
+    this.log(`${label} incident: ${incidentId}`);
 
     try {
-      const result = await this.runner.execute(params);
+      const result = await fn();
 
       if (result.error) {
         this.log(`Incident ${incidentId} completed with error: ${result.error}`);
@@ -260,36 +296,6 @@ export class Orchestrator {
     } catch (err) {
       const errorMsg = (err as Error).message ?? String(err);
       this.log(`Incident ${incidentId} failed: ${errorMsg}`);
-      this.wsClient.sendError(incidentId, errorMsg);
-    }
-  }
-
-  private async runResume(incidentId: string, params: ResumeParams): Promise<void> {
-    this.log(`Continuing incident: ${incidentId}`);
-
-    try {
-      const result = await this.runner.resume(params);
-
-      if (result.error) {
-        this.log(`Continue incident ${incidentId} completed with error: ${result.error}`);
-        this.wsClient.sendError(incidentId, result.error);
-        return;
-      }
-
-      this.wsClient.sendCompleted(
-        incidentId,
-        result.session_id,
-        result.response,
-        result.tokens_used,
-        result.execution_time_ms,
-      );
-
-      this.log(
-        `Continue incident ${incidentId} completed (tokens: ${result.tokens_used}, time: ${result.execution_time_ms}ms)`,
-      );
-    } catch (err) {
-      const errorMsg = (err as Error).message ?? String(err);
-      this.log(`Continue incident ${incidentId} failed: ${errorMsg}`);
       this.wsClient.sendError(incidentId, errorMsg);
     }
   }

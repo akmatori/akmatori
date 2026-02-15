@@ -134,6 +134,23 @@ export class AgentRunner {
    * Execute a new agent session for an incident.
    */
   async execute(params: ExecuteParams): Promise<ExecuteResult> {
+    return this.runSession(params, params.task);
+  }
+
+  /**
+   * Resume an existing session with a follow-up message.
+   */
+  async resume(params: ResumeParams): Promise<ExecuteResult> {
+    return this.runSession(params, params.message);
+  }
+
+  /**
+   * Common session setup and execution logic shared by execute() and resume().
+   */
+  private async runSession(
+    params: ExecuteParams | ResumeParams,
+    promptText: string,
+  ): Promise<ExecuteResult> {
     const startTime = Date.now();
 
     // Set up proxy env vars before creating session
@@ -191,92 +208,9 @@ export class AgentRunner {
     });
 
     try {
-      await session.prompt(params.task);
+      await session.prompt(promptText);
 
       // Extract final response text if we didn't accumulate any
-      if (!responseText) {
-        responseText = session.getLastAssistantText() ?? "";
-      }
-
-      return {
-        session_id: session.sessionId,
-        response: responseText,
-        full_log: fullLog,
-        tokens_used: totalTokens,
-        execution_time_ms: Date.now() - startTime,
-      };
-    } catch (err) {
-      return {
-        session_id: session.sessionId,
-        response: responseText,
-        full_log: fullLog,
-        error: (err as Error).message,
-        tokens_used: totalTokens,
-        execution_time_ms: Date.now() - startTime,
-      };
-    } finally {
-      unsubscribe();
-      this.activeSessions.delete(params.incidentId);
-    }
-  }
-
-  /**
-   * Resume an existing session with a follow-up message.
-   */
-  async resume(params: ResumeParams): Promise<ExecuteResult> {
-    const startTime = Date.now();
-
-    this.applyProxyConfig(params.proxyConfig, params.llmSettings.provider);
-
-    const authStorage = new AuthStorage();
-    authStorage.setRuntimeApiKey(params.llmSettings.provider, params.llmSettings.api_key);
-
-    const model = resolveModel(
-      params.llmSettings.provider,
-      params.llmSettings.model,
-      params.llmSettings.base_url,
-    );
-    const thinkingLevel = mapThinkingLevel(params.llmSettings.thinking_level);
-
-    const mcpTools = createMCPTools(this.mcpGatewayUrl, params.incidentId);
-
-    const sessionManager = SessionManager.inMemory(params.workDir);
-    const settingsManager = SettingsManager.inMemory();
-    const modelRegistry = new ModelRegistry(authStorage);
-
-    const { session } = await createAgentSession({
-      cwd: params.workDir,
-      authStorage,
-      modelRegistry,
-      model,
-      thinkingLevel,
-      tools: createCodingTools(params.workDir),
-      customTools: mcpTools,
-      sessionManager,
-      settingsManager,
-    });
-
-    this.activeSessions.set(params.incidentId, session);
-
-    let responseText = "";
-    let fullLog = "";
-    let totalTokens = 0;
-
-    const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-      params.onEvent?.(event);
-      this.handleEvent(event, params.onOutput, (text) => {
-        responseText += text;
-        fullLog += text;
-      }, (text) => {
-        fullLog += text;
-      }, (tokens) => {
-        totalTokens += tokens;
-      });
-    });
-
-    try {
-      await session.prompt(params.message);
-
       if (!responseText) {
         responseText = session.getLastAssistantText() ?? "";
       }
@@ -412,10 +346,10 @@ export class AgentRunner {
     if (proxyConfig.openai_enabled) {
       process.env.HTTP_PROXY = proxyConfig.url;
       process.env.HTTPS_PROXY = proxyConfig.url;
-    }
 
-    if (proxyConfig.no_proxy) {
-      process.env.NO_PROXY = proxyConfig.no_proxy;
+      if (proxyConfig.no_proxy) {
+        process.env.NO_PROXY = proxyConfig.no_proxy;
+      }
     }
   }
 }
