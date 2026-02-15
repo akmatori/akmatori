@@ -214,7 +214,7 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 - Create: `agent-worker/tests/orchestrator.test.ts`
 
 **Steps:**
-- [ ] Create `Orchestrator` class (port of Go `orchestrator.go`):
+- [x] Create `Orchestrator` class (port of Go `orchestrator.go`):
   - Constructor takes `config: {apiWsUrl, mcpGatewayUrl, workspaceDir}`
   - `start()` - connect WebSocket, register handler, start heartbeat, send "ready" status
   - `stop()` - cancel active runs, close WebSocket
@@ -226,18 +226,18 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
   - Stream output back via `wsClient.sendOutput()`
   - Send completion via `wsClient.sendCompleted()`
   - Handle errors via `wsClient.sendError()`
-- [ ] Create `index.ts` entry point:
+- [x] Create `index.ts` entry point:
   - Read config from environment: `API_WS_URL`, `MCP_GATEWAY_URL`, `WORKSPACE_DIR`
   - Create and start orchestrator
   - Handle SIGTERM/SIGINT for graceful shutdown
   - Reconnection loop on WebSocket disconnect
-- [ ] Write tests:
+- [x] Write tests:
   - Message routing for all message types
   - Output streaming through WebSocket
   - Completion with metrics
   - Error propagation
   - Graceful shutdown
-- [ ] Run `npm test` - must pass before task 6
+- [x] Run `npm test` - must pass before task 6
 
 ### Task 6: Create Docker container and update docker-compose
 
