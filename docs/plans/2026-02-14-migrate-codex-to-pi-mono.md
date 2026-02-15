@@ -396,17 +396,17 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 - Modify: `CLAUDE.md`
 
 **Steps:**
-- [ ] Delete `codex-worker/` directory
-- [ ] Delete `codex-tools/` directory
-- [ ] Delete `Dockerfile.codex`
-- [ ] Delete `entrypoint.sh`
-- [ ] Update Makefile:
+- [x] Delete `codex-worker/` directory
+- [x] Delete `codex-tools/` directory
+- [x] Delete `Dockerfile.codex`
+- [x] Delete `entrypoint.sh`
+- [x] Update Makefile:
   - Add `make test-agent` - Run agent-worker tests (`cd agent-worker && npm test`)
   - Update `make test-all` to include agent-worker
   - Add `make build-agent` - Build agent-worker Docker image
   - Remove old codex-related targets
-- [ ] Update `.gitignore` for agent-worker artifacts (`agent-worker/node_modules/`, `agent-worker/dist/`)
-- [ ] Update `CLAUDE.md`:
+- [x] Update `.gitignore` for agent-worker artifacts (`agent-worker/node_modules/`, `agent-worker/dist/`)
+- [x] Update `CLAUDE.md`:
   - New architecture description (pi-mono SDK instead of Codex CLI)
   - Updated test commands
   - Updated container mapping (akmatori-agent instead of akmatori-codex)

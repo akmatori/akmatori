@@ -44,5 +44,9 @@ Thumbs.db
 # Build output
 web/dist/assets/
 
+# Agent worker
+agent-worker/node_modules/
+agent-worker/dist/
+
 # ralphex progress logs
 progress*.txt
