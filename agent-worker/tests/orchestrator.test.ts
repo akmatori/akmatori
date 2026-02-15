@@ -310,6 +310,41 @@ describe("Orchestrator", () => {
       expect(logs.some((l) => l.includes("missing incident_id"))).toBe(true);
     });
 
+    it("should reject new_incident with path-traversal incident_id", async () => {
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "new_incident",
+        incident_id: "../../../etc/passwd",
+        task: "Some task",
+        openai_api_key: "sk-test",
+        model: "gpt-4o",
+      });
+
+      await sleep(200);
+      expect(logs.some((l) => l.includes("invalid incident_id"))).toBe(true);
+      // Should NOT have executed (no completed or error message sent back)
+      expect(mockSession.prompt).not.toHaveBeenCalled();
+    });
+
+    it("should reject new_incident with special characters in incident_id", async () => {
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "new_incident",
+        incident_id: "incident id with spaces",
+        task: "Some task",
+        openai_api_key: "sk-test",
+        model: "gpt-4o",
+      });
+
+      await sleep(200);
+      expect(logs.some((l) => l.includes("invalid incident_id"))).toBe(true);
+      expect(mockSession.prompt).not.toHaveBeenCalled();
+    });
+
     it("should stream output back through WebSocket during execution", async () => {
       await orchestrator.start();
       await waitForMessage((m) => m.type === "status");
@@ -388,6 +423,24 @@ describe("Orchestrator", () => {
 
       // The mock session.prompt should have been called with the follow-up message
       expect(mockSession.prompt).toHaveBeenCalledWith("What about memory usage?");
+    });
+
+    it("should reject continue_incident with invalid incident_id", async () => {
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "continue_incident",
+        incident_id: "../../secret",
+        session_id: "existing-session-id",
+        message: "Follow up",
+        openai_api_key: "sk-test-key",
+        model: "gpt-4o",
+      });
+
+      await sleep(200);
+      expect(logs.some((l) => l.includes("invalid incident_id"))).toBe(true);
+      expect(mockSession.prompt).not.toHaveBeenCalled();
     });
 
     it("should send error when continue_incident has no API key", async () => {

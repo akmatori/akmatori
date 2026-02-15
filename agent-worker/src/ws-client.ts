@@ -3,7 +3,7 @@
  *
  * Ports the Go codex-worker WebSocket client (codex-worker/internal/ws/client.go)
  * to TypeScript using the `ws` library. Provides connection management,
- * reconnection with exponential backoff, heartbeat, and typed message helpers.
+ * heartbeat, and typed message helpers.
  */
 
 import WebSocket from "ws";
@@ -163,7 +163,7 @@ export class WebSocketClient {
     this.send({ type: "heartbeat" });
   }
 
-  /** Reset client state for reconnection. */
+  /** Reset client state, allowing a new connect() call. */
   reset(): void {
     this.stopHeartbeat();
     this.connected = false;
