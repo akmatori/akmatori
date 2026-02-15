@@ -107,11 +107,13 @@ function monitorConnection(orchestrator: Orchestrator): void {
         const wsClient = orchestrator.getWsClient();
         wsClient.reset();
         await connectWithRetry(orchestrator);
-
-        // Resume monitoring after reconnect
-        monitorConnection(orchestrator);
       } catch (err) {
         log(`Reconnect failed: ${err}`);
+      }
+
+      // Resume monitoring regardless of reconnect success or failure
+      if (!orchestrator.isStopped()) {
+        monitorConnection(orchestrator);
       }
     }
   }, CHECK_INTERVAL_MS);

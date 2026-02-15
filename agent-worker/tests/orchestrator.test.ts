@@ -674,7 +674,7 @@ describe("Orchestrator", () => {
       expect(createAgentSession).toHaveBeenCalled();
     });
 
-    it("should default model to o4-mini when not specified", async () => {
+    it("should default model to gpt-4o when not specified", async () => {
       const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
       const { getModel } = await import("@mariozechner/pi-ai");
 
@@ -693,8 +693,8 @@ describe("Orchestrator", () => {
         (m) => m.type === "codex_completed" && m.incident_id === "incident-settings-002",
       );
 
-      // getModel should have been called with "o4-mini"
-      expect(getModel).toHaveBeenCalledWith("openai", "o4-mini");
+      // getModel should have been called with "gpt-4o" (matches database default)
+      expect(getModel).toHaveBeenCalledWith("openai", "gpt-4o");
     });
   });
 
