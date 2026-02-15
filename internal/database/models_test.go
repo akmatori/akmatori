@@ -266,12 +266,30 @@ func TestLLMSettings_IsActive(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "configured with API key",
+			name: "configured but not enabled",
 			settings: LLMSettings{
 				Provider: LLMProviderAnthropic,
 				APIKey:   "sk-ant-test",
+				Enabled:  false,
+			},
+			expected: false,
+		},
+		{
+			name: "enabled and configured",
+			settings: LLMSettings{
+				Provider: LLMProviderAnthropic,
+				APIKey:   "sk-ant-test",
+				Enabled:  true,
 			},
 			expected: true,
+		},
+		{
+			name: "enabled but not configured",
+			settings: LLMSettings{
+				Provider: LLMProviderAnthropic,
+				Enabled:  true,
+			},
+			expected: false,
 		},
 	}
 
@@ -443,6 +461,7 @@ func TestLLMSettings_MultiProviderConfigs(t *testing.T) {
 				APIKey:        "sk-openai-key",
 				Model:         "gpt-4o",
 				ThinkingLevel: ThinkingLevelMedium,
+				Enabled:       true,
 			},
 		},
 		{
@@ -452,6 +471,7 @@ func TestLLMSettings_MultiProviderConfigs(t *testing.T) {
 				APIKey:        "sk-ant-key",
 				Model:         "claude-opus-4-6",
 				ThinkingLevel: ThinkingLevelHigh,
+				Enabled:       true,
 			},
 		},
 		{
@@ -461,6 +481,7 @@ func TestLLMSettings_MultiProviderConfigs(t *testing.T) {
 				APIKey:        "AIza-key",
 				Model:         "gemini-2.5-pro",
 				ThinkingLevel: ThinkingLevelLow,
+				Enabled:       true,
 			},
 		},
 		{
@@ -471,6 +492,7 @@ func TestLLMSettings_MultiProviderConfigs(t *testing.T) {
 				Model:         "anthropic/claude-opus-4-6",
 				ThinkingLevel: ThinkingLevelMedium,
 				BaseURL:       "https://openrouter.ai/api/v1",
+				Enabled:       true,
 			},
 		},
 		{
@@ -481,6 +503,7 @@ func TestLLMSettings_MultiProviderConfigs(t *testing.T) {
 				Model:         "local-model",
 				ThinkingLevel: ThinkingLevelOff,
 				BaseURL:       "http://localhost:8080/v1",
+				Enabled:       true,
 			},
 		},
 	}

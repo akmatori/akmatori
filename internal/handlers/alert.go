@@ -471,9 +471,9 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 
 		callback := IncidentCallback{
 			OnOutput: func(output string) {
-				lastStreamedLog = output
+				lastStreamedLog += output
 				// Update database with streamed log
-				h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+output)
+				h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog)
 			},
 			OnCompleted: func(sid, output string) {
 				sessionID = sid
@@ -920,13 +920,13 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 
 		callback := IncidentCallback{
 			OnOutput: func(output string) {
-				lastStreamedLog = output
-				h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+output)
+				lastStreamedLog += output
+				h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog)
 
 				// Throttled update of the Slack progress message
 				if progressMsgTS != "" && time.Since(lastSlackUpdate) >= slackProgressInterval {
 					lastSlackUpdate = time.Now()
-					progressLines := utils.GetLastNLines(strings.TrimSpace(output), 15)
+					progressLines := utils.GetLastNLines(strings.TrimSpace(lastStreamedLog), 15)
 					progressLines = truncateLogForSlack(progressLines, 3000)
 					h.updateSlackThreadMessage(slackChannelID, progressMsgTS,
 						fmt.Sprintf("🔍 *Investigating...*\n```\n%s\n```", progressLines))

@@ -726,8 +726,8 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 
 				callback := IncidentCallback{
 					OnOutput: func(output string) {
-						lastStreamedLog = output // Save the accumulated log
-						h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+output)
+						lastStreamedLog += output // Append streamed output delta
+						h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog)
 					},
 					OnCompleted: func(sid, output string) {
 						sessionID = sid
@@ -1131,35 +1131,15 @@ func (h *APIHandler) handleLLMSettings(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Validate provider if provided
-		if req.Provider != nil {
-			validProviders := []string{"openai", "anthropic", "google", "openrouter", "custom"}
-			isValid := false
-			for _, p := range validProviders {
-				if *req.Provider == p {
-					isValid = true
-					break
-				}
-			}
-			if !isValid {
-				http.Error(w, fmt.Sprintf("Invalid provider: %s. Valid options: openai, anthropic, google, openrouter, custom", *req.Provider), http.StatusBadRequest)
-				return
-			}
+		if req.Provider != nil && !database.IsValidLLMProvider(*req.Provider) {
+			http.Error(w, fmt.Sprintf("Invalid provider: %s. Valid options: openai, anthropic, google, openrouter, custom", *req.Provider), http.StatusBadRequest)
+			return
 		}
 
 		// Validate thinking level if provided
-		if req.ThinkingLevel != nil {
-			validLevels := []string{"off", "minimal", "low", "medium", "high", "xhigh"}
-			isValid := false
-			for _, l := range validLevels {
-				if *req.ThinkingLevel == l {
-					isValid = true
-					break
-				}
-			}
-			if !isValid {
-				http.Error(w, fmt.Sprintf("Invalid thinking_level: %s. Valid options: off, minimal, low, medium, high, xhigh", *req.ThinkingLevel), http.StatusBadRequest)
-				return
-			}
+		if req.ThinkingLevel != nil && !database.IsValidThinkingLevel(*req.ThinkingLevel) {
+			http.Error(w, fmt.Sprintf("Invalid thinking_level: %s. Valid options: off, minimal, low, medium, high, xhigh", *req.ThinkingLevel), http.StatusBadRequest)
+			return
 		}
 
 		updates := make(map[string]interface{})
@@ -1168,6 +1148,8 @@ func (h *APIHandler) handleLLMSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.APIKey != nil {
 			updates["api_key"] = *req.APIKey
+			// Auto-enable when API key is provided, disable when cleared
+			updates["enabled"] = *req.APIKey != ""
 		}
 		if req.Model != nil {
 			updates["model"] = *req.Model
@@ -1303,10 +1285,12 @@ func (h *APIHandler) UpdateProxySettings(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Notify agent worker of config change (skip BroadcastProxyConfig for now - will be added later)
-	// if h.agentWSHandler != nil {
-	// 	h.agentWSHandler.BroadcastProxyConfig(settings)
-	// }
+	// Notify agent worker of proxy config change
+	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
+		if err := h.agentWSHandler.BroadcastProxyConfig(settings); err != nil {
+			log.Printf("Warning: failed to broadcast proxy config to agent worker: %v", err)
+		}
+	}
 
 	// Return updated settings
 	h.GetProxySettings(w, r)

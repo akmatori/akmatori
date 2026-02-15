@@ -301,17 +301,15 @@ export class Orchestrator {
   /**
    * Extract LLM settings from a WebSocket message.
    *
-   * The current Go API sends fields like openai_api_key, model, reasoning_effort.
-   * We map these to our LLMSettings type. Once Task 8 updates the API handler,
-   * it will send provider/api_key/thinking_level directly.
+   * The Go API sends provider, openai_api_key (wire compat name), model,
+   * reasoning_effort, and base_url fields.
    */
   private extractLLMSettings(msg: WebSocketMessage): LLMSettings | null {
-    // Current Go API sends openai_api_key, model, reasoning_effort
     const apiKey = msg.openai_api_key;
     if (!apiKey) return null;
 
     return {
-      provider: "openai", // Default to openai until Task 8 adds provider field
+      provider: (msg.provider as LLMSettings["provider"]) ?? "openai",
       api_key: apiKey,
       model: msg.model ?? "o4-mini",
       thinking_level: this.mapReasoningEffort(msg.reasoning_effort),
@@ -324,12 +322,18 @@ export class Orchestrator {
    */
   private mapReasoningEffort(effort: string | undefined): LLMSettings["thinking_level"] {
     switch (effort) {
+      case "off":
+        return "off";
+      case "minimal":
+        return "minimal";
       case "low":
         return "low";
       case "medium":
         return "medium";
       case "high":
         return "high";
+      case "xhigh":
+        return "xhigh";
       default:
         return "medium";
     }

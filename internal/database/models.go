@@ -290,9 +290,9 @@ func (l *LLMSettings) IsConfigured() bool {
 	return l.APIKey != ""
 }
 
-// IsActive returns true if the LLM settings are configured
+// IsActive returns true if the LLM settings are enabled and configured
 func (l *LLMSettings) IsActive() bool {
-	return l.IsConfigured()
+	return l.Enabled && l.IsConfigured()
 }
 
 func (LLMSettings) TableName() string {

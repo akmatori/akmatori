@@ -94,8 +94,8 @@ export interface WebSocketMessage {
   tokens_used?: number;
   execution_time_ms?: number;
 
-  // LLM settings (sent with new_incident) - kept compatible with current
-  // Go fields until Task 8 renames them
+  // LLM settings (sent with new_incident)
+  provider?: string;
   openai_api_key?: string;
   model?: string;
   reasoning_effort?: string;
@@ -139,19 +139,12 @@ export function createMessage(
 // Serialization helpers
 // ---------------------------------------------------------------------------
 
-/** Serialize a WebSocketMessage to JSON matching Go encoding/json output. */
+/** Serialize a WebSocketMessage to JSON, omitting undefined and null values. */
 export function serializeMessage(msg: WebSocketMessage): string {
-  // Go's encoding/json omits zero-value fields when tagged with omitempty.
-  // We replicate this by stripping undefined/null/""/0 values.
-  const cleaned: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(msg)) {
-    if (value !== undefined && value !== null && value !== "" && value !== 0) {
-      cleaned[key] = value;
-    }
-  }
-  // "type" must always be present even if it were empty string (it won't be)
-  cleaned["type"] = msg.type;
-  return JSON.stringify(cleaned);
+  return JSON.stringify(msg, (_key, value) => {
+    if (value === undefined || value === null) return undefined;
+    return value;
+  });
 }
 
 /** Deserialize a JSON string into a WebSocketMessage. */
