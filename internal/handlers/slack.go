@@ -549,8 +549,9 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 				// Update database with streamed log
 				h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog)
 
-				// Also update Slack progress message
-				onStderrUpdate(outputLog)
+				// Update Slack progress message with accumulated log
+				// (onStderrUpdate expects the full log for truncation/dedup logic)
+				onStderrUpdate(lastStreamedLog)
 			},
 			OnCompleted: func(sid, output string) {
 				finalSessionID = sid
