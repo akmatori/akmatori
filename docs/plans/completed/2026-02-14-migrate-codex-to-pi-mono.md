@@ -432,6 +432,6 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 
 ### Task 13: Update documentation
 
-- [ ] Update CLAUDE.md with new architecture and test commands
-- [ ] Update `.env.example` with new environment variables
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update CLAUDE.md with new architecture and test commands
+- [x] Update `.env.example` with new environment variables
+- [x] Move this plan to `docs/plans/completed/`
