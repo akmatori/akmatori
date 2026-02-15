@@ -373,6 +373,17 @@ func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string,
 		msg.BaseURL = llm.BaseURL
 	}
 
+	// Fetch proxy settings from database and include in message
+	if proxySettings, err := database.GetOrCreateProxySettings(); err == nil && proxySettings != nil {
+		msg.ProxyConfig = &ProxyConfig{
+			URL:           proxySettings.ProxyURL,
+			NoProxy:       proxySettings.NoProxy,
+			OpenAIEnabled: proxySettings.OpenAIEnabled,
+			SlackEnabled:  proxySettings.SlackEnabled,
+			ZabbixEnabled: proxySettings.ZabbixEnabled,
+		}
+	}
+
 	if err := h.SendToWorker(msg); err != nil {
 		// Remove callback on error
 		h.callbackMu.Lock()

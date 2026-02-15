@@ -300,6 +300,15 @@ export class AgentRunner {
         break;
       }
 
+      case "tool_execution_update": {
+        const updateText = (event as any).text ?? (event as any).output ?? "";
+        if (updateText) {
+          onOutput(updateText);
+          onLogText(updateText);
+        }
+        break;
+      }
+
       case "tool_execution_end": {
         const resultSummary = event.isError
           ? `\n[Tool Error: ${event.toolName}]\n`

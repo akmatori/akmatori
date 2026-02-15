@@ -167,6 +167,7 @@ export class WebSocketClient {
   reset(): void {
     this.stopHeartbeat();
     this.connected = false;
+    this.closed = false;
     if (this.ws) {
       try {
         this.ws.terminate();
