@@ -404,7 +404,8 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		// Existing DM incident found - resume session
 		sessionID = incident.SessionID
 		incidentUUID = incident.UUID
-		workingDir = incident.WorkingDir
+		// WorkingDir is stored in DB but session already knows its path from creation
+		_ = incident.WorkingDir
 		log.Printf("Resuming session %s for thread %s (incident: %s)", sessionID, threadID, incidentUUID)
 	} else if threadTS != "" {
 		// Try to find an alert channel incident by slack_message_ts
@@ -412,7 +413,8 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		if err := database.GetDB().Where("slack_message_ts = ?", threadID).First(&incident).Error; err == nil {
 			sessionID = incident.SessionID
 			incidentUUID = incident.UUID
-			workingDir = incident.WorkingDir
+			// WorkingDir is stored in DB but session already knows its path from creation
+			_ = incident.WorkingDir
 			log.Printf("Resuming alert channel session %s for thread %s (incident: %s)", sessionID, threadID, incidentUUID)
 		}
 	}

@@ -1,7 +1,6 @@
 package services
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -1065,104 +1064,10 @@ func (s *SkillService) generateIncidentAgentsMd(path string) error {
 	return nil
 }
 
-// formatEnvValue formats a value for .env file output.
-// - Arrays are converted to comma-separated strings
-// - Multi-line values (containing newlines) are base64-encoded with a "base64:" prefix
-func formatEnvValue(value interface{}) string {
-	var str string
-
-	// Handle arrays/slices - convert to comma-separated string
-	switch v := value.(type) {
-	case []interface{}:
-		parts := make([]string, len(v))
-		for i, item := range v {
-			parts[i] = fmt.Sprintf("%v", item)
-		}
-		str = strings.Join(parts, ",")
-	case []string:
-		str = strings.Join(v, ",")
-	default:
-		str = fmt.Sprintf("%v", value)
-	}
-
-	// Handle PEM/SSH keys that might have spaces instead of newlines
-	// (happens when pasted through HTML textarea or JSON parsing issues)
-	if strings.Contains(str, "-----BEGIN") && strings.Contains(str, "-----END") {
-		str = fixPEMKey(str)
-	}
-
-	// Base64 encode if contains newlines
-	if strings.Contains(str, "\n") {
-		return "base64:" + base64.StdEncoding.EncodeToString([]byte(str))
-	}
-	return str
-}
-
-// fixPEMKey reconstructs a PEM key that may have spaces instead of newlines
-func fixPEMKey(key string) string {
-	// If already has newlines, return as-is
-	if strings.Contains(key, "\n") {
-		return key
-	}
-
-	// Check for valid PEM markers
-	if !strings.Contains(key, "-----BEGIN") || !strings.Contains(key, "-----END") {
-		return key
-	}
-
-	// Parse by splitting on whitespace
-	// Format: "-----BEGIN TYPE-----" content "-----END TYPE-----"
-	parts := strings.Fields(key)
-
-	if len(parts) < 4 {
-		return key
-	}
-
-	// Reconstruct: find BEGIN...END markers and body
-	var header, footer string
-	var bodyParts []string
-
-	// Use index-based loop so we can skip parts already processed
-	for i := 0; i < len(parts); i++ {
-		part := parts[i]
-
-		if strings.HasPrefix(part, "-----BEGIN") {
-			// Header spans from here to next "-----"
-			headerParts := []string{part}
-			for j := i + 1; j < len(parts); j++ {
-				headerParts = append(headerParts, parts[j])
-				if strings.HasSuffix(parts[j], "-----") {
-					header = strings.Join(headerParts, " ")
-					i = j // Skip to after header
-					break
-				}
-			}
-		} else if strings.HasPrefix(part, "-----END") {
-			// Footer spans from here to end marker
-			footerParts := []string{part}
-			for j := i + 1; j < len(parts); j++ {
-				footerParts = append(footerParts, parts[j])
-				if strings.HasSuffix(parts[j], "-----") {
-					break
-				}
-			}
-			footer = strings.Join(footerParts, " ")
-			break // Done processing
-		} else if header != "" && !strings.HasSuffix(part, "-----") {
-			// We're in the body (after header, before footer)
-			bodyParts = append(bodyParts, part)
-		}
-	}
-
-	if header == "" || footer == "" {
-		return key
-	}
-
-	// Join body parts (base64 content) - PEM keys have no spaces in the body
-	body := strings.Join(bodyParts, "")
-
-	return header + "\n" + body + "\n" + footer + "\n"
-}
+// NOTE: formatEnvValue and fixPEMKey were removed as unused. They handled
+// .env file value formatting with base64 encoding for multiline values and
+// PEM key reconstruction. See mcp-gateway/internal/tools/ssh/ssh.go for
+// a working fixPEMKey implementation if needed.
 
 // UpdateIncidentStatus updates the status of an incident
 func (s *SkillService) UpdateIncidentStatus(incidentUUID string, status database.IncidentStatus, sessionID string, fullLog string) error {

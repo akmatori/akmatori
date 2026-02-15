@@ -7,7 +7,7 @@ import (
 func TestNewDeviceAuthService(t *testing.T) {
 	svc := NewDeviceAuthService()
 	if svc == nil {
-		t.Error("NewDeviceAuthService() returned nil")
+		t.Fatal("NewDeviceAuthService() returned nil")
 	}
 	if svc.resultChan == nil {
 		t.Error("resultChan should not be nil")

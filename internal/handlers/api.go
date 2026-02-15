@@ -15,7 +15,6 @@ import (
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/services"
 	slackutil "github.com/akmatori/akmatori/internal/slack"
-	"github.com/slack-go/slack"
 	"gorm.io/gorm"
 )
 
@@ -1742,40 +1741,10 @@ func (h *APIHandler) handleContextValidate(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(response)
 }
 
-// updateIncidentProgress streams progress updates to Slack thread (if enabled)
-func (h *APIHandler) updateIncidentProgress(incidentUUID, progressLog string) {
-	slackClient := h.slackManager.GetClient()
-	if slackClient == nil {
-		return
-	}
-
-	incident, err := h.skillService.GetIncident(incidentUUID)
-	if err != nil {
-		log.Printf("Warning: Failed to get incident %s for progress update: %v", incidentUUID, err)
-		return
-	}
-
-	if incident.Source != "slack" {
-		return
-	}
-
-	channel, ok := incident.Context["channel"].(string)
-	if !ok || channel == "" {
-		log.Printf("Warning: No channel found in incident context for %s", incidentUUID)
-		return
-	}
-
-	threadTS := incident.SourceID
-
-	_, _, err = slackClient.PostMessage(
-		channel,
-		slack.MsgOptionText(fmt.Sprintf("🔄 *Progress:*\n```\n%s\n```", progressLog), false),
-		slack.MsgOptionTS(threadTS),
-	)
-	if err != nil {
-		log.Printf("Warning: Failed to post progress to Slack: %v", err)
-	}
-}
+// NOTE: updateIncidentProgress was removed as unused. Restore if progress
+// streaming to Slack threads is needed. The function posted formatted progress
+// updates to the incident's Slack thread using incident.Context["channel"] and
+// incident.SourceID as the thread timestamp.
 
 // ========== Alert Source Management ==========
 

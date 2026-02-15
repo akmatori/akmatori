@@ -183,6 +183,66 @@ make test-all
 
 Use the **code simplifier agent** at the end of a long coding session, or to clean up complex PRs. This helps reduce unnecessary complexity and ensures code remains maintainable.
 
+## Code Quality & Linting
+
+**Run linting tools regularly to catch issues early.**
+
+### Linting Commands
+
+```bash
+# Basic vet check (fast)
+go vet ./...
+
+# Staticcheck for deeper analysis (recommended)
+staticcheck ./...
+
+# golangci-lint for comprehensive linting (requires Go version matching project)
+golangci-lint run --timeout 5m
+```
+
+### Common Staticcheck Fixes
+
+| Issue | Fix |
+|-------|-----|
+| S1031: unnecessary nil check around range | Remove `if x != nil` - ranging over nil map/slice is safe |
+| U1000: unused function | Remove function or add `//nolint:unused` if kept for future use |
+| SA5011: possible nil pointer dereference | Use `t.Fatal()` instead of `t.Error()` before dereferencing |
+| SA4006: value is never used | Remove assignment or use blank identifier `_` |
+| SA1019: deprecated function | Replace with recommended alternative (e.g., `strings.Title` → `cases.Title`) |
+
+### Go Idioms to Follow
+
+```go
+// Nil check around range is unnecessary - ranging over nil is safe
+// BAD:
+if myMap != nil {
+    for k, v := range myMap { ... }
+}
+// GOOD:
+for k, v := range myMap { ... }
+
+// Use t.Fatal for nil checks in tests to prevent nil pointer dereference
+// BAD:
+if svc == nil {
+    t.Error("service is nil")  // continues, then crashes on next line
+}
+// GOOD:
+if svc == nil {
+    t.Fatal("service is nil")  // stops test immediately
+}
+
+// Remove unused code rather than leaving it commented
+// If keeping for future use, add clear NOTE comment explaining why
+```
+
+### Pre-Commit Quality Checklist
+
+Before committing, verify:
+- [ ] `go vet ./...` passes with no output
+- [ ] `staticcheck ./...` passes with no output
+- [ ] `go test ./...` passes
+- [ ] No unused imports (goimports or IDE will catch these)
+
 ## CRITICAL: External API Integration - Rate Limiting & Caching
 
 **Akmatori integrates with enterprise monitoring systems (Zabbix, Datadog, PagerDuty, etc.). Flooding these systems with requests will destroy customer trust and can cause outages.**
