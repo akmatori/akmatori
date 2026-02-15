@@ -19,10 +19,6 @@ export interface WebSocketClientOptions {
   url: string;
   /** Connection timeout in ms (default: 10000) */
   connectTimeoutMs?: number;
-  /** Initial reconnect delay in ms (default: 1000) */
-  reconnectBaseMs?: number;
-  /** Max reconnect delay in ms (default: 30000) */
-  reconnectMaxMs?: number;
   /** Heartbeat interval in ms (default: 30000) */
   heartbeatIntervalMs?: number;
   /** Logger function (default: console.log) */
@@ -38,19 +34,13 @@ export class WebSocketClient {
   private closed = false;
   private messageHandler: MessageHandler | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  private reconnectAttempts = 0;
-
   private readonly connectTimeoutMs: number;
-  private readonly reconnectBaseMs: number;
-  private readonly reconnectMaxMs: number;
   private readonly heartbeatIntervalMs: number;
   private readonly log: (msg: string) => void;
 
   constructor(opts: WebSocketClientOptions) {
     this.url = opts.url;
     this.connectTimeoutMs = opts.connectTimeoutMs ?? 10_000;
-    this.reconnectBaseMs = opts.reconnectBaseMs ?? 1_000;
-    this.reconnectMaxMs = opts.reconnectMaxMs ?? 30_000;
     this.heartbeatIntervalMs = opts.heartbeatIntervalMs ?? 30_000;
     this.log = opts.logger ?? ((msg: string) => console.log(`[ws-client] ${msg}`));
   }
@@ -76,7 +66,6 @@ export class WebSocketClient {
         clearTimeout(timeout);
         this.ws = ws;
         this.connected = true;
-        this.reconnectAttempts = 0;
         this.log(`Connected to ${this.url}`);
         this.startHeartbeat();
         resolve();
@@ -174,26 +163,6 @@ export class WebSocketClient {
     this.send({ type: "heartbeat" });
   }
 
-  /** Connect with exponential backoff reconnection. */
-  async connectWithReconnect(): Promise<void> {
-    while (!this.closed) {
-      try {
-        await this.connect();
-        return;
-      } catch (err) {
-        this.reconnectAttempts++;
-        const delay = Math.min(
-          this.reconnectBaseMs * Math.pow(2, this.reconnectAttempts - 1),
-          this.reconnectMaxMs,
-        );
-        this.log(
-          `Connection failed (attempt ${this.reconnectAttempts}): ${err}. Retrying in ${delay}ms`,
-        );
-        await sleep(delay);
-      }
-    }
-  }
-
   /** Reset client state for reconnection. */
   reset(): void {
     this.stopHeartbeat();
@@ -238,8 +207,4 @@ export class WebSocketClient {
       this.heartbeatTimer = null;
     }
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

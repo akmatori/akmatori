@@ -102,6 +102,13 @@ func (e *AlertExtractor) ExtractWithPrompt(ctx context.Context, messageText, cus
 		return e.createFallbackAlert(messageText), nil
 	}
 
+	// This function uses the OpenAI chat completions API directly.
+	// Only proceed if the provider is OpenAI (or empty/default).
+	if settings.Provider != "" && settings.Provider != database.LLMProviderOpenAI {
+		log.Printf("Alert extraction only supports OpenAI provider, using fallback (current: %s)", settings.Provider)
+		return e.createFallbackAlert(messageText), nil
+	}
+
 	// Use custom prompt or default
 	prompt := customPrompt
 	if prompt == "" {

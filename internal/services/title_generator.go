@@ -73,6 +73,12 @@ func (t *TitleGenerator) GenerateTitle(messageOrAlert string, source string) (st
 		return t.GenerateFallbackTitle(messageOrAlert, source), nil
 	}
 
+	// This function uses the OpenAI chat completions API directly.
+	// Only proceed if the provider is OpenAI (or empty/default).
+	if settings.Provider != "" && settings.Provider != database.LLMProviderOpenAI {
+		return t.GenerateFallbackTitle(messageOrAlert, source), nil
+	}
+
 	// Build the prompt
 	systemPrompt := `You are a concise title generator. Create a short title (max 80 characters) that accurately summarizes the given message.
 
