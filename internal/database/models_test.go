@@ -182,69 +182,63 @@ func TestSlackSettings_IsActive(t *testing.T) {
 	}
 }
 
-func TestOpenAISettings_IsConfigured(t *testing.T) {
+func TestLLMSettings_IsConfigured(t *testing.T) {
 	tests := []struct {
 		name     string
-		settings OpenAISettings
+		settings LLMSettings
 		expected bool
 	}{
 		{
-			name:     "no API key, default auth method",
-			settings: OpenAISettings{},
+			name:     "no API key",
+			settings: LLMSettings{},
 			expected: false,
 		},
 		{
-			name: "with API key, default auth method",
-			settings: OpenAISettings{
-				APIKey: "sk-test",
+			name: "with API key, openai provider",
+			settings: LLMSettings{
+				Provider: LLMProviderOpenAI,
+				APIKey:   "sk-test",
 			},
 			expected: true,
 		},
 		{
-			name: "with API key, explicit api_key auth method",
-			settings: OpenAISettings{
-				AuthMethod: AuthMethodAPIKey,
-				APIKey:     "sk-test",
+			name: "with API key, anthropic provider",
+			settings: LLMSettings{
+				Provider: LLMProviderAnthropic,
+				APIKey:   "sk-ant-test",
 			},
 			expected: true,
 		},
 		{
-			name: "chatgpt_subscription with no tokens",
-			settings: OpenAISettings{
-				AuthMethod: AuthMethodChatGPTSubscription,
-			},
-			expected: false,
-		},
-		{
-			name: "chatgpt_subscription with only access token",
-			settings: OpenAISettings{
-				AuthMethod:         AuthMethodChatGPTSubscription,
-				ChatGPTAccessToken: "access-token",
-			},
-			expected: false,
-		},
-		{
-			name: "chatgpt_subscription with only refresh token",
-			settings: OpenAISettings{
-				AuthMethod:          AuthMethodChatGPTSubscription,
-				ChatGPTRefreshToken: "refresh-token",
-			},
-			expected: false,
-		},
-		{
-			name: "chatgpt_subscription with both tokens",
-			settings: OpenAISettings{
-				AuthMethod:          AuthMethodChatGPTSubscription,
-				ChatGPTAccessToken:  "access-token",
-				ChatGPTRefreshToken: "refresh-token",
+			name: "with API key, google provider",
+			settings: LLMSettings{
+				Provider: LLMProviderGoogle,
+				APIKey:   "AIza-test",
 			},
 			expected: true,
 		},
 		{
-			name: "chatgpt_subscription ignores API key",
-			settings: OpenAISettings{
-				AuthMethod: AuthMethodChatGPTSubscription,
-				APIKey:     "sk-test",
+			name: "with API key, openrouter provider",
+			settings: LLMSettings{
+				Provider: LLMProviderOpenRouter,
+				APIKey:   "sk-or-test",
+			},
+			expected: true,
+		},
+		{
+			name: "with API key, custom provider",
+			settings: LLMSettings{
+				Provider: LLMProviderCustom,
+				APIKey:   "custom-key",
+				BaseURL:  "https://custom.llm.example.com",
+			},
+			expected: true,
+		},
+		{
+			name: "empty API key",
+			settings: LLMSettings{
+				Provider: LLMProviderOpenAI,
+				APIKey:   "",
 			},
 			expected: false,
 		},
@@ -260,111 +254,250 @@ func TestOpenAISettings_IsConfigured(t *testing.T) {
 	}
 }
 
-func TestOpenAISettings_IsChatGPTTokenExpired(t *testing.T) {
-	now := time.Now()
-	past := now.Add(-1 * time.Hour)
-	future := now.Add(1 * time.Hour)
-
+func TestLLMSettings_IsActive(t *testing.T) {
 	tests := []struct {
 		name     string
-		settings OpenAISettings
+		settings LLMSettings
 		expected bool
 	}{
 		{
-			name:     "no expiry set",
-			settings: OpenAISettings{},
+			name:     "not configured",
+			settings: LLMSettings{},
 			expected: false,
 		},
 		{
-			name: "expired token",
-			settings: OpenAISettings{
-				ChatGPTExpiresAt: &past,
+			name: "configured with API key",
+			settings: LLMSettings{
+				Provider: LLMProviderAnthropic,
+				APIKey:   "sk-ant-test",
 			},
 			expected: true,
 		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.settings.IsActive()
+			if result != tt.expected {
+				t.Errorf("IsActive() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLLMProvider_Constants(t *testing.T) {
+	tests := []struct {
+		provider LLMProvider
+		expected string
+	}{
+		{LLMProviderOpenAI, "openai"},
+		{LLMProviderAnthropic, "anthropic"},
+		{LLMProviderGoogle, "google"},
+		{LLMProviderOpenRouter, "openrouter"},
+		{LLMProviderCustom, "custom"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			if string(tt.provider) != tt.expected {
+				t.Errorf("expected %s, got %s", tt.expected, string(tt.provider))
+			}
+		})
+	}
+}
+
+func TestIsValidLLMProvider(t *testing.T) {
+	tests := []struct {
+		provider string
+		expected bool
+	}{
+		{"openai", true},
+		{"anthropic", true},
+		{"google", true},
+		{"openrouter", true},
+		{"custom", true},
+		{"invalid", false},
+		{"", false},
+		{"OpenAI", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			result := IsValidLLMProvider(tt.provider)
+			if result != tt.expected {
+				t.Errorf("IsValidLLMProvider(%q) = %v, want %v", tt.provider, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestThinkingLevel_Constants(t *testing.T) {
+	tests := []struct {
+		level    ThinkingLevel
+		expected string
+	}{
+		{ThinkingLevelOff, "off"},
+		{ThinkingLevelMinimal, "minimal"},
+		{ThinkingLevelLow, "low"},
+		{ThinkingLevelMedium, "medium"},
+		{ThinkingLevelHigh, "high"},
+		{ThinkingLevelXHigh, "xhigh"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			if string(tt.level) != tt.expected {
+				t.Errorf("expected %s, got %s", tt.expected, string(tt.level))
+			}
+		})
+	}
+}
+
+func TestIsValidThinkingLevel(t *testing.T) {
+	tests := []struct {
+		level    string
+		expected bool
+	}{
+		{"off", true},
+		{"minimal", true},
+		{"low", true},
+		{"medium", true},
+		{"high", true},
+		{"xhigh", true},
+		{"invalid", false},
+		{"", false},
+		{"extra_high", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.level, func(t *testing.T) {
+			result := IsValidThinkingLevel(tt.level)
+			if result != tt.expected {
+				t.Errorf("IsValidThinkingLevel(%q) = %v, want %v", tt.level, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestValidLLMProviders(t *testing.T) {
+	providers := ValidLLMProviders()
+	if len(providers) != 5 {
+		t.Errorf("expected 5 providers, got %d", len(providers))
+	}
+}
+
+func TestValidThinkingLevels(t *testing.T) {
+	levels := ValidThinkingLevels()
+	if len(levels) != 6 {
+		t.Errorf("expected 6 thinking levels, got %d", len(levels))
+	}
+}
+
+func TestLLMSettings_JSONSerialization(t *testing.T) {
+	settings := LLMSettings{
+		ID:            1,
+		Provider:      LLMProviderAnthropic,
+		APIKey:        "sk-ant-test",
+		Model:         "claude-opus-4-6",
+		ThinkingLevel: ThinkingLevelHigh,
+		BaseURL:       "",
+		Enabled:       true,
+	}
+
+	data, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("Failed to marshal LLMSettings: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if result["provider"] != "anthropic" {
+		t.Errorf("expected provider 'anthropic', got %v", result["provider"])
+	}
+	if result["api_key"] != "sk-ant-test" {
+		t.Errorf("expected api_key 'sk-ant-test', got %v", result["api_key"])
+	}
+	if result["model"] != "claude-opus-4-6" {
+		t.Errorf("expected model 'claude-opus-4-6', got %v", result["model"])
+	}
+	if result["thinking_level"] != "high" {
+		t.Errorf("expected thinking_level 'high', got %v", result["thinking_level"])
+	}
+	if result["enabled"] != true {
+		t.Errorf("expected enabled true, got %v", result["enabled"])
+	}
+}
+
+func TestLLMSettings_MultiProviderConfigs(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings LLMSettings
+	}{
 		{
-			name: "valid token",
-			settings: OpenAISettings{
-				ChatGPTExpiresAt: &future,
+			name: "openai with gpt-4o",
+			settings: LLMSettings{
+				Provider:      LLMProviderOpenAI,
+				APIKey:        "sk-openai-key",
+				Model:         "gpt-4o",
+				ThinkingLevel: ThinkingLevelMedium,
 			},
-			expected: false,
+		},
+		{
+			name: "anthropic with claude",
+			settings: LLMSettings{
+				Provider:      LLMProviderAnthropic,
+				APIKey:        "sk-ant-key",
+				Model:         "claude-opus-4-6",
+				ThinkingLevel: ThinkingLevelHigh,
+			},
+		},
+		{
+			name: "google with gemini",
+			settings: LLMSettings{
+				Provider:      LLMProviderGoogle,
+				APIKey:        "AIza-key",
+				Model:         "gemini-2.5-pro",
+				ThinkingLevel: ThinkingLevelLow,
+			},
+		},
+		{
+			name: "openrouter with custom model",
+			settings: LLMSettings{
+				Provider:      LLMProviderOpenRouter,
+				APIKey:        "sk-or-key",
+				Model:         "anthropic/claude-opus-4-6",
+				ThinkingLevel: ThinkingLevelMedium,
+				BaseURL:       "https://openrouter.ai/api/v1",
+			},
+		},
+		{
+			name: "custom provider with base url",
+			settings: LLMSettings{
+				Provider:      LLMProviderCustom,
+				APIKey:        "custom-key",
+				Model:         "local-model",
+				ThinkingLevel: ThinkingLevelOff,
+				BaseURL:       "http://localhost:8080/v1",
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := tt.settings.IsChatGPTTokenExpired()
-			if result != tt.expected {
-				t.Errorf("IsChatGPTTokenExpired() = %v, want %v", result, tt.expected)
+			if !tt.settings.IsConfigured() {
+				t.Error("expected IsConfigured() = true for valid settings")
 			}
-		})
-	}
-}
-
-func TestAuthMethod_Constants(t *testing.T) {
-	if AuthMethodAPIKey != "api_key" {
-		t.Error("AuthMethodAPIKey should be 'api_key'")
-	}
-	if AuthMethodChatGPTSubscription != "chatgpt_subscription" {
-		t.Error("AuthMethodChatGPTSubscription should be 'chatgpt_subscription'")
-	}
-}
-
-func TestOpenAISettings_GetValidReasoningEfforts(t *testing.T) {
-	tests := []struct {
-		model    string
-		expected []string
-	}{
-		{"gpt-5.1-codex-max", []string{"low", "medium", "high", "extra_high"}},
-		{"gpt-5.1-codex", []string{"low", "medium", "high"}},
-		{"gpt-5.1-codex-mini", []string{"medium", "high"}},
-		{"gpt-5.1", []string{"low", "medium", "high"}},
-		{"unknown-model", []string{"medium"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.model, func(t *testing.T) {
-			settings := OpenAISettings{Model: tt.model}
-			result := settings.GetValidReasoningEfforts()
-
-			if len(result) != len(tt.expected) {
-				t.Errorf("GetValidReasoningEfforts() = %v, want %v", result, tt.expected)
-				return
+			if !tt.settings.IsActive() {
+				t.Error("expected IsActive() = true for valid settings")
 			}
-
-			for i, v := range result {
-				if v != tt.expected[i] {
-					t.Errorf("GetValidReasoningEfforts()[%d] = %s, want %s", i, v, tt.expected[i])
-				}
+			if !IsValidLLMProvider(string(tt.settings.Provider)) {
+				t.Errorf("expected valid provider: %s", tt.settings.Provider)
 			}
-		})
-	}
-}
-
-func TestOpenAISettings_ValidateReasoningEffort(t *testing.T) {
-	tests := []struct {
-		name     string
-		model    string
-		effort   string
-		expected bool
-	}{
-		{"valid medium for codex", "gpt-5.1-codex", "medium", true},
-		{"valid high for codex", "gpt-5.1-codex", "high", true},
-		{"invalid extra_high for codex", "gpt-5.1-codex", "extra_high", false},
-		{"valid extra_high for max", "gpt-5.1-codex-max", "extra_high", true},
-		{"invalid low for mini", "gpt-5.1-codex-mini", "low", false},
-		{"valid medium for mini", "gpt-5.1-codex-mini", "medium", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			settings := OpenAISettings{
-				Model:                tt.model,
-				ModelReasoningEffort: tt.effort,
-			}
-			result := settings.ValidateReasoningEffort()
-			if result != tt.expected {
-				t.Errorf("ValidateReasoningEffort() = %v, want %v", result, tt.expected)
+			if !IsValidThinkingLevel(string(tt.settings.ThinkingLevel)) {
+				t.Errorf("expected valid thinking level: %s", tt.settings.ThinkingLevel)
 			}
 		})
 	}
@@ -506,7 +639,7 @@ func TestTableNames(t *testing.T) {
 		{EventSource{}, "event_sources"},
 		{Incident{}, "incidents"},
 		{SlackSettings{}, "slack_settings"},
-		{OpenAISettings{}, "openai_settings"},
+		{LLMSettings{}, "llm_settings"},
 		{ContextFile{}, "context_files"},
 		{APIKeySettings{}, "api_key_settings"},
 		{IncidentAlert{}, "incident_alerts"},

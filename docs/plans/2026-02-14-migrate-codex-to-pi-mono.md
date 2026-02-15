@@ -275,7 +275,7 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 - Create: `internal/database/llm_test.go`
 
 **Steps:**
-- [ ] Replace `OpenAISettings` model with `LLMSettings`:
+- [x] Replace `OpenAISettings` model with `LLMSettings`:
   - `Provider` field: `openai`, `anthropic`, `google`, `openrouter`, `custom`
   - `APIKey` field (single field, stores key for selected provider)
   - `Model` field
@@ -285,20 +285,20 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
   - Drop all ChatGPT subscription/OAuth fields (no backward compat)
   - Drop `AuthMethod` field
   - Table name: `llm_settings` (new table)
-- [ ] Update `db.go`:
+- [x] Update `db.go`:
   - Drop `openai_settings` table in migration
   - AutoMigrate `LLMSettings`
   - Update `GetLLMSettings()` / `UpdateLLMSettings()` helpers
-- [ ] Remove all ChatGPT subscription auth code:
+- [x] Remove all ChatGPT subscription auth code:
   - Remove `AuthMethod` type and constants
   - Remove `IsChatGPTTokenExpired()`
   - Remove `GetValidReasoningEfforts()` (pi-mono handles this per-provider)
   - Remove device auth handler code paths
-- [ ] Write tests:
+- [x] Write tests:
   - Multi-provider configuration
   - Provider API key validation
   - Model/provider combinations
-- [ ] Run `go test ./internal/database/...` - must pass before task 8
+- [x] Run `go test ./internal/database/...` - must pass before task 8
 
 ### Task 8: Update WebSocket handler for multi-provider
 

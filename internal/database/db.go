@@ -31,9 +31,18 @@ func Connect(dsn string, logLevel logger.LogLevel) error {
 func AutoMigrate() error {
 	log.Println("Running database migrations...")
 
+	// Drop old openai_settings table (replaced by llm_settings)
+	if DB.Migrator().HasTable("openai_settings") {
+		if err := DB.Migrator().DropTable("openai_settings"); err != nil {
+			log.Printf("Warning: failed to drop openai_settings table: %v", err)
+		} else {
+			log.Println("Dropped old openai_settings table")
+		}
+	}
+
 	err := DB.AutoMigrate(
 		&SlackSettings{},
-		&OpenAISettings{},
+		&LLMSettings{},
 		&ProxySettings{},
 		&ContextFile{},
 		&Skill{},
@@ -81,19 +90,19 @@ func InitializeDefaults() error {
 		log.Println("Created default Slack settings (disabled)")
 	}
 
-	// Create default OpenAI settings if they don't exist
-	DB.Model(&OpenAISettings{}).Count(&count)
+	// Create default LLM settings if they don't exist
+	DB.Model(&LLMSettings{}).Count(&count)
 	if count == 0 {
-		defaultOpenAISettings := &OpenAISettings{
-			Model:                "gpt-5.1-codex",
-			ModelReasoningEffort: "medium",
-			AuthMethod:           AuthMethodAPIKey, // Default to API key authentication
-			Enabled:              false,            // Disabled by default until API key is configured
+		defaultLLMSettings := &LLMSettings{
+			Provider:      LLMProviderOpenAI,
+			Model:         "gpt-4o",
+			ThinkingLevel: ThinkingLevelMedium,
+			Enabled:       false,
 		}
-		if err := DB.Create(defaultOpenAISettings).Error; err != nil {
-			return fmt.Errorf("failed to create default openai settings: %w", err)
+		if err := DB.Create(defaultLLMSettings).Error; err != nil {
+			return fmt.Errorf("failed to create default llm settings: %w", err)
 		}
-		log.Println("Created default OpenAI settings (disabled)")
+		log.Println("Created default LLM settings (disabled)")
 	}
 
 	// Initialize system skill (incident-manager)
@@ -190,18 +199,18 @@ func UpdateSlackSettings(settings *SlackSettings) error {
 	return DB.Model(&SlackSettings{}).Where("id = ?", settings.ID).Updates(settings).Error
 }
 
-// GetOpenAISettings retrieves OpenAI settings from the database
-func GetOpenAISettings() (*OpenAISettings, error) {
-	var settings OpenAISettings
+// GetLLMSettings retrieves LLM settings from the database
+func GetLLMSettings() (*LLMSettings, error) {
+	var settings LLMSettings
 	if err := DB.First(&settings).Error; err != nil {
 		return nil, err
 	}
 	return &settings, nil
 }
 
-// UpdateOpenAISettings updates OpenAI settings in the database
-func UpdateOpenAISettings(settings *OpenAISettings) error {
-	return DB.Model(&OpenAISettings{}).Where("id = ?", settings.ID).Updates(settings).Error
+// UpdateLLMSettings updates LLM settings in the database
+func UpdateLLMSettings(settings *LLMSettings) error {
+	return DB.Model(&LLMSettings{}).Where("id = ?", settings.ID).Updates(settings).Error
 }
 
 // GetDB returns the database instance
@@ -232,24 +241,6 @@ func Close() error {
 	return sqlDB.Close()
 }
 
-// UpdateOpenAIChatGPTTokens updates the ChatGPT OAuth tokens in the database
-// Uses Select to explicitly update all token-related fields including empty values
-func UpdateOpenAIChatGPTTokens(settings *OpenAISettings) error {
-	return DB.Model(&OpenAISettings{}).Where("id = ?", settings.ID).
-		Select("chat_gpt_access_token", "chat_gpt_refresh_token", "chat_gpt_expires_at", "chat_gpt_user_email", "auth_method").
-		Updates(settings).Error
-}
-
-// ClearOpenAIChatGPTTokens clears all ChatGPT OAuth tokens (for disconnect)
-func ClearOpenAIChatGPTTokens(id uint) error {
-	return DB.Model(&OpenAISettings{}).Where("id = ?", id).
-		Updates(map[string]interface{}{
-			"chat_gpt_access_token":  "",
-			"chat_gpt_refresh_token": "",
-			"chat_gpt_expires_at":    nil,
-			"chat_gpt_user_email":    "",
-		}).Error
-}
 
 // GetProxySettings retrieves proxy settings from the database
 func GetProxySettings() (*ProxySettings, error) {
@@ -310,38 +301,12 @@ func UpdateAggregationSettings(db *gorm.DB, settings *AggregationSettings) error
 	return db.Save(settings).Error
 }
 
-// migrateProxySettings copies proxy settings from openai_settings to proxy_settings (one-time migration)
+// migrateProxySettings ensures proxy settings exist with defaults
 func migrateProxySettings(db *gorm.DB) error {
-	// Check if proxy_settings already has data
 	var count int64
 	db.Model(&ProxySettings{}).Count(&count)
 	if count > 0 {
-		return nil // Already migrated
+		return nil // Already exists
 	}
-
-	// Check if openai_settings has proxy configured
-	var openai OpenAISettings
-	if err := db.First(&openai).Error; err != nil {
-		return nil // No OpenAI settings, nothing to migrate
-	}
-
-	if openai.ProxyURL == "" {
-		return nil // No proxy configured, nothing to migrate
-	}
-
-	// Create proxy settings with migrated values
-	proxy := ProxySettings{
-		ProxyURL:      openai.ProxyURL,
-		NoProxy:       openai.NoProxy,
-		OpenAIEnabled: true,  // Was being used for OpenAI
-		SlackEnabled:  true,  // Was being used for Slack
-		ZabbixEnabled: false, // New feature, disabled by default
-	}
-
-	if err := db.Create(&proxy).Error; err != nil {
-		return fmt.Errorf("failed to create proxy settings: %w", err)
-	}
-
-	log.Printf("Migrated proxy settings from OpenAI settings: %s", openai.ProxyURL)
 	return nil
 }

@@ -206,94 +206,97 @@ func (SlackSettings) TableName() string {
 	return "slack_settings"
 }
 
-// AuthMethod represents the OpenAI authentication method
-type AuthMethod string
+// LLMProvider represents the LLM provider
+type LLMProvider string
 
 const (
-	AuthMethodAPIKey              AuthMethod = "api_key"
-	AuthMethodChatGPTSubscription AuthMethod = "chatgpt_subscription"
+	LLMProviderOpenAI     LLMProvider = "openai"
+	LLMProviderAnthropic  LLMProvider = "anthropic"
+	LLMProviderGoogle     LLMProvider = "google"
+	LLMProviderOpenRouter LLMProvider = "openrouter"
+	LLMProviderCustom     LLMProvider = "custom"
 )
 
-// OpenAISettings stores OpenAI API configuration
-type OpenAISettings struct {
-	ID                   uint      `gorm:"primaryKey" json:"id"`
-	APIKey               string    `gorm:"type:text" json:"api_key"`
-	Model                string    `gorm:"type:varchar(100);default:'gpt-5.1-codex'" json:"model"`
-	ModelReasoningEffort string    `gorm:"type:varchar(50);default:'medium'" json:"model_reasoning_effort"`
-	BaseURL              string    `gorm:"type:text" json:"base_url"`  // Custom OpenAI API base URL (for Azure, local LLMs, etc.)
-	ProxyURL             string    `gorm:"type:text" json:"proxy_url"` // HTTP/HTTPS proxy URL
-	NoProxy              string    `gorm:"type:text" json:"no_proxy"`  // Comma-separated hosts to bypass proxy
-	Enabled              bool      `gorm:"default:false" json:"enabled"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
-
-	// Authentication method selection
-	AuthMethod AuthMethod `gorm:"type:varchar(50);default:'api_key'" json:"auth_method"`
-
-	// ChatGPT subscription OAuth tokens (encrypted at rest)
-	ChatGPTAccessToken  string     `gorm:"type:text" json:"-"`                     // Not exposed in JSON responses
-	ChatGPTRefreshToken string     `gorm:"type:text" json:"-"`                     // Not exposed in JSON responses
-	ChatGPTIDToken      string     `gorm:"type:text" json:"-"`                     // ID token required by Codex CLI v0.87+
-	ChatGPTExpiresAt    *time.Time `json:"chatgpt_expires_at,omitempty"`           // Token expiration timestamp
-	ChatGPTUserEmail    string     `gorm:"type:varchar(255)" json:"chatgpt_email"` // Display only - shows who authenticated
-}
-
-// IsConfigured returns true if the selected auth method is properly configured
-func (o *OpenAISettings) IsConfigured() bool {
-	switch o.AuthMethod {
-	case AuthMethodChatGPTSubscription:
-		return o.ChatGPTAccessToken != "" && o.ChatGPTRefreshToken != ""
-	case AuthMethodAPIKey, "":
-		// Default to API key for backward compatibility
-		return o.APIKey != ""
-	default:
-		return o.APIKey != ""
+// ValidLLMProviders returns all valid LLM provider values
+func ValidLLMProviders() []LLMProvider {
+	return []LLMProvider{
+		LLMProviderOpenAI,
+		LLMProviderAnthropic,
+		LLMProviderGoogle,
+		LLMProviderOpenRouter,
+		LLMProviderCustom,
 	}
 }
 
-// IsActive returns true if OpenAI is configured with the selected auth method
-// Note: The "enabled" flag was removed from the UI, so we only check if configured
-func (o *OpenAISettings) IsActive() bool {
-	return o.IsConfigured()
-}
-
-// IsChatGPTTokenExpired returns true if ChatGPT tokens are expired
-func (o *OpenAISettings) IsChatGPTTokenExpired() bool {
-	if o.ChatGPTExpiresAt == nil {
-		return false // No expiry set, assume valid
-	}
-	return time.Now().After(*o.ChatGPTExpiresAt)
-}
-
-// GetValidReasoningEfforts returns valid reasoning effort values for the current model
-func (o *OpenAISettings) GetValidReasoningEfforts() []string {
-	switch o.Model {
-	case "gpt-5.2", "gpt-5.2-codex", "gpt-5.1-codex-max":
-		return []string{"low", "medium", "high", "extra_high"}
-	case "gpt-5.1-codex":
-		return []string{"low", "medium", "high"}
-	case "gpt-5.1-codex-mini":
-		return []string{"medium", "high"}
-	case "gpt-5.1":
-		return []string{"low", "medium", "high"}
-	default:
-		return []string{"medium"}
-	}
-}
-
-// ValidateReasoningEffort checks if the reasoning effort is valid for the current model
-func (o *OpenAISettings) ValidateReasoningEffort() bool {
-	validEfforts := o.GetValidReasoningEfforts()
-	for _, e := range validEfforts {
-		if e == o.ModelReasoningEffort {
+// IsValidLLMProvider checks if a provider string is valid
+func IsValidLLMProvider(provider string) bool {
+	for _, p := range ValidLLMProviders() {
+		if string(p) == provider {
 			return true
 		}
 	}
 	return false
 }
 
-func (OpenAISettings) TableName() string {
-	return "openai_settings"
+// ThinkingLevel represents the thinking/reasoning level for the LLM
+type ThinkingLevel string
+
+const (
+	ThinkingLevelOff     ThinkingLevel = "off"
+	ThinkingLevelMinimal ThinkingLevel = "minimal"
+	ThinkingLevelLow     ThinkingLevel = "low"
+	ThinkingLevelMedium  ThinkingLevel = "medium"
+	ThinkingLevelHigh    ThinkingLevel = "high"
+	ThinkingLevelXHigh   ThinkingLevel = "xhigh"
+)
+
+// ValidThinkingLevels returns all valid thinking level values
+func ValidThinkingLevels() []ThinkingLevel {
+	return []ThinkingLevel{
+		ThinkingLevelOff,
+		ThinkingLevelMinimal,
+		ThinkingLevelLow,
+		ThinkingLevelMedium,
+		ThinkingLevelHigh,
+		ThinkingLevelXHigh,
+	}
+}
+
+// IsValidThinkingLevel checks if a thinking level string is valid
+func IsValidThinkingLevel(level string) bool {
+	for _, l := range ValidThinkingLevels() {
+		if string(l) == level {
+			return true
+		}
+	}
+	return false
+}
+
+// LLMSettings stores multi-provider LLM configuration
+type LLMSettings struct {
+	ID            uint        `gorm:"primaryKey" json:"id"`
+	Provider      LLMProvider `gorm:"type:varchar(50);default:'openai'" json:"provider"`
+	APIKey        string      `gorm:"type:text" json:"api_key"`
+	Model         string      `gorm:"type:varchar(100);default:'gpt-4o'" json:"model"`
+	ThinkingLevel ThinkingLevel `gorm:"type:varchar(50);default:'medium'" json:"thinking_level"`
+	BaseURL       string      `gorm:"type:text" json:"base_url"`
+	Enabled       bool        `gorm:"default:false" json:"enabled"`
+	CreatedAt     time.Time   `json:"created_at"`
+	UpdatedAt     time.Time   `json:"updated_at"`
+}
+
+// IsConfigured returns true if the LLM provider has an API key set
+func (l *LLMSettings) IsConfigured() bool {
+	return l.APIKey != ""
+}
+
+// IsActive returns true if the LLM settings are configured
+func (l *LLMSettings) IsActive() bool {
+	return l.IsConfigured()
+}
+
+func (LLMSettings) TableName() string {
+	return "llm_settings"
 }
 
 // ProxySettings stores HTTP proxy configuration with per-service toggles
