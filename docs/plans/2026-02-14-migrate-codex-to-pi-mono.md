@@ -107,8 +107,8 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 - Create: `agent-worker/tests/ws-client.test.ts`
 
 **Steps:**
-- [ ] Port `codex-worker/internal/ws/client.go` logic to TypeScript using the `ws` library
-- [ ] Implement `WebSocketClient` class with:
+- [x] Port `codex-worker/internal/ws/client.go` logic to TypeScript using the `ws` library
+- [x] Implement `WebSocketClient` class with:
   - `connect(url: string)` - establish connection with reconnection logic
   - `send(msg: WebSocketMessage)` - send JSON message
   - `sendOutput(incidentId, output)` - stream progress to API
@@ -118,13 +118,13 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
   - `onMessage(handler)` - register message handler
   - `close()` - graceful shutdown
   - Exponential backoff reconnection (matching Go behavior)
-- [ ] Match the exact JSON message format from Go (`CodexMessage` struct) so the API handler works without changes initially
-- [ ] Write tests using a mock WebSocket server:
+- [x] Match the exact JSON message format from Go (`CodexMessage` struct) so the API handler works without changes initially
+- [x] Write tests using a mock WebSocket server:
   - Connection and reconnection
   - Message serialization matches Go format
   - Heartbeat sending
   - Error handling on connection loss
-- [ ] Run `npm test` - must pass before task 3
+- [x] Run `npm test` - must pass before task 3
 
 ### Task 3: Implement MCP Gateway tool definitions
 
