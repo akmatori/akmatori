@@ -1,65 +1,62 @@
-# Migrate from Codex CLI to pi-mono coding-agent (SDK mode)
+# Migrate from Codex CLI to pi-mono coding-agent
 
 ## Overview
 
-Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subprocess) with a Node.js/TypeScript worker that uses the `@mariozechner/pi-coding-agent` SDK directly in-process. This enables multi-provider LLM support (Anthropic, OpenAI, Google, OpenRouter, etc.), richer tool integration, and aligns with the openclaw reference architecture.
+Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subprocess) with a Node.js/TypeScript worker that uses the `@mariozechner/pi-coding-agent` SDK directly in-process. This enables multi-provider LLM support (Anthropic, OpenAI, Google, OpenRouter, etc.), richer tool integration via pi-mono's `ToolDefinition` interface, and native session management. No backward compatibility is maintained - this is a clean cut-over.
 
 ## Context
 
-**Current Architecture:**
-- `akmatori-codex` container runs a Go binary (`codex-worker`) that connects to the API via WebSocket
-- The Go worker spawns `codex exec` CLI as a subprocess, parsing JSON events from stdout
-- Tools are Python wrappers calling the MCP Gateway over HTTP
-- Only supports OpenAI models (API key or ChatGPT subscription auth)
-- Skills use `SKILL.md` files with YAML frontmatter + markdown body
+**Current architecture (being removed):**
+- `akmatori-codex` container runs a Go binary that connects to API via WebSocket
+- Go worker spawns `codex exec` CLI as a subprocess, parses JSON events from stdout
+- Tools are Python wrappers (`codex-tools/`) calling MCP Gateway over HTTP
+- Only supports OpenAI models (API key or ChatGPT subscription OAuth)
+- Skills use `.codex/AGENTS.md` + `.codex/skills/SKILL.md` format
 
-**Target Architecture:**
+**Target architecture:**
 - `akmatori-agent` container runs a Node.js process using `@mariozechner/pi-coding-agent` SDK
-- The Node worker connects to the API via the same WebSocket protocol (drop-in replacement)
-- Tools are registered as pi-mono `ToolDefinition` custom tools (calling MCP Gateway)
+- Node worker connects to API via the same WebSocket endpoint (`/ws/codex`)
+- Tools are registered as pi-mono `ToolDefinition` objects (calling MCP Gateway over HTTP)
 - Supports all LLM providers: Anthropic, OpenAI, Google, OpenRouter, custom
-- Skills map to pi-mono's system prompt override + AGENTS.md context files
+- Skills use `AGENTS.md` at workspace root + pi-mono's built-in tool system
 
 **Files involved (modify):**
 - `docker-compose.yml` - Replace `akmatori-codex` service with `akmatori-agent`
-- `internal/database/models.go` - Evolve `OpenAISettings` to `LLMSettings` (multi-provider)
-- `internal/database/db.go` - Migration for new LLM settings table
+- `internal/database/models.go` - Replace `OpenAISettings` with `LLMSettings` (multi-provider)
+- `internal/database/db.go` - Drop old table, create new one
 - `internal/handlers/codex_ws.go` - Rename to `agent_ws.go`, update message types for multi-provider
 - `internal/services/skill_service.go` - Update workspace setup for pi-mono format
-- `internal/config/config.go` - New config for agent container
 - `web/` - Frontend settings page for multi-provider LLM config
 - `.env.example` - New environment variables
+- `Makefile` - Add agent-worker test targets
 
 **Files involved (create):**
 - `agent-worker/` - New Node.js/TypeScript worker module
-- `agent-worker/package.json` - Dependencies on pi-mono packages
-- `agent-worker/tsconfig.json` - TypeScript config
+- `agent-worker/package.json`
+- `agent-worker/tsconfig.json`
 - `agent-worker/src/index.ts` - Entry point
-- `agent-worker/src/ws-client.ts` - WebSocket client (port of Go client)
-- `agent-worker/src/orchestrator.ts` - Message routing and incident handling
-- `agent-worker/src/agent-runner.ts` - pi-mono SDK integration (createAgentSession)
-- `agent-worker/src/tools/mcp-tools.ts` - MCP Gateway tool definitions for pi-mono
-- `agent-worker/src/tools/ssh-tool.ts` - SSH tool as pi-mono ToolDefinition
-- `agent-worker/src/tools/zabbix-tool.ts` - Zabbix tool as pi-mono ToolDefinition
-- `agent-worker/src/auth.ts` - Multi-provider auth storage adapter
-- `agent-worker/src/types.ts` - Shared TypeScript types
-- `agent-worker/Dockerfile` - Node.js container build
-- `agent-worker/tests/` - Test suite
+- `agent-worker/src/ws-client.ts` - WebSocket client
+- `agent-worker/src/orchestrator.ts` - Message routing
+- `agent-worker/src/agent-runner.ts` - pi-mono SDK integration
+- `agent-worker/src/tools/mcp-tools.ts` - MCP Gateway tool definitions
+- `agent-worker/src/types.ts` - Shared types
+- `agent-worker/Dockerfile`
+- `agent-worker/tests/`
 
-**Files involved (remove/deprecate):**
-- `codex-worker/` - Entire Go worker module (replaced by agent-worker)
-- `codex-tools/` - Python MCP wrappers (replaced by TypeScript tool definitions)
+**Files involved (delete):**
+- `codex-worker/` - Entire Go worker module
+- `codex-tools/` - Python MCP wrappers
 - `Dockerfile.codex` - Old container build
 - `entrypoint.sh` - Old container entrypoint
 
-**Related patterns (from openclaw reference):**
+**Related patterns (from openclaw reference at /opt/hybrid/openclaw):**
 - SDK mode: `createAgentSession()` with `customTools`, `authStorage`, `modelRegistry`
-- System prompt: `DefaultResourceLoader` with `systemPromptOverride`
-- Tools: `ToolDefinition` interface with `execute` function, `Type.Object` params
-- Auth: `AuthStorage.setRuntimeApiKey()` for per-request provider keys
+- Tool adapter: `toToolDefinitions()` converts tools to pi-mono `ToolDefinition` format
+- Auth: `AuthStorage` + `ModelRegistry` for multi-provider key management
 - Sessions: `SessionManager.inMemory()` for stateless or `.create(cwd)` for persistent
-- Events: `session.subscribe()` for streaming message/tool events
-- Abort: `session.abort()` for cancellation
+- Events: `session.agent.on("message_update", handler)` for streaming
+- System prompt: `agentDir` parameter with `AGENTS.md` file
+- Tool params: `Type.Object()` from `@sinclair/typebox` for schema definitions
 
 **Dependencies:**
 - `@mariozechner/pi-coding-agent` ^0.52.x
@@ -73,11 +70,10 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 
 - **Testing approach**: Regular (code first, then tests) for the Node.js worker; TDD for database migrations
 - Complete each task fully before moving to the next
-- The Go API server remains unchanged - only the worker container is replaced
-- The WebSocket protocol between API and worker is preserved (backward compatible)
+- The Go API server remains unchanged except for the WebSocket handler and database models
+- **No backward compatibility** - old codex-worker, codex-tools, and OpenAI-only settings are deleted
 - **CRITICAL: every task MUST include new/updated tests**
 - **CRITICAL: all tests must pass before starting next task**
-- **Migration strategy**: Run old and new workers side-by-side during development, switch via env var
 
 ## Implementation Steps
 
@@ -90,17 +86,19 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 - Create: `agent-worker/.gitignore`
 
 **Steps:**
-- [ ] Initialize `agent-worker/` as a Node.js project with TypeScript
-- [ ] Add dependencies: `@mariozechner/pi-coding-agent`, `@mariozechner/pi-ai`, `@mariozechner/pi-agent-core`, `@sinclair/typebox`, `ws`, `@types/ws`
-- [ ] Configure tsconfig for ESM output (Node 22+, moduleResolution: "bundler")
-- [ ] Define shared types in `src/types.ts` mirroring the Go WebSocket message protocol:
-  - `WebSocketMessage` interface matching `ws.Message` from Go
-  - `MessageType` enum matching Go constants
-  - `OpenAISettings`, `ProxyConfig`, `IncidentCallback` types
+- [x] Initialize `agent-worker/` as a Node.js project with TypeScript
+- [x] Add dependencies: `@mariozechner/pi-coding-agent`, `@mariozechner/pi-ai`, `@mariozechner/pi-agent-core`, `@sinclair/typebox`, `ws`, `@types/ws`
+- [x] Add dev dependencies: `vitest`, `typescript`, `@types/node`
+- [x] Configure tsconfig for ESM output (Node 22+, `moduleResolution: "bundler"`, `target: "ES2022"`)
+- [x] Define shared types in `src/types.ts` mirroring the Go WebSocket message protocol:
+  - `WebSocketMessage` interface matching `CodexMessage` from Go
+  - `MessageType` string union matching Go constants (new_incident, codex_output, etc.)
+  - `LLMSettings` type (provider, api key, model, reasoning effort)
+  - `ProxyConfig` type
   - `ExecuteResult` type for runner output
-- [ ] Add build scripts: `build`, `dev`, `test`
-- [ ] Write unit tests for type definitions (serialization round-trip matches Go format)
-- [ ] Run `npm test` - must pass before task 2
+- [x] Add build scripts: `build`, `dev`, `test`
+- [x] Write unit tests for type definitions (serialization round-trip matches Go JSON format)
+- [x] Run `npm test` - must pass before task 2
 
 ### Task 2: Implement WebSocket client
 
@@ -109,19 +107,18 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 - Create: `agent-worker/tests/ws-client.test.ts`
 
 **Steps:**
-- [ ] Port `codex-worker/internal/ws/client.go` to TypeScript using the `ws` library
+- [ ] Port `codex-worker/internal/ws/client.go` logic to TypeScript using the `ws` library
 - [ ] Implement `WebSocketClient` class with:
   - `connect(url: string)` - establish connection with reconnection logic
   - `send(msg: WebSocketMessage)` - send JSON message
-  - `sendOutput(incidentId, output)` - convenience for streaming output
+  - `sendOutput(incidentId, output)` - stream progress to API
   - `sendCompleted(incidentId, sessionId, response, tokensUsed, executionTimeMs)` - completion
   - `sendError(incidentId, errorMsg)` - error notification
-  - `sendHeartbeat()` - heartbeat
+  - `sendHeartbeat()` - heartbeat (30s interval)
   - `onMessage(handler)` - register message handler
-  - `startHeartbeat(intervalMs)` - periodic heartbeat
   - `close()` - graceful shutdown
-  - `reconnect()` - reconnection with exponential backoff
-- [ ] Match the exact JSON message format from Go so the API handler doesn't need changes
+  - Exponential backoff reconnection (matching Go behavior)
+- [ ] Match the exact JSON message format from Go (`CodexMessage` struct) so the API handler works without changes initially
 - [ ] Write tests using a mock WebSocket server:
   - Connection and reconnection
   - Message serialization matches Go format
@@ -133,80 +130,75 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 
 **Files:**
 - Create: `agent-worker/src/tools/mcp-client.ts`
-- Create: `agent-worker/src/tools/ssh-tool.ts`
-- Create: `agent-worker/src/tools/zabbix-tool.ts`
+- Create: `agent-worker/src/tools/mcp-tools.ts`
 - Create: `agent-worker/tests/tools.test.ts`
 
 **Steps:**
 - [ ] Create `mcp-client.ts` - HTTP client for the MCP Gateway (port of Python `mcp_client.py`):
-  - `callTool(gatewayUrl, toolName, method, params)` → JSON result
-  - Include timeout, error handling, and logging
-- [ ] Create SSH tool as pi-mono `ToolDefinition`:
-  - `name: "ssh"`, parameters: host, command, port, username, timeout
-  - `execute` calls MCP Gateway `/ssh/execute` endpoint
-  - Formats output for LLM consumption
-- [ ] Create Zabbix tool as pi-mono `ToolDefinition`:
-  - Multiple sub-tools or single tool with `action` parameter
-  - Actions: get_hosts, get_problems, get_history, get_items, acknowledge_event
-  - `execute` calls MCP Gateway `/zabbix/*` endpoints
-  - Formats output for LLM consumption
-- [ ] Create `createMCPTools(gatewayUrl, incidentId)` factory that returns all tool definitions
+  - `callTool(gatewayUrl, incidentId, toolName, arguments)` - JSON-RPC 2.0 call to `/mcp`
+  - Sets `X-Incident-ID` header for credential resolution
+  - Bypasses proxy for internal MCP calls (NO_PROXY)
+  - Timeout and error handling
+- [ ] Create `mcp-tools.ts` - factory that returns pi-mono `ToolDefinition[]`:
+  - SSH tool: `name: "ssh_execute_command"`, params: `{command: string, servers?: string[]}`
+  - SSH connectivity: `name: "ssh_test_connectivity"`, no params
+  - SSH server info: `name: "ssh_get_server_info"`, params: `{servers?: string[]}`
+  - Zabbix get_hosts: `name: "zabbix_get_hosts"`, params: `{search?: object, filter?: object, limit?: number}`
+  - Zabbix get_problems: `name: "zabbix_get_problems"`, params: `{recent?: boolean, severity_min?: number}`
+  - Zabbix get_history: `name: "zabbix_get_history"`, params: `{itemids: number[], history_type?: number, limit?: number}`
+  - Zabbix get_items_batch: `name: "zabbix_get_items_batch"`, params: `{searches: object[], hostids?: string[]}`
+  - Zabbix acknowledge_event: `name: "zabbix_acknowledge_event"`, params: `{eventids: string[], message: string}`
+  - Each tool's `execute` calls `mcpClient.callTool()` and returns `{content: [{type: "text", text: result}]}`
+  - Use `Type.Object()` from `@sinclair/typebox` for parameter schemas
+- [ ] Create `createMCPTools(gatewayUrl, incidentId)` factory function
 - [ ] Write tests with mocked HTTP responses:
   - SSH tool execute with successful command
   - SSH tool execute with connection error
   - Zabbix tool get_hosts with mock response
-  - Zabbix tool get_problems with mock response
   - Tool parameter validation
+  - MCP client error handling (timeout, network error)
 - [ ] Run `npm test` - must pass before task 4
 
 ### Task 4: Implement agent runner (pi-mono SDK integration)
 
 **Files:**
 - Create: `agent-worker/src/agent-runner.ts`
-- Create: `agent-worker/src/auth.ts`
 - Create: `agent-worker/tests/agent-runner.test.ts`
 
 **Steps:**
-- [ ] Create `auth.ts` - adapter between Akmatori's per-request API keys and pi-mono's `AuthStorage`:
-  - `createRuntimeAuthStorage(provider, apiKey)` - creates AuthStorage with runtime key
-  - Support for OpenAI API key, Anthropic key, and other providers
-  - Map Akmatori's `AuthMethod` to pi-mono provider names
 - [ ] Create `AgentRunner` class wrapping pi-mono SDK:
-  - `execute(incidentId, task, settings, proxyConfig, onOutput, onEvent)`:
-    - Create workspace-scoped `AuthStorage` with runtime API key from settings
+  - `execute(params)` where params = `{incidentId, task, llmSettings, proxyConfig, workDir, onOutput, onEvent}`:
+    - Create `AuthStorage` and set runtime API key via `authStorage.setRuntimeApiKey(provider, key)`
     - Create `ModelRegistry` from auth storage
-    - Resolve model from settings (map `gpt-5.1-codex` → OpenAI model, or use Anthropic/Google)
-    - Build custom tools via `createMCPTools()`
-    - Create `DefaultResourceLoader` with `systemPromptOverride` (from AGENTS.md)
-    - Call `createAgentSession()` with:
-      - `cwd`: workspace directory
-      - `tools`: `createCodingTools(cwd)` (read, bash, edit, write)
-      - `customTools`: MCP tools (SSH, Zabbix, etc.)
-      - `sessionManager`: `SessionManager.create(cwd)` for persistence or `.inMemory()`
-      - `settingsManager`: `SettingsManager.inMemory()` with compaction enabled
-      - `authStorage`, `modelRegistry`, `model`, `thinkingLevel`
-    - Subscribe to session events and stream to `onOutput` callback
+    - Resolve model from settings (map provider + model name to pi-mono model object)
+    - Map reasoning effort: `low/medium/high/extra_high` -> pi-mono `ThinkingLevel` (`off/minimal/low/medium/high/xhigh`)
+    - Build custom tools via `createMCPTools(gatewayUrl, incidentId)`
+    - Get built-in coding tools via `codingTools` from pi-coding-agent (read, write, edit, bash)
+    - Create `DefaultResourceLoader` or pass `agentDir` pointing to workspace `AGENTS.md`
+    - Call `createAgentSession()` with all params
+    - Subscribe to session events (see event mapping below)
     - Call `session.prompt(task)` and await completion
     - Collect result: response text, token usage, execution time
     - Return `ExecuteResult`
-  - `resume(incidentId, sessionId, message, settings, ...)`:
+  - `resume(params)` where params = `{incidentId, sessionId, message, llmSettings, ...}`:
     - Open existing session via `SessionManager.open(sessionFile)`
     - Call `session.prompt(message)` for follow-up
   - `cancel(incidentId)`:
     - Call `session.abort()` on active session
   - `dispose()`:
     - Clean up all active sessions
-- [ ] Handle event mapping:
-  - `message_update` (text_delta) → accumulate response text
-  - `tool_execution_start/end` → format as streaming output (matching current format)
-  - `turn_end` → extract token usage
-  - `agent_end` → mark completion
+- [ ] Event mapping (pi-mono events -> WebSocket output):
+  - `message_update` (text_delta) -> accumulate response text, stream to `onOutput`
+  - `tool_execution_start` -> format as `[Tool: toolName]` in output
+  - `tool_execution_update` -> stream tool output
+  - `tool_execution_end` -> format tool result summary
+  - `turn_end` -> extract token usage from event data
+  - `agent_end` -> mark completion
 - [ ] Handle proxy configuration:
-  - Set `HTTP_PROXY`/`HTTPS_PROXY` env vars before creating session if proxy enabled
-  - Respect per-service proxy toggles
+  - Set `HTTP_PROXY`/`HTTPS_PROXY` env vars before creating session if proxy enabled for LLM calls
+  - Respect per-service proxy toggles from `ProxyConfig`
 - [ ] Write tests (with mocked pi-mono SDK):
-  - Execute with OpenAI API key
-  - Execute with Anthropic API key
+  - Execute with API key for different providers
   - Resume existing session
   - Cancel active execution
   - Event streaming to output callback
@@ -214,7 +206,7 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
   - Proxy configuration application
 - [ ] Run `npm test` - must pass before task 5
 
-### Task 5: Implement orchestrator (message routing)
+### Task 5: Implement orchestrator and entry point
 
 **Files:**
 - Create: `agent-worker/src/orchestrator.ts`
@@ -223,19 +215,19 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 
 **Steps:**
 - [ ] Create `Orchestrator` class (port of Go `orchestrator.go`):
-  - Constructor takes `config: { apiWsUrl, mcpGatewayUrl, workspaceDir, sessionsDir }`
+  - Constructor takes `config: {apiWsUrl, mcpGatewayUrl, workspaceDir}`
   - `start()` - connect WebSocket, register handler, start heartbeat, send "ready" status
   - `stop()` - cancel active runs, close WebSocket
   - `handleMessage(msg)` - route by message type:
-    - `new_incident` → extract LLM settings, call `agentRunner.execute()`
-    - `continue_incident` → call `agentRunner.resume()`
-    - `cancel_incident` → call `agentRunner.cancel()`
-    - `device_auth_start` → handle device auth (if needed, or skip for multi-provider)
-  - Stream output back via WebSocket `sendOutput()`
-  - Send completion via WebSocket `sendCompleted()`
-  - Handle errors via WebSocket `sendError()`
+    - `new_incident` -> extract LLM settings from message, call `agentRunner.execute()`
+    - `continue_incident` -> call `agentRunner.resume()`
+    - `cancel_incident` -> call `agentRunner.cancel()`
+    - `proxy_config_update` -> update cached proxy config
+  - Stream output back via `wsClient.sendOutput()`
+  - Send completion via `wsClient.sendCompleted()`
+  - Handle errors via `wsClient.sendError()`
 - [ ] Create `index.ts` entry point:
-  - Read config from environment variables (same names as Go: `API_WS_URL`, `MCP_GATEWAY_URL`, etc.)
+  - Read config from environment: `API_WS_URL`, `MCP_GATEWAY_URL`, `WORKSPACE_DIR`
   - Create and start orchestrator
   - Handle SIGTERM/SIGINT for graceful shutdown
   - Reconnection loop on WebSocket disconnect
@@ -245,91 +237,98 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
   - Completion with metrics
   - Error propagation
   - Graceful shutdown
-  - Reconnection behavior
 - [ ] Run `npm test` - must pass before task 6
 
-### Task 6: Create Docker container for agent-worker
+### Task 6: Create Docker container and update docker-compose
 
 **Files:**
 - Create: `agent-worker/Dockerfile`
 - Modify: `docker-compose.yml`
+- Modify: `.env.example`
 
 **Steps:**
 - [ ] Create `agent-worker/Dockerfile`:
   - Base: `node:22-bookworm`
-  - Install system deps: `ripgrep`, `git`, `jq`, `python3` (for tools that need it)
-  - Create non-root user (UID 1001, matching old codex user)
-  - Copy `agent-worker/`, install deps, build TypeScript
-  - Set environment defaults matching Go container
+  - Install system deps: `ripgrep`, `git`, `jq` (needed by pi-mono's bash tool)
+  - Create non-root user (UID 1001, matching old codex user for volume permissions)
+  - Copy `agent-worker/`, `npm ci`, build TypeScript
+  - Set environment defaults
   - Run as non-root user
-  - Health check: `pgrep node` or HTTP health endpoint
+  - Health check: `pgrep node`
 - [ ] Update `docker-compose.yml`:
-  - Rename `akmatori-codex` → `akmatori-agent` (or add as new service)
-  - Point to new `agent-worker/Dockerfile`
-  - Keep same network config (frontend, api-internal, codex-network)
+  - Replace `akmatori-codex` service with `akmatori-agent`
+  - Point to `agent-worker/Dockerfile`
+  - Keep same networks (frontend, api-internal, codex-network)
   - Keep same volume mounts (sessions, workspaces, context)
-  - Keep same environment variables (add new ones for multi-provider)
-- [ ] Add new environment variables to `.env.example`:
-  - `LLM_PROVIDER` (default: `openai`)
-  - `ANTHROPIC_API_KEY` (optional)
-  - `OPENAI_API_KEY` (optional)
-  - `GOOGLE_API_KEY` (optional)
+  - Update environment variables
+- [ ] Add new env vars to `.env.example`:
+  - Document that LLM provider/key are configured in web UI, not env vars
 - [ ] Test Docker build: `docker build -t akmatori-agent ./agent-worker`
-- [ ] Test container runs and connects to API WebSocket
-- [ ] Verify health check works
+- [ ] Test container starts and connects to API WebSocket
 
-### Task 7: Update database models for multi-provider LLM support
+### Task 7: Replace OpenAISettings with LLMSettings (database)
 
 **Files:**
 - Modify: `internal/database/models.go`
 - Modify: `internal/database/db.go`
-- Create: `internal/database/models_test.go` (new tests)
+- Modify: `internal/database/openai.go` -> rename to `llm.go`
+- Create: `internal/database/llm_test.go`
 
 **Steps:**
-- [ ] Evolve `OpenAISettings` to support multiple providers while maintaining backward compatibility:
-  - Add `Provider` field: `openai`, `anthropic`, `google`, `openrouter`, `custom`
-  - Add `AnthropicAPIKey` field for Anthropic provider
-  - Add `GoogleAPIKey` field for Google provider
-  - Add `OpenRouterAPIKey` field for OpenRouter provider
-  - Add `CustomProviderURL` field for custom provider endpoints
-  - Keep existing OpenAI fields for backward compatibility
-  - Update `IsConfigured()` to check provider-specific keys
-  - Update `IsActive()` accordingly
-  - Keep table name as `openai_settings` to avoid migration complexity (rename later)
-- [ ] Add database migration in `db.go`:
-  - AutoMigrate will add new columns
-  - Set default `Provider` to `openai` for existing rows
-- [ ] Update helper functions:
-  - `GetOpenAISettings()` → works as before, returns full settings
-  - Add `GetLLMProvider()` helper
-  - Add `GetProviderAPIKey(provider string)` helper
+- [ ] Replace `OpenAISettings` model with `LLMSettings`:
+  - `Provider` field: `openai`, `anthropic`, `google`, `openrouter`, `custom`
+  - `APIKey` field (single field, stores key for selected provider)
+  - `Model` field
+  - `ThinkingLevel` field (replaces `ModelReasoningEffort`)
+  - `BaseURL` field (for custom endpoints)
+  - `Enabled` field
+  - Drop all ChatGPT subscription/OAuth fields (no backward compat)
+  - Drop `AuthMethod` field
+  - Table name: `llm_settings` (new table)
+- [ ] Update `db.go`:
+  - Drop `openai_settings` table in migration
+  - AutoMigrate `LLMSettings`
+  - Update `GetLLMSettings()` / `UpdateLLMSettings()` helpers
+- [ ] Remove all ChatGPT subscription auth code:
+  - Remove `AuthMethod` type and constants
+  - Remove `IsChatGPTTokenExpired()`
+  - Remove `GetValidReasoningEfforts()` (pi-mono handles this per-provider)
+  - Remove device auth handler code paths
 - [ ] Write tests:
   - Multi-provider configuration
-  - Backward compatibility (existing OpenAI-only config still works)
-  - Provider validation
-  - API key retrieval by provider
+  - Provider API key validation
+  - Model/provider combinations
 - [ ] Run `go test ./internal/database/...` - must pass before task 8
 
-### Task 8: Update API WebSocket handler for multi-provider
+### Task 8: Update WebSocket handler for multi-provider
 
 **Files:**
-- Modify: `internal/handlers/codex_ws.go`
-- Modify: `internal/handlers/alert.go`
+- Rename: `internal/handlers/codex_ws.go` -> `internal/handlers/agent_ws.go`
+- Modify: `internal/handlers/agent_ws.go`
+- Update all references to the handler across the codebase
 
 **Steps:**
-- [ ] Update `CodexMessage` struct to include multi-provider fields:
+- [ ] Rename file and update all imports/references
+- [ ] Replace `OpenAISettings` struct in handler with `LLMSettings`:
+  - `Provider` field
+  - `APIKey` field
+  - `Model` field
+  - `ThinkingLevel` field
+  - `BaseURL` field
+- [ ] Update `CodexMessage` -> `AgentMessage`:
+  - Replace `OpenAIAPIKey` with `APIKey`
+  - Replace `ReasoningEffort` with `ThinkingLevel`
   - Add `Provider` field
-  - Add `AnthropicAPIKey`, `GoogleAPIKey`, etc. fields
-  - Keep existing OpenAI fields for backward compatibility
-- [ ] Update `StartIncident()` to include provider-specific API key:
-  - Read `Provider` from LLM settings
-  - Include the correct API key based on provider
-- [ ] Update `ContinueIncident()` similarly
-- [ ] Ensure the WebSocket protocol changes are backward compatible:
-  - If `Provider` is empty, default to `openai`
-  - Old worker ignores unknown fields
-  - New worker handles both old and new format
-- [ ] Update relevant tests
+  - Remove all ChatGPT subscription fields
+  - Remove device auth fields
+- [ ] Update `CodexWSHandler` -> `AgentWSHandler`:
+  - Remove `persistRefreshedTokens()` (no OAuth)
+  - Remove `handleDeviceAuthResponse()` (no device auth)
+  - Remove `StartDeviceAuth()` / `CancelDeviceAuth()`
+  - Update `StartIncident()` to include provider + API key from `LLMSettings`
+- [ ] Keep WebSocket endpoint as `/ws/codex` for now (rename later to avoid config churn)
+- [ ] Update all callers of the handler (alert handlers, settings handlers, etc.)
+- [ ] Update existing handler tests
 - [ ] Run `go test ./internal/handlers/...` - must pass before task 9
 
 ### Task 9: Update skill service for pi-mono workspace format
@@ -338,87 +337,96 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 - Modify: `internal/services/skill_service.go`
 
 **Steps:**
-- [ ] Update `SpawnIncidentManager()` to create pi-mono compatible workspace:
-  - Instead of `.codex/AGENTS.md`, create `AGENTS.md` at workspace root (pi-mono walks up from cwd)
-  - Instead of `.codex/skills/`, create `.pi/skills/` or embed skill content in AGENTS.md
-  - Keep same tool symlink mechanism but adapt paths for Node.js
-- [ ] Update `generateIncidentAgentsMd()` to output pi-mono compatible format:
-  - pi-mono reads `AGENTS.md` files (same format, different location)
-  - Include tool instructions adapted for pi-mono's tool calling
-  - Remove Codex-specific structured output protocol, replace with pi-mono compatible format
+- [ ] Update `SpawnIncidentManager()`:
+  - Instead of creating `.codex/AGENTS.md`, create `AGENTS.md` at workspace root (pi-mono reads it from cwd upward)
+  - Instead of copying skills to `.codex/skills/`, embed skill instructions directly in `AGENTS.md`
+  - Remove the `copyDirPreserveSymlinks()` call for skills (tools are now native pi-mono `ToolDefinition` objects, not Python scripts)
+  - Remove `.codex/` directory creation entirely
+- [ ] Update `generateIncidentAgentsMd()`:
+  - Write to workspace root (not `.codex/`)
+  - Remove Codex-specific structured output protocol (pi-mono handles output natively)
+  - Include skill instructions inline: for each enabled skill, append its SKILL.md body content
+  - Remove Python import instructions from Quick Start sections
 - [ ] Update `generateSkillMd()`:
-  - Keep YAML frontmatter format (pi-mono supports this)
-  - Update tool import instructions for pi-mono tool names
-  - Tools are now native pi-mono `ToolDefinition` objects, not Python scripts
-- [ ] Ensure backward compatibility during migration:
-  - If both old and new worker might run, create both `.codex/` and pi-mono compatible files
+  - Remove Python import code generation (no more `from scripts.ssh import ...`)
+  - Tools are now pi-mono native `ToolDefinition` objects registered at session creation time
+  - Keep YAML frontmatter format (useful for metadata)
+  - Simplify to just frontmatter + user prompt body
+- [ ] Remove or simplify `AssignTools()`:
+  - Remove symlink creation logic (no Python wrappers to symlink)
+  - Keep database association for tracking which tools are assigned
+  - Remove `mcp_client.py` symlink creation
 - [ ] Update tests
 - [ ] Run `go test ./internal/services/...` - must pass before task 10
 
 ### Task 10: Update frontend for multi-provider LLM settings
 
 **Files:**
-- Modify: `web/src/` - Settings page components for LLM provider configuration
+- Modify: `web/src/` - Settings page components
 
 **Steps:**
-- [ ] Update the OpenAI settings page to become a general "LLM Provider" settings page:
-  - Provider selector: OpenAI, Anthropic, Google, OpenRouter, Custom
-  - Per-provider API key input fields
-  - Model selector that shows models for the selected provider
-  - Thinking level / reasoning effort selector
-  - Keep existing proxy configuration
-- [ ] Update API calls to use the updated settings endpoints
-- [ ] Keep backward compatibility: if only OpenAI is configured, it works as before
-- [ ] Update model dropdown to show provider-appropriate models:
-  - OpenAI: gpt-5.1-codex, gpt-5.2, etc.
-  - Anthropic: claude-opus-4-5, claude-sonnet-4-5, etc.
-  - Google: gemini-2.5-pro, gemini-2.5-flash, etc.
+- [ ] Replace the OpenAI settings page with a "LLM Provider" settings page:
+  - Provider selector dropdown: OpenAI, Anthropic, Google, OpenRouter, Custom
+  - API key input field (single field, context changes per provider)
+  - Model input/selector (free text with suggestions per provider)
+  - Thinking level selector: off, minimal, low, medium, high, xhigh
+  - Base URL field (visible when provider is "custom" or "openrouter")
+  - Keep existing proxy configuration section
+- [ ] Remove ChatGPT subscription auth UI:
+  - Remove device auth flow
+  - Remove OAuth token display
+  - Remove "ChatGPT Plus" auth method selector
+- [ ] Update API calls to use new LLM settings endpoints:
+  - `GET/PUT /api/settings/llm` instead of `/api/settings/openai`
+- [ ] Update model suggestions per provider:
+  - OpenAI: gpt-4o, o3, o4-mini, etc.
+  - Anthropic: claude-opus-4-6, claude-sonnet-4-5, claude-haiku-4-5
+  - Google: gemini-2.5-pro, gemini-2.5-flash
 - [ ] Test the settings page renders and saves correctly
 
-### Task 11: Integration testing and cleanup
+### Task 11: Delete old codex code and cleanup
 
 **Files:**
-- Modify: `Makefile` - Add agent-worker test targets
-- Modify: `.gitignore` - Add agent-worker build artifacts
-- Modify: `CLAUDE.md` - Update instructions for new architecture
+- Delete: `codex-worker/` (entire directory)
+- Delete: `codex-tools/` (entire directory)
+- Delete: `Dockerfile.codex`
+- Delete: `entrypoint.sh`
+- Modify: `Makefile`
+- Modify: `.gitignore`
+- Modify: `CLAUDE.md`
 
 **Steps:**
-- [ ] Add Makefile targets:
-  - `make test-agent` - Run agent-worker tests
-  - `make test-all` - Include agent-worker in full test suite
-  - `make build-agent` - Build agent-worker Docker image
-- [ ] End-to-end integration test:
-  - Start all containers with `docker-compose up`
-  - Verify agent-worker connects to API via WebSocket
-  - Send a test incident via API
-  - Verify agent-worker receives and processes it
-  - Verify streaming output reaches the API
-  - Verify completion with metrics
-- [ ] Update CLAUDE.md with:
+- [ ] Delete `codex-worker/` directory
+- [ ] Delete `codex-tools/` directory
+- [ ] Delete `Dockerfile.codex`
+- [ ] Delete `entrypoint.sh`
+- [ ] Update Makefile:
+  - Add `make test-agent` - Run agent-worker tests (`cd agent-worker && npm test`)
+  - Update `make test-all` to include agent-worker
+  - Add `make build-agent` - Build agent-worker Docker image
+  - Remove old codex-related targets
+- [ ] Update `.gitignore` for agent-worker artifacts (`agent-worker/node_modules/`, `agent-worker/dist/`)
+- [ ] Update `CLAUDE.md`:
   - New architecture description (pi-mono SDK instead of Codex CLI)
-  - Updated test commands for agent-worker
-  - Updated container mapping
+  - Updated test commands
+  - Updated container mapping (akmatori-agent instead of akmatori-codex)
   - Updated directory structure
-- [ ] Remove or deprecate old codex-worker code:
-  - Move `codex-worker/` to `_deprecated/codex-worker/` (keep for reference)
-  - Move `codex-tools/` to `_deprecated/codex-tools/`
-  - Move `Dockerfile.codex` to `_deprecated/`
-- [ ] Update `.gitignore` for agent-worker artifacts
 
-### Task 12: Verify acceptance criteria
+### Task 12: Integration testing and acceptance criteria
 
+- [ ] `docker-compose build && docker-compose up -d` - all containers start
 - [ ] Agent-worker connects to API via WebSocket and sends "ready" status
-- [ ] New incidents are processed: API sends task → worker creates pi-mono session → streams output → sends completion
+- [ ] New incidents are processed: API sends task -> worker creates pi-mono session -> streams output -> sends completion
 - [ ] Continue incidents work: existing session is resumed with follow-up message
 - [ ] Cancel incidents work: active session is aborted
 - [ ] SSH tool works: agent can execute remote commands via MCP Gateway
 - [ ] Zabbix tool works: agent can query Zabbix API via MCP Gateway
 - [ ] Multi-provider support: can configure Anthropic, OpenAI, or Google as LLM provider
-- [ ] Streaming output format is compatible with existing frontend display
+- [ ] Streaming output format is displayed correctly in frontend
 - [ ] Session persistence works: sessions survive container restarts
 - [ ] Proxy configuration is respected for LLM API calls
-- [ ] Docker build and healthcheck work
-- [ ] Run full test suite: `make test-all` and `npm test` in agent-worker
+- [ ] Docker healthcheck works
+- [ ] Run full test suite: `make test-all` and `cd agent-worker && npm test`
 - [ ] Run linter: `go vet ./...` for Go code
 - [ ] Verify test coverage meets 80%+
 
