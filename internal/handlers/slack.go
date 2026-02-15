@@ -23,7 +23,7 @@ import (
 type SlackHandler struct {
 	client         *slack.Client
 	codexExecutor  *executor.Executor
-	codexWSHandler *CodexWSHandler
+	agentWSHandler *AgentWSHandler
 	skillService   *services.SkillService
 
 	// Alert channel support
@@ -45,13 +45,13 @@ const progressUpdateInterval = 2 * time.Second
 func NewSlackHandler(
 	client *slack.Client,
 	codexExecutor *executor.Executor,
-	codexWSHandler *CodexWSHandler,
+	agentWSHandler *AgentWSHandler,
 	skillService *services.SkillService,
 ) *SlackHandler {
 	return &SlackHandler{
 		client:         client,
 		codexExecutor:  codexExecutor,
-		codexWSHandler: codexWSHandler,
+		agentWSHandler: agentWSHandler,
 		skillService:   skillService,
 		alertChannels:  make(map[string]*database.AlertSourceInstance),
 		alertExtractor: extraction.NewAlertExtractor(),
@@ -520,32 +520,17 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 
 	taskWithGuidance := executor.PrependGuidance(text)
 
-	// Execute via WebSocket-based Codex worker
-	if h.codexWSHandler != nil && h.codexWSHandler.IsWorkerConnected() {
-		log.Printf("Using WebSocket-based Codex worker for incident %s", incidentUUID)
+	// Execute via WebSocket-based agent worker
+	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
+		log.Printf("Using WebSocket-based agent worker for incident %s", incidentUUID)
 
-		// Fetch OpenAI settings from database
-		var openaiSettings *OpenAISettings
-		if dbSettings, err := database.GetOpenAISettings(); err == nil && dbSettings != nil {
-			openaiSettings = &OpenAISettings{
-				APIKey:          dbSettings.APIKey,
-				Model:           dbSettings.Model,
-				ReasoningEffort: dbSettings.ModelReasoningEffort,
-				BaseURL:         dbSettings.BaseURL,
-				ProxyURL:        dbSettings.ProxyURL,
-				NoProxy:         dbSettings.NoProxy,
-				// ChatGPT subscription auth fields
-				AuthMethod:          string(dbSettings.AuthMethod),
-				ChatGPTAccessToken:  dbSettings.ChatGPTAccessToken,
-				ChatGPTRefreshToken: dbSettings.ChatGPTRefreshToken,
-			}
-			// Add expiry timestamp if set
-			if dbSettings.ChatGPTExpiresAt != nil {
-				openaiSettings.ChatGPTExpiresAt = dbSettings.ChatGPTExpiresAt.Format(time.RFC3339)
-			}
-			log.Printf("Using OpenAI model: %s, auth method: %s", dbSettings.Model, dbSettings.AuthMethod)
+		// Fetch LLM settings from database
+		var llmSettings *LLMSettingsForWorker
+		if dbSettings, err := database.GetLLMSettings(); err == nil && dbSettings != nil {
+			llmSettings = BuildLLMSettingsForWorker(dbSettings)
+			log.Printf("Using LLM provider: %s, model: %s", dbSettings.Provider, dbSettings.Model)
 		} else {
-			log.Printf("Warning: Could not fetch OpenAI settings: %v", err)
+			log.Printf("Warning: Could not fetch LLM settings: %v", err)
 		}
 
 		// Create channels for async result handling
@@ -583,16 +568,16 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		var wsErr error
 		if sessionID != "" {
 			log.Printf("Continuing session %s for incident %s", sessionID, incidentUUID)
-			wsErr = h.codexWSHandler.ContinueIncident(incidentUUID, sessionID, taskWithGuidance, callback)
+			wsErr = h.agentWSHandler.ContinueIncident(incidentUUID, sessionID, taskWithGuidance, callback)
 		} else {
-			log.Printf("Starting new Codex session for incident %s", incidentUUID)
-			wsErr = h.codexWSHandler.StartIncident(incidentUUID, taskWithGuidance, openaiSettings, callback)
+			log.Printf("Starting new agent session for incident %s", incidentUUID)
+			wsErr = h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, callback)
 		}
 
 		if wsErr != nil {
 			log.Printf("Failed to start/continue incident via WebSocket: %v", wsErr)
 			h.finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text,
-				fmt.Sprintf("❌ Codex worker error: %v", wsErr), "", true, "")
+				fmt.Sprintf("❌ Agent worker error: %v", wsErr), "", true, "")
 			return
 		}
 
@@ -627,9 +612,9 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 	}
 
 	// No WebSocket worker available
-	log.Printf("ERROR: Codex worker not connected for incident %s", incidentUUID)
+	log.Printf("ERROR: Agent worker not connected for incident %s", incidentUUID)
 	h.finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text,
-		"❌ Codex worker not connected. Please check that the akmatori-codex container is running.", "", true, "")
+		"❌ Agent worker not connected. Please check that the agent-worker container is running.", "", true, "")
 }
 
 // finishSlackMessage handles the final steps of Slack message processing

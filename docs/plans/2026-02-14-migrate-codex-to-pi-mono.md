@@ -308,28 +308,28 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 - Update all references to the handler across the codebase
 
 **Steps:**
-- [ ] Rename file and update all imports/references
-- [ ] Replace `OpenAISettings` struct in handler with `LLMSettings`:
+- [x] Rename file and update all imports/references
+- [x] Replace `OpenAISettings` struct in handler with `LLMSettings`:
   - `Provider` field
   - `APIKey` field
   - `Model` field
   - `ThinkingLevel` field
   - `BaseURL` field
-- [ ] Update `CodexMessage` -> `AgentMessage`:
+- [x] Update `CodexMessage` -> `AgentMessage`:
   - Replace `OpenAIAPIKey` with `APIKey`
   - Replace `ReasoningEffort` with `ThinkingLevel`
   - Add `Provider` field
   - Remove all ChatGPT subscription fields
   - Remove device auth fields
-- [ ] Update `CodexWSHandler` -> `AgentWSHandler`:
+- [x] Update `CodexWSHandler` -> `AgentWSHandler`:
   - Remove `persistRefreshedTokens()` (no OAuth)
   - Remove `handleDeviceAuthResponse()` (no device auth)
   - Remove `StartDeviceAuth()` / `CancelDeviceAuth()`
   - Update `StartIncident()` to include provider + API key from `LLMSettings`
-- [ ] Keep WebSocket endpoint as `/ws/codex` for now (rename later to avoid config churn)
-- [ ] Update all callers of the handler (alert handlers, settings handlers, etc.)
-- [ ] Update existing handler tests
-- [ ] Run `go test ./internal/handlers/...` - must pass before task 9
+- [x] Keep WebSocket endpoint as `/ws/codex` for now (rename later to avoid config churn)
+- [x] Update all callers of the handler (alert handlers, settings handlers, etc.)
+- [x] Update existing handler tests
+- [x] Run `go test ./internal/handlers/...` - must pass before task 9
 
 ### Task 9: Update skill service for pi-mono workspace format
 

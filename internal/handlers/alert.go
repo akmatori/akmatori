@@ -29,7 +29,7 @@ type AlertHandler struct {
 	config             *config.Config
 	slackManager       *slackutil.Manager
 	codexExecutor      *executor.Executor
-	codexWSHandler     *CodexWSHandler
+	agentWSHandler     *AgentWSHandler
 	skillService       *services.SkillService
 	alertService       *services.AlertService
 	channelResolver    *slackutil.ChannelResolver
@@ -44,7 +44,7 @@ func NewAlertHandler(
 	cfg *config.Config,
 	slackManager *slackutil.Manager,
 	codexExecutor *executor.Executor,
-	codexWSHandler *CodexWSHandler,
+	agentWSHandler *AgentWSHandler,
 	skillService *services.SkillService,
 	alertService *services.AlertService,
 	channelResolver *slackutil.ChannelResolver,
@@ -54,7 +54,7 @@ func NewAlertHandler(
 		config:             cfg,
 		slackManager:       slackManager,
 		codexExecutor:      codexExecutor,
-		codexWSHandler:     codexWSHandler,
+		agentWSHandler:     agentWSHandler,
 		skillService:       skillService,
 		alertService:       alertService,
 		channelResolver:    channelResolver,
@@ -446,31 +446,16 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 	taskWithGuidance := executor.PrependGuidance(investigationPrompt)
 
 	// Try WebSocket-based execution first (new architecture)
-	if h.codexWSHandler != nil && h.codexWSHandler.IsWorkerConnected() {
-		log.Printf("Using WebSocket-based Codex worker for incident %s", incidentUUID)
+	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
+		log.Printf("Using WebSocket-based agent worker for incident %s", incidentUUID)
 
-		// Fetch OpenAI settings from database
-		var openaiSettings *OpenAISettings
-		if dbSettings, err := database.GetOpenAISettings(); err == nil && dbSettings != nil {
-			openaiSettings = &OpenAISettings{
-				APIKey:          dbSettings.APIKey,
-				Model:           dbSettings.Model,
-				ReasoningEffort: dbSettings.ModelReasoningEffort,
-				BaseURL:         dbSettings.BaseURL,
-				ProxyURL:        dbSettings.ProxyURL,
-				NoProxy:         dbSettings.NoProxy,
-				// ChatGPT subscription auth fields
-				AuthMethod:          string(dbSettings.AuthMethod),
-				ChatGPTAccessToken:  dbSettings.ChatGPTAccessToken,
-				ChatGPTRefreshToken: dbSettings.ChatGPTRefreshToken,
-			}
-			// Add expiry timestamp if set
-			if dbSettings.ChatGPTExpiresAt != nil {
-				openaiSettings.ChatGPTExpiresAt = dbSettings.ChatGPTExpiresAt.Format(time.RFC3339)
-			}
-			log.Printf("Using OpenAI model: %s, auth method: %s", dbSettings.Model, dbSettings.AuthMethod)
+		// Fetch LLM settings from database
+		var llmSettings *LLMSettingsForWorker
+		if dbSettings, err := database.GetLLMSettings(); err == nil && dbSettings != nil {
+			llmSettings = BuildLLMSettingsForWorker(dbSettings)
+			log.Printf("Using LLM provider: %s, model: %s", dbSettings.Provider, dbSettings.Model)
 		} else {
-			log.Printf("Warning: Could not fetch OpenAI settings: %v", err)
+			log.Printf("Warning: Could not fetch LLM settings: %v", err)
 		}
 
 		// Create channels for async result handling
@@ -502,7 +487,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 			},
 		}
 
-		if err := h.codexWSHandler.StartIncident(incidentUUID, taskWithGuidance, openaiSettings, callback); err != nil {
+		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, callback); err != nil {
 			log.Printf("Failed to start incident via WebSocket: %v, falling back to local execution", err)
 			h.runInvestigationLocal(incidentUUID, workingDir, alert, instance, threadTS, taskWithGuidance)
 			return
@@ -909,26 +894,13 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 	taskWithGuidance := executor.PrependGuidance(investigationPrompt)
 
 	// Try WebSocket-based execution first
-	if h.codexWSHandler != nil && h.codexWSHandler.IsWorkerConnected() {
-		log.Printf("Using WebSocket-based Codex worker for Slack channel incident %s", incidentUUID)
+	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
+		log.Printf("Using WebSocket-based agent worker for Slack channel incident %s", incidentUUID)
 
-		// Fetch OpenAI settings from database
-		var openaiSettings *OpenAISettings
-		if dbSettings, err := database.GetOpenAISettings(); err == nil && dbSettings != nil {
-			openaiSettings = &OpenAISettings{
-				APIKey:          dbSettings.APIKey,
-				Model:           dbSettings.Model,
-				ReasoningEffort: dbSettings.ModelReasoningEffort,
-				BaseURL:         dbSettings.BaseURL,
-				ProxyURL:        dbSettings.ProxyURL,
-				NoProxy:         dbSettings.NoProxy,
-				AuthMethod:      string(dbSettings.AuthMethod),
-				ChatGPTAccessToken:  dbSettings.ChatGPTAccessToken,
-				ChatGPTRefreshToken: dbSettings.ChatGPTRefreshToken,
-			}
-			if dbSettings.ChatGPTExpiresAt != nil {
-				openaiSettings.ChatGPTExpiresAt = dbSettings.ChatGPTExpiresAt.Format(time.RFC3339)
-			}
+		// Fetch LLM settings from database
+		var llmSettings *LLMSettingsForWorker
+		if dbSettings, err := database.GetLLMSettings(); err == nil && dbSettings != nil {
+			llmSettings = BuildLLMSettingsForWorker(dbSettings)
 		}
 
 		// Post initial progress message in the Slack thread
@@ -972,7 +944,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 			},
 		}
 
-		if err := h.codexWSHandler.StartIncident(incidentUUID, taskWithGuidance, openaiSettings, callback); err != nil {
+		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, callback); err != nil {
 			log.Printf("Failed to start incident via WebSocket: %v, falling back to local execution", err)
 			h.runSlackChannelInvestigationLocal(incidentUUID, workingDir, alert, instance, slackChannelID, slackMessageTS, taskWithGuidance)
 			return
