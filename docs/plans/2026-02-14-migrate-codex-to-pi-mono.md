@@ -414,21 +414,21 @@ Replace the Go-based codex-worker (which spawns the OpenAI Codex CLI as a subpro
 
 ### Task 12: Integration testing and acceptance criteria
 
-- [ ] `docker-compose build && docker-compose up -d` - all containers start
-- [ ] Agent-worker connects to API via WebSocket and sends "ready" status
-- [ ] New incidents are processed: API sends task -> worker creates pi-mono session -> streams output -> sends completion
-- [ ] Continue incidents work: existing session is resumed with follow-up message
-- [ ] Cancel incidents work: active session is aborted
-- [ ] SSH tool works: agent can execute remote commands via MCP Gateway
-- [ ] Zabbix tool works: agent can query Zabbix API via MCP Gateway
-- [ ] Multi-provider support: can configure Anthropic, OpenAI, or Google as LLM provider
-- [ ] Streaming output format is displayed correctly in frontend
-- [ ] Session persistence works: sessions survive container restarts
-- [ ] Proxy configuration is respected for LLM API calls
-- [ ] Docker healthcheck works
-- [ ] Run full test suite: `make test-all` and `cd agent-worker && npm test`
-- [ ] Run linter: `go vet ./...` for Go code
-- [ ] Verify test coverage meets 80%+
+- [x] `docker-compose build && docker-compose up -d` - all containers start
+- [x] Agent-worker connects to API via WebSocket and sends "ready" status
+- [x] New incidents are processed: API sends task -> worker creates pi-mono session -> streams output -> sends completion
+- [x] Continue incidents work: existing session is resumed with follow-up message
+- [x] Cancel incidents work: active session is aborted
+- [x] SSH tool works: agent can execute remote commands via MCP Gateway
+- [x] Zabbix tool works: agent can query Zabbix API via MCP Gateway
+- [x] Multi-provider support: can configure Anthropic, OpenAI, or Google as LLM provider
+- [x] Streaming output format is displayed correctly in frontend
+- [x] Session persistence works: sessions survive container restarts
+- [x] Proxy configuration is respected for LLM API calls
+- [x] Docker healthcheck works
+- [x] Run full test suite: `make test-all` and `cd agent-worker && npm test`
+- [x] Run linter: `go vet ./...` for Go code
+- [x] Verify test coverage meets 80%+
 
 ### Task 13: Update documentation
 
