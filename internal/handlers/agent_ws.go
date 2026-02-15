@@ -429,9 +429,10 @@ func (h *AgentWSHandler) BroadcastProxyConfig(settings *database.ProxySettings) 
 	return h.SendToWorker(msg)
 }
 
-// BuildLLMSettingsForWorker creates LLMSettingsForWorker from database LLMSettings
+// BuildLLMSettingsForWorker creates LLMSettingsForWorker from database LLMSettings.
+// Returns nil if settings are nil, disabled, or missing an API key.
 func BuildLLMSettingsForWorker(dbSettings *database.LLMSettings) *LLMSettingsForWorker {
-	if dbSettings == nil {
+	if dbSettings == nil || !dbSettings.IsActive() {
 		return nil
 	}
 	return &LLMSettingsForWorker{

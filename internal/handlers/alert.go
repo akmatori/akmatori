@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log"
@@ -488,8 +487,10 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 		}
 
 		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, callback); err != nil {
-			log.Printf("Failed to start incident via WebSocket: %v, falling back to local execution", err)
-			h.runInvestigationLocal(incidentUUID, workingDir, alert, instance, threadTS, taskWithGuidance)
+			log.Printf("Failed to start incident via WebSocket: %v", err)
+			errorMsg := fmt.Sprintf("Failed to start investigation: %v", err)
+			h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg)
+			h.updateSlackWithResult(threadTS, "❌ "+errorMsg, true)
 			return
 		}
 
@@ -517,57 +518,13 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 		return
 	}
 
-	// Fall back to local execution (legacy)
-	log.Printf("WebSocket worker not available, using local execution for incident %s", incidentUUID)
-	h.runInvestigationLocal(incidentUUID, workingDir, alert, instance, threadTS, taskWithGuidance)
+	// No WebSocket worker available
+	log.Printf("ERROR: Agent worker not connected for incident %s", incidentUUID)
+	errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
+	h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg)
+	h.updateSlackWithResult(threadTS, "❌ "+errorMsg, true)
 }
 
-// runInvestigationLocal runs investigation using the local executor (legacy fallback)
-func (h *AlertHandler) runInvestigationLocal(incidentUUID, workingDir string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, threadTS string, taskWithGuidance string) {
-	ctx := context.Background()
-
-	result := h.codexExecutor.ExecuteForSlackInDirectory(
-		ctx,
-		taskWithGuidance,
-		"",
-		workingDir,
-		func(progress string) {
-			log.Printf("Investigation progress for %s: %s", alert.AlertName, progress)
-		},
-	)
-
-	// Update incident with results
-	finalStatus := database.IncidentStatusCompleted
-	if result.Error != nil {
-		finalStatus = database.IncidentStatusFailed
-	}
-
-	alertHeader := fmt.Sprintf(`Alert Investigation Log
-
-Alert: %s
-Source: %s (%s)
-Host: %s
-Service: %s
-Severity: %s
-Summary: %s
-
---- Investigation ---
-
-`, alert.AlertName, instance.AlertSourceType.DisplayName, instance.Name,
-		alert.TargetHost, alert.TargetService, alert.Severity, alert.Summary)
-
-	fullLogWithContext := alertHeader + result.FullLog
-
-	if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, result.SessionID, fullLogWithContext, result.Response); err != nil {
-		log.Printf("Warning: Failed to update incident: %v", err)
-	}
-
-	// Update Slack - include reasoning context
-	slackResponse := buildSlackResponse(result.FullLog, result.Response)
-	h.updateSlackWithResult(threadTS, slackResponse, result.Error != nil)
-
-	log.Printf("Investigation completed for alert: %s (status: %s, local)", alert.AlertName, finalStatus)
-}
 
 // buildSlackResponse prepends the last N lines of the reasoning/execution log
 // to the final response so Slack readers can see investigation context.
@@ -945,8 +902,11 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		}
 
 		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, callback); err != nil {
-			log.Printf("Failed to start incident via WebSocket: %v, falling back to local execution", err)
-			h.runSlackChannelInvestigationLocal(incidentUUID, workingDir, alert, instance, slackChannelID, slackMessageTS, taskWithGuidance)
+			log.Printf("Failed to start incident via WebSocket: %v", err)
+			errorMsg := fmt.Sprintf("Failed to start investigation: %v", err)
+			h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg)
+			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
+			h.postSlackThreadReply(slackChannelID, slackMessageTS, "❌ "+errorMsg)
 			return
 		}
 
@@ -981,79 +941,14 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		return
 	}
 
-	// Fallback to local execution
-	h.runSlackChannelInvestigationLocal(incidentUUID, workingDir, alert, instance, slackChannelID, slackMessageTS, taskWithGuidance)
+	// No WebSocket worker available
+	log.Printf("ERROR: Agent worker not connected for Slack channel incident %s", incidentUUID)
+	errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
+	h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg)
+	h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
+	h.postSlackThreadReply(slackChannelID, slackMessageTS, "❌ "+errorMsg)
 }
 
-// runSlackChannelInvestigationLocal runs investigation using local executor
-func (h *AlertHandler) runSlackChannelInvestigationLocal(
-	incidentUUID, workingDir string,
-	alert alerts.NormalizedAlert,
-	instance *database.AlertSourceInstance,
-	slackChannelID, slackMessageTS string,
-	taskWithGuidance string,
-) {
-	ctx := context.Background()
-
-	// Post initial progress message in the Slack thread
-	progressMsgTS := h.postSlackThreadReplyGetTS(slackChannelID, slackMessageTS,
-		"🔍 *Investigating...*\n```\nWaiting for output...\n```")
-	lastSlackUpdate := time.Now()
-
-	result := h.codexExecutor.ExecuteForSlackInDirectory(
-		ctx,
-		taskWithGuidance,
-		"",
-		workingDir,
-		func(progress string) {
-			log.Printf("Investigation progress for %s: %s", alert.AlertName, progress)
-
-			// Throttled update of the Slack progress message
-			if progressMsgTS != "" && time.Since(lastSlackUpdate) >= slackProgressInterval {
-				lastSlackUpdate = time.Now()
-				progressLines := truncateLogForSlack(progress, 3000)
-				h.updateSlackThreadMessage(slackChannelID, progressMsgTS,
-					fmt.Sprintf("🔍 *Investigating...*\n```\n%s\n```", progressLines))
-			}
-		},
-	)
-
-	// Update incident
-	finalStatus := database.IncidentStatusCompleted
-	if result.Error != nil {
-		finalStatus = database.IncidentStatusFailed
-	}
-
-	alertHeader := fmt.Sprintf(`Slack Channel Alert Investigation
-
-Alert: %s
-Source: %s (%s)
-Host: %s
-Service: %s
-Severity: %s
-Summary: %s
-
---- Investigation ---
-
-`, alert.AlertName, instance.AlertSourceType.DisplayName, instance.Name,
-		alert.TargetHost, alert.TargetService, alert.Severity, alert.Summary)
-
-	fullLog := alertHeader + result.FullLog
-	h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, result.SessionID, fullLog, result.Response)
-
-	// Update Slack thread - replace progress message with final result
-	h.updateSlackChannelReactions(slackChannelID, slackMessageTS, result.Error != nil)
-	if progressMsgTS != "" {
-		// Reasoning was already streamed live, so just show the final response
-		h.updateSlackThreadMessage(slackChannelID, progressMsgTS, result.Response)
-	} else {
-		// No live progress was shown, include reasoning context
-		slackResponse := buildSlackResponse(result.FullLog, result.Response)
-		h.postSlackThreadReply(slackChannelID, slackMessageTS, slackResponse)
-	}
-
-	log.Printf("Investigation completed for Slack channel alert: %s (local)", alert.AlertName)
-}
 
 // updateSlackChannelReactions updates reactions on the original Slack message
 func (h *AlertHandler) updateSlackChannelReactions(channelID, messageTS string, hasError bool) {
