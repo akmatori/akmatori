@@ -1,10 +1,15 @@
 package handlers
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/akmatori/akmatori/internal/alerts"
+	"github.com/akmatori/akmatori/internal/database"
 )
 
 func TestPluralize(t *testing.T) {
@@ -246,4 +251,221 @@ func TestTruncateLogForSlack_EmptyLog(t *testing.T) {
 	if result != "" {
 		t.Errorf("truncateLogForSlack(\"\") = %q, want empty", result)
 	}
+}
+
+func TestConvertLabels(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  map[string]string
+		verify func(result map[string]interface{}) bool
+	}{
+		{
+			name:  "nil map returns empty map",
+			input: nil,
+			verify: func(result map[string]interface{}) bool {
+				return len(result) == 0
+			},
+		},
+		{
+			name:  "empty map returns empty map",
+			input: map[string]string{},
+			verify: func(result map[string]interface{}) bool {
+				return len(result) == 0
+			},
+		},
+		{
+			name: "single label converted",
+			input: map[string]string{
+				"host": "server1",
+			},
+			verify: func(result map[string]interface{}) bool {
+				v, ok := result["host"]
+				return ok && v == "server1"
+			},
+		},
+		{
+			name: "multiple labels converted",
+			input: map[string]string{
+				"host":     "server1",
+				"env":      "production",
+				"severity": "critical",
+			},
+			verify: func(result map[string]interface{}) bool {
+				return len(result) == 3 &&
+					result["host"] == "server1" &&
+					result["env"] == "production" &&
+					result["severity"] == "critical"
+			},
+		},
+		{
+			name: "empty string values preserved",
+			input: map[string]string{
+				"key": "",
+			},
+			verify: func(result map[string]interface{}) bool {
+				v, ok := result["key"]
+				return ok && v == ""
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertLabels(tt.input)
+			if result == nil {
+				t.Fatal("convertLabels returned nil")
+			}
+			if !tt.verify(result) {
+				t.Errorf("convertLabels(%v) verification failed, got %v", tt.input, result)
+			}
+		})
+	}
+}
+
+func TestNewAlertHandler(t *testing.T) {
+	// Test that NewAlertHandler creates valid handler with nil dependencies
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	if h == nil {
+		t.Fatal("NewAlertHandler returned nil")
+	}
+	if h.adapters == nil {
+		t.Error("adapters map should be initialized")
+	}
+	if len(h.adapters) != 0 {
+		t.Errorf("adapters map should be empty, got %d entries", len(h.adapters))
+	}
+}
+
+func TestAlertHandler_RegisterAdapter(t *testing.T) {
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+
+	// Create a mock adapter
+	adapter := &mockAlertAdapter{sourceType: "prometheus"}
+
+	h.RegisterAdapter(adapter)
+
+	if len(h.adapters) != 1 {
+		t.Errorf("expected 1 adapter, got %d", len(h.adapters))
+	}
+
+	registered, ok := h.adapters["prometheus"]
+	if !ok {
+		t.Error("prometheus adapter not found")
+	}
+	if registered.GetSourceType() != "prometheus" {
+		t.Error("registered adapter source type does not match")
+	}
+}
+
+func TestAlertHandler_RegisterAdapter_Multiple(t *testing.T) {
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+
+	// Register multiple adapters
+	adapters := []string{"prometheus", "grafana", "datadog", "pagerduty"}
+	for _, name := range adapters {
+		h.RegisterAdapter(&mockAlertAdapter{sourceType: name})
+	}
+
+	if len(h.adapters) != len(adapters) {
+		t.Errorf("expected %d adapters, got %d", len(adapters), len(h.adapters))
+	}
+
+	for _, name := range adapters {
+		if _, ok := h.adapters[name]; !ok {
+			t.Errorf("adapter %q not registered", name)
+		}
+	}
+}
+
+func TestAlertHandler_RegisterAdapter_Overwrite(t *testing.T) {
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+
+	adapter1 := &mockAlertAdapter{sourceType: "prometheus", id: "first"}
+	adapter2 := &mockAlertAdapter{sourceType: "prometheus", id: "second"}
+
+	h.RegisterAdapter(adapter1)
+	h.RegisterAdapter(adapter2)
+
+	if len(h.adapters) != 1 {
+		t.Errorf("expected 1 adapter after overwrite, got %d", len(h.adapters))
+	}
+
+	// Verify an adapter with this source type is registered
+	_, ok := h.adapters["prometheus"]
+	if !ok {
+		t.Error("prometheus adapter should still exist after overwrite")
+	}
+}
+
+func TestAlertHandler_HandleWebhook_MethodNotAllowed(t *testing.T) {
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+
+	methods := []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodPatch}
+	for _, method := range methods {
+		t.Run(method, func(t *testing.T) {
+			req := httptest.NewRequest(method, "/webhook/alert/test-uuid", nil)
+			w := httptest.NewRecorder()
+
+			h.HandleWebhook(w, req)
+
+			if w.Code != http.StatusMethodNotAllowed {
+				t.Errorf("HandleWebhook(%s) = %d, want %d", method, w.Code, http.StatusMethodNotAllowed)
+			}
+		})
+	}
+}
+
+func TestAlertHandler_HandleWebhook_MissingUUID(t *testing.T) {
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/alert/", nil)
+	w := httptest.NewRecorder()
+
+	h.HandleWebhook(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("HandleWebhook with empty UUID = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestAlertHandler_getBaseURL(t *testing.T) {
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+
+	// Test default value
+	os.Unsetenv("AKMATORI_BASE_URL")
+	url := h.getBaseURL()
+	if url != "http://localhost:3000" {
+		t.Errorf("getBaseURL() with no env = %q, want %q", url, "http://localhost:3000")
+	}
+
+	// Test with env var set
+	os.Setenv("AKMATORI_BASE_URL", "https://akmatori.example.com")
+	defer os.Unsetenv("AKMATORI_BASE_URL")
+
+	url = h.getBaseURL()
+	if url != "https://akmatori.example.com" {
+		t.Errorf("getBaseURL() with env = %q, want %q", url, "https://akmatori.example.com")
+	}
+}
+
+// mockAlertAdapter implements alerts.AlertAdapter for testing
+type mockAlertAdapter struct {
+	sourceType string
+	id         string
+}
+
+func (m *mockAlertAdapter) GetSourceType() string {
+	return m.sourceType
+}
+
+func (m *mockAlertAdapter) ParsePayload(body []byte, instance *database.AlertSourceInstance) ([]alerts.NormalizedAlert, error) {
+	return nil, nil
+}
+
+func (m *mockAlertAdapter) ValidateWebhookSecret(r *http.Request, instance *database.AlertSourceInstance) error {
+	return nil
+}
+
+func (m *mockAlertAdapter) GetDefaultMappings() database.JSONB {
+	return database.JSONB{}
 }
