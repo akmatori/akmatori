@@ -53,17 +53,230 @@ make verify           # go vet + all tests
 /opt/akmatori/
 ├── cmd/akmatori/           # Main API server entry point
 ├── internal/
-│   ├── alerts/adapters/    # Alert source adapters (Zabbix, Alertmanager, etc.)
+│   ├── alerts/
+│   │   ├── adapters/       # Alert source adapters (Zabbix, Alertmanager, etc.)
+│   │   └── extraction/     # AI-powered alert extraction from free-form text
 │   ├── database/           # GORM models and database logic
 │   ├── handlers/           # HTTP/WebSocket handlers
 │   ├── middleware/         # Auth, CORS middleware
+│   ├── output/             # Agent output parsing (structured blocks)
 │   ├── services/           # Business logic layer
+│   ├── slack/              # Slack integration (Socket Mode, hot-reload)
 │   └── utils/              # Utility functions
+├── codex-worker/           # Codex CLI execution worker (separate Go module)
+│   └── internal/
+│       ├── codex/          # Codex CLI runner
+│       ├── orchestrator/   # WebSocket message handling and execution
+│       ├── session/        # Session state persistence
+│       └── ws/             # WebSocket client for API communication
 ├── mcp-gateway/            # MCP protocol gateway (separate Go module)
-│   └── internal/tools/     # SSH and Zabbix tool implementations
+│   └── internal/
+│       ├── cache/          # Generic TTL cache implementation
+│       ├── database/       # Credential and config retrieval
+│       ├── mcp/            # MCP protocol handling
+│       ├── ratelimit/      # Token bucket rate limiter
+│       └── tools/          # SSH and Zabbix tool implementations
 ├── web/                    # React frontend
 └── tests/fixtures/         # Test payloads and mock data
 ```
+
+## Codex Worker Architecture
+
+The `codex-worker/` is a **separate Go module** that manages Codex CLI execution:
+
+### Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| Orchestrator | `internal/orchestrator/orchestrator.go` | Main coordinator - handles WebSocket messages, dispatches work |
+| Runner | `internal/codex/runner.go` | Executes Codex CLI, manages process lifecycle |
+| Session Store | `internal/session/store.go` | Persists session IDs for conversation continuity |
+| WS Client | `internal/ws/client.go` | WebSocket communication with API server |
+
+### Message Flow
+
+1. API server sends `new_incident` or `continue_incident` via WebSocket
+2. Orchestrator receives message, extracts OpenAI settings and proxy config
+3. Runner executes Codex CLI with streaming output
+4. Output is streamed back to API via WebSocket
+5. On completion, metrics (tokens, execution time) are reported
+
+### WebSocket Message Types
+
+| Type | Direction | Purpose |
+|------|-----------|---------|
+| `new_incident` | API → Worker | Start new investigation |
+| `continue_incident` | API → Worker | Continue existing session |
+| `cancel_incident` | API → Worker | Cancel running investigation |
+| `device_auth_start` | API → Worker | Start OAuth device flow |
+| `output` | Worker → API | Streaming output chunk |
+| `completed` | Worker → API | Investigation finished with metrics |
+| `error` | Worker → API | Execution failed |
+
+### OpenAI Authentication
+
+The worker supports multiple auth methods:
+- **API Key**: Direct `OPENAI_API_KEY` authentication
+- **ChatGPT OAuth**: Device code flow with token refresh (for ChatGPT Plus accounts)
+
+OAuth tokens are refreshed automatically and returned to API for storage.
+
+## Slack Integration
+
+The `internal/slack/` package provides real-time Slack monitoring:
+
+### Manager (`manager.go`)
+
+Hot-reloadable Slack connection manager:
+
+```go
+// Create and start manager
+manager := slack.NewManager()
+manager.SetEventHandler(myEventHandler)
+manager.Start(ctx)
+
+// Hot-reload on settings change (non-blocking)
+manager.TriggerReload()
+
+// Watch for reloads in background
+go manager.WatchForReloads(ctx)
+```
+
+**Key features:**
+- Socket Mode for real-time events (no public webhook needed)
+- Hot-reload without restart when settings change in database
+- Proxy support for both HTTP API and WebSocket connections
+- Thread-safe client access via `GetClient()` and `GetSocketClient()`
+
+### Channel Management (`channels.go`)
+
+Maps Slack channels to alert sources:
+- Channels can be designated as "alert channels"
+- Bot messages in alert channels trigger investigations
+- @mentions in threads allow follow-up questions
+- Thread parent messages are fetched for context
+
+### Event Types Handled
+
+| Event | Behavior |
+|-------|----------|
+| Bot message in alert channel | Create incident, start investigation |
+| @mention in alert thread | Continue investigation with question |
+| @mention in general channel | Direct response (not investigation) |
+
+## Alert Extraction (`internal/alerts/extraction/`)
+
+AI-powered extraction of structured alert data from free-form text:
+
+### How It Works
+
+1. Slack message (or any text) comes in
+2. `AlertExtractor` sends to GPT-4o-mini with extraction prompt
+3. Returns structured `NormalizedAlert` with:
+   - Alert name, severity, status
+   - Summary, description
+   - Target host/service
+   - Source system identification
+
+### Fallback Mode
+
+If OpenAI is not configured or API fails:
+- First line becomes alert name (stripped of emoji prefixes)
+- Full text becomes description
+- Defaults to `warning` severity, `firing` status
+
+### Usage
+
+```go
+extractor := extraction.NewAlertExtractor()
+alert, err := extractor.Extract(ctx, messageText)
+// Or with custom prompt:
+alert, err := extractor.ExtractWithPrompt(ctx, messageText, customPrompt)
+```
+
+### Cost Optimization
+
+- Uses `gpt-4o-mini` (fast, cheap)
+- Low temperature (0.1) for consistent results
+- Message truncated to 3000 chars
+- Graceful fallback on any error
+
+## Output Parser (`internal/output/`)
+
+Parses structured blocks from agent output for machine-readable results:
+
+### Structured Block Types
+
+```
+[FINAL_RESULT]
+status: resolved|unresolved|escalate
+summary: One-line summary
+actions_taken:
+- Action 1
+- Action 2
+recommendations:
+- Recommendation 1
+[/FINAL_RESULT]
+
+[ESCALATE]
+reason: Why escalation is needed
+urgency: low|medium|high|critical
+context: Additional context
+suggested_actions:
+- Suggested action 1
+[/ESCALATE]
+
+[PROGRESS]
+step: Current investigation step
+completed: What's been done
+findings_so_far: Current findings
+[/PROGRESS]
+```
+
+### Usage
+
+```go
+parsed := output.Parse(agentOutput)
+
+if parsed.FinalResult != nil {
+    // Investigation complete
+    fmt.Printf("Status: %s\n", parsed.FinalResult.Status)
+}
+
+if parsed.Escalation != nil {
+    // Needs human attention
+    notifyOnCall(parsed.Escalation.Urgency, parsed.Escalation.Reason)
+}
+
+// Clean output has structured blocks stripped
+fmt.Println(parsed.CleanOutput)
+```
+
+### Slack Formatter (`slack_formatter.go`)
+
+Converts parsed output to Slack Block Kit format for rich messages.
+
+## Current Test Coverage
+
+**Last updated: Feb 2026**
+
+| Package | Coverage | Status |
+|---------|----------|--------|
+| `internal/alerts/adapters` | 98.4% | ✅ Excellent |
+| `internal/utils` | 98.5% | ✅ Excellent |
+| `internal/alerts/extraction` | 40.2% | ⚠️ Needs work |
+| `internal/middleware` | 38.3% | ⚠️ Needs work |
+| `internal/slack` | 34.6% | ⚠️ Needs work |
+| `internal/database` | 32.2% | ⚠️ Needs work |
+| `internal/jobs` | 20.2% | ⚠️ Needs work |
+| `internal/services` | 13.0% | ⚠️ Needs work |
+| `internal/handlers` | 7.3% | ⚠️ Needs work |
+| `internal/output` | 0.0% | ❌ No tests |
+
+**Priority areas for test improvement:**
+1. `internal/output` - Add parser tests
+2. `internal/handlers` - Add HTTP handler tests
+3. `internal/services` - Add business logic tests
 
 ## Testing Workflow
 
