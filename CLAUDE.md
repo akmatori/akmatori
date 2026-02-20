@@ -278,6 +278,230 @@ Converts parsed output to Slack Block Kit format for rich messages.
 2. `internal/handlers` - Add HTTP handler tests
 3. `internal/services` - Add business logic tests
 
+## Testing Infrastructure
+
+### Test Helpers Package (`internal/testhelpers/`)
+
+The `testhelpers` package provides reusable utilities for testing:
+
+#### HTTP Test Helpers
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+func TestMyHandler(t *testing.T) {
+    // Fluent API for HTTP testing
+    ctx := testhelpers.NewHTTPTestContext(t, http.MethodPost, "/api/v1/alerts", nil)
+    ctx.
+        WithAPIKey("test-key").
+        WithJSONBody(map[string]string{"name": "test"}).
+        ExecuteFunc(myHandler).
+        AssertStatus(http.StatusOK).
+        AssertBodyContains("success")
+    
+    // Decode response JSON
+    var result MyResponse
+    ctx.DecodeJSON(&result)
+}
+```
+
+#### Mock Alert Adapter
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+func TestAlertProcessing(t *testing.T) {
+    // Create mock adapter with predefined responses
+    mock := testhelpers.NewMockAlertAdapter("prometheus").
+        WithAlerts(
+            testhelpers.NewAlertBuilder().
+                WithName("HighCPU").
+                WithSeverity("critical").
+                Build(),
+        )
+    
+    // Or configure it to return an error
+    mockWithError := testhelpers.NewMockAlertAdapter("datadog").
+        WithParseError(errors.New("invalid payload"))
+    
+    // Use in tests
+    alerts, err := mock.ParsePayload(payload, instance)
+}
+```
+
+#### Data Builders
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+// Build test alerts
+alert := testhelpers.NewAlertBuilder().
+    WithName("HighMemory").
+    WithSeverity("warning").
+    WithHost("prod-server-1").
+    WithService("nginx").
+    WithLabel("env", "production").
+    Build()
+
+// Build test incidents
+incident := testhelpers.NewIncidentBuilder().
+    WithID(42).
+    WithUUID("custom-uuid").
+    WithTitle("Database outage").
+    WithStatus("investigating").
+    Build()
+```
+
+#### Assertion Helpers
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+testhelpers.AssertEqual(t, expected, actual, "values should match")
+testhelpers.AssertNil(t, err, "operation should succeed")
+testhelpers.AssertNotNil(t, result, "result should be returned")
+testhelpers.AssertError(t, err, "invalid input should error")
+testhelpers.AssertContains(t, body, "success", "response body check")
+```
+
+### Benchmark Tests
+
+Critical paths have benchmark tests. Run benchmarks with:
+
+```bash
+# Run all benchmarks
+go test -bench=. ./...
+
+# Run specific package benchmarks with memory stats
+go test -bench=. -benchmem ./internal/alerts/adapters/...
+
+# Run benchmarks matching a pattern
+go test -bench=ParsePayload ./internal/alerts/adapters/...
+```
+
+**Benchmarked areas:**
+- Alert adapter payload parsing (`internal/alerts/adapters/`)
+- JSONB operations (`internal/database/`)
+- Auth middleware validation (`internal/middleware/`)
+- Title generation (`internal/services/`)
+
+### Test Fixture Location
+
+Test fixtures are in `tests/fixtures/`:
+
+```
+tests/fixtures/
+├── alerts/
+│   ├── alertmanager_alert.json
+│   ├── grafana_alert.json
+│   └── zabbix_alert.json
+└── ...
+```
+
+Load fixtures in tests:
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+func TestAlertParsing(t *testing.T) {
+    // Load raw bytes
+    payload := testhelpers.LoadFixture(t, "alerts/alertmanager_alert.json")
+    
+    // Or load and unmarshal JSON
+    var alert AlertPayload
+    testhelpers.LoadJSONFixture(t, "alerts/alertmanager_alert.json", &alert)
+}
+```
+
+### Testing Patterns
+
+#### Table-Driven Tests
+
+Use table-driven tests for comprehensive coverage:
+
+```go
+func TestSeverityMapping(t *testing.T) {
+    tests := []struct {
+        name     string
+        input    string
+        expected Severity
+    }{
+        {"critical maps correctly", "critical", SeverityCritical},
+        {"warning maps correctly", "warning", SeverityWarning},
+        {"unknown defaults to warning", "unknown", SeverityWarning},
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            result := mapSeverity(tt.input)
+            if result != tt.expected {
+                t.Errorf("mapSeverity(%q) = %v, want %v", tt.input, result, tt.expected)
+            }
+        })
+    }
+}
+```
+
+#### HTTP Handler Tests
+
+Use `httptest` for handler tests:
+
+```go
+func TestAPIHandler(t *testing.T) {
+    handler := NewHandler(deps)
+    
+    req := httptest.NewRequest(http.MethodPost, "/api/v1/resource", body)
+    req.Header.Set("Content-Type", "application/json")
+    rec := httptest.NewRecorder()
+    
+    handler.ServeHTTP(rec, req)
+    
+    if rec.Code != http.StatusOK {
+        t.Errorf("expected 200, got %d", rec.Code)
+    }
+}
+```
+
+#### Mocking External Services
+
+For external API calls, use interfaces and mocks:
+
+```go
+type ZabbixClient interface {
+    GetHosts(ctx context.Context) ([]Host, error)
+}
+
+// In tests:
+type mockZabbixClient struct {
+    hosts []Host
+    err   error
+}
+
+func (m *mockZabbixClient) GetHosts(ctx context.Context) ([]Host, error) {
+    return m.hosts, m.err
+}
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+make test
+
+# Run with coverage
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out  # View in browser
+
+# Run specific package
+go test -v ./internal/handlers/...
+
+# Run single test
+go test -v -run TestAlertHandler_HandleWebhook ./internal/handlers/...
+
+# Run with race detection
+go test -race ./...
+```
+
 ## Testing Workflow
 
 1. **Before making changes**: Understand what you're modifying

@@ -612,3 +612,126 @@ func TestIncident_AggregationFields(t *testing.T) {
 		t.Errorf("expected ObservingDurationMinutes 30, got %d", incident.ObservingDurationMinutes)
 	}
 }
+
+// ========================================
+// Benchmarks for database model operations
+// ========================================
+
+// BenchmarkJSONB_Scan benchmarks JSONB scanning (common operation for alert payloads)
+func BenchmarkJSONB_Scan(b *testing.B) {
+	data := []byte(`{
+		"labels": {"alertname": "HighCPU", "severity": "critical", "instance": "prod-01"},
+		"annotations": {"summary": "CPU usage above 90%", "description": "Detailed description"},
+		"status": "firing"
+	}`)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var j JSONB
+		j.Scan(data)
+	}
+}
+
+// BenchmarkJSONB_Value benchmarks JSONB value generation
+func BenchmarkJSONB_Value(b *testing.B) {
+	j := JSONB{
+		"labels": map[string]interface{}{
+			"alertname": "HighCPU",
+			"severity":  "critical",
+			"instance":  "prod-01",
+		},
+		"annotations": map[string]interface{}{
+			"summary":     "CPU usage above 90%",
+			"description": "Detailed description",
+		},
+		"status": "firing",
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		j.Value()
+	}
+}
+
+// BenchmarkJSONB_LargeScan benchmarks JSONB scanning with large payload
+func BenchmarkJSONB_LargeScan(b *testing.B) {
+	// Simulate a large alert payload with many labels
+	labels := make(map[string]interface{})
+	for i := 0; i < 50; i++ {
+		labels[string(rune('a'+i%26))+string(rune('0'+i/26))] = "value" + string(rune(i))
+	}
+
+	data, _ := json.Marshal(map[string]interface{}{
+		"labels":      labels,
+		"annotations": labels,
+		"status":      "firing",
+	})
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var j JSONB
+		j.Scan(data)
+	}
+}
+
+// BenchmarkOpenAISettings_IsConfigured benchmarks configuration check
+func BenchmarkOpenAISettings_IsConfigured(b *testing.B) {
+	settings := OpenAISettings{
+		AuthMethod: AuthMethodAPIKey,
+		APIKey:     "sk-test-key-12345",
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		settings.IsConfigured()
+	}
+}
+
+// BenchmarkOpenAISettings_ValidateReasoningEffort benchmarks effort validation
+func BenchmarkOpenAISettings_ValidateReasoningEffort(b *testing.B) {
+	settings := OpenAISettings{
+		Model:                "gpt-5.1-codex",
+		ModelReasoningEffort: "medium",
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		settings.ValidateReasoningEffort()
+	}
+}
+
+// BenchmarkAPIKeySettings_GetActiveKeys benchmarks active key retrieval
+func BenchmarkAPIKeySettings_GetActiveKeys(b *testing.B) {
+	settings := APIKeySettings{
+		Enabled: true,
+		Keys: JSONB{
+			"keys": []interface{}{
+				map[string]interface{}{"key": "key1", "enabled": true},
+				map[string]interface{}{"key": "key2", "enabled": false},
+				map[string]interface{}{"key": "key3", "enabled": true},
+				map[string]interface{}{"key": "key4", "enabled": true},
+				map[string]interface{}{"key": "key5", "enabled": false},
+			},
+		},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		settings.GetActiveKeys()
+	}
+}
+
+// BenchmarkSlackSettings_IsActive benchmarks Slack active check
+func BenchmarkSlackSettings_IsActive(b *testing.B) {
+	settings := SlackSettings{
+		BotToken:      "xoxb-test-token",
+		SigningSecret: "secret-123",
+		AppToken:      "xapp-test-token",
+		Enabled:       true,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		settings.IsActive()
+	}
+}
