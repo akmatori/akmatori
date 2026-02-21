@@ -258,20 +258,22 @@ Converts parsed output to Slack Block Kit format for rich messages.
 
 ## Current Test Coverage
 
-**Last updated: Feb 2026**
+**Last updated: Feb 21, 2026**
 
 | Package | Coverage | Status |
 |---------|----------|--------|
 | `internal/alerts/adapters` | 98.4% | ✅ Excellent |
 | `internal/utils` | 98.5% | ✅ Excellent |
+| `internal/testhelpers` | 59.2% | ⚠️ Needs work |
 | `internal/alerts/extraction` | 40.2% | ⚠️ Needs work |
-| `internal/middleware` | 38.3% | ⚠️ Needs work |
+| `internal/middleware` | 37.9% | ⚠️ Needs work |
 | `internal/slack` | 34.6% | ⚠️ Needs work |
 | `internal/database` | 32.2% | ⚠️ Needs work |
 | `internal/jobs` | 20.2% | ⚠️ Needs work |
 | `internal/services` | 13.0% | ⚠️ Needs work |
-| `internal/handlers` | 7.3% | ⚠️ Needs work |
+| `internal/handlers` | 7.2% | ⚠️ Needs work |
 | `internal/output` | 0.0% | ❌ No tests |
+| **Total** | **20.2%** | ⚠️ Overall |
 
 **Priority areas for test improvement:**
 1. `internal/output` - Add parser tests
@@ -670,6 +672,101 @@ if svc == nil {
 
 // Remove unused code rather than leaving it commented
 // If keeping for future use, add clear NOTE comment explaining why
+```
+
+### Error Handling Patterns
+
+**Always check return values from functions that can fail.** Golangci-lint's `errcheck` will flag unchecked errors.
+
+#### HTTP Response Writing
+
+```go
+// BAD: w.Write error not checked
+w.Write([]byte(`{"error":"message"}`))
+
+// GOOD: Log if write fails (client disconnected, etc.)
+if _, err := w.Write([]byte(`{"error":"message"}`)); err != nil {
+    log.Printf("Failed to write error response: %v", err)
+}
+
+// For json.Encode:
+if err := json.NewEncoder(w).Encode(response); err != nil {
+    log.Printf("Failed to encode response: %v", err)
+}
+```
+
+#### Slack API Calls (Fire-and-Forget)
+
+```go
+// BAD: Reaction/message errors not handled
+slackClient.AddReaction("white_check_mark", itemRef)
+slackClient.PostMessage(channelID, options...)
+
+// GOOD: Log failures but don't abort on non-critical operations
+if err := slackClient.AddReaction("white_check_mark", itemRef); err != nil {
+    log.Printf("Failed to add reaction: %v", err)
+}
+if _, _, err := slackClient.PostMessage(channelID, options...); err != nil {
+    log.Printf("Failed to post message: %v", err)
+}
+```
+
+#### Database/Service Updates in Callbacks
+
+```go
+// BAD: UpdateIncidentLog error ignored
+callback := IncidentCallback{
+    OnOutput: func(output string) {
+        skillService.UpdateIncidentLog(uuid, output)
+    },
+}
+
+// GOOD: Log errors in callbacks
+callback := IncidentCallback{
+    OnOutput: func(output string) {
+        if err := skillService.UpdateIncidentLog(uuid, output); err != nil {
+            log.Printf("Failed to update incident log: %v", err)
+        }
+    },
+}
+```
+
+#### Filesystem Operations
+
+```go
+// BAD: MkdirAll error ignored
+os.MkdirAll(scriptsDir, 0755)
+
+// GOOD: Log non-critical filesystem errors
+if err := os.MkdirAll(scriptsDir, 0755); err != nil {
+    log.Printf("Failed to create scripts directory %s: %v", scriptsDir, err)
+}
+```
+
+#### Tests: Always Check Decode/Unmarshal Errors
+
+```go
+// BAD: Decode errors not checked in tests
+json.NewDecoder(w.Body).Decode(&response)
+
+// GOOD: Fail test if decode fails
+if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+    t.Fatalf("Failed to decode response: %v", err)
+}
+```
+
+#### Map Nil Checks in Conditions
+
+```go
+// BAD: Unnecessary nil check (len() on nil map returns 0)
+if decoded.TargetLabels != nil && len(decoded.TargetLabels) > 0 {
+    // ...
+}
+
+// GOOD: Just check length
+if len(decoded.TargetLabels) > 0 {
+    // ...
+}
 ```
 
 ### Pre-Commit Quality Checklist

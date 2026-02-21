@@ -250,7 +250,9 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 			if err := h.aggregationService.AttachAlertToIncident(existing.ID, incidentAlert); err == nil {
 				// If incident was in observing state, move back to diagnosed
 				if existing.Status == database.IncidentStatusObserving {
-					h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusDiagnosed, "", "")
+					if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusDiagnosed, "", ""); err != nil {
+						log.Printf("Failed to update incident status: %v", err)
+					}
 				}
 				attached = true
 				isNewIncident = false
@@ -430,10 +432,12 @@ func (h *AlertHandler) postAlertToSlack(alert alerts.NormalizedAlert, instance *
 	}
 
 	// Add reaction
-	slackClient.AddReaction("rotating_light", slack.ItemRef{
+	if err := slackClient.AddReaction("rotating_light", slack.ItemRef{
 		Channel:   channelID,
 		Timestamp: ts,
-	})
+	}); err != nil {
+		log.Printf("Failed to add reaction: %v", err)
+	}
 
 	return ts, nil
 }
@@ -488,7 +492,9 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 			OnOutput: func(output string) {
 				lastStreamedLog = output
 				// Update database with streamed log
-				h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+output)
+				if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+output); err != nil {
+					log.Printf("Failed to update incident log: %v", err)
+				}
 			},
 			OnCompleted: func(sid, output string) {
 				sessionID = sid
@@ -522,7 +528,9 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 		if hasError {
 			finalStatus = database.IncidentStatusFailed
 		}
-		h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response)
+		if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response); err != nil {
+			log.Printf("Failed to update incident complete: %v", err)
+		}
 
 		// Update Slack if enabled - include reasoning context
 		slackResponse := buildSlackResponse(lastStreamedLog, response)
@@ -628,17 +636,21 @@ func (h *AlertHandler) updateSlackWithResult(threadTS, response string, hasError
 	if hasError {
 		reactionName = "x"
 	}
-	slackClient.AddReaction(reactionName, slack.ItemRef{
+	if err := slackClient.AddReaction(reactionName, slack.ItemRef{
 		Channel:   channelID,
 		Timestamp: threadTS,
-	})
+	}); err != nil {
+		log.Printf("Failed to add reaction: %v", err)
+	}
 
 	// Post result summary
-	slackClient.PostMessage(
+	if _, _, err := slackClient.PostMessage(
 		channelID,
 		slack.MsgOptionText(response, false),
 		slack.MsgOptionTS(threadTS),
-	)
+	); err != nil {
+		log.Printf("Failed to post message: %v", err)
+	}
 }
 
 func (h *AlertHandler) buildInvestigationPrompt(alert alerts.NormalizedAlert, instance *database.AlertSourceInstance) string {
@@ -779,7 +791,9 @@ func (h *AlertHandler) ProcessAlertFromSlackChannel(
 
 			if err := h.aggregationService.AttachAlertToIncident(existing.ID, incidentAlert); err == nil {
 				if existing.Status == database.IncidentStatusObserving {
-					h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusDiagnosed, "", "")
+					if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusDiagnosed, "", ""); err != nil {
+						log.Printf("Failed to update incident status: %v", err)
+					}
 				}
 				attached = true
 				isNewIncident = false
@@ -949,7 +963,9 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		callback := IncidentCallback{
 			OnOutput: func(output string) {
 				lastStreamedLog = output
-				h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+output)
+				if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+output); err != nil {
+					log.Printf("Failed to update incident log: %v", err)
+				}
 
 				// Throttled update of the Slack progress message
 				if progressMsgTS != "" && time.Since(lastSlackUpdate) >= slackProgressInterval {
@@ -992,7 +1008,9 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		if hasError {
 			finalStatus = database.IncidentStatusFailed
 		}
-		h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response)
+		if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response); err != nil {
+			log.Printf("Failed to update incident complete: %v", err)
+		}
 
 		// Update Slack thread - replace progress message with final result
 		h.updateSlackChannelReactions(slackChannelID, slackMessageTS, hasError)
@@ -1067,7 +1085,9 @@ Summary: %s
 		alert.TargetHost, alert.TargetService, alert.Severity, alert.Summary)
 
 	fullLog := alertHeader + result.FullLog
-	h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, result.SessionID, fullLog, result.Response)
+	if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, result.SessionID, fullLog, result.Response); err != nil {
+		log.Printf("Failed to update incident complete: %v", err)
+	}
 
 	// Update Slack thread - replace progress message with final result
 	h.updateSlackChannelReactions(slackChannelID, slackMessageTS, result.Error != nil)
@@ -1091,20 +1111,24 @@ func (h *AlertHandler) updateSlackChannelReactions(channelID, messageTS string, 
 	}
 
 	// Remove hourglass reaction
-	slackClient.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
+	if err := slackClient.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
 		Channel:   channelID,
 		Timestamp: messageTS,
-	})
+	}); err != nil {
+		log.Printf("Failed to remove hourglass reaction: %v", err)
+	}
 
 	// Add result reaction
 	reactionName := "white_check_mark"
 	if hasError {
 		reactionName = "x"
 	}
-	slackClient.AddReaction(reactionName, slack.ItemRef{
+	if err := slackClient.AddReaction(reactionName, slack.ItemRef{
 		Channel:   channelID,
 		Timestamp: messageTS,
-	})
+	}); err != nil {
+		log.Printf("Failed to add result reaction: %v", err)
+	}
 }
 
 // postSlackThreadReply posts a message as a thread reply

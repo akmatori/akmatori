@@ -239,11 +239,9 @@ func TestTruncateLogForSlack_TrimsToLineBreak(t *testing.T) {
 	}
 
 	// After the marker, the content should start at a line boundary (no partial line)
+	// We just verify the result is non-empty and properly formatted
 	afterMarker := strings.TrimPrefix(result, "...(truncated)\n")
-	if strings.Contains(afterMarker[:10], "a\n") {
-		// This would indicate a partial first line was kept, which is fine
-		// as long as there's no random mid-character break
-	}
+	_ = afterMarker // Used for manual inspection if needed
 }
 
 func TestTruncateLogForSlack_EmptyLog(t *testing.T) {

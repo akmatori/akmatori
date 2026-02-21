@@ -181,7 +181,9 @@ func (m *AuthMiddleware) unauthorized(w http.ResponseWriter, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("WWW-Authenticate", "Bearer realm=\"API\"")
 	w.WriteHeader(http.StatusUnauthorized)
-	w.Write([]byte(`{"error":"` + message + `"}`))
+	if _, err := w.Write([]byte(`{"error":"` + message + `"}`)); err != nil {
+		log.Printf("Failed to write error response: %v", err)
+	}
 }
 
 // SetEnabled enables or disables authentication

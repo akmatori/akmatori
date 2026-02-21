@@ -135,7 +135,9 @@ func (h *APIHandler) handleSkills(w http.ResponseWriter, r *http.Request) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 
 	case http.MethodPost:
 		var req struct {
@@ -157,7 +159,9 @@ func (h *APIHandler) handleSkills(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(skill)
+		if err := json.NewEncoder(w).Encode(skill); err != nil {
+			log.Printf("Failed to encode skill response: %v", err)
+		}
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -220,7 +224,9 @@ func (h *APIHandler) handleSkillByName(w http.ResponseWriter, r *http.Request) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 
 	case http.MethodPut:
 		var updates map[string]interface{}
@@ -707,7 +713,9 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 		// Execute in background (non-blocking)
 		go func() {
 			taskHeader := fmt.Sprintf("📝 API Incident Task:\n%s\n\n--- Execution Log ---\n\n", req.Task)
-			h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", taskHeader+"Starting execution...")
+			if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", taskHeader+"Starting execution..."); err != nil {
+				log.Printf("Failed to update incident status: %v", err)
+			}
 
 			taskWithGuidance := executor.PrependGuidance(req.Task)
 
@@ -748,7 +756,9 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				callback := IncidentCallback{
 					OnOutput: func(output string) {
 						lastStreamedLog = output // Save the accumulated log
-						h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+output)
+						if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+output); err != nil {
+							log.Printf("Failed to update incident log: %v", err)
+						}
 					},
 					OnCompleted: func(sid, output string) {
 						sessionID = sid
@@ -779,9 +789,13 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 
 				// Update incident status
 				if hasError {
-					h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, sessionID, fullLog, response)
+					if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, sessionID, fullLog, response); err != nil {
+						log.Printf("Failed to update incident complete: %v", err)
+					}
 				} else {
-					h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, sessionID, fullLog, response)
+					if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, sessionID, fullLog, response); err != nil {
+						log.Printf("Failed to update incident complete: %v", err)
+					}
 				}
 
 				log.Printf("API incident %s completed (via WebSocket)", incidentUUID)
@@ -815,7 +829,9 @@ func (h *APIHandler) runIncidentLocal(incidentUUID, workingDir, taskHeader, task
 	defer cancel()
 
 	progressCallback := func(progressLog string) {
-		h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+progressLog)
+		if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+progressLog); err != nil {
+			log.Printf("Failed to update incident log: %v", err)
+		}
 	}
 
 	result, err := h.codexExecutor.ExecuteInDirectory(ctx, taskWithGuidance, "", workingDir, progressCallback)
@@ -824,13 +840,17 @@ func (h *APIHandler) runIncidentLocal(incidentUUID, workingDir, taskHeader, task
 
 	if err != nil {
 		log.Printf("Incident %s failed: %v", incidentUUID, err)
-		h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, result.SessionID, fullLogWithContext+"\n\nError: "+err.Error(), "Error: "+err.Error())
+		if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, result.SessionID, fullLogWithContext+"\n\nError: "+err.Error(), "Error: "+err.Error()); updateErr != nil {
+			log.Printf("Failed to update incident complete: %v", updateErr)
+		}
 		return
 	}
 
 	log.Printf("Incident %s completed. Output: %d bytes, Tokens: %d, Session: %s",
 		incidentUUID, len(result.Output), result.TokensUsed, result.SessionID)
-	h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, result.SessionID, fullLogWithContext, result.Output)
+	if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, result.SessionID, fullLogWithContext, result.Output); err != nil {
+		log.Printf("Failed to update incident complete: %v", err)
+	}
 }
 
 // handleIncidentByID handles GET /api/incidents/:uuid
@@ -1408,7 +1428,9 @@ func (h *APIHandler) handleDeviceAuthCancel(w http.ResponseWriter, r *http.Reque
 
 	// Cancel via WebSocket if worker is connected
 	if h.codexWSHandler != nil && h.codexWSHandler.IsWorkerConnected() {
-		h.codexWSHandler.CancelDeviceAuth()
+		if err := h.codexWSHandler.CancelDeviceAuth(); err != nil {
+			log.Printf("Failed to cancel device auth via WebSocket: %v", err)
+		}
 	}
 
 	// Also clear local state

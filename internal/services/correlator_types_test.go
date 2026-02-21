@@ -146,7 +146,7 @@ func TestAlertContext_JSON_EmptyFields(t *testing.T) {
 	if decoded.Severity != "" {
 		t.Errorf("Severity should be empty, got %q", decoded.Severity)
 	}
-	if decoded.TargetLabels != nil && len(decoded.TargetLabels) > 0 {
+	if len(decoded.TargetLabels) > 0 {
 		t.Errorf("TargetLabels should be nil or empty")
 	}
 }
