@@ -54,7 +54,9 @@ func TestAuthHandler_handleLogin_InvalidJSON(t *testing.T) {
 	}
 
 	var response map[string]string
-	json.NewDecoder(w.Body).Decode(&response)
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
 	if response["error"] != "Invalid request body" {
 		t.Errorf("expected 'Invalid request body' error, got %q", response["error"])
 	}
@@ -103,7 +105,9 @@ func TestAuthHandler_handleLogin_MissingCredentials(t *testing.T) {
 			}
 
 			var response map[string]string
-			json.NewDecoder(w.Body).Decode(&response)
+			if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+				t.Fatalf("Failed to decode response: %v", err)
+			}
 			if response["error"] != tt.wantErr {
 				t.Errorf("expected %q error, got %q", tt.wantErr, response["error"])
 			}
@@ -142,7 +146,9 @@ func TestAuthHandler_handleVerify_NoUser(t *testing.T) {
 	}
 
 	var response map[string]string
-	json.NewDecoder(w.Body).Decode(&response)
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
 	if response["error"] != "Not authenticated" {
 		t.Errorf("expected 'Not authenticated' error, got %q", response["error"])
 	}
@@ -177,7 +183,9 @@ func TestLoginResponse_Fields(t *testing.T) {
 	}
 
 	var decoded map[string]interface{}
-	json.Unmarshal(data, &decoded)
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to unmarshal data: %v", err)
+	}
 
 	if decoded["token"] != "test-token" {
 		t.Errorf("token = %v, want %q", decoded["token"], "test-token")

@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -143,7 +144,9 @@ func (s *DeviceAuthService) HandleDeviceAuthResult(result *DeviceAuthResult) {
 		}
 		// Auto-save tokens to database
 		if s.activeFlow.tokens != nil {
-			s.saveTokensToDatabase(s.activeFlow.tokens)
+			if err := s.saveTokensToDatabase(s.activeFlow.tokens); err != nil {
+				log.Printf("Failed to save tokens to database: %v", err)
+			}
 		}
 
 	case "expired":

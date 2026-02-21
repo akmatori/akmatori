@@ -220,7 +220,9 @@ func (m *JWTAuthMiddleware) unauthorized(w http.ResponseWriter, message string) 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("WWW-Authenticate", "Bearer realm=\"API\"")
 	w.WriteHeader(http.StatusUnauthorized)
-	json.NewEncoder(w).Encode(map[string]string{"error": message})
+	if err := json.NewEncoder(w).Encode(map[string]string{"error": message}); err != nil {
+		log.Printf("Failed to encode error response: %v", err)
+	}
 }
 
 // SetEnabled enables or disables authentication

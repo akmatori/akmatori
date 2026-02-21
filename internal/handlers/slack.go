@@ -439,11 +439,14 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		incidentUUID, workingDir, err = h.skillService.SpawnIncidentManager(incidentCtx)
 		if err != nil {
 			log.Printf("Error spawning incident manager: %v", err)
-			h.client.PostMessage(
+			_, _, postErr := h.client.PostMessage(
 				channel,
 				slack.MsgOptionText(fmt.Sprintf("❌ Failed to spawn incident manager: %v", err), false),
 				slack.MsgOptionTS(threadID),
 			)
+			if postErr != nil {
+				log.Printf("Failed to post error message to Slack: %v", postErr)
+			}
 			return
 		}
 
@@ -564,7 +567,9 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			OnOutput: func(outputLog string) {
 				lastStreamedLog = outputLog
 				// Update database with streamed log
-				h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+outputLog)
+				if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+outputLog); err != nil {
+					log.Printf("Failed to update incident log: %v", err)
+				}
 
 				// Also update Slack progress message
 				onStderrUpdate(outputLog)
@@ -766,14 +771,18 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 	} else {
 		log.Printf("AlertHandler not configured, cannot process Slack channel alert")
 		// Remove hourglass and add warning reaction
-		h.client.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
+		if err := h.client.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
 			Channel:   event.Channel,
 			Timestamp: event.TimeStamp,
-		})
-		h.client.AddReaction("warning", slack.ItemRef{
+		}); err != nil {
+			log.Printf("Failed to remove hourglass reaction: %v", err)
+		}
+		if err := h.client.AddReaction("warning", slack.ItemRef{
 			Channel:   event.Channel,
 			Timestamp: event.TimeStamp,
-		})
+		}); err != nil {
+			log.Printf("Failed to add warning reaction: %v", err)
+		}
 	}
 }
 

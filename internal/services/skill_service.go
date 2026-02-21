@@ -803,7 +803,9 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 
 		// Ensure scripts directory exists and create tool symlinks
 		scriptsDir := filepath.Join(s.GetSkillDir(name), "scripts")
-		os.MkdirAll(scriptsDir, 0755)
+		if err := os.MkdirAll(scriptsDir, 0755); err != nil {
+			log.Printf("Failed to create scripts directory %s: %v", scriptsDir, err)
+		}
 
 		// Clear existing symlinks
 		dirEntries, _ := os.ReadDir(scriptsDir)
@@ -952,7 +954,9 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 		return "", "", fmt.Errorf("failed to create incident directory: %w", err)
 	}
 	// Ensure directory has correct permissions even if parent existed
-	os.Chmod(incidentDir, 0777)
+	if err := os.Chmod(incidentDir, 0777); err != nil {
+		log.Printf("Failed to chmod incident directory %s: %v", incidentDir, err)
+	}
 
 	// Create .codex directory with 0755 (codex can read but not modify)
 	codexDir := filepath.Join(incidentDir, ".codex")
