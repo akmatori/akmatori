@@ -120,6 +120,11 @@ vi.mock("@mariozechner/pi-ai", () => {
           maxTokens: 16384,
         };
       }
+      // Simulate pi-ai behavior where unknown models may return undefined
+      // instead of throwing (observed for custom providers).
+      if (provider === "custom" && modelId === "my-model-undefined-return") {
+        return undefined as any;
+      }
       // Unknown model - throw to trigger fallback
       throw new Error(`Unknown model: ${provider}/${modelId}`);
     }),
@@ -220,6 +225,14 @@ describe("resolveModel", () => {
   it("should create custom model spec for unknown provider/model", () => {
     const model = resolveModel("custom", "my-model", "https://my-api.example.com");
     expect(model.id).toBe("my-model");
+    expect(model.provider).toBe("custom");
+    expect(model.api).toBe("openai-completions");
+    expect(model.baseUrl).toBe("https://my-api.example.com");
+  });
+
+  it("should create custom model spec when getModel returns undefined", () => {
+    const model = resolveModel("custom", "my-model-undefined-return", "https://my-api.example.com");
+    expect(model.id).toBe("my-model-undefined-return");
     expect(model.provider).toBe("custom");
     expect(model.api).toBe("openai-completions");
     expect(model.baseUrl).toBe("https://my-api.example.com");
@@ -493,19 +506,47 @@ describe("AgentRunner", () => {
   // -----------------------------------------------------------------------
 
   describe("event streaming", () => {
-    it("should format tool_execution_start events", async () => {
+    it("should format tool execution summary with args and output", async () => {
       const onOutput = vi.fn();
       mockSession.prompt.mockImplementationOnce(async () => {
         for (const sub of mockSession._subscribers) {
-          sub({ type: "tool_execution_start", toolCallId: "tc-1", toolName: "ssh_execute_command", args: {} });
-          sub({ type: "tool_execution_end", toolCallId: "tc-1", toolName: "ssh_execute_command", result: {}, isError: false });
+          sub({
+            type: "tool_execution_start",
+            toolCallId: "tc-1",
+            toolName: "ssh_execute_command",
+            args: { command: "uptime" },
+          });
+          sub({
+            type: "tool_execution_update",
+            toolCallId: "tc-1",
+            toolName: "ssh_execute_command",
+            args: { command: "uptime" },
+            partialResult: {
+              content: [{ type: "text", text: "partial output" }],
+            },
+          });
+          sub({
+            type: "tool_execution_end",
+            toolCallId: "tc-1",
+            toolName: "ssh_execute_command",
+            result: {
+              content: [{ type: "text", text: "final output" }],
+            },
+            isError: false,
+          });
         }
       });
 
       await runner.execute(makeExecuteParams({ onOutput }));
 
-      expect(onOutput).toHaveBeenCalledWith("\n[Tool: ssh_execute_command]\n");
-      expect(onOutput).toHaveBeenCalledWith("\n[Tool Complete: ssh_execute_command]\n");
+      const output = onOutput.mock.calls.map((call: any[]) => call[0]).join("");
+      expect(output).toContain("🛠️ Running: ssh_execute_command");
+      expect(output).toContain("✅ Ran: ssh_execute_command");
+      expect(output).toContain("Args:");
+      expect(output).toContain("\"command\": \"uptime\"");
+      expect(output).toContain("Output:");
+      expect(output).toContain("partial output");
+      expect(output).toContain("final output");
     });
 
     it("should format tool_execution_end error events", async () => {
@@ -519,7 +560,50 @@ describe("AgentRunner", () => {
 
       await runner.execute(makeExecuteParams({ onOutput }));
 
-      expect(onOutput).toHaveBeenCalledWith("\n[Tool Error: ssh_execute_command]\n");
+      const output = onOutput.mock.calls.map((call: any[]) => call[0]).join("");
+      expect(output).toContain("❌ Failed: ssh_execute_command");
+    });
+
+    it("should emit thinking content to execution log", async () => {
+      const onOutput = vi.fn();
+      mockSession.prompt.mockImplementationOnce(async () => {
+        for (const sub of mockSession._subscribers) {
+          sub({
+            type: "message_update",
+            message: {},
+            assistantMessageEvent: {
+              type: "thinking_start",
+              contentIndex: 0,
+              partial: {},
+            },
+          });
+          sub({
+            type: "message_update",
+            message: {},
+            assistantMessageEvent: {
+              type: "thinking_delta",
+              contentIndex: 0,
+              delta: "Investigating CPU spike",
+              partial: {},
+            },
+          });
+          sub({
+            type: "message_update",
+            message: {},
+            assistantMessageEvent: {
+              type: "thinking_end",
+              contentIndex: 0,
+              content: "Investigating CPU spike",
+              partial: {},
+            },
+          });
+        }
+      });
+
+      await runner.execute(makeExecuteParams({ onOutput }));
+
+      const output = onOutput.mock.calls.map((call: any[]) => call[0]).join("");
+      expect(output).toContain("🤔 Investigating CPU spike");
     });
 
     it("should accumulate tokens from turn_end events", async () => {

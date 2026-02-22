@@ -49,6 +49,12 @@ export interface AgentRunnerConfig {
   mcpGatewayUrl: string;
 }
 
+interface ToolExecutionTrace {
+  toolName: string;
+  args: unknown;
+  updates: string[];
+}
+
 // ---------------------------------------------------------------------------
 // Thinking level mapping
 // ---------------------------------------------------------------------------
@@ -91,31 +97,38 @@ export function resolveModel(
   baseUrl?: string,
 ): Model<any> {
   try {
-    return getModel(provider as any, modelId as any);
+    const builtInModel = getModel(provider as any, modelId as any);
+    // pi-ai may return undefined for unknown/custom models instead of throwing.
+    // In that case, we must fall back to a custom model spec.
+    if (builtInModel) {
+      return builtInModel;
+    }
   } catch {
-    // Model not in built-in registry - create a custom model spec.
-    // This handles custom providers, openrouter, and newly released models.
-    const apiMap: Record<string, string> = {
-      openai: "openai-responses",
-      anthropic: "anthropic-messages",
-      google: "google-generative-ai",
-      openrouter: "openai-completions",
-      custom: "openai-completions",
-    };
-
-    return {
-      id: modelId,
-      name: modelId,
-      api: apiMap[provider] ?? "openai-completions",
-      provider,
-      baseUrl: baseUrl ?? "",
-      reasoning: true,
-      input: ["text"],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 128_000,
-      maxTokens: 16_384,
-    } as Model<any>;
+    // Continue to fallback model spec below.
   }
+
+  // Model not in built-in registry - create a custom model spec.
+  // This handles custom providers, openrouter, and newly released models.
+  const apiMap: Record<string, string> = {
+    openai: "openai-responses",
+    anthropic: "anthropic-messages",
+    google: "google-generative-ai",
+    openrouter: "openai-completions",
+    custom: "openai-completions",
+  };
+
+  return {
+    id: modelId,
+    name: modelId,
+    api: apiMap[provider] ?? "openai-completions",
+    provider,
+    baseUrl: baseUrl ?? "",
+    reasoning: true,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 16_384,
+  } as Model<any>;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,9 +212,24 @@ export class AgentRunner {
     let responseText = "";
     let fullLog = "";
     let totalTokens = 0;
+    const toolTraces = new Map<string, ToolExecutionTrace>();
+    const thinkingBuffers = new Map<number, string>();
 
+    let lastErrorMessage = "";
     const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
       params.onEvent?.(event);
+
+      // Capture API-level errors from message_end / turn_end events.
+      // The SDK surfaces provider errors (quota, auth, model not found, etc.)
+      // as a message with stopReason "error" and an errorMessage field,
+      // rather than throwing an exception.
+      if (event.type === "message_end" || event.type === "turn_end") {
+        const msg = (event as any).message;
+        if (msg?.stopReason === "error" && msg?.errorMessage) {
+          lastErrorMessage = msg.errorMessage;
+        }
+      }
+
       this.handleEvent(event, params.onOutput, (text) => {
         responseText += text;
         fullLog += text;
@@ -209,11 +237,23 @@ export class AgentRunner {
         fullLog += text;
       }, (tokens) => {
         totalTokens += tokens;
-      });
+      }, toolTraces, thinkingBuffers);
     });
 
     try {
       await session.prompt(promptText);
+
+      // If the SDK reported an API-level error, propagate it
+      if (lastErrorMessage && !responseText) {
+        return {
+          session_id: session.sessionId,
+          response: responseText,
+          full_log: fullLog,
+          error: lastErrorMessage,
+          tokens_used: totalTokens,
+          execution_time_ms: Date.now() - startTime,
+        };
+      }
 
       // Extract final response text if we didn't accumulate any
       if (!responseText) {
@@ -287,6 +327,8 @@ export class AgentRunner {
     onResponseText: (text: string) => void,
     onLogText: (text: string) => void,
     onTokens: (tokens: number) => void,
+    toolTraces: Map<string, ToolExecutionTrace>,
+    thinkingBuffers: Map<number, string>,
   ): void {
     switch (event.type) {
       case "message_update": {
@@ -294,32 +336,67 @@ export class AgentRunner {
         if (assistantEvent.type === "text_delta") {
           onOutput(assistantEvent.delta);
           onResponseText(assistantEvent.delta);
+        } else if (assistantEvent.type === "thinking_start") {
+          thinkingBuffers.set(assistantEvent.contentIndex, "");
+        } else if (assistantEvent.type === "thinking_delta") {
+          const current = thinkingBuffers.get(assistantEvent.contentIndex) ?? "";
+          thinkingBuffers.set(assistantEvent.contentIndex, current + assistantEvent.delta);
+        } else if (assistantEvent.type === "thinking_end") {
+          const thought = (thinkingBuffers.get(assistantEvent.contentIndex) ?? assistantEvent.content ?? "").trim();
+          thinkingBuffers.delete(assistantEvent.contentIndex);
+          if (thought) {
+            const thoughtLine = `\n🤔 ${thought}\n`;
+            onOutput(thoughtLine);
+            onLogText(thoughtLine);
+          }
         }
         break;
       }
 
       case "tool_execution_start": {
-        const toolLine = `\n[Tool: ${event.toolName}]\n`;
-        onOutput(toolLine);
-        onLogText(toolLine);
+        toolTraces.set(event.toolCallId, {
+          toolName: event.toolName,
+          args: event.args,
+          updates: [],
+        });
+        const startLine = `\n🛠️ Running: ${event.toolName}\n`;
+        onOutput(startLine);
+        onLogText(startLine);
         break;
       }
 
       case "tool_execution_update": {
-        const updateText = (event as any).text ?? (event as any).output ?? "";
+        const trace: ToolExecutionTrace = toolTraces.get(event.toolCallId) ?? {
+          toolName: event.toolName,
+          args: event.args,
+          updates: [],
+        };
+        const updateText = this.extractToolText(event.partialResult);
         if (updateText) {
-          onOutput(updateText);
-          onLogText(updateText);
+          trace.updates.push(updateText);
         }
+        toolTraces.set(event.toolCallId, trace);
         break;
       }
 
       case "tool_execution_end": {
-        const resultSummary = event.isError
-          ? `\n[Tool Error: ${event.toolName}]\n`
-          : `\n[Tool Complete: ${event.toolName}]\n`;
+        const trace = toolTraces.get(event.toolCallId);
+        const status = event.isError ? "❌ Failed:" : "✅ Ran:";
+        const argsText = this.formatToolArgs(trace?.args);
+        const outputText = this.formatToolOutput(trace?.updates ?? [], event.result);
+
+        let resultSummary = `\n${status} ${event.toolName}`;
+        if (argsText) {
+          resultSummary += `\nArgs:\n${argsText}`;
+        }
+        if (outputText) {
+          resultSummary += `\nOutput:\n${outputText}`;
+        }
+        resultSummary += "\n";
+
         onOutput(resultSummary);
         onLogText(resultSummary);
+        toolTraces.delete(event.toolCallId);
         break;
       }
 
@@ -337,6 +414,124 @@ export class AgentRunner {
       default:
         // Other events (agent_start, agent_end, turn_start, etc.) - no output needed
         break;
+    }
+  }
+
+  private formatToolArgs(args: unknown): string {
+    if (args === null || args === undefined) return "";
+    if (typeof args === "string") return args.trim();
+
+    if (Array.isArray(args)) {
+      if (args.length === 0) return "";
+      return this.safeJSONStringify(args);
+    }
+
+    if (typeof args === "object") {
+      if (Object.keys(args as Record<string, unknown>).length === 0) return "";
+      return this.safeJSONStringify(args);
+    }
+
+    return String(args);
+  }
+
+  private formatToolOutput(updates: string[], result: unknown): string {
+    const parts: string[] = [];
+
+    for (const update of updates) {
+      const trimmed = update.trim();
+      if (trimmed) parts.push(trimmed);
+    }
+
+    const resultText = this.extractToolText(result).trim();
+    if (resultText) {
+      parts.push(resultText);
+    } else if (result && typeof result === "object") {
+      if (Array.isArray(result)) {
+        if (result.length > 0) parts.push(this.safeJSONStringify(result));
+      } else if (Object.keys(result as Record<string, unknown>).length > 0) {
+        parts.push(this.safeJSONStringify(result));
+      }
+    }
+
+    const deduped: string[] = [];
+    for (const part of parts) {
+      if (deduped[deduped.length - 1] !== part) {
+        deduped.push(part);
+      }
+    }
+
+    return deduped.join("\n");
+  }
+
+  private extractToolText(value: unknown): string {
+    const parts = this.collectTextParts(value).map((part) => part.trim()).filter(Boolean);
+    return parts.join("\n");
+  }
+
+  private collectTextParts(value: unknown): string[] {
+    if (value === null || value === undefined) return [];
+    if (typeof value === "string") return [value];
+    if (Array.isArray(value)) return value.flatMap((entry) => this.collectTextParts(entry));
+    if (typeof value !== "object") return [];
+
+    const obj = value as Record<string, unknown>;
+    const parts: string[] = [];
+
+    if (typeof obj.text === "string") parts.push(obj.text);
+    if (typeof obj.output === "string") parts.push(obj.output);
+    if (typeof obj.message === "string") parts.push(obj.message);
+    if (typeof obj.error === "string") parts.push(obj.error);
+    if (typeof obj.stderr === "string") parts.push(obj.stderr);
+
+    if (obj.content !== undefined) {
+      parts.push(...this.collectContentText(obj.content));
+    }
+    if (obj.partialResult !== undefined) {
+      parts.push(...this.collectTextParts(obj.partialResult));
+    }
+    if (obj.result !== undefined) {
+      parts.push(...this.collectTextParts(obj.result));
+    }
+    if (obj.details !== undefined) {
+      parts.push(...this.collectTextParts(obj.details));
+    }
+
+    return parts;
+  }
+
+  private collectContentText(content: unknown): string[] {
+    if (!Array.isArray(content)) {
+      return this.collectTextParts(content);
+    }
+
+    const parts: string[] = [];
+    for (const item of content) {
+      if (!item || typeof item !== "object") {
+        if (typeof item === "string") parts.push(item);
+        continue;
+      }
+
+      const contentItem = item as Record<string, unknown>;
+      if (contentItem.type === "text" && typeof contentItem.text === "string") {
+        parts.push(contentItem.text);
+        continue;
+      }
+      if (contentItem.type === "thinking" && typeof contentItem.thinking === "string") {
+        parts.push(contentItem.thinking);
+        continue;
+      }
+
+      parts.push(...this.collectTextParts(contentItem));
+    }
+
+    return parts;
+  }
+
+  private safeJSONStringify(value: unknown): string {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
     }
   }
 
