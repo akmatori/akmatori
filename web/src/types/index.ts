@@ -140,14 +140,24 @@ export interface CreateIncidentResponse {
 export type LLMProvider = 'openai' | 'anthropic' | 'google' | 'openrouter' | 'custom';
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
-export interface LLMSettings {
-  id: number;
-  provider: LLMProvider;
+export interface LLMProviderSettings {
   api_key: string;  // Masked for display
   model: string;
   thinking_level: ThinkingLevel;
   base_url: string;
   is_configured: boolean;
+}
+
+export interface LLMSettings {
+  id: number;
+  provider: LLMProvider;
+  api_key: string;  // Masked for display (active provider)
+  model: string;
+  thinking_level: ThinkingLevel;
+  base_url: string;
+  is_configured: boolean;
+  active_provider: LLMProvider;
+  providers: Record<LLMProvider, LLMProviderSettings>;
   created_at: string;
   updated_at: string;
 }

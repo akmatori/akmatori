@@ -12,10 +12,9 @@ import type { SlackSettings, SlackSettingsUpdate, LLMSettings, LLMSettingsUpdate
 // Model suggestions per provider
 const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: string }[]> = {
   openai: [
-    { value: 'gpt-4o', label: 'gpt-4o (Recommended)' },
-    { value: 'o3', label: 'o3' },
-    { value: 'o4-mini', label: 'o4-mini (Fast)' },
-    { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
+    { value: 'gpt-5.2-codex', label: 'gpt-5.2-codex (Recommended)' },
+    { value: 'gpt-5.1-codex-max', label: 'gpt-5.1-codex-max' },
+    { value: 'gpt-5.1-codex-mini', label: 'gpt-5.1-codex-mini (Fast)' },
   ],
   anthropic: [
     { value: 'claude-opus-4-6', label: 'claude-opus-4-6 (Most capable)' },
@@ -44,7 +43,7 @@ const THINKING_LEVELS: { value: ThinkingLevel; label: string }[] = [
 ];
 
 const PROVIDER_OPTIONS: { value: LLMProvider; label: string; description: string }[] = [
-  { value: 'openai', label: 'OpenAI', description: 'GPT-4o, o3, o4-mini' },
+  { value: 'openai', label: 'OpenAI', description: 'GPT-5.2 Codex, GPT-5.1 Codex' },
   { value: 'anthropic', label: 'Anthropic', description: 'Claude Opus, Sonnet, Haiku' },
   { value: 'google', label: 'Google', description: 'Gemini 2.5 Pro, Flash' },
   { value: 'openrouter', label: 'OpenRouter', description: 'Multi-provider gateway' },
@@ -141,10 +140,12 @@ export default function Settings() {
   // LLM form state
   const [provider, setProvider] = useState<LLMProvider>('openai');
   const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('gpt-4o');
+  const [model, setModel] = useState('gpt-5.2-codex');
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('medium');
   const [baseUrl, setBaseUrl] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // Per-provider settings cache: stores unsaved edits so switching providers preserves input
+  const [providerCache, setProviderCache] = useState<Record<string, { apiKey: string; model: string; thinkingLevel: ThinkingLevel; baseUrl: string }>>({});
 
   useEffect(() => {
     loadSlackSettings();
@@ -172,10 +173,35 @@ export default function Settings() {
       setLlmLoading(true);
       const data = await llmSettingsApi.get();
       setLlmSettings(data);
-      setProvider(data.provider || 'openai');
-      setModel(data.model || 'gpt-4o');
-      setThinkingLevel(data.thinking_level || 'medium');
-      setBaseUrl(data.base_url || '');
+
+      // Build per-provider cache from API response
+      const cache: Record<string, { apiKey: string; model: string; thinkingLevel: ThinkingLevel; baseUrl: string }> = {};
+      if (data.providers) {
+        for (const [p, settings] of Object.entries(data.providers)) {
+          cache[p] = {
+            apiKey: settings.is_configured ? settings.api_key : '',
+            model: settings.model || '',
+            thinkingLevel: settings.thinking_level || 'medium',
+            baseUrl: settings.base_url || '',
+          };
+        }
+      }
+      setProviderCache(cache);
+
+      // Set active provider form state
+      const activeProvider = data.active_provider || data.provider || 'openai';
+      setProvider(activeProvider);
+      const activeSettings = cache[activeProvider];
+      if (activeSettings) {
+        setApiKey('');  // Don't pre-fill masked key
+        setModel(activeSettings.model || 'gpt-5.2-codex');
+        setThinkingLevel(activeSettings.thinkingLevel || 'medium');
+        setBaseUrl(activeSettings.baseUrl || '');
+      } else {
+        setModel(data.model || 'gpt-5.2-codex');
+        setThinkingLevel(data.thinking_level || 'medium');
+        setBaseUrl(data.base_url || '');
+      }
       // Auto-expand advanced if any advanced settings are configured
       if (data.base_url || data.thinking_level !== 'medium') {
         setShowAdvanced(true);
@@ -242,11 +268,14 @@ export default function Settings() {
         updates.api_key = apiKey;
       }
 
-      const updated = await llmSettingsApi.update(updates);
-      setLlmSettings(updated);
+      await llmSettingsApi.update(updates);
+
+      // Reload all settings to refresh the cache
+      await loadLlmSettings();
+      // Restore the provider we just saved (loadLlmSettings sets the active one)
+      setProvider(provider);
       setApiKey('');
-      setThinkingLevel(updated.thinking_level);
-      setBaseUrl(updated.base_url || '');
+
       setLlmSuccess(true);
       setTimeout(() => setLlmSuccess(false), 3000);
     } catch (err) {
@@ -258,13 +287,27 @@ export default function Settings() {
   };
 
   const handleProviderChange = (newProvider: LLMProvider) => {
+    // Save current form state to cache before switching
+    setProviderCache(prev => ({
+      ...prev,
+      [provider]: { apiKey, model, thinkingLevel, baseUrl },
+    }));
+
     setProvider(newProvider);
-    // Set a default model for the new provider
-    const suggestions = MODEL_SUGGESTIONS[newProvider];
-    if (suggestions.length > 0) {
-      setModel(suggestions[0].value);
+
+    // Restore from cache if available, otherwise use defaults
+    const cached = providerCache[newProvider];
+    if (cached) {
+      setApiKey(cached.apiKey || '');
+      setModel(cached.model || MODEL_SUGGESTIONS[newProvider]?.[0]?.value || '');
+      setThinkingLevel(cached.thinkingLevel || 'medium');
+      setBaseUrl(cached.baseUrl || '');
     } else {
-      setModel('');
+      setApiKey('');
+      const suggestions = MODEL_SUGGESTIONS[newProvider];
+      setModel(suggestions.length > 0 ? suggestions[0].value : '');
+      setThinkingLevel('medium');
+      setBaseUrl('');
     }
   };
 
@@ -358,12 +401,12 @@ export default function Settings() {
                   type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={llmSettings?.api_key || getApiKeyPlaceholder(provider)}
+                  placeholder={llmSettings?.providers?.[provider]?.api_key || getApiKeyPlaceholder(provider)}
                   className="input-field"
                 />
-                {llmSettings?.api_key && (
+                {llmSettings?.providers?.[provider]?.is_configured && (
                   <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                    Current: {llmSettings.api_key}
+                    Current: {llmSettings.providers[provider].api_key}
                   </p>
                 )}
               </div>
@@ -378,7 +421,9 @@ export default function Settings() {
                     <select
                       value={MODEL_SUGGESTIONS[provider].some(s => s.value === model) ? model : '__custom__'}
                       onChange={(e) => {
-                        if (e.target.value !== '__custom__') {
+                        if (e.target.value === '__custom__') {
+                          setModel('');
+                        } else {
                           setModel(e.target.value);
                         }
                       }}

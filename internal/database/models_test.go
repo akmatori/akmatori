@@ -455,11 +455,11 @@ func TestLLMSettings_MultiProviderConfigs(t *testing.T) {
 		settings LLMSettings
 	}{
 		{
-			name: "openai with gpt-4o",
+			name: "openai with gpt-5.2-codex",
 			settings: LLMSettings{
 				Provider:      LLMProviderOpenAI,
 				APIKey:        "sk-openai-key",
-				Model:         "gpt-4o",
+				Model:         "gpt-5.2-codex",
 				ThinkingLevel: ThinkingLevelMedium,
 				Enabled:       true,
 			},

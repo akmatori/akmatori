@@ -317,7 +317,7 @@ export class Orchestrator {
     return {
       provider: (msg.provider as LLMSettings["provider"]) ?? "openai",
       api_key: apiKey,
-      model: msg.model ?? "gpt-4o",
+      model: msg.model ?? "gpt-5.2-codex",
       thinking_level: this.mapReasoningEffort(msg.reasoning_effort),
       base_url: msg.base_url,
     };

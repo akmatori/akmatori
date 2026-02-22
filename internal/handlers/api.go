@@ -1060,26 +1060,51 @@ func isValidURL(rawURL string) bool {
 	return parsed.Scheme == "http" || parsed.Scheme == "https"
 }
 
-// handleLLMSettings handles GET /api/settings/llm and PUT /api/settings/llm
+// handleLLMSettings handles GET /api/settings/llm and PUT /api/settings/llm.
+//
+// GET returns all provider settings so the frontend can show per-provider API keys.
+// PUT updates a specific provider's settings (identified by the provider field) and
+// marks it as the active provider.
 func (h *APIHandler) handleLLMSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		settings, err := database.GetLLMSettings()
+		allSettings, err := database.GetAllLLMSettings()
 		if err != nil {
 			http.Error(w, "Settings not found", http.StatusNotFound)
 			return
 		}
 
+		// Build per-provider map
+		providers := make(map[string]interface{})
+		activeProvider := ""
+		for _, s := range allSettings {
+			providers[string(s.Provider)] = map[string]interface{}{
+				"api_key":        maskToken(s.APIKey),
+				"model":          s.Model,
+				"thinking_level": s.ThinkingLevel,
+				"base_url":       s.BaseURL,
+				"is_configured":  s.APIKey != "",
+			}
+			if s.Active {
+				activeProvider = string(s.Provider)
+			}
+		}
+
+		// Backward-compatible: also include top-level fields from the active provider
+		active, _ := database.GetLLMSettings()
 		response := map[string]interface{}{
-			"id":             settings.ID,
-			"provider":       settings.Provider,
-			"api_key":        maskToken(settings.APIKey),
-			"model":          settings.Model,
-			"thinking_level": settings.ThinkingLevel,
-			"base_url":       settings.BaseURL,
-			"is_configured":  settings.APIKey != "",
-			"created_at":     settings.CreatedAt,
-			"updated_at":     settings.UpdatedAt,
+			"active_provider": activeProvider,
+			"providers":       providers,
+			// Top-level fields for backward compat with existing consumers
+			"id":             active.ID,
+			"provider":       active.Provider,
+			"api_key":        maskToken(active.APIKey),
+			"model":          active.Model,
+			"thinking_level": active.ThinkingLevel,
+			"base_url":       active.BaseURL,
+			"is_configured":  active.APIKey != "",
+			"created_at":     active.CreatedAt,
+			"updated_at":     active.UpdatedAt,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
@@ -1098,21 +1123,20 @@ func (h *APIHandler) handleLLMSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		settings, err := database.GetLLMSettings()
-		if err != nil {
-			http.Error(w, "Settings not found", http.StatusNotFound)
+		// Provider is required for per-provider updates
+		if req.Provider == nil || *req.Provider == "" {
+			http.Error(w, "provider is required", http.StatusBadRequest)
+			return
+		}
+
+		if !database.IsValidLLMProvider(*req.Provider) {
+			http.Error(w, fmt.Sprintf("Invalid provider: %s. Valid options: openai, anthropic, google, openrouter, custom", *req.Provider), http.StatusBadRequest)
 			return
 		}
 
 		// Validate base URL if provided
-		if req.BaseURL != nil && !isValidURL(*req.BaseURL) {
+		if req.BaseURL != nil && *req.BaseURL != "" && !isValidURL(*req.BaseURL) {
 			http.Error(w, "Invalid base_url: must be a valid HTTP or HTTPS URL", http.StatusBadRequest)
-			return
-		}
-
-		// Validate provider if provided
-		if req.Provider != nil && !database.IsValidLLMProvider(*req.Provider) {
-			http.Error(w, fmt.Sprintf("Invalid provider: %s. Valid options: openai, anthropic, google, openrouter, custom", *req.Provider), http.StatusBadRequest)
 			return
 		}
 
@@ -1122,13 +1146,19 @@ func (h *APIHandler) handleLLMSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		updates := make(map[string]interface{})
-		if req.Provider != nil {
-			updates["provider"] = *req.Provider
+		provider := database.LLMProvider(*req.Provider)
+
+		// Get the provider's row
+		settings, err := database.GetLLMSettingsByProvider(provider)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Provider settings not found: %s", *req.Provider), http.StatusNotFound)
+			return
 		}
+
+		// Build updates for this provider's row
+		updates := make(map[string]interface{})
 		if req.APIKey != nil {
 			updates["api_key"] = *req.APIKey
-			// Auto-enable when API key is provided, disable when cleared
 			updates["enabled"] = *req.APIKey != ""
 		}
 		if req.Model != nil {
@@ -1141,14 +1171,21 @@ func (h *APIHandler) handleLLMSettings(w http.ResponseWriter, r *http.Request) {
 			updates["base_url"] = *req.BaseURL
 		}
 
-		if err := database.GetDB().Model(settings).Updates(updates).Error; err != nil {
-			http.Error(w, fmt.Sprintf("Failed to update settings: %v", err), http.StatusInternalServerError)
+		if len(updates) > 0 {
+			if err := database.GetDB().Model(settings).Updates(updates).Error; err != nil {
+				http.Error(w, fmt.Sprintf("Failed to update settings: %v", err), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// Mark this provider as active
+		if err := database.SetActiveLLMProvider(provider); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to set active provider: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		// Re-fetch updated settings
-		settings, _ = database.GetLLMSettings()
-
+		// Return the updated provider's settings
+		settings, _ = database.GetLLMSettingsByProvider(provider)
 		response := map[string]interface{}{
 			"id":             settings.ID,
 			"provider":       settings.Provider,

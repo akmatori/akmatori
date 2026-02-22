@@ -272,17 +272,20 @@ func IsValidThinkingLevel(level string) bool {
 	return false
 }
 
-// LLMSettings stores multi-provider LLM configuration
+// LLMSettings stores per-provider LLM configuration.
+// Each provider (openai, anthropic, etc.) has its own row with separate API key, model, and settings.
+// The Active field indicates which provider is currently selected for use.
 type LLMSettings struct {
-	ID            uint        `gorm:"primaryKey" json:"id"`
-	Provider      LLMProvider `gorm:"type:varchar(50);default:'openai'" json:"provider"`
-	APIKey        string      `gorm:"type:text" json:"api_key"`
-	Model         string      `gorm:"type:varchar(100);default:'gpt-4o'" json:"model"`
+	ID            uint          `gorm:"primaryKey" json:"id"`
+	Provider      LLMProvider   `gorm:"type:varchar(50);uniqueIndex;not null" json:"provider"`
+	APIKey        string        `gorm:"type:text" json:"api_key"`
+	Model         string        `gorm:"type:varchar(100)" json:"model"`
 	ThinkingLevel ThinkingLevel `gorm:"type:varchar(50);default:'medium'" json:"thinking_level"`
-	BaseURL       string      `gorm:"type:text" json:"base_url"`
-	Enabled       bool        `gorm:"default:false" json:"enabled"`
-	CreatedAt     time.Time   `json:"created_at"`
-	UpdatedAt     time.Time   `json:"updated_at"`
+	BaseURL       string        `gorm:"type:text" json:"base_url"`
+	Enabled       bool          `gorm:"default:false" json:"enabled"`
+	Active        bool          `gorm:"default:false" json:"active"`
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
 }
 
 // IsConfigured returns true if the LLM provider has an API key set
