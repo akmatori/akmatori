@@ -258,7 +258,7 @@ Converts parsed output to Slack Block Kit format for rich messages.
 
 ## Current Test Coverage
 
-**Last updated: Feb 21, 2026**
+**Last updated: Feb 22, 2026**
 
 | Package | Coverage | Status |
 |---------|----------|--------|
@@ -271,9 +271,9 @@ Converts parsed output to Slack Block Kit format for rich messages.
 | `internal/database` | 32.2% | ⚠️ Needs work |
 | `internal/jobs` | 20.2% | ⚠️ Needs work |
 | `internal/services` | 13.0% | ⚠️ Needs work |
-| `internal/handlers` | 7.2% | ⚠️ Needs work |
+| `internal/handlers` | 6.9% | ⚠️ Needs work |
 | `internal/output` | 0.0% | ❌ No tests |
-| **Total** | **20.2%** | ⚠️ Overall |
+| **Total** | **19.8%** | ⚠️ Overall |
 
 **Priority areas for test improvement:**
 1. `internal/output` - Add parser tests
@@ -510,6 +510,80 @@ go test -race ./...
 2. **After making changes**: Run relevant tests immediately
 3. **If tests fail**: Fix the issue before moving on
 4. **Before committing**: Run `make verify` to ensure everything passes
+
+## Code Quality & Linting
+
+### Linting Tools
+
+Run these tools before committing to catch issues early:
+
+```bash
+# Basic Go vet (included in make verify)
+go vet ./...
+
+# Staticcheck - advanced static analysis
+go install honnef.co/go/tools/cmd/staticcheck@latest
+staticcheck ./...
+
+# golangci-lint - comprehensive linting
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+golangci-lint run ./...
+```
+
+### Common Linting Issues & Fixes
+
+#### 1. Unchecked Error Returns (errcheck)
+
+**Problem**: Return values of functions that return errors are not checked.
+
+**Bad:**
+```go
+json.NewEncoder(w).Encode(response)  // Error ignored!
+w.Write([]byte("hello"))             // Error ignored!
+db.AutoMigrate(&Model{})             // Error ignored!
+```
+
+**Good (production code):**
+```go
+if err := json.NewEncoder(w).Encode(response); err != nil {
+    http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+    return
+}
+```
+
+**Good (test code - explicit ignore with comment):**
+```go
+_, _ = w.Write([]byte("hello"))  // ignore: test ResponseRecorder never fails
+_ = db.AutoMigrate(&Model{})     // ignore: test setup
+```
+
+**Good (benchmarks - intentional ignore):**
+```go
+for i := 0; i < b.N; i++ {
+    _, _ = adapter.ParsePayload(payload, instance) // ignore: benchmark only measures performance
+}
+```
+
+#### 2. HTTP Handler Error Responses
+
+In HTTP handlers, always handle `json.Encode` errors since they affect the response:
+
+```go
+w.Header().Set("Content-Type", "application/json")
+if err := json.NewEncoder(w).Encode(data); err != nil {
+    http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+    return
+}
+```
+
+### When to Use Explicit Ignore (`_ = ...`)
+
+Use explicit ignore only when:
+1. **Test code**: ResponseRecorder.Write() can't fail in tests
+2. **Benchmarks**: Only measuring performance, not correctness
+3. **Error response handlers**: After WriteHeader, can't change status
+
+Always add a comment explaining why the error is ignored.
 
 ## CRITICAL: Rebuild Docker Containers After Changes
 

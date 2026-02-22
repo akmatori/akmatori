@@ -50,14 +50,14 @@ func (h *AuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"}) // ignore: error response
 		return
 	}
 
 	if req.Username == "" || req.Password == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Username and password are required"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Username and password are required"}) // ignore: error response
 		return
 	}
 
@@ -66,7 +66,7 @@ func (h *AuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		log.Printf("AuthHandler: Failed login attempt for user '%s' from %s", req.Username, r.RemoteAddr)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid username or password"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Invalid username or password"}) // ignore: error response
 		return
 	}
 
@@ -76,7 +76,7 @@ func (h *AuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		log.Printf("AuthHandler: Failed to generate token for user '%s': %v", req.Username, err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to generate token"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Failed to generate token"}) // ignore: error response
 		return
 	}
 
@@ -89,7 +89,7 @@ func (h *AuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response) // ignore: final response, nothing more to do
 }
 
 // handleVerify handles GET /auth/verify - verifies if the current token is valid
@@ -104,13 +104,13 @@ func (h *AuthHandler) handleVerify(w http.ResponseWriter, r *http.Request) {
 	if user == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Not authenticated"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Not authenticated"}) // ignore: error response
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"valid":    true,
 		"username": user,
-	})
+	}) // ignore: final response, nothing more to do
 }

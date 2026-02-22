@@ -15,7 +15,7 @@ func TestAuthMiddleware_Disabled(t *testing.T) {
 
 	handler := middleware.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		_, _ = w.Write([]byte("success")) // ignore: test ResponseRecorder never fails
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
@@ -80,7 +80,7 @@ func TestAuthMiddleware_Enabled_ValidKey_XAPIKey(t *testing.T) {
 
 	handler := middleware.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("success"))
+		_, _ = w.Write([]byte("success")) // ignore: test ResponseRecorder never fails
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)

@@ -628,7 +628,7 @@ func BenchmarkJSONB_Scan(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		var j JSONB
-		j.Scan(data)
+		_ = j.Scan(data) // ignore: benchmark only measures performance
 	}
 }
 
@@ -649,7 +649,7 @@ func BenchmarkJSONB_Value(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		j.Value()
+		_, _ = j.Value() // ignore: benchmark only measures performance
 	}
 }
 
@@ -670,7 +670,7 @@ func BenchmarkJSONB_LargeScan(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		var j JSONB
-		j.Scan(data)
+		_ = j.Scan(data) // ignore: benchmark only measures performance
 	}
 }
 

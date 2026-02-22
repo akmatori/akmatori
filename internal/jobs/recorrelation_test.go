@@ -11,7 +11,7 @@ func TestRecorrelationJob_SkipsWhenDisabled(t *testing.T) {
 	db := setupTestDB(t)
 
 	// Also migrate IncidentAlert for the service
-	db.AutoMigrate(&database.IncidentAlert{}, &database.IncidentMerge{})
+	_ = db.AutoMigrate(&database.IncidentAlert{}, &database.IncidentMerge{}) // ignore: test setup
 
 	// Disable recorrelation
 	settings := database.NewDefaultAggregationSettings()
@@ -34,7 +34,7 @@ func TestRecorrelationJob_SkipsWhenTooManyIncidents(t *testing.T) {
 	db := setupTestDB(t)
 
 	// Also migrate IncidentAlert for the service
-	db.AutoMigrate(&database.IncidentAlert{}, &database.IncidentMerge{})
+	_ = db.AutoMigrate(&database.IncidentAlert{}, &database.IncidentMerge{}) // ignore: test setup
 
 	// Set max to 2
 	settings := database.NewDefaultAggregationSettings()

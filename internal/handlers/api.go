@@ -281,7 +281,10 @@ func (h *APIHandler) handleSkillByName(w http.ResponseWriter, r *http.Request) {
 			Prompt: promptText,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodDelete:
 		if err := h.skillService.DeleteSkill(skillName); err != nil {
@@ -310,7 +313,10 @@ func (h *APIHandler) handleSkillPrompt(w http.ResponseWriter, r *http.Request, s
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"prompt": prompt})
+		if err := json.NewEncoder(w).Encode(map[string]string{"prompt": prompt}); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodPut:
 		var req struct {
@@ -327,7 +333,10 @@ func (h *APIHandler) handleSkillPrompt(w http.ResponseWriter, r *http.Request, s
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -346,7 +355,10 @@ func (h *APIHandler) handleSkillTools(w http.ResponseWriter, r *http.Request, sk
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(skill.Tools)
+		if err := json.NewEncoder(w).Encode(skill.Tools); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodPut:
 		var req struct {
@@ -367,7 +379,10 @@ func (h *APIHandler) handleSkillTools(w http.ResponseWriter, r *http.Request, sk
 		var skill database.Skill
 		db.Preload("Tools").Preload("Tools.ToolType").Where("name = ?", skillName).First(&skill)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(skill)
+		if err := json.NewEncoder(w).Encode(skill); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -387,7 +402,10 @@ func (h *APIHandler) handleSkillsSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "Skills synced from filesystem"})
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok", "message": "Skills synced from filesystem"}); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleToolTypes handles GET /api/tool-types
@@ -404,7 +422,10 @@ func (h *APIHandler) handleToolTypes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(toolTypes)
+	if err := json.NewEncoder(w).Encode(toolTypes); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleTools handles GET /api/tools and POST /api/tools
@@ -417,7 +438,10 @@ func (h *APIHandler) handleTools(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(instances)
+		if err := json.NewEncoder(w).Encode(instances); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodPost:
 		var req struct {
@@ -439,7 +463,10 @@ func (h *APIHandler) handleTools(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(instance)
+		if err := json.NewEncoder(w).Encode(instance); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -482,7 +509,10 @@ func (h *APIHandler) handleToolByID(w http.ResponseWriter, r *http.Request) {
 		h.maskSSHKeys(instance)
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(instance)
+		if err := json.NewEncoder(w).Encode(instance); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodPut:
 		var req struct {
@@ -504,7 +534,10 @@ func (h *APIHandler) handleToolByID(w http.ResponseWriter, r *http.Request) {
 		instance, _ := h.toolService.GetToolInstance(uint(id))
 		h.maskSSHKeys(instance)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(instance)
+		if err := json.NewEncoder(w).Encode(instance); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodDelete:
 		if err := h.toolService.DeleteToolInstance(uint(id)); err != nil {
@@ -543,7 +576,10 @@ func (h *APIHandler) handleSSHKeys(w http.ResponseWriter, r *http.Request, toolI
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(keys)
+		if err := json.NewEncoder(w).Encode(keys); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodPost:
 		var req struct {
@@ -578,7 +614,10 @@ func (h *APIHandler) handleSSHKeys(w http.ResponseWriter, r *http.Request, toolI
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(key)
+		if err := json.NewEncoder(w).Encode(key); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -612,7 +651,10 @@ func (h *APIHandler) handleSSHKeyByID(w http.ResponseWriter, r *http.Request, to
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(key)
+		if err := json.NewEncoder(w).Encode(key); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodDelete:
 		if err := h.toolService.DeleteSSHKey(toolID, keyID); err != nil {
@@ -669,7 +711,10 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(incidents)
+		if err := json.NewEncoder(w).Encode(incidents); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodPost:
 		var req CreateIncidentRequest
@@ -816,7 +861,10 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -869,7 +917,10 @@ func (h *APIHandler) handleIncidentByID(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(incident)
+	if err := json.NewEncoder(w).Encode(incident); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 // splitPath splits a URL path by slashes
@@ -903,11 +954,14 @@ func (h *APIHandler) handleSkillScripts(w http.ResponseWriter, r *http.Request, 
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"skill_name":  skillName,
 			"scripts_dir": h.skillService.GetSkillScriptsDir(skillName),
 			"scripts":     scripts,
-		})
+		}); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodDelete:
 		if err := h.skillService.ClearSkillScripts(skillName); err != nil {
@@ -916,10 +970,13 @@ func (h *APIHandler) handleSkillScripts(w http.ResponseWriter, r *http.Request, 
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"message":    "Scripts cleared successfully",
 			"skill_name": skillName,
-		})
+		}); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -943,7 +1000,10 @@ func (h *APIHandler) handleSkillScriptByFilename(w http.ResponseWriter, r *http.
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(scriptInfo)
+		if err := json.NewEncoder(w).Encode(scriptInfo); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodPut:
 		var req struct {
@@ -964,10 +1024,13 @@ func (h *APIHandler) handleSkillScriptByFilename(w http.ResponseWriter, r *http.
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":  true,
 			"filename": filename,
-		})
+		}); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodDelete:
 		if err := h.skillService.DeleteSkillScript(skillName, filename); err != nil {
@@ -1011,7 +1074,10 @@ func (h *APIHandler) handleSlackSettings(w http.ResponseWriter, r *http.Request)
 			"updated_at":     settings.UpdatedAt,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodPut:
 		var req struct {
@@ -1073,7 +1139,10 @@ func (h *APIHandler) handleSlackSettings(w http.ResponseWriter, r *http.Request)
 			"updated_at":     settings.UpdatedAt,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1170,7 +1239,10 @@ func (h *APIHandler) handleOpenAISettings(w http.ResponseWriter, r *http.Request
 			"chatgpt_connected":       settings.ChatGPTAccessToken != "" && settings.ChatGPTRefreshToken != "",
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodPut:
 		var req struct {
@@ -1313,7 +1385,10 @@ func (h *APIHandler) handleOpenAISettings(w http.ResponseWriter, r *http.Request
 			"chatgpt_connected":       settings.ChatGPTAccessToken != "" && settings.ChatGPTRefreshToken != "",
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1378,7 +1453,10 @@ func (h *APIHandler) handleDeviceAuthStart(w http.ResponseWriter, r *http.Reques
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleDeviceAuthStatus handles GET /api/settings/openai/device-auth/status
@@ -1416,7 +1494,10 @@ func (h *APIHandler) handleDeviceAuthStatus(w http.ResponseWriter, r *http.Reque
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleDeviceAuthCancel handles POST /api/settings/openai/device-auth/cancel
@@ -1437,10 +1518,13 @@ func (h *APIHandler) handleDeviceAuthCancel(w http.ResponseWriter, r *http.Reque
 	h.deviceAuthService.CancelDeviceAuth()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Device authentication cancelled",
-	})
+	}); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleChatGPTDisconnect handles POST /api/settings/openai/chatgpt/disconnect
@@ -1465,10 +1549,13 @@ func (h *APIHandler) handleChatGPTDisconnect(w http.ResponseWriter, r *http.Requ
 	log.Printf("ChatGPT subscription disconnected")
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "ChatGPT subscription disconnected",
-	})
+	}); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleProxySettings handles GET /api/settings/proxy and PUT /api/settings/proxy
@@ -1518,7 +1605,10 @@ func (h *APIHandler) GetProxySettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 // UpdateProxySettings updates proxy configuration
@@ -1587,7 +1677,10 @@ func (h *APIHandler) handleGetAggregationSettings(w http.ResponseWriter, r *http
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(settings)
+	if err := json.NewEncoder(w).Encode(settings); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleUpdateAggregationSettings handles PUT /api/settings/aggregation
@@ -1613,7 +1706,10 @@ func (h *APIHandler) handleUpdateAggregationSettings(w http.ResponseWriter, r *h
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(settings)
+	if err := json.NewEncoder(w).Encode(settings); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleContext handles GET /api/context and POST /api/context
@@ -1626,7 +1722,10 @@ func (h *APIHandler) handleContext(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(files)
+		if err := json.NewEncoder(w).Encode(files); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodPost:
 		if err := r.ParseMultipartForm(services.MaxFileSize); err != nil {
@@ -1662,7 +1761,10 @@ func (h *APIHandler) handleContext(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(contextFile)
+		if err := json.NewEncoder(w).Encode(contextFile); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1698,7 +1800,10 @@ func (h *APIHandler) handleContextByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(file)
+		if err := json.NewEncoder(w).Encode(file); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodDelete:
 		if err := h.contextService.DeleteFile(uint(id)); err != nil {
@@ -1760,7 +1865,10 @@ func (h *APIHandler) handleContextValidate(w http.ResponseWriter, r *http.Reques
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 // NOTE: updateIncidentProgress was removed as unused. Restore if progress
@@ -1784,7 +1892,10 @@ func (h *APIHandler) handleAlertSourceTypes(w http.ResponseWriter, r *http.Reque
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sourceTypes)
+	if err := json.NewEncoder(w).Encode(sourceTypes); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleAlertSources handles GET /api/alert-sources and POST /api/alert-sources
@@ -1797,7 +1908,10 @@ func (h *APIHandler) handleAlertSources(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(instances)
+		if err := json.NewEncoder(w).Encode(instances); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodPost:
 		var req struct {
@@ -1836,7 +1950,10 @@ func (h *APIHandler) handleAlertSources(w http.ResponseWriter, r *http.Request) 
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(instance)
+		if err := json.NewEncoder(w).Encode(instance); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 		h.reloadAlertChannels()
 
 	default:
@@ -1860,7 +1977,10 @@ func (h *APIHandler) handleAlertSourceByUUID(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(instance)
+		if err := json.NewEncoder(w).Encode(instance); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 
 	case http.MethodPut:
 		var req struct {
@@ -1916,7 +2036,10 @@ func (h *APIHandler) handleAlertSourceByUUID(w http.ResponseWriter, r *http.Requ
 
 		instance, _ := h.alertService.GetInstanceByUUID(uuid)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(instance)
+		if err := json.NewEncoder(w).Encode(instance); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+			return
+		}
 		h.reloadAlertChannels()
 
 	case http.MethodDelete:
@@ -1954,7 +2077,10 @@ func (h *APIHandler) handleGetIncidentAlerts(w http.ResponseWriter, r *http.Requ
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(alerts)
+	if err := json.NewEncoder(w).Encode(alerts); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleAttachAlert handles POST /api/incidents/{uuid}/alerts
@@ -1993,7 +2119,10 @@ func (h *APIHandler) handleAttachAlert(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(alert)
+	if err := json.NewEncoder(w).Encode(alert); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleDetachAlert handles DELETE /api/incidents/{uuid}/alerts/{alertId}
@@ -2095,9 +2224,12 @@ func (h *APIHandler) handleMergeIncident(w http.ResponseWriter, r *http.Request)
 	db.First(&targetIncident, targetIncident.ID)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":         "Incidents merged successfully",
 		"target_incident": targetIncident,
 		"alerts_moved":    sourceIncident.AlertCount,
-	})
+	}); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
