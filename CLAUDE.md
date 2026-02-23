@@ -258,7 +258,7 @@ Converts parsed output to Slack Block Kit format for rich messages.
 
 ## Current Test Coverage
 
-**Last updated: Feb 21, 2026**
+**Last updated: Feb 23, 2026**
 
 | Package | Coverage | Status |
 |---------|----------|--------|
@@ -271,14 +271,23 @@ Converts parsed output to Slack Block Kit format for rich messages.
 | `internal/database` | 32.2% | ⚠️ Needs work |
 | `internal/jobs` | 20.2% | ⚠️ Needs work |
 | `internal/services` | 13.0% | ⚠️ Needs work |
-| `internal/handlers` | 7.2% | ⚠️ Needs work |
+| `internal/handlers` | 9.4% | ⚠️ Needs work |
 | `internal/output` | 0.0% | ❌ No tests |
 | **Total** | **20.2%** | ⚠️ Overall |
 
 **Priority areas for test improvement:**
 1. `internal/output` - Add parser tests
-2. `internal/handlers` - Add HTTP handler tests
+2. `internal/handlers` - Add HTTP handler tests (DB integration tests needed for higher coverage)
 3. `internal/services` - Add business logic tests
+
+**Note:** Many handlers require database connections for testing. The current tests focus on:
+- Method validation (405 responses)
+- Path parameter extraction
+- Helper function unit tests (maskToken, maskProxyURL, isValidURL, splitPath)
+- Investigation prompt building
+- Alert aggregation footer formatting
+- Log truncation for Slack
+- Mock adapter integration
 
 ## Testing Infrastructure
 
