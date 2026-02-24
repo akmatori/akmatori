@@ -258,22 +258,21 @@ Converts parsed output to Slack Block Kit format for rich messages.
 
 ## Current Test Coverage
 
-**Last updated: Feb 23, 2026**
+**Last updated: Feb 24, 2026**
 
 | Package | Coverage | Status |
 |---------|----------|--------|
 | `internal/alerts/adapters` | 98.4% | ✅ Excellent |
 | `internal/utils` | 98.5% | ✅ Excellent |
 | `internal/testhelpers` | 59.2% | ⚠️ Needs work |
+| `internal/jobs` | 58.1% | ✅ Good (improved from 20.2%) |
 | `internal/alerts/extraction` | 40.2% | ⚠️ Needs work |
 | `internal/middleware` | 37.9% | ⚠️ Needs work |
 | `internal/slack` | 34.6% | ⚠️ Needs work |
 | `internal/database` | 32.2% | ⚠️ Needs work |
-| `internal/jobs` | 20.2% | ⚠️ Needs work |
-| `internal/services` | 13.0% | ⚠️ Needs work |
+| `internal/services` | 13.3% | ⚠️ Needs work |
 | `internal/handlers` | 9.4% | ⚠️ Needs work |
 | `internal/output` | 0.0% | ❌ No tests |
-| **Total** | **20.2%** | ⚠️ Overall |
 
 **Priority areas for test improvement:**
 1. `internal/output` - Add parser tests
@@ -490,6 +489,70 @@ type mockZabbixClient struct {
 
 func (m *mockZabbixClient) GetHosts(ctx context.Context) ([]Host, error) {
     return m.hosts, m.err
+}
+```
+
+#### Edge Case Testing
+
+When writing unit tests, cover these edge cases:
+
+1. **Empty/nil inputs**: Empty strings, nil maps, nil slices
+2. **Boundary conditions**: Exactly at limits, one over/under limits
+3. **Unicode and special characters**: Non-ASCII, emojis, special chars
+4. **Error conditions**: Invalid inputs, missing required fields
+5. **Concurrency**: Thread safety for shared state
+
+Example pattern for edge case coverage:
+
+```go
+func TestFunction_EdgeCases(t *testing.T) {
+    tests := []struct {
+        name      string
+        input     string
+        wantErr   bool
+        checkFunc func(result) bool // Custom verification
+    }{
+        {"empty input", "", false, nil},
+        {"whitespace only", "   ", false, nil},
+        {"unicode chars", "你好世界", false, nil},
+        {"exact boundary", strings.Repeat("a", 100), false, nil},
+        {"over boundary", strings.Repeat("a", 101), false, func(r result) bool {
+            return len(r.Value) <= 100
+        }},
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            result, err := Function(tt.input)
+            if (err != nil) != tt.wantErr {
+                t.Errorf("unexpected error: %v", err)
+            }
+            if tt.checkFunc != nil && !tt.checkFunc(result) {
+                t.Error("custom check failed")
+            }
+        })
+    }
+}
+```
+
+#### Database-Free Testing
+
+For services that try to access the database, test only the paths that don't require DB:
+
+```go
+func TestService_NoDB(t *testing.T) {
+    svc := NewService() // No DB connection
+    
+    // Test methods that don't need DB
+    if !svc.ValidateInput("test") {
+        t.Error("validation should pass")
+    }
+    
+    // Test that DB-requiring methods fail gracefully
+    _, err := svc.GetData()
+    if err == nil {
+        t.Error("should fail without DB")
+    }
 }
 ```
 
