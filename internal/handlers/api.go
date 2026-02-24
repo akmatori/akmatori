@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,7 +16,6 @@ import (
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/services"
 	slackutil "github.com/akmatori/akmatori/internal/slack"
-	"github.com/slack-go/slack"
 	"gorm.io/gorm"
 )
 
@@ -27,20 +27,23 @@ type APIHandler struct {
 	alertService         *services.AlertService
 	codexExecutor        *executor.Executor
 	agentWSHandler       *AgentWSHandler
+	codexWSHandler       *CodexWSHandler
 	slackManager         *slackutil.Manager
+	deviceAuthService    *services.DeviceAuthService
 	alertChannelReloader func() // called after alert source create/update/delete to reload Slack channel mappings
 }
 
 // NewAPIHandler creates a new API handler
 func NewAPIHandler(skillService *services.SkillService, toolService *services.ToolService, contextService *services.ContextService, alertService *services.AlertService, codexExecutor *executor.Executor, agentWSHandler *AgentWSHandler, slackManager *slackutil.Manager) *APIHandler {
 	return &APIHandler{
-		skillService:   skillService,
-		toolService:    toolService,
-		contextService: contextService,
-		alertService:   alertService,
-		codexExecutor:  codexExecutor,
-		agentWSHandler: agentWSHandler,
-		slackManager:   slackManager,
+		skillService:      skillService,
+		toolService:       toolService,
+		contextService:    contextService,
+		alertService:      alertService,
+		codexExecutor:     codexExecutor,
+		agentWSHandler:    agentWSHandler,
+		slackManager:      slackManager,
+		deviceAuthService: services.NewDeviceAuthService(),
 	}
 }
 
@@ -130,7 +133,9 @@ func (h *APIHandler) handleSkills(w http.ResponseWriter, r *http.Request) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 
 	case http.MethodPost:
 		var req struct {
@@ -152,7 +157,9 @@ func (h *APIHandler) handleSkills(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(skill)
+		if err := json.NewEncoder(w).Encode(skill); err != nil {
+			log.Printf("Failed to encode skill response: %v", err)
+		}
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -215,7 +222,9 @@ func (h *APIHandler) handleSkillByName(w http.ResponseWriter, r *http.Request) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.Printf("Failed to encode response: %v", err)
+		}
 
 	case http.MethodPut:
 		var updates map[string]interface{}
@@ -702,7 +711,9 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 		// Execute in background (non-blocking)
 		go func() {
 			taskHeader := fmt.Sprintf("📝 API Incident Task:\n%s\n\n--- Execution Log ---\n\n", req.Task)
-			h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", taskHeader+"Starting execution...")
+			if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", taskHeader+"Starting execution..."); err != nil {
+				log.Printf("Failed to update incident status: %v", err)
+			}
 
 			taskWithGuidance := executor.PrependGuidance(req.Task)
 
@@ -728,7 +739,9 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				callback := IncidentCallback{
 					OnOutput: func(output string) {
 						lastStreamedLog += output // Append streamed output delta
-						h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog)
+						if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog); err != nil {
+							log.Printf("Failed to update incident log: %v", err)
+						}
 					},
 					OnCompleted: func(sid, output string) {
 						sessionID = sid
@@ -760,9 +773,13 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 
 				// Update incident status
 				if hasError {
-					h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, sessionID, fullLog, response)
+					if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, sessionID, fullLog, response); err != nil {
+						log.Printf("Failed to update incident complete: %v", err)
+					}
 				} else {
-					h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, sessionID, fullLog, response)
+					if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, sessionID, fullLog, response); err != nil {
+						log.Printf("Failed to update incident complete: %v", err)
+					}
 				}
 
 				log.Printf("API incident %s completed (via WebSocket)", incidentUUID)
@@ -791,6 +808,35 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// runIncidentLocal runs incident using the local executor (legacy fallback)
+func (h *APIHandler) runIncidentLocal(incidentUUID, workingDir, taskHeader, taskWithGuidance string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+	defer cancel()
+
+	progressCallback := func(progressLog string) {
+		if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+progressLog); err != nil {
+			log.Printf("Failed to update incident log: %v", err)
+		}
+	}
+
+	result, err := h.codexExecutor.ExecuteInDirectory(ctx, taskWithGuidance, "", workingDir, progressCallback)
+
+	fullLogWithContext := taskHeader + result.FullLog
+
+	if err != nil {
+		log.Printf("Incident %s failed: %v", incidentUUID, err)
+		if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, result.SessionID, fullLogWithContext+"\n\nError: "+err.Error(), "Error: "+err.Error()); updateErr != nil {
+			log.Printf("Failed to update incident complete: %v", updateErr)
+		}
+		return
+	}
+
+	log.Printf("Incident %s completed. Output: %d bytes, Tokens: %d, Session: %s",
+		incidentUUID, len(result.Output), result.TokensUsed, result.SessionID)
+	if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, result.SessionID, fullLogWithContext, result.Output); err != nil {
+		log.Printf("Failed to update incident complete: %v", err)
+	}
+}
 
 // handleIncidentByID handles GET /api/incidents/:uuid
 func (h *APIHandler) handleIncidentByID(w http.ResponseWriter, r *http.Request) {
@@ -1060,6 +1106,16 @@ func isValidURL(rawURL string) bool {
 	return parsed.Scheme == "http" || parsed.Scheme == "https"
 }
 
+// ModelConfigs defines the available models and their valid reasoning effort options (legacy, kept for tests)
+var ModelConfigs = map[string][]string{
+	"gpt-5.2":            {"low", "medium", "high", "extra_high"},
+	"gpt-5.2-codex":      {"low", "medium", "high", "extra_high"},
+	"gpt-5.1-codex-max":  {"low", "medium", "high", "extra_high"},
+	"gpt-5.1-codex":      {"low", "medium", "high"},
+	"gpt-5.1-codex-mini": {"medium", "high"},
+	"gpt-5.1":            {"low", "medium", "high"},
+}
+
 // handleLLMSettings handles GET /api/settings/llm and PUT /api/settings/llm.
 //
 // GET returns all provider settings so the frontend can show per-provider API keys.
@@ -1204,6 +1260,158 @@ func (h *APIHandler) handleLLMSettings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
+
+// handleDeviceAuthStart handles POST /api/settings/openai/device-auth/start
+func (h *APIHandler) handleDeviceAuthStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if worker is connected
+	if h.codexWSHandler == nil || !h.codexWSHandler.IsWorkerConnected() {
+		http.Error(w, "Codex worker not connected", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Fetch OpenAI settings from database for proxy configuration
+	var openaiSettings *OpenAISettings
+	if dbSettings, err := database.GetOpenAISettings(); err == nil && dbSettings != nil {
+		openaiSettings = &OpenAISettings{
+			BaseURL:  dbSettings.BaseURL,
+			ProxyURL: dbSettings.ProxyURL,
+			NoProxy:  dbSettings.NoProxy,
+		}
+	}
+
+	// Clear any existing flow
+	h.deviceAuthService.ClearFlow()
+
+	// Start device auth via WebSocket to codex worker (with proxy settings)
+	err := h.codexWSHandler.StartDeviceAuth(func(result *DeviceAuthResult) {
+		// Forward result to device auth service
+		h.deviceAuthService.HandleDeviceAuthResult(&services.DeviceAuthResult{
+			DeviceCode:      result.DeviceCode,
+			UserCode:        result.UserCode,
+			VerificationURL: result.VerificationURL,
+			ExpiresIn:       result.ExpiresIn,
+			Status:          result.Status,
+			Email:           result.Email,
+			AccessToken:     result.AccessToken,
+			RefreshToken:    result.RefreshToken,
+			IDToken:         result.IDToken,
+			ExpiresAt:       result.ExpiresAt,
+			Error:           result.Error,
+		})
+	}, openaiSettings)
+	if err != nil {
+		log.Printf("Failed to start device auth: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to start device authentication: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Wait for initial response (with device code and URL)
+	response, err := h.deviceAuthService.WaitForInitialResponse(30 * time.Second)
+	if err != nil {
+		log.Printf("Failed to get device auth codes: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to start device authentication: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// handleDeviceAuthStatus handles GET /api/settings/openai/device-auth/status
+func (h *APIHandler) handleDeviceAuthStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	deviceCode := r.URL.Query().Get("device_code")
+	if deviceCode == "" {
+		http.Error(w, "device_code query parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	status, err := h.deviceAuthService.GetDeviceAuthStatus(deviceCode)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get device auth status: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// If authentication completed, save tokens to database
+	if status.Status == services.DeviceAuthStatusComplete {
+		tokens, err := h.deviceAuthService.GetAuthTokens()
+		if err == nil && tokens != nil {
+			if err := h.deviceAuthService.SaveTokensToDatabase(tokens); err != nil {
+				log.Printf("Failed to save tokens to database: %v", err)
+				status.Error = "Authentication succeeded but failed to save tokens"
+				status.Status = services.DeviceAuthStatusFailed
+			} else {
+				status.Email = tokens.Email
+				log.Printf("ChatGPT authentication completed for: %s", tokens.Email)
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
+// handleDeviceAuthCancel handles POST /api/settings/openai/device-auth/cancel
+func (h *APIHandler) handleDeviceAuthCancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Cancel via WebSocket if worker is connected
+	if h.codexWSHandler != nil && h.codexWSHandler.IsWorkerConnected() {
+		if err := h.codexWSHandler.CancelDeviceAuth(); err != nil {
+			log.Printf("Failed to cancel device auth via WebSocket: %v", err)
+		}
+	}
+
+	// Also clear local state
+	h.deviceAuthService.CancelDeviceAuth()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Device authentication cancelled",
+	})
+}
+
+// handleChatGPTDisconnect handles POST /api/settings/openai/chatgpt/disconnect
+func (h *APIHandler) handleChatGPTDisconnect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	settings, err := database.GetOpenAISettings()
+	if err != nil {
+		http.Error(w, "Settings not found", http.StatusNotFound)
+		return
+	}
+
+	// Clear ChatGPT tokens
+	if err := database.ClearOpenAIChatGPTTokens(settings.ID); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to disconnect: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("ChatGPT subscription disconnected")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "ChatGPT subscription disconnected",
+	})
+}
+
 
 // handleProxySettings handles GET /api/settings/proxy and PUT /api/settings/proxy
 func (h *APIHandler) handleProxySettings(w http.ResponseWriter, r *http.Request) {
@@ -1499,40 +1707,10 @@ func (h *APIHandler) handleContextValidate(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(response)
 }
 
-// updateIncidentProgress streams progress updates to Slack thread (if enabled)
-func (h *APIHandler) updateIncidentProgress(incidentUUID, progressLog string) {
-	slackClient := h.slackManager.GetClient()
-	if slackClient == nil {
-		return
-	}
-
-	incident, err := h.skillService.GetIncident(incidentUUID)
-	if err != nil {
-		log.Printf("Warning: Failed to get incident %s for progress update: %v", incidentUUID, err)
-		return
-	}
-
-	if incident.Source != "slack" {
-		return
-	}
-
-	channel, ok := incident.Context["channel"].(string)
-	if !ok || channel == "" {
-		log.Printf("Warning: No channel found in incident context for %s", incidentUUID)
-		return
-	}
-
-	threadTS := incident.SourceID
-
-	_, _, err = slackClient.PostMessage(
-		channel,
-		slack.MsgOptionText(fmt.Sprintf("🔄 *Progress:*\n```\n%s\n```", progressLog), false),
-		slack.MsgOptionTS(threadTS),
-	)
-	if err != nil {
-		log.Printf("Warning: Failed to post progress to Slack: %v", err)
-	}
-}
+// NOTE: updateIncidentProgress was removed as unused. Restore if progress
+// streaming to Slack threads is needed. The function posted formatted progress
+// updates to the incident's Slack thread using incident.Context["channel"] and
+// incident.SourceID as the thread timestamp.
 
 // ========== Alert Source Management ==========
 

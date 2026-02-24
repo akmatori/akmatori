@@ -10,7 +10,7 @@ import (
 func TestNewAlertExtractor(t *testing.T) {
 	extractor := NewAlertExtractor()
 	if extractor == nil {
-		t.Error("NewAlertExtractor() returned nil")
+		t.Fatal("NewAlertExtractor() returned nil")
 	}
 	if extractor.httpClient == nil {
 		t.Error("httpClient should not be nil")

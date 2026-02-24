@@ -57,11 +57,15 @@ make verify           # go vet + all tests + agent-worker tests
 /opt/akmatori/
 ├── cmd/akmatori/           # Main API server entry point
 ├── internal/
-│   ├── alerts/adapters/    # Alert source adapters (Zabbix, Alertmanager, etc.)
+│   ├── alerts/
+│   │   ├── adapters/       # Alert source adapters (Zabbix, Alertmanager, etc.)
+│   │   └── extraction/     # AI-powered alert extraction from free-form text
 │   ├── database/           # GORM models and database logic
 │   ├── handlers/           # HTTP/WebSocket handlers
 │   ├── middleware/         # Auth, CORS middleware
+│   ├── output/             # Agent output parsing (structured blocks)
 │   ├── services/           # Business logic layer
+│   ├── slack/              # Slack integration (Socket Mode, hot-reload)
 │   └── utils/              # Utility functions
 ├── agent-worker/           # Node.js/TypeScript agent worker (pi-mono SDK)
 │   ├── src/                # TypeScript source
@@ -72,10 +76,517 @@ make verify           # go vet + all tests + agent-worker tests
 │   │   ├── types.ts        # Shared types
 │   │   └── tools/          # MCP Gateway tool definitions
 │   └── tests/              # Vitest tests
+├── codex-worker/           # Codex CLI execution worker (separate Go module)
+│   └── internal/
+│       ├── codex/          # Codex CLI runner
+│       ├── orchestrator/   # WebSocket message handling and execution
+│       ├── session/        # Session state persistence
+│       └── ws/             # WebSocket client for API communication
 ├── mcp-gateway/            # MCP protocol gateway (separate Go module)
-│   └── internal/tools/     # SSH and Zabbix tool implementations
+│   └── internal/
+│       ├── cache/          # Generic TTL cache implementation
+│       ├── database/       # Credential and config retrieval
+│       ├── mcp/            # MCP protocol handling
+│       ├── ratelimit/      # Token bucket rate limiter
+│       └── tools/          # SSH and Zabbix tool implementations
 ├── web/                    # React frontend
 └── tests/fixtures/         # Test payloads and mock data
+```
+
+## Codex Worker Architecture
+
+The `codex-worker/` is a **separate Go module** that manages Codex CLI execution:
+
+### Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| Orchestrator | `internal/orchestrator/orchestrator.go` | Main coordinator - handles WebSocket messages, dispatches work |
+| Runner | `internal/codex/runner.go` | Executes Codex CLI, manages process lifecycle |
+| Session Store | `internal/session/store.go` | Persists session IDs for conversation continuity |
+| WS Client | `internal/ws/client.go` | WebSocket communication with API server |
+
+### Message Flow
+
+1. API server sends `new_incident` or `continue_incident` via WebSocket
+2. Orchestrator receives message, extracts OpenAI settings and proxy config
+3. Runner executes Codex CLI with streaming output
+4. Output is streamed back to API via WebSocket
+5. On completion, metrics (tokens, execution time) are reported
+
+### WebSocket Message Types
+
+| Type | Direction | Purpose |
+|------|-----------|---------|
+| `new_incident` | API → Worker | Start new investigation |
+| `continue_incident` | API → Worker | Continue existing session |
+| `cancel_incident` | API → Worker | Cancel running investigation |
+| `device_auth_start` | API → Worker | Start OAuth device flow |
+| `output` | Worker → API | Streaming output chunk |
+| `completed` | Worker → API | Investigation finished with metrics |
+| `error` | Worker → API | Execution failed |
+
+### OpenAI Authentication
+
+The worker supports multiple auth methods:
+- **API Key**: Direct `OPENAI_API_KEY` authentication
+- **ChatGPT OAuth**: Device code flow with token refresh (for ChatGPT Plus accounts)
+
+OAuth tokens are refreshed automatically and returned to API for storage.
+
+## Slack Integration
+
+The `internal/slack/` package provides real-time Slack monitoring:
+
+### Manager (`manager.go`)
+
+Hot-reloadable Slack connection manager:
+
+```go
+// Create and start manager
+manager := slack.NewManager()
+manager.SetEventHandler(myEventHandler)
+manager.Start(ctx)
+
+// Hot-reload on settings change (non-blocking)
+manager.TriggerReload()
+
+// Watch for reloads in background
+go manager.WatchForReloads(ctx)
+```
+
+**Key features:**
+- Socket Mode for real-time events (no public webhook needed)
+- Hot-reload without restart when settings change in database
+- Proxy support for both HTTP API and WebSocket connections
+- Thread-safe client access via `GetClient()` and `GetSocketClient()`
+
+### Channel Management (`channels.go`)
+
+Maps Slack channels to alert sources:
+- Channels can be designated as "alert channels"
+- Bot messages in alert channels trigger investigations
+- @mentions in threads allow follow-up questions
+- Thread parent messages are fetched for context
+
+### Event Types Handled
+
+| Event | Behavior |
+|-------|----------|
+| Bot message in alert channel | Create incident, start investigation |
+| @mention in alert thread | Continue investigation with question |
+| @mention in general channel | Direct response (not investigation) |
+
+## Alert Extraction (`internal/alerts/extraction/`)
+
+AI-powered extraction of structured alert data from free-form text:
+
+### How It Works
+
+1. Slack message (or any text) comes in
+2. `AlertExtractor` sends to GPT-4o-mini with extraction prompt
+3. Returns structured `NormalizedAlert` with:
+   - Alert name, severity, status
+   - Summary, description
+   - Target host/service
+   - Source system identification
+
+### Fallback Mode
+
+If OpenAI is not configured or API fails:
+- First line becomes alert name (stripped of emoji prefixes)
+- Full text becomes description
+- Defaults to `warning` severity, `firing` status
+
+### Usage
+
+```go
+extractor := extraction.NewAlertExtractor()
+alert, err := extractor.Extract(ctx, messageText)
+// Or with custom prompt:
+alert, err := extractor.ExtractWithPrompt(ctx, messageText, customPrompt)
+```
+
+### Cost Optimization
+
+- Uses `gpt-4o-mini` (fast, cheap)
+- Low temperature (0.1) for consistent results
+- Message truncated to 3000 chars
+- Graceful fallback on any error
+
+## Output Parser (`internal/output/`)
+
+Parses structured blocks from agent output for machine-readable results:
+
+### Structured Block Types
+
+```
+[FINAL_RESULT]
+status: resolved|unresolved|escalate
+summary: One-line summary
+actions_taken:
+- Action 1
+- Action 2
+recommendations:
+- Recommendation 1
+[/FINAL_RESULT]
+
+[ESCALATE]
+reason: Why escalation is needed
+urgency: low|medium|high|critical
+context: Additional context
+suggested_actions:
+- Suggested action 1
+[/ESCALATE]
+
+[PROGRESS]
+step: Current investigation step
+completed: What's been done
+findings_so_far: Current findings
+[/PROGRESS]
+```
+
+### Usage
+
+```go
+parsed := output.Parse(agentOutput)
+
+if parsed.FinalResult != nil {
+    // Investigation complete
+    fmt.Printf("Status: %s\n", parsed.FinalResult.Status)
+}
+
+if parsed.Escalation != nil {
+    // Needs human attention
+    notifyOnCall(parsed.Escalation.Urgency, parsed.Escalation.Reason)
+}
+
+// Clean output has structured blocks stripped
+fmt.Println(parsed.CleanOutput)
+```
+
+### Slack Formatter (`slack_formatter.go`)
+
+Converts parsed output to Slack Block Kit format for rich messages.
+
+## Current Test Coverage
+
+**Last updated: Feb 24, 2026**
+
+| Package | Coverage | Status |
+|---------|----------|--------|
+| `internal/alerts/adapters` | 98.4% | ✅ Excellent |
+| `internal/utils` | 98.5% | ✅ Excellent |
+| `internal/testhelpers` | 59.2% | ⚠️ Needs work |
+| `internal/jobs` | 58.1% | ✅ Good (improved from 20.2%) |
+| `internal/alerts/extraction` | 40.2% | ⚠️ Needs work |
+| `internal/middleware` | 37.9% | ⚠️ Needs work |
+| `internal/slack` | 34.6% | ⚠️ Needs work |
+| `internal/database` | 32.2% | ⚠️ Needs work |
+| `internal/services` | 13.3% | ⚠️ Needs work |
+| `internal/handlers` | 9.4% | ⚠️ Needs work |
+| `internal/output` | 0.0% | ❌ No tests |
+
+**Priority areas for test improvement:**
+1. `internal/output` - Add parser tests
+2. `internal/handlers` - Add HTTP handler tests (DB integration tests needed for higher coverage)
+3. `internal/services` - Add business logic tests
+
+**Note:** Many handlers require database connections for testing. The current tests focus on:
+- Method validation (405 responses)
+- Path parameter extraction
+- Helper function unit tests (maskToken, maskProxyURL, isValidURL, splitPath)
+- Investigation prompt building
+- Alert aggregation footer formatting
+- Log truncation for Slack
+- Mock adapter integration
+
+## Testing Infrastructure
+
+### Test Helpers Package (`internal/testhelpers/`)
+
+The `testhelpers` package provides reusable utilities for testing:
+
+#### HTTP Test Helpers
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+func TestMyHandler(t *testing.T) {
+    // Fluent API for HTTP testing
+    ctx := testhelpers.NewHTTPTestContext(t, http.MethodPost, "/api/v1/alerts", nil)
+    ctx.
+        WithAPIKey("test-key").
+        WithJSONBody(map[string]string{"name": "test"}).
+        ExecuteFunc(myHandler).
+        AssertStatus(http.StatusOK).
+        AssertBodyContains("success")
+    
+    // Decode response JSON
+    var result MyResponse
+    ctx.DecodeJSON(&result)
+}
+```
+
+#### Mock Alert Adapter
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+func TestAlertProcessing(t *testing.T) {
+    // Create mock adapter with predefined responses
+    mock := testhelpers.NewMockAlertAdapter("prometheus").
+        WithAlerts(
+            testhelpers.NewAlertBuilder().
+                WithName("HighCPU").
+                WithSeverity("critical").
+                Build(),
+        )
+    
+    // Or configure it to return an error
+    mockWithError := testhelpers.NewMockAlertAdapter("datadog").
+        WithParseError(errors.New("invalid payload"))
+    
+    // Use in tests
+    alerts, err := mock.ParsePayload(payload, instance)
+}
+```
+
+#### Data Builders
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+// Build test alerts
+alert := testhelpers.NewAlertBuilder().
+    WithName("HighMemory").
+    WithSeverity("warning").
+    WithHost("prod-server-1").
+    WithService("nginx").
+    WithLabel("env", "production").
+    Build()
+
+// Build test incidents
+incident := testhelpers.NewIncidentBuilder().
+    WithID(42).
+    WithUUID("custom-uuid").
+    WithTitle("Database outage").
+    WithStatus("investigating").
+    Build()
+```
+
+#### Assertion Helpers
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+testhelpers.AssertEqual(t, expected, actual, "values should match")
+testhelpers.AssertNil(t, err, "operation should succeed")
+testhelpers.AssertNotNil(t, result, "result should be returned")
+testhelpers.AssertError(t, err, "invalid input should error")
+testhelpers.AssertContains(t, body, "success", "response body check")
+```
+
+### Benchmark Tests
+
+Critical paths have benchmark tests. Run benchmarks with:
+
+```bash
+# Run all benchmarks
+go test -bench=. ./...
+
+# Run specific package benchmarks with memory stats
+go test -bench=. -benchmem ./internal/alerts/adapters/...
+
+# Run benchmarks matching a pattern
+go test -bench=ParsePayload ./internal/alerts/adapters/...
+```
+
+**Benchmarked areas:**
+- Alert adapter payload parsing (`internal/alerts/adapters/`)
+- JSONB operations (`internal/database/`)
+- Auth middleware validation (`internal/middleware/`)
+- Title generation (`internal/services/`)
+
+### Test Fixture Location
+
+Test fixtures are in `tests/fixtures/`:
+
+```
+tests/fixtures/
+├── alerts/
+│   ├── alertmanager_alert.json
+│   ├── grafana_alert.json
+│   └── zabbix_alert.json
+└── ...
+```
+
+Load fixtures in tests:
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+func TestAlertParsing(t *testing.T) {
+    // Load raw bytes
+    payload := testhelpers.LoadFixture(t, "alerts/alertmanager_alert.json")
+    
+    // Or load and unmarshal JSON
+    var alert AlertPayload
+    testhelpers.LoadJSONFixture(t, "alerts/alertmanager_alert.json", &alert)
+}
+```
+
+### Testing Patterns
+
+#### Table-Driven Tests
+
+Use table-driven tests for comprehensive coverage:
+
+```go
+func TestSeverityMapping(t *testing.T) {
+    tests := []struct {
+        name     string
+        input    string
+        expected Severity
+    }{
+        {"critical maps correctly", "critical", SeverityCritical},
+        {"warning maps correctly", "warning", SeverityWarning},
+        {"unknown defaults to warning", "unknown", SeverityWarning},
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            result := mapSeverity(tt.input)
+            if result != tt.expected {
+                t.Errorf("mapSeverity(%q) = %v, want %v", tt.input, result, tt.expected)
+            }
+        })
+    }
+}
+```
+
+#### HTTP Handler Tests
+
+Use `httptest` for handler tests:
+
+```go
+func TestAPIHandler(t *testing.T) {
+    handler := NewHandler(deps)
+    
+    req := httptest.NewRequest(http.MethodPost, "/api/v1/resource", body)
+    req.Header.Set("Content-Type", "application/json")
+    rec := httptest.NewRecorder()
+    
+    handler.ServeHTTP(rec, req)
+    
+    if rec.Code != http.StatusOK {
+        t.Errorf("expected 200, got %d", rec.Code)
+    }
+}
+```
+
+#### Mocking External Services
+
+For external API calls, use interfaces and mocks:
+
+```go
+type ZabbixClient interface {
+    GetHosts(ctx context.Context) ([]Host, error)
+}
+
+// In tests:
+type mockZabbixClient struct {
+    hosts []Host
+    err   error
+}
+
+func (m *mockZabbixClient) GetHosts(ctx context.Context) ([]Host, error) {
+    return m.hosts, m.err
+}
+```
+
+#### Edge Case Testing
+
+When writing unit tests, cover these edge cases:
+
+1. **Empty/nil inputs**: Empty strings, nil maps, nil slices
+2. **Boundary conditions**: Exactly at limits, one over/under limits
+3. **Unicode and special characters**: Non-ASCII, emojis, special chars
+4. **Error conditions**: Invalid inputs, missing required fields
+5. **Concurrency**: Thread safety for shared state
+
+Example pattern for edge case coverage:
+
+```go
+func TestFunction_EdgeCases(t *testing.T) {
+    tests := []struct {
+        name      string
+        input     string
+        wantErr   bool
+        checkFunc func(result) bool // Custom verification
+    }{
+        {"empty input", "", false, nil},
+        {"whitespace only", "   ", false, nil},
+        {"unicode chars", "你好世界", false, nil},
+        {"exact boundary", strings.Repeat("a", 100), false, nil},
+        {"over boundary", strings.Repeat("a", 101), false, func(r result) bool {
+            return len(r.Value) <= 100
+        }},
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            result, err := Function(tt.input)
+            if (err != nil) != tt.wantErr {
+                t.Errorf("unexpected error: %v", err)
+            }
+            if tt.checkFunc != nil && !tt.checkFunc(result) {
+                t.Error("custom check failed")
+            }
+        })
+    }
+}
+```
+
+#### Database-Free Testing
+
+For services that try to access the database, test only the paths that don't require DB:
+
+```go
+func TestService_NoDB(t *testing.T) {
+    svc := NewService() // No DB connection
+    
+    // Test methods that don't need DB
+    if !svc.ValidateInput("test") {
+        t.Error("validation should pass")
+    }
+    
+    // Test that DB-requiring methods fail gracefully
+    _, err := svc.GetData()
+    if err == nil {
+        t.Error("should fail without DB")
+    }
+}
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+make test
+
+# Run with coverage
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out  # View in browser
+
+# Run specific package
+go test -v ./internal/handlers/...
+
+# Run single test
+go test -v -run TestAlertHandler_HandleWebhook ./internal/handlers/...
+
+# Run with race detection
+go test -race ./...
 ```
 
 ## Testing Workflow
@@ -196,6 +707,161 @@ make test-all
 ## Code Cleanup
 
 Use the **code simplifier agent** at the end of a long coding session, or to clean up complex PRs. This helps reduce unnecessary complexity and ensures code remains maintainable.
+
+## Code Quality & Linting
+
+**Run linting tools regularly to catch issues early.**
+
+### Linting Commands
+
+```bash
+# Basic vet check (fast)
+go vet ./...
+
+# Staticcheck for deeper analysis (recommended)
+staticcheck ./...
+
+# golangci-lint for comprehensive linting (requires Go version matching project)
+golangci-lint run --timeout 5m
+```
+
+### Common Staticcheck Fixes
+
+| Issue | Fix |
+|-------|-----|
+| S1031: unnecessary nil check around range | Remove `if x != nil` - ranging over nil map/slice is safe |
+| U1000: unused function | Remove function or add `//nolint:unused` if kept for future use |
+| SA5011: possible nil pointer dereference | Use `t.Fatal()` instead of `t.Error()` before dereferencing |
+| SA4006: value is never used | Remove assignment or use blank identifier `_` |
+| SA1019: deprecated function | Replace with recommended alternative (e.g., `strings.Title` → `cases.Title`) |
+
+### Go Idioms to Follow
+
+```go
+// Nil check around range is unnecessary - ranging over nil is safe
+// BAD:
+if myMap != nil {
+    for k, v := range myMap { ... }
+}
+// GOOD:
+for k, v := range myMap { ... }
+
+// Use t.Fatal for nil checks in tests to prevent nil pointer dereference
+// BAD:
+if svc == nil {
+    t.Error("service is nil")  // continues, then crashes on next line
+}
+// GOOD:
+if svc == nil {
+    t.Fatal("service is nil")  // stops test immediately
+}
+
+// Remove unused code rather than leaving it commented
+// If keeping for future use, add clear NOTE comment explaining why
+```
+
+### Error Handling Patterns
+
+**Always check return values from functions that can fail.** Golangci-lint's `errcheck` will flag unchecked errors.
+
+#### HTTP Response Writing
+
+```go
+// BAD: w.Write error not checked
+w.Write([]byte(`{"error":"message"}`))
+
+// GOOD: Log if write fails (client disconnected, etc.)
+if _, err := w.Write([]byte(`{"error":"message"}`)); err != nil {
+    log.Printf("Failed to write error response: %v", err)
+}
+
+// For json.Encode:
+if err := json.NewEncoder(w).Encode(response); err != nil {
+    log.Printf("Failed to encode response: %v", err)
+}
+```
+
+#### Slack API Calls (Fire-and-Forget)
+
+```go
+// BAD: Reaction/message errors not handled
+slackClient.AddReaction("white_check_mark", itemRef)
+slackClient.PostMessage(channelID, options...)
+
+// GOOD: Log failures but don't abort on non-critical operations
+if err := slackClient.AddReaction("white_check_mark", itemRef); err != nil {
+    log.Printf("Failed to add reaction: %v", err)
+}
+if _, _, err := slackClient.PostMessage(channelID, options...); err != nil {
+    log.Printf("Failed to post message: %v", err)
+}
+```
+
+#### Database/Service Updates in Callbacks
+
+```go
+// BAD: UpdateIncidentLog error ignored
+callback := IncidentCallback{
+    OnOutput: func(output string) {
+        skillService.UpdateIncidentLog(uuid, output)
+    },
+}
+
+// GOOD: Log errors in callbacks
+callback := IncidentCallback{
+    OnOutput: func(output string) {
+        if err := skillService.UpdateIncidentLog(uuid, output); err != nil {
+            log.Printf("Failed to update incident log: %v", err)
+        }
+    },
+}
+```
+
+#### Filesystem Operations
+
+```go
+// BAD: MkdirAll error ignored
+os.MkdirAll(scriptsDir, 0755)
+
+// GOOD: Log non-critical filesystem errors
+if err := os.MkdirAll(scriptsDir, 0755); err != nil {
+    log.Printf("Failed to create scripts directory %s: %v", scriptsDir, err)
+}
+```
+
+#### Tests: Always Check Decode/Unmarshal Errors
+
+```go
+// BAD: Decode errors not checked in tests
+json.NewDecoder(w.Body).Decode(&response)
+
+// GOOD: Fail test if decode fails
+if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+    t.Fatalf("Failed to decode response: %v", err)
+}
+```
+
+#### Map Nil Checks in Conditions
+
+```go
+// BAD: Unnecessary nil check (len() on nil map returns 0)
+if decoded.TargetLabels != nil && len(decoded.TargetLabels) > 0 {
+    // ...
+}
+
+// GOOD: Just check length
+if len(decoded.TargetLabels) > 0 {
+    // ...
+}
+```
+
+### Pre-Commit Quality Checklist
+
+Before committing, verify:
+- [ ] `go vet ./...` passes with no output
+- [ ] `staticcheck ./...` passes with no output
+- [ ] `go test ./...` passes
+- [ ] No unused imports (goimports or IDE will catch these)
 
 ## CRITICAL: External API Integration - Rate Limiting & Caching
 
