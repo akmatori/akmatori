@@ -1,7 +1,6 @@
 package services
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -803,6 +802,43 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 		}
 
 		log.Printf("Regenerated SKILL.md for skill: %s", skill.Name)
+
+		// Ensure scripts directory exists and create tool symlinks
+		scriptsDir := filepath.Join(s.GetSkillDir(skill.Name), "scripts")
+		if err := os.MkdirAll(scriptsDir, 0755); err != nil {
+			log.Printf("Failed to create scripts directory %s: %v", scriptsDir, err)
+		}
+
+		// Clear existing symlinks
+		dirEntries, _ := os.ReadDir(scriptsDir)
+		for _, de := range dirEntries {
+			entryPath := filepath.Join(scriptsDir, de.Name())
+			if info, err := os.Lstat(entryPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				os.Remove(entryPath)
+			}
+		}
+
+		// Create symlinks for assigned tools
+		for _, tool := range tools {
+			if tool.ToolType.Name == "" {
+				continue
+			}
+			toolName := tool.ToolType.Name
+			linkPath := filepath.Join(scriptsDir, toolName)
+			targetPath := filepath.Join("/tools", toolName)
+			if err := os.Symlink(targetPath, linkPath); err != nil {
+				log.Printf("Warning: failed to create symlink for tool %s in skill %s: %v", toolName, skill.Name, err)
+			}
+		}
+
+		// Create symlink for mcp_client.py (required by all tools)
+		if len(tools) > 0 {
+			mcpClientLink := filepath.Join(scriptsDir, "mcp_client.py")
+			mcpClientTarget := "/tools/mcp_client.py"
+			if err := os.Symlink(mcpClientTarget, mcpClientLink); err != nil {
+				log.Printf("Warning: failed to create symlink for mcp_client.py in skill %s: %v", skill.Name, err)
+			}
+		}
 	}
 
 	return nil
@@ -836,7 +872,9 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 		return "", "", fmt.Errorf("failed to create incident directory: %w", err)
 	}
 	// Ensure directory has correct permissions even if parent existed
-	os.Chmod(incidentDir, 0777)
+	if err := os.Chmod(incidentDir, 0777); err != nil {
+		log.Printf("Failed to chmod incident directory %s: %v", incidentDir, err)
+	}
 
 	// Generate AGENTS.md at workspace root (pi-mono reads agentDir from cwd)
 	agentsMdPath := filepath.Join(incidentDir, "AGENTS.md")
@@ -913,104 +951,10 @@ func (s *SkillService) generateIncidentAgentsMd(path string) error {
 	return nil
 }
 
-// formatEnvValue formats a value for .env file output.
-// - Arrays are converted to comma-separated strings
-// - Multi-line values (containing newlines) are base64-encoded with a "base64:" prefix
-func formatEnvValue(value interface{}) string {
-	var str string
-
-	// Handle arrays/slices - convert to comma-separated string
-	switch v := value.(type) {
-	case []interface{}:
-		parts := make([]string, len(v))
-		for i, item := range v {
-			parts[i] = fmt.Sprintf("%v", item)
-		}
-		str = strings.Join(parts, ",")
-	case []string:
-		str = strings.Join(v, ",")
-	default:
-		str = fmt.Sprintf("%v", value)
-	}
-
-	// Handle PEM/SSH keys that might have spaces instead of newlines
-	// (happens when pasted through HTML textarea or JSON parsing issues)
-	if strings.Contains(str, "-----BEGIN") && strings.Contains(str, "-----END") {
-		str = fixPEMKey(str)
-	}
-
-	// Base64 encode if contains newlines
-	if strings.Contains(str, "\n") {
-		return "base64:" + base64.StdEncoding.EncodeToString([]byte(str))
-	}
-	return str
-}
-
-// fixPEMKey reconstructs a PEM key that may have spaces instead of newlines
-func fixPEMKey(key string) string {
-	// If already has newlines, return as-is
-	if strings.Contains(key, "\n") {
-		return key
-	}
-
-	// Check for valid PEM markers
-	if !strings.Contains(key, "-----BEGIN") || !strings.Contains(key, "-----END") {
-		return key
-	}
-
-	// Parse by splitting on whitespace
-	// Format: "-----BEGIN TYPE-----" content "-----END TYPE-----"
-	parts := strings.Fields(key)
-
-	if len(parts) < 4 {
-		return key
-	}
-
-	// Reconstruct: find BEGIN...END markers and body
-	var header, footer string
-	var bodyParts []string
-
-	// Use index-based loop so we can skip parts already processed
-	for i := 0; i < len(parts); i++ {
-		part := parts[i]
-
-		if strings.HasPrefix(part, "-----BEGIN") {
-			// Header spans from here to next "-----"
-			headerParts := []string{part}
-			for j := i + 1; j < len(parts); j++ {
-				headerParts = append(headerParts, parts[j])
-				if strings.HasSuffix(parts[j], "-----") {
-					header = strings.Join(headerParts, " ")
-					i = j // Skip to after header
-					break
-				}
-			}
-		} else if strings.HasPrefix(part, "-----END") {
-			// Footer spans from here to end marker
-			footerParts := []string{part}
-			for j := i + 1; j < len(parts); j++ {
-				footerParts = append(footerParts, parts[j])
-				if strings.HasSuffix(parts[j], "-----") {
-					break
-				}
-			}
-			footer = strings.Join(footerParts, " ")
-			break // Done processing
-		} else if header != "" && !strings.HasSuffix(part, "-----") {
-			// We're in the body (after header, before footer)
-			bodyParts = append(bodyParts, part)
-		}
-	}
-
-	if header == "" || footer == "" {
-		return key
-	}
-
-	// Join body parts (base64 content) - PEM keys have no spaces in the body
-	body := strings.Join(bodyParts, "")
-
-	return header + "\n" + body + "\n" + footer + "\n"
-}
+// NOTE: formatEnvValue and fixPEMKey were removed as unused. They handled
+// .env file value formatting with base64 encoding for multiline values and
+// PEM key reconstruction. See mcp-gateway/internal/tools/ssh/ssh.go for
+// a working fixPEMKey implementation if needed.
 
 // UpdateIncidentStatus updates the status of an incident.
 // Only sets session_id and full_log when non-empty to avoid overwriting existing values.

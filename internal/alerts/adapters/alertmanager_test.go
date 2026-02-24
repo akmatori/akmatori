@@ -471,3 +471,95 @@ func TestAlertmanagerAdapter_ParsePayload_CustomFieldMappings(t *testing.T) {
 		t.Errorf("Expected SourceFingerprint 'custom', got '%s'", alert.SourceFingerprint)
 	}
 }
+
+// ========================================
+// Benchmarks for critical alert parsing paths
+// ========================================
+
+// BenchmarkAlertmanagerAdapter_ParsePayload_Single benchmarks parsing a single alert
+func BenchmarkAlertmanagerAdapter_ParsePayload_Single(b *testing.B) {
+	adapter := NewAlertmanagerAdapter()
+	instance := &database.AlertSourceInstance{}
+
+	payload := []byte(`{
+		"version": "4",
+		"status": "firing",
+		"alerts": [
+			{
+				"status": "firing",
+				"labels": {
+					"alertname": "HighMemoryUsage",
+					"severity": "critical",
+					"instance": "web-server-01:9090",
+					"job": "node-exporter"
+				},
+				"annotations": {
+					"summary": "Memory usage is above 90%",
+					"description": "Instance has high memory usage"
+				},
+				"startsAt": "2024-01-15T10:30:00Z",
+				"endsAt": "0001-01-01T00:00:00Z",
+				"fingerprint": "abc123def456"
+			}
+		]
+	}`)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		adapter.ParsePayload(payload, instance)
+	}
+}
+
+// BenchmarkAlertmanagerAdapter_ParsePayload_Multiple benchmarks parsing multiple alerts
+func BenchmarkAlertmanagerAdapter_ParsePayload_Multiple(b *testing.B) {
+	adapter := NewAlertmanagerAdapter()
+	instance := &database.AlertSourceInstance{}
+
+	payload := []byte(`{
+		"version": "4",
+		"status": "firing",
+		"alerts": [
+			{"status": "firing", "labels": {"alertname": "Alert1", "severity": "critical"}, "annotations": {}, "fingerprint": "fp1"},
+			{"status": "firing", "labels": {"alertname": "Alert2", "severity": "warning"}, "annotations": {}, "fingerprint": "fp2"},
+			{"status": "firing", "labels": {"alertname": "Alert3", "severity": "info"}, "annotations": {}, "fingerprint": "fp3"},
+			{"status": "resolved", "labels": {"alertname": "Alert4", "severity": "high"}, "annotations": {}, "fingerprint": "fp4"},
+			{"status": "firing", "labels": {"alertname": "Alert5", "severity": "critical"}, "annotations": {}, "fingerprint": "fp5"},
+			{"status": "firing", "labels": {"alertname": "Alert6", "severity": "warning"}, "annotations": {}, "fingerprint": "fp6"},
+			{"status": "resolved", "labels": {"alertname": "Alert7", "severity": "info"}, "annotations": {}, "fingerprint": "fp7"},
+			{"status": "firing", "labels": {"alertname": "Alert8", "severity": "critical"}, "annotations": {}, "fingerprint": "fp8"},
+			{"status": "firing", "labels": {"alertname": "Alert9", "severity": "high"}, "annotations": {}, "fingerprint": "fp9"},
+			{"status": "firing", "labels": {"alertname": "Alert10", "severity": "warning"}, "annotations": {}, "fingerprint": "fp10"}
+		]
+	}`)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		adapter.ParsePayload(payload, instance)
+	}
+}
+
+// BenchmarkAlertmanagerAdapter_ValidateWebhookSecret benchmarks secret validation
+func BenchmarkAlertmanagerAdapter_ValidateWebhookSecret(b *testing.B) {
+	adapter := NewAlertmanagerAdapter()
+	instance := &database.AlertSourceInstance{
+		WebhookSecret: "my-secret-key-for-validation",
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/alert", nil)
+	req.Header.Set("X-Alertmanager-Secret", "my-secret-key-for-validation")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		adapter.ValidateWebhookSecret(req, instance)
+	}
+}
+
+// BenchmarkAlertmanagerAdapter_GetDefaultMappings benchmarks getting mappings
+func BenchmarkAlertmanagerAdapter_GetDefaultMappings(b *testing.B) {
+	adapter := NewAlertmanagerAdapter()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		adapter.GetDefaultMappings()
+	}
+}

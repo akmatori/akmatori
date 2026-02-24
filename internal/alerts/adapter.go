@@ -104,10 +104,9 @@ func MergeMappings(defaults, overrides database.JSONB) database.JSONB {
 	for k, v := range defaults {
 		result[k] = v
 	}
-	if overrides != nil {
-		for k, v := range overrides {
-			result[k] = v
-		}
+	// Range over nil map is safe in Go (iterates zero times)
+	for k, v := range overrides {
+		result[k] = v
 	}
 	return result
 }
@@ -128,21 +127,19 @@ func NormalizeSeverity(severity string, severityMapping map[string][]string) dat
 		return database.AlertSeverityInfo
 	}
 
-	// Check severity mapping
-	if severityMapping != nil {
-		for normalized, aliases := range severityMapping {
-			for _, alias := range aliases {
-				if strings.ToLower(alias) == severity {
-					switch normalized {
-					case "critical":
-						return database.AlertSeverityCritical
-					case "high":
-						return database.AlertSeverityHigh
-					case "warning":
-						return database.AlertSeverityWarning
-					case "info":
-						return database.AlertSeverityInfo
-					}
+	// Check severity mapping (range over nil map is safe - iterates zero times)
+	for normalized, aliases := range severityMapping {
+		for _, alias := range aliases {
+			if strings.ToLower(alias) == severity {
+				switch normalized {
+				case "critical":
+					return database.AlertSeverityCritical
+				case "high":
+					return database.AlertSeverityHigh
+				case "warning":
+					return database.AlertSeverityWarning
+				case "info":
+					return database.AlertSeverityInfo
 				}
 			}
 		}

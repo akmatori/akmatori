@@ -345,6 +345,37 @@ func Close() error {
 	return sqlDB.Close()
 }
 
+// GetOpenAISettings retrieves OpenAI settings from the database (legacy, kept for device auth)
+func GetOpenAISettings() (*OpenAISettings, error) {
+	var settings OpenAISettings
+	if err := DB.First(&settings).Error; err != nil {
+		return nil, err
+	}
+	return &settings, nil
+}
+
+// UpdateOpenAISettings updates OpenAI settings in the database (legacy)
+func UpdateOpenAISettings(settings *OpenAISettings) error {
+	return DB.Model(&OpenAISettings{}).Where("id = ?", settings.ID).Updates(settings).Error
+}
+
+// UpdateOpenAIChatGPTTokens updates the ChatGPT OAuth tokens in the database
+func UpdateOpenAIChatGPTTokens(settings *OpenAISettings) error {
+	return DB.Model(&OpenAISettings{}).Where("id = ?", settings.ID).
+		Select("chat_gpt_access_token", "chat_gpt_refresh_token", "chat_gpt_expires_at", "chat_gpt_user_email", "auth_method").
+		Updates(settings).Error
+}
+
+// ClearOpenAIChatGPTTokens clears all ChatGPT OAuth tokens (for disconnect)
+func ClearOpenAIChatGPTTokens(id uint) error {
+	return DB.Model(&OpenAISettings{}).Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"chat_gpt_access_token":  "",
+			"chat_gpt_refresh_token": "",
+			"chat_gpt_expires_at":    nil,
+			"chat_gpt_user_email":    "",
+		}).Error
+}
 
 // GetProxySettings retrieves proxy settings from the database
 func GetProxySettings() (*ProxySettings, error) {

@@ -404,7 +404,8 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		// Existing DM incident found - resume session
 		sessionID = incident.SessionID
 		incidentUUID = incident.UUID
-		workingDir = incident.WorkingDir
+		// WorkingDir is stored in DB but session already knows its path from creation
+		_ = incident.WorkingDir
 		log.Printf("Resuming session %s for thread %s (incident: %s)", sessionID, threadID, incidentUUID)
 	} else if threadTS != "" {
 		// Try to find an alert channel incident by slack_message_ts
@@ -412,7 +413,8 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		if err := database.GetDB().Where("slack_message_ts = ?", threadID).First(&incident).Error; err == nil {
 			sessionID = incident.SessionID
 			incidentUUID = incident.UUID
-			workingDir = incident.WorkingDir
+			// WorkingDir is stored in DB but session already knows its path from creation
+			_ = incident.WorkingDir
 			log.Printf("Resuming alert channel session %s for thread %s (incident: %s)", sessionID, threadID, incidentUUID)
 		}
 	}
@@ -437,11 +439,14 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		incidentUUID, workingDir, err = h.skillService.SpawnIncidentManager(incidentCtx)
 		if err != nil {
 			log.Printf("Error spawning incident manager: %v", err)
-			h.client.PostMessage(
+			_, _, postErr := h.client.PostMessage(
 				channel,
 				slack.MsgOptionText(fmt.Sprintf("❌ Failed to spawn incident manager: %v", err), false),
 				slack.MsgOptionTS(threadID),
 			)
+			if postErr != nil {
+				log.Printf("Failed to post error message to Slack: %v", postErr)
+			}
 			return
 		}
 
@@ -548,7 +553,9 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			OnOutput: func(outputLog string) {
 				lastStreamedLog += outputLog
 				// Update database with streamed log
-				h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog)
+				if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog); err != nil {
+					log.Printf("Failed to update incident log: %v", err)
+				}
 
 				// Update Slack progress message with accumulated log
 				// (onStderrUpdate expects the full log for truncation/dedup logic)
@@ -751,14 +758,18 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 	} else {
 		log.Printf("AlertHandler not configured, cannot process Slack channel alert")
 		// Remove hourglass and add warning reaction
-		h.client.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
+		if err := h.client.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
 			Channel:   event.Channel,
 			Timestamp: event.TimeStamp,
-		})
-		h.client.AddReaction("warning", slack.ItemRef{
+		}); err != nil {
+			log.Printf("Failed to remove hourglass reaction: %v", err)
+		}
+		if err := h.client.AddReaction("warning", slack.ItemRef{
 			Channel:   event.Channel,
 			Timestamp: event.TimeStamp,
-		})
+		}); err != nil {
+			log.Printf("Failed to add warning reaction: %v", err)
+		}
 	}
 }
 

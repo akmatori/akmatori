@@ -474,3 +474,90 @@ func GetSeverityEmoji(severity AlertSeverity) string {
 		return ":white_circle:"
 	}
 }
+
+// AuthMethod represents the authentication method for OpenAI
+type AuthMethod string
+
+const (
+	AuthMethodAPIKey              AuthMethod = "api_key"
+	AuthMethodChatGPTSubscription AuthMethod = "chatgpt_subscription"
+)
+
+// OpenAISettings stores OpenAI API configuration (legacy, kept for device auth compatibility)
+type OpenAISettings struct {
+	ID                   uint      `gorm:"primaryKey" json:"id"`
+	APIKey               string    `gorm:"type:text" json:"api_key"`
+	Model                string    `gorm:"type:varchar(100);default:'gpt-5.1-codex'" json:"model"`
+	ModelReasoningEffort string    `gorm:"type:varchar(50);default:'medium'" json:"model_reasoning_effort"`
+	BaseURL              string    `gorm:"type:text" json:"base_url"`
+	ProxyURL             string    `gorm:"type:text" json:"proxy_url"`
+	NoProxy              string    `gorm:"type:text" json:"no_proxy"`
+	Enabled              bool      `gorm:"default:false" json:"enabled"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+
+	AuthMethod AuthMethod `gorm:"type:varchar(50);default:'api_key'" json:"auth_method"`
+
+	ChatGPTAccessToken  string     `gorm:"type:text" json:"-"`
+	ChatGPTRefreshToken string     `gorm:"type:text" json:"-"`
+	ChatGPTIDToken      string     `gorm:"type:text" json:"-"`
+	ChatGPTExpiresAt    *time.Time `json:"chatgpt_expires_at,omitempty"`
+	ChatGPTUserEmail    string     `gorm:"type:varchar(255)" json:"chatgpt_email"`
+}
+
+// IsConfigured returns true if the selected auth method is properly configured
+func (o *OpenAISettings) IsConfigured() bool {
+	switch o.AuthMethod {
+	case AuthMethodChatGPTSubscription:
+		return o.ChatGPTAccessToken != "" && o.ChatGPTRefreshToken != ""
+	case AuthMethodAPIKey, "":
+		return o.APIKey != ""
+	default:
+		return o.APIKey != ""
+	}
+}
+
+// IsActive returns true if OpenAI is configured with the selected auth method
+func (o *OpenAISettings) IsActive() bool {
+	return o.IsConfigured()
+}
+
+// IsChatGPTTokenExpired returns true if ChatGPT tokens are expired
+func (o *OpenAISettings) IsChatGPTTokenExpired() bool {
+	if o.ChatGPTExpiresAt == nil {
+		return false
+	}
+	return time.Now().After(*o.ChatGPTExpiresAt)
+}
+
+// GetValidReasoningEfforts returns valid reasoning effort values for the current model
+func (o *OpenAISettings) GetValidReasoningEfforts() []string {
+	switch o.Model {
+	case "gpt-5.2", "gpt-5.2-codex", "gpt-5.1-codex-max":
+		return []string{"low", "medium", "high", "extra_high"}
+	case "gpt-5.1-codex":
+		return []string{"low", "medium", "high"}
+	case "gpt-5.1-codex-mini":
+		return []string{"medium", "high"}
+	case "gpt-5.1":
+		return []string{"low", "medium", "high"}
+	default:
+		return []string{"medium"}
+	}
+}
+
+// ValidateReasoningEffort checks if the reasoning effort is valid for the current model
+func (o *OpenAISettings) ValidateReasoningEffort() bool {
+	validEfforts := o.GetValidReasoningEfforts()
+	for _, e := range validEfforts {
+		if e == o.ModelReasoningEffort {
+			return true
+		}
+	}
+	return false
+}
+
+// TableName returns the table name for OpenAISettings
+func (OpenAISettings) TableName() string {
+	return "openai_settings"
+}

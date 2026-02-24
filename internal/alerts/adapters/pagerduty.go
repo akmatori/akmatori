@@ -1,9 +1,6 @@
 package adapters
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -187,9 +184,5 @@ func (a *PagerDutyAdapter) GetDefaultMappings() database.JSONB {
 	}
 }
 
-// computeHMAC computes HMAC-SHA256 signature
-func computeHMAC(body []byte, secret string) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write(body)
-	return hex.EncodeToString(mac.Sum(nil))
-}
+// NOTE: HMAC signature validation for PagerDuty webhooks can be implemented here
+// when needed. See: https://developer.pagerduty.com/docs/webhooks/v3-overview/

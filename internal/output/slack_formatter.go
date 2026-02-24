@@ -3,6 +3,9 @@ package output
 import (
 	"fmt"
 	"strings"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // FormatForSlack converts parsed output to nicely formatted Slack message
@@ -36,7 +39,7 @@ func formatFinalResultForSlack(result *FinalResult, additionalContext string) st
 
 	// Status emoji and header
 	statusEmoji := getStatusEmoji(result.Status)
-	statusText := strings.Title(result.Status)
+	statusText := cases.Title(language.English).String(result.Status)
 	sb.WriteString(fmt.Sprintf("%s *%s*\n\n", statusEmoji, statusText))
 
 	// Summary
