@@ -105,6 +105,9 @@ export interface WebSocketMessage {
 
   // Proxy configuration with toggles (sent with new_incident)
   proxy_config?: ProxyConfig;
+
+  // Enabled skill names (sent with new_incident to filter skill discovery)
+  enabled_skills?: string[];
 }
 
 // ---------------------------------------------------------------------------

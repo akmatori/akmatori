@@ -13,6 +13,7 @@ import {
   ModelRegistry,
   SessionManager,
   SettingsManager,
+  DefaultResourceLoader,
   createCodingTools,
   type AgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
@@ -30,6 +31,8 @@ export interface ExecuteParams {
   llmSettings: LLMSettings;
   proxyConfig?: ProxyConfig;
   workDir: string;
+  /** Names of enabled skills — only these will be loaded from the shared skills directory */
+  enabledSkills?: string[];
   onOutput: (text: string) => void;
   onEvent?: (event: AgentSessionEvent) => void;
 }
@@ -47,6 +50,8 @@ export interface ResumeParams {
 
 export interface AgentRunnerConfig {
   mcpGatewayUrl: string;
+  /** Directory containing SKILL.md definitions for pi-mono resource loader */
+  skillsDir?: string;
 }
 
 interface ToolExecutionTrace {
@@ -137,10 +142,12 @@ export function resolveModel(
 
 export class AgentRunner {
   private readonly mcpGatewayUrl: string;
+  private readonly skillsDir?: string;
   private activeSessions = new Map<string, AgentSession>();
 
   constructor(config: AgentRunnerConfig) {
     this.mcpGatewayUrl = config.mcpGatewayUrl;
+    this.skillsDir = config.skillsDir;
   }
 
   /**
@@ -194,6 +201,32 @@ export class AgentRunner {
     const settingsManager = SettingsManager.inMemory();
     const modelRegistry = new ModelRegistry(authStorage);
 
+    // Create resource loader with skills directory for pi-mono's native skill system.
+    // This discovers SKILL.md files and includes name+description in the system prompt,
+    // loading full content on-demand when the agent invokes a skill.
+    // Use skillsOverride to filter to only enabled skills — disabled skills may still
+    // have SKILL.md files on disk but should not be available to the agent.
+    const enabledSkillNames = "enabledSkills" in params ? params.enabledSkills : undefined;
+    const resourceLoader = new DefaultResourceLoader({
+      cwd: params.workDir,
+      additionalSkillPaths: this.skillsDir ? [this.skillsDir] : [],
+      noExtensions: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      ...(enabledSkillNames && enabledSkillNames.length > 0
+        ? {
+            skillsOverride: (base) => {
+              const allowedSet = new Set(enabledSkillNames);
+              return {
+                skills: base.skills.filter((s) => allowedSet.has(s.name)),
+                diagnostics: base.diagnostics,
+              };
+            },
+          }
+        : {}),
+    });
+    await resourceLoader.reload();
+
     const { session } = await createAgentSession({
       cwd: params.workDir,
       authStorage,
@@ -202,6 +235,7 @@ export class AgentRunner {
       thinkingLevel,
       tools: createCodingTools(params.workDir),
       customTools: mcpTools,
+      resourceLoader,
       sessionManager,
       settingsManager,
     });

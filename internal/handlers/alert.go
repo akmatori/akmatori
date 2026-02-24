@@ -488,7 +488,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 			},
 		}
 
-		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, callback); err != nil {
+		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
 			log.Printf("Failed to start incident via WebSocket: %v", err)
 			errorMsg := fmt.Sprintf("Failed to start investigation: %v", err)
 			h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg)
@@ -904,7 +904,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 			},
 		}
 
-		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, callback); err != nil {
+		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
 			log.Printf("Failed to start incident via WebSocket: %v", err)
 			errorMsg := fmt.Sprintf("Failed to start investigation: %v", err)
 			h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg)

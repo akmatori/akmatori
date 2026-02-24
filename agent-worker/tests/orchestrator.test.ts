@@ -65,6 +65,18 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
   SettingsManager: {
     inMemory: vi.fn(() => ({})),
   },
+  DefaultResourceLoader: vi.fn().mockImplementation(() => ({
+    reload: vi.fn(async () => {}),
+    getSkills: vi.fn(() => ({ skills: [], diagnostics: [] })),
+    getPrompts: vi.fn(() => ({ prompts: [], diagnostics: [] })),
+    getThemes: vi.fn(() => ({ themes: [], diagnostics: [] })),
+    getExtensions: vi.fn(() => ({})),
+    getAgentsFiles: vi.fn(() => ({ agentsFiles: [] })),
+    getSystemPrompt: vi.fn(() => undefined),
+    getAppendSystemPrompt: vi.fn(() => []),
+    getPathMetadata: vi.fn(() => new Map()),
+    extendResources: vi.fn(),
+  })),
   createCodingTools: vi.fn(() => []),
 }));
 
@@ -189,6 +201,7 @@ describe("Orchestrator", () => {
       apiWsUrl: `ws://127.0.0.1:${serverPort}`,
       mcpGatewayUrl: "http://mcp-gateway:8080",
       workspaceDir: "/tmp/test-workspaces",
+      skillsDir: "/tmp/test-skills",
       logger: (msg: string) => logs.push(msg),
     };
 
@@ -396,6 +409,63 @@ describe("Orchestrator", () => {
           cwd: "/tmp/test-workspaces/incident-ws-test",
         }),
       );
+    });
+
+    it("should pass skillsOverride when enabled_skills is provided", async () => {
+      const { DefaultResourceLoader } = await import("@mariozechner/pi-coding-agent");
+
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "new_incident",
+        incident_id: "incident-skills-filter",
+        task: "Test skill filtering",
+        openai_api_key: "sk-key",
+        enabled_skills: ["linux-agent", "zabbix-analyst"],
+      });
+
+      await waitForMessage(
+        (m) => m.type === "codex_completed" && m.incident_id === "incident-skills-filter",
+      );
+
+      // Verify DefaultResourceLoader was called with a skillsOverride function
+      const constructorCall = (DefaultResourceLoader as any).mock.calls.at(-1)[0];
+      expect(constructorCall.skillsOverride).toBeTypeOf("function");
+
+      // Verify the filter function works correctly
+      const mockSkills = [
+        { name: "linux-agent" },
+        { name: "disabled-skill" },
+        { name: "zabbix-analyst" },
+      ];
+      const result = constructorCall.skillsOverride({
+        skills: mockSkills,
+        diagnostics: [],
+      });
+      expect(result.skills.map((s: any) => s.name)).toEqual(["linux-agent", "zabbix-analyst"]);
+    });
+
+    it("should not set skillsOverride when enabled_skills is absent", async () => {
+      const { DefaultResourceLoader } = await import("@mariozechner/pi-coding-agent");
+
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "new_incident",
+        incident_id: "incident-no-skills-filter",
+        task: "Test no skill filtering",
+        openai_api_key: "sk-key",
+        // No enabled_skills
+      });
+
+      await waitForMessage(
+        (m) => m.type === "codex_completed" && m.incident_id === "incident-no-skills-filter",
+      );
+
+      const constructorCall = (DefaultResourceLoader as any).mock.calls.at(-1)[0];
+      expect(constructorCall.skillsOverride).toBeUndefined();
     });
   });
 

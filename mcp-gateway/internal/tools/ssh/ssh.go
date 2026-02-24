@@ -98,9 +98,10 @@ type ConnectivityResult struct {
 	Error string `json:"error,omitempty"`
 }
 
-// getConfig fetches SSH configuration from database
-func (t *SSHTool) getConfig(ctx context.Context, incidentID string) (*SSHConfig, error) {
-	creds, err := database.GetToolCredentialsForIncident(ctx, incidentID, "ssh")
+// getConfig fetches SSH configuration from database.
+// If instanceID is provided, it resolves credentials for that specific tool instance.
+func (t *SSHTool) getConfig(ctx context.Context, incidentID string, instanceID *uint) (*SSHConfig, error) {
+	creds, err := database.ResolveToolCredentials(ctx, incidentID, "ssh", instanceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get SSH credentials: %w", err)
 	}
@@ -565,9 +566,10 @@ func (t *SSHTool) executeOnServer(ctx context.Context, hostConfig *SSHHostConfig
 	}
 }
 
-// ExecuteCommand executes a command on all or specified servers
-func (t *SSHTool) ExecuteCommand(ctx context.Context, incidentID string, command string, servers []string) (string, error) {
-	config, err := t.getConfig(ctx, incidentID)
+// ExecuteCommand executes a command on all or specified servers.
+// If instanceID is provided, credentials are resolved for that specific tool instance.
+func (t *SSHTool) ExecuteCommand(ctx context.Context, incidentID string, command string, servers []string, instanceID *uint) (string, error) {
+	config, err := t.getConfig(ctx, incidentID, instanceID)
 	if err != nil {
 		return "", err
 	}
@@ -631,9 +633,10 @@ func (t *SSHTool) ExecuteCommand(ctx context.Context, incidentID string, command
 	return t.jsonResult(execResult)
 }
 
-// TestConnectivity tests SSH connectivity to all servers
-func (t *SSHTool) TestConnectivity(ctx context.Context, incidentID string) (string, error) {
-	config, err := t.getConfig(ctx, incidentID)
+// TestConnectivity tests SSH connectivity to all servers.
+// If instanceID is provided, credentials are resolved for that specific tool instance.
+func (t *SSHTool) TestConnectivity(ctx context.Context, incidentID string, instanceID *uint) (string, error) {
+	config, err := t.getConfig(ctx, incidentID, instanceID)
 	if err != nil {
 		return "", err
 	}
@@ -688,13 +691,14 @@ func (t *SSHTool) TestConnectivity(ctx context.Context, incidentID string) (stri
 	return t.jsonResult(result)
 }
 
-// GetServerInfo gets basic system info from specified servers (or all if none specified)
-func (t *SSHTool) GetServerInfo(ctx context.Context, incidentID string, servers []string) (string, error) {
+// GetServerInfo gets basic system info from specified servers (or all if none specified).
+// If instanceID is provided, credentials are resolved for that specific tool instance.
+func (t *SSHTool) GetServerInfo(ctx context.Context, incidentID string, servers []string, instanceID *uint) (string, error) {
 	infoCommand := `echo "HOSTNAME=$(hostname)" && ` +
 		`echo "OS=$(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d'"' -f2 || uname -s)" && ` +
 		`echo "UPTIME=$(uptime -p 2>/dev/null || uptime | awk -F'up ' '{print $2}' | awk -F',' '{print $1}')"`
 
-	return t.ExecuteCommand(ctx, incidentID, infoCommand, servers)
+	return t.ExecuteCommand(ctx, incidentID, infoCommand, servers, instanceID)
 }
 
 // jsonResult converts a result to JSON string

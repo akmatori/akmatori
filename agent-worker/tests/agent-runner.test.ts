@@ -84,6 +84,18 @@ vi.mock("@mariozechner/pi-coding-agent", () => {
       inMemory: vi.fn(() => ({})),
       create: vi.fn(() => ({})),
     },
+    DefaultResourceLoader: vi.fn().mockImplementation(() => ({
+      reload: vi.fn(async () => {}),
+      getSkills: vi.fn(() => ({ skills: [], diagnostics: [] })),
+      getPrompts: vi.fn(() => ({ prompts: [], diagnostics: [] })),
+      getThemes: vi.fn(() => ({ themes: [], diagnostics: [] })),
+      getExtensions: vi.fn(() => ({})),
+      getAgentsFiles: vi.fn(() => ({ agentsFiles: [] })),
+      getSystemPrompt: vi.fn(() => undefined),
+      getAppendSystemPrompt: vi.fn(() => []),
+      getPathMetadata: vi.fn(() => new Map()),
+      extendResources: vi.fn(),
+    })),
     createCodingTools: vi.fn(() => []),
   };
 });

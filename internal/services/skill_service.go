@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -439,6 +440,22 @@ func (s *SkillService) ListEnabledSkills() ([]database.Skill, error) {
 	return skills, nil
 }
 
+// GetEnabledSkillNames returns the names of all enabled, non-system skills.
+// Used to tell the agent worker which skills it should load from the shared skills directory.
+func (s *SkillService) GetEnabledSkillNames() []string {
+	skills, err := s.ListEnabledSkills()
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, sk := range skills {
+		if !sk.IsSystem {
+			names = append(names, sk.Name)
+		}
+	}
+	return names
+}
+
 // GetSkill returns a skill by name
 func (s *SkillService) GetSkill(name string) (*database.Skill, error) {
 	var skill database.Skill
@@ -551,7 +568,7 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 	// Transform [[filename]] references to markdown links [filename](assets/filename)
 	resolvedBody := s.contextService.ResolveReferencesToMarkdownLinks(body)
 
-	// List assigned tools as metadata (tools are registered as pi-mono ToolDefinition objects)
+	// List assigned tools with instance details for per-skill routing
 	var toolsSection strings.Builder
 	var enabledTools []database.ToolInstance
 	for _, tool := range tools {
@@ -560,13 +577,57 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 		}
 	}
 	if len(enabledTools) > 0 {
-		toolsSection.WriteString("\n\n## Assigned Tools\n\n")
+		toolsSection.WriteString("\n\n## Assigned Tools\n")
 		for _, tool := range enabledTools {
-			toolsSection.WriteString(fmt.Sprintf("- %s\n", tool.ToolType.Name))
+			toolsSection.WriteString(fmt.Sprintf("\n### %s (ID: %d, type: %s)\n", tool.Name, tool.ID, tool.ToolType.Name))
+			if details := extractToolDetails(tool); details != "" {
+				toolsSection.WriteString(details)
+			}
+			toolsSection.WriteString(fmt.Sprintf("When using %s tools, pass `tool_instance_id: %d` to target this instance.\n", tool.ToolType.Name, tool.ID))
 		}
 	}
 
 	return fmt.Sprintf("---\n%s---\n\n%s%s\n", string(yamlBytes), resolvedBody, toolsSection.String())
+}
+
+// extractToolDetails extracts non-secret, agent-relevant details from a tool instance's settings.
+// For SSH: lists configured hostnames so the agent knows which servers it can target.
+// For other tool types (zabbix, etc.): no extra details needed — the agent interacts via MCP Gateway
+// tools and doesn't need internal connection details like URLs or endpoints.
+func extractToolDetails(tool database.ToolInstance) string {
+	if tool.Settings == nil {
+		return ""
+	}
+
+	typeName := tool.ToolType.Name
+
+	switch typeName {
+	case "ssh":
+		// Extract hostnames from ssh_hosts array — agent needs these for server targeting
+		hostsData, ok := tool.Settings["ssh_hosts"]
+		if !ok {
+			return ""
+		}
+		hostsJSON, err := json.Marshal(hostsData)
+		if err != nil {
+			return ""
+		}
+		var hosts []map[string]interface{}
+		if err := json.Unmarshal(hostsJSON, &hosts); err != nil {
+			return ""
+		}
+		var hostnames []string
+		for _, h := range hosts {
+			if hostname, ok := h["hostname"].(string); ok && hostname != "" {
+				hostnames = append(hostnames, hostname)
+			}
+		}
+		if len(hostnames) > 0 {
+			return fmt.Sprintf("Configured hosts: %s\n", strings.Join(hostnames, ", "))
+		}
+	}
+
+	return ""
 }
 
 // getSkillTools fetches tool instances for a skill from the database
@@ -689,59 +750,59 @@ func (s *SkillService) SyncSkillsFromFilesystem() error {
 	return nil
 }
 
-// RegenerateAllSkillMds regenerates SKILL.md files for all skills
-// This updates existing skills with the latest template (e.g., resource instructions)
+// RegenerateAllSkillMds regenerates SKILL.md files for all enabled skills.
+// For skills that exist on disk, it updates the SKILL.md with the latest template.
+// For skills that only exist in the database (no directory on disk), it materializes
+// the directory and writes a SKILL.md so pi-mono's DefaultResourceLoader can discover them.
 func (s *SkillService) RegenerateAllSkillMds() error {
-	entries, err := os.ReadDir(s.skillsDir)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("failed to read skills directory: %w", err)
+	// Ensure the skills directory exists
+	if err := os.MkdirAll(s.skillsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create skills directory: %w", err)
 	}
 
-	for _, e := range entries {
-		if !e.IsDir() {
+	// Get all enabled skills from the database (source of truth)
+	var skills []database.Skill
+	if err := s.db.Where("enabled = ?", true).Find(&skills).Error; err != nil {
+		return fmt.Errorf("failed to list skills: %w", err)
+	}
+
+	for _, skill := range skills {
+		// Skip incident-manager (system skill, handled by AGENTS.md)
+		if skill.Name == "incident-manager" {
 			continue
 		}
-		name := e.Name()
 
-		// Skip incident-manager (system skill)
-		if name == "incident-manager" {
+		// Ensure skill directory exists on disk
+		if err := s.EnsureSkillDirectories(skill.Name); err != nil {
+			log.Printf("Warning: failed to create directories for skill %s: %v", skill.Name, err)
 			continue
 		}
 
-		// Get skill from database to get description
-		var skill database.Skill
-		if err := s.db.Where("name = ?", name).First(&skill).Error; err != nil {
-			continue // Skip skills not in database
-		}
-
-		// Get current prompt (strips auto-generated sections)
-		prompt, err := s.GetSkillPrompt(name)
+		// Get current prompt from SKILL.md if it exists, otherwise use description
+		prompt, err := s.GetSkillPrompt(skill.Name)
 		if err != nil {
-			log.Printf("Warning: failed to get prompt for skill %s: %v", name, err)
-			continue
+			// No SKILL.md yet — use description as initial prompt body
+			prompt = skill.Description
 		}
 
 		// Sync asset symlinks for [[filename]] references in prompt
-		if err := s.SyncSkillAssets(name, prompt); err != nil {
-			log.Printf("Warning: failed to sync assets for skill %s: %v", name, err)
+		if err := s.SyncSkillAssets(skill.Name, prompt); err != nil {
+			log.Printf("Warning: failed to sync assets for skill %s: %v", skill.Name, err)
 		}
 
 		// Get tools for this skill
-		tools := s.getSkillTools(name)
+		tools := s.getSkillTools(skill.Name)
 
-		// Regenerate SKILL.md with tool list
-		skillMd := s.generateSkillMd(name, skill.Description, prompt, tools)
-		skillPath := filepath.Join(s.GetSkillDir(name), "SKILL.md")
+		// Write SKILL.md with frontmatter + prompt body
+		skillMd := s.generateSkillMd(skill.Name, skill.Description, prompt, tools)
+		skillPath := filepath.Join(s.GetSkillDir(skill.Name), "SKILL.md")
 
 		if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
-			log.Printf("Warning: failed to regenerate SKILL.md for %s: %v", name, err)
+			log.Printf("Warning: failed to regenerate SKILL.md for %s: %v", skill.Name, err)
 			continue
 		}
 
-		log.Printf("Regenerated SKILL.md for skill: %s", name)
+		log.Printf("Regenerated SKILL.md for skill: %s", skill.Name)
 	}
 
 	return nil
@@ -830,7 +891,8 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 
 // generateIncidentAgentsMd generates the AGENTS.md file for incident manager
 // pi-mono reads this file from the workspace root (agentDir parameter)
-// Skill instructions are embedded inline since tools are native pi-mono ToolDefinition objects
+// Skills are discovered by pi-mono's DefaultResourceLoader via additionalSkillPaths,
+// so only the incident manager prompt is written here.
 func (s *SkillService) generateIncidentAgentsMd(path string) error {
 	// Get incident manager prompt from the system skill
 	prompt, err := s.GetSkillPrompt("incident-manager")
@@ -839,38 +901,11 @@ func (s *SkillService) generateIncidentAgentsMd(path string) error {
 		prompt = database.DefaultIncidentManagerPrompt
 	}
 
-	// Build AGENTS.md content
 	var sb strings.Builder
-
 	sb.WriteString("# Incident Manager\n\n")
 	sb.WriteString(prompt)
-	sb.WriteString("\n\n")
+	sb.WriteString("\n")
 
-	// Embed enabled skill instructions inline
-	// pi-mono tools are registered at session creation time as ToolDefinition objects,
-	// so we only need to include the skill prompt/instructions here (no Python imports)
-	enabledSkills, err := s.ListEnabledSkills()
-	if err == nil && len(enabledSkills) > 0 {
-		sb.WriteString("## Available Skills\n\n")
-		for _, skill := range enabledSkills {
-			if skill.Name == "incident-manager" {
-				continue // Don't embed self
-			}
-			sb.WriteString(fmt.Sprintf("### %s\n\n", skill.Name))
-			if skill.Description != "" {
-				sb.WriteString(skill.Description)
-				sb.WriteString("\n\n")
-			}
-			// Get skill prompt body and embed it
-			skillPrompt, err := s.GetSkillPrompt(skill.Name)
-			if err == nil && skillPrompt != "" {
-				sb.WriteString(skillPrompt)
-				sb.WriteString("\n\n")
-			}
-		}
-	}
-
-	// Write to file
 	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
 		return fmt.Errorf("failed to write AGENTS.md: %w", err)
 	}

@@ -448,6 +448,43 @@ describe("createMCPTools", () => {
     }
   });
 
+  it("should include tool_instance_id in every tool's parameters", () => {
+    const tools = createMCPTools(mock.url, "inc-1");
+
+    for (const tool of tools) {
+      const props = tool.parameters.properties;
+      expect(props).toHaveProperty("tool_instance_id");
+    }
+  });
+
+  it("should pass tool_instance_id through to MCP Gateway", async () => {
+    const tools = createMCPTools(mock.url, "inc-route");
+    const sshTool = tools.find((t) => t.name === "ssh_execute_command")!;
+
+    mock.responseHandler = (req) => ({
+      jsonrpc: "2.0",
+      id: req.id,
+      result: {
+        content: [{ type: "text", text: '{"status": "ok"}' }],
+        isError: false,
+      },
+    });
+
+    await sshTool.execute(
+      "call-route",
+      { command: "uptime", tool_instance_id: 42 } as any,
+      undefined,
+      undefined,
+      {} as any,
+    );
+
+    // Verify tool_instance_id is included in the arguments sent to MCP Gateway
+    expect(mock.requests[0].body.params.arguments).toEqual({
+      command: "uptime",
+      tool_instance_id: 42,
+    });
+  });
+
   // -----------------------------------------------------------------------
   // SSH tool execution
   // -----------------------------------------------------------------------

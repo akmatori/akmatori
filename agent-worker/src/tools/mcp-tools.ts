@@ -21,6 +21,8 @@ import { MCPClient } from "./mcp-client.js";
 
 /**
  * Helper: build a ToolDefinition that proxies to the MCP Gateway.
+ * Automatically injects an optional `tool_instance_id` parameter into every
+ * tool's schema so the agent can route calls to a specific tool instance.
  */
 function mcpTool<T extends TObject>(opts: {
   name: string;
@@ -30,11 +32,22 @@ function mcpTool<T extends TObject>(opts: {
   mcpToolName: string;
   client: MCPClient;
 }): ToolDefinition<T> {
+  // Inject tool_instance_id into the parameter schema
+  const extendedParameters = Type.Object({
+    ...opts.parameters.properties,
+    tool_instance_id: Type.Optional(
+      Type.Number({
+        description:
+          "Optional tool instance ID for routing to a specific configured instance. Provided in SKILL.md when multiple instances of this tool type exist.",
+      }),
+    ),
+  }) as unknown as T;
+
   return {
     name: opts.name,
     label: opts.label,
     description: opts.description,
-    parameters: opts.parameters,
+    parameters: extendedParameters,
     async execute(
       _toolCallId: string,
       params: Record<string, unknown>,

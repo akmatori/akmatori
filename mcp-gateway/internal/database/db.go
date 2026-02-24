@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -172,6 +173,47 @@ func GetAllEnabledToolInstances(ctx context.Context) ([]ToolInstance, error) {
 		Where("enabled = ?", true).
 		Find(&instances).Error
 	return instances, err
+}
+
+// GetToolCredentialsByInstanceID fetches tool credentials by the tool instance primary key.
+// This is used when the agent explicitly specifies which tool instance to use.
+// The expectedToolType parameter ensures the instance belongs to the requested tool type,
+// preventing misrouted calls (e.g., an SSH call with a Zabbix instance ID).
+func GetToolCredentialsByInstanceID(ctx context.Context, instanceID uint, expectedToolType string) (*ToolCredentials, error) {
+	var toolInstance ToolInstance
+	err := DB.WithContext(ctx).
+		Preload("ToolType").
+		Where("id = ? AND enabled = ?", instanceID, true).
+		First(&toolInstance).Error
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("no enabled tool instance found with ID: %d", instanceID)
+		}
+		return nil, err
+	}
+
+	if toolInstance.ToolType.Name != expectedToolType {
+		return nil, fmt.Errorf("tool instance %d is type %q, but %q was requested", instanceID, toolInstance.ToolType.Name, expectedToolType)
+	}
+
+	return &ToolCredentials{
+		ToolType:   toolInstance.ToolType.Name,
+		ToolName:   toolInstance.Name,
+		Settings:   toolInstance.Settings,
+		InstanceID: toolInstance.ID,
+	}, nil
+}
+
+// ResolveToolCredentials resolves tool credentials with optional instance-aware routing.
+// If instanceID is provided, it fetches credentials for that specific instance and
+// validates that it matches the expected tool type. Otherwise, it falls back to
+// the existing type-based lookup.
+func ResolveToolCredentials(ctx context.Context, incidentID string, toolType string, instanceID *uint) (*ToolCredentials, error) {
+	if instanceID != nil && *instanceID > 0 {
+		return GetToolCredentialsByInstanceID(ctx, *instanceID, toolType)
+	}
+	return GetToolCredentialsForIncident(ctx, incidentID, toolType)
 }
 
 // GetToolInstanceByType returns a specific tool instance by type name

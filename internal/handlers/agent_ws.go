@@ -65,6 +65,9 @@ type AgentMessage struct {
 
 	// Proxy configuration with toggles (sent with new_incident)
 	ProxyConfig *ProxyConfig `json:"proxy_config,omitempty"`
+
+	// Enabled skill names (sent with new_incident to filter skill discovery)
+	EnabledSkills []string `json:"enabled_skills,omitempty"`
 }
 
 // LLMSettingsForWorker holds LLM configuration for agent execution
@@ -305,7 +308,7 @@ func (h *AgentWSHandler) SendToWorker(msg AgentMessage) error {
 }
 
 // StartIncident sends a new incident to the agent worker
-func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettingsForWorker, callback IncidentCallback) error {
+func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettingsForWorker, enabledSkills []string, callback IncidentCallback) error {
 	// Register callback
 	h.callbackMu.Lock()
 	h.callbacks[incidentID] = callback
@@ -313,9 +316,10 @@ func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettings
 
 	// Send to worker
 	msg := AgentMessage{
-		Type:       AgentMessageTypeNewIncident,
-		IncidentID: incidentID,
-		Task:       task,
+		Type:          AgentMessageTypeNewIncident,
+		IncidentID:    incidentID,
+		Task:          task,
+		EnabledSkills: enabledSkills,
 	}
 
 	// Include LLM settings if provided
