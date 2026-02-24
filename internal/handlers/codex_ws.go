@@ -33,15 +33,6 @@ const (
 	CodexMessageTypeDeviceAuthResponse CodexMessageType = "device_auth_response"
 )
 
-// ProxyConfig holds proxy configuration with per-service toggles
-type ProxyConfig struct {
-	URL           string `json:"url"`
-	NoProxy       string `json:"no_proxy"`
-	OpenAIEnabled bool   `json:"openai_enabled"`
-	SlackEnabled  bool   `json:"slack_enabled"`
-	ZabbixEnabled bool   `json:"zabbix_enabled"`
-}
-
 // CodexMessage represents a WebSocket message between API and Codex worker
 type CodexMessage struct {
 	Type       CodexMessageType       `json:"type"`
@@ -120,13 +111,6 @@ type CodexWSHandler struct {
 	callbackMu         sync.RWMutex
 	deviceAuthCallback DeviceAuthCallback
 	deviceAuthMu       sync.RWMutex
-}
-
-// IncidentCallback is called when an incident receives updates
-type IncidentCallback struct {
-	OnOutput    func(output string)
-	OnCompleted func(sessionID, response string)
-	OnError     func(errorMsg string)
 }
 
 // DeviceAuthResult holds the result of device authentication
@@ -598,12 +582,4 @@ func (h *CodexWSHandler) BroadcastProxyConfig(settings *database.ProxySettings) 
 	return h.SendToWorker(msg)
 }
 
-// ErrWorkerNotConnected is returned when no worker is connected
-var ErrWorkerNotConnected = &WorkerNotConnectedError{}
-
-// WorkerNotConnectedError represents a worker not connected error
-type WorkerNotConnectedError struct{}
-
-func (e *WorkerNotConnectedError) Error() string {
-	return "codex worker not connected"
-}
+// Note: ErrWorkerNotConnected is defined in agent_ws.go

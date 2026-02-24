@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -20,26 +21,27 @@ import (
 
 // APIHandler handles API endpoints for the UI and skill communication
 type APIHandler struct {
-	skillService          *services.SkillService
-	toolService           *services.ToolService
-	contextService        *services.ContextService
-	alertService          *services.AlertService
-	codexExecutor         *executor.Executor
-	codexWSHandler        *CodexWSHandler
-	slackManager          *slackutil.Manager
-	deviceAuthService     *services.DeviceAuthService
-	alertChannelReloader  func() // called after alert source create/update/delete to reload Slack channel mappings
+	skillService         *services.SkillService
+	toolService          *services.ToolService
+	contextService       *services.ContextService
+	alertService         *services.AlertService
+	codexExecutor        *executor.Executor
+	agentWSHandler       *AgentWSHandler
+	codexWSHandler       *CodexWSHandler
+	slackManager         *slackutil.Manager
+	deviceAuthService    *services.DeviceAuthService
+	alertChannelReloader func() // called after alert source create/update/delete to reload Slack channel mappings
 }
 
 // NewAPIHandler creates a new API handler
-func NewAPIHandler(skillService *services.SkillService, toolService *services.ToolService, contextService *services.ContextService, alertService *services.AlertService, codexExecutor *executor.Executor, codexWSHandler *CodexWSHandler, slackManager *slackutil.Manager) *APIHandler {
+func NewAPIHandler(skillService *services.SkillService, toolService *services.ToolService, contextService *services.ContextService, alertService *services.AlertService, codexExecutor *executor.Executor, agentWSHandler *AgentWSHandler, slackManager *slackutil.Manager) *APIHandler {
 	return &APIHandler{
 		skillService:      skillService,
 		toolService:       toolService,
 		contextService:    contextService,
 		alertService:      alertService,
 		codexExecutor:     codexExecutor,
-		codexWSHandler:    codexWSHandler,
+		agentWSHandler:    agentWSHandler,
 		slackManager:      slackManager,
 		deviceAuthService: services.NewDeviceAuthService(),
 	}
@@ -83,12 +85,8 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	// Slack settings
 	mux.HandleFunc("/api/settings/slack", h.handleSlackSettings)
 
-	// OpenAI settings
-	mux.HandleFunc("/api/settings/openai", h.handleOpenAISettings)
-	mux.HandleFunc("/api/settings/openai/device-auth/start", h.handleDeviceAuthStart)
-	mux.HandleFunc("/api/settings/openai/device-auth/status", h.handleDeviceAuthStatus)
-	mux.HandleFunc("/api/settings/openai/device-auth/cancel", h.handleDeviceAuthCancel)
-	mux.HandleFunc("/api/settings/openai/chatgpt/disconnect", h.handleChatGPTDisconnect)
+	// LLM settings
+	mux.HandleFunc("/api/settings/llm", h.handleLLMSettings)
 
 	// Proxy settings
 	mux.HandleFunc("/api/settings/proxy", h.handleProxySettings)
@@ -720,34 +718,19 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 			taskWithGuidance := executor.PrependGuidance(req.Task)
 
 			// Try WebSocket-based execution first (new architecture)
-			if h.codexWSHandler != nil && h.codexWSHandler.IsWorkerConnected() {
-				log.Printf("Using WebSocket-based Codex worker for API incident %s", incidentUUID)
+			if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
+				log.Printf("Using WebSocket-based agent worker for API incident %s", incidentUUID)
 
-				// Fetch OpenAI settings from database
-				var openaiSettings *OpenAISettings
-				if dbSettings, err := database.GetOpenAISettings(); err == nil && dbSettings != nil {
-					openaiSettings = &OpenAISettings{
-						APIKey:          dbSettings.APIKey,
-						Model:           dbSettings.Model,
-						ReasoningEffort: dbSettings.ModelReasoningEffort,
-						BaseURL:         dbSettings.BaseURL,
-						ProxyURL:        dbSettings.ProxyURL,
-						NoProxy:         dbSettings.NoProxy,
-						// ChatGPT subscription auth fields
-						AuthMethod:          string(dbSettings.AuthMethod),
-						ChatGPTAccessToken:  dbSettings.ChatGPTAccessToken,
-						ChatGPTRefreshToken: dbSettings.ChatGPTRefreshToken,
-						ChatGPTIDToken:      dbSettings.ChatGPTIDToken,
-					}
-					// Add expiry timestamp if set
-					if dbSettings.ChatGPTExpiresAt != nil {
-						openaiSettings.ChatGPTExpiresAt = dbSettings.ChatGPTExpiresAt.Format(time.RFC3339)
-					}
-					log.Printf("Using OpenAI model: %s, auth method: %s", dbSettings.Model, dbSettings.AuthMethod)
+				// Fetch LLM settings from database
+				var llmSettings *LLMSettingsForWorker
+				if dbSettings, err := database.GetLLMSettings(); err == nil && dbSettings != nil {
+					llmSettings = BuildLLMSettingsForWorker(dbSettings)
+					log.Printf("Using LLM provider: %s, model: %s", dbSettings.Provider, dbSettings.Model)
 				}
 
 				// Create channels for async result handling
 				done := make(chan struct{})
+				var closeOnce sync.Once
 				var response string
 				var sessionID string
 				var hasError bool
@@ -755,26 +738,27 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 
 				callback := IncidentCallback{
 					OnOutput: func(output string) {
-						lastStreamedLog = output // Save the accumulated log
-						if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+output); err != nil {
+						lastStreamedLog += output // Append streamed output delta
+						if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog); err != nil {
 							log.Printf("Failed to update incident log: %v", err)
 						}
 					},
 					OnCompleted: func(sid, output string) {
 						sessionID = sid
 						response = output
-						close(done)
+						closeOnce.Do(func() { close(done) })
 					},
 					OnError: func(errorMsg string) {
 						response = fmt.Sprintf("❌ Error: %s", errorMsg)
 						hasError = true
-						close(done)
+						closeOnce.Do(func() { close(done) })
 					},
 				}
 
-				if err := h.codexWSHandler.StartIncident(incidentUUID, taskWithGuidance, openaiSettings, callback); err != nil {
-					log.Printf("Failed to start incident via WebSocket: %v, falling back to local execution", err)
-					h.runIncidentLocal(incidentUUID, workingDir, taskHeader, taskWithGuidance)
+				if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
+					log.Printf("Failed to start incident via WebSocket: %v", err)
+					errorMsg := fmt.Sprintf("Failed to start incident: %v", err)
+					h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg)
 					return
 				}
 
@@ -802,9 +786,10 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			// Fall back to local execution (legacy)
-			log.Printf("WebSocket worker not available, using local execution for API incident %s", incidentUUID)
-			h.runIncidentLocal(incidentUUID, workingDir, taskHeader, taskWithGuidance)
+			// No WebSocket worker available
+			log.Printf("ERROR: Agent worker not connected for API incident %s", incidentUUID)
+			errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
+			h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg)
 		}()
 
 		response := map[string]interface{}{
@@ -1121,7 +1106,7 @@ func isValidURL(rawURL string) bool {
 	return parsed.Scheme == "http" || parsed.Scheme == "https"
 }
 
-// ModelConfig defines the available models and their valid reasoning effort options
+// ModelConfigs defines the available models and their valid reasoning effort options (legacy, kept for tests)
 var ModelConfigs = map[string][]string{
 	"gpt-5.2":            {"low", "medium", "high", "extra_high"},
 	"gpt-5.2-codex":      {"low", "medium", "high", "extra_high"},
@@ -1131,56 +1116,62 @@ var ModelConfigs = map[string][]string{
 	"gpt-5.1":            {"low", "medium", "high"},
 }
 
-// handleOpenAISettings handles GET /api/settings/openai and PUT /api/settings/openai
-func (h *APIHandler) handleOpenAISettings(w http.ResponseWriter, r *http.Request) {
-	db := database.GetDB()
-
+// handleLLMSettings handles GET /api/settings/llm and PUT /api/settings/llm.
+//
+// GET returns all provider settings so the frontend can show per-provider API keys.
+// PUT updates a specific provider's settings (identified by the provider field) and
+// marks it as the active provider.
+func (h *APIHandler) handleLLMSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		var settings database.OpenAISettings
-		if err := db.First(&settings).Error; err != nil {
+		allSettings, err := database.GetAllLLMSettings()
+		if err != nil {
 			http.Error(w, "Settings not found", http.StatusNotFound)
 			return
 		}
 
-		// Determine auth method (default to api_key for backward compatibility)
-		authMethod := string(settings.AuthMethod)
-		if authMethod == "" {
-			authMethod = string(database.AuthMethodAPIKey)
+		// Build per-provider map
+		providers := make(map[string]interface{})
+		activeProvider := ""
+		for _, s := range allSettings {
+			providers[string(s.Provider)] = map[string]interface{}{
+				"api_key":        maskToken(s.APIKey),
+				"model":          s.Model,
+				"thinking_level": s.ThinkingLevel,
+				"base_url":       s.BaseURL,
+				"is_configured":  s.APIKey != "",
+			}
+			if s.Active {
+				activeProvider = string(s.Provider)
+			}
 		}
 
+		// Backward-compatible: also include top-level fields from the active provider
+		active, _ := database.GetLLMSettings()
 		response := map[string]interface{}{
-			"id":                      settings.ID,
-			"api_key":                 maskToken(settings.APIKey),
-			"model":                   settings.Model,
-			"model_reasoning_effort":  settings.ModelReasoningEffort,
-			"base_url":                settings.BaseURL,
-			"proxy_url":               maskProxyURL(settings.ProxyURL),
-			"no_proxy":                settings.NoProxy,
-			"is_configured":           settings.IsConfigured(),
-			"valid_reasoning_efforts": settings.GetValidReasoningEfforts(),
-			"available_models":        ModelConfigs,
-			"created_at":              settings.CreatedAt,
-			"updated_at":              settings.UpdatedAt,
-			// New auth method fields
-			"auth_method":             authMethod,
-			"chatgpt_email":           settings.ChatGPTUserEmail,
-			"chatgpt_expires_at":      settings.ChatGPTExpiresAt,
-			"chatgpt_expired":         settings.IsChatGPTTokenExpired(),
-			"chatgpt_connected":       settings.ChatGPTAccessToken != "" && settings.ChatGPTRefreshToken != "",
+			"active_provider": activeProvider,
+			"providers":       providers,
+			// Top-level fields for backward compat with existing consumers
+			"id":             active.ID,
+			"provider":       active.Provider,
+			"api_key":        maskToken(active.APIKey),
+			"model":          active.Model,
+			"thinking_level": active.ThinkingLevel,
+			"base_url":       active.BaseURL,
+			"is_configured":  active.APIKey != "",
+			"created_at":     active.CreatedAt,
+			"updated_at":     active.UpdatedAt,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
 
 	case http.MethodPut:
 		var req struct {
-			APIKey               *string `json:"api_key"`
-			Model                *string `json:"model"`
-			ModelReasoningEffort *string `json:"model_reasoning_effort"`
-			BaseURL              *string `json:"base_url"`
-			ProxyURL             *string `json:"proxy_url"`
-			NoProxy              *string `json:"no_proxy"`
-			AuthMethod           *string `json:"auth_method"`
+			Provider      *string `json:"provider"`
+			APIKey        *string `json:"api_key"`
+			Model         *string `json:"model"`
+			ThinkingLevel *string `json:"thinking_level"`
+			BaseURL       *string `json:"base_url"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1188,129 +1179,79 @@ func (h *APIHandler) handleOpenAISettings(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		var settings database.OpenAISettings
-		if err := db.First(&settings).Error; err != nil {
-			http.Error(w, "Settings not found", http.StatusNotFound)
+		// Provider is required for per-provider updates
+		if req.Provider == nil || *req.Provider == "" {
+			http.Error(w, "provider is required", http.StatusBadRequest)
 			return
 		}
 
-		// Validate URLs if provided
-		if req.BaseURL != nil && !isValidURL(*req.BaseURL) {
+		if !database.IsValidLLMProvider(*req.Provider) {
+			http.Error(w, fmt.Sprintf("Invalid provider: %s. Valid options: openai, anthropic, google, openrouter, custom", *req.Provider), http.StatusBadRequest)
+			return
+		}
+
+		// Validate base URL if provided
+		if req.BaseURL != nil && *req.BaseURL != "" && !isValidURL(*req.BaseURL) {
 			http.Error(w, "Invalid base_url: must be a valid HTTP or HTTPS URL", http.StatusBadRequest)
 			return
 		}
-		if req.ProxyURL != nil && !isValidURL(*req.ProxyURL) {
-			http.Error(w, "Invalid proxy_url: must be a valid HTTP or HTTPS URL", http.StatusBadRequest)
+
+		// Validate thinking level if provided
+		if req.ThinkingLevel != nil && !database.IsValidThinkingLevel(*req.ThinkingLevel) {
+			http.Error(w, fmt.Sprintf("Invalid thinking_level: %s. Valid options: off, minimal, low, medium, high, xhigh", *req.ThinkingLevel), http.StatusBadRequest)
 			return
 		}
 
-		if req.Model != nil {
-			if _, ok := ModelConfigs[*req.Model]; !ok {
-				http.Error(w, fmt.Sprintf("Invalid model: %s", *req.Model), http.StatusBadRequest)
-				return
-			}
+		provider := database.LLMProvider(*req.Provider)
+
+		// Get the provider's row
+		settings, err := database.GetLLMSettingsByProvider(provider)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Provider settings not found: %s", *req.Provider), http.StatusNotFound)
+			return
 		}
 
-		if req.ModelReasoningEffort != nil {
-			model := settings.Model
-			if req.Model != nil {
-				model = *req.Model
-			}
-			validEfforts := ModelConfigs[model]
-			isValid := false
-			for _, e := range validEfforts {
-				if e == *req.ModelReasoningEffort {
-					isValid = true
-					break
-				}
-			}
-			if !isValid {
-				http.Error(w, fmt.Sprintf("Invalid reasoning effort '%s' for model '%s'. Valid options: %v",
-					*req.ModelReasoningEffort, model, validEfforts), http.StatusBadRequest)
-				return
-			}
-		}
-
+		// Build updates for this provider's row
 		updates := make(map[string]interface{})
 		if req.APIKey != nil {
 			updates["api_key"] = *req.APIKey
+			updates["enabled"] = *req.APIKey != ""
 		}
 		if req.Model != nil {
 			updates["model"] = *req.Model
-			if req.ModelReasoningEffort == nil {
-				validEfforts := ModelConfigs[*req.Model]
-				currentEffortValid := false
-				for _, e := range validEfforts {
-					if e == settings.ModelReasoningEffort {
-						currentEffortValid = true
-						break
-					}
-				}
-				if !currentEffortValid {
-					defaultEffort := validEfforts[0]
-					for _, e := range validEfforts {
-						if e == "medium" {
-							defaultEffort = "medium"
-							break
-						}
-					}
-					updates["model_reasoning_effort"] = defaultEffort
-				}
-			}
 		}
-		if req.ModelReasoningEffort != nil {
-			updates["model_reasoning_effort"] = *req.ModelReasoningEffort
+		if req.ThinkingLevel != nil {
+			updates["thinking_level"] = *req.ThinkingLevel
 		}
 		if req.BaseURL != nil {
 			updates["base_url"] = *req.BaseURL
 		}
-		if req.ProxyURL != nil {
-			updates["proxy_url"] = *req.ProxyURL
-		}
-		if req.NoProxy != nil {
-			updates["no_proxy"] = *req.NoProxy
-		}
-		if req.AuthMethod != nil {
-			// Validate auth method
-			if *req.AuthMethod != string(database.AuthMethodAPIKey) && *req.AuthMethod != string(database.AuthMethodChatGPTSubscription) {
-				http.Error(w, fmt.Sprintf("Invalid auth_method: %s. Valid options: api_key, chatgpt_subscription", *req.AuthMethod), http.StatusBadRequest)
+
+		if len(updates) > 0 {
+			if err := database.GetDB().Model(settings).Updates(updates).Error; err != nil {
+				http.Error(w, fmt.Sprintf("Failed to update settings: %v", err), http.StatusInternalServerError)
 				return
 			}
-			updates["auth_method"] = *req.AuthMethod
 		}
 
-		if err := db.Model(&settings).Updates(updates).Error; err != nil {
-			http.Error(w, fmt.Sprintf("Failed to update settings: %v", err), http.StatusInternalServerError)
+		// Mark this provider as active
+		if err := database.SetActiveLLMProvider(provider); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to set active provider: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		db.First(&settings)
-
-		// Determine auth method for response
-		respAuthMethod := string(settings.AuthMethod)
-		if respAuthMethod == "" {
-			respAuthMethod = string(database.AuthMethodAPIKey)
-		}
-
+		// Return the updated provider's settings
+		settings, _ = database.GetLLMSettingsByProvider(provider)
 		response := map[string]interface{}{
-			"id":                      settings.ID,
-			"api_key":                 maskToken(settings.APIKey),
-			"model":                   settings.Model,
-			"model_reasoning_effort":  settings.ModelReasoningEffort,
-			"base_url":                settings.BaseURL,
-			"proxy_url":               maskProxyURL(settings.ProxyURL),
-			"no_proxy":                settings.NoProxy,
-			"is_configured":           settings.IsConfigured(),
-			"valid_reasoning_efforts": settings.GetValidReasoningEfforts(),
-			"available_models":        ModelConfigs,
-			"created_at":              settings.CreatedAt,
-			"updated_at":              settings.UpdatedAt,
-			// New auth method fields
-			"auth_method":             respAuthMethod,
-			"chatgpt_email":           settings.ChatGPTUserEmail,
-			"chatgpt_expires_at":      settings.ChatGPTExpiresAt,
-			"chatgpt_expired":         settings.IsChatGPTTokenExpired(),
-			"chatgpt_connected":       settings.ChatGPTAccessToken != "" && settings.ChatGPTRefreshToken != "",
+			"id":             settings.ID,
+			"provider":       settings.Provider,
+			"api_key":        maskToken(settings.APIKey),
+			"model":          settings.Model,
+			"thinking_level": settings.ThinkingLevel,
+			"base_url":       settings.BaseURL,
+			"is_configured":  settings.APIKey != "",
+			"created_at":     settings.CreatedAt,
+			"updated_at":     settings.UpdatedAt,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
@@ -1471,6 +1412,7 @@ func (h *APIHandler) handleChatGPTDisconnect(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+
 // handleProxySettings handles GET /api/settings/proxy and PUT /api/settings/proxy
 func (h *APIHandler) handleProxySettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -1568,10 +1510,12 @@ func (h *APIHandler) UpdateProxySettings(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Notify MCP gateway of config change (skip BroadcastProxyConfig for now - will be added later)
-	// if h.codexWSHandler != nil {
-	// 	h.codexWSHandler.BroadcastProxyConfig(settings)
-	// }
+	// Notify agent worker of proxy config change
+	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
+		if err := h.agentWSHandler.BroadcastProxyConfig(settings); err != nil {
+			log.Printf("Warning: failed to broadcast proxy config to agent worker: %v", err)
+		}
+	}
 
 	// Return updated settings
 	h.GetProxySettings(w, r)

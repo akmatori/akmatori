@@ -1,0 +1,30 @@
+{
+  "name": "akmatori-agent-worker",
+  "version": "1.0.0",
+  "description": "Akmatori AI agent worker using pi-coding-agent SDK",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@mariozechner/pi-agent-core": "^0.52.10",
+    "@mariozechner/pi-ai": "^0.52.10",
+    "@mariozechner/pi-coding-agent": "^0.52.10",
+    "@sinclair/typebox": "^0.34.48",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

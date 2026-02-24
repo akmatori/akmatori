@@ -90,15 +90,22 @@ func (e *AlertExtractor) Extract(ctx context.Context, messageText string) (*aler
 
 // ExtractWithPrompt extracts alert information using a custom prompt
 func (e *AlertExtractor) ExtractWithPrompt(ctx context.Context, messageText, customPrompt string) (*alerts.NormalizedAlert, error) {
-	// Get OpenAI settings from database
-	settings, err := database.GetOpenAISettings()
+	// Get LLM settings from database
+	settings, err := database.GetLLMSettings()
 	if err != nil {
-		log.Printf("Failed to get OpenAI settings: %v", err)
+		log.Printf("Failed to get LLM settings: %v", err)
 		return e.createFallbackAlert(messageText), nil
 	}
 
-	if !settings.IsActive() {
-		log.Printf("OpenAI not configured, using fallback extraction")
+	if settings.APIKey == "" {
+		log.Printf("LLM not configured, using fallback extraction")
+		return e.createFallbackAlert(messageText), nil
+	}
+
+	// This function uses the OpenAI chat completions API directly.
+	// Only proceed if the provider is OpenAI (or empty/default).
+	if settings.Provider != "" && settings.Provider != database.LLMProviderOpenAI {
+		log.Printf("Alert extraction only supports OpenAI provider, using fallback (current: %s)", settings.Provider)
 		return e.createFallbackAlert(messageText), nil
 	}
 

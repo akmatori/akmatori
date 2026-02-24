@@ -31,9 +31,18 @@ func Connect(dsn string, logLevel logger.LogLevel) error {
 func AutoMigrate() error {
 	log.Println("Running database migrations...")
 
+	// Drop old openai_settings table (replaced by llm_settings)
+	if DB.Migrator().HasTable("openai_settings") {
+		if err := DB.Migrator().DropTable("openai_settings"); err != nil {
+			log.Printf("Warning: failed to drop openai_settings table: %v", err)
+		} else {
+			log.Println("Dropped old openai_settings table")
+		}
+	}
+
 	err := DB.AutoMigrate(
 		&SlackSettings{},
-		&OpenAISettings{},
+		&LLMSettings{},
 		&ProxySettings{},
 		&ContextFile{},
 		&Skill{},
@@ -81,24 +90,92 @@ func InitializeDefaults() error {
 		log.Println("Created default Slack settings (disabled)")
 	}
 
-	// Create default OpenAI settings if they don't exist
-	DB.Model(&OpenAISettings{}).Count(&count)
-	if count == 0 {
-		defaultOpenAISettings := &OpenAISettings{
-			Model:                "gpt-5.1-codex",
-			ModelReasoningEffort: "medium",
-			AuthMethod:           AuthMethodAPIKey, // Default to API key authentication
-			Enabled:              false,            // Disabled by default until API key is configured
-		}
-		if err := DB.Create(defaultOpenAISettings).Error; err != nil {
-			return fmt.Errorf("failed to create default openai settings: %w", err)
-		}
-		log.Println("Created default OpenAI settings (disabled)")
+	// Migrate LLM settings to per-provider storage.
+	// Seed one row per provider so each has its own API key and config.
+	if err := seedLLMProviders(); err != nil {
+		return fmt.Errorf("failed to seed LLM providers: %w", err)
 	}
 
 	// Initialize system skill (incident-manager)
 	if err := InitializeSystemSkill(); err != nil {
 		return fmt.Errorf("failed to initialize system skill: %w", err)
+	}
+
+	return nil
+}
+
+// Default models per provider, used when seeding new provider rows.
+var defaultModelsPerProvider = map[LLMProvider]string{
+	LLMProviderOpenAI:     "gpt-5.2-codex",
+	LLMProviderAnthropic:  "claude-sonnet-4-5",
+	LLMProviderGoogle:     "gemini-2.5-pro",
+	LLMProviderOpenRouter: "anthropic/claude-sonnet-4-5",
+	LLMProviderCustom:     "",
+}
+
+// seedLLMProviders ensures one row per provider exists in the llm_settings table.
+// On first run (fresh DB), it creates all provider rows with openai as active.
+// On upgrade (existing single-row DB), it preserves the existing row and creates
+// missing provider rows.
+func seedLLMProviders() error {
+	var count int64
+	DB.Model(&LLMSettings{}).Count(&count)
+
+	if count == 0 {
+		// Fresh database: create one row per provider, openai active by default
+		for _, p := range ValidLLMProviders() {
+			row := &LLMSettings{
+				Provider:      p,
+				Model:         defaultModelsPerProvider[p],
+				ThinkingLevel: ThinkingLevelMedium,
+				Enabled:       false,
+				Active:        p == LLMProviderOpenAI,
+			}
+			if err := DB.Create(row).Error; err != nil {
+				return fmt.Errorf("failed to create LLM settings for %s: %w", p, err)
+			}
+		}
+		log.Println("Created default LLM settings for all providers")
+		return nil
+	}
+
+	// Existing database: migrate from singleton to per-provider.
+	// Ensure every provider has a row.
+	var hasActive bool
+	for _, p := range ValidLLMProviders() {
+		var existing LLMSettings
+		err := DB.Where("provider = ?", p).First(&existing).Error
+		if err == nil {
+			if existing.Active {
+				hasActive = true
+			}
+			continue // row exists
+		}
+		row := &LLMSettings{
+			Provider:      p,
+			Model:         defaultModelsPerProvider[p],
+			ThinkingLevel: ThinkingLevelMedium,
+			Enabled:       false,
+			Active:        false,
+		}
+		if err := DB.Create(row).Error; err != nil {
+			return fmt.Errorf("failed to create LLM settings for %s: %w", p, err)
+		}
+		log.Printf("Created LLM settings for provider: %s", p)
+	}
+
+	// If no row is marked active (legacy single-row DB), mark the first enabled
+	// row as active, or the first row overall.
+	if !hasActive {
+		var first LLMSettings
+		if err := DB.Where("enabled = ?", true).First(&first).Error; err != nil {
+			// No enabled row, just pick the first
+			DB.First(&first)
+		}
+		if first.ID > 0 {
+			DB.Model(&first).Update("active", true)
+			log.Printf("Marked provider %s as active (migration)", first.Provider)
+		}
 	}
 
 	return nil
@@ -190,18 +267,54 @@ func UpdateSlackSettings(settings *SlackSettings) error {
 	return DB.Model(&SlackSettings{}).Where("id = ?", settings.ID).Updates(settings).Error
 }
 
-// GetOpenAISettings retrieves OpenAI settings from the database
-func GetOpenAISettings() (*OpenAISettings, error) {
-	var settings OpenAISettings
-	if err := DB.First(&settings).Error; err != nil {
+// GetLLMSettings retrieves the active provider's LLM settings.
+// This is the primary function used by incident dispatch — it returns the
+// provider the user has selected as active.
+func GetLLMSettings() (*LLMSettings, error) {
+	var settings LLMSettings
+	if err := DB.Where("active = ?", true).First(&settings).Error; err != nil {
+		// Fallback: return first enabled provider if none is marked active
+		if err2 := DB.Where("enabled = ?", true).First(&settings).Error; err2 != nil {
+			// Final fallback: return any row
+			if err3 := DB.First(&settings).Error; err3 != nil {
+				return nil, err3
+			}
+		}
+	}
+	return &settings, nil
+}
+
+// GetAllLLMSettings returns all provider settings (one row per provider).
+func GetAllLLMSettings() ([]LLMSettings, error) {
+	var settings []LLMSettings
+	if err := DB.Order("id asc").Find(&settings).Error; err != nil {
+		return nil, err
+	}
+	return settings, nil
+}
+
+// GetLLMSettingsByProvider returns settings for a specific provider.
+func GetLLMSettingsByProvider(provider LLMProvider) (*LLMSettings, error) {
+	var settings LLMSettings
+	if err := DB.Where("provider = ?", provider).First(&settings).Error; err != nil {
 		return nil, err
 	}
 	return &settings, nil
 }
 
-// UpdateOpenAISettings updates OpenAI settings in the database
-func UpdateOpenAISettings(settings *OpenAISettings) error {
-	return DB.Model(&OpenAISettings{}).Where("id = ?", settings.ID).Updates(settings).Error
+// SetActiveLLMProvider marks the given provider as active and deactivates all others.
+func SetActiveLLMProvider(provider LLMProvider) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&LLMSettings{}).Where("active = ?", true).Update("active", false).Error; err != nil {
+			return err
+		}
+		return tx.Model(&LLMSettings{}).Where("provider = ?", provider).Update("active", true).Error
+	})
+}
+
+// UpdateLLMSettings updates LLM settings in the database
+func UpdateLLMSettings(settings *LLMSettings) error {
+	return DB.Model(&LLMSettings{}).Where("id = ?", settings.ID).Updates(settings).Error
 }
 
 // GetDB returns the database instance
@@ -232,8 +345,21 @@ func Close() error {
 	return sqlDB.Close()
 }
 
+// GetOpenAISettings retrieves OpenAI settings from the database (legacy, kept for device auth)
+func GetOpenAISettings() (*OpenAISettings, error) {
+	var settings OpenAISettings
+	if err := DB.First(&settings).Error; err != nil {
+		return nil, err
+	}
+	return &settings, nil
+}
+
+// UpdateOpenAISettings updates OpenAI settings in the database (legacy)
+func UpdateOpenAISettings(settings *OpenAISettings) error {
+	return DB.Model(&OpenAISettings{}).Where("id = ?", settings.ID).Updates(settings).Error
+}
+
 // UpdateOpenAIChatGPTTokens updates the ChatGPT OAuth tokens in the database
-// Uses Select to explicitly update all token-related fields including empty values
 func UpdateOpenAIChatGPTTokens(settings *OpenAISettings) error {
 	return DB.Model(&OpenAISettings{}).Where("id = ?", settings.ID).
 		Select("chat_gpt_access_token", "chat_gpt_refresh_token", "chat_gpt_expires_at", "chat_gpt_user_email", "auth_method").
@@ -310,38 +436,12 @@ func UpdateAggregationSettings(db *gorm.DB, settings *AggregationSettings) error
 	return db.Save(settings).Error
 }
 
-// migrateProxySettings copies proxy settings from openai_settings to proxy_settings (one-time migration)
+// migrateProxySettings ensures proxy settings exist with defaults
 func migrateProxySettings(db *gorm.DB) error {
-	// Check if proxy_settings already has data
 	var count int64
 	db.Model(&ProxySettings{}).Count(&count)
 	if count > 0 {
-		return nil // Already migrated
+		return nil // Already exists
 	}
-
-	// Check if openai_settings has proxy configured
-	var openai OpenAISettings
-	if err := db.First(&openai).Error; err != nil {
-		return nil // No OpenAI settings, nothing to migrate
-	}
-
-	if openai.ProxyURL == "" {
-		return nil // No proxy configured, nothing to migrate
-	}
-
-	// Create proxy settings with migrated values
-	proxy := ProxySettings{
-		ProxyURL:      openai.ProxyURL,
-		NoProxy:       openai.NoProxy,
-		OpenAIEnabled: true,  // Was being used for OpenAI
-		SlackEnabled:  true,  // Was being used for Slack
-		ZabbixEnabled: false, // New feature, disabled by default
-	}
-
-	if err := db.Create(&proxy).Error; err != nil {
-		return fmt.Errorf("failed to create proxy settings: %w", err)
-	}
-
-	log.Printf("Migrated proxy settings from OpenAI settings: %s", openai.ProxyURL)
 	return nil
 }

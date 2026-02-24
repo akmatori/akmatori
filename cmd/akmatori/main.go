@@ -154,10 +154,10 @@ func main() {
 		slackSettings = &database.SlackSettings{Enabled: false}
 	}
 
-	// Initialize Codex WebSocket handler for orchestrator communication
+	// Initialize Agent WebSocket handler for orchestrator communication
 	// This must be created before Slack event handler so it can be captured in closure
-	codexWSHandler := handlers.NewCodexWSHandler()
-	log.Printf("Codex WebSocket handler initialized")
+	agentWSHandler := handlers.NewAgentWSHandler()
+	log.Printf("Agent WebSocket handler initialized")
 
 	// Initialize Slack handler (will be used when Slack is enabled)
 	var slackHandler *handlers.SlackHandler
@@ -170,7 +170,7 @@ func main() {
 		cfg,
 		slackManager, // Pass manager for dynamic client access
 		codexExecutor,
-		codexWSHandler,
+		agentWSHandler,
 		skillService,
 		alertService,
 		channelResolver,
@@ -184,7 +184,7 @@ func main() {
 		slackHandler = handlers.NewSlackHandler(
 			client,
 			codexExecutor,
-			codexWSHandler,
+			agentWSHandler,
 			skillService,
 		)
 
@@ -228,7 +228,7 @@ func main() {
 	httpHandler := handlers.NewHTTPHandler(alertHandler)
 
 	// Initialize API handler for skill communication and management
-	apiHandler := handlers.NewAPIHandler(skillService, toolService, contextService, alertService, codexExecutor, codexWSHandler, slackManager)
+	apiHandler := handlers.NewAPIHandler(skillService, toolService, contextService, alertService, codexExecutor, agentWSHandler, slackManager)
 
 	// Wire alert channel reload: when alert sources are created/updated/deleted via API,
 	// reload the Slack handler's channel mappings so changes take effect immediately.
@@ -246,7 +246,7 @@ func main() {
 	httpHandler.SetupRoutes(mux)
 	apiHandler.SetupRoutes(mux)
 	authHandler.SetupRoutes(mux)
-	codexWSHandler.SetupRoutes(mux)
+	agentWSHandler.SetupRoutes(mux)
 
 	// Wrap all routes with CORS middleware first, then JWT authentication
 	corsMiddleware := middleware.NewCORSMiddleware() // Allow all origins
@@ -292,7 +292,7 @@ func main() {
 	log.Printf("Alert webhook endpoint: http://localhost:%d/webhook/alert/{instance_uuid}", cfg.HTTPPort)
 	log.Printf("Health check endpoint: http://localhost:%d/health", cfg.HTTPPort)
 	log.Printf("API base URL: http://localhost:%d/api", cfg.HTTPPort)
-	log.Printf("Codex WebSocket endpoint: ws://localhost:%d/ws/codex", cfg.HTTPPort)
+	log.Printf("Agent WebSocket endpoint: ws://localhost:%d/ws/codex", cfg.HTTPPort)
 
 	// Create a context for the Slack manager
 	ctx, ctxCancel := context.WithCancel(context.Background())

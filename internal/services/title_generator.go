@@ -62,14 +62,20 @@ func (t *TitleGenerator) GenerateTitle(messageOrAlert string, source string) (st
 		return t.GenerateFallbackTitle(messageOrAlert, source), nil
 	}
 
-	// Get OpenAI settings from database
-	settings, err := database.GetOpenAISettings()
+	// Get LLM settings from database
+	settings, err := database.GetLLMSettings()
 	if err != nil {
-		return "", fmt.Errorf("failed to get OpenAI settings: %w", err)
+		return "", fmt.Errorf("failed to get LLM settings: %w", err)
 	}
 
-	if !settings.IsActive() {
-		// If OpenAI is not configured, generate a simple title from the message
+	if settings.APIKey == "" {
+		// If LLM is not configured, generate a simple title from the message
+		return t.GenerateFallbackTitle(messageOrAlert, source), nil
+	}
+
+	// This function uses the OpenAI chat completions API directly.
+	// Only proceed if the provider is OpenAI (or empty/default).
+	if settings.Provider != "" && settings.Provider != database.LLMProviderOpenAI {
 		return t.GenerateFallbackTitle(messageOrAlert, source), nil
 	}
 

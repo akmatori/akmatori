@@ -4,12 +4,12 @@ version: '3.8'
 # ================================
 # Network Isolation:
 # - frontend: nginx, frontend (external access)
-# - api-internal: API <-> DB, MCP Gateway <-> DB, API <-> Codex (WebSocket)
-# - codex-network: Codex <-> MCP Gateway ONLY (internal)
+# - api-internal: API <-> DB, MCP Gateway <-> DB, API <-> Agent (WebSocket)
+# - codex-network: Agent <-> MCP Gateway ONLY (internal)
 #
 # Security:
-# - Codex container has NO database access
-# - Codex container has NO direct secrets
+# - Agent container has NO database access
+# - Agent container has NO direct secrets
 # - Tool credentials fetched by MCP Gateway at execution time
 
 services:
@@ -109,10 +109,10 @@ services:
       timeout: 5s
       retries: 3
 
-  akmatori-codex:
+  akmatori-agent:
     build:
-      context: .
-      dockerfile: Dockerfile.codex
+      context: ./agent-worker
+      dockerfile: Dockerfile
       args:
         http_proxy:  ${http_proxy}
         https_proxy: ${https_proxy}
@@ -120,10 +120,10 @@ services:
         HTTP_PROXY:  ${HTTP_PROXY}
         HTTPS_PROXY: ${HTTPS_PROXY}
         NO_PROXY:    ${NO_PROXY}
-    container_name: akmatori-codex
+    container_name: akmatori-agent
     restart: unless-stopped
     networks:
-      - frontend        # For external access (OpenAI API)
+      - frontend        # For external access (LLM API calls)
       - api-internal    # For WebSocket to API
       - codex-network   # For MCP calls to gateway
     depends_on:
@@ -133,19 +133,20 @@ services:
       - API_WS_URL=ws://akmatori-api:3000/ws/codex
       - MCP_GATEWAY_URL=http://mcp-gateway:8080
       - WORKSPACE_DIR=/workspaces
-      - SESSIONS_FILE=/home/codex/.codex/sessions.json
+      - SKILLS_DIR=/akmatori/skills
     volumes:
-      - codex_sessions:/home/codex/.codex              # Persistent session data
-      - ./akmatori_data/incidents:/workspaces:rw       # ONLY incidents - no access to skills/tools source
-      - ./akmatori_data/context:/akmatori/context:ro   # Shared context files (read-only)
+      - agent_sessions:/home/agent/.pi               # Persistent session data
+      - ./akmatori_data/incidents:/workspaces:rw      # ONLY incidents - no access to skills/tools source
+      - ./akmatori_data/context:/akmatori/context:ro  # Shared context files (read-only)
+      - ./akmatori_data/skills:/akmatori/skills:ro    # Skill definitions for pi-mono resource loader
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "codex-worker"]
+      test: ["CMD", "pgrep", "node"]
       interval: 30s
       timeout: 5s
       retries: 3
     # NO database access
-    # Credentials passed via WebSocket from API
-    # Codex runs as UID 1001, can read API files (UID 1000) but not modify them
+    # LLM API keys passed via WebSocket from API
+    # Agent runs as UID 1001, can read API files (UID 1000) but not modify them
 
   frontend:
     build:
@@ -192,5 +193,4 @@ networks:
 volumes:
   postgres_data:
   akmatori_data:
-  codex_sessions:
-  codex_workspaces:
+  agent_sessions:
