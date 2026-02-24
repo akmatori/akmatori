@@ -16,6 +16,7 @@ import { Orchestrator, type OrchestratorConfig } from "./orchestrator.js";
 const API_WS_URL = process.env.API_WS_URL ?? "ws://akmatori-api:3000/ws/codex";
 const MCP_GATEWAY_URL = process.env.MCP_GATEWAY_URL ?? "http://mcp-gateway:8080";
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR ?? "/workspaces";
+const SKILLS_DIR = process.env.SKILLS_DIR ?? "/akmatori/skills";
 
 const RECONNECT_DELAY_MS = 5_000;
 
@@ -37,11 +38,13 @@ async function main(): Promise<void> {
   log(`  API_WS_URL:     ${API_WS_URL}`);
   log(`  MCP_GATEWAY_URL: ${MCP_GATEWAY_URL}`);
   log(`  WORKSPACE_DIR:   ${WORKSPACE_DIR}`);
+  log(`  SKILLS_DIR:      ${SKILLS_DIR}`);
 
   const config: OrchestratorConfig = {
     apiWsUrl: API_WS_URL,
     mcpGatewayUrl: MCP_GATEWAY_URL,
     workspaceDir: WORKSPACE_DIR,
+    skillsDir: SKILLS_DIR,
     logger: log,
   };
 

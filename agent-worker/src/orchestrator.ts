@@ -26,6 +26,8 @@ export interface OrchestratorConfig {
   mcpGatewayUrl: string;
   /** Base directory for incident workspaces */
   workspaceDir: string;
+  /** Directory containing SKILL.md definitions for pi-mono resource loader */
+  skillsDir?: string;
   /** Logger function */
   logger?: (msg: string) => void;
 }
@@ -53,6 +55,7 @@ export class Orchestrator {
 
     this.runner = new AgentRunner({
       mcpGatewayUrl: config.mcpGatewayUrl,
+      skillsDir: config.skillsDir,
     });
   }
 
@@ -173,6 +176,7 @@ export class Orchestrator {
       task: msg.task ?? "",
       llmSettings,
       proxyConfig,
+      enabledSkills: msg.enabled_skills,
       workDir: `${this.config.workspaceDir}/${incidentId}`,
       onOutput: (text: string) => {
         this.wsClient.sendOutput(incidentId, text);

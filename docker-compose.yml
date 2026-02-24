@@ -133,10 +133,12 @@ services:
       - API_WS_URL=ws://akmatori-api:3000/ws/codex
       - MCP_GATEWAY_URL=http://mcp-gateway:8080
       - WORKSPACE_DIR=/workspaces
+      - SKILLS_DIR=/akmatori/skills
     volumes:
       - agent_sessions:/home/agent/.pi               # Persistent session data
       - ./akmatori_data/incidents:/workspaces:rw      # ONLY incidents - no access to skills/tools source
       - ./akmatori_data/context:/akmatori/context:ro  # Shared context files (read-only)
+      - ./akmatori_data/skills:/akmatori/skills:ro    # Skill definitions for pi-mono resource loader
     healthcheck:
       test: ["CMD", "pgrep", "node"]
       interval: 30s

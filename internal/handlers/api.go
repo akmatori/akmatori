@@ -742,7 +742,7 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 					},
 				}
 
-				if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, callback); err != nil {
+				if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
 					log.Printf("Failed to start incident via WebSocket: %v", err)
 					errorMsg := fmt.Sprintf("Failed to start incident: %v", err)
 					h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg)
