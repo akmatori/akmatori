@@ -164,7 +164,7 @@ export default function ProxySettings() {
         )}
         <div className="space-y-2">
           <ServiceToggle
-            name="OpenAI API"
+            name="LLM API"
             description="External AI service"
             icon={Server}
             enabled={openaiEnabled}

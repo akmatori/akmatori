@@ -148,17 +148,17 @@ func NewExecutor() *Executor {
 // ensureCodexLogin ensures the codex CLI is authenticated with the API key from database.
 // Codex requires `codex login --with-api-key` - it doesn't read OPENAI_API_KEY env var directly.
 func (e *Executor) ensureCodexLogin(ctx context.Context) error {
-	openaiSettings, err := database.GetOpenAISettings()
+	llmSettings, err := database.GetLLMSettings()
 	if err != nil {
-		return fmt.Errorf("failed to get OpenAI settings: %w", err)
+		return fmt.Errorf("failed to get LLM settings: %w", err)
 	}
-	if openaiSettings.APIKey == "" {
-		return fmt.Errorf("OpenAI API key not configured in database settings")
+	if llmSettings.APIKey == "" {
+		return fmt.Errorf("API key not configured in database settings")
 	}
 
 	// Run codex login --with-api-key, piping the API key to stdin
 	cmd := exec.CommandContext(ctx, "codex", "login", "--with-api-key")
-	cmd.Stdin = strings.NewReader(openaiSettings.APIKey)
+	cmd.Stdin = strings.NewReader(llmSettings.APIKey)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -213,31 +213,22 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 
 	// Add model settings from database
 	// Note: API key is handled via `codex login` in ensureCodexLogin()
-	openaiSettings, _ := database.GetOpenAISettings()
-	if openaiSettings != nil {
+	llmSettings, _ := database.GetLLMSettings()
+	if llmSettings != nil {
 		// Set model if configured
-		if openaiSettings.Model != "" {
-			cmd.Env = append(cmd.Env, "CODEX_MODEL="+openaiSettings.Model)
-			log.Printf("Using model: %s", openaiSettings.Model)
+		if llmSettings.Model != "" {
+			cmd.Env = append(cmd.Env, "CODEX_MODEL="+llmSettings.Model)
+			log.Printf("Using model: %s", llmSettings.Model)
 		}
 		// Set reasoning effort if configured
-		if openaiSettings.ModelReasoningEffort != "" {
-			cmd.Env = append(cmd.Env, "CODEX_REASONING_EFFORT="+openaiSettings.ModelReasoningEffort)
-			log.Printf("Using reasoning effort: %s", openaiSettings.ModelReasoningEffort)
+		if string(llmSettings.ThinkingLevel) != "" {
+			cmd.Env = append(cmd.Env, "CODEX_REASONING_EFFORT="+string(llmSettings.ThinkingLevel))
+			log.Printf("Using reasoning effort: %s", llmSettings.ThinkingLevel)
 		}
 		// Set custom base URL if configured (for Azure OpenAI, local LLMs, etc.)
-		if openaiSettings.BaseURL != "" {
-			cmd.Env = append(cmd.Env, "OPENAI_BASE_URL="+openaiSettings.BaseURL)
-			log.Printf("Using custom base URL: %s", openaiSettings.BaseURL)
-		}
-		// Set proxy settings if configured
-		if openaiSettings.ProxyURL != "" {
-			cmd.Env = append(cmd.Env, "HTTP_PROXY="+openaiSettings.ProxyURL)
-			cmd.Env = append(cmd.Env, "HTTPS_PROXY="+openaiSettings.ProxyURL)
-			log.Printf("Using proxy: %s", openaiSettings.ProxyURL)
-		}
-		if openaiSettings.NoProxy != "" {
-			cmd.Env = append(cmd.Env, "NO_PROXY="+openaiSettings.NoProxy)
+		if llmSettings.BaseURL != "" {
+			cmd.Env = append(cmd.Env, "OPENAI_BASE_URL="+llmSettings.BaseURL)
+			log.Printf("Using custom base URL: %s", llmSettings.BaseURL)
 		}
 	}
 

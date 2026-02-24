@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ArrowRight, Loader2, CheckCircle, Sparkles } from 'lucide-react';
-import { openaiSettingsApi } from '../api/client';
+import { llmSettingsApi } from '../api/client';
 
 interface OnboardingWizardProps {
   onComplete: () => void;
@@ -21,10 +21,8 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
       setSaving(true);
       setError('');
 
-      await openaiSettingsApi.update({
+      await llmSettingsApi.update({
         api_key: apiKey.trim(),
-        model: 'gpt-5.1-codex',
-        model_reasoning_effort: 'medium',
       });
 
       setSuccess(true);
@@ -76,27 +74,19 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
         <form onSubmit={handleSubmit} className="px-8 pb-8">
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              OpenAI API Key
+              LLM API Key
             </label>
             <input
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-..."
+              placeholder="Enter your API key"
               className="input-field text-lg h-14"
               autoFocus
               disabled={saving}
             />
             <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-              Get your key from{' '}
-              <a
-                href="https://platform.openai.com/api-keys"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary-600 dark:text-primary-400 hover:underline"
-              >
-                platform.openai.com
-              </a>
+              Enter an API key for your LLM provider. You can configure the provider in Settings.
             </p>
           </div>
 

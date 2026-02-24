@@ -7,12 +7,10 @@ import type {
   AggregationSettings,
   SlackSettings,
   SlackSettingsUpdate,
-  OpenAISettings,
-  OpenAISettingsUpdate,
+  LLMSettings,
+  LLMSettingsUpdate,
   ProxySettings,
   ProxySettingsUpdate,
-  DeviceAuthStartResponse,
-  DeviceAuthStatusResponse,
   ContextFile,
   ValidateReferencesResponse,
   CreateIncidentRequest,
@@ -125,7 +123,7 @@ export const skillsApi = {
   // Get tools assigned to a skill
   getTools: (name: string) => fetchApi<ToolInstance[]>(`/api/skills/${encodeURIComponent(name)}/tools`),
 
-  // Update tools assigned to a skill (triggers symlink + SKILL.md regeneration)
+  // Update tools assigned to a skill (triggers SKILL.md regeneration)
   updateTools: (name: string, toolInstanceIds: number[]) =>
     fetchApi<Skill>(`/api/skills/${encodeURIComponent(name)}/tools`, {
       method: 'PUT',
@@ -220,33 +218,14 @@ export const slackSettingsApi = {
     }),
 };
 
-// OpenAI Settings API
-export const openaiSettingsApi = {
-  get: () => fetchApi<OpenAISettings>('/api/settings/openai'),
+// LLM Settings API
+export const llmSettingsApi = {
+  get: () => fetchApi<LLMSettings>('/api/settings/llm'),
 
-  update: (settings: OpenAISettingsUpdate) =>
-    fetchApi<OpenAISettings>('/api/settings/openai', {
+  update: (settings: LLMSettingsUpdate) =>
+    fetchApi<LLMSettings>('/api/settings/llm', {
       method: 'PUT',
       body: JSON.stringify(settings),
-    }),
-
-  // Device Auth for ChatGPT Subscription
-  startDeviceAuth: () =>
-    fetchApi<DeviceAuthStartResponse>('/api/settings/openai/device-auth/start', {
-      method: 'POST',
-    }),
-
-  getDeviceAuthStatus: (deviceCode: string) =>
-    fetchApi<DeviceAuthStatusResponse>(`/api/settings/openai/device-auth/status?device_code=${encodeURIComponent(deviceCode)}`),
-
-  cancelDeviceAuth: () =>
-    fetchApi<{ success: boolean; message: string }>('/api/settings/openai/device-auth/cancel', {
-      method: 'POST',
-    }),
-
-  disconnectChatGPT: () =>
-    fetchApi<{ success: boolean; message: string }>('/api/settings/openai/chatgpt/disconnect', {
-      method: 'POST',
     }),
 };
 

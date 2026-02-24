@@ -57,6 +57,21 @@ func (r *Registry) Stop() {
 	}
 }
 
+// extractInstanceID extracts the optional tool_instance_id from tool arguments.
+func extractInstanceID(args map[string]interface{}) *uint {
+	if v, ok := args["tool_instance_id"].(float64); ok && v > 0 {
+		id := uint(v)
+		return &id
+	}
+	return nil
+}
+
+// toolInstanceIDProperty is the shared schema property for tool_instance_id
+var toolInstanceIDProperty = mcp.Property{
+	Type:        "integer",
+	Description: "Optional tool instance ID for routing to a specific configured instance. Provided in SKILL.md when multiple instances of this tool type exist.",
+}
+
 // registerSSHTools registers SSH-related tools
 func (r *Registry) registerSSHTools() {
 	sshTool := ssh.NewSSHTool(r.logger)
@@ -78,11 +93,13 @@ func (r *Registry) registerSSHTools() {
 						Description: "Optional list of specific servers to target (defaults to all configured servers)",
 						Items:       &mcp.Items{Type: "string"},
 					},
+					"tool_instance_id": toolInstanceIDProperty,
 				},
 				Required: []string{"command"},
 			},
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			instanceID := extractInstanceID(args)
 			command, _ := args["command"].(string)
 			var servers []string
 			if serversArg, ok := args["servers"].([]interface{}); ok {
@@ -92,7 +109,7 @@ func (r *Registry) registerSSHTools() {
 					}
 				}
 			}
-			return sshTool.ExecuteCommand(ctx, incidentID, command, servers)
+			return sshTool.ExecuteCommand(ctx, incidentID, command, servers, instanceID)
 		},
 	)
 
@@ -102,12 +119,15 @@ func (r *Registry) registerSSHTools() {
 			Name:        "ssh.test_connectivity",
 			Description: "Test SSH connectivity to all configured servers",
 			InputSchema: mcp.InputSchema{
-				Type:       "object",
-				Properties: map[string]mcp.Property{},
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"tool_instance_id": toolInstanceIDProperty,
+				},
 			},
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
-			return sshTool.TestConnectivity(ctx, incidentID)
+			instanceID := extractInstanceID(args)
+			return sshTool.TestConnectivity(ctx, incidentID, instanceID)
 		},
 	)
 
@@ -124,10 +144,12 @@ func (r *Registry) registerSSHTools() {
 						Description: "List of server hostnames/IPs to query (optional, defaults to all)",
 						Items:       &mcp.Items{Type: "string"},
 					},
+					"tool_instance_id": toolInstanceIDProperty,
 				},
 			},
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			instanceID := extractInstanceID(args)
 			var servers []string
 			if serversArg, ok := args["servers"].([]interface{}); ok {
 				for _, s := range serversArg {
@@ -136,7 +158,7 @@ func (r *Registry) registerSSHTools() {
 					}
 				}
 			}
-			return sshTool.GetServerInfo(ctx, incidentID, servers)
+			return sshTool.GetServerInfo(ctx, incidentID, servers, instanceID)
 		},
 	)
 }
@@ -174,6 +196,7 @@ func (r *Registry) registerZabbixTools() {
 						Type:        "integer",
 						Description: "Maximum number of hosts to return",
 					},
+					"tool_instance_id": toolInstanceIDProperty,
 				},
 			},
 		},
@@ -209,6 +232,7 @@ func (r *Registry) registerZabbixTools() {
 						Type:        "integer",
 						Description: "Maximum number of problems to return",
 					},
+					"tool_instance_id": toolInstanceIDProperty,
 				},
 			},
 		},
@@ -257,6 +281,7 @@ func (r *Registry) registerZabbixTools() {
 						Description: "Sort order: ASC or DESC",
 						Default:     "DESC",
 					},
+					"tool_instance_id": toolInstanceIDProperty,
 				},
 				Required: []string{"itemids"},
 			},
@@ -300,6 +325,7 @@ func (r *Registry) registerZabbixTools() {
 						Type:        "integer",
 						Description: "Maximum number of items to return",
 					},
+					"tool_instance_id": toolInstanceIDProperty,
 				},
 			},
 		},
@@ -340,6 +366,7 @@ func (r *Registry) registerZabbixTools() {
 						Description: "Maximum items per search pattern",
 						Default:     10,
 					},
+					"tool_instance_id": toolInstanceIDProperty,
 				},
 				Required: []string{"searches"},
 			},
@@ -376,6 +403,7 @@ func (r *Registry) registerZabbixTools() {
 						Type:        "string",
 						Description: "Output fields. Server defaults to [triggerid, description, priority, status, value, state] if omitted.",
 					},
+					"tool_instance_id": toolInstanceIDProperty,
 				},
 			},
 		},
@@ -400,14 +428,16 @@ func (r *Registry) registerZabbixTools() {
 						Type:        "object",
 						Description: "Parameters for the API method",
 					},
+					"tool_instance_id": toolInstanceIDProperty,
 				},
 				Required: []string{"method"},
 			},
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			instanceID := extractInstanceID(args)
 			method, _ := args["method"].(string)
 			params, _ := args["params"].(map[string]interface{})
-			return r.zabbixTool.APIRequest(ctx, incidentID, method, params)
+			return r.zabbixTool.APIRequest(ctx, incidentID, method, params, instanceID)
 		},
 	)
 }

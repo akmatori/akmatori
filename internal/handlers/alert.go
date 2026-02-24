@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/alerts"
@@ -29,7 +30,7 @@ type AlertHandler struct {
 	config             *config.Config
 	slackManager       *slackutil.Manager
 	codexExecutor      *executor.Executor
-	codexWSHandler     *CodexWSHandler
+	agentWSHandler     *AgentWSHandler
 	skillService       *services.SkillService
 	alertService       *services.AlertService
 	channelResolver    *slackutil.ChannelResolver
@@ -44,7 +45,7 @@ func NewAlertHandler(
 	cfg *config.Config,
 	slackManager *slackutil.Manager,
 	codexExecutor *executor.Executor,
-	codexWSHandler *CodexWSHandler,
+	agentWSHandler *AgentWSHandler,
 	skillService *services.SkillService,
 	alertService *services.AlertService,
 	channelResolver *slackutil.ChannelResolver,
@@ -54,7 +55,7 @@ func NewAlertHandler(
 		config:             cfg,
 		slackManager:       slackManager,
 		codexExecutor:      codexExecutor,
-		codexWSHandler:     codexWSHandler,
+		agentWSHandler:     agentWSHandler,
 		skillService:       skillService,
 		alertService:       alertService,
 		channelResolver:    channelResolver,
@@ -450,35 +451,21 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 	taskWithGuidance := executor.PrependGuidance(investigationPrompt)
 
 	// Try WebSocket-based execution first (new architecture)
-	if h.codexWSHandler != nil && h.codexWSHandler.IsWorkerConnected() {
-		log.Printf("Using WebSocket-based Codex worker for incident %s", incidentUUID)
+	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
+		log.Printf("Using WebSocket-based agent worker for incident %s", incidentUUID)
 
-		// Fetch OpenAI settings from database
-		var openaiSettings *OpenAISettings
-		if dbSettings, err := database.GetOpenAISettings(); err == nil && dbSettings != nil {
-			openaiSettings = &OpenAISettings{
-				APIKey:          dbSettings.APIKey,
-				Model:           dbSettings.Model,
-				ReasoningEffort: dbSettings.ModelReasoningEffort,
-				BaseURL:         dbSettings.BaseURL,
-				ProxyURL:        dbSettings.ProxyURL,
-				NoProxy:         dbSettings.NoProxy,
-				// ChatGPT subscription auth fields
-				AuthMethod:          string(dbSettings.AuthMethod),
-				ChatGPTAccessToken:  dbSettings.ChatGPTAccessToken,
-				ChatGPTRefreshToken: dbSettings.ChatGPTRefreshToken,
-			}
-			// Add expiry timestamp if set
-			if dbSettings.ChatGPTExpiresAt != nil {
-				openaiSettings.ChatGPTExpiresAt = dbSettings.ChatGPTExpiresAt.Format(time.RFC3339)
-			}
-			log.Printf("Using OpenAI model: %s, auth method: %s", dbSettings.Model, dbSettings.AuthMethod)
+		// Fetch LLM settings from database
+		var llmSettings *LLMSettingsForWorker
+		if dbSettings, err := database.GetLLMSettings(); err == nil && dbSettings != nil {
+			llmSettings = BuildLLMSettingsForWorker(dbSettings)
+			log.Printf("Using LLM provider: %s, model: %s", dbSettings.Provider, dbSettings.Model)
 		} else {
-			log.Printf("Warning: Could not fetch OpenAI settings: %v", err)
+			log.Printf("Warning: Could not fetch LLM settings: %v", err)
 		}
 
 		// Create channels for async result handling
 		done := make(chan struct{})
+		var closeOnce sync.Once
 		var response string
 		var sessionID string
 		var hasError bool
@@ -490,27 +477,29 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 
 		callback := IncidentCallback{
 			OnOutput: func(output string) {
-				lastStreamedLog = output
+				lastStreamedLog += output
 				// Update database with streamed log
-				if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+output); err != nil {
+				if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog); err != nil {
 					log.Printf("Failed to update incident log: %v", err)
 				}
 			},
 			OnCompleted: func(sid, output string) {
 				sessionID = sid
 				response = output
-				close(done)
+				closeOnce.Do(func() { close(done) })
 			},
 			OnError: func(errorMsg string) {
 				response = fmt.Sprintf("❌ Error: %s", errorMsg)
 				hasError = true
-				close(done)
+				closeOnce.Do(func() { close(done) })
 			},
 		}
 
-		if err := h.codexWSHandler.StartIncident(incidentUUID, taskWithGuidance, openaiSettings, callback); err != nil {
-			log.Printf("Failed to start incident via WebSocket: %v, falling back to local execution", err)
-			h.runInvestigationLocal(incidentUUID, workingDir, alert, instance, threadTS, taskWithGuidance)
+		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
+			log.Printf("Failed to start incident via WebSocket: %v", err)
+			errorMsg := fmt.Sprintf("Failed to start investigation: %v", err)
+			h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg)
+			h.updateSlackWithResult(threadTS, "❌ "+errorMsg, true)
 			return
 		}
 
@@ -540,57 +529,13 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 		return
 	}
 
-	// Fall back to local execution (legacy)
-	log.Printf("WebSocket worker not available, using local execution for incident %s", incidentUUID)
-	h.runInvestigationLocal(incidentUUID, workingDir, alert, instance, threadTS, taskWithGuidance)
+	// No WebSocket worker available
+	log.Printf("ERROR: Agent worker not connected for incident %s", incidentUUID)
+	errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
+	h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg)
+	h.updateSlackWithResult(threadTS, "❌ "+errorMsg, true)
 }
 
-// runInvestigationLocal runs investigation using the local executor (legacy fallback)
-func (h *AlertHandler) runInvestigationLocal(incidentUUID, workingDir string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, threadTS string, taskWithGuidance string) {
-	ctx := context.Background()
-
-	result := h.codexExecutor.ExecuteForSlackInDirectory(
-		ctx,
-		taskWithGuidance,
-		"",
-		workingDir,
-		func(progress string) {
-			log.Printf("Investigation progress for %s: %s", alert.AlertName, progress)
-		},
-	)
-
-	// Update incident with results
-	finalStatus := database.IncidentStatusCompleted
-	if result.Error != nil {
-		finalStatus = database.IncidentStatusFailed
-	}
-
-	alertHeader := fmt.Sprintf(`Alert Investigation Log
-
-Alert: %s
-Source: %s (%s)
-Host: %s
-Service: %s
-Severity: %s
-Summary: %s
-
---- Investigation ---
-
-`, alert.AlertName, instance.AlertSourceType.DisplayName, instance.Name,
-		alert.TargetHost, alert.TargetService, alert.Severity, alert.Summary)
-
-	fullLogWithContext := alertHeader + result.FullLog
-
-	if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, result.SessionID, fullLogWithContext, result.Response); err != nil {
-		log.Printf("Warning: Failed to update incident: %v", err)
-	}
-
-	// Update Slack - include reasoning context
-	slackResponse := buildSlackResponse(result.FullLog, result.Response)
-	h.updateSlackWithResult(threadTS, slackResponse, result.Error != nil)
-
-	log.Printf("Investigation completed for alert: %s (status: %s, local)", alert.AlertName, finalStatus)
-}
 
 // buildSlackResponse prepends the last N lines of the reasoning/execution log
 // to the final response so Slack readers can see investigation context.
@@ -923,26 +868,13 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 	taskWithGuidance := executor.PrependGuidance(investigationPrompt)
 
 	// Try WebSocket-based execution first
-	if h.codexWSHandler != nil && h.codexWSHandler.IsWorkerConnected() {
-		log.Printf("Using WebSocket-based Codex worker for Slack channel incident %s", incidentUUID)
+	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
+		log.Printf("Using WebSocket-based agent worker for Slack channel incident %s", incidentUUID)
 
-		// Fetch OpenAI settings from database
-		var openaiSettings *OpenAISettings
-		if dbSettings, err := database.GetOpenAISettings(); err == nil && dbSettings != nil {
-			openaiSettings = &OpenAISettings{
-				APIKey:          dbSettings.APIKey,
-				Model:           dbSettings.Model,
-				ReasoningEffort: dbSettings.ModelReasoningEffort,
-				BaseURL:         dbSettings.BaseURL,
-				ProxyURL:        dbSettings.ProxyURL,
-				NoProxy:         dbSettings.NoProxy,
-				AuthMethod:      string(dbSettings.AuthMethod),
-				ChatGPTAccessToken:  dbSettings.ChatGPTAccessToken,
-				ChatGPTRefreshToken: dbSettings.ChatGPTRefreshToken,
-			}
-			if dbSettings.ChatGPTExpiresAt != nil {
-				openaiSettings.ChatGPTExpiresAt = dbSettings.ChatGPTExpiresAt.Format(time.RFC3339)
-			}
+		// Fetch LLM settings from database
+		var llmSettings *LLMSettingsForWorker
+		if dbSettings, err := database.GetLLMSettings(); err == nil && dbSettings != nil {
+			llmSettings = BuildLLMSettingsForWorker(dbSettings)
 		}
 
 		// Post initial progress message in the Slack thread
@@ -952,6 +884,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 
 		// Create channels for async result handling
 		done := make(chan struct{})
+		var closeOnce sync.Once
 		var response string
 		var sessionID string
 		var hasError bool
@@ -962,15 +895,15 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 
 		callback := IncidentCallback{
 			OnOutput: func(output string) {
-				lastStreamedLog = output
-				if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+output); err != nil {
+				lastStreamedLog += output
+				if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog); err != nil {
 					log.Printf("Failed to update incident log: %v", err)
 				}
 
 				// Throttled update of the Slack progress message
 				if progressMsgTS != "" && time.Since(lastSlackUpdate) >= slackProgressInterval {
 					lastSlackUpdate = time.Now()
-					progressLines := utils.GetLastNLines(strings.TrimSpace(output), 15)
+					progressLines := utils.GetLastNLines(strings.TrimSpace(lastStreamedLog), 15)
 					progressLines = truncateLogForSlack(progressLines, 3000)
 					h.updateSlackThreadMessage(slackChannelID, progressMsgTS,
 						fmt.Sprintf("🔍 *Investigating...*\n```\n%s\n```", progressLines))
@@ -979,18 +912,21 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 			OnCompleted: func(sid, output string) {
 				sessionID = sid
 				response = output
-				close(done)
+				closeOnce.Do(func() { close(done) })
 			},
 			OnError: func(errorMsg string) {
 				response = fmt.Sprintf("❌ Error: %s", errorMsg)
 				hasError = true
-				close(done)
+				closeOnce.Do(func() { close(done) })
 			},
 		}
 
-		if err := h.codexWSHandler.StartIncident(incidentUUID, taskWithGuidance, openaiSettings, callback); err != nil {
-			log.Printf("Failed to start incident via WebSocket: %v, falling back to local execution", err)
-			h.runSlackChannelInvestigationLocal(incidentUUID, workingDir, alert, instance, slackChannelID, slackMessageTS, taskWithGuidance)
+		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
+			log.Printf("Failed to start incident via WebSocket: %v", err)
+			errorMsg := fmt.Sprintf("Failed to start investigation: %v", err)
+			h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg)
+			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
+			h.postSlackThreadReply(slackChannelID, slackMessageTS, "❌ "+errorMsg)
 			return
 		}
 
@@ -1027,8 +963,12 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		return
 	}
 
-	// Fallback to local execution
-	h.runSlackChannelInvestigationLocal(incidentUUID, workingDir, alert, instance, slackChannelID, slackMessageTS, taskWithGuidance)
+	// No WebSocket worker available
+	log.Printf("ERROR: Agent worker not connected for Slack channel incident %s", incidentUUID)
+	errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
+	h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg)
+	h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
+	h.postSlackThreadReply(slackChannelID, slackMessageTS, "❌ "+errorMsg)
 }
 
 // runSlackChannelInvestigationLocal runs investigation using local executor
