@@ -100,8 +100,8 @@ Replace 8 TypeScript `customTools` (defined in `mcp-tools.ts` and `mcp-client.ts
 - Delete: `agent-worker/src/tools/mcp-tools.ts`
 - Delete: `agent-worker/src/tools/mcp-client.ts`
 
-- [ ] Delete both files
-- [ ] Run build: `cd agent-worker && npm run build` - must compile (no other files import these)
+- [x] Delete both files
+- [x] Run build: `cd agent-worker && npm run build` - must compile (no other files import these)
 
 ### Task 7: Update agent-worker tests
 
