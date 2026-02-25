@@ -609,13 +609,14 @@ result = get_server_info(tool_instance_id=%d)
 		return fmt.Sprintf(`
 Usage (via bash tool):
 `+"```python"+`
-from zabbix import get_hosts, get_problems, get_history, get_items_batch, acknowledge_event
+from zabbix import get_hosts, get_problems, get_history, get_items, get_items_batch, get_triggers, api_request
 
 result = get_hosts(tool_instance_id=%d)
 result = get_problems(severity_min=3, tool_instance_id=%d)
 result = get_items_batch(searches=["cpu", "memory"], tool_instance_id=%d)
+result = get_triggers(hostids=["12345"], only_true=True, tool_instance_id=%d)
 `+"```"+`
-`, id, id, id)
+`, id, id, id, id)
 	default:
 		return fmt.Sprintf("When using %s tools, pass `tool_instance_id: %d` to target this instance.\n", typeName, id)
 	}
@@ -834,43 +835,6 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 		}
 
 		log.Printf("Regenerated SKILL.md for skill: %s", skill.Name)
-
-		// Ensure scripts directory exists and create tool symlinks
-		scriptsDir := filepath.Join(s.GetSkillDir(skill.Name), "scripts")
-		if err := os.MkdirAll(scriptsDir, 0755); err != nil {
-			log.Printf("Failed to create scripts directory %s: %v", scriptsDir, err)
-		}
-
-		// Clear existing symlinks
-		dirEntries, _ := os.ReadDir(scriptsDir)
-		for _, de := range dirEntries {
-			entryPath := filepath.Join(scriptsDir, de.Name())
-			if info, err := os.Lstat(entryPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				os.Remove(entryPath)
-			}
-		}
-
-		// Create symlinks for assigned tools
-		for _, tool := range tools {
-			if tool.ToolType.Name == "" {
-				continue
-			}
-			toolName := tool.ToolType.Name
-			linkPath := filepath.Join(scriptsDir, toolName)
-			targetPath := filepath.Join("/tools", toolName)
-			if err := os.Symlink(targetPath, linkPath); err != nil {
-				log.Printf("Warning: failed to create symlink for tool %s in skill %s: %v", toolName, skill.Name, err)
-			}
-		}
-
-		// Create symlink for mcp_client.py (required by all tools)
-		if len(tools) > 0 {
-			mcpClientLink := filepath.Join(scriptsDir, "mcp_client.py")
-			mcpClientTarget := "/tools/mcp_client.py"
-			if err := os.Symlink(mcpClientTarget, mcpClientLink); err != nil {
-				log.Printf("Warning: failed to create symlink for mcp_client.py in skill %s: %v", skill.Name, err)
-			}
-		}
 	}
 
 	return nil
