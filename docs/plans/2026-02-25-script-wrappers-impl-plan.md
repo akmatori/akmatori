@@ -65,12 +65,12 @@ Replace 8 TypeScript `customTools` (defined in `mcp-tools.ts` and `mcp-client.ts
 **Files:**
 - Create: `agent-worker/tools/zabbix/__init__.py`
 
-- [ ] Create `agent-worker/tools/zabbix/` directory
-- [ ] Create `__init__.py` with `get_hosts()`, `get_problems()`, `get_history()`, `get_items_batch()`, `acknowledge_event()`
+- [x] Create `agent-worker/tools/zabbix/` directory
+- [x] Create `__init__.py` with `get_hosts()`, `get_problems()`, `get_history()`, `get_items_batch()`, `acknowledge_event()`
   - Only the 5 tools that exist in MCP Gateway (drops old `get_items`, `get_triggers`, `api_request`)
   - All functions accept `tool_instance_id` kwarg
   - Full code provided in design doc Task 3
-- [ ] Verify syntax: `python3 -c "import ast; ast.parse(open('agent-worker/tools/zabbix/__init__.py').read()); print('OK')"`
+- [x] Verify syntax: `python3 -c "import ast; ast.parse(open('agent-worker/tools/zabbix/__init__.py').read()); print('OK')"`
 
 ### Task 4: Add Python tools to agent-worker Dockerfile
 
