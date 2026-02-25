@@ -232,7 +232,7 @@ export class AgentRunner {
           ...ctx.env,
           MCP_GATEWAY_URL: this.mcpGatewayUrl,
           INCIDENT_ID: params.incidentId,
-          PYTHONPATH: `/tools:${ctx.env.PYTHONPATH || ""}`,
+          PYTHONPATH: ctx.env.PYTHONPATH ? `/tools:${ctx.env.PYTHONPATH}` : "/tools",
         },
       }),
     });

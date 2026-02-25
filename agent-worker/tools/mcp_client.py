@@ -34,6 +34,12 @@ class MCPClient:
         self.incident_id = incident_id or os.environ.get("INCIDENT_ID", "")
         self._request_id = 0
 
+        # Create an opener that bypasses proxy for internal MCP Gateway connections.
+        # This prevents HTTP_PROXY/HTTPS_PROXY env vars (set for LLM API calls)
+        # from routing internal Docker traffic through an external proxy.
+        no_proxy_handler = urllib.request.ProxyHandler({})
+        self._opener = urllib.request.build_opener(no_proxy_handler)
+
     def _next_request_id(self) -> int:
         self._request_id += 1
         return self._request_id
@@ -75,7 +81,7 @@ class MCPClient:
         req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
 
         try:
-            with urllib.request.urlopen(req, timeout=300) as response:
+            with self._opener.open(req, timeout=300) as response:
                 resp_data = response.read()
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="ignore")
@@ -104,6 +110,8 @@ class MCPClient:
                 contents = content["content"]
                 if isinstance(contents, list) and len(contents) > 0:
                     text = contents[0].get("text", "")
+                    if content.get("isError"):
+                        raise MCPError(-32000, f"Tool execution failed: {text}", contents)
                     try:
                         return json.loads(text)
                     except json.JSONDecodeError:
