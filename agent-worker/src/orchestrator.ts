@@ -215,6 +215,7 @@ export class Orchestrator {
       message: msg.message ?? "",
       llmSettings,
       proxyConfig,
+      enabledSkills: msg.enabled_skills,
       workDir: `${this.config.workspaceDir}/${incidentId}`,
       onOutput: (text: string) => {
         this.wsClient.sendOutput(incidentId, text);

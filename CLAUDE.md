@@ -122,7 +122,7 @@ in `agent-worker/tools/` are called via the bash tool:
 |---------|-----------|-------------------------|
 | `tools/mcp_client.py` | `call()`, `MCPClient` | N/A (base client) |
 | `tools/ssh/__init__.py` | `execute_command()`, `test_connectivity()`, `get_server_info()` | `ssh.*` |
-| `tools/zabbix/__init__.py` | `get_hosts()`, `get_problems()`, `get_history()`, `get_items_batch()`, `acknowledge_event()` | `zabbix.*` |
+| `tools/zabbix/__init__.py` | `get_hosts()`, `get_problems()`, `get_history()`, `get_items()`, `get_items_batch()`, `get_triggers()`, `api_request()` | `zabbix.*` |
 
 All wrapper functions accept a `tool_instance_id` kwarg for multi-instance routing.
 
