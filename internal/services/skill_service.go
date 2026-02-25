@@ -1048,8 +1048,9 @@ Output:
 	if len(result.ErrorMessages) > 0 {
 		// Take just the first error message, truncated
 		errorSummary = result.ErrorMessages[0]
-		if len(errorSummary) > 200 {
-			errorSummary = errorSummary[:200] + "..."
+		runes := []rune(errorSummary)
+		if len(runes) > 200 {
+			errorSummary = string(runes[:200]) + "..."
 		}
 	}
 
