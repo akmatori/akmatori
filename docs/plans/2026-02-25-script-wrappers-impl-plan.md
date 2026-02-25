@@ -141,10 +141,10 @@ Replace 8 TypeScript `customTools` (defined in `mcp-tools.ts` and `mcp-client.ts
 
 ### Task 9: Run all tests and verify
 
-- [ ] Run Go tests: `make test` - all pass
-- [ ] Run agent-worker tests: `make test-agent` - all pass
-- [ ] Run MCP gateway tests: `make test-mcp` - all pass (should be unchanged)
-- [ ] Build agent container: `docker-compose build akmatori-agent` - builds with python3 and /tools/
+- [x] Run Go tests: `make test` - all pass
+- [x] Run agent-worker tests: `make test-agent` - all pass
+- [x] Run MCP gateway tests: `make test-mcp` - all pass (should be unchanged)
+- [x] Build agent container: `docker-compose build akmatori-agent` - builds with python3 and /tools/
 
 ### Task 10: Final verification and cleanup
 
