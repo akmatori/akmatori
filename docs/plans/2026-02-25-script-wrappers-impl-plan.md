@@ -109,15 +109,15 @@ Replace 8 TypeScript `customTools` (defined in `mcp-tools.ts` and `mcp-client.ts
 - Modify: `agent-worker/tests/tools.test.ts` (full rewrite)
 - Modify: `agent-worker/tests/agent-runner.test.ts` (update mock and assertions)
 
-- [ ] Rewrite `tools.test.ts` to validate Python wrapper files:
+- [x] Rewrite `tools.test.ts` to validate Python wrapper files:
   - `mcp_client.py`: exists, defines MCPClient, defines call(), reads env vars, sends X-Incident-ID header
   - `ssh/__init__.py`: exists, exports 3 functions, all accept tool_instance_id, uses ssh. prefix
   - `zabbix/__init__.py`: exists, exports 5 functions, all accept tool_instance_id, uses zabbix. prefix
-- [ ] Update `agent-runner.test.ts`:
+- [x] Update `agent-runner.test.ts`:
   - Remove `vi.mock("../src/tools/mcp-tools.js", ...)` block (~lines 146-150)
   - Replace "should pass MCP tools as customTools" test with "should NOT pass customTools" test
   - Add "should configure bash spawnHook with MCP env vars" test
-- [ ] Run tests: `cd agent-worker && npm test` - all must pass
+- [x] Run tests: `cd agent-worker && npm test` - all must pass
 
 ### Task 8: Enrich generateSkillMd() with Python usage examples (TDD)
 
