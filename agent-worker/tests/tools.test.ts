@@ -98,9 +98,19 @@ describe("Python tool wrappers", () => {
       expect(content).toContain("def get_items_batch(");
     });
 
-    it("should export acknowledge_event", () => {
+    it("should export get_items", () => {
       const content = readFileSync(resolve(TOOLS_DIR, "zabbix/__init__.py"), "utf-8");
-      expect(content).toContain("def acknowledge_event(");
+      expect(content).toContain("def get_items(");
+    });
+
+    it("should export get_triggers", () => {
+      const content = readFileSync(resolve(TOOLS_DIR, "zabbix/__init__.py"), "utf-8");
+      expect(content).toContain("def get_triggers(");
+    });
+
+    it("should export api_request", () => {
+      const content = readFileSync(resolve(TOOLS_DIR, "zabbix/__init__.py"), "utf-8");
+      expect(content).toContain("def api_request(");
     });
 
     it("should accept tool_instance_id on all functions", () => {
@@ -118,7 +128,9 @@ describe("Python tool wrappers", () => {
       expect(content).toContain('"zabbix.get_problems"');
       expect(content).toContain('"zabbix.get_history"');
       expect(content).toContain('"zabbix.get_items_batch"');
-      expect(content).toContain('"zabbix.acknowledge_event"');
+      expect(content).toContain('"zabbix.get_items"');
+      expect(content).toContain('"zabbix.get_triggers"');
+      expect(content).toContain('"zabbix.api_request"');
     });
   });
 });
