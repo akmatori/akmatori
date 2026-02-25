@@ -44,6 +44,8 @@ export interface ResumeParams {
   llmSettings: LLMSettings;
   proxyConfig?: ProxyConfig;
   workDir: string;
+  /** Names of enabled skills — only these will be loaded from the shared skills directory */
+  enabledSkills?: string[];
   onOutput: (text: string) => void;
   onEvent?: (event: AgentSessionEvent) => void;
 }

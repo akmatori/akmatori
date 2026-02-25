@@ -561,7 +561,11 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 		},
 	}
 
-	yamlBytes, _ := yaml.Marshal(frontmatter)
+	yamlBytes, err := yaml.Marshal(frontmatter)
+	if err != nil {
+		log.Printf("Failed to marshal SKILL.md frontmatter for %s: %v", name, err)
+		yamlBytes = []byte(fmt.Sprintf("name: %s\n", name))
+	}
 
 	// Transform [[filename]] references to markdown links [filename](assets/filename)
 	resolvedBody := s.contextService.ResolveReferencesToMarkdownLinks(body)
@@ -840,12 +844,13 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 	return nil
 }
 
-// truncateString truncates a string to max length
+// truncateString truncates a string to max rune length, safe for multi-byte UTF-8
 func truncateString(s string, max int) string {
-	if len(s) <= max {
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
-	return s[:max-3] + "..."
+	return string(runes[:max-3]) + "..."
 }
 
 // IncidentContext contains context for spawning an incident manager

@@ -577,7 +577,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		var wsErr error
 		if sessionID != "" {
 			log.Printf("Continuing session %s for incident %s", sessionID, incidentUUID)
-			wsErr = h.agentWSHandler.ContinueIncident(incidentUUID, sessionID, taskWithGuidance, llmSettings, callback)
+			wsErr = h.agentWSHandler.ContinueIncident(incidentUUID, sessionID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback)
 		} else {
 			log.Printf("Starting new agent session for incident %s", incidentUUID)
 			wsErr = h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback)

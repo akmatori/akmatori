@@ -34,11 +34,11 @@ def get_hosts(search: dict = None, filter: dict = None, limit: int = None,
         List of host dictionaries
     """
     args = {}
-    if search:
+    if search is not None:
         args["search"] = search
-    if filter:
+    if filter is not None:
         args["filter"] = filter
-    if limit:
+    if limit is not None:
         args["limit"] = limit
     if tool_instance_id is not None:
         args["tool_instance_id"] = tool_instance_id
