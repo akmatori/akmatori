@@ -15,11 +15,11 @@ import {
   SettingsManager,
   DefaultResourceLoader,
   createCodingTools,
+  createBashTool,
   type AgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
 import { getModel, type Model, type ThinkingLevel as PiThinkingLevel } from "@mariozechner/pi-ai";
 import type { LLMSettings, ExecuteResult, ProxyConfig, ThinkingLevel } from "./types.js";
-import { createMCPTools } from "./tools/mcp-tools.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -189,9 +189,6 @@ export class AgentRunner {
     );
     const thinkingLevel = mapThinkingLevel(params.llmSettings.thinking_level);
 
-    // Tools
-    const mcpTools = createMCPTools(this.mcpGatewayUrl, params.incidentId);
-
     // Session management: persist to disk so resume can restore conversation history.
     // For resume, use continueRecent to load the most recent session from the
     // incident's workspace directory. For new sessions, create a fresh one.
@@ -227,14 +224,32 @@ export class AgentRunner {
     });
     await resourceLoader.reload();
 
+    // Create bash tool with spawnHook to inject MCP Gateway env vars per-session
+    const bashTool = createBashTool(params.workDir, {
+      spawnHook: (ctx) => ({
+        ...ctx,
+        env: {
+          ...ctx.env,
+          MCP_GATEWAY_URL: this.mcpGatewayUrl,
+          INCIDENT_ID: params.incidentId,
+          PYTHONPATH: `/tools:${ctx.env.PYTHONPATH || ""}`,
+        },
+      }),
+    });
+
+    // Create coding tools with the same workDir, then replace the default bash tool
+    const codingTools = createCodingTools(params.workDir);
+    const tools = codingTools.map((t) =>
+      t.name === "bash" ? bashTool : t,
+    );
+
     const { session } = await createAgentSession({
       cwd: params.workDir,
       authStorage,
       modelRegistry,
       model,
       thinkingLevel,
-      tools: createCodingTools(params.workDir),
-      customTools: mcpTools,
+      tools,
       resourceLoader,
       sessionManager,
       settingsManager,
