@@ -77,9 +77,9 @@ Replace 8 TypeScript `customTools` (defined in `mcp-tools.ts` and `mcp-client.ts
 **Files:**
 - Modify: `agent-worker/Dockerfile`
 
-- [ ] Add `python3` to the `apt-get install` line in the runtime stage (~line 33)
-- [ ] Add `COPY tools/ /tools/` before the `USER agent` line (~line 63)
-- [ ] Verify Dockerfile syntax with a quick build check
+- [x] Add `python3` to the `apt-get install` line in the runtime stage (~line 33)
+- [x] Add `COPY tools/ /tools/` before the `USER agent` line (~line 63)
+- [x] Verify Dockerfile syntax with a quick build check
 
 ### Task 5: Replace customTools with spawnHook in agent-runner.ts
 
