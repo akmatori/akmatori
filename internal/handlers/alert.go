@@ -37,7 +37,8 @@ type AlertHandler struct {
 	aggregationService *services.AggregationService
 
 	// Registered adapters by source type
-	adapters map[string]alerts.AlertAdapter
+	adaptersMu sync.RWMutex
+	adapters   map[string]alerts.AlertAdapter
 }
 
 // NewAlertHandler creates a new alert handler
@@ -68,7 +69,9 @@ func NewAlertHandler(
 
 // RegisterAdapter registers an alert adapter for a source type
 func (h *AlertHandler) RegisterAdapter(adapter alerts.AlertAdapter) {
+	h.adaptersMu.Lock()
 	h.adapters[adapter.GetSourceType()] = adapter
+	h.adaptersMu.Unlock()
 	log.Printf("Registered alert adapter: %s", adapter.GetSourceType())
 }
 
@@ -104,7 +107,9 @@ func (h *AlertHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get adapter for source type
+	h.adaptersMu.RLock()
 	adapter, ok := h.adapters[instance.AlertSourceType.Name]
+	h.adaptersMu.RUnlock()
 	if !ok {
 		log.Printf("No adapter for source type: %s", instance.AlertSourceType.Name)
 		http.Error(w, "Unsupported source type", http.StatusBadRequest)
@@ -118,14 +123,15 @@ func (h *AlertHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read request body
-	body, err := io.ReadAll(r.Body)
+	// Read request body (limit to 10 MB to prevent DoS)
+	const maxWebhookBodySize = 10 * 1024 * 1024
+	defer r.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxWebhookBodySize))
 	if err != nil {
 		log.Printf("Error reading webhook body: %v", err)
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
 
 	// Parse payload into normalized alerts
 	normalizedAlerts, err := adapter.ParsePayload(body, instance)
@@ -1125,12 +1131,13 @@ func (h *AlertHandler) updateSlackThreadMessage(channelID, messageTS, message st
 }
 
 // truncateLogForSlack truncates a log string to fit within Slack's message limits.
-// It keeps the last maxLen characters and trims to a clean line boundary.
+// It keeps the last maxLen runes and trims to a clean line boundary.
 func truncateLogForSlack(logText string, maxLen int) string {
-	if len(logText) <= maxLen {
+	runes := []rune(logText)
+	if len(runes) <= maxLen {
 		return logText
 	}
-	truncated := logText[len(logText)-maxLen:]
+	truncated := string(runes[len(runes)-maxLen:])
 	// Find first newline to avoid partial lines
 	if idx := strings.Index(truncated, "\n"); idx > 0 && idx < 100 {
 		truncated = truncated[idx+1:]

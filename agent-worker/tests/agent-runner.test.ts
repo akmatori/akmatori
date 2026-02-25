@@ -706,7 +706,7 @@ describe("AgentRunner", () => {
 
       await runner.execute(makeExecuteParams({ proxyConfig }));
 
-      expect(capturedHttpProxy).toBeUndefined();
+      expect(capturedHttpProxy).toBe("");
     });
 
     it("should clear proxy env vars when no proxy config provided", async () => {
@@ -724,7 +724,7 @@ describe("AgentRunner", () => {
 
       await runner.execute(makeExecuteParams({ proxyConfig: undefined }));
 
-      expect(capturedHttpProxy).toBeUndefined();
+      expect(capturedHttpProxy).toBe("");
     });
   });
 });

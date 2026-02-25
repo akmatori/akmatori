@@ -589,27 +589,24 @@ export class AgentRunner {
   /**
    * Apply proxy configuration to environment variables.
    * Only sets proxy for LLM API calls when the relevant toggle is enabled.
+   *
+   * Note: process.env is global state shared by concurrent sessions. We use
+   * assignment (not delete) to avoid inconsistent intermediate states. In
+   * practice, proxy config is system-global so all sessions receive the same
+   * setting.
    */
   private applyProxyConfig(
     proxyConfig: ProxyConfig | undefined,
     provider: string,
   ): void {
-    // Clear existing proxy settings first
-    delete process.env.HTTP_PROXY;
-    delete process.env.HTTPS_PROXY;
-    delete process.env.NO_PROXY;
-
-    if (!proxyConfig?.url) return;
-
-    // Only apply proxy for providers that use the "openai_enabled" toggle
-    // (historically this was OpenAI-only, but now covers all LLM providers)
-    if (proxyConfig.openai_enabled) {
+    if (proxyConfig?.url && proxyConfig.openai_enabled) {
       process.env.HTTP_PROXY = proxyConfig.url;
       process.env.HTTPS_PROXY = proxyConfig.url;
-
-      if (proxyConfig.no_proxy) {
-        process.env.NO_PROXY = proxyConfig.no_proxy;
-      }
+      process.env.NO_PROXY = proxyConfig.no_proxy || "";
+    } else {
+      process.env.HTTP_PROXY = "";
+      process.env.HTTPS_PROXY = "";
+      process.env.NO_PROXY = "";
     }
   }
 }
