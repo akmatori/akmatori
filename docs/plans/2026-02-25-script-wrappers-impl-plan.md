@@ -52,13 +52,13 @@ Replace 8 TypeScript `customTools` (defined in `mcp-tools.ts` and `mcp-client.ts
 **Files:**
 - Create: `agent-worker/tools/ssh/__init__.py`
 
-- [ ] Create `agent-worker/tools/ssh/` directory
-- [ ] Create `__init__.py` with `execute_command()`, `test_connectivity()`, `get_server_info()`
+- [x] Create `agent-worker/tools/ssh/` directory
+- [x] Create `__init__.py` with `execute_command()`, `test_connectivity()`, `get_server_info()`
   - All functions accept `tool_instance_id` kwarg
   - Uses `sys.path.insert` to resolve imports from parent dir
   - Calls `mcp_client.call()` with `ssh.` prefixed tool names
   - Full code provided in design doc Task 2
-- [ ] Verify syntax: `python3 -c "import ast; ast.parse(open('agent-worker/tools/ssh/__init__.py').read()); print('OK')"`
+- [x] Verify syntax: `python3 -c "import ast; ast.parse(open('agent-worker/tools/ssh/__init__.py').read()); print('OK')"`
 
 ### Task 3: Create Zabbix Python Wrapper
 
