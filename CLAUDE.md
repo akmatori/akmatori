@@ -73,15 +73,12 @@ make verify           # go vet + all tests + agent-worker tests
 │   │   ├── orchestrator.ts # Message routing
 │   │   ├── agent-runner.ts # pi-mono SDK integration
 │   │   ├── ws-client.ts    # WebSocket client
-│   │   ├── types.ts        # Shared types
-│   │   └── tools/          # MCP Gateway tool definitions
+│   │   └── types.ts        # Shared types
+│   ├── tools/              # Python script wrappers for MCP Gateway
+│   │   ├── mcp_client.py   # MCP Gateway HTTP client (JSON-RPC 2.0)
+│   │   ├── ssh/            # SSH tool wrappers
+│   │   └── zabbix/         # Zabbix tool wrappers
 │   └── tests/              # Vitest tests
-├── codex-worker/           # Codex CLI execution worker (separate Go module)
-│   └── internal/
-│       ├── codex/          # Codex CLI runner
-│       ├── orchestrator/   # WebSocket message handling and execution
-│       ├── session/        # Session state persistence
-│       └── ws/             # WebSocket client for API communication
 ├── mcp-gateway/            # MCP protocol gateway (separate Go module)
 │   └── internal/
 │       ├── cache/          # Generic TTL cache implementation
@@ -93,46 +90,49 @@ make verify           # go vet + all tests + agent-worker tests
 └── tests/fixtures/         # Test payloads and mock data
 ```
 
-## Codex Worker Architecture
+## Agent Worker Architecture
 
-The `codex-worker/` is a **separate Go module** that manages Codex CLI execution:
+The `agent-worker/` is a **Node.js/TypeScript module** using the `@mariozechner/pi-coding-agent` SDK:
 
 ### Components
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| Orchestrator | `internal/orchestrator/orchestrator.go` | Main coordinator - handles WebSocket messages, dispatches work |
-| Runner | `internal/codex/runner.go` | Executes Codex CLI, manages process lifecycle |
-| Session Store | `internal/session/store.go` | Persists session IDs for conversation continuity |
-| WS Client | `internal/ws/client.go` | WebSocket communication with API server |
+| Entry Point | `src/index.ts` | Reads config from env, starts orchestrator, handles signals |
+| Orchestrator | `src/orchestrator.ts` | Routes WebSocket messages, dispatches to AgentRunner |
+| Agent Runner | `src/agent-runner.ts` | Creates pi-mono sessions, manages execution lifecycle |
+| WS Client | `src/ws-client.ts` | WebSocket communication with API server |
+| Types | `src/types.ts` | Shared TypeScript types matching Go WebSocket protocol |
+
+### Tool Architecture (Python Script Wrappers)
+
+Tools are **not** registered as pi-mono `customTools`. Instead, Python script wrappers
+in `agent-worker/tools/` are called via the bash tool:
+
+1. `generateSkillMd()` in Go writes Python usage examples per tool instance in SKILL.md
+2. pi-mono's `DefaultResourceLoader` discovers SKILL.md files
+3. Agent sees Python examples, calls `python3 -c "from ssh import execute_command; ..."`
+4. `spawnHook` on `createBashTool()` injects `MCP_GATEWAY_URL`, `INCIDENT_ID`, `PYTHONPATH=/tools`
+5. Python wrapper calls `mcp_client.call()` which sends JSON-RPC 2.0 to MCP Gateway
+6. MCP Gateway resolves credentials by instance ID and executes the tool
+
+### Python Wrappers
+
+| Wrapper | Functions | MCP Gateway Tool Prefix |
+|---------|-----------|-------------------------|
+| `tools/mcp_client.py` | `call()`, `MCPClient` | N/A (base client) |
+| `tools/ssh/__init__.py` | `execute_command()`, `test_connectivity()`, `get_server_info()` | `ssh.*` |
+| `tools/zabbix/__init__.py` | `get_hosts()`, `get_problems()`, `get_history()`, `get_items_batch()`, `acknowledge_event()` | `zabbix.*` |
+
+All wrapper functions accept a `tool_instance_id` kwarg for multi-instance routing.
 
 ### Message Flow
 
 1. API server sends `new_incident` or `continue_incident` via WebSocket
-2. Orchestrator receives message, extracts OpenAI settings and proxy config
-3. Runner executes Codex CLI with streaming output
+2. Orchestrator receives message, extracts LLM settings and proxy config
+3. AgentRunner creates pi-mono session with multi-provider auth
 4. Output is streamed back to API via WebSocket
 5. On completion, metrics (tokens, execution time) are reported
-
-### WebSocket Message Types
-
-| Type | Direction | Purpose |
-|------|-----------|---------|
-| `new_incident` | API → Worker | Start new investigation |
-| `continue_incident` | API → Worker | Continue existing session |
-| `cancel_incident` | API → Worker | Cancel running investigation |
-| `device_auth_start` | API → Worker | Start OAuth device flow |
-| `output` | Worker → API | Streaming output chunk |
-| `completed` | Worker → API | Investigation finished with metrics |
-| `error` | Worker → API | Execution failed |
-
-### OpenAI Authentication
-
-The worker supports multiple auth methods:
-- **API Key**: Direct `OPENAI_API_KEY` authentication
-- **ChatGPT OAuth**: Device code flow with token refresh (for ChatGPT Plus accounts)
-
-OAuth tokens are refreshed automatically and returned to API for storage.
 
 ## Slack Integration
 
