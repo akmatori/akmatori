@@ -86,13 +86,13 @@ Replace 8 TypeScript `customTools` (defined in `mcp-tools.ts` and `mcp-client.ts
 **Files:**
 - Modify: `agent-worker/src/agent-runner.ts`
 
-- [ ] Remove `import { createMCPTools } from "./tools/mcp-tools.js";`
-- [ ] Add `createBashTool` to the pi-coding-agent import
-- [ ] Remove `const mcpTools = createMCPTools(...)` call (~line 193)
-- [ ] Create bash tool with `spawnHook` that injects `MCP_GATEWAY_URL`, `INCIDENT_ID`, `PYTHONPATH=/tools:...`
-- [ ] Create coding tools array, replacing default bash with custom spawnHook bash
-- [ ] Update `createAgentSession()` call: use custom `tools` array, remove `customTools` property
-- [ ] Run build: `cd agent-worker && npm run build` - must compile without errors
+- [x] Remove `import { createMCPTools } from "./tools/mcp-tools.js";`
+- [x] Add `createBashTool` to the pi-coding-agent import
+- [x] Remove `const mcpTools = createMCPTools(...)` call (~line 193)
+- [x] Create bash tool with `spawnHook` that injects `MCP_GATEWAY_URL`, `INCIDENT_ID`, `PYTHONPATH=/tools:...`
+- [x] Create coding tools array, replacing default bash with custom spawnHook bash
+- [x] Update `createAgentSession()` call: use custom `tools` array, remove `customTools` property
+- [x] Run build: `cd agent-worker && npm run build` - must compile without errors
 
 ### Task 6: Delete TypeScript MCP tool files
 
