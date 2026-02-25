@@ -551,8 +551,7 @@ func (s *SkillService) UpdateSkillPrompt(name, prompt string) error {
 }
 
 // generateSkillMd generates a SKILL.md file with YAML frontmatter and user prompt body
-// Tools are native pi-mono ToolDefinition objects registered at session creation time,
-// so no Python import instructions are needed
+// Tools are called via Python wrappers through the bash tool, with usage examples per tool type
 func (s *SkillService) generateSkillMd(name, description, body string, tools []database.ToolInstance) string {
 	frontmatter := SkillFrontmatter{
 		Name:        name,
@@ -567,7 +566,7 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 	// Transform [[filename]] references to markdown links [filename](assets/filename)
 	resolvedBody := s.contextService.ResolveReferencesToMarkdownLinks(body)
 
-	// List assigned tools with instance details for per-skill routing
+	// List assigned tools with Python usage examples for per-skill routing
 	var toolsSection strings.Builder
 	var enabledTools []database.ToolInstance
 	for _, tool := range tools {
@@ -582,11 +581,44 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 			if details := extractToolDetails(tool); details != "" {
 				toolsSection.WriteString(details)
 			}
-			toolsSection.WriteString(fmt.Sprintf("When using %s tools, pass `tool_instance_id: %d` to target this instance.\n", tool.ToolType.Name, tool.ID))
+			toolsSection.WriteString(generateToolUsageExample(tool))
 		}
 	}
 
 	return fmt.Sprintf("---\n%s---\n\n%s%s\n", string(yamlBytes), resolvedBody, toolsSection.String())
+}
+
+// generateToolUsageExample creates Python code block showing how to call the tool
+func generateToolUsageExample(tool database.ToolInstance) string {
+	typeName := tool.ToolType.Name
+	id := tool.ID
+
+	switch typeName {
+	case "ssh":
+		return fmt.Sprintf(`
+Usage (via bash tool):
+`+"```python"+`
+from ssh import execute_command, test_connectivity, get_server_info
+
+result = execute_command("uptime", tool_instance_id=%d)
+result = test_connectivity(tool_instance_id=%d)
+result = get_server_info(tool_instance_id=%d)
+`+"```"+`
+`, id, id, id)
+	case "zabbix":
+		return fmt.Sprintf(`
+Usage (via bash tool):
+`+"```python"+`
+from zabbix import get_hosts, get_problems, get_history, get_items_batch, acknowledge_event
+
+result = get_hosts(tool_instance_id=%d)
+result = get_problems(severity_min=3, tool_instance_id=%d)
+result = get_items_batch(searches=["cpu", "memory"], tool_instance_id=%d)
+`+"```"+`
+`, id, id, id)
+	default:
+		return fmt.Sprintf("When using %s tools, pass `tool_instance_id: %d` to target this instance.\n", typeName, id)
+	}
 }
 
 // extractToolDetails extracts non-secret, agent-relevant details from a tool instance's settings.
