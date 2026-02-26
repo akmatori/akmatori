@@ -409,6 +409,23 @@ describe("AgentRunner", () => {
       expect(opts.customTools).toBeUndefined();
     });
 
+    it("should pass appendSystemPrompt to DefaultResourceLoader", async () => {
+      const { DefaultResourceLoader } = await import("@mariozechner/pi-coding-agent");
+      const params = makeExecuteParams();
+      await runner.execute(params);
+
+      // DefaultResourceLoader should have been constructed with appendSystemPrompt
+      const constructorCalls = (DefaultResourceLoader as any).mock.calls;
+      expect(constructorCalls.length).toBeGreaterThan(0);
+      const opts = constructorCalls[constructorCalls.length - 1][0];
+      expect(opts.appendSystemPrompt).toBeDefined();
+      expect(typeof opts.appendSystemPrompt).toBe("string");
+      expect(opts.appendSystemPrompt).toContain("Tool Calling Instructions");
+      expect(opts.appendSystemPrompt).toContain("python3 -c");
+      expect(opts.appendSystemPrompt).toContain("SKILL.md");
+      expect(opts.appendSystemPrompt).toContain("tool_instance_id");
+    });
+
     it("should configure bash spawnHook with MCP env vars", async () => {
       const params = makeExecuteParams({ incidentId: "inc-env" });
       await runner.execute(params);

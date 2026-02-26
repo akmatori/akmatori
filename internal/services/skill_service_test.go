@@ -565,6 +565,128 @@ func TestGenerateSkillMd_ContainsPythonExamples(t *testing.T) {
 	}
 }
 
+func TestSshAllHostsAllowWrite_AllWriteEnabled(t *testing.T) {
+	tool := database.ToolInstance{
+		ToolType: database.ToolType{Name: "ssh"},
+		Settings: database.JSONB{
+			"ssh_hosts": []interface{}{
+				map[string]interface{}{"hostname": "web-01", "allow_write_commands": true},
+				map[string]interface{}{"hostname": "web-02", "allow_write_commands": true},
+			},
+		},
+	}
+	if !sshAllHostsAllowWrite(tool) {
+		t.Error("expected true when all hosts have allow_write_commands=true")
+	}
+}
+
+func TestSshAllHostsAllowWrite_SomeReadOnly(t *testing.T) {
+	tool := database.ToolInstance{
+		ToolType: database.ToolType{Name: "ssh"},
+		Settings: database.JSONB{
+			"ssh_hosts": []interface{}{
+				map[string]interface{}{"hostname": "web-01", "allow_write_commands": true},
+				map[string]interface{}{"hostname": "web-02", "allow_write_commands": false},
+			},
+		},
+	}
+	if sshAllHostsAllowWrite(tool) {
+		t.Error("expected false when some hosts are read-only")
+	}
+}
+
+func TestSshAllHostsAllowWrite_NoWriteField(t *testing.T) {
+	tool := database.ToolInstance{
+		ToolType: database.ToolType{Name: "ssh"},
+		Settings: database.JSONB{
+			"ssh_hosts": []interface{}{
+				map[string]interface{}{"hostname": "web-01"},
+			},
+		},
+	}
+	if sshAllHostsAllowWrite(tool) {
+		t.Error("expected false when allow_write_commands field is missing")
+	}
+}
+
+func TestSshAllHostsAllowWrite_NoSettings(t *testing.T) {
+	tool := database.ToolInstance{
+		ToolType: database.ToolType{Name: "ssh"},
+	}
+	if sshAllHostsAllowWrite(tool) {
+		t.Error("expected false when settings is nil")
+	}
+}
+
+func TestSshAllHostsAllowWrite_EmptyHosts(t *testing.T) {
+	tool := database.ToolInstance{
+		ToolType: database.ToolType{Name: "ssh"},
+		Settings: database.JSONB{
+			"ssh_hosts": []interface{}{},
+		},
+	}
+	if sshAllHostsAllowWrite(tool) {
+		t.Error("expected false when hosts list is empty")
+	}
+}
+
+func TestSshAllHostsAllowWrite_NoHostsKey(t *testing.T) {
+	tool := database.ToolInstance{
+		ToolType: database.ToolType{Name: "ssh"},
+		Settings: database.JSONB{
+			"other_setting": "value",
+		},
+	}
+	if sshAllHostsAllowWrite(tool) {
+		t.Error("expected false when ssh_hosts key is missing")
+	}
+}
+
+func TestGenerateToolUsageExample_SSHReadOnly(t *testing.T) {
+	tool := database.ToolInstance{
+		ToolType: database.ToolType{Name: "ssh"},
+		Settings: database.JSONB{
+			"ssh_hosts": []interface{}{
+				map[string]interface{}{"hostname": "web-01", "allow_write_commands": false},
+			},
+		},
+	}
+	tool.ID = 5
+
+	result := generateToolUsageExample(tool)
+
+	if !strings.Contains(result, "Read-only mode is enabled") {
+		t.Error("SSH read-only tool should include read-only mode note")
+	}
+	if !strings.Contains(result, "nproc") {
+		t.Error("SSH read-only note should mention nproc")
+	}
+	if !strings.Contains(result, "lscpu") {
+		t.Error("SSH read-only note should mention lscpu")
+	}
+	if !strings.Contains(result, "servers=") {
+		t.Error("SSH usage example should show servers parameter")
+	}
+}
+
+func TestGenerateToolUsageExample_SSHWriteEnabled(t *testing.T) {
+	tool := database.ToolInstance{
+		ToolType: database.ToolType{Name: "ssh"},
+		Settings: database.JSONB{
+			"ssh_hosts": []interface{}{
+				map[string]interface{}{"hostname": "web-01", "allow_write_commands": true},
+			},
+		},
+	}
+	tool.ID = 5
+
+	result := generateToolUsageExample(tool)
+
+	if strings.Contains(result, "Read-only mode is enabled") {
+		t.Error("SSH write-enabled tool should NOT include read-only mode note")
+	}
+}
+
 func TestAssignTools_UpdatesDatabaseAssociation(t *testing.T) {
 	db := setupSkillTestDB(t)
 	svc := newTestSkillService(t, db)

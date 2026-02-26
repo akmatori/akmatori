@@ -592,6 +592,36 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 	return fmt.Sprintf("---\n%s---\n\n%s%s\n", string(yamlBytes), resolvedBody, toolsSection.String())
 }
 
+// sshAllHostsAllowWrite checks if ALL hosts in an SSH tool instance have allow_write_commands enabled.
+// Returns false if any host is read-only (the default), if settings are missing, or if there are no hosts.
+func sshAllHostsAllowWrite(tool database.ToolInstance) bool {
+	if tool.Settings == nil {
+		return false
+	}
+	hostsData, ok := tool.Settings["ssh_hosts"]
+	if !ok {
+		return false
+	}
+	hostsJSON, err := json.Marshal(hostsData)
+	if err != nil {
+		return false
+	}
+	var hosts []map[string]interface{}
+	if err := json.Unmarshal(hostsJSON, &hosts); err != nil {
+		return false
+	}
+	if len(hosts) == 0 {
+		return false
+	}
+	for _, h := range hosts {
+		allow, ok := h["allow_write_commands"].(bool)
+		if !ok || !allow {
+			return false
+		}
+	}
+	return true
+}
+
 // generateToolUsageExample creates Python code block showing how to call the tool
 func generateToolUsageExample(tool database.ToolInstance) string {
 	typeName := tool.ToolType.Name
@@ -599,16 +629,27 @@ func generateToolUsageExample(tool database.ToolInstance) string {
 
 	switch typeName {
 	case "ssh":
+		var readOnlyNote string
+		if !sshAllHostsAllowWrite(tool) {
+			readOnlyNote = `
+**Read-only mode is enabled** — only diagnostic commands are allowed.
+Allowed: cat, head, tail, grep, find, ls, ps, top, df, free, netstat, ss, uptime,
+vmstat, iostat, mpstat, sar, pidstat, journalctl, dmesg, nproc, lscpu, getconf,
+docker ps/logs/inspect, kubectl get/describe/logs, systemctl status.
+For CPU core count use ` + "`nproc`" + ` or ` + "`lscpu`" + ` (not /proc/cpuinfo parsing).
+`
+		}
 		return fmt.Sprintf(`
 Usage (via bash tool):
 `+"```python"+`
 from ssh import execute_command, test_connectivity, get_server_info
 
 result = execute_command("uptime", tool_instance_id=%d)
+result = execute_command("df -h", servers=["hostname"], tool_instance_id=%d)
 result = test_connectivity(tool_instance_id=%d)
 result = get_server_info(tool_instance_id=%d)
 `+"```"+`
-`, id, id, id)
+%s`, id, id, id, id, readOnlyNote)
 	case "zabbix":
 		return fmt.Sprintf(`
 Usage (via bash tool):

@@ -135,6 +135,24 @@ func TestCommandValidator_ErrorContainsAllowedCommands(t *testing.T) {
 	}
 }
 
+func TestCommandValidator_ErrorContainsNewSystemInfoCommands(t *testing.T) {
+	v := NewCommandValidator()
+
+	err := v.ValidateCommand("rm -rf /", false)
+	if err == nil {
+		t.Fatal("Expected error for dangerous command")
+	}
+
+	errorMsg := err.Error()
+
+	// Verify new system info commands appear in the help text
+	for _, cmd := range []string{"nproc", "lscpu", "getconf"} {
+		if !strings.Contains(errorMsg, cmd) {
+			t.Errorf("Error message should list '%s' in system info commands, got: %s", cmd, errorMsg)
+		}
+	}
+}
+
 func TestCommandValidator_DockerSubcommands(t *testing.T) {
 	v := NewCommandValidator()
 
@@ -434,6 +452,26 @@ func TestCommandValidator_AndOrChains(t *testing.T) {
 		err := v.ValidateCommand(cmd, false)
 		if err == nil {
 			t.Errorf("Chain '%s' should be blocked", cmd)
+		}
+	}
+}
+
+func TestCommandValidator_SystemInfoCommands(t *testing.T) {
+	v := NewCommandValidator()
+
+	allowed := []string{
+		"nproc",
+		"nproc --all",
+		"lscpu",
+		"lscpu --extended",
+		"getconf _NPROCESSORS_ONLN",
+		"getconf LONG_BIT",
+	}
+
+	for _, cmd := range allowed {
+		err := v.ValidateCommand(cmd, false)
+		if err != nil {
+			t.Errorf("System info command '%s' should be allowed, got error: %v", cmd, err)
 		}
 	}
 }
