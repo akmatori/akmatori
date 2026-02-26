@@ -34,6 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ripgrep \
     git \
     jq \
+    python3 \
     ca-certificates \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -55,6 +56,9 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 # Copy built JavaScript from builder
 COPY --from=builder /app/dist/ ./dist/
+
+# Copy Python tool wrappers for MCP Gateway access
+COPY tools/ /tools/
 
 # Change ownership
 RUN chown -R agent:agent /home/agent/app

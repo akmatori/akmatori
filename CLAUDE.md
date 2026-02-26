@@ -73,15 +73,12 @@ make verify           # go vet + all tests + agent-worker tests
 │   │   ├── orchestrator.ts # Message routing
 │   │   ├── agent-runner.ts # pi-mono SDK integration
 │   │   ├── ws-client.ts    # WebSocket client
-│   │   ├── types.ts        # Shared types
-│   │   └── tools/          # MCP Gateway tool definitions
+│   │   └── types.ts        # Shared types
+│   ├── tools/              # Python script wrappers for MCP Gateway
+│   │   ├── mcp_client.py   # MCP Gateway HTTP client (JSON-RPC 2.0)
+│   │   ├── ssh/            # SSH tool wrappers
+│   │   └── zabbix/         # Zabbix tool wrappers
 │   └── tests/              # Vitest tests
-├── codex-worker/           # Codex CLI execution worker (separate Go module)
-│   └── internal/
-│       ├── codex/          # Codex CLI runner
-│       ├── orchestrator/   # WebSocket message handling and execution
-│       ├── session/        # Session state persistence
-│       └── ws/             # WebSocket client for API communication
 ├── mcp-gateway/            # MCP protocol gateway (separate Go module)
 │   └── internal/
 │       ├── cache/          # Generic TTL cache implementation
@@ -95,82 +92,48 @@ make verify           # go vet + all tests + agent-worker tests
 
 ## Agent Worker Architecture
 
-The `agent-worker/` is the **primary agent execution engine** using the pi-mono SDK for multi-provider LLM support.
-
-> **Note:** The legacy `codex-worker/` (Go-based, OpenAI Codex CLI only) remains in the codebase but is superseded by agent-worker for all new deployments.
+The `agent-worker/` is a **Node.js/TypeScript module** using the `@mariozechner/pi-coding-agent` SDK:
 
 ### Components
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| Entry Point | `src/index.ts` | Configuration, startup, reconnection logic |
-| Orchestrator | `src/orchestrator.ts` | WebSocket message routing, job dispatch |
-| Agent Runner | `src/agent-runner.ts` | pi-mono SDK integration, session management |
+| Entry Point | `src/index.ts` | Reads config from env, starts orchestrator, handles signals |
+| Orchestrator | `src/orchestrator.ts` | Routes WebSocket messages, dispatches to AgentRunner |
+| Agent Runner | `src/agent-runner.ts` | Creates pi-mono sessions, manages execution lifecycle |
 | WS Client | `src/ws-client.ts` | WebSocket communication with API server |
-| Types | `src/types.ts` | Shared TypeScript interfaces |
-| MCP Tools | `src/tools/mcp-tools.ts` | MCP Gateway tool definitions |
+| Types | `src/types.ts` | Shared TypeScript types matching Go WebSocket protocol |
 
-### Multi-Provider LLM Support
+### Tool Architecture (Python Script Wrappers)
 
-The agent-worker supports multiple LLM providers via pi-mono SDK:
+Tools are **not** registered as pi-mono `customTools`. Instead, Python script wrappers
+in `agent-worker/tools/` are called via the bash tool:
 
-| Provider | Model Examples | Notes |
-|----------|---------------|-------|
-| `anthropic` | claude-sonnet-4-20250514, claude-3-5-haiku | Default for most skills |
-| `openai` | gpt-4o, gpt-4-turbo, o1 | Supports reasoning models |
-| `google` | gemini-1.5-pro, gemini-2.0-flash | Google AI Studio |
-| `openrouter` | Any OpenRouter model | Multi-provider gateway |
-| `custom` | Any OpenAI-compatible | Custom base URL |
+1. `generateSkillMd()` in Go writes Python usage examples per tool instance in SKILL.md
+2. pi-mono's `DefaultResourceLoader` discovers SKILL.md files
+3. Agent sees Python examples, calls `python3 -c "from ssh import execute_command; ..."`
+4. `spawnHook` on `createBashTool()` injects `MCP_GATEWAY_URL`, `INCIDENT_ID`, `PYTHONPATH=/tools`
+5. Python wrapper calls `mcp_client.call()` which sends JSON-RPC 2.0 to MCP Gateway
+6. MCP Gateway resolves credentials by instance ID and executes the tool
 
-### Thinking Levels
+### Python Wrappers
 
-Control reasoning depth per-request:
+| Wrapper | Functions | MCP Gateway Tool Prefix |
+|---------|-----------|-------------------------|
+| `tools/mcp_client.py` | `call()`, `MCPClient` | N/A (base client) |
+| `tools/ssh/__init__.py` | `execute_command()`, `test_connectivity()`, `get_server_info()` | `ssh.*` |
+| `tools/zabbix/__init__.py` | `get_hosts()`, `get_problems()`, `get_history()`, `get_items()`, `get_items_batch()`, `get_triggers()`, `api_request()` | `zabbix.*` |
 
-| Level | Use Case |
-|-------|----------|
-| `off` | Simple tasks, quick responses |
-| `minimal` | Basic reasoning |
-| `low` | Light analysis |
-| `medium` | Standard (default) |
-| `high` | Complex debugging |
-| `xhigh` | Deep root cause analysis |
+All wrapper functions accept a `tool_instance_id` kwarg for multi-instance routing.
 
 ### Message Flow
 
 1. API server sends `new_incident` or `continue_incident` via WebSocket
 2. Orchestrator receives message, extracts LLM settings and proxy config
-3. Agent Runner creates pi-mono session with appropriate model
+3. AgentRunner creates pi-mono session with multi-provider auth
 4. Output is streamed back to API via WebSocket
 5. On completion, metrics (tokens, execution time) are reported
 
-### WebSocket Message Types
-
-| Type | Direction | Purpose |
-|------|-----------|---------|
-| `new_incident` | API → Worker | Start new investigation |
-| `continue_incident` | API → Worker | Continue existing session |
-| `cancel_incident` | API → Worker | Cancel running investigation |
-| `proxy_config_update` | API → Worker | Update proxy settings |
-| `codex_output` | Worker → API | Streaming output chunk |
-| `codex_completed` | Worker → API | Investigation finished with metrics |
-| `codex_error` | Worker → API | Execution failed |
-
-### LLM Settings in Messages
-
-New incidents include full LLM configuration:
-
-```typescript
-{
-  type: "new_incident",
-  incident_id: "uuid",
-  task: "Investigate high CPU on prod-server-1",
-  provider: "anthropic",
-  model: "claude-sonnet-4-20250514",
-  reasoning_effort: "medium",
-  openai_api_key: "sk-...",  // API key for the provider
-  base_url: "",  // Optional custom endpoint
-  enabled_skills: ["zabbix-analyst", "ssh-debug"]
-}
 
 ## Slack Integration
 

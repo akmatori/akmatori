@@ -77,7 +77,16 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
     getPathMetadata: vi.fn(() => new Map()),
     extendResources: vi.fn(),
   })),
-  createCodingTools: vi.fn(() => []),
+  createCodingTools: vi.fn(() => [
+    { name: "bash", definition: { name: "bash" }, execute: vi.fn() },
+    { name: "read", definition: { name: "read" }, execute: vi.fn() },
+  ]),
+  createBashTool: vi.fn((_cwd: string, _opts?: any) => ({
+    name: "bash",
+    definition: { name: "bash" },
+    execute: vi.fn(),
+    _spawnHookOpts: _opts,
+  })),
 }));
 
 vi.mock("@mariozechner/pi-ai", () => ({
@@ -89,10 +98,6 @@ vi.mock("@mariozechner/pi-ai", () => ({
   })),
 }));
 
-// Mock the MCP tools
-vi.mock("../src/tools/mcp-tools.js", () => ({
-  createMCPTools: vi.fn(() => []),
-}));
 
 // ---------------------------------------------------------------------------
 // Mock WebSocket server for the WebSocketClient

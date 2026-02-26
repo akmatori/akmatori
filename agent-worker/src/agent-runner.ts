@@ -15,11 +15,11 @@ import {
   SettingsManager,
   DefaultResourceLoader,
   createCodingTools,
+  createBashTool,
   type AgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
 import { getModel, type Model, type ThinkingLevel as PiThinkingLevel } from "@mariozechner/pi-ai";
 import type { LLMSettings, ExecuteResult, ProxyConfig, ThinkingLevel } from "./types.js";
-import { createMCPTools } from "./tools/mcp-tools.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,6 +44,8 @@ export interface ResumeParams {
   llmSettings: LLMSettings;
   proxyConfig?: ProxyConfig;
   workDir: string;
+  /** Names of enabled skills — only these will be loaded from the shared skills directory */
+  enabledSkills?: string[];
   onOutput: (text: string) => void;
   onEvent?: (event: AgentSessionEvent) => void;
 }
@@ -189,9 +191,6 @@ export class AgentRunner {
     );
     const thinkingLevel = mapThinkingLevel(params.llmSettings.thinking_level);
 
-    // Tools
-    const mcpTools = createMCPTools(this.mcpGatewayUrl, params.incidentId);
-
     // Session management: persist to disk so resume can restore conversation history.
     // For resume, use continueRecent to load the most recent session from the
     // incident's workspace directory. For new sessions, create a fresh one.
@@ -227,14 +226,32 @@ export class AgentRunner {
     });
     await resourceLoader.reload();
 
+    // Create bash tool with spawnHook to inject MCP Gateway env vars per-session
+    const bashTool = createBashTool(params.workDir, {
+      spawnHook: (ctx) => ({
+        ...ctx,
+        env: {
+          ...ctx.env,
+          MCP_GATEWAY_URL: this.mcpGatewayUrl,
+          INCIDENT_ID: params.incidentId,
+          PYTHONPATH: ctx.env.PYTHONPATH ? `/tools:${ctx.env.PYTHONPATH}` : "/tools",
+        },
+      }),
+    });
+
+    // Create coding tools with the same workDir, then replace the default bash tool
+    const codingTools = createCodingTools(params.workDir);
+    const tools = codingTools.map((t) =>
+      t.name === "bash" ? bashTool : t,
+    );
+
     const { session } = await createAgentSession({
       cwd: params.workDir,
       authStorage,
       modelRegistry,
       model,
       thinkingLevel,
-      tools: createCodingTools(params.workDir),
-      customTools: mcpTools,
+      tools,
       resourceLoader,
       sessionManager,
       settingsManager,
@@ -572,27 +589,24 @@ export class AgentRunner {
   /**
    * Apply proxy configuration to environment variables.
    * Only sets proxy for LLM API calls when the relevant toggle is enabled.
+   *
+   * Note: process.env is global state shared by concurrent sessions. We use
+   * assignment (not delete) to avoid inconsistent intermediate states. In
+   * practice, proxy config is system-global so all sessions receive the same
+   * setting.
    */
   private applyProxyConfig(
     proxyConfig: ProxyConfig | undefined,
     provider: string,
   ): void {
-    // Clear existing proxy settings first
-    delete process.env.HTTP_PROXY;
-    delete process.env.HTTPS_PROXY;
-    delete process.env.NO_PROXY;
-
-    if (!proxyConfig?.url) return;
-
-    // Only apply proxy for providers that use the "openai_enabled" toggle
-    // (historically this was OpenAI-only, but now covers all LLM providers)
-    if (proxyConfig.openai_enabled) {
+    if (proxyConfig?.url && proxyConfig.openai_enabled) {
       process.env.HTTP_PROXY = proxyConfig.url;
       process.env.HTTPS_PROXY = proxyConfig.url;
-
-      if (proxyConfig.no_proxy) {
-        process.env.NO_PROXY = proxyConfig.no_proxy;
-      }
+      process.env.NO_PROXY = proxyConfig.no_proxy || "";
+    } else {
+      process.env.HTTP_PROXY = "";
+      process.env.HTTPS_PROXY = "";
+      process.env.NO_PROXY = "";
     }
   }
 }

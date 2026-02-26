@@ -6,7 +6,7 @@
  * methods and streams output/completion/errors back through the WebSocket client.
  */
 
-import { WebSocketClient, type WebSocketClientOptions } from "./ws-client.js";
+import { WebSocketClient } from "./ws-client.js";
 import { AgentRunner, type ExecuteParams, type ResumeParams } from "./agent-runner.js";
 import type {
   WebSocketMessage,
@@ -215,6 +215,7 @@ export class Orchestrator {
       message: msg.message ?? "",
       llmSettings,
       proxyConfig,
+      enabledSkills: msg.enabled_skills,
       workDir: `${this.config.workspaceDir}/${incidentId}`,
       onOutput: (text: string) => {
         this.wsClient.sendOutput(incidentId, text);

@@ -354,7 +354,7 @@ func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettings
 }
 
 // ContinueIncident sends a follow-up message to an existing incident
-func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string, llm *LLMSettingsForWorker, callback IncidentCallback) error {
+func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string, llm *LLMSettingsForWorker, enabledSkills []string, callback IncidentCallback) error {
 	// Register/update callback
 	h.callbackMu.Lock()
 	h.callbacks[incidentID] = callback
@@ -362,10 +362,11 @@ func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string,
 
 	// Send to worker
 	msg := AgentMessage{
-		Type:       AgentMessageTypeContinueIncident,
-		IncidentID: incidentID,
-		SessionID:  sessionID,
-		Message:    message,
+		Type:          AgentMessageTypeContinueIncident,
+		IncidentID:    incidentID,
+		SessionID:     sessionID,
+		Message:       message,
+		EnabledSkills: enabledSkills,
 	}
 
 	// Include LLM settings so the worker can authenticate with the provider

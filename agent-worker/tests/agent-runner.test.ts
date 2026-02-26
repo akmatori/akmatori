@@ -96,7 +96,16 @@ vi.mock("@mariozechner/pi-coding-agent", () => {
       getPathMetadata: vi.fn(() => new Map()),
       extendResources: vi.fn(),
     })),
-    createCodingTools: vi.fn(() => []),
+    createCodingTools: vi.fn(() => [
+      { name: "bash", definition: { name: "bash" }, execute: vi.fn() },
+      { name: "read", definition: { name: "read" }, execute: vi.fn() },
+    ]),
+    createBashTool: vi.fn((_cwd: string, _opts?: any) => ({
+      name: "bash",
+      definition: { name: "bash" },
+      execute: vi.fn(),
+      _spawnHookOpts: _opts,
+    })),
   };
 });
 
@@ -143,11 +152,6 @@ vi.mock("@mariozechner/pi-ai", () => {
   };
 });
 
-vi.mock("../src/tools/mcp-tools.js", () => {
-  return {
-    createMCPTools: vi.fn(() => []),
-  };
-});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -397,15 +401,24 @@ describe("AgentRunner", () => {
       );
     });
 
-    it("should pass MCP tools as customTools", async () => {
-      const { createMCPTools } = await import("../src/tools/mcp-tools.js");
+    it("should NOT pass customTools (Python wrappers used instead)", async () => {
       const params = makeExecuteParams({ incidentId: "inc-tools" });
       await runner.execute(params);
 
-      expect(createMCPTools).toHaveBeenCalledWith(
-        "http://mcp-gateway:8080",
-        "inc-tools",
+      const opts = createAgentSessionCalls[0];
+      expect(opts.customTools).toBeUndefined();
+    });
+
+    it("should configure bash spawnHook with MCP env vars", async () => {
+      const params = makeExecuteParams({ incidentId: "inc-env" });
+      await runner.execute(params);
+
+      const opts = createAgentSessionCalls[0];
+      // Tools array should contain a bash tool with spawnHook
+      const bashTool = opts.tools.find(
+        (t: any) => t.definition?.name === "bash" || t.name === "bash",
       );
+      expect(bashTool).toBeDefined();
     });
 
     it("should use fallback response from getLastAssistantText when no text_delta events", async () => {
@@ -693,7 +706,7 @@ describe("AgentRunner", () => {
 
       await runner.execute(makeExecuteParams({ proxyConfig }));
 
-      expect(capturedHttpProxy).toBeUndefined();
+      expect(capturedHttpProxy).toBe("");
     });
 
     it("should clear proxy env vars when no proxy config provided", async () => {
@@ -711,7 +724,7 @@ describe("AgentRunner", () => {
 
       await runner.execute(makeExecuteParams({ proxyConfig: undefined }));
 
-      expect(capturedHttpProxy).toBeUndefined();
+      expect(capturedHttpProxy).toBe("");
     });
   });
 });
