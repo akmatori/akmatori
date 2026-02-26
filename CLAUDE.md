@@ -93,24 +93,53 @@ make verify           # go vet + all tests + agent-worker tests
 └── tests/fixtures/         # Test payloads and mock data
 ```
 
-## Codex Worker Architecture
+## Agent Worker Architecture
 
-The `codex-worker/` is a **separate Go module** that manages Codex CLI execution:
+The `agent-worker/` is the **primary agent execution engine** using the pi-mono SDK for multi-provider LLM support.
+
+> **Note:** The legacy `codex-worker/` (Go-based, OpenAI Codex CLI only) remains in the codebase but is superseded by agent-worker for all new deployments.
 
 ### Components
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| Orchestrator | `internal/orchestrator/orchestrator.go` | Main coordinator - handles WebSocket messages, dispatches work |
-| Runner | `internal/codex/runner.go` | Executes Codex CLI, manages process lifecycle |
-| Session Store | `internal/session/store.go` | Persists session IDs for conversation continuity |
-| WS Client | `internal/ws/client.go` | WebSocket communication with API server |
+| Entry Point | `src/index.ts` | Configuration, startup, reconnection logic |
+| Orchestrator | `src/orchestrator.ts` | WebSocket message routing, job dispatch |
+| Agent Runner | `src/agent-runner.ts` | pi-mono SDK integration, session management |
+| WS Client | `src/ws-client.ts` | WebSocket communication with API server |
+| Types | `src/types.ts` | Shared TypeScript interfaces |
+| MCP Tools | `src/tools/mcp-tools.ts` | MCP Gateway tool definitions |
+
+### Multi-Provider LLM Support
+
+The agent-worker supports multiple LLM providers via pi-mono SDK:
+
+| Provider | Model Examples | Notes |
+|----------|---------------|-------|
+| `anthropic` | claude-sonnet-4-20250514, claude-3-5-haiku | Default for most skills |
+| `openai` | gpt-4o, gpt-4-turbo, o1 | Supports reasoning models |
+| `google` | gemini-1.5-pro, gemini-2.0-flash | Google AI Studio |
+| `openrouter` | Any OpenRouter model | Multi-provider gateway |
+| `custom` | Any OpenAI-compatible | Custom base URL |
+
+### Thinking Levels
+
+Control reasoning depth per-request:
+
+| Level | Use Case |
+|-------|----------|
+| `off` | Simple tasks, quick responses |
+| `minimal` | Basic reasoning |
+| `low` | Light analysis |
+| `medium` | Standard (default) |
+| `high` | Complex debugging |
+| `xhigh` | Deep root cause analysis |
 
 ### Message Flow
 
 1. API server sends `new_incident` or `continue_incident` via WebSocket
-2. Orchestrator receives message, extracts OpenAI settings and proxy config
-3. Runner executes Codex CLI with streaming output
+2. Orchestrator receives message, extracts LLM settings and proxy config
+3. Agent Runner creates pi-mono session with appropriate model
 4. Output is streamed back to API via WebSocket
 5. On completion, metrics (tokens, execution time) are reported
 
@@ -121,18 +150,27 @@ The `codex-worker/` is a **separate Go module** that manages Codex CLI execution
 | `new_incident` | API → Worker | Start new investigation |
 | `continue_incident` | API → Worker | Continue existing session |
 | `cancel_incident` | API → Worker | Cancel running investigation |
-| `device_auth_start` | API → Worker | Start OAuth device flow |
-| `output` | Worker → API | Streaming output chunk |
-| `completed` | Worker → API | Investigation finished with metrics |
-| `error` | Worker → API | Execution failed |
+| `proxy_config_update` | API → Worker | Update proxy settings |
+| `codex_output` | Worker → API | Streaming output chunk |
+| `codex_completed` | Worker → API | Investigation finished with metrics |
+| `codex_error` | Worker → API | Execution failed |
 
-### OpenAI Authentication
+### LLM Settings in Messages
 
-The worker supports multiple auth methods:
-- **API Key**: Direct `OPENAI_API_KEY` authentication
-- **ChatGPT OAuth**: Device code flow with token refresh (for ChatGPT Plus accounts)
+New incidents include full LLM configuration:
 
-OAuth tokens are refreshed automatically and returned to API for storage.
+```typescript
+{
+  type: "new_incident",
+  incident_id: "uuid",
+  task: "Investigate high CPU on prod-server-1",
+  provider: "anthropic",
+  model: "claude-sonnet-4-20250514",
+  reasoning_effort: "medium",
+  openai_api_key: "sk-...",  // API key for the provider
+  base_url: "",  // Optional custom endpoint
+  enabled_skills: ["zabbix-analyst", "ssh-debug"]
+}
 
 ## Slack Integration
 
@@ -269,28 +307,143 @@ fmt.Println(parsed.CleanOutput)
 
 Converts parsed output to Slack Block Kit format for rich messages.
 
+## Jobs Package (`internal/jobs/`)
+
+Background jobs for incident management and correlation:
+
+### Recorrelation Job (`recorrelation.go`)
+
+Periodically checks open incidents for potential merges:
+
+```go
+job := jobs.NewRecorrelationJob(db, aggregationService, codexExecutor)
+mergeCount, err := job.Run()
+```
+
+**How it works:**
+1. Checks if recorrelation is enabled in aggregation settings
+2. Gets all open incidents (excludes "observing" status)
+3. Skips if too many incidents (> `MaxIncidentsToAnalyze` setting)
+4. Builds incident summaries with their alerts
+5. Calls LLM to analyze potential merges
+6. Executes approved merges
+
+### Observing Monitor (`observing_monitor.go`)
+
+Monitors incidents in "observing" status and auto-resolves them after quiet periods:
+
+```go
+monitor := jobs.NewObservingMonitor(db)
+resolvedCount, err := monitor.Run()
+```
+
+**Behavior:**
+- Incidents marked as "observing" are monitored for new alerts
+- If no new alerts arrive within the observation window, the incident is auto-resolved
+- Helps prevent alert fatigue from flapping alerts
+
+## Tool Instance Routing
+
+Skills can target specific tool instances via `tool_instance_id`. This enables multi-environment setups (e.g., separate Zabbix instances for prod/staging).
+
+### How It Works
+
+1. **SKILL.md** includes tool instance IDs for the skill's environment:
+   ```yaml
+   ---
+   name: prod-zabbix-analyst
+   tools:
+     - type: zabbix
+       instance_id: 1  # Production Zabbix
+     - type: ssh
+       instance_id: 2  # Production SSH servers
+   ---
+   ```
+
+2. **Agent** passes `tool_instance_id` in tool calls:
+   ```json
+   {
+     "tool": "zabbix.get_problems",
+     "arguments": {
+       "severity_min": 3,
+       "tool_instance_id": 1
+     }
+   }
+   ```
+
+3. **MCP Gateway** routes to the correct configured instance
+
+### Default Behavior
+
+- If `tool_instance_id` is omitted, the first enabled instance of that tool type is used
+- Skills without explicit instance IDs work with the default instance
+
+## Services Package (`internal/services/`)
+
+Business logic layer with the following services:
+
+| Service | Purpose |
+|---------|---------|
+| `SkillService` | Skill lifecycle, workspace management, prompt building |
+| `ToolService` | Tool type and instance CRUD, SSH key management |
+| `ContextService` | Context file management (agent assets/references) |
+| `AlertService` | Alert processing and normalization |
+| `AggregationService` | Incident aggregation and correlation settings |
+| `TitleGenerator` | AI-powered incident title generation |
+| `DeviceAuthService` | OAuth device flow for ChatGPT Plus accounts |
+
+### SkillService Key Methods
+
+```go
+// Skill directory management
+svc.GetSkillDir(skillName)        // /akmatori/skills/<name>
+svc.GetSkillScriptsDir(skillName) // /akmatori/skills/<name>/scripts
+svc.EnsureSkillDirectories(name)  // Creates skill folder structure
+
+// Skill validation
+services.ValidateSkillName("my-skill") // Must be kebab-case
+
+// Asset syncing (for [[filename]] references in prompts)
+svc.SyncSkillAssets(skillName, prompt)
+```
+
+### ToolService Key Methods
+
+```go
+// Tool instance management
+svc.CreateToolInstance(toolTypeID, name, settings)
+svc.GetToolInstance(id)
+svc.UpdateToolInstance(id, name, settings, enabled)
+svc.DeleteToolInstance(id)
+
+// SSH key management (per tool instance)
+svc.GetSSHKeys(toolInstanceID)
+svc.AddSSHKey(toolInstanceID, name, privateKey)
+svc.DeleteSSHKey(toolInstanceID, keyID)
+```
+
 ## Current Test Coverage
 
-**Last updated: Feb 24, 2026**
+**Last updated: Feb 26, 2026**
 
 | Package | Coverage | Status |
 |---------|----------|--------|
 | `internal/alerts/adapters` | 98.4% | ✅ Excellent |
 | `internal/utils` | 98.5% | ✅ Excellent |
 | `internal/testhelpers` | 59.2% | ⚠️ Needs work |
-| `internal/jobs` | 58.1% | ✅ Good (improved from 20.2%) |
-| `internal/alerts/extraction` | 40.2% | ⚠️ Needs work |
+| `internal/jobs` | 58.1% | ✅ Good |
+| `internal/alerts/extraction` | 38.9% | ⚠️ Needs work |
 | `internal/middleware` | 37.9% | ⚠️ Needs work |
 | `internal/slack` | 34.6% | ⚠️ Needs work |
-| `internal/database` | 32.2% | ⚠️ Needs work |
-| `internal/services` | 13.3% | ⚠️ Needs work |
-| `internal/handlers` | 9.4% | ⚠️ Needs work |
+| `internal/services` | 25.8% | ⚠️ Improved (was 13.3%) |
+| `internal/database` | 22.8% | ⚠️ Needs work |
+| `internal/handlers` | 8.7% | ⚠️ Needs work |
 | `internal/output` | 0.0% | ❌ No tests |
 
 **Priority areas for test improvement:**
-1. `internal/output` - Add parser tests
+1. `internal/output` - Add parser tests for structured blocks
 2. `internal/handlers` - Add HTTP handler tests (DB integration tests needed for higher coverage)
-3. `internal/services` - Add business logic tests
+3. `internal/database` - Add model tests
 
 **Note:** Many handlers require database connections for testing. The current tests focus on:
 - Method validation (405 responses)
