@@ -551,8 +551,7 @@ func (s *SkillService) UpdateSkillPrompt(name, prompt string) error {
 }
 
 // generateSkillMd generates a SKILL.md file with YAML frontmatter and user prompt body
-// Tools are native pi-mono ToolDefinition objects registered at session creation time,
-// so no Python import instructions are needed
+// Tools are called via Python wrappers through the bash tool, with usage examples per tool type
 func (s *SkillService) generateSkillMd(name, description, body string, tools []database.ToolInstance) string {
 	frontmatter := SkillFrontmatter{
 		Name:        name,
@@ -562,12 +561,16 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 		},
 	}
 
-	yamlBytes, _ := yaml.Marshal(frontmatter)
+	yamlBytes, err := yaml.Marshal(frontmatter)
+	if err != nil {
+		log.Printf("Failed to marshal SKILL.md frontmatter for %s: %v", name, err)
+		yamlBytes = []byte(fmt.Sprintf("name: %s\n", name))
+	}
 
 	// Transform [[filename]] references to markdown links [filename](assets/filename)
 	resolvedBody := s.contextService.ResolveReferencesToMarkdownLinks(body)
 
-	// List assigned tools with instance details for per-skill routing
+	// List assigned tools with Python usage examples for per-skill routing
 	var toolsSection strings.Builder
 	var enabledTools []database.ToolInstance
 	for _, tool := range tools {
@@ -582,11 +585,45 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 			if details := extractToolDetails(tool); details != "" {
 				toolsSection.WriteString(details)
 			}
-			toolsSection.WriteString(fmt.Sprintf("When using %s tools, pass `tool_instance_id: %d` to target this instance.\n", tool.ToolType.Name, tool.ID))
+			toolsSection.WriteString(generateToolUsageExample(tool))
 		}
 	}
 
 	return fmt.Sprintf("---\n%s---\n\n%s%s\n", string(yamlBytes), resolvedBody, toolsSection.String())
+}
+
+// generateToolUsageExample creates Python code block showing how to call the tool
+func generateToolUsageExample(tool database.ToolInstance) string {
+	typeName := tool.ToolType.Name
+	id := tool.ID
+
+	switch typeName {
+	case "ssh":
+		return fmt.Sprintf(`
+Usage (via bash tool):
+`+"```python"+`
+from ssh import execute_command, test_connectivity, get_server_info
+
+result = execute_command("uptime", tool_instance_id=%d)
+result = test_connectivity(tool_instance_id=%d)
+result = get_server_info(tool_instance_id=%d)
+`+"```"+`
+`, id, id, id)
+	case "zabbix":
+		return fmt.Sprintf(`
+Usage (via bash tool):
+`+"```python"+`
+from zabbix import get_hosts, get_problems, get_history, get_items, get_items_batch, get_triggers, api_request
+
+result = get_hosts(tool_instance_id=%d)
+result = get_problems(severity_min=3, tool_instance_id=%d)
+result = get_items_batch(searches=["cpu", "memory"], tool_instance_id=%d)
+result = get_triggers(hostids=["12345"], only_true=True, tool_instance_id=%d)
+`+"```"+`
+`, id, id, id, id)
+	default:
+		return fmt.Sprintf("When using %s tools, pass `tool_instance_id: %d` to target this instance.\n", typeName, id)
+	}
 }
 
 // extractToolDetails extracts non-secret, agent-relevant details from a tool instance's settings.
@@ -802,54 +839,18 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 		}
 
 		log.Printf("Regenerated SKILL.md for skill: %s", skill.Name)
-
-		// Ensure scripts directory exists and create tool symlinks
-		scriptsDir := filepath.Join(s.GetSkillDir(skill.Name), "scripts")
-		if err := os.MkdirAll(scriptsDir, 0755); err != nil {
-			log.Printf("Failed to create scripts directory %s: %v", scriptsDir, err)
-		}
-
-		// Clear existing symlinks
-		dirEntries, _ := os.ReadDir(scriptsDir)
-		for _, de := range dirEntries {
-			entryPath := filepath.Join(scriptsDir, de.Name())
-			if info, err := os.Lstat(entryPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				os.Remove(entryPath)
-			}
-		}
-
-		// Create symlinks for assigned tools
-		for _, tool := range tools {
-			if tool.ToolType.Name == "" {
-				continue
-			}
-			toolName := tool.ToolType.Name
-			linkPath := filepath.Join(scriptsDir, toolName)
-			targetPath := filepath.Join("/tools", toolName)
-			if err := os.Symlink(targetPath, linkPath); err != nil {
-				log.Printf("Warning: failed to create symlink for tool %s in skill %s: %v", toolName, skill.Name, err)
-			}
-		}
-
-		// Create symlink for mcp_client.py (required by all tools)
-		if len(tools) > 0 {
-			mcpClientLink := filepath.Join(scriptsDir, "mcp_client.py")
-			mcpClientTarget := "/tools/mcp_client.py"
-			if err := os.Symlink(mcpClientTarget, mcpClientLink); err != nil {
-				log.Printf("Warning: failed to create symlink for mcp_client.py in skill %s: %v", skill.Name, err)
-			}
-		}
 	}
 
 	return nil
 }
 
-// truncateString truncates a string to max length
+// truncateString truncates a string to max rune length, safe for multi-byte UTF-8
 func truncateString(s string, max int) string {
-	if len(s) <= max {
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
-	return s[:max-3] + "..."
+	return string(runes[:max-3]) + "..."
 }
 
 // IncidentContext contains context for spawning an incident manager
@@ -1047,8 +1048,9 @@ Output:
 	if len(result.ErrorMessages) > 0 {
 		// Take just the first error message, truncated
 		errorSummary = result.ErrorMessages[0]
-		if len(errorSummary) > 200 {
-			errorSummary = errorSummary[:200] + "..."
+		runes := []rune(errorSummary)
+		if len(runes) > 200 {
+			errorSummary = string(runes[:200]) + "..."
 		}
 	}
 
