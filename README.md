@@ -111,6 +111,15 @@ Akmatori uses a secure 4-container architecture:
 - [API Reference](https://akmatori.com/docs/api)
 - [Skills Guide](https://akmatori.com/docs/skills)
 
+### API Documentation (Self-Hosted)
+
+The API server includes built-in interactive documentation:
+
+- **Swagger UI**: `http://localhost:8080/api/docs` — browse and test API endpoints in your browser
+- **OpenAPI Spec**: `http://localhost:8080/api/openapi.yaml` — raw OpenAPI 3.1 specification
+
+Both endpoints are publicly accessible (no authentication required).
+
 ## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.

@@ -1,0 +1,1395 @@
+openapi: 3.1.0
+info:
+  title: Akmatori API
+  description: |
+    AI-powered AIOps platform API. Manages skills, tools, incidents, alert sources,
+    and system settings for automated incident investigation and remediation.
+  version: 1.0.0
+  contact:
+    name: Akmatori
+servers:
+  - url: /api
+    description: API base path
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from POST /auth/login
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+        code:
+          type: string
+          description: Machine-readable error code
+        details:
+          type: object
+          additionalProperties:
+            type: string
+          description: Field-level validation errors
+
+    PaginationMeta:
+      type: object
+      properties:
+        page:
+          type: integer
+        per_page:
+          type: integer
+        total:
+          type: integer
+          format: int64
+        total_pages:
+          type: integer
+
+    Skill:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+          description: Kebab-case skill name
+        description:
+          type: string
+        category:
+          type: string
+        is_system:
+          type: boolean
+        enabled:
+          type: boolean
+        prompt:
+          type: string
+          description: SKILL.md prompt content
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolInstance'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ToolType:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        schema:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ToolInstance:
+      type: object
+      properties:
+        id:
+          type: integer
+        tool_type_id:
+          type: integer
+        name:
+          type: string
+        settings:
+          type: object
+        enabled:
+          type: boolean
+        tool_type:
+          $ref: '#/components/schemas/ToolType'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Incident:
+      type: object
+      properties:
+        id:
+          type: integer
+        uuid:
+          type: string
+          format: uuid
+        source:
+          type: string
+        source_id:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, diagnosed, observing, completed, failed]
+        context:
+          type: object
+        session_id:
+          type: string
+        working_dir:
+          type: string
+        full_log:
+          type: string
+        response:
+          type: string
+        tokens_used:
+          type: integer
+        execution_time_ms:
+          type: integer
+          format: int64
+        alert_count:
+          type: integer
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    IncidentAlert:
+      type: object
+      properties:
+        id:
+          type: integer
+        incident_id:
+          type: integer
+        source_type:
+          type: string
+        source_fingerprint:
+          type: string
+        alert_name:
+          type: string
+        severity:
+          type: string
+          enum: [critical, high, warning, info]
+        target_host:
+          type: string
+        target_service:
+          type: string
+        summary:
+          type: string
+        description:
+          type: string
+        target_labels:
+          type: object
+        status:
+          type: string
+          enum: [firing, resolved]
+        alert_payload:
+          type: object
+        correlation_confidence:
+          type: number
+        correlation_reason:
+          type: string
+        attached_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ContextFile:
+      type: object
+      properties:
+        id:
+          type: integer
+        filename:
+          type: string
+        original_name:
+          type: string
+        mime_type:
+          type: string
+        size:
+          type: integer
+          format: int64
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AlertSourceType:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        display_name:
+          type: string
+        description:
+          type: string
+        default_field_mappings:
+          type: object
+        webhook_secret_header:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AlertSourceInstance:
+      type: object
+      properties:
+        id:
+          type: integer
+        uuid:
+          type: string
+          format: uuid
+        alert_source_type_id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        webhook_secret:
+          type: string
+        field_mappings:
+          type: object
+        settings:
+          type: object
+        enabled:
+          type: boolean
+        alert_source_type:
+          $ref: '#/components/schemas/AlertSourceType'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SSHKey:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        is_default:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    AggregationSettings:
+      type: object
+      properties:
+        id:
+          type: integer
+        enabled:
+          type: boolean
+        correlation_confidence_threshold:
+          type: number
+        merge_confidence_threshold:
+          type: number
+        recorrelation_enabled:
+          type: boolean
+        recorrelation_interval_minutes:
+          type: integer
+        max_incidents_to_analyze:
+          type: integer
+        observing_duration_minutes:
+          type: integer
+        correlator_timeout_seconds:
+          type: integer
+        merge_analyzer_timeout_seconds:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Missing or invalid authentication
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+            example:
+              error: Validation failed
+              code: validation_error
+              details:
+                name: is required
+
+paths:
+  # ===== Authentication =====
+  /auth/login:
+    post:
+      summary: Login
+      operationId: login
+      security: []
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  username:
+                    type: string
+                  expires_in:
+                    type: integer
+                    description: Token expiry in seconds
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/verify:
+    get:
+      summary: Verify token
+      operationId: verifyToken
+      tags: [Authentication]
+      responses:
+        '200':
+          description: Token is valid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  username:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ===== Skills =====
+  /skills:
+    get:
+      summary: List skills
+      operationId: listSkills
+      tags: [Skills]
+      responses:
+        '200':
+          description: List of skills with prompts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Skill'
+    post:
+      summary: Create skill
+      operationId: createSkill
+      tags: [Skills]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 64
+                description:
+                  type: string
+                  maxLength: 1024
+                category:
+                  type: string
+                  maxLength: 64
+                prompt:
+                  type: string
+      responses:
+        '201':
+          description: Skill created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /skills/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Get skill
+      operationId: getSkill
+      tags: [Skills]
+      responses:
+        '200':
+          description: Skill with prompt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      summary: Update skill
+      operationId: updateSkill
+      tags: [Skills]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                description:
+                  type: string
+                category:
+                  type: string
+                enabled:
+                  type: boolean
+                prompt:
+                  type: string
+      responses:
+        '200':
+          description: Updated skill
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete skill
+      operationId: deleteSkill
+      tags: [Skills]
+      responses:
+        '204':
+          description: Skill deleted
+        '403':
+          description: Cannot delete system skill
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /skills/{name}/prompt:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Get skill prompt
+      operationId: getSkillPrompt
+      tags: [Skills]
+      responses:
+        '200':
+          description: Prompt content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  prompt:
+                    type: string
+    put:
+      summary: Update skill prompt
+      operationId: updateSkillPrompt
+      tags: [Skills]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prompt:
+                  type: string
+      responses:
+        '200':
+          description: Prompt updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+
+  /skills/{name}/tools:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Get skill tools
+      operationId: getSkillTools
+      tags: [Skills]
+      responses:
+        '200':
+          description: Tool instances assigned to skill
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ToolInstance'
+    put:
+      summary: Update skill tools
+      operationId: updateSkillTools
+      tags: [Skills]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tool_instance_ids:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: Updated skill
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+
+  /skills/sync:
+    post:
+      summary: Sync skills from filesystem
+      operationId: syncSkills
+      tags: [Skills]
+      responses:
+        '200':
+          description: Sync completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  message:
+                    type: string
+
+  # ===== Tools =====
+  /tool-types:
+    get:
+      summary: List tool types
+      operationId: listToolTypes
+      tags: [Tools]
+      responses:
+        '200':
+          description: Available tool types
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ToolType'
+
+  /tools:
+    get:
+      summary: List tool instances
+      operationId: listTools
+      tags: [Tools]
+      responses:
+        '200':
+          description: Tool instances
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ToolInstance'
+    post:
+      summary: Create tool instance
+      operationId: createTool
+      tags: [Tools]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tool_type_id, name]
+              properties:
+                tool_type_id:
+                  type: integer
+                name:
+                  type: string
+                settings:
+                  type: object
+      responses:
+        '201':
+          description: Tool created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolInstance'
+
+  /tools/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+    get:
+      summary: Get tool instance
+      operationId: getTool
+      tags: [Tools]
+      responses:
+        '200':
+          description: Tool instance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolInstance'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      summary: Update tool instance
+      operationId: updateTool
+      tags: [Tools]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                settings:
+                  type: object
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: Updated tool
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolInstance'
+    delete:
+      summary: Delete tool instance
+      operationId: deleteTool
+      tags: [Tools]
+      responses:
+        '204':
+          description: Tool deleted
+
+  /tools/{id}/ssh-keys:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+    get:
+      summary: List SSH keys
+      operationId: listSSHKeys
+      tags: [Tools]
+      responses:
+        '200':
+          description: SSH keys for tool
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SSHKey'
+    post:
+      summary: Add SSH key
+      operationId: createSSHKey
+      tags: [Tools]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, private_key]
+              properties:
+                name:
+                  type: string
+                private_key:
+                  type: string
+                is_default:
+                  type: boolean
+      responses:
+        '201':
+          description: Key added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SSHKey'
+        '409':
+          description: Key name already exists
+
+  # ===== Incidents =====
+  /incidents:
+    get:
+      summary: List incidents
+      operationId: listIncidents
+      tags: [Incidents]
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: Start time (unix seconds)
+        - name: to
+          in: query
+          schema:
+            type: integer
+            format: int64
+          description: End time (unix seconds)
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+          description: Page number (enables pagination)
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+          description: Items per page (default 50, max 200)
+      responses:
+        '200':
+          description: |
+            Without pagination params: returns array of incidents (max 500).
+            With page/per_page: returns paginated envelope.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      $ref: '#/components/schemas/Incident'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Incident'
+                      pagination:
+                        $ref: '#/components/schemas/PaginationMeta'
+    post:
+      summary: Create incident
+      operationId: createIncident
+      tags: [Incidents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [task]
+              properties:
+                task:
+                  type: string
+                context:
+                  type: object
+      responses:
+        '201':
+          description: Incident created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uuid:
+                    type: string
+                  status:
+                    type: string
+                  working_dir:
+                    type: string
+                  message:
+                    type: string
+
+  /incidents/{uuid}:
+    parameters:
+      - name: uuid
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Get incident
+      operationId: getIncident
+      tags: [Incidents]
+      responses:
+        '200':
+          description: Incident details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /incidents/{uuid}/alerts:
+    parameters:
+      - name: uuid
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: List incident alerts
+      operationId: listIncidentAlerts
+      tags: [Incidents]
+      responses:
+        '200':
+          description: Alerts attached to incident
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IncidentAlert'
+    post:
+      summary: Attach alert to incident
+      operationId: attachAlert
+      tags: [Incidents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentAlert'
+      responses:
+        '201':
+          description: Alert attached
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentAlert'
+
+  /incidents/{uuid}/alerts/{alertId}:
+    parameters:
+      - name: uuid
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: alertId
+        in: path
+        required: true
+        schema:
+          type: integer
+    delete:
+      summary: Detach alert from incident
+      operationId: detachAlert
+      tags: [Incidents]
+      responses:
+        '204':
+          description: Alert detached
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /incidents/{uuid}/merge:
+    parameters:
+      - name: uuid
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Merge incidents
+      operationId: mergeIncident
+      tags: [Incidents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_incident_uuid]
+              properties:
+                source_incident_uuid:
+                  type: string
+      responses:
+        '200':
+          description: Incidents merged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  target_incident:
+                    $ref: '#/components/schemas/Incident'
+                  alerts_moved:
+                    type: integer
+
+  # ===== Settings =====
+  /settings/slack:
+    get:
+      summary: Get Slack settings
+      operationId: getSlackSettings
+      tags: [Settings]
+      responses:
+        '200':
+          description: Slack settings (tokens masked)
+    put:
+      summary: Update Slack settings
+      operationId: updateSlackSettings
+      tags: [Settings]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bot_token:
+                  type: string
+                signing_secret:
+                  type: string
+                app_token:
+                  type: string
+                alerts_channel:
+                  type: string
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: Updated settings
+
+  /settings/llm:
+    get:
+      summary: Get LLM settings
+      operationId: getLLMSettings
+      tags: [Settings]
+      responses:
+        '200':
+          description: Per-provider LLM settings
+    put:
+      summary: Update LLM settings
+      operationId: updateLLMSettings
+      tags: [Settings]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider]
+              properties:
+                provider:
+                  type: string
+                  enum: [openai, anthropic, google, openrouter, custom]
+                api_key:
+                  type: string
+                model:
+                  type: string
+                thinking_level:
+                  type: string
+                  enum: [off, minimal, low, medium, high, xhigh]
+                base_url:
+                  type: string
+                  format: uri
+      responses:
+        '200':
+          description: Updated settings
+
+  /settings/proxy:
+    get:
+      summary: Get proxy settings
+      operationId: getProxySettings
+      tags: [Settings]
+      responses:
+        '200':
+          description: Proxy configuration
+    put:
+      summary: Update proxy settings
+      operationId: updateProxySettings
+      tags: [Settings]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                proxy_url:
+                  type: string
+                  format: uri
+                no_proxy:
+                  type: string
+                services:
+                  type: object
+                  properties:
+                    openai:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                    slack:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                    zabbix:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+      responses:
+        '200':
+          description: Updated proxy settings
+
+  /settings/aggregation:
+    get:
+      summary: Get aggregation settings
+      operationId: getAggregationSettings
+      tags: [Settings]
+      responses:
+        '200':
+          description: Aggregation settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregationSettings'
+    put:
+      summary: Update aggregation settings
+      operationId: updateAggregationSettings
+      tags: [Settings]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AggregationSettings'
+      responses:
+        '200':
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregationSettings'
+
+  # ===== Context Files =====
+  /context:
+    get:
+      summary: List context files
+      operationId: listContextFiles
+      tags: [Context]
+      responses:
+        '200':
+          description: Context files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ContextFile'
+    post:
+      summary: Upload context file
+      operationId: uploadContextFile
+      tags: [Context]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, filename]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                filename:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '201':
+          description: File uploaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContextFile'
+
+  /context/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+    get:
+      summary: Get context file metadata
+      operationId: getContextFile
+      tags: [Context]
+      responses:
+        '200':
+          description: File metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContextFile'
+    delete:
+      summary: Delete context file
+      operationId: deleteContextFile
+      tags: [Context]
+      responses:
+        '204':
+          description: File deleted
+
+  /context/{id}/download:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+    get:
+      summary: Download context file
+      operationId: downloadContextFile
+      tags: [Context]
+      responses:
+        '200':
+          description: File content
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+
+  /context/validate:
+    post:
+      summary: Validate file references
+      operationId: validateReferences
+      tags: [Context]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text:
+                  type: string
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  references:
+                    type: array
+                    items:
+                      type: string
+                  found:
+                    type: array
+                    items:
+                      type: string
+                  missing:
+                    type: array
+                    items:
+                      type: string
+
+  # ===== Alert Sources =====
+  /alert-source-types:
+    get:
+      summary: List alert source types
+      operationId: listAlertSourceTypes
+      tags: [Alert Sources]
+      responses:
+        '200':
+          description: Available alert source types
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AlertSourceType'
+
+  /alert-sources:
+    get:
+      summary: List alert source instances
+      operationId: listAlertSources
+      tags: [Alert Sources]
+      responses:
+        '200':
+          description: Configured alert sources
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AlertSourceInstance'
+    post:
+      summary: Create alert source
+      operationId: createAlertSource
+      tags: [Alert Sources]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_type_name, name]
+              properties:
+                source_type_name:
+                  type: string
+                name:
+                  type: string
+                description:
+                  type: string
+                webhook_secret:
+                  type: string
+                field_mappings:
+                  type: object
+                settings:
+                  type: object
+      responses:
+        '201':
+          description: Alert source created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertSourceInstance'
+
+  /alert-sources/{uuid}:
+    parameters:
+      - name: uuid
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Get alert source
+      operationId: getAlertSource
+      tags: [Alert Sources]
+      responses:
+        '200':
+          description: Alert source details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertSourceInstance'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      summary: Update alert source
+      operationId: updateAlertSource
+      tags: [Alert Sources]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                webhook_secret:
+                  type: string
+                field_mappings:
+                  type: object
+                settings:
+                  type: object
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: Updated alert source
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertSourceInstance'
+    delete:
+      summary: Delete alert source
+      operationId: deleteAlertSource
+      tags: [Alert Sources]
+      responses:
+        '204':
+          description: Alert source deleted

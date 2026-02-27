@@ -1,10 +1,10 @@
 package handlers
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
 
+	"github.com/akmatori/akmatori/internal/api"
 	"github.com/akmatori/akmatori/internal/middleware"
 )
 
@@ -42,74 +42,57 @@ func (h *AuthHandler) SetupRoutes(mux *http.ServeMux) {
 // handleLogin handles POST /auth/login
 func (h *AuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	var req LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid request body"})
+	if err := api.DecodeJSON(r, &req); err != nil {
+		api.RespondError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
 	if req.Username == "" || req.Password == "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Username and password are required"})
+		api.RespondError(w, http.StatusBadRequest, "Username and password are required")
 		return
 	}
 
-	// Validate credentials
 	if !h.jwtAuth.ValidateCredentials(req.Username, req.Password) {
 		log.Printf("AuthHandler: Failed login attempt for user '%s' from %s", req.Username, r.RemoteAddr)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid username or password"})
+		api.RespondError(w, http.StatusUnauthorized, "Invalid username or password")
 		return
 	}
 
-	// Generate JWT token
 	token, err := h.jwtAuth.GenerateToken(req.Username)
 	if err != nil {
 		log.Printf("AuthHandler: Failed to generate token for user '%s': %v", req.Username, err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to generate token"})
+		api.RespondError(w, http.StatusInternalServerError, "Failed to generate token")
 		return
 	}
 
 	log.Printf("AuthHandler: User '%s' logged in successfully from %s", req.Username, r.RemoteAddr)
 
-	response := LoginResponse{
+	api.RespondJSON(w, http.StatusOK, LoginResponse{
 		Token:     token,
 		Username:  req.Username,
-		ExpiresIn: 24 * 60 * 60, // 24 hours in seconds
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+		ExpiresIn: 24 * 60 * 60,
+	})
 }
 
 // handleVerify handles GET /auth/verify - verifies if the current token is valid
 func (h *AuthHandler) handleVerify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	// Get user from context (set by JWT middleware)
 	user := middleware.GetUserFromContext(r.Context())
 	if user == "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Not authenticated"})
+		api.RespondError(w, http.StatusUnauthorized, "Not authenticated")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	api.RespondJSON(w, http.StatusOK, map[string]interface{}{
 		"valid":    true,
 		"username": user,
 	})

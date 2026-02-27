@@ -3,13 +3,13 @@ package middleware
 import (
 	"context"
 	"crypto/subtle"
-	"encoding/json"
 	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/akmatori/akmatori/internal/api"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -217,12 +217,8 @@ func (m *JWTAuthMiddleware) extractToken(r *http.Request) string {
 
 // unauthorized sends an unauthorized response
 func (m *JWTAuthMiddleware) unauthorized(w http.ResponseWriter, message string) {
-	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("WWW-Authenticate", "Bearer realm=\"API\"")
-	w.WriteHeader(http.StatusUnauthorized)
-	if err := json.NewEncoder(w).Encode(map[string]string{"error": message}); err != nil {
-		log.Printf("Failed to encode error response: %v", err)
-	}
+	api.RespondError(w, http.StatusUnauthorized, message)
 }
 
 // SetEnabled enables or disables authentication

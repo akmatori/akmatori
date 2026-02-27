@@ -60,7 +60,9 @@ func main() {
 			"/health",
 			"/webhook/*",
 			"/auth/login",
-			"/ws/codex", // WebSocket endpoint for Codex worker (internal)
+			"/ws/codex",          // WebSocket endpoint for Codex worker (internal)
+			"/api/docs",          // Swagger UI (public)
+			"/api/openapi.yaml",  // OpenAPI spec (public)
 		},
 	})
 	log.Printf("JWT authentication enabled for user: %s", cfg.AdminUsername)
@@ -248,9 +250,10 @@ func main() {
 	authHandler.SetupRoutes(mux)
 	agentWSHandler.SetupRoutes(mux)
 
-	// Wrap all routes with CORS middleware first, then JWT authentication
+	// Wrap all routes with CORS middleware first, then JWT authentication, then request ID
 	corsMiddleware := middleware.NewCORSMiddleware() // Allow all origins
-	authenticatedHandler := corsMiddleware.Wrap(jwtAuthMiddleware.Wrap(mux))
+	authenticatedHandler := corsMiddleware.Wrap(
+		middleware.RequestIDMiddleware(jwtAuthMiddleware.Wrap(mux)))
 
 	// Start HTTP server in goroutine
 	httpServer := &http.Server{

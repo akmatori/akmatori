@@ -74,8 +74,16 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
   }
 
   if (!response.ok) {
+    // Try JSON first (new standard format), fall back to text
+    let message: string;
     const text = await response.text();
-    throw new ApiError(response.status, text || response.statusText);
+    try {
+      const json = JSON.parse(text);
+      message = json.error || text || response.statusText;
+    } catch {
+      message = text || response.statusText;
+    }
+    throw new ApiError(response.status, message);
   }
 
   // Handle 204 No Content
@@ -307,7 +315,14 @@ export const contextApi = {
 
     if (!response.ok) {
       const text = await response.text();
-      throw new ApiError(response.status, text || response.statusText);
+      let message: string;
+      try {
+        const json = JSON.parse(text);
+        message = json.error || text || response.statusText;
+      } catch {
+        message = text || response.statusText;
+      }
+      throw new ApiError(response.status, message);
     }
 
     return response.json();
