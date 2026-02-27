@@ -387,21 +387,23 @@ svc.DeleteSSHKey(toolInstanceID, keyID)
 
 ## Current Test Coverage
 
-**Last updated: Feb 26, 2026**
+**Last updated: Feb 27, 2026**
 
 | Package | Coverage | Status |
 |---------|----------|--------|
 | `internal/alerts/adapters` | 98.4% | ✅ Excellent |
 | `internal/utils` | 98.5% | ✅ Excellent |
-| `internal/testhelpers` | 59.2% | ⚠️ Needs work |
+| `internal/testhelpers` | 73.7% | ✅ Good (was 59.2%) |
 | `internal/jobs` | 58.1% | ✅ Good |
 | `internal/alerts/extraction` | 38.9% | ⚠️ Needs work |
 | `internal/middleware` | 37.9% | ⚠️ Needs work |
 | `internal/slack` | 34.6% | ⚠️ Needs work |
-| `internal/services` | 25.8% | ⚠️ Improved (was 13.3%) |
+| `internal/services` | 28.3% | ⚠️ Improved (was 25.8%) |
 | `internal/database` | 22.8% | ⚠️ Needs work |
-| `internal/handlers` | 8.7% | ⚠️ Needs work |
+| `internal/handlers` | 8.9% | ⚠️ Needs work |
 | `internal/output` | 0.0% | ❌ No tests |
+
+**Total coverage: 27.0%** (was 24.4%)
 
 **Priority areas for test improvement:**
 1. `internal/output` - Add parser tests for structured blocks
@@ -470,6 +472,8 @@ func TestAlertProcessing(t *testing.T) {
 
 #### Data Builders
 
+The testhelpers package provides fluent builders for all major data types:
+
 ```go
 import "github.com/akmatori/akmatori/internal/testhelpers"
 
@@ -489,18 +493,150 @@ incident := testhelpers.NewIncidentBuilder().
     WithTitle("Database outage").
     WithStatus("investigating").
     Build()
+
+// Build test skills
+skill := testhelpers.NewSkillBuilder().
+    WithName("zabbix-analyst").
+    WithDescription("Analyzes Zabbix alerts").
+    WithCategory("monitoring").
+    Build()
+
+// Build tool instances
+toolInstance := testhelpers.NewToolInstanceBuilder().
+    WithName("prod-zabbix").
+    WithToolTypeID(1).
+    WithSetting("url", "https://zabbix.example.com").
+    WithSetting("api_key", "secret").
+    Build()
+
+// Build alert source instances
+alertSource := testhelpers.NewAlertSourceInstanceBuilder().
+    WithName("Production Alertmanager").
+    WithWebhookSecret("supersecret").
+    WithFieldMappings(database.JSONB{"severity": "labels.severity"}).
+    Build()
+
+// Build LLM settings
+llmSettings := testhelpers.NewLLMSettingsBuilder().
+    WithProvider(database.LLMProviderAnthropic).
+    WithModel("claude-3-opus").
+    WithAPIKey("sk-test").
+    Build()
+
+// Build Slack settings
+slackSettings := testhelpers.NewSlackSettingsBuilder().
+    WithBotToken("xoxb-token").
+    WithAlertsChannel("#alerts").
+    Build()
 ```
+
+**Available builders:**
+| Builder | Creates |
+|---------|---------|
+| `NewAlertBuilder()` | `alerts.NormalizedAlert` |
+| `NewIncidentBuilder()` | `database.Incident` |
+| `NewSkillBuilder()` | `database.Skill` |
+| `NewToolInstanceBuilder()` | `database.ToolInstance` |
+| `NewToolTypeBuilder()` | `database.ToolType` |
+| `NewAlertSourceInstanceBuilder()` | `database.AlertSourceInstance` |
+| `NewLLMSettingsBuilder()` | `database.LLMSettings` |
+| `NewSlackSettingsBuilder()` | `database.SlackSettings` |
 
 #### Assertion Helpers
 
 ```go
 import "github.com/akmatori/akmatori/internal/testhelpers"
 
+// Basic assertions
 testhelpers.AssertEqual(t, expected, actual, "values should match")
 testhelpers.AssertNil(t, err, "operation should succeed")
 testhelpers.AssertNotNil(t, result, "result should be returned")
 testhelpers.AssertError(t, err, "invalid input should error")
 testhelpers.AssertContains(t, body, "success", "response body check")
+
+// Boolean assertions
+testhelpers.AssertTrue(t, condition, "should be true")
+testhelpers.AssertFalse(t, condition, "should be false")
+
+// String assertions
+testhelpers.AssertStringPrefix(t, s, "prefix", "should start with prefix")
+testhelpers.AssertStringSuffix(t, s, "suffix", "should end with suffix")
+testhelpers.AssertStringLen(t, s, 10, "should have length 10")
+testhelpers.AssertStringNotEmpty(t, s, "should not be empty")
+
+// Slice assertions (generic)
+testhelpers.AssertSliceLen(t, slice, 5, "should have 5 elements")
+testhelpers.AssertSliceContains(t, slice, elem, "should contain element")
+testhelpers.AssertSliceNotContains(t, slice, elem, "should not contain element")
+
+// Map assertions (generic)
+testhelpers.AssertMapLen(t, m, 3, "should have 3 keys")
+testhelpers.AssertMapContainsKey(t, m, "key", "should contain key")
+testhelpers.AssertMapKeyValue(t, m, "key", expectedValue, "key should have value")
+
+// Time assertions
+testhelpers.AssertTimeAfter(t, actual, reference, "should be after reference")
+testhelpers.AssertTimeBefore(t, actual, reference, "should be before reference")
+testhelpers.AssertTimeWithin(t, actual, reference, time.Second, "should be within 1s")
+```
+
+#### JSON Assertion Helpers
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+// Compare JSON ignoring formatting
+testhelpers.AssertJSONEqual(t, expected, actual, "JSON should be equal")
+
+// Check JSON structure
+testhelpers.AssertJSONContainsKey(t, jsonStr, "name", "should have name key")
+testhelpers.AssertJSONKeyValue(t, jsonStr, "status", "ok", "status should be ok")
+testhelpers.AssertJSONArrayLength(t, jsonStr, 5, "array should have 5 items")
+```
+
+#### Test Directory Utilities
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+func TestFileOperations(t *testing.T) {
+    // Create a temporary directory (automatically cleaned up)
+    dir, cleanup := testhelpers.TempTestDir(t, "mytest-")
+    defer cleanup()
+    
+    // Create test files (supports nested paths)
+    path := testhelpers.WriteTestFile(t, dir, "subdir/test.txt", "content")
+    
+    // Read test files
+    content := testhelpers.ReadTestFile(t, path)
+    
+    // Check file existence
+    if testhelpers.TestFileExists(t, path) { ... }
+    
+    // Assert file properties
+    testhelpers.AssertFileExists(t, path, "file should exist")
+    testhelpers.AssertFileContains(t, path, "expected", "file should contain text")
+}
+```
+
+#### Concurrent Testing Helpers
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+func TestConcurrency(t *testing.T) {
+    // Run function concurrently with N goroutines
+    testhelpers.ConcurrentTest(t, 10, func(workerID int) {
+        // Each worker does something
+        result := myFunction()
+        // ... assertions
+    })
+    
+    // With timeout to prevent hangs
+    testhelpers.ConcurrentTestWithTimeout(t, 5*time.Second, 10, func(workerID int) {
+        // Function must complete within timeout
+    })
+}
 ```
 
 ### Benchmark Tests
