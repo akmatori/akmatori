@@ -60,7 +60,7 @@ func TestHTTPTestContext_ExecuteFunc(t *testing.T) {
 	
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("hello"))
+		_, _ = w.Write([]byte("hello"))
 	}
 	
 	ctx.ExecuteFunc(handler)
@@ -90,7 +90,7 @@ func TestHTTPTestContext_DecodeJSON(t *testing.T) {
 	
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}
 	
 	ctx.ExecuteFunc(handler)
@@ -279,7 +279,7 @@ func BenchmarkMockAlertAdapter_ParsePayload(b *testing.B) {
 	
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		mock.ParsePayload(body, nil)
+		_, _ = mock.ParsePayload(body, nil)
 	}
 }
 

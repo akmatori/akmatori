@@ -52,8 +52,8 @@ func newTestSkillService(t *testing.T, db *gorm.DB) *SkillService {
 	svc.db = db
 
 	// Ensure directories exist
-	os.MkdirAll(svc.incidentsDir, 0755)
-	os.MkdirAll(svc.skillsDir, 0755)
+	_ = os.MkdirAll(svc.incidentsDir, 0755)
+	_ = os.MkdirAll(svc.skillsDir, 0755)
 
 	return svc
 }
@@ -99,8 +99,8 @@ func TestSpawnIncidentManager_NoSkillsCopied(t *testing.T) {
 
 	// Create a skill directory with a SKILL.md to verify it is NOT copied
 	testSkillDir := filepath.Join(svc.skillsDir, "test-skill")
-	os.MkdirAll(testSkillDir, 0755)
-	os.WriteFile(filepath.Join(testSkillDir, "SKILL.md"), []byte("test skill"), 0644)
+	_ = os.MkdirAll(testSkillDir, 0755)
+	_ = os.WriteFile(filepath.Join(testSkillDir, "SKILL.md"), []byte("test skill"), 0644)
 
 	ctx := &IncidentContext{
 		Source:   "test",
@@ -214,9 +214,9 @@ func TestGenerateIncidentAgentsMd_NoSkillsEmbedded(t *testing.T) {
 
 	// Create SKILL.md on filesystem
 	skillDir := filepath.Join(svc.skillsDir, "zabbix-analyst")
-	os.MkdirAll(skillDir, 0755)
+	_ = os.MkdirAll(skillDir, 0755)
 	skillMd := "---\nname: zabbix-analyst\ndescription: Analyzes Zabbix alerts\n---\n\nYou are a Zabbix specialist."
-	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMd), 0644)
+	_ = os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMd), 0644)
 
 	tmpFile := filepath.Join(t.TempDir(), "AGENTS.md")
 	err := svc.generateIncidentAgentsMd(tmpFile)
@@ -695,8 +695,8 @@ func TestAssignTools_UpdatesDatabaseAssociation(t *testing.T) {
 	skill := &database.Skill{Name: "test-skill", Description: "Test", Enabled: true}
 	db.Create(skill)
 	skillDir := filepath.Join(svc.skillsDir, "test-skill")
-	os.MkdirAll(skillDir, 0755)
-	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: test-skill\ndescription: Test\n---\n\ntest prompt"), 0644)
+	_ = os.MkdirAll(skillDir, 0755)
+	_ = os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: test-skill\ndescription: Test\n---\n\ntest prompt"), 0644)
 
 	// Create tool type and instance
 	toolType := &database.ToolType{Name: "ssh", Description: "SSH"}
@@ -726,8 +726,8 @@ func TestAssignTools_NoSymlinks(t *testing.T) {
 	skill := &database.Skill{Name: "test-skill", Description: "Test", Enabled: true}
 	db.Create(skill)
 	skillDir := filepath.Join(svc.skillsDir, "test-skill")
-	os.MkdirAll(skillDir, 0755)
-	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: test-skill\ndescription: Test\n---\n\ntest prompt"), 0644)
+	_ = os.MkdirAll(skillDir, 0755)
+	_ = os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: test-skill\ndescription: Test\n---\n\ntest prompt"), 0644)
 
 	// Create tool
 	toolType := &database.ToolType{Name: "ssh", Description: "SSH"}
@@ -769,8 +769,8 @@ func TestAssignTools_RegeneratesSkillMd(t *testing.T) {
 	skill := &database.Skill{Name: "test-skill", Description: "Test", Enabled: true}
 	db.Create(skill)
 	skillDir := filepath.Join(svc.skillsDir, "test-skill")
-	os.MkdirAll(skillDir, 0755)
-	os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: test-skill\ndescription: Test\n---\n\noriginal prompt"), 0644)
+	_ = os.MkdirAll(skillDir, 0755)
+	_ = os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: test-skill\ndescription: Test\n---\n\noriginal prompt"), 0644)
 
 	// Create tool
 	toolType := &database.ToolType{Name: "zabbix", Description: "Zabbix"}

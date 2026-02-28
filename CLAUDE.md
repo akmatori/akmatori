@@ -387,23 +387,23 @@ svc.DeleteSSHKey(toolInstanceID, keyID)
 
 ## Current Test Coverage
 
-**Last updated: Feb 27, 2026**
+**Last updated: Feb 28, 2026**
 
 | Package | Coverage | Status |
 |---------|----------|--------|
 | `internal/alerts/adapters` | 98.4% | ✅ Excellent |
 | `internal/utils` | 98.5% | ✅ Excellent |
-| `internal/testhelpers` | 73.7% | ✅ Good (was 59.2%) |
+| `internal/testhelpers` | 73.7% | ✅ Good |
 | `internal/jobs` | 58.1% | ✅ Good |
 | `internal/alerts/extraction` | 38.9% | ⚠️ Needs work |
 | `internal/middleware` | 37.9% | ⚠️ Needs work |
 | `internal/slack` | 34.6% | ⚠️ Needs work |
-| `internal/services` | 28.3% | ⚠️ Improved (was 25.8%) |
+| `internal/services` | 28.3% | ⚠️ Needs work |
 | `internal/database` | 22.8% | ⚠️ Needs work |
 | `internal/handlers` | 8.9% | ⚠️ Needs work |
 | `internal/output` | 0.0% | ❌ No tests |
 
-**Total coverage: 27.0%** (was 24.4%)
+**Total coverage: 28.4%** (was 27.0%)
 
 **Priority areas for test improvement:**
 1. `internal/output` - Add parser tests for structured blocks
@@ -1107,11 +1107,40 @@ if len(decoded.TargetLabels) > 0 {
 }
 ```
 
+### Legacy/Future Code with Nolint Directives
+
+When keeping code for future use or as a fallback, use `//nolint` directives with explanations:
+
+```go
+// runIncidentLocal runs incident using the local executor (legacy fallback).
+// Kept in case WebSocket-based execution needs to be bypassed.
+//
+//nolint:unused // Legacy fallback for local execution - may be re-enabled
+func (h *APIHandler) runIncidentLocal(incidentUUID, workingDir, taskHeader, taskWithGuidance string) {
+    // ...
+}
+
+// For struct fields:
+type APIHandler struct {
+    codexWSHandler *CodexWSHandler //nolint:unused // Reserved for device auth feature
+}
+```
+
+**When to use nolint:**
+- Legacy fallback code that may be re-enabled
+- Incomplete features (routes not yet registered)
+- Interface implementations that aren't called directly
+
+**Do NOT use nolint to hide:**
+- Actual bugs or issues
+- Code that should be deleted
+- Unchecked errors in production code
+
 ### Pre-Commit Quality Checklist
 
 Before committing, verify:
 - [ ] `go vet ./...` passes with no output
-- [ ] `staticcheck ./...` passes with no output
+- [ ] `golangci-lint run ./...` passes (preferred over standalone staticcheck)
 - [ ] `go test ./...` passes
 - [ ] No unused imports (goimports or IDE will catch these)
 

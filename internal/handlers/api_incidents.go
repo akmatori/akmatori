@@ -166,7 +166,9 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
 					log.Printf("Failed to start incident via WebSocket: %v", err)
 					errorMsg := fmt.Sprintf("Failed to start incident: %v", err)
-					h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg)
+					if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg); updateErr != nil {
+						log.Printf("Failed to update incident status: %v", updateErr)
+					}
 					return
 				}
 
@@ -193,7 +195,9 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 
 			log.Printf("ERROR: Agent worker not connected for API incident %s", incidentUUID)
 			errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
-			h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg)
+			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg); updateErr != nil {
+				log.Printf("Failed to update incident status: %v", updateErr)
+			}
 		}()
 
 		api.RespondJSON(w, http.StatusCreated, api.CreateIncidentResponse{
@@ -208,7 +212,10 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// runIncidentLocal runs incident using the local executor (legacy fallback)
+// runIncidentLocal runs incident using the local executor (legacy fallback).
+// Kept in case WebSocket-based execution needs to be bypassed.
+//
+//nolint:unused // Legacy fallback for local execution - may be re-enabled
 func (h *APIHandler) runIncidentLocal(incidentUUID, workingDir, taskHeader, taskWithGuidance string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 	defer cancel()
