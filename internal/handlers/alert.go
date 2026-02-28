@@ -504,7 +504,9 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
 			log.Printf("Failed to start incident via WebSocket: %v", err)
 			errorMsg := fmt.Sprintf("Failed to start investigation: %v", err)
-			h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg)
+			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg); updateErr != nil {
+				log.Printf("Failed to update incident status: %v", updateErr)
+			}
 			h.updateSlackWithResult(threadTS, "❌ "+errorMsg, true)
 			return
 		}
@@ -538,7 +540,9 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 	// No WebSocket worker available
 	log.Printf("ERROR: Agent worker not connected for incident %s", incidentUUID)
 	errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
-	h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg)
+	if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg); updateErr != nil {
+		log.Printf("Failed to update incident status: %v", updateErr)
+	}
 	h.updateSlackWithResult(threadTS, "❌ "+errorMsg, true)
 }
 
@@ -930,7 +934,9 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
 			log.Printf("Failed to start incident via WebSocket: %v", err)
 			errorMsg := fmt.Sprintf("Failed to start investigation: %v", err)
-			h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg)
+			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg); updateErr != nil {
+				log.Printf("Failed to update incident status: %v", updateErr)
+			}
 			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
 			h.postSlackThreadReply(slackChannelID, slackMessageTS, "❌ "+errorMsg)
 			return
@@ -972,12 +978,17 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 	// No WebSocket worker available
 	log.Printf("ERROR: Agent worker not connected for Slack channel incident %s", incidentUUID)
 	errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
-	h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg)
+	if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg); updateErr != nil {
+		log.Printf("Failed to update incident status: %v", updateErr)
+	}
 	h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
 	h.postSlackThreadReply(slackChannelID, slackMessageTS, "❌ "+errorMsg)
 }
 
-// runSlackChannelInvestigationLocal runs investigation using local executor
+// runSlackChannelInvestigationLocal runs investigation using local executor.
+// Kept as legacy fallback if WebSocket worker is unavailable.
+//
+//nolint:unused // Legacy fallback for local execution - may be re-enabled
 func (h *AlertHandler) runSlackChannelInvestigationLocal(
 	incidentUUID, workingDir string,
 	alert alerts.NormalizedAlert,

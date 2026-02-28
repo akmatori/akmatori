@@ -512,7 +512,7 @@ func BenchmarkRecorrelationJob_Run(b *testing.B) {
 		b.Fatalf("Failed to open test database: %v", err)
 	}
 
-	db.AutoMigrate(
+	_ = db.AutoMigrate(
 		&database.AggregationSettings{},
 		&database.Incident{},
 		&database.IncidentAlert{},
@@ -528,6 +528,6 @@ func BenchmarkRecorrelationJob_Run(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		job.Run()
+		_, _ = job.Run()
 	}
 }

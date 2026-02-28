@@ -27,7 +27,7 @@ func TestDeviceAuthService_ConcurrentAccess(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
-				svc.GetDeviceAuthStatus("test-code")
+				_, _ = svc.GetDeviceAuthStatus("test-code")
 			}
 		}()
 
@@ -320,6 +320,6 @@ func BenchmarkDeviceAuthService_GetDeviceAuthStatus(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		svc.GetDeviceAuthStatus("dev-code")
+		_, _ = svc.GetDeviceAuthStatus("dev-code")
 	}
 }

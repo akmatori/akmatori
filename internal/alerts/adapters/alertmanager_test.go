@@ -506,7 +506,7 @@ func BenchmarkAlertmanagerAdapter_ParsePayload_Single(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		adapter.ParsePayload(payload, instance)
+		_, _ = adapter.ParsePayload(payload, instance)
 	}
 }
 
@@ -534,7 +534,7 @@ func BenchmarkAlertmanagerAdapter_ParsePayload_Multiple(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		adapter.ParsePayload(payload, instance)
+		_, _ = adapter.ParsePayload(payload, instance)
 	}
 }
 
@@ -550,7 +550,7 @@ func BenchmarkAlertmanagerAdapter_ValidateWebhookSecret(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		adapter.ValidateWebhookSecret(req, instance)
+		_ = adapter.ValidateWebhookSecret(req, instance)
 	}
 }
 

@@ -267,7 +267,10 @@ func (h *APIHandler) handleLLMSettings(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleDeviceAuthStart handles POST /api/settings/openai/device-auth/start
+// handleDeviceAuthStart handles POST /api/settings/openai/device-auth/start.
+// Part of the device authentication flow (not yet wired to routes).
+//
+//nolint:unused // Device auth feature - routes not yet registered
 func (h *APIHandler) handleDeviceAuthStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -321,7 +324,10 @@ func (h *APIHandler) handleDeviceAuthStart(w http.ResponseWriter, r *http.Reques
 	api.RespondJSON(w, http.StatusOK, response)
 }
 
-// handleDeviceAuthStatus handles GET /api/settings/openai/device-auth/status
+// handleDeviceAuthStatus handles GET /api/settings/openai/device-auth/status.
+// Part of the device authentication flow (not yet wired to routes).
+//
+//nolint:unused // Device auth feature - routes not yet registered
 func (h *APIHandler) handleDeviceAuthStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -357,7 +363,10 @@ func (h *APIHandler) handleDeviceAuthStatus(w http.ResponseWriter, r *http.Reque
 	api.RespondJSON(w, http.StatusOK, status)
 }
 
-// handleDeviceAuthCancel handles POST /api/settings/openai/device-auth/cancel
+// handleDeviceAuthCancel handles POST /api/settings/openai/device-auth/cancel.
+// Part of the device authentication flow (not yet wired to routes).
+//
+//nolint:unused // Device auth feature - routes not yet registered
 func (h *APIHandler) handleDeviceAuthCancel(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -378,7 +387,10 @@ func (h *APIHandler) handleDeviceAuthCancel(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// handleChatGPTDisconnect handles POST /api/settings/openai/chatgpt/disconnect
+// handleChatGPTDisconnect handles POST /api/settings/openai/chatgpt/disconnect.
+// Part of the ChatGPT integration (not yet wired to routes).
+//
+//nolint:unused // ChatGPT disconnect feature - routes not yet registered
 func (h *APIHandler) handleChatGPTDisconnect(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
