@@ -25,6 +25,9 @@ type JWTAuthConfig struct {
 	// Enabled determines if JWT authentication is enforced
 	Enabled bool
 
+	// SetupMode indicates the server is waiting for initial admin password setup
+	SetupMode bool
+
 	// AdminUsername is the admin username from env
 	AdminUsername string
 
@@ -137,16 +140,54 @@ func (m *JWTAuthMiddleware) ValidateCredentials(username, password string) bool 
 	return CheckPassword(password, m.config.AdminPasswordHash)
 }
 
+// IsSetupMode returns whether the server is in first-run setup mode
+func (m *JWTAuthMiddleware) IsSetupMode() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.config.SetupMode
+}
+
+// GetAdminUsername returns the configured admin username
+func (m *JWTAuthMiddleware) GetAdminUsername() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.config.AdminUsername
+}
+
+// CompleteSetup exits setup mode and sets the admin password hash
+func (m *JWTAuthMiddleware) CompleteSetup(adminPasswordHash string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.config.AdminPasswordHash = adminPasswordHash
+	m.config.SetupMode = false
+}
+
+// isSetupPath returns true for paths that are allowed during setup mode
+func isSetupPath(path string) bool {
+	return path == "/auth/setup" || path == "/auth/setup-status" || path == "/health"
+}
+
 // Wrap wraps an http.Handler with JWT authentication
 func (m *JWTAuthMiddleware) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check if auth is enabled
 		m.mu.RLock()
 		enabled := m.config.Enabled
+		setupMode := m.config.SetupMode
 		m.mu.RUnlock()
 
 		if !enabled {
 			next.ServeHTTP(w, r)
+			return
+		}
+
+		// In setup mode, only allow setup-related paths
+		if setupMode {
+			if isSetupPath(r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			api.RespondErrorWithCode(w, http.StatusServiceUnavailable, "setup_required", "Initial setup required")
 			return
 		}
 

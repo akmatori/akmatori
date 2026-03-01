@@ -40,6 +40,10 @@ WORKDIR /home/akmatori
 # Copy binary from builder
 COPY --from=builder /app/akmatori .
 
+# Copy entrypoint script
+COPY scripts/api-entrypoint.sh /usr/local/bin/api-entrypoint.sh
+RUN chmod +x /usr/local/bin/api-entrypoint.sh
+
 # Change ownership
 RUN chown -R akmatori:akmatori /home/akmatori
 
@@ -53,5 +57,6 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget -q --spider http://localhost:3000/health || exit 1
 
-# Run the application
+# Use entrypoint to build DATABASE_URL from password file
+ENTRYPOINT ["api-entrypoint.sh"]
 CMD ["./akmatori"]

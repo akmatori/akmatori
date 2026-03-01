@@ -11,10 +11,15 @@ version: '3.8'
 # - Agent container has NO database access
 # - Agent container has NO direct secrets
 # - Tool credentials fetched by MCP Gateway at execution time
+#
+# First-Run Setup:
+# - POSTGRES_PASSWORD is auto-generated to a file if not set
+# - ADMIN_PASSWORD is set via the web UI on first access (setup wizard)
+# - JWT_SECRET is auto-generated and stored in the database
 
 services:
   # Init service to create data directories with correct permissions
-  # This runs as root, creates directories owned by UID 1000, then exits
+  # Also auto-generates a postgres password if one doesn't exist yet
   init-dirs:
     image: alpine:3.19
     container_name: akmatori-init
@@ -23,7 +28,12 @@ services:
       - ./akmatori_data:/akmatori
     command: >
       sh -c "
-        mkdir -p /akmatori/incidents /akmatori/context /akmatori/skills &&
+        mkdir -p /akmatori/incidents /akmatori/context /akmatori/skills /akmatori/secrets &&
+        if [ ! -f /akmatori/secrets/postgres_password ]; then
+          head -c 32 /dev/urandom | base64 | tr -d '=/+' | head -c 32 > /akmatori/secrets/postgres_password;
+          echo 'Generated new PostgreSQL password';
+        fi &&
+        chmod 644 /akmatori/secrets/postgres_password &&
         chown -R 1000:1000 /akmatori &&
         echo 'Data directories initialized with correct permissions'
       "
@@ -38,9 +48,13 @@ services:
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-akmatori}
       - POSTGRES_USER=${POSTGRES_USER:-akmatori}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-akmatori}
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./akmatori_data/secrets/postgres_password:/run/secrets/postgres_password:ro
+    depends_on:
+      init-dirs:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-akmatori}"]
       interval: 10s
@@ -69,9 +83,12 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgres://${POSTGRES_USER:-akmatori}:${POSTGRES_PASSWORD:-akmatori}@postgres:5432/${POSTGRES_DB:-akmatori}?sslmode=disable
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
-      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - POSTGRES_USER=${POSTGRES_USER:-akmatori}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=${POSTGRES_DB:-akmatori}
+      - POSTGRES_PASSWORD_FILE=/akmatori/secrets/postgres_password
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - JWT_SECRET=${JWT_SECRET:-}
     volumes:
       - ./akmatori_data:/akmatori
     healthcheck:
@@ -98,11 +115,18 @@ services:
       - api-internal    # For database access
       - codex-network   # For MCP calls from Codex
     depends_on:
+      init-dirs:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgres://${POSTGRES_USER:-akmatori}:${POSTGRES_PASSWORD:-akmatori}@postgres:5432/${POSTGRES_DB:-akmatori}?sslmode=disable
+      - POSTGRES_USER=${POSTGRES_USER:-akmatori}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=${POSTGRES_DB:-akmatori}
+      - POSTGRES_PASSWORD_FILE=/akmatori/secrets/postgres_password
       - PORT=8080
+    volumes:
+      - ./akmatori_data/secrets:/akmatori/secrets:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
       interval: 30s

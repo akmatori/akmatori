@@ -238,6 +238,16 @@ export interface AuthUser {
   token: string;
 }
 
+export interface SetupStatusResponse {
+  setup_required: boolean;
+  setup_completed: boolean;
+}
+
+export interface SetupRequest {
+  password: string;
+  confirm_password: string;
+}
+
 // Skill Scripts
 export interface ScriptsListResponse {
   skill_name: string;

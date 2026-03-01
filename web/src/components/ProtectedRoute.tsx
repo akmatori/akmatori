@@ -7,7 +7,7 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, setupRequired } = useAuth();
 
   if (isLoading) {
     return (
@@ -15,6 +15,10 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
         <LoadingSpinner />
       </div>
     );
+  }
+
+  if (setupRequired) {
+    return <Navigate to="/setup" replace />;
   }
 
   if (!isAuthenticated) {

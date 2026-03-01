@@ -18,6 +18,7 @@ import (
 	"github.com/akmatori/akmatori/internal/jobs"
 	"github.com/akmatori/akmatori/internal/middleware"
 	"github.com/akmatori/akmatori/internal/services"
+	"github.com/akmatori/akmatori/internal/setup"
 	slackutil "github.com/akmatori/akmatori/internal/slack"
 	"github.com/joho/godotenv"
 	"github.com/slack-go/slack"
@@ -39,49 +40,53 @@ func main() {
 
 	log.Printf("Starting AIOps Codex Bot...")
 
-	// Initialize JWT authentication middleware
-	if cfg.AdminPassword == "" {
-		log.Fatalf("ADMIN_PASSWORD is not set")
+	// Step 1: Initialize database connection FIRST (needed for secret resolution)
+	if err := database.Connect(cfg.DatabaseURL, logger.Warn); err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	log.Printf("Database connection established")
+
+	// Step 2: Run database migrations (creates system_settings table)
+	if err := database.AutoMigrate(); err != nil {
+		log.Fatalf("Failed to run database migrations: %v", err)
 	}
 
-	// Hash the admin password
-	passwordHash, err := middleware.HashPassword(cfg.AdminPassword)
+	// Step 3: Initialize default database records
+	if err := database.InitializeDefaults(); err != nil {
+		log.Fatalf("Failed to initialize database defaults: %v", err)
+	}
+
+	// Step 4: Resolve secrets from env > DB > auto-generate
+	jwtSecret := setup.ResolveJWTSecret(cfg.JWTSecret)
+	passwordHash, setupRequired, err := setup.ResolveAdminPassword(cfg.AdminPassword)
 	if err != nil {
-		log.Fatalf("Failed to hash admin password: %v", err)
+		log.Fatalf("Failed to resolve admin password: %v", err)
 	}
 
+	if setupRequired {
+		log.Println("*** SETUP MODE *** — Visit the web UI to set your admin password")
+	}
+
+	// Step 5: Create JWT middleware with resolved secrets
 	jwtAuthMiddleware := middleware.NewJWTAuthMiddleware(&middleware.JWTAuthConfig{
 		Enabled:           true,
+		SetupMode:         setupRequired,
 		AdminUsername:     cfg.AdminUsername,
 		AdminPasswordHash: passwordHash,
-		JWTSecret:         cfg.JWTSecret,
+		JWTSecret:         jwtSecret,
 		JWTExpiryHours:    cfg.JWTExpiryHours,
 		SkipPaths: []string{
 			"/health",
 			"/webhook/*",
 			"/auth/login",
+			"/auth/setup",
+			"/auth/setup-status",
 			"/ws/codex",          // WebSocket endpoint for Codex worker (internal)
 			"/api/docs",          // Swagger UI (public)
 			"/api/openapi.yaml",  // OpenAPI spec (public)
 		},
 	})
 	log.Printf("JWT authentication enabled for user: %s", cfg.AdminUsername)
-
-	// Initialize database connection
-	if err := database.Connect(cfg.DatabaseURL, logger.Warn); err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
-	}
-	log.Printf("Database connection established")
-
-	// Run database migrations
-	if err := database.AutoMigrate(); err != nil {
-		log.Fatalf("Failed to run database migrations: %v", err)
-	}
-
-	// Initialize default database records
-	if err := database.InitializeDefaults(); err != nil {
-		log.Fatalf("Failed to initialize database defaults: %v", err)
-	}
 
 	// Initialize tool service
 	toolService := services.NewToolService()

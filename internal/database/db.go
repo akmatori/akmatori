@@ -3,11 +3,54 @@ package database
 import (
 	"fmt"
 	"log"
+	"os"
+	"strings"
+	"time"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+// SystemSetting stores key-value pairs for system configuration (JWT secret, admin password hash, etc.)
+type SystemSetting struct {
+	Key       string    `gorm:"primaryKey;size:64" json:"key"`
+	Value     string    `gorm:"type:text;not null" json:"value"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// System setting key constants
+const (
+	SystemSettingJWTSecret         = "jwt_secret"
+	SystemSettingAdminPasswordHash = "admin_password_hash"
+	SystemSettingSetupCompleted    = "setup_completed"
+)
+
+// GetSystemSetting retrieves a system setting by key. Returns empty string and error if not found.
+func GetSystemSetting(key string) (string, error) {
+	var setting SystemSetting
+	if err := DB.Where("key = ?", key).First(&setting).Error; err != nil {
+		return "", err
+	}
+	return setting.Value, nil
+}
+
+// SetSystemSetting creates or updates a system setting.
+func SetSystemSetting(key, value string) error {
+	setting := SystemSetting{
+		Key:       key,
+		Value:     value,
+		UpdatedAt: time.Now(),
+	}
+	return DB.Save(&setting).Error
+}
+
+// HasSystemSetting returns true if the key exists in system_settings.
+func HasSystemSetting(key string) bool {
+	var count int64
+	DB.Model(&SystemSetting{}).Where("key = ?", key).Count(&count)
+	return count > 0
+}
 
 // DB is the global database instance
 var DB *gorm.DB
@@ -41,6 +84,7 @@ func AutoMigrate() error {
 	}
 
 	err := DB.AutoMigrate(
+		&SystemSetting{},
 		&SlackSettings{},
 		&LLMSettings{},
 		&ProxySettings{},
@@ -99,6 +143,20 @@ func InitializeDefaults() error {
 	// Initialize system skill (incident-manager)
 	if err := InitializeSystemSkill(); err != nil {
 		return fmt.Errorf("failed to initialize system skill: %w", err)
+	}
+
+	// Migrate JWT secret from file to DB for existing deployments
+	if !HasSystemSetting(SystemSettingJWTSecret) {
+		if data, err := os.ReadFile("/akmatori/.jwt_secret"); err == nil {
+			secret := strings.TrimSpace(string(data))
+			if secret != "" {
+				if err := SetSystemSetting(SystemSettingJWTSecret, secret); err != nil {
+					log.Printf("Warning: failed to migrate JWT secret to database: %v", err)
+				} else {
+					log.Println("Migrated JWT secret from file to database")
+				}
+			}
+		}
 	}
 
 	return nil
