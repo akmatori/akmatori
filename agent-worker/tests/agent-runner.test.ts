@@ -70,9 +70,11 @@ vi.mock("@mariozechner/pi-coding-agent", () => {
       return { session: mockSession, extensionsResult: {} };
     }),
     AgentSession: vi.fn(),
-    AuthStorage: vi.fn().mockImplementation(() => ({
-      setRuntimeApiKey: vi.fn(),
-    })),
+    AuthStorage: {
+      inMemory: vi.fn(() => ({
+        setRuntimeApiKey: vi.fn(),
+      })),
+    },
     ModelRegistry: vi.fn().mockImplementation(() => ({})),
     SessionManager: {
       inMemory: vi.fn(() => ({})),
@@ -393,8 +395,8 @@ describe("AgentRunner", () => {
       });
       await runner.execute(params);
 
-      // AuthStorage was instantiated and setRuntimeApiKey was called
-      const authInstance = (AuthStorage as any).mock.results[0].value;
+      // AuthStorage.inMemory() was called and setRuntimeApiKey was called on the result
+      const authInstance = (AuthStorage as any).inMemory.mock.results[0].value;
       expect(authInstance.setRuntimeApiKey).toHaveBeenCalledWith(
         "anthropic",
         "sk-ant-my-key",

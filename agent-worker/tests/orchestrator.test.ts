@@ -53,9 +53,11 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
   createAgentSession: vi.fn(async () => ({
     session: mockSession,
   })),
-  AuthStorage: vi.fn(() => ({
-    setRuntimeApiKey: vi.fn(),
-  })),
+  AuthStorage: {
+    inMemory: vi.fn(() => ({
+      setRuntimeApiKey: vi.fn(),
+    })),
+  },
   ModelRegistry: vi.fn(() => ({})),
   SessionManager: {
     inMemory: vi.fn(() => ({})),

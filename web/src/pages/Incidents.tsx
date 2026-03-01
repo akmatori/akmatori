@@ -285,6 +285,7 @@ export default function Incidents() {
       line.startsWith('❌ Failed:') ||
       line.startsWith('🤔 ') ||
       line.startsWith('📝 ') ||
+      line.startsWith('🛠️ Running:') ||
       line.startsWith('--- Final Response ---') ||
       line.startsWith('--- ');
 
@@ -336,8 +337,59 @@ export default function Incidents() {
     // Flush any remaining tool call (in case heredoc wasn't properly closed)
     flushToolCall();
 
-    const toolCallCount = entries.filter(e => e.type === 'tool_call').length;
-    return { entries, toolCallCount };
+    // Group consecutive "🛠️ Running:" lines into batch summaries.
+    // The agent emits "\n🛠️ Running: tool\n", so after split('\n') there are
+    // blank regular entries between consecutive Running lines — skip those.
+    const grouped: typeof entries = [];
+    let i = 0;
+    while (i < entries.length) {
+      const entry = entries[i];
+      if (
+        entry.type === 'regular' &&
+        entry.content.startsWith('🛠️ Running:')
+      ) {
+        // Collect consecutive Running lines (skip interleaved blanks)
+        const batch: string[] = [];
+        let j = i;
+        while (j < entries.length) {
+          const e = entries[j];
+          if (e.type === 'regular' && e.content.startsWith('🛠️ Running:')) {
+            const toolName = e.content.replace('🛠️ Running:', '').trim();
+            batch.push(toolName);
+            j++;
+          } else if (e.type === 'regular' && e.content.trim() === '') {
+            j++;
+          } else {
+            break;
+          }
+        }
+
+        if (batch.length > 1) {
+          // Build "2× read, 5× bash" summary
+          const counts = new Map<string, number>();
+          for (const name of batch) {
+            counts.set(name, (counts.get(name) || 0) + 1);
+          }
+          const parts = Array.from(counts.entries()).map(
+            ([name, count]) => `${count}× ${name}`
+          );
+          grouped.push({
+            type: 'regular',
+            content: `🛠️ Running: ${batch.length} tools (${parts.join(', ')})`,
+          });
+        } else {
+          // Single Running line — keep as-is
+          grouped.push(entry);
+        }
+        i = j;
+      } else {
+        grouped.push(entry);
+        i++;
+      }
+    }
+
+    const toolCallCount = grouped.filter(e => e.type === 'tool_call').length;
+    return { entries: grouped, toolCallCount };
   }, [selectedIncident?.full_log]);
 
   const handleCreateIncident = async () => {
@@ -610,6 +662,14 @@ export default function Incidents() {
                                   {entry.output}
                                 </div>
                               )}
+                            </div>
+                          );
+                        }
+                        // Highlight batch summaries for parallel tool calls
+                        if (entry.content.match(/^🛠️ Running: \d+ tools/)) {
+                          return (
+                            <div key={index} className="text-blue-400">
+                              {entry.content}
                             </div>
                           );
                         }
