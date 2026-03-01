@@ -258,9 +258,13 @@ func (h *CodexWSHandler) handleCodexCompleted(msg CodexMessage) {
 	log.Printf("Incident %s completed with session %s, tokens: %d, time: %dms",
 		msg.IncidentID, msg.SessionID, msg.TokensUsed, msg.ExecutionTimeMs)
 
+	// Clean LLM "thinking" text (e.g. "Let me investigate...") from the response,
+	// keeping only the structured summary starting from the first markdown heading.
+	cleanedOutput := utils.CleanLLMResponse(msg.Output)
+
 	// Append metrics to response (for display in reasoning log and Slack)
 	executionTime := time.Duration(msg.ExecutionTimeMs) * time.Millisecond
-	responseWithMetrics := utils.AppendMetrics(msg.Output, executionTime, msg.TokensUsed)
+	responseWithMetrics := utils.AppendMetrics(cleanedOutput, executionTime, msg.TokensUsed)
 
 	// Persist refreshed OAuth tokens if they were updated
 	if msg.UpdatedAccessToken != "" || msg.UpdatedRefreshToken != "" {

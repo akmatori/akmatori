@@ -105,6 +105,25 @@ func TruncateLogForSlack(log string, maxLen int) string {
 	return "...(truncated)\n" + truncated
 }
 
+// CleanLLMResponse strips leading "thinking/planning" text that LLMs often
+// produce before the actual structured response. If the response contains a
+// markdown heading (## ...), everything before the first heading is removed.
+// If no heading is found, the response is returned as-is.
+func CleanLLMResponse(response string) string {
+	// Look for the first markdown heading (## or ###)
+	lines := strings.Split(response, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "### ") {
+			// Found a heading — return from here onwards
+			cleaned := strings.Join(lines[i:], "\n")
+			return strings.TrimSpace(cleaned)
+		}
+	}
+	// No heading found — return as-is
+	return response
+}
+
 // AppendMetrics adds execution metrics to the end of a response
 func AppendMetrics(response string, executionTime time.Duration, tokensUsed int) string {
 	timeStr := FormatDuration(executionTime)

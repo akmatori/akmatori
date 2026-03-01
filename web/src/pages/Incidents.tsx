@@ -284,7 +284,9 @@ export default function Incidents() {
       line.startsWith('✅ Ran:') ||
       line.startsWith('❌ Failed:') ||
       line.startsWith('🤔 ') ||
-      line.startsWith('📝 ');
+      line.startsWith('📝 ') ||
+      line.startsWith('--- Final Response ---') ||
+      line.startsWith('--- ');
 
     for (const line of lines) {
       if (inToolCall) {
