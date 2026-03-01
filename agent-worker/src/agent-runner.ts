@@ -245,7 +245,7 @@ export class AgentRunner {
     this.applyProxyConfig(params.proxyConfig, params.llmSettings.provider);
 
     // Auth
-    const authStorage = new AuthStorage();
+    const authStorage = AuthStorage.inMemory();
     authStorage.setRuntimeApiKey(params.llmSettings.provider, params.llmSettings.api_key);
 
     // Model
@@ -372,14 +372,16 @@ export class AgentRunner {
         };
       }
 
-      // Extract final response text if we didn't accumulate any
-      if (!responseText) {
-        responseText = session.getLastAssistantText() ?? "";
-      }
+      // Use SDK's getLastAssistantText() for a clean final response.
+      // The accumulated responseText includes text from ALL turns (e.g.
+      // "I'll investigate...", "Let me gather data...") which pollutes the
+      // response field. We only want the last assistant message — the actual
+      // investigation summary.
+      const finalResponse = session.getLastAssistantText() ?? responseText;
 
       return {
         session_id: session.sessionId,
-        response: responseText,
+        response: finalResponse,
         full_log: fullLog,
         tokens_used: totalTokens,
         execution_time_ms: Date.now() - startTime,
