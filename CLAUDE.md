@@ -387,23 +387,24 @@ svc.DeleteSSHKey(toolInstanceID, keyID)
 
 ## Current Test Coverage
 
-**Last updated: Feb 28, 2026**
+**Last updated: Mar 1, 2026**
 
 | Package | Coverage | Status |
 |---------|----------|--------|
 | `internal/alerts/adapters` | 98.4% | ✅ Excellent |
-| `internal/utils` | 98.5% | ✅ Excellent |
+| `internal/utils` | 93.4% | ✅ Excellent |
+| `internal/api` | 92.3% | ✅ Excellent |
 | `internal/testhelpers` | 73.7% | ✅ Good |
 | `internal/jobs` | 58.1% | ✅ Good |
+| `internal/middleware` | 43.1% | ⚠️ Improved |
 | `internal/alerts/extraction` | 38.9% | ⚠️ Needs work |
-| `internal/middleware` | 37.9% | ⚠️ Needs work |
 | `internal/slack` | 34.6% | ⚠️ Needs work |
 | `internal/services` | 28.3% | ⚠️ Needs work |
 | `internal/database` | 22.8% | ⚠️ Needs work |
-| `internal/handlers` | 8.9% | ⚠️ Needs work |
+| `internal/handlers` | 8.8% | ⚠️ Needs work |
 | `internal/output` | 0.0% | ❌ No tests |
 
-**Total coverage: 28.4%** (was 27.0%)
+**Total coverage: 28.3%**
 
 **Priority areas for test improvement:**
 1. `internal/output` - Add parser tests for structured blocks
@@ -970,12 +971,16 @@ Use the **code simplifier agent** at the end of a long coding session, or to cle
 # Basic vet check (fast)
 go vet ./...
 
-# Staticcheck for deeper analysis (recommended)
-staticcheck ./...
-
-# golangci-lint for comprehensive linting (requires Go version matching project)
+# golangci-lint for comprehensive linting (PREFERRED - respects //nolint directives)
 golangci-lint run --timeout 5m
+
+# Standalone staticcheck (note: uses different directive format)
+staticcheck ./...
 ```
+
+**Important:** Use `golangci-lint` as the primary linter. It respects `//nolint:unused` directives.
+Standalone `staticcheck` uses `//lint:ignore U1000 reason` format instead, so it will report
+issues that are intentionally suppressed via golangci-lint directives.
 
 ### Common Staticcheck Fixes
 
