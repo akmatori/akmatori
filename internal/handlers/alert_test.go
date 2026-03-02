@@ -467,3 +467,196 @@ func (m *mockAlertAdapter) ValidateWebhookSecret(r *http.Request, instance *data
 func (m *mockAlertAdapter) GetDefaultMappings() database.JSONB {
 	return database.JSONB{}
 }
+
+// Tests for evaluateAlertAggregation
+
+func TestAlertHandler_evaluateAlertAggregation_NilService(t *testing.T) {
+	// When aggregationService is nil, should return "new" decision
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+
+	instance := &database.AlertSourceInstance{
+		AlertSourceType: database.AlertSourceType{Name: "prometheus"},
+	}
+	normalized := alerts.NormalizedAlert{
+		AlertName:   "HighCPU",
+		Severity:    database.AlertSeverityCritical,
+		TargetHost:  "server1",
+		Summary:     "CPU usage high",
+		Description: "CPU usage is above 90%",
+	}
+
+	result, err := h.evaluateAlertAggregation(instance, normalized)
+
+	if err != nil {
+		t.Fatalf("evaluateAlertAggregation() returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("evaluateAlertAggregation() returned nil result")
+	}
+	if result.Decision != "new" {
+		t.Errorf("evaluateAlertAggregation() decision = %q, want %q", result.Decision, "new")
+	}
+	if result.Reason != "Aggregation service not configured" {
+		t.Errorf("evaluateAlertAggregation() reason = %q, want %q", result.Reason, "Aggregation service not configured")
+	}
+}
+
+func TestAlertHandler_evaluateAlertAggregation_NilInstance(t *testing.T) {
+	// Edge case: nil instance should not panic when aggregationService is nil
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+
+	normalized := alerts.NormalizedAlert{
+		AlertName: "TestAlert",
+	}
+
+	// This should not panic
+	result, err := h.evaluateAlertAggregation(nil, normalized)
+
+	if err != nil {
+		t.Fatalf("evaluateAlertAggregation() with nil instance returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("evaluateAlertAggregation() returned nil result")
+	}
+	if result.Decision != "new" {
+		t.Errorf("evaluateAlertAggregation() decision = %q, want %q", result.Decision, "new")
+	}
+}
+
+func TestAlertHandler_evaluateAlertAggregation_EmptyAlert(t *testing.T) {
+	// Test with empty normalized alert (edge case)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+
+	instance := &database.AlertSourceInstance{
+		AlertSourceType: database.AlertSourceType{Name: "grafana"},
+	}
+	normalized := alerts.NormalizedAlert{} // Empty alert
+
+	result, err := h.evaluateAlertAggregation(instance, normalized)
+
+	if err != nil {
+		t.Fatalf("evaluateAlertAggregation() returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("evaluateAlertAggregation() returned nil result")
+	}
+	if result.Decision != "new" {
+		t.Errorf("evaluateAlertAggregation() decision = %q, want %q", result.Decision, "new")
+	}
+}
+
+// Additional HandleWebhook path tests (those requiring alertService are in integration tests)
+
+// Test buildInvestigationPrompt method
+func TestAlertHandler_buildInvestigationPrompt(t *testing.T) {
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+
+	tests := []struct {
+		name         string
+		alert        alerts.NormalizedAlert
+		instance     *database.AlertSourceInstance
+		wantContains []string
+	}{
+		{
+			name: "basic alert",
+			alert: alerts.NormalizedAlert{
+				AlertName:   "HighCPU",
+				TargetHost:  "server1",
+				Severity:    database.AlertSeverityCritical,
+				Summary:     "CPU is high on server1",
+				Description: "CPU usage exceeded 90%",
+			},
+			instance: &database.AlertSourceInstance{
+				AlertSourceType: database.AlertSourceType{
+					Name:        "prometheus",
+					DisplayName: "Prometheus",
+				},
+			},
+			wantContains: []string{
+				"HighCPU",
+				"server1",
+				"CPU is high on server1",
+				"CPU usage exceeded 90%",
+				"Prometheus",
+			},
+		},
+		{
+			name: "alert with metric",
+			alert: alerts.NormalizedAlert{
+				AlertName:   "DiskFull",
+				TargetHost:  "server2",
+				Severity:    database.AlertSeverityWarning,
+				Summary:     "Disk full on /dev/sda",
+				Description: "Less than 5% free space",
+				MetricName:  "disk_free_percent",
+				MetricValue: "4.5",
+			},
+			instance: &database.AlertSourceInstance{
+				AlertSourceType: database.AlertSourceType{
+					Name:        "grafana",
+					DisplayName: "Grafana",
+				},
+			},
+			wantContains: []string{
+				"DiskFull",
+				"disk_free_percent",
+				"4.5",
+			},
+		},
+		{
+			name: "alert with runbook",
+			alert: alerts.NormalizedAlert{
+				AlertName:   "MemoryHigh",
+				TargetHost:  "server3",
+				Severity:    database.AlertSeverityCritical,
+				Summary:     "Memory usage high",
+				Description: "OOM killer may activate",
+				RunbookURL:  "https://wiki.example.com/runbooks/memory-high",
+			},
+			instance: &database.AlertSourceInstance{
+				AlertSourceType: database.AlertSourceType{
+					Name:        "datadog",
+					DisplayName: "Datadog",
+				},
+			},
+			wantContains: []string{
+				"MemoryHigh",
+				"https://wiki.example.com/runbooks/memory-high",
+				"Runbook",
+			},
+		},
+		{
+			name:  "empty alert",
+			alert: alerts.NormalizedAlert{},
+			instance: &database.AlertSourceInstance{
+				AlertSourceType: database.AlertSourceType{
+					Name:        "custom",
+					DisplayName: "Custom",
+				},
+			},
+			wantContains: []string{
+				"Investigate",
+				"Please:",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := h.buildInvestigationPrompt(tt.alert, tt.instance)
+
+			for _, want := range tt.wantContains {
+				if !strings.Contains(result, want) {
+					t.Errorf("buildInvestigationPrompt() = %q, want to contain %q", result, want)
+				}
+			}
+
+			// Verify it's always non-empty (has investigation instructions)
+			if result == "" {
+				t.Error("buildInvestigationPrompt() returned empty string")
+			}
+		})
+	}
+}
+
+// HandleWebhook tests with full dependencies are in integration_test.go
