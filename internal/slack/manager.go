@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/gorilla/websocket"
@@ -23,9 +24,11 @@ type Manager struct {
 	socketClient *socketmode.Client
 
 	// Control channels
-	stopChan   chan struct{}
 	doneChan   chan struct{}
 	reloadChan chan struct{}
+
+	// Cancel function for the current RunContext goroutine
+	cancelFunc context.CancelFunc
 
 	// Event handler - receives both socket client and regular client
 	eventHandler func(*socketmode.Client, *slack.Client)
@@ -146,26 +149,33 @@ func (m *Manager) startWithSettings(ctx context.Context, settings *database.Slac
 	// Create Socket Mode client
 	m.socketClient = socketmode.New(m.client, socketOptions...)
 
-	// Initialize control channels
-	m.stopChan = make(chan struct{})
-	m.doneChan = make(chan struct{})
+	// Create a child context so we can cancel just this connection's RunContext
+	connCtx, connCancel := context.WithCancel(ctx)
+	m.cancelFunc = connCancel
+
+	// Initialize done channel (captured locally to avoid race with future reloads)
+	doneChan := make(chan struct{})
+	m.doneChan = doneChan
 
 	// Start the event handler if set - pass both clients to avoid deadlock
 	if m.eventHandler != nil {
 		m.eventHandler(m.socketClient, m.client)
 	}
 
+	// Capture socketClient locally so the goroutine uses the correct instance
+	// even if m.socketClient is reassigned by a subsequent reload
+	sc := m.socketClient
+
 	// Start Socket Mode in a goroutine
 	go func() {
-		defer close(m.doneChan)
+		defer close(doneChan)
 		log.Printf("SlackManager: Starting Socket Mode connection...")
 
-		if err := m.socketClient.RunContext(ctx); err != nil {
-			// Check if this was a graceful shutdown
-			select {
-			case <-m.stopChan:
+		if err := sc.RunContext(connCtx); err != nil {
+			// Check if context was cancelled (graceful shutdown)
+			if connCtx.Err() != nil {
 				log.Printf("SlackManager: Socket Mode stopped gracefully")
-			default:
+			} else {
 				log.Printf("SlackManager: Socket Mode error: %v", err)
 			}
 		}
@@ -191,18 +201,23 @@ func (m *Manager) stopLocked() {
 
 	log.Printf("SlackManager: Stopping Slack connection...")
 
-	// Signal stop
-	close(m.stopChan)
+	// Cancel the RunContext goroutine's context
+	if m.cancelFunc != nil {
+		m.cancelFunc()
+	}
 
-	// Wait for socket mode to finish (with timeout)
-	select {
-	case <-m.doneChan:
-		log.Printf("SlackManager: Socket Mode stopped")
-	default:
-		log.Printf("SlackManager: Socket Mode stop signal sent")
+	// Wait for socket mode to finish with a timeout
+	if m.doneChan != nil {
+		select {
+		case <-m.doneChan:
+			log.Printf("SlackManager: Socket Mode stopped")
+		case <-time.After(5 * time.Second):
+			log.Printf("SlackManager: Socket Mode stop timed out after 5s")
+		}
 	}
 
 	m.running = false
+	m.cancelFunc = nil
 	m.client = nil
 	m.socketClient = nil
 }
@@ -238,13 +253,38 @@ func (m *Manager) TriggerReload() {
 	}
 }
 
-// WatchForReloads runs a loop that watches for reload signals
+// WatchForReloads runs a loop that watches for reload signals.
+// Debounces rapid reloads to prevent connection storms.
 func (m *Manager) WatchForReloads(ctx context.Context) {
+	const debounceDuration = 2 * time.Second
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-m.reloadChan:
+			// Debounce: wait and drain any additional reload signals
+			log.Printf("SlackManager: Reload requested, debouncing for %v...", debounceDuration)
+			timer := time.NewTimer(debounceDuration)
+		drainLoop:
+			for {
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				case <-m.reloadChan:
+					// Another reload came in during debounce; reset timer
+					if !timer.Stop() {
+						<-timer.C
+					}
+					timer.Reset(debounceDuration)
+					log.Printf("SlackManager: Additional reload request received, resetting debounce")
+				case <-timer.C:
+					break drainLoop
+				}
+			}
+
+			log.Printf("SlackManager: Debounce complete, reloading now")
 			if err := m.Reload(ctx); err != nil {
 				log.Printf("SlackManager: Reload failed: %v", err)
 			}

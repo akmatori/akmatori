@@ -137,9 +137,11 @@ func (h *SlackHandler) HandleSocketMode(socketClient *socketmode.Client) {
 			case socketmode.EventTypeEventsAPI:
 				eventsAPIEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
 				if !ok {
-					log.Printf("Ignored %+v\n", evt)
+					log.Printf("Ignored non-EventsAPI data: %+v\n", evt)
 					continue
 				}
+
+				log.Printf("Received Events API event: outer_type=%s, inner_type=%s", eventsAPIEvent.Type, eventsAPIEvent.InnerEvent.Type)
 
 				// Ack immediately to avoid Slack retries
 				socketClient.Ack(*evt.Request)
@@ -153,10 +155,17 @@ func (h *SlackHandler) HandleSocketMode(socketClient *socketmode.Client) {
 			case socketmode.EventTypeSlashCommand:
 				socketClient.Ack(*evt.Request)
 
+			case socketmode.EventTypeConnecting,
+				socketmode.EventTypeConnected,
+				socketmode.EventTypeHello:
+				// Socket Mode lifecycle events - expected, no action needed
+				log.Printf("Socket Mode lifecycle event: %s", evt.Type)
+
 			default:
 				log.Printf("Unexpected event type received: %s\n", evt.Type)
 			}
 		}
+		log.Printf("Socket Mode event loop ended (Events channel closed)")
 	}()
 }
 

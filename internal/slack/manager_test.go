@@ -1,6 +1,7 @@
 package slack
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -151,9 +152,10 @@ func TestManager_StateAfterStop(t *testing.T) {
 	m := NewManager()
 
 	// Simulate having been started (set internal state directly for unit test)
+	_, cancel := context.WithCancel(context.Background())
 	m.mu.Lock()
 	m.running = true
-	m.stopChan = make(chan struct{})
+	m.cancelFunc = cancel
 	m.doneChan = make(chan struct{})
 	close(m.doneChan) // Simulate socket mode finished
 	m.mu.Unlock()
