@@ -387,24 +387,26 @@ svc.DeleteSSHKey(toolInstanceID, keyID)
 
 ## Current Test Coverage
 
-**Last updated: Mar 1, 2026**
+**Last updated: Mar 6, 2026**
 
 | Package | Coverage | Status |
 |---------|----------|--------|
+| `internal/alerts` | 100.0% | ✅ Excellent |
 | `internal/alerts/adapters` | 98.4% | ✅ Excellent |
 | `internal/utils` | 93.4% | ✅ Excellent |
 | `internal/api` | 92.3% | ✅ Excellent |
-| `internal/testhelpers` | 73.7% | ✅ Good |
+| `internal/setup` | 84.8% | ✅ Excellent |
+| `internal/middleware` | 78.9% | ✅ Good |
+| `internal/testhelpers` | 74.8% | ✅ Good |
 | `internal/jobs` | 58.1% | ✅ Good |
-| `internal/middleware` | 43.1% | ⚠️ Improved |
 | `internal/alerts/extraction` | 38.9% | ⚠️ Needs work |
-| `internal/slack` | 34.6% | ⚠️ Needs work |
+| `internal/slack` | 32.3% | ⚠️ Needs work |
 | `internal/services` | 28.3% | ⚠️ Needs work |
-| `internal/database` | 22.8% | ⚠️ Needs work |
-| `internal/handlers` | 8.8% | ⚠️ Needs work |
+| `internal/database` | 21.4% | ⚠️ Needs work |
+| `internal/handlers` | 9.5% | ⚠️ Needs work |
 | `internal/output` | 0.0% | ❌ No tests |
 
-**Total coverage: 28.3%**
+**Total coverage: 31.7%**
 
 **Priority areas for test improvement:**
 1. `internal/output` - Add parser tests for structured blocks
@@ -638,6 +640,118 @@ func TestConcurrency(t *testing.T) {
         // Function must complete within timeout
     })
 }
+```
+
+#### Error and Panic Helpers
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+// Check error contains specific message
+testhelpers.AssertErrorContains(t, err, "not found", "error should mention not found")
+
+// Check function panics
+testhelpers.AssertPanics(t, func() {
+    panicFunction()
+}, "should panic on invalid input")
+
+// Check function does NOT panic
+testhelpers.AssertNoPanic(t, func() {
+    safeFunction()
+}, "should not panic")
+```
+
+#### Retry and Eventually Helpers
+
+For testing async operations or eventual consistency:
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+// Retry until condition is true (returns bool)
+success := testhelpers.RetryUntil(t, 5*time.Second, 100*time.Millisecond, func() bool {
+    return checkCondition()
+}, "waiting for condition")
+
+// Assert condition becomes true within timeout
+testhelpers.AssertEventually(t, 5*time.Second, 100*time.Millisecond, func() bool {
+    return service.IsReady()
+}, "service should become ready")
+```
+
+#### Environment Variable Helpers
+
+For tests that need to modify environment:
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+func TestWithEnvVar(t *testing.T) {
+    // Set env var and get cleanup function
+    cleanup := testhelpers.WithEnv(t, "API_KEY", "test-key")
+    defer cleanup() // Restores original value
+    
+    // Set multiple env vars at once
+    cleanup := testhelpers.WithEnvs(t, map[string]string{
+        "DATABASE_URL": "postgres://test",
+        "DEBUG":        "true",
+    })
+    defer cleanup()
+}
+```
+
+#### Call Counter (Thread-Safe)
+
+For counting function invocations in tests:
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+func TestCallCounting(t *testing.T) {
+    counter := testhelpers.NewCallCounter()
+    
+    // In your mock or callback
+    handler := func() {
+        counter.Inc()
+        // ... actual work
+    }
+    
+    // Run some operations
+    doSomething(handler)
+    doSomething(handler)
+    
+    // Assert call count
+    counter.AssertCount(t, 2, "handler should be called twice")
+    
+    // Also works with concurrent tests
+    testhelpers.ConcurrentTest(t, 100, func(workerID int) {
+        counter.Inc()
+    })
+    // counter.Count() is thread-safe
+}
+```
+
+#### Deep Comparison Helper
+
+For comparing complex structs:
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+// Compares using JSON serialization (handles nested types)
+testhelpers.AssertDeepEqual(t, expected, actual, "structs should match")
+```
+
+#### HTTP Response Helpers
+
+```go
+import "github.com/akmatori/akmatori/internal/testhelpers"
+
+// Check status code
+testhelpers.AssertStatusCode(t, resp.StatusCode, http.StatusOK, "should return 200")
+
+// Check Content-Type (handles charset suffix)
+testhelpers.AssertContentType(t, resp.Header.Get("Content-Type"), "application/json", "should be JSON")
 ```
 
 ### Benchmark Tests

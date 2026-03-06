@@ -404,3 +404,319 @@ func BenchmarkAssertMapKeyValue(b *testing.B) {
 		AssertMapKeyValue(mockT, m, "a", 0, "benchmark")
 	}
 }
+
+// ========================================
+// Error Helper Tests
+// ========================================
+
+func TestAssertErrorContains_Success(t *testing.T) {
+	mockT := &testing.T{}
+	err := os.ErrNotExist
+	AssertErrorContains(mockT, err, "not exist", "should find substring")
+
+	if mockT.Failed() {
+		t.Error("AssertErrorContains should not have failed")
+	}
+}
+
+func TestAssertErrorContains_NilError(t *testing.T) {
+	mockT := &testing.T{}
+	AssertErrorContains(mockT, nil, "any", "nil error check")
+
+	if !mockT.Failed() {
+		t.Error("AssertErrorContains should have failed for nil error")
+	}
+}
+
+func TestAssertPanics_Success(t *testing.T) {
+	mockT := &testing.T{}
+	AssertPanics(mockT, func() {
+		panic("test panic")
+	}, "should panic")
+
+	if mockT.Failed() {
+		t.Error("AssertPanics should not have failed when function panics")
+	}
+}
+
+func TestAssertPanics_NoPanic(t *testing.T) {
+	mockT := &testing.T{}
+	AssertPanics(mockT, func() {
+		// No panic
+	}, "should panic")
+
+	if !mockT.Failed() {
+		t.Error("AssertPanics should have failed when function does not panic")
+	}
+}
+
+func TestAssertNoPanic_Success(t *testing.T) {
+	mockT := &testing.T{}
+	AssertNoPanic(mockT, func() {
+		// Normal function
+	}, "should not panic")
+
+	if mockT.Failed() {
+		t.Error("AssertNoPanic should not have failed")
+	}
+}
+
+// ========================================
+// Retry Helper Tests
+// ========================================
+
+func TestRetryUntil_ImmediateSuccess(t *testing.T) {
+	result := RetryUntil(t, time.Second, 10*time.Millisecond, func() bool {
+		return true
+	}, "immediate success")
+
+	if !result {
+		t.Error("RetryUntil should have returned true")
+	}
+}
+
+func TestRetryUntil_EventualSuccess(t *testing.T) {
+	attempts := 0
+	result := RetryUntil(t, time.Second, 10*time.Millisecond, func() bool {
+		attempts++
+		return attempts >= 3
+	}, "eventual success")
+
+	if !result {
+		t.Error("RetryUntil should have returned true")
+	}
+	if attempts < 3 {
+		t.Errorf("Expected at least 3 attempts, got %d", attempts)
+	}
+}
+
+func TestRetryUntil_Timeout(t *testing.T) {
+	result := RetryUntil(t, 50*time.Millisecond, 10*time.Millisecond, func() bool {
+		return false
+	}, "timeout expected")
+
+	if result {
+		t.Error("RetryUntil should have returned false on timeout")
+	}
+}
+
+// ========================================
+// Environment Helper Tests
+// ========================================
+
+func TestWithEnv(t *testing.T) {
+	key := "TEST_HELPER_ENV_VAR"
+	os.Unsetenv(key) // Ensure it's not set
+
+	cleanup := WithEnv(t, key, "test-value")
+
+	if got := os.Getenv(key); got != "test-value" {
+		t.Errorf("expected env var to be 'test-value', got %q", got)
+	}
+
+	cleanup()
+
+	if got := os.Getenv(key); got != "" {
+		t.Errorf("expected env var to be unset after cleanup, got %q", got)
+	}
+}
+
+func TestWithEnv_RestoresOriginal(t *testing.T) {
+	key := "TEST_HELPER_ENV_VAR_RESTORE"
+	os.Setenv(key, "original")
+
+	cleanup := WithEnv(t, key, "modified")
+
+	if got := os.Getenv(key); got != "modified" {
+		t.Errorf("expected env var to be 'modified', got %q", got)
+	}
+
+	cleanup()
+
+	if got := os.Getenv(key); got != "original" {
+		t.Errorf("expected env var to be 'original' after cleanup, got %q", got)
+	}
+
+	os.Unsetenv(key)
+}
+
+func TestWithEnvs(t *testing.T) {
+	envs := map[string]string{
+		"TEST_MULTI_1": "value1",
+		"TEST_MULTI_2": "value2",
+	}
+
+	cleanup := WithEnvs(t, envs)
+
+	for k, v := range envs {
+		if got := os.Getenv(k); got != v {
+			t.Errorf("expected %s=%q, got %q", k, v, got)
+		}
+	}
+
+	cleanup()
+
+	for k := range envs {
+		if got := os.Getenv(k); got != "" {
+			t.Errorf("expected %s to be unset after cleanup, got %q", k, got)
+		}
+	}
+}
+
+// ========================================
+// Call Counter Tests
+// ========================================
+
+func TestCallCounter(t *testing.T) {
+	counter := NewCallCounter()
+
+	if counter.Count() != 0 {
+		t.Errorf("expected initial count 0, got %d", counter.Count())
+	}
+
+	counter.Inc()
+	counter.Inc()
+	counter.Inc()
+
+	if counter.Count() != 3 {
+		t.Errorf("expected count 3, got %d", counter.Count())
+	}
+
+	counter.Reset()
+
+	if counter.Count() != 0 {
+		t.Errorf("expected count 0 after reset, got %d", counter.Count())
+	}
+}
+
+func TestCallCounter_Concurrent(t *testing.T) {
+	counter := NewCallCounter()
+
+	ConcurrentTest(t, 100, func(workerID int) {
+		counter.Inc()
+	})
+
+	if counter.Count() != 100 {
+		t.Errorf("expected count 100, got %d", counter.Count())
+	}
+}
+
+func TestCallCounter_AssertCount(t *testing.T) {
+	mockT := &testing.T{}
+	counter := NewCallCounter()
+	counter.Inc()
+	counter.Inc()
+
+	counter.AssertCount(mockT, 2, "should be 2")
+
+	if mockT.Failed() {
+		t.Error("AssertCount should not have failed")
+	}
+}
+
+// ========================================
+// Deep Equal Tests
+// ========================================
+
+func TestAssertDeepEqual_Success(t *testing.T) {
+	mockT := &testing.T{}
+
+	type Nested struct {
+		Value string `json:"value"`
+	}
+	type TestStruct struct {
+		Name   string   `json:"name"`
+		Count  int      `json:"count"`
+		Nested Nested   `json:"nested"`
+		Tags   []string `json:"tags"`
+	}
+
+	expected := TestStruct{
+		Name:   "test",
+		Count:  5,
+		Nested: Nested{Value: "inner"},
+		Tags:   []string{"a", "b"},
+	}
+	actual := TestStruct{
+		Name:   "test",
+		Count:  5,
+		Nested: Nested{Value: "inner"},
+		Tags:   []string{"a", "b"},
+	}
+
+	AssertDeepEqual(mockT, expected, actual, "structs should be equal")
+
+	if mockT.Failed() {
+		t.Error("AssertDeepEqual should not have failed for equal structs")
+	}
+}
+
+// ========================================
+// HTTP Helper Tests
+// ========================================
+
+func TestAssertStatusCode(t *testing.T) {
+	mockT := &testing.T{}
+	AssertStatusCode(mockT, 200, 200, "status check")
+
+	if mockT.Failed() {
+		t.Error("AssertStatusCode should not have failed")
+	}
+}
+
+func TestAssertContentType(t *testing.T) {
+	mockT := &testing.T{}
+	AssertContentType(mockT, "application/json; charset=utf-8", "application/json", "content type check")
+
+	if mockT.Failed() {
+		t.Error("AssertContentType should not have failed")
+	}
+}
+
+// ========================================
+// Benchmarks for New Utilities
+// ========================================
+
+func BenchmarkCallCounter_Inc(b *testing.B) {
+	counter := NewCallCounter()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		counter.Inc()
+	}
+}
+
+func BenchmarkCallCounter_Concurrent(b *testing.B) {
+	counter := NewCallCounter()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			counter.Inc()
+		}
+	})
+}
+
+func BenchmarkWithEnv(b *testing.B) {
+	mockT := &testing.T{}
+	key := "BENCH_ENV_VAR"
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cleanup := WithEnv(mockT, key, "value")
+		cleanup()
+	}
+}
+
+func BenchmarkAssertDeepEqual(b *testing.B) {
+	type TestStruct struct {
+		Name  string   `json:"name"`
+		Count int      `json:"count"`
+		Tags  []string `json:"tags"`
+	}
+
+	expected := TestStruct{Name: "test", Count: 5, Tags: []string{"a", "b", "c"}}
+	actual := TestStruct{Name: "test", Count: 5, Tags: []string{"a", "b", "c"}}
+	mockT := &testing.T{}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		AssertDeepEqual(mockT, expected, actual, "bench")
+	}
+}
