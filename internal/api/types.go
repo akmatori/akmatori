@@ -124,6 +124,11 @@ type UpdateProxySettingsRequest struct {
 	} `json:"services"`
 }
 
+// UpdateGeneralSettingsRequest is the request body for PUT /api/settings/general.
+type UpdateGeneralSettingsRequest struct {
+	BaseURL *string `json:"base_url"`
+}
+
 // ========== Alert Source Types ==========
 
 // CreateAlertSourceRequest is the request body for POST /api/alert-sources.

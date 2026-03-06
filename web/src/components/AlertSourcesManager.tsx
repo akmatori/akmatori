@@ -318,10 +318,34 @@ export default function AlertSourcesManager() {
                   </p>
                 </div>
 
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="process-human-messages"
+                    checked={(formData.settings?.process_human_messages as boolean) || false}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        settings: { ...formData.settings, process_human_messages: e.target.checked },
+                      })
+                    }
+                  />
+                  <label htmlFor="process-human-messages" className="text-sm text-gray-700 dark:text-gray-300">
+                    Process human messages as alerts
+                  </label>
+                </div>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  When enabled, messages from human users (not just bots/integrations) will also trigger alert
+                  extraction and investigations.
+                </p>
+
                 <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded text-sm">
                   <p className="text-blue-700 dark:text-blue-300">
-                    <strong>Note:</strong> Messages posted to this channel will be treated as alerts.
-                    AI will extract alert details and trigger investigations. Thread replies are ignored.
+                    <strong>Note:</strong>{' '}
+                    {(formData.settings?.process_human_messages as boolean)
+                      ? 'All messages (from bots and humans) posted to this channel will be treated as alerts.'
+                      : 'Only bot/integration messages posted to this channel will be treated as alerts.'}
+                    {' '}AI will extract alert details and trigger investigations. Thread replies are ignored.
                   </p>
                 </div>
               </>

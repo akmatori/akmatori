@@ -7,6 +7,7 @@ import Login from './pages/Login';
 import Setup from './pages/Setup';
 import Dashboard from './pages/Dashboard';
 import Incidents from './pages/Incidents';
+import IncidentDetail from './pages/IncidentDetail';
 import Skills from './pages/Skills';
 import Tools from './pages/Tools';
 import ContextFiles from './pages/ContextFiles';
@@ -27,6 +28,7 @@ function App() {
                   <Layout>
                     <Routes>
                       <Route path="/" element={<Dashboard />} />
+                      <Route path="/incidents/:uuid" element={<IncidentDetail />} />
                       <Route path="/incidents" element={<Incidents />} />
                       <Route path="/skills" element={<Skills />} />
                       <Route path="/tools" element={<Tools />} />

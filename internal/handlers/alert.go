@@ -15,6 +15,7 @@ import (
 	"github.com/akmatori/akmatori/internal/config"
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
+	"github.com/akmatori/akmatori/internal/output"
 	"github.com/akmatori/akmatori/internal/services"
 	"github.com/akmatori/akmatori/internal/utils"
 	slackutil "github.com/akmatori/akmatori/internal/slack"
@@ -529,8 +530,22 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 			log.Printf("Failed to update incident complete: %v", err)
 		}
 
+		// Format response for Slack (parse structured blocks and apply formatting)
+		var formattedResp string
+		if hasError {
+			formattedResp = response
+		} else if response != "" {
+			// Extract metrics before formatting so they don't get lost in truncation
+			contentOnly, footer := buildSlackFooter(response, incidentUUID)
+			parsed := output.Parse(contentOnly)
+			formatted := output.FormatForSlack(parsed)
+			formattedResp = truncateWithFooter(formatted, footer, 3900)
+		} else {
+			formattedResp = "✅ Task completed (no output)"
+		}
+
 		// Update Slack if enabled - include reasoning context
-		slackResponse := buildSlackResponse(lastStreamedLog, response)
+		slackResponse := buildSlackResponse(lastStreamedLog, formattedResp)
 		h.updateSlackWithResult(threadTS, slackResponse, hasError)
 
 		log.Printf("Investigation completed for alert: %s (via WebSocket)", alert.AlertName)
@@ -667,10 +682,7 @@ func (h *AlertHandler) isSlackEnabled() bool {
 // formatAggregationFooter generates a footer for Slack messages showing
 // how many alerts are aggregated into an incident with a link to view it
 func (h *AlertHandler) formatAggregationFooter(incidentUUID string, alertCount int) string {
-	baseURL := os.Getenv("AKMATORI_BASE_URL")
-	if baseURL == "" {
-		baseURL = "http://localhost:3000"
-	}
+	baseURL := h.getBaseURL()
 	return fmt.Sprintf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n:link: %d alert%s aggregated • <%s/incidents/%s|View incident>",
 		alertCount,
 		pluralize(alertCount),
@@ -914,7 +926,8 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 				if progressMsgTS != "" && time.Since(lastSlackUpdate) >= slackProgressInterval {
 					lastSlackUpdate = time.Now()
 					progressLines := utils.GetLastNLines(strings.TrimSpace(lastStreamedLog), 15)
-					progressLines = truncateLogForSlack(progressLines, 3000)
+					// Leave room for the wrapper text (~40 bytes for "🔍 *Investigating...*\n```\n...\n```")
+					progressLines = truncateLogForSlack(progressLines, 3900)
 					h.updateSlackThreadMessage(slackChannelID, progressMsgTS,
 						fmt.Sprintf("🔍 *Investigating...*\n```\n%s\n```", progressLines))
 				}
@@ -945,6 +958,9 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		// Wait for completion
 		<-done
 
+		log.Printf("Investigation done for %s: hasError=%v, response=%d chars, sessionID=%s",
+			incidentUUID, hasError, len(response), sessionID)
+
 		// Build full log
 		fullLog := taskHeader + lastStreamedLog
 		if response != "" {
@@ -960,14 +976,29 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 			log.Printf("Failed to update incident complete: %v", err)
 		}
 
+		// Format response for Slack (parse structured blocks and apply formatting)
+		var formattedResponse string
+		if hasError {
+			formattedResponse = response
+		} else if response != "" {
+			// Extract metrics before formatting so they don't get lost in truncation
+			contentOnly, footer := buildSlackFooter(response, incidentUUID)
+			parsed := output.Parse(contentOnly)
+			formatted := output.FormatForSlack(parsed)
+			formattedResponse = truncateWithFooter(formatted, footer, 3900)
+		} else {
+			formattedResponse = "✅ Task completed (no output)"
+		}
+
 		// Update Slack thread - replace progress message with final result
 		h.updateSlackChannelReactions(slackChannelID, slackMessageTS, hasError)
 		if progressMsgTS != "" {
-			// Reasoning was already streamed live, so just show the final response
-			h.updateSlackThreadMessage(slackChannelID, progressMsgTS, response)
+			log.Printf("Replacing Slack progress message (ts=%s) with final response (%d chars) for incident %s",
+				progressMsgTS, len(formattedResponse), incidentUUID)
+			h.updateSlackThreadMessage(slackChannelID, progressMsgTS, formattedResponse)
 		} else {
 			// No live progress was shown, include reasoning context
-			slackResponse := buildSlackResponse(lastStreamedLog, response)
+			slackResponse := buildSlackResponse(lastStreamedLog, formattedResponse)
 			h.postSlackThreadReply(slackChannelID, slackMessageTS, slackResponse)
 		}
 
@@ -1014,7 +1045,7 @@ func (h *AlertHandler) runSlackChannelInvestigationLocal(
 			// Throttled update of the Slack progress message
 			if progressMsgTS != "" && time.Since(lastSlackUpdate) >= slackProgressInterval {
 				lastSlackUpdate = time.Now()
-				progressLines := truncateLogForSlack(progress, 3000)
+				progressLines := truncateLogForSlack(progress, 3900)
 				h.updateSlackThreadMessage(slackChannelID, progressMsgTS,
 					fmt.Sprintf("🔍 *Investigating...*\n```\n%s\n```", progressLines))
 			}
@@ -1142,18 +1173,75 @@ func (h *AlertHandler) updateSlackThreadMessage(channelID, messageTS, message st
 }
 
 // truncateLogForSlack truncates a log string to fit within Slack's message limits.
-// It keeps the last maxLen runes and trims to a clean line boundary.
+// It keeps the last maxLen bytes and trims to a clean line boundary.
+// Uses byte length (not rune count) because Slack enforces byte-based limits.
 func truncateLogForSlack(logText string, maxLen int) string {
-	runes := []rune(logText)
-	if len(runes) <= maxLen {
+	if len(logText) <= maxLen {
 		return logText
 	}
-	truncated := string(runes[len(runes)-maxLen:])
+	truncated := logText[len(logText)-maxLen:]
 	// Find first newline to avoid partial lines
 	if idx := strings.Index(truncated, "\n"); idx > 0 && idx < 100 {
 		truncated = truncated[idx+1:]
 	}
 	return "...(truncated)\n" + truncated
+}
+
+// buildSlackFooter extracts the metrics line from a response and builds a footer
+// with metrics + a UI link. Returns the response without metrics and the footer string.
+func buildSlackFooter(response, incidentUUID string) (responseWithoutMetrics, footer string) {
+	metricsLine := ""
+	if idx := strings.LastIndex(response, "\n---\n⏱️"); idx >= 0 {
+		metricsLine = strings.TrimSpace(response[idx+len("\n---\n"):])
+		responseWithoutMetrics = response[:idx]
+	} else {
+		responseWithoutMetrics = response
+	}
+
+	baseURL := resolveBaseURL()
+
+	var sb strings.Builder
+	sb.WriteString("\n\n———\n")
+	if metricsLine != "" {
+		sb.WriteString(metricsLine)
+		sb.WriteString("\n")
+	}
+	sb.WriteString(fmt.Sprintf("<%s/incidents/%s|View reasoning log>", baseURL, incidentUUID))
+	footer = sb.String()
+	return
+}
+
+// truncateWithFooter truncates content to fit within maxBytes including a guaranteed footer.
+func truncateWithFooter(content, footer string, maxBytes int) string {
+	if len(content)+len(footer) <= maxBytes {
+		return content + footer
+	}
+	contentLimit := maxBytes - len(footer)
+	if contentLimit < 100 {
+		contentLimit = 100
+	}
+	content = truncateForSlack(content, contentLimit)
+	return content + footer
+}
+
+// truncateForSlack truncates a message to fit within Slack's 4000-byte text limit.
+// Reserves space for a truncation notice.
+func truncateForSlack(message string, maxBytes int) string {
+	if len(message) <= maxBytes {
+		return message
+	}
+	const suffix = "\n\n_...truncated. See full response in the UI._"
+	cutoff := maxBytes - len(suffix)
+	if cutoff < 100 {
+		cutoff = 100
+	}
+	// Avoid cutting in the middle of a UTF-8 character
+	truncated := message[:cutoff]
+	// Find last newline for a cleaner break
+	if idx := strings.LastIndex(truncated, "\n"); idx > cutoff/2 {
+		truncated = truncated[:idx]
+	}
+	return truncated + suffix
 }
 
 // updateIncidentSlackContext updates the incident with Slack channel context
@@ -1166,11 +1254,19 @@ func (h *AlertHandler) updateIncidentSlackContext(incidentUUID, channelID, messa
 		}).Error
 }
 
-// getBaseURL returns the base URL for incident links
-func (h *AlertHandler) getBaseURL() string {
-	baseURL := os.Getenv("AKMATORI_BASE_URL")
-	if baseURL == "" {
-		baseURL = "http://localhost:3000"
+// resolveBaseURL returns the base URL for incident links (package-level helper).
+// Priority: DB GeneralSettings > AKMATORI_BASE_URL env var > fallback.
+func resolveBaseURL() string {
+	if settings, err := database.GetOrCreateGeneralSettings(); err == nil && settings.BaseURL != "" {
+		return strings.TrimRight(settings.BaseURL, "/")
 	}
-	return baseURL
+	if envURL := os.Getenv("AKMATORI_BASE_URL"); envURL != "" {
+		return envURL
+	}
+	return "http://localhost:3000"
+}
+
+// getBaseURL returns the base URL for incident links.
+func (h *AlertHandler) getBaseURL() string {
+	return resolveBaseURL()
 }

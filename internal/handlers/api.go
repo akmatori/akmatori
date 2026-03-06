@@ -79,6 +79,9 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	// LLM settings
 	mux.HandleFunc("/api/settings/llm", h.handleLLMSettings)
 
+	// General settings
+	mux.HandleFunc("/api/settings/general", h.handleGeneralSettings)
+
 	// Proxy settings
 	mux.HandleFunc("/api/settings/proxy", h.handleProxySettings)
 

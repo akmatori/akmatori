@@ -1,13 +1,11 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { RefreshCw, X, Plus, MessageSquare, Activity, Clock, CheckCircle, AlertCircle, Terminal, ChevronDown, ChevronRight, Zap, Timer, FileCode } from 'lucide-react';
-import { JsonView, darkStyles } from 'react-json-view-lite';
-import 'react-json-view-lite/dist/index.css';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { RefreshCw, X, Plus, MessageSquare, Activity, Clock, CheckCircle, AlertCircle, Terminal, Zap, Timer } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { SuccessMessage } from '../components/ErrorMessage';
 import TimeRangePicker from '../components/TimeRangePicker';
-import { IncidentAlertsPanel } from '../components/IncidentAlertsPanel';
+import IncidentDetailView from '../components/IncidentDetailView';
 import { incidentsApi } from '../api/client';
 import type { Incident } from '../types';
 
@@ -16,73 +14,18 @@ const DEFAULT_TIME_RANGE = 30 * 60;
 // Default: refresh every 1 minute
 const DEFAULT_REFRESH_INTERVAL = 60000;
 
-type ModalType = 'reasoning' | 'response' | 'raw';
-
-// Custom styles for JSON viewer to match dark theme
-const jsonViewerStyles = {
-  ...darkStyles,
-  container: 'bg-transparent font-mono text-sm',
-  basicChildStyle: 'pl-4',
-  label: 'text-purple-400 mr-1',
-  nullValue: 'text-gray-500',
-  undefinedValue: 'text-gray-500',
-  stringValue: 'text-green-400',
-  booleanValue: 'text-red-400',
-  numberValue: 'text-orange-400',
-  otherValue: 'text-gray-300',
-  punctuation: 'text-gray-500',
-  expandIcon: 'text-gray-400 cursor-pointer select-none',
-  collapseIcon: 'text-gray-400 cursor-pointer select-none',
-};
-
-interface RawPayloadViewerProps {
-  payload: unknown;
-}
-
-function RawPayloadViewer({ payload }: RawPayloadViewerProps) {
-  // Handle empty/null payload
-  if (payload === null || payload === undefined) {
-    return (
-      <p className="text-gray-500 text-center py-8">
-        No raw payload available for this incident
-      </p>
-    );
-  }
-
-  // Check if payload is a valid object/array for JSON viewer
-  if (typeof payload === 'object') {
-    return (
-      <JsonView
-        data={payload}
-        style={jsonViewerStyles}
-        shouldExpandNode={() => true}
-      />
-    );
-  }
-
-  // Fallback: display as plain text for non-JSON payloads
-  return (
-    <pre className="whitespace-pre-wrap text-gray-300 font-mono text-sm">
-      {String(payload)}
-    </pre>
-  );
-}
-
 export default function Incidents() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const [modalType, setModalType] = useState<ModalType>('reasoning');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newTask, setNewTask] = useState('');
   const [creating, setCreating] = useState(false);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [showToolCalls, setShowToolCalls] = useState(false);
   const refreshIntervalRef = useRef<number | null>(null);
-  const logContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Time range picker state
   const now = Math.floor(Date.now() / 1000);
@@ -183,13 +126,6 @@ export default function Incidents() {
     };
   }, [showModal, selectedIncident?.uuid, selectedIncident?.status, autoRefresh]);
 
-  // Auto-scroll to bottom when log updates
-  useEffect(() => {
-    if (logContainerRef.current && modalType === 'reasoning') {
-      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-    }
-  }, [selectedIncident?.full_log, modalType]);
-
   const getStatusConfig = (status: string) => {
     switch (status) {
       case 'completed':
@@ -227,14 +163,13 @@ export default function Incidents() {
     return tokens.toLocaleString();
   };
 
-  const openModal = useCallback(async (incident: Incident, type: ModalType) => {
+  const openModal = useCallback(async (incident: Incident) => {
     try {
       const latest = await incidentsApi.get(incident.uuid);
       setSelectedIncident(latest);
     } catch {
       setSelectedIncident(incident);
     }
-    setModalType(type);
     setShowModal(true);
   }, []);
 
@@ -242,155 +177,6 @@ export default function Incidents() {
     setShowModal(false);
     setSelectedIncident(null);
   };
-
-  // Parse log to separate tool calls from other entries
-  const parsedLog = useMemo(() => {
-    if (!selectedIncident?.full_log) return null;
-
-    const lines = selectedIncident.full_log.split('\n');
-    const entries: Array<{
-      type: 'regular' | 'tool_call';
-      content: string;
-      output?: string;
-      isMultiline?: boolean
-    }> = [];
-
-    let inToolCall = false;
-    let inOutput = false;
-    let heredocDelimiter: string | null = null;
-    let toolCallLines: string[] = [];
-    let outputLines: string[] = [];
-
-    const flushToolCall = () => {
-      if (toolCallLines.length > 0) {
-        const fullContent = toolCallLines.join('\n');
-        const fullOutput = outputLines.length > 0 ? outputLines.join('\n') : undefined;
-        entries.push({
-          type: 'tool_call',
-          content: fullContent,
-          output: fullOutput,
-          isMultiline: toolCallLines.length > 1
-        });
-        toolCallLines = [];
-        outputLines = [];
-      }
-      inToolCall = false;
-      inOutput = false;
-      heredocDelimiter = null;
-    };
-
-    // Markers that indicate a new section (end current tool call)
-    const isNewSection = (line: string) =>
-      line.startsWith('✅ Ran:') ||
-      line.startsWith('❌ Failed:') ||
-      line.startsWith('🤔 ') ||
-      line.startsWith('📝 ') ||
-      line.startsWith('🛠️ Running:') ||
-      line.startsWith('--- Final Response ---') ||
-      line.startsWith('--- ');
-
-    for (const line of lines) {
-      if (inToolCall) {
-        // Check if this is a new section (flush current tool call first)
-        if (isNewSection(line)) {
-          flushToolCall();
-          // Fall through to process this line as new tool call or regular
-        } else if (inOutput) {
-          // Collecting output lines
-          outputLines.push(line);
-          continue;
-        } else if (line === 'Output:') {
-          // Start of output section
-          inOutput = true;
-          continue;
-        } else if (heredocDelimiter) {
-          // In heredoc mode - check for termination
-          toolCallLines.push(line);
-          if (line.startsWith(heredocDelimiter) || line.match(new RegExp(`^${heredocDelimiter}["']?\\)?$`))) {
-            // Heredoc ended, now wait for Output:
-            heredocDelimiter = null;
-          }
-          continue;
-        } else {
-          // Collecting additional lines for this tool call (command continuation)
-          toolCallLines.push(line);
-          continue;
-        }
-      }
-
-      // Not in tool call (or just flushed) - check for new tool call
-      if (line.startsWith('✅ Ran:') || line.startsWith('❌ Failed:')) {
-        // Check for heredoc pattern
-        const heredocMatch = line.match(/<<[-'"\\]*(\w+)/);
-        if (heredocMatch) {
-          heredocDelimiter = heredocMatch[1];
-        }
-        inToolCall = true;
-        inOutput = false;
-        toolCallLines = [line];
-        outputLines = [];
-      } else {
-        entries.push({ type: 'regular', content: line });
-      }
-    }
-
-    // Flush any remaining tool call (in case heredoc wasn't properly closed)
-    flushToolCall();
-
-    // Group consecutive "🛠️ Running:" lines into batch summaries.
-    // The agent emits "\n🛠️ Running: tool\n", so after split('\n') there are
-    // blank regular entries between consecutive Running lines — skip those.
-    const grouped: typeof entries = [];
-    let i = 0;
-    while (i < entries.length) {
-      const entry = entries[i];
-      if (
-        entry.type === 'regular' &&
-        entry.content.startsWith('🛠️ Running:')
-      ) {
-        // Collect consecutive Running lines (skip interleaved blanks)
-        const batch: string[] = [];
-        let j = i;
-        while (j < entries.length) {
-          const e = entries[j];
-          if (e.type === 'regular' && e.content.startsWith('🛠️ Running:')) {
-            const toolName = e.content.replace('🛠️ Running:', '').trim();
-            batch.push(toolName);
-            j++;
-          } else if (e.type === 'regular' && e.content.trim() === '') {
-            j++;
-          } else {
-            break;
-          }
-        }
-
-        if (batch.length > 1) {
-          // Build "2× read, 5× bash" summary
-          const counts = new Map<string, number>();
-          for (const name of batch) {
-            counts.set(name, (counts.get(name) || 0) + 1);
-          }
-          const parts = Array.from(counts.entries()).map(
-            ([name, count]) => `${count}× ${name}`
-          );
-          grouped.push({
-            type: 'regular',
-            content: `🛠️ Running: ${batch.length} tools (${parts.join(', ')})`,
-          });
-        } else {
-          // Single Running line — keep as-is
-          grouped.push(entry);
-        }
-        i = j;
-      } else {
-        grouped.push(entry);
-        i++;
-      }
-    }
-
-    const toolCallCount = grouped.filter(e => e.type === 'tool_call').length;
-    return { entries: grouped, toolCallCount };
-  }, [selectedIncident?.full_log]);
 
   const handleCreateIncident = async () => {
     if (!newTask.trim()) return;
@@ -517,7 +303,7 @@ export default function Incidents() {
                         <td>
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={() => openModal(incident, 'reasoning')}
+                              onClick={() => openModal(incident)}
                               className={`btn btn-ghost p-1.5 ${incident.status === 'running' ? 'text-primary-500 animate-pulse' : ''}`}
                               title="View reasoning log"
                             >
@@ -525,7 +311,7 @@ export default function Incidents() {
                             </button>
                             {(incident.status === 'completed' || incident.status === 'failed') && (
                               <button
-                                onClick={() => openModal(incident, 'response')}
+                                onClick={() => openModal(incident)}
                                 className="btn btn-ghost p-1.5"
                                 title="View response"
                               >
@@ -553,7 +339,7 @@ export default function Incidents() {
               <div>
                 <div className="flex items-center gap-3">
                   <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-                    {modalType === 'reasoning' ? 'Reasoning Log' : modalType === 'response' ? 'Response' : 'Raw Alert'}
+                    {selectedIncident.title || 'Incident Details'}
                   </h2>
                   <span className={`badge ${getStatusConfig(selectedIncident.status).class}`}>
                     {selectedIncident.status}
@@ -572,156 +358,13 @@ export default function Incidents() {
               </button>
             </div>
 
-            {/* Tab Navigation */}
-            <div className="flex border-b border-gray-200 dark:border-gray-700 px-6">
-              <button
-                onClick={() => setModalType('reasoning')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  modalType === 'reasoning'
-                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-                }`}
-                disabled={selectedIncident.status === 'pending'}
-              >
-                <span className="flex items-center gap-2">
-                  <Terminal className="w-4 h-4" />
-                  Reasoning
-                </span>
-              </button>
-              <button
-                onClick={() => setModalType('response')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  modalType === 'response'
-                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-                }`}
-                disabled={selectedIncident.status === 'pending' || selectedIncident.status === 'running'}
-              >
-                <span className="flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4" />
-                  Response
-                </span>
-              </button>
-              <button
-                onClick={() => setModalType('raw')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  modalType === 'raw'
-                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-                }`}
-              >
-                <span className="flex items-center gap-2">
-                  <FileCode className="w-4 h-4" />
-                  Raw Alert
-                </span>
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div ref={logContainerRef} className="flex-1 overflow-y-auto p-6">
-              {modalType === 'reasoning' ? (
-                <div className="bg-gray-900 rounded-lg p-6 font-mono text-sm overflow-x-auto text-gray-100 min-h-[200px]">
-                  <div className="flex items-center gap-2 text-gray-500 mb-4 pb-4 border-b border-gray-700">
-                    <Terminal className="w-4 h-4" />
-                    <span className="text-xs font-medium uppercase tracking-wide">Execution Log</span>
-                    {parsedLog && parsedLog.toolCallCount > 0 && (
-                      <button
-                        onClick={() => setShowToolCalls(!showToolCalls)}
-                        className="ml-4 flex items-center gap-1.5 px-2 py-1 rounded text-xs bg-gray-800 hover:bg-gray-700 transition-colors"
-                      >
-                        {showToolCalls ? (
-                          <ChevronDown className="w-3 h-3" />
-                        ) : (
-                          <ChevronRight className="w-3 h-3" />
-                        )}
-                        <span>Tool Calls ({parsedLog.toolCallCount})</span>
-                      </button>
-                    )}
-                    {selectedIncident.status === 'running' && autoRefresh && (
-                      <span className="ml-auto flex items-center gap-2 text-primary-400">
-                        <RefreshCw className="w-3 h-3 animate-spin" />
-                        <span className="text-xs">Live</span>
-                      </span>
-                    )}
-                  </div>
-                  {parsedLog ? (
-                    <div className="whitespace-pre-wrap">
-                      {parsedLog.entries.map((entry, index) => {
-                        if (entry.type === 'tool_call') {
-                          if (!showToolCalls) return null;
-                          return (
-                            <div key={index} className="my-3">
-                              {/* Command box */}
-                              <div className="text-gray-300 bg-gray-800/70 px-3 py-2 rounded border-l-2 border-blue-500">
-                                {entry.content}
-                              </div>
-                              {/* Output box */}
-                              {entry.output && (
-                                <div className="mt-1 text-gray-400 bg-gray-800/40 px-3 py-2 rounded border-l-2 border-gray-600 text-xs">
-                                  <div className="text-gray-500 text-[10px] uppercase tracking-wide mb-1">Output:</div>
-                                  {entry.output}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        }
-                        // Highlight batch summaries for parallel tool calls
-                        if (entry.content.match(/^🛠️ Running: \d+ tools/)) {
-                          return (
-                            <div key={index} className="text-blue-400">
-                              {entry.content}
-                            </div>
-                          );
-                        }
-                        return <div key={index}>{entry.content}</div>;
-                      })}
-                    </div>
-                  ) : (
-                    selectedIncident.status === 'pending'
-                      ? '> Waiting for execution to start...'
-                      : '> No log available yet'
-                  )}
-                </div>
-              ) : modalType === 'response' ? (
-                <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-6 min-h-[200px]">
-                  {selectedIncident.response ? (
-                    <div className="whitespace-pre-wrap text-gray-700 dark:text-gray-300 font-mono text-sm">
-                      {selectedIncident.response
-                        .replace(/\[FINAL_RESULT\]\n?/g, '')
-                        .replace(/\[\/FINAL_RESULT\]\n?/g, '')
-                        .trim()}
-                    </div>
-                  ) : (
-                    <p className="text-gray-500 text-center py-8">
-                      {selectedIncident.status === 'pending' || selectedIncident.status === 'running'
-                        ? 'Response will be available when the incident completes...'
-                        : 'No response available'}
-                    </p>
-                  )}
-                </div>
-              ) : (
-                /* Raw Alert Tab */
-                <div className="bg-gray-900 rounded-lg p-6 min-h-[200px] overflow-x-auto">
-                  <div className="flex items-center gap-2 text-gray-500 mb-4 pb-4 border-b border-gray-700">
-                    <FileCode className="w-4 h-4" />
-                    <span className="text-xs font-medium uppercase tracking-wide">Original Webhook Payload</span>
-                  </div>
-                  <RawPayloadViewer payload={selectedIncident.context?.raw_payload} />
-                </div>
-              )}
-
-              {/* Aggregated Alerts Panel */}
-              {selectedIncident.alert_count > 0 && (
-                <div className="mt-6">
-                  <IncidentAlertsPanel incidentUuid={selectedIncident.uuid} />
-                </div>
-              )}
-            </div>
+            {/* Shared Detail View */}
+            <IncidentDetailView incident={selectedIncident} autoRefresh={autoRefresh} />
 
             {/* Modal Footer */}
             <div className="flex items-center justify-between p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
               <div className="flex items-center gap-4">
-                {modalType === 'reasoning' && selectedIncident.status === 'running' && (
+                {selectedIncident.status === 'running' && (
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -731,7 +374,6 @@ export default function Incidents() {
                     <span className="text-sm text-gray-600 dark:text-gray-400">Auto-refresh (2s)</span>
                   </label>
                 )}
-                {/* Execution metrics - show when completed or failed */}
                 {(selectedIncident.status === 'completed' || selectedIncident.status === 'failed') && (
                   <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
                     {selectedIncident.execution_time_ms > 0 && (

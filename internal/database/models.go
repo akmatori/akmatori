@@ -561,3 +561,15 @@ func (o *OpenAISettings) ValidateReasoningEffort() bool {
 func (OpenAISettings) TableName() string {
 	return "openai_settings"
 }
+
+// GeneralSettings stores general instance configuration (singleton)
+type GeneralSettings struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	BaseURL   string    `gorm:"type:text" json:"base_url"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (GeneralSettings) TableName() string {
+	return "general_settings"
+}

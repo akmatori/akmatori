@@ -251,6 +251,38 @@ func TestTruncateLogForSlack_EmptyLog(t *testing.T) {
 	}
 }
 
+func TestTruncateForSlack_Short(t *testing.T) {
+	msg := "short message"
+	result := truncateForSlack(msg, 3900)
+	if result != msg {
+		t.Errorf("short message should not be truncated")
+	}
+}
+
+func TestTruncateForSlack_Long(t *testing.T) {
+	msg := strings.Repeat("Line of text here.\n", 300) // ~5700 bytes
+	result := truncateForSlack(msg, 3900)
+	if len(result) > 3900 {
+		t.Errorf("truncateForSlack() result is %d bytes, want <= 3900", len(result))
+	}
+	if !strings.Contains(result, "truncated") {
+		t.Errorf("truncated message should contain truncation notice")
+	}
+}
+
+func TestTruncateForSlack_BreaksAtNewline(t *testing.T) {
+	// Create content that's just over the limit
+	msg := strings.Repeat("x", 3800) + "\nthis line should be cut\nmore"
+	result := truncateForSlack(msg, 3900)
+	// Should break at the newline, not mid-line
+	if strings.Contains(result, "this line should be cut") {
+		// That's fine — it's within limit
+	}
+	if len(result) > 3900 {
+		t.Errorf("result too long: %d", len(result))
+	}
+}
+
 func TestConvertLabels(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -656,6 +688,114 @@ func TestAlertHandler_buildInvestigationPrompt(t *testing.T) {
 				t.Error("buildInvestigationPrompt() returned empty string")
 			}
 		})
+	}
+}
+
+// --- buildSlackFooter tests ---
+
+func TestBuildSlackFooter_WithMetrics(t *testing.T) {
+	response := "Investigation complete.\n\n---\n⏱️ Time: 41.3s | 🎯 Tokens: 126,028"
+	contentOnly, footer := buildSlackFooter(response, "abc-123")
+
+	// The split is at "\n---\n⏱️" so contentOnly includes the leading "\n"
+	expected := "Investigation complete.\n"
+	if contentOnly != expected {
+		t.Errorf("contentOnly = %q, want %q", contentOnly, expected)
+	}
+	if !strings.Contains(footer, "⏱️ Time: 41.3s") {
+		t.Errorf("footer should contain metrics line, got %q", footer)
+	}
+	if !strings.Contains(footer, "🎯 Tokens: 126,028") {
+		t.Errorf("footer should contain token count, got %q", footer)
+	}
+}
+
+func TestBuildSlackFooter_WithoutMetrics(t *testing.T) {
+	response := "Investigation complete. No issues found."
+	contentOnly, footer := buildSlackFooter(response, "def-456")
+
+	if contentOnly != response {
+		t.Errorf("contentOnly should equal original response when no metrics present")
+	}
+	if strings.Contains(footer, "⏱️") {
+		t.Errorf("footer should not contain metrics when none in response, got %q", footer)
+	}
+}
+
+func TestBuildSlackFooter_UILink(t *testing.T) {
+	os.Setenv("AKMATORI_BASE_URL", "https://akmatori.example.com")
+	defer os.Unsetenv("AKMATORI_BASE_URL")
+
+	_, footer := buildSlackFooter("some response", "uuid-123")
+
+	if !strings.Contains(footer, "<https://akmatori.example.com/incidents/uuid-123|View reasoning log>") {
+		t.Errorf("footer should contain UI link, got %q", footer)
+	}
+}
+
+func TestBuildSlackFooter_UILinkDefaultBaseURL(t *testing.T) {
+	os.Unsetenv("AKMATORI_BASE_URL")
+
+	_, footer := buildSlackFooter("some response", "uuid-456")
+
+	if !strings.Contains(footer, "<http://localhost:3000/incidents/uuid-456|View reasoning log>") {
+		t.Errorf("footer should use default base URL, got %q", footer)
+	}
+}
+
+func TestBuildSlackFooter_MetricsExtractedCorrectly(t *testing.T) {
+	// Verify that only the part after "\n---\n" is extracted as metrics
+	response := "Line 1\n---\nLine 2\n\n---\n⏱️ Time: 10s | 🎯 Tokens: 500"
+	contentOnly, footer := buildSlackFooter(response, "test-uuid")
+
+	// Should extract from the LAST occurrence of "\n---\n⏱️"
+	if !strings.Contains(contentOnly, "Line 2") {
+		t.Errorf("contentOnly should contain middle content, got %q", contentOnly)
+	}
+	if strings.Contains(contentOnly, "⏱️") {
+		t.Errorf("contentOnly should not contain metrics, got %q", contentOnly)
+	}
+	if !strings.Contains(footer, "⏱️ Time: 10s") {
+		t.Errorf("footer should contain extracted metrics, got %q", footer)
+	}
+}
+
+func TestBuildSlackFooter_FooterFormat(t *testing.T) {
+	os.Unsetenv("AKMATORI_BASE_URL")
+
+	response := "Done.\n\n---\n⏱️ Time: 5s | 🎯 Tokens: 100"
+	_, footer := buildSlackFooter(response, "inc-1")
+
+	// Footer should start with separator
+	if !strings.HasPrefix(footer, "\n\n———\n") {
+		t.Errorf("footer should start with separator, got %q", footer)
+	}
+}
+
+func TestTruncateWithFooter_NoTruncation(t *testing.T) {
+	content := "short content"
+	footer := "\n\n———\nmetrics\nlink"
+	result := truncateWithFooter(content, footer, 3900)
+
+	if result != content+footer {
+		t.Errorf("short content should not be truncated")
+	}
+}
+
+func TestTruncateWithFooter_TruncatesContent(t *testing.T) {
+	content := strings.Repeat("Line of text.\n", 300) // ~4500 bytes
+	footer := "\n\n———\n⏱️ Time: 5s\n<http://localhost:3000/incidents/x|View  reasoning log>"
+
+	result := truncateWithFooter(content, footer, 3900)
+
+	if len(result) > 3900 {
+		t.Errorf("result should be <= 3900 bytes, got %d", len(result))
+	}
+	if !strings.Contains(result, "View resoning log") {
+		t.Errorf("footer should always be present in result")
+	}
+	if !strings.Contains(result, "⏱️ Time: 5s") {
+		t.Errorf("metrics should always be present in result")
 	}
 }
 

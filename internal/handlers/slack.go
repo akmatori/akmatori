@@ -176,9 +176,14 @@ func (h *SlackHandler) handleEventsAPI(event slackevents.EventsAPIEvent) {
 		innerEvent := event.InnerEvent
 		switch ev := innerEvent.Data.(type) {
 		case *slackevents.AppMentionEvent:
+			log.Printf("Processing app_mention event from user=%s in channel=%s", ev.User, ev.Channel)
 			h.handleAppMention(ev)
 		case *slackevents.MessageEvent:
+			log.Printf("Processing message event: channel=%s channel_type=%s user=%s subtype=%s bot_id=%s",
+				ev.Channel, ev.ChannelType, ev.User, ev.SubType, ev.BotID)
 			h.handleMessage(ev)
+		default:
+			log.Printf("Unhandled inner event type: %s (data type: %T)", innerEvent.Type, innerEvent.Data)
 		}
 	}
 }
@@ -362,8 +367,30 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 			return
 		}
 
-		// Top-level message: only process bot/integration messages.
+		// Top-level message: check for human @mention of the bot.
 		if !isBotMessage {
+			// Check if this instance processes human messages as alerts
+			if shouldProcessHuman, _ := instance.Settings["process_human_messages"].(bool); shouldProcessHuman {
+				go h.handleAlertChannelMessage(event, instance)
+				return
+			}
+			if h.botUserID != "" && event.SubType == "" && event.User != "" &&
+				strings.Contains(event.Text, fmt.Sprintf("<@%s>", h.botUserID)) {
+				// Human @mentioning the bot at top level in alert channel.
+				// Dedup with app_mention handler.
+				dedupeKey := event.Channel + ":" + event.TimeStamp
+				if _, loaded := h.processedMsgs.LoadOrStore(dedupeKey, struct{}{}); loaded {
+					return
+				}
+				go func() {
+					time.Sleep(60 * time.Second)
+					h.processedMsgs.Delete(dedupeKey)
+				}()
+
+				text := strings.Replace(event.Text, fmt.Sprintf("<@%s>", h.botUserID), "", 1)
+				text = strings.TrimSpace(text)
+				h.processMessage(event.Channel, "", event.TimeStamp, text, event.User)
+			}
 			return
 		}
 
@@ -374,6 +401,35 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 
 	// For non-alert-channel messages, ignore bot messages and subtypes (edits, deletes, etc.)
 	if event.BotID != "" || event.SubType != "" {
+		return
+	}
+
+	// Check for @mention of the bot in a regular channel.
+	// This handles cases where Slack sends a message event but no app_mention event.
+	if event.ChannelType != "im" && h.botUserID != "" &&
+		strings.Contains(event.Text, fmt.Sprintf("<@%s>", h.botUserID)) {
+		// Dedup with app_mention handler
+		dedupeKey := event.Channel + ":" + event.TimeStamp
+		if _, loaded := h.processedMsgs.LoadOrStore(dedupeKey, struct{}{}); loaded {
+			log.Printf("Skipping duplicate message mention processing for %s", dedupeKey)
+			return
+		}
+		go func() {
+			time.Sleep(60 * time.Second)
+			h.processedMsgs.Delete(dedupeKey)
+		}()
+
+		text := strings.Replace(event.Text, fmt.Sprintf("<@%s>", h.botUserID), "", 1)
+		text = strings.TrimSpace(text)
+
+		// If this is a thread reply, fetch parent for context
+		if event.ThreadTimeStamp != "" {
+			if parentText := h.fetchThreadParentText(event.Channel, event.ThreadTimeStamp); parentText != "" {
+				text = fmt.Sprintf("Context — original message in this thread:\n---\n%s\n---\n\nUser request: %s", parentText, text)
+			}
+		}
+
+		h.processMessage(event.Channel, event.ThreadTimeStamp, event.TimeStamp, text, event.User)
 		return
 	}
 
@@ -511,16 +567,8 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		lastUpdate = time.Now()
 		lastProgressLog = progressLog
 
-		// Truncate if too long (Slack has ~4000 char limit, keep under 3000 to be safe)
-		maxProgressLen := 3000
-		truncatedLog := progressLog
-		if len(progressLog) > maxProgressLen {
-			truncatedLog = progressLog[len(progressLog)-maxProgressLen:]
-			if idx := strings.Index(truncatedLog, "\n"); idx > 0 && idx < 100 {
-				truncatedLog = truncatedLog[idx+1:]
-			}
-			truncatedLog = "...(truncated)\n" + truncatedLog
-		}
+		// Truncate for Slack's 4000-byte limit (leave room for wrapper text)
+		truncatedLog := truncateLogForSlack(progressLog, 3900)
 
 		_, _, _, err := h.client.UpdateMessage(
 			channel,
@@ -618,8 +666,11 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		if hasError {
 			finalResponse = response
 		} else if response != "" {
-			parsed := output.Parse(response)
-			finalResponse = output.FormatForSlack(parsed)
+			// Extract metrics before formatting so they don't get lost in truncation
+			contentOnly, footer := buildSlackFooter(response, incidentUUID)
+			parsed := output.Parse(contentOnly)
+			formatted := output.FormatForSlack(parsed)
+			finalResponse = truncateWithFooter(formatted, footer, 3900)
 		} else {
 			finalResponse = "✅ Task completed (no output)"
 		}

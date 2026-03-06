@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
-import { Save, MessageSquare, Cpu, Power, PowerOff, Info, Bell, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, Globe, Layers } from 'lucide-react';
+import { Save, MessageSquare, Cpu, Power, PowerOff, Info, Bell, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, Globe, Layers, Settings2 } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { SuccessMessage, WarningMessage } from '../components/ErrorMessage';
 import AlertSourcesManager from '../components/AlertSourcesManager';
 import ProxySettings from '../components/ProxySettings';
 import AggregationSettings from '../components/AggregationSettings';
-import { slackSettingsApi, llmSettingsApi } from '../api/client';
-import type { SlackSettings, SlackSettingsUpdate, LLMSettings, LLMSettingsUpdate, LLMProvider, ThinkingLevel } from '../types';
+import { slackSettingsApi, llmSettingsApi, generalSettingsApi } from '../api/client';
+import type { SlackSettings, SlackSettingsUpdate, LLMSettings, LLMSettingsUpdate, LLMProvider, ThinkingLevel, GeneralSettings as GeneralSettingsType } from '../types';
 
 // Model suggestions per provider
 const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: string }[]> = {
@@ -147,9 +147,18 @@ export default function Settings() {
   // Per-provider settings cache: stores unsaved edits so switching providers preserves input
   const [providerCache, setProviderCache] = useState<Record<string, { apiKey: string; model: string; thinkingLevel: ThinkingLevel; baseUrl: string }>>({});
 
+  // General settings state
+  const [generalSettings, setGeneralSettings] = useState<GeneralSettingsType | null>(null);
+  const [generalLoading, setGeneralLoading] = useState(true);
+  const [generalSaving, setGeneralSaving] = useState(false);
+  const [generalError, setGeneralError] = useState<string | null>(null);
+  const [generalSuccess, setGeneralSuccess] = useState(false);
+  const [instanceBaseUrl, setInstanceBaseUrl] = useState('');
+
   useEffect(() => {
     loadSlackSettings();
     loadLlmSettings();
+    loadGeneralSettings();
   }, []);
 
   const loadSlackSettings = async () => {
@@ -212,6 +221,39 @@ export default function Settings() {
       console.error(err);
     } finally {
       setLlmLoading(false);
+    }
+  };
+
+  const loadGeneralSettings = async () => {
+    try {
+      setGeneralLoading(true);
+      const data = await generalSettingsApi.get();
+      setGeneralSettings(data);
+      setInstanceBaseUrl(data.base_url || '');
+      setGeneralError(null);
+    } catch (err) {
+      setGeneralError('Failed to load general settings');
+      console.error(err);
+    } finally {
+      setGeneralLoading(false);
+    }
+  };
+
+  const handleGeneralSave = async () => {
+    try {
+      setGeneralSaving(true);
+      setGeneralError(null);
+      setGeneralSuccess(false);
+
+      const updated = await generalSettingsApi.update({ base_url: instanceBaseUrl });
+      setGeneralSettings(updated);
+      setGeneralSuccess(true);
+      setTimeout(() => setGeneralSuccess(false), 3000);
+    } catch (err) {
+      setGeneralError(err instanceof Error ? err.message : 'Failed to save general settings');
+      console.error(err);
+    } finally {
+      setGeneralSaving(false);
     }
   };
 
@@ -345,6 +387,54 @@ export default function Settings() {
 
       {/* Settings Sections */}
       <div className="space-y-4">
+        {/* General Settings */}
+        <SettingsSection
+          title="General"
+          description="Instance configuration and external access"
+          icon={Settings2}
+          status={generalSettings?.base_url ? 'configured' : undefined}
+        >
+          {generalLoading ? (
+            <LoadingSpinner />
+          ) : (
+            <div className="space-y-5">
+              {generalError && <ErrorMessage message={generalError} />}
+              {generalSuccess && <SuccessMessage message="Settings saved" />}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  Base URL
+                </label>
+                <input
+                  type="text"
+                  value={instanceBaseUrl}
+                  onChange={(e) => setInstanceBaseUrl(e.target.value)}
+                  placeholder="https://akmatori.example.com"
+                  className="input-field"
+                />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  External URL for accessing this Akmatori instance. Used in Slack message links.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
+                <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5" />
+                  Takes effect on next investigation
+                </p>
+                <button
+                  onClick={handleGeneralSave}
+                  disabled={generalSaving}
+                  className="btn btn-primary"
+                >
+                  <Save className="w-4 h-4" />
+                  {generalSaving ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            </div>
+          )}
+        </SettingsSection>
+
         {/* LLM Provider Section - Most Important, Default Expanded */}
         <SettingsSection
           title="AI Configuration"

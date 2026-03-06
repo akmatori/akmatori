@@ -326,6 +326,18 @@ export interface SSHKeyUpdateRequest {
   is_default?: boolean;
 }
 
+// General Settings
+export interface GeneralSettings {
+  id: number;
+  base_url: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GeneralSettingsUpdate {
+  base_url?: string;
+}
+
 export interface SSHHostConfig {
   hostname: string;
   address: string;

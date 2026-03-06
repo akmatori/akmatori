@@ -149,7 +149,7 @@ func testSlackHandler(botUserID string, alertChannels map[string]*database.Alert
 // classifyMessage determines what handleMessage would do with a given event,
 // without actually calling external services. Returns one of:
 // "skip_self", "bot_thread_alert", "human_mention_thread", "ignore_thread",
-// "top_level_alert", "ignore_non_bot", "non_alert_channel"
+// "human_top_level_alert", "top_level_alert", "ignore_non_bot", "non_alert_channel"
 func classifyMessage(h *SlackHandler, event *slackevents.MessageEvent) string {
 	// Mirrors the logic in handleMessage
 	if h.botUserID != "" && event.User == h.botUserID {
@@ -157,7 +157,7 @@ func classifyMessage(h *SlackHandler, event *slackevents.MessageEvent) string {
 	}
 
 	h.alertChannelsMu.RLock()
-	_, isAlert := h.alertChannels[event.Channel]
+	instance, isAlert := h.alertChannels[event.Channel]
 	h.alertChannelsMu.RUnlock()
 
 	if isAlert {
@@ -175,6 +175,9 @@ func classifyMessage(h *SlackHandler, event *slackevents.MessageEvent) string {
 		}
 
 		if !isBotMessage {
+			if shouldProcessHuman, _ := instance.Settings["process_human_messages"].(bool); shouldProcessHuman {
+				return "human_top_level_alert"
+			}
 			return "ignore_non_bot"
 		}
 		return "top_level_alert"
@@ -298,6 +301,54 @@ func TestHandleMessage_ThreadReplyHumanNoMention(t *testing.T) {
 	}
 	if got := classifyMessage(h, event); got != "ignore_thread" {
 		t.Errorf("got %q, want ignore_thread", got)
+	}
+}
+
+func TestHandleMessage_TopLevelHumanMessage_ProcessEnabled(t *testing.T) {
+	h := testSlackHandler("U_BOT", map[string]*database.AlertSourceInstance{
+		"C_ALERT": {
+			Settings: database.JSONB{"process_human_messages": true},
+		},
+	})
+	event := &slackevents.MessageEvent{
+		Channel: "C_ALERT",
+		User:    "U_HUMAN",
+		Text:    "PROBLEM: high CPU on web-01",
+	}
+	if got := classifyMessage(h, event); got != "human_top_level_alert" {
+		t.Errorf("got %q, want human_top_level_alert", got)
+	}
+}
+
+func TestHandleMessage_TopLevelHumanMessage_ProcessDisabled(t *testing.T) {
+	h := testSlackHandler("U_BOT", map[string]*database.AlertSourceInstance{
+		"C_ALERT": {
+			Settings: database.JSONB{"process_human_messages": false},
+		},
+	})
+	event := &slackevents.MessageEvent{
+		Channel: "C_ALERT",
+		User:    "U_HUMAN",
+		Text:    "hey team, checking the alerts",
+	}
+	if got := classifyMessage(h, event); got != "ignore_non_bot" {
+		t.Errorf("got %q, want ignore_non_bot", got)
+	}
+}
+
+func TestHandleMessage_TopLevelHumanMessage_SettingMissing(t *testing.T) {
+	h := testSlackHandler("U_BOT", map[string]*database.AlertSourceInstance{
+		"C_ALERT": {
+			Settings: database.JSONB{},
+		},
+	})
+	event := &slackevents.MessageEvent{
+		Channel: "C_ALERT",
+		User:    "U_HUMAN",
+		Text:    "some message",
+	}
+	if got := classifyMessage(h, event); got != "ignore_non_bot" {
+		t.Errorf("got %q, want ignore_non_bot (backward compat)", got)
 	}
 }
 

@@ -103,6 +103,7 @@ func AutoMigrate() error {
 		&IncidentAlert{},
 		&IncidentMerge{},
 		&AggregationSettings{},
+		&GeneralSettings{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
@@ -493,6 +494,31 @@ func GetOrCreateAggregationSettings(db *gorm.DB) (*AggregationSettings, error) {
 // Accepts a db parameter for dependency injection, transaction support, and testing.
 func UpdateAggregationSettings(db *gorm.DB, settings *AggregationSettings) error {
 	return db.Save(settings).Error
+}
+
+// GetOrCreateGeneralSettings retrieves or creates general settings (singleton)
+func GetOrCreateGeneralSettings() (*GeneralSettings, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+	var settings GeneralSettings
+	err := DB.First(&settings).Error
+	if err == gorm.ErrRecordNotFound {
+		settings = GeneralSettings{}
+		if err := DB.Create(&settings).Error; err != nil {
+			return nil, err
+		}
+		return &settings, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &settings, nil
+}
+
+// UpdateGeneralSettings updates general settings in the database
+func UpdateGeneralSettings(settings *GeneralSettings) error {
+	return DB.Save(settings).Error
 }
 
 // migrateProxySettings ensures proxy settings exist with defaults

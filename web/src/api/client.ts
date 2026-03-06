@@ -11,6 +11,8 @@ import type {
   LLMSettingsUpdate,
   ProxySettings,
   ProxySettingsUpdate,
+  GeneralSettings,
+  GeneralSettingsUpdate,
   ContextFile,
   ValidateReferencesResponse,
   CreateIncidentRequest,
@@ -243,6 +245,17 @@ export const proxySettingsApi = {
 
   update: (settings: ProxySettingsUpdate) =>
     fetchApi<ProxySettings>('/api/settings/proxy', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    }),
+};
+
+// General Settings API
+export const generalSettingsApi = {
+  get: () => fetchApi<GeneralSettings>('/api/settings/general'),
+
+  update: (settings: GeneralSettingsUpdate) =>
+    fetchApi<GeneralSettings>('/api/settings/general', {
       method: 'PUT',
       body: JSON.stringify(settings),
     }),
