@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -376,5 +377,201 @@ func AssertFalse(t *testing.T, condition bool, msg string) {
 
 	if condition {
 		t.Errorf("%s: expected false, got true", msg)
+	}
+}
+
+// ========================================
+// Error Helpers
+// ========================================
+
+// AssertErrorContains checks that an error occurred and contains the given substring
+func AssertErrorContains(t *testing.T, err error, substr string, msg string) {
+	t.Helper()
+
+	if err == nil {
+		t.Errorf("%s: expected error containing %q, got nil", msg, substr)
+		return
+	}
+
+	if !strings.Contains(err.Error(), substr) {
+		t.Errorf("%s: expected error to contain %q, got %q", msg, substr, err.Error())
+	}
+}
+
+// AssertPanics checks that the given function panics
+func AssertPanics(t *testing.T, fn func(), msg string) {
+	t.Helper()
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("%s: expected panic, but function did not panic", msg)
+		}
+	}()
+
+	fn()
+}
+
+// AssertNoPanic checks that the given function does not panic
+func AssertNoPanic(t *testing.T, fn func(), msg string) {
+	t.Helper()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("%s: unexpected panic: %v", msg, r)
+		}
+	}()
+
+	fn()
+}
+
+// ========================================
+// Retry Helpers
+// ========================================
+
+// RetryUntil retries a function until it returns true or timeout is reached
+// Useful for testing async operations or eventual consistency
+func RetryUntil(t *testing.T, timeout time.Duration, interval time.Duration, fn func() bool, msg string) bool {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return true
+		}
+		time.Sleep(interval)
+	}
+	return false
+}
+
+// AssertEventually checks that a condition becomes true within the timeout
+func AssertEventually(t *testing.T, timeout time.Duration, interval time.Duration, condition func() bool, msg string) {
+	t.Helper()
+
+	if !RetryUntil(t, timeout, interval, condition, msg) {
+		t.Errorf("%s: condition did not become true within %v", msg, timeout)
+	}
+}
+
+// ========================================
+// Environment Helpers
+// ========================================
+
+// WithEnv temporarily sets an environment variable and returns a cleanup function
+func WithEnv(t *testing.T, key, value string) func() {
+	t.Helper()
+
+	original, existed := os.LookupEnv(key)
+	if err := os.Setenv(key, value); err != nil {
+		t.Fatalf("failed to set env var %s: %v", key, err)
+	}
+
+	return func() {
+		if existed {
+			os.Setenv(key, original)
+		} else {
+			os.Unsetenv(key)
+		}
+	}
+}
+
+// WithEnvs temporarily sets multiple environment variables
+func WithEnvs(t *testing.T, envs map[string]string) func() {
+	t.Helper()
+
+	cleanups := make([]func(), 0, len(envs))
+	for k, v := range envs {
+		cleanups = append(cleanups, WithEnv(t, k, v))
+	}
+
+	return func() {
+		for _, cleanup := range cleanups {
+			cleanup()
+		}
+	}
+}
+
+// ========================================
+// HTTP Response Helpers
+// ========================================
+
+// AssertStatusCode checks the HTTP response status code
+func AssertStatusCode(t *testing.T, got, expected int, msg string) {
+	t.Helper()
+
+	if got != expected {
+		t.Errorf("%s: expected status %d, got %d", msg, expected, got)
+	}
+}
+
+// AssertContentType checks the HTTP Content-Type header
+func AssertContentType(t *testing.T, contentType, expected string, msg string) {
+	t.Helper()
+
+	// Handle Content-Type with charset (e.g., "application/json; charset=utf-8")
+	if !strings.HasPrefix(contentType, expected) {
+		t.Errorf("%s: expected Content-Type starting with %q, got %q", msg, expected, contentType)
+	}
+}
+
+// ========================================
+// Comparison Helpers
+// ========================================
+
+// AssertDeepEqual compares two values using JSON serialization
+// This is useful for comparing structs with complex nested types
+func AssertDeepEqual(t *testing.T, expected, actual interface{}, msg string) {
+	t.Helper()
+
+	expectedJSON, err := json.Marshal(expected)
+	if err != nil {
+		t.Fatalf("%s: failed to marshal expected value: %v", msg, err)
+	}
+
+	actualJSON, err := json.Marshal(actual)
+	if err != nil {
+		t.Fatalf("%s: failed to marshal actual value: %v", msg, err)
+	}
+
+	if string(expectedJSON) != string(actualJSON) {
+		t.Errorf("%s: values differ\nexpected: %s\nactual: %s", msg, expectedJSON, actualJSON)
+	}
+}
+
+// ========================================
+// Counter Helper for Testing
+// ========================================
+
+// CallCounter is a thread-safe counter for tracking function calls in tests
+type CallCounter struct {
+	count int64
+}
+
+// NewCallCounter creates a new CallCounter
+func NewCallCounter() *CallCounter {
+	return &CallCounter{}
+}
+
+// Inc increments the counter
+func (c *CallCounter) Inc() {
+	atomic.AddInt64(&c.count, 1)
+}
+
+// Count returns the current count
+func (c *CallCounter) Count() int64 {
+	return atomic.LoadInt64(&c.count)
+}
+
+// Reset resets the counter to zero
+func (c *CallCounter) Reset() {
+	atomic.StoreInt64(&c.count, 0)
+}
+
+// AssertCount checks the counter value
+func (c *CallCounter) AssertCount(t *testing.T, expected int64, msg string) {
+	t.Helper()
+
+	actual := c.Count()
+	if actual != expected {
+		t.Errorf("%s: expected call count %d, got %d", msg, expected, actual)
 	}
 }
