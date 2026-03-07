@@ -988,7 +988,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 // runSlackChannelInvestigationLocal runs investigation using local executor.
 // Kept as legacy fallback if WebSocket worker is unavailable.
 //
-//nolint:unused // Legacy fallback for local execution - may be re-enabled
+//lint:ignore U1000 Legacy fallback for local execution - may be re-enabled
 func (h *AlertHandler) runSlackChannelInvestigationLocal(
 	incidentUUID, workingDir string,
 	alert alerts.NormalizedAlert,

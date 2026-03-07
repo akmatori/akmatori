@@ -18,7 +18,7 @@ type APIHandler struct {
 	alertService         *services.AlertService
 	codexExecutor        *executor.Executor
 	agentWSHandler       *AgentWSHandler
-	codexWSHandler       *CodexWSHandler //nolint:unused // Reserved for device auth feature
+	codexWSHandler       *CodexWSHandler //lint:ignore U1000 Reserved for device auth feature
 	slackManager         *slackutil.Manager
 	deviceAuthService    *services.DeviceAuthService
 	alertChannelReloader func() // called after alert source create/update/delete to reload Slack channel mappings

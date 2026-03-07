@@ -215,7 +215,7 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 // runIncidentLocal runs incident using the local executor (legacy fallback).
 // Kept in case WebSocket-based execution needs to be bypassed.
 //
-//nolint:unused // Legacy fallback for local execution - may be re-enabled
+//lint:ignore U1000 Legacy fallback for local execution - may be re-enabled
 func (h *APIHandler) runIncidentLocal(incidentUUID, workingDir, taskHeader, taskWithGuidance string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 	defer cancel()
