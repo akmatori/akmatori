@@ -791,7 +791,7 @@ func TestTruncateWithFooter_TruncatesContent(t *testing.T) {
 	if len(result) > 3900 {
 		t.Errorf("result should be <= 3900 bytes, got %d", len(result))
 	}
-	if !strings.Contains(result, "View resoning log") {
+	if !strings.Contains(result, "View  reasoning log") {
 		t.Errorf("footer should always be present in result")
 	}
 	if !strings.Contains(result, "⏱️ Time: 5s") {
