@@ -841,13 +841,28 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 // When event.Text is empty, we fetch the full message via the Slack API to extract
 // text from attachments and blocks.
 func (h *SlackHandler) extractFullMessageText(event *slackevents.MessageEvent) string {
+	// Always try to fetch the full message from the Slack API. The Events API
+	// MessageEvent only contains event.Text (a plain-text summary) and does NOT
+	// include Blocks or Attachments. Bots and integrations (channel relays, Zabbix, Datadog,
+	// etc.) often put the real alert content in blocks/attachments while event.Text
+	// is just a short preview like "New notification from …".
+	fullText := h.fetchFullMessageText(event)
+	if fullText != "" {
+		return fullText
+	}
+
+	// Fallback to event.Text when the API fetch fails or returns nothing
 	if event.Text != "" {
+		log.Printf("Using event.Text fallback for channel=%s ts=%s", event.Channel, event.TimeStamp)
 		return event.Text
 	}
 
-	// Text is empty — fetch the full message from the Slack API to get attachments/blocks.
-	log.Printf("Message text empty for channel=%s ts=%s, fetching full message via API", event.Channel, event.TimeStamp)
+	return ""
+}
 
+// fetchFullMessageText retrieves the full message (with blocks and attachments)
+// from the Slack API and extracts all readable text.
+func (h *SlackHandler) fetchFullMessageText(event *slackevents.MessageEvent) string {
 	if event.ThreadTimeStamp != "" && event.ThreadTimeStamp != event.TimeStamp {
 		// Thread reply: use GetConversationReplies
 		msgs, _, _, err := h.client.GetConversationReplies(&slack.GetConversationRepliesParameters{

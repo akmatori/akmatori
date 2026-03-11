@@ -10,8 +10,8 @@
   "alert_status": "Triggered",
   "hostname": "api-gateway-01",
   "org_id": "org-123",
-  "org_name": "AcmeCorp",
-  "snapshot": "https://app.datadoghq.com/snapshot/123",
+  "org_name": "ExampleCorp",
+  "snapshot": "https://monitoring.example.com/snapshot/123",
   "date": 1705315800,
   "tags": [
     "service:api-gateway",
@@ -25,7 +25,7 @@
       "name": "Runbook"
     },
     {
-      "url": "https://app.datadoghq.com/monitors/123",
+      "url": "https://monitoring.example.com/monitors/123",
       "name": "Monitor"
     }
   ],

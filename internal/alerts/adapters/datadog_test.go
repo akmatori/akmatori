@@ -34,7 +34,7 @@ func TestDatadogAdapter_ParsePayload_TriggeredAlert(t *testing.T) {
 		"alert_status": "Triggered",
 		"hostname": "api-gateway-01",
 		"org_id": "org-123",
-		"org_name": "AcmeCorp",
+		"org_name": "ExampleCorp",
 		"date": 1705315800,
 		"tags": [
 			"service:api-gateway",
