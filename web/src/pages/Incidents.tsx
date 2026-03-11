@@ -8,6 +8,7 @@ import TimeRangePicker from '../components/TimeRangePicker';
 import IncidentDetailView from '../components/IncidentDetailView';
 import { incidentsApi } from '../api/client';
 import type { Incident } from '../types';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 // Default: last 30 minutes
 const DEFAULT_TIME_RANGE = 30 * 60;
@@ -27,6 +28,12 @@ export default function Incidents() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const refreshIntervalRef = useRef<number | null>(null);
 
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(50);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalIncidents, setTotalIncidents] = useState(0);
+
   // Time range picker state
   const now = Math.floor(Date.now() / 1000);
   const [timeFrom, setTimeFrom] = useState(now - DEFAULT_TIME_RANGE);
@@ -37,7 +44,7 @@ export default function Incidents() {
   const listRefreshRef = useRef<number | null>(null);
 
   // Load incidents with current time range
-  const loadIncidents = useCallback(async (from?: number, to?: number, isRefresh?: boolean) => {
+  const loadIncidents = useCallback(async (from?: number, to?: number, isRefresh?: boolean, pageOverride?: number, perPageOverride?: number) => {
     try {
       setLoading(true);
       setError('');
@@ -55,8 +62,12 @@ export default function Incidents() {
         effectiveTo = to ?? currentNow;
       }
 
-      const data = await incidentsApi.list(effectiveFrom, effectiveTo);
-      setIncidents(data);
+      const currentPage = pageOverride ?? page;
+      const currentPerPage = perPageOverride ?? perPage;
+      const result = await incidentsApi.list(effectiveFrom, effectiveTo, currentPage, currentPerPage);
+      setIncidents(result.data);
+      setTotalPages(result.pagination.total_pages);
+      setTotalIncidents(result.pagination.total);
 
       // Update time state for display
       if (isRefresh && relativeRange !== null) {
@@ -68,7 +79,7 @@ export default function Incidents() {
     } finally {
       setLoading(false);
     }
-  }, [timeFrom, relativeRange]);
+  }, [timeFrom, relativeRange, page, perPage]);
 
   // Initial load
   useEffect(() => {
@@ -95,9 +106,16 @@ export default function Incidents() {
   const handleTimeRangeChange = useCallback((from: number, to: number, relativeDuration?: number | null) => {
     setTimeFrom(from);
     setTimeTo(to);
+    setPage(1);
     // Track if this is a relative range (for auto-refresh recalculation)
     setRelativeRange(relativeDuration ?? null);
-    loadIncidents(from, to);
+    loadIncidents(from, to, false, 1);
+  }, [loadIncidents]);
+
+  // Handle page change
+  const handlePageChange = useCallback((newPage: number) => {
+    setPage(newPage);
+    loadIncidents(undefined, undefined, false, newPage);
   }, [loadIncidents]);
 
   // Handle refresh interval change
@@ -241,6 +259,7 @@ export default function Incidents() {
               <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Create a new incident to get started</p>
             </div>
           ) : (
+            <>
             <div className="overflow-x-auto">
               <table className="table">
                 <thead>
@@ -326,6 +345,48 @@ export default function Incidents() {
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+                <div className="flex items-center gap-4">
+                  <span className="text-sm text-gray-500 dark:text-gray-400">
+                    Page {page} of {totalPages} ({totalIncidents.toLocaleString()} total)
+                  </span>
+                  <select
+                    value={perPage}
+                    onChange={(e) => {
+                      const newPerPage = Number(e.target.value);
+                      setPerPage(newPerPage);
+                      setPage(1);
+                      loadIncidents(undefined, undefined, false, 1, newPerPage);
+                    }}
+                    className="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+                  >
+                    <option value={25}>25 per page</option>
+                    <option value={50}>50 per page</option>
+                    <option value={100}>100 per page</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handlePageChange(page - 1)}
+                    disabled={page <= 1}
+                    className="btn btn-secondary p-1.5 disabled:opacity-50"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handlePageChange(page + 1)}
+                    disabled={page >= totalPages}
+                    className="btn btn-secondary p-1.5 disabled:opacity-50"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+            </>
           )}
         </div>
       )}

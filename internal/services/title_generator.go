@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/utils"
 )
 
 // TitleGenerator generates concise titles for incidents using LLM
@@ -162,8 +163,8 @@ Respond with ONLY the title, nothing else.`
 
 // GenerateFallbackTitle creates a simple title when LLM is not available
 func (t *TitleGenerator) GenerateFallbackTitle(message string, source string) string {
-	// Clean up the message
-	message = strings.TrimSpace(message)
+	// Strip any Slack mrkdwn formatting that may have leaked through
+	message = utils.StripSlackMrkdwn(message)
 
 	// Remove common prefixes
 	message = strings.TrimPrefix(message, "Alert:")

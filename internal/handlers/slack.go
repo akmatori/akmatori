@@ -13,6 +13,7 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/output"
+	"github.com/akmatori/akmatori/internal/utils"
 	"github.com/akmatori/akmatori/internal/services"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -751,6 +752,7 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 
 	// Extract message text (including text from blocks and attachments)
 	messageText := h.extractFullMessageText(event)
+	messageText = utils.StripSlackMrkdwn(messageText)
 	if messageText == "" {
 		log.Printf("Empty message text, skipping")
 		return

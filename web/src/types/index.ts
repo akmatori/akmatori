@@ -338,6 +338,19 @@ export interface GeneralSettingsUpdate {
   base_url?: string;
 }
 
+// Pagination
+export interface PaginationMeta {
+  page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  pagination: PaginationMeta;
+}
+
 export interface SSHHostConfig {
   hostname: string;
   address: string;

@@ -17,6 +17,7 @@ import type {
   ValidateReferencesResponse,
   CreateIncidentRequest,
   CreateIncidentResponse,
+  PaginatedResponse,
   ScriptsListResponse,
   ScriptInfo,
   AlertSourceType,
@@ -200,12 +201,13 @@ export const sshKeysApi = {
 
 // Incidents API
 export const incidentsApi = {
-  list: (from?: number, to?: number) => {
+  list: (from?: number, to?: number, page = 1, perPage = 50) => {
     const params = new URLSearchParams();
     if (from !== undefined) params.set('from', String(from));
     if (to !== undefined) params.set('to', String(to));
-    const query = params.toString() ? `?${params.toString()}` : '';
-    return fetchApi<Incident[]>(`/api/incidents${query}`);
+    params.set('page', String(page));
+    params.set('per_page', String(perPage));
+    return fetchApi<PaginatedResponse<Incident>>(`/api/incidents?${params.toString()}`);
   },
 
   get: (uuid: string) => fetchApi<Incident>(`/api/incidents/${uuid}`),

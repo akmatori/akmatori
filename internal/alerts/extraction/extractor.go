@@ -13,6 +13,7 @@ import (
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/utils"
 )
 
 // AlertExtractor extracts alert information from free-form text using AI
@@ -246,12 +247,7 @@ func (e *AlertExtractor) createFallbackAlert(messageText string) *alerts.Normali
 	lines := strings.Split(messageText, "\n")
 	if len(lines) > 0 {
 		firstLine := strings.TrimSpace(lines[0])
-		// Remove common prefixes
-		firstLine = strings.TrimPrefix(firstLine, ":alert:")
-		firstLine = strings.TrimPrefix(firstLine, ":warning:")
-		firstLine = strings.TrimPrefix(firstLine, ":x:")
-		firstLine = strings.TrimPrefix(firstLine, ":rotating_light:")
-		firstLine = strings.TrimSpace(firstLine)
+		firstLine = utils.StripSlackMrkdwn(firstLine)
 
 		if len(firstLine) > 0 && len(firstLine) <= 100 {
 			alertName = firstLine

@@ -183,9 +183,9 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
   }, [incident.full_log]);
 
   return (
-    <div>
+    <div className="flex flex-col min-h-0">
       {/* Tab Navigation */}
-      <div className="flex border-b border-gray-200 dark:border-gray-700 px-6">
+      <div className="flex border-b border-gray-200 dark:border-gray-700 px-6 shrink-0">
         <button
           onClick={() => setActiveTab('reasoning')}
           className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${

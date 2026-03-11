@@ -41,48 +41,37 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Check for pagination params
-		pageParam := r.URL.Query().Get("page")
-		perPageParam := r.URL.Query().Get("per_page")
+		// Always use pagination (defaults: page=1, per_page=50)
+		params := api.ParsePagination(r)
 
-		if pageParam != "" || perPageParam != "" {
-			params := api.ParsePagination(r)
-
-			var total int64
-			countQuery := db.Model(&database.Incident{})
-			if fromParam != "" {
-				if from, err := strconv.ParseInt(fromParam, 10, 64); err == nil {
-					countQuery = countQuery.Where("created_at >= ?", time.Unix(from, 0))
-				}
+		var total int64
+		countQuery := db.Model(&database.Incident{})
+		if fromParam != "" {
+			if from, err := strconv.ParseInt(fromParam, 10, 64); err == nil {
+				countQuery = countQuery.Where("created_at >= ?", time.Unix(from, 0))
 			}
-			if toParam != "" {
-				if to, err := strconv.ParseInt(toParam, 10, 64); err == nil {
-					countQuery = countQuery.Where("created_at <= ?", time.Unix(to, 0))
-				}
-			}
-			countQuery.Count(&total)
-
-			if err := query.Offset(params.Offset()).Limit(params.PerPage).Find(&incidents).Error; err != nil {
-				api.RespondError(w, http.StatusInternalServerError, "Failed to get incidents")
-				return
-			}
-
-			api.RespondJSON(w, http.StatusOK, api.PaginatedResponse{
-				Data: incidents,
-				Pagination: api.PaginationMeta{
-					Page:       params.Page,
-					PerPage:    params.PerPage,
-					Total:      total,
-					TotalPages: params.TotalPages(total),
-				},
-			})
-		} else {
-			if err := query.Limit(500).Find(&incidents).Error; err != nil {
-				api.RespondError(w, http.StatusInternalServerError, "Failed to get incidents")
-				return
-			}
-			api.RespondJSON(w, http.StatusOK, incidents)
 		}
+		if toParam != "" {
+			if to, err := strconv.ParseInt(toParam, 10, 64); err == nil {
+				countQuery = countQuery.Where("created_at <= ?", time.Unix(to, 0))
+			}
+		}
+		countQuery.Count(&total)
+
+		if err := query.Offset(params.Offset()).Limit(params.PerPage).Find(&incidents).Error; err != nil {
+			api.RespondError(w, http.StatusInternalServerError, "Failed to get incidents")
+			return
+		}
+
+		api.RespondJSON(w, http.StatusOK, api.PaginatedResponse{
+			Data: incidents,
+			Pagination: api.PaginationMeta{
+				Page:       params.Page,
+				PerPage:    params.PerPage,
+				Total:      total,
+				TotalPages: params.TotalPages(total),
+			},
+		})
 
 	case http.MethodPost:
 		var req api.CreateIncidentRequest

@@ -34,7 +34,7 @@ export default function Dashboard() {
         alertSourcesApi.list().catch(() => []),
       ]);
 
-      setIncidents(incidentsData?.slice(0, 5) ?? []);
+      setIncidents(incidentsData?.data?.slice(0, 5) ?? []);
       setLlmConfigured(llmSettings?.is_configured ?? false);
       setAlertSourcesCount(alertSources?.length ?? 0);
     } catch (err) {

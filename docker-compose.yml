@@ -43,6 +43,11 @@ services:
     image: postgres:16-alpine
     container_name: akmatori-postgres
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "500m"
+        max-file: "3"
     networks:
       - api-internal
     environment:
@@ -74,6 +79,11 @@ services:
         NO_PROXY:    ${NO_PROXY}
     container_name: akmatori-api
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "500m"
+        max-file: "3"
     networks:
       - frontend
       - api-internal
@@ -110,6 +120,11 @@ services:
         NO_PROXY:    ${NO_PROXY}
     container_name: akmatori-mcp-gateway
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "500m"
+        max-file: "3"
     networks:
       - frontend        # For external access (SSH to remote servers, Zabbix API)
       - api-internal    # For database access
@@ -146,6 +161,11 @@ services:
         NO_PROXY:    ${NO_PROXY}
     container_name: akmatori-agent
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "500m"
+        max-file: "3"
     networks:
       - frontend        # For external access (LLM API calls)
       - api-internal    # For WebSocket to API
@@ -185,6 +205,11 @@ services:
         NO_PROXY:    ${NO_PROXY}
     container_name: akmatori-frontend
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "500m"
+        max-file: "3"
     networks:
       - frontend
     depends_on:
@@ -194,6 +219,11 @@ services:
     image: nginx:alpine
     container_name: akmatori-proxy
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "500m"
+        max-file: "3"
     networks:
       - frontend
     depends_on:
