@@ -28,7 +28,7 @@ services:
       - ./akmatori_data:/akmatori
     command: >
       sh -c "
-        mkdir -p /akmatori/incidents /akmatori/context /akmatori/skills /akmatori/secrets &&
+        mkdir -p /akmatori/incidents /akmatori/context /akmatori/skills /akmatori/runbooks /akmatori/secrets &&
         if [ ! -f /akmatori/secrets/postgres_password ]; then
           head -c 32 /dev/urandom | base64 | tr -d '=/+' | head -c 32 > /akmatori/secrets/postgres_password;
           echo 'Generated new PostgreSQL password';
@@ -183,6 +183,7 @@ services:
       - ./akmatori_data/incidents:/workspaces:rw      # ONLY incidents - no access to skills/tools source
       - ./akmatori_data/context:/akmatori/context:ro  # Shared context files (read-only)
       - ./akmatori_data/skills:/akmatori/skills:ro    # Skill definitions for pi-mono resource loader
+      - ./akmatori_data/runbooks:/akmatori/runbooks:ro  # Runbook SOPs for incident investigations
     healthcheck:
       test: ["CMD", "pgrep", "node"]
       interval: 30s

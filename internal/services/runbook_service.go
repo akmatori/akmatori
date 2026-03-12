@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/akmatori/akmatori/internal/database"
 	"gorm.io/gorm"
@@ -16,6 +17,7 @@ import (
 type RunbookService struct {
 	db          *gorm.DB
 	runbooksDir string
+	syncMu      sync.Mutex // serializes SyncRunbookFiles calls
 }
 
 // NewRunbookService creates a new runbook service
@@ -49,7 +51,7 @@ func (s *RunbookService) CreateRunbook(title, content string) (*database.Runbook
 	}
 
 	if err := s.SyncRunbookFiles(); err != nil {
-		log.Printf("Warning: failed to sync runbook files after create: %v", err)
+		return nil, fmt.Errorf("runbook created but file sync failed: %w", err)
 	}
 
 	return runbook, nil
@@ -76,7 +78,7 @@ func (s *RunbookService) UpdateRunbook(id uint, title, content string) (*databas
 	}
 
 	if err := s.SyncRunbookFiles(); err != nil {
-		log.Printf("Warning: failed to sync runbook files after update: %v", err)
+		return nil, fmt.Errorf("runbook updated but file sync failed: %w", err)
 	}
 
 	return &runbook, nil
@@ -93,7 +95,7 @@ func (s *RunbookService) DeleteRunbook(id uint) error {
 	}
 
 	if err := s.SyncRunbookFiles(); err != nil {
-		log.Printf("Warning: failed to sync runbook files after delete: %v", err)
+		return fmt.Errorf("runbook deleted but file sync failed: %w", err)
 	}
 
 	return nil
@@ -138,8 +140,12 @@ func slugify(title string) string {
 	return s
 }
 
-// SyncRunbookFiles writes all runbooks as markdown files and removes stale ones
+// SyncRunbookFiles writes all runbooks as markdown files and removes stale ones.
+// It is serialized by a mutex to prevent concurrent syncs from racing.
 func (s *RunbookService) SyncRunbookFiles() error {
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+
 	// Ensure directory exists
 	if err := os.MkdirAll(s.runbooksDir, 0755); err != nil {
 		return fmt.Errorf("failed to create runbooks directory: %w", err)

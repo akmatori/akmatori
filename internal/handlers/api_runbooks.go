@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/akmatori/akmatori/internal/api"
 )
@@ -39,7 +40,11 @@ func (h *APIHandler) handleRunbooks(w http.ResponseWriter, r *http.Request) {
 
 		runbook, err := h.runbookService.CreateRunbook(req.Title, req.Content)
 		if err != nil {
-			api.RespondError(w, http.StatusBadRequest, err.Error())
+			status := http.StatusBadRequest
+			if strings.Contains(err.Error(), "file sync failed") {
+				status = http.StatusInternalServerError
+			}
+			api.RespondError(w, status, err.Error())
 			return
 		}
 
@@ -77,7 +82,11 @@ func (h *APIHandler) handleRunbookByID(w http.ResponseWriter, r *http.Request) {
 
 		runbook, err := h.runbookService.UpdateRunbook(uint(id), req.Title, req.Content)
 		if err != nil {
-			api.RespondError(w, http.StatusBadRequest, err.Error())
+			status := http.StatusBadRequest
+			if strings.Contains(err.Error(), "file sync failed") {
+				status = http.StatusInternalServerError
+			}
+			api.RespondError(w, status, err.Error())
 			return
 		}
 
@@ -85,7 +94,11 @@ func (h *APIHandler) handleRunbookByID(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodDelete:
 		if err := h.runbookService.DeleteRunbook(uint(id)); err != nil {
-			api.RespondError(w, http.StatusNotFound, err.Error())
+			status := http.StatusNotFound
+			if strings.Contains(err.Error(), "file sync failed") {
+				status = http.StatusInternalServerError
+			}
+			api.RespondError(w, status, err.Error())
 			return
 		}
 		api.RespondNoContent(w)
