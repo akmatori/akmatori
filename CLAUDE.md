@@ -73,24 +73,26 @@ make verify           # go vet + all tests (pre-commit)
 | Agent worker (`agent-worker/`) | `docker-compose build akmatori-agent && docker-compose up -d akmatori-agent` |
 | Frontend (`web/`) | `docker-compose build frontend && docker-compose up -d frontend` |
 
-## Current Test Coverage (Mar 2026)
+## Current Test Coverage (Mar 12, 2026)
 
 | Package | Coverage | Status |
 |---------|----------|--------|
 | `internal/alerts` | 100.0% | ✅ |
 | `internal/alerts/adapters` | 98.4% | ✅ |
+| `internal/utils` | 94.2% | ✅ |
 | `internal/api` | 92.3% | ✅ |
-| `internal/utils` | 93.4% | ✅ |
 | `internal/setup` | 84.8% | ✅ |
 | `internal/middleware` | 78.9% | ✅ |
 | `internal/testhelpers` | 74.8% | ✅ |
+| `internal/output` | 68.4% | ✅ |
 | `internal/jobs` | 58.1% | ✅ |
+| `internal/alerts/extraction` | 36.0% | ⚠️ |
 | `internal/slack` | 32.3% | ⚠️ |
-| `internal/services` | 28.3% | ⚠️ |
-| `internal/handlers` | 9.5% | ⚠️ |
-| `internal/output` | 0.0% | ❌ |
+| `internal/services` | 28.8% | ⚠️ |
+| `internal/database` | 20.2% | ⚠️ |
+| `internal/handlers` | 10.2% | ⚠️ |
 
-**Total: ~32%** | **Priority**: output (parser tests), handlers (HTTP tests), services
+**Priority**: handlers (HTTP tests), services, extraction (LLM mocks)
 
 ## Agent Worker Architecture
 
@@ -211,6 +213,24 @@ fmt.Println(parsed.CleanOutput)  // Structured blocks stripped
 | AlertService | Alert processing and normalization |
 | AggregationService | Incident correlation settings |
 | TitleGenerator | AI-powered incident title generation |
+| RunbookService | Runbook CRUD and file sync |
+
+## Runbook System (`internal/services/runbook_service.go`)
+
+Runbooks (SOPs) guide AI agent investigations. Stored in PostgreSQL, synced as markdown to `/akmatori/runbooks/`.
+
+**Flow**: DB → markdown files → agent reads during investigation
+
+**API**: REST at `/api/runbooks`
+- `GET /api/runbooks` - List all
+- `POST /api/runbooks` - Create (`{title, content}`)
+- `GET /api/runbooks/{id}` - Get one
+- `PUT /api/runbooks/{id}` - Update
+- `DELETE /api/runbooks/{id}` - Delete
+
+**File Sync**: On any CRUD operation, `SyncRunbookFiles()` writes all runbooks as `{id}-{slug}.md` and removes stale files.
+
+**Agent Access**: Incident manager prompt instructs agent to check `/akmatori/runbooks/` for relevant procedures before starting investigation.
 
 ## Jobs (`internal/jobs/`)
 
