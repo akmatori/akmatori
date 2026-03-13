@@ -439,3 +439,149 @@ func (b *SlackSettingsBuilder) Unconfigured() *SlackSettingsBuilder {
 func (b *SlackSettingsBuilder) Build() database.SlackSettings {
 	return b.settings
 }
+
+// ========================================
+// Runbook Builder
+// ========================================
+
+// RunbookBuilder builds Runbook instances for testing
+type RunbookBuilder struct {
+	runbook database.Runbook
+}
+
+// NewRunbookBuilder creates a new runbook builder with defaults
+func NewRunbookBuilder() *RunbookBuilder {
+	return &RunbookBuilder{
+		runbook: database.Runbook{
+			Title:     "Test Runbook",
+			Content:   "# Test Runbook\n\nThis is a test runbook for unit tests.",
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+	}
+}
+
+// WithID sets the runbook ID
+func (b *RunbookBuilder) WithID(id uint) *RunbookBuilder {
+	b.runbook.ID = id
+	return b
+}
+
+// WithTitle sets the runbook title
+func (b *RunbookBuilder) WithTitle(title string) *RunbookBuilder {
+	b.runbook.Title = title
+	return b
+}
+
+// WithContent sets the runbook content
+func (b *RunbookBuilder) WithContent(content string) *RunbookBuilder {
+	b.runbook.Content = content
+	return b
+}
+
+// Build returns the constructed runbook
+func (b *RunbookBuilder) Build() database.Runbook {
+	return b.runbook
+}
+
+// ========================================
+// Context File Builder
+// ========================================
+
+// ContextFileBuilder builds ContextFile instances for testing
+type ContextFileBuilder struct {
+	file database.ContextFile
+}
+
+// NewContextFileBuilder creates a new context file builder with defaults
+func NewContextFileBuilder() *ContextFileBuilder {
+	return &ContextFileBuilder{
+		file: database.ContextFile{
+			Filename:     "test-file.txt",
+			OriginalName: "test-file.txt",
+			MimeType:     "text/plain",
+			Size:         1024,
+			Description:  "Test context file for unit tests",
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
+		},
+	}
+}
+
+// WithID sets the file ID
+func (b *ContextFileBuilder) WithID(id uint) *ContextFileBuilder {
+	b.file.ID = id
+	return b
+}
+
+// WithFilename sets the stored filename
+func (b *ContextFileBuilder) WithFilename(filename string) *ContextFileBuilder {
+	b.file.Filename = filename
+	return b
+}
+
+// WithOriginalName sets the original filename
+func (b *ContextFileBuilder) WithOriginalName(name string) *ContextFileBuilder {
+	b.file.OriginalName = name
+	return b
+}
+
+// WithMimeType sets the MIME type
+func (b *ContextFileBuilder) WithMimeType(mimeType string) *ContextFileBuilder {
+	b.file.MimeType = mimeType
+	return b
+}
+
+// WithSize sets the file size
+func (b *ContextFileBuilder) WithSize(size int64) *ContextFileBuilder {
+	b.file.Size = size
+	return b
+}
+
+// WithDescription sets the file description
+func (b *ContextFileBuilder) WithDescription(desc string) *ContextFileBuilder {
+	b.file.Description = desc
+	return b
+}
+
+// AsMarkdown configures the file as a markdown document
+func (b *ContextFileBuilder) AsMarkdown() *ContextFileBuilder {
+	b.file.MimeType = "text/markdown"
+	if !hasExtension(b.file.Filename, ".md") {
+		b.file.Filename = replaceExtension(b.file.Filename, ".md")
+	}
+	return b
+}
+
+// AsJSON configures the file as a JSON document
+func (b *ContextFileBuilder) AsJSON() *ContextFileBuilder {
+	b.file.MimeType = "application/json"
+	if !hasExtension(b.file.Filename, ".json") {
+		b.file.Filename = replaceExtension(b.file.Filename, ".json")
+	}
+	return b
+}
+
+// Build returns the constructed context file
+func (b *ContextFileBuilder) Build() database.ContextFile {
+	return b.file
+}
+
+// ========================================
+// Helper functions
+// ========================================
+
+// hasExtension checks if a filename has a specific extension
+func hasExtension(filename, ext string) bool {
+	return len(filename) > len(ext) && filename[len(filename)-len(ext):] == ext
+}
+
+// replaceExtension replaces the file extension
+func replaceExtension(filename, newExt string) string {
+	for i := len(filename) - 1; i >= 0; i-- {
+		if filename[i] == '.' {
+			return filename[:i] + newExt
+		}
+	}
+	return filename + newExt
+}

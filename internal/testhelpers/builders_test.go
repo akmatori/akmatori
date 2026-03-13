@@ -314,3 +314,124 @@ func BenchmarkSlackSettingsBuilder(b *testing.B) {
 			Build()
 	}
 }
+
+func TestRunbookBuilder(t *testing.T) {
+	runbook := NewRunbookBuilder().
+		WithID(1).
+		WithTitle("Database Failover").
+		WithContent("# Database Failover\n\n1. Check replication status\n2. Promote replica").
+		Build()
+
+	if runbook.ID != 1 {
+		t.Errorf("expected ID 1, got %d", runbook.ID)
+	}
+	if runbook.Title != "Database Failover" {
+		t.Errorf("expected Title 'Database Failover', got %s", runbook.Title)
+	}
+	if runbook.Content != "# Database Failover\n\n1. Check replication status\n2. Promote replica" {
+		t.Errorf("unexpected Content: %s", runbook.Content)
+	}
+	if runbook.CreatedAt.IsZero() {
+		t.Error("expected CreatedAt to be set")
+	}
+}
+
+func TestRunbookBuilder_Defaults(t *testing.T) {
+	runbook := NewRunbookBuilder().Build()
+
+	if runbook.Title == "" {
+		t.Error("expected default Title")
+	}
+	if runbook.Content == "" {
+		t.Error("expected default Content")
+	}
+}
+
+func TestContextFileBuilder(t *testing.T) {
+	file := NewContextFileBuilder().
+		WithID(5).
+		WithFilename("architecture.md").
+		WithOriginalName("system-architecture.md").
+		WithMimeType("text/markdown").
+		WithSize(4096).
+		WithDescription("System architecture documentation").
+		Build()
+
+	if file.ID != 5 {
+		t.Errorf("expected ID 5, got %d", file.ID)
+	}
+	if file.Filename != "architecture.md" {
+		t.Errorf("expected Filename 'architecture.md', got %s", file.Filename)
+	}
+	if file.OriginalName != "system-architecture.md" {
+		t.Errorf("expected OriginalName 'system-architecture.md', got %s", file.OriginalName)
+	}
+	if file.MimeType != "text/markdown" {
+		t.Errorf("expected MimeType 'text/markdown', got %s", file.MimeType)
+	}
+	if file.Size != 4096 {
+		t.Errorf("expected Size 4096, got %d", file.Size)
+	}
+}
+
+func TestContextFileBuilder_AsMarkdown(t *testing.T) {
+	file := NewContextFileBuilder().
+		WithFilename("notes.txt").
+		AsMarkdown().
+		Build()
+
+	if file.MimeType != "text/markdown" {
+		t.Errorf("expected MimeType 'text/markdown', got %s", file.MimeType)
+	}
+	if file.Filename != "notes.md" {
+		t.Errorf("expected Filename 'notes.md', got %s", file.Filename)
+	}
+}
+
+func TestContextFileBuilder_AsJSON(t *testing.T) {
+	file := NewContextFileBuilder().
+		WithFilename("config.txt").
+		AsJSON().
+		Build()
+
+	if file.MimeType != "application/json" {
+		t.Errorf("expected MimeType 'application/json', got %s", file.MimeType)
+	}
+	if file.Filename != "config.json" {
+		t.Errorf("expected Filename 'config.json', got %s", file.Filename)
+	}
+}
+
+func TestContextFileBuilder_Defaults(t *testing.T) {
+	file := NewContextFileBuilder().Build()
+
+	if file.Filename == "" {
+		t.Error("expected default Filename")
+	}
+	if file.MimeType == "" {
+		t.Error("expected default MimeType")
+	}
+	if file.Size == 0 {
+		t.Error("expected default Size")
+	}
+}
+
+func BenchmarkRunbookBuilder(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		NewRunbookBuilder().
+			WithID(uint(i)).
+			WithTitle("Test Runbook").
+			WithContent("# Test\n\nContent here").
+			Build()
+	}
+}
+
+func BenchmarkContextFileBuilder(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		NewContextFileBuilder().
+			WithID(uint(i)).
+			WithFilename("test.md").
+			AsMarkdown().
+			Build()
+	}
+}

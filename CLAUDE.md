@@ -306,7 +306,7 @@ toolInstance := testhelpers.NewToolInstanceBuilder().WithName("prod-zabbix").Wit
 llmSettings := testhelpers.NewLLMSettingsBuilder().WithProvider(database.LLMProviderAnthropic).Build()
 ```
 
-**Available**: AlertBuilder, IncidentBuilder, SkillBuilder, ToolInstanceBuilder, ToolTypeBuilder, AlertSourceInstanceBuilder, LLMSettingsBuilder, SlackSettingsBuilder
+**Available**: AlertBuilder, IncidentBuilder, SkillBuilder, ToolInstanceBuilder, ToolTypeBuilder, AlertSourceInstanceBuilder, LLMSettingsBuilder, SlackSettingsBuilder, RunbookBuilder, ContextFileBuilder
 
 ### Assertions
 
