@@ -77,10 +77,22 @@ vi.mock("@mariozechner/pi-coding-agent", () => {
     },
     ModelRegistry: vi.fn().mockImplementation(() => ({})),
     SessionManager: {
-      inMemory: vi.fn(() => ({})),
-      create: vi.fn(() => ({})),
-      continueRecent: vi.fn(() => ({})),
-      open: vi.fn(() => ({})),
+      inMemory: vi.fn(() => ({
+        newSession: vi.fn(),
+        getSessionId: vi.fn(() => "mock-session-123"),
+      })),
+      create: vi.fn(() => ({
+        newSession: vi.fn(),
+        getSessionId: vi.fn(() => "mock-session-123"),
+      })),
+      continueRecent: vi.fn(() => ({
+        newSession: vi.fn(),
+        getSessionId: vi.fn(() => "mock-session-123"),
+      })),
+      open: vi.fn(() => ({
+        newSession: vi.fn(),
+        getSessionId: vi.fn(() => "mock-session-123"),
+      })),
     },
     SettingsManager: {
       inMemory: vi.fn(() => ({})),
@@ -306,6 +318,36 @@ describe("AgentRunner", () => {
       expect(opts.thinkingLevel).toBe("medium");
     });
 
+    it("should use incident ID as deterministic session ID for new sessions", async () => {
+      const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+      const params = makeExecuteParams({ incidentId: "inc-uuid-abc-123" });
+      await runner.execute(params);
+
+      // SessionManager.create should have been called (not continueRecent)
+      expect(SessionManager.create).toHaveBeenCalled();
+
+      // newSession should have been called with the incident ID
+      const mockSessionManager = (SessionManager.create as any).mock.results[
+        (SessionManager.create as any).mock.results.length - 1
+      ].value;
+      expect(mockSessionManager.newSession).toHaveBeenCalledWith({ id: "inc-uuid-abc-123" });
+    });
+
+    it("should NOT call newSession with deterministic ID for resume", async () => {
+      const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+      const params = makeResumeParams({ incidentId: "inc-resume-456" });
+      await runner.resume(params);
+
+      // continueRecent should have been called (not create)
+      expect(SessionManager.continueRecent).toHaveBeenCalled();
+
+      // newSession should NOT have been called (resume uses existing session)
+      const mockSessionManager = (SessionManager.continueRecent as any).mock.results[
+        (SessionManager.continueRecent as any).mock.results.length - 1
+      ].value;
+      expect(mockSessionManager.newSession).not.toHaveBeenCalled();
+    });
+
     it("should call session.prompt with the task", async () => {
       const params = makeExecuteParams({ task: "Check memory usage" });
       await runner.execute(params);
@@ -411,21 +453,34 @@ describe("AgentRunner", () => {
       expect(opts.customTools).toBeUndefined();
     });
 
-    it("should pass appendSystemPrompt to DefaultResourceLoader", async () => {
+    it("should not pass appendSystemPrompt to DefaultResourceLoader", async () => {
       const { DefaultResourceLoader } = await import("@mariozechner/pi-coding-agent");
       const params = makeExecuteParams();
       await runner.execute(params);
 
-      // DefaultResourceLoader should have been constructed with appendSystemPrompt
+      // appendSystemPrompt was removed in favor of promptGuidelines on the bash tool
       const constructorCalls = (DefaultResourceLoader as any).mock.calls;
       expect(constructorCalls.length).toBeGreaterThan(0);
       const opts = constructorCalls[constructorCalls.length - 1][0];
-      expect(opts.appendSystemPrompt).toBeDefined();
-      expect(typeof opts.appendSystemPrompt).toBe("string");
-      expect(opts.appendSystemPrompt).toContain("Tool Calling Instructions");
-      expect(opts.appendSystemPrompt).toContain("python3 -c");
-      expect(opts.appendSystemPrompt).toContain("SKILL.md");
-      expect(opts.appendSystemPrompt).toContain("tool_instance_id");
+      expect(opts.appendSystemPrompt).toBeUndefined();
+    });
+
+    it("should attach promptGuidelines to the bash tool", async () => {
+      const params = makeExecuteParams();
+      await runner.execute(params);
+
+      const opts = createAgentSessionCalls[0];
+      const bashTool = opts.tools.find(
+        (t: any) => t.definition?.name === "bash" || t.name === "bash",
+      );
+      expect(bashTool).toBeDefined();
+      expect(bashTool.promptGuidelines).toBeDefined();
+      expect(typeof bashTool.promptGuidelines).toBe("string");
+      expect(bashTool.promptGuidelines).toContain("python3 -c");
+      expect(bashTool.promptGuidelines).toContain("SKILL.md");
+      expect(bashTool.promptGuidelines).toContain("tool_instance_id");
+      expect(bashTool.promptGuidelines).toContain("ssh");
+      expect(bashTool.promptGuidelines).toContain("zabbix");
     });
 
     it("should configure bash spawnHook with MCP env vars", async () => {
@@ -648,6 +703,92 @@ describe("AgentRunner", () => {
 
       const output = onOutput.mock.calls.map((call: any[]) => call[0]).join("");
       expect(output).toContain("🤔 Investigating CPU spike");
+    });
+
+    it("should stream auto_compaction_start and auto_compaction_end events", async () => {
+      const onOutput = vi.fn();
+      mockSession.prompt.mockImplementationOnce(async () => {
+        for (const sub of mockSession._subscribers) {
+          sub({ type: "auto_compaction_start", reason: "context limit" });
+          sub({ type: "auto_compaction_end", aborted: false });
+        }
+      });
+
+      await runner.execute(makeExecuteParams({ onOutput }));
+
+      const output = onOutput.mock.calls.map((call: any[]) => call[0]).join("");
+      expect(output).toContain("Compacting context");
+      expect(output).toContain("context limit");
+      expect(output).toContain("compaction complete");
+    });
+
+    it("should stream auto_compaction_end with aborted status", async () => {
+      const onOutput = vi.fn();
+      mockSession.prompt.mockImplementationOnce(async () => {
+        for (const sub of mockSession._subscribers) {
+          sub({ type: "auto_compaction_start", reason: "overflow" });
+          sub({ type: "auto_compaction_end", aborted: true });
+        }
+      });
+
+      await runner.execute(makeExecuteParams({ onOutput }));
+
+      const output = onOutput.mock.calls.map((call: any[]) => call[0]).join("");
+      expect(output).toContain("compaction aborted");
+    });
+
+    it("should stream auto_retry_start events", async () => {
+      const onOutput = vi.fn();
+      mockSession.prompt.mockImplementationOnce(async () => {
+        for (const sub of mockSession._subscribers) {
+          sub({
+            type: "auto_retry_start",
+            attempt: 2,
+            maxAttempts: 3,
+            errorMessage: "server_error",
+          });
+        }
+      });
+
+      await runner.execute(makeExecuteParams({ onOutput }));
+
+      const output = onOutput.mock.calls.map((call: any[]) => call[0]).join("");
+      expect(output).toContain("Retrying");
+      expect(output).toContain("attempt 2/3");
+      expect(output).toContain("server_error");
+    });
+
+    it("should stream auto_retry_end failure events", async () => {
+      const onOutput = vi.fn();
+      mockSession.prompt.mockImplementationOnce(async () => {
+        for (const sub of mockSession._subscribers) {
+          sub({
+            type: "auto_retry_end",
+            success: false,
+            finalError: "API quota exceeded",
+          });
+        }
+      });
+
+      await runner.execute(makeExecuteParams({ onOutput }));
+
+      const output = onOutput.mock.calls.map((call: any[]) => call[0]).join("");
+      expect(output).toContain("retries exhausted");
+      expect(output).toContain("API quota exceeded");
+    });
+
+    it("should not emit output for successful auto_retry_end", async () => {
+      const onOutput = vi.fn();
+      mockSession.prompt.mockImplementationOnce(async () => {
+        for (const sub of mockSession._subscribers) {
+          sub({ type: "auto_retry_end", success: true });
+        }
+      });
+
+      await runner.execute(makeExecuteParams({ onOutput }));
+
+      const output = onOutput.mock.calls.map((call: any[]) => call[0]).join("");
+      expect(output).not.toContain("retries exhausted");
     });
 
     it("should accumulate tokens from turn_end events", async () => {

@@ -22,69 +22,35 @@ import { getModel, type Model, type ThinkingLevel as PiThinkingLevel } from "@ma
 import type { LLMSettings, ExecuteResult, ProxyConfig, ThinkingLevel } from "./types.js";
 
 // ---------------------------------------------------------------------------
-// Tool calling instructions appended to the system prompt
+// Tool calling guidelines attached to the bash tool via promptGuidelines
 // ---------------------------------------------------------------------------
 
 /**
- * Injected via `appendSystemPrompt` on DefaultResourceLoader so the agent
- * knows HOW to call tools without wasting turns exploring the filesystem.
+ * Attached to the bash tool via `promptGuidelines` (pi-mono 0.55.4+) so it
+ * appears in the system prompt's Guidelines section automatically when the
+ * bash tool is active.
  *
- * Key points:
- * - Python wrappers live at /tools/ (PYTHONPATH is pre-set by spawnHook)
- * - The calling pattern is `python3 -c "from <module> import <func>; ..."`
- * - SKILL.md files contain the `tool_instance_id` values to pass
- * - SSH read-only mode constraints and allowed diagnostic commands
- * - Zabbix query tips
+ * Previously this was injected as a monolithic `appendSystemPrompt` string on
+ * DefaultResourceLoader. The new approach is more modular — the bash tool
+ * carries its own documentation, and if the tool is ever disabled, the
+ * guidelines disappear from the prompt automatically.
  */
-const TOOL_CALLING_INSTRUCTIONS = `
-## Tool Calling Instructions
-
-You have access to infrastructure tools via Python wrappers. The environment is already
-configured — \`PYTHONPATH=/tools\` is set, so you can import directly.
-
-### Calling Pattern
-
-Use the bash tool with \`python3 -c\` one-liners:
-
-\`\`\`bash
-python3 -c "from ssh import execute_command; print(execute_command('uptime', tool_instance_id=<ID>))"
-python3 -c "from ssh import test_connectivity; print(test_connectivity(tool_instance_id=<ID>))"
-python3 -c "from ssh import get_server_info; print(get_server_info(tool_instance_id=<ID>))"
-python3 -c "from zabbix import get_problems; print(get_problems(severity_min=3, tool_instance_id=<ID>))"
-python3 -c "from zabbix import get_hosts; print(get_hosts(tool_instance_id=<ID>))"
-python3 -c "from zabbix import get_items_batch; print(get_items_batch(searches=['cpu','memory'], hostids=['12345'], tool_instance_id=<ID>))"
-python3 -c "from zabbix import get_history; print(get_history(itemids=['67890'], limit=10, tool_instance_id=<ID>))"
-python3 -c "from zabbix import get_triggers; print(get_triggers(hostids=['12345'], only_true=True, tool_instance_id=<ID>))"
-\`\`\`
-
-### How to Find tool_instance_id Values
-
-Each skill's SKILL.md lists assigned tools with their \`tool_instance_id\`. **Read the SKILL.md
-first**, then call tools directly. Do NOT explore the filesystem to discover tools.
-
-### Efficient Workflow
-
-1. Read the relevant SKILL.md to learn which tool instances are available and their IDs
-2. Call tools directly using the pattern above
-3. Do NOT search for Python files, read source code, or trial-and-error imports
-4. If you get \`ModuleNotFoundError\`, prefix the command with \`PYTHONPATH=/tools\`
-
-### SSH Tips
-
-- Most servers are in **read-only mode** by default — only diagnostic commands are allowed
-- Allowed commands include: cat, head, tail, grep, find, ls, ps, top, df, free, netstat, ss,
-  uptime, vmstat, iostat, mpstat, sar, pidstat, journalctl, dmesg, docker ps/logs, systemctl status,
-  nproc, lscpu, getconf, and more
-- For CPU core count, use \`nproc\` or \`lscpu\` (not \`/proc/cpuinfo\` parsing)
-- Use the \`servers\` parameter to target specific hosts: \`execute_command("uptime", servers=["hostname"], tool_instance_id=<ID>)\`
-
-### Zabbix Tips
-
-- Zabbix API calls can be slow — prefer \`get_items_batch\` over multiple \`get_items\` calls
-- Use \`hostids\` filter to scope queries to specific hosts
-- Severity levels: 0=Not classified, 1=Information, 2=Warning, 3=Average, 4=High, 5=Disaster
-- Use \`severity_min=3\` to filter out low-priority noise
-`;
+const BASH_TOOL_GUIDELINES = `\
+- You have access to infrastructure tools via Python wrappers. PYTHONPATH=/tools is pre-set.
+- Call tools with bash using python3 -c one-liners:
+  python3 -c "from ssh import execute_command; print(execute_command('uptime', tool_instance_id=<ID>))"
+  python3 -c "from ssh import test_connectivity; print(test_connectivity(tool_instance_id=<ID>))"
+  python3 -c "from ssh import get_server_info; print(get_server_info(tool_instance_id=<ID>))"
+  python3 -c "from zabbix import get_problems; print(get_problems(severity_min=3, tool_instance_id=<ID>))"
+  python3 -c "from zabbix import get_hosts; print(get_hosts(tool_instance_id=<ID>))"
+  python3 -c "from zabbix import get_items_batch; print(get_items_batch(searches=['cpu','memory'], hostids=['12345'], tool_instance_id=<ID>))"
+  python3 -c "from zabbix import get_history; print(get_history(itemids=['67890'], limit=10, tool_instance_id=<ID>))"
+  python3 -c "from zabbix import get_triggers; print(get_triggers(hostids=['12345'], only_true=True, tool_instance_id=<ID>))"
+- Each skill's SKILL.md lists assigned tools with their tool_instance_id. Read the SKILL.md first, then call tools directly. Do NOT explore the filesystem to discover tools.
+- Do NOT search for Python files, read source code, or trial-and-error imports. If you get ModuleNotFoundError, prefix the command with PYTHONPATH=/tools.
+- SSH: Most servers are in read-only mode — only diagnostic commands are allowed (cat, head, tail, grep, find, ls, ps, top, df, free, netstat, ss, uptime, vmstat, iostat, journalctl, dmesg, docker ps/logs, systemctl status, nproc, lscpu, etc.)
+- SSH: For CPU core count, use nproc or lscpu (not /proc/cpuinfo parsing). Use the servers parameter to target specific hosts.
+- Zabbix: Prefer get_items_batch over multiple get_items calls. Use hostids to scope queries. Severity: 0=Not classified, 1=Info, 2=Warning, 3=Average, 4=High, 5=Disaster. Use severity_min=3 to filter noise.`;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -259,9 +225,17 @@ export class AgentRunner {
     // Session management: persist to disk so resume can restore conversation history.
     // For resume, use continueRecent to load the most recent session from the
     // incident's workspace directory. For new sessions, create a fresh one.
+    //
+    // Deterministic session IDs (pi-mono 0.58.0): For new sessions, we call
+    // newSession({ id: incidentId }) to use the incident UUID as the pi-mono
+    // session ID. This eliminates the separate incident_id ↔ session_id mapping
+    // and makes debugging/audit simpler (grep by incident UUID finds everything).
     const sessionManager = isResume
       ? SessionManager.continueRecent(params.workDir)
       : SessionManager.create(params.workDir);
+    if (!isResume) {
+      sessionManager.newSession({ id: params.incidentId });
+    }
     const settingsManager = SettingsManager.inMemory();
     const modelRegistry = new ModelRegistry(authStorage);
 
@@ -277,7 +251,6 @@ export class AgentRunner {
       noExtensions: true,
       noPromptTemplates: true,
       noThemes: true,
-      appendSystemPrompt: TOOL_CALLING_INSTRUCTIONS,
       ...(enabledSkillNames && enabledSkillNames.length > 0
         ? {
             skillsOverride: (base) => {
@@ -292,7 +265,9 @@ export class AgentRunner {
     });
     await resourceLoader.reload();
 
-    // Create bash tool with spawnHook to inject MCP Gateway env vars per-session
+    // Create bash tool with spawnHook to inject MCP Gateway env vars per-session.
+    // Attach promptGuidelines (pi-mono 0.55.4+) so infrastructure tool usage
+    // instructions appear in the system prompt's Guidelines section automatically.
     const bashTool = createBashTool(params.workDir, {
       spawnHook: (ctx) => ({
         ...ctx,
@@ -304,6 +279,7 @@ export class AgentRunner {
         },
       }),
     });
+    (bashTool as any).promptGuidelines = BASH_TOOL_GUIDELINES;
 
     // Create coding tools with the same workDir, then replace the default bash tool
     const codingTools = createCodingTools(params.workDir);
@@ -526,6 +502,42 @@ export class AgentRunner {
           if (usage.totalTokens) {
             onTokens(usage.totalTokens);
           }
+        }
+        break;
+      }
+
+      case "auto_compaction_start": {
+        const reason = (event as any).reason ?? "context limit";
+        const compactLine = `\n📦 Compacting context (${reason})...\n`;
+        onOutput(compactLine);
+        onLogText(compactLine);
+        break;
+      }
+
+      case "auto_compaction_end": {
+        const aborted = (event as any).aborted;
+        const compactResult = aborted
+          ? "\n📦 Context compaction aborted\n"
+          : "\n📦 Context compaction complete\n";
+        onOutput(compactResult);
+        onLogText(compactResult);
+        break;
+      }
+
+      case "auto_retry_start": {
+        const retryEvent = event as any;
+        const retryLine = `\n🔄 Retrying (attempt ${retryEvent.attempt ?? "?"}/${retryEvent.maxAttempts ?? "?"}): ${retryEvent.errorMessage ?? "unknown error"}\n`;
+        onOutput(retryLine);
+        onLogText(retryLine);
+        break;
+      }
+
+      case "auto_retry_end": {
+        const retryEndEvent = event as any;
+        if (!retryEndEvent.success) {
+          const failLine = `\n🔄 All retries exhausted: ${retryEndEvent.finalError ?? "unknown error"}\n`;
+          onOutput(failLine);
+          onLogText(failLine);
         }
         break;
       }
