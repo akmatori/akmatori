@@ -77,10 +77,22 @@ vi.mock("@mariozechner/pi-coding-agent", () => {
     },
     ModelRegistry: vi.fn().mockImplementation(() => ({})),
     SessionManager: {
-      inMemory: vi.fn(() => ({})),
-      create: vi.fn(() => ({})),
-      continueRecent: vi.fn(() => ({})),
-      open: vi.fn(() => ({})),
+      inMemory: vi.fn(() => ({
+        newSession: vi.fn(),
+        getSessionId: vi.fn(() => "mock-session-123"),
+      })),
+      create: vi.fn(() => ({
+        newSession: vi.fn(),
+        getSessionId: vi.fn(() => "mock-session-123"),
+      })),
+      continueRecent: vi.fn(() => ({
+        newSession: vi.fn(),
+        getSessionId: vi.fn(() => "mock-session-123"),
+      })),
+      open: vi.fn(() => ({
+        newSession: vi.fn(),
+        getSessionId: vi.fn(() => "mock-session-123"),
+      })),
     },
     SettingsManager: {
       inMemory: vi.fn(() => ({})),
@@ -304,6 +316,36 @@ describe("AgentRunner", () => {
       expect(opts.cwd).toBe("/tmp/workspace");
       expect(opts.model.id).toBe("claude-sonnet-4-5-20250929");
       expect(opts.thinkingLevel).toBe("medium");
+    });
+
+    it("should use incident ID as deterministic session ID for new sessions", async () => {
+      const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+      const params = makeExecuteParams({ incidentId: "inc-uuid-abc-123" });
+      await runner.execute(params);
+
+      // SessionManager.create should have been called (not continueRecent)
+      expect(SessionManager.create).toHaveBeenCalled();
+
+      // newSession should have been called with the incident ID
+      const mockSessionManager = (SessionManager.create as any).mock.results[
+        (SessionManager.create as any).mock.results.length - 1
+      ].value;
+      expect(mockSessionManager.newSession).toHaveBeenCalledWith({ id: "inc-uuid-abc-123" });
+    });
+
+    it("should NOT call newSession with deterministic ID for resume", async () => {
+      const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+      const params = makeResumeParams({ incidentId: "inc-resume-456" });
+      await runner.resume(params);
+
+      // continueRecent should have been called (not create)
+      expect(SessionManager.continueRecent).toHaveBeenCalled();
+
+      // newSession should NOT have been called (resume uses existing session)
+      const mockSessionManager = (SessionManager.continueRecent as any).mock.results[
+        (SessionManager.continueRecent as any).mock.results.length - 1
+      ].value;
+      expect(mockSessionManager.newSession).not.toHaveBeenCalled();
     });
 
     it("should call session.prompt with the task", async () => {

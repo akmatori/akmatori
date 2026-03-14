@@ -225,9 +225,17 @@ export class AgentRunner {
     // Session management: persist to disk so resume can restore conversation history.
     // For resume, use continueRecent to load the most recent session from the
     // incident's workspace directory. For new sessions, create a fresh one.
+    //
+    // Deterministic session IDs (pi-mono 0.58.0): For new sessions, we call
+    // newSession({ id: incidentId }) to use the incident UUID as the pi-mono
+    // session ID. This eliminates the separate incident_id ↔ session_id mapping
+    // and makes debugging/audit simpler (grep by incident UUID finds everything).
     const sessionManager = isResume
       ? SessionManager.continueRecent(params.workDir)
       : SessionManager.create(params.workDir);
+    if (!isResume) {
+      sessionManager.newSession({ id: params.incidentId });
+    }
     const settingsManager = SettingsManager.inMemory();
     const modelRegistry = new ModelRegistry(authStorage);
 
