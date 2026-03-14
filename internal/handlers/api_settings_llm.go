@@ -45,7 +45,16 @@ func (h *APIHandler) handleLLMSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		active, _ := database.GetLLMSettings()
+		active, err := database.GetLLMSettings()
+		if err != nil || active == nil {
+			// No active provider configured, return just the providers list
+			response := map[string]interface{}{
+				"active_provider": activeProvider,
+				"providers":       providers,
+			}
+			api.RespondJSON(w, http.StatusOK, response)
+			return
+		}
 		response := map[string]interface{}{
 			"active_provider": activeProvider,
 			"providers":       providers,
@@ -123,7 +132,11 @@ func (h *APIHandler) handleLLMSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		settings, _ = database.GetLLMSettingsByProvider(provider)
+		settings, err = database.GetLLMSettingsByProvider(provider)
+		if err != nil || settings == nil {
+			api.RespondError(w, http.StatusInternalServerError, "Failed to retrieve updated settings")
+			return
+		}
 		response := map[string]interface{}{
 			"id":             settings.ID,
 			"provider":       settings.Provider,

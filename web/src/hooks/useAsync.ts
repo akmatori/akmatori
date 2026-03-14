@@ -8,7 +8,7 @@ interface AsyncState<T> {
 }
 
 interface UseAsyncReturn<T> extends AsyncState<T> {
-  execute: (...args: any[]) => Promise<T | undefined>;
+  execute: (asyncFn: () => Promise<T>) => Promise<T | undefined>;
   setData: (data: T | null) => void;
   setError: (error: string | null) => void;
   reset: () => void;

@@ -225,21 +225,15 @@ Note: The full reasoning log is stored but not shown here to keep context clean.
 
 // AppendSubagentLog appends a subagent's reasoning log to the incident's full_log
 // This stores the FULL log in the database for debugging/review purposes
+// Uses SQL concatenation to avoid race conditions when multiple subagents complete concurrently
 func (s *SkillService) AppendSubagentLog(incidentUUID string, skillName string, subagentLog string) error {
-	// Get current incident
-	incident, err := s.GetIncident(incidentUUID)
-	if err != nil {
-		return err
-	}
-
 	// Format subagent log with markers
 	formattedLog := fmt.Sprintf("\n\n--- Subagent [%s] Reasoning Log ---\n%s\n--- End Subagent [%s] Reasoning Log ---\n",
 		skillName, subagentLog, skillName)
 
-	// Append to existing log
-	newLog := incident.FullLog + formattedLog
-
-	if err := s.db.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).Update("full_log", newLog).Error; err != nil {
+	// Use SQL concatenation to atomically append without read-modify-write race
+	if err := s.db.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).
+		Update("full_log", s.db.Raw("COALESCE(full_log, '') || ?", formattedLog)).Error; err != nil {
 		return fmt.Errorf("failed to append subagent log: %w", err)
 	}
 
