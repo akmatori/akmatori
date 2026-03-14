@@ -127,7 +127,7 @@ func (r *Registry) registerSSHTools() {
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
 			instanceID := extractInstanceID(args)
-			return sshTool.TestConnectivity(ctx, incidentID, instanceID)
+			return sshTool.TestConnectivity(ctx, incidentID, nil, instanceID)
 		},
 	)
 

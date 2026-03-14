@@ -8,79 +8,52 @@ Currently, the SSH tool can only connect to servers pre-configured in `ssh_hosts
 
 ## Changes
 
-### Phase 1: MCP Gateway - Core SSH Logic
+### Task 1: MCP Gateway - Core SSH Logic
 
 **File: `mcp-gateway/internal/tools/ssh/ssh.go`**
 
-1. **Add fields to `SSHConfig` struct** (line 50):
-   ```go
-   AllowAdhocConnections   bool
-   AdhocDefaultUser        string  // default: "root"
-   AdhocDefaultPort        int     // default: 22
-   AdhocAllowWriteCommands bool    // default: false
-   ```
+- [x] Add ad-hoc connection fields to `SSHConfig` struct
+- [x] Update `getConfig()` to parse new settings and relax ssh_hosts requirement
+- [x] Extract `resolveTargetHosts()` method with ad-hoc fallback logic
+- [x] Update `ExecuteCommand()` to use `resolveTargetHosts()`
+- [x] Update `TestConnectivity()` to accept `servers` parameter and use `resolveTargetHosts()`
 
-2. **Update `getConfig()`** (after line 176, before ssh_hosts parsing):
-   - Parse new settings: `allow_adhoc_connections`, `adhoc_default_user`, `adhoc_default_port`, `adhoc_allow_write_commands`
-   - **Relax the ssh_hosts requirement** (line 180): Only error when `ssh_hosts` is empty AND `AllowAdhocConnections` is false. Guard the host parsing loop.
-
-3. **Extract `resolveTargetHosts()` method** from inline logic in `ExecuteCommand` (lines 586-606):
-   - When a requested server is found in `config.Hosts` → use its config (existing behavior)
-   - When NOT found AND `AllowAdhocConnections=true` → create temporary `SSHHostConfig{Hostname: s, Address: s, User: AdhocDefaultUser, Port: AdhocDefaultPort, AllowWriteCommands: AdhocAllowWriteCommands}` (no KeyID → falls through to default key in `getKeyForHost()`)
-   - When NOT found AND `AllowAdhocConnections=false` → error as before
-
-4. **Update `ExecuteCommand()`** (line 578): Relax `len(config.Hosts) == 0` check when ad-hoc is enabled. Use `resolveTargetHosts()`.
-
-5. **Update `TestConnectivity()`** (line 638): Add `servers []string` parameter. Use `resolveTargetHosts()` to resolve which hosts to test (allows testing ad-hoc servers). When `servers` is empty, test all configured hosts (existing behavior).
-
-### Phase 2: MCP Gateway - Schema
+### Task 2: MCP Gateway - Schema
 
 **File: `mcp-gateway/internal/tools/schemas.go`**
 
-1. **Remove `"ssh_hosts"` from `Required`** (line 78) — hosts are no longer required when ad-hoc is enabled
-2. **Remove `MinItems` from `ssh_hosts` property** (line 116)
-3. **Add 4 new properties** to SSH schema:
-   - `allow_adhoc_connections` (boolean, default false, description: "Allow connecting to servers not in SSH Hosts using default credentials")
-   - `adhoc_default_user` (string, default "root", advanced)
-   - `adhoc_default_port` (integer, default 22, advanced, min 1, max 65535)
-   - `adhoc_allow_write_commands` (boolean, default false, advanced, with warning)
-4. **Update function descriptions** for `test_connectivity` to mention servers parameter
+- [ ] Remove `ssh_hosts` from Required and MinItems constraint
+- [ ] Add 4 new ad-hoc properties to SSH schema
+- [ ] Update `test_connectivity` function description for servers parameter
 
-### Phase 3: MCP Gateway - Tool Registration
+### Task 3: MCP Gateway - Tool Registration
 
 **File: `mcp-gateway/internal/tools/registry.go`**
 
-1. **Update `ssh.test_connectivity` registration** (lines 117-132): Add `servers` parameter to InputSchema and handler, pass to `sshTool.TestConnectivity(ctx, incidentID, servers, instanceID)`
+- [ ] Add `servers` parameter to `ssh.test_connectivity` InputSchema and handler
 
-### Phase 4: Python Wrapper
+### Task 4: Python Wrapper
 
 **File: `agent-worker/tools/ssh/__init__.py`**
 
-1. **Add `servers` parameter** to `test_connectivity()` function
+- [ ] Add `servers` parameter to `test_connectivity()` function
 
-### Phase 5: SKILL.md Generation
+### Task 5: SKILL.md Generation
 
 **File: `internal/services/skill_prompt_service.go`**
 
-1. **Update `extractToolDetails()`** (line 229): When `allow_adhoc_connections` is true, append note: "Ad-hoc connections enabled: You can SSH into ANY server by hostname/IP, not just the configured hosts."
-2. **Update `generateToolUsageExample()`** (line 181): When ad-hoc enabled, add example: `execute_command("uptime", servers=["any-server.example.com"], tool_instance_id=N)`
+- [ ] Update `extractToolDetails()` to note ad-hoc connections when enabled
+- [ ] Update `generateToolUsageExample()` to include ad-hoc example when enabled
 
-### Phase 6: Tests
+### Task 6: Tests
 
 **File: `mcp-gateway/internal/tools/ssh/ssh_test.go`**
 
-Add tests for `resolveTargetHosts()`:
-- Ad-hoc enabled + unconfigured server → returns valid HostConfig with defaults
-- Ad-hoc disabled + unconfigured server → returns error
-- Configured host takes precedence over ad-hoc defaults
-- Mixed configured + unconfigured servers
-- Ad-hoc write commands setting applied correctly
-- Empty servers list with ad-hoc enabled + no configured hosts → error (must specify servers)
+- [ ] Add tests for `resolveTargetHosts()` (ad-hoc enabled/disabled, configured precedence, mixed servers, write commands, empty servers)
 
 **File: `internal/services/skill_prompt_service_test.go`** (if exists)
 
-- `extractToolDetails` includes ad-hoc note when enabled
-- `generateToolUsageExample` includes ad-hoc example when enabled
+- [ ] Add tests for ad-hoc note in `extractToolDetails` and ad-hoc example in `generateToolUsageExample`
 
 ## Key Design Decisions
 

@@ -55,6 +55,12 @@ type SSHConfig struct {
 	Keys         map[string]*SSHKey // key_id -> SSHKey
 	DefaultKeyID string             // ID of the default key
 
+	// Ad-hoc connection settings
+	AllowAdhocConnections   bool
+	AdhocDefaultUser        string // default: "root"
+	AdhocDefaultPort        int    // default: 22
+	AdhocAllowWriteCommands bool   // default: false
+
 	// Global settings
 	CommandTimeout    int
 	ConnectionTimeout int
@@ -175,9 +181,23 @@ func (t *SSHTool) getConfig(ctx context.Context, incidentID string, instanceID *
 		config.KnownHostsPolicy = policy
 	}
 
+	// Parse ad-hoc connection settings
+	if allow, ok := settings["allow_adhoc_connections"].(bool); ok {
+		config.AllowAdhocConnections = allow
+	}
+	if user, ok := settings["adhoc_default_user"].(string); ok && user != "" {
+		config.AdhocDefaultUser = user
+	} else {
+		config.AdhocDefaultUser = "root"
+	}
+	config.AdhocDefaultPort = getInt("adhoc_default_port", 22)
+	if allow, ok := settings["adhoc_allow_write_commands"].(bool); ok {
+		config.AdhocAllowWriteCommands = allow
+	}
+
 	// Parse ssh_hosts array
 	hostsData, ok := settings["ssh_hosts"].([]interface{})
-	if !ok || len(hostsData) == 0 {
+	if (!ok || len(hostsData) == 0) && !config.AllowAdhocConnections {
 		return nil, fmt.Errorf("ssh_hosts must be configured with at least one host")
 	}
 
@@ -566,6 +586,46 @@ func (t *SSHTool) executeOnServer(ctx context.Context, hostConfig *SSHHostConfig
 	}
 }
 
+// resolveTargetHosts resolves server names to SSHHostConfig entries.
+// Configured hosts take precedence. Unconfigured servers fall back to ad-hoc
+// defaults when AllowAdhocConnections is enabled, or return an error otherwise.
+// When servers is empty and hosts are configured, all configured hosts are returned.
+// When servers is empty and no hosts are configured, an error is returned.
+func (t *SSHTool) resolveTargetHosts(servers []string, config *SSHConfig) ([]SSHHostConfig, error) {
+	if len(servers) == 0 {
+		if len(config.Hosts) == 0 {
+			return nil, fmt.Errorf("no servers specified and no hosts configured")
+		}
+		return config.Hosts, nil
+	}
+
+	// Build a map of configured hostnames for lookup
+	hostMap := make(map[string]*SSHHostConfig)
+	for i := range config.Hosts {
+		hostMap[config.Hosts[i].Hostname] = &config.Hosts[i]
+		hostMap[config.Hosts[i].Address] = &config.Hosts[i]
+	}
+
+	var targetHosts []SSHHostConfig
+	for _, s := range servers {
+		if host, ok := hostMap[s]; ok {
+			targetHosts = append(targetHosts, *host)
+		} else if config.AllowAdhocConnections {
+			targetHosts = append(targetHosts, SSHHostConfig{
+				Hostname:           s,
+				Address:            s,
+				User:               config.AdhocDefaultUser,
+				Port:               config.AdhocDefaultPort,
+				AllowWriteCommands: config.AdhocAllowWriteCommands,
+			})
+		} else {
+			return nil, fmt.Errorf("server not configured: %s", s)
+		}
+	}
+
+	return targetHosts, nil
+}
+
 // ExecuteCommand executes a command on all or specified servers.
 // If instanceID is provided, credentials are resolved for that specific tool instance.
 func (t *SSHTool) ExecuteCommand(ctx context.Context, incidentID string, command string, servers []string, instanceID *uint) (string, error) {
@@ -574,35 +634,15 @@ func (t *SSHTool) ExecuteCommand(ctx context.Context, incidentID string, command
 		return "", err
 	}
 
-	// Validate configuration
-	if len(config.Hosts) == 0 {
-		return t.jsonResult(ExecuteResult{Error: "No servers configured"})
-	}
+	// Validate keys
 	if len(config.Keys) == 0 {
 		return t.jsonResult(ExecuteResult{Error: "SSH private key not configured"})
 	}
 
-	// Determine target hosts
-	var targetHosts []SSHHostConfig
-	if len(servers) > 0 {
-		// Build a map of configured hostnames for validation
-		hostMap := make(map[string]*SSHHostConfig)
-		for i := range config.Hosts {
-			hostMap[config.Hosts[i].Hostname] = &config.Hosts[i]
-			// Also map by address for backward compatibility
-			hostMap[config.Hosts[i].Address] = &config.Hosts[i]
-		}
-
-		// Validate and collect specified hosts
-		for _, s := range servers {
-			if host, ok := hostMap[s]; ok {
-				targetHosts = append(targetHosts, *host)
-			} else {
-				return t.jsonResult(ExecuteResult{Error: fmt.Sprintf("Server not configured: %s", s)})
-			}
-		}
-	} else {
-		targetHosts = config.Hosts
+	// Resolve target hosts (supports ad-hoc connections)
+	targetHosts, err := t.resolveTargetHosts(servers, config)
+	if err != nil {
+		return t.jsonResult(ExecuteResult{Error: err.Error()})
 	}
 
 	// Execute in parallel
@@ -633,24 +673,27 @@ func (t *SSHTool) ExecuteCommand(ctx context.Context, incidentID string, command
 	return t.jsonResult(execResult)
 }
 
-// TestConnectivity tests SSH connectivity to all servers.
+// TestConnectivity tests SSH connectivity to specified or all configured servers.
 // If instanceID is provided, credentials are resolved for that specific tool instance.
-func (t *SSHTool) TestConnectivity(ctx context.Context, incidentID string, instanceID *uint) (string, error) {
+func (t *SSHTool) TestConnectivity(ctx context.Context, incidentID string, servers []string, instanceID *uint) (string, error) {
 	config, err := t.getConfig(ctx, incidentID, instanceID)
 	if err != nil {
 		return "", err
 	}
 
-	if len(config.Hosts) == 0 {
-		return t.jsonResult(ConnectivityResult{Error: "No servers configured"})
-	}
 	if len(config.Keys) == 0 {
 		return t.jsonResult(ConnectivityResult{Error: "SSH private key not configured"})
 	}
 
+	// Resolve target hosts (supports ad-hoc connections)
+	targetHosts, err := t.resolveTargetHosts(servers, config)
+	if err != nil {
+		return t.jsonResult(ConnectivityResult{Error: err.Error()})
+	}
+
 	var result ConnectivityResult
-	for i := range config.Hosts {
-		host := &config.Hosts[i]
+	for i := range targetHosts {
+		host := &targetHosts[i]
 
 		// Try to establish connection (handles both direct and jumphost)
 		sshConn, err := t.connect(ctx, host, config)
