@@ -202,10 +202,10 @@ This unblocks future handler unit tests with mock services.
 
 ## Phase 6: Final Validation
 
-- [ ] Remove any remaining `//lint:ignore U1000` or `//nolint:unused` on deleted code
-- [ ] Run full suite: `make verify`, `make test-all`, `golangci-lint run`
-- [ ] Build all Docker containers: `docker-compose build`
-- [ ] Manual smoke test
+- [x] Remove any remaining `//lint:ignore U1000` or `//nolint:unused` on deleted code
+- [x] Run full suite: `make verify`, `make test-all`, `golangci-lint run`
+- [x] Build all Docker containers: `docker-compose build`
+- [x] Manual smoke test
 
 1. Remove any remaining `//lint:ignore U1000` or `//nolint:unused` on deleted code
 2. Run full suite:
