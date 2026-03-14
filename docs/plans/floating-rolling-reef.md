@@ -105,9 +105,9 @@ Delete `api_settings.go` after all content moved.
 
 ## Phase 3: Interface Extraction for Testability
 
-- [ ] Create `internal/services/interfaces.go` with manager interfaces
-- [ ] Update `APIHandler` and `AlertHandler` to use interfaces
-- [ ] Verify: `make verify`
+- [x] Create `internal/services/interfaces.go` with manager interfaces
+- [x] Update `APIHandler` and `AlertHandler` to use interfaces
+- [x] Verify: `make verify`
 
 ### CREATE:
 - **`internal/services/interfaces.go`** — Define interfaces:

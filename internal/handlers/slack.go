@@ -21,14 +21,14 @@ type SlackHandler struct {
 	client         *slack.Client
 	codexExecutor  *executor.Executor
 	agentWSHandler *AgentWSHandler
-	skillService   *services.SkillService
+	skillService   services.SkillIncidentManager
 
 	// Alert channel support
 	alertChannels    map[string]*database.AlertSourceInstance // channel_id -> instance
 	alertChannelsMu  sync.RWMutex
 	alertExtractor   *extraction.AlertExtractor
 	alertHandler     *AlertHandler
-	alertService     *services.AlertService
+	alertService     services.AlertManager
 	botUserID        string // Bot's user ID for self-message filtering
 
 	// Dedup: prevent double processing when both app_mention and message events fire
@@ -43,7 +43,7 @@ func NewSlackHandler(
 	client *slack.Client,
 	codexExecutor *executor.Executor,
 	agentWSHandler *AgentWSHandler,
-	skillService *services.SkillService,
+	skillService services.SkillIncidentManager,
 ) *SlackHandler {
 	return &SlackHandler{
 		client:         client,
@@ -61,7 +61,7 @@ func (h *SlackHandler) SetAlertHandler(alertHandler *AlertHandler) {
 }
 
 // SetAlertService sets the alert service for loading alert channel configs
-func (h *SlackHandler) SetAlertService(alertService *services.AlertService) {
+func (h *SlackHandler) SetAlertService(alertService services.AlertManager) {
 	h.alertService = alertService
 }
 

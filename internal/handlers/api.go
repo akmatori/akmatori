@@ -12,19 +12,19 @@ import (
 
 // APIHandler handles API endpoints for the UI and skill communication
 type APIHandler struct {
-	skillService         *services.SkillService
-	toolService          *services.ToolService
-	contextService       *services.ContextService
-	alertService         *services.AlertService
+	skillService         services.SkillIncidentManager
+	toolService          services.ToolManager
+	contextService       services.ContextManager
+	alertService         services.AlertManager
 	codexExecutor        *executor.Executor
 	agentWSHandler       *AgentWSHandler
 	slackManager         *slackutil.Manager
-	runbookService       *services.RunbookService
+	runbookService       services.RunbookManager
 	alertChannelReloader func() // called after alert source create/update/delete to reload Slack channel mappings
 }
 
 // NewAPIHandler creates a new API handler
-func NewAPIHandler(skillService *services.SkillService, toolService *services.ToolService, contextService *services.ContextService, alertService *services.AlertService, codexExecutor *executor.Executor, agentWSHandler *AgentWSHandler, slackManager *slackutil.Manager, runbookService *services.RunbookService) *APIHandler {
+func NewAPIHandler(skillService services.SkillIncidentManager, toolService services.ToolManager, contextService services.ContextManager, alertService services.AlertManager, codexExecutor *executor.Executor, agentWSHandler *AgentWSHandler, slackManager *slackutil.Manager, runbookService services.RunbookManager) *APIHandler {
 	return &APIHandler{
 		skillService:      skillService,
 		toolService:       toolService,
