@@ -26,10 +26,10 @@ type AlertHandler struct {
 	slackManager       *slackutil.Manager
 	codexExecutor      *executor.Executor
 	agentWSHandler     *AgentWSHandler
-	skillService       *services.SkillService
-	alertService       *services.AlertService
+	skillService       services.SkillIncidentManager
+	alertService       services.AlertManager
 	channelResolver    *slackutil.ChannelResolver
-	aggregationService *services.AggregationService
+	aggregationService services.AggregationManager
 
 	// Registered adapters by source type
 	adaptersMu sync.RWMutex
@@ -42,10 +42,10 @@ func NewAlertHandler(
 	slackManager *slackutil.Manager,
 	codexExecutor *executor.Executor,
 	agentWSHandler *AgentWSHandler,
-	skillService *services.SkillService,
-	alertService *services.AlertService,
+	skillService services.SkillIncidentManager,
+	alertService services.AlertManager,
 	channelResolver *slackutil.ChannelResolver,
-	aggregationService *services.AggregationService,
+	aggregationService services.AggregationManager,
 ) *AlertHandler {
 	h := &AlertHandler{
 		config:             cfg,
