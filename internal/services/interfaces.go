@@ -32,7 +32,7 @@ type SkillManager interface {
 type IncidentManager interface {
 	SpawnIncidentManager(ctx *IncidentContext) (string, string, error)
 	UpdateIncidentStatus(incidentUUID string, status database.IncidentStatus, sessionID string, fullLog string) error
-	UpdateIncidentComplete(incidentUUID string, status database.IncidentStatus, sessionID string, fullLog string, response string) error
+	UpdateIncidentComplete(incidentUUID string, status database.IncidentStatus, sessionID string, fullLog string, response string, tokensUsed int, executionTimeMs int64) error
 	UpdateIncidentLog(incidentUUID string, fullLog string) error
 	GetIncident(incidentUUID string) (*database.Incident, error)
 	AppendSubagentLog(incidentUUID string, skillName string, subagentLog string) error

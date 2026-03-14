@@ -131,6 +131,8 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				var sessionID string
 				var hasError bool
 				var lastStreamedLog string
+				var finalTokensUsed int
+				var finalExecutionTimeMs int64
 
 				callback := IncidentCallback{
 					OnOutput: func(output string) {
@@ -139,9 +141,11 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 							slog.Error("failed to update incident log", "err", err)
 						}
 					},
-					OnCompleted: func(sid, output string) {
+					OnCompleted: func(sid, output string, tokensUsed int, executionTimeMs int64) {
 						sessionID = sid
 						response = output
+						finalTokensUsed = tokensUsed
+						finalExecutionTimeMs = executionTimeMs
 						closeOnce.Do(func() { close(done) })
 					},
 					OnError: func(errorMsg string) {
@@ -154,7 +158,7 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
 					slog.Error("failed to start incident via WebSocket", "err", err)
 					errorMsg := fmt.Sprintf("Failed to start incident: %v", err)
-					if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg); updateErr != nil {
+					if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg, 0, 0); updateErr != nil {
 						slog.Error("failed to update incident status", "err", updateErr)
 					}
 					return
@@ -168,11 +172,11 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				}
 
 				if hasError {
-					if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, sessionID, fullLog, response); err != nil {
+					if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, sessionID, fullLog, response, finalTokensUsed, finalExecutionTimeMs); err != nil {
 						slog.Error("failed to update incident complete", "err", err)
 					}
 				} else {
-					if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, sessionID, fullLog, response); err != nil {
+					if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, sessionID, fullLog, response, finalTokensUsed, finalExecutionTimeMs); err != nil {
 						slog.Error("failed to update incident complete", "err", err)
 					}
 				}
@@ -183,7 +187,7 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 
 			slog.Error("agent worker not connected for API incident", "incident_id", incidentUUID)
 			errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
-			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg); updateErr != nil {
+			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg, 0, 0); updateErr != nil {
 				slog.Error("failed to update incident status", "err", updateErr)
 			}
 		}()

@@ -178,6 +178,8 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		var finalSessionID string
 		var hasError bool
 		var lastStreamedLog string
+		var finalTokensUsed int
+		var finalExecutionTimeMs int64
 
 		// Build task header for logging
 		taskHeader := fmt.Sprintf("📨 Slack Message from User <%s>:\n%s\n\n--- Execution Log ---\n\n", user, text)
@@ -194,9 +196,11 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 				// (onStderrUpdate expects the full log for truncation/dedup logic)
 				onStderrUpdate(lastStreamedLog)
 			},
-			OnCompleted: func(sid, output string) {
+			OnCompleted: func(sid, output string, tokensUsed int, executionTimeMs int64) {
 				finalSessionID = sid
 				response = output
+				finalTokensUsed = tokensUsed
+				finalExecutionTimeMs = executionTimeMs
 				closeOnce.Do(func() { close(done) })
 			},
 			OnError: func(errorMsg string) {
@@ -219,7 +223,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		if wsErr != nil {
 			slog.Error("failed to start/continue incident via WebSocket", "err", wsErr)
 			h.finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text,
-				fmt.Sprintf("❌ Agent worker error: %v", wsErr), "", true, "")
+				fmt.Sprintf("❌ Agent worker error: %v", wsErr), "", true, "", 0, 0)
 			return
 		}
 
@@ -252,18 +256,18 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		}
 
 		h.finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text,
-			finalResponse, fullLog, hasError, finalSessionID)
+			finalResponse, fullLog, hasError, finalSessionID, finalTokensUsed, finalExecutionTimeMs)
 		return
 	}
 
 	// No WebSocket worker available
 	slog.Error("agent worker not connected", "incident_id", incidentUUID)
 	h.finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text,
-		"❌ Agent worker not connected. Please check that the agent-worker container is running.", "", true, "")
+		"❌ Agent worker not connected. Please check that the agent-worker container is running.", "", true, "", 0, 0)
 }
 
 // finishSlackMessage handles the final steps of Slack message processing
-func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text, finalResponse, fullLog string, hasError bool, sessionID string) {
+func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text, finalResponse, fullLog string, hasError bool, sessionID string, tokensUsed int, executionTimeMs int64) {
 	// Remove processing reaction
 	if removeErr := h.client.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
 		Channel:   channel,
@@ -303,7 +307,7 @@ func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS, inci
 				user, text, "")
 		}
 
-		if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLogWithContext, finalResponse); updateErr != nil {
+		if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLogWithContext, finalResponse, tokensUsed, executionTimeMs); updateErr != nil {
 			slog.Warn("failed to update incident", "err", updateErr)
 		} else {
 			slog.Info("updated incident", "incident_id", incidentUUID, "status", finalStatus, "session_id", sessionID)

@@ -92,7 +92,7 @@ type AgentWSHandler struct {
 // IncidentCallback is called when an incident receives updates
 type IncidentCallback struct {
 	OnOutput    func(output string)
-	OnCompleted func(sessionID, response string)
+	OnCompleted func(sessionID, response string, tokensUsed int, executionTimeMs int64)
 	OnError     func(errorMsg string)
 }
 
@@ -229,7 +229,7 @@ func (h *AgentWSHandler) handleAgentCompleted(msg AgentMessage) {
 	h.callbackMu.RUnlock()
 
 	if exists && callback.OnCompleted != nil {
-		callback.OnCompleted(msg.SessionID, responseWithMetrics)
+		callback.OnCompleted(msg.SessionID, responseWithMetrics, msg.TokensUsed, msg.ExecutionTimeMs)
 	} else {
 		// No callback registered, update database directly as fallback
 		now := time.Now()

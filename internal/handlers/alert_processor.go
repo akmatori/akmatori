@@ -437,6 +437,8 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 		var sessionID string
 		var hasError bool
 		var lastStreamedLog string
+		var finalTokensUsed int
+		var finalExecutionTimeMs int64
 
 		// Build task header for logging
 		taskHeader := fmt.Sprintf("📋 Alert Investigation: %s\n🖥️ Host: %s\n⚠️ Severity: %s\n\n--- Execution Log ---\n\n",
@@ -450,9 +452,11 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 					slog.Error("failed to update incident log", "err", err)
 				}
 			},
-			OnCompleted: func(sid, output string) {
+			OnCompleted: func(sid, output string, tokensUsed int, executionTimeMs int64) {
 				sessionID = sid
 				response = output
+				finalTokensUsed = tokensUsed
+				finalExecutionTimeMs = executionTimeMs
 				closeOnce.Do(func() { close(done) })
 			},
 			OnError: func(errorMsg string) {
@@ -465,7 +469,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
 			slog.Error("failed to start incident via WebSocket", "err", err)
 			errorMsg := fmt.Sprintf("Failed to start investigation: %v", err)
-			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg); updateErr != nil {
+			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg, 0, 0); updateErr != nil {
 				slog.Error("failed to update incident status", "err", updateErr)
 			}
 			h.updateSlackWithResult(threadTS, "❌ "+errorMsg, true)
@@ -486,7 +490,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 		if hasError {
 			finalStatus = database.IncidentStatusFailed
 		}
-		if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response); err != nil {
+		if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response, finalTokensUsed, finalExecutionTimeMs); err != nil {
 			slog.Error("failed to update incident complete", "err", err)
 		}
 
@@ -515,7 +519,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 	// No WebSocket worker available
 	slog.Error("agent worker not connected", "incident_id", incidentUUID)
 	errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
-	if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg); updateErr != nil {
+	if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg, 0, 0); updateErr != nil {
 		slog.Error("failed to update incident status", "err", updateErr)
 	}
 	h.updateSlackWithResult(threadTS, "❌ "+errorMsg, true)
@@ -556,6 +560,8 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		var sessionID string
 		var hasError bool
 		var lastStreamedLog string
+		var finalTokensUsed int
+		var finalExecutionTimeMs int64
 
 		taskHeader := fmt.Sprintf("📋 Slack Channel Alert Investigation: %s\n🖥️ Host: %s\n⚠️ Severity: %s\n\n--- Execution Log ---\n\n",
 			alert.AlertName, alert.TargetHost, alert.Severity)
@@ -577,9 +583,11 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 						fmt.Sprintf("🔍 *Investigating...*\n```\n%s\n```", progressLines))
 				}
 			},
-			OnCompleted: func(sid, output string) {
+			OnCompleted: func(sid, output string, tokensUsed int, executionTimeMs int64) {
 				sessionID = sid
 				response = output
+				finalTokensUsed = tokensUsed
+				finalExecutionTimeMs = executionTimeMs
 				closeOnce.Do(func() { close(done) })
 			},
 			OnError: func(errorMsg string) {
@@ -592,7 +600,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
 			slog.Error("failed to start incident via WebSocket", "err", err)
 			errorMsg := fmt.Sprintf("Failed to start investigation: %v", err)
-			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg); updateErr != nil {
+			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg, 0, 0); updateErr != nil {
 				slog.Error("failed to update incident status", "err", updateErr)
 			}
 			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
@@ -616,7 +624,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		if hasError {
 			finalStatus = database.IncidentStatusFailed
 		}
-		if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response); err != nil {
+		if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response, finalTokensUsed, finalExecutionTimeMs); err != nil {
 			slog.Error("failed to update incident complete", "err", err)
 		}
 
@@ -652,7 +660,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 	// No WebSocket worker available
 	slog.Error("agent worker not connected for Slack channel incident", "incident", incidentUUID)
 	errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
-	if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg); updateErr != nil {
+	if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg, 0, 0); updateErr != nil {
 		slog.Error("failed to update incident status", "err", updateErr)
 	}
 	h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)

@@ -144,14 +144,16 @@ func (s *SkillService) UpdateIncidentStatus(incidentUUID string, status database
 }
 
 // UpdateIncidentComplete updates the incident with final status, log, and response
-func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status database.IncidentStatus, sessionID string, fullLog string, response string) error {
+func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status database.IncidentStatus, sessionID string, fullLog string, response string, tokensUsed int, executionTimeMs int64) error {
 	now := time.Now()
 	updates := map[string]interface{}{
-		"status":       status,
-		"session_id":   sessionID,
-		"full_log":     fullLog,
-		"response":     response,
-		"completed_at": &now,
+		"status":            status,
+		"session_id":        sessionID,
+		"full_log":          fullLog,
+		"response":          response,
+		"tokens_used":       tokensUsed,
+		"execution_time_ms": executionTimeMs,
+		"completed_at":      &now,
 	}
 
 	if err := s.db.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).Updates(updates).Error; err != nil {
