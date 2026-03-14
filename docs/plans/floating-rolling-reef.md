@@ -130,12 +130,12 @@ This unblocks future handler unit tests with mock services.
 
 ## Phase 4: React Frontend Refactoring
 
-- [ ] 4A: Create shared hooks (useAsync, useFormState)
-- [ ] 4B: Split Tools.tsx (993 lines)
-- [ ] 4C: Split Settings.tsx (792 lines)
-- [ ] 4D: Split AlertSourcesManager.tsx (595 lines)
-- [ ] 4E: Create shared components (StatusBadge, LoadingError)
-- [ ] Verify: `make test-agent` + manual browser check
+- [x] 4A: Create shared hooks (useAsync, useFormState)
+- [x] 4B: Split Tools.tsx (993 lines)
+- [x] 4C: Split Settings.tsx (792 lines)
+- [x] 4D: Split AlertSourcesManager.tsx (595 lines)
+- [x] 4E: Create shared components (StatusBadge, LoadingError)
+- [x] Verify: `make test-agent` + manual browser check
 
 ### 4A: Create shared hooks
 
