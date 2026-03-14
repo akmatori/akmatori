@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"regexp"
@@ -165,7 +165,7 @@ func (e *Executor) ensureCodexLogin(ctx context.Context) error {
 		return fmt.Errorf("codex login failed: %w (output: %s)", err, string(output))
 	}
 
-	log.Printf("Codex CLI authenticated successfully")
+	slog.Info("Codex CLI authenticated successfully")
 	return nil
 }
 
@@ -218,22 +218,22 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 		// Set model if configured
 		if llmSettings.Model != "" {
 			cmd.Env = append(cmd.Env, "CODEX_MODEL="+llmSettings.Model)
-			log.Printf("Using model: %s", llmSettings.Model)
+			slog.Info("Using model", "model", llmSettings.Model)
 		}
 		// Set reasoning effort if configured
 		if string(llmSettings.ThinkingLevel) != "" {
 			cmd.Env = append(cmd.Env, "CODEX_REASONING_EFFORT="+string(llmSettings.ThinkingLevel))
-			log.Printf("Using reasoning effort: %s", llmSettings.ThinkingLevel)
+			slog.Info("Using reasoning effort", "reasoning_effort", llmSettings.ThinkingLevel)
 		}
 		// Set custom base URL if configured (for Azure OpenAI, local LLMs, etc.)
 		if llmSettings.BaseURL != "" {
 			cmd.Env = append(cmd.Env, "OPENAI_BASE_URL="+llmSettings.BaseURL)
-			log.Printf("Using custom base URL: %s", llmSettings.BaseURL)
+			slog.Info("Using custom base URL", "base_url", llmSettings.BaseURL)
 		}
 	}
 
 	// Log the exact command being executed
-	log.Printf("Executing codex command in %s: codex %v", workingDir, args)
+	slog.Info("Executing codex command", "working_dir", workingDir, "args", args)
 
 	// Create stdin pipe to match Node.js stdio: ['pipe', 'pipe', 'pipe']
 	// We create but don't close it - letting it stay open like Node.js does
@@ -260,7 +260,7 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start codex: %w", err)
 	}
-	log.Printf("Started codex (PID: %d, session: %s)", cmd.Process.Pid, sessionID)
+	slog.Info("Started codex", "pid", cmd.Process.Pid, "session_id", sessionID)
 
 	// Read stderr using io.Copy to avoid Scanner's line buffering issues
 	var stderrBuf bytes.Buffer
@@ -302,7 +302,7 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 					for _, line := range lines {
 						if matches := sessionIDRegex.FindStringSubmatch(line); len(matches) > 1 {
 							extractedSessionID = matches[1]
-							log.Printf("Extracted Codex session ID: %s", extractedSessionID)
+							slog.Info("Extracted Codex session ID", "session_id", extractedSessionID)
 						}
 					}
 
@@ -314,7 +314,7 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 				break
 			}
 			if err != nil {
-				log.Printf("Error reading stderr: %v", err)
+				slog.Error("Error reading stderr", "error", err)
 				break
 			}
 		}
@@ -327,13 +327,13 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 			// Check if this final line contains the session ID
 			if matches := sessionIDRegex.FindStringSubmatch(finalLine); len(matches) > 1 {
 				extractedSessionID = matches[1]
-				log.Printf("Extracted Codex session ID from final line: %s", extractedSessionID)
+				slog.Info("Extracted Codex session ID from final line", "session_id", extractedSessionID)
 			}
 
 			// Raw stderr not sent to UI - use JSON events for output
 		}
 
-		log.Printf("Codex stderr reading complete. Total lines: %d", len(stderrLines))
+		slog.Debug("Codex stderr reading complete", "line_count", len(stderrLines))
 	}()
 
 	// Read stdout as JSONL (JSON lines) - with --json flag, stdout contains JSON events
@@ -357,23 +357,23 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 				if err == io.EOF {
 					break
 				}
-				log.Printf("Error parsing JSON event %d: %v", eventCount, err)
+				slog.Error("Error parsing JSON event", "event_index", eventCount, "error", err)
 				// Don't continue on error - break to avoid infinite loop if decoder is broken
 				break
 			}
 			eventCount++
 
 			// Log each event for debugging
-			log.Printf("Received JSON event %d: type=%s", eventCount, event.Type)
+			slog.Debug("Received JSON event", "event_index", eventCount, "type", event.Type)
 
 			// Log error details if present
 			if event.Type == "error" {
 				if len(event.Error) > 0 {
 					errorJSON, _ := json.Marshal(event.Error)
-					log.Printf("  ERROR: %s", string(errorJSON))
+					slog.Error("Codex error event", "error_detail", string(errorJSON))
 				}
 				if event.Message != "" {
-					log.Printf("  MESSAGE: %s", event.Message)
+					slog.Error("Codex error message", "message", event.Message)
 					// Collect error messages for user-facing output
 					errorMessages = append(errorMessages, event.Message)
 					// Also add to progress messages for full log
@@ -383,17 +383,22 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 			}
 
 			if event.Item != nil {
-				log.Printf("  Item: type=%s, id=%s, status=%s", event.Item.Type, event.Item.ID, event.Item.Status)
+				slog.Debug("Codex item event",
+					"item_type", event.Item.Type,
+					"item_id", event.Item.ID,
+					"item_status", event.Item.Status)
 				if event.Item.Text != "" {
-					log.Printf("  Text length: %d chars", len(event.Item.Text))
+					slog.Debug("Codex item text", "text_length", len(event.Item.Text))
 				}
 				if event.Item.Command != "" {
-					log.Printf("  Command: %s", event.Item.Command)
+					slog.Debug("Codex item command", "command", event.Item.Command)
 				}
 			}
 			if event.Usage != nil {
-				log.Printf("  Usage: input=%d, cached=%d, output=%d",
-					event.Usage.InputTokens, event.Usage.CachedInputTokens, event.Usage.OutputTokens)
+				slog.Debug("Codex usage",
+					"input_tokens", event.Usage.InputTokens,
+					"cached_tokens", event.Usage.CachedInputTokens,
+					"output_tokens", event.Usage.OutputTokens)
 			}
 
 			// Extract agent message text
@@ -443,34 +448,37 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 			// Extract token usage from turn.completed event
 			if event.Type == "turn.completed" && event.Usage != nil {
 				tokensUsed = event.Usage.InputTokens + event.Usage.OutputTokens
-				log.Printf("Extracted token usage from JSON: input=%d, output=%d, total=%d",
-					event.Usage.InputTokens, event.Usage.OutputTokens, tokensUsed)
+				slog.Debug("Extracted token usage from JSON",
+					"input_tokens", event.Usage.InputTokens,
+					"output_tokens", event.Usage.OutputTokens,
+					"total_tokens", tokensUsed)
 			}
 		}
 
-		log.Printf("Codex JSON reading complete. Events: %d, Tokens: %d", eventCount, tokensUsed)
+		slog.Debug("Codex JSON reading complete", "event_count", eventCount, "tokens_used", tokensUsed)
 	}()
 
 	// IMPORTANT: Wait for I/O goroutines to finish BEFORE calling cmd.Wait()
 	// cmd.Wait() closes the pipes, so the goroutines must finish reading first.
 	// This fixes the race condition where "read |0: file already closed" errors occur.
-	log.Printf("Waiting for stdout goroutine to finish...")
+	slog.Debug("Waiting for stdout goroutine to finish")
 	<-stdoutDone
-	log.Printf("Stdout goroutine finished")
-	log.Printf("Waiting for stderr goroutine to finish...")
+	slog.Debug("Stdout goroutine finished")
+	slog.Debug("Waiting for stderr goroutine to finish")
 	<-stderrDone
-	log.Printf("Stderr goroutine finished")
+	slog.Debug("Stderr goroutine finished")
 
 	// Now wait for command to complete - this closes the pipes (but they're already drained)
-	log.Printf("Waiting for codex process to complete...")
+	slog.Debug("Waiting for codex process to complete")
 	err = cmd.Wait()
 	executionTime := time.Since(startTime)
-	log.Printf("Codex process completed in %v with exit code: %v", executionTime, err)
+	slog.Info("Codex process completed", "execution_time", executionTime, "exit_error", err)
 
 	if err != nil {
-		log.Printf("Codex exited with error: %v", err)
-		log.Printf("Codex stderr output:\n%s", strings.Join(stderrLines, "\n"))
-		log.Printf("Codex stdout JSON events: %d", len(progressMessages))
+		slog.Error("Codex exited with error",
+			"error", err,
+			"stderr_lines", strings.Join(stderrLines, "\n"),
+			"json_event_count", len(progressMessages))
 	}
 
 	// Get the output text from JSON parsing (safe to access after stdoutDone is closed)
@@ -479,7 +487,7 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 	// Fallback: If no agent_message was produced but we have reasoning, use the last reasoning
 	// This handles cases where models like gpt-5.2 produce reasoning without a final text response
 	if finalOutput == "" && lastReasoningText != "" {
-		log.Printf("No agent_message produced, using last reasoning text as fallback (%d chars)", len(lastReasoningText))
+		slog.Info("No agent_message produced, using last reasoning text as fallback", "reasoning_length", len(lastReasoningText))
 		finalOutput = lastReasoningText
 	}
 
@@ -496,17 +504,20 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 		ErrorMessages: errorMessages,
 	}
 
-	log.Printf("Execute complete. Output: %d bytes, SessionID: %s, ExecutionTime: %v, TokensUsed: %d",
-		len(result.Output), result.SessionID, result.ExecutionTime, result.TokensUsed)
+	slog.Info("Execute complete",
+		"output_bytes", len(result.Output),
+		"session_id", result.SessionID,
+		"execution_time", result.ExecutionTime,
+		"tokens_used", result.TokensUsed)
 	if result.Output == "" {
-		log.Printf("WARNING: stdout is empty! No output from codex.")
-		log.Printf("DEBUG: Stderr lines count: %d", len(stderrLines))
+		slog.Warn("Stdout is empty, no output from codex")
+		slog.Debug("Stderr line count", "count", len(stderrLines))
 		if len(stderrLines) > 0 {
-			log.Printf("DEBUG: Last 10 stderr lines:\n%s", strings.Join(stderrLines[utils.Max(0, len(stderrLines)-10):], "\n"))
+			slog.Debug("Last stderr lines", "lines", strings.Join(stderrLines[utils.Max(0, len(stderrLines)-10):], "\n"))
 		}
-		log.Printf("DEBUG: Progress messages count: %d", len(progressMessages))
+		slog.Debug("Progress message count", "count", len(progressMessages))
 		if len(progressMessages) > 0 {
-			log.Printf("DEBUG: Last 5 progress messages:\n%s", strings.Join(progressMessages[utils.Max(0, len(progressMessages)-5):], "\n"))
+			slog.Debug("Last progress messages", "messages", strings.Join(progressMessages[utils.Max(0, len(progressMessages)-5):], "\n"))
 		}
 	}
 	return result, nil
@@ -517,7 +528,7 @@ func (e *Executor) ExecuteForSlackInDirectory(ctx context.Context, task string, 
 	result, err := e.ExecuteInDirectory(ctx, task, sessionID, workingDir, onStderrUpdate)
 
 	if err != nil {
-		log.Printf("Error executing codex: %v", err)
+		slog.Error("Error executing codex", "error", err)
 
 		// Guard against nil result (can happen on early failures like cmd.Start errors)
 		var executionTime time.Duration
@@ -574,7 +585,7 @@ func (e *Executor) ExecuteForSlackInDirectory(ctx context.Context, task string, 
 
 	// Append metrics to the response
 	metricsLine := utils.AppendMetrics(response, result.ExecutionTime, result.TokensUsed)
-	log.Printf("Final response length before metrics: %d, after metrics: %d", len(response), len(metricsLine))
+	slog.Info("Final response lengths", "before_metrics", len(response), "after_metrics", len(metricsLine))
 
 	slackResult := &SlackResult{
 		Response:      metricsLine,
@@ -584,7 +595,6 @@ func (e *Executor) ExecuteForSlackInDirectory(ctx context.Context, task string, 
 		TokensUsed:    result.TokensUsed,
 		FullLog:       result.FullLog,
 	}
-	log.Printf("Returning SlackResult with response length: %d, full log length: %d", len(slackResult.Response), len(slackResult.FullLog))
+	slog.Info("Returning SlackResult", "response_length", len(slackResult.Response), "full_log_length", len(slackResult.FullLog))
 	return slackResult
 }
-

@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/akmatori/akmatori/internal/api"
@@ -73,19 +73,19 @@ func (h *AuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !h.jwtAuth.ValidateCredentials(req.Username, req.Password) {
-		log.Printf("AuthHandler: Failed login attempt for user '%s' from %s", req.Username, r.RemoteAddr)
+		slog.Warn("failed login attempt", "username", req.Username, "remote_addr", r.RemoteAddr)
 		api.RespondError(w, http.StatusUnauthorized, "Invalid username or password")
 		return
 	}
 
 	token, err := h.jwtAuth.GenerateToken(req.Username)
 	if err != nil {
-		log.Printf("AuthHandler: Failed to generate token for user '%s': %v", req.Username, err)
+		slog.Error("failed to generate token", "username", req.Username, "err", err)
 		api.RespondError(w, http.StatusInternalServerError, "Failed to generate token")
 		return
 	}
 
-	log.Printf("AuthHandler: User '%s' logged in successfully from %s", req.Username, r.RemoteAddr)
+	slog.Info("user logged in successfully", "username", req.Username, "remote_addr", r.RemoteAddr)
 
 	api.RespondJSON(w, http.StatusOK, LoginResponse{
 		Token:     token,
@@ -163,7 +163,7 @@ func (h *AuthHandler) handleSetup(w http.ResponseWriter, r *http.Request) {
 	// Complete setup: hash and store password
 	hash, err := setup.CompleteSetup(req.Password)
 	if err != nil {
-		log.Printf("AuthHandler: Setup failed: %v", err)
+		slog.Error("setup failed", "err", err)
 		api.RespondError(w, http.StatusInternalServerError, "Failed to complete setup")
 		return
 	}
@@ -175,12 +175,12 @@ func (h *AuthHandler) handleSetup(w http.ResponseWriter, r *http.Request) {
 	username := h.jwtAuth.GetAdminUsername()
 	token, err := h.jwtAuth.GenerateToken(username)
 	if err != nil {
-		log.Printf("AuthHandler: Failed to generate token after setup: %v", err)
+		slog.Error("failed to generate token after setup", "err", err)
 		api.RespondError(w, http.StatusInternalServerError, "Setup completed but failed to generate token")
 		return
 	}
 
-	log.Printf("AuthHandler: Initial setup completed by %s", r.RemoteAddr)
+	slog.Info("initial setup completed", "remote_addr", r.RemoteAddr)
 
 	api.RespondJSON(w, http.StatusOK, LoginResponse{
 		Token:     token,

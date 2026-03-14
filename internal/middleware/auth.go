@@ -2,7 +2,7 @@ package middleware
 
 import (
 	"crypto/subtle"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -63,9 +63,9 @@ func (m *AuthMiddleware) LoadAPIKeysFromDB() error {
 	m.config.APIKeys = settings.GetActiveKeys()
 
 	if m.config.Enabled {
-		log.Printf("AuthMiddleware: Loaded %d API keys, authentication ENABLED", len(m.config.APIKeys))
+		slog.Info("AuthMiddleware: authentication enabled", "api_key_count", len(m.config.APIKeys))
 	} else {
-		log.Printf("AuthMiddleware: Authentication DISABLED")
+		slog.Info("AuthMiddleware: authentication disabled")
 	}
 
 	return nil
@@ -100,7 +100,7 @@ func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 
 		// Validate API key using constant-time comparison
 		if !m.validateAPIKey(apiKey, apiKeys) {
-			log.Printf("AuthMiddleware: Invalid API key attempt from %s", r.RemoteAddr)
+			slog.Warn("AuthMiddleware: invalid API key attempt", "remote_addr", r.RemoteAddr)
 			m.unauthorized(w, "Invalid API key")
 			return
 		}
@@ -182,7 +182,7 @@ func (m *AuthMiddleware) unauthorized(w http.ResponseWriter, message string) {
 	w.Header().Set("WWW-Authenticate", "Bearer realm=\"API\"")
 	w.WriteHeader(http.StatusUnauthorized)
 	if _, err := w.Write([]byte(`{"error":"` + message + `"}`)); err != nil {
-		log.Printf("Failed to write error response: %v", err)
+		slog.Error("Failed to write error response", "error", err)
 	}
 }
 

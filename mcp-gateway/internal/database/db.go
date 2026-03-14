@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"gorm.io/driver/postgres"
@@ -120,7 +120,7 @@ func Connect(dsn string, logLevel logger.LogLevel) error {
 	}
 
 	DB = db
-	log.Println("Database connected successfully")
+	slog.Info("database connected successfully")
 	return nil
 }
 

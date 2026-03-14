@@ -1,9 +1,8 @@
 package handlers
 
 import (
-	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"sync"
@@ -107,23 +106,23 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("Created incident via API: %s", incidentUUID)
+		slog.Info("created incident via API", "incident_id", incidentUUID)
 
 		go func() {
 			taskHeader := fmt.Sprintf("📝 API Incident Task:\n%s\n\n--- Execution Log ---\n\n", req.Task)
 			if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", taskHeader+"Starting execution..."); err != nil {
-				log.Printf("Failed to update incident status: %v", err)
+				slog.Error("failed to update incident status", "err", err)
 			}
 
 			taskWithGuidance := executor.PrependGuidance(req.Task)
 
 			if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
-				log.Printf("Using WebSocket-based agent worker for API incident %s", incidentUUID)
+				slog.Info("using WebSocket-based agent worker for API incident", "incident_id", incidentUUID)
 
 				var llmSettings *LLMSettingsForWorker
 				if dbSettings, err := database.GetLLMSettings(); err == nil && dbSettings != nil {
 					llmSettings = BuildLLMSettingsForWorker(dbSettings)
-					log.Printf("Using LLM provider: %s, model: %s", dbSettings.Provider, dbSettings.Model)
+					slog.Info("using LLM provider", "provider", dbSettings.Provider, "model", dbSettings.Model)
 				}
 
 				done := make(chan struct{})
@@ -132,17 +131,21 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				var sessionID string
 				var hasError bool
 				var lastStreamedLog string
+				var finalTokensUsed int
+				var finalExecutionTimeMs int64
 
 				callback := IncidentCallback{
 					OnOutput: func(output string) {
 						lastStreamedLog += output
 						if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog); err != nil {
-							log.Printf("Failed to update incident log: %v", err)
+							slog.Error("failed to update incident log", "err", err)
 						}
 					},
-					OnCompleted: func(sid, output string) {
+					OnCompleted: func(sid, output string, tokensUsed int, executionTimeMs int64) {
 						sessionID = sid
 						response = output
+						finalTokensUsed = tokensUsed
+						finalExecutionTimeMs = executionTimeMs
 						closeOnce.Do(func() { close(done) })
 					},
 					OnError: func(errorMsg string) {
@@ -153,10 +156,10 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				}
 
 				if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
-					log.Printf("Failed to start incident via WebSocket: %v", err)
+					slog.Error("failed to start incident via WebSocket", "err", err)
 					errorMsg := fmt.Sprintf("Failed to start incident: %v", err)
-					if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg); updateErr != nil {
-						log.Printf("Failed to update incident status: %v", updateErr)
+					if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg, 0, 0); updateErr != nil {
+						slog.Error("failed to update incident status", "err", updateErr)
 					}
 					return
 				}
@@ -169,23 +172,23 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				}
 
 				if hasError {
-					if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, sessionID, fullLog, response); err != nil {
-						log.Printf("Failed to update incident complete: %v", err)
+					if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, sessionID, fullLog, response, finalTokensUsed, finalExecutionTimeMs); err != nil {
+						slog.Error("failed to update incident complete", "err", err)
 					}
 				} else {
-					if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, sessionID, fullLog, response); err != nil {
-						log.Printf("Failed to update incident complete: %v", err)
+					if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, sessionID, fullLog, response, finalTokensUsed, finalExecutionTimeMs); err != nil {
+						slog.Error("failed to update incident complete", "err", err)
 					}
 				}
 
-				log.Printf("API incident %s completed (via WebSocket)", incidentUUID)
+				slog.Info("API incident completed via WebSocket", "incident_id", incidentUUID)
 				return
 			}
 
-			log.Printf("ERROR: Agent worker not connected for API incident %s", incidentUUID)
+			slog.Error("agent worker not connected for API incident", "incident_id", incidentUUID)
 			errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
-			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg); updateErr != nil {
-				log.Printf("Failed to update incident status: %v", updateErr)
+			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg, 0, 0); updateErr != nil {
+				slog.Error("failed to update incident status", "err", updateErr)
 			}
 		}()
 
@@ -198,39 +201,6 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 
 	default:
 		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
-	}
-}
-
-// runIncidentLocal runs incident using the local executor (legacy fallback).
-// Kept in case WebSocket-based execution needs to be bypassed.
-//
-//lint:ignore U1000 Legacy fallback for local execution - may be re-enabled
-func (h *APIHandler) runIncidentLocal(incidentUUID, workingDir, taskHeader, taskWithGuidance string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
-	defer cancel()
-
-	progressCallback := func(progressLog string) {
-		if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+progressLog); err != nil {
-			log.Printf("Failed to update incident log: %v", err)
-		}
-	}
-
-	result, err := h.codexExecutor.ExecuteInDirectory(ctx, taskWithGuidance, "", workingDir, progressCallback)
-
-	fullLogWithContext := taskHeader + result.FullLog
-
-	if err != nil {
-		log.Printf("Incident %s failed: %v", incidentUUID, err)
-		if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, result.SessionID, fullLogWithContext+"\n\nError: "+err.Error(), "Error: "+err.Error()); updateErr != nil {
-			log.Printf("Failed to update incident complete: %v", updateErr)
-		}
-		return
-	}
-
-	log.Printf("Incident %s completed. Output: %d bytes, Tokens: %d, Session: %s",
-		incidentUUID, len(result.Output), result.TokensUsed, result.SessionID)
-	if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, result.SessionID, fullLogWithContext, result.Output); err != nil {
-		log.Printf("Failed to update incident complete: %v", err)
 	}
 }
 
@@ -300,7 +270,7 @@ func (h *APIHandler) handleAttachAlert(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := db.Model(&incident).Update("alert_count", gorm.Expr("alert_count + 1")).Error; err != nil {
-		log.Printf("Warning: Failed to update alert count for incident %s: %v", uuid, err)
+		slog.Warn("failed to update alert count for incident", "incident_id", uuid, "err", err)
 	}
 
 	api.RespondJSON(w, http.StatusCreated, alert)
@@ -336,7 +306,7 @@ func (h *APIHandler) handleDetachAlert(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := db.Model(&incident).Update("alert_count", gorm.Expr("GREATEST(alert_count - 1, 0)")).Error; err != nil {
-		log.Printf("Warning: Failed to update alert count for incident %s: %v", uuid, err)
+		slog.Warn("failed to update alert count for incident", "incident_id", uuid, "err", err)
 	}
 
 	api.RespondNoContent(w)
@@ -378,7 +348,7 @@ func (h *APIHandler) handleMergeIncident(w http.ResponseWriter, r *http.Request)
 	var newAlertCount int64
 	db.Model(&database.IncidentAlert{}).Where("incident_id = ?", targetIncident.ID).Count(&newAlertCount)
 	if err := db.Model(&targetIncident).Update("alert_count", newAlertCount).Error; err != nil {
-		log.Printf("Warning: Failed to update alert count for incident %s: %v", uuid, err)
+		slog.Warn("failed to update alert count for incident", "incident_id", uuid, "err", err)
 	}
 
 	if err := db.Model(&sourceIncident).Updates(map[string]interface{}{
@@ -386,7 +356,7 @@ func (h *APIHandler) handleMergeIncident(w http.ResponseWriter, r *http.Request)
 		"alert_count": 0,
 		"response":    fmt.Sprintf("Merged into incident %s", uuid),
 	}).Error; err != nil {
-		log.Printf("Warning: Failed to update source incident %s after merge: %v", req.SourceIncidentUUID, err)
+		slog.Warn("failed to update source incident after merge", "source_incident_id", req.SourceIncidentUUID, "err", err)
 	}
 
 	db.First(&targetIncident, targetIncident.ID)

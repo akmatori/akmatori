@@ -2,7 +2,7 @@ package services
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/google/uuid"
@@ -87,7 +87,7 @@ func (s *AlertService) EnsureAlertSourceType(name, displayName, description stri
 		if err := s.db.Create(&sourceType).Error; err != nil {
 			return nil, err
 		}
-		log.Printf("Created alert source type: %s", name)
+		slog.Info("created alert source type", "name", name)
 	} else {
 		// Update existing
 		updates := map[string]interface{}{
@@ -317,6 +317,6 @@ func (s *AlertService) InitializeDefaultSourceTypes() error {
 		}
 	}
 
-	log.Println("Alert source types initialized")
+	slog.Info("alert source types initialized")
 	return nil
 }

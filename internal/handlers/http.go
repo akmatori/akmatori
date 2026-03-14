@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 )
 
@@ -43,6 +43,6 @@ func (h *HTTPHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Error encoding health response: %v", err)
+		slog.Error("failed to encode health response", "err", err)
 	}
 }

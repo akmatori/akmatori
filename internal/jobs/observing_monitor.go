@@ -1,7 +1,7 @@
 package jobs
 
 import (
-	"log"
+	"log/slog"
 	"time"
 
 	"gorm.io/gorm"
@@ -45,11 +45,11 @@ func (m *ObservingMonitor) CheckAndTransition() (int, error) {
 			"completed_at": now,
 		}).Error
 		if err != nil {
-			log.Printf("Failed to transition incident %s to resolved: %v", incident.UUID, err)
+			slog.Error("Failed to transition incident to resolved", "incident_uuid", incident.UUID, "error", err)
 			continue
 		}
 		transitioned++
-		log.Printf("Transitioned incident %s from observing to resolved", incident.UUID)
+		slog.Info("Transitioned incident from observing to resolved", "incident_uuid", incident.UUID)
 	}
 
 	return transitioned, nil
@@ -65,12 +65,12 @@ func (m *ObservingMonitor) Start(interval time.Duration, stop <-chan struct{}) {
 		case <-ticker.C:
 			transitioned, err := m.CheckAndTransition()
 			if err != nil {
-				log.Printf("Observing monitor error: %v", err)
+				slog.Error("Observing monitor error", "error", err)
 			} else if transitioned > 0 {
-				log.Printf("Observing monitor: transitioned %d incidents to resolved", transitioned)
+				slog.Info("Observing monitor transitioned incidents to resolved", "transitioned_count", transitioned)
 			}
 		case <-stop:
-			log.Println("Observing monitor stopped")
+			slog.Info("Observing monitor stopped")
 			return
 		}
 	}

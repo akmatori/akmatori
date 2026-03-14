@@ -2,7 +2,7 @@ package database
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -66,20 +66,20 @@ func Connect(dsn string, logLevel logger.LogLevel) error {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	log.Println("Database connection established")
+	slog.Info("database connection established")
 	return nil
 }
 
 // AutoMigrate runs database migrations
 func AutoMigrate() error {
-	log.Println("Running database migrations...")
+	slog.Info("running database migrations")
 
 	// Drop old openai_settings table (replaced by llm_settings)
 	if DB.Migrator().HasTable("openai_settings") {
 		if err := DB.Migrator().DropTable("openai_settings"); err != nil {
-			log.Printf("Warning: failed to drop openai_settings table: %v", err)
+			slog.Warn("failed to drop openai_settings table", "err", err)
 		} else {
-			log.Println("Dropped old openai_settings table")
+			slog.Info("dropped old openai_settings table")
 		}
 	}
 
@@ -112,16 +112,16 @@ func AutoMigrate() error {
 
 	// Migrate proxy settings from OpenAI settings if they exist
 	if err := migrateProxySettings(DB); err != nil {
-		log.Printf("Warning: proxy settings migration failed: %v", err)
+		slog.Warn("proxy settings migration failed", "err", err)
 	}
 
-	log.Println("Database migrations completed successfully")
+	slog.Info("database migrations completed successfully")
 	return nil
 }
 
 // InitializeDefaults creates default records if they don't exist
 func InitializeDefaults() error {
-	log.Println("Initializing default database records...")
+	slog.Info("initializing default database records")
 
 	// Create default Slack settings if they don't exist
 	var count int64
@@ -133,7 +133,7 @@ func InitializeDefaults() error {
 		if err := DB.Create(defaultSlackSettings).Error; err != nil {
 			return fmt.Errorf("failed to create default slack settings: %w", err)
 		}
-		log.Println("Created default Slack settings (disabled)")
+		slog.Info("created default Slack settings (disabled)")
 	}
 
 	// Migrate LLM settings to per-provider storage.
@@ -153,9 +153,9 @@ func InitializeDefaults() error {
 			secret := strings.TrimSpace(string(data))
 			if secret != "" {
 				if err := SetSystemSetting(SystemSettingJWTSecret, secret); err != nil {
-					log.Printf("Warning: failed to migrate JWT secret to database: %v", err)
+					slog.Warn("failed to migrate JWT secret to database", "err", err)
 				} else {
-					log.Println("Migrated JWT secret from file to database")
+					slog.Info("migrated JWT secret from file to database")
 				}
 			}
 		}
@@ -195,7 +195,7 @@ func seedLLMProviders() error {
 				return fmt.Errorf("failed to create LLM settings for %s: %w", p, err)
 			}
 		}
-		log.Println("Created default LLM settings for all providers")
+		slog.Info("created default LLM settings for all providers")
 		return nil
 	}
 
@@ -221,7 +221,7 @@ func seedLLMProviders() error {
 		if err := DB.Create(row).Error; err != nil {
 			return fmt.Errorf("failed to create LLM settings for %s: %w", p, err)
 		}
-		log.Printf("Created LLM settings for provider: %s", p)
+		slog.Info("created LLM settings for provider", "provider", p)
 	}
 
 	// If no row is marked active (legacy single-row DB), mark the first enabled
@@ -234,7 +234,7 @@ func seedLLMProviders() error {
 		}
 		if first.ID > 0 {
 			DB.Model(&first).Update("active", true)
-			log.Printf("Marked provider %s as active (migration)", first.Provider)
+			slog.Info("marked provider as active (migration)", "provider", first.Provider)
 		}
 	}
 
@@ -286,7 +286,7 @@ If a matching runbook exists, follow its procedures as your primary investigatio
 
 // InitializeSystemSkill creates the incident-manager system skill if it doesn't exist
 func InitializeSystemSkill() error {
-	log.Println("Checking for incident-manager system skill...")
+	slog.Info("checking for incident-manager system skill")
 
 	var skill Skill
 	result := DB.Where("name = ?", "incident-manager").First(&skill)
@@ -295,7 +295,7 @@ func InitializeSystemSkill() error {
 		// Skill exists, ensure it's marked as system
 		if !skill.IsSystem {
 			DB.Model(&skill).Update("is_system", true)
-			log.Println("Updated incident-manager skill to system skill")
+			slog.Info("updated incident-manager skill to system skill")
 		}
 		return nil
 	}
@@ -314,7 +314,7 @@ func InitializeSystemSkill() error {
 		return fmt.Errorf("failed to create incident-manager skill: %w", err)
 	}
 
-	log.Printf("Created incident-manager system skill (ID: %d)", skill.ID)
+	slog.Info("created incident-manager system skill", "id", skill.ID)
 
 	return nil
 }
@@ -409,38 +409,6 @@ func Close() error {
 		return err
 	}
 	return sqlDB.Close()
-}
-
-// GetOpenAISettings retrieves OpenAI settings from the database (legacy, kept for device auth)
-func GetOpenAISettings() (*OpenAISettings, error) {
-	var settings OpenAISettings
-	if err := DB.First(&settings).Error; err != nil {
-		return nil, err
-	}
-	return &settings, nil
-}
-
-// UpdateOpenAISettings updates OpenAI settings in the database (legacy)
-func UpdateOpenAISettings(settings *OpenAISettings) error {
-	return DB.Model(&OpenAISettings{}).Where("id = ?", settings.ID).Updates(settings).Error
-}
-
-// UpdateOpenAIChatGPTTokens updates the ChatGPT OAuth tokens in the database
-func UpdateOpenAIChatGPTTokens(settings *OpenAISettings) error {
-	return DB.Model(&OpenAISettings{}).Where("id = ?", settings.ID).
-		Select("chat_gpt_access_token", "chat_gpt_refresh_token", "chat_gpt_expires_at", "chat_gpt_user_email", "auth_method").
-		Updates(settings).Error
-}
-
-// ClearOpenAIChatGPTTokens clears all ChatGPT OAuth tokens (for disconnect)
-func ClearOpenAIChatGPTTokens(id uint) error {
-	return DB.Model(&OpenAISettings{}).Where("id = ?", id).
-		Updates(map[string]interface{}{
-			"chat_gpt_access_token":  "",
-			"chat_gpt_refresh_token": "",
-			"chat_gpt_expires_at":    nil,
-			"chat_gpt_user_email":    "",
-		}).Error
 }
 
 // GetProxySettings retrieves proxy settings from the database

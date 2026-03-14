@@ -235,11 +235,6 @@ func TestNewAPIHandler(t *testing.T) {
 	if h == nil {
 		t.Fatal("NewAPIHandler returned nil")
 	}
-
-	// Check that deviceAuthService is initialized
-	if h.deviceAuthService == nil {
-		t.Error("deviceAuthService should be initialized")
-	}
 }
 
 func TestAPIHandler_SetAlertChannelReloader(t *testing.T) {

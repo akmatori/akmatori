@@ -1,13 +1,8 @@
-import { useEffect, useState } from 'react';
 import {
   Plus,
   Edit2,
   Trash2,
-  Save,
-  X,
   Bell,
-  Power,
-  PowerOff,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -18,10 +13,10 @@ import {
 } from 'lucide-react';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorMessage from './ErrorMessage';
-import { alertSourceTypesApi, alertSourcesApi } from '../api/client';
-import type { AlertSourceType, AlertSourceInstance } from '../types';
+import AlertSourceForm from './alerts/AlertSourceForm';
+import { useAlertSourceManagement } from '../hooks/useAlertSourceManagement';
+import { alertSourcesApi } from '../api/client';
 
-// Source type icon mapping
 const sourceTypeIcons: Record<string, string> = {
   alertmanager: 'AM',
   grafana: 'GF',
@@ -32,169 +27,26 @@ const sourceTypeIcons: Record<string, string> = {
 };
 
 export default function AlertSourcesManager() {
-  const [sources, setSources] = useState<AlertSourceInstance[]>([]);
-  const [sourceTypes, setSourceTypes] = useState<AlertSourceType[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [editingSource, setEditingSource] = useState<AlertSourceInstance | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
-  const [expandedSource, setExpandedSource] = useState<string | null>(null);
-  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
-  const [formData, setFormData] = useState({
-    source_type_name: '',
-    name: '',
-    description: '',
-    webhook_secret: '',
-    field_mappings: {} as Record<string, string>,
-    settings: {} as Record<string, any>,
-    enabled: true,
-  });
-
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      setError('');
-      const [sourcesData, typesData] = await Promise.all([
-        alertSourcesApi.list(),
-        alertSourceTypesApi.list(),
-      ]);
-      setSources(sourcesData);
-      setSourceTypes(typesData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCreate = () => {
-    setIsCreating(true);
-    setFormData({
-      source_type_name: sourceTypes[0]?.name || '',
-      name: '',
-      description: '',
-      webhook_secret: '',
-      field_mappings: {},
-      settings: {},
-      enabled: true,
-    });
-    setEditingSource(null);
-  };
-
-  const handleEdit = (source: AlertSourceInstance) => {
-    setEditingSource(source);
-    setFormData({
-      source_type_name: source.alert_source_type?.name || '',
-      name: source.name,
-      description: source.description,
-      webhook_secret: source.webhook_secret,
-      field_mappings: source.field_mappings || {},
-      settings: source.settings || {},
-      enabled: source.enabled,
-    });
-    setIsCreating(false);
-  };
-
-  const handleSave = async () => {
-    try {
-      setError('');
-
-      if (!formData.name.trim()) {
-        setError('Name is required');
-        return;
-      }
-
-      if (formData.source_type_name === 'slack_channel') {
-        const channelId = formData.settings?.slack_channel_id as string;
-        if (!channelId?.trim()) {
-          setError('Slack Channel ID is required');
-          return;
-        }
-      }
-
-      if (isCreating) {
-        await alertSourcesApi.create({
-          source_type_name: formData.source_type_name,
-          name: formData.name,
-          description: formData.description,
-          webhook_secret: formData.webhook_secret,
-          field_mappings: formData.field_mappings,
-          settings: formData.settings,
-        });
-      } else if (editingSource) {
-        await alertSourcesApi.update(editingSource.uuid, {
-          name: formData.name,
-          description: formData.description,
-          webhook_secret: formData.webhook_secret,
-          field_mappings: formData.field_mappings,
-          settings: formData.settings,
-          enabled: formData.enabled,
-        });
-      }
-
-      setIsCreating(false);
-      setEditingSource(null);
-      setFormData({
-        source_type_name: '',
-        name: '',
-        description: '',
-        webhook_secret: '',
-        field_mappings: {},
-        settings: {},
-        enabled: true,
-      });
-      loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save alert source');
-    }
-  };
-
-  const handleDelete = async (uuid: string) => {
-    if (!confirm('Are you sure you want to delete this alert source?')) return;
-
-    try {
-      setError('');
-      await alertSourcesApi.delete(uuid);
-      loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete alert source');
-    }
-  };
-
-  const handleCancel = () => {
-    setIsCreating(false);
-    setEditingSource(null);
-    setFormData({
-      source_type_name: '',
-      name: '',
-      description: '',
-      webhook_secret: '',
-      field_mappings: {},
-      settings: {},
-      enabled: true,
-    });
-  };
-
-  const toggleExpand = (uuid: string) => {
-    setExpandedSource(expandedSource === uuid ? null : uuid);
-  };
-
-  const copyWebhookUrl = async (uuid: string) => {
-    const url = alertSourcesApi.getWebhookUrl(uuid);
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopiedUrl(uuid);
-      setTimeout(() => setCopiedUrl(null), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
-    }
-  };
-
-  const selectedType = sourceTypes.find((t) => t.name === formData.source_type_name);
+  const {
+    sources,
+    sourceTypes,
+    loading,
+    error,
+    editingSource,
+    isCreating,
+    formData,
+    setFormData,
+    expandedSource,
+    copiedUrl,
+    selectedType,
+    handleCreate,
+    handleEdit,
+    handleSave,
+    handleDelete,
+    handleCancel,
+    toggleExpand,
+    copyWebhookUrl,
+  } = useAlertSourceManagement();
 
   if (loading) {
     return <LoadingSpinner />;
@@ -219,190 +71,16 @@ export default function AlertSourcesManager() {
 
       {/* Create/Edit Form */}
       {(isCreating || editingSource) && (
-        <div className="p-6 bg-gray-50 dark:bg-gray-900/50 rounded-lg border border-gray-200 dark:border-gray-700 animate-fade-in">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">
-            {isCreating ? 'Create Alert Source' : 'Edit Alert Source'}
-          </h3>
-
-          <div className="space-y-6">
-            {/* Source Type */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Source Type <span className="text-red-500">*</span>
-              </label>
-              <select
-                className="input-field"
-                value={formData.source_type_name}
-                onChange={(e) =>
-                  setFormData({ ...formData, source_type_name: e.target.value })
-                }
-                disabled={!!editingSource}
-              >
-                {sourceTypes.map((type) => (
-                  <option key={type.id} value={type.name}>
-                    {type.display_name} - {type.description}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Instance Name */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Instance Name <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                className="input-field"
-                placeholder="e.g., Production Alertmanager"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              />
-            </div>
-
-            {/* Description */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Description
-              </label>
-              <input
-                type="text"
-                className="input-field"
-                placeholder="Optional description"
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              />
-            </div>
-
-            {/* Slack Channel specific fields */}
-            {formData.source_type_name === 'slack_channel' ? (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Slack Channel ID <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    className="input-field"
-                    placeholder="C0123456789"
-                    value={(formData.settings?.slack_channel_id as string) || ''}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        settings: { ...formData.settings, slack_channel_id: e.target.value },
-                      })
-                    }
-                  />
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Enter the Channel ID (not name). Find it in Slack channel details → About → Channel ID.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Custom Extraction Prompt (optional)
-                  </label>
-                  <textarea
-                    className="input-field min-h-[100px]"
-                    placeholder="Override the default AI extraction prompt for alert parsing..."
-                    value={(formData.settings?.extraction_prompt as string) || ''}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        settings: { ...formData.settings, extraction_prompt: e.target.value },
-                      })
-                    }
-                  />
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Leave empty to use the default prompt. Use %s as a placeholder for the message text.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="process-human-messages"
-                    checked={(formData.settings?.process_human_messages as boolean) || false}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        settings: { ...formData.settings, process_human_messages: e.target.checked },
-                      })
-                    }
-                  />
-                  <label htmlFor="process-human-messages" className="text-sm text-gray-700 dark:text-gray-300">
-                    Process human messages as alerts
-                  </label>
-                </div>
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  When enabled, messages from human users (not just bots/integrations) will also trigger alert
-                  extraction and investigations.
-                </p>
-
-                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded text-sm">
-                  <p className="text-blue-700 dark:text-blue-300">
-                    <strong>Note:</strong>{' '}
-                    {(formData.settings?.process_human_messages as boolean)
-                      ? 'All messages (from bots and humans) posted to this channel will be treated as alerts.'
-                      : 'Only bot/integration messages posted to this channel will be treated as alerts.'}
-                    {' '}AI will extract alert details and trigger investigations. Thread replies are ignored.
-                  </p>
-                </div>
-              </>
-            ) : (
-              /* Webhook Secret - for non-Slack types */
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Webhook Secret
-                </label>
-                <input
-                  type="password"
-                  className="input-field"
-                  placeholder="Optional secret for webhook validation"
-                  value={formData.webhook_secret}
-                  onChange={(e) => setFormData({ ...formData, webhook_secret: e.target.value })}
-                />
-                {selectedType && (
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Header: <code>{selectedType.webhook_secret_header}</code>
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Enabled Toggle */}
-            <div className="flex items-center gap-3 p-4 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-              <input
-                type="checkbox"
-                id="enabled"
-                checked={formData.enabled}
-                onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
-              />
-              <label htmlFor="enabled" className="flex items-center gap-2 cursor-pointer">
-                {formData.enabled ? (
-                  <Power className="w-4 h-4 text-green-500" />
-                ) : (
-                  <PowerOff className="w-4 h-4 text-gray-400" />
-                )}
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  {formData.enabled ? 'Enabled' : 'Disabled'}
-                </span>
-              </label>
-            </div>
-
-            {/* Form Actions */}
-            <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
-              <button onClick={handleSave} className="btn btn-primary">
-                <Save className="w-4 h-4" />
-                Save
-              </button>
-              <button onClick={handleCancel} className="btn btn-secondary">
-                <X className="w-4 h-4" />
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+        <AlertSourceForm
+          isCreating={isCreating}
+          formData={formData}
+          setFormData={setFormData}
+          sourceTypes={sourceTypes}
+          selectedType={selectedType}
+          editingSource={editingSource}
+          onSave={handleSave}
+          onCancel={handleCancel}
+        />
       )}
 
       {/* Sources List */}
@@ -433,7 +111,6 @@ export default function AlertSourcesManager() {
                 <div className="p-6">
                   <div className="flex items-start justify-between">
                     <div className="flex items-start gap-4">
-                      {/* Type Icon */}
                       <div className={`source-icon source-icon-${typeName}`}>
                         {sourceTypeIcons[typeName] || typeName.slice(0, 2).toUpperCase()}
                       </div>
@@ -533,7 +210,6 @@ export default function AlertSourcesManager() {
                 {/* Expanded Configuration */}
                 {expandedSource === source.uuid && (
                   <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 p-4 space-y-4">
-                    {/* Field Mappings */}
                     {source.field_mappings &&
                       Object.keys(source.field_mappings).length > 0 && (
                         <div>
@@ -546,7 +222,6 @@ export default function AlertSourcesManager() {
                         </div>
                       )}
 
-                    {/* Settings */}
                     {source.settings && Object.keys(source.settings).length > 0 && (
                       <div>
                         <h4 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
@@ -558,7 +233,6 @@ export default function AlertSourcesManager() {
                       </div>
                     )}
 
-                    {/* Default Mappings from Type */}
                     {source.alert_source_type?.default_field_mappings && (
                       <div>
                         <h4 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
@@ -570,7 +244,6 @@ export default function AlertSourcesManager() {
                       </div>
                     )}
 
-                    {/* Info */}
                     <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded text-sm">
                       <AlertTriangle className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
                       <div className="text-blue-700 dark:text-blue-300">

@@ -26,7 +26,8 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 │   ├── handlers/           # HTTP/WebSocket handlers
 │   ├── middleware/         # Auth, CORS middleware
 │   ├── output/             # Agent output parsing (structured blocks)
-│   ├── services/           # Business logic layer
+│   ├── logging/           # Structured logging (slog) initialization
+│   ├── services/           # Business logic layer (+ interfaces.go for testability)
 │   ├── setup/              # Zero-config first-run setup
 │   ├── slack/              # Slack integration (Socket Mode, hot-reload)
 │   ├── testhelpers/        # Test utilities, builders, mocks
@@ -103,6 +104,7 @@ The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK:
 | Entry Point | `src/index.ts` | Reads config, starts orchestrator |
 | Orchestrator | `src/orchestrator.ts` | Routes WebSocket messages |
 | Agent Runner | `src/agent-runner.ts` | Creates pi-mono sessions |
+| Tool Formatter | `src/tool-output-formatter.ts` | Formats tool args/output for UI streaming |
 | WS Client | `src/ws-client.ts` | WebSocket to API server |
 
 ### Tool Architecture (Python Script Wrappers)
@@ -205,15 +207,30 @@ fmt.Println(parsed.CleanOutput)  // Structured blocks stripped
 
 ## Services (`internal/services/`)
 
-| Service | Purpose |
-|---------|---------|
-| SkillService | Skill lifecycle, workspace, prompt building |
-| ToolService | Tool instances, SSH key management |
-| ContextService | Context file management |
-| AlertService | Alert processing and normalization |
-| AggregationService | Incident correlation settings |
-| TitleGenerator | AI-powered incident title generation |
-| RunbookService | Runbook CRUD and file sync |
+| Service | File(s) | Purpose |
+|---------|---------|---------|
+| SkillService | `skill_service.go`, `skill_file_sync.go`, `skill_prompt_service.go`, `incident_service.go` | Skill CRUD, file sync, prompt building, incident lifecycle |
+| ToolService | `tool_service.go` | Tool instances, SSH key management |
+| ContextService | `context_service.go` | Context file management |
+| AlertService | `alert_service.go` | Alert processing and normalization |
+| AggregationService | `aggregation_service.go` | Incident correlation settings |
+| TitleGenerator | `title_generator.go` | AI-powered incident title generation |
+| RunbookService | `runbook_service.go` | Runbook CRUD and file sync |
+
+### Service Interfaces (`internal/services/interfaces.go`)
+
+Handlers depend on interfaces for testability:
+
+| Interface | Purpose |
+|-----------|---------|
+| `SkillManager` | Skill CRUD + lifecycle |
+| `IncidentManager` | Incident spawn/update/get |
+| `SkillIncidentManager` | Combines SkillManager + IncidentManager (used by handlers) |
+| `ToolManager` | Tool instance CRUD + SSH keys |
+| `AlertManager` | Alert source operations |
+| `RunbookManager` | Runbook CRUD + file sync |
+| `ContextManager` | Context file management |
+| `AggregationManager` | Incident correlation |
 
 ## Runbook System (`internal/services/runbook_service.go`)
 
@@ -427,6 +444,18 @@ go test -bench=. -benchmem ./internal/alerts/adapters/...
 
 Benchmarked: Alert parsing, JSONB ops, auth middleware, title generation
 
+## Logging Convention
+
+All logging uses Go's `log/slog` (structured JSON logging). **Never use `log.Printf`, `log.Fatalf`, or `log.Println`.**
+
+- Initialized in `cmd/akmatori/main.go` via `logging.Init()` (`internal/logging/logging.go`)
+- Use `slog.Info()`, `slog.Warn()`, `slog.Error()` with structured key-value pairs:
+  ```go
+  slog.Info("incident created", "uuid", incident.UUID, "title", incident.Title)
+  slog.Error("failed to process alert", "error", err, "source", sourceName)
+  ```
+- Output format: JSON to stdout (container-friendly for log aggregation)
+
 ## Code Quality & Linting
 
 ```bash
@@ -443,12 +472,12 @@ Always check errors:
 ```go
 // HTTP writes
 if _, err := w.Write(data); err != nil {
-    log.Printf("write failed: %v", err)
+    slog.Error("write failed", "error", err)
 }
 
 // External APIs (log non-critical)
 if err := slackClient.AddReaction(...); err != nil {
-    log.Printf("reaction failed: %v", err)
+    slog.Warn("reaction failed", "error", err)
 }
 
 // Tests - use Fatal for nil checks before dereference

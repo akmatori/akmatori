@@ -2,10 +2,9 @@ package slack
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"sync"
 	"time"
 
@@ -77,12 +76,12 @@ func (m *Manager) SetEventHandler(handler func(*socketmode.Client, *slack.Client
 func (m *Manager) Start(ctx context.Context) error {
 	settings, err := database.GetSlackSettings()
 	if err != nil {
-		log.Printf("SlackManager: Could not load Slack settings: %v", err)
+		slog.Error("SlackManager: could not load Slack settings", "error", err)
 		return nil // Not an error, just disabled
 	}
 
 	if !settings.IsActive() {
-		log.Printf("SlackManager: Slack is disabled (not configured or not enabled)")
+		slog.Info("SlackManager: Slack is disabled (not configured or not enabled)")
 		return nil
 	}
 
@@ -117,7 +116,7 @@ func (m *Manager) startWithSettings(ctx context.Context, settings *database.Slac
 					},
 				}
 				options = append(options, slack.OptionHTTPClient(httpClient))
-				log.Printf("SlackManager: Using proxy: %s", proxySettings.ProxyURL)
+				slog.Info("SlackManager: using proxy", "proxy_url", proxySettings.ProxyURL)
 			}
 		}
 	}
@@ -128,7 +127,7 @@ func (m *Manager) startWithSettings(ctx context.Context, settings *database.Slac
 	// Build Socket Mode options
 	socketOptions := []socketmode.Option{
 		socketmode.OptionDebug(false),
-		socketmode.OptionLog(log.New(os.Stdout, "socketmode: ", log.Lshortfile|log.LstdFlags)),
+		socketmode.OptionLog(slog.NewLogLogger(slog.Default().Handler(), slog.LevelInfo)),
 	}
 
 	// If proxy is configured for Slack, create a custom WebSocket dialer
@@ -141,7 +140,7 @@ func (m *Manager) startWithSettings(ctx context.Context, settings *database.Slac
 					HandshakeTimeout: websocket.DefaultDialer.HandshakeTimeout,
 				}
 				socketOptions = append(socketOptions, socketmode.OptionDialer(dialer))
-				log.Printf("SlackManager: Using proxy for WebSocket: %s", proxySettings.ProxyURL)
+				slog.Info("SlackManager: using proxy for WebSocket", "proxy_url", proxySettings.ProxyURL)
 			}
 		}
 	}
@@ -169,20 +168,20 @@ func (m *Manager) startWithSettings(ctx context.Context, settings *database.Slac
 	// Start Socket Mode in a goroutine
 	go func() {
 		defer close(doneChan)
-		log.Printf("SlackManager: Starting Socket Mode connection...")
+		slog.Info("SlackManager: starting Socket Mode connection")
 
 		if err := sc.RunContext(connCtx); err != nil {
 			// Check if context was cancelled (graceful shutdown)
 			if connCtx.Err() != nil {
-				log.Printf("SlackManager: Socket Mode stopped gracefully")
+				slog.Info("SlackManager: Socket Mode stopped gracefully")
 			} else {
-				log.Printf("SlackManager: Socket Mode error: %v", err)
+				slog.Error("SlackManager: Socket Mode error", "error", err)
 			}
 		}
 	}()
 
 	m.running = true
-	log.Printf("SlackManager: Slack integration is ACTIVE")
+	slog.Info("SlackManager: Slack integration is active")
 	return nil
 }
 
@@ -199,7 +198,7 @@ func (m *Manager) stopLocked() {
 		return
 	}
 
-	log.Printf("SlackManager: Stopping Slack connection...")
+	slog.Info("SlackManager: stopping Slack connection")
 
 	// Cancel the RunContext goroutine's context
 	if m.cancelFunc != nil {
@@ -210,9 +209,9 @@ func (m *Manager) stopLocked() {
 	if m.doneChan != nil {
 		select {
 		case <-m.doneChan:
-			log.Printf("SlackManager: Socket Mode stopped")
+			slog.Info("SlackManager: Socket Mode stopped")
 		case <-time.After(5 * time.Second):
-			log.Printf("SlackManager: Socket Mode stop timed out after 5s")
+			slog.Warn("SlackManager: Socket Mode stop timed out after 5s")
 		}
 	}
 
@@ -224,17 +223,17 @@ func (m *Manager) stopLocked() {
 
 // Reload reloads Slack settings and reconnects
 func (m *Manager) Reload(ctx context.Context) error {
-	log.Printf("SlackManager: Reloading Slack settings...")
+	slog.Info("SlackManager: reloading Slack settings")
 
 	settings, err := database.GetSlackSettings()
 	if err != nil {
-		log.Printf("SlackManager: Could not load Slack settings: %v", err)
+		slog.Error("SlackManager: could not load Slack settings", "error", err)
 		m.Stop()
 		return err
 	}
 
 	if !settings.IsActive() {
-		log.Printf("SlackManager: Slack is now disabled, stopping connection")
+		slog.Info("SlackManager: Slack is now disabled, stopping connection")
 		m.Stop()
 		return nil
 	}
@@ -247,9 +246,9 @@ func (m *Manager) Reload(ctx context.Context) error {
 func (m *Manager) TriggerReload() {
 	select {
 	case m.reloadChan <- struct{}{}:
-		log.Printf("SlackManager: Reload triggered")
+		slog.Info("SlackManager: reload triggered")
 	default:
-		log.Printf("SlackManager: Reload already pending")
+		slog.Info("SlackManager: reload already pending")
 	}
 }
 
@@ -264,7 +263,7 @@ func (m *Manager) WatchForReloads(ctx context.Context) {
 			return
 		case <-m.reloadChan:
 			// Debounce: wait and drain any additional reload signals
-			log.Printf("SlackManager: Reload requested, debouncing for %v...", debounceDuration)
+			slog.Info("SlackManager: reload requested, debouncing", "debounce_duration", debounceDuration)
 			timer := time.NewTimer(debounceDuration)
 		drainLoop:
 			for {
@@ -278,15 +277,15 @@ func (m *Manager) WatchForReloads(ctx context.Context) {
 						<-timer.C
 					}
 					timer.Reset(debounceDuration)
-					log.Printf("SlackManager: Additional reload request received, resetting debounce")
+					slog.Info("SlackManager: additional reload request received, resetting debounce")
 				case <-timer.C:
 					break drainLoop
 				}
 			}
 
-			log.Printf("SlackManager: Debounce complete, reloading now")
+			slog.Info("SlackManager: debounce complete, reloading now")
 			if err := m.Reload(ctx); err != nil {
-				log.Printf("SlackManager: Reload failed: %v", err)
+				slog.Error("SlackManager: reload failed", "error", err)
 			}
 		}
 	}

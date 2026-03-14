@@ -20,6 +20,12 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { getModel, type Model, type ThinkingLevel as PiThinkingLevel } from "@mariozechner/pi-ai";
 import type { LLMSettings, ExecuteResult, ProxyConfig, ThinkingLevel } from "./types.js";
+import {
+  formatToolArgs,
+  formatToolOutput,
+  extractToolText,
+  type ToolExecutionTrace,
+} from "./tool-output-formatter.js";
 
 // ---------------------------------------------------------------------------
 // Tool calling guidelines attached to the bash tool via promptGuidelines
@@ -85,12 +91,6 @@ export interface AgentRunnerConfig {
   mcpGatewayUrl: string;
   /** Directory containing SKILL.md definitions for pi-mono resource loader */
   skillsDir?: string;
-}
-
-interface ToolExecutionTrace {
-  toolName: string;
-  args: unknown;
-  updates: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -466,7 +466,7 @@ export class AgentRunner {
           args: event.args,
           updates: [],
         };
-        const updateText = this.extractToolText(event.partialResult);
+        const updateText = extractToolText(event.partialResult);
         if (updateText) {
           trace.updates.push(updateText);
         }
@@ -477,8 +477,8 @@ export class AgentRunner {
       case "tool_execution_end": {
         const trace = toolTraces.get(event.toolCallId);
         const status = event.isError ? "❌ Failed:" : "✅ Ran:";
-        const argsText = this.formatToolArgs(trace?.args);
-        const outputText = this.formatToolOutput(trace?.updates ?? [], event.result);
+        const argsText = formatToolArgs(trace?.args);
+        const outputText = formatToolOutput(trace?.updates ?? [], event.result);
 
         let resultSummary = `\n${status} ${event.toolName}`;
         if (argsText) {
@@ -545,124 +545,6 @@ export class AgentRunner {
       default:
         // Other events (agent_start, agent_end, turn_start, etc.) - no output needed
         break;
-    }
-  }
-
-  private formatToolArgs(args: unknown): string {
-    if (args === null || args === undefined) return "";
-    if (typeof args === "string") return args.trim();
-
-    if (Array.isArray(args)) {
-      if (args.length === 0) return "";
-      return this.safeJSONStringify(args);
-    }
-
-    if (typeof args === "object") {
-      if (Object.keys(args as Record<string, unknown>).length === 0) return "";
-      return this.safeJSONStringify(args);
-    }
-
-    return String(args);
-  }
-
-  private formatToolOutput(updates: string[], result: unknown): string {
-    const parts: string[] = [];
-
-    for (const update of updates) {
-      const trimmed = update.trim();
-      if (trimmed) parts.push(trimmed);
-    }
-
-    const resultText = this.extractToolText(result).trim();
-    if (resultText) {
-      parts.push(resultText);
-    } else if (result && typeof result === "object") {
-      if (Array.isArray(result)) {
-        if (result.length > 0) parts.push(this.safeJSONStringify(result));
-      } else if (Object.keys(result as Record<string, unknown>).length > 0) {
-        parts.push(this.safeJSONStringify(result));
-      }
-    }
-
-    const deduped: string[] = [];
-    for (const part of parts) {
-      if (deduped[deduped.length - 1] !== part) {
-        deduped.push(part);
-      }
-    }
-
-    return deduped.join("\n");
-  }
-
-  private extractToolText(value: unknown): string {
-    const parts = this.collectTextParts(value).map((part) => part.trim()).filter(Boolean);
-    return parts.join("\n");
-  }
-
-  private collectTextParts(value: unknown): string[] {
-    if (value === null || value === undefined) return [];
-    if (typeof value === "string") return [value];
-    if (Array.isArray(value)) return value.flatMap((entry) => this.collectTextParts(entry));
-    if (typeof value !== "object") return [];
-
-    const obj = value as Record<string, unknown>;
-    const parts: string[] = [];
-
-    if (typeof obj.text === "string") parts.push(obj.text);
-    if (typeof obj.output === "string") parts.push(obj.output);
-    if (typeof obj.message === "string") parts.push(obj.message);
-    if (typeof obj.error === "string") parts.push(obj.error);
-    if (typeof obj.stderr === "string") parts.push(obj.stderr);
-
-    if (obj.content !== undefined) {
-      parts.push(...this.collectContentText(obj.content));
-    }
-    if (obj.partialResult !== undefined) {
-      parts.push(...this.collectTextParts(obj.partialResult));
-    }
-    if (obj.result !== undefined) {
-      parts.push(...this.collectTextParts(obj.result));
-    }
-    if (obj.details !== undefined) {
-      parts.push(...this.collectTextParts(obj.details));
-    }
-
-    return parts;
-  }
-
-  private collectContentText(content: unknown): string[] {
-    if (!Array.isArray(content)) {
-      return this.collectTextParts(content);
-    }
-
-    const parts: string[] = [];
-    for (const item of content) {
-      if (!item || typeof item !== "object") {
-        if (typeof item === "string") parts.push(item);
-        continue;
-      }
-
-      const contentItem = item as Record<string, unknown>;
-      if (contentItem.type === "text" && typeof contentItem.text === "string") {
-        parts.push(contentItem.text);
-        continue;
-      }
-      if (contentItem.type === "thinking" && typeof contentItem.thinking === "string") {
-        parts.push(contentItem.thinking);
-        continue;
-      }
-
-      parts.push(...this.collectTextParts(contentItem));
-    }
-
-    return parts;
-  }
-
-  private safeJSONStringify(value: unknown): string {
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return String(value);
     }
   }
 

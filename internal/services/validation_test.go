@@ -229,21 +229,19 @@ func TestTruncateString(t *testing.T) {
 		{"shorter than max", "hello", 10, "hello"},
 		{"exact length", "hello", 5, "hello"},
 		{"longer than max", "hello world", 8, "hello..."},
-		{"max 3", "hello", 3, "..."},
+		{"max 3 truncates without ellipsis", "hello", 3, "hel"},
 		{"max 4", "hello", 4, "h..."},
+		{"max 1", "hello", 1, "h"},
 		{"unicode safe", "日本語テスト", 5, "日本..."},
 		{"unicode exact", "日本", 2, "日本"},
-		{"unicode truncate", "日本語", 2, ""},
+		{"unicode truncate small max", "日本語", 2, "日本"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Can't call truncateString directly as it's unexported, but we can verify
-			// the behavior through generateSkillMd metadata if needed
-			// For now, test the edge case logic
-			if tt.max < 3 && tt.input != "" && len([]rune(tt.input)) > tt.max {
-				// Would need to handle edge case where max < 3
-				t.Skip("edge case for max < 3")
+			got := truncateString(tt.input, tt.max)
+			if got != tt.want {
+				t.Errorf("truncateString(%q, %d) = %q, want %q", tt.input, tt.max, got, tt.want)
 			}
 		})
 	}
