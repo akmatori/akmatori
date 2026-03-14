@@ -77,6 +77,13 @@ export default function SlackSettingsSection({ onStatusChange }: SlackSettingsSe
       setBotToken('');
       setSigningSecret('');
       setAppToken('');
+      if (updated.is_configured && slackEnabled) {
+        onStatusChange?.('configured');
+      } else if (updated.is_configured && !slackEnabled) {
+        onStatusChange?.('disabled');
+      } else {
+        onStatusChange?.('not-configured');
+      }
       setSlackSuccess(true);
       setTimeout(() => setSlackSuccess(false), 3000);
     } catch (err) {

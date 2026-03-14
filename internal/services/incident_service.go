@@ -10,6 +10,7 @@ import (
 
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // IncidentContext contains context for spawning an incident manager
@@ -233,7 +234,7 @@ func (s *SkillService) AppendSubagentLog(incidentUUID string, skillName string, 
 
 	// Use SQL concatenation to atomically append without read-modify-write race
 	if err := s.db.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).
-		Update("full_log", s.db.Raw("COALESCE(full_log, '') || ?", formattedLog)).Error; err != nil {
+		Update("full_log", gorm.Expr("COALESCE(full_log, '') || ?", formattedLog)).Error; err != nil {
 		return fmt.Errorf("failed to append subagent log: %w", err)
 	}
 

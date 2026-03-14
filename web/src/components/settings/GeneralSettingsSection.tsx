@@ -46,6 +46,7 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
 
       const updated = await generalSettingsApi.update({ base_url: instanceBaseUrl });
       setGeneralSettings(updated);
+      onStatusChange?.(updated.base_url ? 'configured' : undefined);
       setGeneralSuccess(true);
       setTimeout(() => setGeneralSuccess(false), 3000);
     } catch (err) {

@@ -101,7 +101,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
         setThinkingLevel(data.thinking_level || 'medium');
         setBaseUrl(data.base_url || '');
       }
-      if (data.base_url || data.thinking_level !== 'medium') {
+      if (data.base_url || (data.thinking_level && data.thinking_level !== 'medium')) {
         setShowAdvanced(true);
       }
       setLlmError(null);

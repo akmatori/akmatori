@@ -2,7 +2,7 @@ import { Save, X, Power, PowerOff, ChevronDown, ChevronUp, AlertTriangle } from 
 import type { ToolType, SSHKey } from '../../types';
 import SSHKeysSection from './SSHKeysSection';
 import SSHHostsSection from './SSHHostsSection';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface ToolSchema {
   name: string;
@@ -86,6 +86,12 @@ export default function ToolFormSection({
 }: ToolFormSectionProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [expandedHosts, setExpandedHosts] = useState<number[]>([]);
+
+  // Reset local UI state when switching between tools
+  useEffect(() => {
+    setShowAdvanced(false);
+    setExpandedHosts([]);
+  }, [editingToolId, isCreating, formData.tool_type_id]);
 
   const addHost = () => {
     const currentHosts = formData.settings.ssh_hosts || [];
