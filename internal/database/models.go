@@ -546,9 +546,9 @@ func (o *OpenAISettings) IsChatGPTTokenExpired() bool {
 // GetValidReasoningEfforts returns valid reasoning effort values for the current model
 func (o *OpenAISettings) GetValidReasoningEfforts() []string {
 	switch o.Model {
-	case "gpt-5.2", "gpt-5.2-codex", "gpt-5.1-codex-max":
+	case "gpt-5.4", "gpt-5.2", "gpt-5.2-codex", "gpt-5.1-codex-max":
 		return []string{"low", "medium", "high", "extra_high"}
-	case "gpt-5.1-codex":
+	case "gpt-5.3-codex", "gpt-5.1-codex":
 		return []string{"low", "medium", "high"}
 	case "gpt-5.1-codex-mini":
 		return []string{"medium", "high"}
