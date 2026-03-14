@@ -140,7 +140,7 @@ export default function Settings() {
   // LLM form state
   const [provider, setProvider] = useState<LLMProvider>('openai');
   const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('gpt-5.2-codex');
+  const [model, setModel] = useState('gpt-5.4');
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('medium');
   const [baseUrl, setBaseUrl] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -203,11 +203,11 @@ export default function Settings() {
       const activeSettings = cache[activeProvider];
       if (activeSettings) {
         setApiKey('');  // Don't pre-fill masked key
-        setModel(activeSettings.model || 'gpt-5.2-codex');
+        setModel(activeSettings.model || 'gpt-5.4');
         setThinkingLevel(activeSettings.thinkingLevel || 'medium');
         setBaseUrl(activeSettings.baseUrl || '');
       } else {
-        setModel(data.model || 'gpt-5.2-codex');
+        setModel(data.model || 'gpt-5.4');
         setThinkingLevel(data.thinking_level || 'medium');
         setBaseUrl(data.base_url || '');
       }
