@@ -275,9 +275,8 @@ func TestTruncateForSlack_BreaksAtNewline(t *testing.T) {
 	msg := strings.Repeat("x", 3800) + "\nthis line should be cut\nmore"
 	result := truncateForSlack(msg, 3900)
 	// Should break at the newline, not mid-line
-	if strings.Contains(result, "this line should be cut") {
-		// That's fine — it's within limit
-	}
+	// Note: "this line should be cut" may or may not be included depending on
+	// where the truncation happens - either is acceptable as long as limit is respected
 	if len(result) > 3900 {
 		t.Errorf("result too long: %d", len(result))
 	}
