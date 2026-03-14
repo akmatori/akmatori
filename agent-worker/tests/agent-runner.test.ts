@@ -650,6 +650,92 @@ describe("AgentRunner", () => {
       expect(output).toContain("🤔 Investigating CPU spike");
     });
 
+    it("should stream auto_compaction_start and auto_compaction_end events", async () => {
+      const onOutput = vi.fn();
+      mockSession.prompt.mockImplementationOnce(async () => {
+        for (const sub of mockSession._subscribers) {
+          sub({ type: "auto_compaction_start", reason: "context limit" });
+          sub({ type: "auto_compaction_end", aborted: false });
+        }
+      });
+
+      await runner.execute(makeExecuteParams({ onOutput }));
+
+      const output = onOutput.mock.calls.map((call: any[]) => call[0]).join("");
+      expect(output).toContain("Compacting context");
+      expect(output).toContain("context limit");
+      expect(output).toContain("compaction complete");
+    });
+
+    it("should stream auto_compaction_end with aborted status", async () => {
+      const onOutput = vi.fn();
+      mockSession.prompt.mockImplementationOnce(async () => {
+        for (const sub of mockSession._subscribers) {
+          sub({ type: "auto_compaction_start", reason: "overflow" });
+          sub({ type: "auto_compaction_end", aborted: true });
+        }
+      });
+
+      await runner.execute(makeExecuteParams({ onOutput }));
+
+      const output = onOutput.mock.calls.map((call: any[]) => call[0]).join("");
+      expect(output).toContain("compaction aborted");
+    });
+
+    it("should stream auto_retry_start events", async () => {
+      const onOutput = vi.fn();
+      mockSession.prompt.mockImplementationOnce(async () => {
+        for (const sub of mockSession._subscribers) {
+          sub({
+            type: "auto_retry_start",
+            attempt: 2,
+            maxAttempts: 3,
+            errorMessage: "server_error",
+          });
+        }
+      });
+
+      await runner.execute(makeExecuteParams({ onOutput }));
+
+      const output = onOutput.mock.calls.map((call: any[]) => call[0]).join("");
+      expect(output).toContain("Retrying");
+      expect(output).toContain("attempt 2/3");
+      expect(output).toContain("server_error");
+    });
+
+    it("should stream auto_retry_end failure events", async () => {
+      const onOutput = vi.fn();
+      mockSession.prompt.mockImplementationOnce(async () => {
+        for (const sub of mockSession._subscribers) {
+          sub({
+            type: "auto_retry_end",
+            success: false,
+            finalError: "API quota exceeded",
+          });
+        }
+      });
+
+      await runner.execute(makeExecuteParams({ onOutput }));
+
+      const output = onOutput.mock.calls.map((call: any[]) => call[0]).join("");
+      expect(output).toContain("retries exhausted");
+      expect(output).toContain("API quota exceeded");
+    });
+
+    it("should not emit output for successful auto_retry_end", async () => {
+      const onOutput = vi.fn();
+      mockSession.prompt.mockImplementationOnce(async () => {
+        for (const sub of mockSession._subscribers) {
+          sub({ type: "auto_retry_end", success: true });
+        }
+      });
+
+      await runner.execute(makeExecuteParams({ onOutput }));
+
+      const output = onOutput.mock.calls.map((call: any[]) => call[0]).join("");
+      expect(output).not.toContain("retries exhausted");
+    });
+
     it("should accumulate tokens from turn_end events", async () => {
       mockSession.prompt.mockImplementationOnce(async () => {
         for (const sub of mockSession._subscribers) {
