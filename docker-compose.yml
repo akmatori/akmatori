@@ -178,6 +178,7 @@ services:
       - MCP_GATEWAY_URL=http://mcp-gateway:8080
       - WORKSPACE_DIR=/workspaces
       - SKILLS_DIR=/akmatori/skills
+      - PI_CACHE_RETENTION=long  # Extended prompt caching: 1hr Anthropic, 24hr OpenAI
     volumes:
       - agent_sessions:/home/agent/.pi               # Persistent session data
       - ./akmatori_data/incidents:/workspaces:rw      # ONLY incidents - no access to skills/tools source
