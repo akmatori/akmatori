@@ -357,40 +357,84 @@ case "auto_retry_end":
 
 ### Priority 3: Medium Value, Medium Effort
 
-#### 3.1 — `before_provider_request` Extension Hook
+#### 3.1 — Incident-Aligned Session Identity (Deterministic IDs + Directory Customization)
+**Versions**: 0.57.1 (`session_directory`), 0.58.0 (`newSession()` deterministic IDs)
+**What**: Two complementary features that together let us fully align pi-mono sessions with Akmatori incident lifecycle:
+
+1. **Deterministic session IDs** — `newSession()` accepts a caller-supplied session ID. We pass the Akmatori incident UUID, eliminating the separate `incident_id ↔ session_id` mapping we currently maintain in the database.
+2. **Session directory customization** — `session_directory` extension event lets us control where session files land on disk. We can organize as `workspace/{incident_uuid}/` instead of random UUIDs under `~/.pi/sessions/`.
+
+**Why this matters**:
+- **Debugging**: `grep -r <incident-uuid>` finds everything — DB records, session files, agent logs — without cross-referencing IDs.
+- **Audit export**: When a customer requests an incident investigation audit, we can export the session directory directly by incident UUID instead of looking up a mapping first.
+- **Session resume**: When the API sends `continue_incident`, we can resume the exact pi-mono session by ID rather than creating a new session and replaying context.
+- **Cleanup**: Workspace cleanup after incident resolution becomes a simple `rm -rf workspace/{incident_uuid}` — no orphaned session directories.
+
+**Implementation sketch**:
+```typescript
+// In agent-runner.ts, when creating a new session:
+const session = await agentSession.newSession({
+  sessionId: incidentId,  // Akmatori incident UUID as session ID
+});
+
+// Extension hook for session directory (if using extensions):
+pi.on("session_directory", (event) => {
+  event.directory = path.join(WORKSPACE_DIR, event.sessionId);
+});
+```
+
+**Current workaround**: We construct `workDir = ${WORKSPACE_DIR}/${incidentId}` manually and let pi-mono create its own random session ID separately. The mapping lives only in our WS message context.
+
+**Effort**: Medium — need to wire up extension lifecycle in headless mode, update `agent-runner.ts` and `orchestrator.ts`, test session resume with deterministic IDs.
+**Benefit**: High — eliminates ID mapping, simplifies debugging/audit/cleanup, enables true session resume.
+
+#### 3.2 — Provider Payload Interception (`before_provider_request`)
 **Version**: 0.57.0
-**What**: Extensions can intercept and modify provider request payloads before they're sent.
-**Use cases**:
-  - Request logging/auditing (log all LLM API calls for compliance)
-  - Token budget enforcement (reject requests exceeding a budget)
-  - Request modification (inject context, modify temperature)
-  - Custom proxy header injection
-**Effort**: Medium — need to understand extension lifecycle in headless mode.
+**What**: Extension hook that fires before every LLM API request, allowing inspection and modification of the outgoing payload.
 
-#### 3.2 — `session_directory` Extension Event
-**Version**: 0.57.1
-**What**: Extensions can customize session directory paths before session manager creation.
-**How to use**: Organize sessions by date, severity, or other incident metadata.
-**Effort**: Medium.
+**Use cases for Akmatori**:
 
-#### 3.3 — Deterministic Session IDs
-**Version**: 0.58.0
-**What**: Extensions can supply deterministic session IDs via `newSession()`.
-**How to use**: Use incident ID as session ID — trivial lookup, no separate mapping needed.
-**Effort**: Medium.
+1. **Standardized metadata injection** — Attach tracing/audit headers to every LLM request:
+   ```typescript
+   pi.on("before_provider_request", (event) => {
+     event.headers["X-Akmatori-Incident-ID"] = incidentId;
+     event.headers["X-Akmatori-Tenant-ID"] = tenantId;
+     event.headers["X-Trace-ID"] = traceId;
+   });
+   ```
+   This enables end-to-end tracing from Akmatori UI → agent worker → LLM provider, which is invaluable for debugging latency issues, auditing LLM usage per tenant, and correlating provider-side errors with specific incidents.
 
-#### 3.4 — Custom Provider Registration
+2. **Provider-specific request tuning** — Adjust parameters based on the provider or model:
+   ```typescript
+   pi.on("before_provider_request", (event) => {
+     // Lower temperature for remediation actions, higher for analysis
+     if (investigationPhase === "remediation") {
+       event.body.temperature = 0.1;
+     }
+     // Add safety tags for compliance logging
+     event.body.metadata = { safety_tier: "production", org: tenantId };
+   });
+   ```
+
+3. **Request logging for compliance** — Log every LLM API call (model, token count, timestamp) to a dedicated audit table. Some enterprise customers require this for SOC2/ISO compliance.
+
+4. **Token budget enforcement** — Reject or warn when cumulative token usage for an incident approaches a configurable budget, preventing runaway cost from infinite-loop investigations.
+
+**Effort**: Medium — requires understanding extension lifecycle in headless mode, but the hook itself is straightforward once wired up.
+**Benefit**: High for enterprise customers — tracing, compliance logging, and cost control are frequently requested features.
+
+#### 3.3 — Custom Provider Registration
 **Version**: 0.50.0+
 **What**: `pi.registerProvider()` and `pi.unregisterProvider()` for dynamic provider management.
 **How to use**: When users configure a "custom" LLM provider in the Akmatori UI, we could register it as a proper pi-mono provider rather than building a custom Model object manually. Would get proper model metadata, thinking level detection, etc.
 **Effort**: Medium.
 
-#### 3.5 — `beforeToolCall` / `afterToolCall` Hooks
+#### 3.4 — `beforeToolCall` / `afterToolCall` Hooks
 **Version**: 0.58.0
 **What**: Agent-core level hooks for intercepting tool calls.
 **Use cases**:
   - Audit logging of all tool invocations
-  - Rate limiting tool calls
+  - Rate limiting tool calls (prevent agent from flooding external APIs)
   - Permission enforcement (block dangerous commands)
   - Tool call metrics collection
 **Effort**: Medium.
@@ -433,11 +477,13 @@ case "auto_retry_end":
 3. Set `PI_CACHE_RETENTION=long` in docker-compose.yml
 4. Verify 1M context window works with Claude models
 
-### Phase 3: Architecture Improvements (1-2 days, optional)
-1. Implement deterministic session IDs via extension
-2. Explore `before_provider_request` for request auditing
-3. Explore custom provider registration for "custom" LLM endpoints
-4. Prototype native tool definitions (replacing one Python wrapper as POC)
+### Phase 3: Incident-Aligned Sessions & Provider Interception (1-2 days)
+1. Implement deterministic session IDs — pass incident UUID as session ID via `newSession()`
+2. Implement session directory customization — align workspace paths with incident UUIDs
+3. Implement `before_provider_request` hook — inject incident/tenant/trace metadata into LLM requests
+4. Add compliance audit logging for LLM API calls via provider interception
+5. Explore custom provider registration for "custom" LLM endpoints
+6. Prototype native tool definitions (replacing one Python wrapper as POC)
 
 ### Phase 4: Full Tool Migration (3-5 days, future)
 1. Migrate all Python tool wrappers to native `ToolDefinition` objects
