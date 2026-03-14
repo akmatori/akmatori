@@ -530,6 +530,42 @@ export class AgentRunner {
         break;
       }
 
+      case "auto_compaction_start": {
+        const reason = (event as any).reason ?? "context limit";
+        const compactLine = `\n📦 Compacting context (${reason})...\n`;
+        onOutput(compactLine);
+        onLogText(compactLine);
+        break;
+      }
+
+      case "auto_compaction_end": {
+        const aborted = (event as any).aborted;
+        const compactResult = aborted
+          ? "\n📦 Context compaction aborted\n"
+          : "\n📦 Context compaction complete\n";
+        onOutput(compactResult);
+        onLogText(compactResult);
+        break;
+      }
+
+      case "auto_retry_start": {
+        const retryEvent = event as any;
+        const retryLine = `\n🔄 Retrying (attempt ${retryEvent.attempt ?? "?"}/${retryEvent.maxAttempts ?? "?"}): ${retryEvent.errorMessage ?? "unknown error"}\n`;
+        onOutput(retryLine);
+        onLogText(retryLine);
+        break;
+      }
+
+      case "auto_retry_end": {
+        const retryEndEvent = event as any;
+        if (!retryEndEvent.success) {
+          const failLine = `\n🔄 All retries exhausted: ${retryEndEvent.finalError ?? "unknown error"}\n`;
+          onOutput(failLine);
+          onLogText(failLine);
+        }
+        break;
+      }
+
       default:
         // Other events (agent_start, agent_end, turn_start, etc.) - no output needed
         break;
