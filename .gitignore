@@ -50,3 +50,6 @@ agent-worker/dist/
 
 # ralphex progress logs
 progress*.txt
+
+# ralphex progress logs
+.ralphex/worktrees/
