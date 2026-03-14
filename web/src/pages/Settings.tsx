@@ -12,13 +12,13 @@ import type { SlackSettings, SlackSettingsUpdate, LLMSettings, LLMSettingsUpdate
 // Model suggestions per provider
 const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: string }[]> = {
   openai: [
-    { value: 'gpt-5.2-codex', label: 'gpt-5.2-codex (Recommended)' },
-    { value: 'gpt-5.1-codex-max', label: 'gpt-5.1-codex-max' },
-    { value: 'gpt-5.1-codex-mini', label: 'gpt-5.1-codex-mini (Fast)' },
+    { value: 'gpt-5.4', label: 'gpt-5.4 (Recommended)' },
+    { value: 'gpt-5.3-codex', label: 'gpt-5.3-codex' },
+    { value: 'gpt-5.2-codex', label: 'gpt-5.2-codex' },
   ],
   anthropic: [
     { value: 'claude-opus-4-6', label: 'claude-opus-4-6 (Most capable)' },
-    { value: 'claude-sonnet-4-5', label: 'claude-sonnet-4-5 (Recommended)' },
+    { value: 'claude-sonnet-4-6', label: 'claude-sonnet-4-6 (Recommended)' },
     { value: 'claude-haiku-4-5', label: 'claude-haiku-4-5 (Fast)' },
   ],
   google: [
@@ -26,8 +26,8 @@ const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: string }[]>
     { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash (Fast)' },
   ],
   openrouter: [
-    { value: 'anthropic/claude-sonnet-4-5', label: 'anthropic/claude-sonnet-4-5' },
-    { value: 'openai/gpt-4o', label: 'openai/gpt-4o' },
+    { value: 'anthropic/claude-sonnet-4-6', label: 'anthropic/claude-sonnet-4-6' },
+    { value: 'openai/gpt-5.4', label: 'openai/gpt-5.4' },
     { value: 'google/gemini-2.5-pro', label: 'google/gemini-2.5-pro' },
   ],
   custom: [],
@@ -43,8 +43,8 @@ const THINKING_LEVELS: { value: ThinkingLevel; label: string }[] = [
 ];
 
 const PROVIDER_OPTIONS: { value: LLMProvider; label: string; description: string }[] = [
-  { value: 'openai', label: 'OpenAI', description: 'GPT-5.2 Codex, GPT-5.1 Codex' },
-  { value: 'anthropic', label: 'Anthropic', description: 'Claude Opus, Sonnet, Haiku' },
+  { value: 'openai', label: 'OpenAI', description: 'GPT-5.4, GPT-5.3 Codex' },
+  { value: 'anthropic', label: 'Anthropic', description: 'Claude Opus 4.6, Sonnet 4.6, Haiku' },
   { value: 'google', label: 'Google', description: 'Gemini 2.5 Pro, Flash' },
   { value: 'openrouter', label: 'OpenRouter', description: 'Multi-provider gateway' },
   { value: 'custom', label: 'Custom', description: 'Custom OpenAI-compatible endpoint' },
