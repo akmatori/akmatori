@@ -2,7 +2,7 @@ package services
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,7 +25,7 @@ func NewRunbookService(dataDir string) *RunbookService {
 	dir := filepath.Join(dataDir, "runbooks")
 	// Ensure directory exists
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		log.Printf("Warning: failed to create runbooks directory %s: %v", dir, err)
+		slog.Warn("failed to create runbooks directory", "dir", dir, "err", err)
 	}
 	return &RunbookService{
 		db:          database.GetDB(),
@@ -184,7 +184,7 @@ func (s *RunbookService) SyncRunbookFiles() error {
 		if !expectedFiles[entry.Name()] {
 			filePath := filepath.Join(s.runbooksDir, entry.Name())
 			if err := os.Remove(filePath); err != nil {
-				log.Printf("Warning: failed to remove stale runbook file %s: %v", entry.Name(), err)
+				slog.Warn("failed to remove stale runbook file", "file", entry.Name(), "err", err)
 			}
 		}
 	}

@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -23,11 +23,11 @@ const (
 	CodexMessageTypeProxyConfigUpdate CodexMessageType = "proxy_config_update"
 
 	// Messages from Codex Worker to API
-	CodexMessageTypeCodexOutput        CodexMessageType = "codex_output"
-	CodexMessageTypeCodexCompleted     CodexMessageType = "codex_completed"
-	CodexMessageTypeCodexError         CodexMessageType = "codex_error"
-	CodexMessageTypeHeartbeat CodexMessageType = "heartbeat"
-	CodexMessageTypeStatus   CodexMessageType = "status"
+	CodexMessageTypeCodexOutput    CodexMessageType = "codex_output"
+	CodexMessageTypeCodexCompleted CodexMessageType = "codex_completed"
+	CodexMessageTypeCodexError     CodexMessageType = "codex_error"
+	CodexMessageTypeHeartbeat      CodexMessageType = "heartbeat"
+	CodexMessageTypeStatus         CodexMessageType = "status"
 )
 
 // CodexMessage represents a WebSocket message between API and Codex worker
@@ -55,7 +55,6 @@ type CodexMessage struct {
 
 	// Proxy configuration with toggles (sent with new_incident)
 	ProxyConfig *ProxyConfig `json:"proxy_config,omitempty"`
-
 }
 
 // OpenAISettings holds OpenAI configuration for Codex execution
@@ -70,12 +69,12 @@ type OpenAISettings struct {
 
 // CodexWSHandler handles WebSocket connections from the Codex worker
 type CodexWSHandler struct {
-	upgrader           websocket.Upgrader
-	mu                 sync.RWMutex
-	workerConn         *websocket.Conn
-	workerReady        bool
-	callbacks  map[string]IncidentCallback // incident_id -> callback
-	callbackMu sync.RWMutex
+	upgrader    websocket.Upgrader
+	mu          sync.RWMutex
+	workerConn  *websocket.Conn
+	workerReady bool
+	callbacks   map[string]IncidentCallback // incident_id -> callback
+	callbackMu  sync.RWMutex
 }
 
 // NewCodexWSHandler creates a new Codex WebSocket handler
@@ -101,11 +100,11 @@ func (h *CodexWSHandler) SetupRoutes(mux *http.ServeMux) {
 func (h *CodexWSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("Failed to upgrade WebSocket: %v", err)
+		slog.Error("failed to upgrade WebSocket", "err", err)
 		return
 	}
 
-	log.Printf("Codex worker connected from %s", r.RemoteAddr)
+	slog.Info("Codex worker connected", "remote_addr", r.RemoteAddr)
 
 	// Store the worker connection
 	h.mu.Lock()
@@ -125,7 +124,7 @@ func (h *CodexWSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 		}
 		h.mu.Unlock()
 		conn.Close()
-		log.Printf("Codex worker disconnected")
+		slog.Info("Codex worker disconnected")
 	}()
 
 	// Read messages from worker
@@ -133,14 +132,14 @@ func (h *CodexWSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WebSocket read error: %v", err)
+				slog.Error("WebSocket read error", "err", err)
 			}
 			return
 		}
 
 		var msg CodexMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
-			log.Printf("Failed to parse message: %v", err)
+			slog.Error("failed to parse message", "err", err)
 			continue
 		}
 
@@ -150,7 +149,7 @@ func (h *CodexWSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 
 // handleMessage processes incoming messages from the Codex worker
 func (h *CodexWSHandler) handleMessage(msg CodexMessage) {
-	log.Printf("Received message from worker: type=%s incident=%s", msg.Type, msg.IncidentID)
+	slog.Info("received message from worker", "type", msg.Type, "incident_id", msg.IncidentID)
 
 	switch msg.Type {
 	case CodexMessageTypeHeartbeat:
@@ -160,7 +159,7 @@ func (h *CodexWSHandler) handleMessage(msg CodexMessage) {
 	case CodexMessageTypeStatus:
 		// Worker status update
 		if status, ok := msg.Data["status"].(string); ok {
-			log.Printf("Worker status: %s", status)
+			slog.Info("worker status", "status", status)
 		}
 		return
 
@@ -174,7 +173,7 @@ func (h *CodexWSHandler) handleMessage(msg CodexMessage) {
 		h.handleCodexError(msg)
 
 	default:
-		log.Printf("Unknown message type from worker: %s", msg.Type)
+		slog.Warn("unknown message type from worker", "type", msg.Type)
 	}
 }
 
@@ -192,15 +191,14 @@ func (h *CodexWSHandler) handleCodexOutput(msg CodexMessage) {
 		if err := database.GetDB().Model(&database.Incident{}).
 			Where("uuid = ?", msg.IncidentID).
 			Update("full_log", msg.Output).Error; err != nil {
-			log.Printf("Failed to update incident log: %v", err)
+			slog.Error("failed to update incident log", "err", err)
 		}
 	}
 }
 
 // handleCodexCompleted handles completion notification from Codex
 func (h *CodexWSHandler) handleCodexCompleted(msg CodexMessage) {
-	log.Printf("Incident %s completed with session %s, tokens: %d, time: %dms",
-		msg.IncidentID, msg.SessionID, msg.TokensUsed, msg.ExecutionTimeMs)
+	slog.Info("incident completed", "incident_id", msg.IncidentID, "session_id", msg.SessionID, "tokens_used", msg.TokensUsed, "execution_time_ms", msg.ExecutionTimeMs)
 
 	// Clean LLM "thinking" text (e.g. "Let me investigate...") from the response,
 	// keeping only the structured summary starting from the first markdown heading.
@@ -236,13 +234,13 @@ func (h *CodexWSHandler) handleCodexCompleted(msg CodexMessage) {
 			"execution_time_ms": msg.ExecutionTimeMs,
 			"completed_at":      &now,
 		}).Error; err != nil {
-		log.Printf("Failed to update incident completion: %v", err)
+		slog.Error("failed to update incident completion", "err", err)
 	}
 }
 
 // handleCodexError handles error notification from Codex
 func (h *CodexWSHandler) handleCodexError(msg CodexMessage) {
-	log.Printf("Incident %s failed: %s", msg.IncidentID, msg.Error)
+	slog.Error("incident failed", "incident_id", msg.IncidentID, "err", msg.Error)
 
 	// Call callback if registered
 	h.callbackMu.RLock()
@@ -267,7 +265,7 @@ func (h *CodexWSHandler) handleCodexError(msg CodexMessage) {
 			"response":     msg.Error,
 			"completed_at": &now,
 		}).Error; err != nil {
-		log.Printf("Failed to update incident error: %v", err)
+		slog.Error("failed to update incident error", "err", err)
 	}
 }
 

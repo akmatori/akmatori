@@ -3,7 +3,7 @@ package config
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"log"
+	"log/slog"
 	"os"
 	"strconv"
 )
@@ -49,7 +49,7 @@ func Load() (*Config, error) {
 func GenerateSecureSecret(bytes int) string {
 	b := make([]byte, bytes)
 	if _, err := rand.Read(b); err != nil {
-		log.Printf("Warning: Could not generate secure random bytes: %v", err)
+		slog.Warn("Could not generate secure random bytes", "error", err)
 		return "fallback-insecure-secret-please-set-jwt-secret-env"
 	}
 	return hex.EncodeToString(b)

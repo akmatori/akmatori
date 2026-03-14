@@ -30,11 +30,11 @@ Remove unimplemented features and legacy code first to reduce the surface area f
 
 Replace 393 `log.Printf/Fatalf/Println` calls across 28 files with `log/slog`.
 
-- [ ] Create `internal/logging/logging.go` with slog initialization
-- [ ] Migrate all log.Printf/Fatalf/Println calls across 28 files to slog
-- [ ] Add `logging.Init()` call in `cmd/akmatori/main.go`
-- [ ] Update `mcp-gateway/` (8 occurrences across 2 files)
-- [ ] Verify: `make verify` + grep returns 0 log.Printf calls
+- [x] Create `internal/logging/logging.go` with slog initialization
+- [x] Migrate all log.Printf/Fatalf/Println calls across 28 files to slog
+- [x] Add `logging.Init()` call in `cmd/akmatori/main.go`
+- [x] Update `mcp-gateway/` (8 occurrences across 2 files)
+- [x] Verify: `make verify` + grep returns 0 log.Printf calls
 
 ---
 

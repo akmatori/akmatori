@@ -3,7 +3,7 @@ package services
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -132,7 +132,7 @@ func (s *SkillService) SyncSkillAssets(skillName string, prompt string) error {
 
 		// Check if source file exists
 		if _, err := os.Stat(srcPath); os.IsNotExist(err) {
-			log.Printf("Warning: referenced file %s does not exist, skipping", filename)
+			slog.Warn("referenced file does not exist, skipping", "filename", filename)
 			continue
 		}
 
@@ -334,7 +334,7 @@ func (s *SkillService) CreateSkill(name, description, category, prompt string) (
 
 	// Sync asset symlinks for [[filename]] references in prompt
 	if err := s.SyncSkillAssets(name, prompt); err != nil {
-		log.Printf("Warning: failed to sync skill assets: %v", err)
+		slog.Warn("failed to sync skill assets", "err", err)
 		// Continue even if asset sync fails - it's not critical
 	}
 
@@ -385,7 +385,7 @@ func (s *SkillService) UpdateSkill(name string, description, category string, en
 		tools := s.getSkillTools(name)
 		skillMd := s.generateSkillMd(name, description, body, tools)
 		if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
-			log.Printf("Warning: failed to update SKILL.md: %v", err)
+			slog.Warn("failed to update SKILL.md", "err", err)
 		}
 	}
 
@@ -534,7 +534,7 @@ func (s *SkillService) UpdateSkillPrompt(name, prompt string) error {
 
 	// Sync asset symlinks for [[filename]] references in prompt
 	if err := s.SyncSkillAssets(name, prompt); err != nil {
-		log.Printf("Warning: failed to sync skill assets: %v", err)
+		slog.Warn("failed to sync skill assets", "err", err)
 		// Continue even if asset sync fails - it's not critical
 	}
 
@@ -563,7 +563,7 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 
 	yamlBytes, err := yaml.Marshal(frontmatter)
 	if err != nil {
-		log.Printf("Failed to marshal SKILL.md frontmatter for %s: %v", name, err)
+		slog.Error("failed to marshal SKILL.md frontmatter", "skill", name, "err", err)
 		yamlBytes = []byte(fmt.Sprintf("name: %s\n", name))
 	}
 
@@ -794,20 +794,20 @@ func (s *SkillService) SyncSkillsFromFilesystem() error {
 		skillPath := filepath.Join(s.skillsDir, name, "SKILL.md")
 		content, err := os.ReadFile(skillPath)
 		if err != nil {
-			log.Printf("Warning: no SKILL.md for skill %s: %v", name, err)
+			slog.Warn("no SKILL.md for skill", "skill", name, "err", err)
 			continue
 		}
 
 		// Parse frontmatter
 		parts := strings.SplitN(string(content), "---", 3)
 		if len(parts) < 3 {
-			log.Printf("Warning: invalid SKILL.md format for skill %s", name)
+			slog.Warn("invalid SKILL.md format for skill", "skill", name)
 			continue
 		}
 
 		var frontmatter SkillFrontmatter
 		if err := yaml.Unmarshal([]byte(parts[1]), &frontmatter); err != nil {
-			log.Printf("Warning: failed to parse frontmatter for skill %s: %v", name, err)
+			slog.Warn("failed to parse frontmatter for skill", "skill", name, "err", err)
 			continue
 		}
 
@@ -818,9 +818,9 @@ func (s *SkillService) SyncSkillsFromFilesystem() error {
 			Enabled:     true,
 		}
 		if err := s.db.Create(skill).Error; err != nil {
-			log.Printf("Warning: failed to sync skill %s: %v", name, err)
+			slog.Warn("failed to sync skill from filesystem", "skill", name, "err", err)
 		} else {
-			log.Printf("Synced skill from filesystem: %s", name)
+			slog.Info("synced skill from filesystem", "skill", name)
 		}
 	}
 
@@ -851,7 +851,7 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 
 		// Ensure skill directory exists on disk
 		if err := s.EnsureSkillDirectories(skill.Name); err != nil {
-			log.Printf("Warning: failed to create directories for skill %s: %v", skill.Name, err)
+			slog.Warn("failed to create directories for skill", "skill", skill.Name, "err", err)
 			continue
 		}
 
@@ -864,7 +864,7 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 
 		// Sync asset symlinks for [[filename]] references in prompt
 		if err := s.SyncSkillAssets(skill.Name, prompt); err != nil {
-			log.Printf("Warning: failed to sync assets for skill %s: %v", skill.Name, err)
+			slog.Warn("failed to sync assets for skill", "skill", skill.Name, "err", err)
 		}
 
 		// Get tools for this skill
@@ -875,11 +875,11 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 		skillPath := filepath.Join(s.GetSkillDir(skill.Name), "SKILL.md")
 
 		if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
-			log.Printf("Warning: failed to regenerate SKILL.md for %s: %v", skill.Name, err)
+			slog.Warn("failed to regenerate SKILL.md for skill", "skill", skill.Name, "err", err)
 			continue
 		}
 
-		log.Printf("Regenerated SKILL.md for skill: %s", skill.Name)
+		slog.Info("regenerated SKILL.md for skill", "skill", skill.Name)
 	}
 
 	return nil
@@ -915,7 +915,7 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 	}
 	// Ensure directory has correct permissions even if parent existed
 	if err := os.Chmod(incidentDir, 0777); err != nil {
-		log.Printf("Failed to chmod incident directory %s: %v", incidentDir, err)
+		slog.Error("failed to chmod incident directory", "dir", incidentDir, "err", err)
 	}
 
 	// Generate AGENTS.md at workspace root (pi-mono reads agentDir from cwd)
@@ -952,15 +952,15 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 		go func() {
 			generatedTitle, err := titleGen.GenerateTitle(ctx.Message, ctx.Source)
 			if err != nil {
-				log.Printf("Warning: Background title generation failed for %s: %v", incidentUUID, err)
+				slog.Warn("background title generation failed", "incident", incidentUUID, "err", err)
 				return
 			}
 			if generatedTitle != "" && generatedTitle != title {
 				if err := s.db.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).
 					Update("title", generatedTitle).Error; err != nil {
-					log.Printf("Warning: Failed to update incident title for %s: %v", incidentUUID, err)
+					slog.Warn("failed to update incident title", "incident", incidentUUID, "err", err)
 				} else {
-					log.Printf("Updated incident %s title: %s", incidentUUID, generatedTitle)
+					slog.Info("updated incident title", "incident", incidentUUID, "title", generatedTitle)
 				}
 			}
 		}()

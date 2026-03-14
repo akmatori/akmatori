@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +16,7 @@ import (
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/handlers"
 	"github.com/akmatori/akmatori/internal/jobs"
+	"github.com/akmatori/akmatori/internal/logging"
 	"github.com/akmatori/akmatori/internal/middleware"
 	"github.com/akmatori/akmatori/internal/services"
 	"github.com/akmatori/akmatori/internal/setup"
@@ -27,44 +28,51 @@ import (
 )
 
 func main() {
+	logging.Init()
+
 	// Load .env file if it exists (ignore error if file doesn't exist)
 	if err := godotenv.Load(); err != nil {
-		log.Printf("No .env file found or error loading it (this is fine if using environment variables): %v", err)
+		slog.Info("no .env file found or error loading it (this is fine if using environment variables)", "err", err)
 	}
 
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		slog.Error("failed to load configuration", "err", err)
+		os.Exit(1)
 	}
 
-	log.Printf("Starting AIOps Codex Bot...")
+	slog.Info("starting AIOps Codex Bot")
 
 	// Step 1: Initialize database connection FIRST (needed for secret resolution)
 	if err := database.Connect(cfg.DatabaseURL, logger.Warn); err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		slog.Error("failed to connect to database", "err", err)
+		os.Exit(1)
 	}
-	log.Printf("Database connection established")
+	slog.Info("database connection established")
 
 	// Step 2: Run database migrations (creates system_settings table)
 	if err := database.AutoMigrate(); err != nil {
-		log.Fatalf("Failed to run database migrations: %v", err)
+		slog.Error("failed to run database migrations", "err", err)
+		os.Exit(1)
 	}
 
 	// Step 3: Initialize default database records
 	if err := database.InitializeDefaults(); err != nil {
-		log.Fatalf("Failed to initialize database defaults: %v", err)
+		slog.Error("failed to initialize database defaults", "err", err)
+		os.Exit(1)
 	}
 
 	// Step 4: Resolve secrets from env > DB > auto-generate
 	jwtSecret := setup.ResolveJWTSecret(cfg.JWTSecret)
 	passwordHash, setupRequired, err := setup.ResolveAdminPassword(cfg.AdminPassword)
 	if err != nil {
-		log.Fatalf("Failed to resolve admin password: %v", err)
+		slog.Error("failed to resolve admin password", "err", err)
+		os.Exit(1)
 	}
 
 	if setupRequired {
-		log.Println("*** SETUP MODE *** — Visit the web UI to set your admin password")
+		slog.Warn("*** SETUP MODE *** — Visit the web UI to set your admin password")
 	}
 
 	// Step 5: Create JWT middleware with resolved secrets
@@ -81,22 +89,22 @@ func main() {
 			"/auth/login",
 			"/auth/setup",
 			"/auth/setup-status",
-			"/ws/codex",          // WebSocket endpoint for Codex worker (internal)
-			"/api/docs",          // Swagger UI (public)
-			"/api/openapi.yaml",  // OpenAPI spec (public)
+			"/ws/codex",         // WebSocket endpoint for Codex worker (internal)
+			"/api/docs",         // Swagger UI (public)
+			"/api/openapi.yaml", // OpenAPI spec (public)
 		},
 	})
-	log.Printf("JWT authentication enabled for user: %s", cfg.AdminUsername)
+	slog.Info("JWT authentication enabled", "user", cfg.AdminUsername)
 
 	// Initialize tool service
 	toolService := services.NewToolService()
-	log.Println("Tool service initialized")
+	slog.Info("tool service initialized")
 
 	// Ensure tool types exist in database
 	if err := toolService.EnsureToolTypes(); err != nil {
-		log.Printf("Warning: Failed to ensure tool types: %v", err)
+		slog.Warn("failed to ensure tool types", "err", err)
 	} else {
-		log.Println("Tool types ready")
+		slog.Info("tool types ready")
 	}
 
 	// Data directory for skills and incidents (hardcoded)
@@ -105,39 +113,40 @@ func main() {
 	// Initialize context service
 	contextService, err := services.NewContextService(dataDir)
 	if err != nil {
-		log.Fatalf("Failed to initialize context service: %v", err)
+		slog.Error("failed to initialize context service", "err", err)
+		os.Exit(1)
 	}
-	log.Printf("Context service initialized with context dir: %s", contextService.GetContextDir())
+	slog.Info("context service initialized", "context_dir", contextService.GetContextDir())
 
 	// Initialize skill service
 	skillService := services.NewSkillService(dataDir, toolService, contextService)
-	log.Printf("Skill service initialized with data dir: %s", dataDir)
+	slog.Info("skill service initialized", "data_dir", dataDir)
 
 	// Regenerate all SKILL.md files to ensure they have latest template
 	if err := skillService.RegenerateAllSkillMds(); err != nil {
-		log.Printf("Warning: Failed to regenerate SKILL.md files: %v", err)
+		slog.Warn("failed to regenerate SKILL.md files", "err", err)
 	}
 
 	// Initialize Codex executor
 	codexExecutor := executor.NewExecutor()
-	log.Printf("Codex executor initialized")
+	slog.Info("Codex executor initialized")
 
 	// Initialize Alert service
 	alertService := services.NewAlertService()
-	log.Printf("Alert service initialized")
+	slog.Info("alert service initialized")
 
 	// Initialize Runbook service
 	runbookService := services.NewRunbookService(dataDir)
-	log.Printf("Runbook service initialized")
+	slog.Info("runbook service initialized")
 
 	// Sync runbook files on startup
 	if err := runbookService.SyncRunbookFiles(); err != nil {
-		log.Printf("Warning: Failed to sync runbook files: %v", err)
+		slog.Warn("failed to sync runbook files", "err", err)
 	}
 
 	// Initialize Aggregation service
 	aggregationService := services.NewAggregationService(database.GetDB())
-	log.Printf("Aggregation service initialized")
+	slog.Info("aggregation service initialized")
 
 	// Create stop channel for background jobs
 	jobStopChan := make(chan struct{})
@@ -147,17 +156,17 @@ func main() {
 	// Start observing monitor (checks incidents in "observing" status and transitions them to "resolved")
 	observingMonitor := jobs.NewObservingMonitor(database.GetDB())
 	go observingMonitor.Start(time.Minute, jobStopChan)
-	log.Printf("Observing monitor started (runs every minute)")
+	slog.Info("observing monitor started (runs every minute)")
 
 	// Start recorrelation job (analyzes open incidents for merge opportunities)
 	// Note: CodexExecutor is nil until RunMergeAnalyzer is implemented - job handles this gracefully
 	recorrelationJob := jobs.NewRecorrelationJob(database.GetDB(), aggregationService, nil)
 	go recorrelationJob.Start(jobStopChan)
-	log.Printf("Recorrelation job started (interval from settings)")
+	slog.Info("recorrelation job started (interval from settings)")
 
 	// Initialize default alert source types
 	if err := alertService.InitializeDefaultSourceTypes(); err != nil {
-		log.Printf("Warning: Failed to initialize alert source types: %v", err)
+		slog.Warn("failed to initialize alert source types", "err", err)
 	}
 
 	// Initialize Slack manager with hot-reload support
@@ -166,14 +175,14 @@ func main() {
 	// Get initial Slack settings from database
 	slackSettings, err := database.GetSlackSettings()
 	if err != nil {
-		log.Printf("Warning: Could not load Slack settings: %v", err)
+		slog.Warn("could not load Slack settings", "err", err)
 		slackSettings = &database.SlackSettings{Enabled: false}
 	}
 
 	// Initialize Agent WebSocket handler for orchestrator communication
 	// This must be created before Slack event handler so it can be captured in closure
 	agentWSHandler := handlers.NewAgentWSHandler()
-	log.Printf("Agent WebSocket handler initialized")
+	slog.Info("agent WebSocket handler initialized")
 
 	// Initialize Slack handler (will be used when Slack is enabled)
 	var slackHandler *handlers.SlackHandler
@@ -211,25 +220,25 @@ func main() {
 		// Try to get bot user ID for self-message filtering
 		if authTest, err := client.AuthTest(); err == nil {
 			slackHandler.SetBotUserID(authTest.UserID)
-			log.Printf("Slack bot user ID: %s", authTest.UserID)
+			slog.Info("Slack bot user ID", "user_id", authTest.UserID)
 		} else {
-			log.Printf("Warning: Could not get bot user ID: %v", err)
+			slog.Warn("could not get bot user ID", "err", err)
 		}
 
 		// Load alert channel configurations
 		if err := slackHandler.LoadAlertChannels(); err != nil {
-			log.Printf("Warning: Failed to load alert channels: %v", err)
+			slog.Warn("failed to load alert channels", "err", err)
 		}
 
 		slackHandler.HandleSocketMode(socketClient)
-		log.Printf("Slack components initialized (with alert channel support)")
+		slog.Info("Slack components initialized (with alert channel support)")
 	})
 
 	slackEnabled := slackSettings.IsActive()
 	if slackEnabled {
-		log.Printf("Slack integration is ENABLED")
+		slog.Info("Slack integration is ENABLED")
 	} else {
-		log.Printf("Slack integration is DISABLED (configure in Settings)")
+		slog.Info("Slack integration is DISABLED (configure in Settings)")
 	}
 
 	// Register all alert adapters
@@ -238,7 +247,7 @@ func main() {
 	alertHandler.RegisterAdapter(adapters.NewPagerDutyAdapter())
 	alertHandler.RegisterAdapter(adapters.NewGrafanaAdapter())
 	alertHandler.RegisterAdapter(adapters.NewDatadogAdapter())
-	log.Printf("Alert adapters registered: alertmanager, zabbix, pagerduty, grafana, datadog")
+	slog.Info("alert adapters registered: alertmanager, zabbix, pagerduty, grafana, datadog")
 
 	// Initialize HTTP handler
 	httpHandler := handlers.NewHTTPHandler(alertHandler)
@@ -276,9 +285,10 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("Starting HTTP server on port %d", cfg.HTTPPort)
+		slog.Info("starting HTTP server", "port", cfg.HTTPPort)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("HTTP server error: %v", err)
+			slog.Error("HTTP server error", "err", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -289,27 +299,27 @@ func main() {
 	// Handle shutdown in a goroutine
 	go func() {
 		<-sigChan
-		log.Println("\nReceived shutdown signal, cleaning up...")
+		slog.Info("received shutdown signal, cleaning up")
 
 		// Stop background jobs
-		log.Println("Stopping background jobs...")
+		slog.Info("stopping background jobs")
 		close(jobStopChan)
 
 		// Shutdown HTTP server
-		log.Println("Shutting down HTTP server...")
+		slog.Info("shutting down HTTP server")
 		if err := httpServer.Close(); err != nil {
-			log.Printf("Error shutting down HTTP server: %v", err)
+			slog.Error("error shutting down HTTP server", "err", err)
 		}
 
-		log.Println("Shutdown complete")
+		slog.Info("shutdown complete")
 		os.Exit(0)
 	}()
 
-	log.Println("Bot is running! Press Ctrl+C to exit.")
-	log.Printf("Alert webhook endpoint: http://localhost:%d/webhook/alert/{instance_uuid}", cfg.HTTPPort)
-	log.Printf("Health check endpoint: http://localhost:%d/health", cfg.HTTPPort)
-	log.Printf("API base URL: http://localhost:%d/api", cfg.HTTPPort)
-	log.Printf("Agent WebSocket endpoint: ws://localhost:%d/ws/codex", cfg.HTTPPort)
+	slog.Info("Bot is running! Press Ctrl+C to exit.")
+	slog.Info("alert webhook endpoint", "url", fmt.Sprintf("http://localhost:%d/webhook/alert/{instance_uuid}", cfg.HTTPPort))
+	slog.Info("health check endpoint", "url", fmt.Sprintf("http://localhost:%d/health", cfg.HTTPPort))
+	slog.Info("API base URL", "url", fmt.Sprintf("http://localhost:%d/api", cfg.HTTPPort))
+	slog.Info("agent WebSocket endpoint", "url", fmt.Sprintf("ws://localhost:%d/ws/codex", cfg.HTTPPort))
 
 	// Create a context for the Slack manager
 	ctx, ctxCancel := context.WithCancel(context.Background())
@@ -321,12 +331,12 @@ func main() {
 	// Start Slack Socket Mode if enabled
 	if slackEnabled {
 		if err := slackManager.Start(ctx); err != nil {
-			log.Printf("Warning: Failed to start Slack: %v", err)
+			slog.Warn("failed to start Slack", "err", err)
 		} else {
-			log.Println("Slack Socket Mode is ACTIVE")
+			slog.Info("Slack Socket Mode is ACTIVE")
 		}
 	} else {
-		log.Println("Running in API-only mode (Slack disabled)")
+		slog.Info("running in API-only mode (Slack disabled)")
 	}
 
 	// Keep the main goroutine alive

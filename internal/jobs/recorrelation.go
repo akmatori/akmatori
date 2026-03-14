@@ -2,7 +2,7 @@ package jobs
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"time"
 
 	"gorm.io/gorm"
@@ -43,7 +43,7 @@ func (j *RecorrelationJob) Run() (int, error) {
 
 	// Skip if recorrelation is disabled
 	if !settings.RecorrelationEnabled {
-		log.Println("Recorrelation is disabled, skipping")
+		slog.Info("Recorrelation is disabled, skipping")
 		return 0, nil
 	}
 
@@ -55,8 +55,9 @@ func (j *RecorrelationJob) Run() (int, error) {
 
 	// Skip if too many open incidents (could overwhelm the LLM)
 	if len(incidents) > settings.MaxIncidentsToAnalyze {
-		log.Printf("Too many open incidents (%d > %d), skipping recorrelation",
-			len(incidents), settings.MaxIncidentsToAnalyze)
+		slog.Info("Too many open incidents, skipping recorrelation",
+			"incident_count", len(incidents),
+			"max_incidents", settings.MaxIncidentsToAnalyze)
 		return 0, nil
 	}
 
@@ -70,7 +71,7 @@ func (j *RecorrelationJob) Run() (int, error) {
 	for _, inc := range incidents {
 		alerts, err := j.aggService.GetIncidentAlerts(inc.ID)
 		if err != nil {
-			log.Printf("Failed to get alerts for incident %s: %v", inc.UUID, err)
+			slog.Error("Failed to get alerts for incident", "incident_uuid", inc.UUID, "error", err)
 			continue
 		}
 
@@ -128,7 +129,7 @@ func (j *RecorrelationJob) Run() (int, error) {
 
 	// If no executor provided, just return (useful for testing without Codex)
 	if j.executor == nil {
-		log.Println("No Codex executor configured, skipping merge analysis")
+		slog.Info("No Codex executor configured, skipping merge analysis")
 		return 0, nil
 	}
 
@@ -145,22 +146,26 @@ func (j *RecorrelationJob) Run() (int, error) {
 
 	// Log output for debugging
 	outputJSON, _ := json.Marshal(output)
-	log.Printf("Merge analyzer output: %s", string(outputJSON))
+	slog.Info("Merge analyzer output", "output", string(outputJSON))
 
 	// Execute proposed merges that meet the confidence threshold
 	mergesPerformed := 0
 	for _, merge := range output.ProposedMerges {
 		if merge.Confidence < settings.MergeConfidenceThreshold {
-			log.Printf("Skipping merge %s -> %s (confidence %.2f < threshold %.2f)",
-				merge.SourceIncidentUUID, merge.TargetIncidentUUID,
-				merge.Confidence, settings.MergeConfidenceThreshold)
+			slog.Info("Skipping merge below confidence threshold",
+				"source_incident", merge.SourceIncidentUUID,
+				"target_incident", merge.TargetIncidentUUID,
+				"confidence", merge.Confidence,
+				"threshold", settings.MergeConfidenceThreshold)
 			continue
 		}
 
 		err := j.executeMerge(merge)
 		if err != nil {
-			log.Printf("Failed to execute merge %s -> %s: %v",
-				merge.SourceIncidentUUID, merge.TargetIncidentUUID, err)
+			slog.Error("Failed to execute merge",
+				"source_incident", merge.SourceIncidentUUID,
+				"target_incident", merge.TargetIncidentUUID,
+				"error", err)
 			continue
 		}
 		mergesPerformed++
@@ -220,9 +225,11 @@ func (j *RecorrelationJob) executeMerge(merge services.ProposedMerge) error {
 		return err
 	}
 
-	log.Printf("Merged incident %s into %s (confidence: %.2f, reason: %s)",
-		merge.SourceIncidentUUID, merge.TargetIncidentUUID,
-		merge.Confidence, merge.Reason)
+	slog.Info("Merged incident",
+		"source_incident", merge.SourceIncidentUUID,
+		"target_incident", merge.TargetIncidentUUID,
+		"confidence", merge.Confidence,
+		"reason", merge.Reason)
 
 	return nil
 }
@@ -232,7 +239,7 @@ func (j *RecorrelationJob) Start(stop <-chan struct{}) {
 	// Get initial interval from settings
 	settings, err := j.aggService.GetSettings()
 	if err != nil {
-		log.Printf("Failed to get recorrelation settings, using default interval: %v", err)
+		slog.Error("Failed to get recorrelation settings, using default interval", "error", err)
 		settings = database.NewDefaultAggregationSettings()
 	}
 
@@ -245,9 +252,9 @@ func (j *RecorrelationJob) Start(stop <-chan struct{}) {
 		case <-ticker.C:
 			merges, err := j.Run()
 			if err != nil {
-				log.Printf("Recorrelation job error: %v", err)
+				slog.Error("Recorrelation job error", "error", err)
 			} else if merges > 0 {
-				log.Printf("Recorrelation job: performed %d merges", merges)
+				slog.Info("Recorrelation job performed merges", "merge_count", merges)
 			}
 
 			// Refresh interval from settings (in case it changed)
@@ -256,11 +263,11 @@ func (j *RecorrelationJob) Start(stop <-chan struct{}) {
 				settings = newSettings
 				interval = time.Duration(settings.RecorrelationIntervalMinutes) * time.Minute
 				ticker.Reset(interval)
-				log.Printf("Recorrelation interval updated to %d minutes", settings.RecorrelationIntervalMinutes)
+				slog.Info("Recorrelation interval updated", "interval_minutes", settings.RecorrelationIntervalMinutes)
 			}
 
 		case <-stop:
-			log.Println("Recorrelation job stopped")
+			slog.Info("Recorrelation job stopped")
 			return
 		}
 	}

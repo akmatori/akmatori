@@ -2,7 +2,7 @@ package slack
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -46,7 +46,7 @@ func (r *ChannelResolver) ResolveChannel(nameOrID string) (string, error) {
 	r.mu.RLock()
 	if id, ok := r.cache[channelName]; ok {
 		r.mu.RUnlock()
-		log.Printf("Resolved channel '%s' to '%s' (cached)", channelName, id)
+		slog.Info("Resolved channel (cached)", "channel_name", channelName, "channel_id", id)
 		return id, nil
 	}
 	r.mu.RUnlock()
@@ -62,7 +62,7 @@ func (r *ChannelResolver) ResolveChannel(nameOrID string) (string, error) {
 	r.cache[channelName] = id
 	r.mu.Unlock()
 
-	log.Printf("Resolved channel '%s' to '%s'", channelName, id)
+	slog.Info("Resolved channel", "channel_name", channelName, "channel_id", id)
 	return id, nil
 }
 
@@ -92,7 +92,7 @@ func (r *ChannelResolver) lookupChannel(name string) (string, error) {
 		Types:           []string{"private_channel"},
 	})
 	if err != nil {
-		log.Printf("Warning: Failed to list private channels: %v", err)
+		slog.Warn("Failed to list private channels", "error", err)
 		// Don't fail, just return not found for public channels
 		return "", fmt.Errorf("channel '%s' not found", name)
 	}
@@ -112,7 +112,7 @@ func (r *ChannelResolver) ClearCache() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.cache = make(map[string]string)
-	log.Printf("Cleared channel resolution cache")
+	slog.Info("Cleared channel resolution cache")
 }
 
 // isChannelID checks if a string looks like a Slack channel ID

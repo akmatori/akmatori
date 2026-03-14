@@ -3,7 +3,7 @@ package handlers
 import (
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -72,7 +72,7 @@ func (h *AlertHandler) RegisterAdapter(adapter alerts.AlertAdapter) {
 	h.adaptersMu.Lock()
 	h.adapters[adapter.GetSourceType()] = adapter
 	h.adaptersMu.Unlock()
-	log.Printf("Registered alert adapter: %s", adapter.GetSourceType())
+	slog.Info("registered alert adapter", "source_type", adapter.GetSourceType())
 }
 
 // HandleWebhook processes incoming webhook requests
@@ -95,13 +95,13 @@ func (h *AlertHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	// Look up instance
 	instance, err := h.alertService.GetInstanceByUUID(instanceUUID)
 	if err != nil {
-		log.Printf("Alert instance not found: %s - %v", instanceUUID, err)
+		slog.Error("alert instance not found", "instance_uuid", instanceUUID, "err", err)
 		http.Error(w, "Instance not found", http.StatusNotFound)
 		return
 	}
 
 	if !instance.Enabled {
-		log.Printf("Alert instance disabled: %s", instanceUUID)
+		slog.Warn("alert instance disabled", "instance_uuid", instanceUUID)
 		http.Error(w, "Instance disabled", http.StatusForbidden)
 		return
 	}
@@ -111,14 +111,14 @@ func (h *AlertHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	adapter, ok := h.adapters[instance.AlertSourceType.Name]
 	h.adaptersMu.RUnlock()
 	if !ok {
-		log.Printf("No adapter for source type: %s", instance.AlertSourceType.Name)
+		slog.Error("no adapter for source type", "source_type", instance.AlertSourceType.Name)
 		http.Error(w, "Unsupported source type", http.StatusBadRequest)
 		return
 	}
 
 	// Validate webhook secret
 	if err := adapter.ValidateWebhookSecret(r, instance); err != nil {
-		log.Printf("Webhook secret validation failed for %s: %v", instanceUUID, err)
+		slog.Warn("webhook secret validation failed", "instance_uuid", instanceUUID, "err", err)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -128,7 +128,7 @@ func (h *AlertHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxWebhookBodySize))
 	if err != nil {
-		log.Printf("Error reading webhook body: %v", err)
+		slog.Error("failed to read webhook body", "err", err)
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
@@ -136,13 +136,12 @@ func (h *AlertHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	// Parse payload into normalized alerts
 	normalizedAlerts, err := adapter.ParsePayload(body, instance)
 	if err != nil {
-		log.Printf("Error parsing alert payload: %v", err)
+		slog.Error("failed to parse alert payload", "err", err)
 		http.Error(w, "Invalid payload", http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("Received %d alerts from %s (instance: %s)",
-		len(normalizedAlerts), instance.AlertSourceType.Name, instance.Name)
+	slog.Info("received alerts", "count", len(normalizedAlerts), "source_type", instance.AlertSourceType.Name, "instance", instance.Name)
 
 	// Process each alert
 	for _, normalizedAlert := range normalizedAlerts {
@@ -204,25 +203,24 @@ func (h *AlertHandler) evaluateAlertAggregation(
 
 func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, normalized alerts.NormalizedAlert) {
 	if normalized.Status == database.AlertStatusResolved {
-		log.Printf("Processing resolved alert: %s", normalized.AlertName)
+		slog.Info("processing resolved alert", "alert_name", normalized.AlertName)
 		// TODO: Handle resolved alerts (update incident_alerts status)
 		return
 	}
 
-	log.Printf("Processing firing alert: %s (severity: %s)", normalized.AlertName, normalized.Severity)
+	slog.Info("processing firing alert", "alert_name", normalized.AlertName, "severity", normalized.Severity)
 
 	// Evaluate aggregation
 	aggregationResult, err := h.evaluateAlertAggregation(instance, normalized)
 	if err != nil {
-		log.Printf("Warning: Aggregation evaluation failed, creating new incident: %v", err)
+		slog.Warn("aggregation evaluation failed, creating new incident", "err", err)
 		aggregationResult = &services.CorrelatorOutput{
 			Decision: "new",
 			Reason:   err.Error(),
 		}
 	}
 
-	log.Printf("Aggregation decision: %s (confidence: %.2f, reason: %s)",
-		aggregationResult.Decision, aggregationResult.Confidence, aggregationResult.Reason)
+	slog.Info("aggregation decision", "decision", aggregationResult.Decision, "confidence", aggregationResult.Confidence, "reason", aggregationResult.Reason)
 
 	var incidentUUID string
 	var workingDir string
@@ -258,17 +256,17 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 				// If incident was in observing state, move back to diagnosed
 				if existing.Status == database.IncidentStatusObserving {
 					if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusDiagnosed, "", ""); err != nil {
-						log.Printf("Failed to update incident status: %v", err)
+						slog.Error("failed to update incident status", "err", err)
 					}
 				}
 				attached = true
 				isNewIncident = false
-				log.Printf("Attached alert to existing incident: %s", incidentUUID)
+				slog.Info("attached alert to existing incident", "incident_id", incidentUUID)
 			} else {
-				log.Printf("Failed to attach alert to incident %s: %v", incidentUUID, err)
+				slog.Error("failed to attach alert to incident", "incident_id", incidentUUID, "err", err)
 			}
 		} else {
-			log.Printf("Failed to get incident %s, creating new: %v", incidentUUID, err)
+			slog.Error("failed to get incident, creating new", "incident_id", incidentUUID, "err", err)
 		}
 	}
 
@@ -316,11 +314,11 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		var err error
 		incidentUUID, workingDir, err = h.skillService.SpawnIncidentManager(incidentCtx)
 		if err != nil {
-			log.Printf("Error spawning incident manager: %v", err)
+			slog.Error("failed to spawn incident manager", "err", err)
 			return
 		}
 
-		log.Printf("Created incident for alert: UUID=%s, WorkingDir=%s", incidentUUID, workingDir)
+		slog.Info("created incident for alert", "incident_id", incidentUUID, "working_dir", workingDir)
 
 		// Create IncidentAlert record for the initial alert
 		if h.aggregationService != nil {
@@ -343,10 +341,10 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 					AttachedAt:            time.Now(),
 				}
 				if err := h.aggregationService.AttachAlertToIncident(incident.ID, incidentAlert); err != nil {
-					log.Printf("Warning: Failed to create IncidentAlert record: %v", err)
+					slog.Warn("failed to create IncidentAlert record", "err", err)
 				}
 			} else {
-				log.Printf("Warning: Failed to get incident for IncidentAlert record: %v", err)
+				slog.Warn("failed to get incident for IncidentAlert record", "err", err)
 			}
 		}
 
@@ -359,14 +357,14 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		var err error
 		threadTS, err = h.postAlertToSlack(normalized, instance)
 		if err != nil {
-			log.Printf("Warning: Failed to post alert to Slack: %v", err)
+			slog.Warn("failed to post alert to Slack", "err", err)
 		}
 	}
 
 	// Update incident status and run investigation (only for new incidents)
 	if isNewIncident {
 		if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
-			log.Printf("Warning: Failed to update incident status: %v", err)
+			slog.Warn("failed to update incident status", "err", err)
 		}
 		go h.runInvestigation(incidentUUID, workingDir, normalized, instance, threadTS)
 	}
@@ -443,14 +441,14 @@ func (h *AlertHandler) postAlertToSlack(alert alerts.NormalizedAlert, instance *
 		Channel:   channelID,
 		Timestamp: ts,
 	}); err != nil {
-		log.Printf("Failed to add reaction: %v", err)
+		slog.Warn("failed to add reaction", "err", err)
 	}
 
 	return ts, nil
 }
 
 func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, threadTS string) {
-	log.Printf("Starting investigation for alert: %s (incident: %s)", alert.AlertName, incidentUUID)
+	slog.Info("starting investigation for alert", "alert_name", alert.AlertName, "incident_id", incidentUUID)
 
 	// Build investigation prompt
 	investigationPrompt := h.buildInvestigationPrompt(alert, instance)
@@ -458,15 +456,15 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 
 	// Try WebSocket-based execution first (new architecture)
 	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
-		log.Printf("Using WebSocket-based agent worker for incident %s", incidentUUID)
+		slog.Info("using WebSocket-based agent worker", "incident_id", incidentUUID)
 
 		// Fetch LLM settings from database
 		var llmSettings *LLMSettingsForWorker
 		if dbSettings, err := database.GetLLMSettings(); err == nil && dbSettings != nil {
 			llmSettings = BuildLLMSettingsForWorker(dbSettings)
-			log.Printf("Using LLM provider: %s, model: %s", dbSettings.Provider, dbSettings.Model)
+			slog.Info("using LLM provider", "provider", dbSettings.Provider, "model", dbSettings.Model)
 		} else {
-			log.Printf("Warning: Could not fetch LLM settings: %v", err)
+			slog.Warn("could not fetch LLM settings", "err", err)
 		}
 
 		// Create channels for async result handling
@@ -486,7 +484,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 				lastStreamedLog += output
 				// Update database with streamed log
 				if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog); err != nil {
-					log.Printf("Failed to update incident log: %v", err)
+					slog.Error("failed to update incident log", "err", err)
 				}
 			},
 			OnCompleted: func(sid, output string) {
@@ -502,10 +500,10 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 		}
 
 		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
-			log.Printf("Failed to start incident via WebSocket: %v", err)
+			slog.Error("failed to start incident via WebSocket", "err", err)
 			errorMsg := fmt.Sprintf("Failed to start investigation: %v", err)
 			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg); updateErr != nil {
-				log.Printf("Failed to update incident status: %v", updateErr)
+				slog.Error("failed to update incident status", "err", updateErr)
 			}
 			h.updateSlackWithResult(threadTS, "❌ "+errorMsg, true)
 			return
@@ -526,7 +524,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 			finalStatus = database.IncidentStatusFailed
 		}
 		if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response); err != nil {
-			log.Printf("Failed to update incident complete: %v", err)
+			slog.Error("failed to update incident complete", "err", err)
 		}
 
 		// Format response for Slack (parse structured blocks and apply formatting)
@@ -547,15 +545,15 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 		slackResponse := buildSlackResponse(lastStreamedLog, formattedResp)
 		h.updateSlackWithResult(threadTS, slackResponse, hasError)
 
-		log.Printf("Investigation completed for alert: %s (via WebSocket)", alert.AlertName)
+		slog.Info("investigation completed for alert via WebSocket", "alert_name", alert.AlertName)
 		return
 	}
 
 	// No WebSocket worker available
-	log.Printf("ERROR: Agent worker not connected for incident %s", incidentUUID)
+	slog.Error("agent worker not connected", "incident_id", incidentUUID)
 	errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
 	if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg); updateErr != nil {
-		log.Printf("Failed to update incident status: %v", updateErr)
+		slog.Error("failed to update incident status", "err", updateErr)
 	}
 	h.updateSlackWithResult(threadTS, "❌ "+errorMsg, true)
 }
@@ -609,7 +607,7 @@ func (h *AlertHandler) updateSlackWithResult(threadTS, response string, hasError
 		Channel:   channelID,
 		Timestamp: threadTS,
 	}); err != nil {
-		log.Printf("Failed to add reaction: %v", err)
+		slog.Warn("failed to add reaction", "err", err)
 	}
 
 	// Post result summary
@@ -618,7 +616,7 @@ func (h *AlertHandler) updateSlackWithResult(threadTS, response string, hasError
 		slack.MsgOptionText(response, false),
 		slack.MsgOptionTS(threadTS),
 	); err != nil {
-		log.Printf("Failed to post message: %v", err)
+		slog.Error("failed to post message", "err", err)
 	}
 }
 
@@ -707,18 +705,18 @@ func (h *AlertHandler) ProcessAlertFromSlackChannel(
 	slackMessageTS string,
 ) {
 	if normalized.Status == database.AlertStatusResolved {
-		log.Printf("Processing resolved alert from Slack channel: %s", normalized.AlertName)
+		slog.Info("processing resolved alert from Slack channel", "alert_name", normalized.AlertName)
 		// For resolved alerts, we could potentially close related incidents
 		// For now, just log it
 		return
 	}
 
-	log.Printf("Processing Slack channel alert: %s (severity: %s)", normalized.AlertName, normalized.Severity)
+	slog.Info("processing Slack channel alert", "alert_name", normalized.AlertName, "severity", normalized.Severity)
 
 	// Evaluate aggregation
 	aggregationResult, err := h.evaluateAlertAggregation(instance, normalized)
 	if err != nil {
-		log.Printf("Warning: Aggregation evaluation failed, creating new incident: %v", err)
+		slog.Warn("aggregation evaluation failed, creating new incident", "err", err)
 		aggregationResult = &services.CorrelatorOutput{
 			Decision: "new",
 			Reason:   err.Error(),
@@ -758,19 +756,19 @@ func (h *AlertHandler) ProcessAlertFromSlackChannel(
 			if err := h.aggregationService.AttachAlertToIncident(existing.ID, incidentAlert); err == nil {
 				if existing.Status == database.IncidentStatusObserving {
 					if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusDiagnosed, "", ""); err != nil {
-						log.Printf("Failed to update incident status: %v", err)
+						slog.Error("failed to update incident status", "err", err)
 					}
 				}
 				attached = true
 				isNewIncident = false
-				log.Printf("Attached Slack channel alert to existing incident: %s", incidentUUID)
+				slog.Info("attached Slack channel alert to existing incident", "incident_id", incidentUUID)
 
 				// Post a reply in the original Slack thread indicating attachment
 				h.postSlackThreadReply(slackChannelID, slackMessageTS,
 					fmt.Sprintf("🔗 Alert attached to existing incident. View at: %s/incidents/%s",
 						h.getBaseURL(), incidentUUID))
 			} else {
-				log.Printf("Failed to attach alert to incident %s: %v", incidentUUID, err)
+				slog.Error("failed to attach alert to incident", "incident_id", incidentUUID, "err", err)
 			}
 		}
 	}
@@ -821,18 +819,18 @@ func (h *AlertHandler) ProcessAlertFromSlackChannel(
 		var err error
 		incidentUUID, workingDir, err = h.skillService.SpawnIncidentManager(incidentCtx)
 		if err != nil {
-			log.Printf("Error spawning incident manager for Slack channel alert: %v", err)
+			slog.Error("failed to spawn incident manager for Slack channel alert", "err", err)
 			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
 			h.postSlackThreadReply(slackChannelID, slackMessageTS,
 				fmt.Sprintf("❌ Failed to create incident: %v", err))
 			return
 		}
 
-		log.Printf("Created incident for Slack channel alert: UUID=%s", incidentUUID)
+		slog.Info("created incident for Slack channel alert", "incident_id", incidentUUID)
 
 		// Update incident with Slack context for thread replies
 		if err := h.updateIncidentSlackContext(incidentUUID, slackChannelID, slackMessageTS); err != nil {
-			log.Printf("Warning: Failed to update incident Slack context: %v", err)
+			slog.Warn("failed to update incident Slack context", "err", err)
 		}
 
 		// Create IncidentAlert record
@@ -856,7 +854,7 @@ func (h *AlertHandler) ProcessAlertFromSlackChannel(
 					AttachedAt:            time.Now(),
 				}
 				if err := h.aggregationService.AttachAlertToIncident(incident.ID, incidentAlert); err != nil {
-					log.Printf("Warning: Failed to create IncidentAlert record: %v", err)
+					slog.Warn("failed to create IncidentAlert record", "err", err)
 				}
 			}
 		}
@@ -867,7 +865,7 @@ func (h *AlertHandler) ProcessAlertFromSlackChannel(
 	// Run investigation for new incidents
 	if isNewIncident {
 		if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
-			log.Printf("Warning: Failed to update incident status: %v", err)
+			slog.Warn("failed to update incident status", "err", err)
 		}
 
 		// Run investigation with thread reply support
@@ -882,7 +880,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 	instance *database.AlertSourceInstance,
 	slackChannelID, slackMessageTS string,
 ) {
-	log.Printf("Starting investigation for Slack channel alert: %s (incident: %s)", alert.AlertName, incidentUUID)
+	slog.Info("starting investigation for Slack channel alert", "alert_name", alert.AlertName, "incident_id", incidentUUID)
 
 	// Build investigation prompt
 	investigationPrompt := h.buildInvestigationPrompt(alert, instance)
@@ -890,7 +888,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 
 	// Try WebSocket-based execution first
 	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
-		log.Printf("Using WebSocket-based agent worker for Slack channel incident %s", incidentUUID)
+		slog.Info("using WebSocket-based agent worker for Slack channel incident", "incident_id", incidentUUID)
 
 		// Fetch LLM settings from database
 		var llmSettings *LLMSettingsForWorker
@@ -918,7 +916,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 			OnOutput: func(output string) {
 				lastStreamedLog += output
 				if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog); err != nil {
-					log.Printf("Failed to update incident log: %v", err)
+					slog.Error("failed to update incident log", "err", err)
 				}
 
 				// Throttled update of the Slack progress message
@@ -944,10 +942,10 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		}
 
 		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
-			log.Printf("Failed to start incident via WebSocket: %v", err)
+			slog.Error("failed to start incident via WebSocket", "err", err)
 			errorMsg := fmt.Sprintf("Failed to start investigation: %v", err)
 			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg); updateErr != nil {
-				log.Printf("Failed to update incident status: %v", updateErr)
+				slog.Error("failed to update incident status", "err", updateErr)
 			}
 			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
 			h.postSlackThreadReply(slackChannelID, slackMessageTS, "❌ "+errorMsg)
@@ -957,8 +955,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		// Wait for completion
 		<-done
 
-		log.Printf("Investigation done for %s: hasError=%v, response=%d chars, sessionID=%s",
-			incidentUUID, hasError, len(response), sessionID)
+		slog.Info("investigation done", "incident_id", incidentUUID, "has_error", hasError, "response_len", len(response), "session_id", sessionID)
 
 		// Build full log
 		fullLog := taskHeader + lastStreamedLog
@@ -972,7 +969,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 			finalStatus = database.IncidentStatusFailed
 		}
 		if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response); err != nil {
-			log.Printf("Failed to update incident complete: %v", err)
+			slog.Error("failed to update incident complete", "err", err)
 		}
 
 		// Format response for Slack (parse structured blocks and apply formatting)
@@ -992,8 +989,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		// Update Slack thread - replace progress message with final result
 		h.updateSlackChannelReactions(slackChannelID, slackMessageTS, hasError)
 		if progressMsgTS != "" {
-			log.Printf("Replacing Slack progress message (ts=%s) with final response (%d chars) for incident %s",
-				progressMsgTS, len(formattedResponse), incidentUUID)
+			slog.Info("replacing Slack progress message with final response", "ts", progressMsgTS, "response_len", len(formattedResponse), "incident", incidentUUID)
 			h.updateSlackThreadMessage(slackChannelID, progressMsgTS, formattedResponse)
 		} else {
 			// No live progress was shown, include reasoning context
@@ -1001,15 +997,15 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 			h.postSlackThreadReply(slackChannelID, slackMessageTS, slackResponse)
 		}
 
-		log.Printf("Investigation completed for Slack channel alert: %s", alert.AlertName)
+		slog.Info("investigation completed for Slack channel alert", "alert", alert.AlertName)
 		return
 	}
 
 	// No WebSocket worker available
-	log.Printf("ERROR: Agent worker not connected for Slack channel incident %s", incidentUUID)
+	slog.Error("agent worker not connected for Slack channel incident", "incident", incidentUUID)
 	errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
 	if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg); updateErr != nil {
-		log.Printf("Failed to update incident status: %v", updateErr)
+		slog.Error("failed to update incident status", "err", updateErr)
 	}
 	h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
 	h.postSlackThreadReply(slackChannelID, slackMessageTS, "❌ "+errorMsg)
@@ -1027,7 +1023,7 @@ func (h *AlertHandler) updateSlackChannelReactions(channelID, messageTS string, 
 		Channel:   channelID,
 		Timestamp: messageTS,
 	}); err != nil {
-		log.Printf("Failed to remove hourglass reaction: %v", err)
+		slog.Warn("failed to remove hourglass reaction", "err", err)
 	}
 
 	// Add result reaction
@@ -1039,7 +1035,7 @@ func (h *AlertHandler) updateSlackChannelReactions(channelID, messageTS string, 
 		Channel:   channelID,
 		Timestamp: messageTS,
 	}); err != nil {
-		log.Printf("Failed to add result reaction: %v", err)
+		slog.Warn("failed to add result reaction", "err", err)
 	}
 }
 
@@ -1056,7 +1052,7 @@ func (h *AlertHandler) postSlackThreadReply(channelID, threadTS, message string)
 		slack.MsgOptionTS(threadTS),
 	)
 	if err != nil {
-		log.Printf("Error posting thread reply: %v", err)
+		slog.Warn("error posting thread reply", "err", err)
 	}
 }
 
@@ -1073,7 +1069,7 @@ func (h *AlertHandler) postSlackThreadReplyGetTS(channelID, threadTS, message st
 		slack.MsgOptionTS(threadTS),
 	)
 	if err != nil {
-		log.Printf("Error posting thread reply: %v", err)
+		slog.Warn("error posting thread reply", "err", err)
 		return ""
 	}
 	return ts
@@ -1092,7 +1088,7 @@ func (h *AlertHandler) updateSlackThreadMessage(channelID, messageTS, message st
 		slack.MsgOptionText(message, false),
 	)
 	if err != nil {
-		log.Printf("Error updating Slack message (ts=%s): %v", messageTS, err)
+		slog.Warn("error updating Slack message", "ts", messageTS, "err", err)
 	}
 }
 

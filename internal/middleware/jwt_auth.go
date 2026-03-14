@@ -3,7 +3,7 @@ package middleware
 import (
 	"context"
 	"crypto/subtle"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -207,7 +207,7 @@ func (m *JWTAuthMiddleware) Wrap(next http.Handler) http.Handler {
 		// Validate token
 		claims, err := m.ValidateToken(tokenString)
 		if err != nil {
-			log.Printf("JWTAuthMiddleware: Invalid token from %s: %v", r.RemoteAddr, err)
+			slog.Warn("JWTAuthMiddleware: invalid token", "remote_addr", r.RemoteAddr, "error", err)
 			m.unauthorized(w, "Invalid or expired token")
 			return
 		}

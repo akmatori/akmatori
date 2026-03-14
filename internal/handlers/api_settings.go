@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 
@@ -71,7 +71,7 @@ func (h *APIHandler) handleSlackSettings(w http.ResponseWriter, r *http.Request)
 
 		if h.slackManager != nil {
 			h.slackManager.TriggerReload()
-			log.Printf("Slack settings updated, triggering hot-reload")
+			slog.Info("Slack settings updated, triggering hot-reload")
 		}
 
 		db.First(&settings)
@@ -347,7 +347,7 @@ func (h *APIHandler) UpdateProxySettings(w http.ResponseWriter, r *http.Request)
 
 	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
 		if err := h.agentWSHandler.BroadcastProxyConfig(settings); err != nil {
-			log.Printf("Warning: failed to broadcast proxy config to agent worker: %v", err)
+			slog.Warn("failed to broadcast proxy config to agent worker", "err", err)
 		}
 	}
 

@@ -3,7 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -77,7 +77,7 @@ func (h *SlackHandler) SetBotUserID(botUserID string) {
 // LoadAlertChannels loads alert channel configurations from the database
 func (h *SlackHandler) LoadAlertChannels() error {
 	if h.alertService == nil {
-		log.Printf("Alert service not configured, skipping alert channel loading")
+		slog.Info("alert service not configured, skipping alert channel loading")
 		return nil
 	}
 
@@ -102,22 +102,22 @@ func (h *SlackHandler) LoadAlertChannels() error {
 		// Extract channel ID from settings
 		channelID, ok := instance.Settings["slack_channel_id"].(string)
 		if !ok || channelID == "" {
-			log.Printf("Slack channel instance %s has no channel ID configured", instance.Name)
+			slog.Warn("Slack channel instance has no channel ID configured", "instance", instance.Name)
 			continue
 		}
 
 		h.alertChannels[channelID] = instance
-		log.Printf("Loaded alert channel: %s -> %s", channelID, instance.Name)
+		slog.Info("loaded alert channel", "channel", channelID, "instance", instance.Name)
 	}
 
-	log.Printf("Loaded %d alert channel(s)", len(h.alertChannels))
+	slog.Info("loaded alert channels", "count", len(h.alertChannels))
 	return nil
 }
 
 // ReloadAlertChannels reloads alert channel configurations (called when settings change)
 func (h *SlackHandler) ReloadAlertChannels() {
 	if err := h.LoadAlertChannels(); err != nil {
-		log.Printf("Warning: Failed to reload alert channels: %v", err)
+		slog.Warn("failed to reload alert channels", "err", err)
 	}
 }
 
@@ -138,11 +138,11 @@ func (h *SlackHandler) HandleSocketMode(socketClient *socketmode.Client) {
 			case socketmode.EventTypeEventsAPI:
 				eventsAPIEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
 				if !ok {
-					log.Printf("Ignored non-EventsAPI data: %+v\n", evt)
+					slog.Warn("ignored non-EventsAPI data", "event", evt)
 					continue
 				}
 
-				log.Printf("Received Events API event: outer_type=%s, inner_type=%s", eventsAPIEvent.Type, eventsAPIEvent.InnerEvent.Type)
+				slog.Info("received Events API event", "outer_type", eventsAPIEvent.Type, "inner_type", eventsAPIEvent.InnerEvent.Type)
 
 				// Ack immediately to avoid Slack retries
 				socketClient.Ack(*evt.Request)
@@ -160,13 +160,13 @@ func (h *SlackHandler) HandleSocketMode(socketClient *socketmode.Client) {
 				socketmode.EventTypeConnected,
 				socketmode.EventTypeHello:
 				// Socket Mode lifecycle events - expected, no action needed
-				log.Printf("Socket Mode lifecycle event: %s", evt.Type)
+				slog.Info("Socket Mode lifecycle event", "type", evt.Type)
 
 			default:
-				log.Printf("Unexpected event type received: %s\n", evt.Type)
+				slog.Warn("unexpected event type received", "type", evt.Type)
 			}
 		}
-		log.Printf("Socket Mode event loop ended (Events channel closed)")
+		slog.Info("Socket Mode event loop ended (Events channel closed)")
 	}()
 }
 
@@ -177,14 +177,13 @@ func (h *SlackHandler) handleEventsAPI(event slackevents.EventsAPIEvent) {
 		innerEvent := event.InnerEvent
 		switch ev := innerEvent.Data.(type) {
 		case *slackevents.AppMentionEvent:
-			log.Printf("Processing app_mention event from user=%s in channel=%s", ev.User, ev.Channel)
+			slog.Info("processing app_mention event", "user", ev.User, "channel", ev.Channel)
 			h.handleAppMention(ev)
 		case *slackevents.MessageEvent:
-			log.Printf("Processing message event: channel=%s channel_type=%s user=%s subtype=%s bot_id=%s",
-				ev.Channel, ev.ChannelType, ev.User, ev.SubType, ev.BotID)
+			slog.Info("processing message event", "channel", ev.Channel, "channel_type", ev.ChannelType, "user", ev.User, "subtype", ev.SubType, "bot_id", ev.BotID)
 			h.handleMessage(ev)
 		default:
-			log.Printf("Unhandled inner event type: %s (data type: %T)", innerEvent.Type, innerEvent.Data)
+			slog.Info("unhandled inner event type", "type", innerEvent.Type)
 		}
 	}
 }
@@ -194,7 +193,7 @@ func (h *SlackHandler) handleAppMention(event *slackevents.AppMentionEvent) {
 	// Dedup: skip if already processed via handleMessage (both events can fire)
 	dedupeKey := event.Channel + ":" + event.TimeStamp
 	if _, loaded := h.processedMsgs.LoadOrStore(dedupeKey, struct{}{}); loaded {
-		log.Printf("Skipping duplicate app_mention processing for %s", dedupeKey)
+		slog.Info("skipping duplicate app_mention processing", "dedupe_key", dedupeKey)
 		return
 	}
 	go func() {
@@ -238,7 +237,7 @@ func (h *SlackHandler) fetchThreadParentText(channelID, threadTS string) string 
 		Inclusive: true,
 	})
 	if err != nil {
-		log.Printf("Error fetching thread parent message (channel=%s, ts=%s): %v", channelID, threadTS, err)
+		slog.Error("failed to fetch thread parent message", "channel", channelID, "thread_ts", threadTS, "err", err)
 		return ""
 	}
 	if len(msgs) == 0 {
@@ -318,7 +317,7 @@ func (h *SlackHandler) handleBotMentionInThread(channel, threadTS, messageTS, ra
 	// Dedup: skip if this message was already processed (e.g. via app_mention event)
 	dedupeKey := channel + ":" + messageTS
 	if _, loaded := h.processedMsgs.LoadOrStore(dedupeKey, struct{}{}); loaded {
-		log.Printf("Skipping duplicate bot mention processing for %s", dedupeKey)
+		slog.Info("skipping duplicate bot mention processing", "dedupe_key", dedupeKey)
 		return
 	}
 	// Clean up after 60 seconds
@@ -412,7 +411,7 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 		// Dedup with app_mention handler
 		dedupeKey := event.Channel + ":" + event.TimeStamp
 		if _, loaded := h.processedMsgs.LoadOrStore(dedupeKey, struct{}{}); loaded {
-			log.Printf("Skipping duplicate message mention processing for %s", dedupeKey)
+			slog.Info("skipping duplicate message mention processing", "dedupe_key", dedupeKey)
 			return
 		}
 		go func() {
@@ -448,7 +447,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 	// This catches messages queued before Slack was disabled
 	settings, err := database.GetSlackSettings()
 	if err != nil || !settings.IsActive() {
-		log.Printf("Slack is disabled, ignoring message from channel %s", channel)
+		slog.Info("Slack is disabled, ignoring message", "channel", channel)
 		return
 	}
 
@@ -472,7 +471,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		incidentUUID = incident.UUID
 		// WorkingDir is stored in DB but session already knows its path from creation
 		_ = incident.WorkingDir
-		log.Printf("Resuming session %s for thread %s (incident: %s)", sessionID, threadID, incidentUUID)
+		slog.Info("resuming session for thread", "session_id", sessionID, "thread_id", threadID, "incident_id", incidentUUID)
 	} else if threadTS != "" {
 		// Try to find an alert channel incident by slack_message_ts
 		// (when user replies to an alert thread with @Akmatori)
@@ -481,13 +480,13 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			incidentUUID = incident.UUID
 			// WorkingDir is stored in DB but session already knows its path from creation
 			_ = incident.WorkingDir
-			log.Printf("Resuming alert channel session %s for thread %s (incident: %s)", sessionID, threadID, incidentUUID)
+			slog.Info("resuming alert channel session for thread", "session_id", sessionID, "thread_id", threadID, "incident_id", incidentUUID)
 		}
 	}
 
 	if incidentUUID == "" {
 		// New thread - spawn incident manager
-		log.Printf("Starting new session for thread %s", threadID)
+		slog.Info("starting new session for thread", "thread_id", threadID)
 
 		// Spawn incident manager for this event
 		incidentCtx := &services.IncidentContext{
@@ -504,25 +503,25 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		var err error
 		incidentUUID, workingDir, err = h.skillService.SpawnIncidentManager(incidentCtx)
 		if err != nil {
-			log.Printf("Error spawning incident manager: %v", err)
+			slog.Error("failed to spawn incident manager", "err", err)
 			_, _, postErr := h.client.PostMessage(
 				channel,
 				slack.MsgOptionText(fmt.Sprintf("❌ Failed to spawn incident manager: %v", err), false),
 				slack.MsgOptionTS(threadID),
 			)
 			if postErr != nil {
-				log.Printf("Failed to post error message to Slack: %v", postErr)
+				slog.Error("failed to post error message to Slack", "err", postErr)
 			}
 			return
 		}
 
-		log.Printf("Spawned incident manager: UUID=%s, WorkingDir=%s", incidentUUID, workingDir)
+		slog.Info("spawned incident manager", "incident_id", incidentUUID, "working_dir", workingDir)
 	}
 
 	// Update incident status to "running" before execution
 	if incidentUUID != "" {
 		if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
-			log.Printf("Warning: Failed to update incident status to running: %v", err)
+			slog.Warn("failed to update incident status to running", "err", err)
 		}
 	}
 
@@ -532,7 +531,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			Channel:   channel,
 			Timestamp: threadID,
 		}); err != nil {
-			log.Printf("Error adding reaction: %v", err)
+			slog.Warn("failed to add reaction", "err", err)
 		}
 	}()
 
@@ -543,7 +542,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		slack.MsgOptionTS(threadID),
 	)
 	if err != nil {
-		log.Printf("Error posting progress message: %v", err)
+		slog.Error("failed to post progress message", "err", err)
 		return
 	}
 
@@ -577,7 +576,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			slack.MsgOptionText(fmt.Sprintf("🔄 *Progress Log:*\n```\n%s\n```", truncatedLog), false),
 		)
 		if err != nil {
-			log.Printf("Error updating progress message (ts=%s): %v", progressMsgTS, err)
+			slog.Error("failed to update progress message", "progress_ts", progressMsgTS, "err", err)
 		}
 	}
 
@@ -585,15 +584,15 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 
 	// Execute via WebSocket-based agent worker
 	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
-		log.Printf("Using WebSocket-based agent worker for incident %s", incidentUUID)
+		slog.Info("using WebSocket-based agent worker", "incident_id", incidentUUID)
 
 		// Fetch LLM settings from database
 		var llmSettings *LLMSettingsForWorker
 		if dbSettings, err := database.GetLLMSettings(); err == nil && dbSettings != nil {
 			llmSettings = BuildLLMSettingsForWorker(dbSettings)
-			log.Printf("Using LLM provider: %s, model: %s", dbSettings.Provider, dbSettings.Model)
+			slog.Info("using LLM provider", "provider", dbSettings.Provider, "model", dbSettings.Model)
 		} else {
-			log.Printf("Warning: Could not fetch LLM settings: %v", err)
+			slog.Warn("could not fetch LLM settings", "err", err)
 		}
 
 		// Create channels for async result handling
@@ -612,7 +611,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 				lastStreamedLog += outputLog
 				// Update database with streamed log
 				if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog); err != nil {
-					log.Printf("Failed to update incident log: %v", err)
+					slog.Error("failed to update incident log", "err", err)
 				}
 
 				// Update Slack progress message with accumulated log
@@ -634,15 +633,15 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		// Start or continue incident based on whether we have a session
 		var wsErr error
 		if sessionID != "" {
-			log.Printf("Continuing session %s for incident %s", sessionID, incidentUUID)
+			slog.Info("continuing session for incident", "session_id", sessionID, "incident_id", incidentUUID)
 			wsErr = h.agentWSHandler.ContinueIncident(incidentUUID, sessionID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback)
 		} else {
-			log.Printf("Starting new agent session for incident %s", incidentUUID)
+			slog.Info("starting new agent session for incident", "incident_id", incidentUUID)
 			wsErr = h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback)
 		}
 
 		if wsErr != nil {
-			log.Printf("Failed to start/continue incident via WebSocket: %v", wsErr)
+			slog.Error("failed to start/continue incident via WebSocket", "err", wsErr)
 			h.finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text,
 				fmt.Sprintf("❌ Agent worker error: %v", wsErr), "", true, "")
 			return
@@ -682,7 +681,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 	}
 
 	// No WebSocket worker available
-	log.Printf("ERROR: Agent worker not connected for incident %s", incidentUUID)
+	slog.Error("agent worker not connected", "incident_id", incidentUUID)
 	h.finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text,
 		"❌ Agent worker not connected. Please check that the agent-worker container is running.", "", true, "")
 }
@@ -694,7 +693,7 @@ func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS, inci
 		Channel:   channel,
 		Timestamp: threadID,
 	}); removeErr != nil {
-		log.Printf("Error removing reaction: %v", removeErr)
+		slog.Warn("failed to remove reaction", "err", removeErr)
 	}
 
 	// Add result reaction
@@ -703,14 +702,14 @@ func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS, inci
 			Channel:   channel,
 			Timestamp: threadID,
 		}); addErr != nil {
-			log.Printf("Error adding error reaction: %v", addErr)
+			slog.Warn("failed to add error reaction", "err", addErr)
 		}
 	} else {
 		if addErr := h.client.AddReaction("white_check_mark", slack.ItemRef{
 			Channel:   channel,
 			Timestamp: threadID,
 		}); addErr != nil {
-			log.Printf("Error adding success reaction: %v", addErr)
+			slog.Warn("failed to add success reaction", "err", addErr)
 		}
 	}
 
@@ -729,9 +728,9 @@ func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS, inci
 		}
 
 		if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLogWithContext, finalResponse); updateErr != nil {
-			log.Printf("Warning: Failed to update incident: %v", updateErr)
+			slog.Warn("failed to update incident", "err", updateErr)
 		} else {
-			log.Printf("Updated incident %s to status: %s, session: %s", incidentUUID, finalStatus, sessionID)
+			slog.Info("updated incident", "incident_id", incidentUUID, "status", finalStatus, "session_id", sessionID)
 		}
 	}
 
@@ -742,19 +741,19 @@ func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS, inci
 		slack.MsgOptionText(finalResponse, false),
 	)
 	if updateErr != nil {
-		log.Printf("Error updating final result: %v", updateErr)
+		slog.Error("failed to update final result", "err", updateErr)
 	}
 }
 
 // handleAlertChannelMessage processes a message from a configured alert channel
 func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent, instance *database.AlertSourceInstance) {
-	log.Printf("Processing alert channel message from %s in channel %s", event.User, event.Channel)
+	slog.Info("processing alert channel message", "user", event.User, "channel", event.Channel)
 
 	// Extract message text (including text from blocks and attachments)
 	messageText := h.extractFullMessageText(event)
 	messageText = utils.StripSlackMrkdwn(messageText)
 	if messageText == "" {
-		log.Printf("Empty message text, skipping")
+		slog.Info("empty message text, skipping")
 		return
 	}
 
@@ -773,7 +772,7 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 		Channel:   event.Channel,
 		Timestamp: event.TimeStamp,
 	}); err != nil {
-		log.Printf("Error adding reaction: %v", err)
+		slog.Warn("failed to add reaction", "err", err)
 	}
 
 	// Get custom extraction prompt if configured
@@ -796,7 +795,7 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 	}
 
 	if err != nil {
-		log.Printf("Alert extraction failed: %v, using fallback", err)
+		slog.Warn("alert extraction failed, using fallback", "err", err)
 		// Fallback alert is created by the extractor
 	}
 
@@ -818,19 +817,19 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 	if h.alertHandler != nil {
 		h.alertHandler.ProcessAlertFromSlackChannel(instance, *normalized, event.Channel, threadTS)
 	} else {
-		log.Printf("AlertHandler not configured, cannot process Slack channel alert")
+		slog.Error("AlertHandler not configured, cannot process Slack channel alert")
 		// Remove hourglass and add warning reaction
 		if err := h.client.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
 			Channel:   event.Channel,
 			Timestamp: event.TimeStamp,
 		}); err != nil {
-			log.Printf("Failed to remove hourglass reaction: %v", err)
+			slog.Warn("failed to remove hourglass reaction", "err", err)
 		}
 		if err := h.client.AddReaction("warning", slack.ItemRef{
 			Channel:   event.Channel,
 			Timestamp: event.TimeStamp,
 		}); err != nil {
-			log.Printf("Failed to add warning reaction: %v", err)
+			slog.Warn("failed to add warning reaction", "err", err)
 		}
 	}
 }
@@ -853,7 +852,7 @@ func (h *SlackHandler) extractFullMessageText(event *slackevents.MessageEvent) s
 
 	// Fallback to event.Text when the API fetch fails or returns nothing
 	if event.Text != "" {
-		log.Printf("Using event.Text fallback for channel=%s ts=%s", event.Channel, event.TimeStamp)
+		slog.Info("using event.Text fallback", "channel", event.Channel, "ts", event.TimeStamp)
 		return event.Text
 	}
 
@@ -874,7 +873,7 @@ func (h *SlackHandler) fetchFullMessageText(event *slackevents.MessageEvent) str
 			Inclusive: true,
 		})
 		if err != nil {
-			log.Printf("Error fetching full message via replies API (channel=%s, ts=%s): %v", event.Channel, event.TimeStamp, err)
+			slog.Error("failed to fetch full message via replies API", "channel", event.Channel, "ts", event.TimeStamp, "err", err)
 			return ""
 		}
 		// Find the specific message by timestamp
@@ -899,7 +898,7 @@ func (h *SlackHandler) fetchFullMessageText(event *slackevents.MessageEvent) str
 	}
 	history, err := h.client.GetConversationHistory(params)
 	if err != nil {
-		log.Printf("Error fetching full message via history API (channel=%s, ts=%s): %v", event.Channel, event.TimeStamp, err)
+		slog.Error("failed to fetch full message via history API", "channel", event.Channel, "ts", event.TimeStamp, "err", err)
 		return ""
 	}
 	if len(history.Messages) == 0 {

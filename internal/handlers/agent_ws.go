@@ -3,7 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -120,11 +120,11 @@ func (h *AgentWSHandler) SetupRoutes(mux *http.ServeMux) {
 func (h *AgentWSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("Failed to upgrade WebSocket: %v", err)
+		slog.Error("failed to upgrade WebSocket", "err", err)
 		return
 	}
 
-	log.Printf("Agent worker connected from %s", r.RemoteAddr)
+	slog.Info("agent worker connected", "remote_addr", r.RemoteAddr)
 
 	// Store the worker connection
 	h.mu.Lock()
@@ -144,7 +144,7 @@ func (h *AgentWSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 		}
 		h.mu.Unlock()
 		conn.Close()
-		log.Printf("Agent worker disconnected")
+		slog.Info("agent worker disconnected")
 	}()
 
 	// Read messages from worker
@@ -152,14 +152,14 @@ func (h *AgentWSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WebSocket read error: %v", err)
+				slog.Error("WebSocket read error", "err", err)
 			}
 			return
 		}
 
 		var msg AgentMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
-			log.Printf("Failed to parse message: %v", err)
+			slog.Error("failed to parse message", "err", err)
 			continue
 		}
 
@@ -169,7 +169,7 @@ func (h *AgentWSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 
 // handleMessage processes incoming messages from the agent worker
 func (h *AgentWSHandler) handleMessage(msg AgentMessage) {
-	log.Printf("Received message from worker: type=%s incident=%s", msg.Type, msg.IncidentID)
+	slog.Info("received message from worker", "type", msg.Type, "incident_id", msg.IncidentID)
 
 	switch msg.Type {
 	case AgentMessageTypeHeartbeat:
@@ -179,7 +179,7 @@ func (h *AgentWSHandler) handleMessage(msg AgentMessage) {
 	case AgentMessageTypeStatus:
 		// Worker status update
 		if status, ok := msg.Data["status"].(string); ok {
-			log.Printf("Worker status: %s", status)
+			slog.Info("worker status", "status", status)
 		}
 		return
 
@@ -193,7 +193,7 @@ func (h *AgentWSHandler) handleMessage(msg AgentMessage) {
 		h.handleAgentError(msg)
 
 	default:
-		log.Printf("Unknown message type from worker: %s", msg.Type)
+		slog.Warn("unknown message type from worker", "type", msg.Type)
 	}
 }
 
@@ -210,15 +210,14 @@ func (h *AgentWSHandler) handleAgentOutput(msg AgentMessage) {
 		if err := database.GetDB().Model(&database.Incident{}).
 			Where("uuid = ?", msg.IncidentID).
 			Update("full_log", gorm.Expr("COALESCE(full_log, '') || ?", msg.Output)).Error; err != nil {
-			log.Printf("Failed to update incident log: %v", err)
+			slog.Error("failed to update incident log", "err", err)
 		}
 	}
 }
 
 // handleAgentCompleted handles completion notification from the agent
 func (h *AgentWSHandler) handleAgentCompleted(msg AgentMessage) {
-	log.Printf("Incident %s completed with session %s, tokens: %d, time: %dms",
-		msg.IncidentID, msg.SessionID, msg.TokensUsed, msg.ExecutionTimeMs)
+	slog.Info("incident completed", "incident_id", msg.IncidentID, "session_id", msg.SessionID, "tokens_used", msg.TokensUsed, "execution_time_ms", msg.ExecutionTimeMs)
 
 	// Append metrics to response (for display in reasoning log and Slack)
 	executionTime := time.Duration(msg.ExecutionTimeMs) * time.Millisecond
@@ -244,7 +243,7 @@ func (h *AgentWSHandler) handleAgentCompleted(msg AgentMessage) {
 				"execution_time_ms": msg.ExecutionTimeMs,
 				"completed_at":      &now,
 			}).Error; err != nil {
-			log.Printf("Failed to update incident completion: %v", err)
+			slog.Error("failed to update incident completion", "err", err)
 		}
 	}
 
@@ -256,7 +255,7 @@ func (h *AgentWSHandler) handleAgentCompleted(msg AgentMessage) {
 
 // handleAgentError handles error notification from the agent
 func (h *AgentWSHandler) handleAgentError(msg AgentMessage) {
-	log.Printf("Incident %s failed: %s", msg.IncidentID, msg.Error)
+	slog.Error("incident failed", "incident_id", msg.IncidentID, "err", msg.Error)
 
 	// Call callback if registered
 	h.callbackMu.RLock()
@@ -275,7 +274,7 @@ func (h *AgentWSHandler) handleAgentError(msg AgentMessage) {
 				"response":     msg.Error,
 				"completed_at": &now,
 			}).Error; err != nil {
-			log.Printf("Failed to update incident error: %v", err)
+			slog.Error("failed to update incident error", "err", err)
 		}
 	}
 

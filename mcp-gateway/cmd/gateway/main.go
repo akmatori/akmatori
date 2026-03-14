@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,10 +21,11 @@ const (
 )
 
 func main() {
-	// Setup logging
-	log := log.New(os.Stdout, "[MCP-Gateway] ", log.LstdFlags|log.Lshortfile)
+	// Setup structured logging
+	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
+	slog.SetDefault(slog.New(handler))
 
-	log.Println("Starting MCP Gateway...")
+	slog.Info("starting MCP Gateway")
 
 	// Get configuration from environment
 	port := os.Getenv("MCP_PORT")
@@ -34,21 +35,26 @@ func main() {
 
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
-		log.Fatal("DATABASE_URL environment variable is required")
+		slog.Error("DATABASE_URL environment variable is required")
+		os.Exit(1)
 	}
 
 	// Connect to database
-	log.Println("Connecting to database...")
+	slog.Info("connecting to database")
 	if err := database.Connect(databaseURL, logger.Warn); err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		slog.Error("failed to connect to database", "err", err)
+		os.Exit(1)
 	}
-	log.Println("Database connected")
+	slog.Info("database connected")
+
+	// Bridge slog to *log.Logger for internal packages that still accept it
+	stdLogger := slog.NewLogLogger(slog.Default().Handler(), slog.LevelInfo)
 
 	// Create MCP server
-	server := mcp.NewServer("akmatori-mcp-gateway", version, log)
+	server := mcp.NewServer("akmatori-mcp-gateway", version, stdLogger)
 
 	// Register all tools
-	registry := tools.NewRegistry(server, log)
+	registry := tools.NewRegistry(server, stdLogger)
 	registry.RegisterAllTools()
 
 	// Setup HTTP handlers
@@ -116,18 +122,19 @@ func main() {
 
 	// Start server
 	addr := ":" + port
-	log.Printf("MCP Gateway listening on %s", addr)
+	slog.Info("MCP Gateway listening", "addr", addr)
 
 	// Graceful shutdown
 	go func() {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 		<-sigChan
-		log.Println("Shutting down...")
+		slog.Info("shutting down")
 		os.Exit(0)
 	}()
 
 	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("Server error: %v", err)
+		slog.Error("server error", "err", err)
+		os.Exit(1)
 	}
 }

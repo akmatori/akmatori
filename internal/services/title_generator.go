@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -122,30 +122,30 @@ Respond with ONLY the title, nothing else.`
 
 	resp, err := t.httpClient.Do(req)
 	if err != nil {
-		log.Printf("OpenAI API request failed, using fallback title: %v", err)
+		slog.Warn("OpenAI API request failed, using fallback title", "err", err)
 		return t.GenerateFallbackTitle(messageOrAlert, source), nil
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("Failed to read OpenAI response, using fallback title: %v", err)
+		slog.Warn("failed to read OpenAI response, using fallback title", "err", err)
 		return t.GenerateFallbackTitle(messageOrAlert, source), nil
 	}
 
 	var openAIResp openAIResponse
 	if err := json.Unmarshal(body, &openAIResp); err != nil {
-		log.Printf("Failed to parse OpenAI response, using fallback title: %v", err)
+		slog.Warn("failed to parse OpenAI response, using fallback title", "err", err)
 		return t.GenerateFallbackTitle(messageOrAlert, source), nil
 	}
 
 	if openAIResp.Error != nil {
-		log.Printf("OpenAI API error: %s, using fallback title", openAIResp.Error.Message)
+		slog.Warn("OpenAI API error, using fallback title", "message", openAIResp.Error.Message)
 		return t.GenerateFallbackTitle(messageOrAlert, source), nil
 	}
 
 	if len(openAIResp.Choices) == 0 {
-		log.Printf("No choices in OpenAI response, using fallback title")
+		slog.Warn("no choices in OpenAI response, using fallback title")
 		return t.GenerateFallbackTitle(messageOrAlert, source), nil
 	}
 

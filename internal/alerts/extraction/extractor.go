@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -94,19 +94,19 @@ func (e *AlertExtractor) ExtractWithPrompt(ctx context.Context, messageText, cus
 	// Get LLM settings from database
 	settings, err := database.GetLLMSettings()
 	if err != nil {
-		log.Printf("Failed to get LLM settings: %v", err)
+		slog.Error("Failed to get LLM settings", "error", err)
 		return e.createFallbackAlert(messageText), nil
 	}
 
 	if settings.APIKey == "" {
-		log.Printf("LLM not configured, using fallback extraction")
+		slog.Info("LLM not configured, using fallback extraction")
 		return e.createFallbackAlert(messageText), nil
 	}
 
 	// This function uses the OpenAI chat completions API directly.
 	// Only proceed if the provider is OpenAI (or empty/default).
 	if settings.Provider != "" && settings.Provider != database.LLMProviderOpenAI {
-		log.Printf("Alert extraction only supports OpenAI provider, using fallback (current: %s)", settings.Provider)
+		slog.Info("Alert extraction only supports OpenAI provider, using fallback", "current_provider", settings.Provider)
 		return e.createFallbackAlert(messageText), nil
 	}
 
@@ -131,14 +131,14 @@ func (e *AlertExtractor) ExtractWithPrompt(ctx context.Context, messageText, cus
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		log.Printf("Failed to marshal OpenAI request: %v", err)
+		slog.Error("Failed to marshal OpenAI request", "error", err)
 		return e.createFallbackAlert(messageText), nil
 	}
 
 	// Make API request
 	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonBody))
 	if err != nil {
-		log.Printf("Failed to create OpenAI request: %v", err)
+		slog.Error("Failed to create OpenAI request", "error", err)
 		return e.createFallbackAlert(messageText), nil
 	}
 
@@ -147,30 +147,30 @@ func (e *AlertExtractor) ExtractWithPrompt(ctx context.Context, messageText, cus
 
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
-		log.Printf("OpenAI API request failed: %v", err)
+		slog.Error("OpenAI API request failed", "error", err)
 		return e.createFallbackAlert(messageText), nil
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("Failed to read OpenAI response: %v", err)
+		slog.Error("Failed to read OpenAI response", "error", err)
 		return e.createFallbackAlert(messageText), nil
 	}
 
 	var openAIResp openAIResponse
 	if err := json.Unmarshal(body, &openAIResp); err != nil {
-		log.Printf("Failed to parse OpenAI response: %v", err)
+		slog.Error("Failed to parse OpenAI response", "error", err)
 		return e.createFallbackAlert(messageText), nil
 	}
 
 	if openAIResp.Error != nil {
-		log.Printf("OpenAI API error: %s", openAIResp.Error.Message)
+		slog.Error("OpenAI API error", "message", openAIResp.Error.Message)
 		return e.createFallbackAlert(messageText), nil
 	}
 
 	if len(openAIResp.Choices) == 0 {
-		log.Printf("No choices in OpenAI response")
+		slog.Warn("No choices in OpenAI response")
 		return e.createFallbackAlert(messageText), nil
 	}
 
@@ -185,7 +185,7 @@ func (e *AlertExtractor) ExtractWithPrompt(ctx context.Context, messageText, cus
 
 	var extracted ExtractedAlert
 	if err := json.Unmarshal([]byte(content), &extracted); err != nil {
-		log.Printf("Failed to parse extracted alert JSON: %v, content: %s", err, content)
+		slog.Error("Failed to parse extracted alert JSON", "error", err, "content", content)
 		return e.createFallbackAlert(messageText), nil
 	}
 
