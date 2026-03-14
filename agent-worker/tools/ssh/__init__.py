@@ -40,17 +40,20 @@ def execute_command(command: str, servers: list = None, tool_instance_id: int = 
     return call("ssh.execute_command", args)
 
 
-def test_connectivity(tool_instance_id: int = None) -> dict:
+def test_connectivity(servers: list = None, tool_instance_id: int = None) -> dict:
     """
-    Test SSH connectivity to all configured servers.
+    Test SSH connectivity to configured or specified servers.
 
     Args:
+        servers: Optional list of specific servers to test (defaults to all configured)
         tool_instance_id: Optional tool instance ID for routing
 
     Returns:
         Dictionary with per-server reachability results
     """
     args = {}
+    if servers:
+        args["servers"] = servers
     if tool_instance_id is not None:
         args["tool_instance_id"] = tool_instance_id
     return call("ssh.test_connectivity", args)
