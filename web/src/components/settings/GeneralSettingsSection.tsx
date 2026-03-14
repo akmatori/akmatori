@@ -11,7 +11,7 @@ interface GeneralSettingsSectionProps {
 }
 
 export default function GeneralSettingsSection({ onStatusChange }: GeneralSettingsSectionProps) {
-  const [generalSettings, setGeneralSettings] = useState<GeneralSettingsType | null>(null);
+  const [, setGeneralSettings] = useState<GeneralSettingsType | null>(null);
   const [generalLoading, setGeneralLoading] = useState(true);
   const [generalSaving, setGeneralSaving] = useState(false);
   const [generalError, setGeneralError] = useState<string | null>(null);
