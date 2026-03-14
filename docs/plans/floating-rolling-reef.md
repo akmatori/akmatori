@@ -40,12 +40,12 @@ Replace 393 `log.Printf/Fatalf/Println` calls across 28 files with `log/slog`.
 
 ## Phase 2: Go Backend — Split God Objects
 
-- [ ] 2A: Split `internal/database/models.go` (588 lines → 6 files)
-- [ ] 2B: Split `internal/services/skill_service.go` (1,129 lines → 4 files)
-- [ ] 2C: Split `internal/handlers/alert.go` (1,272 lines → 4 files)
-- [ ] 2D: Split `internal/handlers/slack.go` (909 lines → 3 files)
-- [ ] 2E: Split `internal/handlers/api_settings.go` (586 lines → 4 files)
-- [ ] Verify after each sub-phase: `make verify`
+- [x] 2A: Split `internal/database/models.go` (588 lines → 6 files)
+- [x] 2B: Split `internal/services/skill_service.go` (1,129 lines → 4 files)
+- [x] 2C: Split `internal/handlers/alert.go` (1,272 lines → 4 files)
+- [x] 2D: Split `internal/handlers/slack.go` (909 lines → 3 files)
+- [x] 2E: Split `internal/handlers/api_settings.go` (586 lines → 4 files)
+- [x] Verify after each sub-phase: `make verify`
 
 ### 2A: Split `internal/database/models.go` (588 lines → 6 files)
 
