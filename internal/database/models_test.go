@@ -830,32 +830,6 @@ func BenchmarkJSONB_LargeScan(b *testing.B) {
 	}
 }
 
-// BenchmarkOpenAISettings_IsConfigured benchmarks configuration check
-func BenchmarkOpenAISettings_IsConfigured(b *testing.B) {
-	settings := OpenAISettings{
-		AuthMethod: AuthMethodAPIKey,
-		APIKey:     "sk-test-key-12345",
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		settings.IsConfigured()
-	}
-}
-
-// BenchmarkOpenAISettings_ValidateReasoningEffort benchmarks effort validation
-func BenchmarkOpenAISettings_ValidateReasoningEffort(b *testing.B) {
-	settings := OpenAISettings{
-		Model:                "gpt-5.1-codex",
-		ModelReasoningEffort: "medium",
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		settings.ValidateReasoningEffort()
-	}
-}
-
 // BenchmarkAPIKeySettings_GetActiveKeys benchmarks active key retrieval
 func BenchmarkAPIKeySettings_GetActiveKeys(b *testing.B) {
 	settings := APIKeySettings{

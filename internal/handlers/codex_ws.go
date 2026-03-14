@@ -20,17 +20,14 @@ const (
 	CodexMessageTypeNewIncident       CodexMessageType = "new_incident"
 	CodexMessageTypeContinueIncident  CodexMessageType = "continue_incident"
 	CodexMessageTypeCancelIncident    CodexMessageType = "cancel_incident"
-	CodexMessageTypeDeviceAuthStart   CodexMessageType = "device_auth_start"
-	CodexMessageTypeDeviceAuthCancel  CodexMessageType = "device_auth_cancel"
 	CodexMessageTypeProxyConfigUpdate CodexMessageType = "proxy_config_update"
 
 	// Messages from Codex Worker to API
 	CodexMessageTypeCodexOutput        CodexMessageType = "codex_output"
 	CodexMessageTypeCodexCompleted     CodexMessageType = "codex_completed"
 	CodexMessageTypeCodexError         CodexMessageType = "codex_error"
-	CodexMessageTypeHeartbeat          CodexMessageType = "heartbeat"
-	CodexMessageTypeStatus             CodexMessageType = "status"
-	CodexMessageTypeDeviceAuthResponse CodexMessageType = "device_auth_response"
+	CodexMessageTypeHeartbeat CodexMessageType = "heartbeat"
+	CodexMessageTypeStatus   CodexMessageType = "status"
 )
 
 // CodexMessage represents a WebSocket message between API and Codex worker
@@ -59,30 +56,6 @@ type CodexMessage struct {
 	// Proxy configuration with toggles (sent with new_incident)
 	ProxyConfig *ProxyConfig `json:"proxy_config,omitempty"`
 
-	// ChatGPT subscription auth fields (sent with new_incident)
-	AuthMethod          string `json:"auth_method,omitempty"`
-	ChatGPTAccessToken  string `json:"chatgpt_access_token,omitempty"`
-	ChatGPTRefreshToken string `json:"chatgpt_refresh_token,omitempty"`
-	ChatGPTIDToken      string `json:"chatgpt_id_token,omitempty"`
-	ChatGPTExpiresAt    string `json:"chatgpt_expires_at,omitempty"`
-
-	// Updated tokens (returned from worker if tokens were refreshed)
-	UpdatedAccessToken  string `json:"updated_access_token,omitempty"`
-	UpdatedRefreshToken string `json:"updated_refresh_token,omitempty"`
-	UpdatedExpiresAt    string `json:"updated_expires_at,omitempty"`
-
-	// Device auth fields (sent with device_auth_response)
-	DeviceCode      string `json:"device_code,omitempty"`
-	UserCode        string `json:"user_code,omitempty"`
-	VerificationURL string `json:"verification_url,omitempty"`
-	ExpiresIn       int    `json:"expires_in,omitempty"`
-	AuthStatus      string `json:"auth_status,omitempty"` // "pending", "complete", "expired", "failed"
-	AuthEmail       string `json:"auth_email,omitempty"`
-	// Tokens returned when auth is complete
-	AuthAccessToken  string `json:"auth_access_token,omitempty"`
-	AuthRefreshToken string `json:"auth_refresh_token,omitempty"`
-	AuthIDToken      string `json:"auth_id_token,omitempty"`
-	AuthExpiresAt    string `json:"auth_expires_at,omitempty"`
 }
 
 // OpenAISettings holds OpenAI configuration for Codex execution
@@ -93,12 +66,6 @@ type OpenAISettings struct {
 	BaseURL         string
 	ProxyURL        string
 	NoProxy         string
-	// ChatGPT subscription auth fields
-	AuthMethod          string
-	ChatGPTAccessToken  string
-	ChatGPTRefreshToken string
-	ChatGPTIDToken      string
-	ChatGPTExpiresAt    string
 }
 
 // CodexWSHandler handles WebSocket connections from the Codex worker
@@ -107,29 +74,9 @@ type CodexWSHandler struct {
 	mu                 sync.RWMutex
 	workerConn         *websocket.Conn
 	workerReady        bool
-	callbacks          map[string]IncidentCallback // incident_id -> callback
-	callbackMu         sync.RWMutex
-	deviceAuthCallback DeviceAuthCallback
-	deviceAuthMu       sync.RWMutex
+	callbacks  map[string]IncidentCallback // incident_id -> callback
+	callbackMu sync.RWMutex
 }
-
-// DeviceAuthResult holds the result of device authentication
-type DeviceAuthResult struct {
-	DeviceCode      string
-	UserCode        string
-	VerificationURL string
-	ExpiresIn       int
-	Status          string // "pending", "complete", "expired", "failed"
-	Email           string
-	AccessToken     string
-	RefreshToken    string
-	IDToken         string
-	ExpiresAt       string
-	Error           string
-}
-
-// DeviceAuthCallback is called when device auth receives updates
-type DeviceAuthCallback func(result *DeviceAuthResult)
 
 // NewCodexWSHandler creates a new Codex WebSocket handler
 func NewCodexWSHandler() *CodexWSHandler {
@@ -226,9 +173,6 @@ func (h *CodexWSHandler) handleMessage(msg CodexMessage) {
 	case CodexMessageTypeCodexError:
 		h.handleCodexError(msg)
 
-	case CodexMessageTypeDeviceAuthResponse:
-		h.handleDeviceAuthResponse(msg)
-
 	default:
 		log.Printf("Unknown message type from worker: %s", msg.Type)
 	}
@@ -266,11 +210,6 @@ func (h *CodexWSHandler) handleCodexCompleted(msg CodexMessage) {
 	executionTime := time.Duration(msg.ExecutionTimeMs) * time.Millisecond
 	responseWithMetrics := utils.AppendMetrics(cleanedOutput, executionTime, msg.TokensUsed)
 
-	// Persist refreshed OAuth tokens if they were updated
-	if msg.UpdatedAccessToken != "" || msg.UpdatedRefreshToken != "" {
-		h.persistRefreshedTokens(msg)
-	}
-
 	// Call callback if registered
 	h.callbackMu.RLock()
 	callback, exists := h.callbacks[msg.IncidentID]
@@ -298,75 +237,6 @@ func (h *CodexWSHandler) handleCodexCompleted(msg CodexMessage) {
 			"completed_at":      &now,
 		}).Error; err != nil {
 		log.Printf("Failed to update incident completion: %v", err)
-	}
-}
-
-// persistRefreshedTokens saves refreshed OAuth tokens to the database
-func (h *CodexWSHandler) persistRefreshedTokens(msg CodexMessage) {
-	log.Printf("Persisting refreshed OAuth tokens for incident %s", msg.IncidentID)
-
-	settings, err := database.GetOpenAISettings()
-	if err != nil {
-		log.Printf("Failed to get OpenAI settings for token refresh: %v", err)
-		return
-	}
-
-	// Only update if we're using ChatGPT subscription auth
-	if settings.AuthMethod != database.AuthMethodChatGPTSubscription {
-		return
-	}
-
-	// Update tokens
-	if msg.UpdatedAccessToken != "" {
-		settings.ChatGPTAccessToken = msg.UpdatedAccessToken
-	}
-	if msg.UpdatedRefreshToken != "" {
-		settings.ChatGPTRefreshToken = msg.UpdatedRefreshToken
-	}
-	if msg.UpdatedExpiresAt != "" {
-		// Parse the expires_at timestamp
-		if t, err := time.Parse(time.RFC3339, msg.UpdatedExpiresAt); err == nil {
-			settings.ChatGPTExpiresAt = &t
-		}
-	}
-
-	if err := database.UpdateOpenAIChatGPTTokens(settings); err != nil {
-		log.Printf("Failed to persist refreshed tokens: %v", err)
-	} else {
-		log.Printf("Successfully persisted refreshed OAuth tokens")
-	}
-}
-
-// handleDeviceAuthResponse handles device auth response from worker
-func (h *CodexWSHandler) handleDeviceAuthResponse(msg CodexMessage) {
-	log.Printf("Device auth response: status=%s, code=%s", msg.AuthStatus, msg.UserCode)
-
-	h.deviceAuthMu.RLock()
-	callback := h.deviceAuthCallback
-	h.deviceAuthMu.RUnlock()
-
-	if callback != nil {
-		result := &DeviceAuthResult{
-			DeviceCode:      msg.DeviceCode,
-			UserCode:        msg.UserCode,
-			VerificationURL: msg.VerificationURL,
-			ExpiresIn:       msg.ExpiresIn,
-			Status:          msg.AuthStatus,
-			Email:           msg.AuthEmail,
-			AccessToken:     msg.AuthAccessToken,
-			RefreshToken:    msg.AuthRefreshToken,
-			IDToken:         msg.AuthIDToken,
-			ExpiresAt:       msg.AuthExpiresAt,
-			Error:           msg.Error,
-		}
-		callback(result)
-	}
-
-	// Clear callback if auth is complete or failed
-	if msg.AuthStatus == "complete" || msg.AuthStatus == "failed" || msg.AuthStatus == "expired" {
-		h.deviceAuthMu.Lock()
-		h.deviceAuthCallback = nil
-		h.deviceAuthMu.Unlock()
 	}
 }
 
@@ -450,12 +320,6 @@ func (h *CodexWSHandler) StartIncident(incidentID, task string, openai *OpenAISe
 		msg.BaseURL = openai.BaseURL
 		msg.ProxyURL = openai.ProxyURL
 		msg.NoProxy = openai.NoProxy
-		// ChatGPT subscription auth fields
-		msg.AuthMethod = openai.AuthMethod
-		msg.ChatGPTAccessToken = openai.ChatGPTAccessToken
-		msg.ChatGPTRefreshToken = openai.ChatGPTRefreshToken
-		msg.ChatGPTIDToken = openai.ChatGPTIDToken
-		msg.ChatGPTExpiresAt = openai.ChatGPTExpiresAt
 	}
 
 	// Fetch proxy settings from database and include in message
@@ -511,52 +375,6 @@ func (h *CodexWSHandler) CancelIncident(incidentID string) error {
 	msg := CodexMessage{
 		Type:       CodexMessageTypeCancelIncident,
 		IncidentID: incidentID,
-	}
-
-	return h.SendToWorker(msg)
-}
-
-// StartDeviceAuth initiates device authentication via the codex worker
-// Accepts optional OpenAI settings for proxy configuration
-func (h *CodexWSHandler) StartDeviceAuth(callback DeviceAuthCallback, settings *OpenAISettings) error {
-	// Store callback
-	h.deviceAuthMu.Lock()
-	h.deviceAuthCallback = callback
-	h.deviceAuthMu.Unlock()
-
-	// Send to worker with proxy settings if configured
-	msg := CodexMessage{
-		Type: CodexMessageTypeDeviceAuthStart,
-	}
-
-	// Include proxy settings if available
-	if settings != nil {
-		msg.BaseURL = settings.BaseURL
-		msg.ProxyURL = settings.ProxyURL
-		msg.NoProxy = settings.NoProxy
-	}
-
-	if err := h.SendToWorker(msg); err != nil {
-		// Clear callback on error
-		h.deviceAuthMu.Lock()
-		h.deviceAuthCallback = nil
-		h.deviceAuthMu.Unlock()
-		return err
-	}
-
-	return nil
-}
-
-// CancelDeviceAuth cancels an ongoing device authentication
-func (h *CodexWSHandler) CancelDeviceAuth() error {
-	// Clear callback
-	h.deviceAuthMu.Lock()
-	h.deviceAuthCallback = nil
-	h.deviceAuthMu.Unlock()
-
-	// Send cancel to worker
-	msg := CodexMessage{
-		Type: CodexMessageTypeDeviceAuthCancel,
 	}
 
 	return h.SendToWorker(msg)

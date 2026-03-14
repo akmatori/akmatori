@@ -358,15 +358,6 @@ func TestAPIHandler_MaskSSHKeys(t *testing.T) {
 	}
 }
 
-// TestAPIHandler_DeviceAuthService tests device auth service initialization
-func TestAPIHandler_DeviceAuthService(t *testing.T) {
-	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil)
-
-	if h.deviceAuthService == nil {
-		t.Error("deviceAuthService should be initialized")
-	}
-}
-
 // TestAPIHandler_AlertChannelReloader tests reloader callback
 func TestAPIHandler_AlertChannelReloader(t *testing.T) {
 	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil)

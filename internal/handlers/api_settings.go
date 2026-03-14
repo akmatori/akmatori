@@ -5,11 +5,9 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/akmatori/akmatori/internal/api"
 	"github.com/akmatori/akmatori/internal/database"
-	"github.com/akmatori/akmatori/internal/services"
 )
 
 // handleSlackSettings handles GET /api/settings/slack and PUT /api/settings/slack
@@ -267,155 +265,6 @@ func (h *APIHandler) handleLLMSettings(w http.ResponseWriter, r *http.Request) {
 	default:
 		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
-}
-
-// handleDeviceAuthStart handles POST /api/settings/openai/device-auth/start.
-// Part of the device authentication flow (not yet wired to routes).
-//
-//lint:ignore U1000 Device auth feature - routes not yet registered
-func (h *APIHandler) handleDeviceAuthStart(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	if h.codexWSHandler == nil || !h.codexWSHandler.IsWorkerConnected() {
-		api.RespondError(w, http.StatusServiceUnavailable, "Codex worker not connected")
-		return
-	}
-
-	var openaiSettings *OpenAISettings
-	if dbSettings, err := database.GetOpenAISettings(); err == nil && dbSettings != nil {
-		openaiSettings = &OpenAISettings{
-			BaseURL:  dbSettings.BaseURL,
-			ProxyURL: dbSettings.ProxyURL,
-			NoProxy:  dbSettings.NoProxy,
-		}
-	}
-
-	h.deviceAuthService.ClearFlow()
-
-	err := h.codexWSHandler.StartDeviceAuth(func(result *DeviceAuthResult) {
-		h.deviceAuthService.HandleDeviceAuthResult(&services.DeviceAuthResult{
-			DeviceCode:      result.DeviceCode,
-			UserCode:        result.UserCode,
-			VerificationURL: result.VerificationURL,
-			ExpiresIn:       result.ExpiresIn,
-			Status:          result.Status,
-			Email:           result.Email,
-			AccessToken:     result.AccessToken,
-			RefreshToken:    result.RefreshToken,
-			IDToken:         result.IDToken,
-			ExpiresAt:       result.ExpiresAt,
-			Error:           result.Error,
-		})
-	}, openaiSettings)
-	if err != nil {
-		log.Printf("Failed to start device auth: %v", err)
-		api.RespondError(w, http.StatusInternalServerError, "Failed to start device authentication")
-		return
-	}
-
-	response, err := h.deviceAuthService.WaitForInitialResponse(30 * time.Second)
-	if err != nil {
-		log.Printf("Failed to get device auth codes: %v", err)
-		api.RespondError(w, http.StatusInternalServerError, "Failed to start device authentication")
-		return
-	}
-
-	api.RespondJSON(w, http.StatusOK, response)
-}
-
-// handleDeviceAuthStatus handles GET /api/settings/openai/device-auth/status.
-// Part of the device authentication flow (not yet wired to routes).
-//
-//lint:ignore U1000 Device auth feature - routes not yet registered
-func (h *APIHandler) handleDeviceAuthStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	deviceCode := r.URL.Query().Get("device_code")
-	if deviceCode == "" {
-		api.RespondError(w, http.StatusBadRequest, "device_code query parameter is required")
-		return
-	}
-
-	status, err := h.deviceAuthService.GetDeviceAuthStatus(deviceCode)
-	if err != nil {
-		api.RespondError(w, http.StatusInternalServerError, "Failed to get device auth status")
-		return
-	}
-
-	if status.Status == services.DeviceAuthStatusComplete {
-		tokens, err := h.deviceAuthService.GetAuthTokens()
-		if err == nil && tokens != nil {
-			if err := h.deviceAuthService.SaveTokensToDatabase(tokens); err != nil {
-				log.Printf("Failed to save tokens to database: %v", err)
-				status.Error = "Authentication succeeded but failed to save tokens"
-				status.Status = services.DeviceAuthStatusFailed
-			} else {
-				status.Email = tokens.Email
-				log.Printf("ChatGPT authentication completed for: %s", tokens.Email)
-			}
-		}
-	}
-
-	api.RespondJSON(w, http.StatusOK, status)
-}
-
-// handleDeviceAuthCancel handles POST /api/settings/openai/device-auth/cancel.
-// Part of the device authentication flow (not yet wired to routes).
-//
-//lint:ignore U1000 Device auth feature - routes not yet registered
-func (h *APIHandler) handleDeviceAuthCancel(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	if h.codexWSHandler != nil && h.codexWSHandler.IsWorkerConnected() {
-		if err := h.codexWSHandler.CancelDeviceAuth(); err != nil {
-			log.Printf("Failed to cancel device auth via WebSocket: %v", err)
-		}
-	}
-
-	h.deviceAuthService.CancelDeviceAuth()
-
-	api.RespondJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"message": "Device authentication cancelled",
-	})
-}
-
-// handleChatGPTDisconnect handles POST /api/settings/openai/chatgpt/disconnect.
-// Part of the ChatGPT integration (not yet wired to routes).
-//
-//lint:ignore U1000 ChatGPT disconnect feature - routes not yet registered
-func (h *APIHandler) handleChatGPTDisconnect(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	settings, err := database.GetOpenAISettings()
-	if err != nil {
-		api.RespondError(w, http.StatusNotFound, "Settings not found")
-		return
-	}
-
-	if err := database.ClearOpenAIChatGPTTokens(settings.ID); err != nil {
-		api.RespondError(w, http.StatusInternalServerError, "Failed to disconnect")
-		return
-	}
-
-	log.Printf("ChatGPT subscription disconnected")
-
-	api.RespondJSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"message": "ChatGPT subscription disconnected",
-	})
 }
 
 // handleProxySettings handles GET /api/settings/proxy and PUT /api/settings/proxy

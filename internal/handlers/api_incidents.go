@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -198,39 +197,6 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 
 	default:
 		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
-	}
-}
-
-// runIncidentLocal runs incident using the local executor (legacy fallback).
-// Kept in case WebSocket-based execution needs to be bypassed.
-//
-//lint:ignore U1000 Legacy fallback for local execution - may be re-enabled
-func (h *APIHandler) runIncidentLocal(incidentUUID, workingDir, taskHeader, taskWithGuidance string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
-	defer cancel()
-
-	progressCallback := func(progressLog string) {
-		if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+progressLog); err != nil {
-			log.Printf("Failed to update incident log: %v", err)
-		}
-	}
-
-	result, err := h.codexExecutor.ExecuteInDirectory(ctx, taskWithGuidance, "", workingDir, progressCallback)
-
-	fullLogWithContext := taskHeader + result.FullLog
-
-	if err != nil {
-		log.Printf("Incident %s failed: %v", incidentUUID, err)
-		if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, result.SessionID, fullLogWithContext+"\n\nError: "+err.Error(), "Error: "+err.Error()); updateErr != nil {
-			log.Printf("Failed to update incident complete: %v", updateErr)
-		}
-		return
-	}
-
-	log.Printf("Incident %s completed. Output: %d bytes, Tokens: %d, Session: %s",
-		incidentUUID, len(result.Output), result.TokensUsed, result.SessionID)
-	if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, result.SessionID, fullLogWithContext, result.Output); err != nil {
-		log.Printf("Failed to update incident complete: %v", err)
 	}
 }
 

@@ -12,46 +12,17 @@ The Akmatori codebase has accumulated structural debt across all three stacks. S
 
 Remove unimplemented features and legacy code first to reduce the surface area for subsequent phases.
 
-### DELETE files:
-- `internal/services/device_auth_service.go`
-- `internal/services/device_auth_service_test.go`
-- `internal/services/device_auth_service_edge_test.go`
-
-### MODIFY files:
-
-**`internal/handlers/api.go`**:
-- Remove `codexWSHandler *CodexWSHandler` field (line 21)
-- Remove `deviceAuthService *services.DeviceAuthService` field (line 23)
-- Remove `deviceAuthService: services.NewDeviceAuthService()` from `NewAPIHandler` (line 39)
-
-**`internal/handlers/api_settings.go`**:
-- Remove 4 device auth handlers: `handleDeviceAuthStart`, `handleDeviceAuthStatus`, `handleDeviceAuthCancel`, `handleChatGPTDisconnect` (all `//lint:ignore U1000`)
-
-**`internal/handlers/codex_ws.go`**:
-- Remove `DeviceAuthResult` type, `DeviceAuthCallback` type, `deviceAuthCallback` field
-- Remove `handleDeviceAuthResponse`, `StartDeviceAuth`, `CancelDeviceAuth` methods
-- Remove device-auth `CodexMessageType` constants
-- Keep all other CodexWSHandler functionality (incident execution still used)
-
-**`internal/handlers/api_incidents.go`**:
-- Remove `runIncidentLocal` (line 207, `//lint:ignore U1000`)
-
-**`internal/handlers/alert.go`**:
-- Remove `runSlackChannelInvestigationLocal` (line 1022, `//lint:ignore U1000`)
-
-**`internal/database/models.go`**:
-- Remove `OpenAISettings` struct and all its methods (`IsConfigured`, `IsActive`, `IsChatGPTTokenExpired`, `GetValidReasoningEfforts`, `ValidateReasoningEffort`, `TableName`)
-
-**`internal/database/db.go`**:
-- Remove `GetOpenAISettings`, `UpdateOpenAISettings`, `UpdateOpenAIChatGPTTokens`, `ClearOpenAIChatGPTTokens`
-
-**`internal/database/models_test.go`**:
-- Remove `BenchmarkOpenAISettings_IsConfigured` and `BenchmarkOpenAISettings_ValidateReasoningEffort`
-
-**`internal/handlers/api_handler_test.go`**:
-- Update `NewAPIHandler` calls if constructor signature changes
-
-**Verify**: `make verify`
+- [x] Delete `device_auth_service.go`, `device_auth_service_test.go`, `device_auth_service_edge_test.go`
+- [x] Remove `codexWSHandler` and `deviceAuthService` fields from `api.go`
+- [x] Remove 4 device auth handlers from `api_settings.go`
+- [x] Remove device auth types, fields, and methods from `codex_ws.go`
+- [x] Remove `runIncidentLocal` from `api_incidents.go`
+- [x] Remove `runSlackChannelInvestigationLocal` from `alert.go`
+- [x] Remove `OpenAISettings` struct and methods from `models.go`
+- [x] Remove OpenAI DB functions from `db.go`
+- [x] Remove OpenAI benchmarks from `models_test.go`
+- [x] Update test files referencing `deviceAuthService`
+- [x] Verify: `make verify`
 
 ---
 
@@ -59,40 +30,22 @@ Remove unimplemented features and legacy code first to reduce the surface area f
 
 Replace 393 `log.Printf/Fatalf/Println` calls across 28 files with `log/slog`.
 
-### CREATE:
-- **`internal/logging/logging.go`** — slog initialization (JSON handler to stderr, INFO level default)
-
-### Transformation rules:
-
-| Old | New | Level |
-|-----|-----|-------|
-| `log.Printf("Starting %s", name)` | `slog.Info("starting", "component", name)` | Info |
-| `log.Printf("Warning: %v", err)` | `slog.Warn("operation failed", "error", err)` | Warn |
-| `log.Printf("Error: %v", err)` / `log.Fatalf(...)` | `slog.Error("...", "error", err)` | Error |
-| Progress/trace messages | `slog.Debug(...)` | Debug |
-
-### MODIFY (28 files, by occurrence count):
-1. `internal/handlers/alert.go` (66)
-2. `internal/handlers/slack.go` (52)
-3. `cmd/akmatori/main.go` (49) — also add `logging.Init()` call
-4. `internal/executor/codex.go` (39)
-5. `internal/handlers/api_incidents.go` (21)
-6. `internal/slack/manager.go` (20)
-7. `internal/handlers/codex_ws.go` (18)
-8. `internal/services/skill_service.go` (18)
-9. `internal/database/db.go` (16)
-10. `internal/handlers/agent_ws.go` (13)
-11. `internal/jobs/recorrelation.go` (13)
-12. `internal/alerts/extraction/extractor.go` (11)
-13. Remaining 16 files (1-8 each)
-
-Also update `mcp-gateway/` (8 occurrences across 2 files).
-
-**Verify**: `make verify` + `grep -r 'log\.Printf\|log\.Fatalf\|log\.Println' internal/ cmd/ --include='*.go'` returns 0
+- [ ] Create `internal/logging/logging.go` with slog initialization
+- [ ] Migrate all log.Printf/Fatalf/Println calls across 28 files to slog
+- [ ] Add `logging.Init()` call in `cmd/akmatori/main.go`
+- [ ] Update `mcp-gateway/` (8 occurrences across 2 files)
+- [ ] Verify: `make verify` + grep returns 0 log.Printf calls
 
 ---
 
 ## Phase 2: Go Backend — Split God Objects
+
+- [ ] 2A: Split `internal/database/models.go` (588 lines → 6 files)
+- [ ] 2B: Split `internal/services/skill_service.go` (1,129 lines → 4 files)
+- [ ] 2C: Split `internal/handlers/alert.go` (1,272 lines → 4 files)
+- [ ] 2D: Split `internal/handlers/slack.go` (909 lines → 3 files)
+- [ ] 2E: Split `internal/handlers/api_settings.go` (586 lines → 4 files)
+- [ ] Verify after each sub-phase: `make verify`
 
 ### 2A: Split `internal/database/models.go` (588 lines → 6 files)
 
@@ -152,6 +105,10 @@ Delete `api_settings.go` after all content moved.
 
 ## Phase 3: Interface Extraction for Testability
 
+- [ ] Create `internal/services/interfaces.go` with manager interfaces
+- [ ] Update `APIHandler` and `AlertHandler` to use interfaces
+- [ ] Verify: `make verify`
+
 ### CREATE:
 - **`internal/services/interfaces.go`** — Define interfaces:
   - `SkillManager` — skill CRUD + lifecycle
@@ -172,6 +129,13 @@ This unblocks future handler unit tests with mock services.
 ---
 
 ## Phase 4: React Frontend Refactoring
+
+- [ ] 4A: Create shared hooks (useAsync, useFormState)
+- [ ] 4B: Split Tools.tsx (993 lines)
+- [ ] 4C: Split Settings.tsx (792 lines)
+- [ ] 4D: Split AlertSourcesManager.tsx (595 lines)
+- [ ] 4E: Create shared components (StatusBadge, LoadingError)
+- [ ] Verify: `make test-agent` + manual browser check
 
 ### 4A: Create shared hooks
 
@@ -220,6 +184,10 @@ This unblocks future handler unit tests with mock services.
 
 ## Phase 5: Agent Worker Refactoring
 
+- [ ] Create `agent-worker/src/tool-output-formatter.ts`
+- [ ] Update `agent-runner.ts` to import and delegate to formatter
+- [ ] Verify: `cd agent-worker && npm test`
+
 ### CREATE:
 - **`agent-worker/src/tool-output-formatter.ts`** — Extract from `agent-runner.ts`:
   - `formatToolArgs`, `formatToolOutput`, `extractToolText`, `collectTextParts`, `collectContentText`, `safeJSONStringify`
@@ -233,6 +201,11 @@ This unblocks future handler unit tests with mock services.
 ---
 
 ## Phase 6: Final Validation
+
+- [ ] Remove any remaining `//lint:ignore U1000` or `//nolint:unused` on deleted code
+- [ ] Run full suite: `make verify`, `make test-all`, `golangci-lint run`
+- [ ] Build all Docker containers: `docker-compose build`
+- [ ] Manual smoke test
 
 1. Remove any remaining `//lint:ignore U1000` or `//nolint:unused` on deleted code
 2. Run full suite:
