@@ -60,9 +60,18 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
   },
   ModelRegistry: vi.fn(() => ({})),
   SessionManager: {
-    inMemory: vi.fn(() => ({})),
-    create: vi.fn(() => ({})),
-    continueRecent: vi.fn(() => ({})),
+    inMemory: vi.fn(() => ({
+      newSession: vi.fn(),
+      getSessionId: vi.fn(() => "mock-session-456"),
+    })),
+    create: vi.fn(() => ({
+      newSession: vi.fn(),
+      getSessionId: vi.fn(() => "mock-session-456"),
+    })),
+    continueRecent: vi.fn(() => ({
+      newSession: vi.fn(),
+      getSessionId: vi.fn(() => "mock-session-456"),
+    })),
   },
   SettingsManager: {
     inMemory: vi.fn(() => ({})),
