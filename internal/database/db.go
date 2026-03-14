@@ -166,10 +166,10 @@ func InitializeDefaults() error {
 
 // Default models per provider, used when seeding new provider rows.
 var defaultModelsPerProvider = map[LLMProvider]string{
-	LLMProviderOpenAI:     "gpt-5.2-codex",
-	LLMProviderAnthropic:  "claude-sonnet-4-5",
+	LLMProviderOpenAI:     "gpt-5.4",
+	LLMProviderAnthropic:  "claude-sonnet-4-6",
 	LLMProviderGoogle:     "gemini-2.5-pro",
-	LLMProviderOpenRouter: "anthropic/claude-sonnet-4-5",
+	LLMProviderOpenRouter: "anthropic/claude-sonnet-4-6",
 	LLMProviderCustom:     "",
 }
 
