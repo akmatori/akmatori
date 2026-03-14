@@ -36,7 +36,7 @@ Currently, the SSH tool can only connect to servers pre-configured in `ssh_hosts
 
 **File: `agent-worker/tools/ssh/__init__.py`**
 
-- [ ] Add `servers` parameter to `test_connectivity()` function
+- [x] Add `servers` parameter to `test_connectivity()` function
 
 ### Task 5: SKILL.md Generation
 
