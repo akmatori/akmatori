@@ -137,8 +137,10 @@ func isValidURL(rawURL string) bool {
 
 // ModelConfigs defines the available models and their valid reasoning effort options (legacy, kept for tests)
 var ModelConfigs = map[string][]string{
+	"gpt-5.4":            {"low", "medium", "high", "extra_high"},
 	"gpt-5.2":            {"low", "medium", "high", "extra_high"},
 	"gpt-5.2-codex":      {"low", "medium", "high", "extra_high"},
+	"gpt-5.3-codex":      {"low", "medium", "high"},
 	"gpt-5.1-codex-max":  {"low", "medium", "high", "extra_high"},
 	"gpt-5.1-codex":      {"low", "medium", "high"},
 	"gpt-5.1-codex-mini": {"medium", "high"},
