@@ -411,21 +411,34 @@ describe("AgentRunner", () => {
       expect(opts.customTools).toBeUndefined();
     });
 
-    it("should pass appendSystemPrompt to DefaultResourceLoader", async () => {
+    it("should not pass appendSystemPrompt to DefaultResourceLoader", async () => {
       const { DefaultResourceLoader } = await import("@mariozechner/pi-coding-agent");
       const params = makeExecuteParams();
       await runner.execute(params);
 
-      // DefaultResourceLoader should have been constructed with appendSystemPrompt
+      // appendSystemPrompt was removed in favor of promptGuidelines on the bash tool
       const constructorCalls = (DefaultResourceLoader as any).mock.calls;
       expect(constructorCalls.length).toBeGreaterThan(0);
       const opts = constructorCalls[constructorCalls.length - 1][0];
-      expect(opts.appendSystemPrompt).toBeDefined();
-      expect(typeof opts.appendSystemPrompt).toBe("string");
-      expect(opts.appendSystemPrompt).toContain("Tool Calling Instructions");
-      expect(opts.appendSystemPrompt).toContain("python3 -c");
-      expect(opts.appendSystemPrompt).toContain("SKILL.md");
-      expect(opts.appendSystemPrompt).toContain("tool_instance_id");
+      expect(opts.appendSystemPrompt).toBeUndefined();
+    });
+
+    it("should attach promptGuidelines to the bash tool", async () => {
+      const params = makeExecuteParams();
+      await runner.execute(params);
+
+      const opts = createAgentSessionCalls[0];
+      const bashTool = opts.tools.find(
+        (t: any) => t.definition?.name === "bash" || t.name === "bash",
+      );
+      expect(bashTool).toBeDefined();
+      expect(bashTool.promptGuidelines).toBeDefined();
+      expect(typeof bashTool.promptGuidelines).toBe("string");
+      expect(bashTool.promptGuidelines).toContain("python3 -c");
+      expect(bashTool.promptGuidelines).toContain("SKILL.md");
+      expect(bashTool.promptGuidelines).toContain("tool_instance_id");
+      expect(bashTool.promptGuidelines).toContain("ssh");
+      expect(bashTool.promptGuidelines).toContain("zabbix");
     });
 
     it("should configure bash spawnHook with MCP env vars", async () => {
