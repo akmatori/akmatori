@@ -776,7 +776,7 @@ func (c *MCPConnection) sendSSERequest(ctx context.Context, method string, param
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, fmt.Errorf("server returned %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -855,6 +855,12 @@ func (c *MCPConnection) sendStdioRequest(ctx context.Context, method string, par
 
 	select {
 	case <-ctx.Done():
+		// The read goroutine is still running and will consume the next response
+		// from stdout, desynchronizing the stdio protocol. Mark the connection
+		// as unhealthy so the pool reconnects on the next call.
+		c.mu.Lock()
+		c.connected = false
+		c.mu.Unlock()
 		return nil, ctx.Err()
 	case r := <-ch:
 		return r.resp, r.err

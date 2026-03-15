@@ -252,13 +252,14 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 	h.pool.SetSchemaRefreshCallback(func(instanceID uint, tools []mcp.Tool) {
 		h.mu.Lock()
 
-		// Find the namespace prefix and config for this instance
+		// Find the namespace prefix and config from registrations (not toolMap),
+		// so servers that initially had zero tools can still be updated.
 		var prefix string
 		var config MCPServerConfig
-		for name, entry := range h.toolMap {
-			if entry.instanceID == instanceID {
-				prefix = name[:len(name)-len(entry.originalName)-1]
-				config = entry.config
+		for _, reg := range h.registrations {
+			if reg.InstanceID == instanceID {
+				prefix = reg.NamespacePrefix
+				config = reg.Config
 				break
 			}
 		}

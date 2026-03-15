@@ -169,9 +169,9 @@ func (e *HTTPConnectorExecutor) Execute(ctx context.Context, connector Connector
 		return nil, fmt.Errorf("failed to build request: %w", err)
 	}
 
-	// Check cache for GET requests
+	// Check cache for GET requests (include instanceKey to avoid cross-instance leakage)
 	if toolDef.HTTPMethod == "GET" {
-		cacheKey := req.URL.String()
+		cacheKey := instanceKey + ":" + req.URL.String()
 		if cached, ok := e.responseCache.Get(cacheKey); ok {
 			if result, ok := cached.(*ExecuteResult); ok {
 				return result, nil
@@ -209,9 +209,9 @@ func (e *HTTPConnectorExecutor) Execute(ctx context.Context, connector Connector
 		result.Body = json.RawMessage(quoted)
 	}
 
-	// Cache GET responses
+	// Cache GET responses (include instanceKey to avoid cross-instance leakage)
 	if toolDef.HTTPMethod == "GET" {
-		cacheKey := req.URL.String()
+		cacheKey := instanceKey + ":" + req.URL.String()
 		e.responseCache.Set(cacheKey, result)
 	}
 

@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/akmatori/mcp-gateway/internal/database"
 	"github.com/akmatori/mcp-gateway/internal/mcp"
@@ -1130,14 +1131,30 @@ func (r *Registry) GetToolDetail(toolName string) (*mcp.GetToolDetailResult, boo
 }
 
 // BuildInstanceLookup returns an InstanceLookup function that queries the database
-// for enabled tool instances of a given tool type.
+// for enabled tool instances of a given tool type. Results are cached for 30 seconds
+// to avoid repeated database queries on each search/detail call.
 func BuildInstanceLookup() mcp.InstanceLookup {
+	var (
+		mu        sync.Mutex
+		cached    []database.ToolInstance
+		cachedAt  time.Time
+		cacheTTL  = 30 * time.Second
+	)
+
 	return func(toolType string) []mcp.ToolDetailInstance {
-		ctx := context.Background()
-		instances, err := database.GetAllEnabledToolInstances(ctx)
-		if err != nil {
-			return nil
+		mu.Lock()
+		if time.Since(cachedAt) > cacheTTL || cached == nil {
+			ctx := context.Background()
+			instances, err := database.GetAllEnabledToolInstances(ctx)
+			if err != nil {
+				mu.Unlock()
+				return nil
+			}
+			cached = instances
+			cachedAt = time.Now()
 		}
+		instances := cached
+		mu.Unlock()
 
 		var result []mcp.ToolDetailInstance
 		for _, inst := range instances {
