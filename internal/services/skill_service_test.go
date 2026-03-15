@@ -285,6 +285,11 @@ func TestGenerateSkillMd_NoPythonImports(t *testing.T) {
 		Name:       "ssh-prod",
 		Enabled:    true,
 		ToolType:   *toolType,
+		Settings: database.JSONB{
+			"ssh_hosts": []interface{}{
+				map[string]interface{}{"hostname": "web-1", "address": "10.0.0.1"},
+			},
+		},
 	}
 
 	tools := []database.ToolInstance{*toolInstance}
@@ -531,7 +536,7 @@ func TestGenerateSkillMd_ContainsPythonExamples(t *testing.T) {
 		{
 			ToolTypeID: sshType.ID, Name: "Production hosts", Enabled: true, ToolType: *sshType,
 			Settings: database.JSONB{"ssh_hosts": []interface{}{
-				map[string]interface{}{"hostname": "web-01"},
+				map[string]interface{}{"hostname": "web-01", "address": "10.0.0.1"},
 			}},
 		},
 		{ToolTypeID: zabbixType.ID, Name: "Zabbix Main", Enabled: true, ToolType: *zabbixType},
@@ -570,8 +575,8 @@ func TestSshAllHostsAllowWrite_AllWriteEnabled(t *testing.T) {
 		ToolType: database.ToolType{Name: "ssh"},
 		Settings: database.JSONB{
 			"ssh_hosts": []interface{}{
-				map[string]interface{}{"hostname": "web-01", "allow_write_commands": true},
-				map[string]interface{}{"hostname": "web-02", "allow_write_commands": true},
+				map[string]interface{}{"hostname": "web-01", "address": "10.0.0.1", "allow_write_commands": true},
+				map[string]interface{}{"hostname": "web-02", "address": "10.0.0.2", "allow_write_commands": true},
 			},
 		},
 	}
@@ -585,8 +590,8 @@ func TestSshAllHostsAllowWrite_SomeReadOnly(t *testing.T) {
 		ToolType: database.ToolType{Name: "ssh"},
 		Settings: database.JSONB{
 			"ssh_hosts": []interface{}{
-				map[string]interface{}{"hostname": "web-01", "allow_write_commands": true},
-				map[string]interface{}{"hostname": "web-02", "allow_write_commands": false},
+				map[string]interface{}{"hostname": "web-01", "address": "10.0.0.1", "allow_write_commands": true},
+				map[string]interface{}{"hostname": "web-02", "address": "10.0.0.2", "allow_write_commands": false},
 			},
 		},
 	}
@@ -647,7 +652,7 @@ func TestGenerateToolUsageExample_SSHReadOnly(t *testing.T) {
 		ToolType: database.ToolType{Name: "ssh"},
 		Settings: database.JSONB{
 			"ssh_hosts": []interface{}{
-				map[string]interface{}{"hostname": "web-01", "allow_write_commands": false},
+				map[string]interface{}{"hostname": "web-01", "address": "10.0.0.1", "allow_write_commands": false},
 			},
 		},
 	}

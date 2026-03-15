@@ -66,6 +66,21 @@ func extractInstanceID(args map[string]interface{}) *uint {
 	return nil
 }
 
+// extractServers extracts the optional servers string list from tool arguments.
+func extractServers(args map[string]interface{}) []string {
+	serversArg, ok := args["servers"].([]interface{})
+	if !ok {
+		return nil
+	}
+	var servers []string
+	for _, s := range serversArg {
+		if str, ok := s.(string); ok {
+			servers = append(servers, str)
+		}
+	}
+	return servers
+}
+
 // toolInstanceIDProperty is the shared schema property for tool_instance_id
 var toolInstanceIDProperty = mcp.Property{
 	Type:        "integer",
@@ -101,14 +116,7 @@ func (r *Registry) registerSSHTools() {
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
 			instanceID := extractInstanceID(args)
 			command, _ := args["command"].(string)
-			var servers []string
-			if serversArg, ok := args["servers"].([]interface{}); ok {
-				for _, s := range serversArg {
-					if str, ok := s.(string); ok {
-						servers = append(servers, str)
-					}
-				}
-			}
+			servers := extractServers(args)
 			return sshTool.ExecuteCommand(ctx, incidentID, command, servers, instanceID)
 		},
 	)
@@ -117,17 +125,23 @@ func (r *Registry) registerSSHTools() {
 	r.server.RegisterTool(
 		mcp.Tool{
 			Name:        "ssh.test_connectivity",
-			Description: "Test SSH connectivity to all configured servers",
+			Description: "Test SSH connectivity to configured servers, or specific servers when ad-hoc connections are enabled",
 			InputSchema: mcp.InputSchema{
 				Type: "object",
 				Properties: map[string]mcp.Property{
+					"servers": {
+						Type:        "array",
+						Description: "Optional list of specific servers to test connectivity to. When ad-hoc connections are enabled, you can test servers not in the configured list.",
+						Items:       &mcp.Items{Type: "string"},
+					},
 					"tool_instance_id": toolInstanceIDProperty,
 				},
 			},
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
 			instanceID := extractInstanceID(args)
-			return sshTool.TestConnectivity(ctx, incidentID, instanceID)
+			servers := extractServers(args)
+			return sshTool.TestConnectivity(ctx, incidentID, servers, instanceID)
 		},
 	)
 
@@ -150,14 +164,7 @@ func (r *Registry) registerSSHTools() {
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
 			instanceID := extractInstanceID(args)
-			var servers []string
-			if serversArg, ok := args["servers"].([]interface{}); ok {
-				for _, s := range serversArg {
-					if str, ok := s.(string); ok {
-						servers = append(servers, str)
-					}
-				}
-			}
+			servers := extractServers(args)
 			return sshTool.GetServerInfo(ctx, incidentID, servers, instanceID)
 		},
 	)

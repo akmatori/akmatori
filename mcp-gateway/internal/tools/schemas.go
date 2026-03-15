@@ -75,7 +75,7 @@ func getSSHSchema() ToolTypeSchema {
 		Version:     "3.0.0",
 		SettingsSchema: SettingsSchema{
 			Type:     "object",
-			Required: []string{"ssh_hosts"},
+			Required: []string{},
 			Properties: map[string]PropertySchema{
 				"ssh_keys": {
 					Type:        "array",
@@ -113,7 +113,6 @@ func getSSHSchema() ToolTypeSchema {
 				"ssh_hosts": {
 					Type:        "array",
 					Description: "List of SSH host configurations",
-					MinItems:    intPtr(1),
 					Items: &ItemSchema{
 						Type:     "object",
 						Required: []string{"hostname", "address"},
@@ -204,6 +203,32 @@ func getSSHSchema() ToolTypeSchema {
 					Default:     false,
 					Advanced:    true,
 				},
+				"allow_adhoc_connections": {
+					Type:        "boolean",
+					Description: "Allow SSH connections to servers not in the ssh_hosts list. The agent can connect to any server using default credentials.",
+					Default:     false,
+				},
+				"adhoc_default_user": {
+					Type:        "string",
+					Description: "Default SSH username for ad-hoc connections",
+					Default:     "root",
+					Advanced:    true,
+				},
+				"adhoc_default_port": {
+					Type:        "integer",
+					Description: "Default SSH port for ad-hoc connections",
+					Default:     22,
+					Minimum:     intPtr(1),
+					Maximum:     intPtr(65535),
+					Advanced:    true,
+				},
+				"adhoc_allow_write_commands": {
+					Type:        "boolean",
+					Description: "Allow write/destructive commands on ad-hoc connections (WARNING: security risk)",
+					Default:     false,
+					Advanced:    true,
+					Warning:     "Enabling this allows destructive commands like rm, mv, kill on any server the agent connects to.",
+				},
 			},
 		},
 		Functions: []ToolFunction{
@@ -215,8 +240,8 @@ func getSSHSchema() ToolTypeSchema {
 			},
 			{
 				Name:        "test_connectivity",
-				Description: "Test SSH connectivity to all configured servers (including through jumphosts if configured)",
-				Parameters:  "None",
+				Description: "Test SSH connectivity to specified or all configured servers (including through jumphosts if configured). When ad-hoc connections are enabled, can test connectivity to any server.",
+				Parameters:  "servers: list[str] - Optional list of server hostnames/addresses to test (defaults to all configured servers)",
 				Returns:     "JSON string with connectivity status: {results: [{server, reachable, error}], summary: {total, reachable, unreachable}}",
 			},
 			{

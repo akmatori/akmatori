@@ -123,7 +123,7 @@ Tools are Python wrappers in `agent-worker/tools/` called via bash:
 | Wrapper | Functions | MCP Tool Prefix |
 |---------|-----------|-----------------|
 | `tools/mcp_client.py` | `call()`, `MCPClient` | N/A (base) |
-| `tools/ssh/__init__.py` | `execute_command()`, `test_connectivity()`, `get_server_info()` | `ssh.*` |
+| `tools/ssh/__init__.py` | `execute_command()`, `test_connectivity(servers=None)`, `get_server_info()` | `ssh.*` |
 | `tools/zabbix/__init__.py` | `get_hosts()`, `get_problems()`, `get_history()`, `get_items()`, `get_items_batch()`, `get_triggers()` | `zabbix.*` |
 
 ### Message Flow
