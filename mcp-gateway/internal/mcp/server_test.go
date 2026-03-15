@@ -473,6 +473,306 @@ func TestAuthorization_NoAuthorizerAllowsAll(t *testing.T) {
 	}
 }
 
+// --- Discovery filtering by allowlist tests ---
+
+func TestHandleSearchTools_FilteredByAllowlist_PartialAuthorization(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.SetDiscoverer(&mockDiscoverer{
+		tools: []SearchToolsResultItem{
+			{Name: "ssh.execute_command", Description: "Execute command", ToolType: "ssh"},
+			{Name: "zabbix.get_hosts", Description: "Get hosts", ToolType: "zabbix"},
+			{Name: "victoriametrics.instant_query", Description: "Query metrics", ToolType: "victoriametrics"},
+		},
+	})
+	s.SetInstanceLookup(func(toolType string) []ToolDetailInstance {
+		switch toolType {
+		case "ssh":
+			return []ToolDetailInstance{
+				{ID: 1, LogicalName: "prod-ssh", Name: "Production SSH"},
+				{ID: 2, LogicalName: "staging-ssh", Name: "Staging SSH"},
+			}
+		case "zabbix":
+			return []ToolDetailInstance{
+				{ID: 3, LogicalName: "prod-zabbix", Name: "Production Zabbix"},
+			}
+		case "victoriametrics":
+			return []ToolDetailInstance{
+				{ID: 4, LogicalName: "prod-vm", Name: "Production VM"},
+			}
+		}
+		return nil
+	})
+
+	// Only allow SSH (instance 1) and Zabbix (instance 3)
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+		{InstanceID: 3, LogicalName: "prod-zabbix", ToolType: "zabbix"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/search",
+		SearchToolsParams{Query: ""},
+		map[string]string{
+			"X-Incident-ID":    "incident-filter-1",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result SearchToolsResult
+	json.Unmarshal(resultBytes, &result)
+
+	// Should only return ssh and zabbix, not victoriametrics
+	if len(result.Tools) != 2 {
+		t.Fatalf("expected 2 tools, got %d", len(result.Tools))
+	}
+	toolTypes := map[string]bool{}
+	for _, tool := range result.Tools {
+		toolTypes[tool.ToolType] = true
+	}
+	if toolTypes["victoriametrics"] {
+		t.Error("victoriametrics should be excluded from results")
+	}
+	if !toolTypes["ssh"] || !toolTypes["zabbix"] {
+		t.Error("ssh and zabbix should be included")
+	}
+
+	// SSH instances should be filtered: only prod-ssh, not staging-ssh
+	for _, tool := range result.Tools {
+		if tool.ToolType == "ssh" {
+			if len(tool.Instances) != 1 {
+				t.Fatalf("expected 1 ssh instance, got %d", len(tool.Instances))
+			}
+			if tool.Instances[0] != "prod-ssh" {
+				t.Errorf("expected instance 'prod-ssh', got %q", tool.Instances[0])
+			}
+		}
+	}
+}
+
+func TestHandleSearchTools_FilteredByAllowlist_NoAuthorization(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.SetDiscoverer(&mockDiscoverer{
+		tools: []SearchToolsResultItem{
+			{Name: "ssh.execute_command", Description: "Execute command", ToolType: "ssh"},
+			{Name: "zabbix.get_hosts", Description: "Get hosts", ToolType: "zabbix"},
+		},
+	})
+
+	// Empty allowlist = nothing authorized
+	allowlist := []auth.AllowlistEntry{}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/search",
+		SearchToolsParams{Query: ""},
+		map[string]string{
+			"X-Incident-ID":    "incident-filter-empty",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result SearchToolsResult
+	json.Unmarshal(resultBytes, &result)
+
+	if len(result.Tools) != 0 {
+		t.Errorf("expected 0 tools with empty allowlist, got %d", len(result.Tools))
+	}
+}
+
+func TestHandleSearchTools_FilteredByAllowlist_FullAuthorization(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.SetDiscoverer(&mockDiscoverer{
+		tools: []SearchToolsResultItem{
+			{Name: "ssh.execute_command", Description: "Execute command", ToolType: "ssh"},
+			{Name: "zabbix.get_hosts", Description: "Get hosts", ToolType: "zabbix"},
+		},
+	})
+
+	// All types authorized
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+		{InstanceID: 2, LogicalName: "prod-zabbix", ToolType: "zabbix"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/search",
+		SearchToolsParams{Query: ""},
+		map[string]string{
+			"X-Incident-ID":    "incident-filter-full",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result SearchToolsResult
+	json.Unmarshal(resultBytes, &result)
+
+	if len(result.Tools) != 2 {
+		t.Errorf("expected 2 tools with full authorization, got %d", len(result.Tools))
+	}
+}
+
+func TestHandleSearchTools_NoAllowlistReturnsAll(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.SetDiscoverer(&mockDiscoverer{
+		tools: []SearchToolsResultItem{
+			{Name: "ssh.execute_command", Description: "Execute command", ToolType: "ssh"},
+			{Name: "zabbix.get_hosts", Description: "Get hosts", ToolType: "zabbix"},
+		},
+	})
+
+	// No allowlist header — should return all (backward compat)
+	resp := sendJSONRPCWithHeaders(t, s, "tools/search",
+		SearchToolsParams{Query: ""},
+		map[string]string{
+			"X-Incident-ID": "incident-no-filter",
+		},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result SearchToolsResult
+	json.Unmarshal(resultBytes, &result)
+
+	if len(result.Tools) != 2 {
+		t.Errorf("expected 2 tools without allowlist, got %d", len(result.Tools))
+	}
+}
+
+func TestHandleGetToolDetail_FilteredByAllowlist(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.SetDiscoverer(&mockDiscoverer{
+		detail: &GetToolDetailResult{
+			Name:        "ssh.execute_command",
+			Description: "Execute command",
+			ToolType:    "ssh",
+			InputSchema: InputSchema{Type: "object"},
+		},
+	})
+	s.SetInstanceLookup(func(toolType string) []ToolDetailInstance {
+		if toolType == "ssh" {
+			return []ToolDetailInstance{
+				{ID: 1, LogicalName: "prod-ssh", Name: "Production SSH"},
+				{ID: 2, LogicalName: "staging-ssh", Name: "Staging SSH"},
+				{ID: 3, LogicalName: "dev-ssh", Name: "Dev SSH"},
+			}
+		}
+		return nil
+	})
+
+	// Only allow instance 1 and 3
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+		{InstanceID: 3, LogicalName: "dev-ssh", ToolType: "ssh"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/detail",
+		GetToolDetailParams{ToolName: "ssh.execute_command"},
+		map[string]string{
+			"X-Incident-ID":    "incident-detail-filter",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result GetToolDetailResult
+	json.Unmarshal(resultBytes, &result)
+
+	if len(result.Instances) != 2 {
+		t.Fatalf("expected 2 instances, got %d", len(result.Instances))
+	}
+	names := map[string]bool{}
+	for _, inst := range result.Instances {
+		names[inst.LogicalName] = true
+	}
+	if names["staging-ssh"] {
+		t.Error("staging-ssh should be filtered out")
+	}
+	if !names["prod-ssh"] || !names["dev-ssh"] {
+		t.Error("prod-ssh and dev-ssh should be included")
+	}
+}
+
+func TestHandleGetToolDetail_NoAllowlistReturnsAllInstances(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.SetDiscoverer(&mockDiscoverer{
+		detail: &GetToolDetailResult{
+			Name:        "ssh.execute_command",
+			Description: "Execute command",
+			ToolType:    "ssh",
+			InputSchema: InputSchema{Type: "object"},
+		},
+	})
+	s.SetInstanceLookup(func(toolType string) []ToolDetailInstance {
+		if toolType == "ssh" {
+			return []ToolDetailInstance{
+				{ID: 1, LogicalName: "prod-ssh", Name: "Production SSH"},
+				{ID: 2, LogicalName: "staging-ssh", Name: "Staging SSH"},
+			}
+		}
+		return nil
+	})
+
+	// No allowlist — should return all instances
+	resp := sendJSONRPCWithHeaders(t, s, "tools/detail",
+		GetToolDetailParams{ToolName: "ssh.execute_command"},
+		map[string]string{
+			"X-Incident-ID": "incident-detail-no-filter",
+		},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result GetToolDetailResult
+	json.Unmarshal(resultBytes, &result)
+
+	if len(result.Instances) != 2 {
+		t.Errorf("expected 2 instances without allowlist, got %d", len(result.Instances))
+	}
+}
+
 func TestAuthorization_AllowlistPersistsAcrossRequests(t *testing.T) {
 	s := newTestServer()
 	authorizer := auth.NewAuthorizer(time.Hour)

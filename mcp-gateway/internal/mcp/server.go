@@ -188,9 +188,9 @@ func (s *Server) handleRequest(ctx context.Context, req *Request, incidentID str
 	case "tools/call":
 		return s.handleCallTool(ctx, req, incidentID)
 	case "tools/search":
-		return s.handleSearchTools(req)
+		return s.handleSearchTools(req, incidentID)
 	case "tools/detail":
-		return s.handleGetToolDetail(req)
+		return s.handleGetToolDetail(req, incidentID)
 	case "ping":
 		return NewResponse(req.ID, map[string]interface{}{})
 	default:
@@ -293,7 +293,7 @@ func (s *Server) handleCallTool(ctx context.Context, req *Request, incidentID st
 }
 
 // handleSearchTools handles the tools/search request
-func (s *Server) handleSearchTools(req *Request) Response {
+func (s *Server) handleSearchTools(req *Request, incidentID string) Response {
 	if s.discoverer == nil {
 		return NewErrorResponse(req.ID, InternalError, "Tool discovery not configured", nil)
 	}
@@ -321,6 +321,14 @@ func (s *Server) handleSearchTools(req *Request) Response {
 		}
 	}
 
+	// Filter by allowlist: only include tools with at least one authorized instance
+	if s.authorizer != nil && incidentID != "" {
+		allowlist := s.authorizer.GetAllowlist(incidentID)
+		if allowlist != nil {
+			results = filterSearchResultsByAllowlist(results, allowlist)
+		}
+	}
+
 	if results == nil {
 		results = []SearchToolsResultItem{}
 	}
@@ -329,7 +337,7 @@ func (s *Server) handleSearchTools(req *Request) Response {
 }
 
 // handleGetToolDetail handles the tools/detail request
-func (s *Server) handleGetToolDetail(req *Request) Response {
+func (s *Server) handleGetToolDetail(req *Request, incidentID string) Response {
 	if s.discoverer == nil {
 		return NewErrorResponse(req.ID, InternalError, "Tool discovery not configured", nil)
 	}
@@ -351,6 +359,14 @@ func (s *Server) handleGetToolDetail(req *Request) Response {
 	// Populate instances if lookup is available
 	if s.instanceLookup != nil {
 		detail.Instances = s.instanceLookup(detail.ToolType)
+	}
+
+	// Filter instances by allowlist
+	if s.authorizer != nil && incidentID != "" {
+		allowlist := s.authorizer.GetAllowlist(incidentID)
+		if allowlist != nil {
+			detail.Instances = filterInstancesByAllowlist(detail.Instances, detail.ToolType, allowlist)
+		}
 	}
 
 	return NewResponse(req.ID, detail)
@@ -416,4 +432,50 @@ func extractLogicalNameFromArgs(args map[string]interface{}) string {
 		return v
 	}
 	return ""
+}
+
+// filterSearchResultsByAllowlist removes tools that have no authorized instances.
+// A tool is kept if any allowlist entry matches its tool type.
+func filterSearchResultsByAllowlist(results []SearchToolsResultItem, allowlist []auth.AllowlistEntry) []SearchToolsResultItem {
+	// Build set of authorized tool types
+	authorizedTypes := make(map[string]bool)
+	for _, e := range allowlist {
+		authorizedTypes[e.ToolType] = true
+	}
+
+	filtered := make([]SearchToolsResultItem, 0, len(results))
+	for _, item := range results {
+		if !authorizedTypes[item.ToolType] {
+			continue
+		}
+		// Also filter the instance names to only authorized ones
+		if len(item.Instances) > 0 {
+			authorizedNames := make([]string, 0)
+			for _, name := range item.Instances {
+				for _, e := range allowlist {
+					if e.ToolType == item.ToolType && e.LogicalName == name {
+						authorizedNames = append(authorizedNames, name)
+						break
+					}
+				}
+			}
+			item.Instances = authorizedNames
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
+}
+
+// filterInstancesByAllowlist filters tool detail instances to only those in the allowlist.
+func filterInstancesByAllowlist(instances []ToolDetailInstance, toolType string, allowlist []auth.AllowlistEntry) []ToolDetailInstance {
+	filtered := make([]ToolDetailInstance, 0, len(instances))
+	for _, inst := range instances {
+		for _, e := range allowlist {
+			if e.ToolType == toolType && (e.InstanceID == inst.ID || (e.LogicalName != "" && e.LogicalName == inst.LogicalName)) {
+				filtered = append(filtered, inst)
+				break
+			}
+		}
+	}
+	return filtered
 }
