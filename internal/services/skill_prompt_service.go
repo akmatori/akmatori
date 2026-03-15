@@ -205,10 +205,7 @@ func sshAllHostsAllowWrite(tool database.ToolInstance) bool {
 			return false
 		}
 	}
-	if !hasValidHost {
-		return false
-	}
-	return true
+	return hasValidHost
 }
 
 // generateToolUsageExample creates Python code block showing how to call the tool
