@@ -612,3 +612,93 @@ func TestResolveTargetHosts_AdhocNoConfiguredHosts(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveTargetHosts_BlankAddressesFilteredFromFanOut(t *testing.T) {
+	// When config.Hosts contains blank-address placeholder rows alongside
+	// real hosts, resolveTargetHosts (servers=nil) should NOT return the
+	// blank entries — they would produce spurious ":22" targets.
+	tool := newTestTool()
+	config := &SSHConfig{
+		Hosts: []SSHHostConfig{
+			{Hostname: "web-1", Address: "10.0.0.1", User: "root", Port: 22},
+			{Hostname: "", Address: "", User: "root", Port: 22},       // blank placeholder
+			{Hostname: "db-1", Address: "10.0.0.2", User: "admin", Port: 2222},
+			{Hostname: "placeholder", Address: "  ", User: "root", Port: 22}, // whitespace-only
+		},
+		AdhocDefaultUser: "root",
+		AdhocDefaultPort: 22,
+	}
+
+	hosts, err := tool.resolveTargetHosts(nil, config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(hosts) != 2 {
+		t.Fatalf("expected 2 hosts (blanks filtered), got %d", len(hosts))
+	}
+	if hosts[0].Hostname != "web-1" || hosts[1].Hostname != "db-1" {
+		t.Errorf("expected web-1 and db-1, got %s and %s", hosts[0].Hostname, hosts[1].Hostname)
+	}
+}
+
+func TestResolveTargetHosts_IPv6BracketNormalization(t *testing.T) {
+	// A configured host stored with brackets should be found when the agent
+	// targets the same address without brackets, and vice versa.
+	tool := newTestTool()
+	config := &SSHConfig{
+		Hosts: []SSHHostConfig{
+			{Hostname: "ipv6-server", Address: "[2001:db8::1]", User: "root", Port: 22, AllowWriteCommands: true},
+		},
+		AdhocDefaultUser:     "root",
+		AdhocDefaultPort:     22,
+		AllowAdhocConnections: true,
+	}
+
+	// Target without brackets — should still match the configured host
+	hosts, err := tool.resolveTargetHosts([]string{"2001:db8::1"}, config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	}
+	if hosts[0].Hostname != "ipv6-server" {
+		t.Errorf("expected configured host ipv6-server, got %s", hosts[0].Hostname)
+	}
+	if !hosts[0].AllowWriteCommands {
+		t.Error("expected configured host's AllowWriteCommands=true to be preserved")
+	}
+
+	// Target with brackets — should also match
+	hosts, err = tool.resolveTargetHosts([]string{"[2001:db8::1]"}, config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	}
+	if hosts[0].Hostname != "ipv6-server" {
+		t.Errorf("expected configured host ipv6-server, got %s", hosts[0].Hostname)
+	}
+}
+
+func TestStripBrackets(t *testing.T) {
+	tests := []struct {
+		input, want string
+	}{
+		{"192.168.1.1", "192.168.1.1"},
+		{"example.com", "example.com"},
+		{"::1", "::1"},
+		{"[::1]", "::1"},
+		{"[2001:db8::1]", "2001:db8::1"},
+		{"", ""},
+		{"[only-open", "[only-open"},
+		{"only-close]", "only-close]"},
+	}
+	for _, tt := range tests {
+		got := stripBrackets(tt.input)
+		if got != tt.want {
+			t.Errorf("stripBrackets(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}

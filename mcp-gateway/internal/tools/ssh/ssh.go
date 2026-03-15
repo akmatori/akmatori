@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -258,6 +259,11 @@ func (t *SSHTool) getConfig(ctx context.Context, incidentID string, instanceID *
 			host.AllowWriteCommands = allow
 		}
 
+		// Skip placeholder rows with blank addresses
+		if strings.TrimSpace(host.Address) == "" {
+			continue
+		}
+
 		config.Hosts = append(config.Hosts, host)
 	}
 
@@ -334,7 +340,7 @@ func (t *SSHTool) connectDirect(ctx context.Context, hostConfig *SSHHostConfig, 
 		Timeout:         time.Duration(config.ConnectionTimeout) * time.Second,
 	}
 
-	addr := fmt.Sprintf("%s:%d", hostConfig.Address, port)
+	addr := net.JoinHostPort(stripBrackets(hostConfig.Address), fmt.Sprintf("%d", port))
 	t.logger.Printf("Connecting directly to %s as %s", addr, user)
 
 	return ssh.Dial("tcp", addr, clientConfig)
@@ -377,7 +383,7 @@ func (t *SSHTool) connectViaJumphost(ctx context.Context, hostConfig *SSHHostCon
 	}
 
 	// Step 1: Connect to jumphost
-	jumphostAddr := fmt.Sprintf("%s:%d", hostConfig.JumphostAddress, jumphostPort)
+	jumphostAddr := net.JoinHostPort(stripBrackets(hostConfig.JumphostAddress), fmt.Sprintf("%d", jumphostPort))
 	t.logger.Printf("Connecting to jumphost %s as %s", jumphostAddr, jumphostUser)
 
 	jumphostConn, err := ssh.Dial("tcp", jumphostAddr, jumphostConfig)
@@ -396,7 +402,7 @@ func (t *SSHTool) connectViaJumphost(ctx context.Context, hostConfig *SSHHostCon
 		targetPort = 22
 	}
 
-	targetAddr := fmt.Sprintf("%s:%d", hostConfig.Address, targetPort)
+	targetAddr := net.JoinHostPort(stripBrackets(hostConfig.Address), fmt.Sprintf("%d", targetPort))
 	t.logger.Printf("Dialing target %s through jumphost", targetAddr)
 
 	targetNetConn, err := jumphostConn.Dial("tcp", targetAddr)
@@ -589,6 +595,15 @@ func (t *SSHTool) executeOnServer(ctx context.Context, hostConfig *SSHHostConfig
 	}
 }
 
+// stripBrackets removes surrounding brackets from IPv6 literals (e.g. "[::1]" -> "::1")
+// so that net.JoinHostPort doesn't double-bracket them.
+func stripBrackets(host string) string {
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		return host[1 : len(host)-1]
+	}
+	return host
+}
+
 // resolveTargetHosts resolves server names to SSHHostConfig entries.
 // Configured hosts take precedence. Unconfigured servers fall back to ad-hoc
 // defaults when AllowAdhocConnections is enabled, or return an error otherwise.
@@ -596,17 +611,26 @@ func (t *SSHTool) executeOnServer(ctx context.Context, hostConfig *SSHHostConfig
 // When servers is empty and no hosts are configured, an error is returned.
 func (t *SSHTool) resolveTargetHosts(servers []string, config *SSHConfig) ([]SSHHostConfig, error) {
 	if len(servers) == 0 {
-		if len(config.Hosts) == 0 {
+		// Filter out blank-address placeholder rows
+		var validHosts []SSHHostConfig
+		for _, h := range config.Hosts {
+			if strings.TrimSpace(h.Address) != "" {
+				validHosts = append(validHosts, h)
+			}
+		}
+		if len(validHosts) == 0 {
 			return nil, fmt.Errorf("no servers specified and no hosts configured")
 		}
-		return config.Hosts, nil
+		return validHosts, nil
 	}
 
-	// Build a map of configured hostnames for lookup
+	// Build a map of configured hostnames for lookup.
+	// Normalize IPv6 addresses by stripping brackets so that both
+	// "[2001:db8::1]" and "2001:db8::1" resolve to the same host.
 	hostMap := make(map[string]*SSHHostConfig)
 	for i := range config.Hosts {
 		hostMap[config.Hosts[i].Hostname] = &config.Hosts[i]
-		hostMap[config.Hosts[i].Address] = &config.Hosts[i]
+		hostMap[stripBrackets(config.Hosts[i].Address)] = &config.Hosts[i]
 	}
 
 	var targetHosts []SSHHostConfig
@@ -615,7 +639,7 @@ func (t *SSHTool) resolveTargetHosts(servers []string, config *SSHConfig) ([]SSH
 		if s == "" {
 			continue
 		}
-		if host, ok := hostMap[s]; ok {
+		if host, ok := hostMap[stripBrackets(s)]; ok {
 			targetHosts = append(targetHosts, *host)
 		} else if config.AllowAdhocConnections {
 			targetHosts = append(targetHosts, SSHHostConfig{
