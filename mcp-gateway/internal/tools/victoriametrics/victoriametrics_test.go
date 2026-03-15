@@ -314,8 +314,8 @@ func TestClampTimeout(t *testing.T) {
 	}{
 		{"zero is clamped to default", 0, 30},
 		{"negative is clamped to default", -5, 30},
-		{"excessive is clamped to default", 999, 30},
-		{"301 is clamped to default", 301, 30},
+		{"excessive is clamped to max", 999, 300},
+		{"301 is clamped to max", 301, 300},
 		{"valid timeout 1 is kept", 1, 1},
 		{"valid timeout 30 is kept", 30, 30},
 		{"valid timeout 300 is kept", 300, 300},
@@ -1454,6 +1454,8 @@ func TestAPIRequest_RejectsPathTraversal(t *testing.T) {
 		"relative/path",
 		"/api/v1/%2e%2e/%2e%2e/etc/passwd",
 		"/api/v1/..%2F..%2Fetc",
+		"/api/v1/query?query=injected",
+		"/api/v1/query#fragment",
 	}
 	for _, path := range badPaths {
 		_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{

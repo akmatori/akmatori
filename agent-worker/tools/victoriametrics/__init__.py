@@ -21,14 +21,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 from mcp_client import call
 
 
-def instant_query(query: str, time: str = None, step: str = None,
+def instant_query(query: str, eval_time: str = None, step: str = None,
                   timeout: str = None, tool_instance_id: int = None) -> dict:
     """
     Execute an instant PromQL query against VictoriaMetrics.
 
     Args:
         query: PromQL query string
-        time: Evaluation timestamp (RFC3339 or Unix timestamp)
+        eval_time: Evaluation timestamp (RFC3339 or Unix timestamp)
         step: Query resolution step width
         timeout: Evaluation timeout
         tool_instance_id: Optional tool instance ID for routing
@@ -37,8 +37,8 @@ def instant_query(query: str, time: str = None, step: str = None,
         Query result data
     """
     args = {"query": query}
-    if time is not None:
-        args["time"] = time
+    if eval_time is not None:
+        args["time"] = eval_time
     if step is not None:
         args["step"] = step
     if timeout is not None:

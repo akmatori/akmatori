@@ -102,8 +102,11 @@ func extractInstanceID(args map[string]interface{}) *uint {
 
 // clampTimeout ensures timeout is within a safe range (1-300 seconds), defaulting to 30.
 func clampTimeout(timeout int) int {
-	if timeout <= 0 || timeout > 300 {
+	if timeout <= 0 {
 		return 30
+	}
+	if timeout > 300 {
+		return 300
 	}
 	return timeout
 }
@@ -498,6 +501,10 @@ func (t *VictoriaMetricsTool) APIRequest(ctx context.Context, incidentID string,
 	decodedPath, err := url.PathUnescape(path)
 	if err != nil || !strings.HasPrefix(decodedPath, "/") || strings.Contains(decodedPath, "..") {
 		return "", fmt.Errorf("invalid path: must start with / and not contain '..'")
+	}
+	// Reject paths containing query strings or fragments to prevent URL manipulation
+	if strings.ContainsAny(decodedPath, "?#") {
+		return "", fmt.Errorf("invalid path: must not contain query string or fragment (use params argument instead)")
 	}
 	path = decodedPath
 
