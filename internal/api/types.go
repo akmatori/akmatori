@@ -41,16 +41,18 @@ type SkillResponse struct {
 
 // CreateToolInstanceRequest is the request body for POST /api/tools.
 type CreateToolInstanceRequest struct {
-	ToolTypeID uint           `json:"tool_type_id" validate:"required"`
-	Name       string         `json:"name" validate:"required,min=1"`
-	Settings   database.JSONB `json:"settings"`
+	ToolTypeID  uint           `json:"tool_type_id" validate:"required"`
+	Name        string         `json:"name" validate:"required,min=1"`
+	LogicalName string         `json:"logical_name"` // Optional; auto-derived from Name if empty
+	Settings    database.JSONB `json:"settings"`
 }
 
 // UpdateToolInstanceRequest is the request body for PUT /api/tools/:id.
 type UpdateToolInstanceRequest struct {
-	Name     string         `json:"name"`
-	Settings database.JSONB `json:"settings"`
-	Enabled  bool           `json:"enabled"`
+	Name        string         `json:"name"`
+	LogicalName string         `json:"logical_name"` // Optional; re-derived from Name if empty
+	Settings    database.JSONB `json:"settings"`
+	Enabled     bool           `json:"enabled"`
 }
 
 // CreateSSHKeyRequest is the request body for POST /api/tools/:id/ssh-keys.

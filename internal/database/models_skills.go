@@ -33,13 +33,14 @@ type ToolType struct {
 
 // ToolInstance represents an actual configured instance of a tool type
 type ToolInstance struct {
-	ID         uint      `gorm:"primaryKey" json:"id"`
-	ToolTypeID uint      `gorm:"not null;index" json:"tool_type_id"`
-	Name       string    `gorm:"uniqueIndex;not null" json:"name"` // User-friendly name
-	Settings   JSONB     `gorm:"type:jsonb" json:"settings"`       // Tool-specific settings (URLs, tokens, etc.)
-	Enabled    bool      `gorm:"default:true" json:"enabled"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	ToolTypeID  uint      `gorm:"not null;index" json:"tool_type_id"`
+	Name        string    `gorm:"uniqueIndex;not null" json:"name"`         // User-friendly name
+	LogicalName string    `gorm:"uniqueIndex;size:128" json:"logical_name"` // Machine-friendly logical name for agent referencing (e.g., "prod-ssh")
+	Settings    JSONB     `gorm:"type:jsonb" json:"settings"`               // Tool-specific settings (URLs, tokens, etc.)
+	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 
 	// Relationships
 	ToolType ToolType `gorm:"foreignKey:ToolTypeID" json:"tool_type,omitempty"`

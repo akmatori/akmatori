@@ -81,6 +81,14 @@ func extractInstanceID(args map[string]interface{}) *uint {
 	return nil
 }
 
+// extractLogicalName extracts the optional logical_name from tool arguments.
+func extractLogicalName(args map[string]interface{}) string {
+	if v, ok := args["logical_name"].(string); ok {
+		return v
+	}
+	return ""
+}
+
 // extractServers extracts the optional servers string list from tool arguments.
 func extractServers(args map[string]interface{}) []string {
 	serversArg, ok := args["servers"].([]interface{})
