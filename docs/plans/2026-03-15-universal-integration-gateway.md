@@ -240,16 +240,16 @@ Implement the engine that executes declarative HTTP connector tool calls.
 - Create: `mcp-gateway/internal/tools/httpconnector/executor.go` — generic HTTP executor
 - Create: `mcp-gateway/internal/tools/httpconnector/executor_test.go` — tests
 
-- [ ] Implement `HTTPConnectorExecutor` struct with `Execute(ctx, connectorDef, toolName, args, credentials)` method
-- [ ] Path template resolution: replace `{{param}}` with actual values from args
-- [ ] Query parameter injection for `in: "query"` params
-- [ ] Request body construction for `in: "body"` params (POST/PUT)
-- [ ] Header injection for `in: "header"` params
-- [ ] Auth injection based on connector's auth config: bearer_token, basic_auth, api_key
-- [ ] Apply rate limiting (shared per connector instance) and response caching
-- [ ] Read-only enforcement: reject non-GET requests unless tool has `read_only: false`
-- [ ] Write tests: GET with path params, GET with query params, POST with body, auth injection (bearer, basic, api_key), read-only enforcement, error handling
-- [ ] Run `make test-mcp` — must pass before task 3.3
+- [x] Implement `HTTPConnectorExecutor` struct with `Execute(ctx, connectorDef, toolName, args, credentials)` method
+- [x] Path template resolution: replace `{{param}}` with actual values from args
+- [x] Query parameter injection for `in: "query"` params
+- [x] Request body construction for `in: "body"` params (POST/PUT)
+- [x] Header injection for `in: "header"` params
+- [x] Auth injection based on connector's auth config: bearer_token, basic_auth, api_key
+- [x] Apply rate limiting (shared per connector instance) and response caching
+- [x] Read-only enforcement: reject non-GET requests unless tool has `read_only: false`
+- [x] Write tests: GET with path params, GET with query params, POST with body, auth injection (bearer, basic, api_key), read-only enforcement, error handling
+- [x] Run `make test-mcp` — must pass before task 3.3
 
 ### Task 3.3: Dynamic tool registration for HTTP connectors
 
