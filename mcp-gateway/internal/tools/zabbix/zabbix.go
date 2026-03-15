@@ -127,7 +127,7 @@ func responseCacheKey(method string, params interface{}) string {
 
 // getConfig fetches Zabbix configuration from database with caching.
 // If instanceID is provided, credentials are resolved for that specific tool instance.
-func (t *ZabbixTool) getConfig(ctx context.Context, incidentID string, instanceID *uint) (*ZabbixConfig, error) {
+func (t *ZabbixTool) getConfig(ctx context.Context, incidentID string, instanceID *uint, logicalName ...string) (*ZabbixConfig, error) {
 	cacheKey := configCacheKey(incidentID, "zabbix")
 	if instanceID != nil {
 		cacheKey = fmt.Sprintf("creds:instance:%d", *instanceID)
@@ -141,7 +141,11 @@ func (t *ZabbixTool) getConfig(ctx context.Context, incidentID string, instanceI
 		}
 	}
 
-	creds, err := database.ResolveToolCredentials(ctx, incidentID, "zabbix", instanceID)
+	ln := ""
+	if len(logicalName) > 0 {
+		ln = logicalName[0]
+	}
+	creds, err := database.ResolveToolCredentials(ctx, incidentID, "zabbix", instanceID, ln)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get Zabbix credentials: %w", err)
 	}

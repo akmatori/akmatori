@@ -91,12 +91,13 @@ type ToolInstanceBuilder struct {
 func NewToolInstanceBuilder() *ToolInstanceBuilder {
 	return &ToolInstanceBuilder{
 		instance: database.ToolInstance{
-			ToolTypeID: 1,
-			Name:       "test-tool-instance",
-			Settings:   database.JSONB{"host": "localhost", "port": 8080},
-			Enabled:    true,
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
+			ToolTypeID:  1,
+			Name:        "test-tool-instance",
+			LogicalName: "test-tool-instance",
+			Settings:    database.JSONB{"host": "localhost", "port": 8080},
+			Enabled:     true,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
 		},
 	}
 }
@@ -116,6 +117,12 @@ func (b *ToolInstanceBuilder) WithToolTypeID(id uint) *ToolInstanceBuilder {
 // WithName sets the instance name
 func (b *ToolInstanceBuilder) WithName(name string) *ToolInstanceBuilder {
 	b.instance.Name = name
+	return b
+}
+
+// WithLogicalName sets the logical name
+func (b *ToolInstanceBuilder) WithLogicalName(logicalName string) *ToolInstanceBuilder {
+	b.instance.LogicalName = logicalName
 	return b
 }
 

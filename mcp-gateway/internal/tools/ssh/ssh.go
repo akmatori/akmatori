@@ -107,8 +107,12 @@ type ConnectivityResult struct {
 
 // getConfig fetches SSH configuration from database.
 // If instanceID is provided, it resolves credentials for that specific tool instance.
-func (t *SSHTool) getConfig(ctx context.Context, incidentID string, instanceID *uint) (*SSHConfig, error) {
-	creds, err := database.ResolveToolCredentials(ctx, incidentID, "ssh", instanceID)
+func (t *SSHTool) getConfig(ctx context.Context, incidentID string, instanceID *uint, logicalName ...string) (*SSHConfig, error) {
+	ln := ""
+	if len(logicalName) > 0 {
+		ln = logicalName[0]
+	}
+	creds, err := database.ResolveToolCredentials(ctx, incidentID, "ssh", instanceID, ln)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get SSH credentials: %w", err)
 	}

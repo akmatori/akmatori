@@ -113,7 +113,7 @@ func clampTimeout(timeout int) int {
 }
 
 // getConfig fetches VictoriaMetrics configuration from database with caching.
-func (t *VictoriaMetricsTool) getConfig(ctx context.Context, incidentID string, instanceID *uint) (*VMConfig, error) {
+func (t *VictoriaMetricsTool) getConfig(ctx context.Context, incidentID string, instanceID *uint, logicalName ...string) (*VMConfig, error) {
 	cacheKey := configCacheKey(incidentID)
 	if instanceID != nil {
 		cacheKey = fmt.Sprintf("creds:instance:%d", *instanceID)
@@ -127,7 +127,11 @@ func (t *VictoriaMetricsTool) getConfig(ctx context.Context, incidentID string, 
 		}
 	}
 
-	creds, err := database.ResolveToolCredentials(ctx, incidentID, "victoria_metrics", instanceID)
+	ln := ""
+	if len(logicalName) > 0 {
+		ln = logicalName[0]
+	}
+	creds, err := database.ResolveToolCredentials(ctx, incidentID, "victoria_metrics", instanceID, ln)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get VictoriaMetrics credentials: %w", err)
 	}

@@ -115,6 +115,11 @@ func AutoMigrate() error {
 		slog.Warn("proxy settings migration failed", "err", err)
 	}
 
+	// Backfill logical_name for existing tool instances that don't have one
+	if err := backfillToolInstanceLogicalNames(DB); err != nil {
+		slog.Warn("logical_name backfill failed", "err", err)
+	}
+
 	slog.Info("database migrations completed successfully")
 	return nil
 }
@@ -503,4 +508,53 @@ func migrateProxySettings(db *gorm.DB) error {
 		return nil // Already exists
 	}
 	return nil
+}
+
+// backfillToolInstanceLogicalNames sets logical_name for any tool instances where it's empty.
+// Uses a slugified version of the Name field.
+func backfillToolInstanceLogicalNames(db *gorm.DB) error {
+	var instances []ToolInstance
+	if err := db.Where("logical_name IS NULL OR logical_name = ''").Find(&instances).Error; err != nil {
+		return err
+	}
+	if len(instances) == 0 {
+		return nil
+	}
+	slog.Info("backfilling logical_name for tool instances", "count", len(instances))
+	for _, inst := range instances {
+		logicalName := slugifyForLogicalName(inst.Name)
+		if err := db.Model(&ToolInstance{}).Where("id = ?", inst.ID).Update("logical_name", logicalName).Error; err != nil {
+			slog.Warn("failed to backfill logical_name", "id", inst.ID, "error", err)
+		}
+	}
+	return nil
+}
+
+// slugifyForLogicalName converts a user-friendly name to a machine-friendly logical name.
+func slugifyForLogicalName(name string) string {
+	s := strings.ToLower(name)
+	// Replace non-alphanumeric characters with hyphens
+	result := make([]byte, 0, len(s))
+	prevHyphen := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+			result = append(result, c)
+			prevHyphen = false
+		} else if !prevHyphen && len(result) > 0 {
+			result = append(result, '-')
+			prevHyphen = true
+		}
+	}
+	// Trim trailing hyphen
+	if len(result) > 0 && result[len(result)-1] == '-' {
+		result = result[:len(result)-1]
+	}
+	if len(result) > 128 {
+		result = result[:128]
+		if result[len(result)-1] == '-' {
+			result = result[:len(result)-1]
+		}
+	}
+	return string(result)
 }
