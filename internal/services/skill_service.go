@@ -215,7 +215,8 @@ type ToolAllowlistEntry struct {
 // The allowlist is deduplicated by instance ID (a tool instance assigned to multiple skills
 // only appears once). Returns nil if no tools are assigned.
 func (s *SkillService) GetToolAllowlist() []ToolAllowlistEntry {
-	skills, err := s.ListEnabledSkills()
+	var skills []database.Skill
+	err := s.db.Preload("Tools.ToolType").Where("enabled = ?", true).Find(&skills).Error
 	if err != nil {
 		slog.Error("failed to list enabled skills for allowlist", "error", err)
 		return nil

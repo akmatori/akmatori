@@ -186,8 +186,9 @@ func (e *HTTPConnectorExecutor) Execute(ctx context.Context, connector Connector
 	}
 	defer resp.Body.Close()
 
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
+	// Read response body (limit to 10MB to prevent OOM from large responses)
+	const maxResponseBytes = 10 * 1024 * 1024
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}

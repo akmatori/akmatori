@@ -243,11 +243,13 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 
-		// Find the namespace prefix for this instance
+		// Find the namespace prefix and config for this instance
 		var prefix string
+		var config MCPServerConfig
 		for name, entry := range h.toolMap {
 			if entry.instanceID == instanceID {
 				prefix = name[:len(name)-len(entry.originalName)-1]
+				config = entry.config
 				break
 			}
 		}
@@ -262,12 +264,13 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 			}
 		}
 
-		// Re-add with updated tool list
+		// Re-add with updated tool list, preserving config
 		for _, tool := range tools {
 			namespacedName := prefix + "." + tool.Name
 			h.toolMap[namespacedName] = proxyToolEntry{
 				instanceID:   instanceID,
 				originalName: tool.Name,
+				config:       config,
 			}
 		}
 
@@ -286,7 +289,7 @@ func (h *ProxyHandler) HealthStatus(ctx context.Context) []ConnectionStatus {
 
 // Stop cleans up resources.
 func (h *ProxyHandler) Stop() {
-	// Pool manages its own cleanup via CloseAll
+	h.pool.CloseAll()
 }
 
 // GracefulShutdown stops the schema refresh loop and closes all connections.

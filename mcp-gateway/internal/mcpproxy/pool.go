@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -942,8 +943,9 @@ func connectStdio(ctx context.Context, conn *MCPConnection) error {
 
 	cmd := exec.CommandContext(ctx, conn.config.Command, conn.config.Args...)
 
-	// Set environment variables
+	// Set environment variables (inherit parent env and add custom vars)
 	if len(conn.config.EnvVars) > 0 {
+		cmd.Env = os.Environ()
 		for k, v := range conn.config.EnvVars {
 			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 		}
