@@ -100,12 +100,12 @@ Register discovery tools in pi-mono extension.
 **Files:**
 - Modify: `agent-worker/src/gateway-tools.ts` — add search_tools and get_tool_detail definitions
 
-- [ ] Define `search_tools` tool schema: params `query` (string, required), `tool_type` (string, optional)
-- [ ] Define `get_tool_detail` tool schema: params `tool_name` (string, required)
-- [ ] Implement handlers using GatewayClient's `searchTools()` and `getToolDetail()` methods
-- [ ] Register both tools in agent-runner alongside gateway_call
-- [ ] Write tests for discovery tool handlers
-- [ ] Run `make test-agent` — must pass before task 1.6
+- [x] Define `search_tools` tool schema: params `query` (string, required), `tool_type` (string, optional)
+- [x] Define `get_tool_detail` tool schema: params `tool_name` (string, required)
+- [x] Implement handlers using GatewayClient's `searchTools()` and `getToolDetail()` methods
+- [x] Register both tools in agent-runner alongside gateway_call
+- [x] Write tests for discovery tool handlers
+- [x] Run `make test-agent` — must pass before task 1.6
 
 ### Task 1.6: Implement execute_script tool with isolated runtime
 

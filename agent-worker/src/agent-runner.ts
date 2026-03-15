@@ -27,7 +27,7 @@ import {
   type ToolExecutionTrace,
 } from "./tool-output-formatter.js";
 import { GatewayClient } from "./gateway-client.js";
-import { createGatewayCallTool } from "./gateway-tools.js";
+import { createGatewayCallTool, createSearchToolsTool, createGetToolDetailTool } from "./gateway-tools.js";
 
 // ---------------------------------------------------------------------------
 // Tool calling guidelines attached to the bash tool via promptGuidelines
@@ -291,13 +291,16 @@ export class AgentRunner {
       t.name === "bash" ? bashTool : t,
     );
 
-    // Create gateway client for this session and register gateway_call as a custom tool.
+    // Create gateway client for this session and register gateway tools as custom tools.
     const gatewayClient = new GatewayClient({
       gatewayUrl: this.mcpGatewayUrl,
       incidentId: params.incidentId,
       workDir: params.workDir,
     });
-    const gatewayCallTool = createGatewayCallTool({ client: gatewayClient });
+    const gatewayToolCtx = { client: gatewayClient };
+    const gatewayCallTool = createGatewayCallTool(gatewayToolCtx);
+    const searchToolsTool = createSearchToolsTool(gatewayToolCtx);
+    const getToolDetailTool = createGetToolDetailTool(gatewayToolCtx);
 
     const { session } = await createAgentSession({
       cwd: params.workDir,
@@ -306,7 +309,7 @@ export class AgentRunner {
       model,
       thinkingLevel,
       tools,
-      customTools: [gatewayCallTool],
+      customTools: [gatewayCallTool, searchToolsTool, getToolDetailTool],
       resourceLoader,
       sessionManager,
       settingsManager,
