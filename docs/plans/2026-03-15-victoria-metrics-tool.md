@@ -133,8 +133,8 @@ The tool should check `status == "success"` and return the `data` field contents
 - Modify: `internal/services/tool_service.go`
 - Modify: `internal/services/skill_prompt_service.go`
 
-- [ ] Add `{Name: "victoria_metrics", Description: "VictoriaMetrics time-series database integration"}` to `EnsureToolTypes()` in `tool_service.go`
-- [ ] Add `case "victoria_metrics":` to `generateToolUsageExample()` in `skill_prompt_service.go` with Python usage examples:
+- [x] Add `{Name: "victoria_metrics", Description: "VictoriaMetrics time-series database integration"}` to `EnsureToolTypes()` in `tool_service.go`
+- [x] Add `case "victoria_metrics":` to `generateToolUsageExample()` in `skill_prompt_service.go` with Python usage examples:
   ```
   from victoriametrics import instant_query, range_query, label_values, series, api_request
   result = instant_query("up", tool_instance_id=N)
@@ -143,9 +143,9 @@ The tool should check `status == "success"` and return the `data` field contents
   result = series(match=["up"], tool_instance_id=N)
   result = api_request("/api/v1/status/tsdb", tool_instance_id=N)
   ```
-- [ ] No changes needed to `extractToolDetails()` (VM doesn't expose agent-relevant config, same as Zabbix)
-- [ ] Write/update tests for the new switch cases
-- [ ] Run `make test` - must pass before task 5
+- [x] No changes needed to `extractToolDetails()` (VM doesn't expose agent-relevant config, same as Zabbix)
+- [x] Write/update tests for the new switch cases
+- [x] Run `make test` - must pass before task 5
 
 ### Task 5: MCP Gateway - Integration tests
 

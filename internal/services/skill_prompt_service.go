@@ -289,6 +289,19 @@ result = get_triggers(hostids=["12345"], only_true=True, tool_instance_id=%d)
 result = api_request("host.get", params={"output": ["hostid", "host"]}, tool_instance_id=%d)
 `+"```"+`
 `, id, id, id, id, id, id, id)
+	case "victoria_metrics":
+		return fmt.Sprintf(`
+Usage (via bash tool):
+`+"```python"+`
+from victoriametrics import instant_query, range_query, label_values, series, api_request
+
+result = instant_query("up", tool_instance_id=%d)
+result = range_query("rate(http_requests_total[5m])", start="2h", end="now", step="1m", tool_instance_id=%d)
+result = label_values("__name__", tool_instance_id=%d)
+result = series(match=["up"], tool_instance_id=%d)
+result = api_request("/api/v1/status/tsdb", tool_instance_id=%d)
+`+"```"+`
+`, id, id, id, id, id)
 	default:
 		return fmt.Sprintf("When using %s tools, pass `tool_instance_id: %d` to target this instance.\n", typeName, id)
 	}
