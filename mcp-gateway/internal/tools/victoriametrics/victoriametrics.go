@@ -100,6 +100,14 @@ func extractInstanceID(args map[string]interface{}) *uint {
 	return nil
 }
 
+// clampTimeout ensures timeout is within a safe range (1-300 seconds), defaulting to 30.
+func clampTimeout(timeout int) int {
+	if timeout <= 0 || timeout > 300 {
+		return 30
+	}
+	return timeout
+}
+
 // getConfig fetches VictoriaMetrics configuration from database with caching.
 func (t *VictoriaMetricsTool) getConfig(ctx context.Context, incidentID string, instanceID *uint) (*VMConfig, error) {
 	cacheKey := configCacheKey(incidentID)
@@ -157,9 +165,7 @@ func (t *VictoriaMetricsTool) getConfig(ctx context.Context, incidentID string, 
 	}
 
 	// Clamp timeout to safe range to prevent unlimited or negative timeouts
-	if config.Timeout <= 0 || config.Timeout > 300 {
-		config.Timeout = 30
-	}
+	config.Timeout = clampTimeout(config.Timeout)
 
 	// Fetch proxy settings from database (also cached)
 	proxySettings := t.getCachedProxySettings(ctx)
@@ -256,20 +262,18 @@ func (t *VictoriaMetricsTool) doRequest(ctx context.Context, config *VMConfig, m
 	switch config.AuthMethod {
 	case "bearer_token":
 		if config.BearerToken == "" {
-			t.logger.Printf("Warning: auth_method is 'bearer_token' but no token configured")
-		} else {
-			httpReq.Header.Set("Authorization", "Bearer "+config.BearerToken)
+			return nil, fmt.Errorf("auth_method is 'bearer_token' but no token configured")
 		}
+		httpReq.Header.Set("Authorization", "Bearer "+config.BearerToken)
 	case "basic_auth":
 		if config.Username == "" {
-			t.logger.Printf("Warning: auth_method is 'basic_auth' but no username configured")
-		} else {
-			httpReq.SetBasicAuth(config.Username, config.Password)
+			return nil, fmt.Errorf("auth_method is 'basic_auth' but no username configured")
 		}
+		httpReq.SetBasicAuth(config.Username, config.Password)
 	case "none":
 		// No auth
 	default:
-		t.logger.Printf("Warning: unknown auth_method '%s', sending request without authentication", config.AuthMethod)
+		return nil, fmt.Errorf("unknown auth_method '%s'", config.AuthMethod)
 	}
 
 	resp, err := client.Do(httpReq)
@@ -279,9 +283,12 @@ func (t *VictoriaMetricsTool) doRequest(ctx context.Context, config *VMConfig, m
 	defer resp.Body.Close()
 
 	const maxResponseBytes = 50 * 1024 * 1024 // 50 MB
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if len(respBody) > maxResponseBytes {
+		return nil, fmt.Errorf("response exceeds %d MB limit", maxResponseBytes/(1024*1024))
 	}
 
 	if resp.StatusCode != http.StatusOK {

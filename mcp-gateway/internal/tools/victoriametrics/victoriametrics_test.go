@@ -306,65 +306,28 @@ func TestGetConfig_CacheHitByInstanceID(t *testing.T) {
 
 // --- Timeout clamping tests ---
 
-func TestGetConfig_ClampsZeroTimeout(t *testing.T) {
-	tool := NewVictoriaMetricsTool(testLogger(), nil)
-	defer tool.Stop()
-
-	config := &VMConfig{
-		URL:        "https://vm.example.com",
-		AuthMethod: "none",
-		VerifySSL:  true,
-		Timeout:    0,
+func TestClampTimeout(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   int
+		want    int
+	}{
+		{"zero is clamped to default", 0, 30},
+		{"negative is clamped to default", -5, 30},
+		{"excessive is clamped to default", 999, 30},
+		{"301 is clamped to default", 301, 30},
+		{"valid timeout 1 is kept", 1, 1},
+		{"valid timeout 30 is kept", 30, 30},
+		{"valid timeout 300 is kept", 300, 300},
+		{"valid timeout 60 is kept", 60, 60},
 	}
-	tool.configCache.Set(configCacheKey("incident-1"), config)
-
-	got, err := tool.getConfig(context.Background(), "incident-1", nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	// Zero timeout should be clamped, but since we cached the VMConfig directly
-	// (bypassing the clamping in getConfig), we test via a fresh config parse instead
-	_ = got
-}
-
-func TestGetConfig_ClampsNegativeTimeout(t *testing.T) {
-	tool := NewVictoriaMetricsTool(testLogger(), nil)
-	defer tool.Stop()
-
-	// Simulate what getConfig does with settings
-	config := &VMConfig{
-		URL:        "https://vm.example.com",
-		AuthMethod: "none",
-		VerifySSL:  true,
-		Timeout:    -5,
-	}
-
-	// Timeout clamping happens in getConfig after parsing settings,
-	// not on cached configs. Verify the clamping logic directly.
-	if config.Timeout <= 0 || config.Timeout > 300 {
-		config.Timeout = 30
-	}
-	if config.Timeout != 30 {
-		t.Errorf("expected negative timeout to be clamped to 30, got %d", config.Timeout)
-	}
-}
-
-func TestGetConfig_ClampsExcessiveTimeout(t *testing.T) {
-	tool := NewVictoriaMetricsTool(testLogger(), nil)
-	defer tool.Stop()
-
-	config := &VMConfig{
-		URL:        "https://vm.example.com",
-		AuthMethod: "none",
-		VerifySSL:  true,
-		Timeout:    999,
-	}
-
-	if config.Timeout <= 0 || config.Timeout > 300 {
-		config.Timeout = 30
-	}
-	if config.Timeout != 30 {
-		t.Errorf("expected excessive timeout to be clamped to 30, got %d", config.Timeout)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := clampTimeout(tt.input)
+			if got != tt.want {
+				t.Errorf("clampTimeout(%d) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -462,31 +425,61 @@ func TestDoRequest_NoAuth(t *testing.T) {
 }
 
 func TestDoRequest_BearerTokenEmptyString(t *testing.T) {
-	var receivedAuth string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedAuth = r.Header.Get("Authorization")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"status":"success","data":"ok"}`)
-	}))
-	defer server.Close()
-
 	tool := NewVictoriaMetricsTool(testLogger(), nil)
 	defer tool.Stop()
 
 	config := &VMConfig{
-		URL:        server.URL,
+		URL:        "http://localhost:9999",
 		AuthMethod: "bearer_token",
 		BearerToken: "", // Empty token
 		Timeout:    5,
 	}
 
 	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/api/v1/query", nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected error for empty bearer token")
+	}
+	if !strings.Contains(err.Error(), "no token configured") {
+		t.Errorf("expected error about missing token, got: %v", err)
+	}
+}
+
+func TestDoRequest_BasicAuthEmptyUsername(t *testing.T) {
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &VMConfig{
+		URL:        "http://localhost:9999",
+		AuthMethod: "basic_auth",
+		Username:   "",
+		Timeout:    5,
 	}
 
-	if receivedAuth != "" {
-		t.Errorf("expected no Authorization header when bearer token is empty, got %q", receivedAuth)
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/api/v1/query", nil)
+	if err == nil {
+		t.Fatal("expected error for empty username")
+	}
+	if !strings.Contains(err.Error(), "no username configured") {
+		t.Errorf("expected error about missing username, got: %v", err)
+	}
+}
+
+func TestDoRequest_UnknownAuthMethod(t *testing.T) {
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &VMConfig{
+		URL:        "http://localhost:9999",
+		AuthMethod: "kerberos",
+		Timeout:    5,
+	}
+
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/api/v1/query", nil)
+	if err == nil {
+		t.Fatal("expected error for unknown auth method")
+	}
+	if !strings.Contains(err.Error(), "unknown auth_method") {
+		t.Errorf("expected error about unknown auth method, got: %v", err)
 	}
 }
 
