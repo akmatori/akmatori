@@ -106,7 +106,7 @@ func (s *SkillService) UpdateSkillPrompt(name, prompt string) error {
 }
 
 // generateSkillMd generates a SKILL.md file with YAML frontmatter and user prompt body
-// Tools are called via Python wrappers through the bash tool, with usage examples per tool type
+// Tools are called via gateway_call through the pi-mono extension, with usage examples per tool type
 func (s *SkillService) generateSkillMd(name, description, body string, tools []database.ToolInstance) string {
 	frontmatter := SkillFrontmatter{
 		Name:        name,
@@ -125,7 +125,7 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 	// Transform [[filename]] references to markdown links [filename](assets/filename)
 	resolvedBody := s.contextService.ResolveReferencesToMarkdownLinks(body)
 
-	// List assigned tools with Python usage examples for per-skill routing
+	// List assigned tools with gateway_call usage examples for per-skill routing
 	var toolsSection strings.Builder
 	var enabledTools []database.ToolInstance
 	for _, tool := range tools {
@@ -135,8 +135,14 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 	}
 	if len(enabledTools) > 0 {
 		toolsSection.WriteString("\n\n## Assigned Tools\n")
+		toolsSection.WriteString("\nUse `search_tools` to discover available tools and `get_tool_detail` for full parameter schemas.\n")
+		toolsSection.WriteString("Use `execute_script` to run multi-step scripts with built-in `gateway_call()` for batch operations.\n")
 		for _, tool := range enabledTools {
-			toolsSection.WriteString(fmt.Sprintf("\n### %s (ID: %d, type: %s)\n", tool.Name, tool.ID, tool.ToolType.Name))
+			logicalName := tool.LogicalName
+			if logicalName == "" {
+				logicalName = tool.Name
+			}
+			toolsSection.WriteString(fmt.Sprintf("\n### %s (logical_name: \"%s\", type: %s)\n", tool.Name, logicalName, tool.ToolType.Name))
 			if details := extractToolDetails(tool); details != "" {
 				toolsSection.WriteString(details)
 			}
@@ -211,10 +217,13 @@ func sshAllHostsAllowWrite(tool database.ToolInstance) bool {
 	return true
 }
 
-// generateToolUsageExample creates Python code block showing how to call the tool
+// generateToolUsageExample creates usage examples showing how to call the tool via gateway_call
 func generateToolUsageExample(tool database.ToolInstance) string {
 	typeName := tool.ToolType.Name
-	id := tool.ID
+	logicalName := tool.LogicalName
+	if logicalName == "" {
+		logicalName = tool.Name
+	}
 
 	switch typeName {
 	case "ssh":
@@ -227,9 +236,9 @@ func generateToolUsageExample(tool database.ToolInstance) string {
 		// the tool is misconfigured — tell the agent explicitly.
 		if !hasConfiguredHosts && !adhocEnabled {
 			return fmt.Sprintf(`
-**SSH tool "%s" (instance %d) is not configured** — no hosts are defined and ad-hoc connections are disabled.
+**SSH tool "%s" is not configured** — no hosts are defined and ad-hoc connections are disabled.
 Ask the operator to add SSH hosts or enable ad-hoc connections in the tool settings before this tool can be used.
-`, tool.Name, id)
+`, tool.Name)
 		}
 
 		// Build read-only warnings separately for configured hosts and ad-hoc
@@ -252,58 +261,53 @@ For CPU core count use ` + "`nproc`" + ` or ` + "`lscpu`" + ` (not /proc/cpuinfo
 		var configuredExamples string
 		if hasConfiguredHosts {
 			configuredExamples = fmt.Sprintf(`
-result = execute_command("uptime", tool_instance_id=%d)
-result = execute_command("df -h", servers=["hostname"], tool_instance_id=%d)
-result = test_connectivity(tool_instance_id=%d)
-result = get_server_info(tool_instance_id=%d)`, id, id, id, id)
+gateway_call("ssh.execute_command", {"command": "uptime"}, "%s")
+gateway_call("ssh.execute_command", {"command": "df -h", "servers": ["hostname"]}, "%s")
+gateway_call("ssh.test_connectivity", {}, "%s")
+gateway_call("ssh.get_server_info", {}, "%s")`, logicalName, logicalName, logicalName, logicalName)
 		}
 
 		var adhocExample string
 		if adhocEnabled {
 			adhocExample = fmt.Sprintf(`
 # Ad-hoc: connect to any server by hostname/FQDN/IP
-result = execute_command("uptime", servers=["<hostname-or-ip>"], tool_instance_id=%d)
-result = test_connectivity(servers=["<server1>", "<server2>"], tool_instance_id=%d)
-result = get_server_info(servers=["<hostname-or-ip>"], tool_instance_id=%d)`, id, id, id)
+gateway_call("ssh.execute_command", {"command": "uptime", "servers": ["<hostname-or-ip>"]}, "%s")
+gateway_call("ssh.test_connectivity", {"servers": ["<server1>", "<server2>"]}, "%s")
+gateway_call("ssh.get_server_info", {"servers": ["<hostname-or-ip>"]}, "%s")`, logicalName, logicalName, logicalName)
 		}
 
 		return fmt.Sprintf(`
-Usage (via bash tool):
-`+"```python"+`
-from ssh import execute_command, test_connectivity, get_server_info
+Usage (via gateway_call):
+`+"```"+`
 %s%s
 `+"```"+`
 %s`, configuredExamples, adhocExample, readOnlyNote)
 	case "zabbix":
 		return fmt.Sprintf(`
-Usage (via bash tool):
-`+"```python"+`
-from zabbix import get_hosts, get_problems, get_history, get_items, get_items_batch, get_triggers, api_request
-
-result = get_hosts(tool_instance_id=%d)
-result = get_problems(severity_min=3, tool_instance_id=%d)
-result = get_items_batch(searches=["cpu", "memory"], tool_instance_id=%d)
-result = get_history(itemids=["67890"], limit=10, tool_instance_id=%d)
-result = get_items(hostids=["12345"], search={"key_": "cpu"}, tool_instance_id=%d)
-result = get_triggers(hostids=["12345"], only_true=True, tool_instance_id=%d)
-result = api_request("host.get", params={"output": ["hostid", "host"]}, tool_instance_id=%d)
+Usage (via gateway_call):
 `+"```"+`
-`, id, id, id, id, id, id, id)
+gateway_call("zabbix.get_hosts", {}, "%s")
+gateway_call("zabbix.get_problems", {"severity_min": 3}, "%s")
+gateway_call("zabbix.get_items_batch", {"searches": ["cpu", "memory"]}, "%s")
+gateway_call("zabbix.get_history", {"itemids": ["67890"], "limit": 10}, "%s")
+gateway_call("zabbix.get_items", {"hostids": ["12345"], "search": {"key_": "cpu"}}, "%s")
+gateway_call("zabbix.get_triggers", {"hostids": ["12345"], "only_true": true}, "%s")
+gateway_call("zabbix.api_request", {"method": "host.get", "params": {"output": ["hostid", "host"]}}, "%s")
+`+"```"+`
+`, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
 	case "victoria_metrics":
 		return fmt.Sprintf(`
-Usage (via bash tool):
-`+"```python"+`
-from victoriametrics import instant_query, range_query, label_values, series, api_request
-
-result = instant_query("up", tool_instance_id=%d)
-result = range_query("rate(http_requests_total[5m])", start="2h", end="now", step="1m", tool_instance_id=%d)
-result = label_values("__name__", tool_instance_id=%d)
-result = series(match="up", tool_instance_id=%d)
-result = api_request("/api/v1/status/tsdb", tool_instance_id=%d)
+Usage (via gateway_call):
 `+"```"+`
-`, id, id, id, id, id)
+gateway_call("victoriametrics.instant_query", {"query": "up"}, "%s")
+gateway_call("victoriametrics.range_query", {"query": "rate(http_requests_total[5m])", "start": "2h", "end": "now", "step": "1m"}, "%s")
+gateway_call("victoriametrics.label_values", {"label": "__name__"}, "%s")
+gateway_call("victoriametrics.series", {"match": "up"}, "%s")
+gateway_call("victoriametrics.api_request", {"path": "/api/v1/status/tsdb"}, "%s")
+`+"```"+`
+`, logicalName, logicalName, logicalName, logicalName, logicalName)
 	default:
-		return fmt.Sprintf("When using %s tools, pass `tool_instance_id: %d` to target this instance.\n", typeName, id)
+		return fmt.Sprintf("Use `gateway_call(\"%s.<tool_method>\", {<args>}, \"%s\")` to call this tool's methods.\n", typeName, logicalName)
 	}
 }
 

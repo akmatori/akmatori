@@ -134,13 +134,13 @@ Update the skill prompt service to generate tool usage instructions for the new 
 **Files:**
 - Modify: `internal/services/skill_prompt_service.go` — replace Python examples with gateway_call examples using logical names
 
-- [ ] Update `generateToolUsageExample()` to show `gateway_call` usage instead of Python import patterns
-- [ ] Include logical name in examples: `gateway_call("ssh.execute_command", {command: "uptime"}, "prod-ssh")`
-- [ ] Show `search_tools` and `get_tool_detail` usage in skill prompt
-- [ ] Show `execute_script` usage example for batch operations
-- [ ] Update tool assignment section to show logical names alongside IDs
-- [ ] Write tests for updated SKILL.md generation
-- [ ] Run `make test` — must pass before task 1.8
+- [x] Update `generateToolUsageExample()` to show `gateway_call` usage instead of Python import patterns
+- [x] Include logical name in examples: `gateway_call("ssh.execute_command", {command: "uptime"}, "prod-ssh")`
+- [x] Show `search_tools` and `get_tool_detail` usage in skill prompt
+- [x] Show `execute_script` usage example for batch operations
+- [x] Update tool assignment section to show logical names alongside IDs
+- [x] Write tests for updated SKILL.md generation
+- [x] Run `make test` — must pass before task 1.8
 
 ### Task 1.8: Remove Python wrappers
 
