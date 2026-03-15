@@ -12,7 +12,7 @@ import (
 
 // TestAPIHandler_SetupRoutes_DoesNotPanic verifies route setup doesn't panic
 func TestAPIHandler_SetupRoutes_DoesNotPanic(t *testing.T) {
-	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	mux := http.NewServeMux()
 	
 	// Should not panic even with nil services
@@ -27,7 +27,7 @@ func TestAPIHandler_SetupRoutes_DoesNotPanic(t *testing.T) {
 // TestAPIHandler_MethodNotAllowed tests method validation on endpoints
 // Note: Only testing endpoints that validate methods before accessing DB
 func TestAPIHandler_MethodNotAllowed(t *testing.T) {
-	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	tests := []struct {
 		name    string
@@ -278,7 +278,7 @@ func TestModelConfigs_Validity(t *testing.T) {
 
 // TestAPIHandler_MaskSSHKeys tests SSH key masking
 func TestAPIHandler_MaskSSHKeys(t *testing.T) {
-	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -360,7 +360,7 @@ func TestAPIHandler_MaskSSHKeys(t *testing.T) {
 
 // TestAPIHandler_AlertChannelReloader tests reloader callback
 func TestAPIHandler_AlertChannelReloader(t *testing.T) {
-	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	// Initially nil
 	if h.alertChannelReloader != nil {
@@ -383,13 +383,13 @@ func TestAPIHandler_AlertChannelReloader(t *testing.T) {
 	// Note: This is a bit racy, but we're just checking it doesn't panic
 
 	// Test with nil reloader (should not panic)
-	h2 := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h2 := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	h2.reloadAlertChannels() // Should not panic
 }
 
 // TestAPIHandler_HTTPContext demonstrates using testhelpers.HTTPTestContext
 func TestAPIHandler_HTTPContext(t *testing.T) {
-	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	// Only test handlers that check method before accessing DB
 	t.Run("skills sync invalid method", func(t *testing.T) {

@@ -231,14 +231,14 @@ func TestIsValidURL(t *testing.T) {
 
 func TestNewAPIHandler(t *testing.T) {
 	// Test with nil dependencies
-	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	if h == nil {
 		t.Fatal("NewAPIHandler returned nil")
 	}
 }
 
 func TestAPIHandler_SetAlertChannelReloader(t *testing.T) {
-	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	reloader := func() {
 		// Reloader function
@@ -253,13 +253,13 @@ func TestAPIHandler_SetAlertChannelReloader(t *testing.T) {
 
 func TestAPIHandler_reloadAlertChannels(t *testing.T) {
 	t.Run("with nil reloader", func(t *testing.T) {
-		h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 		// Should not panic
 		h.reloadAlertChannels()
 	})
 
 	t.Run("with reloader set", func(t *testing.T) {
-		h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 		
 		h.SetAlertChannelReloader(func() {
 			// Reloader called in goroutine

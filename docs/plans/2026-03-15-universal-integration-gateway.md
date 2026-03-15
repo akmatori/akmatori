@@ -317,12 +317,12 @@ Database model and API for registering external MCP servers.
 - Modify: `internal/database/models_skills.go` — add `MCPServerConfig` model or extend ToolType
 - Modify: `internal/services/tool_service.go` — MCP server registration CRUD
 
-- [ ] Define MCP server config: `transport` (sse/stdio), `url` or `command` + `args`, `namespace_prefix` (e.g., "ext.github"), `auth_config` (JSONB), `env_vars` (JSONB for stdio)
-- [ ] Store as a ToolType with `backend: "mcp_proxy"` discriminator, or as separate MCPServerConfig model
-- [ ] ToolInstance of MCP type stores connection-specific settings (URL, API keys)
-- [ ] CRUD endpoints at `/api/mcp-servers` (admin-only)
-- [ ] Write tests for model and CRUD
-- [ ] Run `make test` — must pass before task 4.3
+- [x] Define MCP server config: `transport` (sse/stdio), `url` or `command` + `args`, `namespace_prefix` (e.g., "ext.github"), `auth_config` (JSONB), `env_vars` (JSONB for stdio)
+- [x] Store as a ToolType with `backend: "mcp_proxy"` discriminator, or as separate MCPServerConfig model
+- [x] ToolInstance of MCP type stores connection-specific settings (URL, API keys)
+- [x] CRUD endpoints at `/api/mcp-servers` (admin-only)
+- [x] Write tests for model and CRUD
+- [x] Run `make test` — must pass before task 4.3
 
 ### Task 4.3: Implement MCP proxy handler in gateway
 

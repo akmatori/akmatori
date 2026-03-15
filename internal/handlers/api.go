@@ -21,12 +21,13 @@ type APIHandler struct {
 	slackManager         *slackutil.Manager
 	runbookService       services.RunbookManager
 	httpConnectorService services.HTTPConnectorManager
+	mcpServerService     services.MCPServerManager
 	alertChannelReloader func() // called after alert source create/update/delete to reload Slack channel mappings
 	gatewayReloader      func() error // called after HTTP connector CRUD to reload gateway tools
 }
 
 // NewAPIHandler creates a new API handler
-func NewAPIHandler(skillService services.SkillIncidentManager, toolService services.ToolManager, contextService services.ContextManager, alertService services.AlertManager, codexExecutor *executor.Executor, agentWSHandler *AgentWSHandler, slackManager *slackutil.Manager, runbookService services.RunbookManager, httpConnectorService services.HTTPConnectorManager) *APIHandler {
+func NewAPIHandler(skillService services.SkillIncidentManager, toolService services.ToolManager, contextService services.ContextManager, alertService services.AlertManager, codexExecutor *executor.Executor, agentWSHandler *AgentWSHandler, slackManager *slackutil.Manager, runbookService services.RunbookManager, httpConnectorService services.HTTPConnectorManager, mcpServerService services.MCPServerManager) *APIHandler {
 	return &APIHandler{
 		skillService:         skillService,
 		toolService:          toolService,
@@ -37,6 +38,7 @@ func NewAPIHandler(skillService services.SkillIncidentManager, toolService servi
 		slackManager:         slackManager,
 		runbookService:       runbookService,
 		httpConnectorService: httpConnectorService,
+		mcpServerService:     mcpServerService,
 	}
 }
 
@@ -109,6 +111,10 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	// HTTP connectors
 	mux.HandleFunc("/api/http-connectors", h.handleHTTPConnectors)
 	mux.HandleFunc("/api/http-connectors/", h.handleHTTPConnectorByID)
+
+	// MCP servers (admin-only)
+	mux.HandleFunc("/api/mcp-servers", h.handleMCPServers)
+	mux.HandleFunc("/api/mcp-servers/", h.handleMCPServerByID)
 
 	// Alert source types and instances
 	mux.HandleFunc("/api/alert-source-types", h.handleAlertSourceTypes)

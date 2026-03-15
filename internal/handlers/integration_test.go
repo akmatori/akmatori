@@ -45,7 +45,7 @@ func TestAlertHandler_GetAdapterCount(t *testing.T) {
 
 // TestAPIHandler_Creation tests APIHandler can be created with nil dependencies
 func TestAPIHandler_Creation(t *testing.T) {
-	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	if h == nil {
 		t.Fatal("NewAPIHandler returned nil")
 	}
