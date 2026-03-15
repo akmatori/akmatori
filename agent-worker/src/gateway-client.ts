@@ -31,15 +31,15 @@ export interface SearchToolsResult {
   tools: Array<{
     name: string;
     description: string;
-    instances: Array<{ id: number; logical_name: string }>;
+    instances: string[];
   }>;
 }
 
 export interface ToolDetailResult {
   name: string;
   description: string;
-  params: Record<string, unknown>;
-  instances: Array<{ id: number; logical_name: string }>;
+  input_schema: Record<string, unknown>;
+  instances: Array<{ id: number; logical_name: string; name: string }>;
 }
 
 export interface CallResult {

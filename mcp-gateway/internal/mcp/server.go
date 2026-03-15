@@ -115,7 +115,9 @@ func (s *Server) HandleHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.authorizer != nil && incidentID != "" {
 		if allowlistHeader := r.Header.Get("X-Tool-Allowlist"); allowlistHeader != "" {
 			var entries []auth.AllowlistEntry
-			if err := json.Unmarshal([]byte(allowlistHeader), &entries); err == nil {
+			if err := json.Unmarshal([]byte(allowlistHeader), &entries); err != nil {
+				s.logger.Printf("WARN: malformed X-Tool-Allowlist header for incident %s: %v", incidentID, err)
+			} else {
 				s.authorizer.SetAllowlist(incidentID, entries)
 			}
 		}
@@ -151,7 +153,9 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request, incidentID st
 	if s.authorizer != nil && incidentID != "" {
 		if allowlistHeader := r.Header.Get("X-Tool-Allowlist"); allowlistHeader != "" {
 			var entries []auth.AllowlistEntry
-			if err := json.Unmarshal([]byte(allowlistHeader), &entries); err == nil {
+			if err := json.Unmarshal([]byte(allowlistHeader), &entries); err != nil {
+				s.logger.Printf("WARN: malformed X-Tool-Allowlist header for incident %s: %v", incidentID, err)
+			} else {
 				s.authorizer.SetAllowlist(incidentID, entries)
 			}
 		}
