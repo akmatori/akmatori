@@ -20,7 +20,7 @@ import (
 
 // TestAPIHandler_RequestValidation tests request validation across endpoints
 func TestAPIHandler_RequestValidation(t *testing.T) {
-	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	tests := []struct {
 		name           string
@@ -242,7 +242,7 @@ func TestAPIHandler_ConcurrentRouteSetup(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 			mux := http.NewServeMux()
 			h.SetupRoutes(mux)
 		}()
@@ -251,7 +251,7 @@ func TestAPIHandler_ConcurrentRouteSetup(t *testing.T) {
 }
 
 func TestAPIHandler_ConcurrentAlertChannelReloader(t *testing.T) {
-	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	
 	reloadCount := 0
 	var mu sync.Mutex
@@ -279,7 +279,7 @@ func TestAPIHandler_ConcurrentAlertChannelReloader(t *testing.T) {
 // ========================================
 
 func TestHTTPTestContext_Chaining(t *testing.T) {
-	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	t.Run("method chaining works correctly", func(t *testing.T) {
 		ctx := testhelpers.NewHTTPTestContext(t, http.MethodGet, "/api/skills/sync", nil)

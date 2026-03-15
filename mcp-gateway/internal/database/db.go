@@ -319,3 +319,42 @@ func GetProxySettings(ctx context.Context) (*ProxySettings, error) {
 	}
 	return &settings, nil
 }
+
+// MCPServerConfig represents a registered external MCP server for proxying.
+type MCPServerConfig struct {
+	ID              uint      `gorm:"primaryKey" json:"id"`
+	Name            string    `gorm:"uniqueIndex;size:128;not null" json:"name"`
+	Transport       string    `gorm:"type:varchar(16);not null" json:"transport"`
+	URL             string    `gorm:"size:512" json:"url,omitempty"`
+	Command         string    `gorm:"size:512" json:"command,omitempty"`
+	Args            JSONB     `gorm:"type:jsonb" json:"args,omitempty"`
+	EnvVars         JSONB     `gorm:"type:jsonb" json:"env_vars,omitempty"`
+	NamespacePrefix string    `gorm:"size:128;not null" json:"namespace_prefix"`
+	AuthConfig      JSONB     `gorm:"type:jsonb" json:"auth_config,omitempty"`
+	Enabled         bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+func (MCPServerConfig) TableName() string {
+	return "mcp_server_configs"
+}
+
+// GetAllEnabledMCPServerConfigs returns all enabled MCP server configurations.
+func GetAllEnabledMCPServerConfigs(ctx context.Context) ([]MCPServerConfig, error) {
+	var configs []MCPServerConfig
+	err := DB.WithContext(ctx).
+		Where("enabled = ?", true).
+		Find(&configs).Error
+	return configs, err
+}
+
+// GetMCPServerConfigByID returns an MCP server config by ID.
+func GetMCPServerConfigByID(ctx context.Context, id uint) (*MCPServerConfig, error) {
+	var config MCPServerConfig
+	err := DB.WithContext(ctx).First(&config, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &config, nil
+}

@@ -119,6 +119,15 @@ type HTTPConnectorManager interface {
 	ListHTTPConnectors() ([]database.HTTPConnector, error)
 }
 
+// MCPServerManager defines the interface for MCP server configuration CRUD operations.
+type MCPServerManager interface {
+	CreateMCPServer(config *database.MCPServerConfig) (*database.MCPServerConfig, error)
+	GetMCPServer(id uint) (*database.MCPServerConfig, error)
+	UpdateMCPServer(id uint, updates map[string]interface{}) (*database.MCPServerConfig, error)
+	DeleteMCPServer(id uint) error
+	ListMCPServers() ([]database.MCPServerConfig, error)
+}
+
 // AggregationManager defines the interface for incident aggregation/correlation.
 type AggregationManager interface {
 	GetOpenIncidents() ([]database.Incident, error)

@@ -303,3 +303,52 @@ func (c *HTTPConnector) GetAuthConfig() (*HTTPConnectorAuthConfig, error) {
 
 	return config, nil
 }
+
+// MCPServerTransport represents the transport type for an MCP server connection
+type MCPServerTransport string
+
+const (
+	MCPServerTransportSSE   MCPServerTransport = "sse"
+	MCPServerTransportStdio MCPServerTransport = "stdio"
+)
+
+// MCPServerConfig represents a registered external MCP server that can be proxied through the gateway.
+// Each config defines how to connect to an external MCP server and how its tools are namespaced.
+type MCPServerConfig struct {
+	ID              uint               `gorm:"primaryKey" json:"id"`
+	Name            string             `gorm:"uniqueIndex;size:128;not null" json:"name"`              // User-friendly name
+	Transport       MCPServerTransport `gorm:"type:varchar(16);not null" json:"transport"`              // "sse" or "stdio"
+	URL             string             `gorm:"size:512" json:"url,omitempty"`                           // For SSE transport
+	Command         string             `gorm:"size:512" json:"command,omitempty"`                       // For stdio transport
+	Args            JSONB              `gorm:"type:jsonb" json:"args,omitempty"`                        // For stdio transport: ["arg1", "arg2"]
+	EnvVars         JSONB              `gorm:"type:jsonb" json:"env_vars,omitempty"`                    // For stdio transport: {"KEY": "value"}
+	NamespacePrefix string             `gorm:"size:128;not null" json:"namespace_prefix"`               // e.g., "ext.github"
+	AuthConfig      JSONB              `gorm:"type:jsonb" json:"auth_config,omitempty"`                 // Auth to inject into connections
+	Enabled         bool               `gorm:"default:true" json:"enabled"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+}
+
+func (MCPServerConfig) TableName() string {
+	return "mcp_server_configs"
+}
+
+// Validate checks that the MCPServerConfig has valid configuration
+func (c *MCPServerConfig) Validate() error {
+	if c.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if c.NamespacePrefix == "" {
+		return fmt.Errorf("namespace_prefix is required")
+	}
+	if c.Transport != MCPServerTransportSSE && c.Transport != MCPServerTransportStdio {
+		return fmt.Errorf("transport must be 'sse' or 'stdio'")
+	}
+	if c.Transport == MCPServerTransportSSE && c.URL == "" {
+		return fmt.Errorf("url is required for SSE transport")
+	}
+	if c.Transport == MCPServerTransportStdio && c.Command == "" {
+		return fmt.Errorf("command is required for stdio transport")
+	}
+	return nil
+}
