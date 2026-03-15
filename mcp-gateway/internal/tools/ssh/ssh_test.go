@@ -372,3 +372,243 @@ func TestConnectivityResult_WithError(t *testing.T) {
 		t.Error("Expected error message in JSON")
 	}
 }
+
+// --- resolveTargetHosts tests ---
+
+func newTestTool() *SSHTool {
+	logger := log.New(os.Stdout, "test: ", log.LstdFlags)
+	return NewSSHTool(logger)
+}
+
+func baseConfig() *SSHConfig {
+	return &SSHConfig{
+		Hosts: []SSHHostConfig{
+			{Hostname: "web-1", Address: "10.0.0.1", User: "root", Port: 22},
+			{Hostname: "db-1", Address: "10.0.0.2", User: "admin", Port: 2222},
+		},
+		CommandTimeout:    120,
+		ConnectionTimeout: 30,
+		AdhocDefaultUser:  "root",
+		AdhocDefaultPort:  22,
+	}
+}
+
+func TestResolveTargetHosts_EmptyServersReturnsAllConfigured(t *testing.T) {
+	tool := newTestTool()
+	config := baseConfig()
+
+	hosts, err := tool.resolveTargetHosts(nil, config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(hosts) != 2 {
+		t.Fatalf("expected 2 hosts, got %d", len(hosts))
+	}
+	if hosts[0].Hostname != "web-1" || hosts[1].Hostname != "db-1" {
+		t.Errorf("expected web-1 and db-1, got %s and %s", hosts[0].Hostname, hosts[1].Hostname)
+	}
+}
+
+func TestResolveTargetHosts_EmptyServersNoHostsError(t *testing.T) {
+	tool := newTestTool()
+	config := &SSHConfig{AdhocDefaultUser: "root", AdhocDefaultPort: 22}
+
+	_, err := tool.resolveTargetHosts(nil, config)
+	if err == nil {
+		t.Fatal("expected error for empty servers and no configured hosts")
+	}
+	if !strings.Contains(err.Error(), "no servers specified") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveTargetHosts_ConfiguredHostByHostname(t *testing.T) {
+	tool := newTestTool()
+	config := baseConfig()
+
+	hosts, err := tool.resolveTargetHosts([]string{"web-1"}, config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	}
+	if hosts[0].Address != "10.0.0.1" {
+		t.Errorf("expected address 10.0.0.1, got %s", hosts[0].Address)
+	}
+	if hosts[0].User != "root" {
+		t.Errorf("expected user root, got %s", hosts[0].User)
+	}
+}
+
+func TestResolveTargetHosts_ConfiguredHostByAddress(t *testing.T) {
+	tool := newTestTool()
+	config := baseConfig()
+
+	hosts, err := tool.resolveTargetHosts([]string{"10.0.0.2"}, config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	}
+	if hosts[0].Hostname != "db-1" {
+		t.Errorf("expected hostname db-1, got %s", hosts[0].Hostname)
+	}
+}
+
+func TestResolveTargetHosts_UnconfiguredServerAdhocDisabled(t *testing.T) {
+	tool := newTestTool()
+	config := baseConfig()
+	config.AllowAdhocConnections = false
+
+	_, err := tool.resolveTargetHosts([]string{"unknown-server.example.com"}, config)
+	if err == nil {
+		t.Fatal("expected error for unconfigured server with ad-hoc disabled")
+	}
+	if !strings.Contains(err.Error(), "server not configured") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveTargetHosts_UnconfiguredServerAdhocEnabled(t *testing.T) {
+	tool := newTestTool()
+	config := baseConfig()
+	config.AllowAdhocConnections = true
+	config.AdhocDefaultUser = "deploy"
+	config.AdhocDefaultPort = 2200
+	config.AdhocAllowWriteCommands = false
+
+	hosts, err := tool.resolveTargetHosts([]string{"new-server.example.com"}, config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	}
+	h := hosts[0]
+	if h.Hostname != "new-server.example.com" {
+		t.Errorf("expected hostname new-server.example.com, got %s", h.Hostname)
+	}
+	if h.Address != "new-server.example.com" {
+		t.Errorf("expected address = hostname for ad-hoc, got %s", h.Address)
+	}
+	if h.User != "deploy" {
+		t.Errorf("expected user deploy, got %s", h.User)
+	}
+	if h.Port != 2200 {
+		t.Errorf("expected port 2200, got %d", h.Port)
+	}
+	if h.AllowWriteCommands {
+		t.Error("expected ad-hoc host to be read-only")
+	}
+}
+
+func TestResolveTargetHosts_AdhocWriteCommandsEnabled(t *testing.T) {
+	tool := newTestTool()
+	config := &SSHConfig{
+		AllowAdhocConnections:   true,
+		AdhocDefaultUser:        "root",
+		AdhocDefaultPort:        22,
+		AdhocAllowWriteCommands: true,
+	}
+
+	hosts, err := tool.resolveTargetHosts([]string{"server.example.com"}, config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hosts[0].AllowWriteCommands {
+		t.Error("expected ad-hoc host to allow write commands")
+	}
+}
+
+func TestResolveTargetHosts_MixedConfiguredAndAdhoc(t *testing.T) {
+	tool := newTestTool()
+	config := baseConfig()
+	config.AllowAdhocConnections = true
+	config.AdhocDefaultUser = "ops"
+	config.AdhocDefaultPort = 22
+
+	hosts, err := tool.resolveTargetHosts([]string{"web-1", "new-server.example.com"}, config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(hosts) != 2 {
+		t.Fatalf("expected 2 hosts, got %d", len(hosts))
+	}
+
+	// First should be the configured host with its original settings
+	if hosts[0].Address != "10.0.0.1" {
+		t.Errorf("expected configured host address 10.0.0.1, got %s", hosts[0].Address)
+	}
+	if hosts[0].User != "root" {
+		t.Errorf("expected configured host user root, got %s", hosts[0].User)
+	}
+
+	// Second should be ad-hoc with defaults
+	if hosts[1].Address != "new-server.example.com" {
+		t.Errorf("expected ad-hoc address new-server.example.com, got %s", hosts[1].Address)
+	}
+	if hosts[1].User != "ops" {
+		t.Errorf("expected ad-hoc user ops, got %s", hosts[1].User)
+	}
+}
+
+func TestResolveTargetHosts_ConfiguredTakesPrecedenceOverAdhoc(t *testing.T) {
+	tool := newTestTool()
+	config := baseConfig()
+	config.AllowAdhocConnections = true
+	config.AdhocDefaultUser = "adhoc-user"
+	config.AdhocDefaultPort = 9999
+
+	// Request a server that IS configured - should use configured settings, not ad-hoc defaults
+	hosts, err := tool.resolveTargetHosts([]string{"web-1"}, config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hosts[0].User != "root" {
+		t.Errorf("expected configured user root (not ad-hoc default), got %s", hosts[0].User)
+	}
+	if hosts[0].Port != 22 {
+		t.Errorf("expected configured port 22 (not ad-hoc default), got %d", hosts[0].Port)
+	}
+	if hosts[0].Address != "10.0.0.1" {
+		t.Errorf("expected configured address 10.0.0.1, got %s", hosts[0].Address)
+	}
+}
+
+func TestResolveTargetHosts_EmptyServersListReturnsAllConfigured(t *testing.T) {
+	tool := newTestTool()
+	config := baseConfig()
+
+	// Explicit empty slice (vs nil)
+	hosts, err := tool.resolveTargetHosts([]string{}, config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(hosts) != 2 {
+		t.Fatalf("expected 2 hosts, got %d", len(hosts))
+	}
+}
+
+func TestResolveTargetHosts_AdhocNoConfiguredHosts(t *testing.T) {
+	tool := newTestTool()
+	config := &SSHConfig{
+		AllowAdhocConnections: true,
+		AdhocDefaultUser:      "root",
+		AdhocDefaultPort:      22,
+	}
+
+	hosts, err := tool.resolveTargetHosts([]string{"server1.example.com", "server2.example.com"}, config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(hosts) != 2 {
+		t.Fatalf("expected 2 hosts, got %d", len(hosts))
+	}
+	for _, h := range hosts {
+		if h.Hostname != h.Address {
+			t.Errorf("expected hostname == address for ad-hoc, got %s != %s", h.Hostname, h.Address)
+		}
+	}
+}

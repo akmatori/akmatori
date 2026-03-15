@@ -49,11 +49,11 @@ Currently, the SSH tool can only connect to servers pre-configured in `ssh_hosts
 
 **File: `mcp-gateway/internal/tools/ssh/ssh_test.go`**
 
-- [ ] Add tests for `resolveTargetHosts()` (ad-hoc enabled/disabled, configured precedence, mixed servers, write commands, empty servers)
+- [x] Add tests for `resolveTargetHosts()` (ad-hoc enabled/disabled, configured precedence, mixed servers, write commands, empty servers)
 
 **File: `internal/services/skill_prompt_service_test.go`** (if exists)
 
-- [ ] Add tests for ad-hoc note in `extractToolDetails` and ad-hoc example in `generateToolUsageExample`
+- [x] Add tests for ad-hoc note in `extractToolDetails` and ad-hoc example in `generateToolUsageExample`
 
 ## Key Design Decisions
 
