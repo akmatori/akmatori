@@ -46,9 +46,9 @@ func TestSlugifyLogicalName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := slugifyLogicalName(tt.input)
+			got := database.SlugifyLogicalName(tt.input)
 			if got != tt.expected {
-				t.Errorf("slugifyLogicalName(%q) = %q, want %q", tt.input, got, tt.expected)
+				t.Errorf("database.SlugifyLogicalName(%q) = %q, want %q", tt.input, got, tt.expected)
 			}
 		})
 	}

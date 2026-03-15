@@ -524,7 +524,7 @@ func backfillToolInstanceLogicalNames(db *gorm.DB) error {
 	}
 	slog.Info("backfilling logical_name for tool instances", "count", len(instances))
 	for _, inst := range instances {
-		logicalName := slugifyForLogicalName(inst.Name)
+		logicalName := SlugifyLogicalName(inst.Name)
 		if err := db.Model(&ToolInstance{}).Where("id = ?", inst.ID).Update("logical_name", logicalName).Error; err != nil {
 			slog.Warn("failed to backfill logical_name", "id", inst.ID, "error", err)
 		}
@@ -532,8 +532,9 @@ func backfillToolInstanceLogicalNames(db *gorm.DB) error {
 	return nil
 }
 
-// slugifyForLogicalName converts a user-friendly name to a machine-friendly logical name.
-func slugifyForLogicalName(name string) string {
+// SlugifyLogicalName converts a user-friendly name to a machine-friendly logical name.
+// e.g., "Production Zabbix" -> "production-zabbix"
+func SlugifyLogicalName(name string) string {
 	s := strings.ToLower(name)
 	// Replace non-alphanumeric characters with hyphens
 	result := make([]byte, 0, len(s))

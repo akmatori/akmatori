@@ -2,28 +2,12 @@ package services
 
 import (
 	"fmt"
-	"regexp"
-	"strings"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
-
-// slugifyLogicalName converts a user-friendly name to a machine-friendly logical name.
-// e.g., "Production Zabbix" -> "production-zabbix"
-func slugifyLogicalName(name string) string {
-	s := strings.ToLower(name)
-	re := regexp.MustCompile(`[^a-z0-9]+`)
-	s = re.ReplaceAllString(s, "-")
-	s = strings.Trim(s, "-")
-	if len(s) > 128 {
-		s = s[:128]
-		s = strings.TrimRight(s, "-")
-	}
-	return s
-}
 
 // SSHKeyEntry represents an SSH key without the private key content (for listing)
 type SSHKeyEntry struct {
@@ -56,7 +40,7 @@ func NewToolService() *ToolService {
 
 // CreateToolInstance creates a new tool instance
 func (s *ToolService) CreateToolInstance(toolTypeID uint, name string, settings database.JSONB) (*database.ToolInstance, error) {
-	logicalName := slugifyLogicalName(name)
+	logicalName := database.SlugifyLogicalName(name)
 
 	instance := &database.ToolInstance{
 		ToolTypeID:  toolTypeID,
@@ -100,7 +84,7 @@ func (s *ToolService) UpdateToolInstance(id uint, name string, settings database
 	}
 
 	// Re-derive logical_name from updated name
-	logicalName := slugifyLogicalName(name)
+	logicalName := database.SlugifyLogicalName(name)
 
 	updates := map[string]interface{}{
 		"name":         name,

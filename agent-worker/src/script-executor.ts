@@ -138,7 +138,6 @@ export class ScriptExecutor {
     try {
       script = new vm.Script(wrappedCode, {
         filename: "execute_script",
-        timeout: this.timeoutMs,
       });
     } catch (err) {
       throw new Error(`Script compilation error: ${(err as Error).message}`);
