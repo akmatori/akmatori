@@ -213,17 +213,18 @@ type ToolAllowlistEntry struct {
 
 // GetToolAllowlist builds an allowlist of tool instances from all enabled, non-system skills.
 // The allowlist is deduplicated by instance ID (a tool instance assigned to multiple skills
-// only appears once). Returns nil if no tools are assigned.
+// only appears once). Returns an empty slice (not nil) if no tools are assigned, so the
+// gateway receives an explicit empty allowlist and rejects all tool calls.
 func (s *SkillService) GetToolAllowlist() []ToolAllowlistEntry {
 	var skills []database.Skill
 	err := s.db.Preload("Tools.ToolType").Where("enabled = ?", true).Find(&skills).Error
 	if err != nil {
 		slog.Error("failed to list enabled skills for allowlist", "error", err)
-		return nil
+		return []ToolAllowlistEntry{}
 	}
 
 	seen := make(map[uint]bool)
-	var entries []ToolAllowlistEntry
+	entries := make([]ToolAllowlistEntry, 0)
 	for _, sk := range skills {
 		if sk.IsSystem {
 			continue

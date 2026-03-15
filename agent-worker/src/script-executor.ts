@@ -68,68 +68,94 @@ export class ScriptExecutor {
     // Build scoped fs object that restricts paths to workDir
     const scopedFs = this.createScopedFs();
 
-    // Collect pending promises from gateway calls so we can await them
-    const context: Record<string, unknown> = {
-      // Gateway functions
-      gateway_call: async (
-        toolName: string,
-        args: Record<string, unknown> = {},
-        instance?: string,
-      ) => {
-        const result = await this.client.call(toolName, args, instance);
-        return result.data;
-      },
-      search_tools: async (query: string, toolType?: string) => {
-        return await this.client.searchTools(query, toolType);
-      },
-      get_tool_detail: async (toolName: string) => {
-        return await this.client.getToolDetail(toolName);
-      },
+    // Use null-prototype object to prevent this.constructor escape chain.
+    // Standard globals (Array, Object, JSON, Math, Promise, etc.) are provided
+    // natively by the vm context — do NOT inject host-realm versions as they
+    // expose the outer Function constructor via obj.constructor.constructor.
+    const context = Object.create(null) as Record<string, unknown>;
 
-      // Console capture
-      console: {
-        log: (...args: unknown[]) => {
-          logs.push(args.map(String).join(" "));
-        },
-        warn: (...args: unknown[]) => {
-          logs.push(`[warn] ${args.map(String).join(" ")}`);
-        },
-        error: (...args: unknown[]) => {
-          logs.push(`[error] ${args.map(String).join(" ")}`);
-        },
-      },
-
-      // Scoped filesystem
-      fs: scopedFs,
-
-      // Standard globals
-      JSON,
-      Array,
-      Object,
-      Map,
-      Set,
-      Date,
-      Math,
-      RegExp,
-      Promise,
-      Error,
-      TypeError,
-      RangeError,
-      parseInt,
-      parseFloat,
-      isNaN,
-      isFinite,
-      encodeURIComponent,
-      decodeURIComponent,
-      encodeURI,
-      decodeURI,
-
-      // Timers (for async patterns)
-      setTimeout,
-      clearTimeout,
+    // Gateway functions — injected as __private refs, wrapped inside the
+    // context later to prevent direct .constructor access on outer-realm closures.
+    context.__gw_call = async (
+      toolName: string,
+      args: Record<string, unknown> = {},
+      instance?: string,
+    ) => {
+      const result = await this.client.call(toolName, args, instance);
+      return result.data;
+    };
+    context.__gw_search = async (query: string, toolType?: string) => {
+      return await this.client.searchTools(query, toolType);
+    };
+    context.__gw_detail = async (toolName: string) => {
+      return await this.client.getToolDetail(toolName);
     };
 
+    // Console capture
+    context.__console_log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+    context.__console_warn = (...args: unknown[]) => {
+      logs.push(`[warn] ${args.map(String).join(" ")}`);
+    };
+    context.__console_error = (...args: unknown[]) => {
+      logs.push(`[error] ${args.map(String).join(" ")}`);
+    };
+
+    // Scoped filesystem — each method is an outer-realm closure
+    context.__fs = scopedFs;
+
+    // Timers — needed for async patterns, injected as private refs
+    context.__setTimeout = setTimeout;
+    context.__clearTimeout = clearTimeout;
+
     vm.createContext(context);
+
+    // Inside the vm context, create inner-realm wrapper functions so user code
+    // cannot traverse .constructor chains back to the host-realm Function.
+    // Then delete the raw outer-realm references from globalThis.
+    vm.runInContext(
+      `'use strict';
+      // Wrap outer-realm functions with inner-realm arrow functions to prevent
+      // .constructor chain traversal back to the host Function constructor.
+      // Use an IIFE to capture references before deleting the raw globals.
+      (function() {
+        var gc = __gw_call, gs = __gw_search, gd = __gw_detail;
+        var cl = __console_log, cw = __console_warn, ce = __console_error;
+        var sfs = __fs, st = __setTimeout, ct = __clearTimeout;
+
+        globalThis.gateway_call = async (name, args, instance) => gc(name, args, instance);
+        globalThis.search_tools = async (query, toolType) => gs(query, toolType);
+        globalThis.get_tool_detail = async (toolName) => gd(toolName);
+        globalThis.console = {
+          log: (...a) => cl(...a),
+          warn: (...a) => cw(...a),
+          error: (...a) => ce(...a),
+        };
+        globalThis.fs = {
+          readFileSync: (p, e) => sfs.readFileSync(p, e),
+          writeFileSync: (p, d) => sfs.writeFileSync(p, d),
+          mkdirSync: (p, o) => sfs.mkdirSync(p, o),
+          readdirSync: (p) => sfs.readdirSync(p),
+          existsSync: (p) => sfs.existsSync(p),
+        };
+        globalThis.setTimeout = (fn, ms) => st(fn, ms);
+        globalThis.clearTimeout = (id) => ct(id);
+
+        // Remove raw outer-realm references from globalThis
+        delete globalThis.__gw_call;
+        delete globalThis.__gw_search;
+        delete globalThis.__gw_detail;
+        delete globalThis.__console_log;
+        delete globalThis.__console_warn;
+        delete globalThis.__console_error;
+        delete globalThis.__fs;
+        delete globalThis.__setTimeout;
+        delete globalThis.__clearTimeout;
+      })();
+      `,
+      context,
+    );
 
     // Wrap code in an async IIFE so top-level await works
     const wrappedCode = `(async () => {\n${code}\n})()`;

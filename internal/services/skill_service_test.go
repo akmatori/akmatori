@@ -910,8 +910,8 @@ func TestGetToolAllowlist_NoTools(t *testing.T) {
 
 	allowlist := svc.GetToolAllowlist()
 
-	if allowlist != nil {
-		t.Errorf("expected nil allowlist for skill with no tools, got %v", allowlist)
+	if len(allowlist) != 0 {
+		t.Errorf("expected empty allowlist for skill with no tools, got %v", allowlist)
 	}
 }
 
@@ -972,8 +972,8 @@ func TestGetToolAllowlist_ExcludesSystemSkills(t *testing.T) {
 
 	allowlist := svc.GetToolAllowlist()
 
-	if allowlist != nil {
-		t.Errorf("expected nil allowlist (system skills excluded), got %v", allowlist)
+	if len(allowlist) != 0 {
+		t.Errorf("expected empty allowlist (system skills excluded), got %v", allowlist)
 	}
 }
 
@@ -1000,7 +1000,7 @@ func TestGetToolAllowlist_ExcludesDisabledToolInstances(t *testing.T) {
 
 	allowlist := svc.GetToolAllowlist()
 
-	if allowlist != nil {
-		t.Errorf("expected nil allowlist (disabled tools excluded), got %v", allowlist)
+	if len(allowlist) != 0 {
+		t.Errorf("expected empty allowlist (disabled tools excluded), got %v", allowlist)
 	}
 }

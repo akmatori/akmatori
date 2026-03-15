@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -427,11 +428,11 @@ func TestExecute_HeaderParams(t *testing.T) {
 }
 
 func TestExecute_ResponseCaching(t *testing.T) {
-	callCount := 0
+	var callCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount++
+		callCount.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]int{"call": callCount})
+		json.NewEncoder(w).Encode(map[string]int32{"call": callCount.Load()})
 	}))
 	defer server.Close()
 
@@ -454,8 +455,8 @@ func TestExecute_ResponseCaching(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if callCount != 1 {
-		t.Errorf("expected server to be called once (caching), got %d calls", callCount)
+	if callCount.Load() != 1 {
+		t.Errorf("expected server to be called once (caching), got %d calls", callCount.Load())
 	}
 
 	// Both results should be the same
@@ -465,11 +466,11 @@ func TestExecute_ResponseCaching(t *testing.T) {
 }
 
 func TestExecute_POSTNotCached(t *testing.T) {
-	callCount := 0
+	var callCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount++
+		callCount.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]int{"call": callCount})
+		json.NewEncoder(w).Encode(map[string]int32{"call": callCount.Load()})
 	}))
 	defer server.Close()
 
@@ -494,8 +495,8 @@ func TestExecute_POSTNotCached(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if callCount != 2 {
-		t.Errorf("expected 2 calls (POST not cached), got %d", callCount)
+	if callCount.Load() != 2 {
+		t.Errorf("expected 2 calls (POST not cached), got %d", callCount.Load())
 	}
 }
 

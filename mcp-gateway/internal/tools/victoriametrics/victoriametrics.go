@@ -124,6 +124,8 @@ func (t *VictoriaMetricsTool) getConfig(ctx context.Context, incidentID string, 
 	cacheKey := configCacheKey(incidentID)
 	if instanceID != nil {
 		cacheKey = fmt.Sprintf("creds:instance:%d", *instanceID)
+	} else if len(logicalName) > 0 && logicalName[0] != "" {
+		cacheKey = fmt.Sprintf("creds:logical:%s:%s", "victoria_metrics", logicalName[0])
 	}
 
 	// Check cache first
@@ -352,6 +354,8 @@ func (t *VictoriaMetricsTool) cachedRequest(ctx context.Context, incidentID, met
 	cacheKey := responseCacheKey(path, params)
 	if instanceID != nil {
 		cacheKey = fmt.Sprintf("inst:%d:%s", *instanceID, cacheKey)
+	} else if len(logicalName) > 0 && logicalName[0] != "" {
+		cacheKey = fmt.Sprintf("logical:%s:%s", logicalName[0], cacheKey)
 	} else {
 		cacheKey = fmt.Sprintf("incident:%s:%s", incidentID, cacheKey)
 	}

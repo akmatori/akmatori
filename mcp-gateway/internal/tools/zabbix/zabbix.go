@@ -131,6 +131,8 @@ func (t *ZabbixTool) getConfig(ctx context.Context, incidentID string, instanceI
 	cacheKey := configCacheKey(incidentID, "zabbix")
 	if instanceID != nil {
 		cacheKey = fmt.Sprintf("creds:instance:%d", *instanceID)
+	} else if len(logicalName) > 0 && logicalName[0] != "" {
+		cacheKey = fmt.Sprintf("creds:logical:%s:%s", "zabbix", logicalName[0])
 	}
 
 	// Check cache first
@@ -385,6 +387,10 @@ func (t *ZabbixTool) cachedRequest(ctx context.Context, incidentID string, metho
 	cacheKey := responseCacheKey(method, params)
 	if instanceID != nil {
 		cacheKey = fmt.Sprintf("inst:%d:%s", *instanceID, cacheKey)
+	} else if len(logicalName) > 0 && logicalName[0] != "" {
+		cacheKey = fmt.Sprintf("logical:%s:%s", logicalName[0], cacheKey)
+	} else {
+		cacheKey = fmt.Sprintf("incident:%s:%s", incidentID, cacheKey)
 	}
 
 	// Check cache first

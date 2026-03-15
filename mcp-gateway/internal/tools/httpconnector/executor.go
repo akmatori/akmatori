@@ -156,8 +156,14 @@ func (e *HTTPConnectorExecutor) Execute(ctx context.Context, connector Connector
 		return nil, fmt.Errorf("tool %q is read-only but uses HTTP method %s; set read_only to false to allow writes", toolName, toolDef.HTTPMethod)
 	}
 
-	// Apply rate limiting
+	// Apply rate limiting — key by connector type + instance ID to isolate
+	// rate limits and caching across different tool instances of the same connector.
 	instanceKey := connector.ToolTypeName
+	if v, ok := args["tool_instance_id"].(float64); ok && v > 0 {
+		instanceKey = fmt.Sprintf("%s:inst:%d", connector.ToolTypeName, int(v))
+	} else if v, ok := args["logical_name"].(string); ok && v != "" {
+		instanceKey = fmt.Sprintf("%s:ln:%s", connector.ToolTypeName, v)
+	}
 	limiter := e.getRateLimiter(instanceKey)
 	if err := limiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("rate limit wait cancelled: %w", err)

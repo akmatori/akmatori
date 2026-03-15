@@ -438,12 +438,15 @@ func (s *Server) sendSSEError(w http.ResponseWriter, flusher http.Flusher, id in
 	s.sendSSEResponse(w, flusher, resp)
 }
 
-// ParseToolName parses a tool name into namespace and action
-// e.g., "ssh.execute_command" -> ("ssh", "execute_command")
+// ParseToolName parses a tool name into namespace (tool type) and action.
+// Splits on the last dot so multi-segment namespaces work correctly:
+//
+//	"ssh.execute_command"       -> ("ssh", "execute_command")
+//	"ext.github.create_issue"  -> ("ext.github", "create_issue")
 func ParseToolName(name string) (namespace, action string) {
-	parts := strings.SplitN(name, ".", 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1]
+	idx := strings.LastIndex(name, ".")
+	if idx >= 0 {
+		return name[:idx], name[idx+1:]
 	}
 	return "", name
 }

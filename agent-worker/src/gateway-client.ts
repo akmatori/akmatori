@@ -234,7 +234,7 @@ export class GatewayClient {
       if (this.incidentId) {
         headers["X-Incident-ID"] = this.incidentId;
       }
-      if (this.toolAllowlist && this.toolAllowlist.length > 0) {
+      if (this.toolAllowlist) {
         headers["X-Tool-Allowlist"] = JSON.stringify(this.toolAllowlist);
       }
 
