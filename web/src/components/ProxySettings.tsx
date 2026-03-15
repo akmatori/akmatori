@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Server, MessageSquare, Shield, Terminal } from 'lucide-react';
+import { Save, Server, MessageSquare, Shield, Terminal, BarChart3 } from 'lucide-react';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorMessage, { SuccessMessage } from './ErrorMessage';
 import { proxySettingsApi } from '../api/client';
@@ -59,6 +59,7 @@ export default function ProxySettings() {
   const [openaiEnabled, setOpenaiEnabled] = useState(true);
   const [slackEnabled, setSlackEnabled] = useState(true);
   const [zabbixEnabled, setZabbixEnabled] = useState(false);
+  const [victoriaMetricsEnabled, setVictoriaMetricsEnabled] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -73,6 +74,7 @@ export default function ProxySettings() {
       setOpenaiEnabled(data.services.openai.enabled);
       setSlackEnabled(data.services.slack.enabled);
       setZabbixEnabled(data.services.zabbix.enabled);
+      setVictoriaMetricsEnabled(data.services.victoria_metrics.enabled);
       setError(null);
     } catch (err) {
       setError('Failed to load proxy settings');
@@ -94,6 +96,7 @@ export default function ProxySettings() {
           openai: { enabled: openaiEnabled },
           slack: { enabled: slackEnabled },
           zabbix: { enabled: zabbixEnabled },
+          victoria_metrics: { enabled: victoriaMetricsEnabled },
         },
       };
 
@@ -189,6 +192,15 @@ export default function ProxySettings() {
             supported={true}
             disabled={!hasProxy}
             onChange={setZabbixEnabled}
+          />
+          <ServiceToggle
+            name="VictoriaMetrics"
+            description="Time-series database"
+            icon={BarChart3}
+            enabled={victoriaMetricsEnabled}
+            supported={true}
+            disabled={!hasProxy}
+            onChange={setVictoriaMetricsEnabled}
           />
           <ServiceToggle
             name="SSH"

@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -304,15 +305,32 @@ func (t *VictoriaMetricsTool) doRequest(ctx context.Context, config *VMConfig, m
 	return respBody, nil
 }
 
-// parsePrometheusResponse checks the Prometheus response status and extracts data or error
+// errVMAPI is returned when VictoriaMetrics returns a valid Prometheus response with error status.
+// This is distinct from parse failures (non-Prometheus responses).
+type errVMAPI struct {
+	ErrorType string
+	Message   string
+}
+
+func (e *errVMAPI) Error() string {
+	return fmt.Sprintf("VictoriaMetrics API error (%s): %s", e.ErrorType, e.Message)
+}
+
+// parsePrometheusResponse checks the Prometheus response status and extracts data or error.
+// Returns *errVMAPI for valid Prometheus error responses, or a generic error for non-Prometheus payloads.
 func parsePrometheusResponse(body []byte) (json.RawMessage, error) {
 	var promResp PrometheusResponse
 	if err := json.Unmarshal(body, &promResp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
+	// No "status" field means this isn't a Prometheus-format response
+	if promResp.Status == "" {
+		return nil, fmt.Errorf("not a Prometheus response: missing status field")
+	}
+
 	if promResp.Status != "success" {
-		return nil, fmt.Errorf("VictoriaMetrics API error (%s): %s", promResp.ErrorType, promResp.Error)
+		return nil, &errVMAPI{ErrorType: promResp.ErrorType, Message: promResp.Error}
 	}
 
 	return promResp.Data, nil
@@ -523,7 +541,14 @@ func (t *VictoriaMetricsTool) APIRequest(ctx context.Context, incidentID string,
 	params := url.Values{}
 	if p, ok := args["params"].(map[string]interface{}); ok {
 		for k, v := range p {
-			params.Set(k, fmt.Sprintf("%v", v))
+			switch val := v.(type) {
+			case []interface{}:
+				for _, item := range val {
+					params.Add(k, fmt.Sprintf("%v", item))
+				}
+			default:
+				params.Set(k, fmt.Sprintf("%v", v))
+			}
 		}
 	}
 
@@ -545,6 +570,11 @@ func (t *VictoriaMetricsTool) APIRequest(ctx context.Context, incidentID string,
 	// Try to parse as Prometheus response, fall back to raw body
 	data, err := parsePrometheusResponse(body)
 	if err != nil {
+		// If it's a valid Prometheus error response, propagate the error
+		var vmErr *errVMAPI
+		if errors.As(err, &vmErr) {
+			return "", err
+		}
 		// Not a standard Prometheus response, return raw body
 		return string(body), nil
 	}
