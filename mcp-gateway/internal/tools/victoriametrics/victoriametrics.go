@@ -154,6 +154,11 @@ func (t *VictoriaMetricsTool) getConfig(ctx context.Context, incidentID string, 
 		config.Timeout = int(timeout)
 	}
 
+	// Clamp timeout to safe range to prevent unlimited or negative timeouts
+	if config.Timeout <= 0 || config.Timeout > 300 {
+		config.Timeout = 30
+	}
+
 	// Cache the config
 	t.configCache.Set(cacheKey, config)
 	t.logger.Printf("Config cached for incident %s", incidentID)
@@ -258,6 +263,8 @@ func (t *VictoriaMetricsTool) cachedRequest(ctx context.Context, incidentID, met
 	cacheKey := responseCacheKey(path, params)
 	if instanceID != nil {
 		cacheKey = fmt.Sprintf("inst:%d:%s", *instanceID, cacheKey)
+	} else {
+		cacheKey = fmt.Sprintf("incident:%s:%s", incidentID, cacheKey)
 	}
 
 	// Check response cache
@@ -434,9 +441,11 @@ func (t *VictoriaMetricsTool) APIRequest(ctx context.Context, incidentID string,
 		return "", fmt.Errorf("path is required")
 	}
 
-	if !strings.HasPrefix(path, "/") || strings.Contains(path, "..") {
+	decodedPath, err := url.PathUnescape(path)
+	if err != nil || !strings.HasPrefix(decodedPath, "/") || strings.Contains(decodedPath, "..") {
 		return "", fmt.Errorf("invalid path: must start with / and not contain '..'")
 	}
+	path = decodedPath
 
 	method := http.MethodGet
 	if m, ok := args["method"].(string); ok && m != "" {
