@@ -221,7 +221,10 @@ func (t *VictoriaMetricsTool) doRequest(ctx context.Context, config *VMConfig, m
 	t.logger.Printf("VictoriaMetrics API call: %s %s", method, path)
 
 	// Create HTTP transport with explicit proxy configuration
-	transport := &http.Transport{}
+	// DisableKeepAlives prevents connection pool leakage since we create a new transport per request
+	transport := &http.Transport{
+		DisableKeepAlives: true,
+	}
 
 	// Handle proxy settings - MUST explicitly set Proxy to prevent env var usage
 	if config.UseProxy && config.ProxyURL != "" {

@@ -304,7 +304,10 @@ func (t *ZabbixTool) doRequest(ctx context.Context, config *ZabbixConfig, method
 	t.logger.Printf("Zabbix API call: %s", method)
 
 	// Create HTTP transport with explicit proxy configuration
-	transport := &http.Transport{}
+	// DisableKeepAlives prevents connection pool leakage since we create a new transport per request
+	transport := &http.Transport{
+		DisableKeepAlives: true,
+	}
 
 	// Handle proxy settings - MUST explicitly set Proxy to prevent env var usage
 	if config.UseProxy && config.ProxyURL != "" {
