@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/akmatori/mcp-gateway/internal/auth"
 )
 
 // ToolHandler is a function that handles a tool call
@@ -35,6 +37,7 @@ type Server struct {
 	logger          *log.Logger
 	discoverer      ToolDiscoverer
 	instanceLookup  InstanceLookup
+	authorizer      *auth.Authorizer
 }
 
 // NewServer creates a new MCP server
@@ -59,6 +62,11 @@ func (s *Server) SetDiscoverer(d ToolDiscoverer) {
 // SetInstanceLookup sets the function used to look up enabled instances by tool type.
 func (s *Server) SetInstanceLookup(fn InstanceLookup) {
 	s.instanceLookup = fn
+}
+
+// SetAuthorizer sets the authorizer used to enforce per-incident tool allowlists.
+func (s *Server) SetAuthorizer(a *auth.Authorizer) {
+	s.authorizer = a
 }
 
 // Tools returns the tools map for external read access.
@@ -93,6 +101,16 @@ func (s *Server) HandleHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/sse" || r.Header.Get("Accept") == "text/event-stream" {
 		s.handleSSE(w, r, incidentID)
 		return
+	}
+
+	// Parse and register tool allowlist from header (sent per-request by agent worker)
+	if s.authorizer != nil && incidentID != "" {
+		if allowlistHeader := r.Header.Get("X-Tool-Allowlist"); allowlistHeader != "" {
+			var entries []auth.AllowlistEntry
+			if err := json.Unmarshal([]byte(allowlistHeader), &entries); err == nil {
+				s.authorizer.SetAllowlist(incidentID, entries)
+			}
+		}
 	}
 
 	// Handle regular HTTP POST for JSON-RPC
@@ -223,6 +241,19 @@ func (s *Server) handleCallTool(ctx context.Context, req *Request, incidentID st
 
 	if !exists {
 		return NewErrorResponse(req.ID, MethodNotFound, fmt.Sprintf("Tool not found: %s", params.Name), nil)
+	}
+
+	// Enforce tool allowlist authorization
+	if s.authorizer != nil && incidentID != "" {
+		toolType, _ := ParseToolName(params.Name)
+		instanceID := extractInstanceIDFromArgs(params.Arguments)
+		logicalName := extractLogicalNameFromArgs(params.Arguments)
+
+		if !s.authorizer.IsAuthorized(incidentID, toolType, instanceID, logicalName) {
+			return NewErrorResponse(req.ID, InvalidRequest,
+				fmt.Sprintf("Unauthorized: incident %s is not authorized to use tool %s", incidentID, params.Name),
+				nil)
+		}
 	}
 
 	// Create context with timeout
@@ -369,4 +400,20 @@ func ParseToolName(name string) (namespace, action string) {
 		return parts[0], parts[1]
 	}
 	return "", name
+}
+
+// extractInstanceIDFromArgs extracts the optional tool_instance_id from tool arguments.
+func extractInstanceIDFromArgs(args map[string]interface{}) uint {
+	if v, ok := args["tool_instance_id"].(float64); ok && v > 0 {
+		return uint(v)
+	}
+	return 0
+}
+
+// extractLogicalNameFromArgs extracts the optional logical_name from tool arguments.
+func extractLogicalNameFromArgs(args map[string]interface{}) string {
+	if v, ok := args["logical_name"].(string); ok {
+		return v
+	}
+	return ""
 }

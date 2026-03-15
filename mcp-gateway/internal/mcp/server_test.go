@@ -2,10 +2,14 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/akmatori/mcp-gateway/internal/auth"
 )
 
 // mockDiscoverer implements ToolDiscoverer for testing
@@ -31,6 +35,11 @@ func newTestServer() *Server {
 
 func sendJSONRPC(t *testing.T, server *Server, method string, params interface{}) Response {
 	t.Helper()
+	return sendJSONRPCWithHeaders(t, server, method, params, nil)
+}
+
+func sendJSONRPCWithHeaders(t *testing.T, server *Server, method string, params interface{}, headers map[string]string) Response {
+	t.Helper()
 
 	var rawParams json.RawMessage
 	if params != nil {
@@ -51,6 +60,9 @@ func sendJSONRPC(t *testing.T, server *Server, method string, params interface{}
 	body, _ := json.Marshal(req)
 	httpReq := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
 	httpReq.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		httpReq.Header.Set(k, v)
+	}
 
 	w := httptest.NewRecorder()
 	server.HandleHTTP(w, httpReq)
@@ -303,5 +315,207 @@ func TestHandleGetToolDetail_NoDiscoverer(t *testing.T) {
 	}
 	if resp.Error.Code != InternalError {
 		t.Errorf("expected error code %d, got %d", InternalError, resp.Error.Code)
+	}
+}
+
+// --- Authorization tests ---
+
+func echoHandler(_ context.Context, _ string, args map[string]interface{}) (interface{}, error) {
+	return "ok", nil
+}
+
+func TestAuthorization_AuthorizedCallPasses(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.RegisterTool(Tool{
+		Name:        "ssh.execute_command",
+		Description: "Execute command",
+		InputSchema: InputSchema{Type: "object"},
+	}, echoHandler)
+
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "ssh.execute_command", Arguments: map[string]interface{}{"command": "uptime"}},
+		map[string]string{
+			"X-Incident-ID":    "incident-auth-1",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+
+	if resp.Error != nil {
+		t.Fatalf("expected authorized call to succeed, got error: %s", resp.Error.Message)
+	}
+}
+
+func TestAuthorization_UnauthorizedCallRejected(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.RegisterTool(Tool{
+		Name:        "zabbix.get_hosts",
+		Description: "Get hosts",
+		InputSchema: InputSchema{Type: "object"},
+	}, echoHandler)
+
+	// Allowlist only permits SSH, not Zabbix
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "zabbix.get_hosts", Arguments: map[string]interface{}{}},
+		map[string]string{
+			"X-Incident-ID":    "incident-auth-2",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+
+	if resp.Error == nil {
+		t.Fatal("expected unauthorized call to be rejected")
+	}
+	if resp.Error.Code != InvalidRequest {
+		t.Errorf("expected error code %d (InvalidRequest), got %d", InvalidRequest, resp.Error.Code)
+	}
+}
+
+func TestAuthorization_NoAllowlistAllowsAll(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.RegisterTool(Tool{
+		Name:        "ssh.execute_command",
+		Description: "Execute command",
+		InputSchema: InputSchema{Type: "object"},
+	}, echoHandler)
+
+	// No allowlist header — should allow all (backward compat)
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "ssh.execute_command", Arguments: map[string]interface{}{"command": "ls"}},
+		map[string]string{
+			"X-Incident-ID": "incident-no-allowlist",
+		},
+	)
+
+	if resp.Error != nil {
+		t.Fatalf("expected call without allowlist to succeed, got error: %s", resp.Error.Message)
+	}
+}
+
+func TestAuthorization_UnauthorizedInstanceIDRejected(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.RegisterTool(Tool{
+		Name:        "ssh.execute_command",
+		Description: "Execute command",
+		InputSchema: InputSchema{Type: "object"},
+	}, echoHandler)
+
+	// Only instance 1 is allowed
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	// Try to use instance 99
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "ssh.execute_command", Arguments: map[string]interface{}{
+			"command":          "uptime",
+			"tool_instance_id": float64(99),
+		}},
+		map[string]string{
+			"X-Incident-ID":    "incident-auth-instance",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+
+	if resp.Error == nil {
+		t.Fatal("expected unauthorized instance ID to be rejected")
+	}
+	if resp.Error.Code != InvalidRequest {
+		t.Errorf("expected error code %d, got %d", InvalidRequest, resp.Error.Code)
+	}
+}
+
+func TestAuthorization_NoAuthorizerAllowsAll(t *testing.T) {
+	s := newTestServer()
+	// No authorizer set on server
+
+	s.RegisterTool(Tool{
+		Name:        "ssh.execute_command",
+		Description: "Execute command",
+		InputSchema: InputSchema{Type: "object"},
+	}, echoHandler)
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "ssh.execute_command", Arguments: map[string]interface{}{"command": "ls"}},
+		map[string]string{
+			"X-Incident-ID": "incident-no-authorizer",
+		},
+	)
+
+	if resp.Error != nil {
+		t.Fatalf("expected call without authorizer to succeed, got error: %s", resp.Error.Message)
+	}
+}
+
+func TestAuthorization_AllowlistPersistsAcrossRequests(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.RegisterTool(Tool{
+		Name:        "ssh.execute_command",
+		Description: "Execute command",
+		InputSchema: InputSchema{Type: "object"},
+	}, echoHandler)
+	s.RegisterTool(Tool{
+		Name:        "zabbix.get_hosts",
+		Description: "Get hosts",
+		InputSchema: InputSchema{Type: "object"},
+	}, echoHandler)
+
+	// First request: set allowlist via header
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "ssh.execute_command", Arguments: map[string]interface{}{"command": "ls"}},
+		map[string]string{
+			"X-Incident-ID":    "incident-persist",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+
+	// Second request: no allowlist header, but the stored allowlist should still be enforced
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "zabbix.get_hosts", Arguments: map[string]interface{}{}},
+		map[string]string{
+			"X-Incident-ID": "incident-persist",
+		},
+	)
+
+	if resp.Error == nil {
+		t.Fatal("expected stored allowlist to reject unauthorized tool type on subsequent request")
+	}
+	if resp.Error.Code != InvalidRequest {
+		t.Errorf("expected error code %d, got %d", InvalidRequest, resp.Error.Code)
 	}
 }

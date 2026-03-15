@@ -191,13 +191,13 @@ Gateway checks every tool call against the incident's allowlist.
 - Create: `mcp-gateway/internal/auth/authorizer.go` — authorization logic
 - Create: `mcp-gateway/internal/auth/authorizer_test.go` — tests
 
-- [ ] Create `Authorizer` struct that stores per-incident allowlists (thread-safe map)
-- [ ] Add `SetAllowlist(incidentID, allowlist)` endpoint or header-based registration
-- [ ] In `handleCallTool()`, check resolved instance ID against incident's allowlist before executing
-- [ ] Return JSON-RPC error code -32600 (unauthorized) if instance not in allowlist
-- [ ] Add allowlist caching with TTL (match incident lifetime)
-- [ ] Write tests: authorized call passes, unauthorized call rejected, no allowlist = allow all (backward compat), expired allowlist
-- [ ] Run `make test-mcp` — must pass before task 2.3
+- [x] Create `Authorizer` struct that stores per-incident allowlists (thread-safe map)
+- [x] Add `SetAllowlist(incidentID, allowlist)` endpoint or header-based registration
+- [x] In `handleCallTool()`, check resolved instance ID against incident's allowlist before executing
+- [x] Return JSON-RPC error code -32600 (unauthorized) if instance not in allowlist
+- [x] Add allowlist caching with TTL (match incident lifetime)
+- [x] Write tests: authorized call passes, unauthorized call rejected, no allowlist = allow all (backward compat), expired allowlist
+- [x] Run `make test-mcp` — must pass before task 2.3
 
 ### Task 2.3: Filter discovery by allowlist
 
