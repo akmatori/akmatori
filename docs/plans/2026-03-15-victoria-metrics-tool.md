@@ -116,16 +116,16 @@ The tool should check `status == "success"` and return the `data` field contents
 **Files:**
 - Create: `agent-worker/tools/victoriametrics/__init__.py`
 
-- [ ] Create `__init__.py` following the exact pattern of `zabbix/__init__.py`
-- [ ] Add module docstring with usage examples
-- [ ] Add `sys.path.insert` and `from mcp_client import call` imports
-- [ ] Implement `instant_query(query, time=None, step=None, timeout=None, tool_instance_id=None)` - calls `victoriametrics.instant_query`
-- [ ] Implement `range_query(query, start, end, step, timeout=None, tool_instance_id=None)` - calls `victoriametrics.range_query`
-- [ ] Implement `label_values(label_name, match=None, start=None, end=None, tool_instance_id=None)` - calls `victoriametrics.label_values`
-- [ ] Implement `series(match, start=None, end=None, tool_instance_id=None)` - calls `victoriametrics.series`
-- [ ] Implement `api_request(path, method="GET", params=None, tool_instance_id=None)` - calls `victoriametrics.api_request`
-- [ ] Write tests for the Python wrapper
-- [ ] Run `make test-agent` - must pass before task 4
+- [x] Create `__init__.py` following the exact pattern of `zabbix/__init__.py`
+- [x] Add module docstring with usage examples
+- [x] Add `sys.path.insert` and `from mcp_client import call` imports
+- [x] Implement `instant_query(query, time=None, step=None, timeout=None, tool_instance_id=None)` - calls `victoriametrics.instant_query`
+- [x] Implement `range_query(query, start, end, step, timeout=None, tool_instance_id=None)` - calls `victoriametrics.range_query`
+- [x] Implement `label_values(label_name, match=None, start=None, end=None, tool_instance_id=None)` - calls `victoriametrics.label_values`
+- [x] Implement `series(match, start=None, end=None, tool_instance_id=None)` - calls `victoriametrics.series`
+- [x] Implement `api_request(path, method="GET", params=None, tool_instance_id=None)` - calls `victoriametrics.api_request`
+- [x] Write tests for the Python wrapper
+- [x] Run `make test-agent` - must pass before task 4
 
 ### Task 4: API server - Tool type registration and SKILL.md generation
 

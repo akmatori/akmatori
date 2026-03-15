@@ -73,6 +73,89 @@ describe("Python tool wrappers", () => {
     });
   });
 
+  describe("victoriametrics/__init__.py", () => {
+    it("should exist", () => {
+      expect(existsSync(resolve(TOOLS_DIR, "victoriametrics/__init__.py"))).toBe(true);
+    });
+
+    it("should export instant_query", () => {
+      const content = readFileSync(resolve(TOOLS_DIR, "victoriametrics/__init__.py"), "utf-8");
+      expect(content).toContain("def instant_query(");
+    });
+
+    it("should export range_query", () => {
+      const content = readFileSync(resolve(TOOLS_DIR, "victoriametrics/__init__.py"), "utf-8");
+      expect(content).toContain("def range_query(");
+    });
+
+    it("should export label_values", () => {
+      const content = readFileSync(resolve(TOOLS_DIR, "victoriametrics/__init__.py"), "utf-8");
+      expect(content).toContain("def label_values(");
+    });
+
+    it("should export series", () => {
+      const content = readFileSync(resolve(TOOLS_DIR, "victoriametrics/__init__.py"), "utf-8");
+      expect(content).toContain("def series(");
+    });
+
+    it("should export api_request", () => {
+      const content = readFileSync(resolve(TOOLS_DIR, "victoriametrics/__init__.py"), "utf-8");
+      expect(content).toContain("def api_request(");
+    });
+
+    it("should accept tool_instance_id on all functions", () => {
+      const content = readFileSync(resolve(TOOLS_DIR, "victoriametrics/__init__.py"), "utf-8");
+      const functions = content.match(/def \w+\([^)]*\)/gs) || [];
+      const publicFunctions = functions.filter((f) => !f.includes("def _"));
+      for (const fn of publicFunctions) {
+        expect(fn).toContain("tool_instance_id");
+      }
+    });
+
+    it("should call MCP Gateway tool names with victoriametrics. prefix", () => {
+      const content = readFileSync(resolve(TOOLS_DIR, "victoriametrics/__init__.py"), "utf-8");
+      expect(content).toContain('"victoriametrics.instant_query"');
+      expect(content).toContain('"victoriametrics.range_query"');
+      expect(content).toContain('"victoriametrics.label_values"');
+      expect(content).toContain('"victoriametrics.series"');
+      expect(content).toContain('"victoriametrics.api_request"');
+    });
+
+    it("should import from mcp_client", () => {
+      const content = readFileSync(resolve(TOOLS_DIR, "victoriametrics/__init__.py"), "utf-8");
+      expect(content).toContain("from mcp_client import call");
+    });
+
+    it("should have module docstring with usage examples", () => {
+      const content = readFileSync(resolve(TOOLS_DIR, "victoriametrics/__init__.py"), "utf-8");
+      expect(content).toContain("from victoriametrics import instant_query, range_query, label_values, series, api_request");
+    });
+
+    it("should have required params for range_query", () => {
+      const content = readFileSync(resolve(TOOLS_DIR, "victoriametrics/__init__.py"), "utf-8");
+      const match = content.match(/def range_query\([^)]*\)/s);
+      expect(match).not.toBeNull();
+      expect(match![0]).toContain("query: str");
+      expect(match![0]).toContain("start: str");
+      expect(match![0]).toContain("end: str");
+      expect(match![0]).toContain("step: str");
+    });
+
+    it("should have required params for label_values", () => {
+      const content = readFileSync(resolve(TOOLS_DIR, "victoriametrics/__init__.py"), "utf-8");
+      const match = content.match(/def label_values\([^)]*\)/s);
+      expect(match).not.toBeNull();
+      expect(match![0]).toContain("label_name: str");
+    });
+
+    it("should have required params for series", () => {
+      const content = readFileSync(resolve(TOOLS_DIR, "victoriametrics/__init__.py"), "utf-8");
+      const match = content.match(/def series\([^)]*\)/s);
+      expect(match).not.toBeNull();
+      expect(match![0]).toContain("match: list");
+    });
+  });
+
   describe("zabbix/__init__.py", () => {
     it("should exist", () => {
       expect(existsSync(resolve(TOOLS_DIR, "zabbix/__init__.py"))).toBe(true);
