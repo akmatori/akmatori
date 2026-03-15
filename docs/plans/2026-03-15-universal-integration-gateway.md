@@ -207,11 +207,11 @@ Gateway checks every tool call against the incident's allowlist.
 - Modify: `mcp-gateway/internal/mcp/server.go` — pass allowlist to search/detail handlers
 - Modify: `mcp-gateway/internal/tools/registry.go` — filter results by allowlist
 
-- [ ] `handleSearchTools()` filters results to only include tools with at least one authorized instance
-- [ ] `handleGetToolDetail()` filters instance list to only authorized instances
-- [ ] If no authorized instances for a tool, tool is excluded from search results entirely
-- [ ] Write tests for filtered discovery (partial authorization, full authorization, no authorization)
-- [ ] Run `make test-mcp && make verify` — must pass before Phase 3
+- [x] `handleSearchTools()` filters results to only include tools with at least one authorized instance
+- [x] `handleGetToolDetail()` filters instance list to only authorized instances
+- [x] If no authorized instances for a tool, tool is excluded from search results entirely
+- [x] Write tests for filtered discovery (partial authorization, full authorization, no authorization)
+- [x] Run `make test-mcp && make verify` — must pass before Phase 3
 
 ---
 

@@ -111,6 +111,22 @@ func (a *Authorizer) IsAuthorized(incidentID string, toolType string, instanceID
 	return false
 }
 
+// GetAllowlist returns the allowlist entries for an incident.
+// Returns nil if no allowlist is set or if it has expired.
+func (a *Authorizer) GetAllowlist(incidentID string) []AllowlistEntry {
+	a.mu.RLock()
+	al, exists := a.allowlists[incidentID]
+	a.mu.RUnlock()
+
+	if !exists {
+		return nil
+	}
+	if time.Now().After(al.expiresAt) {
+		return nil
+	}
+	return al.entries
+}
+
 // RemoveAllowlist removes the allowlist for an incident.
 func (a *Authorizer) RemoveAllowlist(incidentID string) {
 	a.mu.Lock()
