@@ -68,14 +68,14 @@ Build a reusable client library for the agent-worker to communicate with the MCP
 - Create: `agent-worker/src/gateway-client.ts` — HTTP client for MCP Gateway with output management
 - Create: `agent-worker/src/gateway-client.test.ts` — unit tests
 
-- [ ] Implement `GatewayClient` class with constructor accepting `gatewayUrl` and `incidentId`
-- [ ] Implement `call(toolName, args, instanceHint?)` — JSON-RPC 2.0 POST to `/mcp` with `X-Incident-ID` header
-- [ ] Implement output management: if response < 4KB return inline, if >= 4KB write to `{workDir}/tool_outputs/{tool}_{timestamp}.json` and return truncated preview + file path
-- [ ] Implement `searchTools(query, toolType?)` — calls `tools/search` JSON-RPC method
-- [ ] Implement `getToolDetail(toolName)` — calls `tools/detail` JSON-RPC method
-- [ ] Handle JSON-RPC errors: parse error codes, throw typed `GatewayError` with code/message/data
-- [ ] Write unit tests with mocked HTTP (test call, search, detail, output truncation, error handling)
-- [ ] Run `make test-agent` — must pass before task 1.4
+- [x] Implement `GatewayClient` class with constructor accepting `gatewayUrl` and `incidentId`
+- [x] Implement `call(toolName, args, instanceHint?)` — JSON-RPC 2.0 POST to `/mcp` with `X-Incident-ID` header
+- [x] Implement output management: if response < 4KB return inline, if >= 4KB write to `{workDir}/tool_outputs/{tool}_{timestamp}.json` and return truncated preview + file path
+- [x] Implement `searchTools(query, toolType?)` — calls `tools/search` JSON-RPC method
+- [x] Implement `getToolDetail(toolName)` — calls `tools/detail` JSON-RPC method
+- [x] Handle JSON-RPC errors: parse error codes, throw typed `GatewayError` with code/message/data
+- [x] Write unit tests with mocked HTTP (test call, search, detail, output truncation, error handling)
+- [x] Run `make test-agent` — must pass before task 1.4
 
 ### Task 1.4: Register gateway_call tool in pi-mono extension
 
