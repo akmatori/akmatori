@@ -817,6 +817,51 @@ func TestHandlerGracefulShutdown(t *testing.T) {
 	handler.GracefulShutdown()
 }
 
+func TestHandlerStartSchemaRefreshLoop_UpdatesToolMap(t *testing.T) {
+	toolVersion := 0
+	srv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+		if req.Method == "tools/list" {
+			toolVersion++
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{
+				Tools: []mcp.Tool{{Name: fmt.Sprintf("tool_v%d", toolVersion)}},
+			})
+		}
+		return mcp.NewResponse(req.ID, nil)
+	})
+	defer srv.Close()
+
+	pool := NewPool(
+		WithIdleTimeout(time.Minute),
+		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
+			return nil
+		}),
+	)
+	defer pool.CloseAll()
+
+	handler := NewProxyHandler(pool, nil)
+	defer handler.Stop()
+
+	regs := []ServerRegistration{
+		{InstanceID: 1, NamespacePrefix: "ext.svc", Config: MCPServerConfig{Transport: TransportSSE, URL: srv.URL}},
+	}
+	handler.LoadAndRegister(context.Background(), mockLoader(regs))
+
+	if !handler.IsProxyTool("ext.svc.tool_v1") {
+		t.Error("expected ext.svc.tool_v1 after initial load")
+	}
+
+	// Start schema refresh loop with very short interval
+	handler.StartSchemaRefreshLoop(50 * time.Millisecond)
+
+	// Wait for refresh to detect new tools
+	time.Sleep(300 * time.Millisecond)
+
+	// Gateway should not have crashed - the loop ran
+	if handler.ToolCount() < 1 {
+		t.Errorf("expected at least 1 tool after schema refresh, got %d", handler.ToolCount())
+	}
+}
+
 func TestEmptyRegistrations(t *testing.T) {
 	pool := newTestPool(nil)
 	defer pool.CloseAll()

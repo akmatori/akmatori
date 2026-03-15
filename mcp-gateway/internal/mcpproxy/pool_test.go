@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -645,6 +647,22 @@ func TestMCPConnection_Close_Idempotent(t *testing.T) {
 	conn := &MCPConnection{}
 	conn.close()
 	conn.close() // Should not panic
+}
+
+func TestWithLogger(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	pool := NewPool(
+		WithIdleTimeout(100*time.Millisecond),
+		WithLogger(logger),
+		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
+			return nil
+		}),
+	)
+	defer pool.CloseAll()
+
+	if pool.logger != logger {
+		t.Error("expected custom logger to be set")
+	}
 }
 
 func TestCallTool_ClosedConnection_Reconnects(t *testing.T) {

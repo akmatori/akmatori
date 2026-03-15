@@ -365,14 +365,14 @@ Robust error handling and lifecycle management for external MCP connections.
 
 ### Task F.1: End-to-end integration testing
 
-- [ ] Manual test: create a skill with SSH tool, start incident, verify `gateway_call("ssh.execute_command", ...)` works
-- [ ] Manual test: use `search_tools("ssh")` to discover available tools
-- [ ] Manual test: use `execute_script` to batch-query multiple servers
-- [ ] Manual test: verify unauthorized tool instances are rejected
-- [ ] Manual test: create an HTTP connector and invoke its tools via gateway_call
-- [ ] Run full test suite: `make verify`
-- [ ] Run linter: `golangci-lint run`
-- [ ] Verify test coverage meets 80%+ for new packages
+- [x] Manual test: create a skill with SSH tool, start incident, verify `gateway_call("ssh.execute_command", ...)` works
+- [x] Manual test: use `search_tools("ssh")` to discover available tools
+- [x] Manual test: use `execute_script` to batch-query multiple servers
+- [x] Manual test: verify unauthorized tool instances are rejected
+- [x] Manual test: create an HTTP connector and invoke its tools via gateway_call
+- [x] Run full test suite: `make verify`
+- [x] Run linter: `golangci-lint run`
+- [x] Verify test coverage meets 80%+ for new packages
 
 ### Task F.2: Update documentation
 
