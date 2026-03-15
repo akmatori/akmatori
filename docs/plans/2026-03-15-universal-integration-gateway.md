@@ -51,14 +51,14 @@ Add `/tools/search` and `/tools/detail` endpoints for tiered tool discovery.
 - Modify: `mcp-gateway/internal/tools/registry.go` — add `SearchTools(query)` and `GetToolDetail(name)` methods
 - Modify: `mcp-gateway/internal/tools/schemas.go` — ensure all tool schemas have descriptions and param schemas
 
-- [ ] Define `SearchToolsParams` (query string, optional tool_type filter) and `SearchToolsResult` (compact tool list with name, description, instances)
-- [ ] Define `GetToolDetailParams` (tool_name string) and `GetToolDetailResult` (full schema with params, instances, description)
-- [ ] Implement `handleSearchTools()` — fuzzy match on tool name and description, return compact results
-- [ ] Implement `handleGetToolDetail()` — return full JSON schema for a specific tool
-- [ ] Register new JSON-RPC methods: `tools/search` and `tools/detail` in request dispatch
-- [ ] Populate instance logical names in search/detail responses by querying enabled instances per tool type
-- [ ] Write tests for search (query matching, empty results, type filter) and detail (found, not found)
-- [ ] Run `make test-mcp` — must pass before task 1.3
+- [x] Define `SearchToolsParams` (query string, optional tool_type filter) and `SearchToolsResult` (compact tool list with name, description, instances)
+- [x] Define `GetToolDetailParams` (tool_name string) and `GetToolDetailResult` (full schema with params, instances, description)
+- [x] Implement `handleSearchTools()` — fuzzy match on tool name and description, return compact results
+- [x] Implement `handleGetToolDetail()` — return full JSON schema for a specific tool
+- [x] Register new JSON-RPC methods: `tools/search` and `tools/detail` in request dispatch
+- [x] Populate instance logical names in search/detail responses by querying enabled instances per tool type
+- [x] Write tests for search (query matching, empty results, type filter) and detail (found, not found)
+- [x] Run `make test-mcp` — must pass before task 1.3
 
 ### Task 1.3: Create TypeScript gateway client library
 

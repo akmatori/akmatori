@@ -16,14 +16,25 @@ import (
 // ToolHandler is a function that handles a tool call
 type ToolHandler func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error)
 
+// ToolDiscoverer provides tool search and detail capabilities.
+type ToolDiscoverer interface {
+	SearchTools(query string, toolType string) []SearchToolsResultItem
+	GetToolDetail(toolName string) (*GetToolDetailResult, bool)
+}
+
+// InstanceLookup provides instance information for tool discovery responses.
+type InstanceLookup func(toolType string) []ToolDetailInstance
+
 // Server represents an MCP server
 type Server struct {
-	name       string
-	version    string
-	tools      map[string]Tool
-	handlers   map[string]ToolHandler
-	mu         sync.RWMutex
-	logger     *log.Logger
+	name            string
+	version         string
+	tools           map[string]Tool
+	handlers        map[string]ToolHandler
+	mu              sync.RWMutex
+	logger          *log.Logger
+	discoverer      ToolDiscoverer
+	instanceLookup  InstanceLookup
 }
 
 // NewServer creates a new MCP server
@@ -38,6 +49,26 @@ func NewServer(name, version string, logger *log.Logger) *Server {
 		handlers: make(map[string]ToolHandler),
 		logger:   logger,
 	}
+}
+
+// SetDiscoverer sets the tool discoverer for search/detail endpoints.
+func (s *Server) SetDiscoverer(d ToolDiscoverer) {
+	s.discoverer = d
+}
+
+// SetInstanceLookup sets the function used to look up enabled instances by tool type.
+func (s *Server) SetInstanceLookup(fn InstanceLookup) {
+	s.instanceLookup = fn
+}
+
+// Tools returns the tools map for external read access.
+func (s *Server) Tools() map[string]Tool {
+	return s.tools
+}
+
+// Mu returns the server's read-write mutex for external synchronization.
+func (s *Server) Mu() *sync.RWMutex {
+	return &s.mu
 }
 
 // RegisterTool registers a tool with its handler
@@ -138,6 +169,10 @@ func (s *Server) handleRequest(ctx context.Context, req *Request, incidentID str
 		return s.handleListTools(req)
 	case "tools/call":
 		return s.handleCallTool(ctx, req, incidentID)
+	case "tools/search":
+		return s.handleSearchTools(req)
+	case "tools/detail":
+		return s.handleGetToolDetail(req)
 	case "ping":
 		return NewResponse(req.ID, map[string]interface{}{})
 	default:
@@ -224,6 +259,70 @@ func (s *Server) handleCallTool(ctx context.Context, req *Request, incidentID st
 	return NewResponse(req.ID, CallToolResult{
 		Content: []Content{NewTextContent(textResult)},
 	})
+}
+
+// handleSearchTools handles the tools/search request
+func (s *Server) handleSearchTools(req *Request) Response {
+	if s.discoverer == nil {
+		return NewErrorResponse(req.ID, InternalError, "Tool discovery not configured", nil)
+	}
+
+	var params SearchToolsParams
+	if req.Params != nil {
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return NewErrorResponse(req.ID, InvalidParams, "Invalid search params", err.Error())
+		}
+	}
+
+	results := s.discoverer.SearchTools(params.Query, params.ToolType)
+
+	// Populate instance logical names if lookup is available
+	if s.instanceLookup != nil {
+		for i := range results {
+			instances := s.instanceLookup(results[i].ToolType)
+			names := make([]string, 0, len(instances))
+			for _, inst := range instances {
+				if inst.LogicalName != "" {
+					names = append(names, inst.LogicalName)
+				}
+			}
+			results[i].Instances = names
+		}
+	}
+
+	if results == nil {
+		results = []SearchToolsResultItem{}
+	}
+
+	return NewResponse(req.ID, SearchToolsResult{Tools: results})
+}
+
+// handleGetToolDetail handles the tools/detail request
+func (s *Server) handleGetToolDetail(req *Request) Response {
+	if s.discoverer == nil {
+		return NewErrorResponse(req.ID, InternalError, "Tool discovery not configured", nil)
+	}
+
+	var params GetToolDetailParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return NewErrorResponse(req.ID, InvalidParams, "Invalid detail params", err.Error())
+	}
+
+	if params.ToolName == "" {
+		return NewErrorResponse(req.ID, InvalidParams, "tool_name is required", nil)
+	}
+
+	detail, found := s.discoverer.GetToolDetail(params.ToolName)
+	if !found {
+		return NewErrorResponse(req.ID, MethodNotFound, fmt.Sprintf("Tool not found: %s", params.ToolName), nil)
+	}
+
+	// Populate instances if lookup is available
+	if s.instanceLookup != nil {
+		detail.Instances = s.instanceLookup(detail.ToolType)
+	}
+
+	return NewResponse(req.ID, detail)
 }
 
 // sendHTTPResponse sends a JSON-RPC response over HTTP
