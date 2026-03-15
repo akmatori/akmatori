@@ -251,7 +251,6 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 	// Also set up a refresh callback to update our tool map when schemas change
 	h.pool.SetSchemaRefreshCallback(func(instanceID uint, tools []mcp.Tool) {
 		h.mu.Lock()
-		defer h.mu.Unlock()
 
 		// Find the namespace prefix and config for this instance
 		var prefix string
@@ -264,6 +263,7 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 			}
 		}
 		if prefix == "" {
+			h.mu.Unlock()
 			return
 		}
 
@@ -289,6 +289,11 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 			"prefix", prefix,
 			"tools", len(tools),
 		)
+
+		// Release h.mu before calling onToolsChanged to avoid lock inversion.
+		// onToolsChanged acquires r.proxyMu → s.mu, while registerProxyToolsFromHandler
+		// acquires r.proxyMu → h.mu (via GetTools). Holding h.mu here would deadlock.
+		h.mu.Unlock()
 
 		// Notify the registry to re-register proxy tools in the MCP server
 		if h.onToolsChanged != nil {

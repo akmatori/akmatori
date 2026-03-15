@@ -523,9 +523,26 @@ func backfillToolInstanceLogicalNames(db *gorm.DB) error {
 		return nil
 	}
 	slog.Info("backfilling logical_name for tool instances", "count", len(instances))
+
+	// Track used names to avoid unique constraint violations when multiple
+	// instances slugify to the same value (e.g., "Prod SSH" and "prod-ssh").
+	used := make(map[string]bool)
+	// Also check already-assigned logical names in the database.
+	var existing []ToolInstance
+	if err := db.Where("logical_name IS NOT NULL AND logical_name != ''").Find(&existing).Error; err == nil {
+		for _, e := range existing {
+			used[e.LogicalName] = true
+		}
+	}
+
 	for _, inst := range instances {
 		logicalName := SlugifyLogicalName(inst.Name)
-		if err := db.Model(&ToolInstance{}).Where("id = ?", inst.ID).Update("logical_name", logicalName).Error; err != nil {
+		candidate := logicalName
+		for suffix := 2; used[candidate]; suffix++ {
+			candidate = fmt.Sprintf("%s-%d", logicalName, suffix)
+		}
+		used[candidate] = true
+		if err := db.Model(&ToolInstance{}).Where("id = ?", inst.ID).Update("logical_name", candidate).Error; err != nil {
 			slog.Warn("failed to backfill logical_name", "id", inst.ID, "error", err)
 		}
 	}

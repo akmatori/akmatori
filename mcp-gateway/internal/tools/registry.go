@@ -314,6 +314,16 @@ func (r *Registry) registerHTTPConnectorTools(conn database.HTTPConnector) int {
 	count := 0
 	for _, toolDef := range toolDefs {
 		fullName := conn.ToolTypeName + "." + toolDef.Name
+
+		// Validate: read-only tools (default) must use GET. Reject at registration
+		// rather than failing every call at execution time.
+		isReadOnly := toolDef.ReadOnly == nil || *toolDef.ReadOnly
+		if isReadOnly && toolDef.HTTPMethod != "GET" {
+			r.logger.Printf("Skipping tool %q: read_only (default) but uses HTTP method %s; set read_only to false to allow writes",
+				fullName, toolDef.HTTPMethod)
+			continue
+		}
+
 		description := toolDef.Description
 		if description == "" {
 			description = fmt.Sprintf("%s %s %s", toolDef.HTTPMethod, toolDef.Path, conn.ToolTypeName)
