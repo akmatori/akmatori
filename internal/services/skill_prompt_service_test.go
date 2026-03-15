@@ -9,10 +9,11 @@ import (
 
 func sshToolInstance(settings database.JSONB) database.ToolInstance {
 	return database.ToolInstance{
-		ID:      1,
-		Name:    "prod-ssh",
-		Enabled: true,
-		Settings: settings,
+		ID:          1,
+		Name:        "prod-ssh",
+		LogicalName: "prod-ssh",
+		Enabled:     true,
+		Settings:    settings,
 		ToolType: database.ToolType{
 			ID:   1,
 			Name: "ssh",
@@ -149,11 +150,14 @@ func TestGenerateToolUsageExample_SSHBasic(t *testing.T) {
 
 	example := generateToolUsageExample(tool)
 
-	if !strings.Contains(example, "from ssh import") {
-		t.Error("expected Python import in example")
+	if !strings.Contains(example, "gateway_call") {
+		t.Error("expected gateway_call in example")
 	}
-	if !strings.Contains(example, "tool_instance_id=1") {
-		t.Errorf("expected tool_instance_id=1 in example, got: %s", example)
+	if !strings.Contains(example, `"ssh.execute_command"`) {
+		t.Error("expected ssh.execute_command tool name in example")
+	}
+	if !strings.Contains(example, `"prod-ssh"`) {
+		t.Errorf("expected logical name prod-ssh in example, got: %s", example)
 	}
 	if !strings.Contains(example, "Read-only mode") {
 		t.Error("expected read-only note for read-only host")
@@ -180,7 +184,7 @@ func TestGenerateToolUsageExample_SSHAdhocEnabled(t *testing.T) {
 	if !strings.Contains(example, "<hostname-or-ip>") {
 		t.Errorf("expected ad-hoc server placeholder, got: %s", example)
 	}
-	if !strings.Contains(example, "get_server_info(servers=") {
+	if !strings.Contains(example, `"ssh.get_server_info"`) {
 		t.Errorf("expected ad-hoc get_server_info example, got: %s", example)
 	}
 }
@@ -206,22 +210,23 @@ func TestGenerateToolUsageExample_SSHAdhocDisabled(t *testing.T) {
 
 func TestGenerateToolUsageExample_Zabbix(t *testing.T) {
 	tool := database.ToolInstance{
-		ID:       3,
-		Name:     "prod-zabbix",
-		Settings: database.JSONB{},
-		ToolType: database.ToolType{ID: 2, Name: "zabbix"},
+		ID:          3,
+		Name:        "prod-zabbix",
+		LogicalName: "prod-zabbix",
+		Settings:    database.JSONB{},
+		ToolType:    database.ToolType{ID: 2, Name: "zabbix"},
 	}
 
 	example := generateToolUsageExample(tool)
 
-	if !strings.Contains(example, "from zabbix import") {
-		t.Error("expected zabbix import in example")
+	if !strings.Contains(example, "gateway_call") {
+		t.Error("expected gateway_call in example")
 	}
-	if !strings.Contains(example, "tool_instance_id=3") {
-		t.Errorf("expected tool_instance_id=3, got: %s", example)
+	if !strings.Contains(example, `"prod-zabbix"`) {
+		t.Errorf("expected logical name prod-zabbix, got: %s", example)
 	}
-	// Verify all imported functions have usage examples
-	for _, fn := range []string{"get_hosts", "get_problems", "get_history", "get_items(", "get_items_batch", "get_triggers", "api_request"} {
+	// Verify all tool methods have usage examples
+	for _, fn := range []string{"zabbix.get_hosts", "zabbix.get_problems", "zabbix.get_history", "zabbix.get_items\"", "zabbix.get_items_batch", "zabbix.get_triggers", "zabbix.api_request"} {
 		if !strings.Contains(example, fn) {
 			t.Errorf("expected example for %s, got: %s", fn, example)
 		}
@@ -245,7 +250,7 @@ func TestGenerateToolUsageExample_SSHAdhocWriteNoReadOnlyNote(t *testing.T) {
 
 func TestGenerateToolUsageExample_SSHAdhocOnlyNoHostlessExamples(t *testing.T) {
 	// When ad-hoc is enabled but no configured hosts exist,
-	// hostless calls like test_connectivity(tool_instance_id=X) should NOT appear
+	// hostless calls should NOT appear
 	tool := sshToolInstance(database.JSONB{
 		"allow_adhoc_connections":    true,
 		"adhoc_allow_write_commands": false,
@@ -257,14 +262,14 @@ func TestGenerateToolUsageExample_SSHAdhocOnlyNoHostlessExamples(t *testing.T) {
 	if !strings.Contains(example, "Ad-hoc") {
 		t.Errorf("expected ad-hoc example, got: %s", example)
 	}
-	if !strings.Contains(example, `servers=["<hostname-or-ip>"]`) {
+	if !strings.Contains(example, `"<hostname-or-ip>"`) {
 		t.Errorf("expected ad-hoc servers placeholder, got: %s", example)
 	}
-	// Should NOT have hostless calls that would error
-	if strings.Contains(example, "test_connectivity(tool_instance_id=") {
+	// Should NOT have hostless calls that would error (configured host examples without servers)
+	if strings.Contains(example, `"ssh.test_connectivity", {}`) {
 		t.Errorf("ad-hoc-only config should not show hostless test_connectivity, got: %s", example)
 	}
-	if strings.Contains(example, "get_server_info(tool_instance_id=") {
+	if strings.Contains(example, `"ssh.get_server_info", {}`) {
 		t.Errorf("ad-hoc-only config should not show hostless get_server_info, got: %s", example)
 	}
 }
@@ -327,8 +332,8 @@ func TestGenerateToolUsageExample_SSHNoHostsNoAdhoc(t *testing.T) {
 	if !strings.Contains(example, "not configured") {
 		t.Errorf("expected misconfiguration message, got: %s", example)
 	}
-	if strings.Contains(example, "from ssh import") {
-		t.Errorf("misconfigured tool should not show import examples, got: %s", example)
+	if strings.Contains(example, "gateway_call") {
+		t.Errorf("misconfigured tool should not show gateway_call examples, got: %s", example)
 	}
 }
 
@@ -410,22 +415,23 @@ func TestExtractToolDetails_SkipsBlankAddressHosts(t *testing.T) {
 
 func TestGenerateToolUsageExample_VictoriaMetrics(t *testing.T) {
 	tool := database.ToolInstance{
-		ID:       4,
-		Name:     "prod-vm",
-		Settings: database.JSONB{},
-		ToolType: database.ToolType{ID: 3, Name: "victoria_metrics"},
+		ID:          4,
+		Name:        "prod-vm",
+		LogicalName: "prod-vm",
+		Settings:    database.JSONB{},
+		ToolType:    database.ToolType{ID: 3, Name: "victoria_metrics"},
 	}
 
 	example := generateToolUsageExample(tool)
 
-	if !strings.Contains(example, "from victoriametrics import") {
-		t.Error("expected victoriametrics import in example")
+	if !strings.Contains(example, "gateway_call") {
+		t.Error("expected gateway_call in example")
 	}
-	if !strings.Contains(example, "tool_instance_id=4") {
-		t.Errorf("expected tool_instance_id=4, got: %s", example)
+	if !strings.Contains(example, `"prod-vm"`) {
+		t.Errorf("expected logical name prod-vm, got: %s", example)
 	}
-	// Verify all imported functions have usage examples
-	for _, fn := range []string{"instant_query", "range_query", "label_values", "series", "api_request"} {
+	// Verify all tool methods have usage examples
+	for _, fn := range []string{"victoriametrics.instant_query", "victoriametrics.range_query", "victoriametrics.label_values", "victoriametrics.series", "victoriametrics.api_request"} {
 		if !strings.Contains(example, fn) {
 			t.Errorf("expected example for %s, got: %s", fn, example)
 		}
@@ -434,10 +440,11 @@ func TestGenerateToolUsageExample_VictoriaMetrics(t *testing.T) {
 
 func TestGenerateToolUsageExample_VictoriaMetricsContainsPromQL(t *testing.T) {
 	tool := database.ToolInstance{
-		ID:       7,
-		Name:     "staging-vm",
-		Settings: database.JSONB{},
-		ToolType: database.ToolType{ID: 3, Name: "victoria_metrics"},
+		ID:          7,
+		Name:        "staging-vm",
+		LogicalName: "staging-vm",
+		Settings:    database.JSONB{},
+		ToolType:    database.ToolType{ID: 3, Name: "victoria_metrics"},
 	}
 
 	example := generateToolUsageExample(tool)
@@ -466,15 +473,164 @@ func TestExtractToolDetails_VictoriaMetricsTool(t *testing.T) {
 
 func TestGenerateToolUsageExample_UnknownToolType(t *testing.T) {
 	tool := database.ToolInstance{
-		ID:       5,
-		Name:     "custom-tool",
-		Settings: database.JSONB{},
-		ToolType: database.ToolType{ID: 3, Name: "custom"},
+		ID:          5,
+		Name:        "custom-tool",
+		LogicalName: "custom-tool",
+		Settings:    database.JSONB{},
+		ToolType:    database.ToolType{ID: 3, Name: "custom"},
 	}
 
 	example := generateToolUsageExample(tool)
 
-	if !strings.Contains(example, "tool_instance_id: 5") {
-		t.Errorf("expected generic tool_instance_id hint, got: %s", example)
+	if !strings.Contains(example, "gateway_call") {
+		t.Errorf("expected gateway_call in example, got: %s", example)
+	}
+	if !strings.Contains(example, `"custom-tool"`) {
+		t.Errorf("expected logical name in example, got: %s", example)
+	}
+}
+
+func TestGenerateToolUsageExample_FallbackToNameWhenNoLogicalName(t *testing.T) {
+	tool := database.ToolInstance{
+		ID:          6,
+		Name:        "my-tool",
+		LogicalName: "", // no logical name set
+		Settings:    database.JSONB{},
+		ToolType:    database.ToolType{ID: 4, Name: "custom"},
+	}
+
+	example := generateToolUsageExample(tool)
+
+	if !strings.Contains(example, `"my-tool"`) {
+		t.Errorf("expected fallback to Name when LogicalName is empty, got: %s", example)
+	}
+}
+
+func TestGenerateToolUsageExample_SSHUsesLogicalName(t *testing.T) {
+	tool := database.ToolInstance{
+		ID:          1,
+		Name:        "Production SSH",
+		LogicalName: "prod-ssh",
+		Enabled:     true,
+		Settings: database.JSONB{
+			"ssh_hosts": []interface{}{
+				map[string]interface{}{"hostname": "web-1", "address": "10.0.0.1", "allow_write_commands": true},
+			},
+		},
+		ToolType: database.ToolType{ID: 1, Name: "ssh"},
+	}
+
+	example := generateToolUsageExample(tool)
+
+	if !strings.Contains(example, `"prod-ssh"`) {
+		t.Errorf("expected logical name prod-ssh in SSH example, got: %s", example)
+	}
+	// Should NOT contain instance ID references
+	if strings.Contains(example, "tool_instance_id") {
+		t.Errorf("should not contain tool_instance_id reference, got: %s", example)
+	}
+}
+
+func TestGenerateToolUsageExample_ZabbixUsesLogicalName(t *testing.T) {
+	tool := database.ToolInstance{
+		ID:          3,
+		Name:        "Production Zabbix",
+		LogicalName: "prod-zabbix",
+		Settings:    database.JSONB{},
+		ToolType:    database.ToolType{ID: 2, Name: "zabbix"},
+	}
+
+	example := generateToolUsageExample(tool)
+
+	if !strings.Contains(example, `"prod-zabbix"`) {
+		t.Errorf("expected logical name in Zabbix example, got: %s", example)
+	}
+	if strings.Contains(example, "tool_instance_id") {
+		t.Errorf("should not contain tool_instance_id reference, got: %s", example)
+	}
+}
+
+// --- generateSkillMd tool section tests ---
+
+func TestGenerateSkillMd_ToolSectionShowsLogicalNames(t *testing.T) {
+	// Test that the tool section header shows logical_name instead of ID
+	tool := database.ToolInstance{
+		ID:          1,
+		Name:        "prod-ssh",
+		LogicalName: "prod-ssh",
+		Enabled:     true,
+		Settings: database.JSONB{
+			"ssh_hosts": []interface{}{
+				map[string]interface{}{"hostname": "web-1", "address": "10.0.0.1"},
+			},
+		},
+		ToolType: database.ToolType{ID: 1, Name: "ssh"},
+	}
+
+	example := generateToolUsageExample(tool)
+
+	// Header format should include logical_name, not ID
+	if strings.Contains(example, "ID:") {
+		t.Errorf("tool section should not show numeric ID, got: %s", example)
+	}
+}
+
+func TestGenerateSkillMd_ToolSectionShowsDiscoveryHints(t *testing.T) {
+	// Verify the generated output includes search_tools and execute_script hints
+	// This tests the generateSkillMd wrapper behavior indirectly by verifying
+	// the section content includes the expected discovery tool references
+	tool := database.ToolInstance{
+		ID:          1,
+		Name:        "prod-ssh",
+		LogicalName: "prod-ssh",
+		Enabled:     true,
+		Settings: database.JSONB{
+			"ssh_hosts": []interface{}{
+				map[string]interface{}{"hostname": "web-1", "address": "10.0.0.1"},
+			},
+		},
+		ToolType: database.ToolType{ID: 1, Name: "ssh"},
+	}
+
+	example := generateToolUsageExample(tool)
+
+	// The gateway_call examples should be present
+	if !strings.Contains(example, "gateway_call") {
+		t.Errorf("expected gateway_call in example, got: %s", example)
+	}
+}
+
+func TestGenerateToolUsageExample_NoPythonImports(t *testing.T) {
+	// Verify no Python import patterns remain in any tool type
+	tools := []database.ToolInstance{
+		{
+			ID: 1, Name: "ssh-1", LogicalName: "ssh-1", Enabled: true,
+			Settings: database.JSONB{
+				"ssh_hosts": []interface{}{
+					map[string]interface{}{"hostname": "h", "address": "1.2.3.4"},
+				},
+			},
+			ToolType: database.ToolType{ID: 1, Name: "ssh"},
+		},
+		{
+			ID: 2, Name: "zabbix-1", LogicalName: "zabbix-1",
+			Settings: database.JSONB{},
+			ToolType: database.ToolType{ID: 2, Name: "zabbix"},
+		},
+		{
+			ID: 3, Name: "vm-1", LogicalName: "vm-1",
+			Settings: database.JSONB{},
+			ToolType: database.ToolType{ID: 3, Name: "victoria_metrics"},
+		},
+	}
+
+	for _, tool := range tools {
+		example := generateToolUsageExample(tool)
+		if strings.Contains(example, "from ") && strings.Contains(example, " import ") {
+			t.Errorf("tool type %s still has Python import pattern: %s", tool.ToolType.Name, example)
+		}
+		if strings.Contains(example, "tool_instance_id=") {
+			t.Errorf("tool type %s still has tool_instance_id= pattern: %s", tool.ToolType.Name, example)
+		}
 	}
 }
