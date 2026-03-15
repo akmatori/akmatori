@@ -39,7 +39,7 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 │   └── internal/
 │       ├── cache/          # Generic TTL cache
 │       ├── ratelimit/      # Token bucket rate limiter
-│       └── tools/          # SSH and Zabbix implementations
+│       └── tools/          # SSH, Zabbix, and VictoriaMetrics implementations
 ├── web/                    # React frontend
 ├── docs/                   # OpenAPI specs (swagger at /api/docs)
 └── tests/fixtures/         # Test payloads and mock data
@@ -125,6 +125,7 @@ Tools are Python wrappers in `agent-worker/tools/` called via bash:
 | `tools/mcp_client.py` | `call()`, `MCPClient` | N/A (base) |
 | `tools/ssh/__init__.py` | `execute_command()`, `test_connectivity(servers=None)`, `get_server_info()` | `ssh.*` |
 | `tools/zabbix/__init__.py` | `get_hosts()`, `get_problems()`, `get_history()`, `get_items()`, `get_items_batch()`, `get_triggers()` | `zabbix.*` |
+| `tools/victoriametrics/__init__.py` | `instant_query()`, `range_query()`, `label_values()`, `series()`, `api_request()` | `victoriametrics.*` |
 
 ### Message Flow
 
@@ -529,7 +530,8 @@ func legacyHandler() { ... }
 
 - `mcp-gateway/internal/cache/cache.go` - Generic TTL cache with background cleanup
 - `mcp-gateway/internal/ratelimit/limiter.go` - Token bucket rate limiter
-- `mcp-gateway/internal/tools/zabbix/` - Integration with caching and rate limiting
+- `mcp-gateway/internal/tools/zabbix/` - Zabbix integration with caching and rate limiting
+- `mcp-gateway/internal/tools/victoriametrics/` - VictoriaMetrics integration with caching and rate limiting
 
 ### What NOT To Do
 
