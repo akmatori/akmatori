@@ -147,6 +147,31 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 	return fmt.Sprintf("---\n%s---\n\n%s%s\n", string(yamlBytes), resolvedBody, toolsSection.String())
 }
 
+// sshHasConfiguredHosts checks if the SSH tool instance has any configured hosts.
+func sshHasConfiguredHosts(tool database.ToolInstance) bool {
+	if tool.Settings == nil {
+		return false
+	}
+	hostsData, ok := tool.Settings["ssh_hosts"]
+	if !ok {
+		return false
+	}
+	hostsJSON, err := json.Marshal(hostsData)
+	if err != nil {
+		return false
+	}
+	var hosts []map[string]interface{}
+	if err := json.Unmarshal(hostsJSON, &hosts); err != nil {
+		return false
+	}
+	for _, h := range hosts {
+		if addr, _ := h["address"].(string); strings.TrimSpace(addr) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // sshAllHostsAllowWrite checks if ALL hosts in an SSH tool instance have allow_write_commands enabled.
 // Returns false if any host is read-only (the default), if settings are missing, or if there are no hosts.
 func sshAllHostsAllowWrite(tool database.ToolInstance) bool {
@@ -168,11 +193,20 @@ func sshAllHostsAllowWrite(tool database.ToolInstance) bool {
 	if len(hosts) == 0 {
 		return false
 	}
+	hasValidHost := false
 	for _, h := range hosts {
+		// Skip placeholder rows with blank addresses (same filter as runtime)
+		if addr, _ := h["address"].(string); strings.TrimSpace(addr) == "" {
+			continue
+		}
+		hasValidHost = true
 		allow, ok := h["allow_write_commands"].(bool)
 		if !ok || !allow {
 			return false
 		}
+	}
+	if !hasValidHost {
+		return false
 	}
 	return true
 }
@@ -184,40 +218,62 @@ func generateToolUsageExample(tool database.ToolInstance) string {
 
 	switch typeName {
 	case "ssh":
-		var readOnlyNote string
 		adhocEnabled, _ := tool.Settings["allow_adhoc_connections"].(bool)
 		adhocWriteEnabled, _ := tool.Settings["adhoc_allow_write_commands"].(bool)
-		if !sshAllHostsAllowWrite(tool) && !(adhocEnabled && adhocWriteEnabled) {
-			readOnlyNote = `
-**Read-only mode is enabled** — only diagnostic commands are allowed.
-Allowed: cat, head, tail, grep, find, ls, ps, top, df, free, netstat, ss, uptime,
+		hasConfiguredHosts := sshHasConfiguredHosts(tool)
+		configuredHostsWritable := sshAllHostsAllowWrite(tool)
+
+		// If neither configured hosts nor ad-hoc connections are available,
+		// the tool is misconfigured — tell the agent explicitly.
+		if !hasConfiguredHosts && !adhocEnabled {
+			return fmt.Sprintf(`
+**SSH tool "%s" (instance %d) is not configured** — no hosts are defined and ad-hoc connections are disabled.
+Ask the operator to add SSH hosts or enable ad-hoc connections in the tool settings before this tool can be used.
+`, tool.Name, id)
+		}
+
+		// Build read-only warnings separately for configured hosts and ad-hoc
+		var readOnlyNote string
+		readOnlyCommands := `Allowed: cat, head, tail, grep, find, ls, ps, top, df, free, netstat, ss, uptime,
 vmstat, iostat, mpstat, sar, pidstat, journalctl, dmesg, nproc, lscpu, getconf,
 docker ps/logs/inspect, kubectl get/describe/logs, systemctl status.
 For CPU core count use ` + "`nproc`" + ` or ` + "`lscpu`" + ` (not /proc/cpuinfo parsing).
 `
+		if hasConfiguredHosts && !configuredHostsWritable && adhocEnabled && adhocWriteEnabled {
+			readOnlyNote = "\n**Read-only mode is enabled for configured hosts** — only diagnostic commands are allowed.\n" + readOnlyCommands +
+				"Ad-hoc connections allow write commands.\n"
+		} else if hasConfiguredHosts && configuredHostsWritable && adhocEnabled && !adhocWriteEnabled {
+			readOnlyNote = "\n**Read-only mode is enabled for ad-hoc connections** — only diagnostic commands are allowed on ad-hoc targets.\n" + readOnlyCommands
+		} else if !configuredHostsWritable && !(adhocEnabled && adhocWriteEnabled) {
+			readOnlyNote = "\n**Read-only mode is enabled** — only diagnostic commands are allowed.\n" + readOnlyCommands
 		}
 
-		// Add ad-hoc connection example when enabled
+		// Build examples based on what's available
+		var configuredExamples string
+		if hasConfiguredHosts {
+			configuredExamples = fmt.Sprintf(`
+result = execute_command("uptime", tool_instance_id=%d)
+result = execute_command("df -h", servers=["hostname"], tool_instance_id=%d)
+result = test_connectivity(tool_instance_id=%d)
+result = get_server_info(tool_instance_id=%d)`, id, id, id, id)
+		}
+
 		var adhocExample string
-		if allow, ok := tool.Settings["allow_adhoc_connections"].(bool); ok && allow {
+		if adhocEnabled {
 			adhocExample = fmt.Sprintf(`
 # Ad-hoc: connect to any server by hostname/FQDN/IP
 result = execute_command("uptime", servers=["<hostname-or-ip>"], tool_instance_id=%d)
 result = test_connectivity(servers=["<server1>", "<server2>"], tool_instance_id=%d)
-`, id, id)
+result = get_server_info(servers=["<hostname-or-ip>"], tool_instance_id=%d)`, id, id, id)
 		}
 
 		return fmt.Sprintf(`
 Usage (via bash tool):
 `+"```python"+`
 from ssh import execute_command, test_connectivity, get_server_info
-
-result = execute_command("uptime", tool_instance_id=%d)
-result = execute_command("df -h", servers=["hostname"], tool_instance_id=%d)
-result = test_connectivity(tool_instance_id=%d)
-result = get_server_info(tool_instance_id=%d)
-%s`+"```"+`
-%s`, id, id, id, id, adhocExample, readOnlyNote)
+%s%s
+`+"```"+`
+%s`, configuredExamples, adhocExample, readOnlyNote)
 	case "zabbix":
 		return fmt.Sprintf(`
 Usage (via bash tool):
@@ -227,9 +283,12 @@ from zabbix import get_hosts, get_problems, get_history, get_items, get_items_ba
 result = get_hosts(tool_instance_id=%d)
 result = get_problems(severity_min=3, tool_instance_id=%d)
 result = get_items_batch(searches=["cpu", "memory"], tool_instance_id=%d)
+result = get_history(itemids=["67890"], limit=10, tool_instance_id=%d)
+result = get_items(hostids=["12345"], search={"key_": "cpu"}, tool_instance_id=%d)
 result = get_triggers(hostids=["12345"], only_true=True, tool_instance_id=%d)
+result = api_request("host.get", params={"output": ["hostid", "host"]}, tool_instance_id=%d)
 `+"```"+`
-`, id, id, id, id)
+`, id, id, id, id, id, id, id)
 	default:
 		return fmt.Sprintf("When using %s tools, pass `tool_instance_id: %d` to target this instance.\n", typeName, id)
 	}
@@ -259,6 +318,10 @@ func extractToolDetails(tool database.ToolInstance) string {
 				if err := json.Unmarshal(hostsJSON, &hosts); err == nil {
 					var hostnames []string
 					for _, h := range hosts {
+						// Skip placeholder rows with blank addresses (same filter as runtime)
+						if addr, _ := h["address"].(string); strings.TrimSpace(addr) == "" {
+							continue
+						}
 						if hostname, ok := h["hostname"].(string); ok && hostname != "" {
 							hostnames = append(hostnames, hostname)
 						}

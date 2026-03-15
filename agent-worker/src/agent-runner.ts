@@ -43,16 +43,17 @@ import {
  */
 const BASH_TOOL_GUIDELINES = `\
 - You have access to infrastructure tools via Python wrappers. PYTHONPATH=/tools is pre-set.
-- Call tools with bash using python3 -c one-liners:
-  python3 -c "from ssh import execute_command; print(execute_command('uptime', tool_instance_id=<ID>))"
-  python3 -c "from ssh import test_connectivity; print(test_connectivity(tool_instance_id=<ID>))"
-  python3 -c "from ssh import get_server_info; print(get_server_info(tool_instance_id=<ID>))"
+- IMPORTANT: Each skill's SKILL.md lists assigned tools with their tool_instance_id and the exact call forms available. Read the SKILL.md first, then call tools using only the forms shown there. Do NOT explore the filesystem to discover tools.
+- Call tools with bash using python3 -c one-liners. SSH examples (check SKILL.md for which forms apply to your instance):
+  python3 -c "from ssh import execute_command; print(execute_command('uptime', servers=['<hostname>'], tool_instance_id=<ID>))"
+  python3 -c "from ssh import test_connectivity; print(test_connectivity(servers=['<hostname>'], tool_instance_id=<ID>))"
+  python3 -c "from ssh import get_server_info; print(get_server_info(servers=['<hostname>'], tool_instance_id=<ID>))"
+- Zabbix examples:
   python3 -c "from zabbix import get_problems; print(get_problems(severity_min=3, tool_instance_id=<ID>))"
   python3 -c "from zabbix import get_hosts; print(get_hosts(tool_instance_id=<ID>))"
   python3 -c "from zabbix import get_items_batch; print(get_items_batch(searches=['cpu','memory'], hostids=['12345'], tool_instance_id=<ID>))"
   python3 -c "from zabbix import get_history; print(get_history(itemids=['67890'], limit=10, tool_instance_id=<ID>))"
   python3 -c "from zabbix import get_triggers; print(get_triggers(hostids=['12345'], only_true=True, tool_instance_id=<ID>))"
-- Each skill's SKILL.md lists assigned tools with their tool_instance_id. Read the SKILL.md first, then call tools directly. Do NOT explore the filesystem to discover tools.
 - Do NOT search for Python files, read source code, or trial-and-error imports. If you get ModuleNotFoundError, prefix the command with PYTHONPATH=/tools.
 - SSH: Most servers are in read-only mode — only diagnostic commands are allowed (cat, head, tail, grep, find, ls, ps, top, df, free, netstat, ss, uptime, vmstat, iostat, journalctl, dmesg, docker ps/logs, systemctl status, nproc, lscpu, etc.)
 - SSH: For CPU core count, use nproc or lscpu (not /proc/cpuinfo parsing). Use the servers parameter to target specific hosts.
