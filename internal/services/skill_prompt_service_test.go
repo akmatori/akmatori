@@ -408,6 +408,62 @@ func TestExtractToolDetails_SkipsBlankAddressHosts(t *testing.T) {
 	}
 }
 
+func TestGenerateToolUsageExample_VictoriaMetrics(t *testing.T) {
+	tool := database.ToolInstance{
+		ID:       4,
+		Name:     "prod-vm",
+		Settings: database.JSONB{},
+		ToolType: database.ToolType{ID: 3, Name: "victoria_metrics"},
+	}
+
+	example := generateToolUsageExample(tool)
+
+	if !strings.Contains(example, "from victoriametrics import") {
+		t.Error("expected victoriametrics import in example")
+	}
+	if !strings.Contains(example, "tool_instance_id=4") {
+		t.Errorf("expected tool_instance_id=4, got: %s", example)
+	}
+	// Verify all imported functions have usage examples
+	for _, fn := range []string{"instant_query", "range_query", "label_values", "series", "api_request"} {
+		if !strings.Contains(example, fn) {
+			t.Errorf("expected example for %s, got: %s", fn, example)
+		}
+	}
+}
+
+func TestGenerateToolUsageExample_VictoriaMetricsContainsPromQL(t *testing.T) {
+	tool := database.ToolInstance{
+		ID:       7,
+		Name:     "staging-vm",
+		Settings: database.JSONB{},
+		ToolType: database.ToolType{ID: 3, Name: "victoria_metrics"},
+	}
+
+	example := generateToolUsageExample(tool)
+
+	// Verify examples contain realistic PromQL patterns
+	if !strings.Contains(example, "rate(http_requests_total[5m])") {
+		t.Errorf("expected PromQL example in range_query, got: %s", example)
+	}
+	if !strings.Contains(example, `"__name__"`) {
+		t.Errorf("expected __name__ label in label_values example, got: %s", example)
+	}
+}
+
+func TestExtractToolDetails_VictoriaMetricsTool(t *testing.T) {
+	tool := database.ToolInstance{
+		ID:       4,
+		Name:     "prod-vm",
+		Settings: database.JSONB{"vm_url": "https://vm.example.com"},
+		ToolType: database.ToolType{ID: 3, Name: "victoria_metrics"},
+	}
+	details := extractToolDetails(tool)
+	if details != "" {
+		t.Errorf("expected empty details for victoria_metrics tool (no agent-relevant config), got: %s", details)
+	}
+}
+
 func TestGenerateToolUsageExample_UnknownToolType(t *testing.T) {
 	tool := database.ToolInstance{
 		ID:       5,
