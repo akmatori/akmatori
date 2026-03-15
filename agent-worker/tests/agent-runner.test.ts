@@ -488,11 +488,11 @@ describe("AgentRunner", () => {
       expect(bashTool).toBeDefined();
       expect(bashTool.promptGuidelines).toBeDefined();
       expect(typeof bashTool.promptGuidelines).toBe("string");
-      expect(bashTool.promptGuidelines).toContain("python3 -c");
+      expect(bashTool.promptGuidelines).toContain("gateway_call");
       expect(bashTool.promptGuidelines).toContain("SKILL.md");
-      expect(bashTool.promptGuidelines).toContain("tool_instance_id");
-      expect(bashTool.promptGuidelines).toContain("ssh");
-      expect(bashTool.promptGuidelines).toContain("zabbix");
+      expect(bashTool.promptGuidelines).toContain("search_tools");
+      expect(bashTool.promptGuidelines).not.toContain("python3 -c");
+      expect(bashTool.promptGuidelines).not.toContain("PYTHONPATH");
     });
 
     it("should configure bash spawnHook with MCP env vars", async () => {

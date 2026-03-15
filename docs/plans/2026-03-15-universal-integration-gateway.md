@@ -154,12 +154,12 @@ Remove the Python wrapper pattern entirely — the TypeScript gateway tools repl
 - Modify: `agent-worker/Dockerfile` — remove Python installation and PYTHONPATH
 - Modify: `agent-worker/src/agent-runner.ts` — remove PYTHONPATH and Python-related env vars from spawnHook
 
-- [ ] Remove all Python wrapper files in `agent-worker/tools/`
-- [ ] Remove Python3 installation from agent-worker Dockerfile
-- [ ] Remove `PYTHONPATH` injection from spawnHook in agent-runner.ts
-- [ ] Update BASH_TOOL_GUIDELINES to remove Python import references
-- [ ] Verify no remaining references to Python wrappers in codebase
-- [ ] Run `make test-agent && make verify` — must pass before Phase 2
+- [x] Remove all Python wrapper files in `agent-worker/tools/`
+- [x] Remove Python3 installation from agent-worker Dockerfile
+- [x] Remove `PYTHONPATH` injection from spawnHook in agent-runner.ts
+- [x] Update BASH_TOOL_GUIDELINES to remove Python import references
+- [x] Verify no remaining references to Python wrappers in codebase
+- [x] Run `make test-agent && make verify` — must pass before Phase 2
 
 ---
 

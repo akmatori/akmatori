@@ -34,7 +34,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ripgrep \
     git \
     jq \
-    python3 \
     ca-certificates \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -57,9 +56,6 @@ RUN npm ci --omit=dev && npm cache clean --force
 # Copy built JavaScript from builder
 COPY --from=builder /app/dist/ ./dist/
 
-# Copy Python tool wrappers for MCP Gateway access
-COPY tools/ /tools/
-
 # Change ownership
 RUN chown -R agent:agent /home/agent/app
 
@@ -71,10 +67,6 @@ ENV API_WS_URL=ws://akmatori-api:3000/ws/codex
 ENV MCP_GATEWAY_URL=http://mcp-gateway:8080
 ENV WORKSPACE_DIR=/workspaces
 ENV NODE_ENV=production
-# PYTHONPATH must be set here because pi-mono's createBashTool spawnHook
-# does not propagate env vars to the spawned shell process.
-# Without this, python3 cannot find /tools/ssh and /tools/zabbix modules.
-ENV PYTHONPATH=/tools
 
 # Expose nothing - this container only makes outbound connections
 
