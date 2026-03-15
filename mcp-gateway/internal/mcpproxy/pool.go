@@ -202,9 +202,10 @@ func NewPool(opts ...PoolOption) *MCPConnectionPool {
 
 // GetOrConnect returns an existing connection or establishes a new one.
 func (p *MCPConnectionPool) GetOrConnect(ctx context.Context, instanceID uint, config MCPServerConfig) (*MCPConnection, error) {
-	p.mu.RLock()
+	// Use a full lock to avoid TOCTOU races where two goroutines could both
+	// create connections for the same instanceID, leaking one subprocess.
+	p.mu.Lock()
 	conn, exists := p.connections[instanceID]
-	p.mu.RUnlock()
 
 	if exists {
 		conn.mu.RLock()
@@ -215,14 +216,17 @@ func (p *MCPConnectionPool) GetOrConnect(ctx context.Context, instanceID uint, c
 			conn.mu.Lock()
 			conn.lastUsed = time.Now()
 			conn.mu.Unlock()
+			p.mu.Unlock()
 			return conn, nil
 		}
 		// Connection exists but is not healthy — remove and reconnect
-		p.mu.Lock()
 		delete(p.connections, instanceID)
-		p.mu.Unlock()
-		conn.close()
+		go conn.close()
 	}
+
+	// Release pool lock while connecting (slow I/O), but mark the slot
+	// so concurrent callers for the same instanceID wait.
+	p.mu.Unlock()
 
 	// Create new connection
 	conn = &MCPConnection{
@@ -261,7 +265,17 @@ func (p *MCPConnectionPool) GetOrConnect(ctx context.Context, instanceID uint, c
 	cacheKey := fmt.Sprintf("tools:%d", instanceID)
 	p.schemaCache.Set(cacheKey, tools)
 
+	// Re-acquire to insert. If another goroutine raced and inserted first,
+	// close the duplicate and return the existing one.
 	p.mu.Lock()
+	if existing, ok := p.connections[instanceID]; ok {
+		p.mu.Unlock()
+		conn.close()
+		existing.mu.Lock()
+		existing.lastUsed = time.Now()
+		existing.mu.Unlock()
+		return existing, nil
+	}
 	p.connections[instanceID] = conn
 	p.configs[instanceID] = config
 	p.mu.Unlock()
@@ -775,10 +789,15 @@ func (c *MCPConnection) sendSSERequest(ctx context.Context, method string, param
 }
 
 func (c *MCPConnection) sendStdioRequest(ctx context.Context, method string, params interface{}) (*mcp.Response, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	// Grab references to stdin/stdout under the lock, then release it before
+	// blocking on I/O to avoid holding the mutex while waiting for the subprocess.
+	c.mu.RLock()
+	stdinRef := c.stdin
+	stdoutRef := c.stdout
+	closed := c.closed
+	c.mu.RUnlock()
 
-	if c.stdin == nil || c.stdout == nil {
+	if closed || stdinRef == nil || stdoutRef == nil {
 		return nil, fmt.Errorf("stdio not initialized")
 	}
 
@@ -803,9 +822,14 @@ func (c *MCPConnection) sendStdioRequest(ctx context.Context, method string, par
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
+	// Stdio is a serial protocol — serialize write+read as a pair,
+	// but use a dedicated mutex so we don't block close() or status checks.
+	c.idMu.Lock()
+	defer c.idMu.Unlock()
+
 	// Write request followed by newline
 	bodyBytes = append(bodyBytes, '\n')
-	if _, err := c.stdin.Write(bodyBytes); err != nil {
+	if _, err := stdinRef.Write(bodyBytes); err != nil {
 		return nil, fmt.Errorf("write to stdin: %w", err)
 	}
 
@@ -816,7 +840,7 @@ func (c *MCPConnection) sendStdioRequest(ctx context.Context, method string, par
 	}
 	ch := make(chan result, 1)
 	go func() {
-		line, err := c.stdout.ReadBytes('\n')
+		line, err := stdoutRef.ReadBytes('\n')
 		if err != nil {
 			ch <- result{nil, fmt.Errorf("read from stdout: %w", err)}
 			return
@@ -941,7 +965,10 @@ func connectStdio(ctx context.Context, conn *MCPConnection) error {
 		return fmt.Errorf("command is required for stdio transport")
 	}
 
-	cmd := exec.CommandContext(ctx, conn.config.Command, conn.config.Args...)
+	// Use background context for the subprocess lifetime — not the request context.
+	// The subprocess should live as long as the connection pool keeps it, not just
+	// for the duration of the originating request.
+	cmd := exec.Command(conn.config.Command, conn.config.Args...)
 
 	// Set environment variables (inherit parent env and add custom vars)
 	if len(conn.config.EnvVars) > 0 {

@@ -9,16 +9,13 @@ import * as http from "node:http";
 import * as https from "node:https";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { ToolAllowlistEntry } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface ToolAllowlistEntry {
-  instance_id: number;
-  logical_name: string;
-  tool_type: string;
-}
+export type { ToolAllowlistEntry };
 
 export interface GatewayClientOptions {
   gatewayUrl: string;
@@ -253,7 +250,14 @@ export class GatewayClient {
         (res) => {
           const chunks: Buffer[] = [];
           res.on("data", (chunk: Buffer) => chunks.push(chunk));
-          res.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
+          res.on("end", () => {
+            const body = Buffer.concat(chunks).toString("utf-8");
+            if (res.statusCode && res.statusCode >= 400) {
+              reject(new GatewayError(-32000, `Gateway returned HTTP ${res.statusCode}: ${body.slice(0, 200)}`));
+              return;
+            }
+            resolve(body);
+          });
           res.on("error", (err) => reject(new GatewayError(-32000, `Response error: ${err.message}`)));
         },
       );

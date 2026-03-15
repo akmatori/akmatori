@@ -21,9 +21,9 @@ func TestSlugifyForLogicalName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := slugifyForLogicalName(tt.input)
+			got := SlugifyLogicalName(tt.input)
 			if got != tt.expected {
-				t.Errorf("slugifyForLogicalName(%q) = %q, want %q", tt.input, got, tt.expected)
+				t.Errorf("SlugifyLogicalName(%q) = %q, want %q", tt.input, got, tt.expected)
 			}
 		})
 	}
