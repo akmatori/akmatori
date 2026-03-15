@@ -166,12 +166,12 @@ The tool should check `status == "success"` and return the `data` field contents
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] Manual test: create a VictoriaMetrics tool instance via the web UI, verify form renders correctly with auth method dropdown
-- [ ] Manual test: assign the tool to a skill, verify SKILL.md contains correct Python usage examples
-- [ ] Manual test: run an instant query through the agent, verify results are returned
-- [ ] Run full test suite: `make test-all`
-- [ ] Run linter: `golangci-lint run`
-- [ ] Verify test coverage meets 80%+ for new code
+- [x] Manual test: create a VictoriaMetrics tool instance via the web UI, verify form renders correctly with auth method dropdown
+- [x] Manual test: assign the tool to a skill, verify SKILL.md contains correct Python usage examples
+- [x] Manual test: run an instant query through the agent, verify results are returned
+- [x] Run full test suite: `make test-all`
+- [x] Run linter: `golangci-lint run`
+- [x] Verify test coverage meets 80%+ for new code
 
 ### Task 7: Update documentation
 

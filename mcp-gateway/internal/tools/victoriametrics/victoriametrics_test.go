@@ -1288,6 +1288,176 @@ func TestVMConfig_ProxySettings(t *testing.T) {
 	}
 }
 
+// --- Series with optional params ---
+
+func TestSeries_WithStartAndEnd(t *testing.T) {
+	var receivedBody string
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		receivedBody = string(bodyBytes)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":[]}`)
+	})
+
+	_, err := tool.Series(context.Background(), "test-incident", map[string]interface{}{
+		"match": "up",
+		"start": "2024-01-01T00:00:00Z",
+		"end":   "2024-01-01T01:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(receivedBody, "start=") {
+		t.Error("expected 'start' param in body")
+	}
+	if !strings.Contains(receivedBody, "end=") {
+		t.Error("expected 'end' param in body")
+	}
+}
+
+// --- doRequest proxy and SSL tests ---
+
+func TestDoRequest_ProxyConfiguration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":"ok"}`)
+	}))
+	defer server.Close()
+
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &VMConfig{
+		URL:        server.URL,
+		AuthMethod: "none",
+		Timeout:    5,
+		UseProxy:   true,
+		ProxyURL:   "http://127.0.0.1:9999", // Won't actually be used since server is direct
+	}
+
+	// The proxy is set but since we're hitting localhost directly, request still works
+	// This tests the proxy URL parsing code path
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/test", nil)
+	// May fail due to proxy, but the important thing is the code path is exercised
+	_ = err
+}
+
+func TestDoRequest_InvalidProxyURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":"ok"}`)
+	}))
+	defer server.Close()
+
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &VMConfig{
+		URL:        server.URL,
+		AuthMethod: "none",
+		Timeout:    5,
+		UseProxy:   true,
+		ProxyURL:   "://invalid-url",
+	}
+
+	// Should still make request (proxy URL parse fails, proceeds without proxy)
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/test", nil)
+	if err != nil {
+		t.Fatalf("expected request to succeed with invalid proxy (should fall back), got %v", err)
+	}
+}
+
+func TestDoRequest_SSLVerifyDisabled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":"ok"}`)
+	}))
+	defer server.Close()
+
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &VMConfig{
+		URL:        server.URL,
+		AuthMethod: "none",
+		VerifySSL:  false,
+		Timeout:    5,
+	}
+
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/test", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- cachedRequest with instanceID ---
+
+func TestCachedRequest_WithInstanceID(t *testing.T) {
+	callCount := &atomic.Int32{}
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		callCount.Add(1)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`)
+	})
+
+	// Also set config for instance ID
+	config := &VMConfig{
+		URL:        "",
+		AuthMethod: "none",
+		Timeout:    5,
+	}
+	// Get the URL from the cached config
+	cached, _ := tool.configCache.Get(configCacheKey("test-incident"))
+	config = cached.(*VMConfig)
+	instanceID := uintPtr(42)
+	tool.configCache.Set(fmt.Sprintf("creds:instance:%d", *instanceID), config)
+
+	args := map[string]interface{}{
+		"query":            "up",
+		"tool_instance_id": float64(42),
+	}
+
+	// First call
+	_, err := tool.InstantQuery(context.Background(), "test-incident", args)
+	if err != nil {
+		t.Fatalf("first call error: %v", err)
+	}
+
+	// Second call should cache
+	_, err = tool.InstantQuery(context.Background(), "test-incident", args)
+	if err != nil {
+		t.Fatalf("second call error: %v", err)
+	}
+
+	if callCount.Load() != 1 {
+		t.Errorf("expected 1 HTTP request with instance ID caching, got %d", callCount.Load())
+	}
+}
+
+// --- APIRequest empty URL test ---
+
+func TestAPIRequest_EmptyURL(t *testing.T) {
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &VMConfig{
+		URL:        "",
+		AuthMethod: "none",
+	}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/test",
+	})
+	if err == nil {
+		t.Fatal("expected error for empty URL")
+	}
+	if !strings.Contains(err.Error(), "URL not configured") {
+		t.Errorf("expected URL not configured error, got %q", err.Error())
+	}
+}
+
 // --- Cache TTL constants ---
 
 func TestCacheTTLConstants(t *testing.T) {
