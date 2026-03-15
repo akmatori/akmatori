@@ -1,12 +1,85 @@
 package victoriametrics
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/akmatori/mcp-gateway/internal/ratelimit"
 )
+
+// --- Helper functions ---
+
+func uintPtr(v uint) *uint {
+	return &v
+}
+
+func testLogger() *log.Logger {
+	return log.New(io.Discard, "", 0)
+}
+
+// newTestTool creates a VictoriaMetricsTool with an httptest server's URL pre-populated in the config cache.
+// Returns the tool, the test server, and a request counter.
+func newTestTool(t *testing.T, handler http.HandlerFunc) (*VictoriaMetricsTool, *httptest.Server, *atomic.Int32) {
+	t.Helper()
+	counter := &atomic.Int32{}
+	wrappedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		counter.Add(1)
+		handler(w, r)
+	})
+	server := httptest.NewServer(wrappedHandler)
+
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	config := &VMConfig{
+		URL:        server.URL,
+		AuthMethod: "none",
+		VerifySSL:  true,
+		Timeout:    5,
+	}
+	// Pre-populate config cache so getConfig doesn't hit the database
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	t.Cleanup(func() {
+		tool.Stop()
+		server.Close()
+	})
+
+	return tool, server, counter
+}
+
+// newTestToolWithConfig creates a tool with a specific VMConfig pre-populated.
+func newTestToolWithConfig(t *testing.T, config *VMConfig, handler http.HandlerFunc) (*VictoriaMetricsTool, *httptest.Server) {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	config.URL = server.URL
+
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	t.Cleanup(func() {
+		tool.Stop()
+		server.Close()
+	})
+
+	return tool, server
+}
+
+// successResponse builds a valid Prometheus-format JSON response body.
+func successResponse(data interface{}) string {
+	dataJSON, _ := json.Marshal(data)
+	return fmt.Sprintf(`{"status":"success","data":%s}`, string(dataJSON))
+}
+
+// --- Unit tests for parsePrometheusResponse ---
 
 func TestParsePrometheusResponse_Success(t *testing.T) {
 	body := []byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{"__name__":"up"},"value":[1234,"1"]}]}}`)
@@ -48,6 +121,34 @@ func TestParsePrometheusResponse_MalformedJSON(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
+
+func TestParsePrometheusResponse_EmptyData(t *testing.T) {
+	body := []byte(`{"status":"success","data":null}`)
+
+	data, err := parsePrometheusResponse(body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if string(data) != "null" {
+		t.Errorf("expected null data, got %s", string(data))
+	}
+}
+
+func TestParsePrometheusResponse_ErrorWithoutType(t *testing.T) {
+	body := []byte(`{"status":"error","error":"something went wrong"}`)
+
+	_, err := parsePrometheusResponse(body)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "something went wrong") {
+		t.Errorf("expected error to contain message, got %q", err.Error())
+	}
+}
+
+// --- Unit tests for extractInstanceID ---
 
 func TestExtractInstanceID(t *testing.T) {
 	tests := []struct {
@@ -100,6 +201,8 @@ func TestExtractInstanceID(t *testing.T) {
 	}
 }
 
+// --- Unit tests for cache keys ---
+
 func TestConfigCacheKey(t *testing.T) {
 	key := configCacheKey("incident-123")
 	expected := "creds:incident-123:victoria_metrics"
@@ -124,6 +227,8 @@ func TestResponseCacheKey(t *testing.T) {
 	}
 }
 
+// --- Constructor and lifecycle tests ---
+
 func TestNewVictoriaMetricsTool(t *testing.T) {
 	logger := testLogger()
 	tool := NewVictoriaMetricsTool(logger, nil)
@@ -141,14 +246,23 @@ func TestNewVictoriaMetricsTool(t *testing.T) {
 		t.Error("expected nil rateLimiter when none provided")
 	}
 
-	// Cleanup
 	tool.Stop()
+}
+
+func TestNewVictoriaMetricsTool_WithRateLimiter(t *testing.T) {
+	logger := testLogger()
+	limiter := ratelimit.New(10, 20)
+	tool := NewVictoriaMetricsTool(logger, limiter)
+	defer tool.Stop()
+
+	if tool.rateLimiter == nil {
+		t.Error("expected non-nil rateLimiter")
+	}
 }
 
 func TestStop(t *testing.T) {
 	logger := testLogger()
 	tool := NewVictoriaMetricsTool(logger, nil)
-	// Should not panic
 	tool.Stop()
 	// Double stop should not panic
 	tool.Stop()
@@ -159,14 +273,1056 @@ func TestClearCache(t *testing.T) {
 	tool := NewVictoriaMetricsTool(logger, nil)
 	defer tool.Stop()
 
-	// Should not panic on empty caches
+	tool.configCache.Set("key1", "val1")
+	tool.responseCache.Set("key2", "val2")
+
 	tool.ClearCache()
+
+	if _, ok := tool.configCache.Get("key1"); ok {
+		t.Error("expected configCache to be cleared")
+	}
+	if _, ok := tool.responseCache.Get("key2"); ok {
+		t.Error("expected responseCache to be cleared")
+	}
 }
 
-func uintPtr(v uint) *uint {
-	return &v
+// --- Unit tests for getConfig ---
+
+func TestGetConfig_CacheHit(t *testing.T) {
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	expected := &VMConfig{
+		URL:        "https://vm.example.com",
+		AuthMethod: "bearer_token",
+		BearerToken: "my-token",
+		VerifySSL:  true,
+		Timeout:    30,
+	}
+	tool.configCache.Set(configCacheKey("incident-1"), expected)
+
+	config, err := tool.getConfig(context.Background(), "incident-1", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if config.URL != expected.URL {
+		t.Errorf("expected URL %q, got %q", expected.URL, config.URL)
+	}
+	if config.BearerToken != expected.BearerToken {
+		t.Errorf("expected BearerToken %q, got %q", expected.BearerToken, config.BearerToken)
+	}
 }
 
-func testLogger() *log.Logger {
-	return log.New(io.Discard, "", 0)
+func TestGetConfig_CacheHitByInstanceID(t *testing.T) {
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	expected := &VMConfig{
+		URL:        "https://vm-instance.example.com",
+		AuthMethod: "basic_auth",
+		Username:   "admin",
+		Password:   "secret",
+	}
+	instanceID := uintPtr(42)
+	tool.configCache.Set(fmt.Sprintf("creds:instance:%d", *instanceID), expected)
+
+	config, err := tool.getConfig(context.Background(), "incident-1", instanceID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if config.URL != expected.URL {
+		t.Errorf("expected URL %q, got %q", expected.URL, config.URL)
+	}
+	if config.Username != expected.Username {
+		t.Errorf("expected Username %q, got %q", expected.Username, config.Username)
+	}
+}
+
+func TestGetConfig_Defaults(t *testing.T) {
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	// Create a VMConfig with defaults and verify the defaults
+	config := &VMConfig{
+		AuthMethod: "bearer_token",
+		VerifySSL:  true,
+		Timeout:    30,
+	}
+
+	if config.AuthMethod != "bearer_token" {
+		t.Errorf("expected default AuthMethod 'bearer_token', got %q", config.AuthMethod)
+	}
+	if !config.VerifySSL {
+		t.Error("expected default VerifySSL to be true")
+	}
+	if config.Timeout != 30 {
+		t.Errorf("expected default Timeout 30, got %d", config.Timeout)
+	}
+}
+
+// --- Auth header injection tests ---
+
+func TestDoRequest_BearerTokenAuth(t *testing.T) {
+	var receivedAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":"ok"}`)
+	}))
+	defer server.Close()
+
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &VMConfig{
+		URL:        server.URL,
+		AuthMethod: "bearer_token",
+		BearerToken: "test-token-123",
+		Timeout:    5,
+	}
+
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/api/v1/query", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := "Bearer test-token-123"
+	if receivedAuth != expected {
+		t.Errorf("expected Authorization %q, got %q", expected, receivedAuth)
+	}
+}
+
+func TestDoRequest_BasicAuth(t *testing.T) {
+	var receivedAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":"ok"}`)
+	}))
+	defer server.Close()
+
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &VMConfig{
+		URL:        server.URL,
+		AuthMethod: "basic_auth",
+		Username:   "admin",
+		Password:   "secret",
+		Timeout:    5,
+	}
+
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/api/v1/query", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedAuth == "" {
+		t.Error("expected Authorization header to be set for basic auth")
+	}
+	if !strings.HasPrefix(receivedAuth, "Basic ") {
+		t.Errorf("expected Basic auth prefix, got %q", receivedAuth)
+	}
+}
+
+func TestDoRequest_NoAuth(t *testing.T) {
+	var receivedAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":"ok"}`)
+	}))
+	defer server.Close()
+
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &VMConfig{
+		URL:        server.URL,
+		AuthMethod: "none",
+		Timeout:    5,
+	}
+
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/api/v1/query", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedAuth != "" {
+		t.Errorf("expected no Authorization header for 'none' auth, got %q", receivedAuth)
+	}
+}
+
+func TestDoRequest_BearerTokenEmptyString(t *testing.T) {
+	var receivedAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":"ok"}`)
+	}))
+	defer server.Close()
+
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &VMConfig{
+		URL:        server.URL,
+		AuthMethod: "bearer_token",
+		BearerToken: "", // Empty token
+		Timeout:    5,
+	}
+
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/api/v1/query", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedAuth != "" {
+		t.Errorf("expected no Authorization header when bearer token is empty, got %q", receivedAuth)
+	}
+}
+
+// --- doRequest HTTP error handling ---
+
+func TestDoRequest_HTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, "Internal Server Error")
+	}))
+	defer server.Close()
+
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &VMConfig{URL: server.URL, AuthMethod: "none", Timeout: 5}
+
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/api/v1/query", nil)
+	if err == nil {
+		t.Fatal("expected error for HTTP 500")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("expected error to contain status code, got %q", err.Error())
+	}
+}
+
+func TestDoRequest_POSTSendsFormBody(t *testing.T) {
+	var receivedContentType string
+	var receivedBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedContentType = r.Header.Get("Content-Type")
+		bodyBytes, _ := io.ReadAll(r.Body)
+		receivedBody = string(bodyBytes)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":"ok"}`)
+	}))
+	defer server.Close()
+
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &VMConfig{URL: server.URL, AuthMethod: "none", Timeout: 5}
+	params := url.Values{"query": []string{"up"}}
+
+	_, err := tool.doRequest(context.Background(), config, http.MethodPost, "/api/v1/query", params)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedContentType != "application/x-www-form-urlencoded" {
+		t.Errorf("expected form content type, got %q", receivedContentType)
+	}
+	if !strings.Contains(receivedBody, "query=up") {
+		t.Errorf("expected body to contain 'query=up', got %q", receivedBody)
+	}
+}
+
+func TestDoRequest_GETAppendsQueryParams(t *testing.T) {
+	var receivedURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedURL = r.URL.String()
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":"ok"}`)
+	}))
+	defer server.Close()
+
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &VMConfig{URL: server.URL, AuthMethod: "none", Timeout: 5}
+	params := url.Values{"query": []string{"up"}, "time": []string{"1234"}}
+
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/api/v1/query", params)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(receivedURL, "query=up") {
+		t.Errorf("expected URL to contain 'query=up', got %q", receivedURL)
+	}
+	if !strings.Contains(receivedURL, "time=1234") {
+		t.Errorf("expected URL to contain 'time=1234', got %q", receivedURL)
+	}
+}
+
+// --- InstantQuery tests ---
+
+func TestInstantQuery_Success(t *testing.T) {
+	responseData := map[string]interface{}{
+		"resultType": "vector",
+		"result": []map[string]interface{}{
+			{"metric": map[string]string{"__name__": "up"}, "value": []interface{}{1234, "1"}},
+		},
+	}
+
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/query" {
+			t.Errorf("expected path /api/v1/query, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, successResponse(responseData))
+	})
+
+	result, err := tool.InstantQuery(context.Background(), "test-incident", map[string]interface{}{
+		"query": "up",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(result, "vector") {
+		t.Errorf("expected result to contain 'vector', got %s", result)
+	}
+}
+
+func TestInstantQuery_MissingQuery(t *testing.T) {
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.InstantQuery(context.Background(), "test", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing query")
+	}
+	if !strings.Contains(err.Error(), "query is required") {
+		t.Errorf("expected 'query is required' error, got %q", err.Error())
+	}
+}
+
+func TestInstantQuery_WithOptionalParams(t *testing.T) {
+	var receivedBody string
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		receivedBody = string(bodyBytes)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`)
+	})
+
+	_, err := tool.InstantQuery(context.Background(), "test-incident", map[string]interface{}{
+		"query":   "up",
+		"time":    "2024-01-01T00:00:00Z",
+		"step":    "15s",
+		"timeout": "10s",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(receivedBody, "time=") {
+		t.Error("expected 'time' param in request body")
+	}
+	if !strings.Contains(receivedBody, "step=") {
+		t.Error("expected 'step' param in request body")
+	}
+	if !strings.Contains(receivedBody, "timeout=") {
+		t.Error("expected 'timeout' param in request body")
+	}
+}
+
+// --- RangeQuery tests ---
+
+func TestRangeQuery_Success(t *testing.T) {
+	responseData := map[string]interface{}{
+		"resultType": "matrix",
+		"result": []map[string]interface{}{
+			{
+				"metric": map[string]string{"__name__": "http_requests_total"},
+				"values": [][]interface{}{{1234, "100"}, {1235, "150"}},
+			},
+		},
+	}
+
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/query_range" {
+			t.Errorf("expected path /api/v1/query_range, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, successResponse(responseData))
+	})
+
+	result, err := tool.RangeQuery(context.Background(), "test-incident", map[string]interface{}{
+		"query": "rate(http_requests_total[5m])",
+		"start": "2024-01-01T00:00:00Z",
+		"end":   "2024-01-01T01:00:00Z",
+		"step":  "1m",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(result, "matrix") {
+		t.Errorf("expected result to contain 'matrix', got %s", result)
+	}
+}
+
+func TestRangeQuery_MissingRequiredParams(t *testing.T) {
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	tests := []struct {
+		name string
+		args map[string]interface{}
+		want string
+	}{
+		{
+			name: "missing query",
+			args: map[string]interface{}{"start": "1h", "end": "now", "step": "1m"},
+			want: "query is required",
+		},
+		{
+			name: "missing start",
+			args: map[string]interface{}{"query": "up", "end": "now", "step": "1m"},
+			want: "start is required",
+		},
+		{
+			name: "missing end",
+			args: map[string]interface{}{"query": "up", "start": "1h", "step": "1m"},
+			want: "end is required",
+		},
+		{
+			name: "missing step",
+			args: map[string]interface{}{"query": "up", "start": "1h", "end": "now"},
+			want: "step is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.RangeQuery(context.Background(), "test", tt.args)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("expected error containing %q, got %q", tt.want, err.Error())
+			}
+		})
+	}
+}
+
+func TestRangeQuery_VerifyRequestParams(t *testing.T) {
+	var receivedBody string
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		receivedBody = string(bodyBytes)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[]}}`)
+	})
+
+	_, err := tool.RangeQuery(context.Background(), "test-incident", map[string]interface{}{
+		"query": "up",
+		"start": "2024-01-01T00:00:00Z",
+		"end":   "2024-01-01T01:00:00Z",
+		"step":  "1m",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, param := range []string{"query=up", "step=1m"} {
+		if !strings.Contains(receivedBody, param) {
+			t.Errorf("expected body to contain %q, got %q", param, receivedBody)
+		}
+	}
+}
+
+// --- LabelValues tests ---
+
+func TestLabelValues_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/api/v1/label/__name__/values") {
+			t.Errorf("expected path containing /api/v1/label/__name__/values, got %s", r.URL.Path)
+		}
+		// LabelValues uses GET
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET method, got %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":["up","node_cpu_seconds_total","node_memory_MemTotal_bytes"]}`)
+	})
+
+	result, err := tool.LabelValues(context.Background(), "test-incident", map[string]interface{}{
+		"label_name": "__name__",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(result, "up") {
+		t.Errorf("expected result to contain 'up', got %s", result)
+	}
+}
+
+func TestLabelValues_URLPathConstruction(t *testing.T) {
+	var receivedPath string
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":[]}`)
+	})
+
+	_, err := tool.LabelValues(context.Background(), "test-incident", map[string]interface{}{
+		"label_name": "instance",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := "/api/v1/label/instance/values"
+	if receivedPath != expected {
+		t.Errorf("expected path %q, got %q", expected, receivedPath)
+	}
+}
+
+func TestLabelValues_SpecialCharacterInLabelName(t *testing.T) {
+	var receivedPath string
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":[]}`)
+	})
+
+	_, err := tool.LabelValues(context.Background(), "test-incident", map[string]interface{}{
+		"label_name": "__name__",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := "/api/v1/label/__name__/values"
+	if receivedPath != expected {
+		t.Errorf("expected path %q, got %q", expected, receivedPath)
+	}
+}
+
+func TestLabelValues_MissingLabelName(t *testing.T) {
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.LabelValues(context.Background(), "test", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing label_name")
+	}
+	if !strings.Contains(err.Error(), "label_name is required") {
+		t.Errorf("expected 'label_name is required' error, got %q", err.Error())
+	}
+}
+
+func TestLabelValues_WithOptionalParams(t *testing.T) {
+	var receivedURL string
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedURL = r.URL.String()
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":[]}`)
+	})
+
+	_, err := tool.LabelValues(context.Background(), "test-incident", map[string]interface{}{
+		"label_name": "job",
+		"match":      "up",
+		"start":      "2024-01-01T00:00:00Z",
+		"end":        "2024-01-01T01:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// GET request should have query params in URL
+	if !strings.Contains(receivedURL, "match") {
+		t.Error("expected 'match' param in URL")
+	}
+	if !strings.Contains(receivedURL, "start=") {
+		t.Error("expected 'start' param in URL")
+	}
+	if !strings.Contains(receivedURL, "end=") {
+		t.Error("expected 'end' param in URL")
+	}
+}
+
+// --- Series tests ---
+
+func TestSeries_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/series" {
+			t.Errorf("expected path /api/v1/series, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":[{"__name__":"up","job":"prometheus","instance":"localhost:9090"}]}`)
+	})
+
+	result, err := tool.Series(context.Background(), "test-incident", map[string]interface{}{
+		"match": "up",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(result, "prometheus") {
+		t.Errorf("expected result to contain 'prometheus', got %s", result)
+	}
+}
+
+func TestSeries_MissingMatch(t *testing.T) {
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.Series(context.Background(), "test", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing match")
+	}
+	if !strings.Contains(err.Error(), "match is required") {
+		t.Errorf("expected 'match is required' error, got %q", err.Error())
+	}
+}
+
+func TestSeries_VerifyMatchParam(t *testing.T) {
+	var receivedBody string
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		receivedBody = string(bodyBytes)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":[]}`)
+	})
+
+	_, err := tool.Series(context.Background(), "test-incident", map[string]interface{}{
+		"match": "{job=\"prometheus\"}",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// match[] should be in the form body (POST request)
+	if !strings.Contains(receivedBody, "match") {
+		t.Errorf("expected body to contain 'match', got %q", receivedBody)
+	}
+}
+
+// --- APIRequest tests ---
+
+func TestAPIRequest_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/status/tsdb" {
+			t.Errorf("expected path /api/v1/status/tsdb, got %s", r.URL.Path)
+		}
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET method, got %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":{"totalSeries":1000}}`)
+	})
+
+	result, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/api/v1/status/tsdb",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(result, "totalSeries") {
+		t.Errorf("expected result to contain 'totalSeries', got %s", result)
+	}
+}
+
+func TestAPIRequest_CustomMethod(t *testing.T) {
+	var receivedMethod string
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":"ok"}`)
+	})
+
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path":   "/api/v1/admin/snapshot",
+		"method": "post",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedMethod != http.MethodPost {
+		t.Errorf("expected POST method, got %s", receivedMethod)
+	}
+}
+
+func TestAPIRequest_WithParams(t *testing.T) {
+	var receivedURL string
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedURL = r.URL.String()
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":"ok"}`)
+	})
+
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path":   "/api/v1/export",
+		"method": "GET",
+		"params": map[string]interface{}{
+			"match": "{job=\"test\"}",
+			"start": "1h",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(receivedURL, "match=") {
+		t.Error("expected 'match' param in URL")
+	}
+}
+
+func TestAPIRequest_MissingPath(t *testing.T) {
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.APIRequest(context.Background(), "test", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing path")
+	}
+	if !strings.Contains(err.Error(), "path is required") {
+		t.Errorf("expected 'path is required' error, got %q", err.Error())
+	}
+}
+
+func TestAPIRequest_NonPrometheusResponse(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"version":"1.0","uptime":"24h"}`)
+	})
+
+	result, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/api/v1/status/buildinfo",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should fall back to raw body when response isn't Prometheus format
+	if !strings.Contains(result, "version") {
+		t.Errorf("expected raw body to be returned, got %s", result)
+	}
+}
+
+func TestAPIRequest_DefaultsToGET(t *testing.T) {
+	var receivedMethod string
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":"ok"}`)
+	})
+
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/test",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedMethod != http.MethodGet {
+		t.Errorf("expected default method GET, got %s", receivedMethod)
+	}
+}
+
+// --- Response caching tests ---
+
+func TestResponseCaching_CacheHit(t *testing.T) {
+	tool, _, counter := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`)
+	})
+
+	args := map[string]interface{}{"query": "up"}
+
+	// First call - should hit the server
+	result1, err := tool.InstantQuery(context.Background(), "test-incident", args)
+	if err != nil {
+		t.Fatalf("first call error: %v", err)
+	}
+
+	// Second call with same args - should use cache
+	result2, err := tool.InstantQuery(context.Background(), "test-incident", args)
+	if err != nil {
+		t.Fatalf("second call error: %v", err)
+	}
+
+	if result1 != result2 {
+		t.Error("expected same result from cache")
+	}
+
+	if counter.Load() != 1 {
+		t.Errorf("expected 1 HTTP request (second should be cached), got %d", counter.Load())
+	}
+}
+
+func TestResponseCaching_DifferentQueryNotCached(t *testing.T) {
+	tool, _, counter := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`)
+	})
+
+	// Different queries should each hit the server
+	_, err := tool.InstantQuery(context.Background(), "test-incident", map[string]interface{}{"query": "up"})
+	if err != nil {
+		t.Fatalf("first call error: %v", err)
+	}
+
+	_, err = tool.InstantQuery(context.Background(), "test-incident", map[string]interface{}{"query": "down"})
+	if err != nil {
+		t.Fatalf("second call error: %v", err)
+	}
+
+	if counter.Load() != 2 {
+		t.Errorf("expected 2 HTTP requests for different queries, got %d", counter.Load())
+	}
+}
+
+func TestAPIRequest_NotCached(t *testing.T) {
+	tool, _, counter := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":"ok"}`)
+	})
+
+	args := map[string]interface{}{"path": "/api/v1/status/tsdb"}
+
+	// Call twice - both should hit the server since APIRequest is not cached
+	_, err := tool.APIRequest(context.Background(), "test-incident", args)
+	if err != nil {
+		t.Fatalf("first call error: %v", err)
+	}
+
+	_, err = tool.APIRequest(context.Background(), "test-incident", args)
+	if err != nil {
+		t.Fatalf("second call error: %v", err)
+	}
+
+	if counter.Load() != 2 {
+		t.Errorf("expected 2 HTTP requests (APIRequest should not cache), got %d", counter.Load())
+	}
+}
+
+func TestResponseCaching_RangeQuery(t *testing.T) {
+	tool, _, counter := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[]}}`)
+	})
+
+	args := map[string]interface{}{
+		"query": "up",
+		"start": "2024-01-01T00:00:00Z",
+		"end":   "2024-01-01T01:00:00Z",
+		"step":  "1m",
+	}
+
+	_, err := tool.RangeQuery(context.Background(), "test-incident", args)
+	if err != nil {
+		t.Fatalf("first call error: %v", err)
+	}
+
+	_, err = tool.RangeQuery(context.Background(), "test-incident", args)
+	if err != nil {
+		t.Fatalf("second call error: %v", err)
+	}
+
+	if counter.Load() != 1 {
+		t.Errorf("expected 1 HTTP request for cached range query, got %d", counter.Load())
+	}
+}
+
+// --- Rate limiter integration tests ---
+
+func TestRateLimiter_Integration(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"success","data":"ok"}`)
+	})
+
+	// Attach a rate limiter
+	limiter := ratelimit.New(10, 20)
+	tool.rateLimiter = limiter
+
+	config := &VMConfig{
+		URL:        "unused", // won't actually connect
+		AuthMethod: "none",
+		Timeout:    5,
+	}
+
+	// Verify the limiter allows requests through
+	initialTokens := limiter.Tokens()
+	if initialTokens <= 0 {
+		t.Fatal("expected positive initial tokens")
+	}
+
+	// Use doRequest with the server to verify rate limiter is invoked
+	// Get the config from cache first
+	cachedConfig, ok := tool.configCache.Get(configCacheKey("test-incident"))
+	if !ok {
+		t.Fatal("expected config in cache")
+	}
+	config = cachedConfig.(*VMConfig)
+
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/test", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Tokens should have decreased
+	afterTokens := limiter.Tokens()
+	if afterTokens >= initialTokens {
+		t.Error("expected token count to decrease after request")
+	}
+}
+
+func TestRateLimiter_ContextCancellation(t *testing.T) {
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	// Create a rate limiter with 0 burst so it immediately blocks
+	limiter := ratelimit.New(0.001, 0) // Very slow refill, 0 burst
+	tool.rateLimiter = limiter
+
+	// Drain all tokens
+	for limiter.Allow() {
+		// drain
+	}
+
+	config := &VMConfig{
+		URL:        "http://localhost:9999",
+		AuthMethod: "none",
+		Timeout:    5,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err := tool.doRequest(ctx, config, http.MethodGet, "/test", nil)
+	if err == nil {
+		t.Fatal("expected error from cancelled context")
+	}
+	if !strings.Contains(err.Error(), "rate limit wait cancelled") {
+		t.Errorf("expected rate limit cancellation error, got %q", err.Error())
+	}
+}
+
+// --- Config empty URL test ---
+
+func TestCachedRequest_EmptyURL(t *testing.T) {
+	tool := NewVictoriaMetricsTool(testLogger(), nil)
+	defer tool.Stop()
+
+	// Pre-populate cache with config that has empty URL
+	config := &VMConfig{
+		URL:        "",
+		AuthMethod: "none",
+	}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	_, err := tool.InstantQuery(context.Background(), "test-incident", map[string]interface{}{
+		"query": "up",
+	})
+	if err == nil {
+		t.Fatal("expected error for empty URL")
+	}
+	if !strings.Contains(err.Error(), "URL not configured") {
+		t.Errorf("expected URL not configured error, got %q", err.Error())
+	}
+}
+
+// --- VMConfig struct tests ---
+
+func TestVMConfig_AuthMethods(t *testing.T) {
+	tests := []struct {
+		name       string
+		authMethod string
+	}{
+		{"none", "none"},
+		{"bearer_token", "bearer_token"},
+		{"basic_auth", "basic_auth"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &VMConfig{
+				URL:        "https://vm.example.com",
+				AuthMethod: tt.authMethod,
+			}
+			if config.AuthMethod != tt.authMethod {
+				t.Errorf("expected AuthMethod %q, got %q", tt.authMethod, config.AuthMethod)
+			}
+		})
+	}
+}
+
+func TestVMConfig_ProxySettings(t *testing.T) {
+	config := &VMConfig{
+		URL:      "https://vm.example.com",
+		UseProxy: true,
+		ProxyURL: "http://proxy.example.com:8080",
+	}
+	if !config.UseProxy {
+		t.Error("expected UseProxy to be true")
+	}
+	if config.ProxyURL != "http://proxy.example.com:8080" {
+		t.Errorf("expected ProxyURL, got %q", config.ProxyURL)
+	}
+
+	noProxyConfig := &VMConfig{
+		URL:      "https://vm.example.com",
+		UseProxy: false,
+	}
+	if noProxyConfig.UseProxy {
+		t.Error("expected UseProxy to be false")
+	}
+}
+
+// --- Cache TTL constants ---
+
+func TestCacheTTLConstants(t *testing.T) {
+	if ConfigCacheTTL != 5*time.Minute {
+		t.Errorf("expected ConfigCacheTTL 5m, got %v", ConfigCacheTTL)
+	}
+	if InstantQueryTTL != 15*time.Second {
+		t.Errorf("expected InstantQueryTTL 15s, got %v", InstantQueryTTL)
+	}
+	if RangeQueryTTL != 30*time.Second {
+		t.Errorf("expected RangeQueryTTL 30s, got %v", RangeQueryTTL)
+	}
+	if LabelValuesTTL != 60*time.Second {
+		t.Errorf("expected LabelValuesTTL 60s, got %v", LabelValuesTTL)
+	}
+	if SeriesTTL != 30*time.Second {
+		t.Errorf("expected SeriesTTL 30s, got %v", SeriesTTL)
+	}
+}
+
+// --- Error propagation from VictoriaMetrics API ---
+
+func TestInstantQuery_VMAPIError(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"status":"error","errorType":"bad_data","error":"parse error at char 5"}`)
+	})
+
+	_, err := tool.InstantQuery(context.Background(), "test-incident", map[string]interface{}{
+		"query": "invalid{{{",
+	})
+	if err == nil {
+		t.Fatal("expected error from VM API")
+	}
+	if !strings.Contains(err.Error(), "parse error") {
+		t.Errorf("expected parse error, got %q", err.Error())
+	}
 }

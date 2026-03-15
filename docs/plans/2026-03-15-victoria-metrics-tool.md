@@ -152,17 +152,17 @@ The tool should check `status == "success"` and return the `data` field contents
 **Files:**
 - Create: `mcp-gateway/internal/tools/victoriametrics/victoriametrics_test.go`
 
-- [ ] Write unit tests for `getConfig()` - verify credential parsing, defaults, cache hits
-- [ ] Write unit tests for `parsePrometheusResponse()` - success case, error case, malformed JSON
-- [ ] Write unit tests for auth header injection: bearer token, basic auth, no auth
-- [ ] Write unit tests for `InstantQuery` with httptest mock server - verify query params, response parsing
-- [ ] Write unit tests for `RangeQuery` with httptest mock server - verify required params, step calculation
-- [ ] Write unit tests for `LabelValues` with httptest mock server - verify URL path construction with label name
-- [ ] Write unit tests for `Series` with httptest mock server
-- [ ] Write unit tests for `APIRequest` with httptest mock server - verify custom path/method
-- [ ] Write tests for response caching (call twice, verify only one HTTP request)
-- [ ] Write tests for rate limiter integration
-- [ ] Run `make test-mcp` - must pass before task 6
+- [x] Write unit tests for `getConfig()` - verify credential parsing, defaults, cache hits
+- [x] Write unit tests for `parsePrometheusResponse()` - success case, error case, malformed JSON
+- [x] Write unit tests for auth header injection: bearer token, basic auth, no auth
+- [x] Write unit tests for `InstantQuery` with httptest mock server - verify query params, response parsing
+- [x] Write unit tests for `RangeQuery` with httptest mock server - verify required params, step calculation
+- [x] Write unit tests for `LabelValues` with httptest mock server - verify URL path construction with label name
+- [x] Write unit tests for `Series` with httptest mock server
+- [x] Write unit tests for `APIRequest` with httptest mock server - verify custom path/method
+- [x] Write tests for response caching (call twice, verify only one HTTP request)
+- [x] Write tests for rate limiter integration
+- [x] Run `make test-mcp` - must pass before task 6
 
 ### Task 6: Verify acceptance criteria
 
