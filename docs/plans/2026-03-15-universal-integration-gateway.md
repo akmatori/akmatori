@@ -332,16 +332,16 @@ Route tool calls to external MCP servers through the connection pool.
 - Create: `mcp-gateway/internal/mcpproxy/handler.go` — proxy handler
 - Modify: `mcp-gateway/internal/tools/registry.go` — register MCP proxy tools dynamically
 
-- [ ] On startup (and on config reload), fetch MCP server registrations from database
-- [ ] For each registered server, connect lazily and discover tools via `tools/list`
-- [ ] Register discovered tools with namespace prefix: `{prefix}.{tool_name}` (e.g., `ext.github.create_issue`)
-- [ ] Proxy handler forwards `tools/call` to external server, injects credentials from ToolInstance settings
-- [ ] Apply rate limiting per external server instance
-- [ ] Apply response caching with configurable TTL per server
-- [ ] Gateway injects auth into connection config — external servers never see raw agent credentials
-- [ ] Include MCP proxy tools in `search_tools` and `get_tool_detail` discovery responses
-- [ ] Write tests with mock external MCP server: tool discovery, call proxying, namespace prefixing, auth injection
-- [ ] Run `make test-mcp` — must pass before task 4.4
+- [x] On startup (and on config reload), fetch MCP server registrations from database
+- [x] For each registered server, connect lazily and discover tools via `tools/list`
+- [x] Register discovered tools with namespace prefix: `{prefix}.{tool_name}` (e.g., `ext.github.create_issue`)
+- [x] Proxy handler forwards `tools/call` to external server, injects credentials from ToolInstance settings
+- [x] Apply rate limiting per external server instance
+- [x] Apply response caching with configurable TTL per server
+- [x] Gateway injects auth into connection config — external servers never see raw agent credentials
+- [x] Include MCP proxy tools in `search_tools` and `get_tool_detail` discovery responses
+- [x] Write tests with mock external MCP server: tool discovery, call proxying, namespace prefixing, auth injection
+- [x] Run `make test-mcp` — must pass before task 4.4
 
 ### Task 4.4: Handle MCP proxy lifecycle and errors
 

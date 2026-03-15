@@ -10,6 +10,7 @@ import (
 
 	"github.com/akmatori/mcp-gateway/internal/database"
 	"github.com/akmatori/mcp-gateway/internal/mcp"
+	"github.com/akmatori/mcp-gateway/internal/mcpproxy"
 	"github.com/akmatori/mcp-gateway/internal/ratelimit"
 	"github.com/akmatori/mcp-gateway/internal/tools/httpconnector"
 	"github.com/akmatori/mcp-gateway/internal/tools/ssh"
@@ -38,6 +39,11 @@ type Registry struct {
 	httpExecutor      *httpconnector.HTTPConnectorExecutor
 	httpConnectorTools []string // track registered tool names for reload cleanup
 	httpMu            sync.Mutex
+
+	// MCP proxy state
+	proxyHandler   *mcpproxy.ProxyHandler
+	proxyToolNames []string // track registered proxy tool names for reload cleanup
+	proxyMu        sync.Mutex
 }
 
 // NewRegistry creates a new tool registry
@@ -83,6 +89,61 @@ func (r *Registry) Stop() {
 	if r.httpExecutor != nil {
 		r.httpExecutor.Stop()
 	}
+	if r.proxyHandler != nil {
+		r.proxyHandler.Stop()
+	}
+}
+
+// DefaultMCPProxyLoader loads MCP server configs from the database and converts them
+// to proxy handler registrations.
+func DefaultMCPProxyLoader(ctx context.Context) ([]mcpproxy.ServerRegistration, error) {
+	configs, err := database.GetAllEnabledMCPServerConfigs(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var regs []mcpproxy.ServerRegistration
+	for _, cfg := range configs {
+		// Convert database Args JSONB to string slice
+		var args []string
+		if cfg.Args != nil {
+			if argsRaw, ok := cfg.Args["args"]; ok {
+				if argsJSON, err := json.Marshal(argsRaw); err == nil {
+					json.Unmarshal(argsJSON, &args)
+				}
+			}
+		}
+
+		// Convert database EnvVars JSONB to string map
+		envVars := make(map[string]string)
+		for k, v := range cfg.EnvVars {
+			if s, ok := v.(string); ok {
+				envVars[k] = s
+			}
+		}
+
+		var authConfig json.RawMessage
+		if cfg.AuthConfig != nil {
+			authConfig, _ = json.Marshal(cfg.AuthConfig)
+		}
+
+		regs = append(regs, mcpproxy.ServerRegistration{
+			InstanceID:      cfg.ID,
+			NamespacePrefix: cfg.NamespacePrefix,
+			AuthConfig:      authConfig,
+			Config: mcpproxy.MCPServerConfig{
+				Transport:       mcpproxy.TransportType(cfg.Transport),
+				URL:             cfg.URL,
+				Command:         cfg.Command,
+				Args:            args,
+				EnvVars:         envVars,
+				NamespacePrefix: cfg.NamespacePrefix,
+				AuthConfig:      authConfig,
+			},
+		})
+	}
+
+	return regs, nil
 }
 
 // HTTPConnectorLoader is a function that loads enabled HTTP connectors from the database.
@@ -150,6 +211,79 @@ func (r *Registry) ReloadHTTPConnectors(loader HTTPConnectorLoader) {
 	}
 
 	r.logger.Printf("Reloaded %d HTTP connector tools from %d connectors", registered, len(connectors))
+}
+
+// SetProxyHandler sets the MCP proxy handler for this registry.
+func (r *Registry) SetProxyHandler(h *mcpproxy.ProxyHandler) {
+	r.proxyHandler = h
+}
+
+// RegisterMCPProxyTools loads MCP server registrations and registers their discovered
+// tools in the gateway. Each tool is namespaced with the server's prefix.
+func (r *Registry) RegisterMCPProxyTools(loader mcpproxy.MCPServerConfigLoader) {
+	r.proxyMu.Lock()
+	defer r.proxyMu.Unlock()
+
+	if r.proxyHandler == nil {
+		r.logger.Println("MCP proxy handler not configured, skipping proxy tool registration")
+		return
+	}
+
+	ctx := context.Background()
+	if err := r.proxyHandler.LoadAndRegister(ctx, loader); err != nil {
+		r.logger.Printf("Failed to load MCP proxy tools: %v", err)
+		return
+	}
+
+	r.registerProxyToolsFromHandler()
+}
+
+// ReloadMCPProxyTools unregisters all proxy tools and re-registers from the database.
+func (r *Registry) ReloadMCPProxyTools(loader mcpproxy.MCPServerConfigLoader) {
+	r.proxyMu.Lock()
+	defer r.proxyMu.Unlock()
+
+	// Unregister previously registered proxy tools
+	for _, name := range r.proxyToolNames {
+		r.server.UnregisterTool(name)
+	}
+	r.proxyToolNames = nil
+
+	if r.proxyHandler == nil {
+		return
+	}
+
+	ctx := context.Background()
+	if err := r.proxyHandler.Reload(ctx, loader); err != nil {
+		r.logger.Printf("Failed to reload MCP proxy tools: %v", err)
+		return
+	}
+
+	r.registerProxyToolsFromHandler()
+}
+
+// registerProxyToolsFromHandler registers all tools from the proxy handler in the MCP server.
+func (r *Registry) registerProxyToolsFromHandler() {
+	tools := r.proxyHandler.GetTools()
+	handler := r.proxyHandler
+
+	for _, tool := range tools {
+		toolName := tool.Name
+		r.server.RegisterTool(tool, func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			result, err := handler.CallTool(ctx, toolName, args)
+			if err != nil {
+				return nil, err
+			}
+			// Return the call result content as JSON
+			if len(result.Content) == 1 {
+				return result.Content[0].Text, nil
+			}
+			return result, nil
+		})
+		r.proxyToolNames = append(r.proxyToolNames, tool.Name)
+	}
+
+	r.logger.Printf("Registered %d MCP proxy tools", len(tools))
 }
 
 // registerHTTPConnectorTools registers tools for a single HTTP connector.
