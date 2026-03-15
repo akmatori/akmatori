@@ -8,7 +8,9 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
+	"github.com/akmatori/mcp-gateway/internal/auth"
 	"github.com/akmatori/mcp-gateway/internal/database"
 	"github.com/akmatori/mcp-gateway/internal/mcp"
 	"github.com/akmatori/mcp-gateway/internal/tools"
@@ -60,6 +62,10 @@ func main() {
 	// Wire up tool discovery (search/detail JSON-RPC methods)
 	server.SetDiscoverer(registry)
 	server.SetInstanceLookup(tools.BuildInstanceLookup())
+
+	// Wire up per-incident tool authorization with 1-hour TTL (matches typical incident lifetime)
+	authorizer := auth.NewAuthorizer(1 * time.Hour)
+	server.SetAuthorizer(authorizer)
 
 	// Setup HTTP handlers
 	mux := http.NewServeMux()
@@ -134,6 +140,8 @@ func main() {
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 		<-sigChan
 		slog.Info("shutting down")
+		authorizer.Stop()
+		registry.Stop()
 		os.Exit(0)
 	}()
 
