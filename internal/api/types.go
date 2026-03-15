@@ -121,6 +121,9 @@ type UpdateProxySettingsRequest struct {
 		Zabbix struct {
 			Enabled bool `json:"enabled"`
 		} `json:"zabbix"`
+		VictoriaMetrics struct {
+			Enabled bool `json:"enabled"`
+		} `json:"victoria_metrics"`
 	} `json:"services"`
 }
 

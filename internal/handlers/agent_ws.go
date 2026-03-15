@@ -34,11 +34,12 @@ const (
 
 // ProxyConfig holds proxy configuration with per-service toggles
 type ProxyConfig struct {
-	URL           string `json:"url"`
-	NoProxy       string `json:"no_proxy"`
-	OpenAIEnabled bool   `json:"openai_enabled"`
-	SlackEnabled  bool   `json:"slack_enabled"`
-	ZabbixEnabled bool   `json:"zabbix_enabled"`
+	URL                    string `json:"url"`
+	NoProxy                string `json:"no_proxy"`
+	OpenAIEnabled          bool   `json:"openai_enabled"`
+	SlackEnabled           bool   `json:"slack_enabled"`
+	ZabbixEnabled          bool   `json:"zabbix_enabled"`
+	VictoriaMetricsEnabled bool   `json:"victoria_metrics_enabled"`
 }
 
 // AgentMessage represents a WebSocket message between API and agent worker
@@ -337,7 +338,8 @@ func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettings
 			NoProxy:       proxySettings.NoProxy,
 			OpenAIEnabled: proxySettings.OpenAIEnabled,
 			SlackEnabled:  proxySettings.SlackEnabled,
-			ZabbixEnabled: proxySettings.ZabbixEnabled,
+			ZabbixEnabled:          proxySettings.ZabbixEnabled,
+			VictoriaMetricsEnabled: proxySettings.VictoriaMetricsEnabled,
 		}
 	}
 
@@ -384,7 +386,8 @@ func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string,
 			NoProxy:       proxySettings.NoProxy,
 			OpenAIEnabled: proxySettings.OpenAIEnabled,
 			SlackEnabled:  proxySettings.SlackEnabled,
-			ZabbixEnabled: proxySettings.ZabbixEnabled,
+			ZabbixEnabled:          proxySettings.ZabbixEnabled,
+			VictoriaMetricsEnabled: proxySettings.VictoriaMetricsEnabled,
 		}
 	}
 
@@ -422,11 +425,12 @@ func (h *AgentWSHandler) BroadcastProxyConfig(settings *database.ProxySettings) 
 	msg := AgentMessage{
 		Type: AgentMessageTypeProxyConfigUpdate,
 		ProxyConfig: &ProxyConfig{
-			URL:           settings.ProxyURL,
-			NoProxy:       settings.NoProxy,
-			OpenAIEnabled: settings.OpenAIEnabled,
-			SlackEnabled:  settings.SlackEnabled,
-			ZabbixEnabled: settings.ZabbixEnabled,
+			URL:                    settings.ProxyURL,
+			NoProxy:                settings.NoProxy,
+			OpenAIEnabled:          settings.OpenAIEnabled,
+			SlackEnabled:           settings.SlackEnabled,
+			ZabbixEnabled:          settings.ZabbixEnabled,
+			VictoriaMetricsEnabled: settings.VictoriaMetricsEnabled,
 		},
 	}
 

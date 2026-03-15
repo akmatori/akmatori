@@ -126,14 +126,15 @@ func (LLMSettings) TableName() string {
 
 // ProxySettings stores HTTP proxy configuration with per-service toggles
 type ProxySettings struct {
-	ID            uint      `gorm:"primaryKey" json:"id"`
-	ProxyURL      string    `gorm:"type:text" json:"proxy_url"`          // HTTP/HTTPS proxy URL
-	NoProxy       string    `gorm:"type:text" json:"no_proxy"`           // Comma-separated hosts to bypass proxy
-	OpenAIEnabled bool      `gorm:"default:true" json:"openai_enabled"`  // Use proxy for OpenAI API
-	SlackEnabled  bool      `gorm:"default:true" json:"slack_enabled"`   // Use proxy for Slack
-	ZabbixEnabled bool      `gorm:"default:false" json:"zabbix_enabled"` // Use proxy for Zabbix API
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID                     uint      `gorm:"primaryKey" json:"id"`
+	ProxyURL               string    `gorm:"type:text" json:"proxy_url"`                           // HTTP/HTTPS proxy URL
+	NoProxy                string    `gorm:"type:text" json:"no_proxy"`                            // Comma-separated hosts to bypass proxy
+	OpenAIEnabled          bool      `gorm:"default:true" json:"openai_enabled"`                   // Use proxy for OpenAI API
+	SlackEnabled           bool      `gorm:"default:true" json:"slack_enabled"`                    // Use proxy for Slack
+	ZabbixEnabled          bool      `gorm:"default:false" json:"zabbix_enabled"`                  // Use proxy for Zabbix API
+	VictoriaMetricsEnabled bool      `gorm:"default:false" json:"victoria_metrics_enabled"`        // Use proxy for VictoriaMetrics API
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }
 
 // TableName overrides the table name

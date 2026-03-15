@@ -32,13 +32,15 @@ const (
 
 // VMConfig holds VictoriaMetrics connection configuration
 type VMConfig struct {
-	URL        string
-	AuthMethod string // "none", "bearer_token", "basic_auth"
+	URL         string
+	AuthMethod  string // "none", "bearer_token", "basic_auth"
 	BearerToken string
-	Username   string
-	Password   string
-	VerifySSL  bool
-	Timeout    int
+	Username    string
+	Password    string
+	VerifySSL   bool
+	Timeout     int
+	UseProxy    bool
+	ProxyURL    string
 }
 
 // VictoriaMetricsTool handles VictoriaMetrics API operations
@@ -159,11 +161,37 @@ func (t *VictoriaMetricsTool) getConfig(ctx context.Context, incidentID string, 
 		config.Timeout = 30
 	}
 
+	// Fetch proxy settings from database (also cached)
+	proxySettings := t.getCachedProxySettings(ctx)
+	if proxySettings != nil && proxySettings.ProxyURL != "" && proxySettings.VictoriaMetricsEnabled {
+		config.UseProxy = true
+		config.ProxyURL = proxySettings.ProxyURL
+	}
+
 	// Cache the config
 	t.configCache.Set(cacheKey, config)
 	t.logger.Printf("Config cached for incident %s", incidentID)
 
 	return config, nil
+}
+
+// getCachedProxySettings fetches proxy settings with caching
+func (t *VictoriaMetricsTool) getCachedProxySettings(ctx context.Context) *database.ProxySettings {
+	cacheKey := "proxy:settings"
+	if cached, ok := t.configCache.Get(cacheKey); ok {
+		if settings, ok := cached.(*database.ProxySettings); ok {
+			return settings
+		}
+	}
+
+	proxySettings, err := database.GetProxySettings(ctx)
+	if err != nil || proxySettings == nil {
+		return nil
+	}
+
+	t.configCache.Set(cacheKey, proxySettings)
+
+	return proxySettings
 }
 
 // doRequest performs an HTTP request to VictoriaMetrics with rate limiting
@@ -183,9 +211,22 @@ func (t *VictoriaMetricsTool) doRequest(ctx context.Context, config *VMConfig, m
 
 	t.logger.Printf("VictoriaMetrics API call: %s %s", method, path)
 
-	// Create HTTP transport
-	transport := &http.Transport{
-		Proxy: nil,
+	// Create HTTP transport with explicit proxy configuration
+	transport := &http.Transport{}
+
+	// Handle proxy settings - MUST explicitly set Proxy to prevent env var usage
+	if config.UseProxy && config.ProxyURL != "" {
+		proxyURL, err := url.Parse(config.ProxyURL)
+		if err != nil {
+			t.logger.Printf("Invalid proxy URL %s: %v, proceeding without proxy", config.ProxyURL, err)
+			transport.Proxy = nil
+		} else {
+			transport.Proxy = http.ProxyURL(proxyURL)
+			t.logger.Printf("VictoriaMetrics using proxy: %s", config.ProxyURL)
+		}
+	} else {
+		// Explicitly disable proxy (ignore HTTP_PROXY env vars)
+		transport.Proxy = nil
 	}
 
 	if !config.VerifySSL {
@@ -214,15 +255,21 @@ func (t *VictoriaMetricsTool) doRequest(ctx context.Context, config *VMConfig, m
 	// Inject auth header based on config
 	switch config.AuthMethod {
 	case "bearer_token":
-		if config.BearerToken != "" {
+		if config.BearerToken == "" {
+			t.logger.Printf("Warning: auth_method is 'bearer_token' but no token configured")
+		} else {
 			httpReq.Header.Set("Authorization", "Bearer "+config.BearerToken)
 		}
 	case "basic_auth":
-		if config.Username != "" {
+		if config.Username == "" {
+			t.logger.Printf("Warning: auth_method is 'basic_auth' but no username configured")
+		} else {
 			httpReq.SetBasicAuth(config.Username, config.Password)
 		}
 	case "none":
 		// No auth
+	default:
+		t.logger.Printf("Warning: unknown auth_method '%s', sending request without authentication", config.AuthMethod)
 	}
 
 	resp, err := client.Do(httpReq)
