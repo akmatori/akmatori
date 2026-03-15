@@ -110,6 +110,15 @@ type ContextManager interface {
 	CopyReferencedFilesToDir(text string, targetDir string) error
 }
 
+// HTTPConnectorManager defines the interface for HTTP connector CRUD operations.
+type HTTPConnectorManager interface {
+	CreateHTTPConnector(connector *database.HTTPConnector) (*database.HTTPConnector, error)
+	GetHTTPConnector(id uint) (*database.HTTPConnector, error)
+	UpdateHTTPConnector(id uint, updates map[string]interface{}) (*database.HTTPConnector, error)
+	DeleteHTTPConnector(id uint) error
+	ListHTTPConnectors() ([]database.HTTPConnector, error)
+}
+
 // AggregationManager defines the interface for incident aggregation/correlation.
 type AggregationManager interface {
 	GetOpenIncidents() ([]database.Incident, error)

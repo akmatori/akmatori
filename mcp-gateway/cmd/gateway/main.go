@@ -86,6 +86,18 @@ func main() {
 		w.Write([]byte(`{"status":"healthy"}`))
 	})
 
+	// Reload HTTP connector tools (called by API server after connector CRUD)
+	mux.HandleFunc("/reload/http-connectors", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		slog.Info("reloading HTTP connector tools")
+		registry.ReloadHTTPConnectors(tools.DefaultHTTPConnectorLoader)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"reloaded"}`))
+	})
+
 	// Tool schemas endpoint
 	mux.HandleFunc("/tools", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

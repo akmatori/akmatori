@@ -276,15 +276,15 @@ CRUD API for managing declarative HTTP connectors.
 - Modify: `internal/services/tool_service.go` — add connector CRUD methods
 - Modify: `internal/services/interfaces.go` — add ConnectorManager interface
 
-- [ ] `POST /api/http-connectors` — create connector (validate schema, register tools)
-- [ ] `GET /api/http-connectors` — list all connectors
-- [ ] `GET /api/http-connectors/{id}` — get connector detail
-- [ ] `PUT /api/http-connectors/{id}` — update connector (re-register tools)
-- [ ] `DELETE /api/http-connectors/{id}` — delete connector (unregister tools)
-- [ ] Add admin-only middleware to connector endpoints
-- [ ] Trigger gateway tool reload on create/update/delete
-- [ ] Write handler tests with mock service
-- [ ] Run `make test && make verify` — must pass before Phase 4
+- [x] `POST /api/http-connectors` — create connector (validate schema, register tools)
+- [x] `GET /api/http-connectors` — list all connectors
+- [x] `GET /api/http-connectors/{id}` — get connector detail
+- [x] `PUT /api/http-connectors/{id}` — update connector (re-register tools)
+- [x] `DELETE /api/http-connectors/{id}` — delete connector (unregister tools)
+- [x] Add admin-only middleware to connector endpoints
+- [x] Trigger gateway tool reload on create/update/delete
+- [x] Write handler tests with mock service
+- [x] Run `make test && make verify` — must pass before Phase 4
 
 ---
 
