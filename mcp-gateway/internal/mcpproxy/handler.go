@@ -29,12 +29,13 @@ type ServerRegistration struct {
 
 // ProxyHandler manages MCP proxy tool registration, discovery, and call forwarding.
 type ProxyHandler struct {
-	mu            sync.RWMutex
-	pool          *MCPConnectionPool
-	limiters      map[uint]*ratelimit.Limiter // per-instance rate limiters
-	registrations []ServerRegistration
-	toolMap       map[string]proxyToolEntry // namespaced tool name -> entry
-	logger        *slog.Logger
+	mu              sync.RWMutex
+	pool            *MCPConnectionPool
+	limiters        map[uint]*ratelimit.Limiter // per-instance rate limiters
+	registrations   []ServerRegistration
+	toolMap         map[string]proxyToolEntry // namespaced tool name -> entry
+	logger          *slog.Logger
+	onToolsChanged  func() // called when schema refresh updates the tool map
 }
 
 // proxyToolEntry maps a namespaced tool name to its external server and original tool name.
@@ -55,6 +56,15 @@ func NewProxyHandler(pool *MCPConnectionPool, logger *slog.Logger) *ProxyHandler
 		toolMap:  make(map[string]proxyToolEntry),
 		logger:   logger,
 	}
+}
+
+// SetOnToolsChanged sets a callback invoked after the schema refresh loop
+// updates the tool map. The registry uses this to re-register proxy tools
+// in the MCP server so newly-discovered tools become callable.
+func (h *ProxyHandler) SetOnToolsChanged(fn func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onToolsChanged = fn
 }
 
 // MCPServerConfigLoader loads enabled MCP server configs from the database.
@@ -279,6 +289,11 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 			"prefix", prefix,
 			"tools", len(tools),
 		)
+
+		// Notify the registry to re-register proxy tools in the MCP server
+		if h.onToolsChanged != nil {
+			h.onToolsChanged()
+		}
 	})
 }
 
@@ -295,7 +310,6 @@ func (h *ProxyHandler) Stop() {
 // GracefulShutdown stops the schema refresh loop and closes all connections.
 func (h *ProxyHandler) GracefulShutdown() {
 	h.Stop()
-	h.pool.CloseAll()
 	h.logger.Info("proxy handler shut down gracefully")
 }
 

@@ -151,15 +151,20 @@ export class ScriptExecutor {
       const result = script.runInContext(context);
 
       // result is the Promise from the async IIFE
-      returnValue = await Promise.race([
-        result,
-        new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new Error("Script execution timed out")),
-            this.timeoutMs,
-          ),
-        ),
-      ]);
+      let timer: ReturnType<typeof setTimeout>;
+      try {
+        returnValue = await Promise.race([
+          result,
+          new Promise((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error("Script execution timed out")),
+              this.timeoutMs,
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer!);
+      }
     } catch (err) {
       const message = (err as Error).message ?? String(err);
       if (

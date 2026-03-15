@@ -216,6 +216,18 @@ func (r *Registry) ReloadHTTPConnectors(loader HTTPConnectorLoader) {
 // SetProxyHandler sets the MCP proxy handler for this registry.
 func (r *Registry) SetProxyHandler(h *mcpproxy.ProxyHandler) {
 	r.proxyHandler = h
+	// When the proxy handler's schema refresh discovers new/removed tools,
+	// re-register them in the MCP server so they become callable.
+	h.SetOnToolsChanged(func() {
+		r.proxyMu.Lock()
+		defer r.proxyMu.Unlock()
+		// Unregister old proxy tools
+		for _, name := range r.proxyToolNames {
+			r.server.UnregisterTool(name)
+		}
+		r.proxyToolNames = nil
+		r.registerProxyToolsFromHandler()
+	})
 }
 
 // RegisterMCPProxyTools loads MCP server registrations and registers their discovered
