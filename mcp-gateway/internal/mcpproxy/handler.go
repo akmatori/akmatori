@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/akmatori/mcp-gateway/internal/cache"
 	"github.com/akmatori/mcp-gateway/internal/mcp"
 	"github.com/akmatori/mcp-gateway/internal/ratelimit"
 )
@@ -18,8 +17,6 @@ const (
 	DefaultProxyRatePerSecond = 10
 	// DefaultProxyBurstCapacity is the default burst capacity per external MCP server.
 	DefaultProxyBurstCapacity = 20
-	// DefaultResponseCacheTTL is the default TTL for cached responses from external servers.
-	DefaultResponseCacheTTL = DefaultSchemaCacheTTL
 )
 
 // ServerRegistration holds the configuration for a registered external MCP server.
@@ -32,15 +29,12 @@ type ServerRegistration struct {
 
 // ProxyHandler manages MCP proxy tool registration, discovery, and call forwarding.
 type ProxyHandler struct {
-	mu             sync.RWMutex
-	pool           *MCPConnectionPool
-	limiters       map[uint]*ratelimit.Limiter // per-instance rate limiters
-	responseCache  *cache.Cache
-	registrations  []ServerRegistration
-	toolMap        map[string]proxyToolEntry // namespaced tool name -> entry
-	logger         *slog.Logger
-	stopRefresh    chan struct{}
-	refreshStopped bool
+	mu            sync.RWMutex
+	pool          *MCPConnectionPool
+	limiters      map[uint]*ratelimit.Limiter // per-instance rate limiters
+	registrations []ServerRegistration
+	toolMap       map[string]proxyToolEntry // namespaced tool name -> entry
+	logger        *slog.Logger
 }
 
 // proxyToolEntry maps a namespaced tool name to its external server and original tool name.
@@ -56,12 +50,10 @@ func NewProxyHandler(pool *MCPConnectionPool, logger *slog.Logger) *ProxyHandler
 		logger = slog.Default()
 	}
 	return &ProxyHandler{
-		pool:          pool,
-		limiters:      make(map[uint]*ratelimit.Limiter),
-		responseCache: cache.New(DefaultResponseCacheTTL, DefaultCleanupInterval),
-		toolMap:       make(map[string]proxyToolEntry),
-		logger:        logger,
-		stopRefresh:   make(chan struct{}),
+		pool:     pool,
+		limiters: make(map[uint]*ratelimit.Limiter),
+		toolMap:  make(map[string]proxyToolEntry),
+		logger:   logger,
 	}
 }
 
@@ -149,7 +141,10 @@ func (h *ProxyHandler) registerServer(ctx context.Context, reg ServerRegistratio
 func (h *ProxyHandler) CallTool(ctx context.Context, toolName string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	h.mu.RLock()
 	entry, exists := h.toolMap[toolName]
-	limiter := h.limiters[entry.instanceID]
+	var limiter *ratelimit.Limiter
+	if exists {
+		limiter = h.limiters[entry.instanceID]
+	}
 	h.mu.RUnlock()
 
 	if !exists {
@@ -163,16 +158,11 @@ func (h *ProxyHandler) CallTool(ctx context.Context, toolName string, args map[s
 		}
 	}
 
-	// Check response cache
-	cacheKey := buildCacheKey(toolName, args)
-	if cached, ok := h.responseCache.Get(cacheKey); ok {
-		if result, ok := cached.(*mcp.CallToolResult); ok {
-			return result, nil
-		}
-	}
-
 	// Forward the call to the external server using the original tool name.
 	// The pool's CallTool handles transient failures with auto-reconnect.
+	// Note: we do not cache proxy tool calls because external MCP tools may have
+	// side effects (writes, creates, etc.) and there is no reliable way to determine
+	// which tools are read-only.
 	result, err := h.pool.CallTool(ctx, entry.instanceID, entry.originalName, args)
 	if err != nil {
 		h.logger.Error("proxy tool call failed",
@@ -183,9 +173,6 @@ func (h *ProxyHandler) CallTool(ctx context.Context, toolName string, args map[s
 		)
 		return nil, fmt.Errorf("external MCP server error for %s: %w", toolName, err)
 	}
-
-	// Cache the response
-	h.responseCache.Set(cacheKey, result)
 
 	return result, nil
 }
@@ -252,7 +239,7 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 	h.pool.StartSchemaRefreshLoop(interval)
 
 	// Also set up a refresh callback to update our tool map when schemas change
-	h.pool.onSchemaRefresh = func(instanceID uint, tools []mcp.Tool) {
+	h.pool.SetSchemaRefreshCallback(func(instanceID uint, tools []mcp.Tool) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 
@@ -289,7 +276,7 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 			"prefix", prefix,
 			"tools", len(tools),
 		)
-	}
+	})
 }
 
 // HealthStatus returns health information for all managed MCP proxy connections.
@@ -297,16 +284,9 @@ func (h *ProxyHandler) HealthStatus(ctx context.Context) []ConnectionStatus {
 	return h.pool.HealthStatus(ctx)
 }
 
-// Stop cleans up resources (response cache, refresh loop, connections).
+// Stop cleans up resources.
 func (h *ProxyHandler) Stop() {
-	h.mu.Lock()
-	if !h.refreshStopped {
-		h.refreshStopped = true
-		close(h.stopRefresh)
-	}
-	h.mu.Unlock()
-
-	h.responseCache.Stop()
+	// Pool manages its own cleanup via CloseAll
 }
 
 // GracefulShutdown stops the schema refresh loop and closes all connections.
@@ -316,8 +296,3 @@ func (h *ProxyHandler) GracefulShutdown() {
 	h.logger.Info("proxy handler shut down gracefully")
 }
 
-// buildCacheKey creates a cache key from tool name and arguments.
-func buildCacheKey(toolName string, args map[string]interface{}) string {
-	argsJSON, _ := json.Marshal(args)
-	return fmt.Sprintf("proxy:%s:%s", toolName, string(argsJSON))
-}

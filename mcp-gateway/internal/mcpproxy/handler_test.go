@@ -279,7 +279,7 @@ func TestCallTool_NotFound(t *testing.T) {
 	}
 }
 
-func TestCallTool_ResponseCaching(t *testing.T) {
+func TestCallTool_NoCaching(t *testing.T) {
 	callCount := 0
 	srv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
 		switch req.Method {
@@ -319,21 +319,21 @@ func TestCallTool_ResponseCaching(t *testing.T) {
 		t.Fatalf("first call failed: %v", err)
 	}
 
-	// Second call with same args should hit cache
+	// Second call with same args should also hit the server (no caching for proxy tools
+	// because external MCP tools may have side effects)
 	result2, err := handler.CallTool(context.Background(), "ext.api.get_data", args)
 	if err != nil {
 		t.Fatalf("second call failed: %v", err)
 	}
 
-	// Both should return the same result (from cache)
-	if result1.Content[0].Text != result2.Content[0].Text {
-		t.Errorf("expected cached result, got different: %s vs %s",
-			result1.Content[0].Text, result2.Content[0].Text)
+	// Each call should get a unique response from the server
+	if result1.Content[0].Text == result2.Content[0].Text {
+		t.Errorf("expected different results (no caching), both got: %s", result1.Content[0].Text)
 	}
 
-	// Only one actual server call
-	if callCount != 1 {
-		t.Errorf("expected 1 server call (cached), got %d", callCount)
+	// Both calls should have hit the server
+	if callCount != 2 {
+		t.Errorf("expected 2 server calls (no caching), got %d", callCount)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/akmatori/mcp-gateway/internal/cache"
@@ -87,6 +88,7 @@ type ExecuteResult struct {
 type HTTPConnectorExecutor struct {
 	client        *http.Client
 	responseCache *cache.Cache
+	mu            sync.RWMutex
 	rateLimiters  map[string]*ratelimit.Limiter // per connector instance
 }
 
@@ -119,10 +121,18 @@ func (e *HTTPConnectorExecutor) Stop() {
 
 // getRateLimiter returns or creates a rate limiter for the given connector instance
 func (e *HTTPConnectorExecutor) getRateLimiter(instanceKey string) *ratelimit.Limiter {
-	if limiter, ok := e.rateLimiters[instanceKey]; ok {
+	e.mu.RLock()
+	limiter, ok := e.rateLimiters[instanceKey]
+	e.mu.RUnlock()
+	if ok {
 		return limiter
 	}
-	limiter := ratelimit.New(10, 20) // 10 req/sec, burst 20
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if limiter, ok = e.rateLimiters[instanceKey]; ok {
+		return limiter
+	}
+	limiter = ratelimit.New(10, 20) // 10 req/sec, burst 20
 	e.rateLimiters[instanceKey] = limiter
 	return limiter
 }

@@ -189,3 +189,18 @@ func GatewayReloadFunc(gatewayURL string) func() error {
 		return nil
 	}
 }
+
+// GatewayMCPReloadFunc creates a function that triggers the MCP Gateway MCP server proxy reload
+func GatewayMCPReloadFunc(gatewayURL string) func() error {
+	return func() error {
+		resp, err := http.Post(gatewayURL+"/reload/mcp-servers", "application/json", nil)
+		if err != nil {
+			return fmt.Errorf("gateway MCP reload request failed: %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("gateway MCP reload returned status %d", resp.StatusCode)
+		}
+		return nil
+	}
+}

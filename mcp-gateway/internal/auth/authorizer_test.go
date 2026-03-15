@@ -54,8 +54,8 @@ func TestAuthorizer_AuthorizedByToolType(t *testing.T) {
 	}
 
 	// Tool type NOT in allowlist
-	if a.IsAuthorized("incident-1", "victoriametrics", 0, "") {
-		t.Error("expected unauthorized for victoriametrics tool type")
+	if a.IsAuthorized("incident-1", "victoria_metrics", 0, "") {
+		t.Error("expected unauthorized for victoria_metrics tool type")
 	}
 }
 

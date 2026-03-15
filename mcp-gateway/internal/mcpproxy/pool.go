@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -167,6 +168,14 @@ func WithSchemaRefreshCallback(cb func(instanceID uint, tools []mcp.Tool)) PoolO
 	return func(p *MCPConnectionPool) {
 		p.onSchemaRefresh = cb
 	}
+}
+
+// SetSchemaRefreshCallback sets the schema refresh callback in a thread-safe manner.
+// Use this when setting the callback after pool construction.
+func (p *MCPConnectionPool) SetSchemaRefreshCallback(cb func(instanceID uint, tools []mcp.Tool)) {
+	p.mu.Lock()
+	p.onSchemaRefresh = cb
+	p.mu.Unlock()
 }
 
 // NewPool creates a new MCP connection pool.
@@ -378,41 +387,16 @@ func isTransientError(err error) bool {
 		"send request",
 	}
 	for _, pattern := range transientPatterns {
-		if contains(msg, pattern) {
+		if containsCI(msg, pattern) {
 			return true
 		}
 	}
 	return false
 }
 
-// contains is a simple case-insensitive substring check.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchSubstring(s, substr)
-}
-
-func searchSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		match := true
-		for j := 0; j < len(substr); j++ {
-			sc := s[i+j]
-			pc := substr[j]
-			// Simple lowercase comparison for ASCII
-			if sc >= 'A' && sc <= 'Z' {
-				sc += 32
-			}
-			if pc >= 'A' && pc <= 'Z' {
-				pc += 32
-			}
-			if sc != pc {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
+// containsCI is a simple case-insensitive substring check.
+func containsCI(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
 // nextBackoff doubles the backoff up to the max.
@@ -462,8 +446,11 @@ func (p *MCPConnectionPool) refreshAllSchemas() {
 			continue
 		}
 
-		if p.onSchemaRefresh != nil && toolsChanged(oldTools, newTools) {
-			p.onSchemaRefresh(id, newTools)
+		p.mu.RLock()
+		cb := p.onSchemaRefresh
+		p.mu.RUnlock()
+		if cb != nil && toolsChanged(oldTools, newTools) {
+			cb(id, newTools)
 		}
 	}
 }

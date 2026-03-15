@@ -145,6 +145,16 @@ func (s *Server) HandleHTTP(w http.ResponseWriter, r *http.Request) {
 
 // handleSSE handles Server-Sent Events connection for MCP
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request, incidentID string) {
+	// Parse and register tool allowlist from header (same as HTTP POST path)
+	if s.authorizer != nil && incidentID != "" {
+		if allowlistHeader := r.Header.Get("X-Tool-Allowlist"); allowlistHeader != "" {
+			var entries []auth.AllowlistEntry
+			if err := json.Unmarshal([]byte(allowlistHeader), &entries); err == nil {
+				s.authorizer.SetAllowlist(incidentID, entries)
+			}
+		}
+	}
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "SSE not supported", http.StatusInternalServerError)

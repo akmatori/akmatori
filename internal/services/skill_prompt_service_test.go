@@ -431,7 +431,7 @@ func TestGenerateToolUsageExample_VictoriaMetrics(t *testing.T) {
 		t.Errorf("expected logical name prod-vm, got: %s", example)
 	}
 	// Verify all tool methods have usage examples
-	for _, fn := range []string{"victoriametrics.instant_query", "victoriametrics.range_query", "victoriametrics.label_values", "victoriametrics.series", "victoriametrics.api_request"} {
+	for _, fn := range []string{"victoria_metrics.instant_query", "victoria_metrics.range_query", "victoria_metrics.label_values", "victoria_metrics.series", "victoria_metrics.api_request"} {
 		if !strings.Contains(example, fn) {
 			t.Errorf("expected example for %s, got: %s", fn, example)
 		}

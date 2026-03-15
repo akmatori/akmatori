@@ -148,7 +148,7 @@ export function createSearchToolsTool(ctx: GatewayToolContext) {
     promptGuidelines: [
       "Use search_tools to discover available infrastructure tools when you're unsure what's available.",
       "Example: search_tools({ query: \"ssh\" }) — finds all SSH-related tools",
-      "Example: search_tools({ query: \"metrics\", tool_type: \"victoriametrics\" }) — finds VictoriaMetrics tools",
+      "Example: search_tools({ query: \"metrics\", tool_type: \"victoria_metrics\" }) — finds VictoriaMetrics tools",
       "After finding a tool, use get_tool_detail to see its full parameter schema before calling it.",
     ],
     parameters: SearchToolsParams,

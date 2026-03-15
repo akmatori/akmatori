@@ -272,6 +272,7 @@ func main() {
 		mcpGatewayURL = "http://mcp-gateway:8080"
 	}
 	apiHandler.SetGatewayReloader(handlers.GatewayReloadFunc(mcpGatewayURL))
+	apiHandler.SetMCPServerReloader(handlers.GatewayMCPReloadFunc(mcpGatewayURL))
 
 	// Initialize auth handler
 	authHandler := handlers.NewAuthHandler(jwtAuthMiddleware)

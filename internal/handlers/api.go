@@ -24,6 +24,7 @@ type APIHandler struct {
 	mcpServerService     services.MCPServerManager
 	alertChannelReloader func() // called after alert source create/update/delete to reload Slack channel mappings
 	gatewayReloader      func() error // called after HTTP connector CRUD to reload gateway tools
+	mcpServerReloader    func() error // called after MCP server CRUD to reload gateway MCP proxy tools
 }
 
 // NewAPIHandler creates a new API handler
@@ -52,6 +53,12 @@ func (h *APIHandler) SetAlertChannelReloader(fn func()) {
 // to reload MCP Gateway tool registrations.
 func (h *APIHandler) SetGatewayReloader(fn func() error) {
 	h.gatewayReloader = fn
+}
+
+// SetMCPServerReloader sets the callback invoked after MCP server create/update/delete
+// to reload MCP Gateway proxy tool registrations.
+func (h *APIHandler) SetMCPServerReloader(fn func() error) {
+	h.mcpServerReloader = fn
 }
 
 // reloadAlertChannels triggers the alert channel reload callback if set

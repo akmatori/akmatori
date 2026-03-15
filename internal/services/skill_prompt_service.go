@@ -299,11 +299,11 @@ gateway_call("zabbix.api_request", {"method": "host.get", "params": {"output": [
 		return fmt.Sprintf(`
 Usage (via gateway_call):
 `+"```"+`
-gateway_call("victoriametrics.instant_query", {"query": "up"}, "%s")
-gateway_call("victoriametrics.range_query", {"query": "rate(http_requests_total[5m])", "start": "2h", "end": "now", "step": "1m"}, "%s")
-gateway_call("victoriametrics.label_values", {"label": "__name__"}, "%s")
-gateway_call("victoriametrics.series", {"match": "up"}, "%s")
-gateway_call("victoriametrics.api_request", {"path": "/api/v1/status/tsdb"}, "%s")
+gateway_call("victoria_metrics.instant_query", {"query": "up"}, "%s")
+gateway_call("victoria_metrics.range_query", {"query": "rate(http_requests_total[5m])", "start": "2h", "end": "now", "step": "1m"}, "%s")
+gateway_call("victoria_metrics.label_values", {"label_name": "__name__"}, "%s")
+gateway_call("victoria_metrics.series", {"match": "up"}, "%s")
+gateway_call("victoria_metrics.api_request", {"path": "/api/v1/status/tsdb"}, "%s")
 `+"```"+`
 `, logicalName, logicalName, logicalName, logicalName, logicalName)
 	default:

@@ -182,10 +182,10 @@ describe("ScriptExecutor", () => {
       const { executor, client } = createExecutor();
 
       await executor.execute(
-        'await search_tools("metrics", "victoriametrics");',
+        'await search_tools("metrics", "victoria_metrics");',
       );
 
-      expect(client.searchTools).toHaveBeenCalledWith("metrics", "victoriametrics");
+      expect(client.searchTools).toHaveBeenCalledWith("metrics", "victoria_metrics");
     });
 
     it("should call get_tool_detail", async () => {

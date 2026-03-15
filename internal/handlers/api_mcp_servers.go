@@ -183,9 +183,9 @@ func (h *APIHandler) handleMCPServerByID(w http.ResponseWriter, r *http.Request)
 
 // triggerGatewayMCPReload calls the MCP Gateway reload endpoint for MCP proxy configs
 func (h *APIHandler) triggerGatewayMCPReload() {
-	if h.gatewayReloader != nil {
+	if h.mcpServerReloader != nil {
 		go func() {
-			if err := h.gatewayReloader(); err != nil {
+			if err := h.mcpServerReloader(); err != nil {
 				slog.Error("failed to trigger gateway MCP reload", "error", err)
 			}
 		}()

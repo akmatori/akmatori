@@ -196,7 +196,7 @@ export class ScriptExecutor {
 
     function resolveSafe(filePath: string): string {
       const resolved = path.resolve(workDir, filePath);
-      if (!resolved.startsWith(workDir)) {
+      if (resolved !== workDir && !resolved.startsWith(workDir + path.sep)) {
         throw new Error(
           `Access denied: path "${filePath}" resolves outside workspace`,
         );

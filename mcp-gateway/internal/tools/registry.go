@@ -887,7 +887,7 @@ func (r *Registry) registerVictoriaMetricsTools() {
 	// victoriametrics.instant_query
 	r.server.RegisterTool(
 		mcp.Tool{
-			Name:        "victoriametrics.instant_query",
+			Name:        "victoria_metrics.instant_query",
 			Description: "Execute a PromQL instant query against VictoriaMetrics",
 			InputSchema: mcp.InputSchema{
 				Type: "object",
@@ -921,7 +921,7 @@ func (r *Registry) registerVictoriaMetricsTools() {
 	// victoriametrics.range_query
 	r.server.RegisterTool(
 		mcp.Tool{
-			Name:        "victoriametrics.range_query",
+			Name:        "victoria_metrics.range_query",
 			Description: "Execute a PromQL range query against VictoriaMetrics",
 			InputSchema: mcp.InputSchema{
 				Type: "object",
@@ -959,7 +959,7 @@ func (r *Registry) registerVictoriaMetricsTools() {
 	// victoriametrics.label_values
 	r.server.RegisterTool(
 		mcp.Tool{
-			Name:        "victoriametrics.label_values",
+			Name:        "victoria_metrics.label_values",
 			Description: "Get label values for a given label name from VictoriaMetrics",
 			InputSchema: mcp.InputSchema{
 				Type: "object",
@@ -993,7 +993,7 @@ func (r *Registry) registerVictoriaMetricsTools() {
 	// victoriametrics.series
 	r.server.RegisterTool(
 		mcp.Tool{
-			Name:        "victoriametrics.series",
+			Name:        "victoria_metrics.series",
 			Description: "Find series matching a label set from VictoriaMetrics",
 			InputSchema: mcp.InputSchema{
 				Type: "object",
@@ -1023,7 +1023,7 @@ func (r *Registry) registerVictoriaMetricsTools() {
 	// victoriametrics.api_request
 	r.server.RegisterTool(
 		mcp.Tool{
-			Name:        "victoriametrics.api_request",
+			Name:        "victoria_metrics.api_request",
 			Description: "Make a generic HTTP request to VictoriaMetrics API",
 			InputSchema: mcp.InputSchema{
 				Type: "object",

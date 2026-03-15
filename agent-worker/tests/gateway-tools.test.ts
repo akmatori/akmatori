@@ -278,10 +278,10 @@ describe("createSearchToolsTool", () => {
     it("should call GatewayClient.searchTools with query and tool_type", async () => {
       const tool = createSearchToolsTool({ client: mockClient });
 
-      const params: SearchToolsInput = { query: "metrics", tool_type: "victoriametrics" };
+      const params: SearchToolsInput = { query: "metrics", tool_type: "victoria_metrics" };
       await tool.execute("tc-s2", params, undefined, undefined);
 
-      expect(mockClient.searchTools).toHaveBeenCalledWith("metrics", "victoriametrics");
+      expect(mockClient.searchTools).toHaveBeenCalledWith("metrics", "victoria_metrics");
     });
 
     it("should return JSON-stringified search results", async () => {

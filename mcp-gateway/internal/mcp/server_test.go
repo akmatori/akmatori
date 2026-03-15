@@ -485,7 +485,7 @@ func TestHandleSearchTools_FilteredByAllowlist_PartialAuthorization(t *testing.T
 		tools: []SearchToolsResultItem{
 			{Name: "ssh.execute_command", Description: "Execute command", ToolType: "ssh"},
 			{Name: "zabbix.get_hosts", Description: "Get hosts", ToolType: "zabbix"},
-			{Name: "victoriametrics.instant_query", Description: "Query metrics", ToolType: "victoriametrics"},
+			{Name: "victoria_metrics.instant_query", Description: "Query metrics", ToolType: "victoria_metrics"},
 		},
 	})
 	s.SetInstanceLookup(func(toolType string) []ToolDetailInstance {
@@ -499,7 +499,7 @@ func TestHandleSearchTools_FilteredByAllowlist_PartialAuthorization(t *testing.T
 			return []ToolDetailInstance{
 				{ID: 3, LogicalName: "prod-zabbix", Name: "Production Zabbix"},
 			}
-		case "victoriametrics":
+		case "victoria_metrics":
 			return []ToolDetailInstance{
 				{ID: 4, LogicalName: "prod-vm", Name: "Production VM"},
 			}
@@ -537,8 +537,8 @@ func TestHandleSearchTools_FilteredByAllowlist_PartialAuthorization(t *testing.T
 	for _, tool := range result.Tools {
 		toolTypes[tool.ToolType] = true
 	}
-	if toolTypes["victoriametrics"] {
-		t.Error("victoriametrics should be excluded from results")
+	if toolTypes["victoria_metrics"] {
+		t.Error("victoria_metrics should be excluded from results")
 	}
 	if !toolTypes["ssh"] || !toolTypes["zabbix"] {
 		t.Error("ssh and zabbix should be included")
