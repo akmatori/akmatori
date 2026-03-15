@@ -191,6 +191,9 @@ func (t *SSHTool) getConfig(ctx context.Context, incidentID string, instanceID *
 		config.AdhocDefaultUser = "root"
 	}
 	config.AdhocDefaultPort = getInt("adhoc_default_port", 22)
+	if config.AdhocDefaultPort < 1 || config.AdhocDefaultPort > 65535 {
+		config.AdhocDefaultPort = 22
+	}
 	if allow, ok := settings["adhoc_allow_write_commands"].(bool); ok {
 		config.AdhocAllowWriteCommands = allow
 	}
@@ -608,6 +611,10 @@ func (t *SSHTool) resolveTargetHosts(servers []string, config *SSHConfig) ([]SSH
 
 	var targetHosts []SSHHostConfig
 	for _, s := range servers {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
 		if host, ok := hostMap[s]; ok {
 			targetHosts = append(targetHosts, *host)
 		} else if config.AllowAdhocConnections {
