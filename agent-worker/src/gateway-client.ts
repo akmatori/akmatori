@@ -14,12 +14,20 @@ import * as path from "node:path";
 // Types
 // ---------------------------------------------------------------------------
 
+export interface ToolAllowlistEntry {
+  instance_id: number;
+  logical_name: string;
+  tool_type: string;
+}
+
 export interface GatewayClientOptions {
   gatewayUrl: string;
   incidentId: string;
   workDir?: string;
   /** Request timeout in milliseconds (default: 300000 = 5 minutes) */
   timeoutMs?: number;
+  /** Tool instances this incident is authorized to use (undefined = allow all) */
+  toolAllowlist?: ToolAllowlistEntry[];
 }
 
 export interface SearchToolsResult {
@@ -71,6 +79,7 @@ export class GatewayClient {
   private readonly incidentId: string;
   private readonly workDir: string | undefined;
   private readonly timeoutMs: number;
+  private readonly toolAllowlist: ToolAllowlistEntry[] | undefined;
   private requestId = 0;
 
   constructor(options: GatewayClientOptions) {
@@ -78,6 +87,7 @@ export class GatewayClient {
     this.incidentId = options.incidentId;
     this.workDir = options.workDir;
     this.timeoutMs = options.timeoutMs ?? 300_000;
+    this.toolAllowlist = options.toolAllowlist;
   }
 
   /**
@@ -226,6 +236,9 @@ export class GatewayClient {
       };
       if (this.incidentId) {
         headers["X-Incident-ID"] = this.incidentId;
+      }
+      if (this.toolAllowlist && this.toolAllowlist.length > 0) {
+        headers["X-Tool-Allowlist"] = JSON.stringify(this.toolAllowlist);
       }
 
       const req = mod.request(

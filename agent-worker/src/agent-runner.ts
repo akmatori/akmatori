@@ -19,7 +19,7 @@ import {
   type AgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
 import { getModel, type Model, type ThinkingLevel as PiThinkingLevel } from "@mariozechner/pi-ai";
-import type { LLMSettings, ExecuteResult, ProxyConfig, ThinkingLevel } from "./types.js";
+import type { LLMSettings, ExecuteResult, ProxyConfig, ThinkingLevel, ToolAllowlistEntry } from "./types.js";
 import {
   formatToolArgs,
   formatToolOutput,
@@ -64,6 +64,8 @@ export interface ExecuteParams {
   workDir: string;
   /** Names of enabled skills — only these will be loaded from the shared skills directory */
   enabledSkills?: string[];
+  /** Tool instances the incident is authorized to use (nil = allow all for backward compat) */
+  toolAllowlist?: ToolAllowlistEntry[];
   onOutput: (text: string) => void;
   onEvent?: (event: AgentSessionEvent) => void;
 }
@@ -77,6 +79,8 @@ export interface ResumeParams {
   workDir: string;
   /** Names of enabled skills — only these will be loaded from the shared skills directory */
   enabledSkills?: string[];
+  /** Tool instances the incident is authorized to use (nil = allow all for backward compat) */
+  toolAllowlist?: ToolAllowlistEntry[];
   onOutput: (text: string) => void;
   onEvent?: (event: AgentSessionEvent) => void;
 }
@@ -281,10 +285,12 @@ export class AgentRunner {
     );
 
     // Create gateway client for this session and register gateway tools as custom tools.
+    const toolAllowlist = "toolAllowlist" in params ? params.toolAllowlist : undefined;
     const gatewayClient = new GatewayClient({
       gatewayUrl: this.mcpGatewayUrl,
       incidentId: params.incidentId,
       workDir: params.workDir,
+      toolAllowlist,
     });
     const gatewayToolCtx = { client: gatewayClient };
     const gatewayCallTool = createGatewayCallTool(gatewayToolCtx);

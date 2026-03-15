@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/services"
 	"github.com/akmatori/akmatori/internal/utils"
 	"github.com/gorilla/websocket"
 	"gorm.io/gorm"
@@ -69,6 +70,9 @@ type AgentMessage struct {
 
 	// Enabled skill names (sent with new_incident to filter skill discovery)
 	EnabledSkills []string `json:"enabled_skills,omitempty"`
+
+	// Tool allowlist (sent with new_incident to restrict tool access)
+	ToolAllowlist []services.ToolAllowlistEntry `json:"tool_allowlist,omitempty"`
 }
 
 // LLMSettingsForWorker holds LLM configuration for agent execution
@@ -308,7 +312,7 @@ func (h *AgentWSHandler) SendToWorker(msg AgentMessage) error {
 }
 
 // StartIncident sends a new incident to the agent worker
-func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettingsForWorker, enabledSkills []string, callback IncidentCallback) error {
+func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []services.ToolAllowlistEntry, callback IncidentCallback) error {
 	// Register callback
 	h.callbackMu.Lock()
 	h.callbacks[incidentID] = callback
@@ -320,6 +324,7 @@ func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettings
 		IncidentID:    incidentID,
 		Task:          task,
 		EnabledSkills: enabledSkills,
+		ToolAllowlist: toolAllowlist,
 	}
 
 	// Include LLM settings if provided
@@ -355,7 +360,7 @@ func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettings
 }
 
 // ContinueIncident sends a follow-up message to an existing incident
-func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string, llm *LLMSettingsForWorker, enabledSkills []string, callback IncidentCallback) error {
+func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []services.ToolAllowlistEntry, callback IncidentCallback) error {
 	// Register/update callback
 	h.callbackMu.Lock()
 	h.callbacks[incidentID] = callback
@@ -368,6 +373,7 @@ func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string,
 		SessionID:     sessionID,
 		Message:       message,
 		EnabledSkills: enabledSkills,
+		ToolAllowlist: toolAllowlist,
 	}
 
 	// Include LLM settings so the worker can authenticate with the provider

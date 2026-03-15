@@ -836,3 +836,171 @@ func TestAssignTools_RegeneratesSkillMd(t *testing.T) {
 		t.Error("regenerated SKILL.md should NOT contain Python imports")
 	}
 }
+
+func TestGetToolAllowlist_SkillWithTools(t *testing.T) {
+	db := setupSkillTestDB(t)
+	svc := newTestSkillService(t, db)
+
+	// Create tool types
+	sshType := database.ToolType{Name: "ssh", Description: "SSH connections"}
+	db.Create(&sshType)
+	zabbixType := database.ToolType{Name: "zabbix", Description: "Zabbix monitoring"}
+	db.Create(&zabbixType)
+
+	// Create tool instances
+	sshInstance := database.ToolInstance{
+		Name:        "Production SSH",
+		LogicalName: "prod-ssh",
+		ToolTypeID:  sshType.ID,
+		Enabled:     true,
+	}
+	db.Create(&sshInstance)
+
+	zabbixInstance := database.ToolInstance{
+		Name:        "Production Zabbix",
+		LogicalName: "prod-zabbix",
+		ToolTypeID:  zabbixType.ID,
+		Enabled:     true,
+	}
+	db.Create(&zabbixInstance)
+
+	// Create skill with tools assigned
+	skill := database.Skill{Name: "linux-admin", Description: "Linux admin", Enabled: true, IsSystem: false}
+	db.Create(&skill)
+	db.Model(&skill).Association("Tools").Append(&sshInstance, &zabbixInstance)
+
+	allowlist := svc.GetToolAllowlist()
+
+	if len(allowlist) != 2 {
+		t.Fatalf("expected 2 entries in allowlist, got %d", len(allowlist))
+	}
+
+	// Verify entries contain correct data
+	entryMap := make(map[string]ToolAllowlistEntry)
+	for _, e := range allowlist {
+		entryMap[e.LogicalName] = e
+	}
+
+	sshEntry, ok := entryMap["prod-ssh"]
+	if !ok {
+		t.Fatal("expected prod-ssh in allowlist")
+	}
+	if sshEntry.InstanceID != sshInstance.ID {
+		t.Errorf("expected instance ID %d, got %d", sshInstance.ID, sshEntry.InstanceID)
+	}
+	if sshEntry.ToolType != "ssh" {
+		t.Errorf("expected tool type 'ssh', got '%s'", sshEntry.ToolType)
+	}
+
+	zbxEntry, ok := entryMap["prod-zabbix"]
+	if !ok {
+		t.Fatal("expected prod-zabbix in allowlist")
+	}
+	if zbxEntry.ToolType != "zabbix" {
+		t.Errorf("expected tool type 'zabbix', got '%s'", zbxEntry.ToolType)
+	}
+}
+
+func TestGetToolAllowlist_NoTools(t *testing.T) {
+	db := setupSkillTestDB(t)
+	svc := newTestSkillService(t, db)
+
+	// Create skill without any tools
+	db.Create(&database.Skill{Name: "basic-skill", Description: "No tools", Enabled: true, IsSystem: false})
+
+	allowlist := svc.GetToolAllowlist()
+
+	if allowlist != nil {
+		t.Errorf("expected nil allowlist for skill with no tools, got %v", allowlist)
+	}
+}
+
+func TestGetToolAllowlist_MultipleSkillsDeduplication(t *testing.T) {
+	db := setupSkillTestDB(t)
+	svc := newTestSkillService(t, db)
+
+	// Create tool type and instance
+	sshType := database.ToolType{Name: "ssh", Description: "SSH"}
+	db.Create(&sshType)
+	sshInstance := database.ToolInstance{
+		Name:        "Shared SSH",
+		LogicalName: "shared-ssh",
+		ToolTypeID:  sshType.ID,
+		Enabled:     true,
+	}
+	db.Create(&sshInstance)
+
+	// Create two skills that share the same tool instance
+	skill1 := database.Skill{Name: "skill-one", Description: "First", Enabled: true, IsSystem: false}
+	db.Create(&skill1)
+	db.Model(&skill1).Association("Tools").Append(&sshInstance)
+
+	skill2 := database.Skill{Name: "skill-two", Description: "Second", Enabled: true, IsSystem: false}
+	db.Create(&skill2)
+	db.Model(&skill2).Association("Tools").Append(&sshInstance)
+
+	allowlist := svc.GetToolAllowlist()
+
+	// Should deduplicate — only one entry for shared-ssh
+	if len(allowlist) != 1 {
+		t.Fatalf("expected 1 entry (deduplicated), got %d", len(allowlist))
+	}
+	if allowlist[0].LogicalName != "shared-ssh" {
+		t.Errorf("expected logical name 'shared-ssh', got '%s'", allowlist[0].LogicalName)
+	}
+}
+
+func TestGetToolAllowlist_ExcludesSystemSkills(t *testing.T) {
+	db := setupSkillTestDB(t)
+	svc := newTestSkillService(t, db)
+
+	// Create tool type and instance
+	sshType := database.ToolType{Name: "ssh", Description: "SSH"}
+	db.Create(&sshType)
+	sshInstance := database.ToolInstance{
+		Name:        "System SSH",
+		LogicalName: "system-ssh",
+		ToolTypeID:  sshType.ID,
+		Enabled:     true,
+	}
+	db.Create(&sshInstance)
+
+	// Create system skill with tool — should be excluded
+	systemSkill := database.Skill{Name: "incident-manager", Description: "System", Enabled: true, IsSystem: true}
+	db.Create(&systemSkill)
+	db.Model(&systemSkill).Association("Tools").Append(&sshInstance)
+
+	allowlist := svc.GetToolAllowlist()
+
+	if allowlist != nil {
+		t.Errorf("expected nil allowlist (system skills excluded), got %v", allowlist)
+	}
+}
+
+func TestGetToolAllowlist_ExcludesDisabledToolInstances(t *testing.T) {
+	db := setupSkillTestDB(t)
+	svc := newTestSkillService(t, db)
+
+	// Create tool type and disabled instance
+	sshType := database.ToolType{Name: "ssh", Description: "SSH"}
+	db.Create(&sshType)
+	disabledInstance := database.ToolInstance{
+		Name:        "Disabled SSH",
+		LogicalName: "disabled-ssh",
+		ToolTypeID:  sshType.ID,
+		Enabled:     true,
+	}
+	db.Create(&disabledInstance)
+	db.Model(&disabledInstance).Update("enabled", false)
+
+	// Create skill with disabled tool
+	skill := database.Skill{Name: "test-skill", Description: "Test", Enabled: true, IsSystem: false}
+	db.Create(&skill)
+	db.Model(&skill).Association("Tools").Append(&disabledInstance)
+
+	allowlist := svc.GetToolAllowlist()
+
+	if allowlist != nil {
+		t.Errorf("expected nil allowlist (disabled tools excluded), got %v", allowlist)
+	}
+}

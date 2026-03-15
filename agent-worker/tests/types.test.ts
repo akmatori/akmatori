@@ -10,6 +10,7 @@ import {
   type MessageType,
   type APIToWorkerMessageType,
   type WorkerToAPIMessageType,
+  type ToolAllowlistEntry,
 } from "../src/types.js";
 
 describe("MessageType constants", () => {
@@ -440,5 +441,77 @@ describe("ExecuteResult type", () => {
     };
 
     expect(result.error).toBe("API key invalid");
+  });
+});
+
+describe("ToolAllowlistEntry type", () => {
+  it("matches Go ToolAllowlistEntry JSON structure", () => {
+    const entry: ToolAllowlistEntry = {
+      instance_id: 1,
+      logical_name: "prod-ssh",
+      tool_type: "ssh",
+    };
+
+    const json = JSON.stringify(entry);
+    const parsed = JSON.parse(json);
+
+    expect(parsed.instance_id).toBe(1);
+    expect(parsed.logical_name).toBe("prod-ssh");
+    expect(parsed.tool_type).toBe("ssh");
+  });
+
+  it("serializes tool_allowlist in WebSocket message", () => {
+    const allowlist: ToolAllowlistEntry[] = [
+      { instance_id: 1, logical_name: "prod-ssh", tool_type: "ssh" },
+      { instance_id: 2, logical_name: "prod-zabbix", tool_type: "zabbix" },
+    ];
+
+    const msg: WebSocketMessage = {
+      type: "new_incident",
+      incident_id: "inc-allowlist",
+      task: "Investigate alert",
+      tool_allowlist: allowlist,
+    };
+
+    const json = serializeMessage(msg);
+    const parsed = JSON.parse(json);
+
+    expect(parsed.tool_allowlist).toHaveLength(2);
+    expect(parsed.tool_allowlist[0].instance_id).toBe(1);
+    expect(parsed.tool_allowlist[0].logical_name).toBe("prod-ssh");
+    expect(parsed.tool_allowlist[0].tool_type).toBe("ssh");
+    expect(parsed.tool_allowlist[1].instance_id).toBe(2);
+    expect(parsed.tool_allowlist[1].logical_name).toBe("prod-zabbix");
+  });
+
+  it("deserializes tool_allowlist from Go-formatted message", () => {
+    const goJson = JSON.stringify({
+      type: "new_incident",
+      incident_id: "inc-from-go",
+      task: "Check server",
+      tool_allowlist: [
+        { instance_id: 3, logical_name: "staging-ssh", tool_type: "ssh" },
+      ],
+    });
+
+    const msg = deserializeMessage(goJson);
+
+    expect(msg.tool_allowlist).toHaveLength(1);
+    expect(msg.tool_allowlist![0].instance_id).toBe(3);
+    expect(msg.tool_allowlist![0].logical_name).toBe("staging-ssh");
+    expect(msg.tool_allowlist![0].tool_type).toBe("ssh");
+  });
+
+  it("omits tool_allowlist when not present (backward compat)", () => {
+    const msg: WebSocketMessage = {
+      type: "new_incident",
+      incident_id: "inc-no-allowlist",
+      task: "Check server",
+    };
+
+    const json = serializeMessage(msg);
+    const parsed = JSON.parse(json);
+
+    expect(parsed).not.toHaveProperty("tool_allowlist");
   });
 });

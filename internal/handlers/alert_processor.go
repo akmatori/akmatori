@@ -466,7 +466,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 			},
 		}
 
-		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
+		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback); err != nil {
 			slog.Error("failed to start incident via WebSocket", "err", err)
 			errorMsg := fmt.Sprintf("Failed to start investigation: %v", err)
 			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg, 0, 0); updateErr != nil {
@@ -597,7 +597,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 			},
 		}
 
-		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback); err != nil {
+		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback); err != nil {
 			slog.Error("failed to start incident via WebSocket", "err", err)
 			errorMsg := fmt.Sprintf("Failed to start investigation: %v", err)
 			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", "❌ "+errorMsg, 0, 0); updateErr != nil {

@@ -174,13 +174,13 @@ When an incident is spawned, resolve the skill's tool instances into an allowlis
 - Modify: `internal/handlers/agent_ws.go` — pass allowlist in WebSocket message to agent worker
 - Modify: `agent-worker/src/types.ts` — add allowlist field to NewIncidentMessage type
 
-- [ ] In `SpawnIncidentManager()`, resolve skill → tool instances → build allowlist: `[{instance_id, logical_name, tool_type}]`
-- [ ] Add `ToolAllowlist` field to WebSocket `new_incident` message payload
-- [ ] Update agent-worker types to parse allowlist from message
-- [ ] Pass allowlist from orchestrator to agent-runner
-- [ ] GatewayClient sends allowlist to gateway as `X-Tool-Allowlist` header or request body field
-- [ ] Write tests for allowlist construction (skill with tools, skill with no tools, multiple skills)
-- [ ] Run `make test && make test-agent` — must pass before task 2.2
+- [x] In `SpawnIncidentManager()`, resolve skill → tool instances → build allowlist: `[{instance_id, logical_name, tool_type}]`
+- [x] Add `ToolAllowlist` field to WebSocket `new_incident` message payload
+- [x] Update agent-worker types to parse allowlist from message
+- [x] Pass allowlist from orchestrator to agent-runner
+- [x] GatewayClient sends allowlist to gateway as `X-Tool-Allowlist` header or request body field
+- [x] Write tests for allowlist construction (skill with tools, skill with no tools, multiple skills)
+- [x] Run `make test && make test-agent` — must pass before task 2.2
 
 ### Task 2.2: Enforce authorization in MCP Gateway
 

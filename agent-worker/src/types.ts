@@ -70,6 +70,16 @@ export interface LLMSettings {
 }
 
 // ---------------------------------------------------------------------------
+// Tool allowlist (sent with new_incident to restrict tool access)
+// ---------------------------------------------------------------------------
+
+export interface ToolAllowlistEntry {
+  instance_id: number;
+  logical_name: string;
+  tool_type: string;
+}
+
+// ---------------------------------------------------------------------------
 // WebSocket message (matches Go CodexMessage struct JSON wire format)
 // ---------------------------------------------------------------------------
 
@@ -108,6 +118,9 @@ export interface WebSocketMessage {
 
   // Enabled skill names (sent with new_incident to filter skill discovery)
   enabled_skills?: string[];
+
+  // Tool allowlist (sent with new_incident to restrict tool access)
+  tool_allowlist?: ToolAllowlistEntry[];
 }
 
 // ---------------------------------------------------------------------------

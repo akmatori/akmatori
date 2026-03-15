@@ -214,10 +214,10 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		var wsErr error
 		if sessionID != "" {
 			slog.Info("continuing session for incident", "session_id", sessionID, "incident_id", incidentUUID)
-			wsErr = h.agentWSHandler.ContinueIncident(incidentUUID, sessionID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback)
+			wsErr = h.agentWSHandler.ContinueIncident(incidentUUID, sessionID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback)
 		} else {
 			slog.Info("starting new agent session for incident", "incident_id", incidentUUID)
-			wsErr = h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), callback)
+			wsErr = h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback)
 		}
 
 		if wsErr != nil {

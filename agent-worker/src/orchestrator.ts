@@ -13,6 +13,7 @@ import type {
   LLMSettings,
   ProxyConfig,
   ExecuteResult,
+  ToolAllowlistEntry,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -177,6 +178,7 @@ export class Orchestrator {
       llmSettings,
       proxyConfig,
       enabledSkills: msg.enabled_skills,
+      toolAllowlist: msg.tool_allowlist,
       workDir: `${this.config.workspaceDir}/${incidentId}`,
       onOutput: (text: string) => {
         this.wsClient.sendOutput(incidentId, text);
@@ -216,6 +218,7 @@ export class Orchestrator {
       llmSettings,
       proxyConfig,
       enabledSkills: msg.enabled_skills,
+      toolAllowlist: msg.tool_allowlist,
       workDir: `${this.config.workspaceDir}/${incidentId}`,
       onOutput: (text: string) => {
         this.wsClient.sendOutput(incidentId, text);

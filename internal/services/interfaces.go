@@ -14,6 +14,7 @@ type SkillManager interface {
 	ListSkills() ([]database.Skill, error)
 	ListEnabledSkills() ([]database.Skill, error)
 	GetEnabledSkillNames() []string
+	GetToolAllowlist() []ToolAllowlistEntry
 	GetSkill(name string) (*database.Skill, error)
 	AssignTools(skillName string, toolIDs []uint) error
 	GetSkillDir(skillName string) string
