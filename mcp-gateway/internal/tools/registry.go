@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"log"
+	"strings"
 
 	"github.com/akmatori/mcp-gateway/internal/database"
 	"github.com/akmatori/mcp-gateway/internal/mcp"
@@ -641,6 +642,82 @@ func (r *Registry) registerVictoriaMetricsTools() {
 			return r.vmTool.APIRequest(ctx, incidentID, args)
 		},
 	)
+}
+
+// SearchTools searches registered tools by query string and optional tool type filter.
+// It performs case-insensitive substring matching on tool name and description.
+func (r *Registry) SearchTools(query string, toolType string) []mcp.SearchToolsResultItem {
+	r.server.Mu().RLock()
+	defer r.server.Mu().RUnlock()
+
+	query = strings.ToLower(query)
+	var results []mcp.SearchToolsResultItem
+
+	for _, tool := range r.server.Tools() {
+		namespace, _ := mcp.ParseToolName(tool.Name)
+		// Apply tool type filter
+		if toolType != "" && namespace != toolType {
+			continue
+		}
+		// Match query against name and description
+		if query != "" &&
+			!strings.Contains(strings.ToLower(tool.Name), query) &&
+			!strings.Contains(strings.ToLower(tool.Description), query) {
+			continue
+		}
+
+		results = append(results, mcp.SearchToolsResultItem{
+			Name:        tool.Name,
+			Description: tool.Description,
+			ToolType:    namespace,
+		})
+	}
+
+	return results
+}
+
+// GetToolDetail returns full detail for a specific tool by name.
+func (r *Registry) GetToolDetail(toolName string) (*mcp.GetToolDetailResult, bool) {
+	r.server.Mu().RLock()
+	defer r.server.Mu().RUnlock()
+
+	tool, exists := r.server.Tools()[toolName]
+	if !exists {
+		return nil, false
+	}
+
+	namespace, _ := mcp.ParseToolName(tool.Name)
+
+	return &mcp.GetToolDetailResult{
+		Name:        tool.Name,
+		Description: tool.Description,
+		ToolType:    namespace,
+		InputSchema: tool.InputSchema,
+	}, true
+}
+
+// BuildInstanceLookup returns an InstanceLookup function that queries the database
+// for enabled tool instances of a given tool type.
+func BuildInstanceLookup() mcp.InstanceLookup {
+	return func(toolType string) []mcp.ToolDetailInstance {
+		ctx := context.Background()
+		instances, err := database.GetAllEnabledToolInstances(ctx)
+		if err != nil {
+			return nil
+		}
+
+		var result []mcp.ToolDetailInstance
+		for _, inst := range instances {
+			if inst.ToolType.Name == toolType {
+				result = append(result, mcp.ToolDetailInstance{
+					ID:          inst.ID,
+					LogicalName: inst.LogicalName,
+					Name:        inst.Name,
+				})
+			}
+		}
+		return result
+	}
 }
 
 // GetToolCredentials is a helper to fetch credentials from database

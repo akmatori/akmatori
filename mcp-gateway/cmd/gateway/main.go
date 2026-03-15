@@ -57,6 +57,10 @@ func main() {
 	registry := tools.NewRegistry(server, stdLogger)
 	registry.RegisterAllTools()
 
+	// Wire up tool discovery (search/detail JSON-RPC methods)
+	server.SetDiscoverer(registry)
+	server.SetInstanceLookup(tools.BuildInstanceLookup())
+
 	// Setup HTTP handlers
 	mux := http.NewServeMux()
 
