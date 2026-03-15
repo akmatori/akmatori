@@ -70,6 +70,9 @@ func main() {
 	mcpProxyLoader := tools.DefaultMCPProxyLoader
 	registry.RegisterMCPProxyTools(mcpProxyLoader)
 
+	// Start periodic schema refresh for MCP proxy connections (every 5 min)
+	proxyHandler.StartSchemaRefreshLoop(mcpproxy.DefaultSchemaRefreshInterval)
+
 	// Wire up tool discovery (search/detail JSON-RPC methods)
 	server.SetDiscoverer(registry)
 	server.SetInstanceLookup(tools.BuildInstanceLookup())
@@ -92,6 +95,28 @@ func main() {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"healthy"}`))
+	})
+
+	// MCP proxy connections health check
+	mux.HandleFunc("/health/mcp-connections", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		statuses := proxyHandler.HealthStatus(r.Context())
+		allHealthy := true
+		for _, s := range statuses {
+			if !s.Connected {
+				allHealthy = false
+				break
+			}
+		}
+		resp := map[string]interface{}{
+			"healthy":     allHealthy,
+			"connections": statuses,
+			"total":       len(statuses),
+		}
+		if !allHealthy {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+		json.NewEncoder(w).Encode(resp)
 	})
 
 	// Reload HTTP connector tools (called by API server after connector CRUD)
@@ -176,7 +201,7 @@ func main() {
 		<-sigChan
 		slog.Info("shutting down")
 		authorizer.Stop()
-		proxyPool.CloseAll()
+		proxyHandler.GracefulShutdown()
 		registry.Stop()
 		os.Exit(0)
 	}()

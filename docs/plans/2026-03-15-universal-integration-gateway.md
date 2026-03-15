@@ -351,13 +351,13 @@ Robust error handling and lifecycle management for external MCP connections.
 - Modify: `mcp-gateway/internal/mcpproxy/pool.go` — add error handling and lifecycle hooks
 - Modify: `mcp-gateway/internal/mcpproxy/handler.go` — add retry and fallback logic
 
-- [ ] Handle connection failures gracefully: return clear error to agent, don't crash gateway
-- [ ] Auto-reconnect on transient failures (network errors, server restarts) with exponential backoff
-- [ ] Tool schema refresh: re-fetch `tools/list` periodically (every 5 min) to detect new tools
-- [ ] Graceful shutdown: close all connections on gateway stop
-- [ ] Health check endpoint: report status of all MCP connections
-- [ ] Write tests for error scenarios: connection timeout, server crash, schema refresh
-- [ ] Run `make test-mcp && make verify` — must pass before final verification
+- [x] Handle connection failures gracefully: return clear error to agent, don't crash gateway
+- [x] Auto-reconnect on transient failures (network errors, server restarts) with exponential backoff
+- [x] Tool schema refresh: re-fetch `tools/list` periodically (every 5 min) to detect new tools
+- [x] Graceful shutdown: close all connections on gateway stop
+- [x] Health check endpoint: report status of all MCP connections
+- [x] Write tests for error scenarios: connection timeout, server crash, schema refresh
+- [x] Run `make test-mcp && make verify` — must pass before final verification
 
 ---
 

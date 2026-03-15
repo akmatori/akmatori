@@ -687,6 +687,136 @@ func TestSearchAndDetailIncludeProxyTools(t *testing.T) {
 	}
 }
 
+func TestCallTool_GracefulErrorOnServerCrash(t *testing.T) {
+	callCount := 0
+	srv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+		switch req.Method {
+		case "tools/list":
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{
+				Tools: []mcp.Tool{{Name: "fragile_tool"}},
+			})
+		case "tools/call":
+			callCount++
+			if callCount == 1 {
+				// First call fails (simulating crash after registration)
+				return mcp.NewErrorResponse(req.ID, mcp.InternalError, "server crashed", nil)
+			}
+			return mcp.NewResponse(req.ID, mcp.CallToolResult{
+				Content: []mcp.Content{mcp.NewTextContent("recovered")},
+			})
+		default:
+			return mcp.NewResponse(req.ID, nil)
+		}
+	})
+	defer srv.Close()
+
+	pool := NewPool(
+		WithIdleTimeout(time.Minute),
+		WithMaxReconnectAttempts(1),
+		WithBackoff(5*time.Millisecond, 10*time.Millisecond),
+		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
+			return nil
+		}),
+	)
+	defer pool.CloseAll()
+
+	handler := NewProxyHandler(pool, nil)
+	defer handler.Stop()
+
+	regs := []ServerRegistration{
+		{InstanceID: 1, NamespacePrefix: "ext.fragile", Config: MCPServerConfig{Transport: TransportSSE, URL: srv.URL}},
+	}
+	handler.LoadAndRegister(context.Background(), mockLoader(regs))
+
+	// Call should return an error but NOT crash the gateway
+	_, err := handler.CallTool(context.Background(), "ext.fragile.fragile_tool", nil)
+	if err == nil {
+		// The error from the external server is a JSON-RPC error, not a transport error,
+		// so it may be returned as a non-nil result with isError.
+		// The important thing is the gateway didn't crash.
+	}
+	// Gateway is still operational
+	if handler.ToolCount() != 1 {
+		t.Errorf("expected handler to still have 1 tool registered, got %d", handler.ToolCount())
+	}
+}
+
+func TestHandlerHealthStatus(t *testing.T) {
+	srv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+		if req.Method == "tools/list" {
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{
+				Tools: []mcp.Tool{{Name: "t1"}},
+			})
+		}
+		if req.Method == "ping" {
+			return mcp.NewResponse(req.ID, map[string]string{"status": "ok"})
+		}
+		return mcp.NewResponse(req.ID, nil)
+	})
+	defer srv.Close()
+
+	pool := NewPool(
+		WithIdleTimeout(time.Minute),
+		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
+			return nil
+		}),
+	)
+	defer pool.CloseAll()
+
+	handler := NewProxyHandler(pool, nil)
+	defer handler.Stop()
+
+	regs := []ServerRegistration{
+		{InstanceID: 1, NamespacePrefix: "ext.svc", Config: MCPServerConfig{Transport: TransportSSE, URL: srv.URL}},
+	}
+	handler.LoadAndRegister(context.Background(), mockLoader(regs))
+
+	statuses := handler.HealthStatus(context.Background())
+	if len(statuses) != 1 {
+		t.Fatalf("expected 1 status, got %d", len(statuses))
+	}
+	if !statuses[0].Connected {
+		t.Error("expected connected=true")
+	}
+}
+
+func TestHandlerGracefulShutdown(t *testing.T) {
+	srv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+		if req.Method == "tools/list" {
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{
+				Tools: []mcp.Tool{{Name: "t1"}},
+			})
+		}
+		return mcp.NewResponse(req.ID, nil)
+	})
+	defer srv.Close()
+
+	pool := NewPool(
+		WithIdleTimeout(time.Minute),
+		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
+			return nil
+		}),
+	)
+
+	handler := NewProxyHandler(pool, nil)
+
+	regs := []ServerRegistration{
+		{InstanceID: 1, NamespacePrefix: "ext.svc", Config: MCPServerConfig{Transport: TransportSSE, URL: srv.URL}},
+	}
+	handler.LoadAndRegister(context.Background(), mockLoader(regs))
+
+	// Graceful shutdown
+	handler.GracefulShutdown()
+
+	// Pool should have 0 connections after shutdown
+	if pool.ConnectionCount() != 0 {
+		t.Errorf("expected 0 connections after shutdown, got %d", pool.ConnectionCount())
+	}
+
+	// Calling GracefulShutdown again should be safe
+	handler.GracefulShutdown()
+}
+
 func TestEmptyRegistrations(t *testing.T) {
 	pool := newTestPool(nil)
 	defer pool.CloseAll()

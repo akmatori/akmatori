@@ -647,16 +647,32 @@ func TestMCPConnection_Close_Idempotent(t *testing.T) {
 	conn.close() // Should not panic
 }
 
-func TestCallTool_ClosedConnection(t *testing.T) {
-	pool := newTestPool(func(ctx context.Context, conn *MCPConnection) error {
-		return nil
-	})
-	defer pool.CloseAll()
-
+func TestCallTool_ClosedConnection_Reconnects(t *testing.T) {
+	callCount := 0
 	srv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
-		return mcp.NewResponse(req.ID, mcp.ListToolsResult{Tools: []mcp.Tool{{Name: "t1"}}})
+		switch req.Method {
+		case "tools/list":
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{Tools: []mcp.Tool{{Name: "t1"}}})
+		case "tools/call":
+			callCount++
+			return mcp.NewResponse(req.ID, mcp.CallToolResult{
+				Content: []mcp.Content{mcp.NewTextContent("ok")},
+			})
+		default:
+			return mcp.NewResponse(req.ID, nil)
+		}
 	})
 	defer srv.Close()
+
+	pool := NewPool(
+		WithIdleTimeout(100*time.Millisecond),
+		WithMaxReconnectAttempts(2),
+		WithBackoff(10*time.Millisecond, 50*time.Millisecond),
+		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
+			return nil
+		}),
+	)
+	defer pool.CloseAll()
 
 	config := MCPServerConfig{Transport: TransportSSE, URL: srv.URL}
 
@@ -668,11 +684,13 @@ func TestCallTool_ClosedConnection(t *testing.T) {
 	// Close the underlying connection
 	conn.close()
 
-	// CallTool should still work via pool (connection exists in map)
-	// but the send will fail because the connection is closed
-	_, err = pool.CallTool(context.Background(), 1, "t1", nil)
-	if err == nil {
-		t.Error("expected error calling tool on closed connection")
+	// CallTool should auto-reconnect and succeed
+	result, err := pool.CallTool(context.Background(), 1, "t1", nil)
+	if err != nil {
+		t.Fatalf("expected auto-reconnect to succeed, got: %v", err)
+	}
+	if result.Content[0].Text != "ok" {
+		t.Errorf("unexpected result: %s", result.Content[0].Text)
 	}
 }
 
@@ -684,5 +702,461 @@ func TestPoolOptions(t *testing.T) {
 
 	if pool.idleTimeout != 10*time.Minute {
 		t.Errorf("expected 10m idle timeout, got %v", pool.idleTimeout)
+	}
+}
+
+func TestCallTool_ReconnectsOnTransientError(t *testing.T) {
+	callCount := 0
+	srv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+		switch req.Method {
+		case "tools/list":
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{
+				Tools: []mcp.Tool{{Name: "test_tool"}},
+			})
+		case "tools/call":
+			callCount++
+			return mcp.NewResponse(req.ID, mcp.CallToolResult{
+				Content: []mcp.Content{mcp.NewTextContent(fmt.Sprintf("call_%d", callCount))},
+			})
+		default:
+			return mcp.NewResponse(req.ID, nil)
+		}
+	})
+	defer srv.Close()
+
+	connectCalls := 0
+	pool := NewPool(
+		WithIdleTimeout(100*time.Millisecond),
+		WithMaxReconnectAttempts(2),
+		WithBackoff(10*time.Millisecond, 50*time.Millisecond),
+		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
+			connectCalls++
+			return nil
+		}),
+	)
+	defer pool.CloseAll()
+
+	config := MCPServerConfig{Transport: TransportSSE, URL: srv.URL}
+	conn, err := pool.GetOrConnect(context.Background(), 1, config)
+	if err != nil {
+		t.Fatalf("initial connect failed: %v", err)
+	}
+
+	// Simulate a closed connection (transient failure)
+	conn.mu.Lock()
+	conn.closed = true
+	conn.mu.Unlock()
+
+	// CallTool should detect the failure and reconnect
+	result, err := pool.CallTool(context.Background(), 1, "test_tool", nil)
+	if err != nil {
+		t.Fatalf("CallTool after reconnect failed: %v", err)
+	}
+
+	if len(result.Content) == 0 {
+		t.Fatal("expected non-empty result")
+	}
+
+	// Should have connected more than once (initial + reconnect)
+	if connectCalls < 2 {
+		t.Errorf("expected at least 2 connect calls, got %d", connectCalls)
+	}
+}
+
+func TestCallTool_FailsAfterMaxReconnectAttempts(t *testing.T) {
+	pool := NewPool(
+		WithIdleTimeout(100*time.Millisecond),
+		WithMaxReconnectAttempts(2),
+		WithBackoff(5*time.Millisecond, 10*time.Millisecond),
+		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
+			return fmt.Errorf("connection refused")
+		}),
+	)
+	defer pool.CloseAll()
+
+	// Manually insert a connection and config so CallTool has something to work with
+	conn := &MCPConnection{
+		config:     MCPServerConfig{Transport: TransportSSE, URL: "http://localhost:0"},
+		instanceID: 1,
+		lastUsed:   time.Now(),
+		connected:  true,
+		closed:     true, // Simulate closed connection
+		httpClient: &http.Client{Timeout: 5 * time.Second},
+	}
+	pool.mu.Lock()
+	pool.connections[1] = conn
+	pool.configs[1] = conn.config
+	pool.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := pool.CallTool(ctx, 1, "test_tool", nil)
+	if err == nil {
+		t.Fatal("expected error after exhausting reconnect attempts")
+	}
+}
+
+func TestCallTool_ConnectionTimeout(t *testing.T) {
+	// Server that never responds (simulates timeout)
+	srv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+		if req.Method == "tools/list" {
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{
+				Tools: []mcp.Tool{{Name: "slow_tool"}},
+			})
+		}
+		// For tools/call, sleep longer than context timeout
+		time.Sleep(5 * time.Second)
+		return mcp.NewResponse(req.ID, nil)
+	})
+	defer srv.Close()
+
+	pool := NewPool(
+		WithIdleTimeout(time.Minute),
+		WithMaxReconnectAttempts(1),
+		WithBackoff(5*time.Millisecond, 10*time.Millisecond),
+		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
+			return nil
+		}),
+	)
+	defer pool.CloseAll()
+
+	config := MCPServerConfig{Transport: TransportSSE, URL: srv.URL}
+	_, err := pool.GetOrConnect(context.Background(), 1, config)
+	if err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	// Use a very short timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err = pool.CallTool(ctx, 1, "slow_tool", nil)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+}
+
+func TestIsTransientError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{"nil error", nil, false},
+		{"connection refused", fmt.Errorf("connection refused"), true},
+		{"connection reset", fmt.Errorf("connection reset by peer"), true},
+		{"connection closed", fmt.Errorf("connection is closed"), true},
+		{"EOF", fmt.Errorf("unexpected EOF"), true},
+		{"timeout", fmt.Errorf("i/o timeout"), true},
+		{"broken pipe", fmt.Errorf("broken pipe"), true},
+		{"server unreachable", fmt.Errorf("server unreachable: dial failed"), true},
+		{"non-transient", fmt.Errorf("invalid parameter: missing name"), false},
+		{"json parse error", fmt.Errorf("json: cannot unmarshal"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTransientError(tt.err)
+			if got != tt.expected {
+				t.Errorf("isTransientError(%v) = %v, want %v", tt.err, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNextBackoff(t *testing.T) {
+	tests := []struct {
+		current  time.Duration
+		max      time.Duration
+		expected time.Duration
+	}{
+		{100 * time.Millisecond, 1 * time.Second, 200 * time.Millisecond},
+		{500 * time.Millisecond, 1 * time.Second, 1 * time.Second},
+		{800 * time.Millisecond, 1 * time.Second, 1 * time.Second},
+		{1 * time.Second, 1 * time.Second, 1 * time.Second},
+	}
+
+	for _, tt := range tests {
+		got := nextBackoff(tt.current, tt.max)
+		if got != tt.expected {
+			t.Errorf("nextBackoff(%v, %v) = %v, want %v", tt.current, tt.max, got, tt.expected)
+		}
+	}
+}
+
+func TestSchemaRefresh(t *testing.T) {
+	refreshCallCount := 0
+	srv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+		if req.Method == "tools/list" {
+			refreshCallCount++
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{
+				Tools: []mcp.Tool{{Name: fmt.Sprintf("tool_v%d", refreshCallCount)}},
+			})
+		}
+		if req.Method == "ping" {
+			return mcp.NewResponse(req.ID, map[string]string{"status": "ok"})
+		}
+		return mcp.NewResponse(req.ID, nil)
+	})
+	defer srv.Close()
+
+	var refreshedIDs []uint
+	var refreshMu sync.Mutex
+
+	pool := NewPool(
+		WithIdleTimeout(time.Minute),
+		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
+			return nil
+		}),
+		WithSchemaRefreshCallback(func(instanceID uint, tools []mcp.Tool) {
+			refreshMu.Lock()
+			refreshedIDs = append(refreshedIDs, instanceID)
+			refreshMu.Unlock()
+		}),
+	)
+	defer pool.CloseAll()
+
+	config := MCPServerConfig{Transport: TransportSSE, URL: srv.URL}
+	_, err := pool.GetOrConnect(context.Background(), 1, config)
+	if err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	// Manually trigger schema refresh
+	pool.refreshAllSchemas()
+
+	// Should have refreshed and detected the tool name change
+	refreshMu.Lock()
+	refreshCount := len(refreshedIDs)
+	refreshMu.Unlock()
+
+	if refreshCount != 1 {
+		t.Errorf("expected 1 schema refresh callback, got %d", refreshCount)
+	}
+
+	// Verify tools were updated
+	tools, ok := pool.GetTools(1)
+	if !ok {
+		t.Fatal("expected tools to be available")
+	}
+	if tools[0].Name != "tool_v2" {
+		t.Errorf("expected tool_v2 after refresh, got %s", tools[0].Name)
+	}
+}
+
+func TestHealthStatus(t *testing.T) {
+	srv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+		if req.Method == "tools/list" {
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{
+				Tools: []mcp.Tool{{Name: "t1"}, {Name: "t2"}},
+			})
+		}
+		if req.Method == "ping" {
+			return mcp.NewResponse(req.ID, map[string]string{"status": "ok"})
+		}
+		return mcp.NewResponse(req.ID, nil)
+	})
+	defer srv.Close()
+
+	pool := NewPool(
+		WithIdleTimeout(time.Minute),
+		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
+			return nil
+		}),
+	)
+	defer pool.CloseAll()
+
+	config := MCPServerConfig{Transport: TransportSSE, URL: srv.URL}
+	_, err := pool.GetOrConnect(context.Background(), 1, config)
+	if err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	statuses := pool.HealthStatus(context.Background())
+	if len(statuses) != 1 {
+		t.Fatalf("expected 1 status, got %d", len(statuses))
+	}
+
+	status := statuses[0]
+	if status.InstanceID != 1 {
+		t.Errorf("expected instance_id 1, got %d", status.InstanceID)
+	}
+	if !status.Connected {
+		t.Error("expected connected=true")
+	}
+	if status.ToolCount != 2 {
+		t.Errorf("expected 2 tools, got %d", status.ToolCount)
+	}
+	if status.Error != "" {
+		t.Errorf("expected no error, got %s", status.Error)
+	}
+}
+
+func TestHealthStatus_UnhealthyConnection(t *testing.T) {
+	// Server that rejects ping
+	srv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+		if req.Method == "tools/list" {
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{
+				Tools: []mcp.Tool{{Name: "t1"}},
+			})
+		}
+		if req.Method == "ping" {
+			return mcp.NewErrorResponse(req.ID, mcp.InternalError, "server overloaded", nil)
+		}
+		return mcp.NewResponse(req.ID, nil)
+	})
+	defer srv.Close()
+
+	pool := NewPool(
+		WithIdleTimeout(time.Minute),
+		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
+			return nil
+		}),
+	)
+	defer pool.CloseAll()
+
+	config := MCPServerConfig{Transport: TransportSSE, URL: srv.URL}
+	_, err := pool.GetOrConnect(context.Background(), 1, config)
+	if err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	statuses := pool.HealthStatus(context.Background())
+	if len(statuses) != 1 {
+		t.Fatalf("expected 1 status, got %d", len(statuses))
+	}
+
+	if statuses[0].Connected {
+		t.Error("expected connected=false for unhealthy connection")
+	}
+	if statuses[0].Error == "" {
+		t.Error("expected error message for unhealthy connection")
+	}
+}
+
+func TestToolsChanged(t *testing.T) {
+	tests := []struct {
+		name    string
+		old     []mcp.Tool
+		new     []mcp.Tool
+		changed bool
+	}{
+		{
+			"identical",
+			[]mcp.Tool{{Name: "a"}, {Name: "b"}},
+			[]mcp.Tool{{Name: "a"}, {Name: "b"}},
+			false,
+		},
+		{
+			"different count",
+			[]mcp.Tool{{Name: "a"}},
+			[]mcp.Tool{{Name: "a"}, {Name: "b"}},
+			true,
+		},
+		{
+			"different names",
+			[]mcp.Tool{{Name: "a"}, {Name: "b"}},
+			[]mcp.Tool{{Name: "a"}, {Name: "c"}},
+			true,
+		},
+		{
+			"both empty",
+			nil,
+			nil,
+			false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := toolsChanged(tt.old, tt.new)
+			if got != tt.changed {
+				t.Errorf("toolsChanged() = %v, want %v", got, tt.changed)
+			}
+		})
+	}
+}
+
+func TestGracefulShutdown(t *testing.T) {
+	srv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+		return mcp.NewResponse(req.ID, mcp.ListToolsResult{
+			Tools: []mcp.Tool{{Name: "t1"}},
+		})
+	})
+	defer srv.Close()
+
+	pool := NewPool(
+		WithIdleTimeout(time.Minute),
+		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
+			return nil
+		}),
+	)
+
+	config := MCPServerConfig{Transport: TransportSSE, URL: srv.URL}
+	_, err := pool.GetOrConnect(context.Background(), 1, config)
+	if err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	_, err = pool.GetOrConnect(context.Background(), 2, config)
+	if err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	if pool.ConnectionCount() != 2 {
+		t.Errorf("expected 2 connections, got %d", pool.ConnectionCount())
+	}
+
+	// Graceful shutdown
+	pool.CloseAll()
+
+	if pool.ConnectionCount() != 0 {
+		t.Errorf("expected 0 connections after shutdown, got %d", pool.ConnectionCount())
+	}
+
+	// Should not be able to connect after shutdown
+	if pool.IsConnected(1) || pool.IsConnected(2) {
+		t.Error("should not be connected after shutdown")
+	}
+}
+
+func TestStartSchemaRefreshLoop(t *testing.T) {
+	callCount := 0
+	srv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+		if req.Method == "tools/list" {
+			callCount++
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{
+				Tools: []mcp.Tool{{Name: fmt.Sprintf("t_%d", callCount)}},
+			})
+		}
+		return mcp.NewResponse(req.ID, nil)
+	})
+	defer srv.Close()
+
+	pool := NewPool(
+		WithIdleTimeout(time.Minute),
+		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
+			return nil
+		}),
+	)
+	defer pool.CloseAll()
+
+	config := MCPServerConfig{Transport: TransportSSE, URL: srv.URL}
+	_, err := pool.GetOrConnect(context.Background(), 1, config)
+	if err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	initialCount := callCount
+
+	// Start refresh loop with very short interval
+	pool.StartSchemaRefreshLoop(50 * time.Millisecond)
+
+	// Wait for at least one refresh
+	time.Sleep(200 * time.Millisecond)
+
+	if callCount <= initialCount {
+		t.Errorf("expected schema refresh to have run, initial calls=%d, current=%d",
+			initialCount, callCount)
 	}
 }

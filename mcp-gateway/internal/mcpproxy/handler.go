@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/akmatori/mcp-gateway/internal/cache"
 	"github.com/akmatori/mcp-gateway/internal/mcp"
@@ -38,6 +39,8 @@ type ProxyHandler struct {
 	registrations  []ServerRegistration
 	toolMap        map[string]proxyToolEntry // namespaced tool name -> entry
 	logger         *slog.Logger
+	stopRefresh    chan struct{}
+	refreshStopped bool
 }
 
 // proxyToolEntry maps a namespaced tool name to its external server and original tool name.
@@ -58,6 +61,7 @@ func NewProxyHandler(pool *MCPConnectionPool, logger *slog.Logger) *ProxyHandler
 		responseCache: cache.New(DefaultResponseCacheTTL, DefaultCleanupInterval),
 		toolMap:       make(map[string]proxyToolEntry),
 		logger:        logger,
+		stopRefresh:   make(chan struct{}),
 	}
 }
 
@@ -141,6 +145,7 @@ func (h *ProxyHandler) registerServer(ctx context.Context, reg ServerRegistratio
 
 // CallTool proxies a tool call to the appropriate external MCP server.
 // The toolName should be the namespaced name (e.g., "ext.github.create_issue").
+// Connection failures are handled gracefully with clear error messages returned to the caller.
 func (h *ProxyHandler) CallTool(ctx context.Context, toolName string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	h.mu.RLock()
 	entry, exists := h.toolMap[toolName]
@@ -166,10 +171,17 @@ func (h *ProxyHandler) CallTool(ctx context.Context, toolName string, args map[s
 		}
 	}
 
-	// Forward the call to the external server using the original tool name
+	// Forward the call to the external server using the original tool name.
+	// The pool's CallTool handles transient failures with auto-reconnect.
 	result, err := h.pool.CallTool(ctx, entry.instanceID, entry.originalName, args)
 	if err != nil {
-		return nil, fmt.Errorf("proxy call %s (via %s): %w", toolName, entry.originalName, err)
+		h.logger.Error("proxy tool call failed",
+			"tool", toolName,
+			"original_name", entry.originalName,
+			"instance_id", entry.instanceID,
+			"error", err,
+		)
+		return nil, fmt.Errorf("external MCP server error for %s: %w", toolName, err)
 	}
 
 	// Cache the response
@@ -234,9 +246,74 @@ func (h *ProxyHandler) ToolCount() int {
 	return len(h.toolMap)
 }
 
-// Stop cleans up resources (response cache).
+// StartSchemaRefreshLoop starts periodic schema refresh for all registered MCP servers.
+// When new tools are discovered, the tool map is updated automatically.
+func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
+	h.pool.StartSchemaRefreshLoop(interval)
+
+	// Also set up a refresh callback to update our tool map when schemas change
+	h.pool.onSchemaRefresh = func(instanceID uint, tools []mcp.Tool) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+
+		// Find the namespace prefix for this instance
+		var prefix string
+		for name, entry := range h.toolMap {
+			if entry.instanceID == instanceID {
+				prefix = name[:len(name)-len(entry.originalName)-1]
+				break
+			}
+		}
+		if prefix == "" {
+			return
+		}
+
+		// Remove old tools for this instance
+		for name, entry := range h.toolMap {
+			if entry.instanceID == instanceID {
+				delete(h.toolMap, name)
+			}
+		}
+
+		// Re-add with updated tool list
+		for _, tool := range tools {
+			namespacedName := prefix + "." + tool.Name
+			h.toolMap[namespacedName] = proxyToolEntry{
+				instanceID:   instanceID,
+				originalName: tool.Name,
+			}
+		}
+
+		h.logger.Info("updated proxy tools after schema refresh",
+			"instance_id", instanceID,
+			"prefix", prefix,
+			"tools", len(tools),
+		)
+	}
+}
+
+// HealthStatus returns health information for all managed MCP proxy connections.
+func (h *ProxyHandler) HealthStatus(ctx context.Context) []ConnectionStatus {
+	return h.pool.HealthStatus(ctx)
+}
+
+// Stop cleans up resources (response cache, refresh loop, connections).
 func (h *ProxyHandler) Stop() {
+	h.mu.Lock()
+	if !h.refreshStopped {
+		h.refreshStopped = true
+		close(h.stopRefresh)
+	}
+	h.mu.Unlock()
+
 	h.responseCache.Stop()
+}
+
+// GracefulShutdown stops the schema refresh loop and closes all connections.
+func (h *ProxyHandler) GracefulShutdown() {
+	h.Stop()
+	h.pool.CloseAll()
+	h.logger.Info("proxy handler shut down gracefully")
 }
 
 // buildCacheKey creates a cache key from tool name and arguments.
