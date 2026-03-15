@@ -663,8 +663,8 @@ func (t *SSHTool) resolveTargetHosts(servers []string, config *SSHConfig) ([]SSH
 
 // ExecuteCommand executes a command on all or specified servers.
 // If instanceID is provided, credentials are resolved for that specific tool instance.
-func (t *SSHTool) ExecuteCommand(ctx context.Context, incidentID string, command string, servers []string, instanceID *uint) (string, error) {
-	config, err := t.getConfig(ctx, incidentID, instanceID)
+func (t *SSHTool) ExecuteCommand(ctx context.Context, incidentID string, command string, servers []string, instanceID *uint, logicalName ...string) (string, error) {
+	config, err := t.getConfig(ctx, incidentID, instanceID, logicalName...)
 	if err != nil {
 		return "", err
 	}
@@ -710,8 +710,8 @@ func (t *SSHTool) ExecuteCommand(ctx context.Context, incidentID string, command
 
 // TestConnectivity tests SSH connectivity to specified or all configured servers.
 // If instanceID is provided, credentials are resolved for that specific tool instance.
-func (t *SSHTool) TestConnectivity(ctx context.Context, incidentID string, servers []string, instanceID *uint) (string, error) {
-	config, err := t.getConfig(ctx, incidentID, instanceID)
+func (t *SSHTool) TestConnectivity(ctx context.Context, incidentID string, servers []string, instanceID *uint, logicalName ...string) (string, error) {
+	config, err := t.getConfig(ctx, incidentID, instanceID, logicalName...)
 	if err != nil {
 		return "", err
 	}
@@ -771,12 +771,12 @@ func (t *SSHTool) TestConnectivity(ctx context.Context, incidentID string, serve
 
 // GetServerInfo gets basic system info from specified servers (or all if none specified).
 // If instanceID is provided, credentials are resolved for that specific tool instance.
-func (t *SSHTool) GetServerInfo(ctx context.Context, incidentID string, servers []string, instanceID *uint) (string, error) {
+func (t *SSHTool) GetServerInfo(ctx context.Context, incidentID string, servers []string, instanceID *uint, logicalName ...string) (string, error) {
 	infoCommand := `echo "HOSTNAME=$(hostname)" && ` +
 		`echo "OS=$(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d'"' -f2 || uname -s)" && ` +
 		`echo "UPTIME=$(uptime -p 2>/dev/null || uptime | awk -F'up ' '{print $2}' | awk -F',' '{print $1}')"`
 
-	return t.ExecuteCommand(ctx, incidentID, infoCommand, servers, instanceID)
+	return t.ExecuteCommand(ctx, incidentID, infoCommand, servers, instanceID, logicalName...)
 }
 
 // jsonResult converts a result to JSON string

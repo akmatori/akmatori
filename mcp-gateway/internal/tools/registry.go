@@ -546,9 +546,10 @@ func (r *Registry) registerSSHTools() {
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
 			instanceID := extractInstanceID(args)
+			logicalName := extractLogicalName(args)
 			command, _ := args["command"].(string)
 			servers := extractServers(args)
-			return sshTool.ExecuteCommand(ctx, incidentID, command, servers, instanceID)
+			return sshTool.ExecuteCommand(ctx, incidentID, command, servers, instanceID, logicalName)
 		},
 	)
 
@@ -571,8 +572,9 @@ func (r *Registry) registerSSHTools() {
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
 			instanceID := extractInstanceID(args)
+			logicalName := extractLogicalName(args)
 			servers := extractServers(args)
-			return sshTool.TestConnectivity(ctx, incidentID, servers, instanceID)
+			return sshTool.TestConnectivity(ctx, incidentID, servers, instanceID, logicalName)
 		},
 	)
 
@@ -595,8 +597,9 @@ func (r *Registry) registerSSHTools() {
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
 			instanceID := extractInstanceID(args)
+			logicalName := extractLogicalName(args)
 			servers := extractServers(args)
-			return sshTool.GetServerInfo(ctx, incidentID, servers, instanceID)
+			return sshTool.GetServerInfo(ctx, incidentID, servers, instanceID, logicalName)
 		},
 	)
 }
@@ -873,9 +876,10 @@ func (r *Registry) registerZabbixTools() {
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
 			instanceID := extractInstanceID(args)
+			logicalName := extractLogicalName(args)
 			method, _ := args["method"].(string)
 			params, _ := args["params"].(map[string]interface{})
-			return r.zabbixTool.APIRequest(ctx, incidentID, method, params, instanceID)
+			return r.zabbixTool.APIRequest(ctx, incidentID, method, params, instanceID, logicalName)
 		},
 	)
 }

@@ -125,6 +125,7 @@ type ListToolsResult struct {
 type CallToolParams struct {
 	Name      string                 `json:"name"`
 	Arguments map[string]interface{} `json:"arguments,omitempty"`
+	Instance  string                 `json:"instance,omitempty"` // logical name hint from gateway_call
 }
 
 // CallToolResult represents tools/call response

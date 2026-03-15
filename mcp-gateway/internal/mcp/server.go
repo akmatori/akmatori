@@ -127,7 +127,9 @@ func (s *Server) HandleHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(r.Body)
+	// Limit request body to 10MB to prevent memory exhaustion
+	const maxRequestBytes = 10 * 1024 * 1024
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes))
 	if err != nil {
 		s.sendHTTPError(w, nil, ParseError, "Failed to read request body", nil)
 		return
@@ -259,6 +261,16 @@ func (s *Server) handleCallTool(ctx context.Context, req *Request, incidentID st
 
 	if !exists {
 		return NewErrorResponse(req.ID, MethodNotFound, fmt.Sprintf("Tool not found: %s", params.Name), nil)
+	}
+
+	// Inject instance hint into arguments so authorization and tool handlers can use it
+	if params.Instance != "" {
+		if params.Arguments == nil {
+			params.Arguments = make(map[string]interface{})
+		}
+		if _, exists := params.Arguments["logical_name"]; !exists {
+			params.Arguments["logical_name"] = params.Instance
+		}
 	}
 
 	// Enforce tool allowlist authorization
