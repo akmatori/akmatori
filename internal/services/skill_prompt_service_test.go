@@ -177,8 +177,8 @@ func TestGenerateToolUsageExample_SSHAdhocEnabled(t *testing.T) {
 	if !strings.Contains(example, "Ad-hoc") {
 		t.Errorf("expected ad-hoc example when enabled, got: %s", example)
 	}
-	if !strings.Contains(example, "any-server.example.com") {
-		t.Errorf("expected ad-hoc server example, got: %s", example)
+	if !strings.Contains(example, "<hostname-or-ip>") {
+		t.Errorf("expected ad-hoc server placeholder, got: %s", example)
 	}
 }
 
@@ -216,6 +216,21 @@ func TestGenerateToolUsageExample_Zabbix(t *testing.T) {
 	}
 	if !strings.Contains(example, "tool_instance_id=3") {
 		t.Errorf("expected tool_instance_id=3, got: %s", example)
+	}
+}
+
+func TestGenerateToolUsageExample_SSHAdhocWriteNoReadOnlyNote(t *testing.T) {
+	// When ad-hoc connections and write are both enabled (no configured hosts),
+	// the read-only note should NOT appear
+	tool := sshToolInstance(database.JSONB{
+		"allow_adhoc_connections":    true,
+		"adhoc_allow_write_commands": true,
+	})
+
+	example := generateToolUsageExample(tool)
+
+	if strings.Contains(example, "Read-only mode") {
+		t.Errorf("expected no read-only note when ad-hoc write is enabled, got: %s", example)
 	}
 }
 

@@ -185,7 +185,9 @@ func generateToolUsageExample(tool database.ToolInstance) string {
 	switch typeName {
 	case "ssh":
 		var readOnlyNote string
-		if !sshAllHostsAllowWrite(tool) {
+		adhocEnabled, _ := tool.Settings["allow_adhoc_connections"].(bool)
+		adhocWriteEnabled, _ := tool.Settings["adhoc_allow_write_commands"].(bool)
+		if !sshAllHostsAllowWrite(tool) && !(adhocEnabled && adhocWriteEnabled) {
 			readOnlyNote = `
 **Read-only mode is enabled** — only diagnostic commands are allowed.
 Allowed: cat, head, tail, grep, find, ls, ps, top, df, free, netstat, ss, uptime,
@@ -200,8 +202,8 @@ For CPU core count use ` + "`nproc`" + ` or ` + "`lscpu`" + ` (not /proc/cpuinfo
 		if allow, ok := tool.Settings["allow_adhoc_connections"].(bool); ok && allow {
 			adhocExample = fmt.Sprintf(`
 # Ad-hoc: connect to any server by hostname/FQDN/IP
-result = execute_command("uptime", servers=["any-server.example.com"], tool_instance_id=%d)
-result = test_connectivity(servers=["server1.example.com", "server2.example.com"], tool_instance_id=%d)
+result = execute_command("uptime", servers=["<hostname-or-ip>"], tool_instance_id=%d)
+result = test_connectivity(servers=["<server1>", "<server2>"], tool_instance_id=%d)
 `, id, id)
 		}
 
@@ -279,7 +281,7 @@ func extractToolDetails(tool database.ToolInstance) string {
 				port = int(p)
 			}
 			details.WriteString(fmt.Sprintf("Ad-hoc connections enabled: can connect to any server (default user: %s, port: %d)\n", user, port))
-			if allow, ok := tool.Settings["adhoc_allow_write_commands"].(bool); ok && allow {
+			if allowWrite, ok := tool.Settings["adhoc_allow_write_commands"].(bool); ok && allowWrite {
 				details.WriteString("Ad-hoc write commands: allowed\n")
 			} else {
 				details.WriteString("Ad-hoc write commands: read-only (diagnostic commands only)\n")
