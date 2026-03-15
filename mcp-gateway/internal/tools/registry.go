@@ -8,13 +8,16 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/mcp"
 	"github.com/akmatori/mcp-gateway/internal/ratelimit"
 	"github.com/akmatori/mcp-gateway/internal/tools/ssh"
+	"github.com/akmatori/mcp-gateway/internal/tools/victoriametrics"
 	"github.com/akmatori/mcp-gateway/internal/tools/zabbix"
 )
 
-// Rate limit configuration for Zabbix API
+// Rate limit configuration
 const (
 	ZabbixRatePerSecond = 10 // requests per second
 	ZabbixBurstCapacity = 20 // burst capacity
+	VMRatePerSecond     = 10 // requests per second
+	VMBurstCapacity     = 20 // burst capacity
 )
 
 // Registry manages tool registration
@@ -23,6 +26,8 @@ type Registry struct {
 	logger      *log.Logger
 	zabbixTool  *zabbix.ZabbixTool
 	zabbixLimit *ratelimit.Limiter
+	vmTool      *victoriametrics.VictoriaMetricsTool
+	vmLimit     *ratelimit.Limiter
 }
 
 // NewRegistry creates a new tool registry
@@ -47,6 +52,13 @@ func (r *Registry) RegisterAllTools() {
 	// Register Zabbix tools with rate limiter
 	r.registerZabbixTools()
 
+	// Create rate limiter for VictoriaMetrics: 10 req/sec, burst 20
+	r.vmLimit = ratelimit.New(VMRatePerSecond, VMBurstCapacity)
+	r.logger.Printf("VictoriaMetrics rate limiter created: %d req/sec, burst %d", VMRatePerSecond, VMBurstCapacity)
+
+	// Register VictoriaMetrics tools with rate limiter
+	r.registerVictoriaMetricsTools()
+
 	r.logger.Println("All tools registered")
 }
 
@@ -54,6 +66,9 @@ func (r *Registry) RegisterAllTools() {
 func (r *Registry) Stop() {
 	if r.zabbixTool != nil {
 		r.zabbixTool.Stop()
+	}
+	if r.vmTool != nil {
+		r.vmTool.Stop()
 	}
 }
 
@@ -445,6 +460,177 @@ func (r *Registry) registerZabbixTools() {
 			method, _ := args["method"].(string)
 			params, _ := args["params"].(map[string]interface{})
 			return r.zabbixTool.APIRequest(ctx, incidentID, method, params, instanceID)
+		},
+	)
+}
+
+// registerVictoriaMetricsTools registers VictoriaMetrics-related tools
+func (r *Registry) registerVictoriaMetricsTools() {
+	r.vmTool = victoriametrics.NewVictoriaMetricsTool(r.logger, r.vmLimit)
+
+	// victoriametrics.instant_query
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "victoriametrics.instant_query",
+			Description: "Execute a PromQL instant query against VictoriaMetrics",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"query": {
+						Type:        "string",
+						Description: "PromQL query expression",
+					},
+					"time": {
+						Type:        "string",
+						Description: "Evaluation timestamp (RFC3339 or Unix timestamp). Defaults to current time.",
+					},
+					"step": {
+						Type:        "string",
+						Description: "Query resolution step width (e.g., '15s', '1m')",
+					},
+					"timeout": {
+						Type:        "string",
+						Description: "Evaluation timeout (e.g., '30s')",
+					},
+					"tool_instance_id": toolInstanceIDProperty,
+				},
+				Required: []string{"query"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.vmTool.InstantQuery(ctx, incidentID, args)
+		},
+	)
+
+	// victoriametrics.range_query
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "victoriametrics.range_query",
+			Description: "Execute a PromQL range query against VictoriaMetrics",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"query": {
+						Type:        "string",
+						Description: "PromQL query expression",
+					},
+					"start": {
+						Type:        "string",
+						Description: "Start timestamp (RFC3339, Unix timestamp, or relative like '1h')",
+					},
+					"end": {
+						Type:        "string",
+						Description: "End timestamp (RFC3339, Unix timestamp, or relative like 'now')",
+					},
+					"step": {
+						Type:        "string",
+						Description: "Query resolution step width (e.g., '15s', '1m')",
+					},
+					"timeout": {
+						Type:        "string",
+						Description: "Evaluation timeout (e.g., '30s')",
+					},
+					"tool_instance_id": toolInstanceIDProperty,
+				},
+				Required: []string{"query", "start", "end", "step"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.vmTool.RangeQuery(ctx, incidentID, args)
+		},
+	)
+
+	// victoriametrics.label_values
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "victoriametrics.label_values",
+			Description: "Get label values for a given label name from VictoriaMetrics",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"label_name": {
+						Type:        "string",
+						Description: "Label name to get values for (e.g., '__name__', 'job', 'instance')",
+					},
+					"match": {
+						Type:        "string",
+						Description: "Series selector to filter results (e.g., 'up{job=\"prometheus\"}')",
+					},
+					"start": {
+						Type:        "string",
+						Description: "Start timestamp for filtering",
+					},
+					"end": {
+						Type:        "string",
+						Description: "End timestamp for filtering",
+					},
+					"tool_instance_id": toolInstanceIDProperty,
+				},
+				Required: []string{"label_name"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.vmTool.LabelValues(ctx, incidentID, args)
+		},
+	)
+
+	// victoriametrics.series
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "victoriametrics.series",
+			Description: "Find series matching a label set from VictoriaMetrics",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"match": {
+						Type:        "string",
+						Description: "Series selector (e.g., 'up', '{job=\"prometheus\"}')",
+					},
+					"start": {
+						Type:        "string",
+						Description: "Start timestamp for filtering",
+					},
+					"end": {
+						Type:        "string",
+						Description: "End timestamp for filtering",
+					},
+					"tool_instance_id": toolInstanceIDProperty,
+				},
+				Required: []string{"match"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.vmTool.Series(ctx, incidentID, args)
+		},
+	)
+
+	// victoriametrics.api_request
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "victoriametrics.api_request",
+			Description: "Make a generic HTTP request to VictoriaMetrics API",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"path": {
+						Type:        "string",
+						Description: "API path (e.g., '/api/v1/status/tsdb')",
+					},
+					"method": {
+						Type:        "string",
+						Description: "HTTP method (GET or POST). Defaults to GET.",
+					},
+					"params": {
+						Type:        "object",
+						Description: "Query/form parameters as key-value pairs",
+					},
+					"tool_instance_id": toolInstanceIDProperty,
+				},
+				Required: []string{"path"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.vmTool.APIRequest(ctx, incidentID, args)
 		},
 	)
 }

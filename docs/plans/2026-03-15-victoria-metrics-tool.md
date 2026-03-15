@@ -93,23 +93,23 @@ The tool should check `status == "success"` and return the `data` field contents
 - Modify: `mcp-gateway/internal/tools/registry.go`
 - Modify: `mcp-gateway/internal/tools/schemas.go`
 
-- [ ] Add `victoriametrics` import to `registry.go`
-- [ ] Add `vmTool *victoriametrics.VictoriaMetricsTool` and `vmLimit *ratelimit.Limiter` fields to `Registry` struct
-- [ ] Add rate limiter constants: `VMRatePerSecond = 10`, `VMBurstCapacity = 20`
-- [ ] Create `registerVictoriaMetricsTools()` method with 5 tool registrations:
+- [x] Add `victoriametrics` import to `registry.go`
+- [x] Add `vmTool *victoriametrics.VictoriaMetricsTool` and `vmLimit *ratelimit.Limiter` fields to `Registry` struct
+- [x] Add rate limiter constants: `VMRatePerSecond = 10`, `VMBurstCapacity = 20`
+- [x] Create `registerVictoriaMetricsTools()` method with 5 tool registrations:
   - `victoriametrics.instant_query` - required: `query`; optional: `time`, `step`, `timeout`, `tool_instance_id`
   - `victoriametrics.range_query` - required: `query`, `start`, `end`, `step`; optional: `timeout`, `tool_instance_id`
   - `victoriametrics.label_values` - required: `label_name`; optional: `match`, `start`, `end`, `tool_instance_id`
   - `victoriametrics.series` - required: `match`; optional: `start`, `end`, `tool_instance_id`
   - `victoriametrics.api_request` - required: `path`; optional: `method`, `params`, `tool_instance_id`
-- [ ] Call `registerVictoriaMetricsTools()` from `RegisterAllTools()`
-- [ ] Add `r.vmTool.Stop()` to `Stop()` method
-- [ ] Add `getVictoriaMetricsSchema()` to `schemas.go` with:
+- [x] Call `registerVictoriaMetricsTools()` from `RegisterAllTools()`
+- [x] Add `r.vmTool.Stop()` to `Stop()` method
+- [x] Add `getVictoriaMetricsSchema()` to `schemas.go` with:
   - Settings: `vm_url` (required), `vm_auth_method` (enum: none/bearer_token/basic_auth, default: bearer_token), `vm_bearer_token` (secret), `vm_username` (advanced), `vm_password` (secret, advanced), `vm_verify_ssl` (advanced, default: true), `vm_timeout` (advanced, default: 30)
   - Functions list for all 5 tools
-- [ ] Register `"victoria_metrics"` in `GetToolSchemas()` map
-- [ ] Write tests for schema validation
-- [ ] Run `make test-mcp` - must pass before task 3
+- [x] Register `"victoria_metrics"` in `GetToolSchemas()` map
+- [x] Write tests for schema validation
+- [x] Run `make test-mcp` - must pass before task 3
 
 ### Task 3: Agent worker - Python wrapper
 

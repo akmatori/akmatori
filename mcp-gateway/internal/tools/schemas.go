@@ -56,8 +56,9 @@ func intPtr(i int) *int {
 // GetToolSchemas returns all tool type schemas
 func GetToolSchemas() map[string]ToolTypeSchema {
 	return map[string]ToolTypeSchema{
-		"ssh":    getSSHSchema(),
-		"zabbix": getZabbixSchema(),
+		"ssh":              getSSHSchema(),
+		"zabbix":           getZabbixSchema(),
+		"victoria_metrics": getVictoriaMetricsSchema(),
 	}
 }
 
@@ -342,6 +343,93 @@ func getZabbixSchema() ToolTypeSchema {
 				Description: "Make a raw Zabbix API request",
 				Parameters:  "method (required), params",
 				Returns:     "Raw API response",
+			},
+		},
+	}
+}
+
+func getVictoriaMetricsSchema() ToolTypeSchema {
+	return ToolTypeSchema{
+		Name:        "victoria_metrics",
+		Description: "VictoriaMetrics time-series database integration. Query metrics using PromQL, explore label values and series metadata.",
+		Version:     "1.0.0",
+		SettingsSchema: SettingsSchema{
+			Type:     "object",
+			Required: []string{"vm_url"},
+			Properties: map[string]PropertySchema{
+				"vm_url": {
+					Type:        "string",
+					Description: "VictoriaMetrics server URL (e.g., https://victoriametrics.example.com)",
+					Example:     "https://victoriametrics.example.com",
+				},
+				"vm_auth_method": {
+					Type:        "string",
+					Description: "Authentication method",
+					Enum:        []string{"none", "bearer_token", "basic_auth"},
+					Default:     "bearer_token",
+				},
+				"vm_bearer_token": {
+					Type:        "string",
+					Description: "Bearer token for authentication",
+					Secret:      true,
+				},
+				"vm_username": {
+					Type:        "string",
+					Description: "Username for basic auth (if using basic_auth method)",
+					Advanced:    true,
+				},
+				"vm_password": {
+					Type:        "string",
+					Description: "Password for basic auth (if using basic_auth method)",
+					Secret:      true,
+					Advanced:    true,
+				},
+				"vm_verify_ssl": {
+					Type:        "boolean",
+					Description: "Verify SSL certificates",
+					Default:     true,
+					Advanced:    true,
+				},
+				"vm_timeout": {
+					Type:        "integer",
+					Description: "API request timeout in seconds",
+					Default:     30,
+					Minimum:     intPtr(5),
+					Maximum:     intPtr(300),
+					Advanced:    true,
+				},
+			},
+		},
+		Functions: []ToolFunction{
+			{
+				Name:        "instant_query",
+				Description: "Execute a PromQL instant query",
+				Parameters:  "query (required), time, step, timeout",
+				Returns:     "JSON with resultType and result array",
+			},
+			{
+				Name:        "range_query",
+				Description: "Execute a PromQL range query",
+				Parameters:  "query (required), start (required), end (required), step (required), timeout",
+				Returns:     "JSON with resultType and result array (matrix)",
+			},
+			{
+				Name:        "label_values",
+				Description: "Get label values for a given label name",
+				Parameters:  "label_name (required), match, start, end",
+				Returns:     "JSON array of label values",
+			},
+			{
+				Name:        "series",
+				Description: "Find series matching a label set",
+				Parameters:  "match (required), start, end",
+				Returns:     "JSON array of series label sets",
+			},
+			{
+				Name:        "api_request",
+				Description: "Make a generic HTTP request to VictoriaMetrics API",
+				Parameters:  "path (required), method, params",
+				Returns:     "Raw API response data",
 			},
 		},
 	}
