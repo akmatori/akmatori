@@ -33,13 +33,14 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 │   ├── testhelpers/        # Test utilities, builders, mocks
 │   └── utils/              # Utility functions
 ├── agent-worker/           # Node.js/TypeScript agent worker
-│   ├── src/                # TypeScript source
-│   └── tools/              # Python script wrappers for MCP Gateway
+│   └── src/                # TypeScript source (gateway-client, gateway-tools, script-executor)
 ├── mcp-gateway/            # MCP protocol gateway (separate Go module)
 │   └── internal/
+│       ├── auth/           # Per-incident tool authorization (allowlist enforcement)
 │       ├── cache/          # Generic TTL cache
+│       ├── mcpproxy/       # MCP proxy: connection pool + handler for external MCP servers
 │       ├── ratelimit/      # Token bucket rate limiter
-│       └── tools/          # SSH, Zabbix, and VictoriaMetrics implementations
+│       └── tools/          # SSH, Zabbix, VictoriaMetrics, and HTTP connector implementations
 ├── web/                    # React frontend
 ├── docs/                   # OpenAPI specs (swagger at /api/docs)
 └── tests/fixtures/         # Test payloads and mock data
@@ -107,25 +108,32 @@ The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK:
 | Tool Formatter | `src/tool-output-formatter.ts` | Formats tool args/output for UI streaming |
 | WS Client | `src/ws-client.ts` | WebSocket to API server |
 
-### Tool Architecture (Python Script Wrappers)
+### Tool Architecture (TypeScript Gateway Tools)
 
-Tools are Python wrappers in `agent-worker/tools/` called via bash:
+Tools are registered as pi-mono custom tools via `gateway-tools.ts`, communicating with the MCP Gateway through a TypeScript client:
 
-1. `generateSkillMd()` in Go writes Python usage examples in SKILL.md
+1. `generateSkillMd()` in Go writes `gateway_call` usage examples in SKILL.md with logical instance names
 2. pi-mono discovers SKILL.md files
-3. Agent calls `python3 -c "from ssh import execute_command; ..."`
-4. `spawnHook` injects `MCP_GATEWAY_URL`, `INCIDENT_ID`, `PYTHONPATH=/tools`
-5. Python wrapper calls `mcp_client.call()` → MCP Gateway (JSON-RPC 2.0)
-6. MCP Gateway resolves credentials by instance ID and executes
+3. Agent calls `gateway_call("ssh.execute_command", {command: "uptime"}, "prod-ssh")`
+4. `GatewayClient` sends JSON-RPC 2.0 POST to MCP Gateway with `X-Incident-ID` header
+5. MCP Gateway resolves credentials by logical name or instance ID, checks authorization, and executes
+6. Large responses (>4KB) are written to `{workDir}/tool_outputs/` with a truncated preview returned inline
 
-### Python Wrappers
+### Gateway Tools
 
-| Wrapper | Functions | MCP Tool Prefix |
-|---------|-----------|-----------------|
-| `tools/mcp_client.py` | `call()`, `MCPClient` | N/A (base) |
-| `tools/ssh/__init__.py` | `execute_command()`, `test_connectivity(servers=None)`, `get_server_info()` | `ssh.*` |
-| `tools/zabbix/__init__.py` | `get_hosts()`, `get_problems()`, `get_history()`, `get_items()`, `get_items_batch()`, `get_triggers()` | `zabbix.*` |
-| `tools/victoriametrics/__init__.py` | `instant_query()`, `range_query()`, `label_values()`, `series()`, `api_request()` | `victoriametrics.*` |
+| Tool | File | Purpose |
+|------|------|---------|
+| `gateway_call` | `src/gateway-tools.ts` | Call any MCP Gateway tool by name with optional instance hint |
+| `search_tools` | `src/gateway-tools.ts` | Discover available tools by query and optional type filter |
+| `get_tool_detail` | `src/gateway-tools.ts` | Get full JSON schema for a specific tool |
+| `execute_script` | `src/gateway-tools.ts` | Run JavaScript in isolated vm with injected `gateway_call()`, `search_tools()`, scoped `fs` |
+
+### Supporting Modules
+
+| Module | File | Purpose |
+|--------|------|---------|
+| GatewayClient | `src/gateway-client.ts` | JSON-RPC 2.0 HTTP client with output management and allowlist support |
+| ScriptExecutor | `src/script-executor.ts` | Isolated `vm` runtime with 5-minute timeout, scoped fs, captured console |
 
 ### Message Flow
 
@@ -232,6 +240,7 @@ Handlers depend on interfaces for testability:
 | `RunbookManager` | Runbook CRUD + file sync |
 | `ContextManager` | Context file management |
 | `AggregationManager` | Incident correlation |
+| `HTTPConnectorManager` | Declarative HTTP connector CRUD |
 
 ## Runbook System (`internal/services/runbook_service.go`)
 
@@ -279,19 +288,22 @@ Zero-config first-run experience:
 
 ## Tool Instance Routing
 
-Skills target specific tool instances via `tool_instance_id`:
+Skills target specific tool instances via logical name or numeric ID:
 
 ```yaml
 # In SKILL.md
 tools:
   - type: zabbix
-    instance_id: 1  # Production Zabbix
+    logical_name: prod-zabbix  # Human-readable logical name (preferred)
+    instance_id: 1
   - type: ssh
-    instance_id: 2  # Production SSH
+    logical_name: prod-ssh
+    instance_id: 2
 ```
 
-Agent passes `tool_instance_id` → MCP Gateway routes to correct instance.
-Default: first enabled instance of that tool type.
+Resolution priority: explicit instance ID > logical name > first enabled instance of type.
+
+At incident creation, the skill's tool instances are resolved into an allowlist passed to the MCP Gateway. The gateway enforces authorization on every tool call — unauthorized instances return JSON-RPC error -32600.
 
 ## Test Helpers (`internal/testhelpers/`)
 
@@ -532,6 +544,9 @@ func legacyHandler() { ... }
 - `mcp-gateway/internal/ratelimit/limiter.go` - Token bucket rate limiter
 - `mcp-gateway/internal/tools/zabbix/` - Zabbix integration with caching and rate limiting
 - `mcp-gateway/internal/tools/victoriametrics/` - VictoriaMetrics integration with caching and rate limiting
+- `mcp-gateway/internal/tools/httpconnector/` - Declarative HTTP connector executor with auth injection
+- `mcp-gateway/internal/mcpproxy/` - Connection pool and proxy handler for external MCP servers
+- `mcp-gateway/internal/auth/` - Per-incident tool authorization (allowlist enforcement)
 
 ### What NOT To Do
 
