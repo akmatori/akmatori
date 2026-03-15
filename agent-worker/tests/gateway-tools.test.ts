@@ -290,7 +290,7 @@ describe("createSearchToolsTool", () => {
           {
             name: "ssh.execute_command",
             description: "Execute SSH command",
-            instances: [{ id: 1, logical_name: "prod-ssh" }],
+            instances: ["prod-ssh"],
           },
         ],
       };
@@ -311,7 +311,7 @@ describe("createSearchToolsTool", () => {
       const parsed = JSON.parse(result.content[0].text);
       expect(parsed.tools).toHaveLength(1);
       expect(parsed.tools[0].name).toBe("ssh.execute_command");
-      expect(parsed.tools[0].instances[0].logical_name).toBe("prod-ssh");
+      expect(parsed.tools[0].instances[0]).toBe("prod-ssh");
     });
 
     it("should return empty tools array for no matches", async () => {
@@ -412,13 +412,13 @@ describe("createGetToolDetailTool", () => {
       const detail = {
         name: "zabbix.get_problems",
         description: "Get active Zabbix problems",
-        params: {
+        input_schema: {
           severity_min: { type: "number", description: "Minimum severity" },
           hostids: { type: "array", description: "Filter by host IDs" },
         },
         instances: [
-          { id: 1, logical_name: "prod-zabbix" },
-          { id: 2, logical_name: "staging-zabbix" },
+          { id: 1, logical_name: "prod-zabbix", name: "Production Zabbix" },
+          { id: 2, logical_name: "staging-zabbix", name: "Staging Zabbix" },
         ],
       };
       const client = createMockClient({
@@ -437,7 +437,7 @@ describe("createGetToolDetailTool", () => {
       expect(result.content[0].type).toBe("text");
       const parsed = JSON.parse(result.content[0].text);
       expect(parsed.name).toBe("zabbix.get_problems");
-      expect(parsed.params.severity_min).toBeDefined();
+      expect(parsed.input_schema.severity_min).toBeDefined();
       expect(parsed.instances).toHaveLength(2);
       expect(parsed.instances[0].logical_name).toBe("prod-zabbix");
     });

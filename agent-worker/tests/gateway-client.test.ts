@@ -308,7 +308,7 @@ describe("GatewayClient", () => {
     it("sends search request with query", async () => {
       const searchResult = {
         tools: [
-          { name: "ssh.execute_command", description: "Run SSH commands", instances: [{ id: 1, logical_name: "prod-ssh" }] },
+          { name: "ssh.execute_command", description: "Run SSH commands", instances: ["prod-ssh"] },
         ],
       };
       const mock = await createMockGateway(() => jsonRpcSuccess(searchResult));
@@ -353,8 +353,8 @@ describe("GatewayClient", () => {
       const detailResult = {
         name: "ssh.execute_command",
         description: "Execute a command on a remote server via SSH",
-        params: { command: { type: "string", required: true } },
-        instances: [{ id: 1, logical_name: "prod-ssh" }],
+        input_schema: { command: { type: "string", required: true } },
+        instances: [{ id: 1, logical_name: "prod-ssh", name: "Production SSH" }],
       };
       const mock = await createMockGateway(() => jsonRpcSuccess(detailResult));
 
@@ -367,7 +367,7 @@ describe("GatewayClient", () => {
         expect(body.params.tool_name).toBe("ssh.execute_command");
 
         expect(result.name).toBe("ssh.execute_command");
-        expect(result.params).toHaveProperty("command");
+        expect(result.input_schema).toHaveProperty("command");
         expect(result.instances).toHaveLength(1);
       } finally {
         mock.server.close();

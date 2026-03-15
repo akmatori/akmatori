@@ -16,14 +16,14 @@ function createMockClient(overrides?: Partial<GatewayClient>): GatewayClient {
     } as CallResult)),
     searchTools: vi.fn(async () => ({
       tools: [
-        { name: "ssh.execute_command", description: "Execute SSH", instances: [{ id: 1, logical_name: "prod-ssh" }] },
+        { name: "ssh.execute_command", description: "Execute SSH", instances: ["prod-ssh"] },
       ],
     })),
     getToolDetail: vi.fn(async () => ({
       name: "ssh.execute_command",
       description: "Execute SSH command",
-      params: { command: { type: "string" } },
-      instances: [{ id: 1, logical_name: "prod-ssh" }],
+      input_schema: { command: { type: "string" } },
+      instances: [{ id: 1, logical_name: "prod-ssh", name: "Production SSH" }],
     })),
     ...overrides,
   } as unknown as GatewayClient;
