@@ -32,6 +32,15 @@ const (
 
 	// DefaultConnectTimeout is the timeout for establishing a new connection.
 	DefaultConnectTimeout = 30 * time.Second
+
+	// DefaultMaxReconnectAttempts is how many times to retry a connection on transient failure.
+	DefaultMaxReconnectAttempts = 3
+
+	// DefaultBaseBackoff is the initial backoff duration for reconnect retries.
+	DefaultBaseBackoff = 500 * time.Millisecond
+
+	// DefaultMaxBackoff is the maximum backoff duration for reconnect retries.
+	DefaultMaxBackoff = 10 * time.Second
 )
 
 // TransportType defines how to communicate with an external MCP server.
@@ -80,15 +89,35 @@ type MCPConnection struct {
 	logger *slog.Logger
 }
 
+// ConnectionStatus represents the health status of a single MCP connection.
+type ConnectionStatus struct {
+	InstanceID uint          `json:"instance_id"`
+	Transport  TransportType `json:"transport"`
+	Connected  bool          `json:"connected"`
+	ToolCount  int           `json:"tool_count"`
+	LastUsed   time.Time     `json:"last_used"`
+	Error      string        `json:"error,omitempty"`
+}
+
 // MCPConnectionPool manages connections to external MCP servers.
 type MCPConnectionPool struct {
 	mu          sync.RWMutex
 	connections map[uint]*MCPConnection
+	configs     map[uint]MCPServerConfig // stored configs for reconnection
 	schemaCache *cache.Cache
 	idleTimeout time.Duration
 	stopCleanup chan struct{}
+	stopRefresh chan struct{}
 	stopped     bool
 	logger      *slog.Logger
+
+	// Reconnect settings
+	maxReconnectAttempts int
+	baseBackoff          time.Duration
+	maxBackoff           time.Duration
+
+	// Schema refresh callback (called when tools change during refresh)
+	onSchemaRefresh func(instanceID uint, tools []mcp.Tool)
 
 	// For testing: allow overriding connect behavior
 	connectFunc func(ctx context.Context, conn *MCPConnection) error
@@ -118,14 +147,41 @@ func WithConnectFunc(f func(ctx context.Context, conn *MCPConnection) error) Poo
 	}
 }
 
+// WithMaxReconnectAttempts sets the maximum number of reconnect attempts.
+func WithMaxReconnectAttempts(n int) PoolOption {
+	return func(p *MCPConnectionPool) {
+		p.maxReconnectAttempts = n
+	}
+}
+
+// WithBackoff sets the base and max backoff durations for reconnection.
+func WithBackoff(base, max time.Duration) PoolOption {
+	return func(p *MCPConnectionPool) {
+		p.baseBackoff = base
+		p.maxBackoff = max
+	}
+}
+
+// WithSchemaRefreshCallback sets a callback invoked when tools change during periodic refresh.
+func WithSchemaRefreshCallback(cb func(instanceID uint, tools []mcp.Tool)) PoolOption {
+	return func(p *MCPConnectionPool) {
+		p.onSchemaRefresh = cb
+	}
+}
+
 // NewPool creates a new MCP connection pool.
 func NewPool(opts ...PoolOption) *MCPConnectionPool {
 	p := &MCPConnectionPool{
-		connections: make(map[uint]*MCPConnection),
-		schemaCache: cache.New(DefaultSchemaCacheTTL, DefaultCleanupInterval),
-		idleTimeout: DefaultIdleTimeout,
-		stopCleanup: make(chan struct{}),
-		logger:      slog.Default(),
+		connections:          make(map[uint]*MCPConnection),
+		configs:              make(map[uint]MCPServerConfig),
+		schemaCache:          cache.New(DefaultSchemaCacheTTL, DefaultCleanupInterval),
+		idleTimeout:          DefaultIdleTimeout,
+		stopCleanup:          make(chan struct{}),
+		stopRefresh:          make(chan struct{}),
+		logger:               slog.Default(),
+		maxReconnectAttempts: DefaultMaxReconnectAttempts,
+		baseBackoff:          DefaultBaseBackoff,
+		maxBackoff:           DefaultMaxBackoff,
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -197,6 +253,7 @@ func (p *MCPConnectionPool) GetOrConnect(ctx context.Context, instanceID uint, c
 
 	p.mu.Lock()
 	p.connections[instanceID] = conn
+	p.configs[instanceID] = config
 	p.mu.Unlock()
 
 	p.logger.Info("connected to MCP server",
@@ -220,9 +277,11 @@ func (p *MCPConnectionPool) GetCachedTools(instanceID uint) ([]mcp.Tool, bool) {
 }
 
 // CallTool forwards a tool call to the external MCP server.
+// On transient failures, it attempts to reconnect with exponential backoff.
 func (p *MCPConnectionPool) CallTool(ctx context.Context, instanceID uint, toolName string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	p.mu.RLock()
 	conn, exists := p.connections[instanceID]
+	config, hasConfig := p.configs[instanceID]
 	p.mu.RUnlock()
 
 	if !exists {
@@ -233,7 +292,240 @@ func (p *MCPConnectionPool) CallTool(ctx context.Context, instanceID uint, toolN
 	conn.lastUsed = time.Now()
 	conn.mu.Unlock()
 
-	return conn.callTool(ctx, toolName, args)
+	result, err := conn.callTool(ctx, toolName, args)
+	if err == nil {
+		return result, nil
+	}
+
+	// On failure, attempt reconnection with exponential backoff
+	if !hasConfig {
+		return nil, fmt.Errorf("tool call failed (no config for reconnect): %w", err)
+	}
+
+	if !isTransientError(err) {
+		return nil, err
+	}
+
+	p.logger.Warn("transient error calling tool, attempting reconnect",
+		"instance_id", instanceID,
+		"tool", toolName,
+		"error", err,
+	)
+
+	backoff := p.baseBackoff
+	for attempt := 1; attempt <= p.maxReconnectAttempts; attempt++ {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("reconnect cancelled: %w", ctx.Err())
+		case <-time.After(backoff):
+		}
+
+		// Remove old connection and reconnect
+		p.mu.Lock()
+		delete(p.connections, instanceID)
+		p.mu.Unlock()
+		conn.close()
+
+		newConn, connErr := p.GetOrConnect(ctx, instanceID, config)
+		if connErr != nil {
+			p.logger.Warn("reconnect attempt failed",
+				"instance_id", instanceID,
+				"attempt", attempt,
+				"error", connErr,
+			)
+			backoff = nextBackoff(backoff, p.maxBackoff)
+			continue
+		}
+
+		// Retry the tool call
+		result, retryErr := newConn.callTool(ctx, toolName, args)
+		if retryErr == nil {
+			p.logger.Info("reconnect successful, tool call succeeded",
+				"instance_id", instanceID,
+				"attempt", attempt,
+			)
+			return result, nil
+		}
+
+		p.logger.Warn("tool call failed after reconnect",
+			"instance_id", instanceID,
+			"attempt", attempt,
+			"error", retryErr,
+		)
+		backoff = nextBackoff(backoff, p.maxBackoff)
+	}
+
+	return nil, fmt.Errorf("tool call failed after %d reconnect attempts: %w", p.maxReconnectAttempts, err)
+}
+
+// isTransientError checks whether an error is likely transient (network, connection closed).
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	transientPatterns := []string{
+		"connection refused",
+		"connection reset",
+		"connection is closed",
+		"EOF",
+		"broken pipe",
+		"server unreachable",
+		"timeout",
+		"i/o timeout",
+		"write to stdin",
+		"read from stdout",
+		"send request",
+	}
+	for _, pattern := range transientPatterns {
+		if contains(msg, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// contains is a simple case-insensitive substring check.
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && searchSubstring(s, substr)
+}
+
+func searchSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		match := true
+		for j := 0; j < len(substr); j++ {
+			sc := s[i+j]
+			pc := substr[j]
+			// Simple lowercase comparison for ASCII
+			if sc >= 'A' && sc <= 'Z' {
+				sc += 32
+			}
+			if pc >= 'A' && pc <= 'Z' {
+				pc += 32
+			}
+			if sc != pc {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+// nextBackoff doubles the backoff up to the max.
+func nextBackoff(current, max time.Duration) time.Duration {
+	next := current * 2
+	if next > max {
+		return max
+	}
+	return next
+}
+
+// StartSchemaRefreshLoop starts a background goroutine that periodically
+// refreshes tool schemas for all connected instances.
+func (p *MCPConnectionPool) StartSchemaRefreshLoop(interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				p.refreshAllSchemas()
+			case <-p.stopRefresh:
+				return
+			}
+		}
+	}()
+}
+
+// refreshAllSchemas refreshes tool schemas for all active connections.
+func (p *MCPConnectionPool) refreshAllSchemas() {
+	p.mu.RLock()
+	ids := make([]uint, 0, len(p.connections))
+	for id := range p.connections {
+		ids = append(ids, id)
+	}
+	p.mu.RUnlock()
+
+	for _, id := range ids {
+		ctx, cancel := context.WithTimeout(context.Background(), DefaultConnectTimeout)
+		oldTools, _ := p.GetTools(id)
+		newTools, err := p.RefreshTools(ctx, id)
+		cancel()
+
+		if err != nil {
+			p.logger.Warn("schema refresh failed", "instance_id", id, "error", err)
+			continue
+		}
+
+		if p.onSchemaRefresh != nil && toolsChanged(oldTools, newTools) {
+			p.onSchemaRefresh(id, newTools)
+		}
+	}
+}
+
+// toolsChanged compares two tool lists by name.
+func toolsChanged(old, new []mcp.Tool) bool {
+	if len(old) != len(new) {
+		return true
+	}
+	oldNames := make(map[string]bool, len(old))
+	for _, t := range old {
+		oldNames[t.Name] = true
+	}
+	for _, t := range new {
+		if !oldNames[t.Name] {
+			return true
+		}
+	}
+	return false
+}
+
+// HealthStatus returns the status of all managed connections.
+func (p *MCPConnectionPool) HealthStatus(ctx context.Context) []ConnectionStatus {
+	p.mu.RLock()
+	ids := make([]uint, 0, len(p.connections))
+	for id := range p.connections {
+		ids = append(ids, id)
+	}
+	p.mu.RUnlock()
+
+	statuses := make([]ConnectionStatus, 0, len(ids))
+	for _, id := range ids {
+		p.mu.RLock()
+		conn, exists := p.connections[id]
+		p.mu.RUnlock()
+
+		if !exists {
+			continue
+		}
+
+		conn.mu.RLock()
+		status := ConnectionStatus{
+			InstanceID: id,
+			Transport:  conn.config.Transport,
+			Connected:  conn.connected && !conn.closed,
+			ToolCount:  len(conn.tools),
+			LastUsed:   conn.lastUsed,
+		}
+		conn.mu.RUnlock()
+
+		// Ping to check actual health
+		if status.Connected {
+			if err := conn.ping(ctx); err != nil {
+				status.Error = err.Error()
+				status.Connected = false
+			}
+		}
+
+		statuses = append(statuses, status)
+	}
+
+	return statuses
 }
 
 // Close closes a specific connection.
@@ -251,7 +543,7 @@ func (p *MCPConnectionPool) Close(instanceID uint) {
 	}
 }
 
-// CloseAll closes all connections and stops the cleanup goroutine.
+// CloseAll closes all connections, stops the cleanup and schema refresh goroutines.
 func (p *MCPConnectionPool) CloseAll() {
 	p.mu.Lock()
 	if p.stopped {
@@ -264,9 +556,11 @@ func (p *MCPConnectionPool) CloseAll() {
 		conns[k] = v
 	}
 	p.connections = make(map[uint]*MCPConnection)
+	p.configs = make(map[uint]MCPServerConfig)
 	p.mu.Unlock()
 
 	close(p.stopCleanup)
+	close(p.stopRefresh)
 	p.schemaCache.Stop()
 
 	for _, conn := range conns {
