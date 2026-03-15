@@ -70,22 +70,22 @@ The tool should check `status == "success"` and return the `data` field contents
 **Files:**
 - Create: `mcp-gateway/internal/tools/victoriametrics/victoriametrics.go`
 
-- [ ] Create `VictoriaMetricsTool` struct with fields: `logger`, `configCache`, `responseCache`, `rateLimiter`
-- [ ] Define `VMConfig` struct with fields: `URL` (base URL), `AuthMethod` (none/bearer_token/basic_auth), `BearerToken`, `Username`, `Password`, `VerifySSL`, `Timeout`, `UseProxy`, `ProxyURL`
-- [ ] Implement `NewVictoriaMetricsTool(logger, limiter)` constructor (same pattern as `NewZabbixTool`)
-- [ ] Implement `Stop()` for cache cleanup
-- [ ] Implement `getConfig(ctx, incidentID, instanceID)` - resolve credentials via `database.ResolveToolCredentials`, parse settings (`vm_url`, `vm_auth_method`, `vm_bearer_token`, `vm_username`, `vm_password`, `vm_verify_ssl`, `vm_timeout`), apply defaults, cache result
-- [ ] Implement `doRequest(ctx, config, method, path, queryParams)` - generic HTTP request with rate limiting, proxy support, SSL config, auth header injection based on `config.AuthMethod`
-- [ ] Implement `cachedRequest(ctx, incidentID, method, path, params, ttl, instanceID)` - cached wrapper around `doRequest`
-- [ ] Implement `InstantQuery(ctx, incidentID, args)` - calls `/api/v1/query` with `query`, optional `time`, `step`, `timeout` params; cache 15s
-- [ ] Implement `RangeQuery(ctx, incidentID, args)` - calls `/api/v1/query_range` with `query`, `start`, `end`, `step`, `timeout` params; cache 30s
-- [ ] Implement `LabelValues(ctx, incidentID, args)` - calls `/api/v1/label/{label_name}/values` with optional `match[]`, `start`, `end` params; cache 60s
-- [ ] Implement `Series(ctx, incidentID, args)` - calls `/api/v1/series` with `match[]`, `start`, `end` params; cache 30s
-- [ ] Implement `APIRequest(ctx, incidentID, args)` - generic fallback: user provides `path`, `method` (GET/POST), `params`; no caching
-- [ ] Implement helper `extractInstanceID(args)` (reuse pattern from zabbix)
-- [ ] Implement `parsePrometheusResponse(body)` - check `status`, extract `data` or return error
-- [ ] Write tests for this task
-- [ ] Run `make test-mcp` - must pass before task 2
+- [x] Create `VictoriaMetricsTool` struct with fields: `logger`, `configCache`, `responseCache`, `rateLimiter`
+- [x] Define `VMConfig` struct with fields: `URL` (base URL), `AuthMethod` (none/bearer_token/basic_auth), `BearerToken`, `Username`, `Password`, `VerifySSL`, `Timeout`, `UseProxy`, `ProxyURL`
+- [x] Implement `NewVictoriaMetricsTool(logger, limiter)` constructor (same pattern as `NewZabbixTool`)
+- [x] Implement `Stop()` for cache cleanup
+- [x] Implement `getConfig(ctx, incidentID, instanceID)` - resolve credentials via `database.ResolveToolCredentials`, parse settings (`vm_url`, `vm_auth_method`, `vm_bearer_token`, `vm_username`, `vm_password`, `vm_verify_ssl`, `vm_timeout`), apply defaults, cache result
+- [x] Implement `doRequest(ctx, config, method, path, queryParams)` - generic HTTP request with rate limiting, proxy support, SSL config, auth header injection based on `config.AuthMethod`
+- [x] Implement `cachedRequest(ctx, incidentID, method, path, params, ttl, instanceID)` - cached wrapper around `doRequest`
+- [x] Implement `InstantQuery(ctx, incidentID, args)` - calls `/api/v1/query` with `query`, optional `time`, `step`, `timeout` params; cache 15s
+- [x] Implement `RangeQuery(ctx, incidentID, args)` - calls `/api/v1/query_range` with `query`, `start`, `end`, `step`, `timeout` params; cache 30s
+- [x] Implement `LabelValues(ctx, incidentID, args)` - calls `/api/v1/label/{label_name}/values` with optional `match[]`, `start`, `end` params; cache 60s
+- [x] Implement `Series(ctx, incidentID, args)` - calls `/api/v1/series` with `match[]`, `start`, `end` params; cache 30s
+- [x] Implement `APIRequest(ctx, incidentID, args)` - generic fallback: user provides `path`, `method` (GET/POST), `params`; no caching
+- [x] Implement helper `extractInstanceID(args)` (reuse pattern from zabbix)
+- [x] Implement `parsePrometheusResponse(body)` - check `status`, extract `data` or return error
+- [x] Write tests for this task
+- [x] Run `make test-mcp` - must pass before task 2
 
 ### Task 2: MCP Gateway - Tool registration and schema
 
