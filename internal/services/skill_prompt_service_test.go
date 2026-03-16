@@ -162,6 +162,13 @@ func TestGenerateToolUsageExample_SSHBasic(t *testing.T) {
 	if !strings.Contains(example, "Read-only mode") {
 		t.Error("expected read-only note for read-only host")
 	}
+	// Verify inline parameter schemas are present
+	if !strings.Contains(example, "**Parameters:**") {
+		t.Error("expected **Parameters:** section in SSH example")
+	}
+	if !strings.Contains(example, "command*") {
+		t.Errorf("expected command* required param marker, got: %s", example)
+	}
 }
 
 func TestGenerateToolUsageExample_SSHAdhocEnabled(t *testing.T) {
@@ -230,6 +237,16 @@ func TestGenerateToolUsageExample_Zabbix(t *testing.T) {
 		if !strings.Contains(example, fn) {
 			t.Errorf("expected example for %s, got: %s", fn, example)
 		}
+	}
+	// Verify inline parameter schemas are present
+	if !strings.Contains(example, "**Parameters:**") {
+		t.Error("expected **Parameters:** section in zabbix example")
+	}
+	if !strings.Contains(example, "searches*") {
+		t.Errorf("expected searches* required param marker for get_items_batch, got: %s", example)
+	}
+	if !strings.Contains(example, "method*") {
+		t.Errorf("expected method* required param marker for api_request, got: %s", example)
 	}
 }
 
@@ -435,6 +452,18 @@ func TestGenerateToolUsageExample_VictoriaMetrics(t *testing.T) {
 		if !strings.Contains(example, fn) {
 			t.Errorf("expected example for %s, got: %s", fn, example)
 		}
+	}
+	// Verify inline parameter schemas are present
+	if !strings.Contains(example, "**Parameters:**") {
+		t.Error("expected **Parameters:** section in victoria_metrics example")
+	}
+	for _, param := range []string{"instant_query", "range_query", "label_values", "series", "api_request"} {
+		if !strings.Contains(example, "`"+param+"`") {
+			t.Errorf("expected parameter reference for %s, got: %s", param, example)
+		}
+	}
+	if !strings.Contains(example, "label_name*") {
+		t.Errorf("expected label_name* required param marker, got: %s", example)
 	}
 }
 

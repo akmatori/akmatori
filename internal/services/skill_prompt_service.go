@@ -135,7 +135,7 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 	}
 	if len(enabledTools) > 0 {
 		toolsSection.WriteString("\n\n## Assigned Tools\n")
-		toolsSection.WriteString("\nUse `search_tools` to discover available tools and `get_tool_detail` for full parameter schemas.\n")
+		toolsSection.WriteString("\nYour assigned tools are listed below with full parameter info. Use `search_tools` only to find tools not listed here.\n")
 		toolsSection.WriteString("Use `execute_script` to run multi-step scripts with built-in `gateway_call()` for batch operations.\n")
 		for _, tool := range enabledTools {
 			logicalName := tool.LogicalName
@@ -274,6 +274,12 @@ gateway_call("ssh.get_server_info", {"servers": ["<hostname-or-ip>"]}, "%s")`, l
 		}
 
 		return fmt.Sprintf(`
+**Parameters:**
+- `+"`execute_command`"+`: command* | servers
+- `+"`test_connectivity`"+`: servers
+- `+"`get_server_info`"+`: servers
+(* = required)
+
 Usage (via gateway_call):
 `+"```"+`
 %s%s
@@ -281,6 +287,16 @@ Usage (via gateway_call):
 %s`, configuredExamples, adhocExample, readOnlyNote)
 	case "zabbix":
 		return fmt.Sprintf(`
+**Parameters:**
+- `+"`get_hosts`"+`: output, filter, search, start_search, limit
+- `+"`get_problems`"+`: recent, severity_min, hostids, limit
+- `+"`get_items`"+`: hostids, filter, search, start_search, output, limit
+- `+"`get_items_batch`"+`: searches* | hostids, start_search, output, limit_per_search
+- `+"`get_history`"+`: itemids* | history, time_from, time_till, limit, sortfield, sortorder
+- `+"`get_triggers`"+`: hostids, only_true, min_severity, output
+- `+"`api_request`"+`: method* | params
+(* = required)
+
 Usage (via gateway_call):
 `+"```"+`
 gateway_call("zabbix.get_hosts", {}, "%s")
@@ -294,6 +310,14 @@ gateway_call("zabbix.api_request", {"method": "host.get", "params": {"output": [
 `, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
 	case "victoria_metrics":
 		return fmt.Sprintf(`
+**Parameters:**
+- `+"`instant_query`"+`: query* | time, step, timeout
+- `+"`range_query`"+`: query*, start*, end*, step* | timeout
+- `+"`label_values`"+`: label_name* | match, start, end
+- `+"`series`"+`: match* | start, end
+- `+"`api_request`"+`: path* | method, params
+(* = required)
+
 Usage (via gateway_call):
 `+"```"+`
 gateway_call("victoria_metrics.instant_query", {"query": "up"}, "%s")

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1111,6 +1112,28 @@ func (r *Registry) SearchTools(query string, toolType string) []mcp.SearchToolsR
 	}
 
 	return results
+}
+
+// GetAvailableToolTypes returns a deduplicated, sorted list of tool type names
+// from all registered tools.
+func (r *Registry) GetAvailableToolTypes() []string {
+	r.server.Mu().RLock()
+	defer r.server.Mu().RUnlock()
+
+	seen := make(map[string]bool)
+	for _, tool := range r.server.Tools() {
+		namespace, _ := mcp.ParseToolName(tool.Name)
+		if namespace != "" {
+			seen[namespace] = true
+		}
+	}
+
+	types := make([]string, 0, len(seen))
+	for t := range seen {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+	return types
 }
 
 // GetToolDetail returns full detail for a specific tool by name.

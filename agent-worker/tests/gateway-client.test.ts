@@ -3,7 +3,7 @@ import * as http from "node:http";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { GatewayClient, GatewayError } from "../src/gateway-client.js";
+import { GatewayClient, GatewayError, buildSmartPreview } from "../src/gateway-client.js";
 
 // ---------------------------------------------------------------------------
 // Mock HTTP server helpers
@@ -240,7 +240,7 @@ describe("GatewayClient", () => {
         const result = await client.call("tool.large", {});
         expect(result.outputFile).toBeDefined();
         expect(typeof result.data).toBe("string");
-        expect((result.data as string)).toContain("truncated");
+        expect((result.data as string)).toContain("Full output saved to:");
         expect((result.data as string)).toContain(result.outputFile!);
 
         // Verify file was written
@@ -518,5 +518,127 @@ describe("GatewayClient", () => {
         mock.server.close();
       }
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildSmartPreview tests
+// ---------------------------------------------------------------------------
+
+const OUTPUT_FILE = "/tmp/tool_outputs/test_tool_12345.json";
+
+function ser(value: unknown): string {
+  return JSON.stringify(value);
+}
+
+describe("buildSmartPreview", () => {
+  it("summarises a Prometheus vector result", () => {
+    const payload = {
+      resultType: "vector",
+      result: [
+        { metric: { __name__: "up", job: "prometheus", instance: "localhost:9090" }, value: [1741000000, "1"] },
+        { metric: { __name__: "up", job: "node", instance: "host1:9100" }, value: [1741000000, "0"] },
+        { metric: { __name__: "node_cpu_seconds_total", job: "node", instance: "host1:9100" }, value: [1741000000, "1234"] },
+        { metric: { __name__: "node_memory_MemAvailable_bytes", job: "node" }, value: [1741000000, "8192000"] },
+      ],
+    };
+
+    const result = buildSmartPreview(ser(payload), OUTPUT_FILE);
+
+    expect(result).toContain("Prometheus vector result");
+    expect(result).toContain("4 series");
+    expect(result).toContain("up");
+    expect(result).toContain("node_cpu_seconds_total");
+    expect(result).toContain("node_memory_MemAvailable_bytes");
+    expect(result).toContain("[0] metric:");
+    expect(result).toContain("[1] metric:");
+    expect(result).toContain("[2] metric:");
+    expect(result).toContain(`Full output saved to: ${OUTPUT_FILE}`);
+    expect(result).toContain("execute_script");
+  });
+
+  it("summarises a Prometheus matrix result", () => {
+    const payload = {
+      resultType: "matrix",
+      result: [
+        { metric: { __name__: "http_requests_total", handler: "/api/v1" }, values: [[1741000000, "10"]] },
+        { metric: { __name__: "http_requests_total", handler: "/health" }, values: [[1741000000, "1"]] },
+      ],
+    };
+
+    const result = buildSmartPreview(ser(payload), OUTPUT_FILE);
+
+    expect(result).toContain("Prometheus matrix result");
+    expect(result).toContain("2 series");
+    expect(result).toContain("http_requests_total");
+  });
+
+  it("handles Prometheus result with no __name__ labels", () => {
+    const payload = {
+      resultType: "vector",
+      result: [{ metric: { job: "custom" }, value: [1741000000, "42"] }],
+    };
+
+    const result = buildSmartPreview(ser(payload), OUTPUT_FILE);
+    expect(result).toContain("1 series");
+    expect(result).toContain("(none)");
+  });
+
+  it("summarises a plain array of objects", () => {
+    const payload = Array.from({ length: 5 }, (_, i) => ({ id: i, name: `item-${i}` }));
+
+    const result = buildSmartPreview(ser(payload), OUTPUT_FILE);
+
+    expect(result).toContain("Array with 5 item(s)");
+    expect(result).toContain("[0]");
+    expect(result).toContain("[2]");
+    expect(result).not.toContain("[3]");
+    expect(result).toContain("2 more");
+  });
+
+  it("summarises a plain object listing top-level keys", () => {
+    const payload = { status: "ok", count: 42, tags: ["a", "b"], nested: { x: 1 }, enabled: true };
+
+    const result = buildSmartPreview(ser(payload), OUTPUT_FILE);
+
+    expect(result).toContain("Object with 5 top-level key(s)");
+    expect(result).toContain("status");
+    expect(result).toContain("array[2]");
+    expect(result).toContain("object");
+  });
+
+  it("caps object key display at 10", () => {
+    const payload: Record<string, number> = {};
+    for (let i = 0; i < 15; i++) payload[`key${i}`] = i;
+
+    const result = buildSmartPreview(ser(payload), OUTPUT_FILE);
+    expect(result).toContain("15 top-level key(s)");
+    expect(result).toContain("...");
+  });
+
+  it("falls back to raw slice for non-JSON input", () => {
+    const raw = "ERROR: connection refused";
+    const result = buildSmartPreview(raw, OUTPUT_FILE);
+    expect(result).toContain("ERROR: connection refused");
+    expect(result).toContain("[truncated]");
+    expect(result).toContain("execute_script");
+  });
+
+  it("handles empty array", () => {
+    const result = buildSmartPreview(ser([]), OUTPUT_FILE);
+    expect(result).toContain("Array with 0 item(s)");
+  });
+
+  it("handles empty object", () => {
+    const result = buildSmartPreview(ser({}), OUTPUT_FILE);
+    expect(result).toContain("Object with 0 top-level key(s)");
+  });
+
+  it("always appends the execute_script tip", () => {
+    for (const payload of [ser([1, 2]), ser({ a: 1 }), "plain text"]) {
+      const result = buildSmartPreview(payload, OUTPUT_FILE);
+      expect(result).toContain(`Full output saved to: ${OUTPUT_FILE}`);
+      expect(result).toContain(`fs.readFileSync('${OUTPUT_FILE}', 'utf-8')`);
+    }
   });
 });

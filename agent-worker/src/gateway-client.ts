@@ -65,6 +65,107 @@ export class GatewayError extends Error {
 }
 
 // ---------------------------------------------------------------------------
+// Smart preview
+// ---------------------------------------------------------------------------
+
+/**
+ * Build an actionable summary of a large serialized tool output.
+ *
+ * Attempts to parse the payload as JSON and produces a structured summary
+ * depending on the shape of the data.  Falls back to a raw character slice
+ * when the payload is not valid JSON.
+ */
+export function buildSmartPreview(serialized: string, outputFile: string): string {
+  const tip =
+    `\nFull output saved to: ${outputFile}` +
+    `\nTip: Use execute_script with fs.readFileSync('${outputFile}', 'utf-8') to search/filter the full data.`;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(serialized);
+  } catch {
+    return serialized.slice(0, 1024) + `\n\n... [truncated]` + tip;
+  }
+
+  // Prometheus envelope ({ resultType, result: [] })
+  if (
+    parsed !== null &&
+    typeof parsed === "object" &&
+    !Array.isArray(parsed) &&
+    "resultType" in parsed &&
+    "result" in parsed &&
+    Array.isArray((parsed as Record<string, unknown>).result)
+  ) {
+    const prom = parsed as {
+      resultType: string;
+      result: Array<{ metric?: Record<string, string>; value?: unknown; values?: unknown }>;
+    };
+    const resultType = prom.resultType;
+    const resultCount = prom.result.length;
+
+    const names = new Set<string>();
+    for (const item of prom.result) {
+      const metricName = item.metric?.["__name__"];
+      if (metricName && names.size < 5) {
+        names.add(metricName);
+      }
+    }
+    const nameList = names.size > 0 ? `[${[...names].join(", ")}]` : "(none)";
+
+    const sampleLines = prom.result.slice(0, 3).map((item, idx) => {
+      const metricStr = JSON.stringify(item.metric ?? {});
+      return `  [${idx}] metric: ${metricStr.slice(0, 200)}`;
+    });
+
+    const lines: string[] = [
+      `Prometheus ${resultType} result — ${resultCount} series`,
+      `Metric names (up to 5): ${nameList}`,
+      `First ${sampleLines.length} series:`,
+      ...sampleLines,
+      `Tip: Use execute_script to parse the full data and filter by label.`,
+    ];
+    return lines.join("\n") + tip;
+  }
+
+  // Plain array
+  if (Array.isArray(parsed)) {
+    const count = parsed.length;
+    const sampleLines = (parsed as unknown[]).slice(0, 3).map((item, idx) => {
+      const str = JSON.stringify(item);
+      return `  [${idx}] ${str.slice(0, 200)}`;
+    });
+    const lines: string[] = [
+      `Array with ${count} item(s):`,
+      ...sampleLines,
+      ...(count > 3 ? [`  ... and ${count - 3} more`] : []),
+    ];
+    return lines.join("\n") + tip;
+  }
+
+  // Plain object
+  if (typeof parsed === "object" && parsed !== null) {
+    const obj = parsed as Record<string, unknown>;
+    const keys = Object.keys(obj);
+    const shownKeys = keys.slice(0, 10);
+
+    const keyLines = shownKeys.map((k) => {
+      const val = obj[k];
+      const valStr = JSON.stringify(val) ?? String(val);
+      const typeLabel = Array.isArray(val) ? `array[${(val as unknown[]).length}]` : typeof val;
+      return `  ${k} (${typeLabel}): ${valStr.slice(0, 200)}`;
+    });
+
+    const lines: string[] = [
+      `Object with ${keys.length} top-level key(s): ${keys.slice(0, 10).join(", ")}${keys.length > 10 ? ", ..." : ""}`,
+      ...keyLines,
+    ];
+    return lines.join("\n") + tip;
+  }
+
+  return serialized.slice(0, 1024) + `\n\n... [truncated]` + tip;
+}
+
+// ---------------------------------------------------------------------------
 // Client
 // ---------------------------------------------------------------------------
 
@@ -116,7 +217,7 @@ export class GatewayClient {
     const serialized = typeof data === "string" ? data : JSON.stringify(data);
     if (serialized.length >= OUTPUT_SIZE_THRESHOLD && this.workDir) {
       const outputFile = this.writeOutputFile(toolName, serialized);
-      const preview = serialized.slice(0, 1024) + `\n\n... [truncated, full output at ${outputFile}]`;
+      const preview = buildSmartPreview(serialized, outputFile);
       return { data: preview, outputFile };
     }
 

@@ -18,6 +18,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/cache"
 	"github.com/akmatori/mcp-gateway/internal/database"
 	"github.com/akmatori/mcp-gateway/internal/ratelimit"
+	"github.com/akmatori/mcp-gateway/internal/validation"
 )
 
 // Cache TTL constants
@@ -402,7 +403,7 @@ func (t *VictoriaMetricsTool) InstantQuery(ctx context.Context, incidentID strin
 
 	query, ok := args["query"].(string)
 	if !ok || query == "" {
-		return "", fmt.Errorf("query is required")
+		return "", fmt.Errorf("query is required%s", validation.SuggestParam("query", args))
 	}
 
 	params := url.Values{}
@@ -433,22 +434,22 @@ func (t *VictoriaMetricsTool) RangeQuery(ctx context.Context, incidentID string,
 
 	query, ok := args["query"].(string)
 	if !ok || query == "" {
-		return "", fmt.Errorf("query is required")
+		return "", fmt.Errorf("query is required%s", validation.SuggestParam("query", args))
 	}
 
 	start, ok := args["start"].(string)
 	if !ok || start == "" {
-		return "", fmt.Errorf("start is required")
+		return "", fmt.Errorf("start is required%s", validation.SuggestParam("start", args))
 	}
 
 	end, ok := args["end"].(string)
 	if !ok || end == "" {
-		return "", fmt.Errorf("end is required")
+		return "", fmt.Errorf("end is required%s", validation.SuggestParam("end", args))
 	}
 
 	step, ok := args["step"].(string)
 	if !ok || step == "" {
-		return "", fmt.Errorf("step is required")
+		return "", fmt.Errorf("step is required%s", validation.SuggestParam("step", args))
 	}
 
 	params := url.Values{}
@@ -476,7 +477,7 @@ func (t *VictoriaMetricsTool) LabelValues(ctx context.Context, incidentID string
 
 	labelName, ok := args["label_name"].(string)
 	if !ok || labelName == "" {
-		return "", fmt.Errorf("label_name is required")
+		return "", fmt.Errorf("label_name is required%s", validation.SuggestParam("label_name", args))
 	}
 
 	params := url.Values{}
@@ -508,7 +509,7 @@ func (t *VictoriaMetricsTool) Series(ctx context.Context, incidentID string, arg
 
 	match, ok := args["match"].(string)
 	if !ok || match == "" {
-		return "", fmt.Errorf("match is required")
+		return "", fmt.Errorf("match is required%s", validation.SuggestParam("match", args))
 	}
 
 	params := url.Values{}
@@ -536,7 +537,7 @@ func (t *VictoriaMetricsTool) APIRequest(ctx context.Context, incidentID string,
 
 	path, ok := args["path"].(string)
 	if !ok || path == "" {
-		return "", fmt.Errorf("path is required")
+		return "", fmt.Errorf("path is required%s", validation.SuggestParam("path", args))
 	}
 
 	// Decode path repeatedly until stable to prevent double-encoding bypass

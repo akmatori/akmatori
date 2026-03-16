@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,8 +15,9 @@ import (
 
 // mockDiscoverer implements ToolDiscoverer for testing
 type mockDiscoverer struct {
-	tools  []SearchToolsResultItem
-	detail *GetToolDetailResult
+	tools          []SearchToolsResultItem
+	detail         *GetToolDetailResult
+	availableTypes []string
 }
 
 func (m *mockDiscoverer) SearchTools(query string, toolType string) []SearchToolsResultItem {
@@ -27,6 +29,10 @@ func (m *mockDiscoverer) GetToolDetail(toolName string) (*GetToolDetailResult, b
 		return m.detail, true
 	}
 	return nil, false
+}
+
+func (m *mockDiscoverer) GetAvailableToolTypes() []string {
+	return m.availableTypes
 }
 
 func newTestServer() *Server {
@@ -802,6 +808,122 @@ func TestHandleGetToolDetail_NoAllowlistReturnsAllInstances(t *testing.T) {
 
 	if len(result.Instances) != 2 {
 		t.Errorf("expected 2 instances without allowlist, got %d", len(result.Instances))
+	}
+}
+
+func TestHandleSearchTools_EmptyResultsWithHint(t *testing.T) {
+	s := newTestServer()
+	s.SetDiscoverer(&mockDiscoverer{
+		tools:          nil,
+		availableTypes: []string{"ssh", "victoria_metrics", "zabbix"},
+	})
+
+	resp := sendJSONRPC(t, s, "tools/search", SearchToolsParams{Query: "prometheus"})
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result SearchToolsResult
+	json.Unmarshal(resultBytes, &result)
+
+	if len(result.Tools) != 0 {
+		t.Errorf("expected 0 tools, got %d", len(result.Tools))
+	}
+	if result.Hint == "" {
+		t.Fatal("expected hint when no results found")
+	}
+	if !strings.Contains(result.Hint, "prometheus") {
+		t.Errorf("hint should mention the query, got: %s", result.Hint)
+	}
+	if !strings.Contains(result.Hint, "victoria_metrics") {
+		t.Errorf("hint should list available types, got: %s", result.Hint)
+	}
+}
+
+func TestHandleSearchTools_EmptyResultsHintRespectsAllowlist(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.SetDiscoverer(&mockDiscoverer{
+		tools:          nil,
+		availableTypes: []string{"ssh", "victoria_metrics", "zabbix"},
+	})
+
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-vm", ToolType: "victoria_metrics"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/search",
+		SearchToolsParams{Query: "nonexistent"},
+		map[string]string{
+			"X-Incident-ID":    "incident-hint-filter",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result SearchToolsResult
+	json.Unmarshal(resultBytes, &result)
+
+	if result.Hint == "" {
+		t.Fatal("expected hint")
+	}
+	if strings.Contains(result.Hint, "ssh") {
+		t.Errorf("hint should not include unauthorized type 'ssh', got: %s", result.Hint)
+	}
+	if !strings.Contains(result.Hint, "victoria_metrics") {
+		t.Errorf("hint should include authorized type 'victoria_metrics', got: %s", result.Hint)
+	}
+}
+
+func TestHandleSearchTools_NonEmptyResultsNoHint(t *testing.T) {
+	s := newTestServer()
+	s.SetDiscoverer(&mockDiscoverer{
+		tools: []SearchToolsResultItem{
+			{Name: "ssh.execute_command", Description: "Execute command", ToolType: "ssh"},
+		},
+		availableTypes: []string{"ssh", "zabbix"},
+	})
+
+	resp := sendJSONRPC(t, s, "tools/search", SearchToolsParams{Query: "ssh"})
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result SearchToolsResult
+	json.Unmarshal(resultBytes, &result)
+
+	if result.Hint != "" {
+		t.Errorf("expected no hint when results are found, got: %s", result.Hint)
+	}
+}
+
+func TestHandleSearchTools_EmptyQueryNoHint(t *testing.T) {
+	s := newTestServer()
+	s.SetDiscoverer(&mockDiscoverer{
+		tools:          nil,
+		availableTypes: []string{"ssh"},
+	})
+
+	resp := sendJSONRPC(t, s, "tools/search", SearchToolsParams{Query: ""})
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result SearchToolsResult
+	json.Unmarshal(resultBytes, &result)
+
+	if result.Hint != "" {
+		t.Errorf("expected no hint for empty query, got: %s", result.Hint)
 	}
 }
 

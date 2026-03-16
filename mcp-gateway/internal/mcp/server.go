@@ -22,6 +22,7 @@ type ToolHandler func(ctx context.Context, incidentID string, args map[string]in
 type ToolDiscoverer interface {
 	SearchTools(query string, toolType string) []SearchToolsResultItem
 	GetToolDetail(toolName string) (*GetToolDetailResult, bool)
+	GetAvailableToolTypes() []string
 }
 
 // InstanceLookup provides instance information for tool discovery responses.
@@ -373,7 +374,36 @@ func (s *Server) handleSearchTools(req *Request, incidentID string) Response {
 		results = []SearchToolsResultItem{}
 	}
 
-	return NewResponse(req.ID, SearchToolsResult{Tools: results})
+	// When no results found, provide a hint about available tool types
+	var hint string
+	if len(results) == 0 && params.Query != "" {
+		availableTypes := s.discoverer.GetAvailableToolTypes()
+		// Filter by allowlist if present
+		if s.authorizer != nil && incidentID != "" {
+			allowlist := s.authorizer.GetAllowlist(incidentID)
+			if allowlist != nil {
+				authorizedTypes := make(map[string]bool)
+				for _, e := range allowlist {
+					authorizedTypes[e.ToolType] = true
+				}
+				var filtered []string
+				for _, t := range availableTypes {
+					if authorizedTypes[t] {
+						filtered = append(filtered, t)
+					}
+				}
+				availableTypes = filtered
+			}
+		}
+		if len(availableTypes) > 0 {
+			hint = fmt.Sprintf("No tools matched '%s'. Available tool types: %s. Try: search_tools({query: '%s'})",
+				params.Query, strings.Join(availableTypes, ", "), availableTypes[0])
+		} else {
+			hint = fmt.Sprintf("No tools matched '%s'. No tool types are available for this incident.", params.Query)
+		}
+	}
+
+	return NewResponse(req.ID, SearchToolsResult{Tools: results, Hint: hint})
 }
 
 // handleGetToolDetail handles the tools/detail request

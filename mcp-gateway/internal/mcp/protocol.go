@@ -174,6 +174,7 @@ type SearchToolsResultItem struct {
 // SearchToolsResult represents tools/search response
 type SearchToolsResult struct {
 	Tools []SearchToolsResultItem `json:"tools"`
+	Hint  string                  `json:"hint,omitempty"`
 }
 
 // GetToolDetailParams represents tools/detail request params
