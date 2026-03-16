@@ -216,6 +216,8 @@ func (s *Server) handleRequest(ctx context.Context, req *Request, incidentID str
 		return s.handleSearchTools(req, incidentID)
 	case "tools/detail":
 		return s.handleGetToolDetail(req, incidentID)
+	case "tools/list_types":
+		return s.handleListToolTypes(req, incidentID)
 	case "ping":
 		return NewResponse(req.ID, map[string]interface{}{})
 	default:
@@ -440,6 +442,39 @@ func (s *Server) handleGetToolDetail(req *Request, incidentID string) Response {
 	}
 
 	return NewResponse(req.ID, detail)
+}
+
+// handleListToolTypes handles the tools/list_types request
+func (s *Server) handleListToolTypes(req *Request, incidentID string) Response {
+	if s.discoverer == nil {
+		return NewErrorResponse(req.ID, InternalError, "Tool discovery not configured", nil)
+	}
+
+	types := s.discoverer.GetAvailableToolTypes()
+
+	// Filter by allowlist if authorizer and incident ID are present
+	if s.authorizer != nil && incidentID != "" {
+		allowlist := s.authorizer.GetAllowlist(incidentID)
+		if allowlist != nil {
+			authorizedTypes := make(map[string]bool)
+			for _, e := range allowlist {
+				authorizedTypes[e.ToolType] = true
+			}
+			var filtered []string
+			for _, t := range types {
+				if authorizedTypes[t] {
+					filtered = append(filtered, t)
+				}
+			}
+			types = filtered
+		}
+	}
+
+	if types == nil {
+		types = []string{}
+	}
+
+	return NewResponse(req.ID, ListToolTypesResult{Types: types})
 }
 
 // sendHTTPResponse sends a JSON-RPC response over HTTP

@@ -811,6 +811,133 @@ func TestHandleGetToolDetail_NoAllowlistReturnsAllInstances(t *testing.T) {
 	}
 }
 
+// --- tools/list_types tests ---
+
+func TestHandleListToolTypes_ReturnsTypes(t *testing.T) {
+	s := newTestServer()
+	s.SetDiscoverer(&mockDiscoverer{
+		availableTypes: []string{"ssh", "zabbix", "victoria_metrics"},
+	})
+
+	resp := sendJSONRPC(t, s, "tools/list_types", nil)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result ListToolTypesResult
+	json.Unmarshal(resultBytes, &result)
+
+	if len(result.Types) != 3 {
+		t.Fatalf("expected 3 types, got %d", len(result.Types))
+	}
+}
+
+func TestHandleListToolTypes_FilteredByAllowlist(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.SetDiscoverer(&mockDiscoverer{
+		availableTypes: []string{"ssh", "zabbix", "victoria_metrics"},
+	})
+
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+		{InstanceID: 2, LogicalName: "prod-vm", ToolType: "victoria_metrics"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/list_types", nil,
+		map[string]string{
+			"X-Incident-ID":    "incident-list-types",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result ListToolTypesResult
+	json.Unmarshal(resultBytes, &result)
+
+	if len(result.Types) != 2 {
+		t.Fatalf("expected 2 types, got %d", len(result.Types))
+	}
+	typeSet := map[string]bool{}
+	for _, tp := range result.Types {
+		typeSet[tp] = true
+	}
+	if typeSet["zabbix"] {
+		t.Error("zabbix should be filtered out")
+	}
+	if !typeSet["ssh"] || !typeSet["victoria_metrics"] {
+		t.Error("ssh and victoria_metrics should be included")
+	}
+}
+
+func TestHandleListToolTypes_NoAllowlistReturnsAll(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.SetDiscoverer(&mockDiscoverer{
+		availableTypes: []string{"ssh", "zabbix"},
+	})
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/list_types", nil,
+		map[string]string{
+			"X-Incident-ID": "incident-list-types-no-filter",
+		},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result ListToolTypesResult
+	json.Unmarshal(resultBytes, &result)
+
+	if len(result.Types) != 2 {
+		t.Errorf("expected 2 types without allowlist, got %d", len(result.Types))
+	}
+}
+
+func TestHandleListToolTypes_NoDiscoverer(t *testing.T) {
+	s := newTestServer()
+
+	resp := sendJSONRPC(t, s, "tools/list_types", nil)
+	if resp.Error == nil {
+		t.Fatal("expected error when discoverer not set")
+	}
+	if resp.Error.Code != InternalError {
+		t.Errorf("expected error code %d, got %d", InternalError, resp.Error.Code)
+	}
+}
+
+func TestHandleListToolTypes_EmptyTypes(t *testing.T) {
+	s := newTestServer()
+	s.SetDiscoverer(&mockDiscoverer{
+		availableTypes: nil,
+	})
+
+	resp := sendJSONRPC(t, s, "tools/list_types", nil)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result ListToolTypesResult
+	json.Unmarshal(resultBytes, &result)
+
+	if len(result.Types) != 0 {
+		t.Errorf("expected 0 types, got %d", len(result.Types))
+	}
+}
+
 func TestHandleSearchTools_EmptyResultsWithHint(t *testing.T) {
 	s := newTestServer()
 	s.SetDiscoverer(&mockDiscoverer{

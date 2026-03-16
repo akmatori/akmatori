@@ -237,6 +237,11 @@ export class GatewayClient {
     return (await this.rpc("tools/search", params, signal)) as SearchToolsResult;
   }
 
+  /** List all available tool types for this incident. */
+  async listToolTypes(signal?: AbortSignal): Promise<{ types: string[] }> {
+    return (await this.rpc("tools/list_types", {}, signal)) as { types: string[] };
+  }
+
   /** Get full detail for a specific tool. */
   async getToolDetail(toolName: string, signal?: AbortSignal): Promise<ToolDetailResult> {
     return (await this.rpc("tools/detail", {

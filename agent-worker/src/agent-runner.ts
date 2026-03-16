@@ -27,7 +27,7 @@ import {
   type ToolExecutionTrace,
 } from "./tool-output-formatter.js";
 import { GatewayClient } from "./gateway-client.js";
-import { createGatewayCallTool, createSearchToolsTool, createGetToolDetailTool, createExecuteScriptTool } from "./gateway-tools.js";
+import { createGatewayCallTool, createSearchToolsTool, createGetToolDetailTool, createListToolTypesTool, createExecuteScriptTool } from "./gateway-tools.js";
 
 // ---------------------------------------------------------------------------
 // Tool calling guidelines attached to the bash tool via promptGuidelines
@@ -45,8 +45,8 @@ import { createGatewayCallTool, createSearchToolsTool, createGetToolDetailTool, 
  */
 const BASH_TOOL_GUIDELINES = `\
 - Use the gateway_call tool to invoke tools. It communicates directly with the MCP Gateway and does not require bash.
-- For batch operations across multiple hosts or complex data processing, use the execute_script tool. It runs JavaScript with built-in gateway_call(), search_tools(), and get_tool_detail() functions.
-- Use search_tools to discover available tools, and get_tool_detail to see full parameter schemas.
+- For batch operations across multiple hosts or complex data processing, use the execute_script tool. It runs JavaScript with built-in gateway_call(), search_tools(), get_tool_detail(), and synchronous fs (readFileSync, writeFileSync). Do NOT use require() or import() in scripts.
+- Use list_tool_types to see available tool types, then search_tools to find specific tools, and get_tool_detail to see full parameter schemas.
 - IMPORTANT: Each skill's SKILL.md lists assigned tools with their logical names and the exact call forms available. Read the SKILL.md first, then call tools using only the forms shown there. Do NOT explore the filesystem to discover tools.`;
 
 // ---------------------------------------------------------------------------
@@ -293,6 +293,7 @@ export class AgentRunner {
     const gatewayCallTool = createGatewayCallTool(gatewayToolCtx);
     const searchToolsTool = createSearchToolsTool(gatewayToolCtx);
     const getToolDetailTool = createGetToolDetailTool(gatewayToolCtx);
+    const listToolTypesTool = createListToolTypesTool(gatewayToolCtx);
     const executeScriptTool = createExecuteScriptTool({
       client: gatewayClient,
       workDir: params.workDir,
@@ -305,7 +306,7 @@ export class AgentRunner {
       model,
       thinkingLevel,
       tools,
-      customTools: [gatewayCallTool, searchToolsTool, getToolDetailTool, executeScriptTool],
+      customTools: [gatewayCallTool, searchToolsTool, getToolDetailTool, listToolTypesTool, executeScriptTool],
       resourceLoader,
       sessionManager,
       settingsManager,
