@@ -36,6 +36,25 @@ export interface ScriptResult {
 
 const DEFAULT_TIMEOUT_MS = 300_000; // 5 minutes
 
+/**
+ * Detect common mistakes in script code before execution.
+ * Returns an error message if a mistake is found, or null if the code looks ok.
+ */
+export function detectCommonMistakes(code: string): string | null {
+  if (/\brequire\s*\(/.test(code)) {
+    return "require() is not available in the sandbox. " +
+      "All globals are pre-injected — use them directly: " +
+      "fs (readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync), " +
+      "gateway_call(), search_tools(), get_tool_detail(), console.";
+  }
+  if (/^\s*import\s+/m.test(code)) {
+    return "import statements are not available in the sandbox. " +
+      "All globals are pre-injected — use them directly: " +
+      "fs, gateway_call(), search_tools(), get_tool_detail(), console.";
+  }
+  return null;
+}
+
 export class ScriptExecutor {
   private readonly client: GatewayClient;
   private readonly workDir: string;
@@ -63,6 +82,12 @@ export class ScriptExecutor {
    * The return value of the last expression (or explicit `return`) becomes the output.
    */
   async execute(code: string, signal?: AbortSignal): Promise<ScriptResult> {
+    // Detect common mistakes and return helpful errors before execution
+    const codeCheck = detectCommonMistakes(code);
+    if (codeCheck) {
+      throw new Error(codeCheck);
+    }
+
     const logs: string[] = [];
 
     // Create an internal AbortController that combines the external signal and

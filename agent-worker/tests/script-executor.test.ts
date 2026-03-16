@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ScriptExecutor, type ScriptExecutorOptions } from "../src/script-executor.js";
+import { ScriptExecutor, type ScriptExecutorOptions, detectCommonMistakes } from "../src/script-executor.js";
 import type { GatewayClient, CallResult } from "../src/gateway-client.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -59,6 +59,60 @@ describe("ScriptExecutor", () => {
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  describe("detectCommonMistakes", () => {
+    it("should reject require('fs')", async () => {
+      const { executor } = createExecutor();
+      await expect(
+        executor.execute('const fs = require("fs"); return fs.readFileSync("/tmp/test");'),
+      ).rejects.toThrow("require() is not available in the sandbox");
+    });
+
+    it("should reject require('http')", async () => {
+      const { executor } = createExecutor();
+      await expect(
+        executor.execute('const http = require("http");'),
+      ).rejects.toThrow("require() is not available in the sandbox");
+    });
+
+    it("should reject import statements", async () => {
+      const { executor } = createExecutor();
+      await expect(
+        executor.execute('import fs from "fs";\nreturn fs.readFileSync("/tmp/test");'),
+      ).rejects.toThrow("import statements are not available in the sandbox");
+    });
+
+    it("should not flag comments containing import", async () => {
+      const { executor } = createExecutor();
+      const result = await executor.execute('// import fs from "fs"\nreturn 42;');
+      expect(result.output).toBe("42");
+    });
+
+    it("should not flag valid code without require/import", async () => {
+      const { executor } = createExecutor();
+      // This will fail because test.txt doesn't exist, but it should be a runtime error, not a pre-flight error
+      await expect(
+        executor.execute('const data = fs.readFileSync("test.txt"); return "ok";'),
+      ).rejects.toThrow("Script execution error: ENOENT");
+    });
+
+    it("should return null for valid code (unit test)", () => {
+      expect(detectCommonMistakes('const x = await gateway_call("ssh.execute_command", {}); return x;')).toBeNull();
+      expect(detectCommonMistakes('fs.readFileSync("test.txt")')).toBeNull();
+    });
+
+    it("should detect require with single quotes", () => {
+      expect(detectCommonMistakes("const fs = require('fs');")).toContain("require() is not available");
+    });
+
+    it("should detect import default syntax", () => {
+      expect(detectCommonMistakes('import fs from "fs";')).toContain("import statements are not available");
+    });
+
+    it("should detect import named syntax", () => {
+      expect(detectCommonMistakes('import { readFileSync } from "fs";')).toContain("import statements are not available");
+    });
   });
 
   describe("basic script execution", () => {

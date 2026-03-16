@@ -1,9 +1,9 @@
 /**
  * Gateway tool definitions for the pi-mono coding agent.
  *
- * Registers `gateway_call` as a custom tool that replaces the Python wrapper
- * pattern. The agent calls tools on the MCP Gateway directly via the
- * TypeScript GatewayClient instead of shelling out to Python scripts.
+ * Registers `gateway_call` and supporting tools as custom tools for the
+ * pi-mono coding agent. The agent calls tools on the MCP Gateway directly
+ * via the TypeScript GatewayClient.
  */
 
 import { Type, type TSchema, type Static } from "@sinclair/typebox";
@@ -81,7 +81,7 @@ export function createGatewayCallTool(ctx: GatewayToolContext) {
       "(SSH commands, Zabbix queries, VictoriaMetrics queries, etc.) by name. " +
       "Each skill's SKILL.md lists the available tools and their logical instance names.",
     promptGuidelines: [
-      "Use gateway_call to invoke infrastructure tools instead of Python wrappers.",
+      "Use gateway_call to invoke infrastructure tools. Always include the args parameter as an object, even if empty: gateway_call({ tool_name: \"...\", args: {} })",
       "Each skill's SKILL.md lists assigned tools with their logical names and available operations. Read SKILL.md first.",
       "Example: gateway_call({ tool_name: \"ssh.execute_command\", args: { command: \"uptime\", servers: [\"web-01\"] }, instance: \"prod-ssh\" })",
       "Example: gateway_call({ tool_name: \"zabbix.get_problems\", args: { severity_min: 3 }, instance: \"prod-zabbix\" })",
@@ -147,7 +147,7 @@ export function createSearchToolsTool(ctx: GatewayToolContext) {
       "Returns a list of matching tools with their descriptions and available instances. " +
       "Use this to discover what tools are available before calling them.",
     promptGuidelines: [
-      "Call list_tool_types first to see available tool types, then use search_tools to find specific tools within a type.",
+      "Call list_tool_types first to see available tool types. Then search by tool type (e.g. search_tools({query: 'ssh'}) or search_tools({tool_type: 'victoria_metrics'})). Do NOT search for alert text or error messages — search for tool type names only.",
       "Example: search_tools({ query: \"ssh\" }) — finds all SSH-related tools",
       "Example: search_tools({ query: \"metrics\", tool_type: \"victoria_metrics\" }) — finds VictoriaMetrics tools",
       "After finding a tool, use get_tool_detail to see its full parameter schema before calling it.",
