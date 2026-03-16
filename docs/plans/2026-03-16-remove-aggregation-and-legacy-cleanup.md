@@ -231,20 +231,20 @@ Remove the non-working alert aggregation/correlation system entirely and clean u
 
 ### Task 14: Verify Acceptance Criteria
 
-- [ ] All aggregation code removed (no references to aggregation in Go/TS/React)
-- [ ] WebSocket endpoint is `/ws/agent` (not `/ws/codex`)
-- [ ] Wire format uses `api_key` (not `openai_api_key`)
-- [ ] Message types are `agent_output`, `agent_completed`, `agent_error`
-- [ ] No legacy migration code (JWT file, logical_name backfill, proxy migration, openai_settings drop)
-- [ ] No legacy Grafana format support
-- [ ] No stale "removed" or "backward compat" comments
-- [ ] ModelConfigs map and CreateIncidentRequest alias removed
+- [x] All aggregation code removed (no references to aggregation in Go/TS/React)
+- [x] WebSocket endpoint is `/ws/agent` (not `/ws/codex`)
+- [x] Wire format uses `api_key` (not `openai_api_key`)
+- [x] Message types are `agent_output`, `agent_completed`, `agent_error`
+- [x] No legacy migration code (JWT file, logical_name backfill, proxy migration, openai_settings drop)
+- [x] No legacy Grafana format support
+- [x] No stale "removed" or "backward compat" comments
+- [x] ModelConfigs map and CreateIncidentRequest alias removed
 - [ ] Manual test: start all containers with `docker-compose up`, verify WebSocket connects on new endpoint
-- [ ] Run full test suite: `make verify`
-- [ ] Run linter: `golangci-lint run`
-- [ ] Run frontend build: `cd web && npm run build`
-- [ ] Run agent tests: `make test-agent`
-- [ ] Run MCP gateway tests: `make test-mcp`
+- [x] Run full test suite: `make verify`
+- [x] Run linter: `golangci-lint run`
+- [x] Run frontend build: `cd web && npm run build`
+- [x] Run agent tests: `make test-agent`
+- [x] Run MCP gateway tests: `make test-mcp`
 
 ### Task 15: Update Documentation
 

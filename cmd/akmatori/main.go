@@ -88,7 +88,7 @@ func main() {
 			"/auth/login",
 			"/auth/setup",
 			"/auth/setup-status",
-			"/ws/agent",         // WebSocket endpoint for Codex worker (internal)
+			"/ws/agent",         // WebSocket endpoint for Agent worker (internal)
 			"/api/docs",         // Swagger UI (public)
 			"/api/openapi.yaml", // OpenAPI spec (public)
 		},
