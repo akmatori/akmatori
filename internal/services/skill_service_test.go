@@ -867,7 +867,9 @@ func TestGetToolAllowlist_SkillWithTools(t *testing.T) {
 	// Create skill with tools assigned
 	skill := database.Skill{Name: "linux-admin", Description: "Linux admin", Enabled: true, IsSystem: false}
 	db.Create(&skill)
-	db.Model(&skill).Association("Tools").Append(&sshInstance, &zabbixInstance)
+	if err := db.Model(&skill).Association("Tools").Append(&sshInstance, &zabbixInstance); err != nil {
+		t.Fatalf("failed to append tools: %v", err)
+	}
 
 	allowlist := svc.GetToolAllowlist()
 
@@ -933,11 +935,15 @@ func TestGetToolAllowlist_MultipleSkillsDeduplication(t *testing.T) {
 	// Create two skills that share the same tool instance
 	skill1 := database.Skill{Name: "skill-one", Description: "First", Enabled: true, IsSystem: false}
 	db.Create(&skill1)
-	db.Model(&skill1).Association("Tools").Append(&sshInstance)
+	if err := db.Model(&skill1).Association("Tools").Append(&sshInstance); err != nil {
+		t.Fatalf("failed to append tools: %v", err)
+	}
 
 	skill2 := database.Skill{Name: "skill-two", Description: "Second", Enabled: true, IsSystem: false}
 	db.Create(&skill2)
-	db.Model(&skill2).Association("Tools").Append(&sshInstance)
+	if err := db.Model(&skill2).Association("Tools").Append(&sshInstance); err != nil {
+		t.Fatalf("failed to append tools: %v", err)
+	}
 
 	allowlist := svc.GetToolAllowlist()
 
@@ -968,7 +974,9 @@ func TestGetToolAllowlist_ExcludesSystemSkills(t *testing.T) {
 	// Create system skill with tool — should be excluded
 	systemSkill := database.Skill{Name: "incident-manager", Description: "System", Enabled: true, IsSystem: true}
 	db.Create(&systemSkill)
-	db.Model(&systemSkill).Association("Tools").Append(&sshInstance)
+	if err := db.Model(&systemSkill).Association("Tools").Append(&sshInstance); err != nil {
+		t.Fatalf("failed to append tools: %v", err)
+	}
 
 	allowlist := svc.GetToolAllowlist()
 
@@ -996,7 +1004,9 @@ func TestGetToolAllowlist_ExcludesDisabledToolInstances(t *testing.T) {
 	// Create skill with disabled tool
 	skill := database.Skill{Name: "test-skill", Description: "Test", Enabled: true, IsSystem: false}
 	db.Create(&skill)
-	db.Model(&skill).Association("Tools").Append(&disabledInstance)
+	if err := db.Model(&skill).Association("Tools").Append(&disabledInstance); err != nil {
+		t.Fatalf("failed to append tools: %v", err)
+	}
 
 	allowlist := svc.GetToolAllowlist()
 
