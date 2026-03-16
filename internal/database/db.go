@@ -74,15 +74,6 @@ func Connect(dsn string, logLevel logger.LogLevel) error {
 func AutoMigrate() error {
 	slog.Info("running database migrations")
 
-	// Drop old openai_settings table (replaced by llm_settings)
-	if DB.Migrator().HasTable("openai_settings") {
-		if err := DB.Migrator().DropTable("openai_settings"); err != nil {
-			slog.Warn("failed to drop openai_settings table", "err", err)
-		} else {
-			slog.Info("dropped old openai_settings table")
-		}
-	}
-
 	err := DB.AutoMigrate(
 		&SystemSetting{},
 		&SlackSettings{},
@@ -99,10 +90,6 @@ func AutoMigrate() error {
 		// Alert source models
 		&AlertSourceType{},
 		&AlertSourceInstance{},
-		// Alert aggregation models
-		&IncidentAlert{},
-		&IncidentMerge{},
-		&AggregationSettings{},
 		&GeneralSettings{},
 		&Runbook{},
 		&HTTPConnector{},
@@ -451,30 +438,6 @@ func GetOrCreateProxySettings() (*ProxySettings, error) {
 		return nil, err
 	}
 	return &settings, nil
-}
-
-// GetOrCreateAggregationSettings retrieves or creates aggregation settings (singleton).
-// This function accepts a db parameter (rather than using the global DB) to support
-// dependency injection, transaction contexts, and easier testing.
-func GetOrCreateAggregationSettings(db *gorm.DB) (*AggregationSettings, error) {
-	var settings AggregationSettings
-	result := db.First(&settings)
-	if result.Error == gorm.ErrRecordNotFound {
-		settings = *NewDefaultAggregationSettings()
-		if err := db.Create(&settings).Error; err != nil {
-			return nil, err
-		}
-	} else if result.Error != nil {
-		return nil, result.Error
-	}
-	return &settings, nil
-}
-
-// UpdateAggregationSettings updates aggregation settings.
-// Uses Save() which handles both insert and update operations.
-// Accepts a db parameter for dependency injection, transaction support, and testing.
-func UpdateAggregationSettings(db *gorm.DB, settings *AggregationSettings) error {
-	return db.Save(settings).Error
 }
 
 // GetOrCreateGeneralSettings retrieves or creates general settings (singleton)

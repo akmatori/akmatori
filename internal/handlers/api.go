@@ -84,12 +84,6 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/incidents", h.handleIncidents)
 	mux.HandleFunc("/api/incidents/", h.handleIncidentByID)
 
-	// Incident alerts management
-	mux.HandleFunc("GET /api/incidents/{uuid}/alerts", h.handleGetIncidentAlerts)
-	mux.HandleFunc("POST /api/incidents/{uuid}/alerts", h.handleAttachAlert)
-	mux.HandleFunc("DELETE /api/incidents/{uuid}/alerts/{alertId}", h.handleDetachAlert)
-	mux.HandleFunc("POST /api/incidents/{uuid}/merge", h.handleMergeIncident)
-
 	// Slack settings
 	mux.HandleFunc("/api/settings/slack", h.handleSlackSettings)
 
@@ -101,10 +95,6 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 
 	// Proxy settings
 	mux.HandleFunc("/api/settings/proxy", h.handleProxySettings)
-
-	// Aggregation settings
-	mux.HandleFunc("GET /api/settings/aggregation", h.handleGetAggregationSettings)
-	mux.HandleFunc("PUT /api/settings/aggregation", h.handleUpdateAggregationSettings)
 
 	// Context files
 	mux.HandleFunc("/api/context", h.handleContext)

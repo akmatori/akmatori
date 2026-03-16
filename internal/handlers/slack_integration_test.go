@@ -43,7 +43,7 @@ func TestSlackHandler_SetBotUserID(t *testing.T) {
 // TestSlackHandler_SetAlertHandler tests alert handler setting
 func TestSlackHandler_SetAlertHandler(t *testing.T) {
 	h := NewSlackHandler(nil, nil, nil, nil)
-	alertHandler := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	alertHandler := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	h.SetAlertHandler(alertHandler)
 

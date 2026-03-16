@@ -36,13 +36,13 @@ Remove the non-working alert aggregation/correlation system entirely and clean u
 - Modify: `internal/database/models_incidents.go` (remove `alert_count`, `last_alert_at`, `observing_started_at`, `observing_duration_minutes` fields from Incident model)
 - Modify: `internal/database/models_test.go` (remove table name tests for aggregation models)
 
-- [ ] Delete aggregation model files (aggregation_settings, incident_alert, incident_merge + tests)
-- [ ] Remove aggregation-related fields from Incident model in `models_incidents.go`
-- [ ] Remove `GetOrCreateAggregationSettings()` and `UpdateAggregationSettings()` from `db.go`
-- [ ] Remove AutoMigrate references for IncidentAlert, IncidentMerge, AggregationSettings
-- [ ] Remove `openai_settings` table drop migration from `db.go`
-- [ ] Update `models_test.go` to remove aggregation table name tests
-- [ ] Run `make test` - must pass before Task 2
+- [x] Delete aggregation model files (aggregation_settings, incident_alert, incident_merge + tests)
+- [x] Remove aggregation-related fields from Incident model in `models_incidents.go`
+- [x] Remove `GetOrCreateAggregationSettings()` and `UpdateAggregationSettings()` from `db.go`
+- [x] Remove AutoMigrate references for IncidentAlert, IncidentMerge, AggregationSettings
+- [x] Remove `openai_settings` table drop migration from `db.go`
+- [x] Update `models_test.go` to remove aggregation table name tests
+- [x] Run `make test` - must pass before Task 2
 
 ### Task 2: Remove Aggregation Service & Correlator
 
@@ -55,9 +55,9 @@ Remove the non-working alert aggregation/correlation system entirely and clean u
 - Delete: `internal/services/correlator_prompt_test.go`
 - Modify: `internal/services/interfaces.go` (remove `AggregationManager` interface)
 
-- [ ] Delete aggregation service and correlator files (6 files + tests)
-- [ ] Remove `AggregationManager` interface from `interfaces.go`
-- [ ] Run `make test` - must pass before Task 3
+- [x] Delete aggregation service and correlator files (6 files + tests)
+- [x] Remove `AggregationManager` interface from `interfaces.go`
+- [x] Run `make test` - must pass before Task 3
 
 ### Task 3: Remove Aggregation Jobs
 
@@ -68,10 +68,10 @@ Remove the non-working alert aggregation/correlation system entirely and clean u
 - Delete: `internal/jobs/observing_monitor.go`
 - Delete: `internal/jobs/observing_monitor_test.go`
 
-- [ ] Delete recorrelation job files (source + 2 test files)
-- [ ] Delete observing monitor files (source + test)
-- [ ] If the `jobs/` package is now empty, delete the directory
-- [ ] Run `make test` - must pass before Task 4
+- [x] Delete recorrelation job files (source + 2 test files)
+- [x] Delete observing monitor files (source + test)
+- [x] If the `jobs/` package is now empty, delete the directory
+- [x] Run `make test` - must pass before Task 4
 
 ### Task 4: Remove Aggregation from Handlers & API Routes
 
@@ -84,24 +84,24 @@ Remove the non-working alert aggregation/correlation system entirely and clean u
 - Modify: `internal/handlers/api.go` (remove aggregation route registrations)
 - Modify: `internal/handlers/alert_handler_test.go` (remove aggregationService from test setup)
 
-- [ ] Delete `alert_aggregation.go`
-- [ ] Remove aggregationService dependency from AlertHandler struct and NewAlertHandler
-- [ ] Simplify alert_processor.go to always create new incidents (no correlation check)
-- [ ] Remove `formatAggregationStats()` from alert_slack.go
-- [ ] Remove aggregation settings endpoints from api_settings_general.go
-- [ ] Remove aggregation route registrations from api.go
-- [ ] Update alert_handler_test.go
-- [ ] Run `make test` - must pass before Task 5
+- [x] Delete `alert_aggregation.go`
+- [x] Remove aggregationService dependency from AlertHandler struct and NewAlertHandler
+- [x] Simplify alert_processor.go to always create new incidents (no correlation check)
+- [x] Remove `formatAggregationStats()` from alert_slack.go
+- [x] Remove aggregation settings endpoints from api_settings_general.go
+- [x] Remove aggregation route registrations from api.go
+- [x] Update alert_handler_test.go
+- [x] Run `make test` - must pass before Task 5
 
 ### Task 5: Remove Aggregation from Main & Wire-up
 
 **Files:**
 - Modify: `cmd/akmatori/main.go` (remove AggregationService creation, RecorrelationJob init, aggregationService param to AlertHandler)
 
-- [ ] Remove AggregationService instantiation
-- [ ] Remove RecorrelationJob initialization and background job start
-- [ ] Remove aggregationService parameter from AlertHandler construction
-- [ ] Run `make test` - must pass before Task 6
+- [x] Remove AggregationService instantiation
+- [x] Remove RecorrelationJob initialization and background job start
+- [x] Remove aggregationService parameter from AlertHandler construction
+- [x] Run `make test` - must pass before Task 6
 
 ### Task 6: Remove Aggregation from Frontend
 

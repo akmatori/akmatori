@@ -12,7 +12,7 @@ import (
 
 // TestAlertHandler_RegisterAdapter_Idempotent tests registering the same adapter twice
 func TestAlertHandler_RegisterAdapter_Idempotent(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	adapter := &mockAlertAdapter{sourceType: "prometheus"}
 
@@ -27,7 +27,7 @@ func TestAlertHandler_RegisterAdapter_Idempotent(t *testing.T) {
 
 // TestAlertHandler_GetAdapterCount tests adapter counting
 func TestAlertHandler_GetAdapterCount(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	if len(h.adapters) != 0 {
 		t.Errorf("new handler should have 0 adapters, got %d", len(h.adapters))
@@ -115,7 +115,7 @@ func extractPathParam(path, prefix string) string {
 // --- Concurrent Adapter Registration Tests ---
 
 func TestAlertHandler_ConcurrentAdapterRegistration(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	// Simulate concurrent adapter registrations
 	done := make(chan bool, 10)
@@ -137,7 +137,7 @@ func TestAlertHandler_ConcurrentAdapterRegistration(t *testing.T) {
 // --- Edge Cases ---
 
 func TestAlertHandler_AdapterLookup(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	// Register some adapters
 	h.RegisterAdapter(&mockAlertAdapter{sourceType: "grafana"})
@@ -156,7 +156,7 @@ func TestAlertHandler_AdapterLookup(t *testing.T) {
 }
 
 func TestAlertHandler_AdapterSourceTypes(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	adapters := []struct {
 		sourceType string
@@ -214,7 +214,7 @@ func TestJSONSerialization_AlertResponse(t *testing.T) {
 // --- Initialization Tests ---
 
 func TestAlertHandler_InitializationState(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	// New handler should have empty but initialized adapters map
 	if h.adapters == nil {
@@ -229,7 +229,7 @@ func TestAlertHandler_InitializationState(t *testing.T) {
 
 func TestAlertHandler_NilDependencies(t *testing.T) {
 	// All dependencies can be nil for creation
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 	
 	if h == nil {
 		t.Fatal("NewAlertHandler should not return nil")

@@ -412,7 +412,7 @@ func TestWebhookFlow_SecretValidation(t *testing.T) {
 
 // TestAlertHandler_WebhookEndpoint_HTTPFlow tests HTTP handling flow
 func TestAlertHandler_WebhookEndpoint_HTTPFlow(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	// Register mock adapter
 	mockAdapter := testhelpers.NewMockAlertAdapter("test-adapter")
@@ -496,7 +496,7 @@ func TestAlertHandler_WebhookEndpoint_HTTPFlow(t *testing.T) {
 
 // TestWebhookFlow_ConcurrentAdapterRegistration tests concurrent adapter registration
 func TestWebhookFlow_ConcurrentAdapterRegistration(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	var wg sync.WaitGroup
 	numGoroutines := 50
@@ -520,7 +520,7 @@ func TestWebhookFlow_ConcurrentAdapterRegistration(t *testing.T) {
 
 // TestWebhookFlow_ConcurrentMethodValidation tests concurrent method not allowed responses
 func TestWebhookFlow_ConcurrentMethodValidation(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	var wg sync.WaitGroup
 	numRequests := 50
@@ -716,7 +716,7 @@ func BenchmarkWebhookFlow_ZabbixParsing(b *testing.B) {
 func BenchmarkAlertHandler_ConcurrentRegistration(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+		h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 		for j := 0; j < 10; j++ {
 			h.RegisterAdapter(&mockAlertAdapter{sourceType: "type-" + string(rune('0'+j))})
 		}

@@ -15,7 +15,6 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/handlers"
-	"github.com/akmatori/akmatori/internal/jobs"
 	"github.com/akmatori/akmatori/internal/logging"
 	"github.com/akmatori/akmatori/internal/middleware"
 	"github.com/akmatori/akmatori/internal/services"
@@ -144,26 +143,6 @@ func main() {
 		slog.Warn("failed to sync runbook files", "err", err)
 	}
 
-	// Initialize Aggregation service
-	aggregationService := services.NewAggregationService(database.GetDB())
-	slog.Info("aggregation service initialized")
-
-	// Create stop channel for background jobs
-	jobStopChan := make(chan struct{})
-
-	// Start background jobs for alert aggregation
-
-	// Start observing monitor (checks incidents in "observing" status and transitions them to "resolved")
-	observingMonitor := jobs.NewObservingMonitor(database.GetDB())
-	go observingMonitor.Start(time.Minute, jobStopChan)
-	slog.Info("observing monitor started (runs every minute)")
-
-	// Start recorrelation job (analyzes open incidents for merge opportunities)
-	// Note: CodexExecutor is nil until RunMergeAnalyzer is implemented - job handles this gracefully
-	recorrelationJob := jobs.NewRecorrelationJob(database.GetDB(), aggregationService, nil)
-	go recorrelationJob.Start(jobStopChan)
-	slog.Info("recorrelation job started (interval from settings)")
-
 	// Initialize default alert source types
 	if err := alertService.InitializeDefaultSourceTypes(); err != nil {
 		slog.Warn("failed to initialize alert source types", "err", err)
@@ -193,13 +172,12 @@ func main() {
 
 	alertHandler := handlers.NewAlertHandler(
 		cfg,
-		slackManager, // Pass manager for dynamic client access
+		slackManager,
 		codexExecutor,
 		agentWSHandler,
 		skillService,
 		alertService,
 		channelResolver,
-		aggregationService,
 	)
 
 	// Set up event handler for when Slack connects
@@ -311,10 +289,6 @@ func main() {
 	go func() {
 		<-sigChan
 		slog.Info("received shutdown signal, cleaning up")
-
-		// Stop background jobs
-		slog.Info("stopping background jobs")
-		close(jobStopChan)
 
 		// Shutdown HTTP server
 		slog.Info("shutting down HTTP server")
