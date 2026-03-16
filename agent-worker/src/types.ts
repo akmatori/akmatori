@@ -37,6 +37,7 @@ export interface ProxyConfig {
   openai_enabled: boolean;
   slack_enabled: boolean;
   zabbix_enabled: boolean;
+  victoria_metrics_enabled: boolean;
 }
 
 // ---------------------------------------------------------------------------
