@@ -473,6 +473,38 @@ func TestAuthorization_NoAuthorizerAllowsAll(t *testing.T) {
 	}
 }
 
+func TestAuthorization_ProxyToolBypassesAllowlist(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	// Register a proxy tool with compound namespace (e.g., ext.github.create_issue)
+	s.RegisterTool(Tool{
+		Name:        "ext.github.create_issue",
+		Description: "Create GitHub issue",
+		InputSchema: InputSchema{Type: "object"},
+	}, echoHandler)
+
+	// Set allowlist that only includes ssh — no ext.github entries
+	authorizer.SetAllowlist("incident-proxy", []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+	})
+
+	// Proxy tool should bypass the allowlist because its toolType ("ext.github")
+	// contains a dot, indicating it's not managed by the skill-based assignment system.
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "ext.github.create_issue", Arguments: map[string]interface{}{"title": "test"}},
+		map[string]string{
+			"X-Incident-ID": "incident-proxy",
+		},
+	)
+
+	if resp.Error != nil {
+		t.Fatalf("expected proxy tool to bypass allowlist, got error: %s", resp.Error.Message)
+	}
+}
+
 // --- Discovery filtering by allowlist tests ---
 
 func TestHandleSearchTools_FilteredByAllowlist_PartialAuthorization(t *testing.T) {

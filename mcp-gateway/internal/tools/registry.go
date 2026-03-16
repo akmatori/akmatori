@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -110,7 +111,9 @@ func DefaultMCPProxyLoader(ctx context.Context) ([]mcpproxy.ServerRegistration, 
 		if cfg.Args != nil {
 			if argsRaw, ok := cfg.Args["args"]; ok {
 				if argsJSON, err := json.Marshal(argsRaw); err == nil {
-					json.Unmarshal(argsJSON, &args)
+					if err := json.Unmarshal(argsJSON, &args); err != nil {
+						slog.Warn("failed to parse MCP server args", "config_id", cfg.ID, "error", err)
+					}
 				}
 			}
 		}
