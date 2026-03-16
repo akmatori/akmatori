@@ -208,13 +208,13 @@ Remove the non-working alert aggregation/correlation system entirely and clean u
 - Modify: `agent-worker/src/agent-runner.ts` (remove comment about appendSystemPrompt removal)
 - Modify: `agent-worker/tests/agent-runner.test.ts` (remove test for appendSystemPrompt not being passed)
 
-- [ ] Remove "formatEnvValue and fixPEMKey were removed" comment from incident_service.go
-- [ ] Remove "Python wrappers are removed" comment from skill_service.go
-- [ ] Remove "DeviceAuth fields intentionally omitted" comment from types.ts
-- [ ] Remove appendSystemPrompt removal comments from agent-runner.ts
-- [ ] Remove appendSystemPrompt negative test from agent-runner.test.ts
-- [ ] Scan for any other "removed", "legacy", "backward compat" comments that reference completed migrations
-- [ ] Run `make test` and `make test-agent` - must pass before Task 13
+- [x] Remove "formatEnvValue and fixPEMKey were removed" comment from incident_service.go
+- [x] Remove "Python wrappers are removed" comment from skill_service.go
+- [x] Remove "DeviceAuth fields intentionally omitted" comment from types.ts
+- [x] Remove appendSystemPrompt removal comments from agent-runner.ts
+- [x] Remove appendSystemPrompt negative test from agent-runner.test.ts
+- [x] Scan for any other "removed", "legacy", "backward compat" comments that reference completed migrations
+- [x] Run `make test` and `make test-agent` - must pass before Task 13
 
 ### Task 13: Review Tool Allowlist Backward Compat Comments
 

@@ -466,18 +466,6 @@ describe("AgentRunner", () => {
       }
     });
 
-    it("should not pass appendSystemPrompt to DefaultResourceLoader", async () => {
-      const { DefaultResourceLoader } = await import("@mariozechner/pi-coding-agent");
-      const params = makeExecuteParams();
-      await runner.execute(params);
-
-      // appendSystemPrompt was removed in favor of promptGuidelines on the bash tool
-      const constructorCalls = (DefaultResourceLoader as any).mock.calls;
-      expect(constructorCalls.length).toBeGreaterThan(0);
-      const opts = constructorCalls[constructorCalls.length - 1][0];
-      expect(opts.appendSystemPrompt).toBeUndefined();
-    });
-
     it("should attach promptGuidelines to the bash tool", async () => {
       const params = makeExecuteParams();
       await runner.execute(params);

@@ -290,8 +290,7 @@ func (s *SkillService) getSkillTools(skillName string) []database.ToolInstance {
 }
 
 // AssignTools assigns tools to a skill and regenerates SKILL.md
-// Tools are registered as pi-mono ToolDefinition objects at session creation time,
-// so no symlink creation is needed (Python wrappers are removed)
+// Tools are registered as pi-mono ToolDefinition objects at session creation time.
 func (s *SkillService) AssignTools(skillName string, toolIDs []uint) error {
 	// Verify skill exists
 	skill, err := s.GetSkill(skillName)
