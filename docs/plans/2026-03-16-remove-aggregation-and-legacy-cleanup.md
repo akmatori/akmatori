@@ -150,10 +150,10 @@ Remove the non-working alert aggregation/correlation system entirely and clean u
 - Modify: `internal/executor/codex.go` (rename file or internal references from "codex" to "agent" if appropriate)
 - Modify: any handler files referencing `codexExecutor` field name
 
-- [ ] Review `internal/executor/codex.go` - rename to `executor.go` if it makes sense
-- [ ] Rename `codexExecutor` field references in handlers to `agentExecutor` or similar
-- [ ] Update all tests referencing old names
-- [ ] Run `make test` - must pass before Task 9
+- [x] Review `internal/executor/codex.go` - rename to `executor.go` if it makes sense
+- [x] Rename `codexExecutor` field references in handlers to `agentExecutor` or similar
+- [x] Update all tests referencing old names
+- [x] Run `make test` - must pass before Task 9
 
 ### Task 9: Remove Legacy Migration Code
 

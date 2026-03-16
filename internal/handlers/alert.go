@@ -31,7 +31,7 @@ const slackMaxTextBytes = 3000
 type AlertHandler struct {
 	config             *config.Config
 	slackManager       *slackutil.Manager
-	codexExecutor      *executor.Executor
+	agentExecutor      *executor.Executor
 	agentWSHandler     *AgentWSHandler
 	skillService       services.SkillIncidentManager
 	alertService    services.AlertManager
@@ -46,7 +46,7 @@ type AlertHandler struct {
 func NewAlertHandler(
 	cfg *config.Config,
 	slackManager *slackutil.Manager,
-	codexExecutor *executor.Executor,
+	agentExecutor *executor.Executor,
 	agentWSHandler *AgentWSHandler,
 	skillService services.SkillIncidentManager,
 	alertService services.AlertManager,
@@ -55,7 +55,7 @@ func NewAlertHandler(
 	h := &AlertHandler{
 		config:          cfg,
 		slackManager:    slackManager,
-		codexExecutor:   codexExecutor,
+		agentExecutor:   agentExecutor,
 		agentWSHandler:  agentWSHandler,
 		skillService:    skillService,
 		alertService:    alertService,

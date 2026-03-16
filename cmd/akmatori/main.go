@@ -41,7 +41,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("starting AIOps Codex Bot")
+	slog.Info("starting Akmatori")
 
 	// Step 1: Initialize database connection FIRST (needed for secret resolution)
 	if err := database.Connect(cfg.DatabaseURL, logger.Warn); err != nil {
@@ -126,9 +126,9 @@ func main() {
 		slog.Warn("failed to regenerate SKILL.md files", "err", err)
 	}
 
-	// Initialize Codex executor
-	codexExecutor := executor.NewExecutor()
-	slog.Info("Codex executor initialized")
+	// Initialize agent executor
+	agentExecutor := executor.NewExecutor()
+	slog.Info("agent executor initialized")
 
 	// Initialize Alert service
 	alertService := services.NewAlertService()
@@ -173,7 +173,7 @@ func main() {
 	alertHandler := handlers.NewAlertHandler(
 		cfg,
 		slackManager,
-		codexExecutor,
+		agentExecutor,
 		agentWSHandler,
 		skillService,
 		alertService,
@@ -186,7 +186,7 @@ func main() {
 		// Create handler with current client
 		slackHandler = handlers.NewSlackHandler(
 			client,
-			codexExecutor,
+			agentExecutor,
 			agentWSHandler,
 			skillService,
 		)
@@ -233,7 +233,7 @@ func main() {
 	// Initialize API handler for skill communication and management
 	httpConnectorService := services.NewHTTPConnectorService()
 	mcpServerService := services.NewMCPServerService()
-	apiHandler := handlers.NewAPIHandler(skillService, toolService, contextService, alertService, codexExecutor, agentWSHandler, slackManager, runbookService, httpConnectorService, mcpServerService)
+	apiHandler := handlers.NewAPIHandler(skillService, toolService, contextService, alertService, agentExecutor, agentWSHandler, slackManager, runbookService, httpConnectorService, mcpServerService)
 
 	// Wire alert channel reload: when alert sources are created/updated/deleted via API,
 	// reload the Slack handler's channel mappings so changes take effect immediately.

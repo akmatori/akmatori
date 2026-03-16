@@ -17,8 +17,8 @@ import (
 	"github.com/akmatori/akmatori/internal/utils"
 )
 
-// CodexJSONEvent represents a JSON event from codex --json output
-type CodexJSONEvent struct {
+// JSONEvent represents a JSON event from codex --json output
+type JSONEvent struct {
 	Type    string                 `json:"type"`
 	Error   map[string]interface{} `json:"error,omitempty"` // Error can be an object
 	Message string                 `json:"message,omitempty"`
@@ -352,7 +352,7 @@ func (e *Executor) ExecuteInDirectory(ctx context.Context, task string, sessionI
 		eventCount := 0
 
 		for {
-			var event CodexJSONEvent
+			var event JSONEvent
 			if err := decoder.Decode(&event); err != nil {
 				if err == io.EOF {
 					break

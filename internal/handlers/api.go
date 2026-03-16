@@ -16,7 +16,7 @@ type APIHandler struct {
 	toolService          services.ToolManager
 	contextService       services.ContextManager
 	alertService         services.AlertManager
-	codexExecutor        *executor.Executor
+	agentExecutor        *executor.Executor
 	agentWSHandler       *AgentWSHandler
 	slackManager         *slackutil.Manager
 	runbookService       services.RunbookManager
@@ -28,13 +28,13 @@ type APIHandler struct {
 }
 
 // NewAPIHandler creates a new API handler
-func NewAPIHandler(skillService services.SkillIncidentManager, toolService services.ToolManager, contextService services.ContextManager, alertService services.AlertManager, codexExecutor *executor.Executor, agentWSHandler *AgentWSHandler, slackManager *slackutil.Manager, runbookService services.RunbookManager, httpConnectorService services.HTTPConnectorManager, mcpServerService services.MCPServerManager) *APIHandler {
+func NewAPIHandler(skillService services.SkillIncidentManager, toolService services.ToolManager, contextService services.ContextManager, alertService services.AlertManager, agentExecutor *executor.Executor, agentWSHandler *AgentWSHandler, slackManager *slackutil.Manager, runbookService services.RunbookManager, httpConnectorService services.HTTPConnectorManager, mcpServerService services.MCPServerManager) *APIHandler {
 	return &APIHandler{
 		skillService:         skillService,
 		toolService:          toolService,
 		contextService:       contextService,
 		alertService:         alertService,
-		codexExecutor:        codexExecutor,
+		agentExecutor:        agentExecutor,
 		agentWSHandler:       agentWSHandler,
 		slackManager:         slackManager,
 		runbookService:       runbookService,
