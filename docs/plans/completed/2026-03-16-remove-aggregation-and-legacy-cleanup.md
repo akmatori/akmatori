@@ -248,16 +248,16 @@ Remove the non-working alert aggregation/correlation system entirely and clean u
 
 ### Task 15: Update Documentation
 
-- [ ] Update CLAUDE.md:
+- [x] Update CLAUDE.md:
   - Remove AggregationService, AggregationManager from service/interface tables
   - Remove aggregation jobs from jobs table
   - Remove aggregation settings API endpoints
   - Update WebSocket endpoint references from `/ws/codex` to `/ws/agent`
   - Remove aggregation_service from test coverage table
   - Remove IncidentAlert, IncidentMerge from database model references
-- [ ] Create a database migration SQL script (or note) for dropping aggregation tables in production:
+- [x] Create a database migration SQL script (or note) for dropping aggregation tables in production:
   - `DROP TABLE IF EXISTS aggregation_settings;`
   - `DROP TABLE IF EXISTS incident_alerts;`
   - `DROP TABLE IF EXISTS incident_merges;`
   - `ALTER TABLE incidents DROP COLUMN IF EXISTS alert_count, DROP COLUMN IF EXISTS last_alert_at, DROP COLUMN IF EXISTS observing_started_at, DROP COLUMN IF EXISTS observing_duration_minutes;`
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Move this plan to `docs/plans/completed/`
