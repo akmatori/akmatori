@@ -2,6 +2,7 @@ package extraction
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -546,9 +547,17 @@ func TestNewAlertExtractor_Initialization(t *testing.T) {
 		t.Error("httpClient should be initialized")
 	}
 
-	// Verify timeout is set
-	if extractor.httpClient.Timeout == 0 {
-		t.Error("httpClient timeout should be set")
+	// Verify timeout is set (type assert to *http.Client)
+	if client, ok := extractor.httpClient.(*http.Client); ok {
+		if client.Timeout == 0 {
+			t.Error("httpClient timeout should be set")
+		}
+	} else {
+		t.Error("expected httpClient to be *http.Client")
+	}
+
+	if extractor.getLLMSettings == nil {
+		t.Error("getLLMSettings should be initialized")
 	}
 }
 
