@@ -16,9 +16,18 @@ import (
 	"github.com/akmatori/akmatori/internal/utils"
 )
 
+// HTTPDoer abstracts HTTP client for testing
+type HTTPDoer interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+// LLMSettingsGetter abstracts LLM settings retrieval for testing
+type LLMSettingsGetter func() (*database.LLMSettings, error)
+
 // AlertExtractor extracts alert information from free-form text using AI
 type AlertExtractor struct {
-	httpClient *http.Client
+	httpClient        HTTPDoer
+	getLLMSettings    LLMSettingsGetter
 }
 
 // ExtractedAlert represents the structured data extracted from a message
@@ -39,6 +48,15 @@ func NewAlertExtractor() *AlertExtractor {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		getLLMSettings: database.GetLLMSettings,
+	}
+}
+
+// NewAlertExtractorWithDeps creates an extractor with injected dependencies (for testing)
+func NewAlertExtractorWithDeps(httpClient HTTPDoer, getLLMSettings LLMSettingsGetter) *AlertExtractor {
+	return &AlertExtractor{
+		httpClient:     httpClient,
+		getLLMSettings: getLLMSettings,
 	}
 }
 
@@ -92,7 +110,7 @@ func (e *AlertExtractor) Extract(ctx context.Context, messageText string) (*aler
 // ExtractWithPrompt extracts alert information using a custom prompt
 func (e *AlertExtractor) ExtractWithPrompt(ctx context.Context, messageText, customPrompt string) (*alerts.NormalizedAlert, error) {
 	// Get LLM settings from database
-	settings, err := database.GetLLMSettings()
+	settings, err := e.getLLMSettings()
 	if err != nil {
 		slog.Error("Failed to get LLM settings", "error", err)
 		return e.createFallbackAlert(messageText), nil
