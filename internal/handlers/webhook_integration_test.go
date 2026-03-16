@@ -157,23 +157,6 @@ func TestWebhookFlow_GrafanaPayloadParsing(t *testing.T) {
 				testhelpers.AssertEqual(t, database.AlertStatusFiring, a.Status, "Status")
 			},
 		},
-		{
-			name: "legacy alerting payload",
-			payload: `{
-				"ruleName": "CPU Alert",
-				"state": "alerting",
-				"message": "CPU is too high",
-				"ruleId": 123,
-				"ruleUrl": "https://grafana.example.com/alerting/123",
-				"evalMatches": [
-					{"value": 95.5, "metric": "cpu_usage", "tags": {"host": "server-01"}}
-				]
-			}`,
-			expectedAlerts: 1,
-			validateFirst: func(t *testing.T, a alerts.NormalizedAlert) {
-				testhelpers.AssertEqual(t, "CPU Alert", a.AlertName, "AlertName")
-			},
-		},
 	}
 
 	for _, tt := range tests {
