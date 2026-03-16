@@ -112,12 +112,12 @@ Remove the non-working alert aggregation/correlation system entirely and clean u
 - Modify: `web/src/types/index.ts` (remove `IncidentAlert` and `AggregationSettings` interfaces)
 - Modify: any parent component that imports/renders AggregationSettings or IncidentAlertsPanel
 
-- [ ] Delete AggregationSettings.tsx component
-- [ ] Remove or simplify IncidentAlertsPanel.tsx (remove correlation-specific UI)
-- [ ] Remove aggregationSettingsApi and incidentAlertsApi from client.ts
-- [ ] Remove IncidentAlert and AggregationSettings types from types/index.ts
-- [ ] Remove imports/routes referencing deleted components
-- [ ] Run `make test-agent` if applicable, verify frontend builds with `cd web && npm run build`
+- [x] Delete AggregationSettings.tsx component
+- [x] Remove or simplify IncidentAlertsPanel.tsx (remove correlation-specific UI)
+- [x] Remove aggregationSettingsApi and incidentAlertsApi from client.ts
+- [x] Remove IncidentAlert and AggregationSettings types from types/index.ts
+- [x] Remove imports/routes referencing deleted components
+- [x] Run `make test-agent` if applicable, verify frontend builds with `cd web && npm run build`
 
 ### Task 7: Rename Codex → Agent (Wire Format & Endpoints)
 
