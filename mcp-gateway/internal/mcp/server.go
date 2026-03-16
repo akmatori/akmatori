@@ -277,16 +277,22 @@ func (s *Server) handleCallTool(ctx context.Context, req *Request, incidentID st
 		}
 	}
 
-	// Enforce tool allowlist authorization
+	// Enforce tool allowlist authorization.
+	// MCP proxy tools use compound namespaces (e.g., "ext.github") that contain dots.
+	// Standard tool types (ssh, zabbix, victoria_metrics) never contain dots.
+	// Proxy tools are admin-configured and don't participate in skill-based tool
+	// assignment, so they bypass the per-incident allowlist.
 	if s.authorizer != nil && incidentID != "" {
 		toolType, _ := ParseToolName(params.Name)
-		instanceID := extractInstanceIDFromArgs(params.Arguments)
-		logicalName := extractLogicalNameFromArgs(params.Arguments)
+		if !strings.Contains(toolType, ".") {
+			instanceID := extractInstanceIDFromArgs(params.Arguments)
+			logicalName := extractLogicalNameFromArgs(params.Arguments)
 
-		if !s.authorizer.IsAuthorized(incidentID, toolType, instanceID, logicalName) {
-			return NewErrorResponse(req.ID, InvalidRequest,
-				fmt.Sprintf("Unauthorized: incident %s is not authorized to use tool %s", incidentID, params.Name),
-				nil)
+			if !s.authorizer.IsAuthorized(incidentID, toolType, instanceID, logicalName) {
+				return NewErrorResponse(req.ID, InvalidRequest,
+					fmt.Sprintf("Unauthorized: incident %s is not authorized to use tool %s", incidentID, params.Name),
+					nil)
+			}
 		}
 	}
 
