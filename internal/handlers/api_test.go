@@ -270,29 +270,3 @@ func TestAPIHandler_reloadAlertChannels(t *testing.T) {
 	})
 }
 
-func TestModelConfigs(t *testing.T) {
-	// Verify that expected models exist
-	expectedModels := []string{
-		"gpt-5.4",
-		"gpt-5.2",
-		"gpt-5.2-codex",
-		"gpt-5.3-codex",
-		"gpt-5.1-codex-max",
-		"gpt-5.1-codex",
-		"gpt-5.1-codex-mini",
-		"gpt-5.1",
-	}
-
-	for _, model := range expectedModels {
-		if _, ok := ModelConfigs[model]; !ok {
-			t.Errorf("Expected model %q not found in ModelConfigs", model)
-		}
-	}
-
-	// Verify each model has at least one reasoning effort option
-	for model, efforts := range ModelConfigs {
-		if len(efforts) == 0 {
-			t.Errorf("Model %q has no reasoning effort options", model)
-		}
-	}
-}

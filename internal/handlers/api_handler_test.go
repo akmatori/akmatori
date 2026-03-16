@@ -242,39 +242,6 @@ func TestSplitPath_EdgeCases(t *testing.T) {
 	}
 }
 
-// TestModelConfigs_Validity tests model configuration validity
-func TestModelConfigs_Validity(t *testing.T) {
-	// All models should have valid reasoning efforts
-	for model, efforts := range ModelConfigs {
-		t.Run(model, func(t *testing.T) {
-			if len(efforts) == 0 {
-				t.Errorf("model %q has no reasoning efforts", model)
-			}
-
-			// Check for duplicates
-			seen := make(map[string]bool)
-			for _, effort := range efforts {
-				if seen[effort] {
-					t.Errorf("model %q has duplicate effort %q", model, effort)
-				}
-				seen[effort] = true
-
-				// Validate effort values
-				validEfforts := []string{"low", "medium", "high", "extra_high"}
-				isValid := false
-				for _, valid := range validEfforts {
-					if effort == valid {
-						isValid = true
-						break
-					}
-				}
-				if !isValid {
-					t.Errorf("model %q has invalid effort %q", model, effort)
-				}
-			}
-		})
-	}
-}
 
 // TestAPIHandler_MaskSSHKeys tests SSH key masking
 func TestAPIHandler_MaskSSHKeys(t *testing.T) {

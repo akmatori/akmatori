@@ -286,14 +286,14 @@ describe("Orchestrator", () => {
         type: "new_incident",
         incident_id: "incident-001",
         task: "Investigate high CPU usage",
-        openai_api_key: "sk-test-key",
+        api_key: "sk-test-key",
         model: "o4-mini",
-        reasoning_effort: "medium",
+        thinking_level: "medium",
       });
 
       // Wait for the completion message
       const completedMsg = await waitForMessage(
-        (m) => m.type === "codex_completed" && m.incident_id === "incident-001",
+        (m) => m.type === "agent_completed" && m.incident_id === "incident-001",
       );
 
       expect(completedMsg).toBeDefined();
@@ -303,7 +303,7 @@ describe("Orchestrator", () => {
 
       // Should also have output messages
       const outputMsgs = allServerMessages.filter(
-        (m) => m.type === "codex_output" && m.incident_id === "incident-001",
+        (m) => m.type === "agent_output" && m.incident_id === "incident-001",
       );
       expect(outputMsgs.length).toBeGreaterThanOrEqual(1);
     });
@@ -316,11 +316,11 @@ describe("Orchestrator", () => {
         type: "new_incident",
         incident_id: "incident-002",
         task: "Some task",
-        // No openai_api_key
+        // No api_key
       });
 
       const errorMsg = await waitForMessage(
-        (m) => m.type === "codex_error" && m.incident_id === "incident-002",
+        (m) => m.type === "agent_error" && m.incident_id === "incident-002",
       );
       expect(errorMsg).toBeDefined();
       expect(errorMsg!.error).toContain("Missing LLM settings");
@@ -333,7 +333,7 @@ describe("Orchestrator", () => {
       sendFromServer({
         type: "new_incident",
         task: "Some task",
-        openai_api_key: "sk-test",
+        api_key: "sk-test",
         // No incident_id
       });
 
@@ -349,7 +349,7 @@ describe("Orchestrator", () => {
         type: "new_incident",
         incident_id: "../../../etc/passwd",
         task: "Some task",
-        openai_api_key: "sk-test",
+        api_key: "sk-test",
         model: "gpt-4o",
       });
 
@@ -367,7 +367,7 @@ describe("Orchestrator", () => {
         type: "new_incident",
         incident_id: "incident id with spaces",
         task: "Some task",
-        openai_api_key: "sk-test",
+        api_key: "sk-test",
         model: "gpt-4o",
       });
 
@@ -384,17 +384,17 @@ describe("Orchestrator", () => {
         type: "new_incident",
         incident_id: "incident-003",
         task: "Test streaming",
-        openai_api_key: "sk-test-key",
+        api_key: "sk-test-key",
         model: "o4-mini",
       });
 
       // Wait for completion
       await waitForMessage(
-        (m) => m.type === "codex_completed" && m.incident_id === "incident-003",
+        (m) => m.type === "agent_completed" && m.incident_id === "incident-003",
       );
 
       const outputMsgs = allServerMessages.filter(
-        (m) => m.type === "codex_output" && m.incident_id === "incident-003",
+        (m) => m.type === "agent_output" && m.incident_id === "incident-003",
       );
 
       // The mock session emits a text_delta "Done.", which should be streamed
@@ -412,12 +412,12 @@ describe("Orchestrator", () => {
         type: "new_incident",
         incident_id: "incident-ws-test",
         task: "Test workdir",
-        openai_api_key: "sk-key",
+        api_key: "sk-key",
       });
 
       // Wait for execution to complete
       await waitForMessage(
-        (m) => m.type === "codex_completed" && m.incident_id === "incident-ws-test",
+        (m) => m.type === "agent_completed" && m.incident_id === "incident-ws-test",
       );
 
       expect(createAgentSession).toHaveBeenCalledWith(
@@ -437,12 +437,12 @@ describe("Orchestrator", () => {
         type: "new_incident",
         incident_id: "incident-skills-filter",
         task: "Test skill filtering",
-        openai_api_key: "sk-key",
+        api_key: "sk-key",
         enabled_skills: ["linux-agent", "zabbix-analyst"],
       });
 
       await waitForMessage(
-        (m) => m.type === "codex_completed" && m.incident_id === "incident-skills-filter",
+        (m) => m.type === "agent_completed" && m.incident_id === "incident-skills-filter",
       );
 
       // Verify DefaultResourceLoader was called with a skillsOverride function
@@ -472,12 +472,12 @@ describe("Orchestrator", () => {
         type: "new_incident",
         incident_id: "incident-no-skills-filter",
         task: "Test no skill filtering",
-        openai_api_key: "sk-key",
+        api_key: "sk-key",
         // No enabled_skills
       });
 
       await waitForMessage(
-        (m) => m.type === "codex_completed" && m.incident_id === "incident-no-skills-filter",
+        (m) => m.type === "agent_completed" && m.incident_id === "incident-no-skills-filter",
       );
 
       const constructorCall = (DefaultResourceLoader as any).mock.calls.at(-1)[0];
@@ -499,12 +499,12 @@ describe("Orchestrator", () => {
         incident_id: "incident-010",
         session_id: "existing-session-id",
         message: "What about memory usage?",
-        openai_api_key: "sk-test-key",
+        api_key: "sk-test-key",
         model: "o4-mini",
       });
 
       const completedMsg = await waitForMessage(
-        (m) => m.type === "codex_completed" && m.incident_id === "incident-010",
+        (m) => m.type === "agent_completed" && m.incident_id === "incident-010",
       );
       expect(completedMsg).toBeDefined();
       expect(completedMsg!.incident_id).toBe("incident-010");
@@ -522,7 +522,7 @@ describe("Orchestrator", () => {
         incident_id: "../../secret",
         session_id: "existing-session-id",
         message: "Follow up",
-        openai_api_key: "sk-test-key",
+        api_key: "sk-test-key",
         model: "gpt-4o",
       });
 
@@ -539,11 +539,11 @@ describe("Orchestrator", () => {
         type: "continue_incident",
         incident_id: "incident-011",
         message: "Follow up",
-        // No openai_api_key
+        // No api_key
       });
 
       const errorMsg = await waitForMessage(
-        (m) => m.type === "codex_error" && m.incident_id === "incident-011",
+        (m) => m.type === "agent_error" && m.incident_id === "incident-011",
       );
       expect(errorMsg).toBeDefined();
       expect(errorMsg!.error).toContain("Missing LLM settings");
@@ -569,7 +569,7 @@ describe("Orchestrator", () => {
         type: "new_incident",
         incident_id: "incident-020",
         task: "Long running task",
-        openai_api_key: "sk-test-key",
+        api_key: "sk-test-key",
       });
 
       // Give it a moment to start
@@ -583,7 +583,7 @@ describe("Orchestrator", () => {
 
       // Should get at least one cancellation error
       const errorMsg = await waitForMessage(
-        (m) => m.type === "codex_error" && m.incident_id === "incident-020" && !!m.error?.includes("cancelled"),
+        (m) => m.type === "agent_error" && m.incident_id === "incident-020" && !!m.error?.includes("cancelled"),
       );
       expect(errorMsg).toBeDefined();
     });
@@ -655,11 +655,11 @@ describe("Orchestrator", () => {
         type: "new_incident",
         incident_id: "incident-proxy-test",
         task: "Test proxy",
-        openai_api_key: "sk-key",
+        api_key: "sk-key",
       });
 
       await waitForMessage(
-        (m) => m.type === "codex_completed" && m.incident_id === "incident-proxy-test",
+        (m) => m.type === "agent_completed" && m.incident_id === "incident-proxy-test",
       );
 
       expect(createAgentSession).toHaveBeenCalled();
@@ -701,11 +701,11 @@ describe("Orchestrator", () => {
         type: "new_incident",
         incident_id: "incident-err-001",
         task: "Should fail",
-        openai_api_key: "sk-bad-key",
+        api_key: "sk-bad-key",
       });
 
       const errorMsg = await waitForMessage(
-        (m) => m.type === "codex_error" && m.incident_id === "incident-err-001",
+        (m) => m.type === "agent_error" && m.incident_id === "incident-err-001",
       );
       expect(errorMsg).toBeDefined();
       expect(errorMsg!.error).toContain("Auth failed");
@@ -724,11 +724,11 @@ describe("Orchestrator", () => {
         type: "new_incident",
         incident_id: "incident-err-002",
         task: "Should error in result",
-        openai_api_key: "sk-key",
+        api_key: "sk-key",
       });
 
       const errorMsg = await waitForMessage(
-        (m) => m.type === "codex_error" && m.incident_id === "incident-err-002",
+        (m) => m.type === "agent_error" && m.incident_id === "incident-err-002",
       );
       expect(errorMsg).toBeDefined();
       expect(errorMsg!.incident_id).toBe("incident-err-002");
@@ -740,7 +740,7 @@ describe("Orchestrator", () => {
   // -----------------------------------------------------------------------
 
   describe("LLM settings extraction", () => {
-    it("should map reasoning_effort to thinking_level", async () => {
+    it("should map thinking_level to thinking_level", async () => {
       const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
 
       await orchestrator.start();
@@ -750,13 +750,13 @@ describe("Orchestrator", () => {
         type: "new_incident",
         incident_id: "incident-settings-001",
         task: "Test settings",
-        openai_api_key: "sk-key",
+        api_key: "sk-key",
         model: "gpt-4o",
-        reasoning_effort: "high",
+        thinking_level: "high",
       });
 
       await waitForMessage(
-        (m) => m.type === "codex_completed" && m.incident_id === "incident-settings-001",
+        (m) => m.type === "agent_completed" && m.incident_id === "incident-settings-001",
       );
 
       expect(createAgentSession).toHaveBeenCalled();
@@ -773,12 +773,12 @@ describe("Orchestrator", () => {
         type: "new_incident",
         incident_id: "incident-settings-002",
         task: "Test default model",
-        openai_api_key: "sk-key",
+        api_key: "sk-key",
         // No model specified
       });
 
       await waitForMessage(
-        (m) => m.type === "codex_completed" && m.incident_id === "incident-settings-002",
+        (m) => m.type === "agent_completed" && m.incident_id === "incident-settings-002",
       );
 
       // getModel should have been called with "gpt-5.4" (matches database default)

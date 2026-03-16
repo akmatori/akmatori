@@ -111,7 +111,7 @@ describe("WebSocketClient", () => {
       await sleep(50);
 
       client.send({
-        type: "codex_output",
+        type: "agent_output",
         incident_id: "inc-123",
         output: "some output",
       });
@@ -121,7 +121,7 @@ describe("WebSocketClient", () => {
 
       expect(mockServer.received.length).toBeGreaterThanOrEqual(1);
       const parsed = JSON.parse(mockServer.received[0]);
-      expect(parsed.type).toBe("codex_output");
+      expect(parsed.type).toBe("agent_output");
       expect(parsed.incident_id).toBe("inc-123");
       expect(parsed.output).toBe("some output");
       // omitempty: fields not set should not be present
@@ -144,7 +144,7 @@ describe("WebSocketClient", () => {
   });
 
   describe("sendOutput", () => {
-    it("should send codex_output message", async () => {
+    it("should send agent_output message", async () => {
       client = new WebSocketClient({
         url: mockServer.url,
         heartbeatIntervalMs: 60_000,
@@ -158,14 +158,14 @@ describe("WebSocketClient", () => {
       await sleep(50);
 
       const parsed = JSON.parse(mockServer.received[0]);
-      expect(parsed.type).toBe("codex_output");
+      expect(parsed.type).toBe("agent_output");
       expect(parsed.incident_id).toBe("inc-456");
       expect(parsed.output).toBe("running diagnostics...");
     });
   });
 
   describe("sendCompleted", () => {
-    it("should send codex_completed message with metrics", async () => {
+    it("should send agent_completed message with metrics", async () => {
       client = new WebSocketClient({
         url: mockServer.url,
         heartbeatIntervalMs: 60_000,
@@ -179,7 +179,7 @@ describe("WebSocketClient", () => {
       await sleep(50);
 
       const parsed = JSON.parse(mockServer.received[0]);
-      expect(parsed.type).toBe("codex_completed");
+      expect(parsed.type).toBe("agent_completed");
       expect(parsed.incident_id).toBe("inc-789");
       expect(parsed.session_id).toBe("sess-001");
       expect(parsed.output).toBe("Resolved the issue");
@@ -189,7 +189,7 @@ describe("WebSocketClient", () => {
   });
 
   describe("sendError", () => {
-    it("should send codex_error message", async () => {
+    it("should send agent_error message", async () => {
       client = new WebSocketClient({
         url: mockServer.url,
         heartbeatIntervalMs: 60_000,
@@ -203,7 +203,7 @@ describe("WebSocketClient", () => {
       await sleep(50);
 
       const parsed = JSON.parse(mockServer.received[0]);
-      expect(parsed.type).toBe("codex_error");
+      expect(parsed.type).toBe("agent_error");
       expect(parsed.incident_id).toBe("inc-err");
       expect(parsed.error).toBe("API key invalid");
     });
@@ -214,7 +214,7 @@ describe("WebSocketClient", () => {
   // -----------------------------------------------------------------------
 
   describe("message serialization", () => {
-    it("should match Go JSON format for codex_completed", async () => {
+    it("should match Go JSON format for agent_completed", async () => {
       client = new WebSocketClient({
         url: mockServer.url,
         heartbeatIntervalMs: 60_000,
@@ -309,7 +309,7 @@ describe("WebSocketClient", () => {
         type: "new_incident",
         incident_id: "inc-new",
         task: "Check server status",
-        openai_api_key: "sk-test",
+        api_key: "sk-test",
         model: "gpt-4o",
       };
       mockServer.clients[0].send(JSON.stringify(serverMsg));

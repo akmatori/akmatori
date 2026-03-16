@@ -406,7 +406,7 @@ func TestAuthorization_NoAllowlistAllowsAll(t *testing.T) {
 		InputSchema: InputSchema{Type: "object"},
 	}, echoHandler)
 
-	// No allowlist header — should allow all (backward compat)
+	// No allowlist header — gateway allows all tools when no allowlist is registered
 	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
 		CallToolParams{Name: "ssh.execute_command", Arguments: map[string]interface{}{"command": "ls"}},
 		map[string]string{
@@ -685,7 +685,7 @@ func TestHandleSearchTools_NoAllowlistReturnsAll(t *testing.T) {
 		},
 	})
 
-	// No allowlist header — should return all (backward compat)
+	// No allowlist header — returns all tools when no allowlist is registered
 	resp := sendJSONRPCWithHeaders(t, s, "tools/search",
 		SearchToolsParams{Query: ""},
 		map[string]string{
@@ -791,7 +791,7 @@ func TestHandleGetToolDetail_NoAllowlistReturnsAllInstances(t *testing.T) {
 		return nil
 	})
 
-	// No allowlist — should return all instances
+	// No allowlist — returns all instances when no allowlist is registered
 	resp := sendJSONRPCWithHeaders(t, s, "tools/detail",
 		GetToolDetailParams{ToolName: "ssh.execute_command"},
 		map[string]string{

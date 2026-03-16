@@ -63,7 +63,7 @@ RUN chown -R agent:agent /home/agent/app
 USER agent
 
 # Environment variables (defaults, can be overridden)
-ENV API_WS_URL=ws://akmatori-api:3000/ws/codex
+ENV API_WS_URL=ws://akmatori-api:3000/ws/agent
 ENV MCP_GATEWAY_URL=http://mcp-gateway:8080
 ENV WORKSPACE_DIR=/workspaces
 ENV NODE_ENV=production

@@ -15,7 +15,6 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/handlers"
-	"github.com/akmatori/akmatori/internal/jobs"
 	"github.com/akmatori/akmatori/internal/logging"
 	"github.com/akmatori/akmatori/internal/middleware"
 	"github.com/akmatori/akmatori/internal/services"
@@ -42,7 +41,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("starting AIOps Codex Bot")
+	slog.Info("starting Akmatori")
 
 	// Step 1: Initialize database connection FIRST (needed for secret resolution)
 	if err := database.Connect(cfg.DatabaseURL, logger.Warn); err != nil {
@@ -89,7 +88,7 @@ func main() {
 			"/auth/login",
 			"/auth/setup",
 			"/auth/setup-status",
-			"/ws/codex",         // WebSocket endpoint for Codex worker (internal)
+			"/ws/agent",         // WebSocket endpoint for Agent worker (internal)
 			"/api/docs",         // Swagger UI (public)
 			"/api/openapi.yaml", // OpenAPI spec (public)
 		},
@@ -127,9 +126,9 @@ func main() {
 		slog.Warn("failed to regenerate SKILL.md files", "err", err)
 	}
 
-	// Initialize Codex executor
-	codexExecutor := executor.NewExecutor()
-	slog.Info("Codex executor initialized")
+	// Initialize agent executor
+	agentExecutor := executor.NewExecutor()
+	slog.Info("agent executor initialized")
 
 	// Initialize Alert service
 	alertService := services.NewAlertService()
@@ -143,26 +142,6 @@ func main() {
 	if err := runbookService.SyncRunbookFiles(); err != nil {
 		slog.Warn("failed to sync runbook files", "err", err)
 	}
-
-	// Initialize Aggregation service
-	aggregationService := services.NewAggregationService(database.GetDB())
-	slog.Info("aggregation service initialized")
-
-	// Create stop channel for background jobs
-	jobStopChan := make(chan struct{})
-
-	// Start background jobs for alert aggregation
-
-	// Start observing monitor (checks incidents in "observing" status and transitions them to "resolved")
-	observingMonitor := jobs.NewObservingMonitor(database.GetDB())
-	go observingMonitor.Start(time.Minute, jobStopChan)
-	slog.Info("observing monitor started (runs every minute)")
-
-	// Start recorrelation job (analyzes open incidents for merge opportunities)
-	// Note: CodexExecutor is nil until RunMergeAnalyzer is implemented - job handles this gracefully
-	recorrelationJob := jobs.NewRecorrelationJob(database.GetDB(), aggregationService, nil)
-	go recorrelationJob.Start(jobStopChan)
-	slog.Info("recorrelation job started (interval from settings)")
 
 	// Initialize default alert source types
 	if err := alertService.InitializeDefaultSourceTypes(); err != nil {
@@ -193,13 +172,12 @@ func main() {
 
 	alertHandler := handlers.NewAlertHandler(
 		cfg,
-		slackManager, // Pass manager for dynamic client access
-		codexExecutor,
+		slackManager,
+		agentExecutor,
 		agentWSHandler,
 		skillService,
 		alertService,
 		channelResolver,
-		aggregationService,
 	)
 
 	// Set up event handler for when Slack connects
@@ -208,7 +186,7 @@ func main() {
 		// Create handler with current client
 		slackHandler = handlers.NewSlackHandler(
 			client,
-			codexExecutor,
+			agentExecutor,
 			agentWSHandler,
 			skillService,
 		)
@@ -255,7 +233,7 @@ func main() {
 	// Initialize API handler for skill communication and management
 	httpConnectorService := services.NewHTTPConnectorService()
 	mcpServerService := services.NewMCPServerService()
-	apiHandler := handlers.NewAPIHandler(skillService, toolService, contextService, alertService, codexExecutor, agentWSHandler, slackManager, runbookService, httpConnectorService, mcpServerService)
+	apiHandler := handlers.NewAPIHandler(skillService, toolService, contextService, alertService, agentExecutor, agentWSHandler, slackManager, runbookService, httpConnectorService, mcpServerService)
 
 	// Wire alert channel reload: when alert sources are created/updated/deleted via API,
 	// reload the Slack handler's channel mappings so changes take effect immediately.
@@ -312,10 +290,6 @@ func main() {
 		<-sigChan
 		slog.Info("received shutdown signal, cleaning up")
 
-		// Stop background jobs
-		slog.Info("stopping background jobs")
-		close(jobStopChan)
-
 		// Shutdown HTTP server
 		slog.Info("shutting down HTTP server")
 		if err := httpServer.Close(); err != nil {
@@ -330,7 +304,7 @@ func main() {
 	slog.Info("alert webhook endpoint", "url", fmt.Sprintf("http://localhost:%d/webhook/alert/{instance_uuid}", cfg.HTTPPort))
 	slog.Info("health check endpoint", "url", fmt.Sprintf("http://localhost:%d/health", cfg.HTTPPort))
 	slog.Info("API base URL", "url", fmt.Sprintf("http://localhost:%d/api", cfg.HTTPPort))
-	slog.Info("agent WebSocket endpoint", "url", fmt.Sprintf("ws://localhost:%d/ws/codex", cfg.HTTPPort))
+	slog.Info("agent WebSocket endpoint", "url", fmt.Sprintf("ws://localhost:%d/ws/agent", cfg.HTTPPort))
 
 	// Create a context for the Slack manager
 	ctx, ctxCancel := context.WithCancel(context.Background())

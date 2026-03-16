@@ -22,29 +22,11 @@ func NewGrafanaAdapter() *GrafanaAdapter {
 	}
 }
 
-// GrafanaPayload represents the webhook payload from Grafana
-// Supports both legacy alerting and Grafana Alerting (unified alerting)
+// GrafanaPayload represents the webhook payload from Grafana unified alerting
 type GrafanaPayload struct {
-	// Unified Alerting format
 	Receiver string         `json:"receiver"`
 	Status   string         `json:"status"`
 	Alerts   []GrafanaAlert `json:"alerts"`
-
-	// Legacy alerting format
-	RuleName  string `json:"ruleName"`
-	State     string `json:"state"`
-	Message   string `json:"message"`
-	RuleURL   string `json:"ruleUrl"`
-	RuleID    int    `json:"ruleId"`
-	Title     string `json:"title"`
-	OrgID     int    `json:"orgId"`
-	DashboardID int  `json:"dashboardId"`
-	PanelID   int    `json:"panelId"`
-	EvalMatches []struct {
-		Value  float64           `json:"value"`
-		Metric string            `json:"metric"`
-		Tags   map[string]string `json:"tags"`
-	} `json:"evalMatches"`
 }
 
 // GrafanaAlert represents a single alert in unified alerting
@@ -84,21 +66,12 @@ func (a *GrafanaAdapter) ParsePayload(body []byte, instance *database.AlertSourc
 		return nil, fmt.Errorf("failed to parse grafana payload: %w", err)
 	}
 
-	// Get field mappings
+	// Get field mappings (use instance override or defaults)
 	mappings := alerts.MergeMappings(a.GetDefaultMappings(), instance.FieldMappings)
 
 	var normalized []alerts.NormalizedAlert
-
-	// Check if this is unified alerting (has alerts array) or legacy
-	if len(payload.Alerts) > 0 {
-		// Unified Alerting format
-		for _, alert := range payload.Alerts {
-			n := a.parseUnifiedAlert(alert, mappings)
-			normalized = append(normalized, n)
-		}
-	} else {
-		// Legacy alerting format
-		n := a.parseLegacyAlert(payload, mappings)
+	for _, alert := range payload.Alerts {
+		n := a.parseUnifiedAlert(alert, mappings)
 		normalized = append(normalized, n)
 	}
 
@@ -112,17 +85,8 @@ func (a *GrafanaAdapter) parseUnifiedAlert(alert GrafanaAlert, mappings database
 		status = database.AlertStatusResolved
 	}
 
-	// Get alert name from labels
-	alertName := alert.Labels["alertname"]
-	if alertName == "" {
-		alertName = "Grafana Alert"
-	}
-
-	// Get severity from labels
-	severity := alerts.NormalizeSeverity(alert.Labels["severity"], alerts.DefaultSeverityMapping)
-
-	// Build raw payload
-	rawPayload := map[string]interface{}{
+	// Convert alert to map for field extraction
+	alertMap := map[string]interface{}{
 		"status":       alert.Status,
 		"labels":       alert.Labels,
 		"annotations":  alert.Annotations,
@@ -132,110 +96,61 @@ func (a *GrafanaAdapter) parseUnifiedAlert(alert GrafanaAlert, mappings database
 		"generatorURL": alert.GeneratorURL,
 	}
 
+	// Extract fields using mappings
+	alertName := alerts.ExtractString(alertMap, getMapping(mappings, "alert_name"))
+	if alertName == "" {
+		alertName = alert.Labels["alertname"]
+	}
+	if alertName == "" {
+		alertName = "Grafana Alert"
+	}
+
+	severityStr := alerts.ExtractString(alertMap, getMapping(mappings, "severity"))
+	if severityStr == "" {
+		severityStr = alert.Labels["severity"]
+	}
+	severity := alerts.NormalizeSeverity(severityStr, alerts.DefaultSeverityMapping)
+
+	targetHost := alerts.ExtractString(alertMap, getMapping(mappings, "target_host"))
+	if targetHost == "" {
+		targetHost = alert.Labels["instance"]
+	}
+
+	sourceAlertID := alerts.ExtractString(alertMap, getMapping(mappings, "source_alert_id"))
+	if sourceAlertID == "" {
+		sourceAlertID = alert.Fingerprint
+	}
+
+	runbookURL := alerts.ExtractString(alertMap, getMapping(mappings, "runbook_url"))
+	if runbookURL == "" {
+		runbookURL = alert.Annotations["runbook_url"]
+	}
+
 	return alerts.NormalizedAlert{
 		AlertName:         alertName,
 		Severity:          severity,
 		Status:            status,
 		Summary:           alert.Annotations["summary"],
 		Description:       alert.Annotations["description"],
-		TargetHost:        alert.Labels["instance"],
+		TargetHost:        targetHost,
 		TargetService:     alert.Labels["job"],
 		TargetLabels:      alert.Labels,
-		RunbookURL:        alert.Annotations["runbook_url"],
-		SourceAlertID:     alert.Fingerprint,
+		RunbookURL:        runbookURL,
+		SourceAlertID:     sourceAlertID,
 		SourceFingerprint: alert.Fingerprint,
-		RawPayload:        rawPayload,
+		RawPayload:        alertMap,
 	}
 }
 
-func (a *GrafanaAdapter) parseLegacyAlert(payload GrafanaPayload, mappings database.JSONB) alerts.NormalizedAlert {
-	// Map state to status
-	status := database.AlertStatusFiring
-	state := strings.ToLower(payload.State)
-	if state == "ok" || state == "no_data" || state == "paused" {
-		status = database.AlertStatusResolved
-	}
-
-	// Map state to severity
-	severity := a.mapStateToSeverity(payload.State)
-
-	// Extract target host from evalMatches
-	var targetHost string
-	var metricValue string
-	targetLabels := make(map[string]string)
-
-	if len(payload.EvalMatches) > 0 {
-		match := payload.EvalMatches[0]
-		metricValue = fmt.Sprintf("%v", match.Value)
-		if instance, ok := match.Tags["instance"]; ok {
-			targetHost = instance
-		}
-		for k, v := range match.Tags {
-			targetLabels[k] = v
-		}
-	}
-
-	// Build raw payload
-	rawPayload := map[string]interface{}{
-		"ruleName":    payload.RuleName,
-		"state":       payload.State,
-		"message":     payload.Message,
-		"ruleUrl":     payload.RuleURL,
-		"ruleId":      payload.RuleID,
-		"title":       payload.Title,
-		"orgId":       payload.OrgID,
-		"dashboardId": payload.DashboardID,
-		"panelId":     payload.PanelID,
-		"evalMatches": payload.EvalMatches,
-	}
-
-	alertName := payload.RuleName
-	if alertName == "" {
-		alertName = payload.Title
-	}
-
-	return alerts.NormalizedAlert{
-		AlertName:         alertName,
-		Severity:          severity,
-		Status:            status,
-		Summary:           payload.Message,
-		Description:       payload.Message,
-		TargetHost:        targetHost,
-		TargetService:     "",
-		TargetLabels:      targetLabels,
-		MetricValue:       metricValue,
-		RunbookURL:        payload.RuleURL,
-		SourceAlertID:     fmt.Sprintf("%d", payload.RuleID),
-		SourceFingerprint: fmt.Sprintf("%d-%d-%d", payload.OrgID, payload.DashboardID, payload.RuleID),
-		RawPayload:        rawPayload,
-	}
-}
-
-// mapStateToSeverity maps Grafana state to normalized severity
-func (a *GrafanaAdapter) mapStateToSeverity(state string) database.AlertSeverity {
-	switch strings.ToLower(state) {
-	case "alerting":
-		return database.AlertSeverityCritical
-	case "pending":
-		return database.AlertSeverityWarning
-	case "no_data":
-		return database.AlertSeverityInfo
-	case "ok", "paused":
-		return database.AlertSeverityInfo
-	default:
-		return database.AlertSeverityWarning
-	}
-}
-
-// GetDefaultMappings returns the default field mappings for Grafana
+// GetDefaultMappings returns the default field mappings for Grafana unified alerting
 func (a *GrafanaAdapter) GetDefaultMappings() database.JSONB {
 	return database.JSONB{
-		"alert_name":      "ruleName",
-		"severity":        "state",
-		"status":          "state",
-		"summary":         "message",
-		"target_host":     "evalMatches.0.tags.instance",
-		"runbook_url":     "ruleUrl",
-		"source_alert_id": "ruleId",
+		"alert_name":      "labels.alertname",
+		"severity":        "labels.severity",
+		"status":          "status",
+		"summary":         "annotations.summary",
+		"target_host":     "labels.instance",
+		"runbook_url":     "annotations.runbook_url",
+		"source_alert_id": "fingerprint",
 	}
 }

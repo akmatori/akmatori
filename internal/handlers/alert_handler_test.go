@@ -14,7 +14,7 @@ import (
 
 // TestAlertHandler_HandleWebhook_MethodValidation tests HTTP method validation
 func TestAlertHandler_HandleWebhook_MethodValidation(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	tests := []struct {
 		method         string
@@ -44,7 +44,7 @@ func TestAlertHandler_HandleWebhook_MethodValidation(t *testing.T) {
 
 // TestAlertHandler_HandleWebhook_PathExtraction tests UUID extraction from path
 func TestAlertHandler_HandleWebhook_PathExtraction(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	// Only test cases that don't require alertService (empty UUID check)
 	tests := []struct {
@@ -76,7 +76,7 @@ func TestAlertHandler_HandleWebhook_PathExtraction(t *testing.T) {
 
 // TestAlertHandler_HandleWebhook_EmptyUUIDMessage tests error message for empty UUID
 func TestAlertHandler_HandleWebhook_EmptyUUIDMessage(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/webhook/alert/", strings.NewReader("{}"))
 	w := httptest.NewRecorder()
@@ -95,7 +95,7 @@ func TestAlertHandler_HandleWebhook_EmptyUUIDMessage(t *testing.T) {
 
 // TestAlertHandler_BuildInvestigationPrompt tests prompt building
 func TestAlertHandler_BuildInvestigationPrompt(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	tests := []struct {
 		name           string
@@ -218,7 +218,7 @@ func TestAlertHandler_BuildInvestigationPrompt(t *testing.T) {
 
 // TestAlertHandler_GetBaseURL tests base URL retrieval
 func TestAlertHandler_GetBaseURL(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -252,137 +252,6 @@ func TestAlertHandler_GetBaseURL(t *testing.T) {
 			result := h.getBaseURL()
 			if result != tt.expected {
 				t.Errorf("getBaseURL() = %q, want %q", result, tt.expected)
-			}
-		})
-	}
-}
-
-// TestAlertHandler_FormatAggregationFooter tests footer formatting
-func TestAlertHandler_FormatAggregationFooter(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
-
-	tests := []struct {
-		name         string
-		incidentUUID string
-		alertCount   int
-		envBaseURL   string
-		wantContains []string
-	}{
-		{
-			name:         "single alert",
-			incidentUUID: "test-123",
-			alertCount:   1,
-			wantContains: []string{"1 alert aggregated", "View incident", "test-123"},
-		},
-		{
-			name:         "multiple alerts",
-			incidentUUID: "test-456",
-			alertCount:   5,
-			wantContains: []string{"5 alerts aggregated", "View incident"},
-		},
-		{
-			name:         "zero alerts",
-			incidentUUID: "test-789",
-			alertCount:   0,
-			wantContains: []string{"0 alerts aggregated"},
-		},
-		{
-			name:         "with custom base URL",
-			incidentUUID: "uuid-abc",
-			alertCount:   3,
-			envBaseURL:   "https://my.akmatori.io",
-			wantContains: []string{"https://my.akmatori.io/incidents/uuid-abc"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.envBaseURL != "" {
-				t.Setenv("AKMATORI_BASE_URL", tt.envBaseURL)
-			}
-
-			result := h.formatAggregationFooter(tt.incidentUUID, tt.alertCount)
-
-			for _, want := range tt.wantContains {
-				if !strings.Contains(result, want) {
-					t.Errorf("formatAggregationFooter() = %q, want to contain %q", result, want)
-				}
-			}
-
-			// Should always contain separator line
-			if !strings.Contains(result, "━") {
-				t.Error("formatAggregationFooter() should contain separator line")
-			}
-		})
-	}
-}
-
-// TestConvertLabels_EdgeCases tests label conversion edge cases
-func TestConvertLabels_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  map[string]string
-		verify func(map[string]interface{}) bool
-	}{
-		{
-			name:  "nil map",
-			input: nil,
-			verify: func(r map[string]interface{}) bool {
-				return r != nil && len(r) == 0
-			},
-		},
-		{
-			name:  "empty map",
-			input: map[string]string{},
-			verify: func(r map[string]interface{}) bool {
-				return len(r) == 0
-			},
-		},
-		{
-			name: "special characters in keys",
-			input: map[string]string{
-				"key.with.dots":    "value1",
-				"key-with-dashes":  "value2",
-				"key_with_underscores": "value3",
-			},
-			verify: func(r map[string]interface{}) bool {
-				return r["key.with.dots"] == "value1" &&
-					r["key-with-dashes"] == "value2" &&
-					r["key_with_underscores"] == "value3"
-			},
-		},
-		{
-			name: "unicode values",
-			input: map[string]string{
-				"message": "Alerte: température élevée 🔥",
-			},
-			verify: func(r map[string]interface{}) bool {
-				return r["message"] == "Alerte: température élevée 🔥"
-			},
-		},
-		{
-			name: "large number of labels",
-			input: func() map[string]string {
-				m := make(map[string]string)
-				for i := 0; i < 100; i++ {
-					m[string(rune('a'+i%26))+string(rune('0'+i/26))] = "value"
-				}
-				return m
-			}(),
-			verify: func(r map[string]interface{}) bool {
-				return len(r) == 100
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := convertLabels(tt.input)
-			if result == nil {
-				t.Fatal("convertLabels returned nil")
-			}
-			if !tt.verify(result) {
-				t.Errorf("convertLabels(%v) verification failed, got %v", tt.input, result)
 			}
 		})
 	}
@@ -523,7 +392,7 @@ func TestTruncateLogForSlack_Comprehensive(t *testing.T) {
 
 // TestAlertHandler_WithTestHelpers demonstrates using testhelpers
 func TestAlertHandler_WithTestHelpers(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	// Using HTTPTestContext for cleaner test setup - test method not allowed
 	ctx := testhelpers.NewHTTPTestContext(t, http.MethodGet, "/webhook/alert/test-uuid", nil)
@@ -539,7 +408,7 @@ func TestAlertHandler_WithTestHelpers(t *testing.T) {
 
 // TestAlertHandler_MockAdapter tests using mock adapter
 func TestAlertHandler_MockAdapter(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	// Create mock adapter using testhelpers
 	mockAdapter := testhelpers.NewMockAlertAdapter("test-source")

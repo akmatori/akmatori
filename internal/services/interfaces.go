@@ -128,16 +128,3 @@ type MCPServerManager interface {
 	ListMCPServers() ([]database.MCPServerConfig, error)
 }
 
-// AggregationManager defines the interface for incident aggregation/correlation.
-type AggregationManager interface {
-	GetOpenIncidents() ([]database.Incident, error)
-	GetOpenIncidentsForCorrelation() ([]database.Incident, error)
-	GetSettings() (*database.AggregationSettings, error)
-	UpdateSettings(settings *database.AggregationSettings) error
-	GetIncidentAlerts(incidentID uint) ([]database.IncidentAlert, error)
-	GetIncidentByUUID(uuid string) (*database.Incident, error)
-	AttachAlertToIncident(incidentID uint, alert *database.IncidentAlert) error
-	CreateIncidentWithAlert(incident *database.Incident, alert *database.IncidentAlert) error
-	RecordMerge(sourceID, targetID uint, confidence float64, reason, mergedBy string) error
-	BuildCorrelatorInput(incomingAlert AlertContext) (*CorrelatorInput, error)
-}

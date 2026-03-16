@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/akmatori/akmatori/internal/api"
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/services"
 	slackutil "github.com/akmatori/akmatori/internal/slack"
@@ -16,7 +15,7 @@ type APIHandler struct {
 	toolService          services.ToolManager
 	contextService       services.ContextManager
 	alertService         services.AlertManager
-	codexExecutor        *executor.Executor
+	agentExecutor        *executor.Executor
 	agentWSHandler       *AgentWSHandler
 	slackManager         *slackutil.Manager
 	runbookService       services.RunbookManager
@@ -28,13 +27,13 @@ type APIHandler struct {
 }
 
 // NewAPIHandler creates a new API handler
-func NewAPIHandler(skillService services.SkillIncidentManager, toolService services.ToolManager, contextService services.ContextManager, alertService services.AlertManager, codexExecutor *executor.Executor, agentWSHandler *AgentWSHandler, slackManager *slackutil.Manager, runbookService services.RunbookManager, httpConnectorService services.HTTPConnectorManager, mcpServerService services.MCPServerManager) *APIHandler {
+func NewAPIHandler(skillService services.SkillIncidentManager, toolService services.ToolManager, contextService services.ContextManager, alertService services.AlertManager, agentExecutor *executor.Executor, agentWSHandler *AgentWSHandler, slackManager *slackutil.Manager, runbookService services.RunbookManager, httpConnectorService services.HTTPConnectorManager, mcpServerService services.MCPServerManager) *APIHandler {
 	return &APIHandler{
 		skillService:         skillService,
 		toolService:          toolService,
 		contextService:       contextService,
 		alertService:         alertService,
-		codexExecutor:        codexExecutor,
+		agentExecutor:        agentExecutor,
 		agentWSHandler:       agentWSHandler,
 		slackManager:         slackManager,
 		runbookService:       runbookService,
@@ -84,12 +83,6 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/incidents", h.handleIncidents)
 	mux.HandleFunc("/api/incidents/", h.handleIncidentByID)
 
-	// Incident alerts management
-	mux.HandleFunc("GET /api/incidents/{uuid}/alerts", h.handleGetIncidentAlerts)
-	mux.HandleFunc("POST /api/incidents/{uuid}/alerts", h.handleAttachAlert)
-	mux.HandleFunc("DELETE /api/incidents/{uuid}/alerts/{alertId}", h.handleDetachAlert)
-	mux.HandleFunc("POST /api/incidents/{uuid}/merge", h.handleMergeIncident)
-
 	// Slack settings
 	mux.HandleFunc("/api/settings/slack", h.handleSlackSettings)
 
@@ -101,10 +94,6 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 
 	// Proxy settings
 	mux.HandleFunc("/api/settings/proxy", h.handleProxySettings)
-
-	// Aggregation settings
-	mux.HandleFunc("GET /api/settings/aggregation", h.handleGetAggregationSettings)
-	mux.HandleFunc("PUT /api/settings/aggregation", h.handleUpdateAggregationSettings)
 
 	// Context files
 	mux.HandleFunc("/api/context", h.handleContext)
@@ -160,6 +149,3 @@ func containsString(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
 
-// CreateIncidentRequest is kept for backward compatibility with tests.
-// New code should use api.CreateIncidentRequest.
-type CreateIncidentRequest = api.CreateIncidentRequest

@@ -13,7 +13,6 @@ const (
 	IncidentStatusPending   IncidentStatus = "pending"
 	IncidentStatusRunning   IncidentStatus = "running"
 	IncidentStatusDiagnosed IncidentStatus = "diagnosed"
-	IncidentStatusObserving IncidentStatus = "observing"
 	IncidentStatusCompleted IncidentStatus = "completed"
 	IncidentStatusFailed    IncidentStatus = "failed"
 )
@@ -27,9 +26,9 @@ type Incident struct {
 	Title           string         `gorm:"type:varchar(255)" json:"title"`   // LLM-generated title summarizing the incident
 	Status          IncidentStatus `gorm:"type:varchar(50);not null;default:'pending'" json:"status"`
 	Context         JSONB          `gorm:"type:jsonb" json:"context"`       // Event context (message, alert details, etc.)
-	SessionID       string         `gorm:"index" json:"session_id"`         // Codex session ID
+	SessionID       string         `gorm:"index" json:"session_id"`         // Agent session ID
 	WorkingDir      string         `json:"working_dir"`                     // Path to incident working directory
-	FullLog         string         `gorm:"type:text" json:"full_log"`       // Complete Codex output log (reasoning, commands, etc.)
+	FullLog         string         `gorm:"type:text" json:"full_log"`       // Complete agent output log (reasoning, tool calls, etc.)
 	Response        string         `gorm:"type:text" json:"response"`       // Final response/output to user
 	TokensUsed      int            `json:"tokens_used"`                     // Total tokens used (input + output)
 	ExecutionTimeMs int64          `json:"execution_time_ms"`               // Execution time in milliseconds
@@ -37,12 +36,6 @@ type Incident struct {
 	CompletedAt     *time.Time     `json:"completed_at,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
-
-	// Aggregation fields
-	AlertCount               int        `gorm:"default:1" json:"alert_count"`                // Number of alerts aggregated into this incident
-	LastAlertAt              *time.Time `json:"last_alert_at"`                               // Timestamp of when the last alert was attached
-	ObservingStartedAt       *time.Time `json:"observing_started_at"`                        // When the incident entered the "observing" state
-	ObservingDurationMinutes int        `gorm:"default:30" json:"observing_duration_minutes"` // How long to wait in observing state before closing
 
 	// Slack context fields (for thread replies to source messages)
 	SlackChannelID string `gorm:"column:slack_channel_id" json:"slack_channel_id"` // Slack channel ID where alert originated

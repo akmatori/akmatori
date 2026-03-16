@@ -87,7 +87,6 @@ make verify           # go vet + all tests (pre-commit)
 | `internal/middleware` | 78.9% | ✅ |
 | `internal/testhelpers` | 74.8% | ✅ |
 | `internal/output` | 68.4% | ✅ |
-| `internal/jobs` | 58.1% | ✅ |
 | `internal/alerts/extraction` | 36.0% | ⚠️ |
 | `internal/slack` | 32.3% | ⚠️ |
 | `internal/services` | 28.8% | ⚠️ |
@@ -222,7 +221,6 @@ fmt.Println(parsed.CleanOutput)  // Structured blocks stripped
 | ToolService | `tool_service.go` | Tool instances, SSH key management |
 | ContextService | `context_service.go` | Context file management |
 | AlertService | `alert_service.go` | Alert processing and normalization |
-| AggregationService | `aggregation_service.go` | Incident correlation settings |
 | TitleGenerator | `title_generator.go` | AI-powered incident title generation |
 | RunbookService | `runbook_service.go` | Runbook CRUD and file sync |
 
@@ -239,7 +237,6 @@ Handlers depend on interfaces for testability:
 | `AlertManager` | Alert source operations |
 | `RunbookManager` | Runbook CRUD + file sync |
 | `ContextManager` | Context file management |
-| `AggregationManager` | Incident correlation |
 | `HTTPConnectorManager` | Declarative HTTP connector CRUD |
 
 ## Runbook System (`internal/services/runbook_service.go`)
@@ -258,13 +255,6 @@ Runbooks (SOPs) guide AI agent investigations. Stored in PostgreSQL, synced as m
 **File Sync**: On any CRUD operation, `SyncRunbookFiles()` writes all runbooks as `{id}-{slug}.md` and removes stale files.
 
 **Agent Access**: Incident manager prompt instructs agent to check `/akmatori/runbooks/` for relevant procedures before starting investigation.
-
-## Jobs (`internal/jobs/`)
-
-| Job | Purpose |
-|-----|---------|
-| RecorrelationJob | Periodically checks open incidents for potential merges |
-| ObservingMonitor | Auto-resolves incidents after quiet periods |
 
 ## API Package (`internal/api/`)
 
