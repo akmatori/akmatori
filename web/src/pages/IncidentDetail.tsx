@@ -171,9 +171,6 @@ export default function IncidentDetail() {
                 )}
               </>
             )}
-            {incident.alert_count > 0 && (
-              <span>{incident.alert_count} alert{incident.alert_count !== 1 ? 's' : ''}</span>
-            )}
           </div>
         </div>
 

@@ -3,8 +3,6 @@ import type {
   ToolType,
   ToolInstance,
   Incident,
-  IncidentAlert,
-  AggregationSettings,
   SlackSettings,
   SlackSettingsUpdate,
   LLMSettings,
@@ -261,40 +259,6 @@ export const generalSettingsApi = {
     fetchApi<GeneralSettings>('/api/settings/general', {
       method: 'PUT',
       body: JSON.stringify(settings),
-    }),
-};
-
-// Aggregation Settings API
-export const aggregationSettingsApi = {
-  get: () => fetchApi<AggregationSettings>('/api/settings/aggregation'),
-
-  update: (settings: Partial<AggregationSettings>) =>
-    fetchApi<AggregationSettings>('/api/settings/aggregation', {
-      method: 'PUT',
-      body: JSON.stringify(settings),
-    }),
-};
-
-// Incident Alerts API (for alert aggregation)
-export const incidentAlertsApi = {
-  list: (incidentUuid: string) =>
-    fetchApi<IncidentAlert[]>(`/api/incidents/${incidentUuid}/alerts`),
-
-  attach: (incidentUuid: string, alert: Partial<IncidentAlert>) =>
-    fetchApi<IncidentAlert>(`/api/incidents/${incidentUuid}/alerts`, {
-      method: 'POST',
-      body: JSON.stringify(alert),
-    }),
-
-  detach: (incidentUuid: string, alertId: number) =>
-    fetchApi<void>(`/api/incidents/${incidentUuid}/alerts/${alertId}`, {
-      method: 'DELETE',
-    }),
-
-  merge: (targetUuid: string, sourceUuid: string) =>
-    fetchApi<void>(`/api/incidents/${targetUuid}/merge`, {
-      method: 'POST',
-      body: JSON.stringify({ source_incident_uuid: sourceUuid }),
     }),
 };
 
