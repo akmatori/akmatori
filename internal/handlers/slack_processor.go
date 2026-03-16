@@ -143,8 +143,8 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		lastUpdate = time.Now()
 		lastProgressLog = progressLog
 
-		// Truncate for Slack's 4000-byte limit (leave room for wrapper text)
-		truncatedLog := truncateLogForSlack(progressLog, 3900)
+		// Truncate for Slack's text limit (leave room for wrapper text)
+		truncatedLog := truncateLogForSlack(progressLog, slackMaxTextBytes-50)
 
 		_, _, _, err := h.client.UpdateMessage(
 			channel,
@@ -250,7 +250,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			contentOnly, footer := buildSlackFooter(response, incidentUUID)
 			parsed := output.Parse(contentOnly)
 			formatted := output.FormatForSlack(parsed)
-			finalResponse = truncateWithFooter(formatted, footer, 3900)
+			finalResponse = truncateWithFooter(formatted, footer, slackMaxTextBytes)
 		} else {
 			finalResponse = "✅ Task completed (no output)"
 		}

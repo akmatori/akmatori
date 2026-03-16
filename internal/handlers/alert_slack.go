@@ -310,7 +310,7 @@ func truncateWithFooter(content, footer string, maxBytes int) string {
 	return content + footer
 }
 
-// truncateForSlack truncates a message to fit within Slack's 4000-byte text limit.
+// truncateForSlack truncates a message to fit within Slack's text limit.
 // Reserves space for a truncation notice.
 func truncateForSlack(message string, maxBytes int) string {
 	if len(message) <= maxBytes {

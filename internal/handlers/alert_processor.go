@@ -503,7 +503,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 			contentOnly, footer := buildSlackFooter(response, incidentUUID)
 			parsed := output.Parse(contentOnly)
 			formatted := output.FormatForSlack(parsed)
-			formattedResp = truncateWithFooter(formatted, footer, 3900)
+			formattedResp = truncateWithFooter(formatted, footer, slackMaxTextBytes)
 		} else {
 			formattedResp = "✅ Task completed (no output)"
 		}
@@ -578,7 +578,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 					lastSlackUpdate = time.Now()
 					progressLines := utils.GetLastNLines(strings.TrimSpace(lastStreamedLog), 15)
 					// Leave room for the wrapper text (~40 bytes for "🔍 *Investigating...*\n```\n...\n```")
-					progressLines = truncateLogForSlack(progressLines, 3900)
+					progressLines = truncateLogForSlack(progressLines, slackMaxTextBytes-50)
 					h.updateSlackThreadMessage(slackChannelID, progressMsgTS,
 						fmt.Sprintf("🔍 *Investigating...*\n```\n%s\n```", progressLines))
 				}
@@ -637,7 +637,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 			contentOnly, footer := buildSlackFooter(response, incidentUUID)
 			parsed := output.Parse(contentOnly)
 			formatted := output.FormatForSlack(parsed)
-			formattedResponse = truncateWithFooter(formatted, footer, 3900)
+			formattedResponse = truncateWithFooter(formatted, footer, slackMaxTextBytes)
 		} else {
 			formattedResponse = "✅ Task completed (no output)"
 		}

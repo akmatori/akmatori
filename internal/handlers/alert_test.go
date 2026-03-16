@@ -253,7 +253,7 @@ func TestTruncateLogForSlack_EmptyLog(t *testing.T) {
 
 func TestTruncateForSlack_Short(t *testing.T) {
 	msg := "short message"
-	result := truncateForSlack(msg, 3900)
+	result := truncateForSlack(msg, slackMaxTextBytes)
 	if result != msg {
 		t.Errorf("short message should not be truncated")
 	}
@@ -261,9 +261,9 @@ func TestTruncateForSlack_Short(t *testing.T) {
 
 func TestTruncateForSlack_Long(t *testing.T) {
 	msg := strings.Repeat("Line of text here.\n", 300) // ~5700 bytes
-	result := truncateForSlack(msg, 3900)
-	if len(result) > 3900 {
-		t.Errorf("truncateForSlack() result is %d bytes, want <= 3900", len(result))
+	result := truncateForSlack(msg, slackMaxTextBytes)
+	if len(result) > slackMaxTextBytes {
+		t.Errorf("truncateForSlack() result is %d bytes, want <= %d", len(result), slackMaxTextBytes)
 	}
 	if !strings.Contains(result, "truncated") {
 		t.Errorf("truncated message should contain truncation notice")
@@ -272,12 +272,12 @@ func TestTruncateForSlack_Long(t *testing.T) {
 
 func TestTruncateForSlack_BreaksAtNewline(t *testing.T) {
 	// Create content that's just over the limit
-	msg := strings.Repeat("x", 3800) + "\nthis line should be cut\nmore"
-	result := truncateForSlack(msg, 3900)
+	msg := strings.Repeat("x", slackMaxTextBytes-100) + "\nthis line should be cut\nmore"
+	result := truncateForSlack(msg, slackMaxTextBytes)
 	// Should break at the newline, not mid-line
 	// Note: "this line should be cut" may or may not be included depending on
 	// where the truncation happens - either is acceptable as long as limit is respected
-	if len(result) > 3900 {
+	if len(result) > slackMaxTextBytes {
 		t.Errorf("result too long: %d", len(result))
 	}
 }
@@ -774,7 +774,7 @@ func TestBuildSlackFooter_FooterFormat(t *testing.T) {
 func TestTruncateWithFooter_NoTruncation(t *testing.T) {
 	content := "short content"
 	footer := "\n\n———\nmetrics\nlink"
-	result := truncateWithFooter(content, footer, 3900)
+	result := truncateWithFooter(content, footer, slackMaxTextBytes)
 
 	if result != content+footer {
 		t.Errorf("short content should not be truncated")
@@ -785,10 +785,10 @@ func TestTruncateWithFooter_TruncatesContent(t *testing.T) {
 	content := strings.Repeat("Line of text.\n", 300) // ~4500 bytes
 	footer := "\n\n———\n⏱️ Time: 5s\n<http://localhost:3000/incidents/x|View  reasoning log>"
 
-	result := truncateWithFooter(content, footer, 3900)
+	result := truncateWithFooter(content, footer, slackMaxTextBytes)
 
-	if len(result) > 3900 {
-		t.Errorf("result should be <= 3900 bytes, got %d", len(result))
+	if len(result) > slackMaxTextBytes {
+		t.Errorf("result should be <= %d bytes, got %d", slackMaxTextBytes, len(result))
 	}
 	if !strings.Contains(result, "View  reasoning log") {
 		t.Errorf("footer should always be present in result")

@@ -20,6 +20,13 @@ import (
 // to avoid hitting Slack API rate limits during live investigation streaming.
 const slackProgressInterval = 5 * time.Second
 
+// slackMaxTextBytes is the maximum byte size for Slack message text.
+// Slack's documented limit is 4000 characters, but chat.update rejects messages
+// well below that threshold (observed msg_too_long at ~3800 bytes). Using 3000
+// bytes provides a safe margin that accounts for multi-byte characters and any
+// Slack-internal overhead.
+const slackMaxTextBytes = 3000
+
 // AlertHandler handles webhook requests from multiple alert sources
 type AlertHandler struct {
 	config             *config.Config
