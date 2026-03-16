@@ -7,6 +7,20 @@ import (
 	"gorm.io/gorm"
 )
 
+// reservedToolNamespaces contains built-in tool namespaces that cannot be used
+// by user-defined HTTP connectors or MCP servers.
+var reservedToolNamespaces = []string{"ssh", "zabbix", "victoria_metrics"}
+
+// isReservedToolNamespace checks if a name conflicts with a built-in tool namespace.
+func isReservedToolNamespace(name string) bool {
+	for _, ns := range reservedToolNamespaces {
+		if name == ns {
+			return true
+		}
+	}
+	return false
+}
+
 // HTTPConnectorService manages HTTP connector CRUD operations
 type HTTPConnectorService struct {
 	db *gorm.DB
@@ -23,6 +37,11 @@ func NewHTTPConnectorService() *HTTPConnectorService {
 func (s *HTTPConnectorService) CreateHTTPConnector(connector *database.HTTPConnector) (*database.HTTPConnector, error) {
 	if err := connector.Validate(); err != nil {
 		return nil, fmt.Errorf("validation failed: %w", err)
+	}
+
+	// Check for conflicts with built-in tool namespaces
+	if isReservedToolNamespace(connector.ToolTypeName) {
+		return nil, fmt.Errorf("tool_type_name %q conflicts with a built-in tool namespace", connector.ToolTypeName)
 	}
 
 	// Check for duplicate tool_type_name
@@ -59,6 +78,10 @@ func (s *HTTPConnectorService) UpdateHTTPConnector(id uint, updates map[string]i
 	// Apply updates to a copy for validation
 	if v, ok := updates["tool_type_name"]; ok {
 		if name, ok := v.(string); ok {
+			// Check for conflicts with built-in tool namespaces
+			if isReservedToolNamespace(name) {
+				return nil, fmt.Errorf("tool_type_name %q conflicts with a built-in tool namespace", name)
+			}
 			// Check uniqueness if name changed
 			if name != connector.ToolTypeName {
 				var count int64

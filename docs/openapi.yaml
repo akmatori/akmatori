@@ -109,6 +109,9 @@ components:
           type: integer
         name:
           type: string
+        logical_name:
+          type: string
+          description: Human-readable logical name for tool routing (auto-derived from name if empty)
         settings:
           type: object
         enabled:
@@ -697,6 +700,9 @@ paths:
                   type: integer
                 name:
                   type: string
+                logical_name:
+                  type: string
+                  description: Optional logical name; auto-derived from name if empty
                 settings:
                   type: object
       responses:
@@ -739,6 +745,9 @@ paths:
               properties:
                 name:
                   type: string
+                logical_name:
+                  type: string
+                  description: Optional logical name; re-derived from name if empty
                 settings:
                   type: object
                 enabled:

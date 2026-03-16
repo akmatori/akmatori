@@ -78,6 +78,8 @@ func (h *APIHandler) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 				api.RespondError(w, http.StatusConflict, err.Error())
 			} else if containsString(err.Error(), "validation failed") {
 				api.RespondError(w, http.StatusBadRequest, err.Error())
+			} else if containsString(err.Error(), "conflicts with") {
+				api.RespondError(w, http.StatusConflict, err.Error())
 			} else {
 				api.RespondError(w, http.StatusInternalServerError, "Failed to create MCP server")
 			}
@@ -154,6 +156,8 @@ func (h *APIHandler) handleMCPServerByID(w http.ResponseWriter, r *http.Request)
 				api.RespondError(w, http.StatusConflict, err.Error())
 			} else if containsString(err.Error(), "validation failed") {
 				api.RespondError(w, http.StatusBadRequest, err.Error())
+			} else if containsString(err.Error(), "conflicts with") {
+				api.RespondError(w, http.StatusConflict, err.Error())
 			} else {
 				api.RespondError(w, http.StatusInternalServerError, "Failed to update MCP server")
 			}

@@ -48,9 +48,9 @@ type SkillIncidentManager interface {
 
 // ToolManager defines the interface for tool instance CRUD and SSH key management.
 type ToolManager interface {
-	CreateToolInstance(toolTypeID uint, name string, settings database.JSONB) (*database.ToolInstance, error)
+	CreateToolInstance(toolTypeID uint, name string, logicalName string, settings database.JSONB) (*database.ToolInstance, error)
 	GetToolInstance(id uint) (*database.ToolInstance, error)
-	UpdateToolInstance(id uint, name string, settings database.JSONB, enabled bool) error
+	UpdateToolInstance(id uint, name string, logicalName string, settings database.JSONB, enabled bool) error
 	DeleteToolInstance(id uint) error
 	ListToolTypes() ([]database.ToolType, error)
 	ListToolInstances() ([]database.ToolInstance, error)

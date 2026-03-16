@@ -43,9 +43,15 @@ func (h *APIHandler) handleTools(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		instance, err := h.toolService.CreateToolInstance(req.ToolTypeID, req.Name, req.Settings)
+		instance, err := h.toolService.CreateToolInstance(req.ToolTypeID, req.Name, req.LogicalName, req.Settings)
 		if err != nil {
-			api.RespondError(w, http.StatusInternalServerError, "Failed to create tool instance")
+			if containsString(err.Error(), "validation failed") {
+				api.RespondError(w, http.StatusBadRequest, err.Error())
+			} else if containsString(err.Error(), "already exists") || containsString(err.Error(), "UNIQUE constraint") || containsString(err.Error(), "duplicate key") {
+				api.RespondError(w, http.StatusConflict, err.Error())
+			} else {
+				api.RespondError(w, http.StatusInternalServerError, "Failed to create tool instance")
+			}
 			return
 		}
 
@@ -95,8 +101,16 @@ func (h *APIHandler) handleToolByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := h.toolService.UpdateToolInstance(uint(id), req.Name, req.Settings, req.Enabled); err != nil {
-			api.RespondError(w, http.StatusInternalServerError, "Failed to update tool")
+		if err := h.toolService.UpdateToolInstance(uint(id), req.Name, req.LogicalName, req.Settings, req.Enabled); err != nil {
+			if containsString(err.Error(), "validation failed") {
+				api.RespondError(w, http.StatusBadRequest, err.Error())
+			} else if containsString(err.Error(), "not found") || containsString(err.Error(), "record not found") {
+				api.RespondError(w, http.StatusNotFound, err.Error())
+			} else if containsString(err.Error(), "already exists") || containsString(err.Error(), "UNIQUE constraint") || containsString(err.Error(), "duplicate key") {
+				api.RespondError(w, http.StatusConflict, err.Error())
+			} else {
+				api.RespondError(w, http.StatusInternalServerError, "Failed to update tool")
+			}
 			return
 		}
 

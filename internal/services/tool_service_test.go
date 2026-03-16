@@ -1,6 +1,7 @@
 package services
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -64,7 +65,7 @@ func TestCreateToolInstance_SetsLogicalName(t *testing.T) {
 	}
 
 	svc := &ToolService{db: db}
-	instance, err := svc.CreateToolInstance(toolType.ID, "Production SSH", nil)
+	instance, err := svc.CreateToolInstance(toolType.ID, "Production SSH", "", nil)
 	if err != nil {
 		t.Fatalf("CreateToolInstance failed: %v", err)
 	}
@@ -84,13 +85,13 @@ func TestCreateToolInstance_LogicalNameUnique(t *testing.T) {
 
 	svc := &ToolService{db: db}
 
-	_, err := svc.CreateToolInstance(toolType.ID, "Production SSH", nil)
+	_, err := svc.CreateToolInstance(toolType.ID, "Production SSH", "", nil)
 	if err != nil {
 		t.Fatalf("first CreateToolInstance failed: %v", err)
 	}
 
 	// Second instance with same name should fail due to unique constraint on Name
-	_, err = svc.CreateToolInstance(toolType.ID, "Production SSH", nil)
+	_, err = svc.CreateToolInstance(toolType.ID, "Production SSH", "", nil)
 	if err == nil {
 		t.Error("expected error for duplicate logical name, got nil")
 	}
@@ -105,7 +106,7 @@ func TestUpdateToolInstance_UpdatesLogicalName(t *testing.T) {
 	}
 
 	svc := &ToolService{db: db}
-	instance, err := svc.CreateToolInstance(toolType.ID, "Old Name", nil)
+	instance, err := svc.CreateToolInstance(toolType.ID, "Old Name", "", nil)
 	if err != nil {
 		t.Fatalf("CreateToolInstance failed: %v", err)
 	}
@@ -114,7 +115,7 @@ func TestUpdateToolInstance_UpdatesLogicalName(t *testing.T) {
 		t.Fatalf("expected logical_name 'old-name', got %q", instance.LogicalName)
 	}
 
-	err = svc.UpdateToolInstance(instance.ID, "New Name", nil, true)
+	err = svc.UpdateToolInstance(instance.ID, "New Name", "", nil, true)
 	if err != nil {
 		t.Fatalf("UpdateToolInstance failed: %v", err)
 	}
@@ -138,7 +139,7 @@ func TestLogicalName_ExposedInListResponse(t *testing.T) {
 	}
 
 	svc := &ToolService{db: db}
-	_, err := svc.CreateToolInstance(toolType.ID, "My Server", nil)
+	_, err := svc.CreateToolInstance(toolType.ID, "My Server", "", nil)
 	if err != nil {
 		t.Fatalf("CreateToolInstance failed: %v", err)
 	}
@@ -154,5 +155,91 @@ func TestLogicalName_ExposedInListResponse(t *testing.T) {
 
 	if instances[0].LogicalName != "my-server" {
 		t.Errorf("expected logical_name 'my-server', got %q", instances[0].LogicalName)
+	}
+}
+
+func TestCreateToolInstance_HonorsProvidedLogicalName(t *testing.T) {
+	db := setupToolTestDB(t)
+
+	toolType := database.ToolType{Name: "ssh", Description: "SSH tool"}
+	if err := db.Create(&toolType).Error; err != nil {
+		t.Fatalf("failed to create tool type: %v", err)
+	}
+
+	svc := &ToolService{db: db}
+	instance, err := svc.CreateToolInstance(toolType.ID, "Production SSH Server", "prod-ssh", nil)
+	if err != nil {
+		t.Fatalf("CreateToolInstance failed: %v", err)
+	}
+
+	// User-supplied logical_name is sanitized via SlugifyLogicalName, preserving valid slugs.
+	if instance.LogicalName != "prod-ssh" {
+		t.Errorf("expected logical_name 'prod-ssh', got %q", instance.LogicalName)
+	}
+}
+
+func TestCreateToolInstance_SanitizesUnsafeLogicalName(t *testing.T) {
+	db := setupToolTestDB(t)
+
+	toolType := database.ToolType{Name: "ssh", Description: "SSH tool"}
+	if err := db.Create(&toolType).Error; err != nil {
+		t.Fatalf("failed to create tool type: %v", err)
+	}
+
+	svc := &ToolService{db: db}
+	// A logical name with quotes, backticks, and newlines must be sanitized.
+	instance, err := svc.CreateToolInstance(toolType.ID, "Test Server", "evil\"`name\nnewline", nil)
+	if err != nil {
+		t.Fatalf("CreateToolInstance failed: %v", err)
+	}
+
+	// SlugifyLogicalName strips non-alphanumeric chars, so the result should be safe.
+	if instance.LogicalName != "evil-name-newline" {
+		t.Errorf("expected sanitized logical_name 'evil-name-newline', got %q", instance.LogicalName)
+	}
+}
+
+func TestCreateToolInstance_InvalidToolTypeID(t *testing.T) {
+	setupToolTestDB(t)
+
+	svc := &ToolService{db: database.GetDB()}
+
+	// Use a tool type ID that doesn't exist
+	_, err := svc.CreateToolInstance(99999, "Test Instance", "", nil)
+	if err == nil {
+		t.Error("expected error for invalid tool_type_id, got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "validation failed") {
+		t.Errorf("expected 'validation failed' error, got: %v", err)
+	}
+}
+
+func TestUpdateToolInstance_HonorsProvidedLogicalName(t *testing.T) {
+	db := setupToolTestDB(t)
+
+	toolType := database.ToolType{Name: "zabbix", Description: "Zabbix"}
+	if err := db.Create(&toolType).Error; err != nil {
+		t.Fatalf("failed to create tool type: %v", err)
+	}
+
+	svc := &ToolService{db: db}
+	instance, err := svc.CreateToolInstance(toolType.ID, "Old Name", "", nil)
+	if err != nil {
+		t.Fatalf("CreateToolInstance failed: %v", err)
+	}
+
+	err = svc.UpdateToolInstance(instance.ID, "New Name", "custom-logical", nil, true)
+	if err != nil {
+		t.Fatalf("UpdateToolInstance failed: %v", err)
+	}
+
+	updated, err := svc.GetToolInstance(instance.ID)
+	if err != nil {
+		t.Fatalf("GetToolInstance failed: %v", err)
+	}
+
+	// User-supplied logical_name is sanitized via SlugifyLogicalName, preserving valid slugs.
+	if updated.LogicalName != "custom-logical" {
+		t.Errorf("expected logical_name 'custom-logical', got %q", updated.LogicalName)
 	}
 }

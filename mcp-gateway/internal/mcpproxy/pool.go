@@ -309,7 +309,40 @@ func (p *MCPConnectionPool) CallTool(ctx context.Context, instanceID uint, toolN
 	p.mu.RUnlock()
 
 	if !exists {
-		return nil, fmt.Errorf("no connection for instance %d", instanceID)
+		if !hasConfig {
+			return nil, fmt.Errorf("no connection for instance %d", instanceID)
+		}
+		// Connection was cleaned up (e.g., by idle timeout); re-establish it.
+		reconn, err := p.GetOrConnect(ctx, instanceID, config)
+		if err != nil {
+			// Transient connect failures should be retried with backoff
+			// rather than failing immediately.
+			p.logger.Warn("idle reconnect failed, attempting retries",
+				"instance_id", instanceID,
+				"tool", toolName,
+				"error", err,
+			)
+			return p.retryWithBackoff(ctx, instanceID, nil, config, toolName, args, err)
+		}
+		reconn.mu.Lock()
+		reconn.lastUsed = time.Now()
+		reconn.mu.Unlock()
+		result, callErr := reconn.callTool(ctx, toolName, args)
+		if callErr == nil {
+			return result, nil
+		}
+		// The first call on the fresh connection failed. Run the same
+		// transient-retry loop that the normal path uses so the caller
+		// gets the documented reconnect retries instead of a bare error.
+		if !isTransientError(callErr) {
+			return nil, callErr
+		}
+		p.logger.Warn("transient error calling tool after idle reconnect, attempting retries",
+			"instance_id", instanceID,
+			"tool", toolName,
+			"error", callErr,
+		)
+		return p.retryWithBackoff(ctx, instanceID, reconn, config, toolName, args, callErr)
 	}
 
 	conn.mu.Lock()
@@ -336,7 +369,13 @@ func (p *MCPConnectionPool) CallTool(ctx context.Context, instanceID uint, toolN
 		"error", err,
 	)
 
+	return p.retryWithBackoff(ctx, instanceID, conn, config, toolName, args, err)
+}
+
+// retryWithBackoff attempts to reconnect and retry a tool call with exponential backoff.
+func (p *MCPConnectionPool) retryWithBackoff(ctx context.Context, instanceID uint, conn *MCPConnection, config MCPServerConfig, toolName string, args map[string]interface{}, originalErr error) (*mcp.CallToolResult, error) {
 	backoff := p.baseBackoff
+	lastErr := originalErr
 	for attempt := 1; attempt <= p.maxReconnectAttempts; attempt++ {
 		select {
 		case <-ctx.Done():
@@ -345,13 +384,16 @@ func (p *MCPConnectionPool) CallTool(ctx context.Context, instanceID uint, toolN
 		}
 
 		// Remove old connection and reconnect
-		p.mu.Lock()
-		delete(p.connections, instanceID)
-		p.mu.Unlock()
-		conn.close()
+		if conn != nil {
+			p.mu.Lock()
+			delete(p.connections, instanceID)
+			p.mu.Unlock()
+			conn.close()
+		}
 
 		newConn, connErr := p.GetOrConnect(ctx, instanceID, config)
 		if connErr != nil {
+			lastErr = connErr
 			p.logger.Warn("reconnect attempt failed",
 				"instance_id", instanceID,
 				"attempt", attempt,
@@ -371,15 +413,17 @@ func (p *MCPConnectionPool) CallTool(ctx context.Context, instanceID uint, toolN
 			return result, nil
 		}
 
+		lastErr = retryErr
 		p.logger.Warn("tool call failed after reconnect",
 			"instance_id", instanceID,
 			"attempt", attempt,
 			"error", retryErr,
 		)
+		conn = newConn
 		backoff = nextBackoff(backoff, p.maxBackoff)
 	}
 
-	return nil, fmt.Errorf("tool call failed after %d reconnect attempts: %w", p.maxReconnectAttempts, err)
+	return nil, fmt.Errorf("tool call failed after %d reconnect attempts: %w", p.maxReconnectAttempts, lastErr)
 }
 
 // isTransientError checks whether an error is likely transient (network, connection closed).

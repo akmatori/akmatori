@@ -62,8 +62,24 @@ export class ScriptExecutor {
    * The script is wrapped in an async IIFE so `await` works at the top level.
    * The return value of the last expression (or explicit `return`) becomes the output.
    */
-  async execute(code: string): Promise<ScriptResult> {
+  async execute(code: string, signal?: AbortSignal): Promise<ScriptResult> {
     const logs: string[] = [];
+
+    // Create an internal AbortController that combines the external signal and
+    // the execution timeout.  Any of the three triggers (external abort, timeout,
+    // or normal completion) will settle the promise exactly once.
+    const controller = new AbortController();
+    const internalSignal = controller.signal;
+
+    // If the caller's signal is already aborted, reject immediately without
+    // building a vm context or running any script code.
+    if (signal?.aborted) {
+      throw new Error("Script execution aborted");
+    }
+
+    // Forward future aborts from the caller.
+    const onExternalAbort = () => controller.abort(signal!.reason);
+    signal?.addEventListener("abort", onExternalAbort, { once: true });
 
     // Build scoped fs object that restricts paths to workDir
     const scopedFs = this.createScopedFs();
@@ -76,19 +92,30 @@ export class ScriptExecutor {
 
     // Gateway functions — injected as __private refs, wrapped inside the
     // context later to prevent direct .constructor access on outer-realm closures.
+    // Each checks the internal abort signal before making an RPC so that a
+    // timed-out or externally aborted script cannot start new requests.
     context.__gw_call = async (
       toolName: string,
       args: Record<string, unknown> = {},
       instance?: string,
     ) => {
-      const result = await this.client.call(toolName, args, instance);
+      if (internalSignal.aborted) {
+        throw new Error("Script aborted");
+      }
+      const result = await this.client.call(toolName, args, instance, internalSignal);
       return result.data;
     };
     context.__gw_search = async (query: string, toolType?: string) => {
-      return await this.client.searchTools(query, toolType);
+      if (internalSignal.aborted) {
+        throw new Error("Script aborted");
+      }
+      return await this.client.searchTools(query, toolType, internalSignal);
     };
     context.__gw_detail = async (toolName: string) => {
-      return await this.client.getToolDetail(toolName);
+      if (internalSignal.aborted) {
+        throw new Error("Script aborted");
+      }
+      return await this.client.getToolDetail(toolName, internalSignal);
     };
 
     // Console capture
@@ -166,6 +193,7 @@ export class ScriptExecutor {
         filename: "execute_script",
       });
     } catch (err) {
+      signal?.removeEventListener("abort", onExternalAbort);
       throw new Error(`Script compilation error: ${(err as Error).message}`);
     }
 
@@ -175,28 +203,62 @@ export class ScriptExecutor {
       // For async code we use AbortController + setTimeout for the timeout.
       const result = script.runInContext(context);
 
-      // result is the Promise from the async IIFE
-      let timer: ReturnType<typeof setTimeout>;
+      // result is the Promise from the async IIFE.
+      // Race it against a promise that rejects when the internal signal fires
+      // (either from the timeout or from an external caller abort).
+      const timeoutId = setTimeout(
+        () => controller.abort(new Error("Script execution timed out")),
+        this.timeoutMs,
+      );
+
       try {
         returnValue = await Promise.race([
           result,
-          new Promise((_, reject) => {
-            timer = setTimeout(
-              () => reject(new Error("Script execution timed out")),
-              this.timeoutMs,
-            );
+          new Promise<never>((_, reject) => {
+            const rejectWithReason = () => {
+              const reason = internalSignal.reason;
+              const msg =
+                reason instanceof Error
+                  ? reason.message
+                  : String(reason ?? "");
+              if (msg.includes("timed out")) {
+                reject(new Error("Script execution timed out"));
+              } else {
+                reject(new Error("Script aborted"));
+              }
+            };
+            if (internalSignal.aborted) {
+              rejectWithReason();
+              return;
+            }
+            internalSignal.addEventListener("abort", rejectWithReason, {
+              once: true,
+            });
           }),
         ]);
       } finally {
-        clearTimeout(timer!);
+        clearTimeout(timeoutId);
+        controller.abort(); // no-op if already aborted; ensures cleanup
+        signal?.removeEventListener("abort", onExternalAbort);
       }
     } catch (err) {
+      // Clean up listeners if an error escapes the inner try block above
+      // (e.g. script compilation threw before the timeout was registered).
+      signal?.removeEventListener("abort", onExternalAbort);
+
       const message = (err as Error).message ?? String(err);
       if (
         message.includes("Script execution timed out") ||
         message.includes("timed out")
       ) {
         throw new Error("Script execution timed out");
+      }
+      if (
+        message.includes("Script aborted") ||
+        message.includes("operation was aborted") ||
+        (err as { name?: string }).name === "AbortError"
+      ) {
+        throw new Error("Script execution aborted");
       }
       throw new Error(`Script execution error: ${message}`);
     }

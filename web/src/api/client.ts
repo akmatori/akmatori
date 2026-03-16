@@ -160,13 +160,13 @@ export const toolsApi = {
 
   get: (id: number) => fetchApi<ToolInstance>(`/api/tools/${id}`),
 
-  create: (tool: { tool_type_id: number; name: string; settings: Record<string, any> }) =>
+  create: (tool: { tool_type_id: number; name: string; logical_name?: string; settings: Record<string, any> }) =>
     fetchApi<ToolInstance>('/api/tools', {
       method: 'POST',
       body: JSON.stringify(tool),
     }),
 
-  update: (id: number, tool: { name: string; settings: Record<string, any>; enabled: boolean }) =>
+  update: (id: number, tool: { name: string; logical_name?: string; settings: Record<string, any>; enabled: boolean }) =>
     fetchApi<ToolInstance>(`/api/tools/${id}`, {
       method: 'PUT',
       body: JSON.stringify(tool),
