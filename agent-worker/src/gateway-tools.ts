@@ -57,7 +57,7 @@ export type GetToolDetailInput = Static<typeof GetToolDetailParams>;
 // ---------------------------------------------------------------------------
 
 export const ExecuteScriptParams = Type.Object({
-  code: Type.String({ description: "JavaScript code to execute. Has access to gateway_call(), search_tools(), get_tool_detail(), console.log(), and a scoped fs object. Top-level await is supported." }),
+  code: Type.String({ description: "JavaScript code to execute in an isolated sandbox. Pre-injected globals: gateway_call(), search_tools(), get_tool_detail(), console.log(), and fs (synchronous: readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync). Top-level await works for gateway functions. Do NOT use require() or import()." }),
 });
 
 export type ExecuteScriptInput = Static<typeof ExecuteScriptParams>;
@@ -147,7 +147,7 @@ export function createSearchToolsTool(ctx: GatewayToolContext) {
       "Returns a list of matching tools with their descriptions and available instances. " +
       "Use this to discover what tools are available before calling them.",
     promptGuidelines: [
-      "Use search_tools to discover available infrastructure tools when you're unsure what's available.",
+      "Call list_tool_types first to see available tool types, then use search_tools to find specific tools within a type.",
       "Example: search_tools({ query: \"ssh\" }) — finds all SSH-related tools",
       "Example: search_tools({ query: \"metrics\", tool_type: \"victoria_metrics\" }) — finds VictoriaMetrics tools",
       "After finding a tool, use get_tool_detail to see its full parameter schema before calling it.",
@@ -232,6 +232,52 @@ export function createGetToolDetailTool(ctx: GatewayToolContext) {
 }
 
 // ---------------------------------------------------------------------------
+// list_tool_types tool factory
+// ---------------------------------------------------------------------------
+
+/**
+ * Create the `list_tool_types` tool definition for registration with pi-mono.
+ *
+ * Returns the list of available tool types for the current incident,
+ * allowing the agent to see what's available before searching.
+ */
+export function createListToolTypesTool(ctx: GatewayToolContext) {
+  return {
+    name: "list_tool_types",
+    label: "List Tool Types",
+    description:
+      "List all available tool types for this incident. Call this first to see what infrastructure " +
+      "tools are available before using search_tools.",
+    promptGuidelines: [
+      "Call list_tool_types first to see what tool types are available (e.g. ssh, zabbix, victoria_metrics).",
+      "Then use search_tools with a specific type to find individual tools within that type.",
+    ],
+    parameters: Type.Object({}),
+    execute: async (
+      _toolCallId: string,
+      _params: Record<string, never>,
+      signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+    ) => {
+      try {
+        const result = await ctx.client.listToolTypes(signal);
+        const text = JSON.stringify(result, null, 2);
+        return {
+          content: [{ type: "text" as const, text }],
+          details: {},
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text" as const, text: `Error: ${message}` }],
+          details: {},
+        };
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // execute_script tool factory
 // ---------------------------------------------------------------------------
 
@@ -256,15 +302,17 @@ export function createExecuteScriptTool(ctx: ExecuteScriptToolContext) {
     name: "execute_script",
     label: "Execute Script",
     description:
-      "Execute a JavaScript script in an isolated runtime with built-in gateway functions. " +
+      "Execute JavaScript code in an isolated sandbox with built-in gateway functions and synchronous file I/O. " +
       "Use this for batch operations, complex data processing, or orchestrating multiple tool calls. " +
-      "The script has access to gateway_call(), search_tools(), get_tool_detail(), console.log(), and a scoped fs object.",
+      "IMPORTANT: require() and import() are NOT available. Use the pre-injected globals: gateway_call(), search_tools(), get_tool_detail(), console.log(), and the synchronous fs object (readFileSync, writeFileSync, etc.).",
     promptGuidelines: [
       "Use execute_script for batch operations that require multiple gateway_call invocations or data processing.",
-      "Top-level await is supported. The script runs in an async context.",
-      "Example: execute_script({ code: `const hosts = await gateway_call(\"zabbix.get_hosts\", {}); return hosts;` })",
-      "Example: execute_script({ code: `const results = []; for (const h of [\"web-01\",\"web-02\"]) { results.push(await gateway_call(\"ssh.execute_command\", {command: \"uptime\", servers: [h]}, \"prod-ssh\")); } return results;` })",
-      "The script has scoped fs access (readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync) within the incident workspace.",
+      "Top-level await is supported for gateway_call, search_tools, and get_tool_detail only.",
+      "IMPORTANT: Do NOT use require() or import() — they are not available. All globals (fs, gateway_call, etc.) are pre-injected.",
+      "IMPORTANT: fs is synchronous only — use fs.readFileSync(path), NOT fs.readFile() or require('fs').",
+      "Available fs methods: readFileSync(path), writeFileSync(path, data), existsSync(path), readdirSync(path), mkdirSync(path, {recursive: true})",
+      "Example: const data = JSON.parse(fs.readFileSync('tool_outputs/result.json'));",
+      "Example: const hosts = await gateway_call(\"zabbix.get_hosts\", {}); return hosts;",
       "Scripts time out after 5 minutes.",
     ],
     parameters: ExecuteScriptParams,

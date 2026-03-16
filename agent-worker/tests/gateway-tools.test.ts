@@ -3,6 +3,7 @@ import {
   createGatewayCallTool,
   createSearchToolsTool,
   createGetToolDetailTool,
+  createListToolTypesTool,
   createExecuteScriptTool,
   GatewayCallParams,
   SearchToolsParams,
@@ -32,6 +33,7 @@ function createMockClient(overrides?: Partial<GatewayClient>): GatewayClient {
       params: {},
       instances: [],
     })),
+    listToolTypes: vi.fn(async () => ({ types: ["ssh", "zabbix"] })),
     ...overrides,
   } as unknown as GatewayClient;
 }
@@ -491,6 +493,91 @@ describe("GetToolDetailParams schema", () => {
 });
 
 // ---------------------------------------------------------------------------
+// list_tool_types tool
+// ---------------------------------------------------------------------------
+
+describe("createListToolTypesTool", () => {
+  let mockClient: GatewayClient;
+
+  beforeEach(() => {
+    mockClient = createMockClient();
+  });
+
+  describe("tool definition", () => {
+    it("should have correct name and description", () => {
+      const tool = createListToolTypesTool({ client: mockClient });
+
+      expect(tool.name).toBe("list_tool_types");
+      expect(tool.label).toBe("List Tool Types");
+      expect(tool.description).toContain("available tool types");
+    });
+
+    it("should have empty parameter schema", () => {
+      const tool = createListToolTypesTool({ client: mockClient });
+
+      expect(tool.parameters).toBeDefined();
+      expect(Object.keys(tool.parameters.properties ?? {})).toHaveLength(0);
+    });
+
+    it("should have promptGuidelines", () => {
+      const tool = createListToolTypesTool({ client: mockClient });
+
+      expect(tool.promptGuidelines).toBeDefined();
+      expect(Array.isArray(tool.promptGuidelines)).toBe(true);
+      expect(tool.promptGuidelines!.some((g: string) => g.includes("list_tool_types"))).toBe(true);
+    });
+  });
+
+  describe("execute handler", () => {
+    it("should call GatewayClient.listToolTypes", async () => {
+      const tool = createListToolTypesTool({ client: mockClient });
+
+      await tool.execute("tc-lt1", {} as Record<string, never>, undefined, undefined);
+
+      expect(mockClient.listToolTypes).toHaveBeenCalledWith(undefined);
+    });
+
+    it("should return JSON-stringified types", async () => {
+      const client = createMockClient({
+        listToolTypes: vi.fn(async () => ({ types: ["ssh", "zabbix", "victoria_metrics"] })) as any,
+      });
+      const tool = createListToolTypesTool({ client });
+
+      const result = await tool.execute(
+        "tc-lt2",
+        {} as Record<string, never>,
+        undefined,
+        undefined,
+      );
+
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].type).toBe("text");
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.types).toEqual(["ssh", "zabbix", "victoria_metrics"]);
+    });
+
+    it("should handle errors gracefully", async () => {
+      const client = createMockClient({
+        listToolTypes: vi.fn(async () => {
+          throw new Error("MCP Error -32000: Gateway unavailable");
+        }) as any,
+      });
+      const tool = createListToolTypesTool({ client });
+
+      const result = await tool.execute(
+        "tc-lt3",
+        {} as Record<string, never>,
+        undefined,
+        undefined,
+      );
+
+      expect(result.content[0].text).toContain("Error:");
+      expect(result.content[0].text).toContain("Gateway unavailable");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // execute_script tool
 // ---------------------------------------------------------------------------
 
@@ -513,7 +600,7 @@ describe("createExecuteScriptTool", () => {
 
       expect(tool.name).toBe("execute_script");
       expect(tool.label).toBe("Execute Script");
-      expect(tool.description).toContain("isolated runtime");
+      expect(tool.description).toContain("isolated sandbox");
     });
 
     it("should have correct parameter schema", () => {

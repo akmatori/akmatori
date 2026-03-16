@@ -198,6 +198,11 @@ type GetToolDetailResult struct {
 	Instances   []ToolDetailInstance  `json:"instances,omitempty"`
 }
 
+// ListToolTypesResult represents tools/list_types response
+type ListToolTypesResult struct {
+	Types []string `json:"types"`
+}
+
 // NewErrorResponse creates an error JSON-RPC response
 func NewErrorResponse(id interface{}, code int, message string, data interface{}) Response {
 	return Response{

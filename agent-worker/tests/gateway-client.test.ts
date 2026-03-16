@@ -376,6 +376,43 @@ describe("GatewayClient", () => {
   });
 
   // -----------------------------------------------------------------------
+  // listToolTypes()
+  // -----------------------------------------------------------------------
+
+  describe("listToolTypes()", () => {
+    it("sends list_types request and returns types", async () => {
+      const typesResult = { types: ["ssh", "zabbix", "victoria_metrics"] };
+      const mock = await createMockGateway(() => jsonRpcSuccess(typesResult));
+
+      try {
+        const client = new GatewayClient({ gatewayUrl: mock.url, incidentId: "inc-1" });
+        const result = await client.listToolTypes();
+
+        const body = JSON.parse(mock.requests[0].body);
+        expect(body.method).toBe("tools/list_types");
+        expect(body.params).toEqual({});
+
+        expect(result.types).toEqual(["ssh", "zabbix", "victoria_metrics"]);
+      } finally {
+        mock.server.close();
+      }
+    });
+
+    it("returns empty types array", async () => {
+      const mock = await createMockGateway(() => jsonRpcSuccess({ types: [] }));
+
+      try {
+        const client = new GatewayClient({ gatewayUrl: mock.url, incidentId: "inc-1" });
+        const result = await client.listToolTypes();
+
+        expect(result.types).toEqual([]);
+      } finally {
+        mock.server.close();
+      }
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Error handling
   // -----------------------------------------------------------------------
 

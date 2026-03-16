@@ -445,18 +445,19 @@ describe("AgentRunner", () => {
       );
     });
 
-    it("should pass gateway_call, search_tools, get_tool_detail, and execute_script as customTools", async () => {
+    it("should pass gateway_call, search_tools, get_tool_detail, list_tool_types, and execute_script as customTools", async () => {
       const params = makeExecuteParams({ incidentId: "inc-tools" });
       await runner.execute(params);
 
       const opts = createAgentSessionCalls[0];
       expect(opts.customTools).toBeDefined();
-      expect(opts.customTools).toHaveLength(4);
+      expect(opts.customTools).toHaveLength(5);
 
       const toolNames = opts.customTools.map((t: any) => t.name);
       expect(toolNames).toContain("gateway_call");
       expect(toolNames).toContain("search_tools");
       expect(toolNames).toContain("get_tool_detail");
+      expect(toolNames).toContain("list_tool_types");
       expect(toolNames).toContain("execute_script");
 
       for (const tool of opts.customTools) {
