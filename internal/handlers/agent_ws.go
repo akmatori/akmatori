@@ -26,9 +26,9 @@ const (
 	AgentMessageTypeProxyConfigUpdate AgentMessageType = "proxy_config_update"
 
 	// Messages from Agent Worker to API
-	AgentMessageTypeAgentOutput    AgentMessageType = "codex_output"
-	AgentMessageTypeAgentCompleted AgentMessageType = "codex_completed"
-	AgentMessageTypeAgentError     AgentMessageType = "codex_error"
+	AgentMessageTypeAgentOutput    AgentMessageType = "agent_output"
+	AgentMessageTypeAgentCompleted AgentMessageType = "agent_completed"
+	AgentMessageTypeAgentError     AgentMessageType = "agent_error"
 	AgentMessageTypeHeartbeat      AgentMessageType = "heartbeat"
 	AgentMessageTypeStatus         AgentMessageType = "status"
 )
@@ -60,9 +60,9 @@ type AgentMessage struct {
 
 	// LLM settings (sent with new_incident)
 	Provider      string `json:"provider,omitempty"`
-	APIKey        string `json:"openai_api_key,omitempty"` // Keep wire format for backward compat with agent-worker
+	APIKey        string `json:"api_key,omitempty"`
 	Model         string `json:"model,omitempty"`
-	ThinkingLevel string `json:"reasoning_effort,omitempty"` // Keep wire format for backward compat
+	ThinkingLevel string `json:"thinking_level,omitempty"`
 	BaseURL       string `json:"base_url,omitempty"`
 
 	// Proxy configuration with toggles (sent with new_incident)
@@ -116,9 +116,8 @@ func NewAgentWSHandler() *AgentWSHandler {
 }
 
 // SetupRoutes configures WebSocket routes
-// Keep endpoint as /ws/codex for now to avoid config churn
 func (h *AgentWSHandler) SetupRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/ws/codex", h.HandleWebSocket)
+	mux.HandleFunc("/ws/agent", h.HandleWebSocket)
 }
 
 // HandleWebSocket handles the WebSocket connection from the agent worker

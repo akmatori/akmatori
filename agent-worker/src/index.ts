@@ -4,7 +4,7 @@
  * Reads configuration from environment variables, creates the Orchestrator,
  * connects to the API WebSocket with retry logic, and handles graceful shutdown.
  *
- * Ports the Go codex-worker main.go entry point to Node.js.
+ * Ports the Go agent-worker main.go entry point to Node.js.
  */
 
 import { Orchestrator, type OrchestratorConfig } from "./orchestrator.js";
@@ -13,7 +13,7 @@ import { Orchestrator, type OrchestratorConfig } from "./orchestrator.js";
 // Configuration from environment
 // ---------------------------------------------------------------------------
 
-const API_WS_URL = process.env.API_WS_URL ?? "ws://akmatori-api:3000/ws/codex";
+const API_WS_URL = process.env.API_WS_URL ?? "ws://akmatori-api:3000/ws/agent";
 const MCP_GATEWAY_URL = process.env.MCP_GATEWAY_URL ?? "http://mcp-gateway:8080";
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR ?? "/workspaces";
 const SKILLS_DIR = process.env.SKILLS_DIR ?? "/akmatori/skills";

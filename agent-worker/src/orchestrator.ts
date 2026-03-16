@@ -1,8 +1,7 @@
 /**
  * Orchestrator - message router between the API WebSocket and the AgentRunner.
  *
- * Ports the Go codex-worker orchestrator (codex-worker/internal/orchestrator/orchestrator.go)
- * to TypeScript. Routes incoming WebSocket messages to the appropriate AgentRunner
+ * Routes incoming WebSocket messages to the appropriate AgentRunner
  * methods and streams output/completion/errors back through the WebSocket client.
  */
 
@@ -21,7 +20,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 export interface OrchestratorConfig {
-  /** WebSocket URL of the API server (e.g. "ws://akmatori-api:3000/ws/codex") */
+  /** WebSocket URL of the API server (e.g. "ws://akmatori-api:3000/ws/agent") */
   apiWsUrl: string;
   /** MCP Gateway base URL (e.g. "http://mcp-gateway:8080") */
   mcpGatewayUrl: string;
@@ -315,27 +314,26 @@ export class Orchestrator {
   /**
    * Extract LLM settings from a WebSocket message.
    *
-   * The Go API sends provider, openai_api_key (wire compat name), model,
-   * reasoning_effort, and base_url fields.
+   * The Go API sends provider, api_key, model, thinking_level, and base_url fields.
    */
   private extractLLMSettings(msg: WebSocketMessage): LLMSettings | null {
-    const apiKey = msg.openai_api_key;
+    const apiKey = msg.api_key;
     if (!apiKey) return null;
 
     return {
       provider: (msg.provider as LLMSettings["provider"]) ?? "openai",
       api_key: apiKey,
       model: msg.model ?? "gpt-5.4",
-      thinking_level: this.mapReasoningEffort(msg.reasoning_effort),
+      thinking_level: this.mapThinkingLevel(msg.thinking_level),
       base_url: msg.base_url,
     };
   }
 
   /**
-   * Map Go's reasoning effort string to our ThinkingLevel.
+   * Map thinking level string to our ThinkingLevel type.
    */
-  private mapReasoningEffort(effort: string | undefined): LLMSettings["thinking_level"] {
-    switch (effort) {
+  private mapThinkingLevel(level: string | undefined): LLMSettings["thinking_level"] {
+    switch (level) {
       case "off":
         return "off";
       case "minimal":

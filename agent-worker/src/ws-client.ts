@@ -1,9 +1,8 @@
 /**
  * WebSocket client for agent worker.
  *
- * Ports the Go codex-worker WebSocket client (codex-worker/internal/ws/client.go)
- * to TypeScript using the `ws` library. Provides connection management,
- * heartbeat, and typed message helpers.
+ * Provides connection management, heartbeat, and typed message helpers
+ * for communicating with the Go API server over WebSocket.
  */
 
 import WebSocket from "ws";
@@ -125,7 +124,7 @@ export class WebSocketClient {
   /** Send streaming output for an incident. */
   sendOutput(incidentId: string, output: string): void {
     this.send({
-      type: "codex_output",
+      type: "agent_output",
       incident_id: incidentId,
       output,
     });
@@ -140,7 +139,7 @@ export class WebSocketClient {
     executionTimeMs: number,
   ): void {
     this.send({
-      type: "codex_completed",
+      type: "agent_completed",
       incident_id: incidentId,
       session_id: sessionId,
       output: response,
@@ -152,7 +151,7 @@ export class WebSocketClient {
   /** Send error notification for an incident. */
   sendError(incidentId: string, errorMsg: string): void {
     this.send({
-      type: "codex_error",
+      type: "agent_error",
       incident_id: incidentId,
       error: errorMsg,
     });

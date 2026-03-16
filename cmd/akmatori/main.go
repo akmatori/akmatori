@@ -88,7 +88,7 @@ func main() {
 			"/auth/login",
 			"/auth/setup",
 			"/auth/setup-status",
-			"/ws/codex",         // WebSocket endpoint for Codex worker (internal)
+			"/ws/agent",         // WebSocket endpoint for Codex worker (internal)
 			"/api/docs",         // Swagger UI (public)
 			"/api/openapi.yaml", // OpenAPI spec (public)
 		},
@@ -304,7 +304,7 @@ func main() {
 	slog.Info("alert webhook endpoint", "url", fmt.Sprintf("http://localhost:%d/webhook/alert/{instance_uuid}", cfg.HTTPPort))
 	slog.Info("health check endpoint", "url", fmt.Sprintf("http://localhost:%d/health", cfg.HTTPPort))
 	slog.Info("API base URL", "url", fmt.Sprintf("http://localhost:%d/api", cfg.HTTPPort))
-	slog.Info("agent WebSocket endpoint", "url", fmt.Sprintf("ws://localhost:%d/ws/codex", cfg.HTTPPort))
+	slog.Info("agent WebSocket endpoint", "url", fmt.Sprintf("ws://localhost:%d/ws/agent", cfg.HTTPPort))
 
 	// Create a context for the Slack manager
 	ctx, ctxCancel := context.WithCancel(context.Background())

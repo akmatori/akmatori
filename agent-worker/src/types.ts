@@ -2,15 +2,12 @@
  * Shared types for the agent worker, mirroring the Go WebSocket message protocol.
  *
  * These types match the JSON wire format used by the Go API server
- * (internal/handlers/codex_ws.go CodexMessage struct). Field names use
+ * (internal/handlers/agent_ws.go AgentMessage struct). Field names use
  * snake_case to match Go JSON tags exactly.
- *
- * Note: ChatGPT subscription and device auth fields are intentionally omitted -
- * this worker uses multi-provider LLM settings via pi-mono SDK.
  */
 
 // ---------------------------------------------------------------------------
-// Message types (matches Go CodexMessageType constants)
+// Message types (matches Go AgentMessageType constants)
 // ---------------------------------------------------------------------------
 
 /** Messages from API to agent worker */
@@ -22,9 +19,9 @@ export type APIToWorkerMessageType =
 
 /** Messages from agent worker to API */
 export type WorkerToAPIMessageType =
-  | "codex_output"
-  | "codex_completed"
-  | "codex_error"
+  | "agent_output"
+  | "agent_completed"
+  | "agent_error"
   | "heartbeat"
   | "status";
 
@@ -80,7 +77,7 @@ export interface ToolAllowlistEntry {
 }
 
 // ---------------------------------------------------------------------------
-// WebSocket message (matches Go CodexMessage struct JSON wire format)
+// WebSocket message (matches Go AgentMessage struct JSON wire format)
 // ---------------------------------------------------------------------------
 
 /**
@@ -100,18 +97,16 @@ export interface WebSocketMessage {
   error?: string;
   data?: Record<string, unknown>;
 
-  // Execution metrics (sent with codex_completed)
+  // Execution metrics (sent with agent_completed)
   tokens_used?: number;
   execution_time_ms?: number;
 
   // LLM settings (sent with new_incident)
   provider?: string;
-  openai_api_key?: string;
+  api_key?: string;
   model?: string;
-  reasoning_effort?: string;
+  thinking_level?: string;
   base_url?: string;
-  proxy_url?: string;
-  no_proxy?: string;
 
   // Proxy configuration with toggles (sent with new_incident)
   proxy_config?: ProxyConfig;
@@ -124,7 +119,7 @@ export interface WebSocketMessage {
 }
 
 // ---------------------------------------------------------------------------
-// Execution result (matches Go codex-worker ExecuteResult)
+// Execution result (matches Go agent-worker ExecuteResult)
 // ---------------------------------------------------------------------------
 
 export interface ExecuteResult {

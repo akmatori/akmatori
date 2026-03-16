@@ -134,15 +134,15 @@ Remove the non-working alert aggregation/correlation system entirely and clean u
 - Modify: `agent-worker/tests/orchestrator.test.ts` (update `codex_completed` → `agent_completed` etc.)
 - Modify: `agent-worker/tests/types.test.ts` (update wire format expectations)
 
-- [ ] Rename message type constants in agent_ws.go
-- [ ] Rename `/ws/codex` endpoint to `/ws/agent` in agent_ws.go
-- [ ] Rename `openai_api_key` JSON tag to `api_key` in agent_ws.go
-- [ ] Update cmd/akmatori/main.go endpoint registration
-- [ ] Update agent-worker TypeScript types to match new message type strings
-- [ ] Update agent-worker WebSocket client URL
-- [ ] Update agent-worker orchestrator message type references
-- [ ] Update all agent-worker tests
-- [ ] Run `make test` and `make test-agent` - must pass before Task 8
+- [x] Rename message type constants in agent_ws.go
+- [x] Rename `/ws/codex` endpoint to `/ws/agent` in agent_ws.go
+- [x] Rename `openai_api_key` JSON tag to `api_key` in agent_ws.go
+- [x] Update cmd/akmatori/main.go endpoint registration
+- [x] Update agent-worker TypeScript types to match new message type strings
+- [x] Update agent-worker WebSocket client URL
+- [x] Update agent-worker orchestrator message type references
+- [x] Update all agent-worker tests
+- [x] Run `make test` and `make test-agent` - must pass before Task 8
 
 ### Task 8: Remove Legacy Codex Executor Naming
 

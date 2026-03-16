@@ -22,7 +22,7 @@ describe("MessageType constants", () => {
       "proxy_config_update",
     ];
     expect(types).toHaveLength(4);
-    // These values must match Go CodexMessageType constants exactly
+    // These values must match Go AgentMessageType constants exactly
     expect(types).toContain("new_incident");
     expect(types).toContain("continue_incident");
     expect(types).toContain("cancel_incident");
@@ -31,16 +31,16 @@ describe("MessageType constants", () => {
 
   it("worker-to-API message types match Go constants", () => {
     const types: WorkerToAPIMessageType[] = [
-      "codex_output",
-      "codex_completed",
-      "codex_error",
+      "agent_output",
+      "agent_completed",
+      "agent_error",
       "heartbeat",
       "status",
     ];
     expect(types).toHaveLength(5);
-    expect(types).toContain("codex_output");
-    expect(types).toContain("codex_completed");
-    expect(types).toContain("codex_error");
+    expect(types).toContain("agent_output");
+    expect(types).toContain("agent_completed");
+    expect(types).toContain("agent_error");
     expect(types).toContain("heartbeat");
     expect(types).toContain("status");
   });
@@ -52,9 +52,9 @@ describe("WebSocketMessage serialization", () => {
       type: "new_incident",
       incident_id: "inc-123",
       task: "Investigate high CPU on server-01",
-      openai_api_key: "sk-test-key",
+      api_key: "sk-test-key",
       model: "gpt-4o",
-      reasoning_effort: "medium",
+      thinking_level: "medium",
     };
 
     const json = serializeMessage(msg);
@@ -64,9 +64,9 @@ describe("WebSocketMessage serialization", () => {
     expect(parsed.type).toBe("new_incident");
     expect(parsed.incident_id).toBe("inc-123");
     expect(parsed.task).toBe("Investigate high CPU on server-01");
-    expect(parsed.openai_api_key).toBe("sk-test-key");
+    expect(parsed.api_key).toBe("sk-test-key");
     expect(parsed.model).toBe("gpt-4o");
-    expect(parsed.reasoning_effort).toBe("medium");
+    expect(parsed.thinking_level).toBe("medium");
 
     // Verify omitempty: fields not set should not be present
     expect(parsed).not.toHaveProperty("output");
@@ -77,9 +77,9 @@ describe("WebSocketMessage serialization", () => {
     expect(parsed).not.toHaveProperty("proxy_config");
   });
 
-  it("serializes a codex_output message matching Go JSON format", () => {
+  it("serializes a agent_output message matching Go JSON format", () => {
     const msg: WebSocketMessage = {
-      type: "codex_output",
+      type: "agent_output",
       incident_id: "inc-456",
       output: "Checking server metrics...\n",
     };
@@ -87,15 +87,15 @@ describe("WebSocketMessage serialization", () => {
     const json = serializeMessage(msg);
     const parsed = JSON.parse(json);
 
-    expect(parsed.type).toBe("codex_output");
+    expect(parsed.type).toBe("agent_output");
     expect(parsed.incident_id).toBe("inc-456");
     expect(parsed.output).toBe("Checking server metrics...\n");
     expect(Object.keys(parsed)).toHaveLength(3);
   });
 
-  it("serializes a codex_completed message with metrics", () => {
+  it("serializes a agent_completed message with metrics", () => {
     const msg: WebSocketMessage = {
-      type: "codex_completed",
+      type: "agent_completed",
       incident_id: "inc-789",
       session_id: "session-abc",
       output: "Final analysis: CPU spike caused by runaway process",
@@ -106,7 +106,7 @@ describe("WebSocketMessage serialization", () => {
     const json = serializeMessage(msg);
     const parsed = JSON.parse(json);
 
-    expect(parsed.type).toBe("codex_completed");
+    expect(parsed.type).toBe("agent_completed");
     expect(parsed.incident_id).toBe("inc-789");
     expect(parsed.session_id).toBe("session-abc");
     expect(parsed.output).toBe(
@@ -116,9 +116,9 @@ describe("WebSocketMessage serialization", () => {
     expect(parsed.execution_time_ms).toBe(45000);
   });
 
-  it("serializes a codex_error message", () => {
+  it("serializes a agent_error message", () => {
     const msg: WebSocketMessage = {
-      type: "codex_error",
+      type: "agent_error",
       incident_id: "inc-err",
       error: "Authentication failed: invalid API key",
     };
@@ -126,7 +126,7 @@ describe("WebSocketMessage serialization", () => {
     const json = serializeMessage(msg);
     const parsed = JSON.parse(json);
 
-    expect(parsed.type).toBe("codex_error");
+    expect(parsed.type).toBe("agent_error");
     expect(parsed.incident_id).toBe("inc-err");
     expect(parsed.error).toBe("Authentication failed: invalid API key");
   });
@@ -183,7 +183,7 @@ describe("WebSocketMessage serialization", () => {
 
   it("preserves zero and empty string values in serialized output", () => {
     const msg: WebSocketMessage = {
-      type: "codex_completed",
+      type: "agent_completed",
       incident_id: "inc-zero",
       tokens_used: 0,
       execution_time_ms: 0,
@@ -201,7 +201,7 @@ describe("WebSocketMessage serialization", () => {
     expect(parsed.output).toBe("");
     expect(parsed.error).toBe("");
     // type and incident_id should remain
-    expect(parsed.type).toBe("codex_completed");
+    expect(parsed.type).toBe("agent_completed");
     expect(parsed.incident_id).toBe("inc-zero");
   });
 });
@@ -213,9 +213,9 @@ describe("WebSocketMessage deserialization", () => {
       type: "new_incident",
       incident_id: "inc-from-go",
       task: "Investigate alert on db-01",
-      openai_api_key: "sk-from-go",
+      api_key: "sk-from-go",
       model: "o3",
-      reasoning_effort: "high",
+      thinking_level: "high",
       proxy_config: {
         url: "http://proxy:3128",
         no_proxy: "mcp-gateway",
@@ -230,9 +230,9 @@ describe("WebSocketMessage deserialization", () => {
     expect(msg.type).toBe("new_incident");
     expect(msg.incident_id).toBe("inc-from-go");
     expect(msg.task).toBe("Investigate alert on db-01");
-    expect(msg.openai_api_key).toBe("sk-from-go");
+    expect(msg.api_key).toBe("sk-from-go");
     expect(msg.model).toBe("o3");
-    expect(msg.reasoning_effort).toBe("high");
+    expect(msg.thinking_level).toBe("high");
     expect(msg.proxy_config?.url).toBe("http://proxy:3128");
     expect(msg.proxy_config?.openai_enabled).toBe(true);
   });
@@ -286,7 +286,7 @@ describe("WebSocketMessage deserialization", () => {
 
   it("round-trips through serialize -> deserialize", () => {
     const original: WebSocketMessage = {
-      type: "codex_completed",
+      type: "agent_completed",
       incident_id: "inc-rt",
       session_id: "sess-rt",
       output: "Investigation complete",
@@ -313,12 +313,12 @@ describe("createMessage helper", () => {
   });
 
   it("creates a message with type and fields", () => {
-    const msg = createMessage("codex_output", {
+    const msg = createMessage("agent_output", {
       incident_id: "inc-helper",
       output: "Processing...",
     });
 
-    expect(msg.type).toBe("codex_output");
+    expect(msg.type).toBe("agent_output");
     expect(msg.incident_id).toBe("inc-helper");
     expect(msg.output).toBe("Processing...");
   });
