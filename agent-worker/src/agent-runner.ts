@@ -44,13 +44,10 @@ import { createGatewayCallTool, createSearchToolsTool, createGetToolDetailTool, 
  * guidelines disappear from the prompt automatically.
  */
 const BASH_TOOL_GUIDELINES = `\
-- Use the gateway_call tool to invoke infrastructure tools (SSH, Zabbix, VictoriaMetrics, etc.). It communicates directly with the MCP Gateway and does not require bash.
+- Use the gateway_call tool to invoke tools. It communicates directly with the MCP Gateway and does not require bash.
 - For batch operations across multiple hosts or complex data processing, use the execute_script tool. It runs JavaScript with built-in gateway_call(), search_tools(), and get_tool_detail() functions.
 - Use search_tools to discover available tools, and get_tool_detail to see full parameter schemas.
-- IMPORTANT: Each skill's SKILL.md lists assigned tools with their logical names and the exact call forms available. Read the SKILL.md first, then call tools using only the forms shown there. Do NOT explore the filesystem to discover tools.
-- SSH: Most servers are in read-only mode — only diagnostic commands are allowed (cat, head, tail, grep, find, ls, ps, top, df, free, netstat, ss, uptime, vmstat, iostat, journalctl, dmesg, docker ps/logs, systemctl status, nproc, lscpu, etc.)
-- SSH: For CPU core count, use nproc or lscpu (not /proc/cpuinfo parsing). Use the servers parameter to target specific hosts.
-- Zabbix: Prefer get_items_batch over multiple get_items calls. Use hostids to scope queries. Severity: 0=Not classified, 1=Info, 2=Warning, 3=Average, 4=High, 5=Disaster. Use severity_min=3 to filter noise.`;
+- IMPORTANT: Each skill's SKILL.md lists assigned tools with their logical names and the exact call forms available. Read the SKILL.md first, then call tools using only the forms shown there. Do NOT explore the filesystem to discover tools.`;
 
 // ---------------------------------------------------------------------------
 // Types
