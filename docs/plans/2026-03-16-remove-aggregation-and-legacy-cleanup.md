@@ -164,12 +164,12 @@ Remove the non-working alert aggregation/correlation system entirely and clean u
   - Remove `migrateProxySettings()` no-op function
   - Remove LLM provider seeding upgrade path (keep fresh-DB seeding only)
 
-- [ ] Remove JWT secret file migration (lines 157-169 area)
-- [ ] Remove `backfillToolInstanceLogicalNames()` function
-- [ ] Remove `migrateProxySettings()` no-op function
-- [ ] Simplify `seedLLMProviders()` - remove upgrade-from-singleton logic, keep fresh seed only
-- [ ] Remove calls to deleted functions from `AutoMigrate()`
-- [ ] Run `make test` - must pass before Task 10
+- [x] Remove JWT secret file migration (lines 157-169 area)
+- [x] Remove `backfillToolInstanceLogicalNames()` function
+- [x] Remove `migrateProxySettings()` no-op function
+- [x] Simplify `seedLLMProviders()` - remove upgrade-from-singleton logic, keep fresh seed only
+- [x] Remove calls to deleted functions from `AutoMigrate()`
+- [x] Run `make test` - must pass before Task 10
 
 ### Task 10: Remove ModelConfigs Legacy Map & Type Alias
 

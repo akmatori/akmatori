@@ -3,7 +3,6 @@ package database
 import (
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
@@ -99,16 +98,6 @@ func AutoMigrate() error {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 
-	// Migrate proxy settings from OpenAI settings if they exist
-	if err := migrateProxySettings(DB); err != nil {
-		slog.Warn("proxy settings migration failed", "err", err)
-	}
-
-	// Backfill logical_name for existing tool instances that don't have one
-	if err := backfillToolInstanceLogicalNames(DB); err != nil {
-		slog.Warn("logical_name backfill failed", "err", err)
-	}
-
 	slog.Info("database migrations completed successfully")
 	return nil
 }
@@ -141,20 +130,6 @@ func InitializeDefaults() error {
 		return fmt.Errorf("failed to initialize system skill: %w", err)
 	}
 
-	// Migrate JWT secret from file to DB for existing deployments
-	if !HasSystemSetting(SystemSettingJWTSecret) {
-		if data, err := os.ReadFile("/akmatori/.jwt_secret"); err == nil {
-			secret := strings.TrimSpace(string(data))
-			if secret != "" {
-				if err := SetSystemSetting(SystemSettingJWTSecret, secret); err != nil {
-					slog.Warn("failed to migrate JWT secret to database", "err", err)
-				} else {
-					slog.Info("migrated JWT secret from file to database")
-				}
-			}
-		}
-	}
-
 	return nil
 }
 
@@ -168,70 +143,27 @@ var defaultModelsPerProvider = map[LLMProvider]string{
 }
 
 // seedLLMProviders ensures one row per provider exists in the llm_settings table.
-// On first run (fresh DB), it creates all provider rows with openai as active.
-// On upgrade (existing single-row DB), it preserves the existing row and creates
-// missing provider rows.
+// Creates all provider rows with openai as active if no rows exist yet.
 func seedLLMProviders() error {
 	var count int64
 	DB.Model(&LLMSettings{}).Count(&count)
-
-	if count == 0 {
-		// Fresh database: create one row per provider, openai active by default
-		for _, p := range ValidLLMProviders() {
-			row := &LLMSettings{
-				Provider:      p,
-				Model:         defaultModelsPerProvider[p],
-				ThinkingLevel: ThinkingLevelMedium,
-				Enabled:       false,
-				Active:        p == LLMProviderOpenAI,
-			}
-			if err := DB.Create(row).Error; err != nil {
-				return fmt.Errorf("failed to create LLM settings for %s: %w", p, err)
-			}
-		}
-		slog.Info("created default LLM settings for all providers")
+	if count > 0 {
 		return nil
 	}
 
-	// Existing database: migrate from singleton to per-provider.
-	// Ensure every provider has a row.
-	var hasActive bool
 	for _, p := range ValidLLMProviders() {
-		var existing LLMSettings
-		err := DB.Where("provider = ?", p).First(&existing).Error
-		if err == nil {
-			if existing.Active {
-				hasActive = true
-			}
-			continue // row exists
-		}
 		row := &LLMSettings{
 			Provider:      p,
 			Model:         defaultModelsPerProvider[p],
 			ThinkingLevel: ThinkingLevelMedium,
 			Enabled:       false,
-			Active:        false,
+			Active:        p == LLMProviderOpenAI,
 		}
 		if err := DB.Create(row).Error; err != nil {
 			return fmt.Errorf("failed to create LLM settings for %s: %w", p, err)
 		}
-		slog.Info("created LLM settings for provider", "provider", p)
 	}
-
-	// If no row is marked active (legacy single-row DB), mark the first enabled
-	// row as active, or the first row overall.
-	if !hasActive {
-		var first LLMSettings
-		if err := DB.Where("enabled = ?", true).First(&first).Error; err != nil {
-			// No enabled row, just pick the first
-			DB.First(&first)
-		}
-		if first.ID > 0 {
-			DB.Model(&first).Update("active", true)
-			slog.Info("marked provider as active (migration)", "provider", first.Provider)
-		}
-	}
-
+	slog.Info("created default LLM settings for all providers")
 	return nil
 }
 
@@ -463,53 +395,6 @@ func GetOrCreateGeneralSettings() (*GeneralSettings, error) {
 // UpdateGeneralSettings updates general settings in the database
 func UpdateGeneralSettings(settings *GeneralSettings) error {
 	return DB.Save(settings).Error
-}
-
-// migrateProxySettings ensures proxy settings exist with defaults
-func migrateProxySettings(db *gorm.DB) error {
-	var count int64
-	db.Model(&ProxySettings{}).Count(&count)
-	if count > 0 {
-		return nil // Already exists
-	}
-	return nil
-}
-
-// backfillToolInstanceLogicalNames sets logical_name for any tool instances where it's empty.
-// Uses a slugified version of the Name field.
-func backfillToolInstanceLogicalNames(db *gorm.DB) error {
-	var instances []ToolInstance
-	if err := db.Where("logical_name IS NULL OR logical_name = ''").Find(&instances).Error; err != nil {
-		return err
-	}
-	if len(instances) == 0 {
-		return nil
-	}
-	slog.Info("backfilling logical_name for tool instances", "count", len(instances))
-
-	// Track used names to avoid unique constraint violations when multiple
-	// instances slugify to the same value (e.g., "Prod SSH" and "prod-ssh").
-	used := make(map[string]bool)
-	// Also check already-assigned logical names in the database.
-	var existing []ToolInstance
-	if err := db.Where("logical_name IS NOT NULL AND logical_name != ''").Find(&existing).Error; err == nil {
-		for _, e := range existing {
-			used[e.LogicalName] = true
-		}
-	}
-
-	for _, inst := range instances {
-		logicalName := SlugifyLogicalName(inst.Name)
-		candidate := logicalName
-		for suffix := 2; used[candidate]; suffix++ {
-			candidate = fmt.Sprintf("%s-%d", logicalName, suffix)
-		}
-		used[candidate] = true
-		if err := db.Model(&ToolInstance{}).Where("id = ?", inst.ID).Update("logical_name", candidate).Error; err != nil {
-			slog.Warn("failed to backfill logical_name", "id", inst.ID, "error", err)
-		}
-	}
-	return nil
 }
 
 // SlugifyLogicalName converts a user-friendly name to a machine-friendly logical name.
