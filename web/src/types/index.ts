@@ -32,7 +32,7 @@ export interface ToolInstance {
   tool_type?: ToolType;
 }
 
-export type IncidentStatus = 'pending' | 'running' | 'diagnosed' | 'observing' | 'completed' | 'failed';
+export type IncidentStatus = 'pending' | 'running' | 'diagnosed' | 'completed' | 'failed';
 
 export interface Incident {
   id: number;

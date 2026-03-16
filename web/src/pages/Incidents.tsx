@@ -152,8 +152,6 @@ export default function Incidents() {
         return { class: 'badge-primary', icon: Activity, label: 'Running' };
       case 'diagnosed':
         return { class: 'badge-purple', icon: CheckCircle, label: 'Diagnosed' };
-      case 'observing':
-        return { class: 'badge-warning', icon: Clock, label: 'Observing' };
       case 'failed':
         return { class: 'badge-error', icon: AlertCircle, label: 'Failed' };
       default:

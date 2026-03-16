@@ -15,6 +15,9 @@ DROP TABLE IF EXISTS aggregation_settings;
 DROP TABLE IF EXISTS incident_alerts;
 DROP TABLE IF EXISTS incident_merges;
 
+-- Transition any incidents stuck in 'observing' status (no longer a valid state)
+UPDATE incidents SET status = 'diagnosed' WHERE status = 'observing';
+
 -- Remove aggregation-related columns from incidents table
 ALTER TABLE incidents DROP COLUMN IF EXISTS alert_count;
 ALTER TABLE incidents DROP COLUMN IF EXISTS last_alert_at;
