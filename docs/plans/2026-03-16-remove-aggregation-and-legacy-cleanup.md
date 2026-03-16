@@ -192,12 +192,12 @@ Remove the non-working alert aggregation/correlation system entirely and clean u
 - Modify: `internal/handlers/webhook_integration_test.go` (remove "legacy alerting payload" test case)
 - Delete: any legacy Grafana test fixtures
 
-- [ ] Remove `parseLegacyAlert()` from grafana.go
-- [ ] Simplify `Parse()` to only handle unified alerting format
-- [ ] Remove legacy format test cases from grafana_test.go
-- [ ] Remove legacy alerting test case from webhook_integration_test.go
-- [ ] Remove any legacy Grafana fixtures from tests/fixtures/
-- [ ] Run `make test-adapters` and `make test` - must pass before Task 12
+- [x] Remove `parseLegacyAlert()` from grafana.go
+- [x] Simplify `Parse()` to only handle unified alerting format
+- [x] Remove legacy format test cases from grafana_test.go
+- [x] Remove legacy alerting test case from webhook_integration_test.go
+- [x] Remove any legacy Grafana fixtures from tests/fixtures/
+- [x] Run `make test-adapters` and `make test` - must pass before Task 12
 
 ### Task 12: Clean Up Dead Comments & Removal Notes
 

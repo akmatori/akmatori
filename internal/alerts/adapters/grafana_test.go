@@ -174,112 +174,6 @@ func TestGrafanaAdapter_ParsePayload_UnifiedAlerting_MultipleAlerts(t *testing.T
 	}
 }
 
-func TestGrafanaAdapter_ParsePayload_LegacyAlerting(t *testing.T) {
-	adapter := NewGrafanaAdapter()
-	instance := &database.AlertSourceInstance{}
-
-	payload := []byte(`{
-		"ruleName": "CPU Alert",
-		"state": "alerting",
-		"message": "CPU usage is high",
-		"ruleUrl": "http://grafana:3000/d/abc123",
-		"ruleId": 42,
-		"title": "CPU Alert Title",
-		"orgId": 1,
-		"dashboardId": 10,
-		"panelId": 5,
-		"evalMatches": [
-			{
-				"value": 95.5,
-				"metric": "cpu_usage",
-				"tags": {
-					"instance": "web-01:9100",
-					"job": "node"
-				}
-			}
-		]
-	}`)
-
-	alerts, err := adapter.ParsePayload(payload, instance)
-	if err != nil {
-		t.Fatalf("ParsePayload returned error: %v", err)
-	}
-
-	if len(alerts) != 1 {
-		t.Fatalf("Expected 1 alert, got %d", len(alerts))
-	}
-
-	alert := alerts[0]
-
-	// Verify alert name (from ruleName)
-	if alert.AlertName != "CPU Alert" {
-		t.Errorf("Expected AlertName 'CPU Alert', got '%s'", alert.AlertName)
-	}
-
-	// Verify status (alerting = firing)
-	if alert.Status != database.AlertStatusFiring {
-		t.Errorf("Expected Status 'firing', got '%s'", alert.Status)
-	}
-
-	// Verify severity (alerting state = critical)
-	if alert.Severity != database.AlertSeverityCritical {
-		t.Errorf("Expected Severity 'critical' for alerting state, got '%s'", alert.Severity)
-	}
-
-	// Verify target host from evalMatches
-	if alert.TargetHost != "web-01:9100" {
-		t.Errorf("Expected TargetHost 'web-01:9100', got '%s'", alert.TargetHost)
-	}
-
-	// Verify metric value
-	if alert.MetricValue != "95.5" {
-		t.Errorf("Expected MetricValue '95.5', got '%s'", alert.MetricValue)
-	}
-
-	// Verify runbook URL (ruleUrl)
-	if alert.RunbookURL != "http://grafana:3000/d/abc123" {
-		t.Errorf("Expected RunbookURL, got '%s'", alert.RunbookURL)
-	}
-}
-
-func TestGrafanaAdapter_ParsePayload_LegacyAlerting_States(t *testing.T) {
-	adapter := NewGrafanaAdapter()
-	instance := &database.AlertSourceInstance{}
-
-	testCases := []struct {
-		state            string
-		expectedStatus   database.AlertStatus
-		expectedSeverity database.AlertSeverity
-	}{
-		{"alerting", database.AlertStatusFiring, database.AlertSeverityCritical},
-		{"pending", database.AlertStatusFiring, database.AlertSeverityWarning},
-		{"ok", database.AlertStatusResolved, database.AlertSeverityInfo},
-		{"no_data", database.AlertStatusResolved, database.AlertSeverityInfo},
-		{"paused", database.AlertStatusResolved, database.AlertSeverityInfo},
-	}
-
-	for _, tc := range testCases {
-		payload := []byte(`{
-			"ruleName": "Test",
-			"state": "` + tc.state + `",
-			"ruleId": 1
-		}`)
-
-		alerts, err := adapter.ParsePayload(payload, instance)
-		if err != nil {
-			t.Fatalf("ParsePayload returned error for state '%s': %v", tc.state, err)
-		}
-
-		if alerts[0].Status != tc.expectedStatus {
-			t.Errorf("State '%s': expected status %s, got %s", tc.state, tc.expectedStatus, alerts[0].Status)
-		}
-
-		if alerts[0].Severity != tc.expectedSeverity {
-			t.Errorf("State '%s': expected severity %s, got %s", tc.state, tc.expectedSeverity, alerts[0].Severity)
-		}
-	}
-}
-
 func TestGrafanaAdapter_ParsePayload_InvalidJSON(t *testing.T) {
 	adapter := NewGrafanaAdapter()
 	instance := &database.AlertSourceInstance{}
@@ -296,14 +190,10 @@ func TestGrafanaAdapter_ParsePayload_EmptyAlerts(t *testing.T) {
 	adapter := NewGrafanaAdapter()
 	instance := &database.AlertSourceInstance{}
 
-	// Empty alerts array should fall back to legacy format
 	payload := []byte(`{
 		"receiver": "test",
 		"status": "firing",
-		"alerts": [],
-		"ruleName": "FallbackRule",
-		"state": "alerting",
-		"ruleId": 99
+		"alerts": []
 	}`)
 
 	alerts, err := adapter.ParsePayload(payload, instance)
@@ -311,12 +201,8 @@ func TestGrafanaAdapter_ParsePayload_EmptyAlerts(t *testing.T) {
 		t.Fatalf("ParsePayload returned error: %v", err)
 	}
 
-	if len(alerts) != 1 {
-		t.Fatalf("Expected 1 alert from legacy fallback, got %d", len(alerts))
-	}
-
-	if alerts[0].AlertName != "FallbackRule" {
-		t.Errorf("Expected AlertName 'FallbackRule', got '%s'", alerts[0].AlertName)
+	if len(alerts) != 0 {
+		t.Fatalf("Expected 0 alerts for empty alerts array, got %d", len(alerts))
 	}
 }
 
@@ -426,24 +312,3 @@ func TestGrafanaAdapter_ParsePayload_UnifiedAlerting_MissingAlertname(t *testing
 	}
 }
 
-func TestGrafanaAdapter_ParsePayload_LegacyAlerting_TitleFallback(t *testing.T) {
-	adapter := NewGrafanaAdapter()
-	instance := &database.AlertSourceInstance{}
-
-	// When ruleName is empty, should use title
-	payload := []byte(`{
-		"ruleName": "",
-		"title": "Alert Title",
-		"state": "alerting",
-		"ruleId": 1
-	}`)
-
-	alerts, err := adapter.ParsePayload(payload, instance)
-	if err != nil {
-		t.Fatalf("ParsePayload returned error: %v", err)
-	}
-
-	if alerts[0].AlertName != "Alert Title" {
-		t.Errorf("Expected AlertName 'Alert Title' (from title), got '%s'", alerts[0].AlertName)
-	}
-}
