@@ -84,7 +84,7 @@ func (s *SkillService) SyncSkillAssets(skillName string, prompt string) error {
 		}
 
 		// Create symlink pointing to /akmatori/context/{filename}
-		// This path is shared between API and codex containers
+		// This path is shared between API and agent containers
 		symlinkTarget := filepath.Join("/akmatori/context", filename)
 		if err := os.Symlink(symlinkTarget, dstPath); err != nil {
 			return fmt.Errorf("failed to create symlink for %s: %w", filename, err)

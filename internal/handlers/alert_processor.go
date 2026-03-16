@@ -84,16 +84,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 	if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
 		slog.Warn("failed to update incident status", "err", err)
 	}
-	go h.runInvestigation(incidentUUID, "", normalized, instance, threadTS)
-}
-
-// convertLabels converts map[string]string to map[string]interface{}
-func convertLabels(labels map[string]string) map[string]interface{} {
-	result := make(map[string]interface{})
-	for k, v := range labels {
-		result[k] = v
-	}
-	return result
+	go h.runInvestigation(incidentUUID, normalized, instance, threadTS)
 }
 
 // ProcessAlertFromSlackChannel processes an alert that originated from a Slack channel
@@ -172,7 +163,7 @@ func (h *AlertHandler) ProcessAlertFromSlackChannel(
 		slog.Warn("failed to update incident status", "err", err)
 	}
 
-	go h.runSlackChannelInvestigation(incidentUUID, "", normalized, instance, slackChannelID, slackMessageTS)
+	go h.runSlackChannelInvestigation(incidentUUID, normalized, instance, slackChannelID, slackMessageTS)
 }
 
 func (h *AlertHandler) buildInvestigationPrompt(alert alerts.NormalizedAlert, instance *database.AlertSourceInstance) string {
@@ -215,14 +206,14 @@ Be specific and actionable. Reference any relevant data sources or scripts you u
 	return prompt
 }
 
-func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, threadTS string) {
+func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, threadTS string) {
 	slog.Info("starting investigation for alert", "alert_name", alert.AlertName, "incident_id", incidentUUID)
 
 	// Build investigation prompt
 	investigationPrompt := h.buildInvestigationPrompt(alert, instance)
 	taskWithGuidance := executor.PrependGuidance(investigationPrompt)
 
-	// Try WebSocket-based execution first (new architecture)
+	// Use WebSocket-based agent worker
 	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
 		slog.Info("using WebSocket-based agent worker", "incident_id", incidentUUID)
 
@@ -332,7 +323,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID, workingDir string, alert a
 
 // runSlackChannelInvestigation runs investigation and posts results to the Slack thread
 func (h *AlertHandler) runSlackChannelInvestigation(
-	incidentUUID, workingDir string,
+	incidentUUID string,
 	alert alerts.NormalizedAlert,
 	instance *database.AlertSourceInstance,
 	slackChannelID, slackMessageTS string,
@@ -343,7 +334,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 	investigationPrompt := h.buildInvestigationPrompt(alert, instance)
 	taskWithGuidance := executor.PrependGuidance(investigationPrompt)
 
-	// Try WebSocket-based execution first
+	// Use WebSocket-based agent worker
 	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
 		slog.Info("using WebSocket-based agent worker for Slack channel incident", "incident_id", incidentUUID)
 

@@ -66,33 +66,27 @@ func (a *GrafanaAdapter) ParsePayload(body []byte, instance *database.AlertSourc
 		return nil, fmt.Errorf("failed to parse grafana payload: %w", err)
 	}
 
+	// Get field mappings (use instance override or defaults)
+	mappings := alerts.MergeMappings(a.GetDefaultMappings(), instance.FieldMappings)
+
 	var normalized []alerts.NormalizedAlert
 	for _, alert := range payload.Alerts {
-		n := a.parseUnifiedAlert(alert)
+		n := a.parseUnifiedAlert(alert, mappings)
 		normalized = append(normalized, n)
 	}
 
 	return normalized, nil
 }
 
-func (a *GrafanaAdapter) parseUnifiedAlert(alert GrafanaAlert) alerts.NormalizedAlert {
+func (a *GrafanaAdapter) parseUnifiedAlert(alert GrafanaAlert, mappings database.JSONB) alerts.NormalizedAlert {
 	// Map status
 	status := database.AlertStatusFiring
 	if strings.ToLower(alert.Status) == "resolved" {
 		status = database.AlertStatusResolved
 	}
 
-	// Get alert name from labels
-	alertName := alert.Labels["alertname"]
-	if alertName == "" {
-		alertName = "Grafana Alert"
-	}
-
-	// Get severity from labels
-	severity := alerts.NormalizeSeverity(alert.Labels["severity"], alerts.DefaultSeverityMapping)
-
-	// Build raw payload
-	rawPayload := map[string]interface{}{
+	// Convert alert to map for field extraction
+	alertMap := map[string]interface{}{
 		"status":       alert.Status,
 		"labels":       alert.Labels,
 		"annotations":  alert.Annotations,
@@ -102,19 +96,49 @@ func (a *GrafanaAdapter) parseUnifiedAlert(alert GrafanaAlert) alerts.Normalized
 		"generatorURL": alert.GeneratorURL,
 	}
 
+	// Extract fields using mappings
+	alertName := alerts.ExtractString(alertMap, getMapping(mappings, "alert_name"))
+	if alertName == "" {
+		alertName = alert.Labels["alertname"]
+	}
+	if alertName == "" {
+		alertName = "Grafana Alert"
+	}
+
+	severityStr := alerts.ExtractString(alertMap, getMapping(mappings, "severity"))
+	if severityStr == "" {
+		severityStr = alert.Labels["severity"]
+	}
+	severity := alerts.NormalizeSeverity(severityStr, alerts.DefaultSeverityMapping)
+
+	targetHost := alerts.ExtractString(alertMap, getMapping(mappings, "target_host"))
+	if targetHost == "" {
+		targetHost = alert.Labels["instance"]
+	}
+
+	sourceAlertID := alerts.ExtractString(alertMap, getMapping(mappings, "source_alert_id"))
+	if sourceAlertID == "" {
+		sourceAlertID = alert.Fingerprint
+	}
+
+	runbookURL := alerts.ExtractString(alertMap, getMapping(mappings, "runbook_url"))
+	if runbookURL == "" {
+		runbookURL = alert.Annotations["runbook_url"]
+	}
+
 	return alerts.NormalizedAlert{
 		AlertName:         alertName,
 		Severity:          severity,
 		Status:            status,
 		Summary:           alert.Annotations["summary"],
 		Description:       alert.Annotations["description"],
-		TargetHost:        alert.Labels["instance"],
+		TargetHost:        targetHost,
 		TargetService:     alert.Labels["job"],
 		TargetLabels:      alert.Labels,
-		RunbookURL:        alert.Annotations["runbook_url"],
-		SourceAlertID:     alert.Fingerprint,
+		RunbookURL:        runbookURL,
+		SourceAlertID:     sourceAlertID,
 		SourceFingerprint: alert.Fingerprint,
-		RawPayload:        rawPayload,
+		RawPayload:        alertMap,
 	}
 }
 
