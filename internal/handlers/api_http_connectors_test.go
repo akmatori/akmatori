@@ -435,7 +435,7 @@ func TestGatewayReloadFunc(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"reloaded"}`))
+		_, _ = w.Write([]byte(`{"status":"reloaded"}`))
 	}))
 	defer server.Close()
 

@@ -12,93 +12,6 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 )
 
-func TestPluralize(t *testing.T) {
-	tests := []struct {
-		name     string
-		count    int
-		expected string
-	}{
-		{"zero returns s", 0, "s"},
-		{"one returns empty", 1, ""},
-		{"two returns s", 2, "s"},
-		{"many returns s", 100, "s"},
-		{"negative returns s", -1, "s"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := pluralize(tt.count)
-			if result != tt.expected {
-				t.Errorf("pluralize(%d) = %q, want %q", tt.count, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestAlertHandler_formatAggregationFooter(t *testing.T) {
-	h := &AlertHandler{}
-
-	tests := []struct {
-		name         string
-		incidentUUID string
-		alertCount   int
-		baseURL      string
-		wantContains []string
-	}{
-		{
-			name:         "single alert with default base URL",
-			incidentUUID: "abc-123",
-			alertCount:   1,
-			baseURL:      "",
-			wantContains: []string{
-				"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-				":link:",
-				"1 alert aggregated",
-				"<http://localhost:3000/incidents/abc-123|View incident>",
-			},
-		},
-		{
-			name:         "multiple alerts with custom base URL",
-			incidentUUID: "def-456",
-			alertCount:   5,
-			baseURL:      "https://akmatori.example.com",
-			wantContains: []string{
-				"5 alerts aggregated",
-				"<https://akmatori.example.com/incidents/def-456|View incident>",
-			},
-		},
-		{
-			name:         "zero alerts",
-			incidentUUID: "xyz-789",
-			alertCount:   0,
-			baseURL:      "",
-			wantContains: []string{
-				"0 alerts aggregated",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Set or clear the environment variable
-			if tt.baseURL != "" {
-				os.Setenv("AKMATORI_BASE_URL", tt.baseURL)
-				defer os.Unsetenv("AKMATORI_BASE_URL")
-			} else {
-				os.Unsetenv("AKMATORI_BASE_URL")
-			}
-
-			result := h.formatAggregationFooter(tt.incidentUUID, tt.alertCount)
-
-			for _, want := range tt.wantContains {
-				if !contains(result, want) {
-					t.Errorf("formatAggregationFooter() = %q, want to contain %q", result, want)
-				}
-			}
-		})
-	}
-}
-
 func TestBuildSlackResponse(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -282,78 +195,9 @@ func TestTruncateForSlack_BreaksAtNewline(t *testing.T) {
 	}
 }
 
-func TestConvertLabels(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  map[string]string
-		verify func(result map[string]interface{}) bool
-	}{
-		{
-			name:  "nil map returns empty map",
-			input: nil,
-			verify: func(result map[string]interface{}) bool {
-				return len(result) == 0
-			},
-		},
-		{
-			name:  "empty map returns empty map",
-			input: map[string]string{},
-			verify: func(result map[string]interface{}) bool {
-				return len(result) == 0
-			},
-		},
-		{
-			name: "single label converted",
-			input: map[string]string{
-				"host": "server1",
-			},
-			verify: func(result map[string]interface{}) bool {
-				v, ok := result["host"]
-				return ok && v == "server1"
-			},
-		},
-		{
-			name: "multiple labels converted",
-			input: map[string]string{
-				"host":     "server1",
-				"env":      "production",
-				"severity": "critical",
-			},
-			verify: func(result map[string]interface{}) bool {
-				return len(result) == 3 &&
-					result["host"] == "server1" &&
-					result["env"] == "production" &&
-					result["severity"] == "critical"
-			},
-		},
-		{
-			name: "empty string values preserved",
-			input: map[string]string{
-				"key": "",
-			},
-			verify: func(result map[string]interface{}) bool {
-				v, ok := result["key"]
-				return ok && v == ""
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := convertLabels(tt.input)
-			if result == nil {
-				t.Fatal("convertLabels returned nil")
-			}
-			if !tt.verify(result) {
-				t.Errorf("convertLabels(%v) verification failed, got %v", tt.input, result)
-			}
-		})
-	}
-}
-
 func TestNewAlertHandler(t *testing.T) {
 	// Test that NewAlertHandler creates valid handler with nil dependencies
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 	if h == nil {
 		t.Fatal("NewAlertHandler returned nil")
 	}
@@ -366,7 +210,7 @@ func TestNewAlertHandler(t *testing.T) {
 }
 
 func TestAlertHandler_RegisterAdapter(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	// Create a mock adapter
 	adapter := &mockAlertAdapter{sourceType: "prometheus"}
@@ -387,7 +231,7 @@ func TestAlertHandler_RegisterAdapter(t *testing.T) {
 }
 
 func TestAlertHandler_RegisterAdapter_Multiple(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	// Register multiple adapters
 	adapters := []string{"prometheus", "grafana", "datadog", "pagerduty"}
@@ -407,7 +251,7 @@ func TestAlertHandler_RegisterAdapter_Multiple(t *testing.T) {
 }
 
 func TestAlertHandler_RegisterAdapter_Overwrite(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	adapter1 := &mockAlertAdapter{sourceType: "prometheus", id: "first"}
 	adapter2 := &mockAlertAdapter{sourceType: "prometheus", id: "second"}
@@ -427,7 +271,7 @@ func TestAlertHandler_RegisterAdapter_Overwrite(t *testing.T) {
 }
 
 func TestAlertHandler_HandleWebhook_MethodNotAllowed(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	methods := []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodPatch}
 	for _, method := range methods {
@@ -445,7 +289,7 @@ func TestAlertHandler_HandleWebhook_MethodNotAllowed(t *testing.T) {
 }
 
 func TestAlertHandler_HandleWebhook_MissingUUID(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/webhook/alert/", nil)
 	w := httptest.NewRecorder()
@@ -458,7 +302,7 @@ func TestAlertHandler_HandleWebhook_MissingUUID(t *testing.T) {
 }
 
 func TestAlertHandler_getBaseURL(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	// Test default value
 	os.Unsetenv("AKMATORI_BASE_URL")
@@ -499,88 +343,9 @@ func (m *mockAlertAdapter) GetDefaultMappings() database.JSONB {
 	return database.JSONB{}
 }
 
-// Tests for evaluateAlertAggregation
-
-func TestAlertHandler_evaluateAlertAggregation_NilService(t *testing.T) {
-	// When aggregationService is nil, should return "new" decision
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
-
-	instance := &database.AlertSourceInstance{
-		AlertSourceType: database.AlertSourceType{Name: "prometheus"},
-	}
-	normalized := alerts.NormalizedAlert{
-		AlertName:   "HighCPU",
-		Severity:    database.AlertSeverityCritical,
-		TargetHost:  "server1",
-		Summary:     "CPU usage high",
-		Description: "CPU usage is above 90%",
-	}
-
-	result, err := h.evaluateAlertAggregation(instance, normalized)
-
-	if err != nil {
-		t.Fatalf("evaluateAlertAggregation() returned error: %v", err)
-	}
-	if result == nil {
-		t.Fatal("evaluateAlertAggregation() returned nil result")
-	}
-	if result.Decision != "new" {
-		t.Errorf("evaluateAlertAggregation() decision = %q, want %q", result.Decision, "new")
-	}
-	if result.Reason != "Aggregation service not configured" {
-		t.Errorf("evaluateAlertAggregation() reason = %q, want %q", result.Reason, "Aggregation service not configured")
-	}
-}
-
-func TestAlertHandler_evaluateAlertAggregation_NilInstance(t *testing.T) {
-	// Edge case: nil instance should not panic when aggregationService is nil
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
-
-	normalized := alerts.NormalizedAlert{
-		AlertName: "TestAlert",
-	}
-
-	// This should not panic
-	result, err := h.evaluateAlertAggregation(nil, normalized)
-
-	if err != nil {
-		t.Fatalf("evaluateAlertAggregation() with nil instance returned error: %v", err)
-	}
-	if result == nil {
-		t.Fatal("evaluateAlertAggregation() returned nil result")
-	}
-	if result.Decision != "new" {
-		t.Errorf("evaluateAlertAggregation() decision = %q, want %q", result.Decision, "new")
-	}
-}
-
-func TestAlertHandler_evaluateAlertAggregation_EmptyAlert(t *testing.T) {
-	// Test with empty normalized alert (edge case)
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
-
-	instance := &database.AlertSourceInstance{
-		AlertSourceType: database.AlertSourceType{Name: "grafana"},
-	}
-	normalized := alerts.NormalizedAlert{} // Empty alert
-
-	result, err := h.evaluateAlertAggregation(instance, normalized)
-
-	if err != nil {
-		t.Fatalf("evaluateAlertAggregation() returned error: %v", err)
-	}
-	if result == nil {
-		t.Fatal("evaluateAlertAggregation() returned nil result")
-	}
-	if result.Decision != "new" {
-		t.Errorf("evaluateAlertAggregation() decision = %q, want %q", result.Decision, "new")
-	}
-}
-
-// Additional HandleWebhook path tests (those requiring alertService are in integration tests)
-
 // Test buildInvestigationPrompt method
 func TestAlertHandler_buildInvestigationPrompt(t *testing.T) {
-	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	tests := []struct {
 		name         string

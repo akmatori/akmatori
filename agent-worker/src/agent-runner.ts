@@ -36,12 +36,8 @@ import { createGatewayCallTool, createSearchToolsTool, createGetToolDetailTool, 
 /**
  * Attached to the bash tool via `promptGuidelines` (pi-mono 0.55.4+) so it
  * appears in the system prompt's Guidelines section automatically when the
- * bash tool is active.
- *
- * Previously this was injected as a monolithic `appendSystemPrompt` string on
- * DefaultResourceLoader. The new approach is more modular — the bash tool
- * carries its own documentation, and if the tool is ever disabled, the
- * guidelines disappear from the prompt automatically.
+ * bash tool is active. If the tool is ever disabled, the guidelines disappear
+ * from the prompt automatically.
  */
 const BASH_TOOL_GUIDELINES = `\
 - Use the gateway_call tool to invoke tools. It communicates directly with the MCP Gateway and does not require bash.
@@ -61,7 +57,7 @@ export interface ExecuteParams {
   workDir: string;
   /** Names of enabled skills — only these will be loaded from the shared skills directory */
   enabledSkills?: string[];
-  /** Tool instances the incident is authorized to use (nil = allow all for backward compat) */
+  /** Tool instances the incident is authorized to use. When undefined, the gateway allows all tools (safe default for direct/debug calls). */
   toolAllowlist?: ToolAllowlistEntry[];
   onOutput: (text: string) => void;
   onEvent?: (event: AgentSessionEvent) => void;
@@ -76,7 +72,7 @@ export interface ResumeParams {
   workDir: string;
   /** Names of enabled skills — only these will be loaded from the shared skills directory */
   enabledSkills?: string[];
-  /** Tool instances the incident is authorized to use (nil = allow all for backward compat) */
+  /** Tool instances the incident is authorized to use. When undefined, the gateway allows all tools (safe default for direct/debug calls). */
   toolAllowlist?: ToolAllowlistEntry[];
   onOutput: (text: string) => void;
   onEvent?: (event: AgentSessionEvent) => void;

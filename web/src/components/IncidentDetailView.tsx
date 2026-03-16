@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { Terminal, MessageSquare, FileCode, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { JsonView, darkStyles } from 'react-json-view-lite';
 import 'react-json-view-lite/dist/index.css';
-import { IncidentAlertsPanel } from './IncidentAlertsPanel';
 import type { Incident } from '../types';
 
 type TabType = 'reasoning' | 'response' | 'raw';
@@ -307,12 +306,6 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
               <span className="text-xs font-medium uppercase tracking-wide">Original Webhook Payload</span>
             </div>
             <RawPayloadViewer payload={incident.context?.raw_payload} />
-          </div>
-        )}
-
-        {incident.alert_count > 0 && (
-          <div className="mt-6">
-            <IncidentAlertsPanel incidentUuid={incident.uuid} />
           </div>
         )}
       </div>

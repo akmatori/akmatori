@@ -1,8 +1,7 @@
 import { useState } from 'react';
-import { MessageSquare, Cpu, Bell, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, Globe, Layers, Settings2 } from 'lucide-react';
+import { MessageSquare, Cpu, Bell, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, Globe, Settings2 } from 'lucide-react';
 import AlertSourcesManager from '../components/AlertSourcesManager';
 import ProxySettings from '../components/ProxySettings';
-import AggregationSettings from '../components/AggregationSettings';
 import LLMSettingsSection from '../components/settings/LLMSettingsSection';
 import SlackSettingsSection from '../components/settings/SlackSettingsSection';
 import GeneralSettingsSection from '../components/settings/GeneralSettingsSection';
@@ -128,16 +127,6 @@ export default function Settings() {
           defaultExpanded={false}
         >
           <ProxySettings />
-        </SettingsSection>
-
-        {/* Alert Aggregation Settings */}
-        <SettingsSection
-          title="Alert Aggregation"
-          description="Automatically group related alerts into incidents"
-          icon={Layers}
-          defaultExpanded={false}
-        >
-          <AggregationSettings />
         </SettingsSection>
 
         {/* Alert Sources Section */}

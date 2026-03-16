@@ -51,38 +51,3 @@ func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-// handleGetAggregationSettings handles GET /api/settings/aggregation
-func (h *APIHandler) handleGetAggregationSettings(w http.ResponseWriter, r *http.Request) {
-	db := database.GetDB()
-	settings, err := database.GetOrCreateAggregationSettings(db)
-	if err != nil {
-		api.RespondError(w, http.StatusInternalServerError, "Failed to get aggregation settings")
-		return
-	}
-
-	api.RespondJSON(w, http.StatusOK, settings)
-}
-
-// handleUpdateAggregationSettings handles PUT /api/settings/aggregation
-func (h *APIHandler) handleUpdateAggregationSettings(w http.ResponseWriter, r *http.Request) {
-	db := database.GetDB()
-	var settings database.AggregationSettings
-	if err := api.DecodeJSON(r, &settings); err != nil {
-		api.RespondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	existing, err := database.GetOrCreateAggregationSettings(db)
-	if err != nil {
-		api.RespondError(w, http.StatusInternalServerError, "Failed to get aggregation settings")
-		return
-	}
-	settings.ID = existing.ID
-
-	if err := database.UpdateAggregationSettings(db, &settings); err != nil {
-		api.RespondError(w, http.StatusInternalServerError, "Failed to update aggregation settings")
-		return
-	}
-
-	api.RespondJSON(w, http.StatusOK, settings)
-}

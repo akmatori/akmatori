@@ -238,26 +238,6 @@ func (h *AlertHandler) isSlackEnabled() bool {
 	return h.slackManager.GetClient() != nil
 }
 
-// formatAggregationFooter generates a footer for Slack messages showing
-// how many alerts are aggregated into an incident with a link to view it
-func (h *AlertHandler) formatAggregationFooter(incidentUUID string, alertCount int) string {
-	baseURL := h.getBaseURL()
-	return fmt.Sprintf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n:link: %d alert%s aggregated • <%s/incidents/%s|View incident>",
-		alertCount,
-		pluralize(alertCount),
-		baseURL,
-		incidentUUID,
-	)
-}
-
-// pluralize returns "s" for counts other than 1
-func pluralize(count int) string {
-	if count == 1 {
-		return ""
-	}
-	return "s"
-}
-
 // truncateLogForSlack truncates a log string to fit within Slack's message limits.
 // It keeps the last maxLen bytes and trims to a clean line boundary.
 // Uses byte length (not rune count) because Slack enforces byte-based limits.

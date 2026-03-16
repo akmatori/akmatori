@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Skill represents a skill definition (uses SKILL.md format internally for Codex compatibility)
+// Skill represents a skill definition (uses SKILL.md format internally for the agent worker)
 // Skill prompt/instructions are stored in filesystem at /akmatori/skills/{name}/SKILL.md
 type Skill struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`

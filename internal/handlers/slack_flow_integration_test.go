@@ -498,7 +498,7 @@ func TestSlackFlow_TruncationBehavior(t *testing.T) {
 // TestSlackFlow_AlertHandlerInteraction tests slack handler interaction with alert handler
 func TestSlackFlow_AlertHandlerInteraction(t *testing.T) {
 	slackHandler := NewSlackHandler(nil, nil, nil, nil)
-	alertHandler := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil, nil)
+	alertHandler := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	// Wire them together
 	slackHandler.SetAlertHandler(alertHandler)

@@ -84,11 +84,6 @@ type CreateIncidentResponse struct {
 	Message    string `json:"message"`
 }
 
-// MergeIncidentRequest is the request body for POST /api/incidents/:uuid/merge.
-type MergeIncidentRequest struct {
-	SourceIncidentUUID string `json:"source_incident_uuid" validate:"required"`
-}
-
 // ========== Settings Types ==========
 
 // UpdateSlackSettingsRequest is the request body for PUT /api/settings/slack.
@@ -192,7 +187,6 @@ type IncidentListItem struct {
 	Status          database.IncidentStatus `json:"status"`
 	TokensUsed      int                    `json:"tokens_used"`
 	ExecutionTimeMs int64                  `json:"execution_time_ms"`
-	AlertCount      int                    `json:"alert_count"`
 	StartedAt       time.Time              `json:"started_at"`
 	CompletedAt     *time.Time             `json:"completed_at,omitempty"`
 	CreatedAt       time.Time              `json:"created_at"`

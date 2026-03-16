@@ -3,7 +3,6 @@ package database
 import (
 	"encoding/json"
 	"testing"
-	"time"
 )
 
 func TestJSONB_Scan(t *testing.T) {
@@ -665,9 +664,6 @@ func TestTableNames(t *testing.T) {
 		{LLMSettings{}, "llm_settings"},
 		{ContextFile{}, "context_files"},
 		{APIKeySettings{}, "api_key_settings"},
-		{IncidentAlert{}, "incident_alerts"},
-		{IncidentMerge{}, "incident_merges"},
-		{AggregationSettings{}, "aggregation_settings"},
 		{HTTPConnector{}, "http_connectors"},
 	}
 
@@ -689,7 +685,6 @@ func TestIncidentStatus_Constants(t *testing.T) {
 		{IncidentStatusPending, "pending"},
 		{IncidentStatusRunning, "running"},
 		{IncidentStatusDiagnosed, "diagnosed"},
-		{IncidentStatusObserving, "observing"},
 		{IncidentStatusCompleted, "completed"},
 		{IncidentStatusFailed, "failed"},
 	}
@@ -746,29 +741,6 @@ func TestJSONB_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestIncident_AggregationFields(t *testing.T) {
-	now := time.Now()
-	incident := Incident{
-		UUID:                     "test-uuid",
-		AlertCount:               5,
-		LastAlertAt:              &now,
-		ObservingStartedAt:       &now,
-		ObservingDurationMinutes: 30,
-	}
-
-	if incident.AlertCount != 5 {
-		t.Errorf("expected AlertCount 5, got %d", incident.AlertCount)
-	}
-	if incident.LastAlertAt == nil {
-		t.Error("expected LastAlertAt to be set")
-	}
-	if incident.ObservingStartedAt == nil {
-		t.Error("expected ObservingStartedAt to be set")
-	}
-	if incident.ObservingDurationMinutes != 30 {
-		t.Errorf("expected ObservingDurationMinutes 30, got %d", incident.ObservingDurationMinutes)
-	}
-}
 
 // ========================================
 // Benchmarks for database model operations

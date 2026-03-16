@@ -43,7 +43,6 @@ func TestIncidentToListItem(t *testing.T) {
 		WorkingDir:      "/akmatori/incidents/test",
 		TokensUsed:      1500,
 		ExecutionTimeMs: 30000,
-		AlertCount:      3,
 		StartedAt:       now,
 		CompletedAt:     &completed,
 		CreatedAt:       now,
@@ -66,9 +65,6 @@ func TestIncidentToListItem(t *testing.T) {
 	}
 	if item.TokensUsed != 1500 {
 		t.Errorf("TokensUsed = %d, want 1500", item.TokensUsed)
-	}
-	if item.AlertCount != 3 {
-		t.Errorf("AlertCount = %d, want 3", item.AlertCount)
 	}
 	if item.CompletedAt == nil {
 		t.Error("CompletedAt should not be nil")

@@ -19,7 +19,7 @@ import (
 // SlackHandler handles Slack events and commands
 type SlackHandler struct {
 	client         *slack.Client
-	codexExecutor  *executor.Executor
+	agentExecutor  *executor.Executor
 	agentWSHandler *AgentWSHandler
 	skillService   services.SkillIncidentManager
 
@@ -41,13 +41,13 @@ const progressUpdateInterval = 2 * time.Second
 // NewSlackHandler creates a new Slack handler
 func NewSlackHandler(
 	client *slack.Client,
-	codexExecutor *executor.Executor,
+	agentExecutor *executor.Executor,
 	agentWSHandler *AgentWSHandler,
 	skillService services.SkillIncidentManager,
 ) *SlackHandler {
 	return &SlackHandler{
 		client:         client,
-		codexExecutor:  codexExecutor,
+		agentExecutor:  agentExecutor,
 		agentWSHandler: agentWSHandler,
 		skillService:   skillService,
 		alertChannels:  make(map[string]*database.AlertSourceInstance),

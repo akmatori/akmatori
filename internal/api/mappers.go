@@ -22,7 +22,6 @@ func IncidentToListItem(i database.Incident) IncidentListItem {
 		Status:          i.Status,
 		TokensUsed:      i.TokensUsed,
 		ExecutionTimeMs: i.ExecutionTimeMs,
-		AlertCount:      i.AlertCount,
 		StartedAt:       i.StartedAt,
 		CompletedAt:     i.CompletedAt,
 		CreatedAt:       i.CreatedAt,

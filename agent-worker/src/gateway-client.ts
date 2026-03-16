@@ -23,7 +23,7 @@ export interface GatewayClientOptions {
   workDir?: string;
   /** Request timeout in milliseconds (default: 300000 = 5 minutes) */
   timeoutMs?: number;
-  /** Tool instances this incident is authorized to use (undefined = allow all) */
+  /** Tool instances this incident is authorized to use. When undefined, the X-Tool-Allowlist header is omitted and the gateway allows all tools. */
   toolAllowlist?: ToolAllowlistEntry[];
 }
 

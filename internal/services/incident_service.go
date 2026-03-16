@@ -112,11 +112,6 @@ func (s *SkillService) generateIncidentAgentsMd(path string) error {
 	return nil
 }
 
-// NOTE: formatEnvValue and fixPEMKey were removed as unused. They handled
-// .env file value formatting with base64 encoding for multiline values and
-// PEM key reconstruction. See mcp-gateway/internal/tools/ssh/ssh.go for
-// a working fixPEMKey implementation if needed.
-
 // UpdateIncidentStatus updates the status of an incident.
 // Only sets session_id and full_log when non-empty to avoid overwriting existing values.
 func (s *SkillService) UpdateIncidentStatus(incidentUUID string, status database.IncidentStatus, sessionID string, fullLog string) error {

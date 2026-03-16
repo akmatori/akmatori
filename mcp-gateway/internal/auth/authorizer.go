@@ -20,8 +20,10 @@ type incidentAllowlist struct {
 
 // Authorizer enforces per-incident tool instance authorization.
 // It stores allowlists keyed by incident ID with TTL-based expiry.
-// When no allowlist is set for an incident, all tool calls are allowed
-// (backward compatibility).
+// When no allowlist is set for an incident, all tool calls are allowed.
+// This is intentional: the gateway is a standalone service that may receive
+// requests without an allowlist header (e.g., direct API calls, debugging,
+// or the first request before the agent-worker sends allowlist data).
 type Authorizer struct {
 	mu         sync.RWMutex
 	allowlists map[string]*incidentAllowlist
@@ -55,7 +57,7 @@ func (a *Authorizer) SetAllowlist(incidentID string, entries []AllowlistEntry) {
 // IsAuthorized checks whether a tool call is permitted for the given incident.
 //
 // Authorization logic:
-//  1. No allowlist for this incident -> allow all (backward compat)
+//  1. No allowlist for this incident -> allow all (safe default for unregistered incidents)
 //  2. Empty allowlist -> reject everything
 //  3. Check tool_type matches at least one entry
 //  4. If instanceID > 0, that specific ID must be in the allowlist
@@ -67,7 +69,7 @@ func (a *Authorizer) IsAuthorized(incidentID string, toolType string, instanceID
 	al, exists := a.allowlists[incidentID]
 	a.mu.RUnlock()
 
-	// No allowlist = allow all (backward compat)
+	// No allowlist = allow all (gateway may receive requests without allowlist data)
 	if !exists {
 		return true
 	}

@@ -174,7 +174,7 @@ services:
       - akmatori-api
       - mcp-gateway
     environment:
-      - API_WS_URL=ws://akmatori-api:3000/ws/codex
+      - API_WS_URL=ws://akmatori-api:3000/ws/agent
       - MCP_GATEWAY_URL=http://mcp-gateway:8080
       - WORKSPACE_DIR=/workspaces
       - SKILLS_DIR=/akmatori/skills
