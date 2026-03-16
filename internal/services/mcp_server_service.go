@@ -32,6 +32,11 @@ func (s *MCPServerService) CreateMCPServer(config *database.MCPServerConfig) (*d
 		return nil, fmt.Errorf("MCP server with name %q already exists", config.Name)
 	}
 
+	// Check for conflicts with built-in tool namespaces
+	if isReservedToolNamespace(config.NamespacePrefix) {
+		return nil, fmt.Errorf("namespace_prefix %q conflicts with a built-in tool namespace", config.NamespacePrefix)
+	}
+
 	// Check for duplicate namespace_prefix
 	s.db.Model(&database.MCPServerConfig{}).Where("namespace_prefix = ?", config.NamespacePrefix).Count(&count)
 	if count > 0 {
@@ -101,6 +106,10 @@ func (s *MCPServerService) UpdateMCPServer(id uint, updates map[string]interface
 	}
 	if v, ok := updates["namespace_prefix"]; ok {
 		if ns, ok := v.(string); ok {
+			// Check for conflicts with built-in tool namespaces
+			if isReservedToolNamespace(ns) {
+				return nil, fmt.Errorf("namespace_prefix %q conflicts with a built-in tool namespace", ns)
+			}
 			if ns != config.NamespacePrefix {
 				var count int64
 				s.db.Model(&database.MCPServerConfig{}).Where("namespace_prefix = ? AND id != ?", ns, id).Count(&count)

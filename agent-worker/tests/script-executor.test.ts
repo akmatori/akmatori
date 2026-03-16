@@ -122,6 +122,7 @@ describe("ScriptExecutor", () => {
         "ssh.execute_command",
         { command: "uptime" },
         "prod-ssh",
+        expect.any(AbortSignal),
       );
       const parsed = JSON.parse(result.output);
       expect(parsed.uptime).toBe("42 days");
@@ -138,6 +139,7 @@ describe("ScriptExecutor", () => {
         "zabbix.get_problems",
         { severity_min: 3 },
         undefined,
+        expect.any(AbortSignal),
       );
     });
 
@@ -172,7 +174,7 @@ describe("ScriptExecutor", () => {
         'const tools = await search_tools("ssh"); return tools;',
       );
 
-      expect(client.searchTools).toHaveBeenCalledWith("ssh", undefined);
+      expect(client.searchTools).toHaveBeenCalledWith("ssh", undefined, expect.any(AbortSignal));
       const parsed = JSON.parse(result.output);
       expect(parsed.tools).toHaveLength(1);
       expect(parsed.tools[0].name).toBe("ssh.execute_command");
@@ -185,7 +187,7 @@ describe("ScriptExecutor", () => {
         'await search_tools("metrics", "victoria_metrics");',
       );
 
-      expect(client.searchTools).toHaveBeenCalledWith("metrics", "victoria_metrics");
+      expect(client.searchTools).toHaveBeenCalledWith("metrics", "victoria_metrics", expect.any(AbortSignal));
     });
 
     it("should call get_tool_detail", async () => {
@@ -195,7 +197,7 @@ describe("ScriptExecutor", () => {
         'const detail = await get_tool_detail("ssh.execute_command"); return detail;',
       );
 
-      expect(client.getToolDetail).toHaveBeenCalledWith("ssh.execute_command");
+      expect(client.getToolDetail).toHaveBeenCalledWith("ssh.execute_command", expect.any(AbortSignal));
       const parsed = JSON.parse(result.output);
       expect(parsed.name).toBe("ssh.execute_command");
     });
@@ -270,6 +272,65 @@ describe("ScriptExecutor", () => {
     });
   });
 
+  describe("abort signal handling", () => {
+    it("should reject immediately for pre-aborted signal without running script", async () => {
+      const { executor } = createExecutor();
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        executor.execute('fs.writeFileSync("should-not-exist.txt", "bad");', controller.signal),
+      ).rejects.toThrow("Script execution aborted");
+
+      // Verify no file was written — script body should not have executed
+      expect(fs.existsSync(path.join(tmpDir, "should-not-exist.txt"))).toBe(false);
+    });
+
+    it("should classify standard AbortError as abort, not generic error", async () => {
+      const { executor } = createExecutor({
+        call: vi.fn(async (_name: string, _args?: Record<string, unknown>, _inst?: string, signal?: AbortSignal) => {
+          // Simulate a long call that gets aborted by external signal
+          return new Promise<any>((_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              const err = new DOMException("The operation was aborted", "AbortError");
+              reject(err);
+            }, { once: true });
+          });
+        }) as any,
+      });
+
+      const controller = new AbortController();
+      // Abort externally after a short delay
+      setTimeout(() => controller.abort(), 50);
+
+      await expect(
+        executor.execute(
+          'await gateway_call("ssh.execute_command", { command: "sleep 99" });',
+          controller.signal,
+        ),
+      ).rejects.toThrow("Script execution aborted");
+    }, 10_000);
+
+    it("should classify custom abort reasons as abort, not generic error", async () => {
+      const { executor } = createExecutor({
+        call: vi.fn(async () => {
+          return new Promise<any>((resolve) => {
+            // Never resolves — will be aborted externally
+            setTimeout(resolve, 60_000);
+          });
+        }) as any,
+      });
+
+      const controller = new AbortController();
+      // Abort with a custom string reason after a short delay
+      setTimeout(() => controller.abort("user cancelled"), 50);
+
+      await expect(
+        executor.execute('await gateway_call("ssh.execute_command", { command: "sleep 99" });', controller.signal),
+      ).rejects.toThrow("Script execution aborted");
+    }, 10_000);
+  });
+
   describe("timeout enforcement", () => {
     it("should timeout long-running scripts", async () => {
       const { executor } = createExecutor({}, { timeoutMs: 200 });
@@ -287,6 +348,21 @@ describe("ScriptExecutor", () => {
       await expect(
         executor.execute('return {{{'),
       ).rejects.toThrow("Script compilation error");
+    });
+
+    it("should clean up abort listener on compilation error", async () => {
+      const { executor } = createExecutor();
+      const controller = new AbortController();
+      const signal = controller.signal;
+      const removeSpy = vi.spyOn(signal, "removeEventListener");
+
+      await expect(
+        executor.execute('return {{{', signal),
+      ).rejects.toThrow("Script compilation error");
+
+      // Verify that removeEventListener was called to clean up the listener
+      expect(removeSpy).toHaveBeenCalledWith("abort", expect.any(Function));
+      removeSpy.mockRestore();
     });
 
     it("should throw on runtime errors", async () => {

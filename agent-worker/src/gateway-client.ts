@@ -97,6 +97,7 @@ export class GatewayClient {
     toolName: string,
     args: Record<string, unknown> = {},
     instanceHint?: string,
+    signal?: AbortSignal,
   ): Promise<CallResult> {
     const params: Record<string, unknown> = {
       name: toolName,
@@ -106,7 +107,7 @@ export class GatewayClient {
       params.instance = instanceHint;
     }
 
-    const raw = await this.rpc("tools/call", params);
+    const raw = await this.rpc("tools/call", params, signal);
 
     // MCP result is { content: [{type, text}], isError? }
     const data = this.extractResult(raw);
@@ -126,19 +127,20 @@ export class GatewayClient {
   async searchTools(
     query: string,
     toolType?: string,
+    signal?: AbortSignal,
   ): Promise<SearchToolsResult> {
     const params: Record<string, unknown> = { query };
     if (toolType) {
       params.tool_type = toolType;
     }
-    return (await this.rpc("tools/search", params)) as SearchToolsResult;
+    return (await this.rpc("tools/search", params, signal)) as SearchToolsResult;
   }
 
   /** Get full detail for a specific tool. */
-  async getToolDetail(toolName: string): Promise<ToolDetailResult> {
+  async getToolDetail(toolName: string, signal?: AbortSignal): Promise<ToolDetailResult> {
     return (await this.rpc("tools/detail", {
       tool_name: toolName,
-    })) as ToolDetailResult;
+    }, signal)) as ToolDetailResult;
   }
 
   // -------------------------------------------------------------------------
@@ -150,7 +152,7 @@ export class GatewayClient {
   }
 
   /** Send a JSON-RPC 2.0 request to the gateway. */
-  private async rpc(method: string, params: unknown): Promise<unknown> {
+  private async rpc(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
     const body = JSON.stringify({
       jsonrpc: "2.0",
       method,
@@ -158,7 +160,7 @@ export class GatewayClient {
       id: this.nextId(),
     });
 
-    const respBody = await this.httpPost(body);
+    const respBody = await this.httpPost(body, signal);
 
     let parsed: Record<string, unknown>;
     try {
@@ -221,8 +223,14 @@ export class GatewayClient {
   }
 
   /** HTTP POST to the gateway /mcp endpoint, bypassing proxy. */
-  private httpPost(body: string): Promise<string> {
+  private httpPost(body: string, signal?: AbortSignal): Promise<string> {
     return new Promise((resolve, reject) => {
+      // If already aborted, reject immediately without starting the request.
+      if (signal?.aborted) {
+        reject(new GatewayError(-32000, "Request aborted"));
+        return;
+      }
+
       const url = new URL(`${this.gatewayUrl}/mcp`);
       const isHttps = url.protocol === "https:";
       const mod = isHttps ? https : http;
@@ -269,6 +277,16 @@ export class GatewayClient {
         req.destroy();
         reject(new GatewayError(-32000, "Request timed out"));
       });
+
+      // Cancel the in-flight request when the signal fires.
+      const onAbort = () => {
+        req.destroy();
+        reject(new GatewayError(-32000, "Request aborted"));
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+
+      // Clean up the abort listener once the request settles.
+      req.on("close", () => signal?.removeEventListener("abort", onAbort));
 
       req.write(body);
       req.end();

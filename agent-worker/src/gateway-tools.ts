@@ -91,7 +91,7 @@ export function createGatewayCallTool(ctx: GatewayToolContext) {
     execute: async (
       _toolCallId: string,
       params: GatewayCallInput,
-      _signal: AbortSignal | undefined,
+      signal: AbortSignal | undefined,
       _onUpdate: unknown,
     ) => {
       try {
@@ -99,6 +99,7 @@ export function createGatewayCallTool(ctx: GatewayToolContext) {
           params.tool_name,
           params.args as Record<string, unknown>,
           params.instance,
+          signal,
         );
 
         let text: string;
@@ -155,13 +156,14 @@ export function createSearchToolsTool(ctx: GatewayToolContext) {
     execute: async (
       _toolCallId: string,
       params: SearchToolsInput,
-      _signal: AbortSignal | undefined,
+      signal: AbortSignal | undefined,
       _onUpdate: unknown,
     ) => {
       try {
         const result: SearchToolsResult = await ctx.client.searchTools(
           params.query,
           params.tool_type,
+          signal,
         );
 
         const text = JSON.stringify(result, null, 2);
@@ -204,12 +206,13 @@ export function createGetToolDetailTool(ctx: GatewayToolContext) {
     execute: async (
       _toolCallId: string,
       params: GetToolDetailInput,
-      _signal: AbortSignal | undefined,
+      signal: AbortSignal | undefined,
       _onUpdate: unknown,
     ) => {
       try {
         const result: ToolDetailResult = await ctx.client.getToolDetail(
           params.tool_name,
+          signal,
         );
 
         const text = JSON.stringify(result, null, 2);
@@ -268,11 +271,11 @@ export function createExecuteScriptTool(ctx: ExecuteScriptToolContext) {
     execute: async (
       _toolCallId: string,
       params: ExecuteScriptInput,
-      _signal: AbortSignal | undefined,
+      signal: AbortSignal | undefined,
       _onUpdate: unknown,
     ) => {
       try {
-        const result = await executor.execute(params.code);
+        const result = await executor.execute(params.code, signal);
 
         let text = result.output;
         if (result.logs.length > 0 && result.output !== result.logs.join("\n")) {

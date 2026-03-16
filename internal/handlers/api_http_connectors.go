@@ -70,6 +70,8 @@ func (h *APIHandler) handleHTTPConnectors(w http.ResponseWriter, r *http.Request
 				api.RespondError(w, http.StatusConflict, err.Error())
 			} else if containsString(err.Error(), "validation failed") {
 				api.RespondError(w, http.StatusBadRequest, err.Error())
+			} else if containsString(err.Error(), "conflicts with") {
+				api.RespondError(w, http.StatusConflict, err.Error())
 			} else {
 				api.RespondError(w, http.StatusInternalServerError, "Failed to create HTTP connector")
 			}
@@ -137,6 +139,8 @@ func (h *APIHandler) handleHTTPConnectorByID(w http.ResponseWriter, r *http.Requ
 				api.RespondError(w, http.StatusConflict, err.Error())
 			} else if containsString(err.Error(), "validation failed") {
 				api.RespondError(w, http.StatusBadRequest, err.Error())
+			} else if containsString(err.Error(), "conflicts with") {
+				api.RespondError(w, http.StatusConflict, err.Error())
 			} else {
 				api.RespondError(w, http.StatusInternalServerError, "Failed to update HTTP connector")
 			}

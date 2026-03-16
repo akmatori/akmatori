@@ -75,6 +75,7 @@ export function useToolManagement() {
     setFormData({
       tool_type_id: tool.tool_type_id,
       name: tool.name,
+      logical_name: tool.logical_name || '',
       settings: tool.settings,
       enabled: tool.enabled,
     });
@@ -100,8 +101,12 @@ export function useToolManagement() {
         const cleanSettings = { ...formData.settings };
         MANAGED_SETTINGS_FIELDS.forEach(field => delete cleanSettings[field]);
 
+        // If the user renamed the tool, send empty logical_name so the backend
+        // re-derives it from the new name. Otherwise preserve the existing slug.
+        const nameChanged = formData.name !== editingTool.name;
         await toolsApi.update(editingTool.id, {
           name: formData.name,
+          logical_name: nameChanged ? '' : (formData.logical_name || ''),
           settings: cleanSettings,
           enabled: formData.enabled,
         });

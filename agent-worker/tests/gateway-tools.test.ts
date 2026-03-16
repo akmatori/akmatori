@@ -92,6 +92,7 @@ describe("createGatewayCallTool", () => {
         "ssh.execute_command",
         { command: "uptime", servers: ["web-01"] },
         "prod-ssh",
+        undefined,
       );
     });
 
@@ -108,6 +109,7 @@ describe("createGatewayCallTool", () => {
       expect(mockClient.call).toHaveBeenCalledWith(
         "zabbix.get_problems",
         { severity_min: 3 },
+        undefined,
         undefined,
       );
     });
@@ -272,7 +274,7 @@ describe("createSearchToolsTool", () => {
       const params: SearchToolsInput = { query: "ssh" };
       await tool.execute("tc-s1", params, undefined, undefined);
 
-      expect(mockClient.searchTools).toHaveBeenCalledWith("ssh", undefined);
+      expect(mockClient.searchTools).toHaveBeenCalledWith("ssh", undefined, undefined);
     });
 
     it("should call GatewayClient.searchTools with query and tool_type", async () => {
@@ -281,7 +283,7 @@ describe("createSearchToolsTool", () => {
       const params: SearchToolsInput = { query: "metrics", tool_type: "victoria_metrics" };
       await tool.execute("tc-s2", params, undefined, undefined);
 
-      expect(mockClient.searchTools).toHaveBeenCalledWith("metrics", "victoria_metrics");
+      expect(mockClient.searchTools).toHaveBeenCalledWith("metrics", "victoria_metrics", undefined);
     });
 
     it("should return JSON-stringified search results", async () => {
@@ -405,7 +407,7 @@ describe("createGetToolDetailTool", () => {
       const params: GetToolDetailInput = { tool_name: "ssh.execute_command" };
       await tool.execute("tc-d1", params, undefined, undefined);
 
-      expect(mockClient.getToolDetail).toHaveBeenCalledWith("ssh.execute_command");
+      expect(mockClient.getToolDetail).toHaveBeenCalledWith("ssh.execute_command", undefined);
     });
 
     it("should return JSON-stringified tool detail", async () => {
@@ -559,7 +561,7 @@ describe("createExecuteScriptTool", () => {
         undefined,
       );
 
-      expect(client.call).toHaveBeenCalledWith("zabbix.get_hosts", {}, undefined);
+      expect(client.call).toHaveBeenCalledWith("zabbix.get_hosts", {}, undefined, expect.any(AbortSignal));
       const parsed = JSON.parse(result.content[0].text);
       expect(parsed.hosts).toEqual(["web-01"]);
     });

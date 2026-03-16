@@ -24,6 +24,7 @@ export interface ToolInstance {
   id: number;
   tool_type_id: number;
   name: string;
+  logical_name: string;
   settings: Record<string, any>;
   enabled: boolean;
   created_at: string;
