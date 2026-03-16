@@ -1,7 +1,9 @@
 -- Migration: Drop aggregation tables and columns
 -- Context: The alert aggregation/correlation system has been removed from the codebase.
 -- These tables and columns are no longer referenced by any application code.
--- Run this migration against production PostgreSQL after deploying the updated application.
+-- IMPORTANT: Run this migration AFTER deploying the application version that removes
+-- aggregation code. Running it before deployment will break the running application
+-- because the old binary still references these columns and tables.
 --
 -- Date: 2026-03-16
 -- Related: docs/plans/completed/2026-03-16-remove-aggregation-and-legacy-cleanup.md

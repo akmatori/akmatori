@@ -141,7 +141,7 @@ components:
           type: string
         status:
           type: string
-          enum: [pending, running, diagnosed, observing, completed, failed]
+          enum: [pending, running, diagnosed, completed, failed]
         context:
           type: object
         session_id:
@@ -157,61 +157,10 @@ components:
         execution_time_ms:
           type: integer
           format: int64
-        alert_count:
-          type: integer
         started_at:
           type: string
           format: date-time
         completed_at:
-          type: string
-          format: date-time
-          nullable: true
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-
-    IncidentAlert:
-      type: object
-      properties:
-        id:
-          type: integer
-        incident_id:
-          type: integer
-        source_type:
-          type: string
-        source_fingerprint:
-          type: string
-        alert_name:
-          type: string
-        severity:
-          type: string
-          enum: [critical, high, warning, info]
-        target_host:
-          type: string
-        target_service:
-          type: string
-        summary:
-          type: string
-        description:
-          type: string
-        target_labels:
-          type: object
-        status:
-          type: string
-          enum: [firing, resolved]
-        alert_payload:
-          type: object
-        correlation_confidence:
-          type: number
-        correlation_reason:
-          type: string
-        attached_at:
-          type: string
-          format: date-time
-        resolved_at:
           type: string
           format: date-time
           nullable: true
@@ -308,36 +257,6 @@ components:
         is_default:
           type: boolean
         created_at:
-          type: string
-          format: date-time
-
-    AggregationSettings:
-      type: object
-      properties:
-        id:
-          type: integer
-        enabled:
-          type: boolean
-        correlation_confidence_threshold:
-          type: number
-        merge_confidence_threshold:
-          type: number
-        recorrelation_enabled:
-          type: boolean
-        recorrelation_interval_minutes:
-          type: integer
-        max_incidents_to_analyze:
-          type: integer
-        observing_duration_minutes:
-          type: integer
-        correlator_timeout_seconds:
-          type: integer
-        merge_analyzer_timeout_seconds:
-          type: integer
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
           type: string
           format: date-time
 
@@ -921,102 +840,6 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /incidents/{uuid}/alerts:
-    parameters:
-      - name: uuid
-        in: path
-        required: true
-        schema:
-          type: string
-    get:
-      summary: List incident alerts
-      operationId: listIncidentAlerts
-      tags: [Incidents]
-      responses:
-        '200':
-          description: Alerts attached to incident
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/IncidentAlert'
-    post:
-      summary: Attach alert to incident
-      operationId: attachAlert
-      tags: [Incidents]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/IncidentAlert'
-      responses:
-        '201':
-          description: Alert attached
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/IncidentAlert'
-
-  /incidents/{uuid}/alerts/{alertId}:
-    parameters:
-      - name: uuid
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: alertId
-        in: path
-        required: true
-        schema:
-          type: integer
-    delete:
-      summary: Detach alert from incident
-      operationId: detachAlert
-      tags: [Incidents]
-      responses:
-        '204':
-          description: Alert detached
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /incidents/{uuid}/merge:
-    parameters:
-      - name: uuid
-        in: path
-        required: true
-        schema:
-          type: string
-    post:
-      summary: Merge incidents
-      operationId: mergeIncident
-      tags: [Incidents]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [source_incident_uuid]
-              properties:
-                source_incident_uuid:
-                  type: string
-      responses:
-        '200':
-          description: Incidents merged
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                  target_incident:
-                    $ref: '#/components/schemas/Incident'
-                  alerts_moved:
-                    type: integer
-
   # ===== Settings =====
   /settings/slack:
     get:
@@ -1130,35 +953,6 @@ paths:
       responses:
         '200':
           description: Updated proxy settings
-
-  /settings/aggregation:
-    get:
-      summary: Get aggregation settings
-      operationId: getAggregationSettings
-      tags: [Settings]
-      responses:
-        '200':
-          description: Aggregation settings
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AggregationSettings'
-    put:
-      summary: Update aggregation settings
-      operationId: updateAggregationSettings
-      tags: [Settings]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AggregationSettings'
-      responses:
-        '200':
-          description: Updated settings
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AggregationSettings'
 
   # ===== Context Files =====
   /context:
