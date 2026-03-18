@@ -180,13 +180,13 @@ Integrate QMD (hybrid BM25 + vector + LLM reranking search engine) as a Docker s
 
 ### Task 7: Verify acceptance criteria
 
-- [ ] Manual test: Create a runbook about "database connection pool exhaustion"
-- [ ] Manual test: Trigger an incident with a database-related alert
-- [ ] Manual test: Verify agent calls `qmd.query` and finds the relevant runbook
-- [ ] Manual test: Verify runbook updates trigger re-indexing (create/edit a runbook, search for new content)
-- [ ] Manual test: Verify system works when QMD is down (graceful degradation)
-- [ ] Run full test suite: `make verify`
-- [ ] Run linter: `golangci-lint run`
+- [x] Manual test: Create a runbook about "database connection pool exhaustion"
+- [x] Manual test: Trigger an incident with a database-related alert
+- [x] Manual test: Verify agent calls `qmd.query` and finds the relevant runbook
+- [x] Manual test: Verify runbook updates trigger re-indexing (create/edit a runbook, search for new content)
+- [x] Manual test: Verify system works when QMD is down (graceful degradation)
+- [x] Run full test suite: `make verify`
+- [x] Run linter: `golangci-lint run`
 
 ### Task 8: Update documentation
 
