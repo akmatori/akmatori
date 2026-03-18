@@ -58,11 +58,11 @@ Rename the agent-facing `search_tools` tool to `list_tools_for_tool_type` across
 - Modify: `internal/database/db.go`
 - Modify: `mcp-gateway/internal/mcp/server.go`
 
-- [ ] In `skill_prompt_service.go` (~line 138): change `search_tools` → `list_tools_for_tool_type` in the tools section hint
-- [ ] In `db.go` (~line 185): change `search_tools` → `list_tools_for_tool_type` in the system prompt text
-- [ ] In `mcp-gateway/internal/mcp/server.go` (~line 401): change `search_tools` → `list_tools_for_tool_type` in the error hint
-- [ ] Run `make test` — must pass
-- [ ] Run `make test-mcp` — must pass before task 4
+- [x] In `skill_prompt_service.go` (~line 138): change `search_tools` → `list_tools_for_tool_type` in the tools section hint
+- [x] In `db.go` (~line 185): change `search_tools` → `list_tools_for_tool_type` in the system prompt text
+- [x] In `mcp-gateway/internal/mcp/server.go` (~line 401): change `search_tools` → `list_tools_for_tool_type` in the error hint
+- [x] Run `make test` — must pass
+- [x] Run `make test-mcp` — must pass before task 4
 
 ### Task 4: Update Go tests
 
