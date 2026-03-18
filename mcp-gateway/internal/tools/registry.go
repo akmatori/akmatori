@@ -7,7 +7,6 @@ import (
 	"log"
 	"log/slog"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -1082,29 +1081,21 @@ func (r *Registry) registerVictoriaMetricsTools() {
 	)
 }
 
-// SearchTools searches registered tools by query string and optional tool type filter.
-// It performs case-insensitive substring matching on tool name and description.
-func (r *Registry) SearchTools(query string, toolType string) []mcp.SearchToolsResultItem {
+// ListToolsByType lists registered tools filtered by tool type.
+// If toolType is empty, returns all tools.
+func (r *Registry) ListToolsByType(toolType string) []mcp.ToolListItem {
 	r.server.Mu().RLock()
 	defer r.server.Mu().RUnlock()
 
-	query = strings.ToLower(query)
-	var results []mcp.SearchToolsResultItem
+	var results []mcp.ToolListItem
 
 	for _, tool := range r.server.Tools() {
 		namespace, _ := mcp.ParseToolName(tool.Name)
-		// Apply tool type filter
 		if toolType != "" && namespace != toolType {
 			continue
 		}
-		// Match query against name and description
-		if query != "" &&
-			!strings.Contains(strings.ToLower(tool.Name), query) &&
-			!strings.Contains(strings.ToLower(tool.Description), query) {
-			continue
-		}
 
-		results = append(results, mcp.SearchToolsResultItem{
+		results = append(results, mcp.ToolListItem{
 			Name:        tool.Name,
 			Description: tool.Description,
 			ToolType:    namespace,

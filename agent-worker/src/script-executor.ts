@@ -130,11 +130,11 @@ export class ScriptExecutor {
       const result = await this.client.call(toolName, args, instance, internalSignal);
       return result.data;
     };
-    context.__gw_search = async (query: string, toolType?: string) => {
+    context.__gw_search = async (toolType: string) => {
       if (internalSignal.aborted) {
         throw new Error("Script aborted");
       }
-      return await this.client.searchTools(query, toolType, internalSignal);
+      return await this.client.listToolsByType(toolType, internalSignal);
     };
     context.__gw_detail = async (toolName: string) => {
       if (internalSignal.aborted) {
@@ -177,7 +177,7 @@ export class ScriptExecutor {
         var sfs = __fs, st = __setTimeout, ct = __clearTimeout;
 
         globalThis.gateway_call = async (name, args, instance) => gc(name, args, instance);
-        globalThis.list_tools_for_tool_type = async (query, toolType) => gs(query, toolType);
+        globalThis.list_tools_for_tool_type = async (toolType) => gs(toolType);
         globalThis.get_tool_detail = async (toolName) => gd(toolName);
         globalThis.console = {
           log: (...a) => cl(...a),

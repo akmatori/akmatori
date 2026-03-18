@@ -15,12 +15,12 @@ import (
 
 // mockDiscoverer implements ToolDiscoverer for testing
 type mockDiscoverer struct {
-	tools          []SearchToolsResultItem
+	tools          []ToolListItem
 	detail         *GetToolDetailResult
 	availableTypes []string
 }
 
-func (m *mockDiscoverer) SearchTools(query string, toolType string) []SearchToolsResultItem {
+func (m *mockDiscoverer) ListToolsByType(toolType string) []ToolListItem {
 	return m.tools
 }
 
@@ -80,77 +80,21 @@ func sendJSONRPCWithHeaders(t *testing.T, server *Server, method string, params 
 	return resp
 }
 
-func TestHandleSearchTools_QueryMatching(t *testing.T) {
-	s := newTestServer()
-	s.RegisterTool(Tool{
-		Name:        "ssh.execute_command",
-		Description: "Execute a shell command on SSH servers",
-		InputSchema: InputSchema{Type: "object"},
-	}, nil)
-	s.RegisterTool(Tool{
-		Name:        "zabbix.get_hosts",
-		Description: "Get hosts from Zabbix",
-		InputSchema: InputSchema{Type: "object"},
-	}, nil)
-
-	s.SetDiscoverer(&mockDiscoverer{
-		tools: []SearchToolsResultItem{
-			{Name: "ssh.execute_command", Description: "Execute a shell command on SSH servers", ToolType: "ssh"},
-		},
-	})
-
-	resp := sendJSONRPC(t, s, "tools/search", SearchToolsParams{Query: "ssh"})
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %s", resp.Error.Message)
-	}
-
-	resultBytes, _ := json.Marshal(resp.Result)
-	var result SearchToolsResult
-	if err := json.Unmarshal(resultBytes, &result); err != nil {
-		t.Fatalf("failed to decode result: %v", err)
-	}
-
-	if len(result.Tools) != 1 {
-		t.Fatalf("expected 1 tool, got %d", len(result.Tools))
-	}
-	if result.Tools[0].Name != "ssh.execute_command" {
-		t.Errorf("expected tool name 'ssh.execute_command', got %q", result.Tools[0].Name)
-	}
-}
-
-func TestHandleSearchTools_EmptyResults(t *testing.T) {
-	s := newTestServer()
-	s.SetDiscoverer(&mockDiscoverer{tools: nil})
-
-	resp := sendJSONRPC(t, s, "tools/search", SearchToolsParams{Query: "nonexistent"})
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %s", resp.Error.Message)
-	}
-
-	resultBytes, _ := json.Marshal(resp.Result)
-	var result SearchToolsResult
-	json.Unmarshal(resultBytes, &result)
-
-	if len(result.Tools) != 0 {
-		t.Errorf("expected 0 tools, got %d", len(result.Tools))
-	}
-}
-
-func TestHandleSearchTools_TypeFilter(t *testing.T) {
+func TestHandleListToolsByType_TypeFilter(t *testing.T) {
 	s := newTestServer()
 	s.SetDiscoverer(&mockDiscoverer{
-		tools: []SearchToolsResultItem{
+		tools: []ToolListItem{
 			{Name: "zabbix.get_hosts", Description: "Get hosts", ToolType: "zabbix"},
 		},
 	})
 
-	resp := sendJSONRPC(t, s, "tools/search", SearchToolsParams{Query: "", ToolType: "zabbix"})
+	resp := sendJSONRPC(t, s, "tools/list_by_type", ListToolsByTypeParams{ToolType: "zabbix"})
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %s", resp.Error.Message)
 	}
 
 	resultBytes, _ := json.Marshal(resp.Result)
-	var result SearchToolsResult
+	var result ListToolsByTypeResult
 	json.Unmarshal(resultBytes, &result)
 
 	if len(result.Tools) != 1 {
@@ -161,10 +105,23 @@ func TestHandleSearchTools_TypeFilter(t *testing.T) {
 	}
 }
 
-func TestHandleSearchTools_WithInstanceLookup(t *testing.T) {
+func TestHandleListToolsByType_MissingToolType(t *testing.T) {
+	s := newTestServer()
+	s.SetDiscoverer(&mockDiscoverer{tools: nil})
+
+	resp := sendJSONRPC(t, s, "tools/list_by_type", ListToolsByTypeParams{ToolType: ""})
+	if resp.Error == nil {
+		t.Fatal("expected error when tool_type is missing")
+	}
+	if resp.Error.Code != InvalidParams {
+		t.Errorf("expected error code %d, got %d", InvalidParams, resp.Error.Code)
+	}
+}
+
+func TestHandleListToolsByType_WithInstanceLookup(t *testing.T) {
 	s := newTestServer()
 	s.SetDiscoverer(&mockDiscoverer{
-		tools: []SearchToolsResultItem{
+		tools: []ToolListItem{
 			{Name: "ssh.execute_command", Description: "Execute command", ToolType: "ssh"},
 		},
 	})
@@ -178,13 +135,13 @@ func TestHandleSearchTools_WithInstanceLookup(t *testing.T) {
 		return nil
 	})
 
-	resp := sendJSONRPC(t, s, "tools/search", SearchToolsParams{Query: "ssh"})
+	resp := sendJSONRPC(t, s, "tools/list_by_type", ListToolsByTypeParams{ToolType: "ssh"})
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %s", resp.Error.Message)
 	}
 
 	resultBytes, _ := json.Marshal(resp.Result)
-	var result SearchToolsResult
+	var result ListToolsByTypeResult
 	json.Unmarshal(resultBytes, &result)
 
 	if len(result.Tools) != 1 {
@@ -198,10 +155,10 @@ func TestHandleSearchTools_WithInstanceLookup(t *testing.T) {
 	}
 }
 
-func TestHandleSearchTools_NoDiscoverer(t *testing.T) {
+func TestHandleListToolsByType_NoDiscoverer(t *testing.T) {
 	s := newTestServer()
 
-	resp := sendJSONRPC(t, s, "tools/search", SearchToolsParams{Query: "ssh"})
+	resp := sendJSONRPC(t, s, "tools/list_by_type", ListToolsByTypeParams{ToolType: "ssh"})
 	if resp.Error == nil {
 		t.Fatal("expected error when discoverer not set")
 	}
@@ -513,14 +470,14 @@ func TestAuthorization_ProxyToolBypassesAllowlist(t *testing.T) {
 
 // --- Discovery filtering by allowlist tests ---
 
-func TestHandleSearchTools_FilteredByAllowlist_PartialAuthorization(t *testing.T) {
+func TestHandleListToolsByType_FilteredByAllowlist_PartialAuthorization(t *testing.T) {
 	s := newTestServer()
 	authorizer := auth.NewAuthorizer(time.Hour)
 	defer authorizer.Stop()
 	s.SetAuthorizer(authorizer)
 
 	s.SetDiscoverer(&mockDiscoverer{
-		tools: []SearchToolsResultItem{
+		tools: []ToolListItem{
 			{Name: "ssh.execute_command", Description: "Execute command", ToolType: "ssh"},
 			{Name: "zabbix.get_hosts", Description: "Get hosts", ToolType: "zabbix"},
 			{Name: "victoria_metrics.instant_query", Description: "Query metrics", ToolType: "victoria_metrics"},
@@ -552,8 +509,8 @@ func TestHandleSearchTools_FilteredByAllowlist_PartialAuthorization(t *testing.T
 	}
 	allowlistJSON, _ := json.Marshal(allowlist)
 
-	resp := sendJSONRPCWithHeaders(t, s, "tools/search",
-		SearchToolsParams{Query: ""},
+	resp := sendJSONRPCWithHeaders(t, s, "tools/list_by_type",
+		ListToolsByTypeParams{ToolType: "ssh"},
 		map[string]string{
 			"X-Incident-ID":    "incident-filter-1",
 			"X-Tool-Allowlist": string(allowlistJSON),
@@ -564,7 +521,7 @@ func TestHandleSearchTools_FilteredByAllowlist_PartialAuthorization(t *testing.T
 	}
 
 	resultBytes, _ := json.Marshal(resp.Result)
-	var result SearchToolsResult
+	var result ListToolsByTypeResult
 	json.Unmarshal(resultBytes, &result)
 
 	// Should only return ssh and zabbix, not victoriametrics
@@ -595,14 +552,14 @@ func TestHandleSearchTools_FilteredByAllowlist_PartialAuthorization(t *testing.T
 	}
 }
 
-func TestHandleSearchTools_FilteredByAllowlist_NoAuthorization(t *testing.T) {
+func TestHandleListToolsByType_FilteredByAllowlist_NoAuthorization(t *testing.T) {
 	s := newTestServer()
 	authorizer := auth.NewAuthorizer(time.Hour)
 	defer authorizer.Stop()
 	s.SetAuthorizer(authorizer)
 
 	s.SetDiscoverer(&mockDiscoverer{
-		tools: []SearchToolsResultItem{
+		tools: []ToolListItem{
 			{Name: "ssh.execute_command", Description: "Execute command", ToolType: "ssh"},
 			{Name: "zabbix.get_hosts", Description: "Get hosts", ToolType: "zabbix"},
 		},
@@ -612,8 +569,8 @@ func TestHandleSearchTools_FilteredByAllowlist_NoAuthorization(t *testing.T) {
 	allowlist := []auth.AllowlistEntry{}
 	allowlistJSON, _ := json.Marshal(allowlist)
 
-	resp := sendJSONRPCWithHeaders(t, s, "tools/search",
-		SearchToolsParams{Query: ""},
+	resp := sendJSONRPCWithHeaders(t, s, "tools/list_by_type",
+		ListToolsByTypeParams{ToolType: "ssh"},
 		map[string]string{
 			"X-Incident-ID":    "incident-filter-empty",
 			"X-Tool-Allowlist": string(allowlistJSON),
@@ -624,7 +581,7 @@ func TestHandleSearchTools_FilteredByAllowlist_NoAuthorization(t *testing.T) {
 	}
 
 	resultBytes, _ := json.Marshal(resp.Result)
-	var result SearchToolsResult
+	var result ListToolsByTypeResult
 	json.Unmarshal(resultBytes, &result)
 
 	if len(result.Tools) != 0 {
@@ -632,14 +589,14 @@ func TestHandleSearchTools_FilteredByAllowlist_NoAuthorization(t *testing.T) {
 	}
 }
 
-func TestHandleSearchTools_FilteredByAllowlist_FullAuthorization(t *testing.T) {
+func TestHandleListToolsByType_FilteredByAllowlist_FullAuthorization(t *testing.T) {
 	s := newTestServer()
 	authorizer := auth.NewAuthorizer(time.Hour)
 	defer authorizer.Stop()
 	s.SetAuthorizer(authorizer)
 
 	s.SetDiscoverer(&mockDiscoverer{
-		tools: []SearchToolsResultItem{
+		tools: []ToolListItem{
 			{Name: "ssh.execute_command", Description: "Execute command", ToolType: "ssh"},
 			{Name: "zabbix.get_hosts", Description: "Get hosts", ToolType: "zabbix"},
 		},
@@ -652,8 +609,8 @@ func TestHandleSearchTools_FilteredByAllowlist_FullAuthorization(t *testing.T) {
 	}
 	allowlistJSON, _ := json.Marshal(allowlist)
 
-	resp := sendJSONRPCWithHeaders(t, s, "tools/search",
-		SearchToolsParams{Query: ""},
+	resp := sendJSONRPCWithHeaders(t, s, "tools/list_by_type",
+		ListToolsByTypeParams{ToolType: "ssh"},
 		map[string]string{
 			"X-Incident-ID":    "incident-filter-full",
 			"X-Tool-Allowlist": string(allowlistJSON),
@@ -664,7 +621,7 @@ func TestHandleSearchTools_FilteredByAllowlist_FullAuthorization(t *testing.T) {
 	}
 
 	resultBytes, _ := json.Marshal(resp.Result)
-	var result SearchToolsResult
+	var result ListToolsByTypeResult
 	json.Unmarshal(resultBytes, &result)
 
 	if len(result.Tools) != 2 {
@@ -672,22 +629,22 @@ func TestHandleSearchTools_FilteredByAllowlist_FullAuthorization(t *testing.T) {
 	}
 }
 
-func TestHandleSearchTools_NoAllowlistReturnsAll(t *testing.T) {
+func TestHandleListToolsByType_NoAllowlistReturnsAll(t *testing.T) {
 	s := newTestServer()
 	authorizer := auth.NewAuthorizer(time.Hour)
 	defer authorizer.Stop()
 	s.SetAuthorizer(authorizer)
 
 	s.SetDiscoverer(&mockDiscoverer{
-		tools: []SearchToolsResultItem{
+		tools: []ToolListItem{
 			{Name: "ssh.execute_command", Description: "Execute command", ToolType: "ssh"},
 			{Name: "zabbix.get_hosts", Description: "Get hosts", ToolType: "zabbix"},
 		},
 	})
 
 	// No allowlist header — returns all tools when no allowlist is registered
-	resp := sendJSONRPCWithHeaders(t, s, "tools/search",
-		SearchToolsParams{Query: ""},
+	resp := sendJSONRPCWithHeaders(t, s, "tools/list_by_type",
+		ListToolsByTypeParams{ToolType: "ssh"},
 		map[string]string{
 			"X-Incident-ID": "incident-no-filter",
 		},
@@ -697,7 +654,7 @@ func TestHandleSearchTools_NoAllowlistReturnsAll(t *testing.T) {
 	}
 
 	resultBytes, _ := json.Marshal(resp.Result)
-	var result SearchToolsResult
+	var result ListToolsByTypeResult
 	json.Unmarshal(resultBytes, &result)
 
 	if len(result.Tools) != 2 {
@@ -938,20 +895,20 @@ func TestHandleListToolTypes_EmptyTypes(t *testing.T) {
 	}
 }
 
-func TestHandleSearchTools_EmptyResultsWithHint(t *testing.T) {
+func TestHandleListToolsByType_EmptyResultsWithHint(t *testing.T) {
 	s := newTestServer()
 	s.SetDiscoverer(&mockDiscoverer{
 		tools:          nil,
 		availableTypes: []string{"ssh", "victoria_metrics", "zabbix"},
 	})
 
-	resp := sendJSONRPC(t, s, "tools/search", SearchToolsParams{Query: "prometheus"})
+	resp := sendJSONRPC(t, s, "tools/list_by_type", ListToolsByTypeParams{ToolType: "prometheus"})
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %s", resp.Error.Message)
 	}
 
 	resultBytes, _ := json.Marshal(resp.Result)
-	var result SearchToolsResult
+	var result ListToolsByTypeResult
 	json.Unmarshal(resultBytes, &result)
 
 	if len(result.Tools) != 0 {
@@ -961,14 +918,14 @@ func TestHandleSearchTools_EmptyResultsWithHint(t *testing.T) {
 		t.Fatal("expected hint when no results found")
 	}
 	if !strings.Contains(result.Hint, "prometheus") {
-		t.Errorf("hint should mention the query, got: %s", result.Hint)
+		t.Errorf("hint should mention the requested type, got: %s", result.Hint)
 	}
 	if !strings.Contains(result.Hint, "victoria_metrics") {
 		t.Errorf("hint should list available types, got: %s", result.Hint)
 	}
 }
 
-func TestHandleSearchTools_EmptyResultsHintRespectsAllowlist(t *testing.T) {
+func TestHandleListToolsByType_EmptyResultsHintRespectsAllowlist(t *testing.T) {
 	s := newTestServer()
 	authorizer := auth.NewAuthorizer(time.Hour)
 	defer authorizer.Stop()
@@ -984,8 +941,8 @@ func TestHandleSearchTools_EmptyResultsHintRespectsAllowlist(t *testing.T) {
 	}
 	allowlistJSON, _ := json.Marshal(allowlist)
 
-	resp := sendJSONRPCWithHeaders(t, s, "tools/search",
-		SearchToolsParams{Query: "nonexistent"},
+	resp := sendJSONRPCWithHeaders(t, s, "tools/list_by_type",
+		ListToolsByTypeParams{ToolType: "nonexistent"},
 		map[string]string{
 			"X-Incident-ID":    "incident-hint-filter",
 			"X-Tool-Allowlist": string(allowlistJSON),
@@ -996,7 +953,7 @@ func TestHandleSearchTools_EmptyResultsHintRespectsAllowlist(t *testing.T) {
 	}
 
 	resultBytes, _ := json.Marshal(resp.Result)
-	var result SearchToolsResult
+	var result ListToolsByTypeResult
 	json.Unmarshal(resultBytes, &result)
 
 	if result.Hint == "" {
@@ -1010,47 +967,26 @@ func TestHandleSearchTools_EmptyResultsHintRespectsAllowlist(t *testing.T) {
 	}
 }
 
-func TestHandleSearchTools_NonEmptyResultsNoHint(t *testing.T) {
+func TestHandleListToolsByType_NonEmptyResultsNoHint(t *testing.T) {
 	s := newTestServer()
 	s.SetDiscoverer(&mockDiscoverer{
-		tools: []SearchToolsResultItem{
+		tools: []ToolListItem{
 			{Name: "ssh.execute_command", Description: "Execute command", ToolType: "ssh"},
 		},
 		availableTypes: []string{"ssh", "zabbix"},
 	})
 
-	resp := sendJSONRPC(t, s, "tools/search", SearchToolsParams{Query: "ssh"})
+	resp := sendJSONRPC(t, s, "tools/list_by_type", ListToolsByTypeParams{ToolType: "ssh"})
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %s", resp.Error.Message)
 	}
 
 	resultBytes, _ := json.Marshal(resp.Result)
-	var result SearchToolsResult
+	var result ListToolsByTypeResult
 	json.Unmarshal(resultBytes, &result)
 
 	if result.Hint != "" {
 		t.Errorf("expected no hint when results are found, got: %s", result.Hint)
-	}
-}
-
-func TestHandleSearchTools_EmptyQueryNoHint(t *testing.T) {
-	s := newTestServer()
-	s.SetDiscoverer(&mockDiscoverer{
-		tools:          nil,
-		availableTypes: []string{"ssh"},
-	})
-
-	resp := sendJSONRPC(t, s, "tools/search", SearchToolsParams{Query: ""})
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %s", resp.Error.Message)
-	}
-
-	resultBytes, _ := json.Marshal(resp.Result)
-	var result SearchToolsResult
-	json.Unmarshal(resultBytes, &result)
-
-	if result.Hint != "" {
-		t.Errorf("expected no hint for empty query, got: %s", result.Hint)
 	}
 }
 

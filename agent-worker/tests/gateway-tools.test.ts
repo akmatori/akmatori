@@ -26,7 +26,7 @@ import * as os from "node:os";
 function createMockClient(overrides?: Partial<GatewayClient>): GatewayClient {
   return {
     call: vi.fn(async () => ({ data: { status: "ok" } } as CallResult)),
-    searchTools: vi.fn(async () => ({ tools: [] })),
+    listToolsByType: vi.fn(async () => ({ tools: [] })),
     getToolDetail: vi.fn(async () => ({
       name: "ssh.execute_command",
       description: "Execute SSH command",
@@ -256,8 +256,8 @@ describe("createListToolsForToolTypeTool", () => {
       const tool = createListToolsForToolTypeTool({ client: mockClient });
 
       expect(tool.parameters).toBe(ListToolsForToolTypeParams);
-      expect(tool.parameters.properties.query).toBeDefined();
       expect(tool.parameters.properties.tool_type).toBeDefined();
+      expect(tool.parameters.properties.query).toBeUndefined();
     });
 
     it("should have promptGuidelines", () => {
@@ -270,26 +270,17 @@ describe("createListToolsForToolTypeTool", () => {
   });
 
   describe("execute handler", () => {
-    it("should call GatewayClient.searchTools with query only", async () => {
+    it("should call GatewayClient.listToolsByType with tool_type", async () => {
       const tool = createListToolsForToolTypeTool({ client: mockClient });
 
-      const params: ListToolsForToolTypeInput = { query: "ssh" };
+      const params: ListToolsForToolTypeInput = { tool_type: "ssh" };
       await tool.execute("tc-s1", params, undefined, undefined);
 
-      expect(mockClient.searchTools).toHaveBeenCalledWith("ssh", undefined, undefined);
+      expect(mockClient.listToolsByType).toHaveBeenCalledWith("ssh", undefined);
     });
 
-    it("should call GatewayClient.searchTools with query and tool_type", async () => {
-      const tool = createListToolsForToolTypeTool({ client: mockClient });
-
-      const params: ListToolsForToolTypeInput = { query: "metrics", tool_type: "victoria_metrics" };
-      await tool.execute("tc-s2", params, undefined, undefined);
-
-      expect(mockClient.searchTools).toHaveBeenCalledWith("metrics", "victoria_metrics", undefined);
-    });
-
-    it("should return JSON-stringified search results", async () => {
-      const searchResult = {
+    it("should return JSON-stringified list results", async () => {
+      const listResult = {
         tools: [
           {
             name: "ssh.execute_command",
@@ -299,13 +290,13 @@ describe("createListToolsForToolTypeTool", () => {
         ],
       };
       const client = createMockClient({
-        searchTools: vi.fn(async () => searchResult) as any,
+        listToolsByType: vi.fn(async () => listResult) as any,
       });
       const tool = createListToolsForToolTypeTool({ client });
 
       const result = await tool.execute(
         "tc-s3",
-        { query: "ssh" },
+        { tool_type: "ssh" },
         undefined,
         undefined,
       );
@@ -318,15 +309,15 @@ describe("createListToolsForToolTypeTool", () => {
       expect(parsed.tools[0].instances[0]).toBe("prod-ssh");
     });
 
-    it("should return empty tools array for no matches", async () => {
+    it("should return empty tools array for unknown type", async () => {
       const client = createMockClient({
-        searchTools: vi.fn(async () => ({ tools: [] })) as any,
+        listToolsByType: vi.fn(async () => ({ tools: [] })) as any,
       });
       const tool = createListToolsForToolTypeTool({ client });
 
       const result = await tool.execute(
         "tc-s4",
-        { query: "nonexistent" },
+        { tool_type: "nonexistent" },
         undefined,
         undefined,
       );
@@ -337,7 +328,7 @@ describe("createListToolsForToolTypeTool", () => {
 
     it("should handle errors gracefully", async () => {
       const client = createMockClient({
-        searchTools: vi.fn(async () => {
+        listToolsByType: vi.fn(async () => {
           throw new Error("MCP Error -32000: Gateway unavailable");
         }) as any,
       });
@@ -345,7 +336,7 @@ describe("createListToolsForToolTypeTool", () => {
 
       const result = await tool.execute(
         "tc-s5",
-        { query: "ssh" },
+        { tool_type: "ssh" },
         undefined,
         undefined,
       );
@@ -357,12 +348,8 @@ describe("createListToolsForToolTypeTool", () => {
 });
 
 describe("ListToolsForToolTypeParams schema", () => {
-  it("should require query as string", () => {
-    expect(ListToolsForToolTypeParams.properties.query.type).toBe("string");
-  });
-
-  it("should have optional tool_type field", () => {
-    expect(ListToolsForToolTypeParams.properties.tool_type).toBeDefined();
+  it("should require tool_type as string", () => {
+    expect(ListToolsForToolTypeParams.properties.tool_type.type).toBe("string");
   });
 });
 

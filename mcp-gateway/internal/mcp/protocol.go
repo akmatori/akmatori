@@ -157,24 +157,23 @@ func NewResponse(id interface{}, result interface{}) Response {
 	}
 }
 
-// SearchToolsParams represents tools/search request params
-type SearchToolsParams struct {
-	Query    string `json:"query"`
-	ToolType string `json:"tool_type,omitempty"`
+// ListToolsByTypeParams represents tools/list_by_type request params
+type ListToolsByTypeParams struct {
+	ToolType string `json:"tool_type"`
 }
 
-// SearchToolsResultItem represents a single tool in search results (compact)
-type SearchToolsResultItem struct {
+// ToolListItem represents a single tool in list results (compact)
+type ToolListItem struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	ToolType    string   `json:"tool_type"`
 	Instances   []string `json:"instances,omitempty"` // logical names of enabled instances
 }
 
-// SearchToolsResult represents tools/search response
-type SearchToolsResult struct {
-	Tools []SearchToolsResultItem `json:"tools"`
-	Hint  string                  `json:"hint,omitempty"`
+// ListToolsByTypeResult represents tools/list_by_type response
+type ListToolsByTypeResult struct {
+	Tools []ToolListItem `json:"tools"`
+	Hint  string         `json:"hint,omitempty"`
 }
 
 // GetToolDetailParams represents tools/detail request params

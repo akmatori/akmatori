@@ -18,9 +18,9 @@ import (
 // ToolHandler is a function that handles a tool call
 type ToolHandler func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error)
 
-// ToolDiscoverer provides tool search and detail capabilities.
+// ToolDiscoverer provides tool listing and detail capabilities.
 type ToolDiscoverer interface {
-	SearchTools(query string, toolType string) []SearchToolsResultItem
+	ListToolsByType(toolType string) []ToolListItem
 	GetToolDetail(toolName string) (*GetToolDetailResult, bool)
 	GetAvailableToolTypes() []string
 }
@@ -212,8 +212,8 @@ func (s *Server) handleRequest(ctx context.Context, req *Request, incidentID str
 		return s.handleListTools(req)
 	case "tools/call":
 		return s.handleCallTool(ctx, req, incidentID)
-	case "tools/search":
-		return s.handleSearchTools(req, incidentID)
+	case "tools/list_by_type":
+		return s.handleListToolsByType(req, incidentID)
 	case "tools/detail":
 		return s.handleGetToolDetail(req, incidentID)
 	case "tools/list_types":
@@ -335,20 +335,24 @@ func (s *Server) handleCallTool(ctx context.Context, req *Request, incidentID st
 	})
 }
 
-// handleSearchTools handles the tools/search request
-func (s *Server) handleSearchTools(req *Request, incidentID string) Response {
+// handleListToolsByType handles the tools/list_by_type request
+func (s *Server) handleListToolsByType(req *Request, incidentID string) Response {
 	if s.discoverer == nil {
 		return NewErrorResponse(req.ID, InternalError, "Tool discovery not configured", nil)
 	}
 
-	var params SearchToolsParams
+	var params ListToolsByTypeParams
 	if req.Params != nil {
 		if err := json.Unmarshal(req.Params, &params); err != nil {
-			return NewErrorResponse(req.ID, InvalidParams, "Invalid search params", err.Error())
+			return NewErrorResponse(req.ID, InvalidParams, "Invalid list params", err.Error())
 		}
 	}
 
-	results := s.discoverer.SearchTools(params.Query, params.ToolType)
+	if params.ToolType == "" {
+		return NewErrorResponse(req.ID, InvalidParams, "tool_type is required", nil)
+	}
+
+	results := s.discoverer.ListToolsByType(params.ToolType)
 
 	// Populate instance logical names if lookup is available
 	if s.instanceLookup != nil {
@@ -368,17 +372,17 @@ func (s *Server) handleSearchTools(req *Request, incidentID string) Response {
 	if s.authorizer != nil && incidentID != "" {
 		allowlist := s.authorizer.GetAllowlist(incidentID)
 		if allowlist != nil {
-			results = filterSearchResultsByAllowlist(results, allowlist)
+			results = filterToolsByAllowlist(results, allowlist)
 		}
 	}
 
 	if results == nil {
-		results = []SearchToolsResultItem{}
+		results = []ToolListItem{}
 	}
 
-	// When no results found, provide a hint about available tool types
+	// When no tools found for this type, provide a hint about available types
 	var hint string
-	if len(results) == 0 && params.Query != "" {
+	if len(results) == 0 {
 		availableTypes := s.discoverer.GetAvailableToolTypes()
 		// Filter by allowlist if present
 		if s.authorizer != nil && incidentID != "" {
@@ -398,14 +402,14 @@ func (s *Server) handleSearchTools(req *Request, incidentID string) Response {
 			}
 		}
 		if len(availableTypes) > 0 {
-			hint = fmt.Sprintf("No tools matched '%s'. Available tool types: %s. Try: list_tools_for_tool_type({query: '%s'})",
-				params.Query, strings.Join(availableTypes, ", "), availableTypes[0])
+			hint = fmt.Sprintf("No tools found for type '%s'. Available tool types: %s",
+				params.ToolType, strings.Join(availableTypes, ", "))
 		} else {
-			hint = fmt.Sprintf("No tools matched '%s'. No tool types are available for this incident.", params.Query)
+			hint = fmt.Sprintf("No tools found for type '%s'. No tool types are available for this incident.", params.ToolType)
 		}
 	}
 
-	return NewResponse(req.ID, SearchToolsResult{Tools: results, Hint: hint})
+	return NewResponse(req.ID, ListToolsByTypeResult{Tools: results, Hint: hint})
 }
 
 // handleGetToolDetail handles the tools/detail request
@@ -542,16 +546,16 @@ func extractLogicalNameFromArgs(args map[string]interface{}) string {
 	return ""
 }
 
-// filterSearchResultsByAllowlist removes tools that have no authorized instances.
+// filterToolsByAllowlist removes tools that have no authorized instances.
 // A tool is kept if any allowlist entry matches its tool type.
-func filterSearchResultsByAllowlist(results []SearchToolsResultItem, allowlist []auth.AllowlistEntry) []SearchToolsResultItem {
+func filterToolsByAllowlist(results []ToolListItem, allowlist []auth.AllowlistEntry) []ToolListItem {
 	// Build set of authorized tool types
 	authorizedTypes := make(map[string]bool)
 	for _, e := range allowlist {
 		authorizedTypes[e.ToolType] = true
 	}
 
-	filtered := make([]SearchToolsResultItem, 0, len(results))
+	filtered := make([]ToolListItem, 0, len(results))
 	for _, item := range results {
 		if !authorizedTypes[item.ToolType] {
 			continue

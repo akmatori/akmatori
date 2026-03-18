@@ -7,7 +7,7 @@
  */
 
 import { Type, type TSchema, type Static } from "@sinclair/typebox";
-import type { GatewayClient, CallResult, SearchToolsResult, ToolDetailResult } from "./gateway-client.js";
+import type { GatewayClient, CallResult, ListToolsResult, ToolDetailResult } from "./gateway-client.js";
 import { ScriptExecutor } from "./script-executor.js";
 
 // Re-export the ToolDefinition type from pi-coding-agent for convenience.
@@ -36,8 +36,7 @@ export type GatewayCallInput = Static<typeof GatewayCallParams>;
 // ---------------------------------------------------------------------------
 
 export const ListToolsForToolTypeParams = Type.Object({
-  query: Type.String({ description: "Search query to match against tool names and descriptions" }),
-  tool_type: Type.Optional(Type.String({ description: "Optional filter by tool type (e.g. 'ssh', 'zabbix', 'victoriametrics')" })),
+  tool_type: Type.String({ description: "Tool type to list (e.g. 'ssh', 'zabbix', 'victoria_metrics'). Use list_tool_types to see available types." }),
 });
 
 export type ListToolsForToolTypeInput = Static<typeof ListToolsForToolTypeParams>;
@@ -135,8 +134,7 @@ export function createGatewayCallTool(ctx: GatewayToolContext) {
 /**
  * Create the `list_tools_for_tool_type` tool definition for registration with pi-mono.
  *
- * Allows the agent to discover available tools by searching with a query
- * string and optional tool type filter.
+ * Allows the agent to discover available tools by listing all tools of a given type.
  */
 export function createListToolsForToolTypeTool(ctx: GatewayToolContext) {
   return {
@@ -144,12 +142,12 @@ export function createListToolsForToolTypeTool(ctx: GatewayToolContext) {
     label: "List Tools For Tool Type",
     description:
       "List available infrastructure tools on the MCP Gateway filtered by tool type. " +
-      "Returns a list of matching tools with their descriptions and available instances. " +
+      "Returns all tools of the specified type with their descriptions and available instances. " +
       "Use this to discover what tools are available before calling them.",
     promptGuidelines: [
-      "Call list_tool_types first to see available tool types. Then list tools by type (e.g. list_tools_for_tool_type({query: 'ssh'}) or list_tools_for_tool_type({query: 'metrics', tool_type: 'victoria_metrics'})). Do NOT search for alert text or error messages — search for tool type names only.",
-      "Example: list_tools_for_tool_type({ query: \"ssh\" }) — finds all SSH-related tools",
-      "Example: list_tools_for_tool_type({ query: \"metrics\", tool_type: \"victoria_metrics\" }) — finds VictoriaMetrics tools",
+      "Call list_tool_types first to see available tool types. Then list tools by type: list_tools_for_tool_type({ tool_type: \"victoria_metrics\" }).",
+      "Example: list_tools_for_tool_type({ tool_type: \"ssh\" }) — lists all SSH tools",
+      "Example: list_tools_for_tool_type({ tool_type: \"victoria_metrics\" }) — lists VictoriaMetrics tools",
       "After finding a tool, use get_tool_detail to see its full parameter schema before calling it.",
     ],
     parameters: ListToolsForToolTypeParams,
@@ -160,8 +158,7 @@ export function createListToolsForToolTypeTool(ctx: GatewayToolContext) {
       _onUpdate: unknown,
     ) => {
       try {
-        const result: SearchToolsResult = await ctx.client.searchTools(
-          params.query,
+        const result: ListToolsResult = await ctx.client.listToolsByType(
           params.tool_type,
           signal,
         );
