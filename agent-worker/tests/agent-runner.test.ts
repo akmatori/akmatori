@@ -445,7 +445,7 @@ describe("AgentRunner", () => {
       );
     });
 
-    it("should pass gateway_call, search_tools, get_tool_detail, list_tool_types, and execute_script as customTools", async () => {
+    it("should pass gateway_call, list_tools_for_tool_type, get_tool_detail, list_tool_types, and execute_script as customTools", async () => {
       const params = makeExecuteParams({ incidentId: "inc-tools" });
       await runner.execute(params);
 
@@ -455,7 +455,7 @@ describe("AgentRunner", () => {
 
       const toolNames = opts.customTools.map((t: any) => t.name);
       expect(toolNames).toContain("gateway_call");
-      expect(toolNames).toContain("search_tools");
+      expect(toolNames).toContain("list_tools_for_tool_type");
       expect(toolNames).toContain("get_tool_detail");
       expect(toolNames).toContain("list_tool_types");
       expect(toolNames).toContain("execute_script");
@@ -479,7 +479,7 @@ describe("AgentRunner", () => {
       expect(typeof bashTool.promptGuidelines).toBe("string");
       expect(bashTool.promptGuidelines).toContain("gateway_call");
       expect(bashTool.promptGuidelines).toContain("SKILL.md");
-      expect(bashTool.promptGuidelines).toContain("search_tools");
+      expect(bashTool.promptGuidelines).toContain("list_tools_for_tool_type");
       expect(bashTool.promptGuidelines).not.toContain("python3 -c");
       expect(bashTool.promptGuidelines).not.toContain("PYTHONPATH");
     });

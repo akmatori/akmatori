@@ -26,18 +26,18 @@ Rename the agent-facing `search_tools` tool to `list_tools_for_tool_type` across
 - Modify: `agent-worker/src/script-executor.ts`
 - Modify: `agent-worker/src/agent-runner.ts`
 
-- [ ] In `gateway-tools.ts`: rename `SearchToolsParams` → `ListToolsForToolTypeParams`, `SearchToolsInput` → `ListToolsForToolTypeInput`
-- [ ] In `gateway-tools.ts`: rename the factory function `createSearchToolsTool` → `createListToolsForToolTypeTool`
-- [ ] In `gateway-tools.ts`: change `name: "search_tools"` → `name: "list_tools_for_tool_type"`
-- [ ] In `gateway-tools.ts`: update all `promptGuidelines` strings referencing `search_tools` to `list_tools_for_tool_type`
-- [ ] In `gateway-tools.ts`: update the `execute_script` params description (injected globals list)
-- [ ] In `gateway-tools.ts`: update `get_tool_detail` guidelines that reference `search_tools`
-- [ ] In `gateway-tools.ts`: update `list_tool_types` guidelines that reference `search_tools`
-- [ ] In `gateway-tools.ts`: update `execute_script` guidelines that reference `search_tools`
-- [ ] In `script-executor.ts`: rename `globalThis.search_tools` → `globalThis.list_tools_for_tool_type`
-- [ ] In `script-executor.ts`: update all JSDoc and error message strings referencing `search_tools`
-- [ ] In `agent-runner.ts`: update the system prompt / bash tool guidelines referencing `search_tools`
-- [ ] Run `make test-agent` — must pass before task 2
+- [x] In `gateway-tools.ts`: rename `SearchToolsParams` → `ListToolsForToolTypeParams`, `SearchToolsInput` → `ListToolsForToolTypeInput`
+- [x] In `gateway-tools.ts`: rename the factory function `createSearchToolsTool` → `createListToolsForToolTypeTool`
+- [x] In `gateway-tools.ts`: change `name: "search_tools"` → `name: "list_tools_for_tool_type"`
+- [x] In `gateway-tools.ts`: update all `promptGuidelines` strings referencing `search_tools` to `list_tools_for_tool_type`
+- [x] In `gateway-tools.ts`: update the `execute_script` params description (injected globals list)
+- [x] In `gateway-tools.ts`: update `get_tool_detail` guidelines that reference `search_tools`
+- [x] In `gateway-tools.ts`: update `list_tool_types` guidelines that reference `search_tools`
+- [x] In `gateway-tools.ts`: update `execute_script` guidelines that reference `search_tools`
+- [x] In `script-executor.ts`: rename `globalThis.search_tools` → `globalThis.list_tools_for_tool_type`
+- [x] In `script-executor.ts`: update all JSDoc and error message strings referencing `search_tools`
+- [x] In `agent-runner.ts`: update the system prompt / bash tool guidelines referencing `search_tools`
+- [x] Run `make test-agent` — must pass before task 2
 
 ### Task 2: Rename in agent-worker tests
 

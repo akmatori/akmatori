@@ -1,16 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   createGatewayCallTool,
-  createSearchToolsTool,
+  createListToolsForToolTypeTool,
   createGetToolDetailTool,
   createListToolTypesTool,
   createExecuteScriptTool,
   GatewayCallParams,
-  SearchToolsParams,
+  ListToolsForToolTypeParams,
   GetToolDetailParams,
   ExecuteScriptParams,
   type GatewayCallInput,
-  type SearchToolsInput,
+  type ListToolsForToolTypeInput,
   type GetToolDetailInput,
   type ExecuteScriptInput,
 } from "../src/gateway-tools.js";
@@ -233,10 +233,10 @@ describe("GatewayCallParams schema", () => {
 });
 
 // ---------------------------------------------------------------------------
-// search_tools tool
+// list_tools_for_tool_type tool
 // ---------------------------------------------------------------------------
 
-describe("createSearchToolsTool", () => {
+describe("createListToolsForToolTypeTool", () => {
   let mockClient: GatewayClient;
 
   beforeEach(() => {
@@ -245,44 +245,44 @@ describe("createSearchToolsTool", () => {
 
   describe("tool definition", () => {
     it("should have correct name and description", () => {
-      const tool = createSearchToolsTool({ client: mockClient });
+      const tool = createListToolsForToolTypeTool({ client: mockClient });
 
-      expect(tool.name).toBe("search_tools");
-      expect(tool.label).toBe("Search Tools");
-      expect(tool.description).toContain("Search for available infrastructure tools");
+      expect(tool.name).toBe("list_tools_for_tool_type");
+      expect(tool.label).toBe("List Tools For Tool Type");
+      expect(tool.description).toContain("List available infrastructure tools");
     });
 
     it("should have correct parameter schema", () => {
-      const tool = createSearchToolsTool({ client: mockClient });
+      const tool = createListToolsForToolTypeTool({ client: mockClient });
 
-      expect(tool.parameters).toBe(SearchToolsParams);
+      expect(tool.parameters).toBe(ListToolsForToolTypeParams);
       expect(tool.parameters.properties.query).toBeDefined();
       expect(tool.parameters.properties.tool_type).toBeDefined();
     });
 
     it("should have promptGuidelines", () => {
-      const tool = createSearchToolsTool({ client: mockClient });
+      const tool = createListToolsForToolTypeTool({ client: mockClient });
 
       expect(tool.promptGuidelines).toBeDefined();
       expect(Array.isArray(tool.promptGuidelines)).toBe(true);
-      expect(tool.promptGuidelines!.some((g: string) => g.includes("search_tools"))).toBe(true);
+      expect(tool.promptGuidelines!.some((g: string) => g.includes("list_tools_for_tool_type"))).toBe(true);
     });
   });
 
   describe("execute handler", () => {
     it("should call GatewayClient.searchTools with query only", async () => {
-      const tool = createSearchToolsTool({ client: mockClient });
+      const tool = createListToolsForToolTypeTool({ client: mockClient });
 
-      const params: SearchToolsInput = { query: "ssh" };
+      const params: ListToolsForToolTypeInput = { query: "ssh" };
       await tool.execute("tc-s1", params, undefined, undefined);
 
       expect(mockClient.searchTools).toHaveBeenCalledWith("ssh", undefined, undefined);
     });
 
     it("should call GatewayClient.searchTools with query and tool_type", async () => {
-      const tool = createSearchToolsTool({ client: mockClient });
+      const tool = createListToolsForToolTypeTool({ client: mockClient });
 
-      const params: SearchToolsInput = { query: "metrics", tool_type: "victoria_metrics" };
+      const params: ListToolsForToolTypeInput = { query: "metrics", tool_type: "victoria_metrics" };
       await tool.execute("tc-s2", params, undefined, undefined);
 
       expect(mockClient.searchTools).toHaveBeenCalledWith("metrics", "victoria_metrics", undefined);
@@ -301,7 +301,7 @@ describe("createSearchToolsTool", () => {
       const client = createMockClient({
         searchTools: vi.fn(async () => searchResult) as any,
       });
-      const tool = createSearchToolsTool({ client });
+      const tool = createListToolsForToolTypeTool({ client });
 
       const result = await tool.execute(
         "tc-s3",
@@ -322,7 +322,7 @@ describe("createSearchToolsTool", () => {
       const client = createMockClient({
         searchTools: vi.fn(async () => ({ tools: [] })) as any,
       });
-      const tool = createSearchToolsTool({ client });
+      const tool = createListToolsForToolTypeTool({ client });
 
       const result = await tool.execute(
         "tc-s4",
@@ -341,7 +341,7 @@ describe("createSearchToolsTool", () => {
           throw new Error("MCP Error -32000: Gateway unavailable");
         }) as any,
       });
-      const tool = createSearchToolsTool({ client });
+      const tool = createListToolsForToolTypeTool({ client });
 
       const result = await tool.execute(
         "tc-s5",
@@ -356,13 +356,13 @@ describe("createSearchToolsTool", () => {
   });
 });
 
-describe("SearchToolsParams schema", () => {
+describe("ListToolsForToolTypeParams schema", () => {
   it("should require query as string", () => {
-    expect(SearchToolsParams.properties.query.type).toBe("string");
+    expect(ListToolsForToolTypeParams.properties.query.type).toBe("string");
   });
 
   it("should have optional tool_type field", () => {
-    expect(SearchToolsParams.properties.tool_type).toBeDefined();
+    expect(ListToolsForToolTypeParams.properties.tool_type).toBeDefined();
   });
 });
 
