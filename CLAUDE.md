@@ -6,7 +6,7 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 
 ## Architecture
 
-- **4-container Docker architecture**: API, Agent Worker, MCP Gateway, PostgreSQL
+- **5-container Docker architecture**: API, Agent Worker, MCP Gateway, PostgreSQL, QMD (runbook search)
 - **Backend**: Go 1.24+ (API server, MCP gateway)
 - **Agent Worker**: Node.js 22+ / TypeScript using `@mariozechner/pi-coding-agent` SDK
 - **Frontend**: React 19 + TypeScript + Vite + Tailwind
@@ -42,6 +42,7 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 │       ├── ratelimit/      # Token bucket rate limiter
 │       └── tools/          # SSH, Zabbix, VictoriaMetrics, and HTTP connector implementations
 ├── web/                    # React frontend
+├── qmd/                    # QMD search sidecar (Dockerfile, config, entrypoint)
 ├── docs/                   # OpenAPI specs (swagger at /api/docs)
 └── tests/fixtures/         # Test payloads and mock data
 ```
@@ -74,6 +75,7 @@ make verify           # go vet + all tests (pre-commit)
 | MCP Gateway (`mcp-gateway/`) | `docker-compose build mcp-gateway && docker-compose up -d mcp-gateway` |
 | Agent worker (`agent-worker/`) | `docker-compose build akmatori-agent && docker-compose up -d akmatori-agent` |
 | Frontend (`web/`) | `docker-compose build frontend && docker-compose up -d frontend` |
+| QMD search (`qmd/`) | `docker-compose build qmd && docker-compose up -d qmd` |
 
 ## Current Test Coverage (Mar 12, 2026)
 
@@ -254,7 +256,19 @@ Runbooks (SOPs) guide AI agent investigations. Stored in PostgreSQL, synced as m
 
 **File Sync**: On any CRUD operation, `SyncRunbookFiles()` writes all runbooks as `{id}-{slug}.md` and removes stale files.
 
-**Agent Access**: Incident manager prompt instructs agent to check `/akmatori/runbooks/` for relevant procedures before starting investigation.
+**Agent Access**: Agent uses `gateway_call("qmd.query", ...)` to semantically search runbooks, with filesystem fallback if QMD is unavailable.
+
+**QMD Re-indexing**: `SyncRunbookFiles()` triggers a non-blocking HTTP POST to QMD's `/update` endpoint after writing files, keeping the search index current.
+
+### QMD Search Service
+
+QMD is a hybrid search engine (BM25 + vector + LLM reranking) running as a Docker sidecar. It indexes runbook markdown files and exposes tools via MCP HTTP server.
+
+- **Config**: `qmd/qmd-config.yml` defines the runbooks collection
+- **Docker service**: `qmd` on `codex-network`, port 8181 (internal only)
+- **Environment variable**: `QMD_URL` (default: `http://qmd:8181`) — configured on both the API server (for re-index triggers) and the MCP Gateway (for auto-registration as proxy)
+- **MCP tools**: `qmd.query` (search), `qmd.get` (retrieve), `qmd.multi_get`, `qmd.status` — registered automatically on gateway startup via `mcpproxy`
+- **Bypass**: QMD proxy tools bypass the per-incident tool allowlist (all MCP proxy tools with dots in their name do)
 
 ## API Package (`internal/api/`)
 
