@@ -1,11 +1,12 @@
 FROM node:22-slim
 
-# Install curl for health checks
-RUN apt-get update && apt-get install -y --no-install-recommends curl && \
+# Install curl (health checks) and git (clone source)
+RUN apt-get update && apt-get install -y --no-install-recommends curl git && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy QMD source from additional build context and install + build
-COPY --from=qmd-src / /opt/qmd
+# Clone QMD source at pinned version, install + build
+ARG QMD_VERSION=v2.0.1
+RUN git clone --branch ${QMD_VERSION} --depth 1 https://github.com/tobi/qmd.git /opt/qmd
 WORKDIR /opt/qmd
 RUN npm install && npm run build && npm link
 

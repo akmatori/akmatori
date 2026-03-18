@@ -202,8 +202,6 @@ services:
     build:
       context: ./qmd
       dockerfile: Dockerfile
-      additional_contexts:
-        - qmd-src=/opt/qmd
       args:
         http_proxy:  ${http_proxy}
         https_proxy: ${https_proxy}
