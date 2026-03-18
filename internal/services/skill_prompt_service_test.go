@@ -605,7 +605,7 @@ func TestGenerateSkillMd_ToolSectionShowsLogicalNames(t *testing.T) {
 }
 
 func TestGenerateSkillMd_ToolSectionShowsDiscoveryHints(t *testing.T) {
-	// Verify the generated output includes search_tools and execute_script hints
+	// Verify the generated output includes list_tools_for_tool_type and execute_script hints
 	// This tests the generateSkillMd wrapper behavior indirectly by verifying
 	// the section content includes the expected discovery tool references
 	tool := database.ToolInstance{

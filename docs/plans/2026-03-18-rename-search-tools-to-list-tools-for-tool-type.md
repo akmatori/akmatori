@@ -70,9 +70,9 @@ Rename the agent-facing `search_tools` tool to `list_tools_for_tool_type` across
 - Modify: `internal/services/skill_service_test.go`
 - Modify: `internal/services/skill_prompt_service_test.go`
 
-- [ ] In `skill_service_test.go` (~line 568-569): change `"search_tools"` → `"list_tools_for_tool_type"` in assertion string and error message
-- [ ] In `skill_prompt_service_test.go` (~line 608): update comment referencing `search_tools`
-- [ ] Run `make test` — must pass before task 5
+- [x] In `skill_service_test.go` (~line 568-569): change `"search_tools"` → `"list_tools_for_tool_type"` in assertion string and error message
+- [x] In `skill_prompt_service_test.go` (~line 608): update comment referencing `search_tools`
+- [x] Run `make test` — must pass before task 5
 
 ### Task 5: Update documentation
 
