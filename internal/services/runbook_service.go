@@ -3,11 +3,13 @@ package services
 import (
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
 	"gorm.io/gorm"
@@ -18,6 +20,8 @@ type RunbookService struct {
 	db          *gorm.DB
 	runbooksDir string
 	syncMu      sync.Mutex // serializes SyncRunbookFiles calls
+	qmdURL      string     // QMD service URL for triggering re-index (empty = disabled)
+	httpClient  *http.Client
 }
 
 // NewRunbookService creates a new runbook service
@@ -30,7 +34,15 @@ func NewRunbookService(dataDir string) *RunbookService {
 	return &RunbookService{
 		db:          database.GetDB(),
 		runbooksDir: dir,
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
 	}
+}
+
+// SetQMDURL configures the QMD service URL for automatic re-indexing after runbook changes.
+func (s *RunbookService) SetQMDURL(url string) {
+	s.qmdURL = strings.TrimRight(url, "/")
 }
 
 // CreateRunbook creates a new runbook and syncs files
@@ -189,5 +201,31 @@ func (s *RunbookService) SyncRunbookFiles() error {
 		}
 	}
 
+	// Trigger QMD re-index asynchronously (non-blocking)
+	go s.triggerQMDReindex()
+
 	return nil
+}
+
+// triggerQMDReindex sends a POST to QMD's /update endpoint to re-index runbooks.
+// Failures are logged but do not affect runbook operations.
+func (s *RunbookService) triggerQMDReindex() {
+	if s.qmdURL == "" {
+		return
+	}
+
+	url := s.qmdURL + "/update"
+	resp, err := s.httpClient.Post(url, "application/json", nil)
+	if err != nil {
+		slog.Warn("failed to trigger QMD re-index", "url", url, "error", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Warn("QMD re-index returned non-200 status", "url", url, "status", resp.StatusCode)
+		return
+	}
+
+	slog.Info("QMD re-index triggered successfully")
 }

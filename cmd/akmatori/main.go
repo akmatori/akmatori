@@ -136,6 +136,10 @@ func main() {
 
 	// Initialize Runbook service
 	runbookService := services.NewRunbookService(dataDir)
+	if qmdURL := os.Getenv("QMD_URL"); qmdURL != "" {
+		runbookService.SetQMDURL(qmdURL)
+		slog.Info("runbook service configured with QMD re-indexing", "qmd_url", qmdURL)
+	}
 	slog.Info("runbook service initialized")
 
 	// Sync runbook files on startup

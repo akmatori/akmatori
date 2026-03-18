@@ -99,6 +99,7 @@ services:
       - POSTGRES_PASSWORD_FILE=/akmatori/secrets/postgres_password
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - JWT_SECRET=${JWT_SECRET:-}
+      - QMD_URL=http://qmd:8181
     volumes:
       - ./akmatori_data:/akmatori
     healthcheck:
@@ -217,6 +218,7 @@ services:
         max-file: "3"
     networks:
       - codex-network
+      - api-internal
     depends_on:
       init-dirs:
         condition: service_completed_successfully

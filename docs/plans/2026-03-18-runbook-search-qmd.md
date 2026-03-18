@@ -100,16 +100,16 @@ Integrate QMD (hybrid BM25 + vector + LLM reranking search engine) as a Docker s
 
 **Description**: After `SyncRunbookFiles()` writes runbook markdown files, notify QMD to re-index. This ensures the search index stays current when runbooks are created, updated, or deleted.
 
-- [ ] Add a `qmdReindexURL` field to `RunbookService` (e.g., `http://qmd:8181/reindex` or call QMD's update mechanism)
-- [ ] Since QMD's MCP server doesn't expose an update endpoint, implement re-indexing by calling QMD's REST search endpoint approach:
+- [x] Add a `qmdReindexURL` field to `RunbookService` (e.g., `http://qmd:8181/reindex` or call QMD's update mechanism)
+- [x] Since QMD's MCP server doesn't expose an update endpoint, implement re-indexing by calling QMD's REST search endpoint approach:
   - **Option A (preferred)**: Add a lightweight `/update` REST endpoint to QMD's HTTP server that triggers `store.update()` + `store.embed()`. This is a small upstream change to QMD.
   - **Option B (no QMD changes)**: Use Docker exec to run `qmd update && qmd embed` in the QMD container. Requires the API server to have Docker socket access (not ideal).
   - **Option C (simplest)**: Run a file watcher or periodic cron inside the QMD container that detects changes to `/akmatori/runbooks/` and re-indexes. Add `inotifywait` or a simple poll loop in the entrypoint.
-- [ ] Recommended: Go with **Option A** — add `/update` endpoint to QMD, then call it from `SyncRunbookFiles()` via HTTP POST
-- [ ] In `RunbookService`, after successful `SyncRunbookFiles()`, make a non-blocking HTTP POST to QMD's update endpoint. Log warnings on failure but don't fail the runbook operation.
-- [ ] Add `QMD_URL` environment variable to the API server (or pass via constructor)
-- [ ] Write tests: mock HTTP call, verify it's triggered after sync, verify runbook ops don't fail if QMD is down
-- [ ] Run `make test` — must pass
+- [x] Recommended: Go with **Option A** — add `/update` endpoint to QMD, then call it from `SyncRunbookFiles()` via HTTP POST
+- [x] In `RunbookService`, after successful `SyncRunbookFiles()`, make a non-blocking HTTP POST to QMD's update endpoint. Log warnings on failure but don't fail the runbook operation.
+- [x] Add `QMD_URL` environment variable to the API server (or pass via constructor)
+- [x] Write tests: mock HTTP call, verify it's triggered after sync, verify runbook ops don't fail if QMD is down
+- [x] Run `make test` — must pass
 
 ### Task 4: Add /update endpoint to QMD MCP HTTP server
 
