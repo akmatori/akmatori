@@ -862,6 +862,158 @@ func TestHandlerStartSchemaRefreshLoop_UpdatesToolMap(t *testing.T) {
 	}
 }
 
+func TestRegisterSystemServer_DiscoverTools(t *testing.T) {
+	externalTools := []mcp.Tool{
+		{Name: "query", Description: "Search documents"},
+		{Name: "get", Description: "Get a document"},
+		{Name: "status", Description: "Get index status"},
+	}
+
+	srv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+		if req.Method == "tools/list" {
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{Tools: externalTools})
+		}
+		return mcp.NewResponse(req.ID, nil)
+	})
+	defer srv.Close()
+
+	pool := newTestPool(func(ctx context.Context, conn *MCPConnection) error {
+		return nil
+	})
+	defer pool.CloseAll()
+
+	handler := NewProxyHandler(pool, nil)
+	defer handler.Stop()
+
+	reg := ServerRegistration{
+		InstanceID:      SystemInstanceIDBase,
+		NamespacePrefix: "qmd",
+		Config:          MCPServerConfig{Transport: TransportSSE, URL: srv.URL, NamespacePrefix: "qmd"},
+	}
+
+	err := handler.RegisterSystemServer(context.Background(), reg)
+	if err != nil {
+		t.Fatalf("RegisterSystemServer failed: %v", err)
+	}
+
+	if handler.ToolCount() != 3 {
+		t.Errorf("expected 3 tools, got %d", handler.ToolCount())
+	}
+
+	if !handler.IsProxyTool("qmd.query") {
+		t.Error("expected qmd.query to be a proxy tool")
+	}
+	if !handler.IsProxyTool("qmd.get") {
+		t.Error("expected qmd.get to be a proxy tool")
+	}
+	if !handler.IsProxyTool("qmd.status") {
+		t.Error("expected qmd.status to be a proxy tool")
+	}
+}
+
+func TestRegisterSystemServer_SurvivesReload(t *testing.T) {
+	qmdTools := []mcp.Tool{
+		{Name: "query", Description: "Search documents"},
+	}
+	dbTools := []mcp.Tool{
+		{Name: "create_issue", Description: "Create issue"},
+	}
+
+	qmdSrv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+		if req.Method == "tools/list" {
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{Tools: qmdTools})
+		}
+		return mcp.NewResponse(req.ID, nil)
+	})
+	defer qmdSrv.Close()
+
+	dbSrv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+		if req.Method == "tools/list" {
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{Tools: dbTools})
+		}
+		return mcp.NewResponse(req.ID, nil)
+	})
+	defer dbSrv.Close()
+
+	pool := newTestPool(func(ctx context.Context, conn *MCPConnection) error {
+		return nil
+	})
+	defer pool.CloseAll()
+
+	handler := NewProxyHandler(pool, nil)
+	defer handler.Stop()
+
+	// Register system server (QMD)
+	qmdReg := ServerRegistration{
+		InstanceID:      SystemInstanceIDBase,
+		NamespacePrefix: "qmd",
+		Config:          MCPServerConfig{Transport: TransportSSE, URL: qmdSrv.URL, NamespacePrefix: "qmd"},
+	}
+	err := handler.RegisterSystemServer(context.Background(), qmdReg)
+	if err != nil {
+		t.Fatalf("RegisterSystemServer failed: %v", err)
+	}
+
+	// Load DB-based server
+	dbRegs := []ServerRegistration{
+		{InstanceID: 1, NamespacePrefix: "ext.github", Config: MCPServerConfig{Transport: TransportSSE, URL: dbSrv.URL}},
+	}
+	err = handler.LoadAndRegister(context.Background(), mockLoader(dbRegs))
+	if err != nil {
+		t.Fatalf("LoadAndRegister failed: %v", err)
+	}
+
+	// After LoadAndRegister, only DB tools are in the map (LoadAndRegister resets toolMap).
+	// But system tools should be re-registered on Reload.
+
+	// Close connections so pool reconnects on reload
+	pool.Close(SystemInstanceIDBase)
+	pool.Close(1)
+
+	// Reload - system servers should survive
+	err = handler.Reload(context.Background(), mockLoader(dbRegs))
+	if err != nil {
+		t.Fatalf("Reload failed: %v", err)
+	}
+
+	// Both DB and system tools should exist after reload
+	if !handler.IsProxyTool("qmd.query") {
+		t.Error("expected qmd.query to survive reload")
+	}
+	if !handler.IsProxyTool("ext.github.create_issue") {
+		t.Error("expected ext.github.create_issue after reload")
+	}
+}
+
+func TestRegisterSystemServer_ConnectionError(t *testing.T) {
+	pool := newTestPool(func(ctx context.Context, conn *MCPConnection) error {
+		return fmt.Errorf("connection refused")
+	})
+	defer pool.CloseAll()
+
+	handler := NewProxyHandler(pool, nil)
+	defer handler.Stop()
+
+	reg := ServerRegistration{
+		InstanceID:      SystemInstanceIDBase,
+		NamespacePrefix: "qmd",
+		Config:          MCPServerConfig{Transport: TransportSSE, URL: "http://localhost:0"},
+	}
+
+	err := handler.RegisterSystemServer(context.Background(), reg)
+	if err == nil {
+		t.Fatal("expected error when QMD is unreachable")
+	}
+
+	// System registration is still stored for retry on reload
+	handler.mu.RLock()
+	sysCount := len(handler.systemRegistrations)
+	handler.mu.RUnlock()
+	if sysCount != 1 {
+		t.Errorf("expected 1 system registration stored, got %d", sysCount)
+	}
+}
+
 func TestEmptyRegistrations(t *testing.T) {
 	pool := newTestPool(nil)
 	defer pool.CloseAll()

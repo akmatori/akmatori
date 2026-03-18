@@ -83,15 +83,15 @@ Integrate QMD (hybrid BM25 + vector + LLM reranking search engine) as a Docker s
 
 **Description**: On gateway startup, ensure QMD is registered as an external MCP server so its tools (`qmd.query`, `qmd.get`, etc.) are available through the gateway proxy.
 
-- [ ] Add environment variable `QMD_URL` (default: `http://qmd:8181`) to gateway config
-- [ ] In gateway `main.go`, after proxy handler initialization, register QMD as a system-level MCP proxy:
+- [x] Add environment variable `QMD_URL` (default: `http://qmd:8181`) to gateway config
+- [x] In gateway `main.go`, after proxy handler initialization, register QMD as a system-level MCP proxy:
   - Check if `QMD_URL` is set and non-empty
   - Register with `proxyHandler.RegisterServer()` using SSE/HTTP transport to QMD's MCP endpoint
   - Namespace prefix: `qmd` (tools become `qmd.query`, `qmd.get`, `qmd.multi_get`, `qmd.status`)
   - Skip if QMD is unreachable (log warning, don't crash)
-- [ ] Add `QMD_URL=http://qmd:8181` to mcp-gateway environment in `docker-compose.yml`
-- [ ] Write tests: verify QMD tools appear in registry when QMD_URL is configured
-- [ ] Run `make test-mcp` — must pass
+- [x] Add `QMD_URL=http://qmd:8181` to mcp-gateway environment in `docker-compose.yml`
+- [x] Write tests: verify QMD tools appear in registry when QMD_URL is configured
+- [x] Run `make test-mcp` — must pass
 
 ### Task 3: Trigger QMD re-index on runbook changes
 
