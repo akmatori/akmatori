@@ -1,6 +1,6 @@
 version: '3.8'
 
-# Secure 4-Container Architecture
+# Secure 5-Container Architecture
 # ================================
 # Network Isolation:
 # - frontend: nginx, frontend (external access)
@@ -99,6 +99,7 @@ services:
       - POSTGRES_PASSWORD_FILE=/akmatori/secrets/postgres_password
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - JWT_SECRET=${JWT_SECRET:-}
+      - QMD_URL=http://qmd:8181
     volumes:
       - ./akmatori_data:/akmatori
     healthcheck:
@@ -134,12 +135,15 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      qmd:
+        condition: service_started
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-akmatori}
       - POSTGRES_HOST=postgres
       - POSTGRES_DB=${POSTGRES_DB:-akmatori}
       - POSTGRES_PASSWORD_FILE=/akmatori/secrets/postgres_password
       - PORT=8080
+      - QMD_URL=http://qmd:8181
     volumes:
       - ./akmatori_data/secrets:/akmatori/secrets:ro
     healthcheck:
@@ -193,6 +197,43 @@ services:
     # NO database access
     # LLM API keys passed via WebSocket from API
     # Agent runs as UID 1001, can read API files (UID 1000) but not modify them
+
+  qmd:
+    build:
+      context: ./qmd
+      dockerfile: Dockerfile
+      additional_contexts:
+        - qmd-src=/opt/qmd
+      args:
+        http_proxy:  ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy:    ${no_proxy}
+        HTTP_PROXY:  ${HTTP_PROXY}
+        HTTPS_PROXY: ${HTTPS_PROXY}
+        NO_PROXY:    ${NO_PROXY}
+    container_name: akmatori-qmd
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "500m"
+        max-file: "3"
+    networks:
+      - codex-network
+      - api-internal
+    depends_on:
+      init-dirs:
+        condition: service_completed_successfully
+    environment:
+      - QMD_BIND_HOST=0.0.0.0
+    volumes:
+      - ./akmatori_data/runbooks:/akmatori/runbooks:ro
+      - qmd_cache:/root/.cache/qmd
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8181/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
 
   frontend:
     build:
@@ -250,3 +291,4 @@ volumes:
   postgres_data:
   akmatori_data:
   agent_sessions:
+  qmd_cache:

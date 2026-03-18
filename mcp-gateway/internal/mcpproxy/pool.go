@@ -77,6 +77,7 @@ type MCPConnection struct {
 	// SSE transport
 	httpClient *http.Client
 	sseCancel  context.CancelFunc
+	sessionID  string // MCP Streamable HTTP session ID (if established)
 
 	// Stdio transport
 	cmd    *exec.Cmd
@@ -205,6 +206,12 @@ func (p *MCPConnectionPool) GetOrConnect(ctx context.Context, instanceID uint, c
 	// Use a full lock to avoid TOCTOU races where two goroutines could both
 	// create connections for the same instanceID, leaking one subprocess.
 	p.mu.Lock()
+
+	if p.stopped {
+		p.mu.Unlock()
+		return nil, fmt.Errorf("connection pool is stopped")
+	}
+
 	conn, exists := p.connections[instanceID]
 
 	if exists {
@@ -265,9 +272,15 @@ func (p *MCPConnectionPool) GetOrConnect(ctx context.Context, instanceID uint, c
 	cacheKey := fmt.Sprintf("tools:%d", instanceID)
 	p.schemaCache.Set(cacheKey, tools)
 
-	// Re-acquire to insert. If another goroutine raced and inserted first,
-	// close the duplicate and return the existing one.
+	// Re-acquire to insert. If the pool was stopped while we were connecting,
+	// close the new connection and return an error. If another goroutine raced
+	// and inserted first, close the duplicate and return the existing one.
 	p.mu.Lock()
+	if p.stopped {
+		p.mu.Unlock()
+		conn.close()
+		return nil, fmt.Errorf("connection pool is stopped")
+	}
 	if existing, ok := p.connections[instanceID]; ok {
 		p.mu.Unlock()
 		conn.close()
@@ -813,6 +826,13 @@ func (c *MCPConnection) sendSSERequest(ctx context.Context, method string, param
 	}
 	req.Header.Set("Content-Type", "application/json")
 
+	// Include MCP session ID if one was established during initialize
+	c.mu.RLock()
+	if c.sessionID != "" {
+		req.Header.Set("Mcp-Session-Id", c.sessionID)
+	}
+	c.mu.RUnlock()
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
@@ -989,12 +1009,23 @@ func defaultConnect(ctx context.Context, conn *MCPConnection) error {
 }
 
 // connectSSE validates the SSE endpoint is reachable.
+// It first tries an MCP Streamable HTTP initialize handshake (required by servers
+// like QMD). If that fails, it falls back to a basic reachability check for
+// legacy SSE servers.
 func connectSSE(ctx context.Context, conn *MCPConnection) error {
 	if conn.config.URL == "" {
 		return fmt.Errorf("URL is required for SSE transport")
 	}
 
-	// Verify the server is reachable with a simple request
+	// Try MCP Streamable HTTP initialize handshake first.
+	// Servers like QMD require this to establish a session before accepting tool calls.
+	initErr := tryMCPInitialize(ctx, conn)
+	if initErr == nil {
+		return nil
+	}
+	slog.Debug("MCP initialize handshake failed, falling back to basic reachability check", "url", conn.config.URL, "error", initErr)
+
+	// Fall back to basic reachability check for non-session servers
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, conn.config.URL, nil)
 	if err != nil {
 		return fmt.Errorf("create health check request: %w", err)
@@ -1005,6 +1036,66 @@ func connectSSE(ctx context.Context, conn *MCPConnection) error {
 		return fmt.Errorf("server unreachable: %w", err)
 	}
 	resp.Body.Close()
+
+	return nil
+}
+
+// tryMCPInitialize performs the MCP Streamable HTTP initialize handshake.
+// On success, the session ID is stored on the connection for subsequent requests.
+func tryMCPInitialize(ctx context.Context, conn *MCPConnection) error {
+	initReq := mcp.Request{
+		JSONRPC: "2.0",
+		ID:      conn.nextRequestID(),
+		Method:  "initialize",
+		Params:  json.RawMessage(`{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"akmatori-gateway","version":"1.0.0"}}`),
+	}
+
+	bodyBytes, err := json.Marshal(initReq)
+	if err != nil {
+		return fmt.Errorf("marshal initialize: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, conn.config.URL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return fmt.Errorf("create initialize request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := conn.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("initialize request failed: %w", err)
+	}
+	defer func() {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("initialize returned %d", resp.StatusCode)
+	}
+
+	// Capture session ID from response header
+	if sid := resp.Header.Get("Mcp-Session-Id"); sid != "" {
+		conn.mu.Lock()
+		conn.sessionID = sid
+		conn.mu.Unlock()
+	}
+
+	// Send initialized notification (required by MCP protocol)
+	notifJSON := []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	notifReq, err := http.NewRequestWithContext(ctx, http.MethodPost, conn.config.URL, bytes.NewReader(notifJSON))
+	if err != nil {
+		return nil // Initialize succeeded; notification failure is non-fatal
+	}
+	notifReq.Header.Set("Content-Type", "application/json")
+	conn.mu.RLock()
+	if conn.sessionID != "" {
+		notifReq.Header.Set("Mcp-Session-Id", conn.sessionID)
+	}
+	conn.mu.RUnlock()
+	if notifResp, err := conn.httpClient.Do(notifReq); err == nil {
+		notifResp.Body.Close()
+	}
 
 	return nil
 }

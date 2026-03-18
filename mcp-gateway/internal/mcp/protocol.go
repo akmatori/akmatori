@@ -134,10 +134,31 @@ type CallToolResult struct {
 	IsError bool      `json:"isError,omitempty"`
 }
 
-// Content represents tool result content
+// Content represents tool result content (text or resource types per MCP spec)
 type Content struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type     string    `json:"type"`
+	Text     string    `json:"text,omitempty"`
+	Resource *Resource `json:"resource,omitempty"`
+}
+
+// Resource represents an embedded resource in MCP content (type: "resource")
+type Resource struct {
+	URI      string `json:"uri,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Title    string `json:"title,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+	Text     string `json:"text,omitempty"`
+}
+
+// ExtractText returns the text content from either a text or resource content item.
+func (c Content) ExtractText() string {
+	if c.Text != "" {
+		return c.Text
+	}
+	if c.Resource != nil {
+		return c.Resource.Text
+	}
+	return ""
 }
 
 // NewTextContent creates a text content response

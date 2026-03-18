@@ -234,6 +234,24 @@ func (r *Registry) SetProxyHandler(h *mcpproxy.ProxyHandler) {
 	})
 }
 
+// RegisterSystemMCPProxy registers a single system-level MCP server and its tools.
+// System servers persist across reloads (unlike DB-loaded servers).
+func (r *Registry) RegisterSystemMCPProxy(ctx context.Context, reg mcpproxy.ServerRegistration) error {
+	r.proxyMu.Lock()
+	defer r.proxyMu.Unlock()
+
+	if r.proxyHandler == nil {
+		return fmt.Errorf("MCP proxy handler not configured")
+	}
+
+	if err := r.proxyHandler.RegisterSystemServer(ctx, reg); err != nil {
+		return fmt.Errorf("register system MCP server %q: %w", reg.NamespacePrefix, err)
+	}
+
+	r.registerProxyToolsFromHandler()
+	return nil
+}
+
 // RegisterMCPProxyTools loads MCP server registrations and registers their discovered
 // tools in the gateway. Each tool is namespaced with the server's prefix.
 func (r *Registry) RegisterMCPProxyTools(loader mcpproxy.MCPServerConfigLoader) {
@@ -282,6 +300,7 @@ func (r *Registry) ReloadMCPProxyTools(loader mcpproxy.MCPServerConfigLoader) {
 func (r *Registry) registerProxyToolsFromHandler() {
 	tools := r.proxyHandler.GetTools()
 	handler := r.proxyHandler
+	seenNamespaces := make(map[string]bool)
 
 	for _, tool := range tools {
 		toolName := tool.Name
@@ -292,11 +311,20 @@ func (r *Registry) registerProxyToolsFromHandler() {
 			}
 			// Return the call result content as JSON
 			if len(result.Content) == 1 {
-				return result.Content[0].Text, nil
+				return result.Content[0].ExtractText(), nil
 			}
 			return result, nil
 		})
 		r.proxyToolNames = append(r.proxyToolNames, tool.Name)
+
+		// Register the namespace as a proxy namespace so it bypasses per-incident
+		// allowlist checks. This is needed for single-segment namespaces (e.g., "qmd")
+		// that don't contain dots.
+		namespace, _ := mcp.ParseToolName(toolName)
+		if !seenNamespaces[namespace] {
+			r.server.AddProxyNamespace(namespace)
+			seenNamespaces[namespace] = true
+		}
 	}
 
 	r.logger.Printf("Registered %d MCP proxy tools", len(tools))
