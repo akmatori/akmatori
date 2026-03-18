@@ -85,8 +85,8 @@ Rename the agent-facing `search_tools` tool to `list_tools_for_tool_type` across
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] Run full test suite: `make test-all`
-- [ ] Run linter: `golangci-lint run`
-- [ ] Grep for any remaining `search_tools` references (excluding `docs/plans/completed/` which is historical): `grep -r "search_tools" --include="*.go" --include="*.ts" --include="*.md" . | grep -v "docs/plans/completed/" | grep -v node_modules`
-- [ ] Verify no stale references remain
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Run full test suite: `make test-all`
+- [x] Run linter: `golangci-lint run`
+- [x] Grep for any remaining `search_tools` references (excluding `docs/plans/completed/` which is historical): `grep -r "search_tools" --include="*.go" --include="*.ts" --include="*.md" . | grep -v "docs/plans/completed/" | grep -v node_modules`
+- [x] Verify no stale references remain
+- [x] Move this plan to `docs/plans/completed/`
