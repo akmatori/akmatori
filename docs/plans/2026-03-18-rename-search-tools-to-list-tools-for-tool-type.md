@@ -46,10 +46,10 @@ Rename the agent-facing `search_tools` tool to `list_tools_for_tool_type` across
 - Modify: `agent-worker/tests/script-executor.test.ts`
 - Modify: `agent-worker/tests/agent-runner.test.ts`
 
-- [ ] In `gateway-tools.test.ts`: update test descriptions and assertions checking for `"search_tools"` → `"list_tools_for_tool_type"`
-- [ ] In `script-executor.test.ts`: update `search_tools` calls in test script strings and describe blocks
-- [ ] In `agent-runner.test.ts`: update `toContain("search_tools")` assertions
-- [ ] Run `make test-agent` — must pass before task 3
+- [x] In `gateway-tools.test.ts`: update test descriptions and assertions checking for `"search_tools"` → `"list_tools_for_tool_type"`
+- [x] In `script-executor.test.ts`: update `search_tools` calls in test script strings and describe blocks
+- [x] In `agent-runner.test.ts`: update `toContain("search_tools")` assertions
+- [x] Run `make test-agent` — must pass before task 3
 
 ### Task 3: Rename in Go backend
 
