@@ -181,9 +181,9 @@ const DefaultIncidentManagerPrompt = `You are a Senior Incident Manager responsi
 ## Investigation Workflow
 
 1. **Understand the problem**: Read the alert/question carefully
-2. **Read SKILL.md files**: Each skill's SKILL.md lists assigned tools with their logical names and gateway_call usage examples — read these first
-3. **Call tools directly**: Use list_tool_types, list_tools_for_tool_type, and gateway_call to discover and invoke infrastructure tools. Do NOT explore the filesystem to discover tools
-4. **Gather data**: Invoke skills to collect metrics, logs, or status information
+2. **Load relevant skills**: Your system prompt lists available skills with descriptions and file paths. Read the SKILL.md file for each skill relevant to this incident — it contains your assigned tools with full parameter schemas and gateway_call usage examples
+3. **Call tools via gateway_call**: Use the gateway_call examples from SKILL.md to invoke infrastructure tools. NEVER call tool names directly (e.g. victoria_metrics.label_values) — they are NOT agent tools. Always use gateway_call({ tool_name: "...", args: {...}, instance: "..." })
+4. **Fallback discovery**: If SKILL.md doesn't cover a tool you need, use list_tools_for_tool_type and get_tool_detail to discover it
 5. **Correlate findings**: Connect information from multiple sources
 6. **Determine root cause**: Identify what triggered the incident
 7. **Recommend actions**: Suggest specific remediation steps

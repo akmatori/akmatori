@@ -40,10 +40,10 @@ import { createGatewayCallTool, createListToolsForToolTypeTool, createGetToolDet
  * from the prompt automatically.
  */
 const BASH_TOOL_GUIDELINES = `\
-- Use the gateway_call tool to invoke tools. It communicates directly with the MCP Gateway and does not require bash.
-- For batch operations across multiple hosts or complex data processing, use the execute_script tool. It runs JavaScript with built-in gateway_call(), list_tools_for_tool_type(), get_tool_detail(), and synchronous fs (readFileSync, writeFileSync). Do NOT use require() or import() in scripts.
-- Use list_tool_types to see available tool types, then list_tools_for_tool_type to find specific tools, and get_tool_detail to see full parameter schemas.
-- IMPORTANT: Each skill's SKILL.md lists assigned tools with their logical names and the exact call forms available. Read the SKILL.md first, then call tools using only the forms shown there. Do NOT explore the filesystem to discover tools.`;
+- IMPORTANT: Each skill's SKILL.md contains your assigned tools with parameter schemas and gateway_call examples. ALWAYS read the relevant SKILL.md FIRST — it has everything you need.
+- Use gateway_call to invoke infrastructure tools. NEVER call tool names directly (e.g. victoria_metrics.label_values) — only gateway_call, list_tools_for_tool_type, get_tool_detail, list_tool_types, and execute_script are available as agent tools.
+- Only use list_tools_for_tool_type / get_tool_detail as a fallback if SKILL.md doesn't cover the tool you need.
+- For batch operations across multiple hosts or complex data processing, use execute_script. It runs JavaScript with built-in gateway_call(), list_tools_for_tool_type(), get_tool_detail(), and synchronous fs (readFileSync, writeFileSync). Do NOT use require() or import() in scripts.`;
 
 // ---------------------------------------------------------------------------
 // Types
