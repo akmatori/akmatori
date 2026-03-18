@@ -316,6 +316,12 @@ func (r *Registry) registerProxyToolsFromHandler() {
 			return result, nil
 		})
 		r.proxyToolNames = append(r.proxyToolNames, tool.Name)
+
+		// Register the namespace as a proxy namespace so it bypasses per-incident
+		// allowlist checks. This is needed for single-segment namespaces (e.g., "qmd")
+		// that don't contain dots.
+		namespace, _ := mcp.ParseToolName(toolName)
+		r.server.AddProxyNamespace(namespace)
 	}
 
 	r.logger.Printf("Registered %d MCP proxy tools", len(tools))

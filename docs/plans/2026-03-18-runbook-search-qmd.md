@@ -173,10 +173,10 @@ Integrate QMD (hybrid BM25 + vector + LLM reranking search engine) as a Docker s
 
 **Description**: QMD tools (like `qmd.query`) are system-level tools, not tied to specific tool instances. They should be available to all incidents without explicit allowlisting, similar to how MCP proxy tools already bypass the allowlist.
 
-- [ ] Verify that MCP proxy tools (those with dots in the name, e.g., `qmd.query`) already bypass the per-incident allowlist check. Based on the existing code, proxy tools should bypass — confirm this.
-- [ ] If proxy tools don't bypass, add QMD namespace (`qmd.*`) to the bypass list in the authorizer
-- [ ] Write test: verify `qmd.query` is authorized for any incident without explicit allowlist entry
-- [ ] Run `make test-mcp` — must pass
+- [x] Verify that MCP proxy tools (those with dots in the name, e.g., `qmd.query`) already bypass the per-incident allowlist check. Based on the existing code, proxy tools should bypass — confirm this.
+- [x] If proxy tools don't bypass, add QMD namespace (`qmd.*`) to the bypass list in the authorizer
+- [x] Write test: verify `qmd.query` is authorized for any incident without explicit allowlist entry
+- [x] Run `make test-mcp` — must pass
 
 ### Task 7: Verify acceptance criteria
 

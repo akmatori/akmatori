@@ -511,6 +511,75 @@ func TestAuthorization_ProxyToolBypassesAllowlist(t *testing.T) {
 	}
 }
 
+func TestAuthorization_QMDProxyToolBypassesAllowlist(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	// Register QMD as a proxy namespace (single-segment, no dot in namespace).
+	// In production, this is done by registerProxyToolsFromHandler in the registry.
+	s.AddProxyNamespace("qmd")
+
+	s.RegisterTool(Tool{
+		Name:        "qmd.query",
+		Description: "Search runbooks using QMD",
+		InputSchema: InputSchema{Type: "object"},
+	}, echoHandler)
+
+	// Set allowlist that only includes SSH — no QMD entries
+	authorizer.SetAllowlist("incident-qmd", []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+	})
+
+	// qmd.query bypasses the allowlist because "qmd" is a registered proxy namespace
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "qmd.query", Arguments: map[string]interface{}{
+			"searches": []map[string]interface{}{{"type": "lex", "query": "database"}},
+		}},
+		map[string]string{
+			"X-Incident-ID": "incident-qmd",
+		},
+	)
+
+	if resp.Error != nil {
+		t.Fatalf("expected qmd.query to bypass allowlist, got error: %s", resp.Error.Message)
+	}
+}
+
+func TestAuthorization_NonProxySingleSegmentStillChecked(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	// Do NOT register "ssh" as a proxy namespace — standard tool types are checked
+	s.RegisterTool(Tool{
+		Name:        "ssh.execute_command",
+		Description: "Execute command",
+		InputSchema: InputSchema{Type: "object"},
+	}, echoHandler)
+
+	// Set allowlist that only includes zabbix, not ssh
+	authorizer.SetAllowlist("incident-nonproxy", []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-zabbix", ToolType: "zabbix"},
+	})
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "ssh.execute_command", Arguments: map[string]interface{}{"command": "ls"}},
+		map[string]string{
+			"X-Incident-ID": "incident-nonproxy",
+		},
+	)
+
+	if resp.Error == nil {
+		t.Fatal("expected non-proxy tool to be checked against allowlist and rejected")
+	}
+	if resp.Error.Code != InvalidRequest {
+		t.Errorf("expected error code %d, got %d", InvalidRequest, resp.Error.Code)
+	}
+}
+
 // --- Discovery filtering by allowlist tests ---
 
 func TestHandleSearchTools_FilteredByAllowlist_PartialAuthorization(t *testing.T) {
