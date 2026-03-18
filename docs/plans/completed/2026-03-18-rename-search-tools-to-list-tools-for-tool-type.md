@@ -1,0 +1,92 @@
+# Rename `search_tools` to `list_tools_for_tool_type`
+
+## Overview
+
+Rename the agent-facing `search_tools` tool to `list_tools_for_tool_type` across the entire codebase. This makes the tool's purpose clearer — it lists available tools filtered by tool type, not a free-text search engine.
+
+## Context
+
+- Files involved: See each task below
+- Related patterns: Other tool names follow verb_noun convention (`gateway_call`, `get_tool_detail`, `list_tool_types`, `execute_script`)
+- Dependencies: None — pure rename, no logic changes
+
+## Development Approach
+
+- **Testing approach**: Regular (rename first, update tests to match)
+- Complete each task fully before moving to the next
+- **CRITICAL: every task MUST include new/updated tests**
+- **CRITICAL: all tests must pass before starting next task**
+
+## Implementation Steps
+
+### Task 1: Rename in agent-worker TypeScript source
+
+**Files:**
+- Modify: `agent-worker/src/gateway-tools.ts`
+- Modify: `agent-worker/src/script-executor.ts`
+- Modify: `agent-worker/src/agent-runner.ts`
+
+- [x] In `gateway-tools.ts`: rename `SearchToolsParams` → `ListToolsForToolTypeParams`, `SearchToolsInput` → `ListToolsForToolTypeInput`
+- [x] In `gateway-tools.ts`: rename the factory function `createSearchToolsTool` → `createListToolsForToolTypeTool`
+- [x] In `gateway-tools.ts`: change `name: "search_tools"` → `name: "list_tools_for_tool_type"`
+- [x] In `gateway-tools.ts`: update all `promptGuidelines` strings referencing `search_tools` to `list_tools_for_tool_type`
+- [x] In `gateway-tools.ts`: update the `execute_script` params description (injected globals list)
+- [x] In `gateway-tools.ts`: update `get_tool_detail` guidelines that reference `search_tools`
+- [x] In `gateway-tools.ts`: update `list_tool_types` guidelines that reference `search_tools`
+- [x] In `gateway-tools.ts`: update `execute_script` guidelines that reference `search_tools`
+- [x] In `script-executor.ts`: rename `globalThis.search_tools` → `globalThis.list_tools_for_tool_type`
+- [x] In `script-executor.ts`: update all JSDoc and error message strings referencing `search_tools`
+- [x] In `agent-runner.ts`: update the system prompt / bash tool guidelines referencing `search_tools`
+- [x] Run `make test-agent` — must pass before task 2
+
+### Task 2: Rename in agent-worker tests
+
+**Files:**
+- Modify: `agent-worker/tests/gateway-tools.test.ts`
+- Modify: `agent-worker/tests/script-executor.test.ts`
+- Modify: `agent-worker/tests/agent-runner.test.ts`
+
+- [x] In `gateway-tools.test.ts`: update test descriptions and assertions checking for `"search_tools"` → `"list_tools_for_tool_type"`
+- [x] In `script-executor.test.ts`: update `search_tools` calls in test script strings and describe blocks
+- [x] In `agent-runner.test.ts`: update `toContain("search_tools")` assertions
+- [x] Run `make test-agent` — must pass before task 3
+
+### Task 3: Rename in Go backend
+
+**Files:**
+- Modify: `internal/services/skill_prompt_service.go`
+- Modify: `internal/database/db.go`
+- Modify: `mcp-gateway/internal/mcp/server.go`
+
+- [x] In `skill_prompt_service.go` (~line 138): change `search_tools` → `list_tools_for_tool_type` in the tools section hint
+- [x] In `db.go` (~line 185): change `search_tools` → `list_tools_for_tool_type` in the system prompt text
+- [x] In `mcp-gateway/internal/mcp/server.go` (~line 401): change `search_tools` → `list_tools_for_tool_type` in the error hint
+- [x] Run `make test` — must pass
+- [x] Run `make test-mcp` — must pass before task 4
+
+### Task 4: Update Go tests
+
+**Files:**
+- Modify: `internal/services/skill_service_test.go`
+- Modify: `internal/services/skill_prompt_service_test.go`
+
+- [x] In `skill_service_test.go` (~line 568-569): change `"search_tools"` → `"list_tools_for_tool_type"` in assertion string and error message
+- [x] In `skill_prompt_service_test.go` (~line 608): update comment referencing `search_tools`
+- [x] Run `make test` — must pass before task 5
+
+### Task 5: Update documentation
+
+**Files:**
+- Modify: `CLAUDE.md`
+
+- [x] Update the Gateway Tools table: `search_tools` → `list_tools_for_tool_type`
+- [x] Update the execute_script description mentioning injected `search_tools()`
+- [x] Update any other references in CLAUDE.md
+
+### Task 6: Verify acceptance criteria
+
+- [x] Run full test suite: `make test-all`
+- [x] Run linter: `golangci-lint run`
+- [x] Grep for any remaining `search_tools` references (excluding `docs/plans/completed/` which is historical): `grep -r "search_tools" --include="*.go" --include="*.ts" --include="*.md" . | grep -v "docs/plans/completed/" | grep -v node_modules`
+- [x] Verify no stale references remain
+- [x] Move this plan to `docs/plans/completed/`

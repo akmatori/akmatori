@@ -14,7 +14,7 @@ function createMockClient(overrides?: Partial<GatewayClient>): GatewayClient {
     call: vi.fn(async (_toolName: string, _args?: Record<string, unknown>, _instance?: string) => ({
       data: { status: "ok", result: "mock-result" },
     } as CallResult)),
-    searchTools: vi.fn(async () => ({
+    listToolsByType: vi.fn(async () => ({
       tools: [
         { name: "ssh.execute_command", description: "Execute SSH", instances: ["prod-ssh"] },
       ],
@@ -220,28 +220,18 @@ describe("ScriptExecutor", () => {
     });
   });
 
-  describe("search_tools and get_tool_detail within script", () => {
-    it("should call search_tools", async () => {
+  describe("list_tools_for_tool_type and get_tool_detail within script", () => {
+    it("should call list_tools_for_tool_type", async () => {
       const { executor, client } = createExecutor();
 
       const result = await executor.execute(
-        'const tools = await search_tools("ssh"); return tools;',
+        'const tools = await list_tools_for_tool_type("ssh"); return tools;',
       );
 
-      expect(client.searchTools).toHaveBeenCalledWith("ssh", undefined, expect.any(AbortSignal));
+      expect(client.listToolsByType).toHaveBeenCalledWith("ssh", expect.any(AbortSignal));
       const parsed = JSON.parse(result.output);
       expect(parsed.tools).toHaveLength(1);
       expect(parsed.tools[0].name).toBe("ssh.execute_command");
-    });
-
-    it("should call search_tools with tool_type", async () => {
-      const { executor, client } = createExecutor();
-
-      await executor.execute(
-        'await search_tools("metrics", "victoria_metrics");',
-      );
-
-      expect(client.searchTools).toHaveBeenCalledWith("metrics", "victoria_metrics", expect.any(AbortSignal));
     });
 
     it("should call get_tool_detail", async () => {

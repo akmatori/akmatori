@@ -301,43 +301,28 @@ describe("GatewayClient", () => {
   });
 
   // -----------------------------------------------------------------------
-  // searchTools()
+  // listToolsByType()
   // -----------------------------------------------------------------------
 
-  describe("searchTools()", () => {
-    it("sends search request with query", async () => {
-      const searchResult = {
+  describe("listToolsByType()", () => {
+    it("sends list request with tool_type", async () => {
+      const listResult = {
         tools: [
           { name: "ssh.execute_command", description: "Run SSH commands", instances: ["prod-ssh"] },
         ],
       };
-      const mock = await createMockGateway(() => jsonRpcSuccess(searchResult));
+      const mock = await createMockGateway(() => jsonRpcSuccess(listResult));
 
       try {
         const client = new GatewayClient({ gatewayUrl: mock.url, incidentId: "inc-1" });
-        const result = await client.searchTools("ssh");
+        const result = await client.listToolsByType("ssh");
 
         const body = JSON.parse(mock.requests[0].body);
-        expect(body.method).toBe("tools/search");
-        expect(body.params.query).toBe("ssh");
-        expect(body.params.tool_type).toBeUndefined();
+        expect(body.method).toBe("tools/list_by_type");
+        expect(body.params.tool_type).toBe("ssh");
 
         expect(result.tools).toHaveLength(1);
         expect(result.tools[0].name).toBe("ssh.execute_command");
-      } finally {
-        mock.server.close();
-      }
-    });
-
-    it("sends search request with tool_type filter", async () => {
-      const mock = await createMockGateway(() => jsonRpcSuccess({ tools: [] }));
-
-      try {
-        const client = new GatewayClient({ gatewayUrl: mock.url, incidentId: "inc-1" });
-        await client.searchTools("query", "zabbix");
-
-        const body = JSON.parse(mock.requests[0].body);
-        expect(body.params.tool_type).toBe("zabbix");
       } finally {
         mock.server.close();
       }
