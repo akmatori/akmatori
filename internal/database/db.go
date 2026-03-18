@@ -207,8 +207,21 @@ Escalate to human operators when:
 
 ## Runbooks
 
-Before starting your investigation, check the /akmatori/runbooks/ directory for relevant runbooks.
-If a matching runbook exists, follow its procedures as your primary investigation guide.`
+Before starting your investigation, search for relevant runbooks using the QMD search tool:
+
+gateway_call("qmd.query", {
+  "searches": [{"type": "lex", "query": "<keywords from the alert>"}],
+  "limit": 5
+})
+
+If relevant runbooks are found (score > 0.3), retrieve the full content:
+
+gateway_call("qmd.get", {"path": "<file path from search result>"})
+
+Follow matching runbook procedures as your primary investigation guide.
+If no relevant runbooks are found, proceed with general investigation.
+
+Note: If QMD search is unavailable, you can fall back to browsing /akmatori/runbooks/ directly.`
 
 // InitializeSystemSkill creates the incident-manager system skill if it doesn't exist
 func InitializeSystemSkill() error {

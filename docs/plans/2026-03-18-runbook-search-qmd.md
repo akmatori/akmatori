@@ -139,7 +139,7 @@ Integrate QMD (hybrid BM25 + vector + LLM reranking search engine) as a Docker s
 
 **Description**: Update the incident manager prompt so the agent uses `gateway_call("qmd.query", ...)` to search for relevant runbooks instead of manually browsing the filesystem.
 
-- [ ] Replace the current runbook instruction block:
+- [x] Replace the current runbook instruction block:
   ```
   ## Runbooks
   Before starting your investigation, check the /akmatori/runbooks/ directory for relevant runbooks.
@@ -162,9 +162,9 @@ Integrate QMD (hybrid BM25 + vector + LLM reranking search engine) as a Docker s
   Follow matching runbook procedures as your primary investigation guide.
   If no relevant runbooks are found, proceed with general investigation.
   ```
-- [ ] Keep the `/akmatori/runbooks/` filesystem access as a fallback mention (in case QMD is unavailable)
-- [ ] Write test: verify the prompt contains `qmd.query` reference
-- [ ] Run `make test` — must pass
+- [x] Keep the `/akmatori/runbooks/` filesystem access as a fallback mention (in case QMD is unavailable)
+- [x] Write test: verify the prompt contains `qmd.query` reference
+- [x] Run `make test` — must pass
 
 ### Task 6: Ensure QMD tools bypass per-incident allowlist
 
