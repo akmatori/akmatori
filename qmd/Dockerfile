@@ -1,7 +1,7 @@
 FROM node:22-slim
 
 # Install curl (health checks) and git (clone source)
-RUN apt-get update && apt-get install -y --no-install-recommends curl git && \
+RUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 # Clone QMD source at pinned version, install + build
