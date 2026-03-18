@@ -235,6 +235,24 @@ func (r *Registry) SetProxyHandler(h *mcpproxy.ProxyHandler) {
 	})
 }
 
+// RegisterSystemMCPProxy registers a single system-level MCP server and its tools.
+// System servers persist across reloads (unlike DB-loaded servers).
+func (r *Registry) RegisterSystemMCPProxy(ctx context.Context, reg mcpproxy.ServerRegistration) error {
+	r.proxyMu.Lock()
+	defer r.proxyMu.Unlock()
+
+	if r.proxyHandler == nil {
+		return fmt.Errorf("MCP proxy handler not configured")
+	}
+
+	if err := r.proxyHandler.RegisterSystemServer(ctx, reg); err != nil {
+		return fmt.Errorf("register system MCP server %q: %w", reg.NamespacePrefix, err)
+	}
+
+	r.registerProxyToolsFromHandler()
+	return nil
+}
+
 // RegisterMCPProxyTools loads MCP server registrations and registers their discovered
 // tools in the gateway. Each tool is namespaced with the server's prefix.
 func (r *Registry) RegisterMCPProxyTools(loader mcpproxy.MCPServerConfigLoader) {

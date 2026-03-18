@@ -140,6 +140,7 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-akmatori}
       - POSTGRES_PASSWORD_FILE=/akmatori/secrets/postgres_password
       - PORT=8080
+      - QMD_URL=http://qmd:8181
     volumes:
       - ./akmatori_data/secrets:/akmatori/secrets:ro
     healthcheck:
