@@ -50,8 +50,8 @@ Integrate QMD (hybrid BM25 + vector + LLM reranking search engine) as a Docker s
 
 **Description**: Add a QMD container that indexes `/akmatori/runbooks/` and exposes its MCP HTTP server on the `codex-network`.
 
-- [ ] Create `qmd/Dockerfile` based on Node.js 22 image that installs QMD from `/opt/qmd` (copy or mount)
-- [ ] Create `qmd/qmd-config.yml` defining the runbooks collection:
+- [x] Create `qmd/Dockerfile` based on Node.js 22 image that installs QMD from `/opt/qmd` (copy or mount)
+- [x] Create `qmd/qmd-config.yml` defining the runbooks collection:
   ```yaml
   collections:
     runbooks:
@@ -60,20 +60,20 @@ Integrate QMD (hybrid BM25 + vector + LLM reranking search engine) as a Docker s
       context:
         "/": "Runbook SOPs for incident investigation and remediation"
   ```
-- [ ] Create `qmd/entrypoint.sh` that:
+- [x] Create `qmd/entrypoint.sh` that:
   1. Copies `qmd-config.yml` to `~/.config/qmd/index.yml`
   2. Runs `qmd update` to scan files
   3. Runs `qmd embed` to generate vector embeddings
   4. Starts `qmd mcp --http --port 8181` (foreground)
-- [ ] Add `qmd` service to `docker-compose.yml`:
+- [x] Add `qmd` service to `docker-compose.yml`:
   - Mount `./akmatori_data/runbooks:/akmatori/runbooks:ro`
   - Mount a named volume for QMD cache (`qmd_cache:/root/.cache/qmd`)
   - Network: `codex-network` only (internal, same as agent ↔ gateway)
   - Expose port 8181 internally
   - Depends on: `init-dirs`
   - Health check: `curl -sf http://localhost:8181/health`
-- [ ] Verify: `docker-compose build qmd && docker-compose up qmd` starts and indexes successfully
-- [ ] No automated tests for this task (Docker infrastructure)
+- [x] Verify: `docker-compose build qmd && docker-compose up qmd` starts and indexes successfully
+- [x] No automated tests for this task (Docker infrastructure)
 
 ### Task 2: Auto-register QMD as MCP proxy server
 

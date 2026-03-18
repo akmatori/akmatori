@@ -1,0 +1,6 @@
+collections:
+  runbooks:
+    path: /akmatori/runbooks
+    pattern: "**/*.md"
+    context:
+      "/": "Runbook SOPs for incident investigation and remediation"

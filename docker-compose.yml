@@ -194,6 +194,42 @@ services:
     # LLM API keys passed via WebSocket from API
     # Agent runs as UID 1001, can read API files (UID 1000) but not modify them
 
+  qmd:
+    build:
+      context: ./qmd
+      dockerfile: Dockerfile
+      additional_contexts:
+        - qmd-src=/opt/qmd
+      args:
+        http_proxy:  ${http_proxy}
+        https_proxy: ${https_proxy}
+        no_proxy:    ${no_proxy}
+        HTTP_PROXY:  ${HTTP_PROXY}
+        HTTPS_PROXY: ${HTTPS_PROXY}
+        NO_PROXY:    ${NO_PROXY}
+    container_name: akmatori-qmd
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "500m"
+        max-file: "3"
+    networks:
+      - codex-network
+    depends_on:
+      init-dirs:
+        condition: service_completed_successfully
+    environment:
+      - QMD_BIND_HOST=0.0.0.0
+    volumes:
+      - ./akmatori_data/runbooks:/akmatori/runbooks:ro
+      - qmd_cache:/root/.cache/qmd
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8181/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
   frontend:
     build:
       context: ./web
@@ -250,3 +286,4 @@ volumes:
   postgres_data:
   akmatori_data:
   agent_sessions:
+  qmd_cache:
