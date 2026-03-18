@@ -287,8 +287,12 @@ func (h *ProxyHandler) ToolCount() int {
 
 // StartSchemaRefreshLoop starts periodic schema refresh for all registered MCP servers.
 // When new tools are discovered, the tool map is updated automatically.
+// It also retries failed system registrations (e.g., QMD not ready at startup).
 func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 	h.pool.StartSchemaRefreshLoop(interval)
+
+	// Retry failed system registrations periodically
+	go h.retryFailedSystemRegistrations(interval)
 
 	// Also set up a refresh callback to update our tool map when schemas change
 	h.pool.SetSchemaRefreshCallback(func(instanceID uint, tools []mcp.Tool) {
@@ -355,6 +359,52 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 			cb()
 		}
 	})
+}
+
+// retryFailedSystemRegistrations periodically checks for system registrations
+// that don't have active pool connections and re-attempts registration.
+// This handles the case where a system service (e.g., QMD) wasn't ready at gateway startup.
+func (h *ProxyHandler) retryFailedSystemRegistrations(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		h.mu.RLock()
+		regs := make([]ServerRegistration, len(h.systemRegistrations))
+		copy(regs, h.systemRegistrations)
+		h.mu.RUnlock()
+
+		for _, reg := range regs {
+			if h.pool.IsConnected(reg.InstanceID) {
+				continue
+			}
+			h.logger.Info("retrying failed system MCP server registration",
+				"instance_id", reg.InstanceID,
+				"namespace", reg.NamespacePrefix,
+			)
+			ctx, cancel := context.WithTimeout(context.Background(), DefaultConnectTimeout)
+			if err := h.registerServer(ctx, reg); err != nil {
+				h.logger.Warn("system MCP server retry failed",
+					"instance_id", reg.InstanceID,
+					"namespace", reg.NamespacePrefix,
+					"error", err,
+				)
+			} else {
+				h.logger.Info("system MCP server registration succeeded on retry",
+					"instance_id", reg.InstanceID,
+					"namespace", reg.NamespacePrefix,
+				)
+				// Notify the registry to re-register proxy tools
+				h.mu.RLock()
+				cb := h.onToolsChanged
+				h.mu.RUnlock()
+				if cb != nil {
+					cb()
+				}
+			}
+			cancel()
+		}
+	}
 }
 
 // HealthStatus returns health information for all managed MCP proxy connections.

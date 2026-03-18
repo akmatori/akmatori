@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1011,6 +1012,76 @@ func TestRegisterSystemServer_ConnectionError(t *testing.T) {
 	handler.mu.RUnlock()
 	if sysCount != 1 {
 		t.Errorf("expected 1 system registration stored, got %d", sysCount)
+	}
+}
+
+func TestRetryFailedSystemRegistrations(t *testing.T) {
+	// Simulate QMD being unavailable initially, then becoming available.
+	var connectAttempts int32
+	qmdTools := []mcp.Tool{
+		{Name: "query", Description: "Search documents"},
+	}
+
+	qmdSrv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+		if req.Method == "tools/list" {
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{Tools: qmdTools})
+		}
+		return mcp.NewResponse(req.ID, nil)
+	})
+	defer qmdSrv.Close()
+
+	pool := newTestPool(func(ctx context.Context, conn *MCPConnection) error {
+		attempt := atomic.AddInt32(&connectAttempts, 1)
+		if attempt <= 1 {
+			return fmt.Errorf("connection refused") // First attempt fails
+		}
+		return nil // Subsequent attempts succeed
+	})
+	defer pool.CloseAll()
+
+	var toolsChangedCalls int32
+	handler := NewProxyHandler(pool, nil)
+	handler.SetOnToolsChanged(func() {
+		atomic.AddInt32(&toolsChangedCalls, 1)
+	})
+	defer handler.Stop()
+
+	reg := ServerRegistration{
+		InstanceID:      SystemInstanceIDBase,
+		NamespacePrefix: "qmd",
+		Config:          MCPServerConfig{Transport: TransportSSE, URL: qmdSrv.URL, NamespacePrefix: "qmd"},
+	}
+
+	// Initial registration fails (QMD not ready)
+	err := handler.RegisterSystemServer(context.Background(), reg)
+	if err == nil {
+		t.Fatal("expected error on first registration attempt")
+	}
+
+	// No tools registered yet
+	if handler.ToolCount() != 0 {
+		t.Errorf("expected 0 tools before retry, got %d", handler.ToolCount())
+	}
+
+	// Start the retry loop with a very short interval
+	handler.StartSchemaRefreshLoop(100 * time.Millisecond)
+
+	// Wait for retry to succeed
+	deadline := time.After(3 * time.Second)
+	for {
+		if handler.ToolCount() > 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("retry did not register QMD tools within timeout")
+		default:
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	if !handler.IsProxyTool("qmd.query") {
+		t.Error("expected qmd.query to be registered after retry")
 	}
 }
 

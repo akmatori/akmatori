@@ -86,7 +86,7 @@ func main() {
 		}
 		ctx := context.Background()
 		if err := registry.RegisterSystemMCPProxy(ctx, reg); err != nil {
-			slog.Warn("QMD proxy registration failed (QMD may not be running yet, will retry on schema refresh)", "url", qmdURL, "error", err)
+			slog.Warn("QMD proxy registration failed (QMD may not be running yet, will retry periodically)", "url", qmdURL, "error", err)
 		} else {
 			slog.Info("QMD proxy registered", "url", qmdURL)
 		}
