@@ -265,10 +265,12 @@ Runbooks (SOPs) guide AI agent investigations. Stored in PostgreSQL, synced as m
 QMD is a hybrid search engine (BM25 + vector + LLM reranking) running as a Docker sidecar. It indexes runbook markdown files and exposes tools via MCP HTTP server.
 
 - **Config**: `qmd/qmd-config.yml` defines the runbooks collection
-- **Docker service**: `qmd` on `codex-network`, port 8181 (internal only)
+- **Docker service**: `qmd` on `codex-network` + `api-internal`, port 8181 (internal only)
 - **Environment variable**: `QMD_URL` (default: `http://qmd:8181`) — configured on both the API server (for re-index triggers) and the MCP Gateway (for auto-registration as proxy)
+- **Environment variable**: `QMD_BIND_HOST` (default: `localhost`, set to `0.0.0.0` in Docker) — bind address for the QMD HTTP server
+- **REST endpoints**: `/health` (GET, container health check), `/update` (POST, trigger re-index)
 - **MCP tools**: `qmd.query` (search), `qmd.get` (retrieve), `qmd.multi_get`, `qmd.status` — registered automatically on gateway startup via `mcpproxy`
-- **Bypass**: QMD proxy tools bypass the per-incident tool allowlist (all MCP proxy tools with dots in their name do)
+- **Bypass**: QMD proxy tools bypass the per-incident tool allowlist (registered proxy namespaces and multi-segment namespaces with dots bypass)
 
 ## API Package (`internal/api/`)
 

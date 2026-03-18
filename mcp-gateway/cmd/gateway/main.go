@@ -73,12 +73,14 @@ func main() {
 
 	// Register QMD as a system-level MCP proxy (if configured)
 	if qmdURL := os.Getenv("QMD_URL"); qmdURL != "" {
+		// QMD uses MCP Streamable HTTP at the /mcp path
+		mcpEndpoint := strings.TrimRight(qmdURL, "/") + "/mcp"
 		reg := mcpproxy.ServerRegistration{
 			InstanceID:      mcpproxy.SystemInstanceIDBase,
 			NamespacePrefix: "qmd",
 			Config: mcpproxy.MCPServerConfig{
 				Transport:       mcpproxy.TransportSSE,
-				URL:             qmdURL,
+				URL:             mcpEndpoint,
 				NamespacePrefix: "qmd",
 			},
 		}

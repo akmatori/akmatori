@@ -305,6 +305,16 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 				break
 			}
 		}
+		// Also check system registrations (e.g., QMD)
+		if prefix == "" {
+			for _, reg := range h.systemRegistrations {
+				if reg.InstanceID == instanceID {
+					prefix = reg.NamespacePrefix
+					config = reg.Config
+					break
+				}
+			}
+		}
 		if prefix == "" {
 			h.mu.Unlock()
 			return

@@ -301,6 +301,7 @@ func (r *Registry) ReloadMCPProxyTools(loader mcpproxy.MCPServerConfigLoader) {
 func (r *Registry) registerProxyToolsFromHandler() {
 	tools := r.proxyHandler.GetTools()
 	handler := r.proxyHandler
+	seenNamespaces := make(map[string]bool)
 
 	for _, tool := range tools {
 		toolName := tool.Name
@@ -321,7 +322,10 @@ func (r *Registry) registerProxyToolsFromHandler() {
 		// allowlist checks. This is needed for single-segment namespaces (e.g., "qmd")
 		// that don't contain dots.
 		namespace, _ := mcp.ParseToolName(toolName)
-		r.server.AddProxyNamespace(namespace)
+		if !seenNamespaces[namespace] {
+			r.server.AddProxyNamespace(namespace)
+			seenNamespaces[namespace] = true
+		}
 	}
 
 	r.logger.Printf("Registered %d MCP proxy tools", len(tools))
