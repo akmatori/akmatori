@@ -41,6 +41,7 @@ type ProxyHandler struct {
 	toolMap             map[string]proxyToolEntry // namespaced tool name -> entry
 	logger              *slog.Logger
 	onToolsChanged      func() // called when schema refresh updates the tool map
+	stopRetry           chan struct{}
 }
 
 // proxyToolEntry maps a namespaced tool name to its external server and original tool name.
@@ -56,10 +57,11 @@ func NewProxyHandler(pool *MCPConnectionPool, logger *slog.Logger) *ProxyHandler
 		logger = slog.Default()
 	}
 	return &ProxyHandler{
-		pool:     pool,
-		limiters: make(map[uint]*ratelimit.Limiter),
-		toolMap:  make(map[string]proxyToolEntry),
-		logger:   logger,
+		pool:      pool,
+		limiters:  make(map[uint]*ratelimit.Limiter),
+		toolMap:   make(map[string]proxyToolEntry),
+		logger:    logger,
+		stopRetry: make(chan struct{}),
 	}
 }
 
@@ -368,7 +370,12 @@ func (h *ProxyHandler) retryFailedSystemRegistrations(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	for range ticker.C {
+	for {
+		select {
+		case <-h.stopRetry:
+			return
+		case <-ticker.C:
+		}
 		h.mu.RLock()
 		regs := make([]ServerRegistration, len(h.systemRegistrations))
 		copy(regs, h.systemRegistrations)
@@ -412,8 +419,16 @@ func (h *ProxyHandler) HealthStatus(ctx context.Context) []ConnectionStatus {
 	return h.pool.HealthStatus(ctx)
 }
 
-// Stop cleans up resources.
+// Stop cleans up resources and stops background goroutines.
 func (h *ProxyHandler) Stop() {
+	// Signal the retry goroutine to stop before closing the pool,
+	// so it cannot recreate connections after shutdown.
+	select {
+	case <-h.stopRetry:
+		// Already closed
+	default:
+		close(h.stopRetry)
+	}
 	h.pool.CloseAll()
 }
 

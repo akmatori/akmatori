@@ -206,6 +206,12 @@ func (p *MCPConnectionPool) GetOrConnect(ctx context.Context, instanceID uint, c
 	// Use a full lock to avoid TOCTOU races where two goroutines could both
 	// create connections for the same instanceID, leaking one subprocess.
 	p.mu.Lock()
+
+	if p.stopped {
+		p.mu.Unlock()
+		return nil, fmt.Errorf("connection pool is stopped")
+	}
+
 	conn, exists := p.connections[instanceID]
 
 	if exists {
@@ -266,9 +272,15 @@ func (p *MCPConnectionPool) GetOrConnect(ctx context.Context, instanceID uint, c
 	cacheKey := fmt.Sprintf("tools:%d", instanceID)
 	p.schemaCache.Set(cacheKey, tools)
 
-	// Re-acquire to insert. If another goroutine raced and inserted first,
-	// close the duplicate and return the existing one.
+	// Re-acquire to insert. If the pool was stopped while we were connecting,
+	// close the new connection and return an error. If another goroutine raced
+	// and inserted first, close the duplicate and return the existing one.
 	p.mu.Lock()
+	if p.stopped {
+		p.mu.Unlock()
+		conn.close()
+		return nil, fmt.Errorf("connection pool is stopped")
+	}
 	if existing, ok := p.connections[instanceID]; ok {
 		p.mu.Unlock()
 		conn.close()

@@ -312,7 +312,7 @@ func (r *Registry) registerProxyToolsFromHandler() {
 			}
 			// Return the call result content as JSON
 			if len(result.Content) == 1 {
-				return result.Content[0].Text, nil
+				return result.Content[0].ExtractText(), nil
 			}
 			return result, nil
 		})

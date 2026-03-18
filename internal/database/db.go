@@ -216,7 +216,7 @@ gateway_call("qmd.query", {
 
 If relevant runbooks are found (score > 0.3), retrieve the full content:
 
-gateway_call("qmd.get", {"path": "<file path from search result>"})
+gateway_call("qmd.get", {"file": "<file path from search result>"})
 
 Follow matching runbook procedures as your primary investigation guide.
 If no relevant runbooks are found, proceed with general investigation.
