@@ -27,7 +27,7 @@ export interface GatewayClientOptions {
   toolAllowlist?: ToolAllowlistEntry[];
 }
 
-export interface SearchToolsResult {
+export interface ListToolsResult {
   tools: Array<{
     name: string;
     description: string;
@@ -224,17 +224,12 @@ export class GatewayClient {
     return { data };
   }
 
-  /** Search for tools by query string and optional tool type filter. */
-  async searchTools(
-    query: string,
-    toolType?: string,
+  /** List tools filtered by tool type. */
+  async listToolsByType(
+    toolType: string,
     signal?: AbortSignal,
-  ): Promise<SearchToolsResult> {
-    const params: Record<string, unknown> = { query };
-    if (toolType) {
-      params.tool_type = toolType;
-    }
-    return (await this.rpc("tools/search", params, signal)) as SearchToolsResult;
+  ): Promise<ListToolsResult> {
+    return (await this.rpc("tools/list_by_type", { tool_type: toolType }, signal)) as ListToolsResult;
   }
 
   /** List all available tool types for this incident. */

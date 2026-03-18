@@ -129,33 +129,10 @@ func newTestRegistry() (*Registry, *mcp.Server) {
 	return registry, server
 }
 
-func TestSearchTools_QueryMatching(t *testing.T) {
+func TestListToolsByType_TypeFilter(t *testing.T) {
 	registry, _ := newTestRegistry()
 
-	results := registry.SearchTools("ssh", "")
-	if len(results) != 2 {
-		t.Fatalf("expected 2 SSH tools, got %d", len(results))
-	}
-	for _, r := range results {
-		if r.ToolType != "ssh" {
-			t.Errorf("expected tool_type 'ssh', got %q", r.ToolType)
-		}
-	}
-}
-
-func TestSearchTools_EmptyResults(t *testing.T) {
-	registry, _ := newTestRegistry()
-
-	results := registry.SearchTools("nonexistent_tool_xyz", "")
-	if len(results) != 0 {
-		t.Errorf("expected 0 results, got %d", len(results))
-	}
-}
-
-func TestSearchTools_TypeFilter(t *testing.T) {
-	registry, _ := newTestRegistry()
-
-	results := registry.SearchTools("", "zabbix")
+	results := registry.ListToolsByType("zabbix")
 	if len(results) != 2 {
 		t.Fatalf("expected 2 Zabbix tools, got %d", len(results))
 	}
@@ -166,45 +143,12 @@ func TestSearchTools_TypeFilter(t *testing.T) {
 	}
 }
 
-func TestSearchTools_QueryAndTypeFilter(t *testing.T) {
+func TestListToolsByType_NoType_ReturnsAll(t *testing.T) {
 	registry, _ := newTestRegistry()
 
-	results := registry.SearchTools("hosts", "zabbix")
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-	if results[0].Name != "zabbix.get_hosts" {
-		t.Errorf("expected 'zabbix.get_hosts', got %q", results[0].Name)
-	}
-}
-
-func TestSearchTools_CaseInsensitive(t *testing.T) {
-	registry, _ := newTestRegistry()
-
-	results := registry.SearchTools("SSH", "")
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results for case-insensitive 'SSH', got %d", len(results))
-	}
-}
-
-func TestSearchTools_MatchesDescription(t *testing.T) {
-	registry, _ := newTestRegistry()
-
-	results := registry.SearchTools("monitoring", "")
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result matching description, got %d", len(results))
-	}
-	if results[0].Name != "zabbix.get_hosts" {
-		t.Errorf("expected 'zabbix.get_hosts', got %q", results[0].Name)
-	}
-}
-
-func TestSearchTools_EmptyQuery_ReturnsAll(t *testing.T) {
-	registry, _ := newTestRegistry()
-
-	results := registry.SearchTools("", "")
+	results := registry.ListToolsByType("")
 	if len(results) != 4 {
-		t.Fatalf("expected 4 results for empty query, got %d", len(results))
+		t.Fatalf("expected 4 results for empty type, got %d", len(results))
 	}
 }
 
@@ -321,16 +265,16 @@ func TestRegisterHTTPConnectors_RegistersTools(t *testing.T) {
 	}
 }
 
-func TestRegisterHTTPConnectors_ToolsAppearInSearch(t *testing.T) {
+func TestRegisterHTTPConnectors_ToolsAppearInList(t *testing.T) {
 	registry, _ := newTestRegistry()
 
 	connector := makeBillingConnector()
 	registry.RegisterHTTPConnectors(mockConnectorLoader([]database.HTTPConnector{connector}))
 
-	// Search by connector type name
-	results := registry.SearchTools("billing", "")
+	// List by connector type name
+	results := registry.ListToolsByType("internal-billing")
 	if len(results) != 2 {
-		t.Fatalf("expected 2 billing tools in search, got %d", len(results))
+		t.Fatalf("expected 2 billing tools in list, got %d", len(results))
 	}
 	for _, r := range results {
 		if r.ToolType != "internal-billing" {

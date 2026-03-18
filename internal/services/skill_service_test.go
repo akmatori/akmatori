@@ -565,8 +565,8 @@ func TestGenerateSkillMd_ContainsGatewayCallExamples(t *testing.T) {
 		t.Error("SKILL.md should contain logical name zabbix-main for Zabbix instance")
 	}
 	// Should contain discovery and scripting hints
-	if !strings.Contains(result, "search_tools") {
-		t.Error("SKILL.md should mention search_tools for discovery")
+	if !strings.Contains(result, "list_tools_for_tool_type") {
+		t.Error("SKILL.md should mention list_tools_for_tool_type for discovery")
 	}
 	if !strings.Contains(result, "execute_script") {
 		t.Error("SKILL.md should mention execute_script for batch operations")

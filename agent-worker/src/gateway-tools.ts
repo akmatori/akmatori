@@ -7,7 +7,7 @@
  */
 
 import { Type, type TSchema, type Static } from "@sinclair/typebox";
-import type { GatewayClient, CallResult, SearchToolsResult, ToolDetailResult } from "./gateway-client.js";
+import type { GatewayClient, CallResult, ListToolsResult, ToolDetailResult } from "./gateway-client.js";
 import { ScriptExecutor } from "./script-executor.js";
 
 // Re-export the ToolDefinition type from pi-coding-agent for convenience.
@@ -32,15 +32,14 @@ export const GatewayCallParams = Type.Object({
 export type GatewayCallInput = Static<typeof GatewayCallParams>;
 
 // ---------------------------------------------------------------------------
-// search_tools tool schema
+// list_tools_for_tool_type tool schema
 // ---------------------------------------------------------------------------
 
-export const SearchToolsParams = Type.Object({
-  query: Type.String({ description: "Search query to match against tool names and descriptions" }),
-  tool_type: Type.Optional(Type.String({ description: "Optional filter by tool type (e.g. 'ssh', 'zabbix', 'victoriametrics')" })),
+export const ListToolsForToolTypeParams = Type.Object({
+  tool_type: Type.String({ description: "Tool type to list (e.g. 'ssh', 'zabbix', 'victoria_metrics'). Use list_tool_types to see available types." }),
 });
 
-export type SearchToolsInput = Static<typeof SearchToolsParams>;
+export type ListToolsForToolTypeInput = Static<typeof ListToolsForToolTypeParams>;
 
 // ---------------------------------------------------------------------------
 // get_tool_detail tool schema
@@ -57,7 +56,7 @@ export type GetToolDetailInput = Static<typeof GetToolDetailParams>;
 // ---------------------------------------------------------------------------
 
 export const ExecuteScriptParams = Type.Object({
-  code: Type.String({ description: "JavaScript code to execute in an isolated sandbox. Pre-injected globals: gateway_call(), search_tools(), get_tool_detail(), console.log(), and fs (synchronous: readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync). Top-level await works for gateway functions. Do NOT use require() or import()." }),
+  code: Type.String({ description: "JavaScript code to execute in an isolated sandbox. Pre-injected globals: gateway_call(), list_tools_for_tool_type(), get_tool_detail(), console.log(), and fs (synchronous: readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync). Top-level await works for gateway functions. Do NOT use require() or import()." }),
 });
 
 export type ExecuteScriptInput = Static<typeof ExecuteScriptParams>;
@@ -129,39 +128,37 @@ export function createGatewayCallTool(ctx: GatewayToolContext) {
 }
 
 // ---------------------------------------------------------------------------
-// search_tools tool factory
+// list_tools_for_tool_type tool factory
 // ---------------------------------------------------------------------------
 
 /**
- * Create the `search_tools` tool definition for registration with pi-mono.
+ * Create the `list_tools_for_tool_type` tool definition for registration with pi-mono.
  *
- * Allows the agent to discover available tools by searching with a query
- * string and optional tool type filter.
+ * Allows the agent to discover available tools by listing all tools of a given type.
  */
-export function createSearchToolsTool(ctx: GatewayToolContext) {
+export function createListToolsForToolTypeTool(ctx: GatewayToolContext) {
   return {
-    name: "search_tools",
-    label: "Search Tools",
+    name: "list_tools_for_tool_type",
+    label: "List Tools For Tool Type",
     description:
-      "Search for available infrastructure tools on the MCP Gateway. " +
-      "Returns a list of matching tools with their descriptions and available instances. " +
+      "List available infrastructure tools on the MCP Gateway filtered by tool type. " +
+      "Returns all tools of the specified type with their descriptions and available instances. " +
       "Use this to discover what tools are available before calling them.",
     promptGuidelines: [
-      "Call list_tool_types first to see available tool types. Then search by tool type (e.g. search_tools({query: 'ssh'}) or search_tools({tool_type: 'victoria_metrics'})). Do NOT search for alert text or error messages — search for tool type names only.",
-      "Example: search_tools({ query: \"ssh\" }) — finds all SSH-related tools",
-      "Example: search_tools({ query: \"metrics\", tool_type: \"victoria_metrics\" }) — finds VictoriaMetrics tools",
+      "Call list_tool_types first to see available tool types. Then list tools by type: list_tools_for_tool_type({ tool_type: \"victoria_metrics\" }).",
+      "Example: list_tools_for_tool_type({ tool_type: \"ssh\" }) — lists all SSH tools",
+      "Example: list_tools_for_tool_type({ tool_type: \"victoria_metrics\" }) — lists VictoriaMetrics tools",
       "After finding a tool, use get_tool_detail to see its full parameter schema before calling it.",
     ],
-    parameters: SearchToolsParams,
+    parameters: ListToolsForToolTypeParams,
     execute: async (
       _toolCallId: string,
-      params: SearchToolsInput,
+      params: ListToolsForToolTypeInput,
       signal: AbortSignal | undefined,
       _onUpdate: unknown,
     ) => {
       try {
-        const result: SearchToolsResult = await ctx.client.searchTools(
-          params.query,
+        const result: ListToolsResult = await ctx.client.listToolsByType(
           params.tool_type,
           signal,
         );
@@ -197,7 +194,7 @@ export function createGetToolDetailTool(ctx: GatewayToolContext) {
     label: "Get Tool Detail",
     description:
       "Get full details for a specific MCP Gateway tool, including its parameter schema " +
-      "and available instances. Use this after search_tools to understand how to call a tool.",
+      "and available instances. Use this after list_tools_for_tool_type to understand how to call a tool.",
     promptGuidelines: [
       "Use get_tool_detail to see the full parameter schema for a tool before calling it with gateway_call.",
       "Example: get_tool_detail({ tool_name: \"ssh.execute_command\" }) — shows parameters and instances",
@@ -247,10 +244,10 @@ export function createListToolTypesTool(ctx: GatewayToolContext) {
     label: "List Tool Types",
     description:
       "List all available tool types for this incident. Call this first to see what infrastructure " +
-      "tools are available before using search_tools.",
+      "tools are available before using list_tools_for_tool_type.",
     promptGuidelines: [
       "Call list_tool_types first to see what tool types are available (e.g. ssh, zabbix, victoria_metrics).",
-      "Then use search_tools with a specific type to find individual tools within that type.",
+      "Then use list_tools_for_tool_type with a specific type to find individual tools within that type.",
     ],
     parameters: Type.Object({}),
     execute: async (
@@ -290,7 +287,7 @@ export interface ExecuteScriptToolContext {
  * Create the `execute_script` tool definition for registration with pi-mono.
  *
  * Runs agent-written JavaScript in an isolated vm context with built-in
- * gateway_call(), search_tools(), and get_tool_detail() functions.
+ * gateway_call(), list_tools_for_tool_type(), and get_tool_detail() functions.
  */
 export function createExecuteScriptTool(ctx: ExecuteScriptToolContext) {
   const executor = new ScriptExecutor({
@@ -304,10 +301,10 @@ export function createExecuteScriptTool(ctx: ExecuteScriptToolContext) {
     description:
       "Execute JavaScript code in an isolated sandbox with built-in gateway functions and synchronous file I/O. " +
       "Use this for batch operations, complex data processing, or orchestrating multiple tool calls. " +
-      "IMPORTANT: require() and import() are NOT available. Use the pre-injected globals: gateway_call(), search_tools(), get_tool_detail(), console.log(), and the synchronous fs object (readFileSync, writeFileSync, etc.).",
+      "IMPORTANT: require() and import() are NOT available. Use the pre-injected globals: gateway_call(), list_tools_for_tool_type(), get_tool_detail(), console.log(), and the synchronous fs object (readFileSync, writeFileSync, etc.).",
     promptGuidelines: [
       "Use execute_script for batch operations that require multiple gateway_call invocations or data processing.",
-      "Top-level await is supported for gateway_call, search_tools, and get_tool_detail only.",
+      "Top-level await is supported for gateway_call, list_tools_for_tool_type, and get_tool_detail only.",
       "IMPORTANT: Do NOT use require() or import() — they are not available. All globals (fs, gateway_call, etc.) are pre-injected.",
       "IMPORTANT: fs is synchronous only — use fs.readFileSync(path), NOT fs.readFile() or require('fs').",
       "Available fs methods: readFileSync(path), writeFileSync(path, data), existsSync(path), readdirSync(path), mkdirSync(path, {recursive: true})",

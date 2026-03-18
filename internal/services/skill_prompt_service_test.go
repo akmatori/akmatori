@@ -604,10 +604,8 @@ func TestGenerateSkillMd_ToolSectionShowsLogicalNames(t *testing.T) {
 	}
 }
 
-func TestGenerateSkillMd_ToolSectionShowsDiscoveryHints(t *testing.T) {
-	// Verify the generated output includes search_tools and execute_script hints
-	// This tests the generateSkillMd wrapper behavior indirectly by verifying
-	// the section content includes the expected discovery tool references
+func TestGenerateToolUsageExample_ContainsGatewayCall(t *testing.T) {
+	// Verify that generateToolUsageExample includes gateway_call examples
 	tool := database.ToolInstance{
 		ID:          1,
 		Name:        "prod-ssh",
@@ -623,7 +621,6 @@ func TestGenerateSkillMd_ToolSectionShowsDiscoveryHints(t *testing.T) {
 
 	example := generateToolUsageExample(tool)
 
-	// The gateway_call examples should be present
 	if !strings.Contains(example, "gateway_call") {
 		t.Errorf("expected gateway_call in example, got: %s", example)
 	}

@@ -2,7 +2,7 @@
  * Isolated script execution engine for the execute_script tool.
  *
  * Runs agent-written JavaScript code in a Node.js `vm` context with injected
- * gateway functions (gateway_call, search_tools, get_tool_detail) and scoped
+ * gateway functions (gateway_call, list_tools_for_tool_type, get_tool_detail) and scoped
  * filesystem access.
  */
 
@@ -45,12 +45,12 @@ export function detectCommonMistakes(code: string): string | null {
     return "require() is not available in the sandbox. " +
       "All globals are pre-injected — use them directly: " +
       "fs (readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync), " +
-      "gateway_call(), search_tools(), get_tool_detail(), console.";
+      "gateway_call(), list_tools_for_tool_type(), get_tool_detail(), console.";
   }
   if (/^\s*import\s+/m.test(code)) {
     return "import statements are not available in the sandbox. " +
       "All globals are pre-injected — use them directly: " +
-      "fs, gateway_call(), search_tools(), get_tool_detail(), console.";
+      "fs, gateway_call(), list_tools_for_tool_type(), get_tool_detail(), console.";
   }
   return null;
 }
@@ -71,7 +71,7 @@ export class ScriptExecutor {
    *
    * The script receives:
    * - `gateway_call(toolName, args, instance?)` — async, calls MCP Gateway
-   * - `search_tools(query, toolType?)` — async, searches available tools
+   * - `list_tools_for_tool_type(query, toolType?)` — async, lists available tools by type
    * - `get_tool_detail(toolName)` — async, gets tool schema
    * - `console.log(...)` — captures output
    * - `fs` — scoped to workDir (readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync)
@@ -130,11 +130,11 @@ export class ScriptExecutor {
       const result = await this.client.call(toolName, args, instance, internalSignal);
       return result.data;
     };
-    context.__gw_search = async (query: string, toolType?: string) => {
+    context.__gw_search = async (toolType: string) => {
       if (internalSignal.aborted) {
         throw new Error("Script aborted");
       }
-      return await this.client.searchTools(query, toolType, internalSignal);
+      return await this.client.listToolsByType(toolType, internalSignal);
     };
     context.__gw_detail = async (toolName: string) => {
       if (internalSignal.aborted) {
@@ -177,7 +177,7 @@ export class ScriptExecutor {
         var sfs = __fs, st = __setTimeout, ct = __clearTimeout;
 
         globalThis.gateway_call = async (name, args, instance) => gc(name, args, instance);
-        globalThis.search_tools = async (query, toolType) => gs(query, toolType);
+        globalThis.list_tools_for_tool_type = async (toolType) => gs(toolType);
         globalThis.get_tool_detail = async (toolName) => gd(toolName);
         globalThis.console = {
           log: (...a) => cl(...a),
