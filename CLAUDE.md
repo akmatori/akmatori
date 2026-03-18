@@ -123,9 +123,9 @@ Tools are registered as pi-mono custom tools via `gateway-tools.ts`, communicati
 | Tool | File | Purpose |
 |------|------|---------|
 | `gateway_call` | `src/gateway-tools.ts` | Call any MCP Gateway tool by name with optional instance hint |
-| `search_tools` | `src/gateway-tools.ts` | Discover available tools by query and optional type filter |
+| `list_tools_for_tool_type` | `src/gateway-tools.ts` | Discover available tools by query and optional type filter |
 | `get_tool_detail` | `src/gateway-tools.ts` | Get full JSON schema for a specific tool |
-| `execute_script` | `src/gateway-tools.ts` | Run JavaScript in isolated vm with injected `gateway_call()`, `search_tools()`, scoped `fs` |
+| `execute_script` | `src/gateway-tools.ts` | Run JavaScript in isolated vm with injected `gateway_call()`, `list_tools_for_tool_type()`, scoped `fs` |
 
 ### Supporting Modules
 

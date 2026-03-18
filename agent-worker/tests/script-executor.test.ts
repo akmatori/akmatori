@@ -220,12 +220,12 @@ describe("ScriptExecutor", () => {
     });
   });
 
-  describe("search_tools and get_tool_detail within script", () => {
-    it("should call search_tools", async () => {
+  describe("list_tools_for_tool_type and get_tool_detail within script", () => {
+    it("should call list_tools_for_tool_type", async () => {
       const { executor, client } = createExecutor();
 
       const result = await executor.execute(
-        'const tools = await search_tools("ssh"); return tools;',
+        'const tools = await list_tools_for_tool_type("ssh"); return tools;',
       );
 
       expect(client.searchTools).toHaveBeenCalledWith("ssh", undefined, expect.any(AbortSignal));
@@ -234,11 +234,11 @@ describe("ScriptExecutor", () => {
       expect(parsed.tools[0].name).toBe("ssh.execute_command");
     });
 
-    it("should call search_tools with tool_type", async () => {
+    it("should call list_tools_for_tool_type with tool_type", async () => {
       const { executor, client } = createExecutor();
 
       await executor.execute(
-        'await search_tools("metrics", "victoria_metrics");',
+        'await list_tools_for_tool_type("metrics", "victoria_metrics");',
       );
 
       expect(client.searchTools).toHaveBeenCalledWith("metrics", "victoria_metrics", expect.any(AbortSignal));

@@ -135,7 +135,7 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 	}
 	if len(enabledTools) > 0 {
 		toolsSection.WriteString("\n\n## Assigned Tools\n")
-		toolsSection.WriteString("\nYour assigned tools are listed below with full parameter info. Use `search_tools` only to find tools not listed here.\n")
+		toolsSection.WriteString("\nYour assigned tools are listed below with full parameter info. Use `list_tools_for_tool_type` only to find tools not listed here.\n")
 		toolsSection.WriteString("Use `execute_script` to run multi-step scripts with built-in `gateway_call()` for batch operations.\n")
 		for _, tool := range enabledTools {
 			logicalName := tool.LogicalName

@@ -398,7 +398,7 @@ func (s *Server) handleSearchTools(req *Request, incidentID string) Response {
 			}
 		}
 		if len(availableTypes) > 0 {
-			hint = fmt.Sprintf("No tools matched '%s'. Available tool types: %s. Try: search_tools({query: '%s'})",
+			hint = fmt.Sprintf("No tools matched '%s'. Available tool types: %s. Try: list_tools_for_tool_type({query: '%s'})",
 				params.Query, strings.Join(availableTypes, ", "), availableTypes[0])
 		} else {
 			hint = fmt.Sprintf("No tools matched '%s'. No tool types are available for this incident.", params.Query)
