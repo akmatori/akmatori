@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -69,6 +70,27 @@ func main() {
 	registry.SetProxyHandler(proxyHandler)
 	mcpProxyLoader := tools.DefaultMCPProxyLoader
 	registry.RegisterMCPProxyTools(mcpProxyLoader)
+
+	// Register QMD as a system-level MCP proxy (if configured)
+	if qmdURL := os.Getenv("QMD_URL"); qmdURL != "" {
+		// QMD uses MCP Streamable HTTP at the /mcp path
+		mcpEndpoint := strings.TrimRight(qmdURL, "/") + "/mcp"
+		reg := mcpproxy.ServerRegistration{
+			InstanceID:      mcpproxy.SystemInstanceIDBase,
+			NamespacePrefix: "qmd",
+			Config: mcpproxy.MCPServerConfig{
+				Transport:       mcpproxy.TransportSSE,
+				URL:             mcpEndpoint,
+				NamespacePrefix: "qmd",
+			},
+		}
+		ctx := context.Background()
+		if err := registry.RegisterSystemMCPProxy(ctx, reg); err != nil {
+			slog.Warn("QMD proxy registration failed (QMD may not be running yet, will retry periodically)", "url", qmdURL, "error", err)
+		} else {
+			slog.Info("QMD proxy registered", "url", qmdURL)
+		}
+	}
 
 	// Start periodic schema refresh for MCP proxy connections (every 5 min)
 	proxyHandler.StartSchemaRefreshLoop(mcpproxy.DefaultSchemaRefreshInterval)

@@ -30,15 +30,16 @@ type InstanceLookup func(toolType string) []ToolDetailInstance
 
 // Server represents an MCP server
 type Server struct {
-	name            string
-	version         string
-	tools           map[string]Tool
-	handlers        map[string]ToolHandler
-	mu              sync.RWMutex
-	logger          *log.Logger
-	discoverer      ToolDiscoverer
-	instanceLookup  InstanceLookup
-	authorizer      *auth.Authorizer
+	name             string
+	version          string
+	tools            map[string]Tool
+	handlers         map[string]ToolHandler
+	mu               sync.RWMutex
+	logger           *log.Logger
+	discoverer       ToolDiscoverer
+	instanceLookup   InstanceLookup
+	authorizer       *auth.Authorizer
+	proxyNamespaces  map[string]bool
 }
 
 // NewServer creates a new MCP server
@@ -47,11 +48,12 @@ func NewServer(name, version string, logger *log.Logger) *Server {
 		logger = log.Default()
 	}
 	return &Server{
-		name:     name,
-		version:  version,
-		tools:    make(map[string]Tool),
-		handlers: make(map[string]ToolHandler),
-		logger:   logger,
+		name:            name,
+		version:         version,
+		tools:           make(map[string]Tool),
+		handlers:        make(map[string]ToolHandler),
+		logger:          logger,
+		proxyNamespaces: make(map[string]bool),
 	}
 }
 
@@ -68,6 +70,22 @@ func (s *Server) SetInstanceLookup(fn InstanceLookup) {
 // SetAuthorizer sets the authorizer used to enforce per-incident tool allowlists.
 func (s *Server) SetAuthorizer(a *auth.Authorizer) {
 	s.authorizer = a
+}
+
+// AddProxyNamespace registers a namespace as belonging to an MCP proxy server.
+// Proxy namespaces bypass per-incident allowlist checks because they are
+// system-level tools not managed by the skill-based assignment system.
+func (s *Server) AddProxyNamespace(namespace string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.proxyNamespaces[namespace] = true
+}
+
+// isProxyNamespace checks if a namespace belongs to an MCP proxy server.
+func (s *Server) isProxyNamespace(namespace string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.proxyNamespaces[namespace]
 }
 
 // Tools returns the tools map for external read access.
@@ -281,13 +299,13 @@ func (s *Server) handleCallTool(ctx context.Context, req *Request, incidentID st
 	}
 
 	// Enforce tool allowlist authorization.
-	// MCP proxy tools use compound namespaces (e.g., "ext.github") that contain dots.
-	// Standard tool types (ssh, zabbix, victoria_metrics) never contain dots.
-	// Proxy tools are admin-configured and don't participate in skill-based tool
-	// assignment, so they bypass the per-incident allowlist.
+	// MCP proxy tools bypass the per-incident allowlist because they are system-level
+	// tools not managed by the skill-based assignment system. Proxy tools are identified by:
+	// 1. Multi-segment namespaces containing dots (e.g., "ext.github")
+	// 2. Explicitly registered proxy namespaces (e.g., "qmd" for single-segment proxies)
 	if s.authorizer != nil && incidentID != "" {
 		toolType, _ := ParseToolName(params.Name)
-		if !strings.Contains(toolType, ".") {
+		if !strings.Contains(toolType, ".") && !s.isProxyNamespace(toolType) {
 			instanceID := extractInstanceIDFromArgs(params.Arguments)
 			logicalName := extractLogicalNameFromArgs(params.Arguments)
 
@@ -372,7 +390,14 @@ func (s *Server) handleListToolsByType(req *Request, incidentID string) Response
 	if s.authorizer != nil && incidentID != "" {
 		allowlist := s.authorizer.GetAllowlist(incidentID)
 		if allowlist != nil {
-			results = filterToolsByAllowlist(results, allowlist)
+			// Snapshot proxyNamespaces under lock to avoid data race with AddProxyNamespace
+			s.mu.RLock()
+			pns := make(map[string]bool, len(s.proxyNamespaces))
+			for k, v := range s.proxyNamespaces {
+				pns[k] = v
+			}
+			s.mu.RUnlock()
+			results = filterToolsByAllowlist(results, allowlist, pns)
 		}
 	}
 
@@ -394,7 +419,7 @@ func (s *Server) handleListToolsByType(req *Request, incidentID string) Response
 				}
 				var filtered []string
 				for _, t := range availableTypes {
-					if authorizedTypes[t] {
+					if authorizedTypes[t] || s.isProxyNamespace(t) || strings.Contains(t, ".") {
 						filtered = append(filtered, t)
 					}
 				}
@@ -466,7 +491,7 @@ func (s *Server) handleListToolTypes(req *Request, incidentID string) Response {
 			}
 			var filtered []string
 			for _, t := range types {
-				if authorizedTypes[t] {
+				if authorizedTypes[t] || s.isProxyNamespace(t) || strings.Contains(t, ".") {
 					filtered = append(filtered, t)
 				}
 			}
@@ -547,8 +572,9 @@ func extractLogicalNameFromArgs(args map[string]interface{}) string {
 }
 
 // filterToolsByAllowlist removes tools that have no authorized instances.
-// A tool is kept if any allowlist entry matches its tool type.
-func filterToolsByAllowlist(results []ToolListItem, allowlist []auth.AllowlistEntry) []ToolListItem {
+// A tool is kept if any allowlist entry matches its tool type, or if the tool
+// belongs to a registered proxy namespace (proxy tools bypass the allowlist).
+func filterToolsByAllowlist(results []ToolListItem, allowlist []auth.AllowlistEntry, proxyNamespaces map[string]bool) []ToolListItem {
 	// Build set of authorized tool types
 	authorizedTypes := make(map[string]bool)
 	for _, e := range allowlist {
@@ -557,7 +583,8 @@ func filterToolsByAllowlist(results []ToolListItem, allowlist []auth.AllowlistEn
 
 	filtered := make([]ToolListItem, 0, len(results))
 	for _, item := range results {
-		if !authorizedTypes[item.ToolType] {
+		// Proxy namespaces and multi-segment namespaces bypass the allowlist
+		if !authorizedTypes[item.ToolType] && !proxyNamespaces[item.ToolType] && !strings.Contains(item.ToolType, ".") {
 			continue
 		}
 		// Also filter the instance names to only authorized ones

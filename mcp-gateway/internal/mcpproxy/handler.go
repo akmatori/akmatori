@@ -27,15 +27,21 @@ type ServerRegistration struct {
 	AuthConfig      json.RawMessage
 }
 
+// SystemInstanceIDBase is the starting ID for system-level MCP servers (not from DB).
+// Using a high value to avoid collisions with DB auto-increment IDs.
+const SystemInstanceIDBase uint = 900000
+
 // ProxyHandler manages MCP proxy tool registration, discovery, and call forwarding.
 type ProxyHandler struct {
-	mu              sync.RWMutex
-	pool            *MCPConnectionPool
-	limiters        map[uint]*ratelimit.Limiter // per-instance rate limiters
-	registrations   []ServerRegistration
-	toolMap         map[string]proxyToolEntry // namespaced tool name -> entry
-	logger          *slog.Logger
-	onToolsChanged  func() // called when schema refresh updates the tool map
+	mu                  sync.RWMutex
+	pool                *MCPConnectionPool
+	limiters            map[uint]*ratelimit.Limiter // per-instance rate limiters
+	registrations       []ServerRegistration
+	systemRegistrations []ServerRegistration // system-level servers that survive reloads
+	toolMap             map[string]proxyToolEntry // namespaced tool name -> entry
+	logger              *slog.Logger
+	onToolsChanged      func() // called when schema refresh updates the tool map
+	stopRetry           chan struct{}
 }
 
 // proxyToolEntry maps a namespaced tool name to its external server and original tool name.
@@ -51,10 +57,11 @@ func NewProxyHandler(pool *MCPConnectionPool, logger *slog.Logger) *ProxyHandler
 		logger = slog.Default()
 	}
 	return &ProxyHandler{
-		pool:     pool,
-		limiters: make(map[uint]*ratelimit.Limiter),
-		toolMap:  make(map[string]proxyToolEntry),
-		logger:   logger,
+		pool:      pool,
+		limiters:  make(map[uint]*ratelimit.Limiter),
+		toolMap:   make(map[string]proxyToolEntry),
+		logger:    logger,
+		stopRetry: make(chan struct{}),
 	}
 }
 
@@ -102,12 +109,49 @@ func (h *ProxyHandler) LoadAndRegister(ctx context.Context, loader MCPServerConf
 }
 
 // Reload unregisters all proxy tools and re-registers from the database.
+// System-level servers (registered via RegisterSystemServer) are preserved.
 func (h *ProxyHandler) Reload(ctx context.Context, loader MCPServerConfigLoader) error {
 	h.mu.Lock()
 	h.toolMap = make(map[string]proxyToolEntry)
+	sysRegs := make([]ServerRegistration, len(h.systemRegistrations))
+	copy(sysRegs, h.systemRegistrations)
 	h.mu.Unlock()
 
-	return h.LoadAndRegister(ctx, loader)
+	if err := h.LoadAndRegister(ctx, loader); err != nil {
+		return err
+	}
+
+	// Re-register system servers
+	for _, reg := range sysRegs {
+		if err := h.registerServer(ctx, reg); err != nil {
+			h.logger.Warn("failed to re-register system MCP server on reload",
+				"instance_id", reg.InstanceID,
+				"namespace", reg.NamespacePrefix,
+				"error", err,
+			)
+		}
+	}
+
+	return nil
+}
+
+// RegisterSystemServer registers a system-level MCP server that persists across Reload calls.
+// Use this for infrastructure services like QMD that are configured via environment variables
+// rather than the database.
+func (h *ProxyHandler) RegisterSystemServer(ctx context.Context, reg ServerRegistration) error {
+	h.mu.Lock()
+	h.systemRegistrations = append(h.systemRegistrations, reg)
+	h.mu.Unlock()
+
+	if err := h.registerServer(ctx, reg); err != nil {
+		return err
+	}
+
+	h.logger.Info("registered system MCP server",
+		"instance_id", reg.InstanceID,
+		"namespace", reg.NamespacePrefix,
+	)
+	return nil
 }
 
 // registerServer connects to an external MCP server and maps its tools.
@@ -245,8 +289,12 @@ func (h *ProxyHandler) ToolCount() int {
 
 // StartSchemaRefreshLoop starts periodic schema refresh for all registered MCP servers.
 // When new tools are discovered, the tool map is updated automatically.
+// It also retries failed system registrations (e.g., QMD not ready at startup).
 func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 	h.pool.StartSchemaRefreshLoop(interval)
+
+	// Retry failed system registrations periodically
+	go h.retryFailedSystemRegistrations(interval)
 
 	// Also set up a refresh callback to update our tool map when schemas change
 	h.pool.SetSchemaRefreshCallback(func(instanceID uint, tools []mcp.Tool) {
@@ -261,6 +309,16 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 				prefix = reg.NamespacePrefix
 				config = reg.Config
 				break
+			}
+		}
+		// Also check system registrations (e.g., QMD)
+		if prefix == "" {
+			for _, reg := range h.systemRegistrations {
+				if reg.InstanceID == instanceID {
+					prefix = reg.NamespacePrefix
+					config = reg.Config
+					break
+				}
 			}
 		}
 		if prefix == "" {
@@ -305,13 +363,72 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 	})
 }
 
+// retryFailedSystemRegistrations periodically checks for system registrations
+// that don't have active pool connections and re-attempts registration.
+// This handles the case where a system service (e.g., QMD) wasn't ready at gateway startup.
+func (h *ProxyHandler) retryFailedSystemRegistrations(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-h.stopRetry:
+			return
+		case <-ticker.C:
+		}
+		h.mu.RLock()
+		regs := make([]ServerRegistration, len(h.systemRegistrations))
+		copy(regs, h.systemRegistrations)
+		h.mu.RUnlock()
+
+		for _, reg := range regs {
+			if h.pool.IsConnected(reg.InstanceID) {
+				continue
+			}
+			h.logger.Info("retrying failed system MCP server registration",
+				"instance_id", reg.InstanceID,
+				"namespace", reg.NamespacePrefix,
+			)
+			ctx, cancel := context.WithTimeout(context.Background(), DefaultConnectTimeout)
+			if err := h.registerServer(ctx, reg); err != nil {
+				h.logger.Warn("system MCP server retry failed",
+					"instance_id", reg.InstanceID,
+					"namespace", reg.NamespacePrefix,
+					"error", err,
+				)
+			} else {
+				h.logger.Info("system MCP server registration succeeded on retry",
+					"instance_id", reg.InstanceID,
+					"namespace", reg.NamespacePrefix,
+				)
+				// Notify the registry to re-register proxy tools
+				h.mu.RLock()
+				cb := h.onToolsChanged
+				h.mu.RUnlock()
+				if cb != nil {
+					cb()
+				}
+			}
+			cancel()
+		}
+	}
+}
+
 // HealthStatus returns health information for all managed MCP proxy connections.
 func (h *ProxyHandler) HealthStatus(ctx context.Context) []ConnectionStatus {
 	return h.pool.HealthStatus(ctx)
 }
 
-// Stop cleans up resources.
+// Stop cleans up resources and stops background goroutines.
 func (h *ProxyHandler) Stop() {
+	// Signal the retry goroutine to stop before closing the pool,
+	// so it cannot recreate connections after shutdown.
+	select {
+	case <-h.stopRetry:
+		// Already closed
+	default:
+		close(h.stopRetry)
+	}
 	h.pool.CloseAll()
 }
 
