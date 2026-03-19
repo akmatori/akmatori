@@ -17,6 +17,10 @@ const (
 	DefaultProxyRatePerSecond = 10
 	// DefaultProxyBurstCapacity is the default burst capacity per external MCP server.
 	DefaultProxyBurstCapacity = 20
+	// DefaultSystemRetryInterval is the retry interval for failed system registrations
+	// (e.g., QMD not ready at startup). Shorter than the general schema refresh interval
+	// because system services are expected to come up quickly.
+	DefaultSystemRetryInterval = 30 * time.Second
 )
 
 // ServerRegistration holds the configuration for a registered external MCP server.
@@ -33,15 +37,16 @@ const SystemInstanceIDBase uint = 900000
 
 // ProxyHandler manages MCP proxy tool registration, discovery, and call forwarding.
 type ProxyHandler struct {
-	mu                  sync.RWMutex
-	pool                *MCPConnectionPool
-	limiters            map[uint]*ratelimit.Limiter // per-instance rate limiters
-	registrations       []ServerRegistration
-	systemRegistrations []ServerRegistration // system-level servers that survive reloads
-	toolMap             map[string]proxyToolEntry // namespaced tool name -> entry
-	logger              *slog.Logger
-	onToolsChanged      func() // called when schema refresh updates the tool map
-	stopRetry           chan struct{}
+	mu                    sync.RWMutex
+	pool                  *MCPConnectionPool
+	limiters              map[uint]*ratelimit.Limiter // per-instance rate limiters
+	registrations         []ServerRegistration
+	systemRegistrations   []ServerRegistration // system-level servers that survive reloads
+	toolMap               map[string]proxyToolEntry // namespaced tool name -> entry
+	logger                *slog.Logger
+	onToolsChanged        func() // called when schema refresh updates the tool map
+	stopRetry             chan struct{}
+	systemRetryInterval   time.Duration // retry interval for failed system registrations
 }
 
 // proxyToolEntry maps a namespaced tool name to its external server and original tool name.
@@ -57,11 +62,12 @@ func NewProxyHandler(pool *MCPConnectionPool, logger *slog.Logger) *ProxyHandler
 		logger = slog.Default()
 	}
 	return &ProxyHandler{
-		pool:      pool,
-		limiters:  make(map[uint]*ratelimit.Limiter),
-		toolMap:   make(map[string]proxyToolEntry),
-		logger:    logger,
-		stopRetry: make(chan struct{}),
+		pool:                pool,
+		limiters:            make(map[uint]*ratelimit.Limiter),
+		toolMap:             make(map[string]proxyToolEntry),
+		logger:              logger,
+		stopRetry:           make(chan struct{}),
+		systemRetryInterval: DefaultSystemRetryInterval,
 	}
 }
 
@@ -192,6 +198,8 @@ func (h *ProxyHandler) registerServer(ctx context.Context, reg ServerRegistratio
 // CallTool proxies a tool call to the appropriate external MCP server.
 // The toolName should be the namespaced name (e.g., "ext.github.create_issue").
 // Connection failures are handled gracefully with clear error messages returned to the caller.
+// For system-registered servers, a failed call triggers an on-demand re-registration
+// attempt before returning the error.
 func (h *ProxyHandler) CallTool(ctx context.Context, toolName string, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	h.mu.RLock()
 	entry, exists := h.toolMap[toolName]
@@ -202,6 +210,13 @@ func (h *ProxyHandler) CallTool(ctx context.Context, toolName string, args map[s
 	h.mu.RUnlock()
 
 	if !exists {
+		// Tool not in the map — check if it belongs to a system registration
+		// that failed to connect. If so, try re-registering on demand.
+		if reg, ok := h.findSystemRegistrationByTool(toolName); ok {
+			if result, err := h.retrySystemCallOnce(ctx, reg, toolName, args); err == nil {
+				return result, nil
+			}
+		}
 		return nil, fmt.Errorf("proxy tool not found: %s", toolName)
 	}
 
@@ -225,10 +240,85 @@ func (h *ProxyHandler) CallTool(ctx context.Context, toolName string, args map[s
 			"instance_id", entry.instanceID,
 			"error", err,
 		)
+
+		// For system registrations, attempt on-demand re-registration and retry once
+		if reg, ok := h.findSystemRegistrationByID(entry.instanceID); ok {
+			if retryResult, retryErr := h.retrySystemCallOnce(ctx, reg, toolName, args); retryErr == nil {
+				return retryResult, nil
+			}
+		}
+
 		return nil, fmt.Errorf("external MCP server error for %s: %w", toolName, err)
 	}
 
 	return result, nil
+}
+
+// findSystemRegistrationByTool finds a system registration whose namespace prefix
+// matches the tool name (e.g., "qmd" matches "qmd.query").
+func (h *ProxyHandler) findSystemRegistrationByTool(toolName string) (ServerRegistration, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, reg := range h.systemRegistrations {
+		prefix := reg.NamespacePrefix + "."
+		if len(toolName) > len(prefix) && toolName[:len(prefix)] == prefix {
+			return reg, true
+		}
+	}
+	return ServerRegistration{}, false
+}
+
+// findSystemRegistrationByID finds a system registration by instance ID.
+func (h *ProxyHandler) findSystemRegistrationByID(instanceID uint) (ServerRegistration, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, reg := range h.systemRegistrations {
+		if reg.InstanceID == instanceID {
+			return reg, true
+		}
+	}
+	return ServerRegistration{}, false
+}
+
+// retrySystemCallOnce re-registers a system server and retries the tool call once.
+// Returns the call result on success, or an error if re-registration or the retry fails.
+func (h *ProxyHandler) retrySystemCallOnce(ctx context.Context, reg ServerRegistration, toolName string, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	h.logger.Info("attempting on-demand re-registration for system server",
+		"namespace", reg.NamespacePrefix,
+		"tool", toolName,
+	)
+
+	if err := h.registerServer(ctx, reg); err != nil {
+		h.logger.Warn("on-demand re-registration failed",
+			"namespace", reg.NamespacePrefix,
+			"error", err,
+		)
+		return nil, err
+	}
+
+	h.logger.Info("on-demand re-registration succeeded, retrying tool call",
+		"namespace", reg.NamespacePrefix,
+		"tool", toolName,
+	)
+
+	// Notify the registry to update MCP server tool list
+	h.mu.RLock()
+	cb := h.onToolsChanged
+	h.mu.RUnlock()
+	if cb != nil {
+		cb()
+	}
+
+	// Look up the tool again after re-registration
+	h.mu.RLock()
+	entry, exists := h.toolMap[toolName]
+	h.mu.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("tool still not found after re-registration: %s", toolName)
+	}
+
+	return h.pool.CallTool(ctx, entry.instanceID, entry.originalName, args)
 }
 
 // GetTools returns the MCP tool definitions for all registered proxy tools,
@@ -293,8 +383,9 @@ func (h *ProxyHandler) ToolCount() int {
 func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 	h.pool.StartSchemaRefreshLoop(interval)
 
-	// Retry failed system registrations periodically
-	go h.retryFailedSystemRegistrations(interval)
+	// Retry failed system registrations on a shorter interval than general schema refresh.
+	// System services like QMD are expected to come up quickly; no need to wait 5 minutes.
+	go h.retryFailedSystemRegistrations(h.systemRetryInterval)
 
 	// Also set up a refresh callback to update our tool map when schemas change
 	h.pool.SetSchemaRefreshCallback(func(instanceID uint, tools []mcp.Tool) {

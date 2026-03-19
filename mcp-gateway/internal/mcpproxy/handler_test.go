@@ -1041,6 +1041,7 @@ func TestRetryFailedSystemRegistrations(t *testing.T) {
 
 	var toolsChangedCalls int32
 	handler := NewProxyHandler(pool, nil)
+	handler.systemRetryInterval = 100 * time.Millisecond // Short interval for test
 	handler.SetOnToolsChanged(func() {
 		atomic.AddInt32(&toolsChangedCalls, 1)
 	})
@@ -1063,7 +1064,7 @@ func TestRetryFailedSystemRegistrations(t *testing.T) {
 		t.Errorf("expected 0 tools before retry, got %d", handler.ToolCount())
 	}
 
-	// Start the retry loop with a very short interval
+	// Start the retry loop (uses handler.systemRetryInterval for system retries)
 	handler.StartSchemaRefreshLoop(100 * time.Millisecond)
 
 	// Wait for retry to succeed
