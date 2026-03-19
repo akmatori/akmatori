@@ -77,25 +77,44 @@ make verify           # go vet + all tests (pre-commit)
 | Frontend (`web/`) | `docker-compose build frontend && docker-compose up -d frontend` |
 | QMD search (`qmd/`) | `docker-compose build qmd && docker-compose up -d qmd` |
 
-## Current Test Coverage (Mar 12, 2026)
+## Current Test Coverage (Mar 19, 2026)
+
+### Main Module (`akmatori`)
 
 | Package | Coverage | Status |
 |---------|----------|--------|
 | `internal/alerts` | 100.0% | ✅ |
 | `internal/alerts/adapters` | 98.4% | ✅ |
 | `internal/utils` | 94.2% | ✅ |
+| `internal/alerts/extraction` | 93.1% | ✅ |
 | `internal/api` | 92.3% | ✅ |
 | `internal/setup` | 84.8% | ✅ |
 | `internal/middleware` | 78.9% | ✅ |
-| `internal/testhelpers` | 74.8% | ✅ |
+| `internal/testhelpers` | 76.2% | ✅ |
 | `internal/output` | 68.4% | ✅ |
-| `internal/alerts/extraction` | 36.0% | ⚠️ |
+| `internal/database` | 52.2% | ⚠️ |
 | `internal/slack` | 32.3% | ⚠️ |
-| `internal/services` | 28.8% | ⚠️ |
-| `internal/database` | 20.2% | ⚠️ |
-| `internal/handlers` | 10.2% | ⚠️ |
+| `internal/services` | 27.8% | ⚠️ |
+| `internal/handlers` | 17.8% | ⚠️ |
 
-**Priority**: handlers (HTTP tests), services, extraction (LLM mocks)
+### MCP Gateway (`mcp-gateway`)
+
+| Package | Coverage | Status |
+|---------|----------|--------|
+| `internal/cache` | 100.0% | ✅ |
+| `internal/ratelimit` | 100.0% | ✅ |
+| `internal/validation` | 100.0% | ✅ |
+| `internal/tools/httpconnector` | 91.6% | ✅ |
+| `internal/auth` | 81.8% | ✅ |
+| `internal/tools/victoriametrics` | 76.2% | ✅ |
+| `internal/mcpproxy` | 70.8% | ✅ |
+| `internal/mcp` | 66.8% | ⚠️ |
+| `internal/database` | 40.5% | ⚠️ |
+| `internal/tools` | 40.3% | ⚠️ |
+| `internal/tools/ssh` | 33.8% | ⚠️ |
+| `internal/tools/zabbix` | 5.2% | ⚠️ |
+
+**Priority**: handlers, services, zabbix tools (mock external APIs)
 
 ## Agent Worker Architecture
 
@@ -125,9 +144,11 @@ Tools are registered as pi-mono custom tools via `gateway-tools.ts`, communicati
 | Tool | File | Purpose |
 |------|------|---------|
 | `gateway_call` | `src/gateway-tools.ts` | Call any MCP Gateway tool by name with optional instance hint |
-| `list_tools_for_tool_type` | `src/gateway-tools.ts` | Discover available tools by query and optional type filter |
+| `list_tools_for_tool_type` | `src/gateway-tools.ts` | List all tools of a given type (e.g., `ssh`, `zabbix`, `victoria_metrics`) |
 | `get_tool_detail` | `src/gateway-tools.ts` | Get full JSON schema for a specific tool |
 | `execute_script` | `src/gateway-tools.ts` | Run JavaScript in isolated vm with injected `gateway_call()`, `list_tools_for_tool_type()`, scoped `fs` |
+
+**Note**: Tool discovery is type-based, not query-based. Use `list_tool_types` first, then `list_tools_for_tool_type({ tool_type: "ssh" })`.
 
 ### Supporting Modules
 
@@ -553,6 +574,7 @@ func legacyHandler() { ... }
 - `mcp-gateway/internal/tools/httpconnector/` - Declarative HTTP connector executor with auth injection
 - `mcp-gateway/internal/mcpproxy/` - Connection pool and proxy handler for external MCP servers
 - `mcp-gateway/internal/auth/` - Per-incident tool authorization (allowlist enforcement)
+- `mcp-gateway/internal/validation/` - Parameter validation with typo suggestions for better error messages
 
 ### What NOT To Do
 
