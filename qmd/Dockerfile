@@ -8,7 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl git ca-cer
 ARG QMD_VERSION=v2.0.1
 RUN git clone --branch ${QMD_VERSION} --depth 1 https://github.com/tobi/qmd.git /opt/qmd
 WORKDIR /opt/qmd
-RUN npm install && npm run build && npm link
+# Remove bun lock files so bin/qmd's runtime detection picks node (not bun)
+RUN rm -f bun.lock bun.lockb && npm install && npm run build && npm link
 
 # Copy config and entrypoint
 COPY qmd-config.yml /opt/qmd-config.yml
