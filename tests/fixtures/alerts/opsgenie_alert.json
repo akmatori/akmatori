@@ -1,0 +1,38 @@
+{
+  "action": "Create",
+  "alert": {
+    "alertId": "550e8400-e29b-41d4-a716-446655440000",
+    "message": "Database connection pool exhausted",
+    "tags": ["database", "critical", "production"],
+    "tinyId": "1234",
+    "entity": "db-pool-01",
+    "alias": "db-connection-pool-alert",
+    "description": "The database connection pool has reached its maximum capacity. New connections are being rejected.",
+    "source": "API",
+    "user": "monitoring-service",
+    "team": "dba-team",
+    "createdAt": 1705315800000,
+    "updatedAt": 1705315800000,
+    "priority": "P1",
+    "responders": [
+      {
+        "id": "4513b7ea-3b91-438f-b7e4-e3e54af9147c",
+        "type": "team",
+        "name": "DBA Team"
+      }
+    ],
+    "details": {
+      "host": "db-primary-01.prod.internal",
+      "pool_size": "100",
+      "active_connections": "100",
+      "waiting_requests": "50",
+      "service": "user-authentication"
+    }
+  },
+  "source": {
+    "name": "Prometheus",
+    "type": "API"
+  },
+  "integrationId": "12345678-1234-1234-1234-123456789012",
+  "integrationName": "Prometheus Integration"
+}

@@ -133,7 +133,10 @@ Available fixtures:
 - `alerts/alertmanager_firing.json`
 - `alerts/datadog_monitor.json`
 - `alerts/grafana_alerting.json`
+- `alerts/newrelic_alert.json`
+- `alerts/opsgenie_alert.json`
 - `alerts/pagerduty_trigger.json`
+- `alerts/sentry_alert.json`
 - `alerts/zabbix_problem.json`
 - `runbooks/database_failover.md`
 
@@ -145,6 +148,71 @@ adapter := NewMockAlertAdapter("test").
     WithParseError(nil)
 
 alerts, err := adapter.ParsePayload(body, instance)
+```
+
+## Service Mocks
+
+Thread-safe mocks for testing handlers:
+
+```go
+// Alert service mock
+alertSvc := NewMockAlertService().
+    WithInstance("uuid", &instance).
+    WithProcessedAlerts(alert1, alert2)
+
+// Incident service mock
+incidentSvc := NewMockIncidentService().
+    WithIncident("uuid", &incident).
+    WithCreatedIncident(&newIncident)
+
+// Skill service mock
+skillSvc := NewMockSkillService().
+    WithSkill("name", &skill).
+    WithAllSkills(skill1, skill2)
+
+// Check call tracking
+if len(alertSvc.GetInstanceCalls) != 1 { ... }
+```
+
+## Webhook Request Builder
+
+Build webhook requests with signatures:
+
+```go
+// Basic request
+req := NewWebhookRequest(t).
+    WithInstanceUUID("prod-alertmanager").
+    WithJSONBody(payload).
+    Build()
+
+// With Slack signature
+req := NewWebhookRequest(t).
+    WithBody(body).
+    WithSlackSignature("webhook-secret").
+    Build()
+
+// With PagerDuty/Grafana signatures
+req := NewWebhookRequest(t).
+    WithBody(body).
+    WithPagerDutySignature("secret").
+    Build()
+
+// Get request + recorder together
+req, rec := NewWebhookRequest(t).
+    WithInstanceUUID("test").
+    BuildWithRecorder()
+```
+
+## Alert Payload Builders
+
+Build Alertmanager payloads:
+
+```go
+payload := NewAlertmanagerPayload().
+    WithFiringAlert("HighCPU", "critical").
+    WithFiringAlert("LowMemory", "warning").
+    WithResolvedAlert("DiskFull").
+    Build(t)
 ```
 
 ## Call Counter

@@ -1,0 +1,33 @@
+{
+  "action": "triggered",
+  "actor": {
+    "id": "12345",
+    "name": "Sentry",
+    "type": "application"
+  },
+  "data": {
+    "event": {
+      "event_id": "abc123def456789",
+      "project": 98765,
+      "project_slug": "api-gateway",
+      "release": "v2.5.1",
+      "dist": null,
+      "platform": "python",
+      "message": "ConnectionError: Unable to connect to upstream service",
+      "datetime": "2024-01-15T10:30:00.000000Z",
+      "tags": [
+        ["environment", "production"],
+        ["server_name", "api-server-01"],
+        ["level", "error"],
+        ["handled", "no"]
+      ],
+      "title": "ConnectionError: Unable to connect to upstream service",
+      "location": "app/services/upstream_client.py",
+      "url": "https://sentry.io/organizations/myorg/issues/123456789/events/abc123def456789/"
+    },
+    "triggered_rule": "High Error Volume"
+  },
+  "installation": {
+    "uuid": "install-uuid-12345"
+  }
+}

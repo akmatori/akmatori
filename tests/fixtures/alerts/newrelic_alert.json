@@ -1,0 +1,32 @@
+{
+  "account_id": "1234567",
+  "account_name": "Production Account",
+  "condition_id": "987654",
+  "condition_name": "High Error Rate",
+  "current_state": "open",
+  "details": "Error rate exceeded 5% threshold",
+  "event_type": "INCIDENT",
+  "incident_acknowledge_url": "https://alerts.newrelic.com/accounts/1234567/incidents/12345/acknowledge",
+  "incident_id": "12345",
+  "incident_url": "https://alerts.newrelic.com/accounts/1234567/incidents/12345",
+  "owner": "",
+  "policy_name": "Application Health",
+  "policy_url": "https://alerts.newrelic.com/accounts/1234567/policies/11111",
+  "runbook_url": "https://runbooks.example.com/error-rate",
+  "severity": "CRITICAL",
+  "targets": [
+    {
+      "id": "web-api",
+      "name": "Web API Service",
+      "link": "https://one.newrelic.com/redirect/entity/Mjk4fEFQTXxBUFBMSUNBVElPTnwxMjM0NTY3OA",
+      "product": "APM",
+      "type": "Application",
+      "labels": {
+        "environment": "production",
+        "team": "backend"
+      }
+    }
+  ],
+  "timestamp": 1705315800000,
+  "version": "3.0"
+}
