@@ -719,7 +719,7 @@ describe("formatDirectToolCallHint", () => {
     const hint = formatDirectToolCallHint("Tool not found: 'victoria_metrics.instant_query'");
     expect(hint).toContain("victoria_metrics.instant_query");
     expect(hint).toContain("gateway_call");
-    expect(hint).toContain("is not a direct agent tool");
+    expect(hint).toContain("is a gateway tool");
   });
 
   it("should work with double-quoted tool names in error messages", () => {

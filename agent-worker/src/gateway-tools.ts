@@ -49,8 +49,8 @@ export function formatDirectToolCallHint(errorMessage: string): string {
   const match = errorMessage.match(/['"`]([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*)['"`]/);
   if (match && isDotNamespacedToolName(match[1]) && !REGISTERED_TOOL_NAMES.has(match[1])) {
     return (
-      `\n\nHint: Tool '${match[1]}' is not a direct agent tool. ` +
-      `Use gateway_call({ tool_name: "${match[1]}", args: {...} }) instead.`
+      `\n\nHint: '${match[1]}' is a gateway tool. ` +
+      `Call it via gateway_call("${match[1]}", {<args>}) or gateway_call("${match[1]}", {<args>}, "<instance>").`
     );
   }
   return "";
