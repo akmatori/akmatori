@@ -692,11 +692,12 @@ describe("createExecuteScriptTool", () => {
 // ---------------------------------------------------------------------------
 
 describe("isDotNamespacedToolName", () => {
-  it("should return true for dot-namespaced tool names", () => {
+  it("should return true for known tool namespaces", () => {
     expect(isDotNamespacedToolName("ssh.execute_command")).toBe(true);
     expect(isDotNamespacedToolName("victoria_metrics.instant_query")).toBe(true);
     expect(isDotNamespacedToolName("zabbix.get_problems")).toBe(true);
     expect(isDotNamespacedToolName("qmd.query")).toBe(true);
+    expect(isDotNamespacedToolName("http_connector.some_tool")).toBe(true);
   });
 
   it("should return false for non-namespaced names", () => {
@@ -712,6 +713,14 @@ describe("isDotNamespacedToolName", () => {
     expect(isDotNamespacedToolName("trailing_dot.")).toBe(false);
     expect(isDotNamespacedToolName("has space.tool")).toBe(false);
   });
+
+  it("should return false for unknown namespaces (hostnames, filenames, etc.)", () => {
+    expect(isDotNamespacedToolName("db.prod")).toBe(false);
+    expect(isDotNamespacedToolName("config.yaml")).toBe(false);
+    expect(isDotNamespacedToolName("node.js")).toBe(false);
+    expect(isDotNamespacedToolName("metrics.company")).toBe(false);
+    expect(isDotNamespacedToolName("host.get")).toBe(false);
+  });
 });
 
 describe("formatDirectToolCallHint", () => {
@@ -722,10 +731,10 @@ describe("formatDirectToolCallHint", () => {
     expect(hint).toContain("is a gateway tool");
   });
 
-  it("should return a hint for real unauthorized error format", () => {
-    const hint = formatDirectToolCallHint("Unauthorized: incident abc is not authorized to use tool ssh.execute_command");
-    expect(hint).toContain("ssh.execute_command");
-    expect(hint).toContain("gateway_call");
+  it("should suppress hint for authorization errors (agent already used gateway_call correctly)", () => {
+    expect(formatDirectToolCallHint("Unauthorized: incident abc is not authorized to use tool ssh.execute_command")).toBe("");
+    expect(formatDirectToolCallHint("MCP Error -32600: Unauthorized: not authorized to use tool victoria_metrics.instant_query")).toBe("");
+    expect(formatDirectToolCallHint("Forbidden: access denied for zabbix.get_problems")).toBe("");
   });
 
   it("should work with quoted tool names in error messages", () => {
@@ -744,13 +753,21 @@ describe("formatDirectToolCallHint", () => {
     // These are the 5 registered tools - should not trigger a hint
     expect(formatDirectToolCallHint("Error with 'gateway_call'")).toBe("");
   });
+
+  it("should not return a hint for unknown namespaces (hostnames, filenames, etc.)", () => {
+    expect(formatDirectToolCallHint("Connection refused: db.prod.internal:5432")).toBe("");
+    expect(formatDirectToolCallHint("SSL error for metrics.company.com")).toBe("");
+    expect(formatDirectToolCallHint("config.yaml is missing")).toBe("");
+    expect(formatDirectToolCallHint("error in node.js version 18")).toBe("");
+    expect(formatDirectToolCallHint("Host key verification failed for db.host")).toBe("");
+  });
 });
 
 describe("gateway_call error messages with direct tool hints", () => {
-  it("should include gateway_call hint when gateway error mentions a dot-namespaced tool", async () => {
+  it("should include gateway_call hint for tool-not-found errors", async () => {
     const client = createMockClient({
       call: vi.fn(async () => {
-        throw new Error("MCP Error -32600: Unauthorized: incident test is not authorized to use tool victoria_metrics.instant_query");
+        throw new Error("MCP Error -32601: Method not found: victoria_metrics.instant_query");
       }) as any,
     });
     const tool = createGatewayCallTool({ client });
@@ -763,10 +780,30 @@ describe("gateway_call error messages with direct tool hints", () => {
     );
 
     expect(result.content[0].text).toContain("Error:");
-    expect(result.content[0].text).toContain("is not authorized");
+    expect(result.content[0].text).toContain("Method not found");
     expect(result.content[0].text).toContain("Hint:");
     expect(result.content[0].text).toContain("gateway_call");
     expect(result.content[0].text).toContain("victoria_metrics.instant_query");
+  });
+
+  it("should not include hint for authorization errors (agent used gateway_call correctly)", async () => {
+    const client = createMockClient({
+      call: vi.fn(async () => {
+        throw new Error("MCP Error -32600: Unauthorized: incident test is not authorized to use tool victoria_metrics.instant_query");
+      }) as any,
+    });
+    const tool = createGatewayCallTool({ client });
+
+    const result = await tool.execute(
+      "tc-hint2",
+      { tool_name: "victoria_metrics.instant_query", args: {} },
+      undefined,
+      undefined,
+    );
+
+    expect(result.content[0].text).toContain("Error:");
+    expect(result.content[0].text).toContain("is not authorized");
+    expect(result.content[0].text).not.toContain("Hint:");
   });
 
   it("should not include hint for errors without dot-namespaced tool names", async () => {
@@ -778,7 +815,7 @@ describe("gateway_call error messages with direct tool hints", () => {
     const tool = createGatewayCallTool({ client });
 
     const result = await tool.execute(
-      "tc-hint2",
+      "tc-hint3",
       { tool_name: "ssh.execute_command", args: { command: "uptime" } },
       undefined,
       undefined,

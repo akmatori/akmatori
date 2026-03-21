@@ -28,23 +28,46 @@ const REGISTERED_TOOL_NAMES = new Set([
   "execute_script",
 ]);
 
+/** Known MCP tool type namespaces (the segment before the dot). */
+const KNOWN_TOOL_NAMESPACES = new Set([
+  "ssh",
+  "zabbix",
+  "victoria_metrics",
+  "qmd",
+  "http_connector",
+]);
+
+/** Error patterns where the hint should NOT fire (agent already used gateway_call correctly). */
+const SUPPRESS_HINT_PATTERNS = [
+  /\bUnauthorized\b/i,
+  /\bnot authorized\b/i,
+  /\bforbidden\b/i,
+];
+
 /**
  * Returns true if the given string looks like a dot-namespaced MCP tool name
  * (e.g. "victoria_metrics.instant_query", "ssh.execute_command").
+ * Validates that the namespace segment is a known tool type.
  */
 export function isDotNamespacedToolName(name: string): boolean {
   if (!name || typeof name !== "string") return false;
-  // Must contain at least one dot with non-empty segments on both sides
   const dotIndex = name.indexOf(".");
-  return dotIndex > 0 && dotIndex < name.length - 1 && !name.includes(" ");
+  if (dotIndex <= 0 || dotIndex >= name.length - 1 || name.includes(" ")) return false;
+  const namespace = name.substring(0, dotIndex);
+  return KNOWN_TOOL_NAMESPACES.has(namespace);
 }
 
 /**
- * If an error message contains a dot-namespaced tool name that isn't one of
- * the 5 registered agent tools, return a hint suggesting gateway_call usage.
+ * If an error message indicates a tool-not-found scenario and contains a
+ * dot-namespaced MCP tool name, return a hint suggesting gateway_call usage.
+ * Suppressed for authorization errors (agent is already using gateway_call correctly).
  * Returns an empty string if no hint is applicable.
  */
 export function formatDirectToolCallHint(errorMessage: string): string {
+  // Don't hint on authorization errors — the agent is already using gateway_call,
+  // the problem is the tool instance isn't in the allowlist.
+  if (SUPPRESS_HINT_PATTERNS.some((p) => p.test(errorMessage))) return "";
+
   // Extract potential tool names from the error message.
   // Try quoted first, then fall back to unquoted (gateway errors don't quote tool names).
   const quoted = errorMessage.match(/['"`]([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*)['"`]/);
