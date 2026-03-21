@@ -338,7 +338,7 @@ func (s *Server) handleCallTool(ctx context.Context, req *Request, incidentID st
 					// Instance ID provided without logical name — inject the
 					// logical name from the matching allowlist entry.
 					for _, e := range entries {
-						if e.InstanceID == instanceID && e.ToolType == toolType {
+						if e.InstanceID == instanceID && e.ToolType == toolType && e.LogicalName != "" {
 							params.Arguments["logical_name"] = e.LogicalName
 							break
 						}

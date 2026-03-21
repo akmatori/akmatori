@@ -67,6 +67,12 @@ export function isDotNamespacedToolName(name: string): boolean {
  * dot-namespaced MCP tool name, return a hint suggesting gateway_call usage.
  * Suppressed for authorization errors (agent is already using gateway_call correctly).
  * Returns an empty string if no hint is applicable.
+ *
+ * NOTE: Currently exported for testing only. The pi-mono SDK does not expose a
+ * hook for tool-not-found errors (the "Tool X not found" message is returned
+ * directly to the LLM context without passing through afterToolCall). The
+ * BASH_TOOL_GUIDELINES prompt provides equivalent guidance as a mitigation.
+ * This function is ready to be wired in once the SDK adds such a hook.
  */
 export function formatDirectToolCallHint(errorMessage: string): string {
   // Only hint on tool routing/discovery errors (not-found, unknown tool, etc.)
@@ -131,7 +137,7 @@ export type GetToolDetailInput = Static<typeof GetToolDetailParams>;
 // ---------------------------------------------------------------------------
 
 export const ExecuteScriptParams = Type.Object({
-  code: Type.String({ description: "JavaScript code to execute in an isolated sandbox. Pre-injected globals: gateway_call(), list_tools_for_tool_type(), get_tool_detail(), console.log(), and fs (synchronous: readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync). Top-level await works for gateway functions. Do NOT use require() or import()." }),
+  code: Type.String({ description: "JavaScript code to execute in an isolated sandbox. Pre-injected globals: gateway_call(), list_tools_for_tool_type(), list_tool_types(), get_tool_detail(), console.log(), and fs (synchronous: readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync). Top-level await works for gateway functions. Do NOT use require() or import()." }),
 });
 
 export type ExecuteScriptInput = Static<typeof ExecuteScriptParams>;
