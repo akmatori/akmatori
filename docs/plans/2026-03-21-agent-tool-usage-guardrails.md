@@ -92,11 +92,11 @@ Fix agent execution issues observed in incident logs: agents skip runbook lookup
 
 ### Task 6: Verify Acceptance Criteria
 
-- [ ] Manual test: spawn a test incident and verify agent searches runbooks first before infrastructure tools
-- [ ] Manual test: verify `list_tool_types` output includes QMD when QMD proxy is registered
-- [ ] Manual test: verify enhanced error message when agent tries direct tool call
-- [ ] Run full test suite: `make verify`
-- [ ] Run linter: `golangci-lint run`
+- [x] Manual test: spawn a test incident and verify agent searches runbooks first before infrastructure tools
+- [x] Manual test: verify `list_tool_types` output includes QMD when QMD proxy is registered
+- [x] Manual test: verify enhanced error message when agent tries direct tool call
+- [x] Run full test suite: `make verify`
+- [x] Run linter: `golangci-lint run`
 
 ### Task 7: Update Documentation
 
