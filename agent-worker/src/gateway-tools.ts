@@ -45,8 +45,11 @@ export function isDotNamespacedToolName(name: string): boolean {
  * Returns an empty string if no hint is applicable.
  */
 export function formatDirectToolCallHint(errorMessage: string): string {
-  // Extract potential tool names from the error message
-  const match = errorMessage.match(/['"`]([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*)['"`]/);
+  // Extract potential tool names from the error message.
+  // Try quoted first, then fall back to unquoted (gateway errors don't quote tool names).
+  const quoted = errorMessage.match(/['"`]([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*)['"`]/);
+  const unquoted = errorMessage.match(/\b([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*)\b/);
+  const match = quoted ?? unquoted;
   if (match && isDotNamespacedToolName(match[1]) && !REGISTERED_TOOL_NAMES.has(match[1])) {
     return (
       `\n\nHint: '${match[1]}' is a gateway tool. ` +

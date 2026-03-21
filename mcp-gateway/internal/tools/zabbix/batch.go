@@ -207,8 +207,8 @@ func (t *ZabbixTool) GetItemsBatchWithHistory(ctx context.Context, incidentID st
 		"sortorder": "DESC",
 	}
 
-	logicalName2 := extractLogicalName(args)
-	historyResult, err := t.cachedRequest(ctx, incidentID, "history.get", historyParams, 15*time.Second, logicalName2)
+	logicalName := extractLogicalName(args)
+	historyResult, err := t.cachedRequest(ctx, incidentID, "history.get", historyParams, 15*time.Second, logicalName)
 	if err != nil {
 		// Return items without history if history fetch fails
 		t.logger.Printf("Failed to fetch history for batch items: %v", err)

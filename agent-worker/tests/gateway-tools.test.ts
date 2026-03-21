@@ -715,21 +715,21 @@ describe("isDotNamespacedToolName", () => {
 });
 
 describe("formatDirectToolCallHint", () => {
-  it("should return a hint for error messages containing dot-namespaced tool names", () => {
-    const hint = formatDirectToolCallHint("Tool not found: 'victoria_metrics.instant_query'");
+  it("should return a hint for unquoted tool names (real gateway error format)", () => {
+    const hint = formatDirectToolCallHint("Tool not found: victoria_metrics.instant_query");
     expect(hint).toContain("victoria_metrics.instant_query");
     expect(hint).toContain("gateway_call");
     expect(hint).toContain("is a gateway tool");
   });
 
-  it("should work with double-quoted tool names in error messages", () => {
-    const hint = formatDirectToolCallHint('Unknown tool "ssh.execute_command"');
+  it("should return a hint for real unauthorized error format", () => {
+    const hint = formatDirectToolCallHint("Unauthorized: incident abc is not authorized to use tool ssh.execute_command");
     expect(hint).toContain("ssh.execute_command");
     expect(hint).toContain("gateway_call");
   });
 
-  it("should work with backtick-quoted tool names", () => {
-    const hint = formatDirectToolCallHint("Cannot call `zabbix.get_problems` directly");
+  it("should work with quoted tool names in error messages", () => {
+    const hint = formatDirectToolCallHint("Cannot call 'zabbix.get_problems' directly");
     expect(hint).toContain("zabbix.get_problems");
     expect(hint).toContain("gateway_call");
   });
@@ -750,7 +750,7 @@ describe("gateway_call error messages with direct tool hints", () => {
   it("should include gateway_call hint when gateway error mentions a dot-namespaced tool", async () => {
     const client = createMockClient({
       call: vi.fn(async () => {
-        throw new Error("MCP Error -32600: Tool 'victoria_metrics.instant_query' is not authorized");
+        throw new Error("MCP Error -32600: Unauthorized: incident test is not authorized to use tool victoria_metrics.instant_query");
       }) as any,
     });
     const tool = createGatewayCallTool({ client });
