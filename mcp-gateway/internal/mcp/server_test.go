@@ -1035,9 +1035,14 @@ func TestHandleListToolTypes_QMDProxyBypassesAllowlist(t *testing.T) {
 		t.Fatalf("unexpected error: %s", resp.Error.Message)
 	}
 
-	resultBytes, _ := json.Marshal(resp.Result)
+	resultBytes, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatalf("failed to marshal result: %v", err)
+	}
 	var result ListToolTypesResult
-	json.Unmarshal(resultBytes, &result)
+	if err := json.Unmarshal(resultBytes, &result); err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
 
 	// Should include ssh (in allowlist) and qmd (proxy namespace bypass), but not zabbix
 	typeSet := map[string]bool{}
@@ -1085,9 +1090,14 @@ func TestHandleListToolTypes_DotNamespacedBypassesAllowlist(t *testing.T) {
 		t.Fatalf("unexpected error: %s", resp.Error.Message)
 	}
 
-	resultBytes, _ := json.Marshal(resp.Result)
+	resultBytes, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatalf("failed to marshal result: %v", err)
+	}
 	var result ListToolTypesResult
-	json.Unmarshal(resultBytes, &result)
+	if err := json.Unmarshal(resultBytes, &result); err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
 
 	typeSet := map[string]bool{}
 	for _, tp := range result.Types {
