@@ -46,11 +46,11 @@ Fix agent execution issues observed in incident logs: agents skip runbook lookup
 - Modify: `mcp-gateway/internal/mcp/server.go` (lines ~476-507, if changes needed)
 - Possibly modify: test files for list_tool_types
 
-- [ ] Trace the `handleListToolTypes` logic to confirm proxy-namespaced tools (like `qmd`) appear in output
-- [ ] The code at line 494 shows proxy namespaces bypass the allowlist filter - verify this works for QMD specifically
-- [ ] If QMD does NOT appear: fix the proxy namespace registration or the filter logic
-- [ ] If QMD DOES appear: add a test that explicitly asserts QMD proxy tools are included in list_tool_types output when registered
-- [ ] Run `make test-mcp` - must pass before task 3
+- [x] Trace the `handleListToolTypes` logic to confirm proxy-namespaced tools (like `qmd`) appear in output
+- [x] The code at line 494 shows proxy namespaces bypass the allowlist filter - verify this works for QMD specifically
+- [x] If QMD does NOT appear: fix the proxy namespace registration or the filter logic
+- [x] If QMD DOES appear: add a test that explicitly asserts QMD proxy tools are included in list_tool_types output when registered
+- [x] Run `make test-mcp` - must pass before task 3
 
 ### Task 3: Better Error Messages for Direct Tool Calls
 

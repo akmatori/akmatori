@@ -1006,6 +1006,105 @@ func TestHandleListToolTypes_EmptyTypes(t *testing.T) {
 	}
 }
 
+func TestHandleListToolTypes_QMDProxyBypassesAllowlist(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	// QMD is a proxy namespace — it should appear in list_tool_types even when
+	// the incident allowlist does not include it.
+	s.AddProxyNamespace("qmd")
+	s.SetDiscoverer(&mockDiscoverer{
+		availableTypes: []string{"ssh", "zabbix", "qmd"},
+	})
+
+	// Allowlist only contains ssh — no qmd entry
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/list_types", nil,
+		map[string]string{
+			"X-Incident-ID":    "incident-qmd-types",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result ListToolTypesResult
+	json.Unmarshal(resultBytes, &result)
+
+	// Should include ssh (in allowlist) and qmd (proxy namespace bypass), but not zabbix
+	typeSet := map[string]bool{}
+	for _, tp := range result.Types {
+		typeSet[tp] = true
+	}
+
+	if !typeSet["ssh"] {
+		t.Error("ssh should be included (in allowlist)")
+	}
+	if !typeSet["qmd"] {
+		t.Error("qmd should be included (proxy namespace bypasses allowlist)")
+	}
+	if typeSet["zabbix"] {
+		t.Error("zabbix should be filtered out (not in allowlist and not a proxy namespace)")
+	}
+	if len(result.Types) != 2 {
+		t.Errorf("expected 2 types (ssh, qmd), got %d: %v", len(result.Types), result.Types)
+	}
+}
+
+func TestHandleListToolTypes_DotNamespacedBypassesAllowlist(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	// Multi-segment namespaces with dots also bypass the allowlist filter
+	s.SetDiscoverer(&mockDiscoverer{
+		availableTypes: []string{"ssh", "custom.monitoring"},
+	})
+
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/list_types", nil,
+		map[string]string{
+			"X-Incident-ID":    "incident-dot-ns",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result ListToolTypesResult
+	json.Unmarshal(resultBytes, &result)
+
+	typeSet := map[string]bool{}
+	for _, tp := range result.Types {
+		typeSet[tp] = true
+	}
+
+	if !typeSet["ssh"] {
+		t.Error("ssh should be included (in allowlist)")
+	}
+	if !typeSet["custom.monitoring"] {
+		t.Error("custom.monitoring should be included (dot-namespaced bypasses allowlist)")
+	}
+	if len(result.Types) != 2 {
+		t.Errorf("expected 2 types, got %d: %v", len(result.Types), result.Types)
+	}
+}
+
 func TestHandleListToolsByType_EmptyResultsWithHint(t *testing.T) {
 	s := newTestServer()
 	s.SetDiscoverer(&mockDiscoverer{
