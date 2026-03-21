@@ -32,13 +32,13 @@ Fix agent execution issues observed in incident logs: agents skip runbook lookup
 **Files:**
 - Modify: `internal/database/db.go` (lines ~170-223)
 
-- [ ] Rewrite the Investigation Workflow section to make runbook search MANDATORY as step 2
-- [ ] Move the QMD usage instructions inline into the workflow step (not in a separate section at the bottom)
-- [ ] Add explicit language: "MANDATORY - Search runbooks FIRST before using any infrastructure tools"
-- [ ] Include the gateway_call example directly in the workflow step: `gateway_call("qmd.query", {"searches": [{"type": "lex", "query": "<alert text>"}], "limit": 5})`
-- [ ] Add: "Skip this step ONLY if QMD search returns an error (not if results are empty)"
-- [ ] Update or add tests that validate the prompt contains the mandatory runbook search language
-- [ ] Run `make test` - must pass before task 2
+- [x] Rewrite the Investigation Workflow section to make runbook search MANDATORY as step 2
+- [x] Move the QMD usage instructions inline into the workflow step (not in a separate section at the bottom)
+- [x] Add explicit language: "MANDATORY - Search runbooks FIRST before using any infrastructure tools"
+- [x] Include the gateway_call example directly in the workflow step: `gateway_call("qmd.query", {"searches": [{"type": "lex", "query": "<alert text>"}], "limit": 5})`
+- [x] Add: "Skip this step ONLY if QMD search returns an error (not if results are empty)"
+- [x] Update or add tests that validate the prompt contains the mandatory runbook search language
+- [x] Run `make test` - must pass before task 2
 
 ### Task 2: Verify QMD Appears in list_tool_types Output
 
