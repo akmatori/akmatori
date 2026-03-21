@@ -290,7 +290,7 @@ func TestSpawnIncidentManager_SourceVariations(t *testing.T) {
 
 	sources := []string{
 		"slack",
-		"pagerduty", 
+		"pagerduty",
 		"prometheus",
 	}
 

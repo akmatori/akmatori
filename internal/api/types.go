@@ -179,16 +179,16 @@ type PaginatedResponse struct {
 // IncidentListItem is a compact representation of an incident for list views.
 // It omits large fields like FullLog to reduce response size.
 type IncidentListItem struct {
-	ID              uint                   `json:"id"`
-	UUID            string                 `json:"uuid"`
-	Source          string                 `json:"source"`
-	SourceID        string                 `json:"source_id"`
-	Title           string                 `json:"title"`
+	ID              uint                    `json:"id"`
+	UUID            string                  `json:"uuid"`
+	Source          string                  `json:"source"`
+	SourceID        string                  `json:"source_id"`
+	Title           string                  `json:"title"`
 	Status          database.IncidentStatus `json:"status"`
-	TokensUsed      int                    `json:"tokens_used"`
-	ExecutionTimeMs int64                  `json:"execution_time_ms"`
-	StartedAt       time.Time              `json:"started_at"`
-	CompletedAt     *time.Time             `json:"completed_at,omitempty"`
-	CreatedAt       time.Time              `json:"created_at"`
-	UpdatedAt       time.Time              `json:"updated_at"`
+	TokensUsed      int                     `json:"tokens_used"`
+	ExecutionTimeMs int64                   `json:"execution_time_ms"`
+	StartedAt       time.Time               `json:"started_at"`
+	CompletedAt     *time.Time              `json:"completed_at,omitempty"`
+	CreatedAt       time.Time               `json:"created_at"`
+	UpdatedAt       time.Time               `json:"updated_at"`
 }

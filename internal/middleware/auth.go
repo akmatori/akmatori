@@ -24,9 +24,9 @@ type AuthConfig struct {
 
 // AuthMiddleware provides API key authentication
 type AuthMiddleware struct {
-	config   *AuthConfig
-	mu       sync.RWMutex
-	skipMap  map[string]bool
+	config  *AuthConfig
+	mu      sync.RWMutex
+	skipMap map[string]bool
 }
 
 // NewAuthMiddleware creates a new authentication middleware

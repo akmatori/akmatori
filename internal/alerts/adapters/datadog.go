@@ -24,22 +24,22 @@ func NewDatadogAdapter() *DatadogAdapter {
 
 // DatadogPayload represents the webhook payload from Datadog
 type DatadogPayload struct {
-	ID           string   `json:"id"`
-	Title        string   `json:"title"`
-	Body         string   `json:"body"`
-	AlertType    string   `json:"alert_type"` // error, warning, info, success
-	EventType    string   `json:"event_type"`
-	Priority     string   `json:"priority"` // normal, low
-	AlertID      string   `json:"alert_id"`
-	AlertTitle   string   `json:"alert_title"`
-	AlertStatus  string   `json:"alert_status"` // Triggered, Recovered, etc.
-	Hostname     string   `json:"hostname"`
-	OrgID        string   `json:"org_id"`
-	OrgName      string   `json:"org_name"`
-	Snapshot     string   `json:"snapshot"`
-	Date         int64    `json:"date"`
-	Tags         []string `json:"tags"`
-	EventLinks   []struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Body        string   `json:"body"`
+	AlertType   string   `json:"alert_type"` // error, warning, info, success
+	EventType   string   `json:"event_type"`
+	Priority    string   `json:"priority"` // normal, low
+	AlertID     string   `json:"alert_id"`
+	AlertTitle  string   `json:"alert_title"`
+	AlertStatus string   `json:"alert_status"` // Triggered, Recovered, etc.
+	Hostname    string   `json:"hostname"`
+	OrgID       string   `json:"org_id"`
+	OrgName     string   `json:"org_name"`
+	Snapshot    string   `json:"snapshot"`
+	Date        int64    `json:"date"`
+	Tags        []string `json:"tags"`
+	EventLinks  []struct {
 		URL  string `json:"url"`
 		Name string `json:"name"`
 	} `json:"event_links"`

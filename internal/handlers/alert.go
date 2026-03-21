@@ -29,11 +29,11 @@ const slackMaxTextBytes = 3000
 
 // AlertHandler handles webhook requests from multiple alert sources
 type AlertHandler struct {
-	config             *config.Config
-	slackManager       *slackutil.Manager
-	agentExecutor      *executor.Executor
-	agentWSHandler     *AgentWSHandler
-	skillService       services.SkillIncidentManager
+	config          *config.Config
+	slackManager    *slackutil.Manager
+	agentExecutor   *executor.Executor
+	agentWSHandler  *AgentWSHandler
+	skillService    services.SkillIncidentManager
 	alertService    services.AlertManager
 	channelResolver *slackutil.ChannelResolver
 

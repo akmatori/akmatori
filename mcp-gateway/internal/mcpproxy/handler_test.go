@@ -527,10 +527,10 @@ func TestCallTool_RateLimiting(t *testing.T) {
 
 func TestNamespacePrefixing(t *testing.T) {
 	tests := []struct {
-		name            string
-		prefix          string
-		externalTool    string
-		expectedFull    string
+		name         string
+		prefix       string
+		externalTool string
+		expectedFull string
 	}{
 		{"simple prefix", "ext.github", "create_issue", "ext.github.create_issue"},
 		{"nested prefix", "ext.cloud.aws", "list_instances", "ext.cloud.aws.list_instances"},

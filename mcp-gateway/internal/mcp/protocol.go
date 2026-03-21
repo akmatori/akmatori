@@ -47,7 +47,7 @@ type InitializeParams struct {
 
 // ClientCapability represents client capabilities
 type ClientCapability struct {
-	Roots   *RootsCapability   `json:"roots,omitempty"`
+	Roots    *RootsCapability    `json:"roots,omitempty"`
 	Sampling *SamplingCapability `json:"sampling,omitempty"`
 }
 
@@ -97,17 +97,17 @@ type Tool struct {
 
 // InputSchema represents JSON schema for tool parameters
 type InputSchema struct {
-	Type       string                 `json:"type"`
-	Properties map[string]Property    `json:"properties,omitempty"`
-	Required   []string               `json:"required,omitempty"`
+	Type       string              `json:"type"`
+	Properties map[string]Property `json:"properties,omitempty"`
+	Required   []string            `json:"required,omitempty"`
 }
 
 // Property represents a property in JSON schema
 type Property struct {
-	Type        string   `json:"type"`
-	Description string   `json:"description,omitempty"`
-	Items       *Items   `json:"items,omitempty"`
-	Enum        []string `json:"enum,omitempty"`
+	Type        string      `json:"type"`
+	Description string      `json:"description,omitempty"`
+	Items       *Items      `json:"items,omitempty"`
+	Enum        []string    `json:"enum,omitempty"`
 	Default     interface{} `json:"default,omitempty"`
 }
 
@@ -215,7 +215,7 @@ type GetToolDetailResult struct {
 	Description string               `json:"description"`
 	ToolType    string               `json:"tool_type"`
 	InputSchema InputSchema          `json:"input_schema"`
-	Instances   []ToolDetailInstance  `json:"instances,omitempty"`
+	Instances   []ToolDetailInstance `json:"instances,omitempty"`
 }
 
 // ListToolTypesResult represents tools/list_types response

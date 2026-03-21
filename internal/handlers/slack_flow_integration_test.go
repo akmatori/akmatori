@@ -260,11 +260,11 @@ func TestSlackFlow_MessageExtraction_AllBlockTypes(t *testing.T) {
 // TestSlackFlow_ThreadTracking tests thread timestamp tracking
 func TestSlackFlow_ThreadTracking(t *testing.T) {
 	tests := []struct {
-		name            string
-		ts              string
-		threadTS        string
-		expectedRootTS  string
-		isThreadReply   bool
+		name           string
+		ts             string
+		threadTS       string
+		expectedRootTS string
+		isThreadReply  bool
 	}{
 		{
 			name:           "top-level message",

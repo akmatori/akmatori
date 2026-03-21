@@ -23,13 +23,13 @@ import (
 
 // Cache TTL constants
 const (
-	ConfigCacheTTL     = 5 * time.Minute  // Credentials cache TTL
-	ResponseCacheTTL   = 30 * time.Second // Default API response cache TTL
-	CacheCleanupTick   = time.Minute      // Background cleanup interval
-	InstantQueryTTL    = 15 * time.Second // Instant query cache TTL
-	RangeQueryTTL      = 30 * time.Second // Range query cache TTL
-	LabelValuesTTL     = 60 * time.Second // Label values cache TTL
-	SeriesTTL          = 30 * time.Second // Series cache TTL
+	ConfigCacheTTL   = 5 * time.Minute  // Credentials cache TTL
+	ResponseCacheTTL = 30 * time.Second // Default API response cache TTL
+	CacheCleanupTick = time.Minute      // Background cleanup interval
+	InstantQueryTTL  = 15 * time.Second // Instant query cache TTL
+	RangeQueryTTL    = 30 * time.Second // Range query cache TTL
+	LabelValuesTTL   = 60 * time.Second // Label values cache TTL
+	SeriesTTL        = 30 * time.Second // Series cache TTL
 )
 
 // VMConfig holds VictoriaMetrics connection configuration

@@ -66,9 +66,9 @@ func TestAuthHandler_handleLogin_MissingCredentials(t *testing.T) {
 	h := NewAuthHandler(nil)
 
 	tests := []struct {
-		name     string
-		body     map[string]string
-		wantErr  string
+		name    string
+		body    map[string]string
+		wantErr string
 	}{
 		{
 			name:    "empty username",

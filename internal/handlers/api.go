@@ -21,7 +21,7 @@ type APIHandler struct {
 	runbookService       services.RunbookManager
 	httpConnectorService services.HTTPConnectorManager
 	mcpServerService     services.MCPServerManager
-	alertChannelReloader func() // called after alert source create/update/delete to reload Slack channel mappings
+	alertChannelReloader func()       // called after alert source create/update/delete to reload Slack channel mappings
 	gatewayReloader      func() error // called after HTTP connector CRUD to reload gateway tools
 	mcpServerReloader    func() error // called after MCP server CRUD to reload gateway MCP proxy tools
 }
@@ -148,4 +148,3 @@ func splitPath(path string) []string {
 func containsString(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
-

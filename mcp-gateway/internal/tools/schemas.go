@@ -2,11 +2,11 @@ package tools
 
 // ToolTypeSchema defines the configuration schema for a tool type
 type ToolTypeSchema struct {
-	Name           string                 `json:"name"`
-	Description    string                 `json:"description"`
-	Version        string                 `json:"version"`
-	SettingsSchema SettingsSchema         `json:"settings_schema"`
-	Functions      []ToolFunction         `json:"functions"`
+	Name           string         `json:"name"`
+	Description    string         `json:"description"`
+	Version        string         `json:"version"`
+	SettingsSchema SettingsSchema `json:"settings_schema"`
+	Functions      []ToolFunction `json:"functions"`
 }
 
 // SettingsSchema defines the JSON schema for tool settings
@@ -18,19 +18,19 @@ type SettingsSchema struct {
 
 // PropertySchema defines a single property in the settings schema
 type PropertySchema struct {
-	Type        string                    `json:"type"`
-	Description string                    `json:"description,omitempty"`
-	Default     interface{}               `json:"default,omitempty"`
-	Secret      bool                      `json:"secret,omitempty"`
-	Format      string                    `json:"format,omitempty"`
-	Advanced    bool                      `json:"advanced,omitempty"`
-	Warning     string                    `json:"warning,omitempty"`
-	Enum        []string                  `json:"enum,omitempty"`
-	Minimum     *int                      `json:"minimum,omitempty"`
-	Maximum     *int                      `json:"maximum,omitempty"`
-	MinItems    *int                      `json:"minItems,omitempty"`
-	Example     interface{}               `json:"example,omitempty"`
-	Items       *ItemSchema               `json:"items,omitempty"`
+	Type        string      `json:"type"`
+	Description string      `json:"description,omitempty"`
+	Default     interface{} `json:"default,omitempty"`
+	Secret      bool        `json:"secret,omitempty"`
+	Format      string      `json:"format,omitempty"`
+	Advanced    bool        `json:"advanced,omitempty"`
+	Warning     string      `json:"warning,omitempty"`
+	Enum        []string    `json:"enum,omitempty"`
+	Minimum     *int        `json:"minimum,omitempty"`
+	Maximum     *int        `json:"maximum,omitempty"`
+	MinItems    *int        `json:"minItems,omitempty"`
+	Example     interface{} `json:"example,omitempty"`
+	Items       *ItemSchema `json:"items,omitempty"`
 }
 
 // ItemSchema defines the schema for array items

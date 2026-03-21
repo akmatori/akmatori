@@ -68,10 +68,10 @@ func (d ToolDef) IsReadOnly() bool {
 
 // ConnectorDef holds the full connector definition needed for execution
 type ConnectorDef struct {
-	ToolTypeName string     `json:"tool_type_name"`
-	BaseURL      string     `json:"base_url"` // resolved base URL (from instance settings)
+	ToolTypeName string      `json:"tool_type_name"`
+	BaseURL      string      `json:"base_url"` // resolved base URL (from instance settings)
 	AuthConfig   *AuthConfig `json:"auth_config,omitempty"`
-	Tools        []ToolDef  `json:"tools"`
+	Tools        []ToolDef   `json:"tools"`
 }
 
 // Credentials holds resolved credential values from the tool instance settings

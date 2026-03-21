@@ -621,7 +621,7 @@ func TestResolveTargetHosts_BlankAddressesFilteredFromFanOut(t *testing.T) {
 	config := &SSHConfig{
 		Hosts: []SSHHostConfig{
 			{Hostname: "web-1", Address: "10.0.0.1", User: "root", Port: 22},
-			{Hostname: "", Address: "", User: "root", Port: 22},       // blank placeholder
+			{Hostname: "", Address: "", User: "root", Port: 22}, // blank placeholder
 			{Hostname: "db-1", Address: "10.0.0.2", User: "admin", Port: 2222},
 			{Hostname: "placeholder", Address: "  ", User: "root", Port: 22}, // whitespace-only
 		},
@@ -649,8 +649,8 @@ func TestResolveTargetHosts_IPv6BracketNormalization(t *testing.T) {
 		Hosts: []SSHHostConfig{
 			{Hostname: "ipv6-server", Address: "[2001:db8::1]", User: "root", Port: 22, AllowWriteCommands: true},
 		},
-		AdhocDefaultUser:     "root",
-		AdhocDefaultPort:     22,
+		AdhocDefaultUser:      "root",
+		AdhocDefaultPort:      22,
 		AllowAdhocConnections: true,
 	}
 

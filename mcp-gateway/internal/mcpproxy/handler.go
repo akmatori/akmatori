@@ -37,16 +37,16 @@ const SystemInstanceIDBase uint = 900000
 
 // ProxyHandler manages MCP proxy tool registration, discovery, and call forwarding.
 type ProxyHandler struct {
-	mu                    sync.RWMutex
-	pool                  *MCPConnectionPool
-	limiters              map[uint]*ratelimit.Limiter // per-instance rate limiters
-	registrations         []ServerRegistration
-	systemRegistrations   []ServerRegistration // system-level servers that survive reloads
-	toolMap               map[string]proxyToolEntry // namespaced tool name -> entry
-	logger                *slog.Logger
-	onToolsChanged        func() // called when schema refresh updates the tool map
-	stopRetry             chan struct{}
-	systemRetryInterval   time.Duration // retry interval for failed system registrations
+	mu                  sync.RWMutex
+	pool                *MCPConnectionPool
+	limiters            map[uint]*ratelimit.Limiter // per-instance rate limiters
+	registrations       []ServerRegistration
+	systemRegistrations []ServerRegistration      // system-level servers that survive reloads
+	toolMap             map[string]proxyToolEntry // namespaced tool name -> entry
+	logger              *slog.Logger
+	onToolsChanged      func() // called when schema refresh updates the tool map
+	stopRetry           chan struct{}
+	systemRetryInterval time.Duration // retry interval for failed system registrations
 }
 
 // proxyToolEntry maps a namespaced tool name to its external server and original tool name.
@@ -528,4 +528,3 @@ func (h *ProxyHandler) GracefulShutdown() {
 	h.Stop()
 	h.logger.Info("proxy handler shut down gracefully")
 }
-

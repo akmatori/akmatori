@@ -258,11 +258,11 @@ func TestGetConfig_CacheHit(t *testing.T) {
 	defer tool.Stop()
 
 	expected := &VMConfig{
-		URL:        "https://vm.example.com",
-		AuthMethod: "bearer_token",
+		URL:         "https://vm.example.com",
+		AuthMethod:  "bearer_token",
 		BearerToken: "my-token",
-		VerifySSL:  true,
-		Timeout:    30,
+		VerifySSL:   true,
+		Timeout:     30,
 	}
 	tool.configCache.Set(configCacheKey("incident-1"), expected)
 
@@ -303,14 +303,13 @@ func TestGetConfig_CacheHitByInstanceID(t *testing.T) {
 	}
 }
 
-
 // --- Timeout clamping tests ---
 
 func TestClampTimeout(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   int
-		want    int
+		name  string
+		input int
+		want  int
 	}{
 		{"zero is clamped to default", 0, 30},
 		{"negative is clamped to default", -5, 30},
@@ -346,10 +345,10 @@ func TestDoRequest_BearerTokenAuth(t *testing.T) {
 	defer tool.Stop()
 
 	config := &VMConfig{
-		URL:        server.URL,
-		AuthMethod: "bearer_token",
+		URL:         server.URL,
+		AuthMethod:  "bearer_token",
 		BearerToken: "test-token-123",
-		Timeout:    5,
+		Timeout:     5,
 	}
 
 	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/api/v1/query", nil)
@@ -429,10 +428,10 @@ func TestDoRequest_BearerTokenEmptyString(t *testing.T) {
 	defer tool.Stop()
 
 	config := &VMConfig{
-		URL:        "http://localhost:9999",
-		AuthMethod: "bearer_token",
+		URL:         "http://localhost:9999",
+		AuthMethod:  "bearer_token",
 		BearerToken: "", // Empty token
-		Timeout:    5,
+		Timeout:     5,
 	}
 
 	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/api/v1/query", nil)

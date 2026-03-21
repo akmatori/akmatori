@@ -14,10 +14,10 @@ import (
 func TestAPIHandler_SetupRoutes_DoesNotPanic(t *testing.T) {
 	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	mux := http.NewServeMux()
-	
+
 	// Should not panic even with nil services
 	h.SetupRoutes(mux)
-	
+
 	// Verify mux has routes by checking it's not nil
 	if mux == nil {
 		t.Error("mux should not be nil after SetupRoutes")
@@ -95,9 +95,9 @@ func TestMaskToken_Comprehensive(t *testing.T) {
 // TestMaskProxyURL_Comprehensive tests proxy URL masking
 func TestMaskProxyURL_Comprehensive(t *testing.T) {
 	tests := []struct {
-		name          string
-		input         string
-		wantContains  []string
+		name           string
+		input          string
+		wantContains   []string
 		wantNotContain []string
 	}{
 		{
@@ -242,15 +242,14 @@ func TestSplitPath_EdgeCases(t *testing.T) {
 	}
 }
 
-
 // TestAPIHandler_MaskSSHKeys tests SSH key masking
 func TestAPIHandler_MaskSSHKeys(t *testing.T) {
 	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	tests := []struct {
-		name     string
-		input    *database.ToolInstance
-		verify   func(*database.ToolInstance) bool
+		name   string
+		input  *database.ToolInstance
+		verify func(*database.ToolInstance) bool
 	}{
 		{
 			name:  "nil instance",

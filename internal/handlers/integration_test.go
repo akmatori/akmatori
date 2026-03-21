@@ -230,14 +230,14 @@ func TestAlertHandler_InitializationState(t *testing.T) {
 func TestAlertHandler_NilDependencies(t *testing.T) {
 	// All dependencies can be nil for creation
 	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
-	
+
 	if h == nil {
 		t.Fatal("NewAlertHandler should not return nil")
 	}
 
 	// Should be able to register adapters even with nil dependencies
 	h.RegisterAdapter(&mockAlertAdapter{sourceType: "test"})
-	
+
 	if len(h.adapters) != 1 {
 		t.Error("should be able to register adapter with nil dependencies")
 	}

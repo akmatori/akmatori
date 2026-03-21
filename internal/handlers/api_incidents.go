@@ -220,4 +220,3 @@ func (h *APIHandler) handleIncidentByID(w http.ResponseWriter, r *http.Request) 
 
 	api.RespondJSON(w, http.StatusOK, incident)
 }
-

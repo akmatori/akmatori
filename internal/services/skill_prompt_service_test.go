@@ -44,8 +44,8 @@ func TestExtractToolDetails_SSHWithConfiguredHosts(t *testing.T) {
 func TestExtractToolDetails_SSHAdhocEnabled(t *testing.T) {
 	tool := sshToolInstance(database.JSONB{
 		"allow_adhoc_connections": true,
-		"adhoc_default_user":     "deploy",
-		"adhoc_default_port":     float64(2222),
+		"adhoc_default_user":      "deploy",
+		"adhoc_default_port":      float64(2222),
 	})
 
 	details := extractToolDetails(tool)

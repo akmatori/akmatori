@@ -311,4 +311,3 @@ func TestGrafanaAdapter_ParsePayload_UnifiedAlerting_MissingAlertname(t *testing
 		t.Errorf("Expected default AlertName 'Grafana Alert', got '%s'", alerts[0].AlertName)
 	}
 }
-

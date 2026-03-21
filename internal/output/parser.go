@@ -7,7 +7,7 @@ import (
 
 // FinalResult represents a parsed [FINAL_RESULT] block
 type FinalResult struct {
-	Status          string   // resolved, unresolved, escalate
+	Status          string // resolved, unresolved, escalate
 	Summary         string
 	ActionsTaken    []string
 	Recommendations []string
@@ -23,9 +23,9 @@ type Escalation struct {
 
 // Progress represents a parsed [PROGRESS] block
 type Progress struct {
-	Step           string
-	Completed      string
-	FindingsSoFar  string
+	Step          string
+	Completed     string
+	FindingsSoFar string
 }
 
 // ParsedOutput contains all parsed structured blocks from agent output
@@ -44,9 +44,9 @@ type ParsedOutput struct {
 
 // Regex patterns for structured blocks
 var (
-	finalResultPattern = regexp.MustCompile(`(?s)\[FINAL_RESULT\]\s*(.+?)\s*\[/FINAL_RESULT\]`)
-	escalatePattern    = regexp.MustCompile(`(?s)\[ESCALATE\]\s*(.+?)\s*\[/ESCALATE\]`)
-	progressPattern    = regexp.MustCompile(`(?s)\[PROGRESS\]\s*(.+?)\s*\[/PROGRESS\]`)
+	finalResultPattern  = regexp.MustCompile(`(?s)\[FINAL_RESULT\]\s*(.+?)\s*\[/FINAL_RESULT\]`)
+	escalatePattern     = regexp.MustCompile(`(?s)\[ESCALATE\]\s*(.+?)\s*\[/ESCALATE\]`)
+	progressPattern     = regexp.MustCompile(`(?s)\[PROGRESS\]\s*(.+?)\s*\[/PROGRESS\]`)
 	multiNewlinePattern = regexp.MustCompile(`\n{3,}`)
 )
 

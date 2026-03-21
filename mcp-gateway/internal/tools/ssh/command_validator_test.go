@@ -576,10 +576,10 @@ func TestExtractCommandAfterSudo(t *testing.T) {
 		{"sudo -E env", "env"},
 		{"sudo -u root -g wheel ls /root", "ls /root"},
 		{"sudo --preserve-env cat /etc/shadow", "cat /etc/shadow"},
-		{"sudo", ""},               // No command after sudo
-		{"sudo -u user", ""},       // Only flag with argument
-		{"notasudo cat", ""},       // Not a sudo command
-		{"cat /etc/passwd", ""},    // Not a sudo command
+		{"sudo", ""},            // No command after sudo
+		{"sudo -u user", ""},    // Only flag with argument
+		{"notasudo cat", ""},    // Not a sudo command
+		{"cat /etc/passwd", ""}, // Not a sudo command
 	}
 
 	for _, test := range tests {

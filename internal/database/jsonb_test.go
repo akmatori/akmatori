@@ -110,33 +110,33 @@ func TestJSONB_Scan_TableDriven(t *testing.T) {
 			},
 		},
 		{
-			name:    "int type (not []byte)",
-			input:   42,
-			wantErr: true,
+			name:        "int type (not []byte)",
+			input:       42,
+			wantErr:     true,
 			checkResult: func(t *testing.T, j JSONB) {},
 		},
 		{
-			name:    "invalid JSON syntax",
-			input:   []byte(`not valid json`),
-			wantErr: true,
+			name:        "invalid JSON syntax",
+			input:       []byte(`not valid json`),
+			wantErr:     true,
 			checkResult: func(t *testing.T, j JSONB) {},
 		},
 		{
-			name:    "truncated JSON",
-			input:   []byte(`{"key": "val`),
-			wantErr: true,
+			name:        "truncated JSON",
+			input:       []byte(`{"key": "val`),
+			wantErr:     true,
 			checkResult: func(t *testing.T, j JSONB) {},
 		},
 		{
-			name:    "JSON array at root (invalid for JSONB map)",
-			input:   []byte(`[1, 2, 3]`),
-			wantErr: true, // json.Unmarshal into map fails for array
+			name:        "JSON array at root (invalid for JSONB map)",
+			input:       []byte(`[1, 2, 3]`),
+			wantErr:     true, // json.Unmarshal into map fails for array
 			checkResult: func(t *testing.T, j JSONB) {},
 		},
 		{
-			name:    "empty bytes",
-			input:   []byte(``),
-			wantErr: true, // empty is not valid JSON
+			name:        "empty bytes",
+			input:       []byte(``),
+			wantErr:     true, // empty is not valid JSON
 			checkResult: func(t *testing.T, j JSONB) {},
 		},
 		{
@@ -223,9 +223,9 @@ func TestJSONB_Value_TableDriven(t *testing.T) {
 			wantJSON: `{"num":42}`,
 		},
 		{
-			name:     "boolean values",
-			jsonb:    JSONB{"yes": true, "no": false},
-			wantNil:  false,
+			name:    "boolean values",
+			jsonb:   JSONB{"yes": true, "no": false},
+			wantNil: false,
 			// Order may vary, so we'll verify by unmarshaling
 		},
 		{

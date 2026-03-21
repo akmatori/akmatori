@@ -38,9 +38,9 @@ type Registry struct {
 	vmLimit     *ratelimit.Limiter
 
 	// HTTP connector state
-	httpExecutor      *httpconnector.HTTPConnectorExecutor
+	httpExecutor       *httpconnector.HTTPConnectorExecutor
 	httpConnectorTools []string // track registered tool names for reload cleanup
-	httpMu            sync.Mutex
+	httpMu             sync.Mutex
 
 	// MCP proxy state
 	proxyHandler   *mcpproxy.ProxyHandler
@@ -445,12 +445,12 @@ func parseHTTPConnectorToolDefs(tools database.JSONB) ([]httpConnectorToolDef, e
 
 // httpConnectorToolDef mirrors the main app's HTTPConnectorToolDef for JSON parsing
 type httpConnectorToolDef struct {
-	Name        string                    `json:"name"`
-	Description string                    `json:"description,omitempty"`
-	HTTPMethod  string                    `json:"http_method"`
-	Path        string                    `json:"path"`
-	Params      []httpConnectorToolParam  `json:"params,omitempty"`
-	ReadOnly    *bool                     `json:"read_only,omitempty"`
+	Name        string                   `json:"name"`
+	Description string                   `json:"description,omitempty"`
+	HTTPMethod  string                   `json:"http_method"`
+	Path        string                   `json:"path"`
+	Params      []httpConnectorToolParam `json:"params,omitempty"`
+	ReadOnly    *bool                    `json:"read_only,omitempty"`
 }
 
 type httpConnectorToolParam struct {
@@ -525,12 +525,12 @@ func convertToolDef(def httpConnectorToolDef) httpconnector.ToolDef {
 		})
 	}
 	return httpconnector.ToolDef{
-		Name:       def.Name,
+		Name:        def.Name,
 		Description: def.Description,
-		HTTPMethod: def.HTTPMethod,
-		Path:       def.Path,
-		Params:     params,
-		ReadOnly:   def.ReadOnly,
+		HTTPMethod:  def.HTTPMethod,
+		Path:        def.Path,
+		Params:      params,
+		ReadOnly:    def.ReadOnly,
 	}
 }
 
@@ -1180,10 +1180,10 @@ func (r *Registry) GetToolDetail(toolName string) (*mcp.GetToolDetailResult, boo
 // to avoid repeated database queries on each search/detail call.
 func BuildInstanceLookup() mcp.InstanceLookup {
 	var (
-		mu        sync.Mutex
-		cached    []database.ToolInstance
-		cachedAt  time.Time
-		cacheTTL  = 30 * time.Second
+		mu       sync.Mutex
+		cached   []database.ToolInstance
+		cachedAt time.Time
+		cacheTTL = 30 * time.Second
 	)
 
 	return func(toolType string) []mcp.ToolDetailInstance {

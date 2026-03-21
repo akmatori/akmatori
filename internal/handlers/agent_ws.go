@@ -338,10 +338,10 @@ func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettings
 	// Fetch proxy settings from database and include in message
 	if proxySettings, err := database.GetOrCreateProxySettings(); err == nil && proxySettings != nil {
 		msg.ProxyConfig = &ProxyConfig{
-			URL:           proxySettings.ProxyURL,
-			NoProxy:       proxySettings.NoProxy,
-			OpenAIEnabled: proxySettings.OpenAIEnabled,
-			SlackEnabled:  proxySettings.SlackEnabled,
+			URL:                    proxySettings.ProxyURL,
+			NoProxy:                proxySettings.NoProxy,
+			OpenAIEnabled:          proxySettings.OpenAIEnabled,
+			SlackEnabled:           proxySettings.SlackEnabled,
 			ZabbixEnabled:          proxySettings.ZabbixEnabled,
 			VictoriaMetricsEnabled: proxySettings.VictoriaMetricsEnabled,
 		}
@@ -387,10 +387,10 @@ func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string,
 	// Fetch proxy settings from database and include in message
 	if proxySettings, err := database.GetOrCreateProxySettings(); err == nil && proxySettings != nil {
 		msg.ProxyConfig = &ProxyConfig{
-			URL:           proxySettings.ProxyURL,
-			NoProxy:       proxySettings.NoProxy,
-			OpenAIEnabled: proxySettings.OpenAIEnabled,
-			SlackEnabled:  proxySettings.SlackEnabled,
+			URL:                    proxySettings.ProxyURL,
+			NoProxy:                proxySettings.NoProxy,
+			OpenAIEnabled:          proxySettings.OpenAIEnabled,
+			SlackEnabled:           proxySettings.SlackEnabled,
 			ZabbixEnabled:          proxySettings.ZabbixEnabled,
 			VictoriaMetricsEnabled: proxySettings.VictoriaMetricsEnabled,
 		}

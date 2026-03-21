@@ -305,7 +305,7 @@ func (s *AlertService) InitializeDefaultSourceTypes() error {
 			Name:                "slack_channel",
 			DisplayName:         "Slack Alert Channel",
 			Description:         "Monitor a Slack channel for alert messages",
-			WebhookSecretHeader: "", // Not used - alerts come via Socket Mode
+			WebhookSecretHeader: "",               // Not used - alerts come via Socket Mode
 			DefaultMappings:     database.JSONB{}, // AI extraction, not path-based
 		},
 	}

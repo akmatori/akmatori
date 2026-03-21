@@ -63,21 +63,21 @@ type SlackResult struct {
 // This prevents Codex from accessing sensitive variables like DATABASE_URL, JWT_SECRET, etc.
 var safeEnvVars = map[string]bool{
 	// Essential system variables
-	"HOME":    true,
-	"USER":    true,
-	"PATH":    true,
-	"SHELL":   true,
-	"TERM":    true,
-	"LANG":    true,
-	"LC_ALL":  true,
-	"TZ":      true,
-	"TMPDIR":  true,
+	"HOME":            true,
+	"USER":            true,
+	"PATH":            true,
+	"SHELL":           true,
+	"TERM":            true,
+	"LANG":            true,
+	"LC_ALL":          true,
+	"TZ":              true,
+	"TMPDIR":          true,
 	"XDG_CONFIG_HOME": true,
 	"XDG_DATA_HOME":   true,
 	"XDG_CACHE_HOME":  true,
 
 	// Node.js / npm (needed for Codex CLI)
-	"NODE_PATH":    true,
+	"NODE_PATH":         true,
 	"NPM_CONFIG_PREFIX": true,
 
 	// Git (for version control operations)
@@ -87,7 +87,7 @@ var safeEnvVars = map[string]bool{
 	"GIT_COMMITTER_EMAIL": true,
 
 	// Python (for scripts)
-	"PYTHONPATH":       true,
+	"PYTHONPATH":              true,
 	"PYTHONDONTWRITEBYTECODE": true,
 
 	// Editor preferences
@@ -95,11 +95,11 @@ var safeEnvVars = map[string]bool{
 	"VISUAL": true,
 
 	// Color output
-	"CLICOLOR":       true,
-	"FORCE_COLOR":    true,
-	"NO_COLOR":       true,
-	"COLORTERM":      true,
-	"TERM_PROGRAM":   true,
+	"CLICOLOR":     true,
+	"FORCE_COLOR":  true,
+	"NO_COLOR":     true,
+	"COLORTERM":    true,
+	"TERM_PROGRAM": true,
 }
 
 // buildSafeEnvironment creates a filtered environment for Codex execution.

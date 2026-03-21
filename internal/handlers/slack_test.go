@@ -246,10 +246,10 @@ func TestHandleMessage_ThreadReplyBotMessage(t *testing.T) {
 		"C_ALERT": {},
 	})
 	event := &slackevents.MessageEvent{
-		Channel:        "C_ALERT",
-		SubType:        "bot_message",
-		BotID:          "B_ZABBIX",
-		TimeStamp:      "1707000002.000200",
+		Channel:         "C_ALERT",
+		SubType:         "bot_message",
+		BotID:           "B_ZABBIX",
+		TimeStamp:       "1707000002.000200",
 		ThreadTimeStamp: "1707000001.000100",
 	}
 	if got := classifyMessage(h, event); got != "bot_thread_alert" {
@@ -262,9 +262,9 @@ func TestHandleMessage_ThreadReplyBotByBotIDOnly(t *testing.T) {
 		"C_ALERT": {},
 	})
 	event := &slackevents.MessageEvent{
-		Channel:        "C_ALERT",
-		BotID:          "B_ZABBIX",
-		TimeStamp:      "1707000002.000200",
+		Channel:         "C_ALERT",
+		BotID:           "B_ZABBIX",
+		TimeStamp:       "1707000002.000200",
 		ThreadTimeStamp: "1707000001.000100",
 	}
 	if got := classifyMessage(h, event); got != "bot_thread_alert" {
@@ -277,10 +277,10 @@ func TestHandleMessage_ThreadReplyHumanMention(t *testing.T) {
 		"C_ALERT": {},
 	})
 	event := &slackevents.MessageEvent{
-		Channel:        "C_ALERT",
-		User:           "U_HUMAN",
-		Text:           "<@U_BOT> please investigate this",
-		TimeStamp:      "1707000003.000300",
+		Channel:         "C_ALERT",
+		User:            "U_HUMAN",
+		Text:            "<@U_BOT> please investigate this",
+		TimeStamp:       "1707000003.000300",
 		ThreadTimeStamp: "1707000001.000100",
 	}
 	if got := classifyMessage(h, event); got != "human_mention_thread" {
@@ -293,10 +293,10 @@ func TestHandleMessage_ThreadReplyHumanNoMention(t *testing.T) {
 		"C_ALERT": {},
 	})
 	event := &slackevents.MessageEvent{
-		Channel:        "C_ALERT",
-		User:           "U_HUMAN",
-		Text:           "I'll look into this manually",
-		TimeStamp:      "1707000003.000300",
+		Channel:         "C_ALERT",
+		User:            "U_HUMAN",
+		Text:            "I'll look into this manually",
+		TimeStamp:       "1707000003.000300",
 		ThreadTimeStamp: "1707000001.000100",
 	}
 	if got := classifyMessage(h, event); got != "ignore_thread" {
@@ -388,8 +388,8 @@ func TestHandleAlertChannelMessage_ThreadTSResolution_TopLevel(t *testing.T) {
 func TestHandleAlertChannelMessage_ThreadTSResolution_ThreadReply(t *testing.T) {
 	// For thread replies, threadTS should be the parent/root TS
 	event := &slackevents.MessageEvent{
-		Channel:        "C_ALERT",
-		TimeStamp:      "1707000002.000200",
+		Channel:         "C_ALERT",
+		TimeStamp:       "1707000002.000200",
 		ThreadTimeStamp: "1707000001.000100",
 	}
 

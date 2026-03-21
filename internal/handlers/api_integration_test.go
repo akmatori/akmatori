@@ -146,9 +146,9 @@ func TestAPI_ResponseFormat(t *testing.T) {
 
 func TestAPI_Pagination(t *testing.T) {
 	tests := []struct {
-		name           string
-		queryParams    string
-		expectedPage   int
+		name            string
+		queryParams     string
+		expectedPage    int
 		expectedPerPage int
 	}{
 		{"defaults", "", 1, 50},
@@ -252,10 +252,10 @@ func TestAPIHandler_ConcurrentRouteSetup(t *testing.T) {
 
 func TestAPIHandler_ConcurrentAlertChannelReloader(t *testing.T) {
 	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	
+
 	reloadCount := 0
 	var mu sync.Mutex
-	
+
 	h.SetAlertChannelReloader(func() {
 		mu.Lock()
 		reloadCount++

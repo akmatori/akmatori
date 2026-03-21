@@ -118,9 +118,9 @@ func TestChannelResolver_ClearCache(t *testing.T) {
 	resolver := &ChannelResolver{
 		client: nil,
 		cache: map[string]string{
-			"alerts":   "C01234567890",
-			"random":   "C09876543210",
-			"general":  "C11111111111",
+			"alerts":  "C01234567890",
+			"random":  "C09876543210",
+			"general": "C11111111111",
 		},
 	}
 
@@ -184,7 +184,7 @@ func TestChannelResolver_ConcurrentClearAndRead(t *testing.T) {
 		done <- true
 	}()
 
-	// Concurrent reads (some may hit empty cache, but that's fine - 
+	// Concurrent reads (some may hit empty cache, but that's fine -
 	// they'll get error from nil client, which we catch)
 	for i := 0; i < 5; i++ {
 		go func() {

@@ -714,7 +714,7 @@ func TestCallTool_ClosedConnection_Reconnects(t *testing.T) {
 
 func TestPoolOptions(t *testing.T) {
 	pool := NewPool(
-		WithIdleTimeout(10*time.Minute),
+		WithIdleTimeout(10 * time.Minute),
 	)
 	defer pool.CloseAll()
 

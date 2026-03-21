@@ -128,12 +128,12 @@ func (ctx *HTTPTestContext) DecodeJSON(v interface{}) *HTTPTestContext {
 
 // MockAlertAdapter implements alerts.AlertAdapter for testing
 type MockAlertAdapter struct {
-	SourceType         string
-	ParsedAlerts       []alerts.NormalizedAlert
-	ParseError         error
-	ValidateSecretErr  error
-	DefaultMappings    database.JSONB
-	ParsePayloadCalled bool
+	SourceType           string
+	ParsedAlerts         []alerts.NormalizedAlert
+	ParseError           error
+	ValidateSecretErr    error
+	DefaultMappings      database.JSONB
+	ParsePayloadCalled   bool
 	ValidateSecretCalled bool
 }
 
@@ -196,21 +196,21 @@ func (m *MockAlertAdapter) WithValidationError(err error) *MockAlertAdapter {
 // LoadFixture loads a test fixture file from tests/fixtures/
 func LoadFixture(t *testing.T, path string) []byte {
 	t.Helper()
-	
+
 	// Try both relative and absolute paths
 	paths := []string{
 		filepath.Join("tests", "fixtures", path),
 		filepath.Join("..", "..", "tests", "fixtures", path),
 		filepath.Join("..", "..", "..", "tests", "fixtures", path),
 	}
-	
+
 	for _, p := range paths {
 		data, err := os.ReadFile(p)
 		if err == nil {
 			return data
 		}
 	}
-	
+
 	t.Fatalf("failed to load fixture %s", path)
 	return nil
 }
@@ -417,7 +417,7 @@ func MustCompleteWithin(t *testing.T, timeout time.Duration, fn func()) {
 		fn()
 		close(done)
 	}()
-	
+
 	select {
 	case <-done:
 		return

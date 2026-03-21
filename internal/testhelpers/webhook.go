@@ -170,15 +170,15 @@ func (b *WebhookRequestBuilder) BuildWithRecorder() (*http.Request, *httptest.Re
 
 // AlertmanagerPayload builds an Alertmanager webhook payload
 type AlertmanagerPayload struct {
-	Version           string                 `json:"version"`
-	GroupKey          string                 `json:"groupKey"`
-	Status            string                 `json:"status"`
-	Receiver          string                 `json:"receiver"`
-	GroupLabels       map[string]string      `json:"groupLabels"`
-	CommonLabels      map[string]string      `json:"commonLabels"`
-	CommonAnnotations map[string]string      `json:"commonAnnotations"`
-	ExternalURL       string                 `json:"externalURL"`
-	Alerts            []AlertmanagerAlert    `json:"alerts"`
+	Version           string              `json:"version"`
+	GroupKey          string              `json:"groupKey"`
+	Status            string              `json:"status"`
+	Receiver          string              `json:"receiver"`
+	GroupLabels       map[string]string   `json:"groupLabels"`
+	CommonLabels      map[string]string   `json:"commonLabels"`
+	CommonAnnotations map[string]string   `json:"commonAnnotations"`
+	ExternalURL       string              `json:"externalURL"`
+	Alerts            []AlertmanagerAlert `json:"alerts"`
 }
 
 // AlertmanagerAlert represents a single alert in the payload

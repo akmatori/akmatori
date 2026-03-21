@@ -107,12 +107,12 @@ func TestAlertHandler_BuildInvestigationPrompt(t *testing.T) {
 		{
 			name: "basic alert",
 			alert: alerts.NormalizedAlert{
-				AlertName:   "HighCPU",
-				TargetHost:  "server-01",
+				AlertName:     "HighCPU",
+				TargetHost:    "server-01",
 				TargetService: "nginx",
-				Severity:    database.AlertSeverityCritical,
-				Summary:     "CPU usage above 90%",
-				Description: "The CPU has been above threshold for 5 minutes",
+				Severity:      database.AlertSeverityCritical,
+				Summary:       "CPU usage above 90%",
+				Description:   "The CPU has been above threshold for 5 minutes",
 			},
 			instance: &database.AlertSourceInstance{
 				AlertSourceType: database.AlertSourceType{DisplayName: "Prometheus"},
@@ -412,16 +412,16 @@ func TestAlertHandler_MockAdapter(t *testing.T) {
 
 	// Create mock adapter using testhelpers
 	mockAdapter := testhelpers.NewMockAlertAdapter("test-source")
-	
+
 	// Configure mock to return specific alerts
 	now := time.Now()
 	mockAdapter.WithAlerts(alerts.NormalizedAlert{
-		AlertName:   "TestAlert",
-		Severity:    database.AlertSeverityCritical,
-		Status:      database.AlertStatusFiring,
-		TargetHost:  "test-host",
-		Summary:     "Test alert fired",
-		StartedAt:   &now,
+		AlertName:  "TestAlert",
+		Severity:   database.AlertSeverityCritical,
+		Status:     database.AlertStatusFiring,
+		TargetHost: "test-host",
+		Summary:    "Test alert fired",
+		StartedAt:  &now,
 	})
 
 	h.RegisterAdapter(mockAdapter)

@@ -127,4 +127,3 @@ type MCPServerManager interface {
 	DeleteMCPServer(id uint) error
 	ListMCPServers() ([]database.MCPServerConfig, error)
 }
-

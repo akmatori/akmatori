@@ -11,14 +11,14 @@ import (
 
 // CreateMCPServerRequest is the request body for POST /api/mcp-servers
 type CreateMCPServerRequest struct {
-	Name            string                     `json:"name"`
+	Name            string                      `json:"name"`
 	Transport       database.MCPServerTransport `json:"transport"`
-	URL             string                     `json:"url,omitempty"`
-	Command         string                     `json:"command,omitempty"`
-	Args            database.JSONB             `json:"args,omitempty"`
-	EnvVars         database.JSONB             `json:"env_vars,omitempty"`
-	NamespacePrefix string                     `json:"namespace_prefix"`
-	AuthConfig      database.JSONB             `json:"auth_config,omitempty"`
+	URL             string                      `json:"url,omitempty"`
+	Command         string                      `json:"command,omitempty"`
+	Args            database.JSONB              `json:"args,omitempty"`
+	EnvVars         database.JSONB              `json:"env_vars,omitempty"`
+	NamespacePrefix string                      `json:"namespace_prefix"`
+	AuthConfig      database.JSONB              `json:"auth_config,omitempty"`
 }
 
 // UpdateMCPServerRequest is the request body for PUT /api/mcp-servers/:id

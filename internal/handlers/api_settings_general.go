@@ -50,4 +50,3 @@ func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Reques
 		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
 }
-

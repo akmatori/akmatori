@@ -337,11 +337,11 @@ func TestWebhookFlow_PagerDutyPayloadParsing(t *testing.T) {
 // TestWebhookFlow_SecretValidation tests secret validation across adapters
 func TestWebhookFlow_SecretValidation(t *testing.T) {
 	adapterConfigs := []struct {
-		name           string
-		adapter        alerts.AlertAdapter
-		headerName     string
-		secretValue    string
-		supportBearer  bool
+		name          string
+		adapter       alerts.AlertAdapter
+		headerName    string
+		secretValue   string
+		supportBearer bool
 	}{
 		{"alertmanager", adapters.NewAlertmanagerAdapter(), "X-Alertmanager-Secret", "am-secret", true},
 		{"grafana", adapters.NewGrafanaAdapter(), "X-Grafana-Secret", "grafana-secret", true},

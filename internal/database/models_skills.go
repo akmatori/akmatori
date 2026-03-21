@@ -110,9 +110,9 @@ const (
 // HTTPConnectorToolParam defines a parameter for an HTTP connector tool
 type HTTPConnectorToolParam struct {
 	Name     string      `json:"name"`
-	Type     string      `json:"type"`               // string, integer, number, boolean
+	Type     string      `json:"type"` // string, integer, number, boolean
 	Required bool        `json:"required"`
-	In       string      `json:"in"`                  // path, query, body, header
+	In       string      `json:"in"` // path, query, body, header
 	Default  interface{} `json:"default,omitempty"`
 }
 
@@ -144,15 +144,15 @@ type HTTPConnectorAuthConfig struct {
 // HTTPConnector represents a declarative HTTP connector definition
 // It allows users to define integrations with external HTTP APIs without writing code
 type HTTPConnector struct {
-	ID           uint                    `gorm:"primaryKey" json:"id"`
-	ToolTypeName string                  `gorm:"uniqueIndex;size:128;not null" json:"tool_type_name"` // e.g., "internal-billing"
-	Description  string                  `gorm:"size:1024" json:"description"`
-	BaseURLField string                  `gorm:"size:128;not null" json:"base_url_field"` // field name in instance settings holding the base URL
-	AuthConfig   JSONB                   `gorm:"type:jsonb" json:"auth_config"`           // HTTPConnectorAuthConfig serialized
-	Tools        JSONB                   `gorm:"type:jsonb;not null" json:"tools"`         // []HTTPConnectorToolDef serialized
-	Enabled      bool                    `gorm:"default:true" json:"enabled"`
-	CreatedAt    time.Time               `json:"created_at"`
-	UpdatedAt    time.Time               `json:"updated_at"`
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	ToolTypeName string    `gorm:"uniqueIndex;size:128;not null" json:"tool_type_name"` // e.g., "internal-billing"
+	Description  string    `gorm:"size:1024" json:"description"`
+	BaseURLField string    `gorm:"size:128;not null" json:"base_url_field"` // field name in instance settings holding the base URL
+	AuthConfig   JSONB     `gorm:"type:jsonb" json:"auth_config"`           // HTTPConnectorAuthConfig serialized
+	Tools        JSONB     `gorm:"type:jsonb;not null" json:"tools"`        // []HTTPConnectorToolDef serialized
+	Enabled      bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func (HTTPConnector) TableName() string {
@@ -316,14 +316,14 @@ const (
 // Each config defines how to connect to an external MCP server and how its tools are namespaced.
 type MCPServerConfig struct {
 	ID              uint               `gorm:"primaryKey" json:"id"`
-	Name            string             `gorm:"uniqueIndex;size:128;not null" json:"name"`              // User-friendly name
-	Transport       MCPServerTransport `gorm:"type:varchar(16);not null" json:"transport"`              // "sse" or "stdio"
-	URL             string             `gorm:"size:512" json:"url,omitempty"`                           // For SSE transport
-	Command         string             `gorm:"size:512" json:"command,omitempty"`                       // For stdio transport
-	Args            JSONB              `gorm:"type:jsonb" json:"args,omitempty"`                        // For stdio transport: ["arg1", "arg2"]
-	EnvVars         JSONB              `gorm:"type:jsonb" json:"env_vars,omitempty"`                    // For stdio transport: {"KEY": "value"}
-	NamespacePrefix string             `gorm:"size:128;not null" json:"namespace_prefix"`               // e.g., "ext.github"
-	AuthConfig      JSONB              `gorm:"type:jsonb" json:"auth_config,omitempty"`                 // Auth to inject into connections
+	Name            string             `gorm:"uniqueIndex;size:128;not null" json:"name"`  // User-friendly name
+	Transport       MCPServerTransport `gorm:"type:varchar(16);not null" json:"transport"` // "sse" or "stdio"
+	URL             string             `gorm:"size:512" json:"url,omitempty"`              // For SSE transport
+	Command         string             `gorm:"size:512" json:"command,omitempty"`          // For stdio transport
+	Args            JSONB              `gorm:"type:jsonb" json:"args,omitempty"`           // For stdio transport: ["arg1", "arg2"]
+	EnvVars         JSONB              `gorm:"type:jsonb" json:"env_vars,omitempty"`       // For stdio transport: {"KEY": "value"}
+	NamespacePrefix string             `gorm:"size:128;not null" json:"namespace_prefix"`  // e.g., "ext.github"
+	AuthConfig      JSONB              `gorm:"type:jsonb" json:"auth_config,omitempty"`    // Auth to inject into connections
 	Enabled         bool               `gorm:"default:true" json:"enabled"`
 	CreatedAt       time.Time          `json:"created_at"`
 	UpdatedAt       time.Time          `json:"updated_at"`

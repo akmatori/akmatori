@@ -224,12 +224,12 @@ func TestAlertAdapters_ConcurrentParsing(t *testing.T) {
 // TestWebhookSecretValidation_AllAdapters tests secret validation consistency
 func TestWebhookSecretValidation_AllAdapters(t *testing.T) {
 	tests := []struct {
-		name           string
-		adapter        alerts.AlertAdapter
-		secret         string
-		headerName     string
-		headerValue    string
-		expectValid    bool
+		name        string
+		adapter     alerts.AlertAdapter
+		secret      string
+		headerName  string
+		headerValue string
+		expectValid bool
 	}{
 		// Alertmanager variations
 		{"alertmanager_custom_header", adapters.NewAlertmanagerAdapter(), "secret123", "X-Alertmanager-Secret", "secret123", true},

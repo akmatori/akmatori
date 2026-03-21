@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/akmatori/akmatori/internal/alerts/extraction"
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
-	"github.com/akmatori/akmatori/internal/alerts/extraction"
 	"github.com/akmatori/akmatori/internal/services"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -24,12 +24,12 @@ type SlackHandler struct {
 	skillService   services.SkillIncidentManager
 
 	// Alert channel support
-	alertChannels    map[string]*database.AlertSourceInstance // channel_id -> instance
-	alertChannelsMu  sync.RWMutex
-	alertExtractor   *extraction.AlertExtractor
-	alertHandler     *AlertHandler
-	alertService     services.AlertManager
-	botUserID        string // Bot's user ID for self-message filtering
+	alertChannels   map[string]*database.AlertSourceInstance // channel_id -> instance
+	alertChannelsMu sync.RWMutex
+	alertExtractor  *extraction.AlertExtractor
+	alertHandler    *AlertHandler
+	alertService    services.AlertManager
+	botUserID       string // Bot's user ID for self-message filtering
 
 	// Dedup: prevent double processing when both app_mention and message events fire
 	processedMsgs sync.Map // key: "channel:messageTS" -> struct{}

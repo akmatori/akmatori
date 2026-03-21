@@ -165,13 +165,13 @@ func TestToNormalizedAlert_EdgeCases(t *testing.T) {
 		checkRawPaylod func(t *testing.T, payload map[string]interface{})
 	}{
 		{
-			name:           "empty extraction defaults",
-			extracted:      ExtractedAlert{},
-			originalMsg:    "Original message content",
-			wantName:       "Slack Alert",
-			wantSeverity:   database.AlertSeverityWarning,
-			wantStatus:     database.AlertStatusFiring,
-			wantSummary:    "Original message content",
+			name:         "empty extraction defaults",
+			extracted:    ExtractedAlert{},
+			originalMsg:  "Original message content",
+			wantName:     "Slack Alert",
+			wantSeverity: database.AlertSeverityWarning,
+			wantStatus:   database.AlertStatusFiring,
+			wantSummary:  "Original message content",
 		},
 		{
 			name: "resolved status lowercase",
@@ -179,10 +179,10 @@ func TestToNormalizedAlert_EdgeCases(t *testing.T) {
 				AlertName: "Test Alert",
 				Status:    "resolved",
 			},
-			originalMsg:   "Test",
-			wantName:      "Test Alert",
-			wantStatus:    database.AlertStatusResolved,
-			wantSeverity:  database.AlertSeverityWarning,
+			originalMsg:  "Test",
+			wantName:     "Test Alert",
+			wantStatus:   database.AlertStatusResolved,
+			wantSeverity: database.AlertSeverityWarning,
 		},
 		{
 			name: "resolved status uppercase",
@@ -190,10 +190,10 @@ func TestToNormalizedAlert_EdgeCases(t *testing.T) {
 				AlertName: "Test Alert",
 				Status:    "RESOLVED",
 			},
-			originalMsg:   "Test",
-			wantName:      "Test Alert",
-			wantStatus:    database.AlertStatusResolved,
-			wantSeverity:  database.AlertSeverityWarning,
+			originalMsg:  "Test",
+			wantName:     "Test Alert",
+			wantStatus:   database.AlertStatusResolved,
+			wantSeverity: database.AlertSeverityWarning,
 		},
 		{
 			name: "resolved status mixed case",
@@ -201,10 +201,10 @@ func TestToNormalizedAlert_EdgeCases(t *testing.T) {
 				AlertName: "Test Alert",
 				Status:    "ReSOLved",
 			},
-			originalMsg:   "Test",
-			wantName:      "Test Alert",
-			wantStatus:    database.AlertStatusResolved,
-			wantSeverity:  database.AlertSeverityWarning,
+			originalMsg:  "Test",
+			wantName:     "Test Alert",
+			wantStatus:   database.AlertStatusResolved,
+			wantSeverity: database.AlertSeverityWarning,
 		},
 		{
 			name: "unknown status defaults to firing",
@@ -212,10 +212,10 @@ func TestToNormalizedAlert_EdgeCases(t *testing.T) {
 				AlertName: "Test Alert",
 				Status:    "unknown",
 			},
-			originalMsg:   "Test",
-			wantName:      "Test Alert",
-			wantStatus:    database.AlertStatusFiring,
-			wantSeverity:  database.AlertSeverityWarning,
+			originalMsg:  "Test",
+			wantName:     "Test Alert",
+			wantStatus:   database.AlertStatusFiring,
+			wantSeverity: database.AlertSeverityWarning,
 		},
 		{
 			name: "all severities critical",
@@ -223,10 +223,10 @@ func TestToNormalizedAlert_EdgeCases(t *testing.T) {
 				AlertName: "Critical Alert",
 				Severity:  "critical",
 			},
-			originalMsg:   "Test",
-			wantName:      "Critical Alert",
-			wantSeverity:  database.AlertSeverityCritical,
-			wantStatus:    database.AlertStatusFiring,
+			originalMsg:  "Test",
+			wantName:     "Critical Alert",
+			wantSeverity: database.AlertSeverityCritical,
+			wantStatus:   database.AlertStatusFiring,
 		},
 		{
 			name: "all severities high",
@@ -234,10 +234,10 @@ func TestToNormalizedAlert_EdgeCases(t *testing.T) {
 				AlertName: "High Alert",
 				Severity:  "high",
 			},
-			originalMsg:   "Test",
-			wantName:      "High Alert",
-			wantSeverity:  database.AlertSeverityHigh,
-			wantStatus:    database.AlertStatusFiring,
+			originalMsg:  "Test",
+			wantName:     "High Alert",
+			wantSeverity: database.AlertSeverityHigh,
+			wantStatus:   database.AlertStatusFiring,
 		},
 		{
 			name: "all severities info",
@@ -245,10 +245,10 @@ func TestToNormalizedAlert_EdgeCases(t *testing.T) {
 				AlertName: "Info Alert",
 				Severity:  "info",
 			},
-			originalMsg:   "Test",
-			wantName:      "Info Alert",
-			wantSeverity:  database.AlertSeverityInfo,
-			wantStatus:    database.AlertStatusFiring,
+			originalMsg:  "Test",
+			wantName:     "Info Alert",
+			wantSeverity: database.AlertSeverityInfo,
+			wantStatus:   database.AlertStatusFiring,
 		},
 		{
 			name: "summary provided takes precedence",
@@ -256,11 +256,11 @@ func TestToNormalizedAlert_EdgeCases(t *testing.T) {
 				AlertName: "Test",
 				Summary:   "Custom summary",
 			},
-			originalMsg:   "Long original message that would be truncated if used",
-			wantName:      "Test",
-			wantSummary:   "Custom summary",
-			wantSeverity:  database.AlertSeverityWarning,
-			wantStatus:    database.AlertStatusFiring,
+			originalMsg:  "Long original message that would be truncated if used",
+			wantName:     "Test",
+			wantSummary:  "Custom summary",
+			wantSeverity: database.AlertSeverityWarning,
+			wantStatus:   database.AlertStatusFiring,
 		},
 		{
 			name: "description provided takes precedence",
@@ -268,10 +268,10 @@ func TestToNormalizedAlert_EdgeCases(t *testing.T) {
 				AlertName:   "Test",
 				Description: "Custom description",
 			},
-			originalMsg:   "Original",
-			wantName:      "Test",
-			wantSeverity:  database.AlertSeverityWarning,
-			wantStatus:    database.AlertStatusFiring,
+			originalMsg:  "Original",
+			wantName:     "Test",
+			wantSeverity: database.AlertSeverityWarning,
+			wantStatus:   database.AlertStatusFiring,
 		},
 		{
 			name: "target labels with source system",
@@ -279,10 +279,10 @@ func TestToNormalizedAlert_EdgeCases(t *testing.T) {
 				AlertName:    "Test",
 				SourceSystem: "Prometheus",
 			},
-			originalMsg:   "Test",
-			wantName:      "Test",
-			wantSeverity:  database.AlertSeverityWarning,
-			wantStatus:    database.AlertStatusFiring,
+			originalMsg:  "Test",
+			wantName:     "Test",
+			wantSeverity: database.AlertSeverityWarning,
+			wantStatus:   database.AlertStatusFiring,
 			checkRawPaylod: func(t *testing.T, payload map[string]interface{}) {
 				if _, ok := payload["extracted"]; !ok {
 					t.Error("RawPayload should contain 'extracted'")
@@ -581,15 +581,15 @@ func TestNormalizeSeverity_AllValues(t *testing.T) {
 		{"WARNING", database.AlertSeverityWarning},
 
 		// Alternative names - map to what the actual implementation does
-		{"error", database.AlertSeverityHigh},     // maps to high
+		{"error", database.AlertSeverityHigh}, // maps to high
 		{"fatal", database.AlertSeverityCritical},
-		{"severe", database.AlertSeverityHigh},    // maps to high
-		{"major", database.AlertSeverityHigh},     // maps to high
+		{"severe", database.AlertSeverityHigh}, // maps to high
+		{"major", database.AlertSeverityHigh},  // maps to high
 		{"warn", database.AlertSeverityWarning},
 		{"medium", database.AlertSeverityWarning}, // not mapped, defaults to warning
 		{"low", database.AlertSeverityInfo},
-		{"debug", database.AlertSeverityInfo},     // maps to info
-		{"notice", database.AlertSeverityInfo},    // maps to info
+		{"debug", database.AlertSeverityInfo},  // maps to info
+		{"notice", database.AlertSeverityInfo}, // maps to info
 
 		// Unknown values default to warning
 		{"unknown", database.AlertSeverityWarning},

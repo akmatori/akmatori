@@ -26,8 +26,8 @@ type LLMSettingsGetter func() (*database.LLMSettings, error)
 
 // AlertExtractor extracts alert information from free-form text using AI
 type AlertExtractor struct {
-	httpClient        HTTPDoer
-	getLLMSettings    LLMSettingsGetter
+	httpClient     HTTPDoer
+	getLLMSettings LLMSettingsGetter
 }
 
 // ExtractedAlert represents the structured data extracted from a message

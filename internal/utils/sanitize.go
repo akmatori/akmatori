@@ -18,15 +18,15 @@ type SanitizationResult struct {
 var (
 	// Shell injection patterns
 	shellInjectionPatterns = []*regexp.Regexp{
-		regexp.MustCompile(`\$\([^)]+\)`),            // $(command)
-		regexp.MustCompile("`[^`]+`"),                // `command`
-		regexp.MustCompile(`;\s*\w+`),                // ; command
-		regexp.MustCompile(`\|\s*\w+`),               // | command (pipe)
-		regexp.MustCompile(`&&\s*\w+`),               // && command
-		regexp.MustCompile(`\|\|\s*\w+`),             // || command
-		regexp.MustCompile(`>\s*/`),                  // > /path (redirect to root)
-		regexp.MustCompile(`>>\s*/`),                 // >> /path (append to root)
-		regexp.MustCompile(`<\s*/`),                  // < /path (read from root)
+		regexp.MustCompile(`\$\([^)]+\)`), // $(command)
+		regexp.MustCompile("`[^`]+`"),     // `command`
+		regexp.MustCompile(`;\s*\w+`),     // ; command
+		regexp.MustCompile(`\|\s*\w+`),    // | command (pipe)
+		regexp.MustCompile(`&&\s*\w+`),    // && command
+		regexp.MustCompile(`\|\|\s*\w+`),  // || command
+		regexp.MustCompile(`>\s*/`),       // > /path (redirect to root)
+		regexp.MustCompile(`>>\s*/`),      // >> /path (append to root)
+		regexp.MustCompile(`<\s*/`),       // < /path (read from root)
 	}
 
 	// Suspicious path patterns

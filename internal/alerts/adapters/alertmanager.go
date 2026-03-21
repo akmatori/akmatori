@@ -24,14 +24,14 @@ func NewAlertmanagerAdapter() *AlertmanagerAdapter {
 
 // AlertmanagerPayload represents the webhook payload from Alertmanager
 type AlertmanagerPayload struct {
-	Alerts      []AlertmanagerAlert `json:"alerts"`
-	Status      string              `json:"status"`
-	GroupLabels map[string]string   `json:"groupLabels"`
-	CommonLabels map[string]string  `json:"commonLabels"`
-	CommonAnnotations map[string]string `json:"commonAnnotations"`
-	ExternalURL string              `json:"externalURL"`
-	Version     string              `json:"version"`
-	GroupKey    string              `json:"groupKey"`
+	Alerts            []AlertmanagerAlert `json:"alerts"`
+	Status            string              `json:"status"`
+	GroupLabels       map[string]string   `json:"groupLabels"`
+	CommonLabels      map[string]string   `json:"commonLabels"`
+	CommonAnnotations map[string]string   `json:"commonAnnotations"`
+	ExternalURL       string              `json:"externalURL"`
+	Version           string              `json:"version"`
+	GroupKey          string              `json:"groupKey"`
 }
 
 // AlertmanagerAlert represents a single alert in the payload

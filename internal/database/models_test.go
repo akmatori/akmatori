@@ -608,9 +608,9 @@ func TestAPIKeySettings_IsActive(t *testing.T) {
 			expected: false,
 		},
 		{
-			name:    "enabled with no keys",
-			enabled: true,
-			keys:    nil,
+			name:     "enabled with no keys",
+			enabled:  true,
+			keys:     nil,
 			expected: false,
 		},
 		{
@@ -740,7 +740,6 @@ func TestJSONB_RoundTrip(t *testing.T) {
 		t.Error("bool field mismatch")
 	}
 }
-
 
 // ========================================
 // Benchmarks for database model operations

@@ -25,13 +25,13 @@ type Incident struct {
 	SourceID        string         `gorm:"index" json:"source_id"`           // e.g., thread_ts, alert_id
 	Title           string         `gorm:"type:varchar(255)" json:"title"`   // LLM-generated title summarizing the incident
 	Status          IncidentStatus `gorm:"type:varchar(50);not null;default:'pending'" json:"status"`
-	Context         JSONB          `gorm:"type:jsonb" json:"context"`       // Event context (message, alert details, etc.)
-	SessionID       string         `gorm:"index" json:"session_id"`         // Agent session ID
-	WorkingDir      string         `json:"working_dir"`                     // Path to incident working directory
-	FullLog         string         `gorm:"type:text" json:"full_log"`       // Complete agent output log (reasoning, tool calls, etc.)
-	Response        string         `gorm:"type:text" json:"response"`       // Final response/output to user
-	TokensUsed      int            `json:"tokens_used"`                     // Total tokens used (input + output)
-	ExecutionTimeMs int64          `json:"execution_time_ms"`               // Execution time in milliseconds
+	Context         JSONB          `gorm:"type:jsonb" json:"context"` // Event context (message, alert details, etc.)
+	SessionID       string         `gorm:"index" json:"session_id"`   // Agent session ID
+	WorkingDir      string         `json:"working_dir"`               // Path to incident working directory
+	FullLog         string         `gorm:"type:text" json:"full_log"` // Complete agent output log (reasoning, tool calls, etc.)
+	Response        string         `gorm:"type:text" json:"response"` // Final response/output to user
+	TokensUsed      int            `json:"tokens_used"`               // Total tokens used (input + output)
+	ExecutionTimeMs int64          `json:"execution_time_ms"`         // Execution time in milliseconds
 	StartedAt       time.Time      `json:"started_at"`
 	CompletedAt     *time.Time     `json:"completed_at,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`

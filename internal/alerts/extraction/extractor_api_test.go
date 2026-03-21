@@ -185,7 +185,7 @@ func TestExtract_APIError(t *testing.T) {
 
 func TestExtract_EmptyChoices(t *testing.T) {
 	emptyResponse := openAIResponse{
-		ID:      "test-id",
+		ID: "test-id",
 		Choices: []struct {
 			Message struct {
 				Content string `json:"content"`

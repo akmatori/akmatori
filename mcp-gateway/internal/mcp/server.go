@@ -30,16 +30,16 @@ type InstanceLookup func(toolType string) []ToolDetailInstance
 
 // Server represents an MCP server
 type Server struct {
-	name             string
-	version          string
-	tools            map[string]Tool
-	handlers         map[string]ToolHandler
-	mu               sync.RWMutex
-	logger           *log.Logger
-	discoverer       ToolDiscoverer
-	instanceLookup   InstanceLookup
-	authorizer       *auth.Authorizer
-	proxyNamespaces  map[string]bool
+	name            string
+	version         string
+	tools           map[string]Tool
+	handlers        map[string]ToolHandler
+	mu              sync.RWMutex
+	logger          *log.Logger
+	discoverer      ToolDiscoverer
+	instanceLookup  InstanceLookup
+	authorizer      *auth.Authorizer
+	proxyNamespaces map[string]bool
 }
 
 // NewServer creates a new MCP server

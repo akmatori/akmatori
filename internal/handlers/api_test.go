@@ -260,7 +260,7 @@ func TestAPIHandler_reloadAlertChannels(t *testing.T) {
 
 	t.Run("with reloader set", func(t *testing.T) {
 		h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-		
+
 		h.SetAlertChannelReloader(func() {
 			// Reloader called in goroutine
 		})
@@ -269,4 +269,3 @@ func TestAPIHandler_reloadAlertChannels(t *testing.T) {
 		h.reloadAlertChannels()
 	})
 }
-
