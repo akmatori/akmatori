@@ -55,6 +55,7 @@ func (a *Authorizer) SetAllowlist(incidentID string, entries []AllowlistEntry) {
 }
 
 // IsAuthorized checks whether a tool call is permitted for the given incident.
+// It resolves the allowlist for the incident and delegates to IsAuthorizedFromEntries.
 //
 // Authorization logic:
 //  1. No allowlist for this incident -> allow all (safe default for unregistered incidents)
@@ -65,65 +66,8 @@ func (a *Authorizer) SetAllowlist(incidentID string, entries []AllowlistEntry) {
 //  6. If neither instanceID nor logicalName is specified, any entry matching
 //     the tool type is sufficient (the handler will pick an authorized instance)
 func (a *Authorizer) IsAuthorized(incidentID string, toolType string, instanceID uint, logicalName string) bool {
-	a.mu.RLock()
-	al, exists := a.allowlists[incidentID]
-	a.mu.RUnlock()
-
-	// No allowlist = allow all (gateway may receive requests without allowlist data)
-	if !exists {
-		return true
-	}
-
-	// Expired allowlist = allow all (treat as no allowlist)
-	if time.Now().After(al.expiresAt) {
-		return true
-	}
-
-	// Empty allowlist = reject all
-	if len(al.entries) == 0 {
-		return false
-	}
-
-	// If both instance ID and logical name are provided, they must match the
-	// SAME allowlist entry. This prevents an attacker from passing an authorized
-	// instanceID alongside an unauthorized logicalName to bypass authorization
-	// (the handler resolves credentials from logicalName after instanceID is stripped).
-	if instanceID > 0 && logicalName != "" {
-		for _, e := range al.entries {
-			if e.InstanceID == instanceID && e.LogicalName == logicalName && e.ToolType == toolType {
-				return true
-			}
-		}
-		return false
-	}
-
-	// If only a specific instance ID is requested, check it directly
-	if instanceID > 0 {
-		for _, e := range al.entries {
-			if e.InstanceID == instanceID && e.ToolType == toolType {
-				return true
-			}
-		}
-		return false
-	}
-
-	// If only a logical name is requested, check it directly
-	if logicalName != "" {
-		for _, e := range al.entries {
-			if e.LogicalName == logicalName && e.ToolType == toolType {
-				return true
-			}
-		}
-		return false
-	}
-
-	// No specific instance requested: allow if any entry matches the tool type
-	for _, e := range al.entries {
-		if e.ToolType == toolType {
-			return true
-		}
-	}
-	return false
+	entries := a.GetAllowlist(incidentID)
+	return IsAuthorizedFromEntries(entries, toolType, instanceID, logicalName)
 }
 
 // GetAllowlist returns the allowlist entries for an incident.
