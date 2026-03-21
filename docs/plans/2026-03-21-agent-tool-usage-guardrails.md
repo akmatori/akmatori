@@ -84,11 +84,11 @@ Fix agent execution issues observed in incident logs: agents skip runbook lookup
 **Files:**
 - Modify: `agent-worker/src/agent-runner.ts` (lines ~42-46)
 
-- [ ] Add a stronger opening line: "CRITICAL: You only have 5 tools available: gateway_call, list_tools_for_tool_type, get_tool_detail, list_tool_types, execute_script. ALL infrastructure operations go through gateway_call."
-- [ ] Add: "If you get 'Tool not found', you are calling it wrong - use gateway_call instead."
-- [ ] Keep existing guidelines but reorder so the most critical instruction (use gateway_call) comes first
-- [ ] Update any tests that validate the BASH_TOOL_GUIDELINES content
-- [ ] Run `make test-agent` - must pass before task 6
+- [x] Add a stronger opening line: "CRITICAL: You only have 5 tools available: gateway_call, list_tools_for_tool_type, get_tool_detail, list_tool_types, execute_script. ALL infrastructure operations go through gateway_call."
+- [x] Add: "If you get 'Tool not found', you are calling it wrong - use gateway_call instead."
+- [x] Keep existing guidelines but reorder so the most critical instruction (use gateway_call) comes first
+- [x] Update any tests that validate the BASH_TOOL_GUIDELINES content
+- [x] Run `make test-agent` - must pass before task 6
 
 ### Task 6: Verify Acceptance Criteria
 
