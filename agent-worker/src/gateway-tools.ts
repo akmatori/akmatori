@@ -28,19 +28,6 @@ const REGISTERED_TOOL_NAMES = new Set([
   "execute_script",
 ]);
 
-/**
- * Known MCP tool type namespaces (the segment before the dot).
- * Used for logging/diagnostics only — isDotNamespacedToolName accepts any
- * valid identifier namespace to also cover dynamically registered HTTP
- * connector tool types (e.g. "internal-billing.get_invoice").
- */
-const KNOWN_TOOL_NAMESPACES = new Set([
-  "ssh",
-  "zabbix",
-  "victoria_metrics",
-  "qmd",
-  "http_connector",
-]);
 
 /** Error patterns that indicate a tool routing/discovery issue where the hint is relevant.
  * Patterns are intentionally specific to tool/method routing errors to avoid
@@ -64,7 +51,7 @@ const TOOL_ROUTING_ERROR_PATTERNS = [
  *
  * Accepts any namespace that looks like a valid identifier (alphanumeric,
  * underscores, hyphens) so it also covers dynamically registered HTTP
- * connector tool types, not just the hard-coded KNOWN_TOOL_NAMESPACES set.
+ * connector tool types.
  */
 export function isDotNamespacedToolName(name: string): boolean {
   if (!name || typeof name !== "string") return false;

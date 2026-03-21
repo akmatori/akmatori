@@ -139,7 +139,10 @@ func (a *Authorizer) GetAllowlist(incidentID string) []AllowlistEntry {
 	if time.Now().After(al.expiresAt) {
 		return nil
 	}
-	return al.entries
+	// Return a copy so callers get a true snapshot that is safe to mutate.
+	result := make([]AllowlistEntry, len(al.entries))
+	copy(result, al.entries)
+	return result
 }
 
 // IsAuthorizedFromEntries checks authorization against a pre-fetched allowlist
