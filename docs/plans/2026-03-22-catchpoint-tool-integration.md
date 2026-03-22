@@ -106,13 +106,13 @@ Snake_case params in args mapped to camelCase for Catchpoint API. Use `validatio
 **Files:**
 - Modify: `mcp-gateway/internal/tools/registry.go`
 
-- [ ] Add import for `catchpoint` package
-- [ ] Add constants: `CatchpointRatePerSecond = 10`, `CatchpointBurstCapacity = 20`
-- [ ] Add fields to Registry struct: `catchpointTool *catchpoint.CatchpointTool`, `catchpointLimit *ratelimit.Limiter`
-- [ ] Add to `RegisterAllTools()`: create limiter, call `r.registerCatchpointTools()`
-- [ ] Add to `Stop()`: stop catchpoint tool
-- [ ] Implement `registerCatchpointTools()` method (~250 lines): instantiate tool, register 12 MCP tools with `r.server.RegisterTool()` using proper `mcp.Tool{Name, Description, InputSchema}` and handler functions
-- [ ] Run `make test-mcp` - must pass before task 7
+- [x] Add import for `catchpoint` package
+- [x] Add constants: `CatchpointRatePerSecond = 10`, `CatchpointBurstCapacity = 20`
+- [x] Add fields to Registry struct: `catchpointTool *catchpoint.CatchpointTool`, `catchpointLimit *ratelimit.Limiter`
+- [x] Add to `RegisterAllTools()`: create limiter, call `r.registerCatchpointTools()`
+- [x] Add to `Stop()`: stop catchpoint tool
+- [x] Implement `registerCatchpointTools()` method (~250 lines): instantiate tool, register 12 MCP tools with `r.server.RegisterTool()` using proper `mcp.Tool{Name, Description, InputSchema}` and handler functions
+- [x] Run `make test-mcp` - must pass before task 7
 
 ### Task 7: Verify acceptance criteria
 
