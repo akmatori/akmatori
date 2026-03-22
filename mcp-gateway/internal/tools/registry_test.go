@@ -11,37 +11,6 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/mcp"
 )
 
-func TestExtractInstanceID(t *testing.T) {
-	tests := []struct {
-		name string
-		args map[string]interface{}
-		want *uint
-	}{
-		{"present", map[string]interface{}{"tool_instance_id": float64(5)}, uintPtr(5)},
-		{"zero", map[string]interface{}{"tool_instance_id": float64(0)}, nil},
-		{"missing", map[string]interface{}{}, nil},
-		{"wrong type", map[string]interface{}{"tool_instance_id": "5"}, nil},
-		{"negative", map[string]interface{}{"tool_instance_id": float64(-1)}, nil},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractInstanceID(tt.args)
-			if tt.want == nil {
-				if got != nil {
-					t.Errorf("extractInstanceID() = %v, want nil", *got)
-				}
-			} else {
-				if got == nil {
-					t.Errorf("extractInstanceID() = nil, want %d", *tt.want)
-				} else if *got != *tt.want {
-					t.Errorf("extractInstanceID() = %d, want %d", *got, *tt.want)
-				}
-			}
-		})
-	}
-}
-
 func TestExtractLogicalName(t *testing.T) {
 	tests := []struct {
 		name string
@@ -90,8 +59,6 @@ func TestExtractServers(t *testing.T) {
 		})
 	}
 }
-
-func uintPtr(v uint) *uint { return &v }
 
 func newTestRegistry() (*Registry, *mcp.Server) {
 	stdLogger := log.New(io.Discard, "", 0)
@@ -304,7 +271,7 @@ func TestRegisterHTTPConnectors_ToolsAppearInDetail(t *testing.T) {
 	}
 }
 
-func TestRegisterHTTPConnectors_InputSchemaHasToolInstanceID(t *testing.T) {
+func TestRegisterHTTPConnectors_InputSchemaOmitsToolInstanceID(t *testing.T) {
 	registry, _ := newTestRegistry()
 
 	connector := makeBillingConnector()
@@ -314,8 +281,8 @@ func TestRegisterHTTPConnectors_InputSchemaHasToolInstanceID(t *testing.T) {
 	if !found {
 		t.Fatal("expected tool to be found")
 	}
-	if _, ok := detail.InputSchema.Properties["tool_instance_id"]; !ok {
-		t.Error("expected 'tool_instance_id' property in input schema")
+	if _, ok := detail.InputSchema.Properties["tool_instance_id"]; ok {
+		t.Error("tool_instance_id should not be in input schema (routing is handled by gateway_call)")
 	}
 }
 
@@ -597,12 +564,12 @@ func TestBuildHTTPConnectorInputSchema(t *testing.T) {
 	if schema.Type != "object" {
 		t.Errorf("expected type 'object', got %q", schema.Type)
 	}
-	// Should have id, status, and tool_instance_id
-	if len(schema.Properties) != 3 {
-		t.Errorf("expected 3 properties, got %d", len(schema.Properties))
+	// Should have id and status (tool_instance_id removed - routing handled by gateway_call)
+	if len(schema.Properties) != 2 {
+		t.Errorf("expected 2 properties, got %d", len(schema.Properties))
 	}
-	if _, ok := schema.Properties["tool_instance_id"]; !ok {
-		t.Error("expected tool_instance_id property")
+	if _, ok := schema.Properties["tool_instance_id"]; ok {
+		t.Error("tool_instance_id should not be in input schema")
 	}
 	if len(schema.Required) != 1 || schema.Required[0] != "id" {
 		t.Errorf("expected required [id], got %v", schema.Required)

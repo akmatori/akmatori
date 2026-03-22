@@ -144,11 +144,14 @@ Tools are registered as pi-mono custom tools via `gateway-tools.ts`, communicati
 | Tool | File | Purpose |
 |------|------|---------|
 | `gateway_call` | `src/gateway-tools.ts` | Call any MCP Gateway tool by name with optional instance hint |
+| `list_tool_types` | `src/gateway-tools.ts` | List all available tool types (e.g., `ssh`, `zabbix`, `victoria_metrics`, `qmd`) |
 | `list_tools_for_tool_type` | `src/gateway-tools.ts` | List all tools of a given type (e.g., `ssh`, `zabbix`, `victoria_metrics`) |
 | `get_tool_detail` | `src/gateway-tools.ts` | Get full JSON schema for a specific tool |
 | `execute_script` | `src/gateway-tools.ts` | Run JavaScript in isolated vm with injected `gateway_call()`, `list_tools_for_tool_type()`, scoped `fs` |
 
 **Note**: Tool discovery is type-based, not query-based. Use `list_tool_types` first, then `list_tools_for_tool_type({ tool_type: "ssh" })`.
+
+**Note**: Tool schemas do NOT include routing parameters (`tool_instance_id`, `logical_name`). Instance routing is handled by `gateway_call`'s `instance` parameter. If an agent tries to call a tool directly (e.g., `ssh.execute_command`), the error message guides it to use `gateway_call` instead.
 
 ### Supporting Modules
 

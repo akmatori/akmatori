@@ -482,6 +482,14 @@ describe("AgentRunner", () => {
       expect(bashTool.promptGuidelines).toContain("list_tools_for_tool_type");
       expect(bashTool.promptGuidelines).not.toContain("python3 -c");
       expect(bashTool.promptGuidelines).not.toContain("PYTHONPATH");
+      // Task 5: Verify stronger opening line lists all 5 tools
+      expect(bashTool.promptGuidelines).toContain("CRITICAL: You only have 5 tools available");
+      expect(bashTool.promptGuidelines).toContain("execute_script");
+      expect(bashTool.promptGuidelines).toContain("get_tool_detail");
+      expect(bashTool.promptGuidelines).toContain("list_tool_types");
+      // Task 5: Verify "Tool not found" guidance
+      expect(bashTool.promptGuidelines).toContain("Tool not found");
+      expect(bashTool.promptGuidelines).toContain("you are calling it wrong");
     });
 
     it("should configure bash spawnHook with MCP env vars", async () => {

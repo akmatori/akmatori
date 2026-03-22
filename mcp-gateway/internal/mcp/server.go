@@ -136,6 +136,8 @@ func (s *Server) HandleHTTP(w http.ResponseWriter, r *http.Request) {
 			var entries []auth.AllowlistEntry
 			if err := json.Unmarshal([]byte(allowlistHeader), &entries); err != nil {
 				s.logger.Printf("WARN: malformed X-Tool-Allowlist header for incident %s: %v", incidentID, err)
+			} else if entries == nil {
+				s.logger.Printf("WARN: null X-Tool-Allowlist header for incident %s, ignoring", incidentID)
 			} else {
 				s.authorizer.SetAllowlist(incidentID, entries)
 			}
@@ -174,6 +176,8 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request, incidentID st
 			var entries []auth.AllowlistEntry
 			if err := json.Unmarshal([]byte(allowlistHeader), &entries); err != nil {
 				s.logger.Printf("WARN: malformed X-Tool-Allowlist header for incident %s: %v", incidentID, err)
+			} else if entries == nil {
+				s.logger.Printf("WARN: null X-Tool-Allowlist header for incident %s, ignoring", incidentID)
 			} else {
 				s.authorizer.SetAllowlist(incidentID, entries)
 			}
@@ -309,10 +313,48 @@ func (s *Server) handleCallTool(ctx context.Context, req *Request, incidentID st
 			instanceID := extractInstanceIDFromArgs(params.Arguments)
 			logicalName := extractLogicalNameFromArgs(params.Arguments)
 
-			if !s.authorizer.IsAuthorized(incidentID, toolType, instanceID, logicalName) {
+			// Snapshot the allowlist once to avoid TOCTOU races: another
+			// request for the same incident could replace the allowlist
+			// between authorization and the logical_name injection below.
+			entries := s.authorizer.GetAllowlist(incidentID)
+
+			if !auth.IsAuthorizedFromEntries(entries, toolType, instanceID, logicalName) {
 				return NewErrorResponse(req.ID, InvalidRequest,
 					fmt.Sprintf("Unauthorized: incident %s is not authorized to use tool %s", incidentID, params.Name),
 					nil)
+			}
+
+			// When an allowlist is active, remove tool_instance_id from args
+			// after authorization to prevent auth/execution mismatch, and
+			// inject the matching logical_name so downstream handlers resolve
+			// credentials for the exact authorized instance. When no allowlist
+			// is set (direct API / debugging path), preserve args as-is so
+			// that tool_instance_id is not silently dropped.
+			if entries != nil {
+				if params.Arguments == nil {
+					params.Arguments = make(map[string]interface{})
+				}
+				if instanceID > 0 && logicalName == "" {
+					// Instance ID provided without logical name — inject the
+					// logical name from the matching allowlist entry.
+					for _, e := range entries {
+						if e.InstanceID == instanceID && e.ToolType == toolType && e.LogicalName != "" {
+							params.Arguments["logical_name"] = e.LogicalName
+							break
+						}
+					}
+				} else if instanceID == 0 && logicalName == "" {
+					// Neither instance ID nor logical name provided — inject the
+					// first authorized instance's logical name to prevent fallback
+					// to an arbitrary enabled instance that may not be in the allowlist.
+					for _, e := range entries {
+						if e.ToolType == toolType && e.LogicalName != "" {
+							params.Arguments["logical_name"] = e.LogicalName
+							break
+						}
+					}
+				}
+				delete(params.Arguments, "tool_instance_id")
 			}
 		}
 	}

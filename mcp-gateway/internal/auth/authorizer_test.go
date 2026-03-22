@@ -112,6 +112,41 @@ func TestAuthorizer_AuthorizedByLogicalName(t *testing.T) {
 	}
 }
 
+func TestAuthorizer_BothInstanceIDAndLogicalName_MustMatchSameEntry(t *testing.T) {
+	a := NewAuthorizer(time.Hour)
+	defer a.Stop()
+
+	a.SetAllowlist("incident-1", []AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+		{InstanceID: 2, LogicalName: "staging-ssh", ToolType: "ssh"},
+	})
+
+	// Both match the same entry — should pass
+	if !a.IsAuthorized("incident-1", "ssh", 1, "prod-ssh") {
+		t.Error("expected authorized when instanceID and logicalName match same entry")
+	}
+	if !a.IsAuthorized("incident-1", "ssh", 2, "staging-ssh") {
+		t.Error("expected authorized when instanceID and logicalName match same entry (staging)")
+	}
+
+	// Authorized instanceID + unauthorized logicalName — must reject
+	// This prevents auth bypass: attacker passes authorized ID to pass auth check
+	// then the handler resolves credentials from the unauthorized logical name.
+	if a.IsAuthorized("incident-1", "ssh", 1, "unauthorized-ssh") {
+		t.Error("expected unauthorized: instanceID=1 authorized but logicalName=unauthorized-ssh is not")
+	}
+
+	// Mismatched but both individually authorized — must reject (different entries)
+	if a.IsAuthorized("incident-1", "ssh", 1, "staging-ssh") {
+		t.Error("expected unauthorized: instanceID=1 is prod-ssh, not staging-ssh")
+	}
+
+	// Authorized logicalName + unauthorized instanceID — must reject
+	if a.IsAuthorized("incident-1", "ssh", 99, "prod-ssh") {
+		t.Error("expected unauthorized: logicalName=prod-ssh authorized but instanceID=99 is not")
+	}
+}
+
 func TestAuthorizer_ExpiredAllowlist_AllowsAll(t *testing.T) {
 	a := NewAuthorizer(50 * time.Millisecond)
 	defer a.Stop()
@@ -249,6 +284,62 @@ func TestAuthorizer_ProxyToolType_BypassesAllowlist(t *testing.T) {
 	// Standard tool types work as expected
 	if !a.IsAuthorized("incident-1", "ssh", 0, "") {
 		t.Error("ssh should be authorized")
+	}
+}
+
+func TestIsAuthorizedFromEntries_NilAllowsAll(t *testing.T) {
+	if !IsAuthorizedFromEntries(nil, "ssh", 0, "") {
+		t.Error("nil entries should allow all")
+	}
+	if !IsAuthorizedFromEntries(nil, "ssh", 5, "prod-ssh") {
+		t.Error("nil entries should allow all regardless of instance/name")
+	}
+}
+
+func TestIsAuthorizedFromEntries_EmptyRejectsAll(t *testing.T) {
+	entries := []AllowlistEntry{}
+	if IsAuthorizedFromEntries(entries, "ssh", 0, "") {
+		t.Error("empty entries should reject all")
+	}
+}
+
+func TestIsAuthorizedFromEntries_MatchesSameAsAuthorizer(t *testing.T) {
+	entries := []AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+		{InstanceID: 2, LogicalName: "staging-ssh", ToolType: "ssh"},
+		{InstanceID: 3, LogicalName: "prod-zabbix", ToolType: "zabbix"},
+	}
+
+	// Tool type match
+	if !IsAuthorizedFromEntries(entries, "ssh", 0, "") {
+		t.Error("should allow ssh by tool type")
+	}
+	if IsAuthorizedFromEntries(entries, "victoria_metrics", 0, "") {
+		t.Error("should reject unknown tool type")
+	}
+
+	// Instance ID match
+	if !IsAuthorizedFromEntries(entries, "ssh", 1, "") {
+		t.Error("should allow instance ID 1")
+	}
+	if IsAuthorizedFromEntries(entries, "ssh", 99, "") {
+		t.Error("should reject unknown instance ID")
+	}
+
+	// Logical name match
+	if !IsAuthorizedFromEntries(entries, "ssh", 0, "prod-ssh") {
+		t.Error("should allow logical name prod-ssh")
+	}
+	if IsAuthorizedFromEntries(entries, "ssh", 0, "unknown-ssh") {
+		t.Error("should reject unknown logical name")
+	}
+
+	// Both must match same entry
+	if !IsAuthorizedFromEntries(entries, "ssh", 1, "prod-ssh") {
+		t.Error("should allow when both match same entry")
+	}
+	if IsAuthorizedFromEntries(entries, "ssh", 1, "staging-ssh") {
+		t.Error("should reject when instanceID and logicalName are from different entries")
 	}
 }
 
