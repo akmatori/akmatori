@@ -127,5 +127,5 @@ Snake_case params in args mapped to camelCase for Catchpoint API. Use `validatio
 
 ### Task 8: Update documentation
 
-- [ ] Update CLAUDE.md: add Catchpoint to MCP Gateway coverage table if test coverage data available
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update CLAUDE.md: add Catchpoint to MCP Gateway coverage table if test coverage data available
+- [x] Move this plan to `docs/plans/completed/`
