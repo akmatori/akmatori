@@ -595,9 +595,9 @@ func (t *CatchpointTool) AcknowledgeAlerts(ctx context.Context, incidentID strin
 		return "", fmt.Errorf("assignee is required when action is 'assign'")
 	}
 
-	// Build request body
+	// Build request body — alertIds must be a JSON array of strings
 	reqBody := map[string]interface{}{
-		"alertIds": alertIDs,
+		"alertIds": strings.Split(alertIDs, ","),
 		"action":   action,
 	}
 	if assignee != "" {
