@@ -102,8 +102,11 @@ func escapeCSVPathSegment(csv string) string {
 
 // clampTimeout ensures timeout is within a safe range (5-300 seconds), defaulting to 30.
 func clampTimeout(timeout int) int {
-	if timeout < 5 {
+	if timeout <= 0 {
 		return 30
+	}
+	if timeout < 5 {
+		return 5
 	}
 	if timeout > 300 {
 		return 300

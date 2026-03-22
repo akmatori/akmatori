@@ -176,7 +176,8 @@ func TestClampTimeout(t *testing.T) {
 	}{
 		{"zero is clamped to default", 0, 30},
 		{"negative is clamped to default", -5, 30},
-		{"below minimum is clamped to default", 4, 30},
+		{"just below minimum is clamped to 5", 1, 5},
+		{"near minimum is clamped to 5", 4, 5},
 		{"excessive is clamped to max", 999, 300},
 		{"301 is clamped to max", 301, 300},
 		{"valid timeout 5 is kept", 5, 5},
