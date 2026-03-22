@@ -917,6 +917,10 @@ func TestAcknowledgeAlerts_Success(t *testing.T) {
 	if !strings.Contains(receivedBody, "acknowledge") {
 		t.Errorf("expected body to contain 'acknowledge', got %s", receivedBody)
 	}
+	// Verify alertIds is sent as a JSON array, not a string
+	if !strings.Contains(receivedBody, `["123","456"]`) {
+		t.Errorf("expected alertIds as JSON array [\"123\",\"456\"], got %s", receivedBody)
+	}
 	if !strings.Contains(result, "success") {
 		t.Errorf("expected result to contain 'success', got %s", result)
 	}
