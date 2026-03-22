@@ -1242,5 +1242,224 @@ func TestAcknowledgeAlerts_ValidActions(t *testing.T) {
 	}
 }
 
+// TestGetTests_WithAllOptionalParams verifies optional params (test_type, folder_id, status) are sent
+func TestGetTests_WithAllOptionalParams(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("testType") != "web" {
+			t.Errorf("expected testType=web, got %q", q.Get("testType"))
+		}
+		if q.Get("folderId") != "42" {
+			t.Errorf("expected folderId=42, got %q", q.Get("folderId"))
+		}
+		if q.Get("status") != "active" {
+			t.Errorf("expected status=active, got %q", q.Get("status"))
+		}
+		if q.Get("testIds") != "1,2,3" {
+			t.Errorf("expected testIds=1,2,3, got %q", q.Get("testIds"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"tests":[]}`)
+	})
+
+	_, err := tool.GetTests(context.Background(), "test-incident", map[string]interface{}{
+		"test_ids":  "1,2,3",
+		"test_type": "web",
+		"folder_id": "42",
+		"status":    "active",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestDoRequest_WithProxyURL verifies proxy URL is set when configured
+func TestDoRequest_WithProxyURL(t *testing.T) {
+	// We can't easily verify the proxy was set on the transport, but we can verify
+	// the request goes through without error when UseProxy is true with valid URL
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer server.Close()
+
+	tool := NewCatchpointTool(testLogger(), nil)
+	config := &CatchpointConfig{
+		URL:       server.URL,
+		APIToken:  "test-token",
+		VerifySSL: true,
+		Timeout:   5,
+		UseProxy:  true,
+		ProxyURL:  "http://127.0.0.1:9999", // non-listening proxy - request will fail
+	}
+
+	// With a non-listening proxy, the request should fail (proving proxy was used)
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/test", nil, nil)
+	if err == nil {
+		t.Fatal("expected error when proxy is not reachable")
+	}
+}
+
+// TestDoRequest_WithInvalidProxyURL verifies invalid proxy URL is handled gracefully
+func TestDoRequest_WithInvalidProxyURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer server.Close()
+
+	tool := NewCatchpointTool(testLogger(), nil)
+	config := &CatchpointConfig{
+		URL:       server.URL,
+		APIToken:  "test-token",
+		VerifySSL: true,
+		Timeout:   5,
+		UseProxy:  true,
+		ProxyURL:  "://invalid-url",
+	}
+
+	// With an invalid proxy URL, it falls back to no proxy
+	resp, err := tool.doRequest(context.Background(), config, http.MethodGet, "/test", nil, nil)
+	if err != nil {
+		t.Fatalf("expected no error (should fall back to no proxy), got: %v", err)
+	}
+	if string(resp) != `{"ok":true}` {
+		t.Errorf("unexpected response: %s", resp)
+	}
+}
+
+// TestCachedGet_WithLogicalName verifies logical name cache key prefix
+func TestCachedGet_WithLogicalName(t *testing.T) {
+	var callCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount.Add(1)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"data":"from-server"}`)
+	}))
+	defer server.Close()
+
+	tool := NewCatchpointTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &CatchpointConfig{
+		URL:       server.URL,
+		APIToken:  "test-token",
+		VerifySSL: true,
+		Timeout:   5,
+	}
+	// Pre-populate both possible cache key formats for logical name
+	tool.configCache.Set("creds:logical:catchpoint:prod-catchpoint", config)
+
+	params := url.Values{"testIds": {"1"}}
+	_, err := tool.cachedGet(context.Background(), "test-incident", "/v4/tests", params, 30*time.Second, "prod-catchpoint")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Second call with same logical name should be cached
+	_, err = tool.cachedGet(context.Background(), "test-incident", "/v4/tests", params, 30*time.Second, "prod-catchpoint")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if callCount.Load() != 1 {
+		t.Errorf("expected 1 server call (second should be cached), got %d", callCount.Load())
+	}
+}
+
+// TestGetTestPerformance_WithOptionalParams verifies optional params are passed
+func TestGetTestPerformance_WithOptionalParams(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("metrics") != "timing,availability" {
+			t.Errorf("expected metrics param, got %q", q.Get("metrics"))
+		}
+		if q.Get("dimensions") != "city,isp" {
+			t.Errorf("expected dimensions param, got %q", q.Get("dimensions"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"data":[]}`)
+	})
+
+	_, err := tool.GetTestPerformance(context.Background(), "test-incident", map[string]interface{}{
+		"test_ids":   "1",
+		"metrics":    "timing,availability",
+		"dimensions": "city,isp",
+		"start_time": "2026-01-01T00:00:00Z",
+		"end_time":   "2026-01-02T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestGetTestPerformanceRaw_WithOptionalParams verifies optional params
+func TestGetTestPerformanceRaw_WithOptionalParams(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("nodeIds") != "10,20" {
+			t.Errorf("expected nodeIds=10,20, got %q", q.Get("nodeIds"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"data":[]}`)
+	})
+
+	_, err := tool.GetTestPerformanceRaw(context.Background(), "test-incident", map[string]interface{}{
+		"test_ids": "1",
+		"node_ids": "10,20",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestGetAlerts_WithOptionalParams verifies alert filter params
+func TestGetAlerts_WithOptionalParams(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("severity") != "critical" {
+			t.Errorf("expected severity=critical, got %q", q.Get("severity"))
+		}
+		if q.Get("testIds") != "5,6" {
+			t.Errorf("expected testIds=5,6, got %q", q.Get("testIds"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"alerts":[]}`)
+	})
+
+	_, err := tool.GetAlerts(context.Background(), "test-incident", map[string]interface{}{
+		"severity":   "critical",
+		"test_ids":   "5,6",
+		"start_time": "2026-01-01",
+		"end_time":   "2026-01-02",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestGetInternetOutages_WithOptionalParams verifies outage filter params
+func TestGetInternetOutages_WithOptionalParams(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("asn") != "15169" {
+			t.Errorf("expected asn=15169, got %q", q.Get("asn"))
+		}
+		if q.Get("country") != "US" {
+			t.Errorf("expected country=US, got %q", q.Get("country"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"outages":[]}`)
+	})
+
+	_, err := tool.GetInternetOutages(context.Background(), "test-incident", map[string]interface{}{
+		"asn":     "15169",
+		"country": "US",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // Verify unused import doesn't leak into test file
 var _ = time.Second // ensure time is used

@@ -116,14 +116,14 @@ Snake_case params in args mapped to camelCase for Catchpoint API. Use `validatio
 
 ### Task 7: Verify acceptance criteria
 
-- [ ] Run full test suite: `make test-all`
-- [ ] Run linter: `golangci-lint run ./mcp-gateway/...`
-- [ ] Run vet: `go vet ./mcp-gateway/...`
-- [ ] Run `make verify`
-- [ ] Manual test: rebuild mcp-gateway container (`docker-compose build mcp-gateway && docker-compose up -d mcp-gateway`)
-- [ ] Manual test: create Catchpoint tool instance via web UI, verify schema renders correctly
-- [ ] Manual test: verify tool discovery works (list_tool_types shows catchpoint, list_tools_for_tool_type returns all 12 methods)
-- [ ] Verify test coverage for catchpoint package meets 80%+
+- [x] Run full test suite: `make test-all`
+- [x] Run linter: `golangci-lint run ./mcp-gateway/...`
+- [x] Run vet: `go vet ./mcp-gateway/...`
+- [x] Run `make verify`
+- [x] Manual test: rebuild mcp-gateway container (`docker-compose build mcp-gateway && docker-compose up -d mcp-gateway`)
+- [x] Manual test: create Catchpoint tool instance via web UI, verify schema renders correctly
+- [x] Manual test: verify tool discovery works (list_tool_types shows catchpoint, list_tools_for_tool_type returns all 12 methods)
+- [x] Verify test coverage for catchpoint package meets 80%+
 
 ### Task 8: Update documentation
 
