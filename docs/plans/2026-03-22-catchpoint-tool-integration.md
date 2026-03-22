@@ -65,19 +65,19 @@ All methods follow signature: `(ctx context.Context, incidentID string, args map
 
 Snake_case params in args mapped to camelCase for Catchpoint API. Use `validation.SuggestParam()` for required param validation.
 
-- [ ] Implement `GetAlerts` - GET `/v4/tests/alerts` (15s cache) - params: severity, start_time, end_time, test_ids, page_number, page_size
-- [ ] Implement `GetAlertDetails` - GET `/v4/tests/alerts/{alertIds}` (15s cache) - required: alert_ids
-- [ ] Implement `GetTestPerformance` - GET `/v4/tests/explorer/aggregated` (30s cache) - required: test_ids; optional: start_time, end_time, metrics, dimensions
-- [ ] Implement `GetTestPerformanceRaw` - GET `/v4/tests/explorer/raw` (30s cache) - required: test_ids; optional: start_time, end_time, node_ids, page_number, page_size
-- [ ] Implement `GetTests` - GET `/v4/tests` (60s cache) - params: test_ids, test_type, folder_id, status, page_number, page_size
-- [ ] Implement `GetTestDetails` - GET `/v4/tests/{testIds}` (60s cache) - required: test_ids
-- [ ] Implement `GetTestErrors` - GET `/v4/tests/errors/raw` (15s cache) - params: test_ids, start_time, end_time, page_number, page_size
-- [ ] Implement `GetInternetOutages` - GET `/v4/iw/outages` (30s cache) - params: start_time, end_time, asn, country, page_number, page_size
-- [ ] Implement `GetNodes` - GET `/v4/nodes/all` (60s cache) - params: page_number, page_size
-- [ ] Implement `GetNodeAlerts` - GET `/v4/node/alerts` (15s cache) - params: node_ids, start_time, end_time, page_number, page_size
-- [ ] Enforce pageSize clamp to max 100 per Catchpoint API in all paginated methods
-- [ ] Write tests for each method: success case + error case (24 subtests), table-driven param validation, cache hit verification via request counter
-- [ ] Run `make test-mcp` - must pass before task 4
+- [x] Implement `GetAlerts` - GET `/v4/tests/alerts` (15s cache) - params: severity, start_time, end_time, test_ids, page_number, page_size
+- [x] Implement `GetAlertDetails` - GET `/v4/tests/alerts/{alertIds}` (15s cache) - required: alert_ids
+- [x] Implement `GetTestPerformance` - GET `/v4/tests/explorer/aggregated` (30s cache) - required: test_ids; optional: start_time, end_time, metrics, dimensions
+- [x] Implement `GetTestPerformanceRaw` - GET `/v4/tests/explorer/raw` (30s cache) - required: test_ids; optional: start_time, end_time, node_ids, page_number, page_size
+- [x] Implement `GetTests` - GET `/v4/tests` (60s cache) - params: test_ids, test_type, folder_id, status, page_number, page_size
+- [x] Implement `GetTestDetails` - GET `/v4/tests/{testIds}` (60s cache) - required: test_ids
+- [x] Implement `GetTestErrors` - GET `/v4/tests/errors/raw` (15s cache) - params: test_ids, start_time, end_time, page_number, page_size
+- [x] Implement `GetInternetOutages` - GET `/v4/iw/outages` (30s cache) - params: start_time, end_time, asn, country, page_number, page_size
+- [x] Implement `GetNodes` - GET `/v4/nodes/all` (60s cache) - params: page_number, page_size
+- [x] Implement `GetNodeAlerts` - GET `/v4/node/alerts` (15s cache) - params: node_ids, start_time, end_time, page_number, page_size
+- [x] Enforce pageSize clamp to max 100 per Catchpoint API in all paginated methods
+- [x] Write tests for each method: success case + error case (24 subtests), table-driven param validation, cache hit verification via request counter
+- [x] Run `make test-mcp` - must pass before task 4
 
 ### Task 4: Write operation methods (2 methods)
 
