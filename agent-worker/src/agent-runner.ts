@@ -40,8 +40,9 @@ import { createGatewayCallTool, createListToolsForToolTypeTool, createGetToolDet
  * from the prompt automatically.
  */
 const BASH_TOOL_GUIDELINES = `\
-- IMPORTANT: Each skill's SKILL.md contains your assigned tools with parameter schemas and gateway_call examples. ALWAYS read the relevant SKILL.md FIRST — it has everything you need.
-- Use gateway_call to invoke infrastructure tools. NEVER call tool names directly (e.g. victoria_metrics.label_values) — only gateway_call, list_tools_for_tool_type, get_tool_detail, list_tool_types, and execute_script are available as agent tools.
+- CRITICAL: You only have 5 tools available: gateway_call, list_tools_for_tool_type, get_tool_detail, list_tool_types, execute_script. ALL infrastructure operations go through gateway_call. NEVER call tool names directly (e.g. victoria_metrics.label_values, ssh.execute_command, zabbix.get_hosts).
+- If you get a "Tool not found" error, you are calling it wrong — use gateway_call instead. Example: gateway_call("victoria_metrics.instant_query", {query: "up"}, "my-vm-instance").
+- Each skill's SKILL.md contains your assigned tools with parameter schemas and gateway_call examples. ALWAYS read the relevant SKILL.md FIRST — it has everything you need.
 - Only use list_tools_for_tool_type / get_tool_detail as a fallback if SKILL.md doesn't cover the tool you need.
 - For batch operations across multiple hosts or complex data processing, use execute_script. It runs JavaScript with built-in gateway_call(), list_tools_for_tool_type(), get_tool_detail(), and synchronous fs (readFileSync, writeFileSync). Do NOT use require() or import() in scripts.`;
 

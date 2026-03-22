@@ -2,7 +2,7 @@
  * Isolated script execution engine for the execute_script tool.
  *
  * Runs agent-written JavaScript code in a Node.js `vm` context with injected
- * gateway functions (gateway_call, list_tools_for_tool_type, get_tool_detail) and scoped
+ * gateway functions (gateway_call, list_tools_for_tool_type, list_tool_types, get_tool_detail) and scoped
  * filesystem access.
  */
 
@@ -45,12 +45,12 @@ export function detectCommonMistakes(code: string): string | null {
     return "require() is not available in the sandbox. " +
       "All globals are pre-injected — use them directly: " +
       "fs (readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync), " +
-      "gateway_call(), list_tools_for_tool_type(), get_tool_detail(), console.";
+      "gateway_call(), list_tools_for_tool_type(), list_tool_types(), get_tool_detail(), console.";
   }
   if (/^\s*import\s+/m.test(code)) {
     return "import statements are not available in the sandbox. " +
       "All globals are pre-injected — use them directly: " +
-      "fs, gateway_call(), list_tools_for_tool_type(), get_tool_detail(), console.";
+      "fs, gateway_call(), list_tools_for_tool_type(), list_tool_types(), get_tool_detail(), console.";
   }
   return null;
 }
@@ -71,7 +71,8 @@ export class ScriptExecutor {
    *
    * The script receives:
    * - `gateway_call(toolName, args, instance?)` — async, calls MCP Gateway
-   * - `list_tools_for_tool_type(query, toolType?)` — async, lists available tools by type
+   * - `list_tools_for_tool_type(toolType)` — async, lists available tools by type
+   * - `list_tool_types()` — async, lists all available tool types
    * - `get_tool_detail(toolName)` — async, gets tool schema
    * - `console.log(...)` — captures output
    * - `fs` — scoped to workDir (readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync)
@@ -142,6 +143,12 @@ export class ScriptExecutor {
       }
       return await this.client.getToolDetail(toolName, internalSignal);
     };
+    context.__gw_list_types = async () => {
+      if (internalSignal.aborted) {
+        throw new Error("Script aborted");
+      }
+      return await this.client.listToolTypes(internalSignal);
+    };
 
     // Console capture
     context.__console_log = (...args: unknown[]) => {
@@ -172,12 +179,13 @@ export class ScriptExecutor {
       // .constructor chain traversal back to the host Function constructor.
       // Use an IIFE to capture references before deleting the raw globals.
       (function() {
-        var gc = __gw_call, gs = __gw_search, gd = __gw_detail;
+        var gc = __gw_call, gs = __gw_search, gd = __gw_detail, glt = __gw_list_types;
         var cl = __console_log, cw = __console_warn, ce = __console_error;
         var sfs = __fs, st = __setTimeout, ct = __clearTimeout;
 
         globalThis.gateway_call = async (name, args, instance) => gc(name, args, instance);
         globalThis.list_tools_for_tool_type = async (toolType) => gs(toolType);
+        globalThis.list_tool_types = async () => glt();
         globalThis.get_tool_detail = async (toolName) => gd(toolName);
         globalThis.console = {
           log: (...a) => cl(...a),
@@ -198,6 +206,7 @@ export class ScriptExecutor {
         delete globalThis.__gw_call;
         delete globalThis.__gw_search;
         delete globalThis.__gw_detail;
+        delete globalThis.__gw_list_types;
         delete globalThis.__console_log;
         delete globalThis.__console_warn;
         delete globalThis.__console_error;

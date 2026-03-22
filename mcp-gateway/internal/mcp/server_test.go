@@ -414,6 +414,243 @@ func TestAuthorization_UnauthorizedInstanceIDRejected(t *testing.T) {
 	}
 }
 
+func TestAuthorization_InstanceIDStrippedAfterAuth(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	// Capture the args actually passed to the handler
+	var capturedArgs map[string]interface{}
+	s.RegisterTool(Tool{
+		Name:        "ssh.execute_command",
+		Description: "Execute command",
+		InputSchema: InputSchema{Type: "object"},
+	}, func(_ context.Context, _ string, args map[string]interface{}) (interface{}, error) {
+		capturedArgs = args
+		return "ok", nil
+	})
+
+	// Allow instance 1
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	// Send tool_instance_id=1 (authorized) plus logical_name — tool_instance_id
+	// should be stripped after auth so the handler only sees logical_name.
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "ssh.execute_command", Arguments: map[string]interface{}{
+			"command":          "uptime",
+			"tool_instance_id": float64(1),
+			"logical_name":     "prod-ssh",
+		}},
+		map[string]string{
+			"X-Incident-ID":    "incident-strip-test",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+
+	if resp.Error != nil {
+		t.Fatalf("expected authorized call to succeed, got error: %s", resp.Error.Message)
+	}
+	if capturedArgs == nil {
+		t.Fatal("handler was not called")
+	}
+	if _, ok := capturedArgs["tool_instance_id"]; ok {
+		t.Error("tool_instance_id should be stripped from args after authorization")
+	}
+	if v, ok := capturedArgs["logical_name"].(string); !ok || v != "prod-ssh" {
+		t.Errorf("expected logical_name=prod-ssh, got %v", capturedArgs["logical_name"])
+	}
+}
+
+func TestAuthorization_MismatchedInstanceIDAndLogicalName_Rejected(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.RegisterTool(Tool{
+		Name:        "ssh.execute_command",
+		Description: "Execute command",
+		InputSchema: InputSchema{Type: "object"},
+	}, func(_ context.Context, _ string, args map[string]interface{}) (interface{}, error) {
+		t.Error("handler should NOT be called for mismatched instanceID/logicalName")
+		return "ok", nil
+	})
+
+	// Allow instance 1 = prod-ssh only
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	// Exploit attempt: authorized tool_instance_id=1 + unauthorized logical_name
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "ssh.execute_command", Arguments: map[string]interface{}{
+			"command":          "uptime",
+			"tool_instance_id": float64(1),
+			"logical_name":     "unauthorized-ssh",
+		}},
+		map[string]string{
+			"X-Incident-ID":    "incident-exploit-test",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+
+	if resp.Error == nil {
+		t.Fatal("expected mismatched instanceID/logicalName to be rejected")
+	}
+	if resp.Error.Code != InvalidRequest {
+		t.Errorf("expected InvalidRequest error code, got %d", resp.Error.Code)
+	}
+}
+
+func TestAuthorization_InstanceIDOnly_InjectsLogicalNameFromAllowlist(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	var capturedArgs map[string]interface{}
+	s.RegisterTool(Tool{
+		Name:        "ssh.execute_command",
+		Description: "Execute command",
+		InputSchema: InputSchema{Type: "object"},
+	}, func(_ context.Context, _ string, args map[string]interface{}) (interface{}, error) {
+		capturedArgs = args
+		return "ok", nil
+	})
+
+	// Allowlist with instance 1 = prod-ssh
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+		{InstanceID: 2, LogicalName: "staging-ssh", ToolType: "ssh"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	// Send tool_instance_id=1 WITHOUT logical_name — the server should inject
+	// the logical_name from the allowlist so the handler resolves the correct instance.
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "ssh.execute_command", Arguments: map[string]interface{}{
+			"command":          "uptime",
+			"tool_instance_id": float64(1),
+		}},
+		map[string]string{
+			"X-Incident-ID":    "incident-inject-test",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+
+	if resp.Error != nil {
+		t.Fatalf("expected authorized call to succeed, got error: %s", resp.Error.Message)
+	}
+	if capturedArgs == nil {
+		t.Fatal("handler was not called")
+	}
+	if _, ok := capturedArgs["tool_instance_id"]; ok {
+		t.Error("tool_instance_id should be stripped from args after authorization")
+	}
+	if v, ok := capturedArgs["logical_name"].(string); !ok || v != "prod-ssh" {
+		t.Errorf("expected logical_name=prod-ssh to be injected from allowlist, got %v", capturedArgs["logical_name"])
+	}
+}
+
+func TestAuthorization_NoInstanceHint_InjectsFirstAuthorizedInstance(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	var capturedArgs map[string]interface{}
+	s.RegisterTool(Tool{
+		Name:        "ssh.execute_command",
+		Description: "Execute command",
+		InputSchema: InputSchema{Type: "object"},
+	}, func(_ context.Context, _ string, args map[string]interface{}) (interface{}, error) {
+		capturedArgs = args
+		return "ok", nil
+	})
+
+	// Allowlist allows prod-ssh (instance 1) and staging-ssh (instance 2).
+	// When the agent omits both instance and logical_name, the server should
+	// inject the first authorized instance's logical name to prevent fallback
+	// to an arbitrary enabled instance that might not be in the allowlist.
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+		{InstanceID: 2, LogicalName: "staging-ssh", ToolType: "ssh"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	// Call with NO instance hint at all
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "ssh.execute_command", Arguments: map[string]interface{}{
+			"command": "uptime",
+		}},
+		map[string]string{
+			"X-Incident-ID":    "incident-no-hint",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+
+	if resp.Error != nil {
+		t.Fatalf("expected authorized call to succeed, got error: %s", resp.Error.Message)
+	}
+	if capturedArgs == nil {
+		t.Fatal("handler was not called")
+	}
+	// logical_name should be injected from the first matching allowlist entry
+	if v, ok := capturedArgs["logical_name"].(string); !ok || v != "prod-ssh" {
+		t.Errorf("expected logical_name=prod-ssh injected from allowlist, got %v", capturedArgs["logical_name"])
+	}
+	// tool_instance_id should not be present
+	if _, ok := capturedArgs["tool_instance_id"]; ok {
+		t.Error("tool_instance_id should not be present when caller didn't send one")
+	}
+}
+
+func TestAuthorization_NilArguments_DoesNotPanic(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	var capturedArgs map[string]interface{}
+	s.RegisterTool(Tool{
+		Name:        "ssh.execute_command",
+		Description: "Execute command",
+		InputSchema: InputSchema{Type: "object"},
+	}, func(_ context.Context, _ string, args map[string]interface{}) (interface{}, error) {
+		capturedArgs = args
+		return "ok", nil
+	})
+
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	// Call with nil arguments (omitted from JSON) — must not panic
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "ssh.execute_command"},
+		map[string]string{
+			"X-Incident-ID":    "incident-nil-args",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+
+	if resp.Error != nil {
+		t.Fatalf("expected authorized call to succeed, got error: %s", resp.Error.Message)
+	}
+	if capturedArgs == nil {
+		t.Fatal("handler was not called")
+	}
+	if v, ok := capturedArgs["logical_name"].(string); !ok || v != "prod-ssh" {
+		t.Errorf("expected logical_name=prod-ssh injected, got %v", capturedArgs["logical_name"])
+	}
+}
+
 func TestAuthorization_NoAuthorizerAllowsAll(t *testing.T) {
 	s := newTestServer()
 	// No authorizer set on server
@@ -433,6 +670,46 @@ func TestAuthorization_NoAuthorizerAllowsAll(t *testing.T) {
 
 	if resp.Error != nil {
 		t.Fatalf("expected call without authorizer to succeed, got error: %s", resp.Error.Message)
+	}
+}
+
+func TestAuthorization_NoAllowlist_PreservesToolInstanceID(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+	// No allowlist set for this incident — direct API / debugging path
+
+	var capturedArgs map[string]interface{}
+	s.RegisterTool(Tool{
+		Name:        "ssh.execute_command",
+		Description: "Execute command",
+		InputSchema: InputSchema{Type: "object"},
+	}, func(_ context.Context, _ string, args map[string]interface{}) (interface{}, error) {
+		capturedArgs = args
+		return "ok", nil
+	})
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "ssh.execute_command", Arguments: map[string]interface{}{
+			"command":          "uptime",
+			"tool_instance_id": float64(3),
+		}},
+		map[string]string{
+			"X-Incident-ID": "incident-no-allowlist",
+		},
+	)
+
+	if resp.Error != nil {
+		t.Fatalf("expected call without allowlist to succeed, got error: %s", resp.Error.Message)
+	}
+	if capturedArgs == nil {
+		t.Fatal("handler was not called")
+	}
+	// Without an active allowlist, tool_instance_id should be preserved
+	// so direct API callers can route to a specific instance.
+	if _, ok := capturedArgs["tool_instance_id"]; !ok {
+		t.Error("tool_instance_id should be preserved when no allowlist is active (direct API path)")
 	}
 }
 
@@ -1006,6 +1283,115 @@ func TestHandleListToolTypes_EmptyTypes(t *testing.T) {
 	}
 }
 
+func TestHandleListToolTypes_QMDProxyBypassesAllowlist(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	// QMD is a proxy namespace — it should appear in list_tool_types even when
+	// the incident allowlist does not include it.
+	s.AddProxyNamespace("qmd")
+	s.SetDiscoverer(&mockDiscoverer{
+		availableTypes: []string{"ssh", "zabbix", "qmd"},
+	})
+
+	// Allowlist only contains ssh — no qmd entry
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/list_types", nil,
+		map[string]string{
+			"X-Incident-ID":    "incident-qmd-types",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatalf("failed to marshal result: %v", err)
+	}
+	var result ListToolTypesResult
+	if err := json.Unmarshal(resultBytes, &result); err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
+
+	// Should include ssh (in allowlist) and qmd (proxy namespace bypass), but not zabbix
+	typeSet := map[string]bool{}
+	for _, tp := range result.Types {
+		typeSet[tp] = true
+	}
+
+	if !typeSet["ssh"] {
+		t.Error("ssh should be included (in allowlist)")
+	}
+	if !typeSet["qmd"] {
+		t.Error("qmd should be included (proxy namespace bypasses allowlist)")
+	}
+	if typeSet["zabbix"] {
+		t.Error("zabbix should be filtered out (not in allowlist and not a proxy namespace)")
+	}
+	if len(result.Types) != 2 {
+		t.Errorf("expected 2 types (ssh, qmd), got %d: %v", len(result.Types), result.Types)
+	}
+}
+
+func TestHandleListToolTypes_DotNamespacedBypassesAllowlist(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	// Multi-segment namespaces with dots also bypass the allowlist filter
+	s.SetDiscoverer(&mockDiscoverer{
+		availableTypes: []string{"ssh", "custom.monitoring"},
+	})
+
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/list_types", nil,
+		map[string]string{
+			"X-Incident-ID":    "incident-dot-ns",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatalf("failed to marshal result: %v", err)
+	}
+	var result ListToolTypesResult
+	if err := json.Unmarshal(resultBytes, &result); err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
+
+	typeSet := map[string]bool{}
+	for _, tp := range result.Types {
+		typeSet[tp] = true
+	}
+
+	if !typeSet["ssh"] {
+		t.Error("ssh should be included (in allowlist)")
+	}
+	if !typeSet["custom.monitoring"] {
+		t.Error("custom.monitoring should be included (dot-namespaced bypasses allowlist)")
+	}
+	if len(result.Types) != 2 {
+		t.Errorf("expected 2 types, got %d: %v", len(result.Types), result.Types)
+	}
+}
+
 func TestHandleListToolsByType_EmptyResultsWithHint(t *testing.T) {
 	s := newTestServer()
 	s.SetDiscoverer(&mockDiscoverer{
@@ -1142,6 +1528,55 @@ func TestAuthorization_AllowlistPersistsAcrossRequests(t *testing.T) {
 
 	if resp.Error == nil {
 		t.Fatal("expected stored allowlist to reject unauthorized tool type on subsequent request")
+	}
+	if resp.Error.Code != InvalidRequest {
+		t.Errorf("expected error code %d, got %d", InvalidRequest, resp.Error.Code)
+	}
+}
+
+func TestAuthorization_NullAllowlistHeaderDoesNotBypass(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.RegisterTool(Tool{
+		Name:        "ssh.execute_command",
+		Description: "Execute command",
+		InputSchema: InputSchema{Type: "object"},
+	}, echoHandler)
+	s.RegisterTool(Tool{
+		Name:        "zabbix.get_hosts",
+		Description: "Get hosts",
+		InputSchema: InputSchema{Type: "object"},
+	}, echoHandler)
+
+	// First request: set a real allowlist that only allows ssh
+	allowlist := []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "ssh.execute_command", Arguments: map[string]interface{}{"command": "ls"}},
+		map[string]string{
+			"X-Incident-ID":    "incident-null-bypass",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+
+	// Second request: try to overwrite the allowlist with JSON "null" to bypass restrictions
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "zabbix.get_hosts", Arguments: map[string]interface{}{}},
+		map[string]string{
+			"X-Incident-ID":    "incident-null-bypass",
+			"X-Tool-Allowlist": "null",
+		},
+	)
+
+	// The null header should NOT have overwritten the real allowlist — zabbix should still be rejected
+	if resp.Error == nil {
+		t.Fatal("expected null X-Tool-Allowlist header to NOT bypass existing allowlist restrictions")
 	}
 	if resp.Error.Code != InvalidRequest {
 		t.Errorf("expected error code %d, got %d", InvalidRequest, resp.Error.Code)

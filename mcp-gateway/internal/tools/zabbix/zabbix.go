@@ -126,12 +126,9 @@ func responseCacheKey(method string, params interface{}) string {
 }
 
 // getConfig fetches Zabbix configuration from database with caching.
-// If instanceID is provided, credentials are resolved for that specific tool instance.
-func (t *ZabbixTool) getConfig(ctx context.Context, incidentID string, instanceID *uint, logicalName ...string) (*ZabbixConfig, error) {
+func (t *ZabbixTool) getConfig(ctx context.Context, incidentID string, logicalName ...string) (*ZabbixConfig, error) {
 	cacheKey := configCacheKey(incidentID, "zabbix")
-	if instanceID != nil {
-		cacheKey = fmt.Sprintf("creds:instance:%d", *instanceID)
-	} else if len(logicalName) > 0 && logicalName[0] != "" {
+	if len(logicalName) > 0 && logicalName[0] != "" {
 		cacheKey = fmt.Sprintf("creds:logical:%s:%s", "zabbix", logicalName[0])
 	}
 
@@ -147,7 +144,7 @@ func (t *ZabbixTool) getConfig(ctx context.Context, incidentID string, instanceI
 	if len(logicalName) > 0 {
 		ln = logicalName[0]
 	}
-	creds, err := database.ResolveToolCredentials(ctx, incidentID, "zabbix", instanceID, ln)
+	creds, err := database.ResolveToolCredentials(ctx, incidentID, "zabbix", nil, ln)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get Zabbix credentials: %w", err)
 	}
@@ -382,12 +379,9 @@ func (t *ZabbixTool) doRequest(ctx context.Context, config *ZabbixConfig, method
 }
 
 // cachedRequest performs a cached API request for read-only methods.
-// If instanceID is provided, it is used for instance-specific cache keys and credential resolution.
-func (t *ZabbixTool) cachedRequest(ctx context.Context, incidentID string, method string, params interface{}, ttl time.Duration, instanceID *uint, logicalName ...string) (json.RawMessage, error) {
+func (t *ZabbixTool) cachedRequest(ctx context.Context, incidentID string, method string, params interface{}, ttl time.Duration, logicalName ...string) (json.RawMessage, error) {
 	cacheKey := responseCacheKey(method, params)
-	if instanceID != nil {
-		cacheKey = fmt.Sprintf("inst:%d:%s", *instanceID, cacheKey)
-	} else if len(logicalName) > 0 && logicalName[0] != "" {
+	if len(logicalName) > 0 && logicalName[0] != "" {
 		cacheKey = fmt.Sprintf("logical:%s:%s", logicalName[0], cacheKey)
 	} else {
 		cacheKey = fmt.Sprintf("incident:%s:%s", incidentID, cacheKey)
@@ -402,7 +396,7 @@ func (t *ZabbixTool) cachedRequest(ctx context.Context, incidentID string, metho
 	}
 
 	// Make the actual request
-	result, err := t.request(ctx, incidentID, method, params, instanceID, logicalName...)
+	result, err := t.request(ctx, incidentID, method, params, logicalName...)
 	if err != nil {
 		return nil, err
 	}
@@ -415,9 +409,8 @@ func (t *ZabbixTool) cachedRequest(ctx context.Context, incidentID string, metho
 }
 
 // request performs an authenticated Zabbix API request.
-// If instanceID is provided, credentials are resolved for that specific tool instance.
-func (t *ZabbixTool) request(ctx context.Context, incidentID string, method string, params interface{}, instanceID *uint, logicalName ...string) (json.RawMessage, error) {
-	config, err := t.getConfig(ctx, incidentID, instanceID, logicalName...)
+func (t *ZabbixTool) request(ctx context.Context, incidentID string, method string, params interface{}, logicalName ...string) (json.RawMessage, error) {
+	config, err := t.getConfig(ctx, incidentID, logicalName...)
 	if err != nil {
 		return nil, err
 	}
@@ -434,15 +427,8 @@ func (t *ZabbixTool) request(ctx context.Context, incidentID string, method stri
 	return t.doRequest(ctx, config, method, params, auth)
 }
 
-// extractInstanceID extracts the optional tool_instance_id from tool arguments.
-func extractInstanceID(args map[string]interface{}) *uint {
-	if v, ok := args["tool_instance_id"].(float64); ok && v > 0 {
-		id := uint(v)
-		return &id
-	}
-	return nil
-}
-
+// extractLogicalName extracts the optional logical_name from tool arguments.
+// The MCP server injects this from the gateway_call instance hint.
 func extractLogicalName(args map[string]interface{}) string {
 	if v, ok := args["logical_name"].(string); ok {
 		return v
@@ -452,7 +438,6 @@ func extractLogicalName(args map[string]interface{}) string {
 
 // GetHosts retrieves hosts from Zabbix with caching
 func (t *ZabbixTool) GetHosts(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
-	instanceID := extractInstanceID(args)
 	logicalName := extractLogicalName(args)
 	params := make(map[string]interface{})
 
@@ -483,7 +468,7 @@ func (t *ZabbixTool) GetHosts(ctx context.Context, incidentID string, args map[s
 		params["limit"] = limit
 	}
 
-	result, err := t.cachedRequest(ctx, incidentID, "host.get", params, ResponseCacheTTL, instanceID, logicalName)
+	result, err := t.cachedRequest(ctx, incidentID, "host.get", params, ResponseCacheTTL, logicalName)
 	if err != nil {
 		return "", err
 	}
@@ -493,7 +478,6 @@ func (t *ZabbixTool) GetHosts(ctx context.Context, incidentID string, args map[s
 
 // GetProblems retrieves current problems from Zabbix with caching
 func (t *ZabbixTool) GetProblems(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
-	instanceID := extractInstanceID(args)
 	logicalName := extractLogicalName(args)
 	params := make(map[string]interface{})
 
@@ -524,7 +508,7 @@ func (t *ZabbixTool) GetProblems(ctx context.Context, incidentID string, args ma
 	}
 
 	// Use shorter TTL for problems (15 seconds) since they change frequently
-	result, err := t.cachedRequest(ctx, incidentID, "problem.get", params, 15*time.Second, instanceID, logicalName)
+	result, err := t.cachedRequest(ctx, incidentID, "problem.get", params, 15*time.Second, logicalName)
 	if err != nil {
 		return "", err
 	}
@@ -534,7 +518,6 @@ func (t *ZabbixTool) GetProblems(ctx context.Context, incidentID string, args ma
 
 // GetHistory retrieves metric history from Zabbix with caching
 func (t *ZabbixTool) GetHistory(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
-	instanceID := extractInstanceID(args)
 	logicalName := extractLogicalName(args)
 	params := make(map[string]interface{})
 
@@ -579,7 +562,7 @@ func (t *ZabbixTool) GetHistory(ctx context.Context, incidentID string, args map
 
 	params["output"] = "extend"
 
-	result, err := t.cachedRequest(ctx, incidentID, "history.get", params, ResponseCacheTTL, instanceID, logicalName)
+	result, err := t.cachedRequest(ctx, incidentID, "history.get", params, ResponseCacheTTL, logicalName)
 	if err != nil {
 		return "", err
 	}
@@ -589,7 +572,6 @@ func (t *ZabbixTool) GetHistory(ctx context.Context, incidentID string, args map
 
 // GetItems retrieves items (metrics) from Zabbix with caching
 func (t *ZabbixTool) GetItems(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
-	instanceID := extractInstanceID(args)
 	logicalName := extractLogicalName(args)
 	params := make(map[string]interface{})
 
@@ -624,7 +606,7 @@ func (t *ZabbixTool) GetItems(ctx context.Context, incidentID string, args map[s
 		params["limit"] = limit
 	}
 
-	result, err := t.cachedRequest(ctx, incidentID, "item.get", params, ResponseCacheTTL, instanceID, logicalName)
+	result, err := t.cachedRequest(ctx, incidentID, "item.get", params, ResponseCacheTTL, logicalName)
 	if err != nil {
 		return "", err
 	}
@@ -634,7 +616,6 @@ func (t *ZabbixTool) GetItems(ctx context.Context, incidentID string, args map[s
 
 // GetTriggers retrieves triggers from Zabbix with caching
 func (t *ZabbixTool) GetTriggers(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
-	instanceID := extractInstanceID(args)
 	logicalName := extractLogicalName(args)
 	params := make(map[string]interface{})
 
@@ -660,7 +641,7 @@ func (t *ZabbixTool) GetTriggers(ctx context.Context, incidentID string, args ma
 	params["selectHosts"] = []string{"hostid", "host", "name"}
 	params["expandDescription"] = true
 
-	result, err := t.cachedRequest(ctx, incidentID, "trigger.get", params, ResponseCacheTTL, instanceID, logicalName)
+	result, err := t.cachedRequest(ctx, incidentID, "trigger.get", params, ResponseCacheTTL, logicalName)
 	if err != nil {
 		return "", err
 	}
@@ -669,12 +650,12 @@ func (t *ZabbixTool) GetTriggers(ctx context.Context, incidentID string, args ma
 }
 
 // APIRequest performs a raw Zabbix API request (not cached for flexibility)
-func (t *ZabbixTool) APIRequest(ctx context.Context, incidentID string, method string, params map[string]interface{}, instanceID *uint, logicalName ...string) (string, error) {
+func (t *ZabbixTool) APIRequest(ctx context.Context, incidentID string, method string, params map[string]interface{}, logicalName ...string) (string, error) {
 	if params == nil {
 		params = make(map[string]interface{})
 	}
 
-	result, err := t.request(ctx, incidentID, method, params, instanceID, logicalName...)
+	result, err := t.request(ctx, incidentID, method, params, logicalName...)
 	if err != nil {
 		return "", err
 	}

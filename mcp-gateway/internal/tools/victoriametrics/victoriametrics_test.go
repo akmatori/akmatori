@@ -19,9 +19,6 @@ import (
 
 // --- Helper functions ---
 
-func uintPtr(v uint) *uint {
-	return &v
-}
 
 func testLogger() *log.Logger {
 	return log.New(io.Discard, "", 0)
@@ -131,58 +128,6 @@ func TestParsePrometheusResponse_ErrorWithoutType(t *testing.T) {
 	}
 }
 
-// --- Unit tests for extractInstanceID ---
-
-func TestExtractInstanceID(t *testing.T) {
-	tests := []struct {
-		name   string
-		args   map[string]interface{}
-		wantID *uint
-	}{
-		{
-			name:   "valid instance ID",
-			args:   map[string]interface{}{"tool_instance_id": float64(5)},
-			wantID: uintPtr(5),
-		},
-		{
-			name:   "zero instance ID",
-			args:   map[string]interface{}{"tool_instance_id": float64(0)},
-			wantID: nil,
-		},
-		{
-			name:   "negative instance ID",
-			args:   map[string]interface{}{"tool_instance_id": float64(-1)},
-			wantID: nil,
-		},
-		{
-			name:   "missing instance ID",
-			args:   map[string]interface{}{},
-			wantID: nil,
-		},
-		{
-			name:   "wrong type",
-			args:   map[string]interface{}{"tool_instance_id": "5"},
-			wantID: nil,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractInstanceID(tt.args)
-			if tt.wantID == nil {
-				if got != nil {
-					t.Errorf("expected nil, got %d", *got)
-				}
-			} else {
-				if got == nil {
-					t.Errorf("expected %d, got nil", *tt.wantID)
-				} else if *got != *tt.wantID {
-					t.Errorf("expected %d, got %d", *tt.wantID, *got)
-				}
-			}
-		})
-	}
-}
 
 // --- Unit tests for cache keys ---
 
@@ -266,7 +211,7 @@ func TestGetConfig_CacheHit(t *testing.T) {
 	}
 	tool.configCache.Set(configCacheKey("incident-1"), expected)
 
-	config, err := tool.getConfig(context.Background(), "incident-1", nil)
+	config, err := tool.getConfig(context.Background(), "incident-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -278,7 +223,7 @@ func TestGetConfig_CacheHit(t *testing.T) {
 	}
 }
 
-func TestGetConfig_CacheHitByInstanceID(t *testing.T) {
+func TestGetConfig_CacheHitByLogicalName(t *testing.T) {
 	tool := NewVictoriaMetricsTool(testLogger(), nil)
 	defer tool.Stop()
 
@@ -288,10 +233,9 @@ func TestGetConfig_CacheHitByInstanceID(t *testing.T) {
 		Username:   "admin",
 		Password:   "secret",
 	}
-	instanceID := uintPtr(42)
-	tool.configCache.Set(fmt.Sprintf("creds:instance:%d", *instanceID), expected)
+	tool.configCache.Set(fmt.Sprintf("creds:logical:%s:%s", "victoria_metrics", "prod-vm"), expected)
 
-	config, err := tool.getConfig(context.Background(), "incident-1", instanceID)
+	config, err := tool.getConfig(context.Background(), "incident-1", "prod-vm")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1335,9 +1279,9 @@ func TestDoRequest_SSLVerifyDisabled(t *testing.T) {
 	}
 }
 
-// --- cachedRequest with instanceID ---
+// --- cachedRequest with logical name ---
 
-func TestCachedRequest_WithInstanceID(t *testing.T) {
+func TestCachedRequest_WithLogicalName(t *testing.T) {
 	callCount := &atomic.Int32{}
 	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
 		callCount.Add(1)
@@ -1345,21 +1289,14 @@ func TestCachedRequest_WithInstanceID(t *testing.T) {
 		fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`)
 	})
 
-	// Also set config for instance ID
-	config := &VMConfig{
-		URL:        "",
-		AuthMethod: "none",
-		Timeout:    5,
-	}
-	// Get the URL from the cached config
+	// Also set config for logical name
 	cached, _ := tool.configCache.Get(configCacheKey("test-incident"))
-	config = cached.(*VMConfig)
-	instanceID := uintPtr(42)
-	tool.configCache.Set(fmt.Sprintf("creds:instance:%d", *instanceID), config)
+	config := cached.(*VMConfig)
+	tool.configCache.Set(fmt.Sprintf("creds:logical:%s:%s", "victoria_metrics", "prod-vm"), config)
 
 	args := map[string]interface{}{
-		"query":            "up",
-		"tool_instance_id": float64(42),
+		"query":        "up",
+		"logical_name": "prod-vm",
 	}
 
 	// First call
@@ -1375,7 +1312,7 @@ func TestCachedRequest_WithInstanceID(t *testing.T) {
 	}
 
 	if callCount.Load() != 1 {
-		t.Errorf("expected 1 HTTP request with instance ID caching, got %d", callCount.Load())
+		t.Errorf("expected 1 HTTP request with logical name caching, got %d", callCount.Load())
 	}
 }
 
