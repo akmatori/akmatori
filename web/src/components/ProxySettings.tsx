@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Server, MessageSquare, Shield, Terminal, BarChart3 } from 'lucide-react';
+import { Save, Server, MessageSquare, Shield, Terminal, BarChart3, Activity } from 'lucide-react';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorMessage, { SuccessMessage } from './ErrorMessage';
 import { proxySettingsApi } from '../api/client';
@@ -60,6 +60,7 @@ export default function ProxySettings() {
   const [slackEnabled, setSlackEnabled] = useState(true);
   const [zabbixEnabled, setZabbixEnabled] = useState(false);
   const [victoriaMetricsEnabled, setVictoriaMetricsEnabled] = useState(false);
+  const [catchpointEnabled, setCatchpointEnabled] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -75,6 +76,7 @@ export default function ProxySettings() {
       setSlackEnabled(data.services.slack.enabled);
       setZabbixEnabled(data.services.zabbix.enabled);
       setVictoriaMetricsEnabled(data.services.victoria_metrics.enabled);
+      setCatchpointEnabled(data.services.catchpoint.enabled);
       setError(null);
     } catch (err) {
       setError('Failed to load proxy settings');
@@ -97,6 +99,7 @@ export default function ProxySettings() {
           slack: { enabled: slackEnabled },
           zabbix: { enabled: zabbixEnabled },
           victoria_metrics: { enabled: victoriaMetricsEnabled },
+          catchpoint: { enabled: catchpointEnabled },
         },
       };
 
@@ -201,6 +204,15 @@ export default function ProxySettings() {
             supported={true}
             disabled={!hasProxy}
             onChange={setVictoriaMetricsEnabled}
+          />
+          <ServiceToggle
+            name="Catchpoint"
+            description="Digital experience monitoring"
+            icon={Activity}
+            enabled={catchpointEnabled}
+            supported={true}
+            disabled={!hasProxy}
+            onChange={setCatchpointEnabled}
           />
           <ServiceToggle
             name="SSH"
