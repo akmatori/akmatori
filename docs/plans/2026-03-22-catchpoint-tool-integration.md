@@ -94,12 +94,12 @@ Snake_case params in args mapped to camelCase for Catchpoint API. Use `validatio
 **Files:**
 - Modify: `mcp-gateway/internal/tools/schemas.go`
 
-- [ ] Add `"catchpoint": getCatchpointSchema()` to `GetToolSchemas()` map
-- [ ] Implement `getCatchpointSchema()` function (~70 lines) with:
+- [x] Add `"catchpoint": getCatchpointSchema()` to `GetToolSchemas()` map
+- [x] Implement `getCatchpointSchema()` function (~70 lines) with:
   - Settings: `catchpoint_url` (string, default `https://io.catchpoint.com/api`), `catchpoint_api_token` (string, secret, required), `catchpoint_verify_ssl` (bool, advanced, default true), `catchpoint_timeout` (int, advanced, default 30)
   - Functions: 12 entries matching all public methods, with Parameters as comma-separated lists
   - Required: `["catchpoint_api_token"]`
-- [ ] Run `make test-mcp` - must pass before task 6
+- [x] Run `make test-mcp` - must pass before task 6
 
 ### Task 6: Registry integration
 

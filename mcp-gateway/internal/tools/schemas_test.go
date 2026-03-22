@@ -117,10 +117,121 @@ func TestVictoriaMetricsSchema_Defaults(t *testing.T) {
 	}
 }
 
+func TestGetToolSchemas_ContainsCatchpoint(t *testing.T) {
+	schemas := GetToolSchemas()
+
+	if _, ok := schemas["catchpoint"]; !ok {
+		t.Fatal("catchpoint schema not found in GetToolSchemas()")
+	}
+}
+
+func TestGetToolSchema_Catchpoint(t *testing.T) {
+	schema, ok := GetToolSchema("catchpoint")
+	if !ok {
+		t.Fatal("catchpoint schema not found")
+	}
+
+	if schema.Name != "catchpoint" {
+		t.Errorf("expected name 'catchpoint', got %q", schema.Name)
+	}
+
+	if schema.Version != "1.0.0" {
+		t.Errorf("expected version '1.0.0', got %q", schema.Version)
+	}
+}
+
+func TestCatchpointSchema_RequiredFields(t *testing.T) {
+	schema, _ := GetToolSchema("catchpoint")
+
+	if len(schema.SettingsSchema.Required) != 1 || schema.SettingsSchema.Required[0] != "catchpoint_api_token" {
+		t.Errorf("expected required field 'catchpoint_api_token', got %v", schema.SettingsSchema.Required)
+	}
+}
+
+func TestCatchpointSchema_Settings(t *testing.T) {
+	schema, _ := GetToolSchema("catchpoint")
+	props := schema.SettingsSchema.Properties
+
+	expectedFields := []string{"catchpoint_url", "catchpoint_api_token", "catchpoint_verify_ssl", "catchpoint_timeout"}
+	for _, field := range expectedFields {
+		if _, ok := props[field]; !ok {
+			t.Errorf("missing settings field: %s", field)
+		}
+	}
+}
+
+func TestCatchpointSchema_SecretFields(t *testing.T) {
+	schema, _ := GetToolSchema("catchpoint")
+	props := schema.SettingsSchema.Properties
+
+	if !props["catchpoint_api_token"].Secret {
+		t.Error("expected catchpoint_api_token to be marked as secret")
+	}
+}
+
+func TestCatchpointSchema_AdvancedFields(t *testing.T) {
+	schema, _ := GetToolSchema("catchpoint")
+	props := schema.SettingsSchema.Properties
+
+	advancedFields := []string{"catchpoint_verify_ssl", "catchpoint_timeout"}
+	for _, field := range advancedFields {
+		if !props[field].Advanced {
+			t.Errorf("expected %s to be marked as advanced", field)
+		}
+	}
+}
+
+func TestCatchpointSchema_Defaults(t *testing.T) {
+	schema, _ := GetToolSchema("catchpoint")
+	props := schema.SettingsSchema.Properties
+
+	if props["catchpoint_url"].Default != "https://io.catchpoint.com/api" {
+		t.Errorf("expected catchpoint_url default, got %v", props["catchpoint_url"].Default)
+	}
+
+	if props["catchpoint_verify_ssl"].Default != true {
+		t.Errorf("expected catchpoint_verify_ssl default true, got %v", props["catchpoint_verify_ssl"].Default)
+	}
+
+	if props["catchpoint_timeout"].Default != 30 {
+		t.Errorf("expected catchpoint_timeout default 30, got %v", props["catchpoint_timeout"].Default)
+	}
+}
+
+func TestCatchpointSchema_Functions(t *testing.T) {
+	schema, _ := GetToolSchema("catchpoint")
+
+	expectedFunctions := []string{
+		"get_alerts", "get_alert_details", "get_test_performance", "get_test_performance_raw",
+		"get_tests", "get_test_details", "get_test_errors", "get_internet_outages",
+		"get_nodes", "get_node_alerts", "acknowledge_alerts", "run_instant_test",
+	}
+	if len(schema.Functions) != len(expectedFunctions) {
+		t.Fatalf("expected %d functions, got %d", len(expectedFunctions), len(schema.Functions))
+	}
+	for i, name := range expectedFunctions {
+		if schema.Functions[i].Name != name {
+			t.Errorf("expected function[%d] = %q, got %q", i, name, schema.Functions[i].Name)
+		}
+	}
+}
+
+func TestCatchpointSchema_TimeoutBounds(t *testing.T) {
+	schema, _ := GetToolSchema("catchpoint")
+	timeout := schema.SettingsSchema.Properties["catchpoint_timeout"]
+
+	if timeout.Minimum == nil || *timeout.Minimum != 5 {
+		t.Error("expected catchpoint_timeout minimum 5")
+	}
+	if timeout.Maximum == nil || *timeout.Maximum != 300 {
+		t.Error("expected catchpoint_timeout maximum 300")
+	}
+}
+
 func TestGetToolSchemas_AllPresent(t *testing.T) {
 	schemas := GetToolSchemas()
 
-	expected := []string{"ssh", "zabbix", "victoria_metrics"}
+	expected := []string{"ssh", "zabbix", "victoria_metrics", "catchpoint"}
 	for _, name := range expected {
 		if _, ok := schemas[name]; !ok {
 			t.Errorf("missing schema: %s", name)
