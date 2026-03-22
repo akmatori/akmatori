@@ -143,6 +143,7 @@ export interface ProxySettings {
     slack: ProxyServiceConfig;
     zabbix: ProxyServiceConfig;
     victoria_metrics: ProxyServiceConfig;
+    catchpoint: ProxyServiceConfig;
     ssh: ProxyServiceConfig;
   };
 }
@@ -155,6 +156,7 @@ export interface ProxySettingsUpdate {
     slack: { enabled: boolean };
     zabbix: { enabled: boolean };
     victoria_metrics: { enabled: boolean };
+    catchpoint: { enabled: boolean };
   };
 }
 

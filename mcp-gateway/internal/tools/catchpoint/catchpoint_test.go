@@ -1480,3 +1480,27 @@ func TestGetInternetOutages_WithOptionalParams(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestEscapeCSVPathSegment(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"single ID", "123", "123"},
+		{"multiple IDs", "123,456,789", "123,456,789"},
+		{"whitespace trimmed", " 123 , 456 ", "123,456"},
+		{"path traversal escaped", "123/../456", "123%2F..%2F456"},
+		{"special chars escaped", "a b/c", "a%20b%2Fc"},
+		{"empty string", "", ""},
+		{"single comma", ",", ","},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := escapeCSVPathSegment(tt.input)
+			if got != tt.want {
+				t.Errorf("escapeCSVPathSegment(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
