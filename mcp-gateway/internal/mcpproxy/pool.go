@@ -825,6 +825,7 @@ func (c *MCPConnection) sendSSERequest(ctx context.Context, method string, param
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
 
 	// Include MCP session ID if one was established during initialize
 	c.mu.RLock()
@@ -1060,6 +1061,7 @@ func tryMCPInitialize(ctx context.Context, conn *MCPConnection) error {
 		return fmt.Errorf("create initialize request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
 
 	resp, err := conn.httpClient.Do(req)
 	if err != nil {
@@ -1088,6 +1090,7 @@ func tryMCPInitialize(ctx context.Context, conn *MCPConnection) error {
 		return nil // Initialize succeeded; notification failure is non-fatal
 	}
 	notifReq.Header.Set("Content-Type", "application/json")
+	notifReq.Header.Set("Accept", "application/json, text/event-stream")
 	conn.mu.RLock()
 	if conn.sessionID != "" {
 		notifReq.Header.Set("Mcp-Session-Id", conn.sessionID)

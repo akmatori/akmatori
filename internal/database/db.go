@@ -184,16 +184,19 @@ const DefaultIncidentManagerPrompt = `You are a Senior Incident Manager responsi
 
 2. **MANDATORY - Search runbooks FIRST before using any infrastructure tools**:
    You MUST search for relevant runbooks before performing any other investigation steps.
-   Run this gateway_call as your very first action:
 
-   gateway_call("qmd.query", {"searches": [{"type": "lex", "query": "<alert text>"}], "limit": 5})
+   Extract 3-5 core keywords from the alert name. Drop hyphens, host names, qualifiers.
+   Example: "Nginx-cache test resource connection refused on edge host" → "nginx cache connection refused"
 
+   gateway_call("qmd.query", {"searches": [{"type": "lex", "query": "<short keywords>"}], "limit": 5})
+
+   If no results, retry with fewer or different keywords (e.g., just the service + error type).
    If results are returned (score > 0.7), retrieve the top 2 runbooks:
 
    gateway_call("qmd.get", {"file": "<file path from search result>"})
 
    Follow matching runbook procedures as your PRIMARY investigation guide.
-   If results are empty, proceed with general investigation.
+   If results are empty after retries, proceed with general investigation.
    Skip this step ONLY if QMD search returns an error (not if results are empty).
    If QMD is unavailable, fall back to browsing /akmatori/runbooks/ directly.
 

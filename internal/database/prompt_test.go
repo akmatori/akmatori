@@ -39,7 +39,7 @@ func TestDefaultIncidentManagerPrompt_MandatoryRunbookSearch(t *testing.T) {
 		{"mandatory keyword", "MANDATORY"},
 		{"search first instruction", "MANDATORY - Search runbooks FIRST before using any infrastructure tools"},
 		{"must search before other steps", "You MUST search for relevant runbooks before performing any other investigation steps"},
-		{"inline gateway_call example", `gateway_call("qmd.query", {"searches": [{"type": "lex", "query": "<alert text>"}], "limit": 5})`},
+		{"inline gateway_call example", `gateway_call("qmd.query", {"searches": [{"type": "lex", "query": "<short keywords>"}], "limit": 5})`},
 		{"skip only on error", "Skip this step ONLY if QMD search returns an error (not if results are empty)"},
 		{"primary guide", "PRIMARY investigation guide"},
 	}

@@ -130,10 +130,27 @@ func buildSafeEnvironment() []string {
 	return env
 }
 
-// PrependGuidance adds the current time and task framing to a task
+// PrependGuidance adds the current time, task framing, and runbook-first
+// instruction to a task. The runbook search reminder is placed in the user
+// message (not just the system prompt) because models follow user-turn
+// instructions more reliably than long system prompt sections.
 func PrependGuidance(task string) string {
 	currentTime := time.Now().UTC().Format("2006-01-02 15:04:05 UTC")
-	return fmt.Sprintf("Current time: %s\nPlease help with the following incident or request:\n\n%s",
+	return fmt.Sprintf(`Current time: %s
+
+IMPORTANT: Before using any infrastructure tools, you MUST search for relevant runbooks first.
+Use short, simple keywords (3-5 words). Remove hyphens, extra qualifiers, and host names.
+Example: alert "Nginx-cache test resource connection refused on edge host" → search "nginx cache connection refused"
+
+  gateway_call("qmd.query", {"searches": [{"type": "lex", "query": "<short keywords>"}], "limit": 5})
+
+If no results, retry with fewer/different keywords. If results have score > 0.7, retrieve the runbook:
+  gateway_call("qmd.get", {"file": "<path from results>"})
+Follow matching runbook procedures as your PRIMARY investigation guide.
+
+Please help with the following incident or request:
+
+%s`,
 		currentTime, task)
 }
 
