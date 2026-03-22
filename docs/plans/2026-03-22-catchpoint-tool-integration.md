@@ -84,10 +84,10 @@ Snake_case params in args mapped to camelCase for Catchpoint API. Use `validatio
 **Files:**
 - Modify: `mcp-gateway/internal/tools/catchpoint/catchpoint.go`
 
-- [ ] Implement `AcknowledgeAlerts` - PATCH `/v4/tests/alerts` - required: alert_ids, action (acknowledge/assign/drop); optional: assignee. Validate action enum. NOT cached.
-- [ ] Implement `RunInstantTest` - POST `/v4/instanttests/{testId}` - required: test_id. NOT cached.
-- [ ] Write tests verifying: correct HTTP method, required param validation, responses NOT cached, success and error cases
-- [ ] Run `make test-mcp` - must pass before task 5
+- [x] Implement `AcknowledgeAlerts` - PATCH `/v4/tests/alerts` - required: alert_ids, action (acknowledge/assign/drop); optional: assignee. Validate action enum. NOT cached.
+- [x] Implement `RunInstantTest` - POST `/v4/instanttests/{testId}` - required: test_id. NOT cached.
+- [x] Write tests verifying: correct HTTP method, required param validation, responses NOT cached, success and error cases
+- [x] Run `make test-mcp` - must pass before task 5
 
 ### Task 5: Schema definition
 
