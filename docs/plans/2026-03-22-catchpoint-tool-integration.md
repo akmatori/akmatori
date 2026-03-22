@@ -46,15 +46,15 @@ Add a Catchpoint Digital Experience Monitoring integration to the MCP Gateway fo
 **Files:**
 - Create: `mcp-gateway/internal/tools/catchpoint/catchpoint.go`
 
-- [ ] Create package `catchpoint` with CatchpointTool struct (4 fields: logger, configCache, responseCache, rateLimiter)
-- [ ] Define CatchpointConfig struct: URL (default `https://io.catchpoint.com/api`), APIToken, VerifySSL (default true), Timeout (default 30, clamp 5-300), UseProxy, ProxyURL
-- [ ] Implement `NewCatchpointTool(logger, limiter)` constructor with cache initialization and `Stop()` method
-- [ ] Implement `getConfig(ctx, incidentID, logicalName...)` using `database.ResolveToolCredentials` with 5-min config cache
-- [ ] Implement `doRequest(ctx, config, httpMethod, path, queryParams, body)` with: rate limiting first, bearer token auth header, proxy support (explicitly set `transport.Proxy = nil` when not using proxy), TLS verification toggle, `DisableKeepAlives: true`, 5MB response limit
-- [ ] Implement `cachedGet(ctx, incidentID, path, queryParams, ttl, logicalName...)` cache wrapper using SHA256 response cache keys
-- [ ] Implement helper: `extractLogicalName(args)`, `responseCacheKey(path, params)`, `getCachedProxySettings(config)`
-- [ ] Write tests for constructor, Stop, getConfig (with pre-populated configCache), doRequest (auth header, proxy, SSL, 5MB limit, error codes, rate limiting), cachedGet (cache hit/miss verification)
-- [ ] Run `make test-mcp` - must pass before task 3
+- [x] Create package `catchpoint` with CatchpointTool struct (4 fields: logger, configCache, responseCache, rateLimiter)
+- [x] Define CatchpointConfig struct: URL (default `https://io.catchpoint.com/api`), APIToken, VerifySSL (default true), Timeout (default 30, clamp 5-300), UseProxy, ProxyURL
+- [x] Implement `NewCatchpointTool(logger, limiter)` constructor with cache initialization and `Stop()` method
+- [x] Implement `getConfig(ctx, incidentID, logicalName...)` using `database.ResolveToolCredentials` with 5-min config cache
+- [x] Implement `doRequest(ctx, config, httpMethod, path, queryParams, body)` with: rate limiting first, bearer token auth header, proxy support (explicitly set `transport.Proxy = nil` when not using proxy), TLS verification toggle, `DisableKeepAlives: true`, 5MB response limit
+- [x] Implement `cachedGet(ctx, incidentID, path, queryParams, ttl, logicalName...)` cache wrapper using SHA256 response cache keys
+- [x] Implement helper: `extractLogicalName(args)`, `responseCacheKey(path, params)`, `getCachedProxySettings(config)`
+- [x] Write tests for constructor, Stop, getConfig (with pre-populated configCache), doRequest (auth header, proxy, SSL, 5MB limit, error codes, rate limiting), cachedGet (cache hit/miss verification)
+- [x] Run `make test-mcp` - must pass before task 3
 
 ### Task 3: Read-only tool methods (10 methods)
 
