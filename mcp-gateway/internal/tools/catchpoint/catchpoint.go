@@ -262,7 +262,11 @@ func (t *CatchpointTool) doRequest(ctx context.Context, config *CatchpointConfig
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(respBody))
+		errMsg := string(respBody)
+		if len(errMsg) > 500 {
+			errMsg = errMsg[:500] + "... (truncated)"
+		}
+		return nil, fmt.Errorf("HTTP error %d: %s", resp.StatusCode, errMsg)
 	}
 
 	return respBody, nil
@@ -372,7 +376,7 @@ func (t *CatchpointTool) GetAlertDetails(ctx context.Context, incidentID string,
 		return "", fmt.Errorf("alert_ids is required%s", validation.SuggestParam("alert_ids", args))
 	}
 
-	path := fmt.Sprintf("/v4/tests/alerts/%s", alertIDs)
+	path := fmt.Sprintf("/v4/tests/alerts/%s", url.PathEscape(alertIDs))
 
 	body, err := t.cachedGet(ctx, incidentID, path, nil, AlertsCacheTTL, logicalName)
 	if err != nil {
@@ -469,7 +473,7 @@ func (t *CatchpointTool) GetTestDetails(ctx context.Context, incidentID string, 
 		return "", fmt.Errorf("test_ids is required%s", validation.SuggestParam("test_ids", args))
 	}
 
-	path := fmt.Sprintf("/v4/tests/%s", testIDs)
+	path := fmt.Sprintf("/v4/tests/%s", url.PathEscape(testIDs))
 
 	body, err := t.cachedGet(ctx, incidentID, path, nil, InventoryCacheTTL, logicalName)
 	if err != nil {
