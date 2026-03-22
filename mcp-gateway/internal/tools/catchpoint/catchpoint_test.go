@@ -967,6 +967,22 @@ func TestAcknowledgeAlerts_InvalidAction(t *testing.T) {
 	}
 }
 
+func TestAcknowledgeAlerts_AssignWithoutAssignee(t *testing.T) {
+	tool := NewCatchpointTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.AcknowledgeAlerts(context.Background(), "test", map[string]interface{}{
+		"alert_ids": "123",
+		"action":    "assign",
+	})
+	if err == nil {
+		t.Fatal("expected error for assign without assignee")
+	}
+	if !strings.Contains(err.Error(), "assignee is required") {
+		t.Errorf("expected 'assignee is required', got %q", err.Error())
+	}
+}
+
 func TestAcknowledgeAlerts_WithAssignee(t *testing.T) {
 	var receivedBody string
 	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
@@ -1231,10 +1247,14 @@ func TestAcknowledgeAlerts_ValidActions(t *testing.T) {
 				fmt.Fprint(w, `{"success": true}`)
 			})
 
-			_, err := tool.AcknowledgeAlerts(context.Background(), "test-incident", map[string]interface{}{
+			args := map[string]interface{}{
 				"alert_ids": "1",
 				"action":    action,
-			})
+			}
+			if action == "assign" {
+				args["assignee"] = "oncall@example.com"
+			}
+			_, err := tool.AcknowledgeAlerts(context.Background(), "test-incident", args)
 			if err != nil {
 				t.Fatalf("unexpected error for action %q: %v", action, err)
 			}
