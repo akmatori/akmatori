@@ -1460,6 +1460,3 @@ func TestGetInternetOutages_WithOptionalParams(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
-
-// Verify unused import doesn't leak into test file
-var _ = time.Second // ensure time is used

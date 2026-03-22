@@ -1,6 +1,7 @@
 package catchpoint
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -371,7 +372,7 @@ func (t *CatchpointTool) GetAlertDetails(ctx context.Context, incidentID string,
 		return "", fmt.Errorf("alert_ids is required%s", validation.SuggestParam("alert_ids", args))
 	}
 
-	path := fmt.Sprintf("/v4/tests/alerts/%s", url.PathEscape(alertIDs))
+	path := fmt.Sprintf("/v4/tests/alerts/%s", alertIDs)
 
 	body, err := t.cachedGet(ctx, incidentID, path, nil, AlertsCacheTTL, logicalName)
 	if err != nil {
@@ -468,7 +469,7 @@ func (t *CatchpointTool) GetTestDetails(ctx context.Context, incidentID string, 
 		return "", fmt.Errorf("test_ids is required%s", validation.SuggestParam("test_ids", args))
 	}
 
-	path := fmt.Sprintf("/v4/tests/%s", url.PathEscape(testIDs))
+	path := fmt.Sprintf("/v4/tests/%s", testIDs)
 
 	body, err := t.cachedGet(ctx, incidentID, path, nil, InventoryCacheTTL, logicalName)
 	if err != nil {
@@ -590,7 +591,7 @@ func (t *CatchpointTool) AcknowledgeAlerts(ctx context.Context, incidentID strin
 		return "", err
 	}
 
-	respBody, err := t.doRequest(ctx, config, http.MethodPatch, "/v4/tests/alerts", nil, strings.NewReader(string(bodyJSON)))
+	respBody, err := t.doRequest(ctx, config, http.MethodPatch, "/v4/tests/alerts", nil, bytes.NewReader(bodyJSON))
 	if err != nil {
 		return "", err
 	}
