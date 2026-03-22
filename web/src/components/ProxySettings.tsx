@@ -76,7 +76,7 @@ export default function ProxySettings() {
       setSlackEnabled(data.services.slack.enabled);
       setZabbixEnabled(data.services.zabbix.enabled);
       setVictoriaMetricsEnabled(data.services.victoria_metrics.enabled);
-      setCatchpointEnabled(data.services.catchpoint.enabled);
+      setCatchpointEnabled(data.services.catchpoint?.enabled ?? false);
       setError(null);
     } catch (err) {
       setError('Failed to load proxy settings');

@@ -199,6 +199,11 @@ func (t *CatchpointTool) getCachedProxySettings(ctx context.Context) *database.P
 
 // doRequest performs an HTTP request to Catchpoint API with rate limiting
 func (t *CatchpointTool) doRequest(ctx context.Context, config *CatchpointConfig, method, path string, queryParams url.Values, body io.Reader) ([]byte, error) {
+	// Validate token before consuming rate limit budget
+	if config.APIToken == "" {
+		return nil, fmt.Errorf("Catchpoint API token is required but not configured")
+	}
+
 	// Apply rate limiting
 	if t.rateLimiter != nil {
 		if err := t.rateLimiter.Wait(ctx); err != nil {
@@ -249,10 +254,7 @@ func (t *CatchpointTool) doRequest(ctx context.Context, config *CatchpointConfig
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Catchpoint uses static JWT bearer token auth
-	if config.APIToken == "" {
-		return nil, fmt.Errorf("Catchpoint API token is required but not configured")
-	}
+	// Catchpoint uses static JWT bearer token auth (token validated at function entry)
 	httpReq.Header.Set("Authorization", "Bearer "+config.APIToken)
 
 	if body != nil {
@@ -596,8 +598,12 @@ func (t *CatchpointTool) AcknowledgeAlerts(ctx context.Context, incidentID strin
 	}
 
 	// Build request body — alertIds must be a JSON array of strings
+	ids := strings.Split(alertIDs, ",")
+	for i := range ids {
+		ids[i] = strings.TrimSpace(ids[i])
+	}
 	reqBody := map[string]interface{}{
-		"alertIds": strings.Split(alertIDs, ","),
+		"alertIds": ids,
 		"action":   action,
 	}
 	if assignee != "" {
