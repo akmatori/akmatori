@@ -586,13 +586,19 @@ func (t *CatchpointTool) AcknowledgeAlerts(ctx context.Context, incidentID strin
 		return "", fmt.Errorf("invalid action '%s': must be one of acknowledge, assign, drop", action)
 	}
 
+	// Validate assignee is provided for assign action
+	assignee, _ := args["assignee"].(string)
+	if action == "assign" && assignee == "" {
+		return "", fmt.Errorf("assignee is required when action is 'assign'")
+	}
+
 	// Build request body
 	reqBody := map[string]interface{}{
 		"alertIds": alertIDs,
 		"action":   action,
 	}
-	if v, ok := args["assignee"].(string); ok && v != "" {
-		reqBody["assignee"] = v
+	if assignee != "" {
+		reqBody["assignee"] = assignee
 	}
 
 	bodyJSON, err := json.Marshal(reqBody)
