@@ -37,9 +37,9 @@ Add a Catchpoint Digital Experience Monitoring integration to the MCP Gateway fo
 - Modify: `mcp-gateway/internal/database/db.go`
 - Modify: `internal/services/tool_service.go`
 
-- [ ] Add `CatchpointEnabled bool` field to `ProxySettings` struct in db.go (around line 304, following VictoriaMetricsEnabled pattern): `CatchpointEnabled bool \`gorm:"default:false" json:"catchpoint_enabled"\``
-- [ ] Add catchpoint to `EnsureToolTypes()` slice in tool_service.go (around line 154): `{Name: "catchpoint", Description: "Catchpoint Digital Experience Monitoring integration"}`
-- [ ] Run `make test-mcp` and `make test` - must pass before task 2
+- [x] Add `CatchpointEnabled bool` field to `ProxySettings` struct in db.go (around line 304, following VictoriaMetricsEnabled pattern): `CatchpointEnabled bool \`gorm:"default:false" json:"catchpoint_enabled"\``
+- [x] Add catchpoint to `EnsureToolTypes()` slice in tool_service.go (around line 154): `{Name: "catchpoint", Description: "Catchpoint Digital Experience Monitoring integration"}`
+- [x] Run `make test-mcp` and `make test` - must pass before task 2
 
 ### Task 2: Core tool implementation - struct, config, HTTP client
 
