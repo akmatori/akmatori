@@ -1,6 +1,7 @@
 package services
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -339,10 +340,11 @@ func TestAggregationService_BuildCorrelatorInput(t *testing.T) {
 
 func TestAggregationService_ParseCorrelatorOutput(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		expected CorrelatorOutput
-		wantErr  bool
+		name        string
+		input       string
+		expected    CorrelatorOutput
+		wantErr     bool
+		errContains string
 	}{
 		{
 			name:  "valid attach decision",
@@ -364,9 +366,32 @@ func TestAggregationService_ParseCorrelatorOutput(t *testing.T) {
 			},
 		},
 		{
-			name:    "invalid JSON",
-			input:   `not json`,
-			wantErr: true,
+			name:  "extracts JSON from wrapped text",
+			input: "correlator reply:\n```json\n{\"decision\": \"attach\", \"incident_uuid\": \"inc-99\", \"confidence\": 0.91, \"reason\": \"Shared host and service\"}\n```",
+			expected: CorrelatorOutput{
+				Decision:     "attach",
+				IncidentUUID: "inc-99",
+				Confidence:   0.91,
+				Reason:       "Shared host and service",
+			},
+		},
+		{
+			name:        "rejects invalid decision",
+			input:       `{"decision": "merge", "confidence": 0.75, "reason": "Different host"}`,
+			wantErr:     true,
+			errContains: "invalid decision: merge",
+		},
+		{
+			name:        "attach decision requires incident UUID",
+			input:       `{"decision": "attach", "confidence": 0.88, "reason": "Same host"}`,
+			wantErr:     true,
+			errContains: "attach decision requires incident_uuid",
+		},
+		{
+			name:        "invalid JSON",
+			input:       `not json`,
+			wantErr:     true,
+			errContains: "failed to parse correlator output",
 		},
 	}
 
@@ -375,7 +400,10 @@ func TestAggregationService_ParseCorrelatorOutput(t *testing.T) {
 			output, err := ParseCorrelatorOutput(tt.input)
 			if tt.wantErr {
 				if err == nil {
-					t.Error("expected error, got nil")
+					t.Fatalf("expected error containing %q, got nil", tt.errContains)
+				}
+				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Fatalf("expected error containing %q, got %q", tt.errContains, err.Error())
 				}
 				return
 			}
@@ -383,10 +411,16 @@ func TestAggregationService_ParseCorrelatorOutput(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if output.Decision != tt.expected.Decision {
-				t.Errorf("expected Decision '%s', got '%s'", tt.expected.Decision, output.Decision)
+				t.Errorf("Decision = %q, want %q", output.Decision, tt.expected.Decision)
 			}
 			if output.IncidentUUID != tt.expected.IncidentUUID {
-				t.Errorf("expected IncidentUUID '%s', got '%s'", tt.expected.IncidentUUID, output.IncidentUUID)
+				t.Errorf("IncidentUUID = %q, want %q", output.IncidentUUID, tt.expected.IncidentUUID)
+			}
+			if output.Confidence != tt.expected.Confidence {
+				t.Errorf("Confidence = %v, want %v", output.Confidence, tt.expected.Confidence)
+			}
+			if output.Reason != tt.expected.Reason {
+				t.Errorf("Reason = %q, want %q", output.Reason, tt.expected.Reason)
 			}
 		})
 	}
