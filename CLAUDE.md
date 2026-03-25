@@ -249,6 +249,7 @@ fmt.Println(parsed.CleanOutput)  // Structured blocks stripped
 | AlertService | `alert_service.go` | Alert processing and normalization |
 | TitleGenerator | `title_generator.go` | AI-powered incident title generation |
 | RunbookService | `runbook_service.go` | Runbook CRUD and file sync |
+| RetentionService | `retention_service.go` | Automated incident data cleanup (expired + orphaned) |
 
 ### Service Interfaces (`internal/services/interfaces.go`)
 

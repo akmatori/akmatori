@@ -95,6 +95,9 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	// Proxy settings
 	mux.HandleFunc("/api/settings/proxy", h.handleProxySettings)
 
+	// Retention settings
+	mux.HandleFunc("/api/settings/retention", h.handleRetentionSettings)
+
 	// Context files
 	mux.HandleFunc("/api/context", h.handleContext)
 	mux.HandleFunc("/api/context/", h.handleContextByID)

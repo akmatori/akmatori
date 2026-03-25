@@ -129,6 +129,13 @@ type UpdateGeneralSettingsRequest struct {
 	BaseURL *string `json:"base_url"`
 }
 
+// UpdateRetentionSettingsRequest is the request body for PUT /api/settings/retention.
+type UpdateRetentionSettingsRequest struct {
+	Enabled              *bool `json:"enabled"`
+	RetentionDays        *int  `json:"retention_days"`
+	CleanupIntervalHours *int  `json:"cleanup_interval_hours"`
+}
+
 // ========== Alert Source Types ==========
 
 // CreateAlertSourceRequest is the request body for POST /api/alert-sources.
