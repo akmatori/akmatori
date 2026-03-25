@@ -78,7 +78,7 @@ func (s *RetentionService) cleanupExpiredIncidents(retentionDays int, result *Cl
 	var incidents []database.Incident
 	err := s.db.Select("id, uuid, working_dir, status, completed_at").
 		Where("status IN ? AND completed_at < ?",
-			[]database.IncidentStatus{database.IncidentStatusCompleted, database.IncidentStatusFailed},
+			[]database.IncidentStatus{database.IncidentStatusCompleted, database.IncidentStatusFailed, database.IncidentStatusDiagnosed},
 			cutoff,
 		).Find(&incidents).Error
 	if err != nil {
@@ -86,39 +86,15 @@ func (s *RetentionService) cleanupExpiredIncidents(retentionDays int, result *Cl
 		return
 	}
 
-	for _, incident := range incidents {
-		// Delete working directory from disk
-		dirRemoved := true
-		if incident.WorkingDir != "" {
-			// Validate that WorkingDir is under dataDir to prevent path traversal
-			absWorkDir, err := filepath.Abs(incident.WorkingDir)
-			if err != nil {
-				result.Errors = append(result.Errors, fmt.Errorf("resolve dir %s: %w", incident.UUID, err))
-				continue
-			}
-			absDataDir, _ := filepath.Abs(s.dataDir)
-			if !strings.HasPrefix(absWorkDir, absDataDir+string(os.PathSeparator)) {
-				result.Errors = append(result.Errors, fmt.Errorf("working dir %q for %s is outside data dir, skipping", incident.WorkingDir, incident.UUID))
-				continue
-			}
+	// Resolve dataDir once (with symlinks resolved) for path traversal checks
+	absDataDir, err := filepath.EvalSymlinks(s.dataDir)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Errorf("resolve data dir: %w", err))
+		return
+	}
 
-			bytesFreed, err := dirSize(incident.WorkingDir)
-			if err == nil {
-				if err := os.RemoveAll(incident.WorkingDir); err != nil {
-					slog.Error("failed to remove incident directory", "uuid", incident.UUID, "dir", incident.WorkingDir, "error", err)
-					result.Errors = append(result.Errors, fmt.Errorf("remove dir %s: %w", incident.UUID, err))
-					dirRemoved = false
-				} else {
-					result.ExpiredDirsDeleted++
-					result.ExpiredBytesFreed += bytesFreed
-				}
-			} else if os.IsNotExist(err) {
-				// Directory already gone, that's fine
-			} else {
-				result.Errors = append(result.Errors, fmt.Errorf("stat dir %s: %w", incident.UUID, err))
-				dirRemoved = false
-			}
-		}
+	for _, incident := range incidents {
+		dirRemoved := s.removeIncidentDir(incident, absDataDir, result)
 
 		// Only delete the DB record if the directory was successfully removed (or didn't exist)
 		if !dirRemoved {
@@ -131,6 +107,47 @@ func (s *RetentionService) cleanupExpiredIncidents(retentionDays int, result *Cl
 			result.ExpiredIncidentsDeleted++
 		}
 	}
+}
+
+// removeIncidentDir removes an incident's working directory from disk.
+// Returns true if the directory was successfully removed or didn't exist.
+func (s *RetentionService) removeIncidentDir(incident database.Incident, absDataDir string, result *CleanupResult) bool {
+	if incident.WorkingDir == "" {
+		return true
+	}
+
+	// Resolve symlinks to prevent path traversal via symlinked WorkingDir
+	absWorkDir, err := filepath.EvalSymlinks(incident.WorkingDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true // Directory already gone
+		}
+		result.Errors = append(result.Errors, fmt.Errorf("resolve dir %s: %w", incident.UUID, err))
+		return false
+	}
+	if !strings.HasPrefix(absWorkDir, absDataDir+string(os.PathSeparator)) {
+		result.Errors = append(result.Errors, fmt.Errorf("working dir %q for %s is outside data dir, skipping", incident.WorkingDir, incident.UUID))
+		return false
+	}
+
+	bytesFreed, err := dirSize(absWorkDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true // Directory already gone
+		}
+		result.Errors = append(result.Errors, fmt.Errorf("stat dir %s: %w", incident.UUID, err))
+		return false
+	}
+
+	if err := os.RemoveAll(absWorkDir); err != nil {
+		slog.Error("failed to remove incident directory", "uuid", incident.UUID, "dir", absWorkDir, "error", err)
+		result.Errors = append(result.Errors, fmt.Errorf("remove dir %s: %w", incident.UUID, err))
+		return false
+	}
+
+	result.ExpiredDirsDeleted++
+	result.ExpiredBytesFreed += bytesFreed
+	return true
 }
 
 // cleanupOrphanedDirectories removes directories in dataDir with no matching incident record.
