@@ -210,3 +210,17 @@ func (a *APIKeySettings) IsActive() bool {
 func (APIKeySettings) TableName() string {
 	return "api_key_settings"
 }
+
+// RetentionSettings stores incident data retention policy configuration (singleton)
+type RetentionSettings struct {
+	ID                   uint      `gorm:"primaryKey" json:"id"`
+	Enabled              bool      `gorm:"default:true" json:"enabled"`
+	RetentionDays        int       `gorm:"default:90" json:"retention_days"`
+	CleanupIntervalHours int       `gorm:"default:6" json:"cleanup_interval_hours"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+}
+
+func (RetentionSettings) TableName() string {
+	return "retention_settings"
+}

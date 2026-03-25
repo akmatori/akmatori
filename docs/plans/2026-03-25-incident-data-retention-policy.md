@@ -38,11 +38,11 @@ Add a background cleanup goroutine to the API server that periodically purges ol
 - Modify: `internal/database/models_settings.go`
 - Modify: `internal/database/db.go`
 
-- [ ] Add `RetentionSettings` model to `models_settings.go` with fields: `ID`, `Enabled` (default: true), `RetentionDays` (default: 90), `CleanupIntervalHours` (default: 6), `CreatedAt`, `UpdatedAt`
-- [ ] Add `RetentionSettings` to AutoMigrate list in `db.go`
-- [ ] Add `GetOrCreateRetentionSettings()` and `UpdateRetentionSettings()` functions in `db.go` following the GeneralSettings pattern
-- [ ] Write tests for the new database functions
-- [ ] Run `make test` - must pass before task 2
+- [x] Add `RetentionSettings` model to `models_settings.go` with fields: `ID`, `Enabled` (default: true), `RetentionDays` (default: 90), `CleanupIntervalHours` (default: 6), `CreatedAt`, `UpdatedAt`
+- [x] Add `RetentionSettings` to AutoMigrate list in `db.go`
+- [x] Add `GetOrCreateRetentionSettings()` and `UpdateRetentionSettings()` functions in `db.go` following the GeneralSettings pattern
+- [x] Write tests for the new database functions
+- [x] Run `make test` - must pass before task 2
 
 ### Task 2: Create retention cleanup service
 

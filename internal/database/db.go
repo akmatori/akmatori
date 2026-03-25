@@ -93,6 +93,7 @@ func AutoMigrate() error {
 		&Runbook{},
 		&HTTPConnector{},
 		&MCPServerConfig{},
+		&RetentionSettings{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
@@ -406,6 +407,35 @@ func GetOrCreateGeneralSettings() (*GeneralSettings, error) {
 
 // UpdateGeneralSettings updates general settings in the database
 func UpdateGeneralSettings(settings *GeneralSettings) error {
+	return DB.Save(settings).Error
+}
+
+// GetOrCreateRetentionSettings retrieves or creates retention settings (singleton)
+func GetOrCreateRetentionSettings() (*RetentionSettings, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+	var settings RetentionSettings
+	err := DB.First(&settings).Error
+	if err == gorm.ErrRecordNotFound {
+		settings = RetentionSettings{
+			Enabled:              true,
+			RetentionDays:        90,
+			CleanupIntervalHours: 6,
+		}
+		if err := DB.Create(&settings).Error; err != nil {
+			return nil, err
+		}
+		return &settings, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &settings, nil
+}
+
+// UpdateRetentionSettings updates retention settings in the database
+func UpdateRetentionSettings(settings *RetentionSettings) error {
 	return DB.Save(settings).Error
 }
 
