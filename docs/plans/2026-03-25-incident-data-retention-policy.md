@@ -86,10 +86,10 @@ Add a background cleanup goroutine to the API server that periodically purges ol
 **Files:**
 - Modify: `web/src/` (settings page component - identify exact file during implementation)
 
-- [ ] Add "Data Retention" section to the settings page
-- [ ] Include toggle for enabled/disabled, input for retention days, cleanup interval
-- [ ] Wire up to GET/PUT `/api/settings/retention` endpoints
-- [ ] Verify UI renders correctly in browser
+- [x] Add "Data Retention" section to the settings page
+- [x] Include toggle for enabled/disabled, input for retention days, cleanup interval
+- [x] Wire up to GET/PUT `/api/settings/retention` endpoints
+- [x] Verify UI renders correctly in browser
 
 ### Task 6: Verify acceptance criteria
 

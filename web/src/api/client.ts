@@ -11,6 +11,8 @@ import type {
   ProxySettingsUpdate,
   GeneralSettings,
   GeneralSettingsUpdate,
+  RetentionSettings,
+  RetentionSettingsUpdate,
   ContextFile,
   ValidateReferencesResponse,
   CreateIncidentRequest,
@@ -246,6 +248,17 @@ export const proxySettingsApi = {
 
   update: (settings: ProxySettingsUpdate) =>
     fetchApi<ProxySettings>('/api/settings/proxy', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    }),
+};
+
+// Retention Settings API
+export const retentionSettingsApi = {
+  get: () => fetchApi<RetentionSettings>('/api/settings/retention'),
+
+  update: (settings: RetentionSettingsUpdate) =>
+    fetchApi<RetentionSettings>('/api/settings/retention', {
       method: 'PUT',
       body: JSON.stringify(settings),
     }),
