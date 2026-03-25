@@ -100,5 +100,5 @@ Add a background cleanup goroutine to the API server that periodically purges ol
 
 ### Task 7: Update documentation
 
-- [ ] Update CLAUDE.md if internal patterns changed (add RetentionService to services table)
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update CLAUDE.md if internal patterns changed (add RetentionService to services table)
+- [x] Move this plan to `docs/plans/completed/`
