@@ -296,6 +296,22 @@ export interface SSHKeyUpdateRequest {
   is_default?: boolean;
 }
 
+// Retention Settings
+export interface RetentionSettings {
+  id: number;
+  enabled: boolean;
+  retention_days: number;
+  cleanup_interval_hours: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RetentionSettingsUpdate {
+  enabled?: boolean;
+  retention_days?: number;
+  cleanup_interval_hours?: number;
+}
+
 // General Settings
 export interface GeneralSettings {
   id: number;

@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { MessageSquare, Cpu, Bell, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, Globe, Settings2 } from 'lucide-react';
+import { MessageSquare, Cpu, Bell, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, Globe, Settings2, Trash2 } from 'lucide-react';
 import AlertSourcesManager from '../components/AlertSourcesManager';
 import ProxySettings from '../components/ProxySettings';
 import LLMSettingsSection from '../components/settings/LLMSettingsSection';
 import SlackSettingsSection from '../components/settings/SlackSettingsSection';
 import GeneralSettingsSection from '../components/settings/GeneralSettingsSection';
+import RetentionSettingsSection from '../components/settings/RetentionSettingsSection';
 
 // Collapsible Section Component
 function SettingsSection({
@@ -75,6 +76,7 @@ export default function Settings() {
   const [llmStatus, setLlmStatus] = useState<'configured' | 'not-configured'>('not-configured');
   const [slackStatus, setSlackStatus] = useState<'configured' | 'not-configured' | 'disabled' | undefined>();
   const [generalStatus, setGeneralStatus] = useState<'configured' | undefined>();
+  const [retentionStatus, setRetentionStatus] = useState<'configured' | 'disabled' | undefined>();
 
   return (
     <div className="animate-fade-in max-w-3xl mx-auto">
@@ -127,6 +129,16 @@ export default function Settings() {
           defaultExpanded={false}
         >
           <ProxySettings />
+        </SettingsSection>
+
+        {/* Data Retention */}
+        <SettingsSection
+          title="Data Retention"
+          description="Automatic cleanup of old incident data"
+          icon={Trash2}
+          status={retentionStatus}
+        >
+          <RetentionSettingsSection onStatusChange={setRetentionStatus} />
         </SettingsSection>
 
         {/* Alert Sources Section */}
