@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -243,10 +246,10 @@ func TestHandleMessage_ThreadReplyBotMessage(t *testing.T) {
 		"C_ALERT": {},
 	})
 	event := &slackevents.MessageEvent{
-		Channel:        "C_ALERT",
-		SubType:        "bot_message",
-		BotID:          "B_ZABBIX",
-		TimeStamp:      "1707000002.000200",
+		Channel:         "C_ALERT",
+		SubType:         "bot_message",
+		BotID:           "B_ZABBIX",
+		TimeStamp:       "1707000002.000200",
 		ThreadTimeStamp: "1707000001.000100",
 	}
 	if got := classifyMessage(h, event); got != "bot_thread_alert" {
@@ -259,9 +262,9 @@ func TestHandleMessage_ThreadReplyBotByBotIDOnly(t *testing.T) {
 		"C_ALERT": {},
 	})
 	event := &slackevents.MessageEvent{
-		Channel:        "C_ALERT",
-		BotID:          "B_ZABBIX",
-		TimeStamp:      "1707000002.000200",
+		Channel:         "C_ALERT",
+		BotID:           "B_ZABBIX",
+		TimeStamp:       "1707000002.000200",
 		ThreadTimeStamp: "1707000001.000100",
 	}
 	if got := classifyMessage(h, event); got != "bot_thread_alert" {
@@ -274,10 +277,10 @@ func TestHandleMessage_ThreadReplyHumanMention(t *testing.T) {
 		"C_ALERT": {},
 	})
 	event := &slackevents.MessageEvent{
-		Channel:        "C_ALERT",
-		User:           "U_HUMAN",
-		Text:           "<@U_BOT> please investigate this",
-		TimeStamp:      "1707000003.000300",
+		Channel:         "C_ALERT",
+		User:            "U_HUMAN",
+		Text:            "<@U_BOT> please investigate this",
+		TimeStamp:       "1707000003.000300",
 		ThreadTimeStamp: "1707000001.000100",
 	}
 	if got := classifyMessage(h, event); got != "human_mention_thread" {
@@ -290,10 +293,10 @@ func TestHandleMessage_ThreadReplyHumanNoMention(t *testing.T) {
 		"C_ALERT": {},
 	})
 	event := &slackevents.MessageEvent{
-		Channel:        "C_ALERT",
-		User:           "U_HUMAN",
-		Text:           "I'll look into this manually",
-		TimeStamp:      "1707000003.000300",
+		Channel:         "C_ALERT",
+		User:            "U_HUMAN",
+		Text:            "I'll look into this manually",
+		TimeStamp:       "1707000003.000300",
 		ThreadTimeStamp: "1707000001.000100",
 	}
 	if got := classifyMessage(h, event); got != "ignore_thread" {
@@ -337,8 +340,8 @@ func TestHandleAlertChannelMessage_ThreadTSResolution_TopLevel(t *testing.T) {
 func TestHandleAlertChannelMessage_ThreadTSResolution_ThreadReply(t *testing.T) {
 	// For thread replies, threadTS should be the parent/root TS
 	event := &slackevents.MessageEvent{
-		Channel:        "C_ALERT",
-		TimeStamp:      "1707000002.000200",
+		Channel:         "C_ALERT",
+		TimeStamp:       "1707000002.000200",
 		ThreadTimeStamp: "1707000001.000100",
 	}
 
@@ -380,6 +383,124 @@ func TestDedup_DifferentKeysAreIndependent(t *testing.T) {
 
 	if _, loaded := h.processedMsgs.LoadOrStore(key2, struct{}{}); loaded {
 		t.Error("different key should not be marked as duplicate")
+	}
+}
+
+func TestExtractFullMessageText_UsesHistoryForTopLevelAttachmentOnlyMessage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/conversations.history" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		if got := r.Form.Get("channel"); got != "C_ALERT" {
+			t.Fatalf("channel = %q, want %q", got, "C_ALERT")
+		}
+		if got := r.Form.Get("latest"); got != "1707000001.000100" {
+			t.Fatalf("latest = %q, want event ts", got)
+		}
+		if got := r.Form.Get("oldest"); got != "1707000001.000100" {
+			t.Fatalf("oldest = %q, want event ts", got)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true,
+			"messages": []slack.Message{{
+				Msg: slack.Msg{
+					Timestamp: "1707000001.000100",
+					Attachments: []slack.Attachment{{
+						Title: "PROBLEM: Disk full",
+						Text:  "/var is 98% full",
+					}},
+				},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	h := &SlackHandler{client: slack.New("test-token", slack.OptionAPIURL(server.URL+"/"))}
+	event := &slackevents.MessageEvent{Channel: "C_ALERT", TimeStamp: "1707000001.000100"}
+
+	result := h.extractFullMessageText(event)
+	if !contains(result, "PROBLEM: Disk full") {
+		t.Fatalf("expected attachment title in result, got: %q", result)
+	}
+	if !contains(result, "/var is 98% full") {
+		t.Fatalf("expected attachment text in result, got: %q", result)
+	}
+}
+
+func TestExtractFullMessageText_UsesRepliesForThreadReplyAndSelectsExactTimestamp(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/conversations.replies" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		if got := r.Form.Get("channel"); got != "C_ALERT" {
+			t.Fatalf("channel = %q, want %q", got, "C_ALERT")
+		}
+		if got := r.Form.Get("ts"); got != "1707000001.000100" {
+			t.Fatalf("thread root ts = %q, want %q", got, "1707000001.000100")
+		}
+		if got := r.Form.Get("latest"); got != "1707000002.000200" {
+			t.Fatalf("latest = %q, want reply ts", got)
+		}
+		if got := r.Form.Get("oldest"); got != "1707000002.000200" {
+			t.Fatalf("oldest = %q, want reply ts", got)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true,
+			"messages": []slack.Message{
+				{Msg: slack.Msg{Timestamp: "1707000001.000100", Text: "root"}},
+				{Msg: slack.Msg{Timestamp: "1707000002.000200", Text: "exact reply text"}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	h := &SlackHandler{client: slack.New("test-token", slack.OptionAPIURL(server.URL+"/"))}
+	event := &slackevents.MessageEvent{
+		Channel:         "C_ALERT",
+		TimeStamp:       "1707000002.000200",
+		ThreadTimeStamp: "1707000001.000100",
+		Text:            "",
+	}
+
+	result := h.extractFullMessageText(event)
+	if result != "exact reply text" {
+		t.Fatalf("got %q, want exact reply text", result)
+	}
+}
+
+func TestExtractFullMessageText_RepliesFallbackToLastMessageWhenTimestampMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true,
+			"messages": []slack.Message{
+				{Msg: slack.Msg{Timestamp: "1707000001.000100", Text: "root"}},
+				{Msg: slack.Msg{Timestamp: "1707000001.000150", Text: "fallback reply text"}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	h := &SlackHandler{client: slack.New("test-token", slack.OptionAPIURL(server.URL+"/"))}
+	event := &slackevents.MessageEvent{
+		Channel:         "C_ALERT",
+		TimeStamp:       "1707000002.000200",
+		ThreadTimeStamp: "1707000001.000100",
+	}
+
+	result := h.extractFullMessageText(event)
+	if result != "fallback reply text" {
+		t.Fatalf("got %q, want fallback reply text", result)
 	}
 }
 
