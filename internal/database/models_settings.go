@@ -224,3 +224,12 @@ type RetentionSettings struct {
 func (RetentionSettings) TableName() string {
 	return "retention_settings"
 }
+
+// DefaultRetentionSettings returns the default retention settings values.
+func DefaultRetentionSettings() *RetentionSettings {
+	return &RetentionSettings{
+		Enabled:              true,
+		RetentionDays:        90,
+		CleanupIntervalHours: 6,
+	}
+}

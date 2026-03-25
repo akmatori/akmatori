@@ -27,7 +27,13 @@ func setupRetentionTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("failed to migrate test database: %v", err)
 	}
 
+	// Clean tables to prevent data leaking between tests
+	db.Exec("DELETE FROM incidents")
+	db.Exec("DELETE FROM retention_settings")
+
+	origDB := database.DB
 	database.DB = db
+	t.Cleanup(func() { database.DB = origDB })
 	return db
 }
 
@@ -261,6 +267,12 @@ func TestRunCleanup_MissingWorkingDir(t *testing.T) {
 	// DB record should still be deleted even if dir doesn't exist
 	if result.ExpiredIncidentsDeleted != 1 {
 		t.Errorf("expected 1 expired incident deleted, got %d", result.ExpiredIncidentsDeleted)
+	}
+	if result.ExpiredDirsDeleted != 0 {
+		t.Errorf("expected 0 expired dirs deleted (dir didn't exist), got %d", result.ExpiredDirsDeleted)
+	}
+	if len(result.Errors) != 0 {
+		t.Errorf("expected 0 errors, got %d: %v", len(result.Errors), result.Errors)
 	}
 }
 

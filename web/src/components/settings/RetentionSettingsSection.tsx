@@ -4,14 +4,12 @@ import LoadingSpinner from '../LoadingSpinner';
 import ErrorMessage from '../ErrorMessage';
 import { SuccessMessage } from '../ErrorMessage';
 import { retentionSettingsApi } from '../../api/client';
-import type { RetentionSettings } from '../../types';
 
 interface RetentionSettingsSectionProps {
   onStatusChange?: (status: 'configured' | 'disabled' | undefined) => void;
 }
 
 export default function RetentionSettingsSection({ onStatusChange }: RetentionSettingsSectionProps) {
-  const [, setSettings] = useState<RetentionSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +26,6 @@ export default function RetentionSettingsSection({ onStatusChange }: RetentionSe
     try {
       setLoading(true);
       const data = await retentionSettingsApi.get();
-      setSettings(data);
       setEnabled(data.enabled);
       setRetentionDays(data.retention_days);
       setCleanupIntervalHours(data.cleanup_interval_hours);
@@ -53,7 +50,6 @@ export default function RetentionSettingsSection({ onStatusChange }: RetentionSe
         retention_days: retentionDays,
         cleanup_interval_hours: cleanupIntervalHours,
       });
-      setSettings(updated);
       onStatusChange?.(updated.enabled ? 'configured' : 'disabled');
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);

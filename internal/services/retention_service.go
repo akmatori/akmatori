@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -85,22 +86,42 @@ func (s *RetentionService) cleanupExpiredIncidents(retentionDays int, result *Cl
 
 	for _, incident := range incidents {
 		// Delete working directory from disk
+		dirRemoved := true
 		if incident.WorkingDir != "" {
+			// Validate that WorkingDir is under dataDir to prevent path traversal
+			absWorkDir, err := filepath.Abs(incident.WorkingDir)
+			if err != nil {
+				result.Errors = append(result.Errors, fmt.Errorf("resolve dir %s: %w", incident.UUID, err))
+				continue
+			}
+			absDataDir, _ := filepath.Abs(s.dataDir)
+			if !strings.HasPrefix(absWorkDir, absDataDir+string(os.PathSeparator)) {
+				result.Errors = append(result.Errors, fmt.Errorf("working dir %q for %s is outside data dir, skipping", incident.WorkingDir, incident.UUID))
+				continue
+			}
+
 			bytesFreed, err := dirSize(incident.WorkingDir)
 			if err == nil {
 				if err := os.RemoveAll(incident.WorkingDir); err != nil {
 					slog.Error("failed to remove incident directory", "uuid", incident.UUID, "dir", incident.WorkingDir, "error", err)
 					result.Errors = append(result.Errors, fmt.Errorf("remove dir %s: %w", incident.UUID, err))
+					dirRemoved = false
 				} else {
 					result.ExpiredDirsDeleted++
 					result.ExpiredBytesFreed += bytesFreed
 				}
-			} else if !os.IsNotExist(err) {
+			} else if os.IsNotExist(err) {
+				// Directory already gone, that's fine
+			} else {
 				result.Errors = append(result.Errors, fmt.Errorf("stat dir %s: %w", incident.UUID, err))
+				dirRemoved = false
 			}
 		}
 
-		// Delete the incident record from the database
+		// Only delete the DB record if the directory was successfully removed (or didn't exist)
+		if !dirRemoved {
+			continue
+		}
 		if err := s.db.Delete(&incident).Error; err != nil {
 			slog.Error("failed to delete incident record", "uuid", incident.UUID, "error", err)
 			result.Errors = append(result.Errors, fmt.Errorf("delete record %s: %w", incident.UUID, err))
@@ -197,11 +218,7 @@ func (s *RetentionService) getRetentionSettings() (*database.RetentionSettings, 
 	var settings database.RetentionSettings
 	err := s.db.First(&settings).Error
 	if err == gorm.ErrRecordNotFound {
-		return &database.RetentionSettings{
-			Enabled:              true,
-			RetentionDays:        90,
-			CleanupIntervalHours: 6,
-		}, nil
+		return database.DefaultRetentionSettings(), nil
 	}
 	if err != nil {
 		return nil, err

@@ -418,15 +418,11 @@ func GetOrCreateRetentionSettings() (*RetentionSettings, error) {
 	var settings RetentionSettings
 	err := DB.First(&settings).Error
 	if err == gorm.ErrRecordNotFound {
-		settings = RetentionSettings{
-			Enabled:              true,
-			RetentionDays:        90,
-			CleanupIntervalHours: 6,
-		}
-		if err := DB.Create(&settings).Error; err != nil {
+		defaults := DefaultRetentionSettings()
+		if err := DB.Create(defaults).Error; err != nil {
 			return nil, err
 		}
-		return &settings, nil
+		return defaults, nil
 	}
 	if err != nil {
 		return nil, err

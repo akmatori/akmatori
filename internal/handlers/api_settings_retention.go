@@ -35,15 +35,15 @@ func (h *APIHandler) handleRetentionSettings(w http.ResponseWriter, r *http.Requ
 			settings.Enabled = *req.Enabled
 		}
 		if req.RetentionDays != nil {
-			if *req.RetentionDays < 1 {
-				api.RespondError(w, http.StatusBadRequest, "retention_days must be at least 1")
+			if *req.RetentionDays < 1 || *req.RetentionDays > 3650 {
+				api.RespondError(w, http.StatusBadRequest, "retention_days must be between 1 and 3650")
 				return
 			}
 			settings.RetentionDays = *req.RetentionDays
 		}
 		if req.CleanupIntervalHours != nil {
-			if *req.CleanupIntervalHours < 1 {
-				api.RespondError(w, http.StatusBadRequest, "cleanup_interval_hours must be at least 1")
+			if *req.CleanupIntervalHours < 1 || *req.CleanupIntervalHours > 8760 {
+				api.RespondError(w, http.StatusBadRequest, "cleanup_interval_hours must be between 1 and 8760")
 				return
 			}
 			settings.CleanupIntervalHours = *req.CleanupIntervalHours
