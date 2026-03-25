@@ -181,6 +181,74 @@ func TestJWTAuth_NormalMode_InvalidToken(t *testing.T) {
 	}
 }
 
+func TestJWTAuth_NormalMode_ValidTokenInQueryParam(t *testing.T) {
+	m := newTestJWTMiddleware(false)
+
+	token, err := m.GenerateToken("admin")
+	if err != nil {
+		t.Fatalf("Failed to generate token: %v", err)
+	}
+
+	handler := m.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := GetUserFromContext(r.Context())
+		if user != "admin" {
+			t.Errorf("Expected user 'admin' in context, got '%s'", user)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/context/1/download?token="+token, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected 200 for valid query param token, got %d", rec.Code)
+	}
+}
+
+func TestJWTAuth_NormalMode_InvalidTokenInQueryParam(t *testing.T) {
+	m := newTestJWTMiddleware(false)
+
+	handler := m.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/context/1/download?token=invalid-token", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("Expected 401 for invalid query param token, got %d", rec.Code)
+	}
+}
+
+func TestJWTAuth_NormalMode_HeaderTokenTakesPrecedence(t *testing.T) {
+	m := newTestJWTMiddleware(false)
+
+	validToken, err := m.GenerateToken("admin")
+	if err != nil {
+		t.Fatalf("Failed to generate token: %v", err)
+	}
+
+	handler := m.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := GetUserFromContext(r.Context())
+		if user != "admin" {
+			t.Errorf("Expected user 'admin' in context, got '%s'", user)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Valid header token + invalid query param token — header should win
+	req := httptest.NewRequest(http.MethodGet, "/api/context/1/download?token=invalid-token", nil)
+	req.Header.Set("Authorization", "Bearer "+validToken)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Expected 200 when header token is valid (should take precedence), got %d", rec.Code)
+	}
+}
+
 func TestJWTAuth_ValidateCredentials(t *testing.T) {
 	m := newTestJWTMiddleware(false)
 

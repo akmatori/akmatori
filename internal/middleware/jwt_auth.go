@@ -253,6 +253,12 @@ func (m *JWTAuthMiddleware) extractToken(r *http.Request) string {
 		return strings.TrimPrefix(authHeader, "Bearer ")
 	}
 
+	// Try query parameter (for browser-initiated downloads where custom headers
+	// cannot be set, e.g. <a href="..."> links)
+	if token := r.URL.Query().Get("token"); token != "" {
+		return token
+	}
+
 	return ""
 }
 

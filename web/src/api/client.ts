@@ -313,7 +313,11 @@ export const contextApi = {
       method: 'DELETE',
     }),
 
-  getDownloadUrl: (id: number) => `${API_BASE_URL}/api/context/${id}/download`,
+  getDownloadUrl: (id: number) => {
+    const token = localStorage.getItem(TOKEN_KEY);
+    const base = `${API_BASE_URL}/api/context/${id}/download`;
+    return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+  },
 
   validate: (text: string) =>
     fetchApi<ValidateReferencesResponse>('/api/context/validate', {
