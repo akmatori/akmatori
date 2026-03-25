@@ -49,15 +49,15 @@ Add a background cleanup goroutine to the API server that periodically purges ol
 **Files:**
 - Create: `internal/services/retention_service.go`
 
-- [ ] Create `RetentionService` struct with `dataDir string` and `db *gorm.DB` fields
-- [ ] Implement `NewRetentionService(dataDir string) *RetentionService`
-- [ ] Implement `RunCleanup()` method with two cleanup phases:
+- [x] Create `RetentionService` struct with `dataDir string` and `db *gorm.DB` fields
+- [x] Implement `NewRetentionService(dataDir string) *RetentionService`
+- [x] Implement `RunCleanup()` method with two cleanup phases:
   - Phase 1 (expired incidents): query DB for incidents with status completed/failed and completed_at older than retention days. For each expired incident: delete its working directory from disk, then delete the incident record from the database (this removes the FullLog, Response, and alert Context stored in that row)
   - Phase 2 (orphaned directories): scan all subdirectories in dataDir, check each UUID against the database, and delete directories that have no matching incident record (leftovers from deleted or never-recorded incidents)
-- [ ] Implement `StartBackgroundCleanup(ctx context.Context)` method: runs `RunCleanup()` on a ticker based on CleanupIntervalHours, respects context cancellation
-- [ ] Log cleanup actions with slog (number of directories cleaned per phase, DB records deleted, bytes freed, errors)
-- [ ] Write tests for RunCleanup using temp directories and mock incident data, including tests for orphan cleanup and DB record deletion
-- [ ] Run `make test` - must pass before task 3
+- [x] Implement `StartBackgroundCleanup(ctx context.Context)` method: runs `RunCleanup()` on a ticker based on CleanupIntervalHours, respects context cancellation
+- [x] Log cleanup actions with slog (number of directories cleaned per phase, DB records deleted, bytes freed, errors)
+- [x] Write tests for RunCleanup using temp directories and mock incident data, including tests for orphan cleanup and DB record deletion
+- [x] Run `make test` - must pass before task 3
 
 ### Task 3: Add retention settings API endpoint
 
