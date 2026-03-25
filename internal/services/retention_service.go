@@ -86,11 +86,17 @@ func (s *RetentionService) cleanupExpiredIncidents(retentionDays int, result *Cl
 		return
 	}
 
-	// Resolve dataDir once (with symlinks resolved) for path traversal checks
+	// Resolve dataDir once (with symlinks resolved) for path traversal checks.
+	// If dataDir doesn't exist yet (e.g., fresh install), use the configured path
+	// and continue — per-incident removeIncidentDir handles missing directories.
 	absDataDir, err := filepath.EvalSymlinks(s.dataDir)
 	if err != nil {
-		result.Errors = append(result.Errors, fmt.Errorf("resolve data dir: %w", err))
-		return
+		if os.IsNotExist(err) {
+			absDataDir = s.dataDir
+		} else {
+			result.Errors = append(result.Errors, fmt.Errorf("resolve data dir: %w", err))
+			return
+		}
 	}
 
 	for _, incident := range incidents {

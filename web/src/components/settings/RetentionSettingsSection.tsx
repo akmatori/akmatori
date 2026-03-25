@@ -103,6 +103,7 @@ export default function RetentionSettingsSection({ onStatusChange }: RetentionSe
         <input
           type="number"
           min={1}
+          max={3650}
           value={retentionDays}
           onChange={(e) => setRetentionDays(Math.max(1, parseInt(e.target.value) || 1))}
           disabled={!enabled}
@@ -120,6 +121,7 @@ export default function RetentionSettingsSection({ onStatusChange }: RetentionSe
         <input
           type="number"
           min={1}
+          max={8760}
           value={cleanupIntervalHours}
           onChange={(e) => setCleanupIntervalHours(Math.max(1, parseInt(e.target.value) || 1))}
           disabled={!enabled}
