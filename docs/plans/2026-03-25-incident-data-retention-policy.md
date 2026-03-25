@@ -77,9 +77,9 @@ Add a background cleanup goroutine to the API server that periodically purges ol
 **Files:**
 - Modify: `cmd/akmatori/main.go`
 
-- [ ] Create `RetentionService` after other services are initialized
-- [ ] Launch `go retentionService.StartBackgroundCleanup(ctx)` alongside other background goroutines
-- [ ] Run `make verify` - must pass before task 5
+- [x] Create `RetentionService` after other services are initialized
+- [x] Launch `go retentionService.StartBackgroundCleanup(ctx)` alongside other background goroutines
+- [x] Run `make verify` - must pass before task 5
 
 ### Task 5: Add retention settings to web UI
 
