@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -310,9 +311,14 @@ func main() {
 	slog.Info("API base URL", "url", fmt.Sprintf("http://localhost:%d/api", cfg.HTTPPort))
 	slog.Info("agent WebSocket endpoint", "url", fmt.Sprintf("ws://localhost:%d/ws/agent", cfg.HTTPPort))
 
-	// Create a context for the Slack manager
+	// Create a context for background goroutines
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	defer ctxCancel()
+
+	// Start retention cleanup service
+	retentionService := services.NewRetentionService(filepath.Join(dataDir, "incidents"), database.GetDB())
+	go retentionService.StartBackgroundCleanup(ctx)
+	slog.Info("retention cleanup service started")
 
 	// Start watching for Slack settings reload requests
 	go slackManager.WatchForReloads(ctx)
