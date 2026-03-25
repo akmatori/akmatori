@@ -26,6 +26,13 @@ func TestRetentionSettings_Defaults(t *testing.T) {
 	}
 }
 
+func TestDefaultRetentionSettings_SingletonKey(t *testing.T) {
+	defaults := DefaultRetentionSettings()
+	if defaults.SingletonKey != "default" {
+		t.Errorf("SingletonKey = %q, want %q", defaults.SingletonKey, "default")
+	}
+}
+
 func TestGetOrCreateRetentionSettings_NilDB(t *testing.T) {
 	// Save and restore global DB
 	origDB := DB

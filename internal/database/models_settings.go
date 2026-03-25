@@ -211,9 +211,12 @@ func (APIKeySettings) TableName() string {
 	return "api_key_settings"
 }
 
-// RetentionSettings stores incident data retention policy configuration (singleton)
+// RetentionSettings stores incident data retention policy configuration (singleton).
+// SingletonKey with a unique index ensures only one row can exist at the DB level,
+// preventing duplicate rows from concurrent FirstOrCreate calls.
 type RetentionSettings struct {
 	ID                   uint      `gorm:"primaryKey" json:"id"`
+	SingletonKey         string    `gorm:"uniqueIndex;default:'default';not null" json:"-"`
 	Enabled              bool      `gorm:"default:true" json:"enabled"`
 	RetentionDays        int       `gorm:"default:90" json:"retention_days"`
 	CleanupIntervalHours int       `gorm:"default:6" json:"cleanup_interval_hours"`
@@ -228,6 +231,7 @@ func (RetentionSettings) TableName() string {
 // DefaultRetentionSettings returns the default retention settings values.
 func DefaultRetentionSettings() *RetentionSettings {
 	return &RetentionSettings{
+		SingletonKey:         "default",
 		Enabled:              true,
 		RetentionDays:        90,
 		CleanupIntervalHours: 6,

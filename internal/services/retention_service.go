@@ -59,14 +59,19 @@ func (s *RetentionService) RunCleanup() (*CleanupResult, error) {
 	// Phase 2: Delete orphaned directories
 	s.cleanupOrphanedDirectories(result)
 
-	slog.Info("retention cleanup completed",
+	logAttrs := []any{
 		"expired_incidents_deleted", result.ExpiredIncidentsDeleted,
 		"expired_dirs_deleted", result.ExpiredDirsDeleted,
 		"expired_bytes_freed", result.ExpiredBytesFreed,
 		"orphaned_dirs_deleted", result.OrphanedDirsDeleted,
 		"orphaned_bytes_freed", result.OrphanedBytesFreed,
 		"errors", len(result.Errors),
-	)
+	}
+	if len(result.Errors) > 0 {
+		slog.Warn("retention cleanup completed with errors", logAttrs...)
+	} else {
+		slog.Info("retention cleanup completed", logAttrs...)
+	}
 
 	return result, nil
 }
@@ -136,13 +141,13 @@ func (s *RetentionService) removeIncidentDir(incident database.Incident, absData
 		return false
 	}
 
-	bytesFreed, err := dirSize(absWorkDir)
-	if err != nil {
-		if os.IsNotExist(err) {
+	bytesFreed, sizeErr := dirSize(absWorkDir)
+	if sizeErr != nil {
+		if os.IsNotExist(sizeErr) {
 			return true // Directory already gone
 		}
-		result.Errors = append(result.Errors, fmt.Errorf("stat dir %s: %w", incident.UUID, err))
-		return false
+		slog.Warn("failed to calculate dir size, proceeding with removal", "uuid", incident.UUID, "error", sizeErr)
+		bytesFreed = 0
 	}
 
 	if err := os.RemoveAll(absWorkDir); err != nil {
@@ -232,10 +237,10 @@ func (s *RetentionService) cleanupOrphanedDirectories(result *CleanupResult) {
 			continue
 		}
 
-		bytesFreed, err := dirSize(c.path)
-		if err != nil {
-			result.Errors = append(result.Errors, fmt.Errorf("stat orphan %s: %w", c.name, err))
-			continue
+		bytesFreed, sizeErr := dirSize(c.path)
+		if sizeErr != nil {
+			slog.Warn("failed to calculate orphan dir size, proceeding with removal", "dir", c.name, "error", sizeErr)
+			bytesFreed = 0
 		}
 
 		if err := os.RemoveAll(c.path); err != nil {

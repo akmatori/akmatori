@@ -126,6 +126,24 @@ func InitializeDefaults() error {
 		return fmt.Errorf("failed to seed LLM providers: %w", err)
 	}
 
+	// Create default retention settings if they don't exist.
+	// FirstOrCreate is SELECT+INSERT which can race under concurrent startups:
+	// both see no row, both INSERT, loser hits the unique constraint. On any
+	// error we fall back to a plain read, which succeeds if the other caller
+	// just created the row.
+	{
+		var rs RetentionSettings
+		defaults := DefaultRetentionSettings()
+		if err := DB.Where(RetentionSettings{SingletonKey: "default"}).Attrs(defaults).FirstOrCreate(&rs).Error; err != nil {
+			if rerr := DB.Where(RetentionSettings{SingletonKey: "default"}).First(&rs).Error; rerr != nil {
+				return fmt.Errorf("failed to create default retention settings: %w (retry: %v)", err, rerr)
+			}
+		}
+		if rs.CreatedAt.Equal(rs.UpdatedAt) {
+			slog.Info("created default retention settings")
+		}
+	}
+
 	// Initialize system skill (incident-manager)
 	if err := InitializeSystemSkill(); err != nil {
 		return fmt.Errorf("failed to initialize system skill: %w", err)
@@ -410,22 +428,21 @@ func UpdateGeneralSettings(settings *GeneralSettings) error {
 	return DB.Save(settings).Error
 }
 
-// GetOrCreateRetentionSettings retrieves or creates retention settings (singleton)
+// GetOrCreateRetentionSettings retrieves or creates retention settings (singleton).
+// The row is normally seeded by InitializeDefaults at startup; the create path
+// here is only a fallback. If FirstOrCreate races with another caller (both see
+// no row, both INSERT, one hits unique constraint), we fall back to a plain read.
 func GetOrCreateRetentionSettings() (*RetentionSettings, error) {
 	if DB == nil {
 		return nil, fmt.Errorf("database not initialized")
 	}
 	var settings RetentionSettings
-	err := DB.First(&settings).Error
-	if err == gorm.ErrRecordNotFound {
-		defaults := DefaultRetentionSettings()
-		if err := DB.Create(defaults).Error; err != nil {
-			return nil, err
+	defaults := DefaultRetentionSettings()
+	if err := DB.Where(RetentionSettings{SingletonKey: "default"}).Attrs(defaults).FirstOrCreate(&settings).Error; err != nil {
+		// Race: another caller just inserted the row. Read it.
+		if rerr := DB.Where(RetentionSettings{SingletonKey: "default"}).First(&settings).Error; rerr != nil {
+			return nil, fmt.Errorf("%w (retry: %v)", err, rerr)
 		}
-		return defaults, nil
-	}
-	if err != nil {
-		return nil, err
 	}
 	return &settings, nil
 }
