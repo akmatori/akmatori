@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -75,10 +76,11 @@ func (s *RetentionService) cleanupExpiredIncidents(retentionDays int, result *Cl
 	cutoff := time.Now().AddDate(0, 0, -retentionDays)
 
 	var incidents []database.Incident
-	err := s.db.Where("status IN ? AND completed_at < ?",
-		[]database.IncidentStatus{database.IncidentStatusCompleted, database.IncidentStatusFailed},
-		cutoff,
-	).Find(&incidents).Error
+	err := s.db.Select("id, uuid, working_dir, status, completed_at").
+		Where("status IN ? AND completed_at < ?",
+			[]database.IncidentStatus{database.IncidentStatusCompleted, database.IncidentStatusFailed},
+			cutoff,
+		).Find(&incidents).Error
 	if err != nil {
 		result.Errors = append(result.Errors, fmt.Errorf("query expired incidents: %w", err))
 		return
@@ -142,39 +144,84 @@ func (s *RetentionService) cleanupOrphanedDirectories(result *CleanupResult) {
 		return
 	}
 
+	// Collect candidate directories (must be valid UUIDs and not recently modified)
+	type candidate struct {
+		name string
+		path string
+	}
+	var candidates []candidate
+	var candidateUUIDs []string
+	gracePeriod := time.Now().Add(-1 * time.Hour)
+
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 
 		dirName := entry.Name()
-		dirPath := filepath.Join(s.dataDir, dirName)
 
-		// Check if there's a matching incident record
-		var count int64
-		if err := s.db.Model(&database.Incident{}).Where("uuid = ?", dirName).Count(&count).Error; err != nil {
-			result.Errors = append(result.Errors, fmt.Errorf("check orphan %s: %w", dirName, err))
+		// Only consider directories with valid UUID names
+		if _, err := uuid.Parse(dirName); err != nil {
 			continue
 		}
 
-		if count > 0 {
-			continue
-		}
-
-		// Orphaned directory - remove it
-		bytesFreed, err := dirSize(dirPath)
+		// Skip recently modified directories to avoid racing with incident creation
+		info, err := entry.Info()
 		if err != nil {
-			result.Errors = append(result.Errors, fmt.Errorf("stat orphan %s: %w", dirName, err))
+			continue
+		}
+		if info.ModTime().After(gracePeriod) {
 			continue
 		}
 
-		if err := os.RemoveAll(dirPath); err != nil {
-			slog.Error("failed to remove orphaned directory", "dir", dirPath, "error", err)
-			result.Errors = append(result.Errors, fmt.Errorf("remove orphan %s: %w", dirName, err))
+		dirPath := filepath.Join(s.dataDir, dirName)
+		candidates = append(candidates, candidate{name: dirName, path: dirPath})
+		candidateUUIDs = append(candidateUUIDs, dirName)
+	}
+
+	if len(candidates) == 0 {
+		return
+	}
+
+	// Batch lookup: find which UUIDs exist in the database
+	existingUUIDs := make(map[string]bool)
+	const batchSize = 500
+	for i := 0; i < len(candidateUUIDs); i += batchSize {
+		end := i + batchSize
+		if end > len(candidateUUIDs) {
+			end = len(candidateUUIDs)
+		}
+		batch := candidateUUIDs[i:end]
+
+		var found []struct{ UUID string }
+		if err := s.db.Model(&database.Incident{}).Select("uuid").Where("uuid IN ?", batch).Find(&found).Error; err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("batch check orphans: %w", err))
+			return
+		}
+		for _, f := range found {
+			existingUUIDs[f.UUID] = true
+		}
+	}
+
+	// Remove orphaned directories
+	for _, c := range candidates {
+		if existingUUIDs[c.name] {
+			continue
+		}
+
+		bytesFreed, err := dirSize(c.path)
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("stat orphan %s: %w", c.name, err))
+			continue
+		}
+
+		if err := os.RemoveAll(c.path); err != nil {
+			slog.Error("failed to remove orphaned directory", "dir", c.path, "error", err)
+			result.Errors = append(result.Errors, fmt.Errorf("remove orphan %s: %w", c.name, err))
 		} else {
 			result.OrphanedDirsDeleted++
 			result.OrphanedBytesFreed += bytesFreed
-			slog.Info("removed orphaned incident directory", "dir", dirName, "bytes_freed", bytesFreed)
+			slog.Info("removed orphaned incident directory", "dir", c.name, "bytes_freed", bytesFreed)
 		}
 	}
 }

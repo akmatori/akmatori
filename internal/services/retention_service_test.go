@@ -177,16 +177,22 @@ func TestRunCleanup_OrphanedDirectories(t *testing.T) {
 
 	db.Create(&database.RetentionSettings{Enabled: true, RetentionDays: 30, CleanupIntervalHours: 6})
 
-	// Create an orphaned directory (no matching DB record)
-	orphanDir := filepath.Join(dataDir, "orphan-uuid-1")
+	// Create an orphaned directory with a valid UUID name (no matching DB record)
+	orphanUUID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+	orphanDir := filepath.Join(dataDir, orphanUUID)
 	os.MkdirAll(orphanDir, 0755)
 	os.WriteFile(filepath.Join(orphanDir, "data.txt"), []byte("orphaned data"), 0644)
+	// Backdate to be older than the 1-hour grace period
+	oldTime := time.Now().Add(-2 * time.Hour)
+	os.Chtimes(orphanDir, oldTime, oldTime)
 
-	// Create a directory with a matching DB record (should not be deleted)
-	matchedDir := filepath.Join(dataDir, "matched-uuid-1")
+	// Create a directory with a valid UUID and matching DB record (should not be deleted)
+	matchedUUID := "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+	matchedDir := filepath.Join(dataDir, matchedUUID)
 	os.MkdirAll(matchedDir, 0755)
+	os.Chtimes(matchedDir, oldTime, oldTime)
 	db.Create(&database.Incident{
-		UUID:       "matched-uuid-1",
+		UUID:       matchedUUID,
 		Source:     "test",
 		Status:     database.IncidentStatusRunning,
 		WorkingDir: matchedDir,
@@ -213,6 +219,66 @@ func TestRunCleanup_OrphanedDirectories(t *testing.T) {
 	// Verify matched directory still exists
 	if _, err := os.Stat(matchedDir); err != nil {
 		t.Error("expected matched directory to still exist")
+	}
+}
+
+func TestRunCleanup_NonUUIDDirectoriesIgnored(t *testing.T) {
+	db := setupRetentionTestDB(t)
+	dataDir := t.TempDir()
+
+	db.Create(&database.RetentionSettings{Enabled: true, RetentionDays: 30, CleanupIntervalHours: 6})
+
+	// Create directories with non-UUID names - should be ignored by orphan cleanup
+	os.MkdirAll(filepath.Join(dataDir, "tmp"), 0755)
+	os.MkdirAll(filepath.Join(dataDir, "not-a-uuid"), 0755)
+	oldTime := time.Now().Add(-2 * time.Hour)
+	os.Chtimes(filepath.Join(dataDir, "tmp"), oldTime, oldTime)
+	os.Chtimes(filepath.Join(dataDir, "not-a-uuid"), oldTime, oldTime)
+
+	svc := NewRetentionService(dataDir, db)
+	result, err := svc.RunCleanup()
+	if err != nil {
+		t.Fatalf("RunCleanup failed: %v", err)
+	}
+
+	if result.OrphanedDirsDeleted != 0 {
+		t.Errorf("expected 0 orphaned dirs deleted, got %d", result.OrphanedDirsDeleted)
+	}
+
+	// Directories should still exist
+	if _, err := os.Stat(filepath.Join(dataDir, "tmp")); err != nil {
+		t.Error("expected tmp directory to still exist")
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "not-a-uuid")); err != nil {
+		t.Error("expected not-a-uuid directory to still exist")
+	}
+}
+
+func TestRunCleanup_RecentDirectoriesNotOrphaned(t *testing.T) {
+	db := setupRetentionTestDB(t)
+	dataDir := t.TempDir()
+
+	db.Create(&database.RetentionSettings{Enabled: true, RetentionDays: 30, CleanupIntervalHours: 6})
+
+	// Create a recent directory with valid UUID but no DB record - should be skipped (grace period)
+	recentUUID := "c3d4e5f6-a7b8-9012-cdef-123456789012"
+	recentDir := filepath.Join(dataDir, recentUUID)
+	os.MkdirAll(recentDir, 0755)
+	// Don't backdate - it's recent, should be protected by grace period
+
+	svc := NewRetentionService(dataDir, db)
+	result, err := svc.RunCleanup()
+	if err != nil {
+		t.Fatalf("RunCleanup failed: %v", err)
+	}
+
+	if result.OrphanedDirsDeleted != 0 {
+		t.Errorf("expected 0 orphaned dirs deleted (grace period), got %d", result.OrphanedDirsDeleted)
+	}
+
+	// Directory should still exist
+	if _, err := os.Stat(recentDir); err != nil {
+		t.Error("expected recent directory to still exist")
 	}
 }
 
@@ -396,10 +462,13 @@ func TestRunCleanup_BothPhasesCombined(t *testing.T) {
 	// Create an expired incident
 	createExpiredIncident(t, db, "expired-uuid-1", dataDir, 60)
 
-	// Create an orphaned directory
-	orphanDir := filepath.Join(dataDir, "orphan-uuid-1")
+	// Create an orphaned directory with valid UUID
+	orphanUUID := "d4e5f6a7-b8c9-0123-def0-123456789abc"
+	orphanDir := filepath.Join(dataDir, orphanUUID)
 	os.MkdirAll(orphanDir, 0755)
 	os.WriteFile(filepath.Join(orphanDir, "data.txt"), []byte("orphan"), 0644)
+	oldTime := time.Now().Add(-2 * time.Hour)
+	os.Chtimes(orphanDir, oldTime, oldTime)
 
 	svc := NewRetentionService(dataDir, db)
 	result, err := svc.RunCleanup()
