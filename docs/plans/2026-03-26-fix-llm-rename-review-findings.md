@@ -32,11 +32,11 @@ Address critical and warning-level issues found during code review of the `opena
 **Files:**
 - Modify: `agent-worker/package.json`
 
-- [ ] Check the version of `undici` currently resolved in `node_modules`
-- [ ] Add `undici` to `dependencies` in `agent-worker/package.json` with a compatible version range
-- [ ] Run `npm install` in `agent-worker/` to update the lockfile
-- [ ] Verify existing agent-worker tests still pass: `make test-agent`
-- [ ] Run `make verify` - must pass before task 3
+- [x] Check the version of `undici` currently resolved in `node_modules`
+- [x] Add `undici` to `dependencies` in `agent-worker/package.json` with a compatible version range
+- [x] Run `npm install` in `agent-worker/` to update the lockfile
+- [x] Verify existing agent-worker tests still pass: `make test-agent`
+- [x] Run `make verify` - must pass before task 3
 
 ### Task 3: Make database migration transactional
 
