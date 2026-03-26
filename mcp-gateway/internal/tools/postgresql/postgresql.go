@@ -48,7 +48,7 @@ var dangerousFuncPattern = regexp.MustCompile(`(?i)\b(pg_terminate_backend|pg_ca
 var (
 	blockCommentPattern  = regexp.MustCompile(`/\*[\s\S]*?\*/`)
 	lineCommentPattern   = regexp.MustCompile(`--[^\n]*`)
-	singleQuoteLiteral   = regexp.MustCompile(`'(?:[^'\\]|\\.)*'`)
+	singleQuoteLiteral   = regexp.MustCompile(`'(?:[^'\\]|\\.|\'{2})*'`)
 	dollarQuoteLiteral   = regexp.MustCompile(`\$[^$]*\$[\s\S]*?\$[^$]*\$`)
 	limitPattern         = regexp.MustCompile(`(?i)\bLIMIT\b`)
 	explainPattern       = regexp.MustCompile(`(?i)^\s*EXPLAIN\b`)
@@ -283,7 +283,7 @@ func buildConnConfig(config *PGConfig) (*pgx.ConnConfig, error) {
 		}
 		connConfig.TLSConfig = tlsConf
 	default:
-		// prefer mode: try TLS, fall back to plaintext
+		// Unknown mode: default to requiring TLS without cert verification
 		connConfig.TLSConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // prefer mode skips cert verification by design
 	}
 
@@ -451,7 +451,7 @@ func getSchema(args map[string]interface{}) string {
 
 // hasLimitClause checks if a query already contains a LIMIT clause
 func hasLimitClause(query string) bool {
-	cleaned := stripSQLComments(query)
+	cleaned := stripSQLLiterals(stripSQLComments(query))
 	return limitPattern.MatchString(cleaned)
 }
 

@@ -168,6 +168,8 @@ func TestIsSelectOnly(t *testing.T) {
 		{"keyword TRUNCATE in dollar-quoted literal", "SELECT * FROM t WHERE x = $$TRUNCATE$$", true},
 		{"real INSERT not in string literal", "INSERT INTO users VALUES ('safe')", false},
 		{"real DELETE not in string literal", "DELETE FROM users WHERE name = 'test'", false},
+		{"doubled-quote escaping with keyword", "SELECT * FROM t WHERE name = 'it''s a DELETE'", true},
+		{"doubled-quote escaping mid-string", "SELECT * FROM t WHERE x = 'can''t DROP this'", true},
 
 		// Semicolons
 		{"select with semicolon", "SELECT * FROM users;", true},
@@ -446,6 +448,7 @@ func TestHasLimitClause(t *testing.T) {
 		{"with limit", "SELECT * FROM users LIMIT 10", true},
 		{"lowercase limit", "SELECT * FROM users limit 10", true},
 		{"limit in comment", "SELECT * FROM users -- LIMIT 10", false},
+		{"limit in string literal", "SELECT * FROM t WHERE status = 'LIMIT reached'", false},
 	}
 
 	for _, tt := range tests {
