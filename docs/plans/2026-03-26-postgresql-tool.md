@@ -79,14 +79,14 @@ Add a PostgreSQL database integration to the MCP Gateway as a native tool. The t
 
 All methods follow signature: `(ctx context.Context, incidentID string, args map[string]interface{}) (string, error)`
 
-- [ ] Implement `ExecuteQuery` - execute arbitrary SELECT query (15s cache). Required: `query`. Validates via `isSelectOnly()`. Optional: `limit` (default 100, max 1000) — appends `LIMIT` if not present in query. Returns JSON array of row objects
-- [ ] Implement `ListTables` - query `information_schema.tables` (60s cache). Optional: `schema` (default "public"). Returns table names, types, row estimates
-- [ ] Implement `DescribeTable` - query `information_schema.columns` (60s cache). Required: `table_name`. Optional: `schema` (default "public"). Returns column names, types, nullability, defaults
-- [ ] Implement `GetIndexes` - query `pg_indexes` (60s cache). Required: `table_name`. Optional: `schema` (default "public"). Returns index names, definitions, uniqueness
-- [ ] Implement `GetTableStats` - query `pg_stat_user_tables` (30s cache). Optional: `table_name` (if omitted, returns all tables). Returns seq_scan, idx_scan, n_live_tup, n_dead_tup, last_vacuum, last_analyze
-- [ ] Implement `ExplainQuery` - execute `EXPLAIN (ANALYZE false, FORMAT JSON)` (15s cache). Required: `query`. Validates via `isSelectOnly()`. Returns JSON execution plan. Note: ANALYZE is false to avoid actually running the query
-- [ ] Write tests for each method: success case (mock pgx), error case, parameter validation, cache hit verification
-- [ ] Run `make test-mcp` - must pass before task 5
+- [x] Implement `ExecuteQuery` - execute arbitrary SELECT query (15s cache). Required: `query`. Validates via `isSelectOnly()`. Optional: `limit` (default 100, max 1000) — appends `LIMIT` if not present in query. Returns JSON array of row objects
+- [x] Implement `ListTables` - query `information_schema.tables` (60s cache). Optional: `schema` (default "public"). Returns table names, types, row estimates
+- [x] Implement `DescribeTable` - query `information_schema.columns` (60s cache). Required: `table_name`. Optional: `schema` (default "public"). Returns column names, types, nullability, defaults
+- [x] Implement `GetIndexes` - query `pg_indexes` (60s cache). Required: `table_name`. Optional: `schema` (default "public"). Returns index names, definitions, uniqueness
+- [x] Implement `GetTableStats` - query `pg_stat_user_tables` (30s cache). Optional: `table_name` (if omitted, returns all tables). Returns seq_scan, idx_scan, n_live_tup, n_dead_tup, last_vacuum, last_analyze
+- [x] Implement `ExplainQuery` - execute `EXPLAIN (ANALYZE false, FORMAT JSON)` (15s cache). Required: `query`. Validates via `isSelectOnly()`. Returns JSON execution plan. Note: ANALYZE is false to avoid actually running the query
+- [x] Write tests for each method: success case (mock pgx), error case, parameter validation, cache hit verification
+- [x] Run `make test-mcp` - must pass before task 5
 
 ### Task 5: Diagnostic tools (4 methods)
 

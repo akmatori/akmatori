@@ -1,6 +1,7 @@
 package postgresql
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"testing"
@@ -456,6 +457,431 @@ func TestRowsToJSON_Empty(t *testing.T) {
 	}
 	if result != "null" {
 		t.Errorf("expected 'null', got %q", result)
+	}
+}
+
+// --- Task 4: Comprehensive tests for read-only query tools ---
+
+func TestExecuteQuery_CacheHit(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	// Pre-populate the config cache so getConfig succeeds
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	// Pre-populate the response cache for the expected query
+	query := "SELECT * FROM users LIMIT 100"
+	cacheKey := responseCacheKey(query, map[string]interface{}{"query": "SELECT * FROM users"})
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"id":1,"name":"alice"}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
+
+	result, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{
+		"query": "SELECT * FROM users",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestExecuteQuery_AppendLimitWhenMissing(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	// With custom limit - verify the query gets limit appended by checking the cache key
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	// Pre-populate cache for query WITH limit appended (limit=50)
+	queryWithLimit := "SELECT * FROM users LIMIT 50"
+	cacheKey := responseCacheKey(queryWithLimit, map[string]interface{}{"query": "SELECT * FROM users", "limit": float64(50)})
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"id":1}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
+
+	result, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{
+		"query": "SELECT * FROM users",
+		"limit": float64(50),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestExecuteQuery_PreservesExistingLimit(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	// Query already has LIMIT - should NOT append another
+	queryWithLimit := "SELECT * FROM users LIMIT 5"
+	cacheKey := responseCacheKey(queryWithLimit, map[string]interface{}{"query": queryWithLimit})
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"id":1}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
+
+	result, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{
+		"query": queryWithLimit,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestExecuteQuery_EmptyQuery(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{
+		"query": "",
+	})
+	if err == nil {
+		t.Error("expected error for empty query")
+	}
+}
+
+func TestExecuteQuery_WithLogicalName(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "prod-host", Port: 5432, Database: "proddb", Username: "admin", Password: "secret", SSLMode: "require", Timeout: 30}
+	tool.configCache.Set("creds:logical:postgresql:prod-pg", config)
+
+	query := "SELECT 1 LIMIT 100"
+	cacheKey := responseCacheKey(query, map[string]interface{}{"query": "SELECT 1", "logical_name": "prod-pg"})
+	fullCacheKey := "logical:prod-pg:" + cacheKey
+	expectedResult := `[{"?column?":1}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
+
+	result, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{
+		"query":        "SELECT 1",
+		"logical_name": "prod-pg",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestListTables_CacheHit(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	cacheKey := responseCacheKey("list_tables", map[string]string{"schema": "public"})
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"table_name":"users","table_type":"BASE TABLE","row_estimate":1000}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, SchemaCacheTTL)
+
+	result, err := tool.ListTables(nil, "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestListTables_CustomSchema(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	cacheKey := responseCacheKey("list_tables", map[string]string{"schema": "myschema"})
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"table_name":"orders","table_type":"BASE TABLE","row_estimate":500}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, SchemaCacheTTL)
+
+	result, err := tool.ListTables(nil, "test-incident", map[string]interface{}{
+		"schema": "myschema",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestDescribeTable_CacheHit(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	cacheKey := responseCacheKey("describe_table", map[string]string{"schema": "public", "table": "users"})
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"column_name":"id","data_type":"integer","is_nullable":"NO"}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, SchemaCacheTTL)
+
+	result, err := tool.DescribeTable(nil, "test-incident", map[string]interface{}{
+		"table_name": "users",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestDescribeTable_EmptyTableName(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.DescribeTable(nil, "test-incident", map[string]interface{}{
+		"table_name": "",
+	})
+	if err == nil {
+		t.Error("expected error for empty table_name")
+	}
+}
+
+func TestGetIndexes_CacheHit(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	cacheKey := responseCacheKey("get_indexes", map[string]string{"schema": "public", "table": "users"})
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"indexname":"users_pkey","indexdef":"CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id)","is_unique":true}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, SchemaCacheTTL)
+
+	result, err := tool.GetIndexes(nil, "test-incident", map[string]interface{}{
+		"table_name": "users",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestGetIndexes_EmptyTableName(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.GetIndexes(nil, "test-incident", map[string]interface{}{
+		"table_name": "",
+	})
+	if err == nil {
+		t.Error("expected error for empty table_name")
+	}
+}
+
+func TestGetTableStats_AllTables_CacheHit(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	cacheKey := responseCacheKey("get_table_stats", map[string]string{})
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"table_name":"users","n_live_tup":1000,"n_dead_tup":50}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, StatsCacheTTL)
+
+	result, err := tool.GetTableStats(nil, "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestGetTableStats_SpecificTable_CacheHit(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	cacheKey := responseCacheKey("get_table_stats", map[string]string{"table": "orders"})
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"table_name":"orders","n_live_tup":5000,"n_dead_tup":200}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, StatsCacheTTL)
+
+	result, err := tool.GetTableStats(nil, "test-incident", map[string]interface{}{
+		"table_name": "orders",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestExplainQuery_CacheHit(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	cacheKey := responseCacheKey("explain", map[string]string{"query": "SELECT * FROM users"})
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"QUERY PLAN":[{"Plan":{"Node Type":"Seq Scan","Relation Name":"users"}}]}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
+
+	result, err := tool.ExplainQuery(nil, "test-incident", map[string]interface{}{
+		"query": "SELECT * FROM users",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestExplainQuery_EmptyQuery(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.ExplainQuery(nil, "test-incident", map[string]interface{}{
+		"query": "",
+	})
+	if err == nil {
+		t.Error("expected error for empty query")
+	}
+}
+
+// Test CachedQuery directly for cache behavior verification
+func TestCachedQuery_CacheHitAndMiss(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	callCount := 0
+	queryFn := func() (string, error) {
+		callCount++
+		return `{"result":"fresh"}`, nil
+	}
+
+	// First call - should execute queryFn (cache miss)
+	result1, err := tool.cachedQuery(nil, "incident-1", "test-key", QueryCacheTTL, queryFn)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("expected queryFn called once, got %d", callCount)
+	}
+
+	// Second call - should hit cache
+	result2, err := tool.cachedQuery(nil, "incident-1", "test-key", QueryCacheTTL, queryFn)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("expected queryFn still called once (cache hit), got %d", callCount)
+	}
+	if result1 != result2 {
+		t.Errorf("cache hit should return same result: %q vs %q", result1, result2)
+	}
+}
+
+func TestCachedQuery_DifferentIncidentsHaveDifferentCaches(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	callCount := 0
+	queryFn := func() (string, error) {
+		callCount++
+		return `{"result":"data"}`, nil
+	}
+
+	_, err := tool.cachedQuery(nil, "incident-1", "key", QueryCacheTTL, queryFn)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("expected 1 call, got %d", callCount)
+	}
+
+	// Different incident should not hit the cache
+	_, err = tool.cachedQuery(nil, "incident-2", "key", QueryCacheTTL, queryFn)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if callCount != 2 {
+		t.Errorf("expected 2 calls (different incident), got %d", callCount)
+	}
+}
+
+func TestCachedQuery_LogicalNameCacheKey(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	callCount := 0
+	queryFn := func() (string, error) {
+		callCount++
+		return `{"result":"data"}`, nil
+	}
+
+	// With logical name
+	_, err := tool.cachedQuery(nil, "incident-1", "key", QueryCacheTTL, queryFn, "prod-pg")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("expected 1 call, got %d", callCount)
+	}
+
+	// Same logical name from different incident should hit cache
+	_, err = tool.cachedQuery(nil, "incident-2", "key", QueryCacheTTL, queryFn, "prod-pg")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if callCount != 1 {
+		t.Errorf("expected 1 call (logical name cache hit), got %d", callCount)
+	}
+}
+
+func TestCachedQuery_ErrorNotCached(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	callCount := 0
+	queryFn := func() (string, error) {
+		callCount++
+		return "", fmt.Errorf("connection failed")
+	}
+
+	_, err := tool.cachedQuery(nil, "incident-1", "key", QueryCacheTTL, queryFn)
+	if err == nil {
+		t.Error("expected error")
+	}
+
+	// Second call should also execute queryFn (errors are not cached)
+	_, err = tool.cachedQuery(nil, "incident-1", "key", QueryCacheTTL, queryFn)
+	if err == nil {
+		t.Error("expected error")
+	}
+	if callCount != 2 {
+		t.Errorf("expected 2 calls (errors not cached), got %d", callCount)
 	}
 }
 
