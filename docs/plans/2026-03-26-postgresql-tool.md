@@ -119,13 +119,13 @@ All methods follow signature: `(ctx context.Context, incidentID string, args map
 **Files:**
 - Modify: `mcp-gateway/internal/tools/registry.go`
 
-- [ ] Add import for `"github.com/akmatori/mcp-gateway/internal/tools/postgresql"` package
-- [ ] Add constants: `PostgreSQLRatePerSecond = 10`, `PostgreSQLBurstCapacity = 20`
-- [ ] Add fields to Registry struct: `postgresqlTool *postgresql.PostgreSQLTool`, `postgresqlLimit *ratelimit.Limiter`
-- [ ] Add to `RegisterAllTools()`: create limiter, call `r.registerPostgreSQLTools()`
-- [ ] Add to `Stop()`: stop postgresql tool
-- [ ] Implement `registerPostgreSQLTools()` method: instantiate tool, register 10 MCP tools with `r.server.RegisterTool()` using proper `mcp.Tool{Name, Description, InputSchema}` and handler functions. Tool names: `postgresql.execute_query`, `postgresql.list_tables`, `postgresql.describe_table`, `postgresql.get_indexes`, `postgresql.get_table_stats`, `postgresql.explain_query`, `postgresql.get_active_queries`, `postgresql.get_locks`, `postgresql.get_replication_status`, `postgresql.get_database_stats`
-- [ ] Run `make test-mcp` - must pass before task 8
+- [x] Add import for `"github.com/akmatori/mcp-gateway/internal/tools/postgresql"` package
+- [x] Add constants: `PostgreSQLRatePerSecond = 10`, `PostgreSQLBurstCapacity = 20`
+- [x] Add fields to Registry struct: `postgresqlTool *postgresql.PostgreSQLTool`, `postgresqlLimit *ratelimit.Limiter`
+- [x] Add to `RegisterAllTools()`: create limiter, call `r.registerPostgreSQLTools()`
+- [x] Add to `Stop()`: stop postgresql tool
+- [x] Implement `registerPostgreSQLTools()` method: instantiate tool, register 10 MCP tools with `r.server.RegisterTool()` using proper `mcp.Tool{Name, Description, InputSchema}` and handler functions. Tool names: `postgresql.execute_query`, `postgresql.list_tables`, `postgresql.describe_table`, `postgresql.get_indexes`, `postgresql.get_table_stats`, `postgresql.explain_query`, `postgresql.get_active_queries`, `postgresql.get_locks`, `postgresql.get_replication_status`, `postgresql.get_database_stats`
+- [x] Run `make test-mcp` - must pass before task 8
 
 ### Task 8: Skill prompt integration
 

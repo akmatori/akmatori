@@ -16,6 +16,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/ratelimit"
 	"github.com/akmatori/mcp-gateway/internal/tools/catchpoint"
 	"github.com/akmatori/mcp-gateway/internal/tools/httpconnector"
+	"github.com/akmatori/mcp-gateway/internal/tools/postgresql"
 	"github.com/akmatori/mcp-gateway/internal/tools/ssh"
 	"github.com/akmatori/mcp-gateway/internal/tools/victoriametrics"
 	"github.com/akmatori/mcp-gateway/internal/tools/zabbix"
@@ -27,8 +28,10 @@ const (
 	ZabbixBurstCapacity     = 20 // burst capacity
 	VMRatePerSecond         = 10 // requests per second
 	VMBurstCapacity         = 20 // burst capacity
-	CatchpointRatePerSecond = 10 // requests per second
-	CatchpointBurstCapacity = 20 // burst capacity
+	CatchpointRatePerSecond  = 10 // requests per second
+	CatchpointBurstCapacity  = 20 // burst capacity
+	PostgreSQLRatePerSecond  = 10 // requests per second
+	PostgreSQLBurstCapacity  = 20 // burst capacity
 )
 
 // Registry manages tool registration
@@ -39,8 +42,10 @@ type Registry struct {
 	zabbixLimit    *ratelimit.Limiter
 	vmTool         *victoriametrics.VictoriaMetricsTool
 	vmLimit        *ratelimit.Limiter
-	catchpointTool *catchpoint.CatchpointTool
-	catchpointLimit *ratelimit.Limiter
+	catchpointTool   *catchpoint.CatchpointTool
+	catchpointLimit  *ratelimit.Limiter
+	postgresqlTool   *postgresql.PostgreSQLTool
+	postgresqlLimit  *ratelimit.Limiter
 
 	// HTTP connector state
 	httpExecutor       *httpconnector.HTTPConnectorExecutor
@@ -89,6 +94,13 @@ func (r *Registry) RegisterAllTools() {
 	// Register Catchpoint tools with rate limiter
 	r.registerCatchpointTools()
 
+	// Create rate limiter for PostgreSQL: 10 req/sec, burst 20
+	r.postgresqlLimit = ratelimit.New(PostgreSQLRatePerSecond, PostgreSQLBurstCapacity)
+	r.logger.Printf("PostgreSQL rate limiter created: %d req/sec, burst %d", PostgreSQLRatePerSecond, PostgreSQLBurstCapacity)
+
+	// Register PostgreSQL tools with rate limiter
+	r.registerPostgreSQLTools()
+
 	r.logger.Println("All tools registered")
 }
 
@@ -102,6 +114,9 @@ func (r *Registry) Stop() {
 	}
 	if r.catchpointTool != nil {
 		r.catchpointTool.Stop()
+	}
+	if r.postgresqlTool != nil {
+		r.postgresqlTool.Stop()
 	}
 	if r.httpExecutor != nil {
 		r.httpExecutor.Stop()
@@ -1589,4 +1604,220 @@ func (r *Registry) registerCatchpointTools() {
 	)
 
 	r.logger.Println("Catchpoint tools registered (12 methods)")
+}
+
+func (r *Registry) registerPostgreSQLTools() {
+	r.postgresqlTool = postgresql.NewPostgreSQLTool(r.logger, r.postgresqlLimit)
+
+	// postgresql.execute_query
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "postgresql.execute_query",
+			Description: "Execute a read-only SQL query (SELECT only) against a PostgreSQL database",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"query": {
+						Type:        "string",
+						Description: "SQL SELECT query to execute (required)",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of rows to return (default 100, max 1000)",
+					},
+				},
+				Required: []string{"query"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.postgresqlTool.ExecuteQuery(ctx, incidentID, args)
+		},
+	)
+
+	// postgresql.list_tables
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "postgresql.list_tables",
+			Description: "List tables in a PostgreSQL database schema with row estimates",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"schema": {
+						Type:        "string",
+						Description: "Schema name (default: public)",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.postgresqlTool.ListTables(ctx, incidentID, args)
+		},
+	)
+
+	// postgresql.describe_table
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "postgresql.describe_table",
+			Description: "Describe columns of a PostgreSQL table including types, nullability, and defaults",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"table_name": {
+						Type:        "string",
+						Description: "Table name to describe (required)",
+					},
+					"schema": {
+						Type:        "string",
+						Description: "Schema name (default: public)",
+					},
+				},
+				Required: []string{"table_name"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.postgresqlTool.DescribeTable(ctx, incidentID, args)
+		},
+	)
+
+	// postgresql.get_indexes
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "postgresql.get_indexes",
+			Description: "Get indexes for a PostgreSQL table including definitions and uniqueness",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"table_name": {
+						Type:        "string",
+						Description: "Table name to get indexes for (required)",
+					},
+					"schema": {
+						Type:        "string",
+						Description: "Schema name (default: public)",
+					},
+				},
+				Required: []string{"table_name"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.postgresqlTool.GetIndexes(ctx, incidentID, args)
+		},
+	)
+
+	// postgresql.get_table_stats
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "postgresql.get_table_stats",
+			Description: "Get table statistics from pg_stat_user_tables (scans, tuples, vacuum info)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"table_name": {
+						Type:        "string",
+						Description: "Table name (optional, returns all tables if omitted)",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.postgresqlTool.GetTableStats(ctx, incidentID, args)
+		},
+	)
+
+	// postgresql.explain_query
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "postgresql.explain_query",
+			Description: "Get the execution plan for a SELECT query (EXPLAIN without ANALYZE)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"query": {
+						Type:        "string",
+						Description: "SQL SELECT query to explain (required)",
+					},
+				},
+				Required: []string{"query"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.postgresqlTool.ExplainQuery(ctx, incidentID, args)
+		},
+	)
+
+	// postgresql.get_active_queries
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "postgresql.get_active_queries",
+			Description: "Get currently active queries from pg_stat_activity",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"include_idle": {
+						Type:        "boolean",
+						Description: "Include idle connections (default: false)",
+					},
+					"min_duration_seconds": {
+						Type:        "number",
+						Description: "Only show queries running longer than this many seconds",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.postgresqlTool.GetActiveQueries(ctx, incidentID, args)
+		},
+	)
+
+	// postgresql.get_locks
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "postgresql.get_locks",
+			Description: "Get lock information from pg_locks joined with pg_stat_activity",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"blocked_only": {
+						Type:        "boolean",
+						Description: "Only show blocked (waiting) locks (default: false)",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.postgresqlTool.GetLocks(ctx, incidentID, args)
+		},
+	)
+
+	// postgresql.get_replication_status
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "postgresql.get_replication_status",
+			Description: "Get replication status from pg_stat_replication (LSN positions, lag)",
+			InputSchema: mcp.InputSchema{
+				Type:       "object",
+				Properties: map[string]mcp.Property{},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.postgresqlTool.GetReplicationStatus(ctx, incidentID, args)
+		},
+	)
+
+	// postgresql.get_database_stats
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "postgresql.get_database_stats",
+			Description: "Get database-level statistics (connections, transactions, cache hit ratio, size)",
+			InputSchema: mcp.InputSchema{
+				Type:       "object",
+				Properties: map[string]mcp.Property{},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.postgresqlTool.GetDatabaseStats(ctx, incidentID, args)
+		},
+	)
+
+	r.logger.Println("PostgreSQL tools registered (10 methods)")
 }
