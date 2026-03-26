@@ -133,6 +133,7 @@ type ProxySettings struct {
 	SlackEnabled           bool      `gorm:"default:true" json:"slack_enabled"`             // Use proxy for Slack
 	ZabbixEnabled          bool      `gorm:"default:false" json:"zabbix_enabled"`           // Use proxy for Zabbix API
 	VictoriaMetricsEnabled bool      `gorm:"default:false" json:"victoria_metrics_enabled"` // Use proxy for VictoriaMetrics API
+	CatchpointEnabled      bool      `gorm:"default:false" json:"catchpoint_enabled"`       // Use proxy for Catchpoint API
 	CreatedAt              time.Time `json:"created_at"`
 	UpdatedAt              time.Time `json:"updated_at"`
 }

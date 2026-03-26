@@ -121,6 +121,9 @@ type UpdateProxySettingsRequest struct {
 		VictoriaMetrics struct {
 			Enabled bool `json:"enabled"`
 		} `json:"victoria_metrics"`
+		Catchpoint struct {
+			Enabled bool `json:"enabled"`
+		} `json:"catchpoint"`
 	} `json:"services"`
 }
 

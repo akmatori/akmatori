@@ -105,6 +105,7 @@ make verify           # go vet + all tests (pre-commit)
 | `internal/ratelimit` | 100.0% | ✅ |
 | `internal/validation` | 100.0% | ✅ |
 | `internal/tools/httpconnector` | 91.6% | ✅ |
+| `internal/tools/catchpoint` | 83.5% | ✅ |
 | `internal/auth` | 81.8% | ✅ |
 | `internal/tools/victoriametrics` | 76.2% | ✅ |
 | `internal/mcpproxy` | 70.8% | ✅ |

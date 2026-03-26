@@ -156,6 +156,7 @@ func (s *ToolService) EnsureToolTypes() error {
 		{Name: "ssh", Description: "SSH remote command execution tool"},
 		{Name: "zabbix", Description: "Zabbix monitoring integration"},
 		{Name: "victoria_metrics", Description: "VictoriaMetrics time-series database integration"},
+		{Name: "catchpoint", Description: "Catchpoint Digital Experience Monitoring integration"},
 	}
 
 	for _, tt := range toolTypes {

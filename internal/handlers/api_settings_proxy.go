@@ -51,6 +51,10 @@ func (h *APIHandler) GetProxySettings(w http.ResponseWriter, r *http.Request) {
 				"enabled":   settings.VictoriaMetricsEnabled,
 				"supported": true,
 			},
+			"catchpoint": map[string]interface{}{
+				"enabled":   settings.CatchpointEnabled,
+				"supported": true,
+			},
 			"ssh": map[string]interface{}{
 				"enabled":   false,
 				"supported": false,
@@ -86,6 +90,7 @@ func (h *APIHandler) UpdateProxySettings(w http.ResponseWriter, r *http.Request)
 	settings.SlackEnabled = input.Services.Slack.Enabled
 	settings.ZabbixEnabled = input.Services.Zabbix.Enabled
 	settings.VictoriaMetricsEnabled = input.Services.VictoriaMetrics.Enabled
+	settings.CatchpointEnabled = input.Services.Catchpoint.Enabled
 
 	if err := database.UpdateProxySettings(settings); err != nil {
 		api.RespondError(w, http.StatusInternalServerError, "Failed to update proxy settings")

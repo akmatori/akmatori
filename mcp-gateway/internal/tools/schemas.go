@@ -59,6 +59,7 @@ func GetToolSchemas() map[string]ToolTypeSchema {
 		"ssh":              getSSHSchema(),
 		"zabbix":           getZabbixSchema(),
 		"victoria_metrics": getVictoriaMetricsSchema(),
+		"catchpoint":       getCatchpointSchema(),
 	}
 }
 
@@ -430,6 +431,118 @@ func getVictoriaMetricsSchema() ToolTypeSchema {
 				Description: "Make a generic HTTP request to VictoriaMetrics API",
 				Parameters:  "path (required), method, params",
 				Returns:     "Raw API response data",
+			},
+		},
+	}
+}
+
+func getCatchpointSchema() ToolTypeSchema {
+	return ToolTypeSchema{
+		Name:        "catchpoint",
+		Description: "Catchpoint Digital Experience Monitoring integration. Query test performance, alerts, errors, nodes, and internet outages from the Catchpoint API.",
+		Version:     "1.0.0",
+		SettingsSchema: SettingsSchema{
+			Type:     "object",
+			Required: []string{"catchpoint_api_token"},
+			Properties: map[string]PropertySchema{
+				"catchpoint_url": {
+					Type:        "string",
+					Description: "Catchpoint API base URL",
+					Default:     "https://io.catchpoint.com/api",
+				},
+				"catchpoint_api_token": {
+					Type:        "string",
+					Description: "Catchpoint API bearer token (static JWT)",
+					Secret:      true,
+				},
+				"catchpoint_verify_ssl": {
+					Type:        "boolean",
+					Description: "Verify SSL certificates",
+					Default:     true,
+					Advanced:    true,
+				},
+				"catchpoint_timeout": {
+					Type:        "integer",
+					Description: "API request timeout in seconds",
+					Default:     30,
+					Minimum:     intPtr(5),
+					Maximum:     intPtr(300),
+					Advanced:    true,
+				},
+			},
+		},
+		Functions: []ToolFunction{
+			{
+				Name:        "get_alerts",
+				Description: "Get test alerts from Catchpoint",
+				Parameters:  "severity, start_time, end_time, test_ids, page_number, page_size",
+				Returns:     "JSON array of alert objects",
+			},
+			{
+				Name:        "get_alert_details",
+				Description: "Get detailed information for specific alerts",
+				Parameters:  "alert_ids (required)",
+				Returns:     "JSON alert detail objects",
+			},
+			{
+				Name:        "get_test_performance",
+				Description: "Get aggregated test performance metrics",
+				Parameters:  "test_ids (required), start_time, end_time, metrics, dimensions",
+				Returns:     "JSON with aggregated performance data",
+			},
+			{
+				Name:        "get_test_performance_raw",
+				Description: "Get raw test performance data points",
+				Parameters:  "test_ids (required), start_time, end_time, node_ids, page_number, page_size",
+				Returns:     "JSON with raw performance data points",
+			},
+			{
+				Name:        "get_tests",
+				Description: "List tests from Catchpoint",
+				Parameters:  "test_ids, test_type, folder_id, status, page_number, page_size",
+				Returns:     "JSON array of test objects",
+			},
+			{
+				Name:        "get_test_details",
+				Description: "Get detailed configuration for specific tests",
+				Parameters:  "test_ids (required)",
+				Returns:     "JSON test detail objects",
+			},
+			{
+				Name:        "get_test_errors",
+				Description: "Get raw test error data",
+				Parameters:  "test_ids, start_time, end_time, page_number, page_size",
+				Returns:     "JSON array of test error records",
+			},
+			{
+				Name:        "get_internet_outages",
+				Description: "Get internet outage data from Catchpoint Internet Weather",
+				Parameters:  "start_time, end_time, asn, country, page_number, page_size",
+				Returns:     "JSON array of outage objects",
+			},
+			{
+				Name:        "get_nodes",
+				Description: "List all Catchpoint monitoring nodes",
+				Parameters:  "page_number, page_size",
+				Returns:     "JSON array of node objects",
+			},
+			{
+				Name:        "get_node_alerts",
+				Description: "Get alerts for specific monitoring nodes",
+				Parameters:  "node_ids, start_time, end_time, page_number, page_size",
+				Returns:     "JSON array of node alert objects",
+			},
+			{
+				Name:        "acknowledge_alerts",
+				Description: "Acknowledge, assign, or drop test alerts",
+				Parameters:  "alert_ids (required), action (required: acknowledge/assign/drop), assignee",
+				Returns:     "JSON confirmation of alert action",
+			},
+			{
+				Name:        "run_instant_test",
+				Description: "Trigger an instant (on-demand) test execution",
+				Parameters:  "test_id (required)",
+				Returns:     "JSON with instant test execution result",
 			},
 		},
 	}
