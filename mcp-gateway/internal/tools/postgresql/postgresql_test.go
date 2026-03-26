@@ -885,6 +885,280 @@ func TestCachedQuery_ErrorNotCached(t *testing.T) {
 	}
 }
 
+// --- Task 5: Tests for diagnostic tools ---
+
+func TestGetActiveQueries_CacheHit(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	cacheKey := responseCacheKey("get_active_queries", map[string]interface{}{})
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"pid":123,"state":"active","query":"SELECT 1","duration_seconds":5.2}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
+
+	result, err := tool.GetActiveQueries(nil, "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestGetActiveQueries_IncludeIdle(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	// Cache with include_idle=true produces a different cache key
+	args := map[string]interface{}{"include_idle": true}
+	cacheKey := responseCacheKey("get_active_queries", args)
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"pid":123,"state":"idle","query":"SELECT 1"}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
+
+	result, err := tool.GetActiveQueries(nil, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestGetActiveQueries_MinDuration(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	args := map[string]interface{}{"min_duration_seconds": float64(10)}
+	cacheKey := responseCacheKey("get_active_queries", args)
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"pid":456,"state":"active","query":"SELECT pg_sleep(30)","duration_seconds":25.1}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
+
+	result, err := tool.GetActiveQueries(nil, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestGetActiveQueries_WithLogicalName(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "prod-host", Port: 5432, Database: "proddb", Username: "admin", Password: "secret", SSLMode: "require", Timeout: 30}
+	tool.configCache.Set("creds:logical:postgresql:prod-pg", config)
+
+	args := map[string]interface{}{"logical_name": "prod-pg"}
+	cacheKey := responseCacheKey("get_active_queries", args)
+	fullCacheKey := "logical:prod-pg:" + cacheKey
+	expectedResult := `[{"pid":789,"state":"active","query":"SELECT count(*) FROM orders"}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
+
+	result, err := tool.GetActiveQueries(nil, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestGetLocks_CacheHit(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	args := map[string]interface{}{}
+	cacheKey := responseCacheKey("get_locks", args)
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"locktype":"relation","relation":"users","mode":"AccessShareLock","granted":true,"pid":123}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
+
+	result, err := tool.GetLocks(nil, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestGetLocks_BlockedOnly(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	args := map[string]interface{}{"blocked_only": true}
+	cacheKey := responseCacheKey("get_locks", args)
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"locktype":"relation","relation":"orders","mode":"ExclusiveLock","granted":false,"pid":456}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
+
+	result, err := tool.GetLocks(nil, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestGetLocks_BlockedOnlyDefault(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	// Default blocked_only is false - different cache key than blocked_only=true
+	argsDefault := map[string]interface{}{}
+	argsBlocked := map[string]interface{}{"blocked_only": true}
+	key1 := responseCacheKey("get_locks", argsDefault)
+	key2 := responseCacheKey("get_locks", argsBlocked)
+	if key1 == key2 {
+		t.Error("expected different cache keys for different blocked_only values")
+	}
+}
+
+func TestGetReplicationStatus_CacheHit(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	cacheKey := responseCacheKey("get_replication_status", nil)
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"client_addr":"10.0.0.2","state":"streaming","sent_lsn":"0/3000060","write_lsn":"0/3000060","flush_lsn":"0/3000060","replay_lsn":"0/3000060","sync_state":"async"}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, StatsCacheTTL)
+
+	result, err := tool.GetReplicationStatus(nil, "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestGetReplicationStatus_WithLogicalName(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "prod-host", Port: 5432, Database: "proddb", Username: "admin", Password: "secret", SSLMode: "require", Timeout: 30}
+	tool.configCache.Set("creds:logical:postgresql:prod-pg", config)
+
+	cacheKey := responseCacheKey("get_replication_status", nil)
+	fullCacheKey := "logical:prod-pg:" + cacheKey
+	expectedResult := `[{"client_addr":"10.0.1.5","state":"streaming"}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, StatsCacheTTL)
+
+	result, err := tool.GetReplicationStatus(nil, "test-incident", map[string]interface{}{
+		"logical_name": "prod-pg",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestGetDatabaseStats_CacheHit(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	cacheKey := responseCacheKey("get_database_stats", nil)
+	fullCacheKey := "incident:test-incident:" + cacheKey
+	expectedResult := `[{"numbackends":15,"xact_commit":50000,"xact_rollback":100,"blks_read":1000,"blks_hit":99000,"cache_hit_ratio":99.0,"deadlocks":0,"db_size":104857600}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, StatsCacheTTL)
+
+	result, err := tool.GetDatabaseStats(nil, "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestGetDatabaseStats_WithLogicalName(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PGConfig{Host: "prod-host", Port: 5432, Database: "proddb", Username: "admin", Password: "secret", SSLMode: "require", Timeout: 30}
+	tool.configCache.Set("creds:logical:postgresql:prod-pg", config)
+
+	cacheKey := responseCacheKey("get_database_stats", nil)
+	fullCacheKey := "logical:prod-pg:" + cacheKey
+	expectedResult := `[{"numbackends":50,"xact_commit":500000,"deadlocks":2,"db_size":1073741824}]`
+	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, StatsCacheTTL)
+
+	result, err := tool.GetDatabaseStats(nil, "test-incident", map[string]interface{}{
+		"logical_name": "prod-pg",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != expectedResult {
+		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestGetDatabaseStats_CacheSeparation(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	callCount := 0
+	queryFn := func() (string, error) {
+		callCount++
+		return `{"numbackends":10}`, nil
+	}
+
+	// Two different incidents should get separate caches for database stats
+	_, err := tool.cachedQuery(nil, "incident-1", "dbstats", StatsCacheTTL, queryFn)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, err = tool.cachedQuery(nil, "incident-2", "dbstats", StatsCacheTTL, queryFn)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if callCount != 2 {
+		t.Errorf("expected 2 calls for different incidents, got %d", callCount)
+	}
+
+	// Same incident should hit cache
+	_, err = tool.cachedQuery(nil, "incident-1", "dbstats", StatsCacheTTL, queryFn)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if callCount != 2 {
+		t.Errorf("expected still 2 calls (cache hit), got %d", callCount)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
 }

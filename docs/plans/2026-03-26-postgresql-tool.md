@@ -93,12 +93,12 @@ All methods follow signature: `(ctx context.Context, incidentID string, args map
 **Files:**
 - Modify: `mcp-gateway/internal/tools/postgresql/postgresql.go`
 
-- [ ] Implement `GetActiveQueries` - query `pg_stat_activity` (15s cache). Optional: `include_idle` (default false), `min_duration_seconds`. Returns pid, state, query, duration, wait_event, client_addr
-- [ ] Implement `GetLocks` - query `pg_locks` joined with `pg_stat_activity` (15s cache). Optional: `blocked_only` (default false). Returns lock type, relation, mode, granted, blocking/blocked pids, query text
-- [ ] Implement `GetReplicationStatus` - query `pg_stat_replication` (30s cache). Returns client_addr, state, sent_lsn, write_lsn, flush_lsn, replay_lsn, lag
-- [ ] Implement `GetDatabaseStats` - query `pg_stat_database` for current database (30s cache). Returns numbackends, xact_commit, xact_rollback, blks_read, blks_hit, cache_hit_ratio, tup_returned, tup_fetched, tup_inserted, tup_updated, tup_deleted, conflicts, deadlocks, temp_files, temp_bytes, db_size
-- [ ] Write tests for each method: success case, parameter validation, cache behavior
-- [ ] Run `make test-mcp` - must pass before task 6
+- [x] Implement `GetActiveQueries` - query `pg_stat_activity` (15s cache). Optional: `include_idle` (default false), `min_duration_seconds`. Returns pid, state, query, duration, wait_event, client_addr
+- [x] Implement `GetLocks` - query `pg_locks` joined with `pg_stat_activity` (15s cache). Optional: `blocked_only` (default false). Returns lock type, relation, mode, granted, blocking/blocked pids, query text
+- [x] Implement `GetReplicationStatus` - query `pg_stat_replication` (30s cache). Returns client_addr, state, sent_lsn, write_lsn, flush_lsn, replay_lsn, lag
+- [x] Implement `GetDatabaseStats` - query `pg_stat_database` for current database (30s cache). Returns numbackends, xact_commit, xact_rollback, blks_read, blks_hit, cache_hit_ratio, tup_returned, tup_fetched, tup_inserted, tup_updated, tup_deleted, conflicts, deadlocks, temp_files, temp_bytes, db_size
+- [x] Write tests for each method: success case, parameter validation, cache behavior
+- [x] Run `make test-mcp` - must pass before task 6
 
 ### Task 6: Schema definition
 
