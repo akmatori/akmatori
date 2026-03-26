@@ -327,6 +327,33 @@ gateway_call("victoria_metrics.series", {"match": "up"}, "%s")
 gateway_call("victoria_metrics.api_request", {"path": "/api/v1/status/tsdb"}, "%s")
 `+"```"+`
 `, logicalName, logicalName, logicalName, logicalName, logicalName)
+	case "postgresql":
+		return fmt.Sprintf(`
+**Parameters:**
+- `+"`execute_query`"+`: query* | limit
+- `+"`list_tables`"+`: schema
+- `+"`describe_table`"+`: table_name* | schema
+- `+"`get_indexes`"+`: table_name* | schema
+- `+"`get_table_stats`"+`: table_name
+- `+"`explain_query`"+`: query*
+- `+"`get_active_queries`"+`: include_idle, min_duration_seconds
+- `+"`get_locks`"+`: blocked_only
+- `+"`get_replication_status`"+`: (no parameters)
+- `+"`get_database_stats`"+`: (no parameters)
+(* = required)
+
+All queries are read-only — INSERT/UPDATE/DELETE/DROP are rejected.
+
+Usage (via gateway_call):
+`+"```"+`
+gateway_call("postgresql.execute_query", {"query": "SELECT * FROM users LIMIT 10"}, "%s")
+gateway_call("postgresql.list_tables", {}, "%s")
+gateway_call("postgresql.describe_table", {"table_name": "users"}, "%s")
+gateway_call("postgresql.get_active_queries", {}, "%s")
+gateway_call("postgresql.get_locks", {"blocked_only": true}, "%s")
+gateway_call("postgresql.get_database_stats", {}, "%s")
+`+"```"+`
+`, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
 	default:
 		return fmt.Sprintf("Use `gateway_call(\"%s.<tool_method>\", {<args>}, \"%s\")` to call this tool's methods.\n", typeName, logicalName)
 	}

@@ -132,7 +132,7 @@ All methods follow signature: `(ctx context.Context, incidentID string, args map
 **Files:**
 - Modify: `internal/services/skill_prompt_service.go`
 
-- [ ] Add `case "postgresql":` to `generateToolUsageExample()` with usage examples:
+- [x] Add `case "postgresql":` to `generateToolUsageExample()` with usage examples:
   ```
   gateway_call("postgresql.execute_query", {"query": "SELECT * FROM users LIMIT 10"}, "<logical_name>")
   gateway_call("postgresql.list_tables", {}, "<logical_name>")
@@ -141,8 +141,8 @@ All methods follow signature: `(ctx context.Context, incidentID string, args map
   gateway_call("postgresql.get_locks", {"blocked_only": true}, "<logical_name>")
   gateway_call("postgresql.get_database_stats", {}, "<logical_name>")
   ```
-- [ ] No changes needed to `extractToolDetails()` — PostgreSQL doesn't expose agent-relevant config (same as Zabbix/VM)
-- [ ] Run `make test` - must pass before task 9
+- [x] No changes needed to `extractToolDetails()` — PostgreSQL doesn't expose agent-relevant config (same as Zabbix/VM)
+- [x] Run `make test` - must pass before task 9
 
 ### Task 9: Verify acceptance criteria
 
