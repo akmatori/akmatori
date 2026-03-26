@@ -43,11 +43,11 @@ Address critical and warning-level issues found during code review of the `opena
 **Files:**
 - Modify: `internal/database/models.go` (or wherever the migration lives)
 
-- [ ] Find the migration that copies `openai_enabled` → `llm_enabled` and drops the old column
-- [ ] Wrap the UPDATE + DROP COLUMN in a database transaction
-- [ ] Change the data-copy warning log to return an error on failure (fail loudly)
-- [ ] Write a test verifying the migration handles partial failure gracefully
-- [ ] Run `make test` - must pass before task 4
+- [x] Find the migration that copies `openai_enabled` → `llm_enabled` and drops the old column
+- [x] Wrap the UPDATE + DROP COLUMN in a database transaction
+- [x] Change the data-copy warning log to return an error on failure (fail loudly)
+- [x] Write a test verifying the migration handles partial failure gracefully
+- [x] Run `make test` - must pass before task 4
 
 ### Task 4: Verify acceptance criteria
 

@@ -103,19 +103,31 @@ func AutoMigrate() error {
 	// GORM's AutoMigrate already created the new llm_enabled column from the
 	// updated model. We need to copy values from the old column and drop it.
 	// The old column name is "open_ai_enabled" (GORM's snake_case of OpenAIEnabled).
-	if DB.Migrator().HasColumn(&ProxySettings{}, "open_ai_enabled") {
-		if err := DB.Exec("UPDATE proxy_settings SET llm_enabled = open_ai_enabled WHERE llm_enabled IS NULL OR llm_enabled != open_ai_enabled").Error; err != nil {
-			slog.Warn("failed to copy open_ai_enabled values to llm_enabled", "error", err)
-		}
-		if err := DB.Exec("ALTER TABLE proxy_settings DROP COLUMN open_ai_enabled").Error; err != nil {
-			slog.Warn("failed to drop old open_ai_enabled column", "error", err)
-		} else {
-			slog.Info("migrated proxy_settings: open_ai_enabled → llm_enabled")
-		}
+	if err := migrateOpenAIToLLMEnabled(DB); err != nil {
+		return fmt.Errorf("failed to migrate open_ai_enabled to llm_enabled: %w", err)
 	}
 
 	slog.Info("database migrations completed successfully")
 	return nil
+}
+
+// migrateOpenAIToLLMEnabled copies open_ai_enabled values to llm_enabled
+// and drops the old column, all within a transaction to prevent partial state.
+func migrateOpenAIToLLMEnabled(db *gorm.DB) error {
+	if !db.Migrator().HasColumn(&ProxySettings{}, "open_ai_enabled") {
+		return nil
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("UPDATE proxy_settings SET llm_enabled = open_ai_enabled WHERE llm_enabled IS NULL OR llm_enabled != open_ai_enabled").Error; err != nil {
+			return fmt.Errorf("copy open_ai_enabled values: %w", err)
+		}
+		if err := tx.Exec("ALTER TABLE proxy_settings DROP COLUMN open_ai_enabled").Error; err != nil {
+			return fmt.Errorf("drop open_ai_enabled column: %w", err)
+		}
+		slog.Info("migrated proxy_settings: open_ai_enabled → llm_enabled")
+		return nil
+	})
 }
 
 // InitializeDefaults creates default records if they don't exist
