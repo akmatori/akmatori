@@ -159,6 +159,16 @@ func TestIsSelectOnly(t *testing.T) {
 		{"dangerous in line comment only", "SELECT * FROM users -- INSERT INTO foo", true},
 		{"dangerous in block comment only", "SELECT * FROM users /* DELETE FROM foo */", true},
 
+		// Keywords inside string literals should not trigger false positives
+		{"keyword DELETE in string literal", "SELECT * FROM events WHERE status = 'DELETE_PENDING'", true},
+		{"keyword INSERT in string literal", "SELECT * FROM logs WHERE action = 'INSERT'", true},
+		{"keyword SET in string literal", "SELECT * FROM config WHERE key = 'SET'", true},
+		{"keyword DROP in string literal", "SELECT * FROM audit WHERE op = 'DROP TABLE'", true},
+		{"keyword UPDATE in string literal", "SELECT * FROM history WHERE type = 'UPDATE'", true},
+		{"keyword TRUNCATE in dollar-quoted literal", "SELECT * FROM t WHERE x = $$TRUNCATE$$", true},
+		{"real INSERT not in string literal", "INSERT INTO users VALUES ('safe')", false},
+		{"real DELETE not in string literal", "DELETE FROM users WHERE name = 'test'", false},
+
 		// Semicolons
 		{"select with semicolon", "SELECT * FROM users;", true},
 		{"multi-statement injection", "SELECT * FROM users; DROP TABLE users", false},
@@ -1047,7 +1057,7 @@ func TestGetActiveQueries_CacheHit(t *testing.T) {
 	config := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
 	tool.configCache.Set(configCacheKey("test-incident"), config)
 
-	cacheKey := responseCacheKey("get_active_queries", map[string]interface{}{})
+	cacheKey := responseCacheKey("get_active_queries", map[string]interface{}{"include_idle": false})
 	fullCacheKey := "incident:test-incident:" + cacheKey
 	expectedResult := `[{"pid":123,"state":"active","query":"SELECT 1","duration_seconds":5.2}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
@@ -1070,7 +1080,7 @@ func TestGetActiveQueries_IncludeIdle(t *testing.T) {
 
 	// Cache with include_idle=true produces a different cache key
 	args := map[string]interface{}{"include_idle": true}
-	cacheKey := responseCacheKey("get_active_queries", args)
+	cacheKey := responseCacheKey("get_active_queries", map[string]interface{}{"include_idle": true})
 	fullCacheKey := "incident:test-incident:" + cacheKey
 	expectedResult := `[{"pid":123,"state":"idle","query":"SELECT 1"}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
@@ -1092,7 +1102,7 @@ func TestGetActiveQueries_MinDuration(t *testing.T) {
 	tool.configCache.Set(configCacheKey("test-incident"), config)
 
 	args := map[string]interface{}{"min_duration_seconds": float64(10)}
-	cacheKey := responseCacheKey("get_active_queries", args)
+	cacheKey := responseCacheKey("get_active_queries", map[string]interface{}{"include_idle": false, "min_duration_seconds": float64(10)})
 	fullCacheKey := "incident:test-incident:" + cacheKey
 	expectedResult := `[{"pid":456,"state":"active","query":"SELECT pg_sleep(30)","duration_seconds":25.1}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
@@ -1114,7 +1124,7 @@ func TestGetActiveQueries_WithLogicalName(t *testing.T) {
 	tool.configCache.Set("creds:logical:postgresql:prod-pg", config)
 
 	args := map[string]interface{}{"logical_name": "prod-pg"}
-	cacheKey := responseCacheKey("get_active_queries", args)
+	cacheKey := responseCacheKey("get_active_queries", map[string]interface{}{"include_idle": false})
 	fullCacheKey := "logical:prod-pg:" + cacheKey
 	expectedResult := `[{"pid":789,"state":"active","query":"SELECT count(*) FROM orders"}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
@@ -1136,7 +1146,7 @@ func TestGetLocks_CacheHit(t *testing.T) {
 	tool.configCache.Set(configCacheKey("test-incident"), config)
 
 	args := map[string]interface{}{}
-	cacheKey := responseCacheKey("get_locks", args)
+	cacheKey := responseCacheKey("get_locks", map[string]interface{}{"blocked_only": false})
 	fullCacheKey := "incident:test-incident:" + cacheKey
 	expectedResult := `[{"locktype":"relation","relation":"users","mode":"AccessShareLock","granted":true,"pid":123}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
@@ -1158,7 +1168,7 @@ func TestGetLocks_BlockedOnly(t *testing.T) {
 	tool.configCache.Set(configCacheKey("test-incident"), config)
 
 	args := map[string]interface{}{"blocked_only": true}
-	cacheKey := responseCacheKey("get_locks", args)
+	cacheKey := responseCacheKey("get_locks", map[string]interface{}{"blocked_only": true})
 	fullCacheKey := "incident:test-incident:" + cacheKey
 	expectedResult := `[{"locktype":"relation","relation":"orders","mode":"ExclusiveLock","granted":false,"pid":456}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
@@ -1180,10 +1190,8 @@ func TestGetLocks_BlockedOnlyDefault(t *testing.T) {
 	tool.configCache.Set(configCacheKey("test-incident"), config)
 
 	// Default blocked_only is false - different cache key than blocked_only=true
-	argsDefault := map[string]interface{}{}
-	argsBlocked := map[string]interface{}{"blocked_only": true}
-	key1 := responseCacheKey("get_locks", argsDefault)
-	key2 := responseCacheKey("get_locks", argsBlocked)
+	key1 := responseCacheKey("get_locks", map[string]interface{}{"blocked_only": false})
+	key2 := responseCacheKey("get_locks", map[string]interface{}{"blocked_only": true})
 	if key1 == key2 {
 		t.Error("expected different cache keys for different blocked_only values")
 	}

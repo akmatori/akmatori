@@ -46,10 +46,12 @@ var dangerousFuncPattern = regexp.MustCompile(`(?i)\b(pg_terminate_backend|pg_ca
 
 // Pre-compiled regex patterns for SQL comment stripping and LIMIT detection
 var (
-	blockCommentPattern = regexp.MustCompile(`/\*[\s\S]*?\*/`)
-	lineCommentPattern  = regexp.MustCompile(`--[^\n]*`)
-	limitPattern        = regexp.MustCompile(`(?i)\bLIMIT\b`)
-	explainPattern      = regexp.MustCompile(`(?i)^\s*EXPLAIN\b`)
+	blockCommentPattern  = regexp.MustCompile(`/\*[\s\S]*?\*/`)
+	lineCommentPattern   = regexp.MustCompile(`--[^\n]*`)
+	singleQuoteLiteral   = regexp.MustCompile(`'(?:[^'\\]|\\.)*'`)
+	dollarQuoteLiteral   = regexp.MustCompile(`\$[^$]*\$[\s\S]*?\$[^$]*\$`)
+	limitPattern         = regexp.MustCompile(`(?i)\bLIMIT\b`)
+	explainPattern       = regexp.MustCompile(`(?i)^\s*EXPLAIN\b`)
 )
 
 // PGConfig holds PostgreSQL connection configuration
@@ -140,8 +142,8 @@ func clampTimeout(timeout int) int {
 // Also rejects EXPLAIN statements (use ExplainQuery tool instead).
 // Allows SELECT and WITH (CTEs).
 func isSelectOnly(query string) bool {
-	// Strip SQL comments (both -- and /* */)
-	cleaned := stripSQLComments(query)
+	// Strip SQL comments and string literals so keywords inside quotes don't trigger false positives
+	cleaned := stripSQLLiterals(stripSQLComments(query))
 	if dangerousStmtPattern.MatchString(cleaned) {
 		return false
 	}
@@ -158,7 +160,7 @@ func isSelectOnly(query string) bool {
 // isReadOnlyQuery validates that a SQL query contains no dangerous statements.
 // Unlike isSelectOnly, this does not block EXPLAIN — used by ExplainQuery which wraps the query.
 func isReadOnlyQuery(query string) bool {
-	cleaned := stripSQLComments(query)
+	cleaned := stripSQLLiterals(stripSQLComments(query))
 	if dangerousStmtPattern.MatchString(cleaned) {
 		return false
 	}
@@ -172,6 +174,14 @@ func isReadOnlyQuery(query string) bool {
 func stripSQLComments(query string) string {
 	result := blockCommentPattern.ReplaceAllString(query, " ")
 	result = lineCommentPattern.ReplaceAllString(result, " ")
+	return result
+}
+
+// stripSQLLiterals removes string literals so keyword detection does not match inside quoted values.
+// Handles single-quoted ('...') and dollar-quoted ($$...$$) strings.
+func stripSQLLiterals(query string) string {
+	result := dollarQuoteLiteral.ReplaceAllString(query, "''")
+	result = singleQuoteLiteral.ReplaceAllString(result, "''")
 	return result
 }
 
@@ -603,9 +613,8 @@ func (t *PostgreSQLTool) GetTableStats(ctx context.Context, incidentID string, a
 
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
-	} else {
-		query += " ORDER BY n_live_tup DESC"
 	}
+	query += " ORDER BY n_live_tup DESC"
 
 	cacheKey := responseCacheKey("get_table_stats", params)
 
@@ -683,7 +692,11 @@ func (t *PostgreSQLTool) GetActiveQueries(ctx context.Context, incidentID string
 
 	query += " ORDER BY duration_seconds DESC NULLS LAST"
 
-	cacheKey := responseCacheKey("get_active_queries", args)
+	cacheParams := map[string]interface{}{"include_idle": includeIdle}
+	if v, ok := args["min_duration_seconds"].(float64); ok {
+		cacheParams["min_duration_seconds"] = v
+	}
+	cacheKey := responseCacheKey("get_active_queries", cacheParams)
 
 	return t.cachedQuery(ctx, incidentID, cacheKey, QueryCacheTTL, func() (string, error) {
 		config, err := t.resolveConfig(ctx, incidentID, logicalName)
@@ -720,7 +733,7 @@ func (t *PostgreSQLTool) GetLocks(ctx context.Context, incidentID string, args m
 
 	query += " ORDER BY l.granted, duration_seconds DESC NULLS LAST"
 
-	cacheKey := responseCacheKey("get_locks", args)
+	cacheKey := responseCacheKey("get_locks", map[string]interface{}{"blocked_only": blockedOnly})
 
 	return t.cachedQuery(ctx, incidentID, cacheKey, QueryCacheTTL, func() (string, error) {
 		config, err := t.resolveConfig(ctx, incidentID, logicalName)
