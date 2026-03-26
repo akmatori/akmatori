@@ -117,7 +117,8 @@ func TestIsSelectOnly(t *testing.T) {
 		{"CTE with select", "WITH active_users AS (SELECT * FROM users WHERE active = true) SELECT * FROM active_users", true},
 		{"nested subquery", "SELECT * FROM (SELECT id FROM users) sub", true},
 		{"select count", "SELECT COUNT(*) FROM orders", true},
-		{"explain select", "EXPLAIN SELECT * FROM users", true},
+		{"explain select blocked", "EXPLAIN SELECT * FROM users", false},
+		{"explain analyze blocked", "EXPLAIN ANALYZE SELECT * FROM users", false},
 
 		// Dangerous functions
 		{"pg_terminate_backend", "SELECT pg_terminate_backend(123)", false},
@@ -269,6 +270,20 @@ func TestBuildConnConfig(t *testing.T) {
 	if connConfig.Password != "secret" {
 		t.Errorf("expected password 'secret', got %q", connConfig.Password)
 	}
+	// verify-full should set TLSConfig with ServerName
+	if connConfig.TLSConfig == nil {
+		t.Fatal("expected TLSConfig for verify-full")
+	}
+	if connConfig.TLSConfig.InsecureSkipVerify {
+		t.Error("expected InsecureSkipVerify=false for verify-full")
+	}
+	if connConfig.TLSConfig.ServerName != "db.example.com" {
+		t.Errorf("expected ServerName 'db.example.com', got %q", connConfig.TLSConfig.ServerName)
+	}
+	// RuntimeParams should include read-only and timeout defaults
+	if connConfig.RuntimeParams["default_transaction_read_only"] != "on" {
+		t.Error("expected default_transaction_read_only='on' in RuntimeParams")
+	}
 }
 
 func TestBuildConnConfig_DisableSSL(t *testing.T) {
@@ -283,6 +298,67 @@ func TestBuildConnConfig_DisableSSL(t *testing.T) {
 	}
 	if connConfig.TLSConfig != nil {
 		t.Error("expected nil TLSConfig for sslmode=disable")
+	}
+}
+
+func TestBuildConnConfig_RequireSSL(t *testing.T) {
+	config := &PGConfig{
+		Host:    "localhost",
+		Port:    5432,
+		SSLMode: "require",
+		Timeout: 30,
+	}
+	connConfig, err := buildConnConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if connConfig.TLSConfig == nil {
+		t.Fatal("expected TLSConfig for sslmode=require")
+	}
+	if !connConfig.TLSConfig.InsecureSkipVerify {
+		t.Error("expected InsecureSkipVerify=true for require mode")
+	}
+}
+
+func TestBuildConnConfig_VerifyCA(t *testing.T) {
+	config := &PGConfig{
+		Host:    "db.example.com",
+		Port:    5432,
+		SSLMode: "verify-ca",
+		Timeout: 30,
+	}
+	connConfig, err := buildConnConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if connConfig.TLSConfig == nil {
+		t.Fatal("expected TLSConfig for sslmode=verify-ca")
+	}
+	if connConfig.TLSConfig.InsecureSkipVerify {
+		t.Error("expected InsecureSkipVerify=false for verify-ca")
+	}
+	// verify-ca should NOT set ServerName (only verify-full does)
+	if connConfig.TLSConfig.ServerName != "" {
+		t.Errorf("expected empty ServerName for verify-ca, got %q", connConfig.TLSConfig.ServerName)
+	}
+}
+
+func TestBuildConnConfig_RuntimeParams(t *testing.T) {
+	config := &PGConfig{
+		Host:    "localhost",
+		Port:    5432,
+		SSLMode: "disable",
+		Timeout: 60,
+	}
+	connConfig, err := buildConnConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if connConfig.RuntimeParams["default_transaction_read_only"] != "on" {
+		t.Error("expected default_transaction_read_only='on'")
+	}
+	if connConfig.RuntimeParams["statement_timeout"] != "60000" {
+		t.Errorf("expected statement_timeout='60000', got %q", connConfig.RuntimeParams["statement_timeout"])
 	}
 }
 

@@ -3,11 +3,13 @@ package postgresql
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,6 +49,7 @@ var (
 	blockCommentPattern = regexp.MustCompile(`/\*[\s\S]*?\*/`)
 	lineCommentPattern  = regexp.MustCompile(`--[^\n]*`)
 	limitPattern        = regexp.MustCompile(`(?i)\bLIMIT\b`)
+	explainPattern      = regexp.MustCompile(`(?i)^\s*EXPLAIN\b`)
 )
 
 // PGConfig holds PostgreSQL connection configuration
@@ -110,7 +113,7 @@ func responseCacheKey(query string, params interface{}) string {
 	paramsJSON, _ := json.Marshal(params)
 	combined := query + ":" + string(paramsJSON)
 	hash := sha256.Sum256([]byte(combined))
-	return fmt.Sprintf("pg:%s", hex.EncodeToString(hash[:8]))
+	return fmt.Sprintf("pg:%s", hex.EncodeToString(hash[:]))
 }
 
 // extractLogicalName extracts the optional logical_name from tool arguments.
@@ -134,9 +137,27 @@ func clampTimeout(timeout int) int {
 
 // isSelectOnly validates that a SQL query is read-only.
 // Rejects queries containing INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, GRANT, REVOKE.
+// Also rejects EXPLAIN statements (use ExplainQuery tool instead).
 // Allows SELECT and WITH (CTEs).
 func isSelectOnly(query string) bool {
 	// Strip SQL comments (both -- and /* */)
+	cleaned := stripSQLComments(query)
+	if dangerousStmtPattern.MatchString(cleaned) {
+		return false
+	}
+	if dangerousFuncPattern.MatchString(cleaned) {
+		return false
+	}
+	// Block EXPLAIN statements — users should use the dedicated ExplainQuery tool
+	if explainPattern.MatchString(cleaned) {
+		return false
+	}
+	return true
+}
+
+// isReadOnlyQuery validates that a SQL query contains no dangerous statements.
+// Unlike isSelectOnly, this does not block EXPLAIN — used by ExplainQuery which wraps the query.
+func isReadOnlyQuery(query string) bool {
 	cleaned := stripSQLComments(query)
 	if dangerousStmtPattern.MatchString(cleaned) {
 		return false
@@ -239,15 +260,26 @@ func buildConnConfig(config *PGConfig) (*pgx.ConnConfig, error) {
 	connConfig.User = config.Username
 	connConfig.Password = config.Password
 
-	// Configure TLS based on SSLMode
+	// Configure TLS based on SSLMode via pgx TLSConfig (RuntimeParams["sslmode"] is not honored by pgx)
 	switch config.SSLMode {
 	case "disable":
 		connConfig.TLSConfig = nil
+	case "require":
+		connConfig.TLSConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // require mode skips cert verification by design
+	case "verify-ca", "verify-full":
+		tlsConf := &tls.Config{InsecureSkipVerify: false}
+		if config.SSLMode == "verify-full" {
+			tlsConf.ServerName = config.Host
+		}
+		connConfig.TLSConfig = tlsConf
 	default:
-		// For require/verify-ca/verify-full, use the sslmode parameter via RuntimeParams
-		// pgx handles TLS negotiation; we pass sslmode so the connection string fallback works
-		connConfig.RuntimeParams["sslmode"] = config.SSLMode
+		// prefer mode: try TLS, fall back to plaintext
+		connConfig.TLSConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // prefer mode skips cert verification by design
 	}
+
+	// Set read-only and timeout via RuntimeParams so they apply before any queries
+	connConfig.RuntimeParams["default_transaction_read_only"] = "on"
+	connConfig.RuntimeParams["statement_timeout"] = strconv.Itoa(config.Timeout * 1000)
 
 	return connConfig, nil
 }
@@ -262,14 +294,6 @@ func (t *PostgreSQLTool) connect(ctx context.Context, config *PGConfig) (*pgx.Co
 	conn, err := pgx.ConnectConfig(ctx, connConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to PostgreSQL at %s:%d/%s: %w", config.Host, config.Port, config.Database, err)
-	}
-
-	// Set connection to read-only mode and configure statement timeout
-	timeoutMs := config.Timeout * 1000
-	_, err = conn.Exec(ctx, fmt.Sprintf("SET default_transaction_read_only = on; SET statement_timeout = %d", timeoutMs))
-	if err != nil {
-		conn.Close(ctx)
-		return nil, fmt.Errorf("failed to configure connection: %w", err)
 	}
 
 	return conn, nil
@@ -433,7 +457,7 @@ func (t *PostgreSQLTool) ExecuteQuery(ctx context.Context, incidentID string, ar
 	}
 
 	if !isSelectOnly(query) {
-		return "", fmt.Errorf("only SELECT queries are allowed (write statements, SET, LOCK, and dangerous functions are blocked)")
+		return "", fmt.Errorf("only SELECT queries are allowed (write statements, SET, LOCK, EXPLAIN, and dangerous functions are blocked; use explain_query for execution plans)")
 	}
 
 	limit := parseLimit(args)
@@ -560,11 +584,25 @@ func (t *PostgreSQLTool) GetTableStats(ctx context.Context, incidentID string, a
 
 	params := map[string]string{}
 	var queryArgs []interface{}
+	paramIdx := 1
+	var conditions []string
 
 	if tableName, ok := args["table_name"].(string); ok && tableName != "" {
-		query += " WHERE relname = $1"
+		conditions = append(conditions, fmt.Sprintf("relname = $%d", paramIdx))
 		params["table"] = tableName
 		queryArgs = append(queryArgs, tableName)
+		paramIdx++
+	}
+
+	if schema, ok := args["schema"].(string); ok && schema != "" {
+		conditions = append(conditions, fmt.Sprintf("schemaname = $%d", paramIdx))
+		params["schema"] = schema
+		queryArgs = append(queryArgs, schema)
+		paramIdx++ //nolint:ineffassign // keep paramIdx pattern consistent for future parameters
+	}
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
 	} else {
 		query += " ORDER BY n_live_tup DESC"
 	}
@@ -593,7 +631,8 @@ func (t *PostgreSQLTool) ExplainQuery(ctx context.Context, incidentID string, ar
 		return "", fmt.Errorf("query is required%s", validation.SuggestParam("query", args))
 	}
 
-	if !isSelectOnly(query) {
+	// ExplainQuery uses isReadOnlyQuery (not isSelectOnly) since EXPLAIN prefix is expected here
+	if !isReadOnlyQuery(query) {
 		return "", fmt.Errorf("only SELECT queries are allowed (write statements, SET, LOCK, and dangerous functions are blocked)")
 	}
 

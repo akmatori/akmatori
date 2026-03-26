@@ -1716,6 +1716,10 @@ func (r *Registry) registerPostgreSQLTools() {
 						Type:        "string",
 						Description: "Table name (optional, returns all tables if omitted)",
 					},
+					"schema": {
+						Type:        "string",
+						Description: "Schema name to filter by (optional)",
+					},
 				},
 			},
 		},

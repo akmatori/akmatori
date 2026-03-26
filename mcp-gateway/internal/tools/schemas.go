@@ -629,7 +629,7 @@ func getPostgreSQLSchema() ToolTypeSchema {
 			{
 				Name:        "get_table_stats",
 				Description: "Get table statistics (scans, tuples, vacuum info)",
-				Parameters:  "table_name",
+				Parameters:  "table_name, schema",
 				Returns:     "JSON array of table stat objects",
 			},
 			{
