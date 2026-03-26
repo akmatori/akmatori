@@ -37,7 +37,10 @@ const (
 
 // dangerousStmtPattern matches SQL statements that modify data or schema.
 // This is a defense-in-depth layer — the read-only transaction is the primary guard.
-var dangerousStmtPattern = regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|COPY|DO|CALL)\b`)
+var dangerousStmtPattern = regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|COPY|DO|CALL|SET|LOCK)\b`)
+
+// dangerousFuncPattern matches SQL functions that can affect other sessions or server state.
+var dangerousFuncPattern = regexp.MustCompile(`(?i)\b(pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_rotate_logfile|pg_switch_wal|set_config)\s*\(`)
 
 // Pre-compiled regex patterns for SQL comment stripping and LIMIT detection
 var (
@@ -121,7 +124,7 @@ func extractLogicalName(args map[string]interface{}) string {
 // clampTimeout ensures timeout is within a safe range (5-300 seconds), defaulting to 30.
 func clampTimeout(timeout int) int {
 	if timeout < MinTimeout {
-		return DefaultTimeout
+		return MinTimeout
 	}
 	if timeout > MaxTimeout {
 		return MaxTimeout
@@ -135,7 +138,13 @@ func clampTimeout(timeout int) int {
 func isSelectOnly(query string) bool {
 	// Strip SQL comments (both -- and /* */)
 	cleaned := stripSQLComments(query)
-	return !dangerousStmtPattern.MatchString(cleaned)
+	if dangerousStmtPattern.MatchString(cleaned) {
+		return false
+	}
+	if dangerousFuncPattern.MatchString(cleaned) {
+		return false
+	}
+	return true
 }
 
 // stripSQLComments removes SQL line comments (--) and block comments (/* */)
@@ -190,7 +199,10 @@ func parseSettings(settings map[string]interface{}) *PGConfig {
 		config.Host = v
 	}
 	if v, ok := settings["pg_port"].(float64); ok {
-		config.Port = int(v)
+		p := int(v)
+		if p >= 1 && p <= 65535 {
+			config.Port = p
+		}
 	}
 	if v, ok := settings["pg_database"].(string); ok {
 		config.Database = v
@@ -281,8 +293,8 @@ func (t *PostgreSQLTool) executeReadOnly(ctx context.Context, config *PGConfig, 
 
 	t.logger.Printf("PostgreSQL query: %s", truncateQuery(query))
 
-	// Execute inside read-only transaction (default_transaction_read_only = on is set at connection level)
-	tx, err := conn.Begin(ctx)
+	// Execute inside explicit read-only transaction for defense in depth
+	tx, err := conn.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
@@ -421,7 +433,7 @@ func (t *PostgreSQLTool) ExecuteQuery(ctx context.Context, incidentID string, ar
 	}
 
 	if !isSelectOnly(query) {
-		return "", fmt.Errorf("only SELECT queries are allowed (INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, GRANT, REVOKE, COPY, DO, CALL are blocked)")
+		return "", fmt.Errorf("only SELECT queries are allowed (write statements, SET, LOCK, and dangerous functions are blocked)")
 	}
 
 	limit := parseLimit(args)
@@ -582,7 +594,7 @@ func (t *PostgreSQLTool) ExplainQuery(ctx context.Context, incidentID string, ar
 	}
 
 	if !isSelectOnly(query) {
-		return "", fmt.Errorf("only SELECT queries are allowed (INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, GRANT, REVOKE, COPY, DO, CALL are blocked)")
+		return "", fmt.Errorf("only SELECT queries are allowed (write statements, SET, LOCK, and dangerous functions are blocked)")
 	}
 
 	explainQuery := "EXPLAIN (ANALYZE false, FORMAT JSON) " + query
@@ -651,7 +663,7 @@ func (t *PostgreSQLTool) GetActiveQueries(ctx context.Context, incidentID string
 func (t *PostgreSQLTool) GetLocks(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
 	logicalName := extractLogicalName(args)
 
-	query := `SELECT l.locktype, l.relation::regclass AS relation, l.mode, l.granted, l.pid,
+	query := `SELECT l.locktype, CASE WHEN l.relation IS NOT NULL THEN l.relation::regclass::text ELSE NULL END AS relation, l.mode, l.granted, l.pid,
 		a.usename, a.state, a.query,
 		EXTRACT(EPOCH FROM (now() - a.query_start))::numeric(10,2) AS duration_seconds,
 		l.waitstart

@@ -119,6 +119,18 @@ func TestIsSelectOnly(t *testing.T) {
 		{"select count", "SELECT COUNT(*) FROM orders", true},
 		{"explain select", "EXPLAIN SELECT * FROM users", true},
 
+		// Dangerous functions
+		{"pg_terminate_backend", "SELECT pg_terminate_backend(123)", false},
+		{"pg_cancel_backend", "SELECT pg_cancel_backend(123)", false},
+		{"pg_reload_conf", "SELECT pg_reload_conf()", false},
+		{"pg_switch_wal", "SELECT pg_switch_wal()", false},
+		{"set_config", "SELECT set_config('statement_timeout', '0', false)", false},
+
+		// SET and LOCK
+		{"set statement", "SET statement_timeout = 0", false},
+		{"set local", "SET LOCAL statement_timeout = 0", false},
+		{"lock table", "LOCK TABLE users IN ACCESS SHARE MODE", false},
+
 		// Dangerous statements
 		{"insert", "INSERT INTO users (name) VALUES ('test')", false},
 		{"INSERT uppercase", "INSERT INTO users (name) VALUES ('test')", false},
@@ -167,9 +179,9 @@ func TestClampTimeout(t *testing.T) {
 		input   int
 		want    int
 	}{
-		{"zero defaults to 30", 0, DefaultTimeout},
-		{"negative defaults to 30", -1, DefaultTimeout},
-		{"below min defaults to 30", 3, DefaultTimeout},
+		{"zero defaults to min", 0, MinTimeout},
+		{"negative defaults to min", -1, MinTimeout},
+		{"below min defaults to min", 3, MinTimeout},
 		{"at min", 5, 5},
 		{"normal", 60, 60},
 		{"at max", 300, 300},
@@ -1696,6 +1708,29 @@ func TestParseSettings_WrongTypes(t *testing.T) {
 	}
 	if config.Database != "" {
 		t.Errorf("expected empty database for wrong type, got %q", config.Database)
+	}
+}
+
+func TestParseSettings_PortBoundsCheck(t *testing.T) {
+	tests := []struct {
+		name string
+		port float64
+		want int
+	}{
+		{"valid port", 5433, 5433},
+		{"zero falls back to default", 0, DefaultPort},
+		{"negative falls back to default", -1, DefaultPort},
+		{"overflow falls back to default", 99999, DefaultPort},
+		{"max valid", 65535, 65535},
+		{"min valid", 1, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := parseSettings(map[string]interface{}{"pg_port": tt.port})
+			if config.Port != tt.want {
+				t.Errorf("port=%v: got %d, want %d", tt.port, config.Port, tt.want)
+			}
+		})
 	}
 }
 
