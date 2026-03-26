@@ -58,5 +58,5 @@ Address critical and warning-level issues found during code review of the `opena
 
 ### Task 5: Update documentation
 
-- [ ] Update CLAUDE.md if internal patterns changed
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update CLAUDE.md if internal patterns changed
+- [x] Move this plan to `docs/plans/completed/`
