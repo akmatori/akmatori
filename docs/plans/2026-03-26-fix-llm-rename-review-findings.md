@@ -51,10 +51,10 @@ Address critical and warning-level issues found during code review of the `opena
 
 ### Task 4: Verify acceptance criteria
 
-- [ ] Manual test: save LLM proxy settings via the API using the new field name, confirm they persist correctly
-- [ ] Run full test suite: `make test-all`
-- [ ] Run linter: `golangci-lint run`
-- [ ] Verify test coverage meets 80%+
+- [x] Manual test: save LLM proxy settings via the API using the new field name, confirm they persist correctly
+- [x] Run full test suite: `make test-all`
+- [x] Run linter: `golangci-lint run`
+- [x] Verify test coverage meets 80%+
 
 ### Task 5: Update documentation
 
