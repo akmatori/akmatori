@@ -303,7 +303,6 @@ type ProxySettings struct {
 	ZabbixEnabled          bool      `gorm:"default:false" json:"zabbix_enabled"`
 	VictoriaMetricsEnabled bool      `gorm:"default:false" json:"victoria_metrics_enabled"`
 	CatchpointEnabled      bool      `gorm:"default:false" json:"catchpoint_enabled"`
-	PostgreSQLEnabled      bool      `gorm:"default:false" json:"postgresql_enabled"`
 	CreatedAt              time.Time `json:"created_at"`
 	UpdatedAt              time.Time `json:"updated_at"`
 }
