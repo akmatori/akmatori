@@ -827,11 +827,11 @@ describe("AgentRunner", () => {
   // -----------------------------------------------------------------------
 
   describe("proxy configuration", () => {
-    it("should set HTTP_PROXY and HTTPS_PROXY when openai_enabled is true", async () => {
+    it("should set env vars and undici EnvHttpProxyAgent when llm_enabled is true", async () => {
       const proxyConfig: ProxyConfig = {
         url: "http://proxy.example.com:8080",
         no_proxy: "localhost,127.0.0.1",
-        openai_enabled: true,
+        llm_enabled: true,
         slack_enabled: false,
         zabbix_enabled: false,
       };
@@ -839,13 +839,16 @@ describe("AgentRunner", () => {
       let capturedHttpProxy: string | undefined;
       let capturedHttpsProxy: string | undefined;
       let capturedNoProxy: string | undefined;
+      let capturedDispatcher: string | undefined;
 
-      // Capture env vars during session creation
+      // Capture env vars and dispatcher during session creation
       const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
       (createAgentSession as any).mockImplementationOnce(async () => {
         capturedHttpProxy = process.env.HTTP_PROXY;
         capturedHttpsProxy = process.env.HTTPS_PROXY;
         capturedNoProxy = process.env.NO_PROXY;
+        const undici = await import("undici");
+        capturedDispatcher = undici.getGlobalDispatcher()?.constructor?.name;
         return { session: mockSession, extensionsResult: {} };
       });
 
@@ -854,46 +857,55 @@ describe("AgentRunner", () => {
       expect(capturedHttpProxy).toBe("http://proxy.example.com:8080");
       expect(capturedHttpsProxy).toBe("http://proxy.example.com:8080");
       expect(capturedNoProxy).toBe("localhost,127.0.0.1");
+      expect(capturedDispatcher).toBe("EnvHttpProxyAgent");
     });
 
-    it("should NOT set proxy when openai_enabled is false", async () => {
+    it("should NOT set proxy when llm_enabled is false", async () => {
       const proxyConfig: ProxyConfig = {
         url: "http://proxy.example.com:8080",
         no_proxy: "",
-        openai_enabled: false,
+        llm_enabled: false,
         slack_enabled: true,
         zabbix_enabled: true,
       };
 
       let capturedHttpProxy: string | undefined;
+      let capturedDispatcher: string | undefined;
 
       const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
       (createAgentSession as any).mockImplementationOnce(async () => {
         capturedHttpProxy = process.env.HTTP_PROXY;
+        const undici = await import("undici");
+        capturedDispatcher = undici.getGlobalDispatcher()?.constructor?.name;
         return { session: mockSession, extensionsResult: {} };
       });
 
       await runner.execute(makeExecuteParams({ proxyConfig }));
 
       expect(capturedHttpProxy).toBe("");
+      expect(capturedDispatcher).toBe("Agent");
     });
 
-    it("should clear proxy env vars when no proxy config provided", async () => {
+    it("should clear proxy env vars and reset dispatcher when no proxy config provided", async () => {
       // Set some proxy vars first
       process.env.HTTP_PROXY = "http://old-proxy:1234";
       process.env.HTTPS_PROXY = "http://old-proxy:1234";
 
       let capturedHttpProxy: string | undefined;
+      let capturedDispatcher: string | undefined;
 
       const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
       (createAgentSession as any).mockImplementationOnce(async () => {
         capturedHttpProxy = process.env.HTTP_PROXY;
+        const undici = await import("undici");
+        capturedDispatcher = undici.getGlobalDispatcher()?.constructor?.name;
         return { session: mockSession, extensionsResult: {} };
       });
 
       await runner.execute(makeExecuteParams({ proxyConfig: undefined }));
 
       expect(capturedHttpProxy).toBe("");
+      expect(capturedDispatcher).toBe("Agent");
     });
   });
 });

@@ -56,7 +56,7 @@ export default function ProxySettings() {
 
   const [proxyUrl, setProxyUrl] = useState('');
   const [noProxy, setNoProxy] = useState('');
-  const [openaiEnabled, setOpenaiEnabled] = useState(true);
+  const [llmEnabled, setLlmEnabled] = useState(true);
   const [slackEnabled, setSlackEnabled] = useState(true);
   const [zabbixEnabled, setZabbixEnabled] = useState(false);
   const [victoriaMetricsEnabled, setVictoriaMetricsEnabled] = useState(false);
@@ -72,7 +72,7 @@ export default function ProxySettings() {
       const data = await proxySettingsApi.get();
       setProxyUrl(data.proxy_url || '');
       setNoProxy(data.no_proxy || '');
-      setOpenaiEnabled(data.services.openai.enabled);
+      setLlmEnabled(data.services.llm.enabled);
       setSlackEnabled(data.services.slack.enabled);
       setZabbixEnabled(data.services.zabbix.enabled);
       setVictoriaMetricsEnabled(data.services.victoria_metrics.enabled);
@@ -95,7 +95,7 @@ export default function ProxySettings() {
         proxy_url: proxyUrl,
         no_proxy: noProxy,
         services: {
-          openai: { enabled: openaiEnabled },
+          llm: { enabled: llmEnabled },
           slack: { enabled: slackEnabled },
           zabbix: { enabled: zabbixEnabled },
           victoria_metrics: { enabled: victoriaMetricsEnabled },
@@ -173,10 +173,10 @@ export default function ProxySettings() {
             name="LLM API"
             description="External AI service"
             icon={Server}
-            enabled={openaiEnabled}
+            enabled={llmEnabled}
             supported={true}
             disabled={!hasProxy}
-            onChange={setOpenaiEnabled}
+            onChange={setLlmEnabled}
           />
           <ServiceToggle
             name="Slack"

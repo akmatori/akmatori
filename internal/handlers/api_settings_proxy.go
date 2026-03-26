@@ -35,8 +35,8 @@ func (h *APIHandler) GetProxySettings(w http.ResponseWriter, r *http.Request) {
 		"proxy_url": maskedURL,
 		"no_proxy":  settings.NoProxy,
 		"services": map[string]interface{}{
-			"openai": map[string]interface{}{
-				"enabled":   settings.OpenAIEnabled,
+			"llm": map[string]interface{}{
+				"enabled":   settings.LLMEnabled,
 				"supported": true,
 			},
 			"slack": map[string]interface{}{
@@ -86,7 +86,7 @@ func (h *APIHandler) UpdateProxySettings(w http.ResponseWriter, r *http.Request)
 
 	settings.ProxyURL = input.ProxyURL
 	settings.NoProxy = input.NoProxy
-	settings.OpenAIEnabled = input.Services.OpenAI.Enabled
+	settings.LLMEnabled = input.Services.LLM.Enabled
 	settings.SlackEnabled = input.Services.Slack.Enabled
 	settings.ZabbixEnabled = input.Services.Zabbix.Enabled
 	settings.VictoriaMetricsEnabled = input.Services.VictoriaMetrics.Enabled

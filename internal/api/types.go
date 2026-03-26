@@ -109,9 +109,9 @@ type UpdateProxySettingsRequest struct {
 	ProxyURL string `json:"proxy_url"`
 	NoProxy  string `json:"no_proxy"`
 	Services struct {
-		OpenAI struct {
+		LLM struct {
 			Enabled bool `json:"enabled"`
-		} `json:"openai"`
+		} `json:"llm"`
 		Slack struct {
 			Enabled bool `json:"enabled"`
 		} `json:"slack"`

@@ -139,7 +139,7 @@ export interface ProxySettings {
   proxy_url: string;
   no_proxy: string;
   services: {
-    openai: ProxyServiceConfig;
+    llm: ProxyServiceConfig;
     slack: ProxyServiceConfig;
     zabbix: ProxyServiceConfig;
     victoria_metrics: ProxyServiceConfig;
@@ -152,7 +152,7 @@ export interface ProxySettingsUpdate {
   proxy_url: string;
   no_proxy: string;
   services: {
-    openai: { enabled: boolean };
+    llm: { enabled: boolean };
     slack: { enabled: boolean };
     zabbix: { enabled: boolean };
     victoria_metrics: { enabled: boolean };

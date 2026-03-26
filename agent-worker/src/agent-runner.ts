@@ -19,6 +19,7 @@ import {
   type AgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
 import { getModel, type Model, type ThinkingLevel as PiThinkingLevel } from "@mariozechner/pi-ai";
+import { Agent as UndiciAgent, EnvHttpProxyAgent, setGlobalDispatcher } from "undici";
 import type { LLMSettings, ExecuteResult, ProxyConfig, ThinkingLevel, ToolAllowlistEntry } from "./types.js";
 import {
   formatToolArgs,
@@ -559,26 +560,38 @@ export class AgentRunner {
   }
 
   /**
-   * Apply proxy configuration to environment variables.
-   * Only sets proxy for LLM API calls when the relevant toggle is enabled.
+   * Apply proxy configuration for LLM API calls.
    *
-   * Note: process.env is global state shared by concurrent sessions. We use
-   * assignment (not delete) to avoid inconsistent intermediate states. In
-   * practice, proxy config is system-global so all sessions receive the same
-   * setting.
+   * Node.js's built-in fetch (undici) does NOT automatically honour
+   * HTTP_PROXY / HTTPS_PROXY env vars. We must explicitly set the global
+   * undici dispatcher to an EnvHttpProxyAgent so that all fetch() calls
+   * (used by the LLM provider SDKs) route through the configured proxy.
+   *
+   * We still set the env vars as well — some libraries (e.g. node-fetch,
+   * child processes) do read them.
+   *
+   * Note: the global dispatcher is process-wide state shared by concurrent
+   * sessions. In practice, proxy config is system-global so all sessions
+   * receive the same setting.
    */
   private applyProxyConfig(
     proxyConfig: ProxyConfig | undefined,
     provider: string,
   ): void {
-    if (proxyConfig?.url && proxyConfig.openai_enabled) {
+    if (proxyConfig?.url && proxyConfig.llm_enabled) {
       process.env.HTTP_PROXY = proxyConfig.url;
       process.env.HTTPS_PROXY = proxyConfig.url;
       process.env.NO_PROXY = proxyConfig.no_proxy || "";
+
+      // Set undici's global dispatcher so fetch() uses the proxy
+      setGlobalDispatcher(new EnvHttpProxyAgent());
     } else {
       process.env.HTTP_PROXY = "";
       process.env.HTTPS_PROXY = "";
       process.env.NO_PROXY = "";
+
+      // Reset to default dispatcher (no proxy)
+      setGlobalDispatcher(new UndiciAgent());
     }
   }
 }
