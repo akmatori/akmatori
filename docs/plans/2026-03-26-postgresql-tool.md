@@ -51,9 +51,9 @@ Add a PostgreSQL database integration to the MCP Gateway as a native tool. The t
 **Files:**
 - Modify: `mcp-gateway/go.mod`
 
-- [ ] Run `cd mcp-gateway && go get github.com/jackc/pgx/v5` to add the PostgreSQL driver
-- [ ] Run `go mod tidy` to clean up
-- [ ] Run `make test-mcp` - must pass before task 3
+- [x] Run `cd mcp-gateway && go get github.com/jackc/pgx/v5` to add the PostgreSQL driver
+- [x] Run `go mod tidy` to clean up
+- [x] Run `make test-mcp` - must pass before task 3
 
 ### Task 3: Core tool implementation - struct, config, connection management
 
