@@ -1,6 +1,7 @@
 package postgresql
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -447,6 +448,18 @@ func TestRowsToJSON(t *testing.T) {
 	}
 	if !contains(result, "test") || !contains(result, "foo") {
 		t.Errorf("unexpected result: %s", result)
+	}
+}
+
+func TestRowsToJSON_MarshalError(t *testing.T) {
+	// json.Marshal fails on channels
+	rows := []map[string]interface{}{{"bad": make(chan int)}}
+	_, err := rowsToJSON(rows)
+	if err == nil {
+		t.Error("expected marshal error")
+	}
+	if err != nil && !contains(err.Error(), "failed to marshal") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
@@ -1170,4 +1183,623 @@ func containsHelper(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// --- Task 9: Tests with mock execution for full coverage ---
+
+// newTestToolWithMock creates a tool with mock execQuery and resolveConfig functions.
+func newTestToolWithMock(mockRows []map[string]interface{}, mockErr error) *PostgreSQLTool {
+	tool := NewPostgreSQLTool(testLogger(), ratelimit.New(10, 20))
+	tool.execQuery = func(ctx context.Context, config *PGConfig, query string, args ...interface{}) ([]map[string]interface{}, error) {
+		return mockRows, mockErr
+	}
+	mockConfig := &PGConfig{Host: "localhost", Port: 5432, Database: "testdb", Username: "user", Password: "pass", SSLMode: "disable", Timeout: 30}
+	tool.resolveConfig = func(ctx context.Context, incidentID string, logicalName ...string) (*PGConfig, error) {
+		return mockConfig, nil
+	}
+	// Also pre-populate config cache for tests that use it directly
+	tool.configCache.Set(configCacheKey("inc-1"), mockConfig)
+	return tool
+}
+
+// newTestToolWithConfigError creates a tool where resolveConfig always fails.
+func newTestToolWithConfigError(configErr error) *PostgreSQLTool {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	tool.resolveConfig = func(ctx context.Context, incidentID string, logicalName ...string) (*PGConfig, error) {
+		return nil, configErr
+	}
+	return tool
+}
+
+func TestExecuteQuery_FullPath(t *testing.T) {
+	rows := []map[string]interface{}{{"id": 1, "name": "alice"}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.ExecuteQuery(nil, "inc-1", map[string]interface{}{"query": "SELECT * FROM users"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "alice") {
+		t.Errorf("expected result to contain 'alice', got %s", result)
+	}
+}
+
+func TestExecuteQuery_FullPath_WithLimit(t *testing.T) {
+	rows := []map[string]interface{}{{"id": 1}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.ExecuteQuery(nil, "inc-1", map[string]interface{}{
+		"query": "SELECT * FROM users",
+		"limit": float64(50),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "id") {
+		t.Errorf("expected result to contain 'id', got %s", result)
+	}
+}
+
+func TestExecuteQuery_FullPath_ExistingLimit(t *testing.T) {
+	rows := []map[string]interface{}{{"id": 1}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.ExecuteQuery(nil, "inc-1", map[string]interface{}{
+		"query": "SELECT * FROM users LIMIT 5",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "id") {
+		t.Errorf("expected result to contain 'id', got %s", result)
+	}
+}
+
+func TestExecuteQuery_FullPath_Error(t *testing.T) {
+	tool := newTestToolWithMock(nil, fmt.Errorf("connection refused"))
+	defer tool.Stop()
+
+	_, err := tool.ExecuteQuery(nil, "inc-1", map[string]interface{}{"query": "SELECT 1"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !contains(err.Error(), "connection refused") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestListTables_FullPath(t *testing.T) {
+	rows := []map[string]interface{}{{"table_name": "users", "table_type": "BASE TABLE", "row_estimate": 1000}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.ListTables(nil, "inc-1", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "users") {
+		t.Errorf("expected result to contain 'users', got %s", result)
+	}
+}
+
+func TestListTables_FullPath_CustomSchema(t *testing.T) {
+	rows := []map[string]interface{}{{"table_name": "orders"}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.ListTables(nil, "inc-1", map[string]interface{}{"schema": "custom"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "orders") {
+		t.Errorf("expected result to contain 'orders', got %s", result)
+	}
+}
+
+func TestListTables_FullPath_Error(t *testing.T) {
+	tool := newTestToolWithMock(nil, fmt.Errorf("query failed"))
+	defer tool.Stop()
+
+	_, err := tool.ListTables(nil, "inc-1", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestDescribeTable_FullPath(t *testing.T) {
+	rows := []map[string]interface{}{{"column_name": "id", "data_type": "integer", "is_nullable": "NO"}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.DescribeTable(nil, "inc-1", map[string]interface{}{"table_name": "users"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "integer") {
+		t.Errorf("expected result to contain 'integer', got %s", result)
+	}
+}
+
+func TestDescribeTable_FullPath_CustomSchema(t *testing.T) {
+	rows := []map[string]interface{}{{"column_name": "id"}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.DescribeTable(nil, "inc-1", map[string]interface{}{"table_name": "orders", "schema": "sales"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "id") {
+		t.Errorf("expected result to contain 'id', got %s", result)
+	}
+}
+
+func TestDescribeTable_FullPath_Error(t *testing.T) {
+	tool := newTestToolWithMock(nil, fmt.Errorf("table not found"))
+	defer tool.Stop()
+
+	_, err := tool.DescribeTable(nil, "inc-1", map[string]interface{}{"table_name": "nonexistent"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetIndexes_FullPath(t *testing.T) {
+	rows := []map[string]interface{}{{"indexname": "users_pkey", "indexdef": "CREATE UNIQUE INDEX users_pkey ON users (id)", "is_unique": true}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.GetIndexes(nil, "inc-1", map[string]interface{}{"table_name": "users"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "users_pkey") {
+		t.Errorf("expected result to contain 'users_pkey', got %s", result)
+	}
+}
+
+func TestGetIndexes_FullPath_Error(t *testing.T) {
+	tool := newTestToolWithMock(nil, fmt.Errorf("query failed"))
+	defer tool.Stop()
+
+	_, err := tool.GetIndexes(nil, "inc-1", map[string]interface{}{"table_name": "users"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetTableStats_FullPath_AllTables(t *testing.T) {
+	rows := []map[string]interface{}{{"table_name": "users", "n_live_tup": 1000, "n_dead_tup": 50}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.GetTableStats(nil, "inc-1", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "n_live_tup") {
+		t.Errorf("expected result to contain 'n_live_tup', got %s", result)
+	}
+}
+
+func TestGetTableStats_FullPath_SpecificTable(t *testing.T) {
+	rows := []map[string]interface{}{{"table_name": "orders", "n_live_tup": 5000}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.GetTableStats(nil, "inc-1", map[string]interface{}{"table_name": "orders"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "orders") {
+		t.Errorf("expected result to contain 'orders', got %s", result)
+	}
+}
+
+func TestGetTableStats_FullPath_Error(t *testing.T) {
+	tool := newTestToolWithMock(nil, fmt.Errorf("connection lost"))
+	defer tool.Stop()
+
+	_, err := tool.GetTableStats(nil, "inc-1", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetTableStats_FullPath_SpecificTable_Error(t *testing.T) {
+	tool := newTestToolWithMock(nil, fmt.Errorf("connection lost"))
+	defer tool.Stop()
+
+	_, err := tool.GetTableStats(nil, "inc-1", map[string]interface{}{"table_name": "users"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestExplainQuery_FullPath(t *testing.T) {
+	rows := []map[string]interface{}{{"QUERY PLAN": "Seq Scan on users"}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.ExplainQuery(nil, "inc-1", map[string]interface{}{"query": "SELECT * FROM users"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "Seq Scan") {
+		t.Errorf("expected result to contain 'Seq Scan', got %s", result)
+	}
+}
+
+func TestExplainQuery_FullPath_Error(t *testing.T) {
+	tool := newTestToolWithMock(nil, fmt.Errorf("query failed"))
+	defer tool.Stop()
+
+	_, err := tool.ExplainQuery(nil, "inc-1", map[string]interface{}{"query": "SELECT 1"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetActiveQueries_FullPath(t *testing.T) {
+	rows := []map[string]interface{}{{"pid": 123, "state": "active", "query": "SELECT 1"}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.GetActiveQueries(nil, "inc-1", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "active") {
+		t.Errorf("expected result to contain 'active', got %s", result)
+	}
+}
+
+func TestGetActiveQueries_FullPath_IncludeIdle(t *testing.T) {
+	rows := []map[string]interface{}{{"pid": 123, "state": "idle"}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.GetActiveQueries(nil, "inc-1", map[string]interface{}{"include_idle": true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "idle") {
+		t.Errorf("expected result to contain 'idle', got %s", result)
+	}
+}
+
+func TestGetActiveQueries_FullPath_MinDuration(t *testing.T) {
+	rows := []map[string]interface{}{{"pid": 456, "duration_seconds": 25.1}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.GetActiveQueries(nil, "inc-1", map[string]interface{}{"min_duration_seconds": float64(10)})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "456") {
+		t.Errorf("expected result to contain '456', got %s", result)
+	}
+}
+
+func TestGetActiveQueries_FullPath_Error(t *testing.T) {
+	tool := newTestToolWithMock(nil, fmt.Errorf("db error"))
+	defer tool.Stop()
+
+	_, err := tool.GetActiveQueries(nil, "inc-1", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetLocks_FullPath(t *testing.T) {
+	rows := []map[string]interface{}{{"locktype": "relation", "mode": "AccessShareLock", "granted": true}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.GetLocks(nil, "inc-1", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "AccessShareLock") {
+		t.Errorf("expected result to contain 'AccessShareLock', got %s", result)
+	}
+}
+
+func TestGetLocks_FullPath_BlockedOnly(t *testing.T) {
+	rows := []map[string]interface{}{{"locktype": "relation", "granted": false}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.GetLocks(nil, "inc-1", map[string]interface{}{"blocked_only": true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "false") {
+		t.Errorf("expected result to contain 'false', got %s", result)
+	}
+}
+
+func TestGetLocks_FullPath_Error(t *testing.T) {
+	tool := newTestToolWithMock(nil, fmt.Errorf("lock query failed"))
+	defer tool.Stop()
+
+	_, err := tool.GetLocks(nil, "inc-1", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetReplicationStatus_FullPath(t *testing.T) {
+	rows := []map[string]interface{}{{"client_addr": "10.0.0.2", "state": "streaming"}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.GetReplicationStatus(nil, "inc-1", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "streaming") {
+		t.Errorf("expected result to contain 'streaming', got %s", result)
+	}
+}
+
+func TestGetReplicationStatus_FullPath_Error(t *testing.T) {
+	tool := newTestToolWithMock(nil, fmt.Errorf("replication query failed"))
+	defer tool.Stop()
+
+	_, err := tool.GetReplicationStatus(nil, "inc-1", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetDatabaseStats_FullPath(t *testing.T) {
+	rows := []map[string]interface{}{{"numbackends": 15, "xact_commit": 50000, "deadlocks": 0}}
+	tool := newTestToolWithMock(rows, nil)
+	defer tool.Stop()
+
+	result, err := tool.GetDatabaseStats(nil, "inc-1", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "numbackends") {
+		t.Errorf("expected result to contain 'numbackends', got %s", result)
+	}
+}
+
+func TestGetDatabaseStats_FullPath_Error(t *testing.T) {
+	tool := newTestToolWithMock(nil, fmt.Errorf("stats query failed"))
+	defer tool.Stop()
+
+	_, err := tool.GetDatabaseStats(nil, "inc-1", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestParseSettings_FullConfig(t *testing.T) {
+	settings := map[string]interface{}{
+		"pg_host":     "db.example.com",
+		"pg_port":     float64(5433),
+		"pg_database": "mydb",
+		"pg_username": "admin",
+		"pg_password": "secret123",
+		"pg_ssl_mode": "verify-full",
+		"pg_timeout":  float64(60),
+	}
+	config := parseSettings(settings)
+
+	if config.Host != "db.example.com" {
+		t.Errorf("expected host 'db.example.com', got %q", config.Host)
+	}
+	if config.Port != 5433 {
+		t.Errorf("expected port 5433, got %d", config.Port)
+	}
+	if config.Database != "mydb" {
+		t.Errorf("expected database 'mydb', got %q", config.Database)
+	}
+	if config.Username != "admin" {
+		t.Errorf("expected username 'admin', got %q", config.Username)
+	}
+	if config.Password != "secret123" {
+		t.Errorf("expected password 'secret123', got %q", config.Password)
+	}
+	if config.SSLMode != "verify-full" {
+		t.Errorf("expected ssl_mode 'verify-full', got %q", config.SSLMode)
+	}
+	if config.Timeout != 60 {
+		t.Errorf("expected timeout 60, got %d", config.Timeout)
+	}
+}
+
+func TestParseSettings_Defaults(t *testing.T) {
+	config := parseSettings(map[string]interface{}{})
+
+	if config.Port != DefaultPort {
+		t.Errorf("expected default port %d, got %d", DefaultPort, config.Port)
+	}
+	if config.SSLMode != "require" {
+		t.Errorf("expected default ssl_mode 'require', got %q", config.SSLMode)
+	}
+	if config.Timeout != DefaultTimeout {
+		t.Errorf("expected default timeout %d, got %d", DefaultTimeout, config.Timeout)
+	}
+}
+
+func TestParseSettings_TimeoutClamped(t *testing.T) {
+	settings := map[string]interface{}{
+		"pg_timeout": float64(999),
+	}
+	config := parseSettings(settings)
+	if config.Timeout != MaxTimeout {
+		t.Errorf("expected clamped timeout %d, got %d", MaxTimeout, config.Timeout)
+	}
+}
+
+func TestParseSettings_WrongTypes(t *testing.T) {
+	settings := map[string]interface{}{
+		"pg_host":     123,       // wrong type
+		"pg_port":     "invalid", // wrong type
+		"pg_database": true,      // wrong type
+	}
+	config := parseSettings(settings)
+
+	if config.Host != "" {
+		t.Errorf("expected empty host for wrong type, got %q", config.Host)
+	}
+	if config.Port != DefaultPort {
+		t.Errorf("expected default port for wrong type, got %d", config.Port)
+	}
+	if config.Database != "" {
+		t.Errorf("expected empty database for wrong type, got %q", config.Database)
+	}
+}
+
+func TestParseSettings_NilSettings(t *testing.T) {
+	config := parseSettings(nil)
+	if config.Port != DefaultPort {
+		t.Errorf("expected default port, got %d", config.Port)
+	}
+	if config.SSLMode != "require" {
+		t.Errorf("expected default ssl_mode, got %q", config.SSLMode)
+	}
+}
+
+// --- Config error tests using mock resolveConfig ---
+
+func TestExecuteQuery_ConfigError(t *testing.T) {
+	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
+	defer tool.Stop()
+
+	_, err := tool.ExecuteQuery(nil, "inc-1", map[string]interface{}{"query": "SELECT 1"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !contains(err.Error(), "no credentials found") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestListTables_ConfigError(t *testing.T) {
+	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
+	defer tool.Stop()
+
+	_, err := tool.ListTables(nil, "inc-1", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestDescribeTable_ConfigError(t *testing.T) {
+	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
+	defer tool.Stop()
+
+	_, err := tool.DescribeTable(nil, "inc-1", map[string]interface{}{"table_name": "users"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetIndexes_ConfigError(t *testing.T) {
+	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
+	defer tool.Stop()
+
+	_, err := tool.GetIndexes(nil, "inc-1", map[string]interface{}{"table_name": "users"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetTableStats_ConfigError(t *testing.T) {
+	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
+	defer tool.Stop()
+
+	_, err := tool.GetTableStats(nil, "inc-1", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetTableStats_SpecificTable_ConfigError(t *testing.T) {
+	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
+	defer tool.Stop()
+
+	_, err := tool.GetTableStats(nil, "inc-1", map[string]interface{}{"table_name": "users"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestExplainQuery_ConfigError(t *testing.T) {
+	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
+	defer tool.Stop()
+
+	_, err := tool.ExplainQuery(nil, "inc-1", map[string]interface{}{"query": "SELECT 1"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetActiveQueries_ConfigError(t *testing.T) {
+	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
+	defer tool.Stop()
+
+	_, err := tool.GetActiveQueries(nil, "inc-1", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetLocks_ConfigError(t *testing.T) {
+	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
+	defer tool.Stop()
+
+	_, err := tool.GetLocks(nil, "inc-1", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetReplicationStatus_ConfigError(t *testing.T) {
+	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
+	defer tool.Stop()
+
+	_, err := tool.GetReplicationStatus(nil, "inc-1", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetDatabaseStats_ConfigError(t *testing.T) {
+	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
+	defer tool.Stop()
+
+	_, err := tool.GetDatabaseStats(nil, "inc-1", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestExecuteQuery_WithLogicalName_FullPath(t *testing.T) {
+	rows := []map[string]interface{}{{"count": 42}}
+	tool := newTestToolWithMock(rows, nil)
+	tool.configCache.Set("creds:logical:postgresql:prod-pg", &PGConfig{
+		Host: "prod-host", Port: 5432, Database: "proddb", Username: "admin", Password: "secret", SSLMode: "require", Timeout: 30,
+	})
+	defer tool.Stop()
+
+	result, err := tool.ExecuteQuery(nil, "inc-1", map[string]interface{}{
+		"query":        "SELECT count(*) FROM users",
+		"logical_name": "prod-pg",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !contains(result, "42") {
+		t.Errorf("expected result to contain '42', got %s", result)
+	}
 }
