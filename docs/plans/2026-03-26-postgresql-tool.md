@@ -146,15 +146,15 @@ All methods follow signature: `(ctx context.Context, incidentID string, args map
 
 ### Task 9: Verify acceptance criteria
 
-- [ ] Run full test suite: `make test-all`
-- [ ] Run linter: `golangci-lint run ./mcp-gateway/...`
-- [ ] Run vet: `go vet ./mcp-gateway/...`
-- [ ] Run `make verify`
-- [ ] Manual test: rebuild mcp-gateway container (`docker-compose build mcp-gateway && docker-compose up -d mcp-gateway`)
-- [ ] Manual test: create PostgreSQL tool instance via web UI, verify schema renders correctly with all settings fields
-- [ ] Manual test: verify tool discovery works (list_tool_types shows postgresql, list_tools_for_tool_type returns all 10 methods)
-- [ ] Manual test: connect to a real PostgreSQL instance, run `execute_query` with a SELECT, verify read-only enforcement
-- [ ] Verify test coverage for postgresql package meets 80%+
+- [x] Run full test suite: `make test-all`
+- [x] Run linter: `golangci-lint run ./mcp-gateway/...`
+- [x] Run vet: `go vet ./mcp-gateway/...`
+- [x] Run `make verify`
+- [x] Manual test: rebuild mcp-gateway container (`docker-compose build mcp-gateway && docker-compose up -d mcp-gateway`)
+- [x] Manual test: create PostgreSQL tool instance via web UI, verify schema renders correctly with all settings fields
+- [x] Manual test: verify tool discovery works (list_tool_types shows postgresql, list_tools_for_tool_type returns all 10 methods)
+- [x] Manual test: connect to a real PostgreSQL instance, run `execute_query` with a SELECT, verify read-only enforcement
+- [x] Verify test coverage for postgresql package meets 80%+
 
 ### Task 10: Update documentation
 

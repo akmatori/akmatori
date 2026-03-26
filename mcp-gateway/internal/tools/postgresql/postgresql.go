@@ -51,22 +51,34 @@ type PGConfig struct {
 	Timeout  int
 }
 
+// queryExecFunc is the function signature for executing read-only queries.
+// Extracted as a type to allow test injection.
+type queryExecFunc func(ctx context.Context, config *PGConfig, query string, args ...interface{}) ([]map[string]interface{}, error)
+
+// configResolverFunc is the function signature for resolving config.
+type configResolverFunc func(ctx context.Context, incidentID string, logicalName ...string) (*PGConfig, error)
+
 // PostgreSQLTool handles PostgreSQL database operations
 type PostgreSQLTool struct {
 	logger        *log.Logger
 	configCache   *cache.Cache
 	responseCache *cache.Cache
 	rateLimiter   *ratelimit.Limiter
+	execQuery     queryExecFunc    // overridable for testing
+	resolveConfig configResolverFunc // overridable for testing
 }
 
 // NewPostgreSQLTool creates a new PostgreSQL tool with optional rate limiter
 func NewPostgreSQLTool(logger *log.Logger, limiter *ratelimit.Limiter) *PostgreSQLTool {
-	return &PostgreSQLTool{
+	t := &PostgreSQLTool{
 		logger:        logger,
 		configCache:   cache.New(ConfigCacheTTL, CacheCleanupTick),
 		responseCache: cache.New(ResponseCacheTTL, CacheCleanupTick),
 		rateLimiter:   limiter,
 	}
+	t.execQuery = t.executeReadOnly
+	t.resolveConfig = t.getConfig
+	return t
 }
 
 // Stop cleans up cache resources
@@ -155,13 +167,22 @@ func (t *PostgreSQLTool) getConfig(ctx context.Context, incidentID string, logic
 		return nil, fmt.Errorf("failed to get PostgreSQL credentials: %w", err)
 	}
 
+	config := parseSettings(creds.Settings)
+
+	// Cache the config
+	t.configCache.Set(cacheKey, config)
+	t.logger.Printf("Config cached for key %s", cacheKey)
+
+	return config, nil
+}
+
+// parseSettings converts a settings map into a PGConfig with defaults applied
+func parseSettings(settings map[string]interface{}) *PGConfig {
 	config := &PGConfig{
 		Port:    DefaultPort,
 		SSLMode: "require",
 		Timeout: DefaultTimeout,
 	}
-
-	settings := creds.Settings
 
 	if v, ok := settings["pg_host"].(string); ok {
 		config.Host = v
@@ -186,12 +207,7 @@ func (t *PostgreSQLTool) getConfig(ctx context.Context, incidentID string, logic
 	}
 
 	config.Timeout = clampTimeout(config.Timeout)
-
-	// Cache the config
-	t.configCache.Set(cacheKey, config)
-	t.logger.Printf("Config cached for key %s", cacheKey)
-
-	return config, nil
+	return config
 }
 
 // connString builds a pgx connection string from config
@@ -396,11 +412,11 @@ func (t *PostgreSQLTool) ExecuteQuery(ctx context.Context, incidentID string, ar
 	cacheKey := responseCacheKey(query, args)
 
 	return t.cachedQuery(ctx, incidentID, cacheKey, QueryCacheTTL, func() (string, error) {
-		config, err := t.getConfig(ctx, incidentID, logicalName)
+		config, err := t.resolveConfig(ctx, incidentID, logicalName)
 		if err != nil {
 			return "", err
 		}
-		rows, err := t.executeReadOnly(ctx, config, query)
+		rows, err := t.execQuery(ctx, config, query)
 		if err != nil {
 			return "", err
 		}
@@ -422,11 +438,11 @@ func (t *PostgreSQLTool) ListTables(ctx context.Context, incidentID string, args
 	cacheKey := responseCacheKey("list_tables", map[string]string{"schema": schema})
 
 	return t.cachedQuery(ctx, incidentID, cacheKey, SchemaCacheTTL, func() (string, error) {
-		config, err := t.getConfig(ctx, incidentID, logicalName)
+		config, err := t.resolveConfig(ctx, incidentID, logicalName)
 		if err != nil {
 			return "", err
 		}
-		rows, err := t.executeReadOnly(ctx, config, query, schema)
+		rows, err := t.execQuery(ctx, config, query, schema)
 		if err != nil {
 			return "", err
 		}
@@ -453,11 +469,11 @@ func (t *PostgreSQLTool) DescribeTable(ctx context.Context, incidentID string, a
 	cacheKey := responseCacheKey("describe_table", map[string]string{"schema": schema, "table": tableName})
 
 	return t.cachedQuery(ctx, incidentID, cacheKey, SchemaCacheTTL, func() (string, error) {
-		config, err := t.getConfig(ctx, incidentID, logicalName)
+		config, err := t.resolveConfig(ctx, incidentID, logicalName)
 		if err != nil {
 			return "", err
 		}
-		rows, err := t.executeReadOnly(ctx, config, query, schema, tableName)
+		rows, err := t.execQuery(ctx, config, query, schema, tableName)
 		if err != nil {
 			return "", err
 		}
@@ -488,11 +504,11 @@ func (t *PostgreSQLTool) GetIndexes(ctx context.Context, incidentID string, args
 	cacheKey := responseCacheKey("get_indexes", map[string]string{"schema": schema, "table": tableName})
 
 	return t.cachedQuery(ctx, incidentID, cacheKey, SchemaCacheTTL, func() (string, error) {
-		config, err := t.getConfig(ctx, incidentID, logicalName)
+		config, err := t.resolveConfig(ctx, incidentID, logicalName)
 		if err != nil {
 			return "", err
 		}
-		rows, err := t.executeReadOnly(ctx, config, query, schema, tableName)
+		rows, err := t.execQuery(ctx, config, query, schema, tableName)
 		if err != nil {
 			return "", err
 		}
@@ -519,11 +535,11 @@ func (t *PostgreSQLTool) GetTableStats(ctx context.Context, incidentID string, a
 		cacheKey := responseCacheKey("get_table_stats", params)
 
 		return t.cachedQuery(ctx, incidentID, cacheKey, StatsCacheTTL, func() (string, error) {
-			config, err := t.getConfig(ctx, incidentID, logicalName)
+			config, err := t.resolveConfig(ctx, incidentID, logicalName)
 			if err != nil {
 				return "", err
 			}
-			rows, err := t.executeReadOnly(ctx, config, query, tableName)
+			rows, err := t.execQuery(ctx, config, query, tableName)
 			if err != nil {
 				return "", err
 			}
@@ -535,11 +551,11 @@ func (t *PostgreSQLTool) GetTableStats(ctx context.Context, incidentID string, a
 	cacheKey := responseCacheKey("get_table_stats", params)
 
 	return t.cachedQuery(ctx, incidentID, cacheKey, StatsCacheTTL, func() (string, error) {
-		config, err := t.getConfig(ctx, incidentID, logicalName)
+		config, err := t.resolveConfig(ctx, incidentID, logicalName)
 		if err != nil {
 			return "", err
 		}
-		rows, err := t.executeReadOnly(ctx, config, query)
+		rows, err := t.execQuery(ctx, config, query)
 		if err != nil {
 			return "", err
 		}
@@ -565,11 +581,11 @@ func (t *PostgreSQLTool) ExplainQuery(ctx context.Context, incidentID string, ar
 	cacheKey := responseCacheKey("explain", map[string]string{"query": query})
 
 	return t.cachedQuery(ctx, incidentID, cacheKey, QueryCacheTTL, func() (string, error) {
-		config, err := t.getConfig(ctx, incidentID, logicalName)
+		config, err := t.resolveConfig(ctx, incidentID, logicalName)
 		if err != nil {
 			return "", err
 		}
-		rows, err := t.executeReadOnly(ctx, config, explainQuery)
+		rows, err := t.execQuery(ctx, config, explainQuery)
 		if err != nil {
 			return "", err
 		}
@@ -605,11 +621,11 @@ func (t *PostgreSQLTool) GetActiveQueries(ctx context.Context, incidentID string
 	cacheKey := responseCacheKey("get_active_queries", args)
 
 	return t.cachedQuery(ctx, incidentID, cacheKey, QueryCacheTTL, func() (string, error) {
-		config, err := t.getConfig(ctx, incidentID, logicalName)
+		config, err := t.resolveConfig(ctx, incidentID, logicalName)
 		if err != nil {
 			return "", err
 		}
-		rows, err := t.executeReadOnly(ctx, config, query)
+		rows, err := t.execQuery(ctx, config, query)
 		if err != nil {
 			return "", err
 		}
@@ -642,11 +658,11 @@ func (t *PostgreSQLTool) GetLocks(ctx context.Context, incidentID string, args m
 	cacheKey := responseCacheKey("get_locks", args)
 
 	return t.cachedQuery(ctx, incidentID, cacheKey, QueryCacheTTL, func() (string, error) {
-		config, err := t.getConfig(ctx, incidentID, logicalName)
+		config, err := t.resolveConfig(ctx, incidentID, logicalName)
 		if err != nil {
 			return "", err
 		}
-		rows, err := t.executeReadOnly(ctx, config, query)
+		rows, err := t.execQuery(ctx, config, query)
 		if err != nil {
 			return "", err
 		}
@@ -668,11 +684,11 @@ func (t *PostgreSQLTool) GetReplicationStatus(ctx context.Context, incidentID st
 	cacheKey := responseCacheKey("get_replication_status", nil)
 
 	return t.cachedQuery(ctx, incidentID, cacheKey, StatsCacheTTL, func() (string, error) {
-		config, err := t.getConfig(ctx, incidentID, logicalName)
+		config, err := t.resolveConfig(ctx, incidentID, logicalName)
 		if err != nil {
 			return "", err
 		}
-		rows, err := t.executeReadOnly(ctx, config, query)
+		rows, err := t.execQuery(ctx, config, query)
 		if err != nil {
 			return "", err
 		}
@@ -698,11 +714,11 @@ func (t *PostgreSQLTool) GetDatabaseStats(ctx context.Context, incidentID string
 	cacheKey := responseCacheKey("get_database_stats", nil)
 
 	return t.cachedQuery(ctx, incidentID, cacheKey, StatsCacheTTL, func() (string, error) {
-		config, err := t.getConfig(ctx, incidentID, logicalName)
+		config, err := t.resolveConfig(ctx, incidentID, logicalName)
 		if err != nil {
 			return "", err
 		}
-		rows, err := t.executeReadOnly(ctx, config, query)
+		rows, err := t.execQuery(ctx, config, query)
 		if err != nil {
 			return "", err
 		}
