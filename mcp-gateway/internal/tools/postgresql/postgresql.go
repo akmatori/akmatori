@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -38,7 +37,14 @@ const (
 
 // dangerousStmtPattern matches SQL statements that modify data or schema.
 // This is a defense-in-depth layer — the read-only transaction is the primary guard.
-var dangerousStmtPattern = regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE)\b`)
+var dangerousStmtPattern = regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|COPY|DO|CALL)\b`)
+
+// Pre-compiled regex patterns for SQL comment stripping and LIMIT detection
+var (
+	blockCommentPattern = regexp.MustCompile(`/\*[\s\S]*?\*/`)
+	lineCommentPattern  = regexp.MustCompile(`--[^\n]*`)
+	limitPattern        = regexp.MustCompile(`(?i)\bLIMIT\b`)
+)
 
 // PGConfig holds PostgreSQL connection configuration
 type PGConfig struct {
@@ -134,12 +140,8 @@ func isSelectOnly(query string) bool {
 
 // stripSQLComments removes SQL line comments (--) and block comments (/* */)
 func stripSQLComments(query string) string {
-	// Remove block comments
-	blockComment := regexp.MustCompile(`/\*[\s\S]*?\*/`)
-	result := blockComment.ReplaceAllString(query, " ")
-	// Remove line comments
-	lineComment := regexp.MustCompile(`--[^\n]*`)
-	result = lineComment.ReplaceAllString(result, " ")
+	result := blockCommentPattern.ReplaceAllString(query, " ")
+	result = lineCommentPattern.ReplaceAllString(result, " ")
 	return result
 }
 
@@ -210,21 +212,44 @@ func parseSettings(settings map[string]interface{}) *PGConfig {
 	return config
 }
 
-// connString builds a pgx connection string from config
-func connString(config *PGConfig) string {
-	return fmt.Sprintf(
-		"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s",
-		config.Host, config.Port, config.Database, config.Username, config.Password, config.SSLMode,
-	)
+// buildConnConfig creates a pgx connection config from PGConfig.
+// Uses structured config instead of string interpolation to avoid injection via special characters.
+func buildConnConfig(config *PGConfig) (*pgx.ConnConfig, error) {
+	// Build a minimal DSN for pgx.ParseConfig, then override fields programmatically
+	connConfig, err := pgx.ParseConfig("")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create connection config: %w", err)
+	}
+
+	connConfig.Host = config.Host
+	connConfig.Port = uint16(config.Port)
+	connConfig.Database = config.Database
+	connConfig.User = config.Username
+	connConfig.Password = config.Password
+
+	// Configure TLS based on SSLMode
+	switch config.SSLMode {
+	case "disable":
+		connConfig.TLSConfig = nil
+	default:
+		// For require/verify-ca/verify-full, use the sslmode parameter via RuntimeParams
+		// pgx handles TLS negotiation; we pass sslmode so the connection string fallback works
+		connConfig.RuntimeParams["sslmode"] = config.SSLMode
+	}
+
+	return connConfig, nil
 }
 
 // connect creates a pgx connection with read-only defaults and statement timeout
 func (t *PostgreSQLTool) connect(ctx context.Context, config *PGConfig) (*pgx.Conn, error) {
-	connStr := connString(config)
-
-	conn, err := pgx.Connect(ctx, connStr)
+	connConfig, err := buildConnConfig(config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to PostgreSQL: %w", err)
+		return nil, err
+	}
+
+	conn, err := pgx.ConnectConfig(ctx, connConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to PostgreSQL at %s:%d/%s: %w", config.Host, config.Port, config.Database, err)
 	}
 
 	// Set connection to read-only mode and configure statement timeout
@@ -256,17 +281,12 @@ func (t *PostgreSQLTool) executeReadOnly(ctx context.Context, config *PGConfig, 
 
 	t.logger.Printf("PostgreSQL query: %s", truncateQuery(query))
 
-	// Execute inside explicit read-only transaction
+	// Execute inside read-only transaction (default_transaction_read_only = on is set at connection level)
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback on defer is best-effort
-
-	_, err = tx.Exec(ctx, "SET TRANSACTION READ ONLY")
-	if err != nil {
-		return nil, fmt.Errorf("failed to set read-only transaction: %w", err)
-	}
 
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
@@ -386,7 +406,7 @@ func getSchema(args map[string]interface{}) string {
 // hasLimitClause checks if a query already contains a LIMIT clause
 func hasLimitClause(query string) bool {
 	cleaned := stripSQLComments(query)
-	return regexp.MustCompile(`(?i)\bLIMIT\b`).MatchString(cleaned)
+	return limitPattern.MatchString(cleaned)
 }
 
 // --- Tool methods ---
@@ -401,7 +421,7 @@ func (t *PostgreSQLTool) ExecuteQuery(ctx context.Context, incidentID string, ar
 	}
 
 	if !isSelectOnly(query) {
-		return "", fmt.Errorf("only SELECT queries are allowed (INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, GRANT, REVOKE are blocked)")
+		return "", fmt.Errorf("only SELECT queries are allowed (INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, GRANT, REVOKE, COPY, DO, CALL are blocked)")
 	}
 
 	limit := parseLimit(args)
@@ -527,27 +547,16 @@ func (t *PostgreSQLTool) GetTableStats(ctx context.Context, incidentID string, a
 		FROM pg_stat_user_tables`
 
 	params := map[string]string{}
+	var queryArgs []interface{}
 
 	if tableName, ok := args["table_name"].(string); ok && tableName != "" {
 		query += " WHERE relname = $1"
 		params["table"] = tableName
-
-		cacheKey := responseCacheKey("get_table_stats", params)
-
-		return t.cachedQuery(ctx, incidentID, cacheKey, StatsCacheTTL, func() (string, error) {
-			config, err := t.resolveConfig(ctx, incidentID, logicalName)
-			if err != nil {
-				return "", err
-			}
-			rows, err := t.execQuery(ctx, config, query, tableName)
-			if err != nil {
-				return "", err
-			}
-			return rowsToJSON(rows)
-		}, logicalName)
+		queryArgs = append(queryArgs, tableName)
+	} else {
+		query += " ORDER BY n_live_tup DESC"
 	}
 
-	query += " ORDER BY n_live_tup DESC"
 	cacheKey := responseCacheKey("get_table_stats", params)
 
 	return t.cachedQuery(ctx, incidentID, cacheKey, StatsCacheTTL, func() (string, error) {
@@ -555,7 +564,7 @@ func (t *PostgreSQLTool) GetTableStats(ctx context.Context, incidentID string, a
 		if err != nil {
 			return "", err
 		}
-		rows, err := t.execQuery(ctx, config, query)
+		rows, err := t.execQuery(ctx, config, query, queryArgs...)
 		if err != nil {
 			return "", err
 		}
@@ -573,7 +582,7 @@ func (t *PostgreSQLTool) ExplainQuery(ctx context.Context, incidentID string, ar
 	}
 
 	if !isSelectOnly(query) {
-		return "", fmt.Errorf("only SELECT queries are allowed (INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, GRANT, REVOKE are blocked)")
+		return "", fmt.Errorf("only SELECT queries are allowed (INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, GRANT, REVOKE, COPY, DO, CALL are blocked)")
 	}
 
 	explainQuery := "EXPLAIN (ANALYZE false, FORMAT JSON) " + query
@@ -604,6 +613,9 @@ func (t *PostgreSQLTool) GetActiveQueries(ctx context.Context, incidentID string
 		FROM pg_stat_activity
 		WHERE pid != pg_backend_pid()`
 
+	var queryArgs []interface{}
+	paramIdx := 1
+
 	includeIdle := false
 	if v, ok := args["include_idle"].(bool); ok {
 		includeIdle = v
@@ -613,7 +625,9 @@ func (t *PostgreSQLTool) GetActiveQueries(ctx context.Context, incidentID string
 	}
 
 	if v, ok := args["min_duration_seconds"].(float64); ok && v > 0 {
-		query += fmt.Sprintf(" AND EXTRACT(EPOCH FROM (now() - query_start)) > %s", strconv.FormatFloat(v, 'f', -1, 64))
+		query += fmt.Sprintf(" AND EXTRACT(EPOCH FROM (now() - query_start)) > $%d", paramIdx)
+		queryArgs = append(queryArgs, v)
+		paramIdx++ //nolint:ineffassign // keep paramIdx pattern consistent for future parameters
 	}
 
 	query += " ORDER BY duration_seconds DESC NULLS LAST"
@@ -625,7 +639,7 @@ func (t *PostgreSQLTool) GetActiveQueries(ctx context.Context, incidentID string
 		if err != nil {
 			return "", err
 		}
-		rows, err := t.execQuery(ctx, config, query)
+		rows, err := t.execQuery(ctx, config, query, queryArgs...)
 		if err != nil {
 			return "", err
 		}

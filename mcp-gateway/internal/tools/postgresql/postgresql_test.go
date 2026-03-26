@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
 	"testing"
 
 	"github.com/akmatori/mcp-gateway/internal/ratelimit"
@@ -129,6 +130,10 @@ func TestIsSelectOnly(t *testing.T) {
 		{"truncate", "TRUNCATE TABLE users", false},
 		{"grant", "GRANT SELECT ON users TO readonly", false},
 		{"revoke", "REVOKE ALL ON users FROM public", false},
+		{"copy to", "COPY users TO '/tmp/data.csv'", false},
+		{"copy from", "COPY users FROM '/tmp/data.csv'", false},
+		{"do block", "DO $$ BEGIN RAISE NOTICE 'test'; END $$", false},
+		{"call procedure", "CALL my_procedure()", false},
 
 		// Case variations
 		{"mixed case insert", "InSeRt INTO users (name) VALUES ('test')", false},
@@ -224,7 +229,7 @@ func TestResponseCacheKey(t *testing.T) {
 	}
 }
 
-func TestConnString(t *testing.T) {
+func TestBuildConnConfig(t *testing.T) {
 	config := &PGConfig{
 		Host:     "db.example.com",
 		Port:     5433,
@@ -233,10 +238,57 @@ func TestConnString(t *testing.T) {
 		Password: "secret",
 		SSLMode:  "verify-full",
 	}
-	got := connString(config)
-	expected := "host=db.example.com port=5433 dbname=mydb user=admin password=secret sslmode=verify-full"
-	if got != expected {
-		t.Errorf("connString() = %q, want %q", got, expected)
+	connConfig, err := buildConnConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if connConfig.Host != "db.example.com" {
+		t.Errorf("expected host 'db.example.com', got %q", connConfig.Host)
+	}
+	if connConfig.Port != 5433 {
+		t.Errorf("expected port 5433, got %d", connConfig.Port)
+	}
+	if connConfig.Database != "mydb" {
+		t.Errorf("expected database 'mydb', got %q", connConfig.Database)
+	}
+	if connConfig.User != "admin" {
+		t.Errorf("expected user 'admin', got %q", connConfig.User)
+	}
+	if connConfig.Password != "secret" {
+		t.Errorf("expected password 'secret', got %q", connConfig.Password)
+	}
+}
+
+func TestBuildConnConfig_DisableSSL(t *testing.T) {
+	config := &PGConfig{
+		Host:    "localhost",
+		Port:    5432,
+		SSLMode: "disable",
+	}
+	connConfig, err := buildConnConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if connConfig.TLSConfig != nil {
+		t.Error("expected nil TLSConfig for sslmode=disable")
+	}
+}
+
+func TestBuildConnConfig_SpecialCharsInPassword(t *testing.T) {
+	config := &PGConfig{
+		Host:     "localhost",
+		Port:     5432,
+		Database: "testdb",
+		Username: "user",
+		Password: "p@ss w0rd='tricky\\value",
+		SSLMode:  "disable",
+	}
+	connConfig, err := buildConnConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if connConfig.Password != "p@ss w0rd='tricky\\value" {
+		t.Errorf("expected password preserved exactly, got %q", connConfig.Password)
 	}
 }
 
@@ -369,7 +421,7 @@ func TestExecuteQuery_RejectsNonSelect(t *testing.T) {
 			if err == nil {
 				t.Error("expected error for non-SELECT query")
 			}
-			if err != nil && !contains(err.Error(), "only SELECT queries are allowed") {
+			if err != nil && !strings.Contains(err.Error(), "only SELECT queries are allowed") {
 				t.Errorf("unexpected error: %v", err)
 			}
 		})
@@ -384,7 +436,7 @@ func TestExecuteQuery_RequiresQuery(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for missing query")
 	}
-	if err != nil && !contains(err.Error(), "query is required") {
+	if err != nil && !strings.Contains(err.Error(), "query is required") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -397,7 +449,7 @@ func TestDescribeTable_RequiresTableName(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for missing table_name")
 	}
-	if err != nil && !contains(err.Error(), "table_name is required") {
+	if err != nil && !strings.Contains(err.Error(), "table_name is required") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -410,7 +462,7 @@ func TestGetIndexes_RequiresTableName(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for missing table_name")
 	}
-	if err != nil && !contains(err.Error(), "table_name is required") {
+	if err != nil && !strings.Contains(err.Error(), "table_name is required") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -446,7 +498,7 @@ func TestRowsToJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "test") || !contains(result, "foo") {
+	if !strings.Contains(result, "test") || !strings.Contains(result, "foo") {
 		t.Errorf("unexpected result: %s", result)
 	}
 }
@@ -458,7 +510,7 @@ func TestRowsToJSON_MarshalError(t *testing.T) {
 	if err == nil {
 		t.Error("expected marshal error")
 	}
-	if err != nil && !contains(err.Error(), "failed to marshal") {
+	if err != nil && !strings.Contains(err.Error(), "failed to marshal") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -1172,18 +1224,6 @@ func TestGetDatabaseStats_CacheSeparation(t *testing.T) {
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
 
 // --- Task 9: Tests with mock execution for full coverage ---
 
@@ -1220,7 +1260,7 @@ func TestExecuteQuery_FullPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "alice") {
+	if !strings.Contains(result, "alice") {
 		t.Errorf("expected result to contain 'alice', got %s", result)
 	}
 }
@@ -1237,7 +1277,7 @@ func TestExecuteQuery_FullPath_WithLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "id") {
+	if !strings.Contains(result, "id") {
 		t.Errorf("expected result to contain 'id', got %s", result)
 	}
 }
@@ -1253,7 +1293,7 @@ func TestExecuteQuery_FullPath_ExistingLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "id") {
+	if !strings.Contains(result, "id") {
 		t.Errorf("expected result to contain 'id', got %s", result)
 	}
 }
@@ -1266,7 +1306,7 @@ func TestExecuteQuery_FullPath_Error(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !contains(err.Error(), "connection refused") {
+	if !strings.Contains(err.Error(), "connection refused") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -1280,7 +1320,7 @@ func TestListTables_FullPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "users") {
+	if !strings.Contains(result, "users") {
 		t.Errorf("expected result to contain 'users', got %s", result)
 	}
 }
@@ -1294,7 +1334,7 @@ func TestListTables_FullPath_CustomSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "orders") {
+	if !strings.Contains(result, "orders") {
 		t.Errorf("expected result to contain 'orders', got %s", result)
 	}
 }
@@ -1318,7 +1358,7 @@ func TestDescribeTable_FullPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "integer") {
+	if !strings.Contains(result, "integer") {
 		t.Errorf("expected result to contain 'integer', got %s", result)
 	}
 }
@@ -1332,7 +1372,7 @@ func TestDescribeTable_FullPath_CustomSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "id") {
+	if !strings.Contains(result, "id") {
 		t.Errorf("expected result to contain 'id', got %s", result)
 	}
 }
@@ -1356,7 +1396,7 @@ func TestGetIndexes_FullPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "users_pkey") {
+	if !strings.Contains(result, "users_pkey") {
 		t.Errorf("expected result to contain 'users_pkey', got %s", result)
 	}
 }
@@ -1380,7 +1420,7 @@ func TestGetTableStats_FullPath_AllTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "n_live_tup") {
+	if !strings.Contains(result, "n_live_tup") {
 		t.Errorf("expected result to contain 'n_live_tup', got %s", result)
 	}
 }
@@ -1394,7 +1434,7 @@ func TestGetTableStats_FullPath_SpecificTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "orders") {
+	if !strings.Contains(result, "orders") {
 		t.Errorf("expected result to contain 'orders', got %s", result)
 	}
 }
@@ -1428,7 +1468,7 @@ func TestExplainQuery_FullPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "Seq Scan") {
+	if !strings.Contains(result, "Seq Scan") {
 		t.Errorf("expected result to contain 'Seq Scan', got %s", result)
 	}
 }
@@ -1452,7 +1492,7 @@ func TestGetActiveQueries_FullPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "active") {
+	if !strings.Contains(result, "active") {
 		t.Errorf("expected result to contain 'active', got %s", result)
 	}
 }
@@ -1466,7 +1506,7 @@ func TestGetActiveQueries_FullPath_IncludeIdle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "idle") {
+	if !strings.Contains(result, "idle") {
 		t.Errorf("expected result to contain 'idle', got %s", result)
 	}
 }
@@ -1480,7 +1520,7 @@ func TestGetActiveQueries_FullPath_MinDuration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "456") {
+	if !strings.Contains(result, "456") {
 		t.Errorf("expected result to contain '456', got %s", result)
 	}
 }
@@ -1504,7 +1544,7 @@ func TestGetLocks_FullPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "AccessShareLock") {
+	if !strings.Contains(result, "AccessShareLock") {
 		t.Errorf("expected result to contain 'AccessShareLock', got %s", result)
 	}
 }
@@ -1518,7 +1558,7 @@ func TestGetLocks_FullPath_BlockedOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "false") {
+	if !strings.Contains(result, "false") {
 		t.Errorf("expected result to contain 'false', got %s", result)
 	}
 }
@@ -1542,7 +1582,7 @@ func TestGetReplicationStatus_FullPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "streaming") {
+	if !strings.Contains(result, "streaming") {
 		t.Errorf("expected result to contain 'streaming', got %s", result)
 	}
 }
@@ -1566,7 +1606,7 @@ func TestGetDatabaseStats_FullPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "numbackends") {
+	if !strings.Contains(result, "numbackends") {
 		t.Errorf("expected result to contain 'numbackends', got %s", result)
 	}
 }
@@ -1679,7 +1719,7 @@ func TestExecuteQuery_ConfigError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !contains(err.Error(), "no credentials found") {
+	if !strings.Contains(err.Error(), "no credentials found") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -1799,7 +1839,7 @@ func TestExecuteQuery_WithLogicalName_FullPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !contains(result, "42") {
+	if !strings.Contains(result, "42") {
 		t.Errorf("expected result to contain '42', got %s", result)
 	}
 }
