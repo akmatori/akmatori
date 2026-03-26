@@ -614,7 +614,7 @@ describe("Orchestrator", () => {
       const proxyConfig: ProxyConfig = {
         url: "http://proxy:8080",
         no_proxy: "localhost",
-        openai_enabled: true,
+        llm_enabled: true,
         slack_enabled: false,
         zabbix_enabled: false,
       };
@@ -638,7 +638,7 @@ describe("Orchestrator", () => {
       const proxyConfig: ProxyConfig = {
         url: "http://proxy:9090",
         no_proxy: "internal",
-        openai_enabled: true,
+        llm_enabled: true,
         slack_enabled: false,
         zabbix_enabled: false,
       };

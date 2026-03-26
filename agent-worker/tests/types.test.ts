@@ -157,7 +157,7 @@ describe("WebSocketMessage serialization", () => {
     const proxyConfig: ProxyConfig = {
       url: "http://proxy.internal:8080",
       no_proxy: "localhost,mcp-gateway",
-      openai_enabled: true,
+      llm_enabled: true,
       slack_enabled: false,
       zabbix_enabled: false,
     };
@@ -175,7 +175,7 @@ describe("WebSocketMessage serialization", () => {
     expect(parsed.proxy_config).toEqual({
       url: "http://proxy.internal:8080",
       no_proxy: "localhost,mcp-gateway",
-      openai_enabled: true,
+      llm_enabled: true,
       slack_enabled: false,
       zabbix_enabled: false,
     });
@@ -219,7 +219,7 @@ describe("WebSocketMessage deserialization", () => {
       proxy_config: {
         url: "http://proxy:3128",
         no_proxy: "mcp-gateway",
-        openai_enabled: true,
+        llm_enabled: true,
         slack_enabled: true,
         zabbix_enabled: false,
       },
@@ -234,7 +234,7 @@ describe("WebSocketMessage deserialization", () => {
     expect(msg.model).toBe("o3");
     expect(msg.thinking_level).toBe("high");
     expect(msg.proxy_config?.url).toBe("http://proxy:3128");
-    expect(msg.proxy_config?.openai_enabled).toBe(true);
+    expect(msg.proxy_config?.llm_enabled).toBe(true);
   });
 
   it("deserializes a continue_incident message", () => {
@@ -337,7 +337,7 @@ describe("ProxyConfig type", () => {
     const config: ProxyConfig = {
       url: "http://squid:3128",
       no_proxy: "localhost,127.0.0.1,mcp-gateway",
-      openai_enabled: true,
+      llm_enabled: true,
       slack_enabled: true,
       zabbix_enabled: false,
     };
@@ -348,7 +348,7 @@ describe("ProxyConfig type", () => {
     // Verify Go field names
     expect(parsed.url).toBe("http://squid:3128");
     expect(parsed.no_proxy).toBe("localhost,127.0.0.1,mcp-gateway");
-    expect(parsed.openai_enabled).toBe(true);
+    expect(parsed.llm_enabled).toBe(true);
     expect(parsed.slack_enabled).toBe(true);
     expect(parsed.zabbix_enabled).toBe(false);
   });

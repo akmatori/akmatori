@@ -34,7 +34,7 @@ export type MessageType = APIToWorkerMessageType | WorkerToAPIMessageType;
 export interface ProxyConfig {
   url: string;
   no_proxy: string;
-  openai_enabled: boolean;
+  llm_enabled: boolean;
   slack_enabled: boolean;
   zabbix_enabled: boolean;
   victoria_metrics_enabled: boolean;

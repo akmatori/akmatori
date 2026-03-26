@@ -37,7 +37,7 @@ const (
 type ProxyConfig struct {
 	URL                    string `json:"url"`
 	NoProxy                string `json:"no_proxy"`
-	OpenAIEnabled          bool   `json:"openai_enabled"`
+	LLMEnabled             bool   `json:"llm_enabled"`
 	SlackEnabled           bool   `json:"slack_enabled"`
 	ZabbixEnabled          bool   `json:"zabbix_enabled"`
 	VictoriaMetricsEnabled bool   `json:"victoria_metrics_enabled"`
@@ -340,7 +340,7 @@ func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettings
 		msg.ProxyConfig = &ProxyConfig{
 			URL:                    proxySettings.ProxyURL,
 			NoProxy:                proxySettings.NoProxy,
-			OpenAIEnabled:          proxySettings.OpenAIEnabled,
+			LLMEnabled:             proxySettings.LLMEnabled,
 			SlackEnabled:           proxySettings.SlackEnabled,
 			ZabbixEnabled:          proxySettings.ZabbixEnabled,
 			VictoriaMetricsEnabled: proxySettings.VictoriaMetricsEnabled,
@@ -389,7 +389,7 @@ func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string,
 		msg.ProxyConfig = &ProxyConfig{
 			URL:                    proxySettings.ProxyURL,
 			NoProxy:                proxySettings.NoProxy,
-			OpenAIEnabled:          proxySettings.OpenAIEnabled,
+			LLMEnabled:             proxySettings.LLMEnabled,
 			SlackEnabled:           proxySettings.SlackEnabled,
 			ZabbixEnabled:          proxySettings.ZabbixEnabled,
 			VictoriaMetricsEnabled: proxySettings.VictoriaMetricsEnabled,
@@ -432,7 +432,7 @@ func (h *AgentWSHandler) BroadcastProxyConfig(settings *database.ProxySettings) 
 		ProxyConfig: &ProxyConfig{
 			URL:                    settings.ProxyURL,
 			NoProxy:                settings.NoProxy,
-			OpenAIEnabled:          settings.OpenAIEnabled,
+			LLMEnabled:             settings.LLMEnabled,
 			SlackEnabled:           settings.SlackEnabled,
 			ZabbixEnabled:          settings.ZabbixEnabled,
 			VictoriaMetricsEnabled: settings.VictoriaMetricsEnabled,
