@@ -47,10 +47,16 @@ func TestMigrateOpenAIToLLMEnabled_CopiesAndDrops(t *testing.T) {
 		t.Fatalf("failed to add old column: %v", err)
 	}
 
-	// Insert a row with the old column set to true, new column defaults
+	// Insert two rows: one with true, one with false.
+	// The false case is critical because llm_enabled has default:true —
+	// if the migration didn't actually run, the default would mask the bug.
 	err = db.Exec("INSERT INTO proxy_settings (id, open_ai_enabled, llm_enabled) VALUES (1, 1, 0)").Error
 	if err != nil {
-		t.Fatalf("failed to insert test row: %v", err)
+		t.Fatalf("failed to insert test row 1: %v", err)
+	}
+	err = db.Exec("INSERT INTO proxy_settings (id, open_ai_enabled, llm_enabled) VALUES (2, 0, 1)").Error
+	if err != nil {
+		t.Fatalf("failed to insert test row 2: %v", err)
 	}
 
 	// Run migration
@@ -59,14 +65,24 @@ func TestMigrateOpenAIToLLMEnabled_CopiesAndDrops(t *testing.T) {
 		t.Fatalf("migration failed: %v", err)
 	}
 
-	// Verify llm_enabled was copied from open_ai_enabled
-	var settings ProxySettings
-	err = db.First(&settings, 1).Error
+	// Verify llm_enabled was copied from open_ai_enabled (true case)
+	var settings1 ProxySettings
+	err = db.First(&settings1, 1).Error
 	if err != nil {
-		t.Fatalf("failed to read settings: %v", err)
+		t.Fatalf("failed to read settings row 1: %v", err)
 	}
-	if !settings.LLMEnabled {
-		t.Error("expected llm_enabled to be true after migration")
+	if !settings1.LLMEnabled {
+		t.Error("row 1: expected llm_enabled to be true after migration")
+	}
+
+	// Verify llm_enabled was copied from open_ai_enabled (false case)
+	var settings2 ProxySettings
+	err = db.First(&settings2, 2).Error
+	if err != nil {
+		t.Fatalf("failed to read settings row 2: %v", err)
+	}
+	if settings2.LLMEnabled {
+		t.Error("row 2: expected llm_enabled to be false after migration")
 	}
 
 	// Verify old column was dropped
@@ -76,33 +92,11 @@ func TestMigrateOpenAIToLLMEnabled_CopiesAndDrops(t *testing.T) {
 }
 
 func TestMigrateOpenAIToLLMEnabled_TransactionRollsBack(t *testing.T) {
-	db := setupMigrationTestDB(t)
-
-	// Create the table with the new schema
-	err := db.AutoMigrate(&ProxySettings{})
-	if err != nil {
-		t.Fatalf("AutoMigrate failed: %v", err)
-	}
-
-	// Add the old column
-	err = db.Exec("ALTER TABLE proxy_settings ADD COLUMN open_ai_enabled BOOLEAN DEFAULT 1").Error
-	if err != nil {
-		t.Fatalf("failed to add old column: %v", err)
-	}
-
-	// Insert a row
-	err = db.Exec("INSERT INTO proxy_settings (id, open_ai_enabled, llm_enabled) VALUES (1, 1, 0)").Error
-	if err != nil {
-		t.Fatalf("failed to insert test row: %v", err)
-	}
-
-	// Sabotage: drop the proxy_settings table and recreate without open_ai_enabled
-	// but with a view that makes HasColumn return true. This is hard to do with SQLite,
-	// so instead we test that the function returns an error on invalid SQL.
-	// We'll use a broken DB session to simulate a failure during the UPDATE.
+	// Create a database with open_ai_enabled but no llm_enabled column.
+	// This causes the UPDATE to fail, verifying error propagation and
+	// that the old column is not partially dropped.
 	brokenDB := setupMigrationTestDB(t)
-	// Create a table with open_ai_enabled but no llm_enabled column to cause UPDATE to fail
-	err = brokenDB.Exec("CREATE TABLE proxy_settings (id INTEGER PRIMARY KEY, open_ai_enabled BOOLEAN DEFAULT 1)").Error
+	err := brokenDB.Exec("CREATE TABLE proxy_settings (id INTEGER PRIMARY KEY, open_ai_enabled BOOLEAN DEFAULT 1)").Error
 	if err != nil {
 		t.Fatalf("failed to create broken table: %v", err)
 	}
@@ -117,7 +111,7 @@ func TestMigrateOpenAIToLLMEnabled_TransactionRollsBack(t *testing.T) {
 		t.Error("expected error when UPDATE fails, got nil")
 	}
 
-	// Verify old column still exists (transaction rolled back, no partial state)
+	// Verify old column still exists (no partial state)
 	if !brokenDB.Migrator().HasColumn(&ProxySettings{}, "open_ai_enabled") {
 		t.Error("expected open_ai_enabled column to still exist after failed migration")
 	}

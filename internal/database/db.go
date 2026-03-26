@@ -104,7 +104,7 @@ func AutoMigrate() error {
 	// updated model. We need to copy values from the old column and drop it.
 	// The old column name is "open_ai_enabled" (GORM's snake_case of OpenAIEnabled).
 	if err := migrateOpenAIToLLMEnabled(DB); err != nil {
-		return fmt.Errorf("failed to migrate open_ai_enabled to llm_enabled: %w", err)
+		return err
 	}
 
 	slog.Info("database migrations completed successfully")
