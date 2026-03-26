@@ -14,6 +14,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/mcp"
 	"github.com/akmatori/mcp-gateway/internal/mcpproxy"
 	"github.com/akmatori/mcp-gateway/internal/ratelimit"
+	"github.com/akmatori/mcp-gateway/internal/tools/catchpoint"
 	"github.com/akmatori/mcp-gateway/internal/tools/httpconnector"
 	"github.com/akmatori/mcp-gateway/internal/tools/ssh"
 	"github.com/akmatori/mcp-gateway/internal/tools/victoriametrics"
@@ -22,20 +23,24 @@ import (
 
 // Rate limit configuration
 const (
-	ZabbixRatePerSecond = 10 // requests per second
-	ZabbixBurstCapacity = 20 // burst capacity
-	VMRatePerSecond     = 10 // requests per second
-	VMBurstCapacity     = 20 // burst capacity
+	ZabbixRatePerSecond     = 10 // requests per second
+	ZabbixBurstCapacity     = 20 // burst capacity
+	VMRatePerSecond         = 10 // requests per second
+	VMBurstCapacity         = 20 // burst capacity
+	CatchpointRatePerSecond = 10 // requests per second
+	CatchpointBurstCapacity = 20 // burst capacity
 )
 
 // Registry manages tool registration
 type Registry struct {
 	server      *mcp.Server
 	logger      *log.Logger
-	zabbixTool  *zabbix.ZabbixTool
-	zabbixLimit *ratelimit.Limiter
-	vmTool      *victoriametrics.VictoriaMetricsTool
-	vmLimit     *ratelimit.Limiter
+	zabbixTool     *zabbix.ZabbixTool
+	zabbixLimit    *ratelimit.Limiter
+	vmTool         *victoriametrics.VictoriaMetricsTool
+	vmLimit        *ratelimit.Limiter
+	catchpointTool *catchpoint.CatchpointTool
+	catchpointLimit *ratelimit.Limiter
 
 	// HTTP connector state
 	httpExecutor       *httpconnector.HTTPConnectorExecutor
@@ -77,6 +82,13 @@ func (r *Registry) RegisterAllTools() {
 	// Register VictoriaMetrics tools with rate limiter
 	r.registerVictoriaMetricsTools()
 
+	// Create rate limiter for Catchpoint: 10 req/sec, burst 20
+	r.catchpointLimit = ratelimit.New(CatchpointRatePerSecond, CatchpointBurstCapacity)
+	r.logger.Printf("Catchpoint rate limiter created: %d req/sec, burst %d", CatchpointRatePerSecond, CatchpointBurstCapacity)
+
+	// Register Catchpoint tools with rate limiter
+	r.registerCatchpointTools()
+
 	r.logger.Println("All tools registered")
 }
 
@@ -87,6 +99,9 @@ func (r *Registry) Stop() {
 	}
 	if r.vmTool != nil {
 		r.vmTool.Stop()
+	}
+	if r.catchpointTool != nil {
+		r.catchpointTool.Stop()
 	}
 	if r.httpExecutor != nil {
 		r.httpExecutor.Stop()
@@ -1181,4 +1196,397 @@ func BuildInstanceLookup() mcp.InstanceLookup {
 // GetToolCredentials is a helper to fetch credentials from database
 func GetToolCredentials(ctx context.Context, incidentID string, toolType string) (*database.ToolCredentials, error) {
 	return database.GetToolCredentialsForIncident(ctx, incidentID, toolType)
+}
+
+// registerCatchpointTools registers all Catchpoint tool methods
+func (r *Registry) registerCatchpointTools() {
+	r.catchpointTool = catchpoint.NewCatchpointTool(r.logger, r.catchpointLimit)
+
+	// catchpoint.get_alerts
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "catchpoint.get_alerts",
+			Description: "Get test alerts from Catchpoint",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"severity": {
+						Type:        "string",
+						Description: "Filter by alert severity",
+					},
+					"start_time": {
+						Type:        "string",
+						Description: "Start time filter (ISO 8601)",
+					},
+					"end_time": {
+						Type:        "string",
+						Description: "End time filter (ISO 8601)",
+					},
+					"test_ids": {
+						Type:        "string",
+						Description: "Comma-separated test IDs to filter by",
+					},
+					"page_number": {
+						Type:        "number",
+						Description: "Page number for pagination",
+					},
+					"page_size": {
+						Type:        "number",
+						Description: "Page size (max 100)",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.catchpointTool.GetAlerts(ctx, incidentID, args)
+		},
+	)
+
+	// catchpoint.get_alert_details
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "catchpoint.get_alert_details",
+			Description: "Get detailed information for specific alerts",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"alert_ids": {
+						Type:        "string",
+						Description: "Comma-separated alert IDs (required)",
+					},
+				},
+				Required: []string{"alert_ids"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.catchpointTool.GetAlertDetails(ctx, incidentID, args)
+		},
+	)
+
+	// catchpoint.get_test_performance
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "catchpoint.get_test_performance",
+			Description: "Get aggregated test performance metrics",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"test_ids": {
+						Type:        "string",
+						Description: "Comma-separated test IDs (required)",
+					},
+					"start_time": {
+						Type:        "string",
+						Description: "Start time filter (ISO 8601)",
+					},
+					"end_time": {
+						Type:        "string",
+						Description: "End time filter (ISO 8601)",
+					},
+					"metrics": {
+						Type:        "string",
+						Description: "Comma-separated metric names to return",
+					},
+					"dimensions": {
+						Type:        "string",
+						Description: "Comma-separated dimension names for grouping",
+					},
+				},
+				Required: []string{"test_ids"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.catchpointTool.GetTestPerformance(ctx, incidentID, args)
+		},
+	)
+
+	// catchpoint.get_test_performance_raw
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "catchpoint.get_test_performance_raw",
+			Description: "Get raw test performance data points",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"test_ids": {
+						Type:        "string",
+						Description: "Comma-separated test IDs (required)",
+					},
+					"start_time": {
+						Type:        "string",
+						Description: "Start time filter (ISO 8601)",
+					},
+					"end_time": {
+						Type:        "string",
+						Description: "End time filter (ISO 8601)",
+					},
+					"node_ids": {
+						Type:        "string",
+						Description: "Comma-separated node IDs to filter by",
+					},
+					"page_number": {
+						Type:        "number",
+						Description: "Page number for pagination",
+					},
+					"page_size": {
+						Type:        "number",
+						Description: "Page size (max 100)",
+					},
+				},
+				Required: []string{"test_ids"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.catchpointTool.GetTestPerformanceRaw(ctx, incidentID, args)
+		},
+	)
+
+	// catchpoint.get_tests
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "catchpoint.get_tests",
+			Description: "List tests from Catchpoint",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"test_ids": {
+						Type:        "string",
+						Description: "Comma-separated test IDs to filter by",
+					},
+					"test_type": {
+						Type:        "string",
+						Description: "Filter by test type",
+					},
+					"folder_id": {
+						Type:        "string",
+						Description: "Filter by folder ID",
+					},
+					"status": {
+						Type:        "string",
+						Description: "Filter by test status",
+					},
+					"page_number": {
+						Type:        "number",
+						Description: "Page number for pagination",
+					},
+					"page_size": {
+						Type:        "number",
+						Description: "Page size (max 100)",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.catchpointTool.GetTests(ctx, incidentID, args)
+		},
+	)
+
+	// catchpoint.get_test_details
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "catchpoint.get_test_details",
+			Description: "Get detailed configuration for specific tests",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"test_ids": {
+						Type:        "string",
+						Description: "Comma-separated test IDs (required)",
+					},
+				},
+				Required: []string{"test_ids"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.catchpointTool.GetTestDetails(ctx, incidentID, args)
+		},
+	)
+
+	// catchpoint.get_test_errors
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "catchpoint.get_test_errors",
+			Description: "Get raw test error data",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"test_ids": {
+						Type:        "string",
+						Description: "Comma-separated test IDs to filter by",
+					},
+					"start_time": {
+						Type:        "string",
+						Description: "Start time filter (ISO 8601)",
+					},
+					"end_time": {
+						Type:        "string",
+						Description: "End time filter (ISO 8601)",
+					},
+					"page_number": {
+						Type:        "number",
+						Description: "Page number for pagination",
+					},
+					"page_size": {
+						Type:        "number",
+						Description: "Page size (max 100)",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.catchpointTool.GetTestErrors(ctx, incidentID, args)
+		},
+	)
+
+	// catchpoint.get_internet_outages
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "catchpoint.get_internet_outages",
+			Description: "Get internet outage data from Catchpoint Internet Weather",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"start_time": {
+						Type:        "string",
+						Description: "Start time filter (ISO 8601)",
+					},
+					"end_time": {
+						Type:        "string",
+						Description: "End time filter (ISO 8601)",
+					},
+					"asn": {
+						Type:        "string",
+						Description: "Filter by Autonomous System Number",
+					},
+					"country": {
+						Type:        "string",
+						Description: "Filter by country code",
+					},
+					"page_number": {
+						Type:        "number",
+						Description: "Page number for pagination",
+					},
+					"page_size": {
+						Type:        "number",
+						Description: "Page size (max 100)",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.catchpointTool.GetInternetOutages(ctx, incidentID, args)
+		},
+	)
+
+	// catchpoint.get_nodes
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "catchpoint.get_nodes",
+			Description: "List all Catchpoint monitoring nodes",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"page_number": {
+						Type:        "number",
+						Description: "Page number for pagination",
+					},
+					"page_size": {
+						Type:        "number",
+						Description: "Page size (max 100)",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.catchpointTool.GetNodes(ctx, incidentID, args)
+		},
+	)
+
+	// catchpoint.get_node_alerts
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "catchpoint.get_node_alerts",
+			Description: "Get alerts for specific monitoring nodes",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"node_ids": {
+						Type:        "string",
+						Description: "Comma-separated node IDs to filter by",
+					},
+					"start_time": {
+						Type:        "string",
+						Description: "Start time filter (ISO 8601)",
+					},
+					"end_time": {
+						Type:        "string",
+						Description: "End time filter (ISO 8601)",
+					},
+					"page_number": {
+						Type:        "number",
+						Description: "Page number for pagination",
+					},
+					"page_size": {
+						Type:        "number",
+						Description: "Page size (max 100)",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.catchpointTool.GetNodeAlerts(ctx, incidentID, args)
+		},
+	)
+
+	// catchpoint.acknowledge_alerts (write operation)
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "catchpoint.acknowledge_alerts",
+			Description: "Acknowledge, assign, or drop test alerts",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"alert_ids": {
+						Type:        "string",
+						Description: "Comma-separated alert IDs to act on (required)",
+					},
+					"action": {
+						Type:        "string",
+						Description: "Action to perform: acknowledge, assign, or drop (required)",
+					},
+					"assignee": {
+						Type:        "string",
+						Description: "User to assign alerts to (required when action is 'assign')",
+					},
+				},
+				Required: []string{"alert_ids", "action"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.catchpointTool.AcknowledgeAlerts(ctx, incidentID, args)
+		},
+	)
+
+	// catchpoint.run_instant_test (write operation)
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "catchpoint.run_instant_test",
+			Description: "Trigger an instant (on-demand) test execution",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"test_id": {
+						Type:        "string",
+						Description: "Test ID to execute (required)",
+					},
+				},
+				Required: []string{"test_id"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.catchpointTool.RunInstantTest(ctx, incidentID, args)
+		},
+	)
+
+	r.logger.Println("Catchpoint tools registered (12 methods)")
 }
