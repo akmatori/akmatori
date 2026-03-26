@@ -590,6 +590,21 @@ func TestExplainQuery_RequiresQuery(t *testing.T) {
 	}
 }
 
+func TestExplainQuery_RejectsQueryWithExplain(t *testing.T) {
+	tool := NewPostgreSQLTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.ExplainQuery(nil, "test-incident", map[string]interface{}{
+		"query": "EXPLAIN SELECT * FROM users",
+	})
+	if err == nil {
+		t.Fatal("expected error for query containing EXPLAIN")
+	}
+	if !strings.Contains(err.Error(), "do not include EXPLAIN") {
+		t.Errorf("expected error about EXPLAIN, got: %v", err)
+	}
+}
+
 func TestRowsToJSON(t *testing.T) {
 	rows := []map[string]interface{}{
 		{"id": 1, "name": "test"},

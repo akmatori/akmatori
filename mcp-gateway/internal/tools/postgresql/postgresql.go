@@ -645,6 +645,11 @@ func (t *PostgreSQLTool) ExplainQuery(ctx context.Context, incidentID string, ar
 		return "", fmt.Errorf("only SELECT queries are allowed (write statements, SET, LOCK, and dangerous functions are blocked)")
 	}
 
+	// Reject queries that already start with EXPLAIN — the tool adds the wrapper automatically
+	if explainPattern.MatchString(stripSQLLiterals(stripSQLComments(query))) {
+		return "", fmt.Errorf("do not include EXPLAIN in the query; the explain_query tool adds it automatically")
+	}
+
 	explainQuery := "EXPLAIN (ANALYZE false, FORMAT JSON) " + query
 
 	cacheKey := responseCacheKey("explain", map[string]string{"query": query})
