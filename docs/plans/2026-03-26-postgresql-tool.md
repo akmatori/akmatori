@@ -60,17 +60,17 @@ Add a PostgreSQL database integration to the MCP Gateway as a native tool. The t
 **Files:**
 - Create: `mcp-gateway/internal/tools/postgresql/postgresql.go`
 
-- [ ] Create package `postgresql` with PostgreSQLTool struct (4 fields: logger, configCache, responseCache, rateLimiter)
-- [ ] Define PGConfig struct: Host, Port (default 5432), Database, Username, Password, SSLMode (default "require"), Timeout (default 30, clamp 5-300)
-- [ ] Implement `NewPostgreSQLTool(logger, limiter)` constructor with cache initialization and `Stop()` method
-- [ ] Implement `getConfig(ctx, incidentID, logicalName...)` using `database.ResolveToolCredentials` with 5-min config cache. Parse settings keys: `pg_host`, `pg_port`, `pg_database`, `pg_username`, `pg_password`, `pg_ssl_mode`, `pg_timeout`
-- [ ] Implement `connect(ctx, config)` that builds a pgx connection string, connects, and returns `*pgx.Conn`. Connection must set `default_transaction_read_only = on` and `statement_timeout` based on config timeout
-- [ ] Implement `executeReadOnly(ctx, config, query string, args ...interface{})` that: checks rate limiter, opens connection, executes query inside `BEGIN; SET TRANSACTION READ ONLY; ... COMMIT`, returns `[]map[string]interface{}` rows with column names as keys, respects 5MB result size limit
-- [ ] Implement SQL safety check: `isSelectOnly(query string) bool` that rejects queries containing INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE/GRANT/REVOKE (case-insensitive, handles CTEs). This is a defense-in-depth layer on top of the read-only transaction
-- [ ] Implement helpers: `extractLogicalName(args)`, `configCacheKey(incidentID)`, `responseCacheKey(query, params)`, `clampTimeout(timeout)`
-- [ ] Implement `cachedQuery(ctx, incidentID, cacheKey string, ttl time.Duration, queryFn func() (string, error), logicalName ...string)` cache wrapper
-- [ ] Write tests: constructor, Stop, getConfig (with pre-populated configCache), isSelectOnly (table-driven: SELECT/WITH allowed, INSERT/UPDATE/DELETE/DROP rejected, case variations, comments, semicolons), clampTimeout
-- [ ] Run `make test-mcp` - must pass before task 4
+- [x] Create package `postgresql` with PostgreSQLTool struct (4 fields: logger, configCache, responseCache, rateLimiter)
+- [x] Define PGConfig struct: Host, Port (default 5432), Database, Username, Password, SSLMode (default "require"), Timeout (default 30, clamp 5-300)
+- [x] Implement `NewPostgreSQLTool(logger, limiter)` constructor with cache initialization and `Stop()` method
+- [x] Implement `getConfig(ctx, incidentID, logicalName...)` using `database.ResolveToolCredentials` with 5-min config cache. Parse settings keys: `pg_host`, `pg_port`, `pg_database`, `pg_username`, `pg_password`, `pg_ssl_mode`, `pg_timeout`
+- [x] Implement `connect(ctx, config)` that builds a pgx connection string, connects, and returns `*pgx.Conn`. Connection must set `default_transaction_read_only = on` and `statement_timeout` based on config timeout
+- [x] Implement `executeReadOnly(ctx, config, query string, args ...interface{})` that: checks rate limiter, opens connection, executes query inside `BEGIN; SET TRANSACTION READ ONLY; ... COMMIT`, returns `[]map[string]interface{}` rows with column names as keys, respects 5MB result size limit
+- [x] Implement SQL safety check: `isSelectOnly(query string) bool` that rejects queries containing INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE/GRANT/REVOKE (case-insensitive, handles CTEs). This is a defense-in-depth layer on top of the read-only transaction
+- [x] Implement helpers: `extractLogicalName(args)`, `configCacheKey(incidentID)`, `responseCacheKey(query, params)`, `clampTimeout(timeout)`
+- [x] Implement `cachedQuery(ctx, incidentID, cacheKey string, ttl time.Duration, queryFn func() (string, error), logicalName ...string)` cache wrapper
+- [x] Write tests: constructor, Stop, getConfig (with pre-populated configCache), isSelectOnly (table-driven: SELECT/WITH allowed, INSERT/UPDATE/DELETE/DROP rejected, case variations, comments, semicolons), clampTimeout
+- [x] Run `make test-mcp` - must pass before task 4
 
 ### Task 4: Read-only query tools (6 methods)
 
