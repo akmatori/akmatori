@@ -22,10 +22,10 @@ Address critical and warning-level issues found during code review of the `opena
 **Files:**
 - Modify: `docs/openapi.yaml`
 
-- [ ] Search `docs/openapi.yaml` for remaining `openai` references in the proxy settings schema
-- [ ] Rename the service key from `openai` to `llm` to match the new DB/API field names
-- [ ] Verify the schema matches the Go struct and frontend types
-- [ ] Run `make verify` - must pass before task 2
+- [x] Search `docs/openapi.yaml` for remaining `openai` references in the proxy settings schema
+- [x] Rename the service key from `openai` to `llm` to match the new DB/API field names
+- [x] Verify the schema matches the Go struct and frontend types
+- [x] Run `make verify` - must pass before task 2
 
 ### Task 2: Add undici as explicit dependency
 
