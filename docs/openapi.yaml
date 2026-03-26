@@ -935,7 +935,7 @@ paths:
                 services:
                   type: object
                   properties:
-                    openai:
+                    llm:
                       type: object
                       properties:
                         enabled:
