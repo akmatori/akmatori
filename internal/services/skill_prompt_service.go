@@ -334,7 +334,7 @@ gateway_call("victoria_metrics.api_request", {"path": "/api/v1/status/tsdb"}, "%
 - `+"`list_tables`"+`: schema
 - `+"`describe_table`"+`: table_name* | schema
 - `+"`get_indexes`"+`: table_name* | schema
-- `+"`get_table_stats`"+`: table_name
+- `+"`get_table_stats`"+`: table_name | schema
 - `+"`explain_query`"+`: query*
 - `+"`get_active_queries`"+`: include_idle, min_duration_seconds
 - `+"`get_locks`"+`: blocked_only
