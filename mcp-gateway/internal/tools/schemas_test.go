@@ -228,10 +228,146 @@ func TestCatchpointSchema_TimeoutBounds(t *testing.T) {
 	}
 }
 
+func TestGetToolSchemas_ContainsPostgreSQL(t *testing.T) {
+	schemas := GetToolSchemas()
+
+	if _, ok := schemas["postgresql"]; !ok {
+		t.Fatal("postgresql schema not found in GetToolSchemas()")
+	}
+}
+
+func TestGetToolSchema_PostgreSQL(t *testing.T) {
+	schema, ok := GetToolSchema("postgresql")
+	if !ok {
+		t.Fatal("postgresql schema not found")
+	}
+
+	if schema.Name != "postgresql" {
+		t.Errorf("expected name 'postgresql', got %q", schema.Name)
+	}
+
+	if schema.Version != "1.0.0" {
+		t.Errorf("expected version '1.0.0', got %q", schema.Version)
+	}
+
+	if len(schema.Functions) != 10 {
+		t.Errorf("expected 10 functions, got %d", len(schema.Functions))
+	}
+}
+
+func TestPostgreSQLSchema_RequiredFields(t *testing.T) {
+	schema, _ := GetToolSchema("postgresql")
+
+	expectedRequired := []string{"pg_host", "pg_database", "pg_username", "pg_password"}
+	if len(schema.SettingsSchema.Required) != len(expectedRequired) {
+		t.Fatalf("expected %d required fields, got %d", len(expectedRequired), len(schema.SettingsSchema.Required))
+	}
+	for i, field := range expectedRequired {
+		if schema.SettingsSchema.Required[i] != field {
+			t.Errorf("expected required[%d] = %q, got %q", i, field, schema.SettingsSchema.Required[i])
+		}
+	}
+}
+
+func TestPostgreSQLSchema_Settings(t *testing.T) {
+	schema, _ := GetToolSchema("postgresql")
+	props := schema.SettingsSchema.Properties
+
+	expectedFields := []string{"pg_host", "pg_port", "pg_database", "pg_username", "pg_password", "pg_ssl_mode", "pg_timeout"}
+	for _, field := range expectedFields {
+		if _, ok := props[field]; !ok {
+			t.Errorf("missing settings field: %s", field)
+		}
+	}
+}
+
+func TestPostgreSQLSchema_SecretFields(t *testing.T) {
+	schema, _ := GetToolSchema("postgresql")
+	props := schema.SettingsSchema.Properties
+
+	if !props["pg_password"].Secret {
+		t.Error("expected pg_password to be marked as secret")
+	}
+}
+
+func TestPostgreSQLSchema_AdvancedFields(t *testing.T) {
+	schema, _ := GetToolSchema("postgresql")
+	props := schema.SettingsSchema.Properties
+
+	advancedFields := []string{"pg_ssl_mode", "pg_timeout"}
+	for _, field := range advancedFields {
+		if !props[field].Advanced {
+			t.Errorf("expected %s to be marked as advanced", field)
+		}
+	}
+}
+
+func TestPostgreSQLSchema_SSLModeEnum(t *testing.T) {
+	schema, _ := GetToolSchema("postgresql")
+	sslMode := schema.SettingsSchema.Properties["pg_ssl_mode"]
+
+	expectedEnum := []string{"disable", "require", "verify-ca", "verify-full"}
+	if len(sslMode.Enum) != len(expectedEnum) {
+		t.Fatalf("expected %d enum values, got %d", len(expectedEnum), len(sslMode.Enum))
+	}
+	for i, v := range expectedEnum {
+		if sslMode.Enum[i] != v {
+			t.Errorf("expected enum[%d] = %q, got %q", i, v, sslMode.Enum[i])
+		}
+	}
+
+	if sslMode.Default != "require" {
+		t.Errorf("expected default 'require', got %v", sslMode.Default)
+	}
+}
+
+func TestPostgreSQLSchema_Defaults(t *testing.T) {
+	schema, _ := GetToolSchema("postgresql")
+	props := schema.SettingsSchema.Properties
+
+	if props["pg_port"].Default != 5432 {
+		t.Errorf("expected pg_port default 5432, got %v", props["pg_port"].Default)
+	}
+
+	if props["pg_timeout"].Default != 30 {
+		t.Errorf("expected pg_timeout default 30, got %v", props["pg_timeout"].Default)
+	}
+}
+
+func TestPostgreSQLSchema_TimeoutBounds(t *testing.T) {
+	schema, _ := GetToolSchema("postgresql")
+	timeout := schema.SettingsSchema.Properties["pg_timeout"]
+
+	if timeout.Minimum == nil || *timeout.Minimum != 5 {
+		t.Error("expected pg_timeout minimum 5")
+	}
+	if timeout.Maximum == nil || *timeout.Maximum != 300 {
+		t.Error("expected pg_timeout maximum 300")
+	}
+}
+
+func TestPostgreSQLSchema_Functions(t *testing.T) {
+	schema, _ := GetToolSchema("postgresql")
+
+	expectedFunctions := []string{
+		"execute_query", "list_tables", "describe_table", "get_indexes",
+		"get_table_stats", "explain_query", "get_active_queries", "get_locks",
+		"get_replication_status", "get_database_stats",
+	}
+	if len(schema.Functions) != len(expectedFunctions) {
+		t.Fatalf("expected %d functions, got %d", len(expectedFunctions), len(schema.Functions))
+	}
+	for i, name := range expectedFunctions {
+		if schema.Functions[i].Name != name {
+			t.Errorf("expected function[%d] = %q, got %q", i, name, schema.Functions[i].Name)
+		}
+	}
+}
+
 func TestGetToolSchemas_AllPresent(t *testing.T) {
 	schemas := GetToolSchemas()
 
-	expected := []string{"ssh", "zabbix", "victoria_metrics", "catchpoint"}
+	expected := []string{"ssh", "zabbix", "victoria_metrics", "catchpoint", "postgresql"}
 	for _, name := range expected {
 		if _, ok := schemas[name]; !ok {
 			t.Errorf("missing schema: %s", name)

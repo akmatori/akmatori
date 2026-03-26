@@ -60,6 +60,7 @@ func GetToolSchemas() map[string]ToolTypeSchema {
 		"zabbix":           getZabbixSchema(),
 		"victoria_metrics": getVictoriaMetricsSchema(),
 		"catchpoint":       getCatchpointSchema(),
+		"postgresql":       getPostgreSQLSchema(),
 	}
 }
 
@@ -543,6 +544,123 @@ func getCatchpointSchema() ToolTypeSchema {
 				Description: "Trigger an instant (on-demand) test execution",
 				Parameters:  "test_id (required)",
 				Returns:     "JSON with instant test execution result",
+			},
+		},
+	}
+}
+
+func getPostgreSQLSchema() ToolTypeSchema {
+	return ToolTypeSchema{
+		Name:        "postgresql",
+		Description: "PostgreSQL database integration for read-only queries and diagnostics. Execute SELECT queries, inspect schema, analyze performance, and monitor database health.",
+		Version:     "1.0.0",
+		SettingsSchema: SettingsSchema{
+			Type:     "object",
+			Required: []string{"pg_host", "pg_database", "pg_username", "pg_password"},
+			Properties: map[string]PropertySchema{
+				"pg_host": {
+					Type:        "string",
+					Description: "PostgreSQL server hostname or IP address",
+					Example:     "db.example.com",
+				},
+				"pg_port": {
+					Type:        "integer",
+					Description: "PostgreSQL server port",
+					Default:     5432,
+					Minimum:     intPtr(1),
+					Maximum:     intPtr(65535),
+				},
+				"pg_database": {
+					Type:        "string",
+					Description: "Database name to connect to",
+					Example:     "myapp_production",
+				},
+				"pg_username": {
+					Type:        "string",
+					Description: "Database username",
+				},
+				"pg_password": {
+					Type:        "string",
+					Description: "Database password",
+					Secret:      true,
+				},
+				"pg_ssl_mode": {
+					Type:        "string",
+					Description: "SSL connection mode",
+					Enum:        []string{"disable", "require", "verify-ca", "verify-full"},
+					Default:     "require",
+					Advanced:    true,
+				},
+				"pg_timeout": {
+					Type:        "integer",
+					Description: "Query timeout in seconds",
+					Default:     30,
+					Minimum:     intPtr(5),
+					Maximum:     intPtr(300),
+					Advanced:    true,
+				},
+			},
+		},
+		Functions: []ToolFunction{
+			{
+				Name:        "execute_query",
+				Description: "Execute a read-only SQL query (SELECT only)",
+				Parameters:  "query (required), limit",
+				Returns:     "JSON array of row objects",
+			},
+			{
+				Name:        "list_tables",
+				Description: "List tables in a schema with row estimates",
+				Parameters:  "schema",
+				Returns:     "JSON array of table objects",
+			},
+			{
+				Name:        "describe_table",
+				Description: "Get column definitions for a table",
+				Parameters:  "table_name (required), schema",
+				Returns:     "JSON array of column objects",
+			},
+			{
+				Name:        "get_indexes",
+				Description: "Get indexes for a table",
+				Parameters:  "table_name (required), schema",
+				Returns:     "JSON array of index objects",
+			},
+			{
+				Name:        "get_table_stats",
+				Description: "Get table statistics (scans, tuples, vacuum info)",
+				Parameters:  "table_name",
+				Returns:     "JSON array of table stat objects",
+			},
+			{
+				Name:        "explain_query",
+				Description: "Get query execution plan without running the query",
+				Parameters:  "query (required)",
+				Returns:     "JSON execution plan",
+			},
+			{
+				Name:        "get_active_queries",
+				Description: "Get currently running queries from pg_stat_activity",
+				Parameters:  "include_idle, min_duration_seconds",
+				Returns:     "JSON array of active query objects",
+			},
+			{
+				Name:        "get_locks",
+				Description: "Get current lock information with blocking details",
+				Parameters:  "blocked_only",
+				Returns:     "JSON array of lock objects",
+			},
+			{
+				Name:        "get_replication_status",
+				Description: "Get streaming replication status and lag",
+				Parameters:  "",
+				Returns:     "JSON array of replication slot objects",
+			},
+			{
+				Name:        "get_database_stats",
+				Description: "Get database-level statistics and cache hit ratio",
+				Parameters:  "",
+				Returns:     "JSON object with database stats",
 			},
 		},
 	}

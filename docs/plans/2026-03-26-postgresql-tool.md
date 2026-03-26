@@ -106,13 +106,13 @@ All methods follow signature: `(ctx context.Context, incidentID string, args map
 - Modify: `mcp-gateway/internal/tools/schemas.go`
 - Modify: `mcp-gateway/internal/tools/schemas_test.go`
 
-- [ ] Add `"postgresql": getPostgreSQLSchema()` to `GetToolSchemas()` map
-- [ ] Implement `getPostgreSQLSchema()` function with:
+- [x] Add `"postgresql": getPostgreSQLSchema()` to `GetToolSchemas()` map
+- [x] Implement `getPostgreSQLSchema()` function with:
   - Settings: `pg_host` (string, required), `pg_port` (integer, default 5432), `pg_database` (string, required), `pg_username` (string, required), `pg_password` (string, secret, required), `pg_ssl_mode` (string, enum: disable/require/verify-ca/verify-full, default "require"), `pg_timeout` (integer, advanced, default 30, min 5, max 300)
   - Functions: 10 entries matching all public methods with Parameters as comma-separated lists
   - Required: `["pg_host", "pg_database", "pg_username", "pg_password"]`
-- [ ] Add tests: `TestGetToolSchemas_ContainsPostgreSQL`, `TestGetToolSchema_PostgreSQL` (verify name, version, required settings, function count), update `TestGetToolSchemas_AllPresent` to include "postgresql"
-- [ ] Run `make test-mcp` - must pass before task 7
+- [x] Add tests: `TestGetToolSchemas_ContainsPostgreSQL`, `TestGetToolSchema_PostgreSQL` (verify name, version, required settings, function count), update `TestGetToolSchemas_AllPresent` to include "postgresql"
+- [x] Run `make test-mcp` - must pass before task 7
 
 ### Task 7: Registry integration
 
