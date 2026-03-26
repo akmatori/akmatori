@@ -288,10 +288,12 @@ func (s *RetentionService) StartBackgroundCleanup(ctx context.Context) {
 	}
 }
 
-// getRetentionSettings retrieves settings using the service's db instance.
+// getRetentionSettings retrieves the singleton retention settings using the
+// service's db instance. Matching on SingletonKey keeps tests and runtime
+// behavior aligned with database.GetOrCreateRetentionSettings().
 func (s *RetentionService) getRetentionSettings() (*database.RetentionSettings, error) {
 	var settings database.RetentionSettings
-	err := s.db.First(&settings).Error
+	err := s.db.Where("singleton_key = ?", "default").First(&settings).Error
 	if err == gorm.ErrRecordNotFound {
 		return database.DefaultRetentionSettings(), nil
 	}

@@ -286,7 +286,14 @@ func TestRunCleanup_DisabledRetention(t *testing.T) {
 	db := setupRetentionTestDB(t)
 	dataDir := t.TempDir()
 
-	db.Create(&database.RetentionSettings{Enabled: false, RetentionDays: 30, CleanupIntervalHours: 6})
+	// Use a map so GORM persists the explicit false value instead of applying the
+	// model's default:true tag during INSERT.
+	db.Model(&database.RetentionSettings{}).Create(map[string]interface{}{
+		"singleton_key":           "default",
+		"enabled":                 false,
+		"retention_days":          30,
+		"cleanup_interval_hours":  6,
+	})
 
 	// Create an expired incident
 	createExpiredIncident(t, db, "expired-uuid-1", dataDir, 60)

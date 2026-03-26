@@ -303,13 +303,24 @@ QMD is a hybrid search engine (BM25 + vector + LLM reranking) running as a Docke
 Standardized request/response helpers:
 
 ```go
-api.WriteJSON(w, http.StatusOK, data)
-api.WriteError(w, http.StatusBadRequest, "invalid input")
+api.RespondJSON(w, http.StatusOK, data)
+api.RespondError(w, http.StatusBadRequest, "invalid input")
 api.DecodeJSON(r, &request)
-page, perPage, from, to := api.GetPaginationParams(r)
 ```
 
+Use `api.RespondErrorWithCode()` when the frontend needs a stable machine-readable error code in addition to the message.
+
 **API Documentation**: Swagger UI at `/api/docs` when enabled
+
+### Retention Settings API
+
+Incident retention is configured via `/api/settings/retention`:
+
+- `GET /api/settings/retention` → returns the singleton `retention_settings` record
+- `PUT /api/settings/retention` → partial update of `enabled`, `retention_days`, `cleanup_interval_hours`
+- Validation: `retention_days` must be `1..3650`, `cleanup_interval_hours` must be `1..8760`
+
+Keep handler validation aligned with `internal/api/types.go` and database defaults.
 
 ## Setup Package (`internal/setup/`)
 
@@ -569,6 +580,17 @@ func legacyHandler() { ... }
 | Host/inventory data | 30-60 sec |
 | Problems/alerts | 15 sec |
 | Metrics/history | 30 sec |
+
+### Catchpoint Patterns
+
+Catchpoint is a first-class MCP tool type with a shared rate limiter and cached GET helpers.
+
+- Tool namespace: `catchpoint.*`
+- Read paths use `cachedGet(...)`; write paths (`acknowledge_alerts`, `run_instant_test`) must not be cached
+- Reuse `addPaginationParams()` and `addTimeParams()` for optional query args
+- `page_size` must be clamped to the API max of `100`
+- Honor proxy settings only when `ProxySettings.CatchpointEnabled` is true
+- Keep error messages parameter-specific and use `validation.SuggestParam()` for typo hints on required args
 
 ### Implementation Reference
 
