@@ -4,13 +4,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/akmatori/mcp-gateway/internal/cache"
@@ -39,7 +42,7 @@ const (
 
 // dangerousStmtPattern matches SQL statements that modify data or schema.
 // This is a defense-in-depth layer — the read-only transaction is the primary guard.
-var dangerousStmtPattern = regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|COPY|DO|CALL|SET|LOCK)\b`)
+var dangerousStmtPattern = regexp.MustCompile(`(?i)\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|COPY|DO|CALL|SET|LOCK|MERGE)\b`)
 
 // dangerousFuncPattern matches SQL functions that can affect other sessions or server state.
 var dangerousFuncPattern = regexp.MustCompile(`(?i)\b(pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_rotate_logfile|pg_switch_wal|set_config)\s*\(`)
@@ -50,8 +53,11 @@ var (
 	lineCommentPattern   = regexp.MustCompile(`--[^\n]*`)
 	singleQuoteLiteral   = regexp.MustCompile(`'(?:[^'\\]|\\.|\'{2})*'`)
 	dollarQuoteLiteral   = regexp.MustCompile(`\$[^$]*\$[\s\S]*?\$[^$]*\$`)
-	limitPattern         = regexp.MustCompile(`(?i)\bLIMIT\b`)
+	doubleQuotedIdent    = regexp.MustCompile(`"(?:[^"\\]|\\.|""){0,128}"`)
+	validSSLModes        = map[string]bool{"disable": true, "require": true, "verify-ca": true, "verify-full": true}
+	limitPattern         = regexp.MustCompile(`(?i)(\bLIMIT\b|\bFETCH\s+(FIRST|NEXT)\b)`)
 	explainPattern       = regexp.MustCompile(`(?i)^\s*EXPLAIN\b`)
+	selectStartPattern   = regexp.MustCompile(`(?i)^\s*(SELECT|WITH)\b`)
 )
 
 // PGConfig holds PostgreSQL connection configuration
@@ -138,12 +144,17 @@ func clampTimeout(timeout int) int {
 }
 
 // isSelectOnly validates that a SQL query is read-only.
-// Rejects queries containing INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, GRANT, REVOKE.
-// Also rejects EXPLAIN statements (use ExplainQuery tool instead).
-// Allows SELECT and WITH (CTEs).
+// Uses a positive allowlist: query must start with SELECT or WITH (after stripping comments/literals).
+// Also rejects dangerous statements (INSERT, UPDATE, etc.) and dangerous functions as defense in depth.
+// Rejects EXPLAIN statements (use ExplainQuery tool instead).
 func isSelectOnly(query string) bool {
-	// Strip SQL comments and string literals so keywords inside quotes don't trigger false positives
-	cleaned := stripSQLLiterals(stripSQLComments(query))
+	// Strip string literals BEFORE comments so that -- or /* */ inside quoted strings
+	// are not mistaken for real comment delimiters.
+	cleaned := stripSQLComments(stripSQLLiterals(query))
+	// Positive allowlist: query must start with SELECT or WITH
+	if !selectStartPattern.MatchString(cleaned) {
+		return false
+	}
 	if dangerousStmtPattern.MatchString(cleaned) {
 		return false
 	}
@@ -158,9 +169,14 @@ func isSelectOnly(query string) bool {
 }
 
 // isReadOnlyQuery validates that a SQL query contains no dangerous statements.
+// Uses a positive allowlist: query must start with SELECT or WITH (after stripping comments/literals).
 // Unlike isSelectOnly, this does not block EXPLAIN — used by ExplainQuery which wraps the query.
 func isReadOnlyQuery(query string) bool {
-	cleaned := stripSQLLiterals(stripSQLComments(query))
+	cleaned := stripSQLComments(stripSQLLiterals(query))
+	// Positive allowlist: query must start with SELECT or WITH
+	if !selectStartPattern.MatchString(cleaned) {
+		return false
+	}
 	if dangerousStmtPattern.MatchString(cleaned) {
 		return false
 	}
@@ -177,11 +193,13 @@ func stripSQLComments(query string) string {
 	return result
 }
 
-// stripSQLLiterals removes string literals so keyword detection does not match inside quoted values.
-// Handles single-quoted ('...') and dollar-quoted ($$...$$) strings.
+// stripSQLLiterals removes string literals and quoted identifiers so keyword detection
+// does not match inside quoted values or column/table names.
+// Handles single-quoted ('...'), dollar-quoted ($$...$$), and double-quoted ("...") strings.
 func stripSQLLiterals(query string) string {
 	result := dollarQuoteLiteral.ReplaceAllString(query, "''")
 	result = singleQuoteLiteral.ReplaceAllString(result, "''")
+	result = doubleQuotedIdent.ReplaceAllString(result, "\"_\"")
 	return result
 }
 
@@ -255,36 +273,145 @@ func parseSettings(settings map[string]interface{}) *PGConfig {
 	return config
 }
 
+// verifyCAOnly verifies the server certificate chain against the system root CAs
+// without checking the hostname. This implements PostgreSQL's verify-ca SSL mode.
+func verifyCAOnly(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+	if len(rawCerts) == 0 {
+		return fmt.Errorf("no server certificates provided")
+	}
+	certs := make([]*x509.Certificate, len(rawCerts))
+	for i, raw := range rawCerts {
+		cert, err := x509.ParseCertificate(raw)
+		if err != nil {
+			return fmt.Errorf("failed to parse certificate: %w", err)
+		}
+		certs[i] = cert
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		return fmt.Errorf("failed to load system cert pool: %w", err)
+	}
+	opts := x509.VerifyOptions{
+		Roots:         pool,
+		Intermediates: x509.NewCertPool(),
+	}
+	for _, cert := range certs[1:] {
+		opts.Intermediates.AddCert(cert)
+	}
+	_, err = certs[0].Verify(opts)
+	return err
+}
+
+// escapeConnParam escapes a value for use in a pgx keyword=value connection string.
+// Values are single-quoted; internal single-quotes and backslashes are backslash-escaped.
+func escapeConnParam(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `'`, `\'`)
+	return "'" + s + "'"
+}
+
+// parseConfigMu serializes calls to pgx.ParseConfig so that the temporary
+// clearing of PG* environment variables is safe under concurrent use.
+//
+// Why not construct pgx.ConnConfig directly? pgconn.Config has an unexported
+// createdByParseConfig field that pgx.ConnectConfig enforces with a panic —
+// ParseConfig is the only supported way to create a ConnConfig in pgx v5.
+// The mutex protects concurrent buildConnConfig calls from interfering with
+// each other. Other goroutines that independently read PG* env vars could
+// theoretically observe the temporary unsets; this is accepted because (a) the
+// window is sub-millisecond, (b) tool connections are the only PG* consumer
+// during request handling, and (c) the gateway's own DB connection is
+// established once at startup before any tool calls.
+var parseConfigMu sync.Mutex
+
+// pgEnvVarsToShield lists every PG* environment variable that pgx.ParseConfig
+// reads. We temporarily clear them before parsing so that ambient env state
+// (including PGSERVICE/PGSERVICEFILE which can fail the parse itself) never
+// leaks into tool connections.
+var pgEnvVarsToShield = []string{
+	"PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "PGPASSFILE",
+	"PGAPPNAME", "PGCONNECT_TIMEOUT", "PGSSLMODE", "PGSSLKEY", "PGSSLCERT",
+	"PGSSLSNI", "PGSSLROOTCERT", "PGSSLPASSWORD", "PGSSLNEGOTIATION",
+	"PGTARGETSESSIONATTRS", "PGSERVICE", "PGSERVICEFILE", "PGTZ", "PGOPTIONS",
+	"PGMINPROTOCOLVERSION", "PGMAXPROTOCOLVERSION",
+}
+
 // buildConnConfig creates a pgx connection config from PGConfig.
-// Uses structured config instead of string interpolation to avoid injection via special characters.
+// All PG* environment variables are temporarily cleared during parsing so
+// pgx.ParseConfig cannot read ambient env state or service files.
 func buildConnConfig(config *PGConfig) (*pgx.ConnConfig, error) {
-	// Build a minimal DSN for pgx.ParseConfig, then override fields programmatically
-	connConfig, err := pgx.ParseConfig("")
+	// Build a connection string with all parameters explicitly set.
+	// sslmode=disable here because we configure TLS manually below via connConfig.TLSConfig.
+	// target_session_attrs=any prevents PGTARGETSESSIONATTRS env leak.
+	// connect_timeout uses the configured pg_timeout so a blackholed host doesn't hang indefinitely.
+	connStr := fmt.Sprintf(
+		"host=%s port=%d dbname=%s user=%s password=%s sslmode=disable connect_timeout=%d target_session_attrs=any",
+		escapeConnParam(config.Host),
+		config.Port,
+		escapeConnParam(config.Database),
+		escapeConnParam(config.Username),
+		escapeConnParam(config.Password),
+		config.Timeout,
+	)
+
+	// Temporarily clear all PG* env vars so pgx.ParseConfig cannot consult
+	// them — including PGSERVICE/PGSERVICEFILE which could fail the parse
+	// before we reach the post-parse cleanup.
+	parseConfigMu.Lock()
+	saved := make(map[string]string)
+	for _, key := range pgEnvVarsToShield {
+		if val, ok := os.LookupEnv(key); ok {
+			saved[key] = val
+			os.Unsetenv(key)
+		}
+	}
+
+	connConfig, err := pgx.ParseConfig(connStr)
+
+	// Restore env vars before releasing the lock.
+	for key, val := range saved {
+		os.Setenv(key, val)
+	}
+	parseConfigMu.Unlock()
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create connection config: %w", err)
 	}
 
-	connConfig.Host = config.Host
-	connConfig.Port = uint16(config.Port)
-	connConfig.Database = config.Database
-	connConfig.User = config.Username
-	connConfig.Password = config.Password
+	// Defense-in-depth: clear fields that may have been set by pgx defaults
+	// (not from env vars which are now shielded, but from pgx internal defaults).
+	connConfig.Fallbacks = nil
+	connConfig.RuntimeParams = map[string]string{}
+	connConfig.ValidateConnect = nil
+	connConfig.SSLNegotiation = ""
+	connConfig.MinProtocolVersion = ""
+	connConfig.MaxProtocolVersion = ""
+	connConfig.ChannelBinding = ""
+	connConfig.KerberosSrvName = ""
+	connConfig.KerberosSpn = ""
 
 	// Configure TLS based on SSLMode via pgx TLSConfig (RuntimeParams["sslmode"] is not honored by pgx)
 	switch config.SSLMode {
 	case "disable":
 		connConfig.TLSConfig = nil
 	case "require":
-		connConfig.TLSConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // require mode skips cert verification by design
-	case "verify-ca", "verify-full":
-		tlsConf := &tls.Config{InsecureSkipVerify: false}
-		if config.SSLMode == "verify-full" {
-			tlsConf.ServerName = config.Host
+		connConfig.TLSConfig = &tls.Config{InsecureSkipVerify: true, ServerName: config.Host} //nolint:gosec // require mode skips cert verification by design; ServerName enables SNI
+	case "verify-ca":
+		// verify-ca: verify the server certificate is signed by a trusted CA, but do NOT
+		// verify the hostname. We must set InsecureSkipVerify=true and use a custom
+		// VerifyPeerCertificate to check the chain without hostname matching.
+		connConfig.TLSConfig = &tls.Config{
+			InsecureSkipVerify: true, //nolint:gosec // hostname verification intentionally skipped for verify-ca; chain is verified below
+			ServerName:         config.Host,
+			VerifyPeerCertificate: verifyCAOnly,
 		}
-		connConfig.TLSConfig = tlsConf
+	case "verify-full":
+		connConfig.TLSConfig = &tls.Config{
+			InsecureSkipVerify: false,
+			ServerName:         config.Host,
+		}
 	default:
-		// Unknown mode: default to requiring TLS without cert verification
-		connConfig.TLSConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // prefer mode skips cert verification by design
+		return nil, fmt.Errorf("unsupported pg_ssl_mode %q: valid values are disable, require, verify-ca, verify-full", config.SSLMode)
 	}
 
 	// Set read-only and timeout via RuntimeParams so they apply before any queries
@@ -417,8 +544,12 @@ func truncateQuery(query string) string {
 	return query
 }
 
-// rowsToJSON converts query result rows to a JSON string
+// rowsToJSON converts query result rows to a JSON string.
+// Returns "[]" for nil/empty slices to satisfy the JSON-array contract.
 func rowsToJSON(rows []map[string]interface{}) (string, error) {
+	if rows == nil {
+		rows = []map[string]interface{}{}
+	}
 	data, err := json.Marshal(rows)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal results: %w", err)
@@ -449,9 +580,19 @@ func getSchema(args map[string]interface{}) string {
 	return "public"
 }
 
-// hasLimitClause checks if a query already contains a LIMIT clause
+// hasLimitClause checks if the outermost query already contains a LIMIT clause.
+// A LIMIT inside a subquery (parenthesized) does not count as bounding the top-level result.
 func hasLimitClause(query string) bool {
-	cleaned := stripSQLLiterals(stripSQLComments(query))
+	cleaned := stripSQLComments(stripSQLLiterals(query))
+	// Remove all parenthesized groups (subqueries) so we only inspect the top-level SQL.
+	// Nested parens are handled by repeated stripping until stable.
+	for {
+		stripped := regexp.MustCompile(`\([^()]*\)`).ReplaceAllString(cleaned, " ")
+		if stripped == cleaned {
+			break
+		}
+		cleaned = stripped
+	}
 	return limitPattern.MatchString(cleaned)
 }
 
@@ -640,14 +781,15 @@ func (t *PostgreSQLTool) ExplainQuery(ctx context.Context, incidentID string, ar
 		return "", fmt.Errorf("query is required%s", validation.SuggestParam("query", args))
 	}
 
-	// ExplainQuery uses isReadOnlyQuery (not isSelectOnly) since EXPLAIN prefix is expected here
-	if !isReadOnlyQuery(query) {
-		return "", fmt.Errorf("only SELECT queries are allowed (write statements, SET, LOCK, and dangerous functions are blocked)")
+	// Reject queries that already start with EXPLAIN — the tool adds the wrapper automatically.
+	// Check this before isReadOnlyQuery so users get a helpful message instead of a generic rejection.
+	if explainPattern.MatchString(stripSQLComments(stripSQLLiterals(query))) {
+		return "", fmt.Errorf("do not include EXPLAIN in the query; the explain_query tool adds it automatically")
 	}
 
-	// Reject queries that already start with EXPLAIN — the tool adds the wrapper automatically
-	if explainPattern.MatchString(stripSQLLiterals(stripSQLComments(query))) {
-		return "", fmt.Errorf("do not include EXPLAIN in the query; the explain_query tool adds it automatically")
+	// ExplainQuery uses isReadOnlyQuery (not isSelectOnly) since EXPLAIN prefix is not expected here
+	if !isReadOnlyQuery(query) {
+		return "", fmt.Errorf("only SELECT queries are allowed (write statements, SET, LOCK, and dangerous functions are blocked)")
 	}
 
 	explainQuery := "EXPLAIN (ANALYZE false, FORMAT JSON) " + query
@@ -720,7 +862,7 @@ func (t *PostgreSQLTool) GetActiveQueries(ctx context.Context, incidentID string
 func (t *PostgreSQLTool) GetLocks(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
 	logicalName := extractLogicalName(args)
 
-	query := `SELECT l.locktype, CASE WHEN l.relation IS NOT NULL THEN l.relation::regclass::text ELSE NULL END AS relation, l.mode, l.granted, l.pid,
+	query := `SELECT l.locktype, CASE WHEN l.relation IS NOT NULL AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database()) THEN l.relation::regclass::text ELSE NULL END AS relation, l.mode, l.granted, l.pid,
 		a.usename, a.state, a.query,
 		EXTRACT(EPOCH FROM (now() - a.query_start))::numeric(10,2) AS duration_seconds,
 		l.waitstart

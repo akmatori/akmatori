@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/akmatori/mcp-gateway/internal/ratelimit"
 )
@@ -148,6 +149,12 @@ func TestIsSelectOnly(t *testing.T) {
 		{"do block", "DO $$ BEGIN RAISE NOTICE 'test'; END $$", false},
 		{"call procedure", "CALL my_procedure()", false},
 
+		// MERGE (PostgreSQL 15+)
+		{"merge statement", "MERGE INTO target USING source ON target.id = source.id WHEN MATCHED THEN UPDATE SET name = source.name", false},
+		{"merge with CTE", "WITH src AS (SELECT * FROM source) MERGE INTO target USING src ON target.id = src.id WHEN MATCHED THEN DELETE", false},
+		{"mixed case merge", "MeRgE INTO target USING source ON target.id = source.id WHEN NOT MATCHED THEN INSERT (id) VALUES (source.id)", false},
+		{"merge keyword in string literal", "SELECT * FROM logs WHERE action = 'MERGE'", true},
+
 		// Case variations
 		{"mixed case insert", "InSeRt INTO users (name) VALUES ('test')", false},
 		{"mixed case update", "uPdAtE users SET name = 'test'", false},
@@ -171,9 +178,35 @@ func TestIsSelectOnly(t *testing.T) {
 		{"doubled-quote escaping with keyword", "SELECT * FROM t WHERE name = 'it''s a DELETE'", true},
 		{"doubled-quote escaping mid-string", "SELECT * FROM t WHERE x = 'can''t DROP this'", true},
 
+		// Comment-like sequences inside string literals must not be treated as comments
+		{"line comment delimiter in string literal", "SELECT '--' AS msg LIMIT 5", true},
+		{"block comment delimiter in string literal", "SELECT '/* not a comment */' AS msg", true},
+		{"keyword after fake line comment in string", "SELECT 'DELETE -- ok' AS msg", true},
+		{"line comment in string with LIMIT after", "SELECT * FROM t WHERE x = '--' LIMIT 10", true},
+
 		// Semicolons
 		{"select with semicolon", "SELECT * FROM users;", true},
 		{"multi-statement injection", "SELECT * FROM users; DROP TABLE users", false},
+
+		// Positive allowlist: must start with SELECT or WITH
+		{"SHOW statement", "SHOW search_path", false},
+		{"SHOW ALL", "SHOW ALL", false},
+		{"comment-only input", "-- just a comment", false},
+		{"empty after comment strip", "/* block comment only */", false},
+		{"whitespace only", "   ", false},
+		{"empty string", "", false},
+		{"VACUUM", "VACUUM users", false},
+		{"ANALYZE statement", "ANALYZE users", false},
+		{"LISTEN", "LISTEN my_channel", false},
+		{"NOTIFY", "NOTIFY my_channel", false},
+		{"DISCARD", "DISCARD ALL", false},
+		{"FETCH", "FETCH NEXT FROM my_cursor", false},
+		{"REINDEX", "REINDEX TABLE users", false},
+
+		// SELECT/WITH with leading comments should still pass
+		{"select with leading line comment", "-- a comment\nSELECT 1", true},
+		{"select with leading block comment", "/* comment */ SELECT 1", true},
+		{"WITH after leading comment", "-- intro\nWITH cte AS (SELECT 1) SELECT * FROM cte", true},
 	}
 
 	for _, tt := range tests {
@@ -332,7 +365,9 @@ func TestBuildConnConfig_RequireSSL(t *testing.T) {
 	}
 }
 
-func TestBuildConnConfig_VerifyCA(t *testing.T) {
+func TestBuildConnConfig_VerifyCA_Legacy(t *testing.T) {
+	// verify-ca uses InsecureSkipVerify=true with custom VerifyPeerCertificate
+	// to check the CA chain without hostname matching (matching libpq semantics)
 	config := &PGConfig{
 		Host:    "db.example.com",
 		Port:    5432,
@@ -346,12 +381,11 @@ func TestBuildConnConfig_VerifyCA(t *testing.T) {
 	if connConfig.TLSConfig == nil {
 		t.Fatal("expected TLSConfig for sslmode=verify-ca")
 	}
-	if connConfig.TLSConfig.InsecureSkipVerify {
-		t.Error("expected InsecureSkipVerify=false for verify-ca")
+	if !connConfig.TLSConfig.InsecureSkipVerify {
+		t.Error("expected InsecureSkipVerify=true for verify-ca (hostname skip; CA verified via callback)")
 	}
-	// verify-ca should NOT set ServerName (only verify-full does)
-	if connConfig.TLSConfig.ServerName != "" {
-		t.Errorf("expected empty ServerName for verify-ca, got %q", connConfig.TLSConfig.ServerName)
+	if connConfig.TLSConfig.VerifyPeerCertificate == nil {
+		t.Error("expected VerifyPeerCertificate callback for verify-ca")
 	}
 }
 
@@ -374,6 +408,23 @@ func TestBuildConnConfig_RuntimeParams(t *testing.T) {
 	}
 }
 
+func TestBuildConnConfig_ConnectTimeoutMatchesConfig(t *testing.T) {
+	config := &PGConfig{
+		Host:    "localhost",
+		Port:    5432,
+		SSLMode: "disable",
+		Timeout: 45,
+	}
+	connConfig, err := buildConnConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := time.Duration(45) * time.Second
+	if connConfig.ConnectTimeout != expected {
+		t.Errorf("expected ConnectTimeout=%v, got %v", expected, connConfig.ConnectTimeout)
+	}
+}
+
 func TestBuildConnConfig_SpecialCharsInPassword(t *testing.T) {
 	config := &PGConfig{
 		Host:     "localhost",
@@ -389,6 +440,212 @@ func TestBuildConnConfig_SpecialCharsInPassword(t *testing.T) {
 	}
 	if connConfig.Password != "p@ss w0rd='tricky\\value" {
 		t.Errorf("expected password preserved exactly, got %q", connConfig.Password)
+	}
+}
+
+func TestBuildConnConfig_ClearsFallbacks(t *testing.T) {
+	config := &PGConfig{
+		Host:    "myhost",
+		Port:    5432,
+		SSLMode: "disable",
+		Timeout: 30,
+	}
+	connConfig, err := buildConnConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if connConfig.Fallbacks != nil {
+		t.Errorf("expected Fallbacks to be nil, got %v", connConfig.Fallbacks)
+	}
+}
+
+func TestBuildConnConfig_IgnoresEnvVars(t *testing.T) {
+	// Set PG* env vars that would pollute the config if pgx read them as fallbacks.
+	t.Setenv("PGHOST", "env-leaked-host")
+	t.Setenv("PGPORT", "9999")
+	t.Setenv("PGDATABASE", "env-leaked-db")
+	t.Setenv("PGUSER", "env-leaked-user")
+	t.Setenv("PGPASSWORD", "env-leaked-pass")
+	t.Setenv("PGSSLNEGOTIATION", "direct")
+	t.Setenv("PGMINPROTOCOLVERSION", "3.2")
+	t.Setenv("PGMAXPROTOCOLVERSION", "3.2")
+
+	config := &PGConfig{
+		Host:     "myhost",
+		Port:     5432,
+		Database: "mydb",
+		Username: "myuser",
+		Password: "mypass",
+		SSLMode:  "disable",
+		Timeout:  30,
+	}
+	connConfig, err := buildConnConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Verify that env vars did NOT leak into the connection config.
+	if connConfig.Host != "myhost" {
+		t.Errorf("expected Host 'myhost', got %q (env leak)", connConfig.Host)
+	}
+	if connConfig.Port != 5432 {
+		t.Errorf("expected Port 5432, got %d (env leak)", connConfig.Port)
+	}
+	if connConfig.Database != "mydb" {
+		t.Errorf("expected Database 'mydb', got %q (env leak)", connConfig.Database)
+	}
+	if connConfig.User != "myuser" {
+		t.Errorf("expected User 'myuser', got %q (env leak)", connConfig.User)
+	}
+	if connConfig.Password != "mypass" {
+		t.Errorf("expected Password 'mypass', got %q (env leak)", connConfig.Password)
+	}
+	// Verify protocol/SSL negotiation env vars are cleared
+	if connConfig.Config.SSLNegotiation != "" {
+		t.Errorf("expected SSLNegotiation to be empty, got %q (PGSSLNEGOTIATION env leak)", connConfig.Config.SSLNegotiation)
+	}
+	if connConfig.Config.MinProtocolVersion != "" {
+		t.Errorf("expected MinProtocolVersion to be empty, got %q (PGMINPROTOCOLVERSION env leak)", connConfig.Config.MinProtocolVersion)
+	}
+	if connConfig.Config.MaxProtocolVersion != "" {
+		t.Errorf("expected MaxProtocolVersion to be empty, got %q (PGMAXPROTOCOLVERSION env leak)", connConfig.Config.MaxProtocolVersion)
+	}
+	// Verify channel_binding and kerberos fields are cleared (could leak via PGSERVICE service-file)
+	if connConfig.Config.ChannelBinding != "" {
+		t.Errorf("expected ChannelBinding to be empty, got %q (env/service-file leak)", connConfig.Config.ChannelBinding)
+	}
+	if connConfig.Config.KerberosSrvName != "" {
+		t.Errorf("expected KerberosSrvName to be empty, got %q (env/service-file leak)", connConfig.Config.KerberosSrvName)
+	}
+	if connConfig.Config.KerberosSpn != "" {
+		t.Errorf("expected KerberosSpn to be empty, got %q (env/service-file leak)", connConfig.Config.KerberosSpn)
+	}
+}
+
+func TestBuildConnConfig_PGSERVICEDoesNotFailParse(t *testing.T) {
+	// PGSERVICE pointing to a nonexistent service would fail pgx.ParseConfig
+	// before the post-parse cleanup. Verify that env shielding prevents this.
+	t.Setenv("PGSERVICE", "nonexistent-service")
+	t.Setenv("PGSERVICEFILE", "/nonexistent/pg_service.conf")
+
+	config := &PGConfig{
+		Host:     "myhost",
+		Port:     5432,
+		Database: "mydb",
+		Username: "myuser",
+		Password: "mypass",
+		SSLMode:  "disable",
+		Timeout:  30,
+	}
+	connConfig, err := buildConnConfig(config)
+	if err != nil {
+		t.Fatalf("PGSERVICE env var leaked into ParseConfig and caused failure: %v", err)
+	}
+	if connConfig.Host != "myhost" {
+		t.Errorf("expected Host 'myhost', got %q", connConfig.Host)
+	}
+}
+
+func TestBuildConnConfig_RequireSSL_HasServerName(t *testing.T) {
+	config := &PGConfig{
+		Host:    "db.example.com",
+		Port:    5432,
+		SSLMode: "require",
+		Timeout: 30,
+	}
+	connConfig, err := buildConnConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if connConfig.TLSConfig.ServerName != "db.example.com" {
+		t.Errorf("expected ServerName 'db.example.com' for SNI, got %q", connConfig.TLSConfig.ServerName)
+	}
+}
+
+func TestBuildConnConfig_VerifyCA_SkipsHostnameVerification(t *testing.T) {
+	config := &PGConfig{
+		Host:    "db.example.com",
+		Port:    5432,
+		SSLMode: "verify-ca",
+		Timeout: 30,
+	}
+	connConfig, err := buildConnConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if connConfig.TLSConfig == nil {
+		t.Fatal("expected TLSConfig for sslmode=verify-ca")
+	}
+	// verify-ca uses InsecureSkipVerify=true with custom VerifyPeerCertificate
+	if !connConfig.TLSConfig.InsecureSkipVerify {
+		t.Error("expected InsecureSkipVerify=true for verify-ca (hostname check skipped, CA verified via callback)")
+	}
+	if connConfig.TLSConfig.VerifyPeerCertificate == nil {
+		t.Error("expected VerifyPeerCertificate callback for verify-ca")
+	}
+	if connConfig.TLSConfig.ServerName != "db.example.com" {
+		t.Errorf("expected ServerName for SNI, got %q", connConfig.TLSConfig.ServerName)
+	}
+}
+
+func TestBuildConnConfig_VerifyFull(t *testing.T) {
+	config := &PGConfig{
+		Host:    "db.example.com",
+		Port:    5432,
+		SSLMode: "verify-full",
+		Timeout: 30,
+	}
+	connConfig, err := buildConnConfig(config)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if connConfig.TLSConfig == nil {
+		t.Fatal("expected TLSConfig for sslmode=verify-full")
+	}
+	if connConfig.TLSConfig.InsecureSkipVerify {
+		t.Error("expected InsecureSkipVerify=false for verify-full")
+	}
+	if connConfig.TLSConfig.ServerName != "db.example.com" {
+		t.Errorf("expected ServerName 'db.example.com', got %q", connConfig.TLSConfig.ServerName)
+	}
+}
+
+func TestBuildConnConfig_UnknownSSLModeReturnsError(t *testing.T) {
+	config := &PGConfig{
+		Host:    "db.example.com",
+		Port:    5432,
+		SSLMode: "verify_ca", // underscore instead of hyphen — common typo
+		Timeout: 30,
+	}
+	_, err := buildConnConfig(config)
+	if err == nil {
+		t.Fatal("expected error for unknown SSL mode, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported pg_ssl_mode") {
+		t.Errorf("expected error about unsupported ssl mode, got: %v", err)
+	}
+}
+
+func TestIsSelectOnly_QuotedIdentifiersWithBlockedWords(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  bool
+	}{
+		{"double-quoted delete column", `SELECT "delete" FROM audit_log`, true},
+		{"double-quoted lock column", `SELECT "lock" FROM t`, true},
+		{"double-quoted insert column", `SELECT "insert", "update" FROM changelog`, true},
+		{"double-quoted SET column", `SELECT "set" FROM config`, true},
+		{"double-quoted DROP in table name", `SELECT * FROM "drop_log"`, true},
+		{"real DELETE not in quotes", `DELETE FROM audit_log`, false},
+		{"mixed quoted and real keyword", `SELECT "delete" FROM t; DROP TABLE t`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isSelectOnly(tt.query)
+			if got != tt.want {
+				t.Errorf("isSelectOnly(%q) = %v, want %v", tt.query, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -449,6 +706,14 @@ func TestHasLimitClause(t *testing.T) {
 		{"lowercase limit", "SELECT * FROM users limit 10", true},
 		{"limit in comment", "SELECT * FROM users -- LIMIT 10", false},
 		{"limit in string literal", "SELECT * FROM t WHERE status = 'LIMIT reached'", false},
+		{"limit in subquery only", "SELECT * FROM users WHERE id IN (SELECT user_id FROM admins LIMIT 1)", false},
+		{"limit in subquery and outer", "SELECT * FROM users WHERE id IN (SELECT user_id FROM admins LIMIT 1) LIMIT 50", true},
+		{"nested subquery with limit", "SELECT * FROM t WHERE id IN (SELECT id FROM (SELECT id FROM s LIMIT 5) sub)", false},
+		{"limit after fake comment in string", "SELECT * FROM t WHERE x = '--' LIMIT 10", true},
+		{"FETCH FIRST", "SELECT * FROM users FETCH FIRST 10 ROWS ONLY", true},
+		{"FETCH NEXT", "SELECT * FROM users FETCH NEXT 5 ROWS ONLY", true},
+		{"fetch first lowercase", "SELECT * FROM users fetch first 10 rows only", true},
+		{"FETCH FIRST in subquery only", "SELECT * FROM users WHERE id IN (SELECT id FROM t FETCH FIRST 1 ROWS ONLY)", false},
 	}
 
 	for _, tt := range tests {
@@ -636,8 +901,18 @@ func TestRowsToJSON_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "null" {
-		t.Errorf("expected 'null', got %q", result)
+	if result != "[]" {
+		t.Errorf("expected '[]', got %q", result)
+	}
+}
+
+func TestRowsToJSON_EmptySlice(t *testing.T) {
+	result, err := rowsToJSON([]map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "[]" {
+		t.Errorf("expected '[]', got %q", result)
 	}
 }
 
