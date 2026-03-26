@@ -56,6 +56,7 @@ var (
 	doubleQuotedIdent    = regexp.MustCompile(`"(?:[^"\\]|\\.|""){0,128}"`)
 	validSSLModes        = map[string]bool{"disable": true, "require": true, "verify-ca": true, "verify-full": true}
 	limitPattern         = regexp.MustCompile(`(?i)(\bLIMIT\b|\bFETCH\s+(FIRST|NEXT)\b)`)
+	parenGroupPattern    = regexp.MustCompile(`\([^()]*\)`)
 	explainPattern       = regexp.MustCompile(`(?i)^\s*EXPLAIN\b`)
 	selectStartPattern   = regexp.MustCompile(`(?i)^\s*(SELECT|WITH)\b`)
 )
@@ -262,7 +263,7 @@ func parseSettings(settings map[string]interface{}) *PGConfig {
 	if v, ok := settings["pg_password"].(string); ok {
 		config.Password = v
 	}
-	if v, ok := settings["pg_ssl_mode"].(string); ok {
+	if v, ok := settings["pg_ssl_mode"].(string); ok && validSSLModes[v] {
 		config.SSLMode = v
 	}
 	if v, ok := settings["pg_timeout"].(float64); ok {
@@ -587,7 +588,7 @@ func hasLimitClause(query string) bool {
 	// Remove all parenthesized groups (subqueries) so we only inspect the top-level SQL.
 	// Nested parens are handled by repeated stripping until stable.
 	for {
-		stripped := regexp.MustCompile(`\([^()]*\)`).ReplaceAllString(cleaned, " ")
+		stripped := parenGroupPattern.ReplaceAllString(cleaned, " ")
 		if stripped == cleaned {
 			break
 		}
