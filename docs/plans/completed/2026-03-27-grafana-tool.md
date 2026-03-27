@@ -98,5 +98,5 @@ Add a first-class Grafana MCP tool type to the MCP Gateway, providing the AI age
 
 ### Task 7: Update documentation
 
-- [ ] Update CLAUDE.md to add Grafana to the tool types list and coverage table
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update CLAUDE.md to add Grafana to the tool types list and coverage table
+- [x] Move this plan to `docs/plans/completed/`
