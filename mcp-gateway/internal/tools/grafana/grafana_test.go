@@ -2,6 +2,7 @@ package grafana
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -614,5 +615,351 @@ func TestCachedGet_CacheExpiry(t *testing.T) {
 
 	if callCount.Load() != 2 {
 		t.Errorf("expected 2 HTTP requests after cache expiry, got %d", callCount.Load())
+	}
+}
+
+// --- SearchDashboards tests ---
+
+func TestSearchDashboards_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/search" {
+			t.Errorf("expected path /api/search, got %s", r.URL.Path)
+		}
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[{"uid":"abc","title":"CPU Dashboard","type":"dash-db"}]`)
+	})
+
+	result, err := tool.SearchDashboards(context.Background(), "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "CPU Dashboard") {
+		t.Errorf("expected result to contain 'CPU Dashboard', got %s", result)
+	}
+}
+
+func TestSearchDashboards_WithQueryAndTag(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("query") != "cpu" {
+			t.Errorf("expected query=cpu, got %s", q.Get("query"))
+		}
+		if q.Get("tag") != "production" {
+			t.Errorf("expected tag=production, got %s", q.Get("tag"))
+		}
+		if q.Get("type") != "dash-db" {
+			t.Errorf("expected type=dash-db, got %s", q.Get("type"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[]`)
+	})
+
+	_, err := tool.SearchDashboards(context.Background(), "test-incident", map[string]interface{}{
+		"query": "cpu",
+		"tag":   "production",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSearchDashboards_WithTypeOverride(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("type") != "dash-folder" {
+			t.Errorf("expected type=dash-folder, got %s", r.URL.Query().Get("type"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[]`)
+	})
+
+	_, err := tool.SearchDashboards(context.Background(), "test-incident", map[string]interface{}{
+		"type": "dash-folder",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSearchDashboards_WithFolderIDAndLimit(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("folderIds") != "42" {
+			t.Errorf("expected folderIds=42, got %s", q.Get("folderIds"))
+		}
+		if q.Get("limit") != "10" {
+			t.Errorf("expected limit=10, got %s", q.Get("limit"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[]`)
+	})
+
+	_, err := tool.SearchDashboards(context.Background(), "test-incident", map[string]interface{}{
+		"folder_id": float64(42),
+		"limit":     float64(10),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSearchDashboards_LimitClamped(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("limit") != "5000" {
+			t.Errorf("expected limit clamped to 5000, got %s", r.URL.Query().Get("limit"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[]`)
+	})
+
+	_, err := tool.SearchDashboards(context.Background(), "test-incident", map[string]interface{}{
+		"limit": float64(99999),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSearchDashboards_Cached(t *testing.T) {
+	tool, _, counter := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[{"uid":"abc"}]`)
+	})
+
+	ctx := context.Background()
+	args := map[string]interface{}{"query": "cpu"}
+
+	_, err := tool.SearchDashboards(ctx, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, err = tool.SearchDashboards(ctx, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if counter.Load() != 1 {
+		t.Errorf("expected 1 HTTP request (cache hit on second), got %d", counter.Load())
+	}
+}
+
+// --- GetDashboardByUID tests ---
+
+func TestGetDashboardByUID_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/dashboards/uid/abc123" {
+			t.Errorf("expected path /api/dashboards/uid/abc123, got %s", r.URL.Path)
+		}
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"dashboard":{"uid":"abc123","title":"My Dashboard"},"meta":{"slug":"my-dashboard"}}`)
+	})
+
+	result, err := tool.GetDashboardByUID(context.Background(), "test-incident", map[string]interface{}{
+		"uid": "abc123",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "My Dashboard") {
+		t.Errorf("expected result to contain 'My Dashboard', got %s", result)
+	}
+}
+
+func TestGetDashboardByUID_MissingUID(t *testing.T) {
+	tool := NewGrafanaTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.GetDashboardByUID(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing uid")
+	}
+	if !strings.Contains(err.Error(), "uid is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestGetDashboardByUID_EmptyUID(t *testing.T) {
+	tool := NewGrafanaTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.GetDashboardByUID(context.Background(), "test-incident", map[string]interface{}{
+		"uid": "",
+	})
+	if err == nil {
+		t.Fatal("expected error for empty uid")
+	}
+	if !strings.Contains(err.Error(), "uid is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestGetDashboardByUID_SpecialCharsInUID(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		// url.PathEscape encodes slashes and special chars
+		if !strings.HasPrefix(r.URL.Path, "/api/dashboards/uid/") {
+			t.Errorf("expected path to start with /api/dashboards/uid/, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"dashboard":{"uid":"a/b","title":"Test"}}`)
+	})
+
+	_, err := tool.GetDashboardByUID(context.Background(), "test-incident", map[string]interface{}{
+		"uid": "a/b",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetDashboardByUID_Cached(t *testing.T) {
+	tool, _, counter := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"dashboard":{"uid":"abc"}}`)
+	})
+
+	ctx := context.Background()
+	args := map[string]interface{}{"uid": "abc"}
+
+	_, err := tool.GetDashboardByUID(ctx, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, err = tool.GetDashboardByUID(ctx, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if counter.Load() != 1 {
+		t.Errorf("expected 1 HTTP request (cache hit), got %d", counter.Load())
+	}
+}
+
+// --- GetDashboardPanels tests ---
+
+func TestGetDashboardPanels_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"dashboard":{"panels":[{"id":1,"title":"CPU Usage","type":"graph","datasource":"Prometheus"},{"id":2,"title":"Memory","type":"stat","datasource":"InfluxDB"}]}}`)
+	})
+
+	result, err := tool.GetDashboardPanels(context.Background(), "test-incident", map[string]interface{}{
+		"uid": "abc123",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "CPU Usage") {
+		t.Errorf("expected 'CPU Usage' in result, got %s", result)
+	}
+	if !strings.Contains(result, "Memory") {
+		t.Errorf("expected 'Memory' in result, got %s", result)
+	}
+	if !strings.Contains(result, "graph") {
+		t.Errorf("expected panel type 'graph' in result, got %s", result)
+	}
+}
+
+func TestGetDashboardPanels_MissingUID(t *testing.T) {
+	tool := NewGrafanaTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.GetDashboardPanels(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing uid")
+	}
+	if !strings.Contains(err.Error(), "uid is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestGetDashboardPanels_NoPanels(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"dashboard":{"panels":[]}}`)
+	})
+
+	result, err := tool.GetDashboardPanels(context.Background(), "test-incident", map[string]interface{}{
+		"uid": "empty-dash",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should return null or empty array JSON
+	if result != "null" && result != "[]" {
+		t.Errorf("expected null or [] for empty panels, got %s", result)
+	}
+}
+
+func TestGetDashboardPanels_NestedRowPanels(t *testing.T) {
+	dashJSON := `{
+		"dashboard": {
+			"panels": [
+				{
+					"id": 1,
+					"title": "Row",
+					"type": "row",
+					"panels": [
+						{"id": 2, "title": "Nested CPU", "type": "graph", "datasource": "Prometheus"},
+						{"id": 3, "title": "Nested Mem", "type": "stat", "datasource": "Prometheus"}
+					]
+				},
+				{"id": 4, "title": "Top Level", "type": "gauge"}
+			]
+		}
+	}`
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, dashJSON)
+	})
+
+	result, err := tool.GetDashboardPanels(context.Background(), "test-incident", map[string]interface{}{
+		"uid": "row-dash",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should contain both the row panel and its nested panels, plus top level
+	if !strings.Contains(result, "Row") {
+		t.Error("expected 'Row' panel in result")
+	}
+	if !strings.Contains(result, "Nested CPU") {
+		t.Error("expected 'Nested CPU' in result")
+	}
+	if !strings.Contains(result, "Nested Mem") {
+		t.Error("expected 'Nested Mem' in result")
+	}
+	if !strings.Contains(result, "Top Level") {
+		t.Error("expected 'Top Level' in result")
+	}
+
+	// Verify we get 4 panels total (row + 2 nested + top level)
+	var panels []map[string]interface{}
+	if err := json.Unmarshal([]byte(result), &panels); err != nil {
+		t.Fatalf("failed to parse result: %v", err)
+	}
+	if len(panels) != 4 {
+		t.Errorf("expected 4 panels, got %d", len(panels))
+	}
+}
+
+func TestGetDashboardPanels_InvalidDashboardJSON(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `not-json`)
+	})
+
+	_, err := tool.GetDashboardPanels(context.Background(), "test-incident", map[string]interface{}{
+		"uid": "bad-dash",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+	if !strings.Contains(err.Error(), "failed to parse dashboard") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
