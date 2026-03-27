@@ -752,9 +752,11 @@ func sanitizeIdentifier(name string) string {
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 }
 
-// sanitizeStringValue escapes single quotes in string values for safe embedding in queries.
-// Uses standard SQL double-quote escaping ('') which works in all ClickHouse configurations,
-// unlike backslash escaping which depends on allow_backslash_escaping_in_strings.
+// sanitizeStringValue escapes string values for safe embedding in ClickHouse queries.
+// Escapes backslashes first (to prevent \' from being interpreted as an escaped quote
+// when allow_backslash_escaping_in_strings=1, which is the ClickHouse default), then
+// escapes single quotes using standard SQL '' escaping.
 func sanitizeStringValue(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
 	return strings.ReplaceAll(s, "'", "''")
 }
