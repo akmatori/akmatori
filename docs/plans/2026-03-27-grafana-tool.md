@@ -29,15 +29,15 @@ Add a first-class Grafana MCP tool type to the MCP Gateway, providing the AI age
 **Files:**
 - Create: `mcp-gateway/internal/tools/grafana/grafana.go`
 
-- [ ] Create `grafana` package with `GrafanaConfig` struct (URL, APIToken, VerifySSL, Timeout, UseProxy, ProxyURL)
-- [ ] Implement `GrafanaTool` struct with configCache, responseCache, rateLimiter (same as CatchpointTool)
-- [ ] Implement `NewGrafanaTool()`, `Stop()`, `getConfig()`, `getCachedProxySettings()`
-- [ ] Implement `doRequest()` with rate limiting, proxy support, SSL config, Bearer token auth
-- [ ] Implement `cachedGet()` helper with TTL-based response caching
-- [ ] Implement `doPost()` helper for write operations (annotations, silences) - no caching
-- [ ] Add helper functions: `configCacheKey()`, `responseCacheKey()`, `extractLogicalName()`, `clampTimeout()`
-- [ ] Write tests: constructor, lifecycle, config caching, HTTP helpers, rate limiting, error handling
-- [ ] Run `make test-mcp` - must pass
+- [x] Create `grafana` package with `GrafanaConfig` struct (URL, APIToken, VerifySSL, Timeout, UseProxy, ProxyURL)
+- [x] Implement `GrafanaTool` struct with configCache, responseCache, rateLimiter (same as CatchpointTool)
+- [x] Implement `NewGrafanaTool()`, `Stop()`, `getConfig()`, `getCachedProxySettings()`
+- [x] Implement `doRequest()` with rate limiting, proxy support, SSL config, Bearer token auth
+- [x] Implement `cachedGet()` helper with TTL-based response caching
+- [x] Implement `doPost()` helper for write operations (annotations, silences) - no caching
+- [x] Add helper functions: `configCacheKey()`, `responseCacheKey()`, `extractLogicalName()`, `clampTimeout()`
+- [x] Write tests: constructor, lifecycle, config caching, HTTP helpers, rate limiting, error handling
+- [x] Run `make test-mcp` - must pass
 
 ### Task 2: Dashboard and search tools
 
