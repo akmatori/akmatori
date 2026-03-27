@@ -470,17 +470,6 @@ func getGrafanaSchema() ToolTypeSchema {
 					Maximum:     intPtr(300),
 					Advanced:    true,
 				},
-				"grafana_use_proxy": {
-					Type:        "boolean",
-					Description: "Route requests through the configured HTTP proxy",
-					Default:     false,
-					Advanced:    true,
-				},
-				"grafana_proxy_url": {
-					Type:        "string",
-					Description: "HTTP proxy URL (overrides global proxy setting)",
-					Advanced:    true,
-				},
 			},
 		},
 		Functions: []ToolFunction{

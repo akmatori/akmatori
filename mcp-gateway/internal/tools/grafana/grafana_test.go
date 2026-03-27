@@ -586,6 +586,30 @@ func TestDoRequest_ResponseSizeLimit(t *testing.T) {
 	}
 }
 
+func TestDoPost_EmptyURL(t *testing.T) {
+	tool := NewGrafanaTool(testLogger(), nil)
+	defer tool.Stop()
+
+	// Pre-populate config cache with empty URL
+	config := &GrafanaConfig{
+		URL:       "",
+		APIToken:  "test-token",
+		VerifySSL: true,
+		Timeout:   30,
+	}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	_, err := tool.doPost(context.Background(), "test-incident", "/api/annotations", map[string]interface{}{
+		"text": "test",
+	})
+	if err == nil {
+		t.Fatal("expected error for empty URL")
+	}
+	if !strings.Contains(err.Error(), "Grafana URL not configured") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 // --- Cache expiry test ---
 
 func TestCachedGet_CacheExpiry(t *testing.T) {
@@ -1268,6 +1292,80 @@ func TestSilenceAlert_Success(t *testing.T) {
 	if receivedBody["comment"] != "Silencing during maintenance" {
 		t.Errorf("expected comment, got %v", receivedBody["comment"])
 	}
+	if receivedBody["startsAt"] != "2026-03-27T00:00:00Z" {
+		t.Errorf("expected startsAt=2026-03-27T00:00:00Z, got %v", receivedBody["startsAt"])
+	}
+	if receivedBody["endsAt"] != "2026-03-28T00:00:00Z" {
+		t.Errorf("expected endsAt=2026-03-28T00:00:00Z, got %v", receivedBody["endsAt"])
+	}
+	matchers, ok := receivedBody["matchers"].([]interface{})
+	if !ok || len(matchers) != 1 {
+		t.Fatalf("expected 1 matcher, got %v", receivedBody["matchers"])
+	}
+	matcher, ok := matchers[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected matcher to be a map, got %T", matchers[0])
+	}
+	if matcher["name"] != "alertname" || matcher["value"] != "HighCPU" {
+		t.Errorf("unexpected matcher: %v", matcher)
+	}
+}
+
+func TestSilenceAlert_InvalidStartsAt(t *testing.T) {
+	tool := NewGrafanaTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.SilenceAlert(context.Background(), "test-incident", map[string]interface{}{
+		"matchers":   []interface{}{map[string]interface{}{"name": "alertname", "value": "test"}},
+		"starts_at":  "not-a-timestamp",
+		"ends_at":    "2026-03-28T00:00:00Z",
+		"created_by": "agent",
+		"comment":    "test",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid starts_at")
+	}
+	if !strings.Contains(err.Error(), "starts_at must be a valid RFC3339") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestSilenceAlert_InvalidEndsAt(t *testing.T) {
+	tool := NewGrafanaTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.SilenceAlert(context.Background(), "test-incident", map[string]interface{}{
+		"matchers":   []interface{}{map[string]interface{}{"name": "alertname", "value": "test"}},
+		"starts_at":  "2026-03-27T00:00:00Z",
+		"ends_at":    "invalid",
+		"created_by": "agent",
+		"comment":    "test",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid ends_at")
+	}
+	if !strings.Contains(err.Error(), "ends_at must be a valid RFC3339") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestSilenceAlert_EndsAtBeforeStartsAt(t *testing.T) {
+	tool := NewGrafanaTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.SilenceAlert(context.Background(), "test-incident", map[string]interface{}{
+		"matchers":   []interface{}{map[string]interface{}{"name": "alertname", "value": "test"}},
+		"starts_at":  "2026-03-28T00:00:00Z",
+		"ends_at":    "2026-03-27T00:00:00Z",
+		"created_by": "agent",
+		"comment":    "test",
+	})
+	if err == nil {
+		t.Fatal("expected error when ends_at is before starts_at")
+	}
+	if !strings.Contains(err.Error(), "ends_at must be after starts_at") {
+		t.Errorf("unexpected error: %v", err)
+	}
 }
 
 func TestSilenceAlert_MissingMatchers(t *testing.T) {
@@ -1505,6 +1603,72 @@ func TestQueryDataSource_Success(t *testing.T) {
 	}
 	if receivedBody["to"] != "now" {
 		t.Errorf("expected to=now, got %v", receivedBody["to"])
+	}
+}
+
+func TestQueryDataSource_InjectsDatasourceUID(t *testing.T) {
+	var receivedBody map[string]interface{}
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedBody)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"results":{}}`)
+	})
+
+	// Query without datasource field - should get injected
+	_, err := tool.QueryDataSource(context.Background(), "test-incident", map[string]interface{}{
+		"datasource_uid": "prom-1",
+		"queries": []interface{}{
+			map[string]interface{}{
+				"refId": "A",
+				"expr":  "up",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	queries := receivedBody["queries"].([]interface{})
+	q := queries[0].(map[string]interface{})
+	ds, ok := q["datasource"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected datasource to be injected into query")
+	}
+	if ds["uid"] != "prom-1" {
+		t.Errorf("expected injected datasource uid=prom-1, got %v", ds["uid"])
+	}
+}
+
+func TestQueryDataSource_DoesNotOverrideDatasource(t *testing.T) {
+	var receivedBody map[string]interface{}
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedBody)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"results":{}}`)
+	})
+
+	// Query with explicit datasource field - should NOT be overridden
+	_, err := tool.QueryDataSource(context.Background(), "test-incident", map[string]interface{}{
+		"datasource_uid": "prom-1",
+		"queries": []interface{}{
+			map[string]interface{}{
+				"refId":      "A",
+				"datasource": map[string]interface{}{"uid": "other-ds", "type": "prometheus"},
+				"expr":       "up",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	queries := receivedBody["queries"].([]interface{})
+	q := queries[0].(map[string]interface{})
+	ds := q["datasource"].(map[string]interface{})
+	if ds["uid"] != "other-ds" {
+		t.Errorf("expected datasource uid=other-ds to be preserved, got %v", ds["uid"])
 	}
 }
 
@@ -1778,6 +1942,31 @@ func TestQueryLoki_MinimalArgs(t *testing.T) {
 	}
 	if _, exists := q["direction"]; exists {
 		t.Error("direction should not be present when not provided")
+	}
+}
+
+func TestQueryLoki_MaxLinesClamped(t *testing.T) {
+	var receivedBody map[string]interface{}
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedBody)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"results":{"A":{"frames":[]}}}`)
+	})
+
+	_, err := tool.QueryLoki(context.Background(), "test-incident", map[string]interface{}{
+		"datasource_uid": "loki-1",
+		"expr":           "{app=\"test\"}",
+		"limit":          float64(100000),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	queries := receivedBody["queries"].([]interface{})
+	q := queries[0].(map[string]interface{})
+	if q["maxLines"] != float64(5000) {
+		t.Errorf("expected maxLines to be clamped to 5000, got %v", q["maxLines"])
 	}
 }
 

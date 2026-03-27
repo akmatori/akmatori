@@ -1,6 +1,7 @@
 package grafana
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -17,6 +18,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/cache"
 	"github.com/akmatori/mcp-gateway/internal/database"
 	"github.com/akmatori/mcp-gateway/internal/ratelimit"
+	"github.com/akmatori/mcp-gateway/internal/validation"
 )
 
 // Cache TTL constants
@@ -321,12 +323,16 @@ func (t *GrafanaTool) doPost(ctx context.Context, incidentID, path string, reqBo
 		return nil, err
 	}
 
+	if config.URL == "" {
+		return nil, fmt.Errorf("Grafana URL not configured")
+	}
+
 	bodyJSON, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
-	return t.doRequest(ctx, config, http.MethodPost, path, nil, strings.NewReader(string(bodyJSON)))
+	return t.doRequest(ctx, config, http.MethodPost, path, nil, bytes.NewReader(bodyJSON))
 }
 
 // SearchDashboards searches and lists Grafana dashboards.
@@ -371,7 +377,7 @@ func (t *GrafanaTool) GetDashboardByUID(ctx context.Context, incidentID string, 
 
 	uid, ok := args["uid"].(string)
 	if !ok || uid == "" {
-		return "", fmt.Errorf("uid is required")
+		return "", fmt.Errorf("uid is required%s", validation.SuggestParam("uid", args))
 	}
 
 	path := fmt.Sprintf("/api/dashboards/uid/%s", url.PathEscape(uid))
@@ -390,7 +396,7 @@ func (t *GrafanaTool) GetDashboardPanels(ctx context.Context, incidentID string,
 
 	uid, ok := args["uid"].(string)
 	if !ok || uid == "" {
-		return "", fmt.Errorf("uid is required")
+		return "", fmt.Errorf("uid is required%s", validation.SuggestParam("uid", args))
 	}
 
 	path := fmt.Sprintf("/api/dashboards/uid/%s", url.PathEscape(uid))
@@ -507,7 +513,7 @@ func (t *GrafanaTool) GetAlertRuleByUID(ctx context.Context, incidentID string, 
 
 	uid, ok := args["uid"].(string)
 	if !ok || uid == "" {
-		return "", fmt.Errorf("uid is required")
+		return "", fmt.Errorf("uid is required%s", validation.SuggestParam("uid", args))
 	}
 
 	path := fmt.Sprintf("/api/v1/provisioning/alert-rules/%s", url.PathEscape(uid))
@@ -528,24 +534,38 @@ func (t *GrafanaTool) SilenceAlert(ctx context.Context, incidentID string, args 
 	// Validate required fields
 	matchers, ok := args["matchers"]
 	if !ok {
-		return "", fmt.Errorf("matchers is required (array of {name, value, isRegex, isEqual})")
+		return "", fmt.Errorf("matchers is required (array of {name, value, isRegex, isEqual})%s", validation.SuggestParam("matchers", args))
 	}
 
 	startsAt, ok := args["starts_at"].(string)
 	if !ok || startsAt == "" {
-		return "", fmt.Errorf("starts_at is required (RFC3339 timestamp)")
+		return "", fmt.Errorf("starts_at is required (RFC3339 timestamp)%s", validation.SuggestParam("starts_at", args))
 	}
+	startsAtTime, err := time.Parse(time.RFC3339, startsAt)
+	if err != nil {
+		return "", fmt.Errorf("starts_at must be a valid RFC3339 timestamp (e.g. 2026-03-27T00:00:00Z): %w", err)
+	}
+
 	endsAt, ok := args["ends_at"].(string)
 	if !ok || endsAt == "" {
-		return "", fmt.Errorf("ends_at is required (RFC3339 timestamp)")
+		return "", fmt.Errorf("ends_at is required (RFC3339 timestamp)%s", validation.SuggestParam("ends_at", args))
 	}
+	endsAtTime, err := time.Parse(time.RFC3339, endsAt)
+	if err != nil {
+		return "", fmt.Errorf("ends_at must be a valid RFC3339 timestamp (e.g. 2026-03-28T00:00:00Z): %w", err)
+	}
+
+	if !endsAtTime.After(startsAtTime) {
+		return "", fmt.Errorf("ends_at must be after starts_at")
+	}
+
 	createdBy, ok := args["created_by"].(string)
 	if !ok || createdBy == "" {
-		return "", fmt.Errorf("created_by is required")
+		return "", fmt.Errorf("created_by is required%s", validation.SuggestParam("created_by", args))
 	}
 	comment, ok := args["comment"].(string)
 	if !ok || comment == "" {
-		return "", fmt.Errorf("comment is required")
+		return "", fmt.Errorf("comment is required%s", validation.SuggestParam("comment", args))
 	}
 
 	reqBody := map[string]interface{}{
@@ -583,12 +603,25 @@ func (t *GrafanaTool) QueryDataSource(ctx context.Context, incidentID string, ar
 
 	dsUID, ok := args["datasource_uid"].(string)
 	if !ok || dsUID == "" {
-		return "", fmt.Errorf("datasource_uid is required")
+		return "", fmt.Errorf("datasource_uid is required%s", validation.SuggestParam("datasource_uid", args))
 	}
 
 	queries, hasQueries := args["queries"]
 	if !hasQueries {
 		return "", fmt.Errorf("queries is required (array of query objects with refId and datasource)")
+	}
+
+	// Inject datasource UID into queries that lack a datasource field
+	if querySlice, ok := queries.([]interface{}); ok {
+		for i, q := range querySlice {
+			if qMap, ok := q.(map[string]interface{}); ok {
+				if _, hasDatasource := qMap["datasource"]; !hasDatasource {
+					qMap["datasource"] = map[string]interface{}{"uid": dsUID}
+					querySlice[i] = qMap
+				}
+			}
+		}
+		queries = querySlice
 	}
 
 	reqBody := map[string]interface{}{
@@ -618,12 +651,12 @@ func (t *GrafanaTool) QueryPrometheus(ctx context.Context, incidentID string, ar
 
 	dsUID, ok := args["datasource_uid"].(string)
 	if !ok || dsUID == "" {
-		return "", fmt.Errorf("datasource_uid is required")
+		return "", fmt.Errorf("datasource_uid is required%s", validation.SuggestParam("datasource_uid", args))
 	}
 
 	expr, ok := args["expr"].(string)
 	if !ok || expr == "" {
-		return "", fmt.Errorf("expr is required (PromQL expression)")
+		return "", fmt.Errorf("expr is required (PromQL expression)%s", validation.SuggestParam("expr", args))
 	}
 
 	query := map[string]interface{}{
@@ -680,12 +713,12 @@ func (t *GrafanaTool) QueryLoki(ctx context.Context, incidentID string, args map
 
 	dsUID, ok := args["datasource_uid"].(string)
 	if !ok || dsUID == "" {
-		return "", fmt.Errorf("datasource_uid is required")
+		return "", fmt.Errorf("datasource_uid is required%s", validation.SuggestParam("datasource_uid", args))
 	}
 
 	expr, ok := args["expr"].(string)
 	if !ok || expr == "" {
-		return "", fmt.Errorf("expr is required (LogQL expression)")
+		return "", fmt.Errorf("expr is required (LogQL expression)%s", validation.SuggestParam("expr", args))
 	}
 
 	query := map[string]interface{}{
@@ -698,7 +731,11 @@ func (t *GrafanaTool) QueryLoki(ctx context.Context, incidentID string, args map
 	}
 
 	if limit, ok := args["limit"].(float64); ok && limit > 0 {
-		query["maxLines"] = int(limit)
+		maxLines := int(limit)
+		if maxLines > 5000 {
+			maxLines = 5000
+		}
+		query["maxLines"] = maxLines
 	}
 	if direction, ok := args["direction"].(string); ok && direction != "" {
 		query["direction"] = direction
@@ -736,7 +773,7 @@ func (t *GrafanaTool) CreateAnnotation(ctx context.Context, incidentID string, a
 
 	text, ok := args["text"].(string)
 	if !ok || text == "" {
-		return "", fmt.Errorf("text is required")
+		return "", fmt.Errorf("text is required%s", validation.SuggestParam("text", args))
 	}
 
 	reqBody := map[string]interface{}{

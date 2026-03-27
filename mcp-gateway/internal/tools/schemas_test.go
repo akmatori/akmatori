@@ -269,7 +269,7 @@ func TestGrafanaSchema_Settings(t *testing.T) {
 	schema, _ := GetToolSchema("grafana")
 	props := schema.SettingsSchema.Properties
 
-	expectedFields := []string{"grafana_url", "grafana_api_token", "grafana_verify_ssl", "grafana_timeout", "grafana_use_proxy", "grafana_proxy_url"}
+	expectedFields := []string{"grafana_url", "grafana_api_token", "grafana_verify_ssl", "grafana_timeout"}
 	for _, field := range expectedFields {
 		if _, ok := props[field]; !ok {
 			t.Errorf("missing settings field: %s", field)
@@ -290,7 +290,7 @@ func TestGrafanaSchema_AdvancedFields(t *testing.T) {
 	schema, _ := GetToolSchema("grafana")
 	props := schema.SettingsSchema.Properties
 
-	advancedFields := []string{"grafana_verify_ssl", "grafana_timeout", "grafana_use_proxy", "grafana_proxy_url"}
+	advancedFields := []string{"grafana_verify_ssl", "grafana_timeout"}
 	for _, field := range advancedFields {
 		if !props[field].Advanced {
 			t.Errorf("expected %s to be marked as advanced", field)
@@ -310,9 +310,6 @@ func TestGrafanaSchema_Defaults(t *testing.T) {
 		t.Errorf("expected grafana_timeout default 30, got %v", props["grafana_timeout"].Default)
 	}
 
-	if props["grafana_use_proxy"].Default != false {
-		t.Errorf("expected grafana_use_proxy default false, got %v", props["grafana_use_proxy"].Default)
-	}
 }
 
 func TestGrafanaSchema_TimeoutBounds(t *testing.T) {
