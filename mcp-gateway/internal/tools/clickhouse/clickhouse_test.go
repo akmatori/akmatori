@@ -561,8 +561,9 @@ func TestSanitizeStringValue(t *testing.T) {
 		{"no special chars", "default", "default"},
 		{"single quote", "it's", "it''s"},
 		{"multiple quotes", "a'b'c", "a''b''c"},
-		{"backslash", "a\\b", "a\\b"},
-		{"backslash-quote combo", "a\\'b", "a\\''b"},
+		{"backslash", "a\\b", "a\\\\b"},
+		{"backslash-quote combo", "a\\'b", "a\\\\''b"},
+		{"injection attempt", "\\' ; DROP TABLE x; --", "\\\\'' ; DROP TABLE x; --"},
 		{"empty string", "", ""},
 	}
 
