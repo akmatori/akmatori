@@ -82,13 +82,13 @@ Add a first-class Grafana MCP tool type to the MCP Gateway, providing the AI age
 - Modify: `mcp-gateway/internal/tools/schemas.go`
 - Modify: `mcp-gateway/internal/tools/registry.go`
 
-- [ ] Add `getGrafanaSchema()` to schemas.go with settings schema (url, api_token, verify_ssl, timeout, use_proxy, proxy_url) and all function definitions
-- [ ] Add `"grafana": getGrafanaSchema()` to `GetToolSchemas()`
-- [ ] Add `grafanaTool` and `grafanaLimit` fields to `Registry` struct
-- [ ] Implement `registerGrafanaTools()` method with MCP tool registrations for all Grafana functions (search_dashboards, get_dashboard, get_dashboard_panels, get_alert_rules, get_alert_instances, get_alert_rule, silence_alert, list_data_sources, query_data_source, query_prometheus, query_loki, create_annotation, get_annotations)
-- [ ] Call `registerGrafanaTools()` from `RegisterAllTools()` with rate limiter (10 req/sec, burst 20)
-- [ ] Write tests for schema completeness and registration
-- [ ] Run `make test-mcp` - must pass
+- [x] Add `getGrafanaSchema()` to schemas.go with settings schema (url, api_token, verify_ssl, timeout, use_proxy, proxy_url) and all function definitions
+- [x] Add `"grafana": getGrafanaSchema()` to `GetToolSchemas()`
+- [x] Add `grafanaTool` and `grafanaLimit` fields to `Registry` struct
+- [x] Implement `registerGrafanaTools()` method with MCP tool registrations for all Grafana functions (search_dashboards, get_dashboard, get_dashboard_panels, get_alert_rules, get_alert_instances, get_alert_rule, silence_alert, list_data_sources, query_data_source, query_prometheus, query_loki, create_annotation, get_annotations)
+- [x] Call `registerGrafanaTools()` from `RegisterAllTools()` with rate limiter (10 req/sec, burst 20)
+- [x] Write tests for schema completeness and registration
+- [x] Run `make test-mcp` - must pass
 
 ### Task 6: Verify acceptance criteria
 

@@ -15,6 +15,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/mcpproxy"
 	"github.com/akmatori/mcp-gateway/internal/ratelimit"
 	"github.com/akmatori/mcp-gateway/internal/tools/catchpoint"
+	"github.com/akmatori/mcp-gateway/internal/tools/grafana"
 	"github.com/akmatori/mcp-gateway/internal/tools/httpconnector"
 	"github.com/akmatori/mcp-gateway/internal/tools/ssh"
 	"github.com/akmatori/mcp-gateway/internal/tools/victoriametrics"
@@ -29,6 +30,8 @@ const (
 	VMBurstCapacity         = 20 // burst capacity
 	CatchpointRatePerSecond = 10 // requests per second
 	CatchpointBurstCapacity = 20 // burst capacity
+	GrafanaRatePerSecond    = 10 // requests per second
+	GrafanaBurstCapacity    = 20 // burst capacity
 )
 
 // Registry manages tool registration
@@ -39,8 +42,10 @@ type Registry struct {
 	zabbixLimit    *ratelimit.Limiter
 	vmTool         *victoriametrics.VictoriaMetricsTool
 	vmLimit        *ratelimit.Limiter
-	catchpointTool *catchpoint.CatchpointTool
+	catchpointTool  *catchpoint.CatchpointTool
 	catchpointLimit *ratelimit.Limiter
+	grafanaTool     *grafana.GrafanaTool
+	grafanaLimit    *ratelimit.Limiter
 
 	// HTTP connector state
 	httpExecutor       *httpconnector.HTTPConnectorExecutor
@@ -89,6 +94,13 @@ func (r *Registry) RegisterAllTools() {
 	// Register Catchpoint tools with rate limiter
 	r.registerCatchpointTools()
 
+	// Create rate limiter for Grafana: 10 req/sec, burst 20
+	r.grafanaLimit = ratelimit.New(GrafanaRatePerSecond, GrafanaBurstCapacity)
+	r.logger.Printf("Grafana rate limiter created: %d req/sec, burst %d", GrafanaRatePerSecond, GrafanaBurstCapacity)
+
+	// Register Grafana tools with rate limiter
+	r.registerGrafanaTools()
+
 	r.logger.Println("All tools registered")
 }
 
@@ -102,6 +114,9 @@ func (r *Registry) Stop() {
 	}
 	if r.catchpointTool != nil {
 		r.catchpointTool.Stop()
+	}
+	if r.grafanaTool != nil {
+		r.grafanaTool.Stop()
 	}
 	if r.httpExecutor != nil {
 		r.httpExecutor.Stop()
@@ -1589,4 +1604,429 @@ func (r *Registry) registerCatchpointTools() {
 	)
 
 	r.logger.Println("Catchpoint tools registered (12 methods)")
+}
+
+// registerGrafanaTools registers all Grafana tool methods
+func (r *Registry) registerGrafanaTools() {
+	r.grafanaTool = grafana.NewGrafanaTool(r.logger, r.grafanaLimit)
+
+	// grafana.search_dashboards
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "grafana.search_dashboards",
+			Description: "Search and list Grafana dashboards by query, tag, or folder",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"query": {
+						Type:        "string",
+						Description: "Search query string",
+					},
+					"tag": {
+						Type:        "string",
+						Description: "Filter by dashboard tag",
+					},
+					"type": {
+						Type:        "string",
+						Description: "Result type: dash-db or dash-folder (default: dash-db)",
+					},
+					"folder_id": {
+						Type:        "number",
+						Description: "Filter by folder ID",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results (max 5000)",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.grafanaTool.SearchDashboards(ctx, incidentID, args)
+		},
+	)
+
+	// grafana.get_dashboard
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "grafana.get_dashboard",
+			Description: "Get a full dashboard model by UID",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"uid": {
+						Type:        "string",
+						Description: "Dashboard UID (required)",
+					},
+				},
+				Required: []string{"uid"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.grafanaTool.GetDashboardByUID(ctx, incidentID, args)
+		},
+	)
+
+	// grafana.get_dashboard_panels
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "grafana.get_dashboard_panels",
+			Description: "Get a summary list of panels from a dashboard",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"uid": {
+						Type:        "string",
+						Description: "Dashboard UID (required)",
+					},
+				},
+				Required: []string{"uid"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.grafanaTool.GetDashboardPanels(ctx, incidentID, args)
+		},
+	)
+
+	// grafana.get_alert_rules
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "grafana.get_alert_rules",
+			Description: "List all provisioned alert rules from Grafana Unified Alerting",
+			InputSchema: mcp.InputSchema{
+				Type:       "object",
+				Properties: map[string]mcp.Property{},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.grafanaTool.GetAlertRules(ctx, incidentID, args)
+		},
+	)
+
+	// grafana.get_alert_instances
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "grafana.get_alert_instances",
+			Description: "Get firing and pending alert instances from Grafana Alertmanager",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"filter": {
+						Type:        "string",
+						Description: "Alertmanager filter expression",
+					},
+					"silenced": {
+						Type:        "boolean",
+						Description: "Include silenced alerts",
+					},
+					"inhibited": {
+						Type:        "boolean",
+						Description: "Include inhibited alerts",
+					},
+					"active": {
+						Type:        "boolean",
+						Description: "Include active alerts",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.grafanaTool.GetAlertInstances(ctx, incidentID, args)
+		},
+	)
+
+	// grafana.get_alert_rule
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "grafana.get_alert_rule",
+			Description: "Get a specific alert rule by UID",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"uid": {
+						Type:        "string",
+						Description: "Alert rule UID (required)",
+					},
+				},
+				Required: []string{"uid"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.grafanaTool.GetAlertRuleByUID(ctx, incidentID, args)
+		},
+	)
+
+	// grafana.silence_alert (write operation)
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "grafana.silence_alert",
+			Description: "Create a silence in Grafana Alertmanager",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"matchers": {
+						Type:        "array",
+						Description: "Label matchers for the silence (array of {name, value, isRegex, isEqual})",
+					},
+					"starts_at": {
+						Type:        "string",
+						Description: "Silence start time (RFC3339 timestamp, required)",
+					},
+					"ends_at": {
+						Type:        "string",
+						Description: "Silence end time (RFC3339 timestamp, required)",
+					},
+					"created_by": {
+						Type:        "string",
+						Description: "Creator of the silence (required)",
+					},
+					"comment": {
+						Type:        "string",
+						Description: "Reason for the silence (required)",
+					},
+				},
+				Required: []string{"matchers", "starts_at", "ends_at", "created_by", "comment"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.grafanaTool.SilenceAlert(ctx, incidentID, args)
+		},
+	)
+
+	// grafana.list_data_sources
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "grafana.list_data_sources",
+			Description: "List all configured data sources in Grafana",
+			InputSchema: mcp.InputSchema{
+				Type:       "object",
+				Properties: map[string]mcp.Property{},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.grafanaTool.ListDataSources(ctx, incidentID, args)
+		},
+	)
+
+	// grafana.query_data_source
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "grafana.query_data_source",
+			Description: "Query a data source via the Grafana unified query API",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"datasource_uid": {
+						Type:        "string",
+						Description: "Data source UID (required)",
+					},
+					"queries": {
+						Type:        "array",
+						Description: "Array of query objects with refId and datasource (required)",
+					},
+					"from": {
+						Type:        "string",
+						Description: "Start of time range (epoch ms or relative string)",
+					},
+					"to": {
+						Type:        "string",
+						Description: "End of time range (epoch ms or relative string)",
+					},
+				},
+				Required: []string{"datasource_uid", "queries"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.grafanaTool.QueryDataSource(ctx, incidentID, args)
+		},
+	)
+
+	// grafana.query_prometheus
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "grafana.query_prometheus",
+			Description: "Query a Prometheus-type data source via Grafana proxy (instant or range)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"datasource_uid": {
+						Type:        "string",
+						Description: "Prometheus data source UID (required)",
+					},
+					"expr": {
+						Type:        "string",
+						Description: "PromQL expression (required)",
+					},
+					"start": {
+						Type:        "string",
+						Description: "Range query start time",
+					},
+					"end": {
+						Type:        "string",
+						Description: "Range query end time",
+					},
+					"step": {
+						Type:        "string",
+						Description: "Range query step interval",
+					},
+					"instant": {
+						Type:        "boolean",
+						Description: "Execute as instant query",
+					},
+					"range": {
+						Type:        "boolean",
+						Description: "Execute as range query",
+					},
+					"from": {
+						Type:        "string",
+						Description: "Start of time range for the query request",
+					},
+					"to": {
+						Type:        "string",
+						Description: "End of time range for the query request",
+					},
+				},
+				Required: []string{"datasource_uid", "expr"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.grafanaTool.QueryPrometheus(ctx, incidentID, args)
+		},
+	)
+
+	// grafana.query_loki
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "grafana.query_loki",
+			Description: "Query a Loki-type data source via Grafana proxy (log queries)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"datasource_uid": {
+						Type:        "string",
+						Description: "Loki data source UID (required)",
+					},
+					"expr": {
+						Type:        "string",
+						Description: "LogQL expression (required)",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of log lines to return",
+					},
+					"direction": {
+						Type:        "string",
+						Description: "Log order direction (forward or backward)",
+					},
+					"start": {
+						Type:        "string",
+						Description: "Query start time",
+					},
+					"end": {
+						Type:        "string",
+						Description: "Query end time",
+					},
+					"from": {
+						Type:        "string",
+						Description: "Start of time range for the query request",
+					},
+					"to": {
+						Type:        "string",
+						Description: "End of time range for the query request",
+					},
+				},
+				Required: []string{"datasource_uid", "expr"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.grafanaTool.QueryLoki(ctx, incidentID, args)
+		},
+	)
+
+	// grafana.create_annotation (write operation)
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "grafana.create_annotation",
+			Description: "Create an annotation on a Grafana dashboard or globally",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"text": {
+						Type:        "string",
+						Description: "Annotation text (required)",
+					},
+					"dashboard_id": {
+						Type:        "number",
+						Description: "Dashboard ID to attach the annotation to",
+					},
+					"panel_id": {
+						Type:        "number",
+						Description: "Panel ID to attach the annotation to",
+					},
+					"tags": {
+						Type:        "array",
+						Description: "Tags for the annotation",
+					},
+					"time": {
+						Type:        "number",
+						Description: "Annotation timestamp (epoch milliseconds)",
+					},
+					"time_end": {
+						Type:        "number",
+						Description: "Annotation end timestamp for region annotations (epoch milliseconds)",
+					},
+				},
+				Required: []string{"text"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.grafanaTool.CreateAnnotation(ctx, incidentID, args)
+		},
+	)
+
+	// grafana.get_annotations
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "grafana.get_annotations",
+			Description: "List annotations with optional filters",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"from": {
+						Type:        "number",
+						Description: "Start time filter (epoch milliseconds)",
+					},
+					"to": {
+						Type:        "number",
+						Description: "End time filter (epoch milliseconds)",
+					},
+					"dashboard_id": {
+						Type:        "number",
+						Description: "Filter by dashboard ID",
+					},
+					"panel_id": {
+						Type:        "number",
+						Description: "Filter by panel ID",
+					},
+					"tags": {
+						Type:        "string",
+						Description: "Filter by tags (comma-separated)",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results (max 5000)",
+					},
+					"type": {
+						Type:        "string",
+						Description: "Filter by type: annotation or alert",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.grafanaTool.GetAnnotations(ctx, incidentID, args)
+		},
+	)
+
+	r.logger.Println("Grafana tools registered (13 methods)")
 }
