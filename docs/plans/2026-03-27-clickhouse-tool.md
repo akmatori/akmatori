@@ -124,11 +124,11 @@ Add a ClickHouse tool to the MCP Gateway, providing read-only query execution an
 
 ### Task 7: Verify acceptance criteria
 
-- [ ] Manual test: create a ClickHouse tool instance via the API, verify `list_tool_types` includes `clickhouse`
-- [ ] Run full test suite: `make test-mcp`
-- [ ] Run linter: `cd mcp-gateway && golangci-lint run`
-- [ ] Verify test coverage for `internal/tools/clickhouse` meets 80%+
-- [ ] Run `make verify` for overall project health
+- [x] Manual test: create a ClickHouse tool instance via the API, verify `list_tool_types` includes `clickhouse`
+- [x] Run full test suite: `make test-mcp`
+- [x] Run linter: `cd mcp-gateway && golangci-lint run`
+- [x] Verify test coverage for `internal/tools/clickhouse` meets 80%+
+- [x] Run `make verify` for overall project health
 
 ### Task 8: Update documentation
 
