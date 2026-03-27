@@ -2150,8 +2150,9 @@ func TestGetAnnotations_WithAllFilters(t *testing.T) {
 	if receivedParams.Get("panelId") != "7" {
 		t.Errorf("expected panelId=7, got %s", receivedParams.Get("panelId"))
 	}
-	if receivedParams.Get("tags") != "deploy,production" {
-		t.Errorf("expected tags param, got %s", receivedParams.Get("tags"))
+	tagValues := receivedParams["tags"]
+	if len(tagValues) != 2 || tagValues[0] != "deploy" || tagValues[1] != "production" {
+		t.Errorf("expected tags=[deploy, production], got %v", tagValues)
 	}
 	if receivedParams.Get("type") != "annotation" {
 		t.Errorf("expected type=annotation, got %s", receivedParams.Get("type"))

@@ -823,7 +823,12 @@ func (t *GrafanaTool) GetAnnotations(ctx context.Context, incidentID string, arg
 		params.Set("panelId", fmt.Sprintf("%d", int(panelID)))
 	}
 	if tags, ok := args["tags"].(string); ok && tags != "" {
-		params.Set("tags", tags)
+		for _, tag := range strings.Split(tags, ",") {
+			tag = strings.TrimSpace(tag)
+			if tag != "" {
+				params.Add("tags", tag)
+			}
+		}
 	}
 	if limit, ok := args["limit"].(float64); ok && limit > 0 {
 		l := int(limit)

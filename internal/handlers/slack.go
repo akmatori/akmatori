@@ -33,6 +33,10 @@ type SlackHandler struct {
 
 	// Dedup: prevent double processing when both app_mention and message events fire
 	processedMsgs sync.Map // key: "channel:messageTS" -> struct{}
+
+	// Track alert channel threads that already have a bot message being processed,
+	// so subsequent bot thread replies (status updates) are skipped.
+	alertThreads sync.Map // key: threadTS -> struct{}
 }
 
 // Progress update interval for Slack messages (rate limiting)
@@ -279,6 +283,15 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 	// Check if this is a configured alert channel BEFORE filtering bots,
 	// because monitoring integrations post as bots (bot_message subtype)
 	if instance, ok := h.isAlertChannel(event.Channel); ok {
+		slog.Info("alert channel message received",
+			"channel", event.Channel,
+			"user", event.User,
+			"bot_id", event.BotID,
+			"sub_type", event.SubType,
+			"ts", event.TimeStamp,
+			"thread_ts", event.ThreadTimeStamp,
+			"text_preview", truncateForLog(event.Text, 100),
+		)
 		// Detect bot/integration messages (Zabbix, Alertmanager, etc.)
 		// Some integrations set BotID without bot_message subtype,
 		// others use the bot_message subtype. Accept both.
@@ -287,9 +300,25 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 		if event.ThreadTimeStamp != "" {
 			// Thread reply in alert channel.
 			if isBotMessage {
-				// Bot/integration thread reply (e.g. Zabbix follow-up alert):
-				// process as alert channel message.
-				go h.handleAlertChannelMessage(event, instance)
+				// Allow the first bot message per thread (the actual alert) but skip
+				// subsequent bot thread replies which are status updates (e.g. PagerDuty
+				// "Status changed to Acknowledged", "Status changed to Triggered").
+				if _, alreadyTracked := h.alertThreads.LoadOrStore(event.ThreadTimeStamp, struct{}{}); alreadyTracked {
+					slog.Info("skipping bot thread reply in alert channel (status update)",
+						"thread_ts", event.ThreadTimeStamp,
+						"channel", event.Channel,
+						"bot_id", event.BotID,
+					)
+				} else {
+					// Clean up after 1 hour to prevent unbounded growth.
+					threadTS := event.ThreadTimeStamp
+					go func() {
+						time.Sleep(1 * time.Hour)
+						h.alertThreads.Delete(threadTS)
+					}()
+					// First bot message in this thread — process as alert.
+					go h.handleAlertChannelMessage(event, instance)
+				}
 			} else if h.botUserID != "" && event.SubType == "" && event.User != "" &&
 				strings.Contains(event.Text, fmt.Sprintf("<@%s>", h.botUserID)) {
 				// Human user @mentioning the bot in a thread reply.
@@ -326,7 +355,14 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 			return
 		}
 
-		// Process as alert channel message
+		// Top-level bot message — process as alert and track the thread
+		// so that subsequent bot replies (status updates) in this thread are skipped.
+		h.alertThreads.LoadOrStore(event.TimeStamp, struct{}{})
+		ts := event.TimeStamp
+		go func() {
+			time.Sleep(1 * time.Hour)
+			h.alertThreads.Delete(ts)
+		}()
 		go h.handleAlertChannelMessage(event, instance)
 		return
 	}
@@ -371,4 +407,13 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 	}
 
 	h.processMessage(event.Channel, event.ThreadTimeStamp, event.TimeStamp, event.Text, event.User)
+}
+
+// truncateForLog truncates a string to maxLen runes for log output.
+func truncateForLog(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
 }
