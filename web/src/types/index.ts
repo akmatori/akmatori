@@ -144,6 +144,7 @@ export interface ProxySettings {
     zabbix: ProxyServiceConfig;
     victoria_metrics: ProxyServiceConfig;
     catchpoint: ProxyServiceConfig;
+    grafana: ProxyServiceConfig;
     ssh: ProxyServiceConfig;
   };
 }
@@ -157,6 +158,7 @@ export interface ProxySettingsUpdate {
     zabbix: { enabled: boolean };
     victoria_metrics: { enabled: boolean };
     catchpoint: { enabled: boolean };
+    grafana: { enabled: boolean };
   };
 }
 

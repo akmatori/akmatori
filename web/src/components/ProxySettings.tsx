@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Server, MessageSquare, Shield, Terminal, BarChart3, Activity } from 'lucide-react';
+import { Save, Server, MessageSquare, Shield, Terminal, BarChart3, Activity, LayoutDashboard } from 'lucide-react';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorMessage, { SuccessMessage } from './ErrorMessage';
 import { proxySettingsApi } from '../api/client';
@@ -61,6 +61,7 @@ export default function ProxySettings() {
   const [zabbixEnabled, setZabbixEnabled] = useState(false);
   const [victoriaMetricsEnabled, setVictoriaMetricsEnabled] = useState(false);
   const [catchpointEnabled, setCatchpointEnabled] = useState(false);
+  const [grafanaEnabled, setGrafanaEnabled] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -77,6 +78,7 @@ export default function ProxySettings() {
       setZabbixEnabled(data.services.zabbix.enabled);
       setVictoriaMetricsEnabled(data.services.victoria_metrics.enabled);
       setCatchpointEnabled(data.services.catchpoint?.enabled ?? false);
+      setGrafanaEnabled(data.services.grafana?.enabled ?? false);
       setError(null);
     } catch (err) {
       setError('Failed to load proxy settings');
@@ -100,6 +102,7 @@ export default function ProxySettings() {
           zabbix: { enabled: zabbixEnabled },
           victoria_metrics: { enabled: victoriaMetricsEnabled },
           catchpoint: { enabled: catchpointEnabled },
+          grafana: { enabled: grafanaEnabled },
         },
       };
 
@@ -213,6 +216,15 @@ export default function ProxySettings() {
             supported={true}
             disabled={!hasProxy}
             onChange={setCatchpointEnabled}
+          />
+          <ServiceToggle
+            name="Grafana"
+            description="Observability dashboards"
+            icon={LayoutDashboard}
+            enabled={grafanaEnabled}
+            supported={true}
+            disabled={!hasProxy}
+            onChange={setGrafanaEnabled}
           />
           <ServiceToggle
             name="SSH"
