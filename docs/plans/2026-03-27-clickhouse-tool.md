@@ -87,13 +87,13 @@ Add a ClickHouse tool to the MCP Gateway, providing read-only query execution an
 **Files:**
 - Modify: `mcp-gateway/internal/tools/clickhouse/clickhouse.go`
 
-- [ ] Implement `ExecuteQuery()` — validates SELECT-only, adds LIMIT, caches responses (15s TTL)
-- [ ] Implement `ShowDatabases()` — `SHOW DATABASES`, cached 60s
-- [ ] Implement `ShowTables()` — `SHOW TABLES FROM {database}`, cached 60s
-- [ ] Implement `DescribeTable()` — `DESCRIBE TABLE {database}.{table}`, cached 60s
-- [ ] All methods: validate required params, use rate limiter, return JSON-formatted results
-- [ ] Write tests for each method using injectable execQuery mock
-- [ ] Run `make test-mcp` — must pass before Task 5
+- [x] Implement `ExecuteQuery()` — validates SELECT-only, adds LIMIT, caches responses (15s TTL)
+- [x] Implement `ShowDatabases()` — `SHOW DATABASES`, cached 60s
+- [x] Implement `ShowTables()` — `SHOW TABLES FROM {database}`, cached 60s
+- [x] Implement `DescribeTable()` — `DESCRIBE TABLE {database}.{table}`, cached 60s
+- [x] All methods: validate required params, use rate limiter, return JSON-formatted results
+- [x] Write tests for each method using injectable execQuery mock
+- [x] Run `make test-mcp` — must pass before Task 5
 
 ### Task 5: Implement system diagnostic tools
 
