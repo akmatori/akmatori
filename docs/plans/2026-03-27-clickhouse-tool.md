@@ -100,14 +100,14 @@ Add a ClickHouse tool to the MCP Gateway, providing read-only query execution an
 **Files:**
 - Modify: `mcp-gateway/internal/tools/clickhouse/clickhouse.go`
 
-- [ ] Implement `GetQueryLog()` — queries `system.query_log` with filters for duration, query_kind, limit; cached 15s
-- [ ] Implement `GetRunningQueries()` — queries `system.processes` with elapsed filter; cached 15s
-- [ ] Implement `GetMerges()` — queries `system.merges` with optional table/database filter; cached 15s
-- [ ] Implement `GetReplicationStatus()` — queries `system.replication_queue` with optional table/database filter; cached 30s
-- [ ] Implement `GetPartsInfo()` — queries `system.parts` for table, with active_only filter; cached 30s
-- [ ] Implement `GetClusterInfo()` — queries `system.clusters` with optional cluster filter; cached 60s
-- [ ] Write tests for each diagnostic method
-- [ ] Run `make test-mcp` — must pass before Task 6
+- [x] Implement `GetQueryLog()` — queries `system.query_log` with filters for duration, query_kind, limit; cached 15s
+- [x] Implement `GetRunningQueries()` — queries `system.processes` with elapsed filter; cached 15s
+- [x] Implement `GetMerges()` — queries `system.merges` with optional table/database filter; cached 15s
+- [x] Implement `GetReplicationStatus()` — queries `system.replication_queue` with optional table/database filter; cached 30s
+- [x] Implement `GetPartsInfo()` — queries `system.parts` for table, with active_only filter; cached 30s
+- [x] Implement `GetClusterInfo()` — queries `system.clusters` with optional cluster filter; cached 60s
+- [x] Write tests for each diagnostic method
+- [x] Run `make test-mcp` — must pass before Task 6
 
 ### Task 6: Register ClickHouse tools in the gateway registry
 
