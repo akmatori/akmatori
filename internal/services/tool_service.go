@@ -157,6 +157,7 @@ func (s *ToolService) EnsureToolTypes() error {
 		{Name: "zabbix", Description: "Zabbix monitoring integration"},
 		{Name: "victoria_metrics", Description: "VictoriaMetrics time-series database integration"},
 		{Name: "catchpoint", Description: "Catchpoint Digital Experience Monitoring integration"},
+		{Name: "grafana", Description: "Grafana observability platform integration"},
 	}
 
 	for _, tt := range toolTypes {
