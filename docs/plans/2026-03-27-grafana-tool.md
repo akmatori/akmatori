@@ -92,9 +92,9 @@ Add a first-class Grafana MCP tool type to the MCP Gateway, providing the AI age
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] Run full test suite (`make test-mcp`)
-- [ ] Run linter (`golangci-lint run ./mcp-gateway/...`)
-- [ ] Verify test coverage for grafana package meets 80%+
+- [x] Run full test suite (`make test-mcp`)
+- [x] Run linter (`golangci-lint run ./mcp-gateway/...`)
+- [x] Verify test coverage for grafana package meets 80%+
 
 ### Task 7: Update documentation
 
