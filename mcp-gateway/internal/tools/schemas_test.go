@@ -479,10 +479,143 @@ func TestGrafanaSchema_Functions(t *testing.T) {
 	}
 }
 
+func TestGetToolSchemas_ContainsClickHouse(t *testing.T) {
+	schemas := GetToolSchemas()
+
+	if _, ok := schemas["clickhouse"]; !ok {
+		t.Fatal("clickhouse schema not found in GetToolSchemas()")
+	}
+}
+
+func TestGetToolSchema_ClickHouse(t *testing.T) {
+	schema, ok := GetToolSchema("clickhouse")
+	if !ok {
+		t.Fatal("clickhouse schema not found")
+	}
+
+	if schema.Name != "clickhouse" {
+		t.Errorf("expected name 'clickhouse', got %q", schema.Name)
+	}
+
+	if schema.Version != "1.0.0" {
+		t.Errorf("expected version '1.0.0', got %q", schema.Version)
+	}
+
+	if len(schema.Functions) != 10 {
+		t.Errorf("expected 10 functions, got %d", len(schema.Functions))
+	}
+}
+
+func TestClickHouseSchema_RequiredFields(t *testing.T) {
+	schema, _ := GetToolSchema("clickhouse")
+
+	expectedRequired := []string{"ch_host", "ch_database", "ch_username", "ch_password"}
+	if len(schema.SettingsSchema.Required) != len(expectedRequired) {
+		t.Fatalf("expected %d required fields, got %d", len(expectedRequired), len(schema.SettingsSchema.Required))
+	}
+	for i, field := range expectedRequired {
+		if schema.SettingsSchema.Required[i] != field {
+			t.Errorf("expected required[%d] = %q, got %q", i, field, schema.SettingsSchema.Required[i])
+		}
+	}
+}
+
+func TestClickHouseSchema_Settings(t *testing.T) {
+	schema, _ := GetToolSchema("clickhouse")
+	props := schema.SettingsSchema.Properties
+
+	expectedFields := []string{"ch_host", "ch_port", "ch_database", "ch_username", "ch_password", "ch_ssl_enabled", "ch_timeout"}
+	for _, field := range expectedFields {
+		if _, ok := props[field]; !ok {
+			t.Errorf("missing settings field: %s", field)
+		}
+	}
+}
+
+func TestClickHouseSchema_SecretFields(t *testing.T) {
+	schema, _ := GetToolSchema("clickhouse")
+	props := schema.SettingsSchema.Properties
+
+	if !props["ch_password"].Secret {
+		t.Error("expected ch_password to be marked as secret")
+	}
+}
+
+func TestClickHouseSchema_AdvancedFields(t *testing.T) {
+	schema, _ := GetToolSchema("clickhouse")
+	props := schema.SettingsSchema.Properties
+
+	advancedFields := []string{"ch_ssl_enabled", "ch_timeout"}
+	for _, field := range advancedFields {
+		if !props[field].Advanced {
+			t.Errorf("expected %s to be marked as advanced", field)
+		}
+	}
+}
+
+func TestClickHouseSchema_Defaults(t *testing.T) {
+	schema, _ := GetToolSchema("clickhouse")
+	props := schema.SettingsSchema.Properties
+
+	if props["ch_port"].Default != 8123 {
+		t.Errorf("expected ch_port default 8123, got %v", props["ch_port"].Default)
+	}
+
+	if props["ch_ssl_enabled"].Default != false {
+		t.Errorf("expected ch_ssl_enabled default false, got %v", props["ch_ssl_enabled"].Default)
+	}
+
+	if props["ch_timeout"].Default != 30 {
+		t.Errorf("expected ch_timeout default 30, got %v", props["ch_timeout"].Default)
+	}
+}
+
+func TestClickHouseSchema_TimeoutBounds(t *testing.T) {
+	schema, _ := GetToolSchema("clickhouse")
+	timeout := schema.SettingsSchema.Properties["ch_timeout"]
+
+	if timeout.Minimum == nil || *timeout.Minimum != 5 {
+		t.Error("expected ch_timeout minimum 5")
+	}
+	if timeout.Maximum == nil || *timeout.Maximum != 300 {
+		t.Error("expected ch_timeout maximum 300")
+	}
+}
+
+func TestClickHouseSchema_PortBounds(t *testing.T) {
+	schema, _ := GetToolSchema("clickhouse")
+	port := schema.SettingsSchema.Properties["ch_port"]
+
+	if port.Minimum == nil || *port.Minimum != 1 {
+		t.Error("expected ch_port minimum 1")
+	}
+	if port.Maximum == nil || *port.Maximum != 65535 {
+		t.Error("expected ch_port maximum 65535")
+	}
+}
+
+func TestClickHouseSchema_Functions(t *testing.T) {
+	schema, _ := GetToolSchema("clickhouse")
+
+	expectedFunctions := []string{
+		"execute_query", "show_databases", "show_tables", "describe_table",
+		"get_query_log", "get_running_queries", "get_merges",
+		"get_replication_status", "get_parts_info", "get_cluster_info",
+	}
+	if len(schema.Functions) != len(expectedFunctions) {
+		t.Fatalf("expected %d functions, got %d", len(expectedFunctions), len(schema.Functions))
+	}
+	for i, name := range expectedFunctions {
+		if schema.Functions[i].Name != name {
+			t.Errorf("expected function[%d] = %q, got %q", i, name, schema.Functions[i].Name)
+		}
+	}
+}
+
 func TestGetToolSchemas_AllPresent(t *testing.T) {
 	schemas := GetToolSchemas()
 
-	expected := []string{"ssh", "zabbix", "victoria_metrics", "catchpoint", "postgresql", "grafana"}
+	expected := []string{"ssh", "zabbix", "victoria_metrics", "catchpoint", "postgresql", "grafana", "clickhouse"}
 	for _, name := range expected {
 		if _, ok := schemas[name]; !ok {
 			t.Errorf("missing schema: %s", name)
