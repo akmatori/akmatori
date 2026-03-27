@@ -10,11 +10,13 @@ package testhelpers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -193,26 +195,32 @@ func (m *MockAlertAdapter) WithValidationError(err error) *MockAlertAdapter {
 // Test Fixture Helpers
 // ========================================
 
-// LoadFixture loads a test fixture file from tests/fixtures/
+// fixturePath resolves a fixture path relative to the repository root.
+func fixturePath(path string) (string, error) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		return "", fmt.Errorf("failed to determine testhelpers package path")
+	}
+
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", ".."))
+	return filepath.Join(repoRoot, "tests", "fixtures", filepath.Clean(path)), nil
+}
+
+// LoadFixture loads a test fixture file from tests/fixtures/.
 func LoadFixture(t *testing.T, path string) []byte {
 	t.Helper()
 
-	// Try both relative and absolute paths
-	paths := []string{
-		filepath.Join("tests", "fixtures", path),
-		filepath.Join("..", "..", "tests", "fixtures", path),
-		filepath.Join("..", "..", "..", "tests", "fixtures", path),
+	fixtureFile, err := fixturePath(path)
+	if err != nil {
+		t.Fatalf("failed to resolve fixture %s: %v", path, err)
 	}
 
-	for _, p := range paths {
-		data, err := os.ReadFile(p)
-		if err == nil {
-			return data
-		}
+	data, err := os.ReadFile(fixtureFile)
+	if err != nil {
+		t.Fatalf("failed to load fixture %s (%s): %v", path, fixtureFile, err)
 	}
 
-	t.Fatalf("failed to load fixture %s", path)
-	return nil
+	return data
 }
 
 // LoadJSONFixture loads and unmarshals a JSON fixture

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -291,5 +292,44 @@ func BenchmarkAlertBuilder(b *testing.B) {
 			WithHost("prod-1").
 			WithLabel("env", "prod").
 			Build()
+	}
+}
+
+func TestLoadFixture_FromDifferentWorkingDirectory(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get cwd: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change cwd: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("failed to restore cwd: %v", err)
+		}
+	}()
+
+	data := LoadFixture(t, "alerts/alertmanager_firing.json")
+	AssertStringNotEmpty(t, string(data), "fixture should load even when cwd changes")
+	AssertJSONContainsKey(t, string(data), "version", "fixture should contain version field")
+}
+
+func TestLoadJSONFixture(t *testing.T) {
+	var payload map[string]any
+	LoadJSONFixture(t, "alerts/alertmanager_firing.json", &payload)
+
+	if payload["version"] != "4" {
+		t.Fatalf("expected version 4, got %v", payload["version"])
+	}
+}
+
+func BenchmarkLoadFixture(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		data := LoadFixture(&testing.T{}, "alerts/alertmanager_firing.json")
+		if len(data) == 0 {
+			b.Fatal("fixture should not be empty")
+		}
 	}
 }
