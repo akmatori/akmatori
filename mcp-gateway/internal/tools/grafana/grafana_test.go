@@ -1640,7 +1640,7 @@ func TestQueryDataSource_InjectsDatasourceUID(t *testing.T) {
 	}
 }
 
-func TestQueryDataSource_DoesNotOverrideDatasource(t *testing.T) {
+func TestQueryDataSource_OverridesEmbeddedDatasource(t *testing.T) {
 	var receivedBody map[string]interface{}
 	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -1649,7 +1649,7 @@ func TestQueryDataSource_DoesNotOverrideDatasource(t *testing.T) {
 		fmt.Fprint(w, `{"results":{}}`)
 	})
 
-	// Query with explicit datasource field - should NOT be overridden
+	// Query with explicit datasource field - MUST be overridden by top-level datasource_uid
 	_, err := tool.QueryDataSource(context.Background(), "test-incident", map[string]interface{}{
 		"datasource_uid": "prom-1",
 		"queries": []interface{}{
@@ -1667,8 +1667,8 @@ func TestQueryDataSource_DoesNotOverrideDatasource(t *testing.T) {
 	queries := receivedBody["queries"].([]interface{})
 	q := queries[0].(map[string]interface{})
 	ds := q["datasource"].(map[string]interface{})
-	if ds["uid"] != "other-ds" {
-		t.Errorf("expected datasource uid=other-ds to be preserved, got %v", ds["uid"])
+	if ds["uid"] != "prom-1" {
+		t.Errorf("expected embedded datasource uid to be overridden to prom-1, got %v", ds["uid"])
 	}
 }
 

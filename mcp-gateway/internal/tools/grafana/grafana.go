@@ -611,14 +611,13 @@ func (t *GrafanaTool) QueryDataSource(ctx context.Context, incidentID string, ar
 		return "", fmt.Errorf("queries is required (array of query objects with refId and datasource)")
 	}
 
-	// Inject datasource UID into queries that lack a datasource field
+	// Inject/override datasource UID in all queries to enforce the required top-level datasource_uid.
+	// Any embedded datasource is replaced to prevent routing queries to the wrong data source.
 	if querySlice, ok := queries.([]interface{}); ok {
 		for i, q := range querySlice {
 			if qMap, ok := q.(map[string]interface{}); ok {
-				if _, hasDatasource := qMap["datasource"]; !hasDatasource {
-					qMap["datasource"] = map[string]interface{}{"uid": dsUID}
-					querySlice[i] = qMap
-				}
+				qMap["datasource"] = map[string]interface{}{"uid": dsUID}
+				querySlice[i] = qMap
 			}
 		}
 		queries = querySlice

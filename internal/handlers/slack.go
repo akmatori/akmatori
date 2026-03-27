@@ -283,7 +283,7 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 	// Check if this is a configured alert channel BEFORE filtering bots,
 	// because monitoring integrations post as bots (bot_message subtype)
 	if instance, ok := h.isAlertChannel(event.Channel); ok {
-		slog.Info("alert channel message received",
+		slog.Debug("alert channel message received",
 			"channel", event.Channel,
 			"user", event.User,
 			"bot_id", event.BotID,
