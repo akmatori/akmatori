@@ -54,13 +54,13 @@ Add a ClickHouse tool to the MCP Gateway, providing read-only query execution an
 **Files:**
 - Modify: `mcp-gateway/internal/tools/schemas.go`
 
-- [ ] Add `getClickHouseSchema()` function returning `ToolTypeSchema` with:
+- [x] Add `getClickHouseSchema()` function returning `ToolTypeSchema` with:
   - Name: `clickhouse`
   - Settings: `ch_host` (required), `ch_port` (default 8123, HTTP protocol), `ch_database` (required), `ch_username` (required), `ch_password` (required, secret), `ch_ssl_enabled` (boolean, default false), `ch_timeout` (default 30, range 5-300)
   - All 10 function schemas with input parameters and descriptions
-- [ ] Add `"clickhouse"` entry to `GetToolSchemas()` map
-- [ ] Write tests verifying the schema is valid and present in GetToolSchemas
-- [ ] Run `make test-mcp` — must pass before Task 3
+- [x] Add `"clickhouse"` entry to `GetToolSchemas()` map
+- [x] Write tests verifying the schema is valid and present in GetToolSchemas
+- [x] Run `make test-mcp` — must pass before Task 3
 
 ### Task 3: Core ClickHouse tool — struct, config, connection
 

@@ -62,6 +62,7 @@ func GetToolSchemas() map[string]ToolTypeSchema {
 		"grafana":          getGrafanaSchema(),
 		"catchpoint":       getCatchpointSchema(),
 		"postgresql":       getPostgreSQLSchema(),
+		"clickhouse":       getClickHouseSchema(),
 	}
 }
 
@@ -663,6 +664,122 @@ func getCatchpointSchema() ToolTypeSchema {
 				Description: "Trigger an instant (on-demand) test execution",
 				Parameters:  "test_id (required)",
 				Returns:     "JSON with instant test execution result",
+			},
+		},
+	}
+}
+
+func getClickHouseSchema() ToolTypeSchema {
+	return ToolTypeSchema{
+		Name:        "clickhouse",
+		Description: "ClickHouse OLAP database integration for read-only queries and system diagnostics. Execute SELECT queries, inspect schema, analyze running queries, merges, replication, and cluster topology.",
+		Version:     "1.0.0",
+		SettingsSchema: SettingsSchema{
+			Type:     "object",
+			Required: []string{"ch_host", "ch_database", "ch_username", "ch_password"},
+			Properties: map[string]PropertySchema{
+				"ch_host": {
+					Type:        "string",
+					Description: "ClickHouse server hostname or IP address",
+					Example:     "clickhouse.example.com",
+				},
+				"ch_port": {
+					Type:        "integer",
+					Description: "ClickHouse HTTP protocol port",
+					Default:     8123,
+					Minimum:     intPtr(1),
+					Maximum:     intPtr(65535),
+				},
+				"ch_database": {
+					Type:        "string",
+					Description: "Default database name to connect to",
+					Example:     "default",
+				},
+				"ch_username": {
+					Type:        "string",
+					Description: "Database username",
+				},
+				"ch_password": {
+					Type:        "string",
+					Description: "Database password",
+					Secret:      true,
+				},
+				"ch_ssl_enabled": {
+					Type:        "boolean",
+					Description: "Enable SSL/TLS for the connection",
+					Default:     false,
+					Advanced:    true,
+				},
+				"ch_timeout": {
+					Type:        "integer",
+					Description: "Query timeout in seconds",
+					Default:     30,
+					Minimum:     intPtr(5),
+					Maximum:     intPtr(300),
+					Advanced:    true,
+				},
+			},
+		},
+		Functions: []ToolFunction{
+			{
+				Name:        "execute_query",
+				Description: "Execute a read-only SQL query (SELECT, WITH, SHOW, DESCRIBE, EXPLAIN, EXISTS only)",
+				Parameters:  "query (required), limit, timeout_seconds",
+				Returns:     "JSON array of row objects",
+			},
+			{
+				Name:        "show_databases",
+				Description: "List all databases on the ClickHouse server",
+				Parameters:  "",
+				Returns:     "JSON array of database names",
+			},
+			{
+				Name:        "show_tables",
+				Description: "List tables in a database",
+				Parameters:  "database",
+				Returns:     "JSON array of table names",
+			},
+			{
+				Name:        "describe_table",
+				Description: "Get column definitions and types for a table",
+				Parameters:  "table_name (required), database",
+				Returns:     "JSON array of column objects",
+			},
+			{
+				Name:        "get_query_log",
+				Description: "Get recent queries from system.query_log",
+				Parameters:  "min_duration_ms, limit, query_kind",
+				Returns:     "JSON array of query log entries",
+			},
+			{
+				Name:        "get_running_queries",
+				Description: "Get currently running queries from system.processes",
+				Parameters:  "min_elapsed_seconds",
+				Returns:     "JSON array of running query objects",
+			},
+			{
+				Name:        "get_merges",
+				Description: "Get active merge operations from system.merges",
+				Parameters:  "table, database",
+				Returns:     "JSON array of merge objects",
+			},
+			{
+				Name:        "get_replication_status",
+				Description: "Get replication queue status from system.replication_queue",
+				Parameters:  "table, database",
+				Returns:     "JSON array of replication queue entries",
+			},
+			{
+				Name:        "get_parts_info",
+				Description: "Get parts information from system.parts for a table",
+				Parameters:  "table_name (required), database, active_only",
+				Returns:     "JSON array of part objects",
+			},
+			{
+				Name:        "get_cluster_info",
+				Description: "Get cluster topology from system.clusters",
+				Parameters:  "cluster",
+				Returns:     "JSON array of cluster node objects",
 			},
 		},
 	}
