@@ -67,20 +67,20 @@ Add a ClickHouse tool to the MCP Gateway, providing read-only query execution an
 **Files:**
 - Create: `mcp-gateway/internal/tools/clickhouse/clickhouse.go`
 
-- [ ] Define `ClickHouseTool` struct with logger, configCache, responseCache, rateLimiter, injectable `execQuery` and `resolveConfig` functions (same pattern as PostgreSQL)
-- [ ] Implement `NewClickHouseTool()` constructor
-- [ ] Implement `Stop()` for resource cleanup
-- [ ] Define `CHConfig` struct: Host, Port, Database, Username, Password, SSLEnabled, Timeout
-- [ ] Implement `resolveConfigFromDB()` — reads ToolInstance settings, caches for 5 minutes
-- [ ] Implement `buildConnString()` — constructs `clickhouse://user:pass@host:port/database` DSN with TLS and timeout params
-- [ ] Implement `executeQueryInternal()` — opens connection via `clickhouse-go` HTTP driver, executes query, returns JSON rows
-- [ ] Implement read-only query validation: `isSelectOnly()` adapted for ClickHouse SQL dialect
+- [x] Define `ClickHouseTool` struct with logger, configCache, responseCache, rateLimiter, injectable `execQuery` and `resolveConfig` functions (same pattern as PostgreSQL)
+- [x] Implement `NewClickHouseTool()` constructor
+- [x] Implement `Stop()` for resource cleanup
+- [x] Define `CHConfig` struct: Host, Port, Database, Username, Password, SSLEnabled, Timeout
+- [x] Implement `resolveConfigFromDB()` — reads ToolInstance settings, caches for 5 minutes
+- [x] Implement `buildConnString()` — constructs `clickhouse://user:pass@host:port/database` DSN with TLS and timeout params
+- [x] Implement `executeQueryInternal()` — opens connection via `clickhouse-go` HTTP driver, executes query, returns JSON rows
+- [x] Implement read-only query validation: `isSelectOnly()` adapted for ClickHouse SQL dialect
   - Allow: SELECT, WITH, SHOW, DESCRIBE, EXPLAIN, EXISTS
   - Block: INSERT, ALTER, DROP, CREATE, TRUNCATE, RENAME, EXCHANGE, GRANT, REVOKE, KILL, SYSTEM, OPTIMIZE, ATTACH, DETACH, MOVE
   - Block dangerous functions: `currentUser()` mutations won't apply but block `arrayJoin` in LIMIT position, etc.
-- [ ] Implement result size limiting (5 MB max) and row limit (default 100, max 1000)
-- [ ] Write tests for config resolution, connection string building, query validation (comprehensive table-driven tests for isSelectOnly)
-- [ ] Run `make test-mcp` — must pass before Task 4
+- [x] Implement result size limiting (5 MB max) and row limit (default 100, max 1000)
+- [x] Write tests for config resolution, connection string building, query validation (comprehensive table-driven tests for isSelectOnly)
+- [x] Run `make test-mcp` — must pass before Task 4
 
 ### Task 4: Implement query and schema discovery tools
 
