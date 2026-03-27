@@ -40,7 +40,7 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 │       ├── cache/          # Generic TTL cache
 │       ├── mcpproxy/       # MCP proxy: connection pool + handler for external MCP servers
 │       ├── ratelimit/      # Token bucket rate limiter
-│       └── tools/          # SSH, Zabbix, VictoriaMetrics, PostgreSQL, Grafana, and HTTP connector implementations
+│       └── tools/          # SSH, Zabbix, VictoriaMetrics, PostgreSQL, ClickHouse, Grafana, and HTTP connector implementations
 ├── web/                    # React frontend
 ├── qmd/                    # QMD search sidecar (Dockerfile, config, entrypoint)
 ├── docs/                   # OpenAPI specs (swagger at /api/docs)
@@ -109,6 +109,7 @@ make verify           # go vet + all tests (pre-commit)
 | `internal/tools/grafana` | 81.0% | ✅ |
 | `internal/auth` | 81.8% | ✅ |
 | `internal/tools/postgresql` | 79.9% | ✅ |
+| `internal/tools/clickhouse` | 82.8% | ✅ |
 | `internal/tools/victoriametrics` | 76.2% | ✅ |
 | `internal/mcpproxy` | 70.8% | ✅ |
 | `internal/mcp` | 66.8% | ⚠️ |
@@ -147,8 +148,8 @@ Tools are registered as pi-mono custom tools via `gateway-tools.ts`, communicati
 | Tool | File | Purpose |
 |------|------|---------|
 | `gateway_call` | `src/gateway-tools.ts` | Call any MCP Gateway tool by name with optional instance hint |
-| `list_tool_types` | `src/gateway-tools.ts` | List all available tool types (e.g., `ssh`, `zabbix`, `victoria_metrics`, `postgresql`, `grafana`, `qmd`) |
-| `list_tools_for_tool_type` | `src/gateway-tools.ts` | List all tools of a given type (e.g., `ssh`, `zabbix`, `victoria_metrics`, `postgresql`, `grafana`) |
+| `list_tool_types` | `src/gateway-tools.ts` | List all available tool types (e.g., `ssh`, `zabbix`, `victoria_metrics`, `postgresql`, `clickhouse`, `grafana`, `qmd`) |
+| `list_tools_for_tool_type` | `src/gateway-tools.ts` | List all tools of a given type (e.g., `ssh`, `zabbix`, `victoria_metrics`, `postgresql`, `clickhouse`, `grafana`) |
 | `get_tool_detail` | `src/gateway-tools.ts` | Get full JSON schema for a specific tool |
 | `execute_script` | `src/gateway-tools.ts` | Run JavaScript in isolated vm with injected `gateway_call()`, `list_tools_for_tool_type()`, scoped `fs` |
 
@@ -344,6 +345,9 @@ tools:
   - type: ssh
     logical_name: prod-ssh
     instance_id: 2
+  - type: clickhouse
+    logical_name: prod-clickhouse
+    instance_id: 3
 ```
 
 Resolution priority: explicit instance ID > logical name > first enabled instance of type.
@@ -601,6 +605,7 @@ Catchpoint is a first-class MCP tool type with a shared rate limiter and cached 
 - `mcp-gateway/internal/tools/zabbix/` - Zabbix integration with caching and rate limiting
 - `mcp-gateway/internal/tools/victoriametrics/` - VictoriaMetrics integration with caching and rate limiting
 - `mcp-gateway/internal/tools/postgresql/` - PostgreSQL read-only query and diagnostics integration
+- `mcp-gateway/internal/tools/clickhouse/` - ClickHouse read-only query and OLAP diagnostics integration
 - `mcp-gateway/internal/tools/grafana/` - Grafana integration with caching and rate limiting (dashboards, alerting, data source proxy, annotations)
 - `mcp-gateway/internal/tools/httpconnector/` - Declarative HTTP connector executor with auth injection
 - `mcp-gateway/internal/mcpproxy/` - Connection pool and proxy handler for external MCP servers
