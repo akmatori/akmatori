@@ -9,6 +9,7 @@ import (
 
 	"github.com/akmatori/mcp-gateway/internal/database"
 	"github.com/akmatori/mcp-gateway/internal/mcp"
+	"github.com/akmatori/mcp-gateway/internal/ratelimit"
 )
 
 func TestExtractLogicalName(t *testing.T) {
@@ -578,4 +579,130 @@ func TestBuildHTTPConnectorInputSchema(t *testing.T) {
 	if statusProp.Default != "active" {
 		t.Errorf("expected default 'active' for status, got %v", statusProp.Default)
 	}
+}
+
+// --- ClickHouse Tool Registration Tests ---
+
+func TestRegisterClickHouseTools_AllToolsRegistered(t *testing.T) {
+	stdLogger := log.New(io.Discard, "", 0)
+	server := mcp.NewServer("test", "1.0.0", stdLogger)
+	registry := NewRegistry(server, stdLogger)
+
+	registry.clickhouseLimit = ratelimit.New(ClickHouseRatePerSecond, ClickHouseBurstCapacity)
+	registry.registerClickHouseTools()
+
+	expectedTools := []string{
+		"clickhouse.execute_query",
+		"clickhouse.show_databases",
+		"clickhouse.show_tables",
+		"clickhouse.describe_table",
+		"clickhouse.get_query_log",
+		"clickhouse.get_running_queries",
+		"clickhouse.get_merges",
+		"clickhouse.get_replication_status",
+		"clickhouse.get_parts_info",
+		"clickhouse.get_cluster_info",
+	}
+
+	tools := server.Tools()
+	for _, name := range expectedTools {
+		if _, ok := tools[name]; !ok {
+			t.Errorf("expected tool %q to be registered", name)
+		}
+	}
+}
+
+func TestRegisterClickHouseTools_ToolCount(t *testing.T) {
+	stdLogger := log.New(io.Discard, "", 0)
+	server := mcp.NewServer("test", "1.0.0", stdLogger)
+	registry := NewRegistry(server, stdLogger)
+
+	registry.clickhouseLimit = ratelimit.New(ClickHouseRatePerSecond, ClickHouseBurstCapacity)
+	registry.registerClickHouseTools()
+
+	tools := server.Tools()
+	count := 0
+	for name := range tools {
+		if len(name) > 11 && name[:11] == "clickhouse." {
+			count++
+		}
+	}
+	if count != 10 {
+		t.Errorf("expected 10 clickhouse tools, got %d", count)
+	}
+}
+
+func TestRegisterClickHouseTools_InputSchemas(t *testing.T) {
+	stdLogger := log.New(io.Discard, "", 0)
+	server := mcp.NewServer("test", "1.0.0", stdLogger)
+	registry := NewRegistry(server, stdLogger)
+
+	registry.clickhouseLimit = ratelimit.New(ClickHouseRatePerSecond, ClickHouseBurstCapacity)
+	registry.registerClickHouseTools()
+
+	tools := server.Tools()
+
+	// execute_query requires "query"
+	eq := tools["clickhouse.execute_query"]
+	if len(eq.InputSchema.Required) != 1 || eq.InputSchema.Required[0] != "query" {
+		t.Errorf("execute_query: expected required [query], got %v", eq.InputSchema.Required)
+	}
+	if _, ok := eq.InputSchema.Properties["query"]; !ok {
+		t.Error("execute_query: expected 'query' property")
+	}
+	if _, ok := eq.InputSchema.Properties["limit"]; !ok {
+		t.Error("execute_query: expected 'limit' property")
+	}
+	if _, ok := eq.InputSchema.Properties["timeout_seconds"]; !ok {
+		t.Error("execute_query: expected 'timeout_seconds' property")
+	}
+
+	// describe_table requires "table_name"
+	dt := tools["clickhouse.describe_table"]
+	if len(dt.InputSchema.Required) != 1 || dt.InputSchema.Required[0] != "table_name" {
+		t.Errorf("describe_table: expected required [table_name], got %v", dt.InputSchema.Required)
+	}
+
+	// get_parts_info requires "table_name"
+	pi := tools["clickhouse.get_parts_info"]
+	if len(pi.InputSchema.Required) != 1 || pi.InputSchema.Required[0] != "table_name" {
+		t.Errorf("get_parts_info: expected required [table_name], got %v", pi.InputSchema.Required)
+	}
+
+	// show_databases has no required params
+	sd := tools["clickhouse.show_databases"]
+	if len(sd.InputSchema.Required) != 0 {
+		t.Errorf("show_databases: expected no required params, got %v", sd.InputSchema.Required)
+	}
+}
+
+func TestRegisterClickHouseTools_ListToolsByType(t *testing.T) {
+	stdLogger := log.New(io.Discard, "", 0)
+	server := mcp.NewServer("test", "1.0.0", stdLogger)
+	registry := NewRegistry(server, stdLogger)
+
+	registry.clickhouseLimit = ratelimit.New(ClickHouseRatePerSecond, ClickHouseBurstCapacity)
+	registry.registerClickHouseTools()
+
+	results := registry.ListToolsByType("clickhouse")
+	if len(results) != 10 {
+		t.Fatalf("expected 10 clickhouse tools in list, got %d", len(results))
+	}
+	for _, r := range results {
+		if r.ToolType != "clickhouse" {
+			t.Errorf("expected tool_type 'clickhouse', got %q", r.ToolType)
+		}
+	}
+}
+
+func TestRegisterClickHouseTools_StopCleanup(t *testing.T) {
+	stdLogger := log.New(io.Discard, "", 0)
+	server := mcp.NewServer("test", "1.0.0", stdLogger)
+	registry := NewRegistry(server, stdLogger)
+
+	registry.clickhouseLimit = ratelimit.New(ClickHouseRatePerSecond, ClickHouseBurstCapacity)
+	registry.registerClickHouseTools()
+
+	// Stop should not panic even with a live tool
+	registry.Stop()
 }

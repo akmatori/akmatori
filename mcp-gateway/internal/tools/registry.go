@@ -15,6 +15,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/mcpproxy"
 	"github.com/akmatori/mcp-gateway/internal/ratelimit"
 	"github.com/akmatori/mcp-gateway/internal/tools/catchpoint"
+	"github.com/akmatori/mcp-gateway/internal/tools/clickhouse"
 	"github.com/akmatori/mcp-gateway/internal/tools/grafana"
 	"github.com/akmatori/mcp-gateway/internal/tools/httpconnector"
 	"github.com/akmatori/mcp-gateway/internal/tools/postgresql"
@@ -35,6 +36,8 @@ const (
 	PostgreSQLBurstCapacity  = 20 // burst capacity
 	GrafanaRatePerSecond     = 10 // requests per second
 	GrafanaBurstCapacity     = 20 // burst capacity
+	ClickHouseRatePerSecond  = 10 // requests per second
+	ClickHouseBurstCapacity  = 20 // burst capacity
 )
 
 // Registry manages tool registration
@@ -51,6 +54,8 @@ type Registry struct {
 	postgresqlLimit  *ratelimit.Limiter
 	grafanaTool      *grafana.GrafanaTool
 	grafanaLimit     *ratelimit.Limiter
+	clickhouseTool   *clickhouse.ClickHouseTool
+	clickhouseLimit  *ratelimit.Limiter
 
 	// HTTP connector state
 	httpExecutor       *httpconnector.HTTPConnectorExecutor
@@ -113,6 +118,13 @@ func (r *Registry) RegisterAllTools() {
 	// Register Grafana tools with rate limiter
 	r.registerGrafanaTools()
 
+	// Create rate limiter for ClickHouse: 10 req/sec, burst 20
+	r.clickhouseLimit = ratelimit.New(ClickHouseRatePerSecond, ClickHouseBurstCapacity)
+	r.logger.Printf("ClickHouse rate limiter created: %d req/sec, burst %d", ClickHouseRatePerSecond, ClickHouseBurstCapacity)
+
+	// Register ClickHouse tools with rate limiter
+	r.registerClickHouseTools()
+
 	r.logger.Println("All tools registered")
 }
 
@@ -132,6 +144,9 @@ func (r *Registry) Stop() {
 	}
 	if r.grafanaTool != nil {
 		r.grafanaTool.Stop()
+	}
+	if r.clickhouseTool != nil {
+		r.clickhouseTool.Stop()
 	}
 	if r.httpExecutor != nil {
 		r.httpExecutor.Stop()
@@ -2264,4 +2279,245 @@ func (r *Registry) registerGrafanaTools() {
 	)
 
 	r.logger.Println("Grafana tools registered (13 methods)")
+}
+
+// registerClickHouseTools registers all ClickHouse tool methods
+func (r *Registry) registerClickHouseTools() {
+	r.clickhouseTool = clickhouse.NewClickHouseTool(r.logger, r.clickhouseLimit)
+
+	// clickhouse.execute_query
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "clickhouse.execute_query",
+			Description: "Execute a read-only SQL query (SELECT, WITH, SHOW, DESCRIBE, EXPLAIN, EXISTS only) against a ClickHouse database",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"query": {
+						Type:        "string",
+						Description: "SQL query to execute (required)",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of rows to return (default 100, max 1000)",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Description: "Query timeout in seconds (default 30, range 5-300)",
+					},
+				},
+				Required: []string{"query"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.clickhouseTool.ExecuteQuery(ctx, incidentID, args)
+		},
+	)
+
+	// clickhouse.show_databases
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "clickhouse.show_databases",
+			Description: "List all databases on the ClickHouse server",
+			InputSchema: mcp.InputSchema{
+				Type:       "object",
+				Properties: map[string]mcp.Property{},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.clickhouseTool.ShowDatabases(ctx, incidentID, args)
+		},
+	)
+
+	// clickhouse.show_tables
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "clickhouse.show_tables",
+			Description: "List tables in a ClickHouse database",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"database": {
+						Type:        "string",
+						Description: "Database name (defaults to configured database)",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.clickhouseTool.ShowTables(ctx, incidentID, args)
+		},
+	)
+
+	// clickhouse.describe_table
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "clickhouse.describe_table",
+			Description: "Get column definitions and types for a ClickHouse table",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"table_name": {
+						Type:        "string",
+						Description: "Table name to describe (required)",
+					},
+					"database": {
+						Type:        "string",
+						Description: "Database name (defaults to configured database)",
+					},
+				},
+				Required: []string{"table_name"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.clickhouseTool.DescribeTable(ctx, incidentID, args)
+		},
+	)
+
+	// clickhouse.get_query_log
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "clickhouse.get_query_log",
+			Description: "Get recent queries from system.query_log",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"min_duration_ms": {
+						Type:        "number",
+						Description: "Minimum query duration in milliseconds to filter",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of entries to return (default 50, max 1000)",
+					},
+					"query_kind": {
+						Type:        "string",
+						Description: "Filter by query kind (e.g. Select, Insert)",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.clickhouseTool.GetQueryLog(ctx, incidentID, args)
+		},
+	)
+
+	// clickhouse.get_running_queries
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "clickhouse.get_running_queries",
+			Description: "Get currently running queries from system.processes",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"min_elapsed_seconds": {
+						Type:        "number",
+						Description: "Only show queries running longer than this many seconds",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.clickhouseTool.GetRunningQueries(ctx, incidentID, args)
+		},
+	)
+
+	// clickhouse.get_merges
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "clickhouse.get_merges",
+			Description: "Get active merge operations from system.merges",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"table": {
+						Type:        "string",
+						Description: "Filter by table name",
+					},
+					"database": {
+						Type:        "string",
+						Description: "Filter by database name",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.clickhouseTool.GetMerges(ctx, incidentID, args)
+		},
+	)
+
+	// clickhouse.get_replication_status
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "clickhouse.get_replication_status",
+			Description: "Get replication queue status from system.replication_queue",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"table": {
+						Type:        "string",
+						Description: "Filter by table name",
+					},
+					"database": {
+						Type:        "string",
+						Description: "Filter by database name",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.clickhouseTool.GetReplicationStatus(ctx, incidentID, args)
+		},
+	)
+
+	// clickhouse.get_parts_info
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "clickhouse.get_parts_info",
+			Description: "Get parts information from system.parts for a ClickHouse table",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"table_name": {
+						Type:        "string",
+						Description: "Table name to get parts info for (required)",
+					},
+					"database": {
+						Type:        "string",
+						Description: "Database name (defaults to configured database)",
+					},
+					"active_only": {
+						Type:        "boolean",
+						Description: "Only show active parts (default: true)",
+					},
+				},
+				Required: []string{"table_name"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.clickhouseTool.GetPartsInfo(ctx, incidentID, args)
+		},
+	)
+
+	// clickhouse.get_cluster_info
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "clickhouse.get_cluster_info",
+			Description: "Get cluster topology from system.clusters",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"cluster": {
+						Type:        "string",
+						Description: "Filter by cluster name",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.clickhouseTool.GetClusterInfo(ctx, incidentID, args)
+		},
+	)
+
+	r.logger.Println("ClickHouse tools registered (10 methods)")
 }

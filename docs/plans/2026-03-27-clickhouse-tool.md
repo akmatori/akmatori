@@ -114,13 +114,13 @@ Add a ClickHouse tool to the MCP Gateway, providing read-only query execution an
 **Files:**
 - Modify: `mcp-gateway/internal/tools/registry.go`
 
-- [ ] Add `clickhouseTool` and `clickhouseLimit` fields to Registry struct
-- [ ] Add `ClickHouseRatePerSecond` (10) and `ClickHouseBurstCapacity` (20) constants
-- [ ] Implement `registerClickHouseTools()` — create rate limiter, instantiate tool, register all 10 tools with MCP input schemas
-- [ ] Call `registerClickHouseTools()` from `RegisterAllTools()`
-- [ ] Add `clickhouseTool.Stop()` call in registry cleanup
-- [ ] Write tests verifying all 10 tools are registered with correct names and schemas
-- [ ] Run `make test-mcp` — must pass before Task 7
+- [x] Add `clickhouseTool` and `clickhouseLimit` fields to Registry struct
+- [x] Add `ClickHouseRatePerSecond` (10) and `ClickHouseBurstCapacity` (20) constants
+- [x] Implement `registerClickHouseTools()` — create rate limiter, instantiate tool, register all 10 tools with MCP input schemas
+- [x] Call `registerClickHouseTools()` from `RegisterAllTools()`
+- [x] Add `clickhouseTool.Stop()` call in registry cleanup
+- [x] Write tests verifying all 10 tools are registered with correct names and schemas
+- [x] Run `make test-mcp` — must pass before Task 7
 
 ### Task 7: Verify acceptance criteria
 
