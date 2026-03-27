@@ -59,6 +59,7 @@ func GetToolSchemas() map[string]ToolTypeSchema {
 		"ssh":              getSSHSchema(),
 		"zabbix":           getZabbixSchema(),
 		"victoria_metrics": getVictoriaMetricsSchema(),
+		"grafana":          getGrafanaSchema(),
 		"catchpoint":       getCatchpointSchema(),
 	}
 }
@@ -431,6 +432,135 @@ func getVictoriaMetricsSchema() ToolTypeSchema {
 				Description: "Make a generic HTTP request to VictoriaMetrics API",
 				Parameters:  "path (required), method, params",
 				Returns:     "Raw API response data",
+			},
+		},
+	}
+}
+
+func getGrafanaSchema() ToolTypeSchema {
+	return ToolTypeSchema{
+		Name:        "grafana",
+		Description: "Grafana observability platform integration. Search dashboards, query data sources (Prometheus, Loki) via proxy, manage alerts and silences, and create annotations.",
+		Version:     "1.0.0",
+		SettingsSchema: SettingsSchema{
+			Type:     "object",
+			Required: []string{"grafana_url", "grafana_api_token"},
+			Properties: map[string]PropertySchema{
+				"grafana_url": {
+					Type:        "string",
+					Description: "Grafana server URL (e.g., https://grafana.example.com)",
+					Example:     "https://grafana.example.com",
+				},
+				"grafana_api_token": {
+					Type:        "string",
+					Description: "Grafana API token (Service Account token recommended)",
+					Secret:      true,
+				},
+				"grafana_verify_ssl": {
+					Type:        "boolean",
+					Description: "Verify SSL certificates",
+					Default:     true,
+					Advanced:    true,
+				},
+				"grafana_timeout": {
+					Type:        "integer",
+					Description: "API request timeout in seconds",
+					Default:     30,
+					Minimum:     intPtr(5),
+					Maximum:     intPtr(300),
+					Advanced:    true,
+				},
+				"grafana_use_proxy": {
+					Type:        "boolean",
+					Description: "Route requests through the configured HTTP proxy",
+					Default:     false,
+					Advanced:    true,
+				},
+				"grafana_proxy_url": {
+					Type:        "string",
+					Description: "HTTP proxy URL (overrides global proxy setting)",
+					Advanced:    true,
+				},
+			},
+		},
+		Functions: []ToolFunction{
+			{
+				Name:        "search_dashboards",
+				Description: "Search and list Grafana dashboards by query, tag, or folder",
+				Parameters:  "query, tag, type (dash-db|dash-folder), folder_id, limit",
+				Returns:     "JSON array of dashboard search results",
+			},
+			{
+				Name:        "get_dashboard",
+				Description: "Get a full dashboard model by UID",
+				Parameters:  "uid (required)",
+				Returns:     "JSON dashboard object with metadata and panels",
+			},
+			{
+				Name:        "get_dashboard_panels",
+				Description: "Get a summary list of panels from a dashboard",
+				Parameters:  "uid (required)",
+				Returns:     "JSON array of panel summaries (id, title, type, datasource)",
+			},
+			{
+				Name:        "get_alert_rules",
+				Description: "List all provisioned alert rules from Grafana Unified Alerting",
+				Parameters:  "None",
+				Returns:     "JSON array of alert rule objects",
+			},
+			{
+				Name:        "get_alert_instances",
+				Description: "Get firing and pending alert instances from Grafana Alertmanager",
+				Parameters:  "filter, silenced, inhibited, active",
+				Returns:     "JSON array of alert instance objects",
+			},
+			{
+				Name:        "get_alert_rule",
+				Description: "Get a specific alert rule by UID",
+				Parameters:  "uid (required)",
+				Returns:     "JSON alert rule object with full definition",
+			},
+			{
+				Name:        "silence_alert",
+				Description: "Create a silence in Grafana Alertmanager",
+				Parameters:  "matchers (required), starts_at (required), ends_at (required), created_by (required), comment (required)",
+				Returns:     "JSON with silence ID",
+			},
+			{
+				Name:        "list_data_sources",
+				Description: "List all configured data sources in Grafana",
+				Parameters:  "None",
+				Returns:     "JSON array of data source objects (uid, name, type, url)",
+			},
+			{
+				Name:        "query_data_source",
+				Description: "Query a data source via the Grafana unified query API",
+				Parameters:  "datasource_uid (required), queries (required), from, to",
+				Returns:     "JSON query results",
+			},
+			{
+				Name:        "query_prometheus",
+				Description: "Query a Prometheus-type data source via Grafana proxy (instant or range)",
+				Parameters:  "datasource_uid (required), expr (required), start, end, step, instant, range, from, to",
+				Returns:     "JSON Prometheus query results",
+			},
+			{
+				Name:        "query_loki",
+				Description: "Query a Loki-type data source via Grafana proxy (log queries)",
+				Parameters:  "datasource_uid (required), expr (required), limit, direction, start, end, from, to",
+				Returns:     "JSON Loki query results",
+			},
+			{
+				Name:        "create_annotation",
+				Description: "Create an annotation on a Grafana dashboard or globally",
+				Parameters:  "text (required), dashboard_id, panel_id, tags, time, time_end",
+				Returns:     "JSON with annotation ID",
+			},
+			{
+				Name:        "get_annotations",
+				Description: "List annotations with optional filters",
+				Parameters:  "from, to, dashboard_id, panel_id, tags, limit, type (annotation|alert)",
+				Returns:     "JSON array of annotation objects",
 			},
 		},
 	}
