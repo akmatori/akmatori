@@ -124,6 +124,9 @@ type UpdateProxySettingsRequest struct {
 		Catchpoint struct {
 			Enabled bool `json:"enabled"`
 		} `json:"catchpoint"`
+		Grafana struct {
+			Enabled bool `json:"enabled"`
+		} `json:"grafana"`
 	} `json:"services"`
 }
 

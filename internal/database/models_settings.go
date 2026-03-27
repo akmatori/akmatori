@@ -134,6 +134,7 @@ type ProxySettings struct {
 	ZabbixEnabled          bool      `gorm:"default:false" json:"zabbix_enabled"`           // Use proxy for Zabbix API
 	VictoriaMetricsEnabled bool      `gorm:"default:false" json:"victoria_metrics_enabled"` // Use proxy for VictoriaMetrics API
 	CatchpointEnabled      bool      `gorm:"default:false" json:"catchpoint_enabled"`       // Use proxy for Catchpoint API
+	GrafanaEnabled         bool      `gorm:"default:false" json:"grafana_enabled"`          // Use proxy for Grafana API
 	CreatedAt              time.Time `json:"created_at"`
 	UpdatedAt              time.Time `json:"updated_at"`
 }

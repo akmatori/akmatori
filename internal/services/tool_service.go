@@ -158,6 +158,7 @@ func (s *ToolService) EnsureToolTypes() error {
 		{Name: "victoria_metrics", Description: "VictoriaMetrics time-series database integration"},
 		{Name: "catchpoint", Description: "Catchpoint Digital Experience Monitoring integration"},
 		{Name: "postgresql", Description: "PostgreSQL database integration for read-only queries and diagnostics"},
+		{Name: "grafana", Description: "Grafana observability platform integration"},
 	}
 
 	for _, tt := range toolTypes {
