@@ -1389,3 +1389,640 @@ func TestSilenceAlert_NotCached(t *testing.T) {
 		t.Errorf("expected 2 HTTP requests (no caching for POST), got %d", counter.Load())
 	}
 }
+
+// --- ListDataSources tests ---
+
+func TestListDataSources_Success(t *testing.T) {
+	var receivedPath string
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[{"id":1,"uid":"prom-1","name":"Prometheus","type":"prometheus","url":"http://prometheus:9090"},{"id":2,"uid":"loki-1","name":"Loki","type":"loki","url":"http://loki:3100"}]`)
+	})
+
+	result, err := tool.ListDataSources(context.Background(), "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedPath != "/api/datasources" {
+		t.Errorf("expected /api/datasources, got %s", receivedPath)
+	}
+	if !strings.Contains(result, "prom-1") {
+		t.Error("expected result to contain prometheus datasource")
+	}
+	if !strings.Contains(result, "loki-1") {
+		t.Error("expected result to contain loki datasource")
+	}
+}
+
+func TestListDataSources_Cached(t *testing.T) {
+	tool, _, counter := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[{"id":1,"uid":"prom-1"}]`)
+	})
+
+	ctx := context.Background()
+	args := map[string]interface{}{}
+
+	_, err := tool.ListDataSources(ctx, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, err = tool.ListDataSources(ctx, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if counter.Load() != 1 {
+		t.Errorf("expected 1 HTTP request (cache hit), got %d", counter.Load())
+	}
+}
+
+func TestListDataSources_WithLogicalName(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[{"id":1,"uid":"prom-1"}]`)
+	})
+
+	// Set up logical name config
+	cached, _ := tool.configCache.Get(configCacheKey("test-incident"))
+	tool.configCache.Set("creds:logical:grafana:prod-grafana", cached)
+
+	result, err := tool.ListDataSources(context.Background(), "test-incident", map[string]interface{}{
+		"logical_name": "prod-grafana",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "prom-1") {
+		t.Error("expected result to contain datasource")
+	}
+}
+
+// --- QueryDataSource tests ---
+
+func TestQueryDataSource_Success(t *testing.T) {
+	var receivedMethod string
+	var receivedPath string
+	var receivedBody map[string]interface{}
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		receivedPath = r.URL.Path
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedBody)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"results":{"A":{"frames":[{"data":{"values":[[1,2,3]]}}]}}}`)
+	})
+
+	result, err := tool.QueryDataSource(context.Background(), "test-incident", map[string]interface{}{
+		"datasource_uid": "prom-1",
+		"queries": []interface{}{
+			map[string]interface{}{
+				"refId":      "A",
+				"datasource": map[string]interface{}{"uid": "prom-1", "type": "prometheus"},
+				"expr":       "up",
+			},
+		},
+		"from": "now-1h",
+		"to":   "now",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedMethod != http.MethodPost {
+		t.Errorf("expected POST, got %s", receivedMethod)
+	}
+	if receivedPath != "/api/ds/query" {
+		t.Errorf("expected /api/ds/query, got %s", receivedPath)
+	}
+	if !strings.Contains(result, "frames") {
+		t.Error("expected result to contain query results")
+	}
+	if receivedBody["from"] != "now-1h" {
+		t.Errorf("expected from=now-1h, got %v", receivedBody["from"])
+	}
+	if receivedBody["to"] != "now" {
+		t.Errorf("expected to=now, got %v", receivedBody["to"])
+	}
+}
+
+func TestQueryDataSource_MissingDatasourceUID(t *testing.T) {
+	tool := NewGrafanaTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.QueryDataSource(context.Background(), "test-incident", map[string]interface{}{
+		"queries": []interface{}{},
+	})
+	if err == nil {
+		t.Fatal("expected error for missing datasource_uid")
+	}
+	if !strings.Contains(err.Error(), "datasource_uid is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestQueryDataSource_MissingQueries(t *testing.T) {
+	tool := NewGrafanaTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.QueryDataSource(context.Background(), "test-incident", map[string]interface{}{
+		"datasource_uid": "prom-1",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing queries")
+	}
+	if !strings.Contains(err.Error(), "queries is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestQueryDataSource_NotCached(t *testing.T) {
+	tool, _, counter := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"results":{}}`)
+	})
+
+	ctx := context.Background()
+	args := map[string]interface{}{
+		"datasource_uid": "prom-1",
+		"queries":        []interface{}{map[string]interface{}{"refId": "A", "expr": "up"}},
+	}
+
+	_, err := tool.QueryDataSource(ctx, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, err = tool.QueryDataSource(ctx, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if counter.Load() != 2 {
+		t.Errorf("expected 2 HTTP requests (no caching for POST), got %d", counter.Load())
+	}
+}
+
+// --- QueryPrometheus tests ---
+
+func TestQueryPrometheus_Success(t *testing.T) {
+	var receivedBody map[string]interface{}
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedBody)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"results":{"A":{"frames":[{"data":{"values":[[1]]}}]}}}`)
+	})
+
+	result, err := tool.QueryPrometheus(context.Background(), "test-incident", map[string]interface{}{
+		"datasource_uid": "prom-1",
+		"expr":           "node_cpu_seconds_total{mode=\"idle\"}",
+		"instant":        true,
+		"from":           "now-5m",
+		"to":             "now",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(result, "frames") {
+		t.Error("expected result to contain query frames")
+	}
+
+	// Verify the query structure
+	queries, ok := receivedBody["queries"].([]interface{})
+	if !ok || len(queries) == 0 {
+		t.Fatal("expected queries array in request body")
+	}
+	q := queries[0].(map[string]interface{})
+	if q["expr"] != "node_cpu_seconds_total{mode=\"idle\"}" {
+		t.Errorf("unexpected expr: %v", q["expr"])
+	}
+	ds := q["datasource"].(map[string]interface{})
+	if ds["uid"] != "prom-1" {
+		t.Errorf("expected datasource uid=prom-1, got %v", ds["uid"])
+	}
+	if ds["type"] != "prometheus" {
+		t.Errorf("expected datasource type=prometheus, got %v", ds["type"])
+	}
+	if q["instant"] != true {
+		t.Error("expected instant=true in query")
+	}
+}
+
+func TestQueryPrometheus_RangeQuery(t *testing.T) {
+	var receivedBody map[string]interface{}
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedBody)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"results":{"A":{"frames":[]}}}`)
+	})
+
+	_, err := tool.QueryPrometheus(context.Background(), "test-incident", map[string]interface{}{
+		"datasource_uid": "prom-1",
+		"expr":           "rate(http_requests_total[5m])",
+		"range":          true,
+		"start":          "2026-03-27T00:00:00Z",
+		"end":            "2026-03-27T01:00:00Z",
+		"step":           "60s",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	queries := receivedBody["queries"].([]interface{})
+	q := queries[0].(map[string]interface{})
+	if q["range"] != true {
+		t.Error("expected range=true")
+	}
+	if q["start"] != "2026-03-27T00:00:00Z" {
+		t.Errorf("expected start time, got %v", q["start"])
+	}
+	if q["step"] != "60s" {
+		t.Errorf("expected step=60s, got %v", q["step"])
+	}
+}
+
+func TestQueryPrometheus_MissingDatasourceUID(t *testing.T) {
+	tool := NewGrafanaTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.QueryPrometheus(context.Background(), "test-incident", map[string]interface{}{
+		"expr": "up",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing datasource_uid")
+	}
+	if !strings.Contains(err.Error(), "datasource_uid is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestQueryPrometheus_MissingExpr(t *testing.T) {
+	tool := NewGrafanaTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.QueryPrometheus(context.Background(), "test-incident", map[string]interface{}{
+		"datasource_uid": "prom-1",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing expr")
+	}
+	if !strings.Contains(err.Error(), "expr is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// --- QueryLoki tests ---
+
+func TestQueryLoki_Success(t *testing.T) {
+	var receivedBody map[string]interface{}
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedBody)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"results":{"A":{"frames":[{"data":{"values":[["log line 1","log line 2"]]}}]}}}`)
+	})
+
+	result, err := tool.QueryLoki(context.Background(), "test-incident", map[string]interface{}{
+		"datasource_uid": "loki-1",
+		"expr":           "{app=\"nginx\"} |= \"error\"",
+		"limit":          float64(100),
+		"direction":      "backward",
+		"from":           "now-1h",
+		"to":             "now",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(result, "log line") {
+		t.Error("expected result to contain log data")
+	}
+
+	queries := receivedBody["queries"].([]interface{})
+	q := queries[0].(map[string]interface{})
+	if q["expr"] != "{app=\"nginx\"} |= \"error\"" {
+		t.Errorf("unexpected expr: %v", q["expr"])
+	}
+	ds := q["datasource"].(map[string]interface{})
+	if ds["uid"] != "loki-1" {
+		t.Errorf("expected datasource uid=loki-1, got %v", ds["uid"])
+	}
+	if ds["type"] != "loki" {
+		t.Errorf("expected datasource type=loki, got %v", ds["type"])
+	}
+	// maxLines is marshalled as float64 from JSON
+	if q["maxLines"] != float64(100) {
+		t.Errorf("expected maxLines=100, got %v", q["maxLines"])
+	}
+	if q["direction"] != "backward" {
+		t.Errorf("expected direction=backward, got %v", q["direction"])
+	}
+}
+
+func TestQueryLoki_MissingDatasourceUID(t *testing.T) {
+	tool := NewGrafanaTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.QueryLoki(context.Background(), "test-incident", map[string]interface{}{
+		"expr": "{app=\"nginx\"}",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing datasource_uid")
+	}
+	if !strings.Contains(err.Error(), "datasource_uid is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestQueryLoki_MissingExpr(t *testing.T) {
+	tool := NewGrafanaTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.QueryLoki(context.Background(), "test-incident", map[string]interface{}{
+		"datasource_uid": "loki-1",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing expr")
+	}
+	if !strings.Contains(err.Error(), "expr is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestQueryLoki_MinimalArgs(t *testing.T) {
+	var receivedBody map[string]interface{}
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedBody)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"results":{"A":{"frames":[]}}}`)
+	})
+
+	_, err := tool.QueryLoki(context.Background(), "test-incident", map[string]interface{}{
+		"datasource_uid": "loki-1",
+		"expr":           "{app=\"test\"}",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	queries := receivedBody["queries"].([]interface{})
+	q := queries[0].(map[string]interface{})
+	// Should not have optional fields when not provided
+	if _, exists := q["maxLines"]; exists {
+		t.Error("maxLines should not be present when limit not provided")
+	}
+	if _, exists := q["direction"]; exists {
+		t.Error("direction should not be present when not provided")
+	}
+}
+
+// --- CreateAnnotation tests ---
+
+func TestCreateAnnotation_Success(t *testing.T) {
+	var receivedMethod string
+	var receivedPath string
+	var receivedBody map[string]interface{}
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		receivedPath = r.URL.Path
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedBody)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"id":42,"message":"Annotation added"}`)
+	})
+
+	result, err := tool.CreateAnnotation(context.Background(), "test-incident", map[string]interface{}{
+		"text":         "Deployment started",
+		"dashboard_id": float64(5),
+		"panel_id":     float64(2),
+		"tags":         []interface{}{"deploy", "production"},
+		"time":         float64(1711497600000),
+		"time_end":     float64(1711501200000),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedMethod != http.MethodPost {
+		t.Errorf("expected POST, got %s", receivedMethod)
+	}
+	if receivedPath != "/api/annotations" {
+		t.Errorf("expected /api/annotations, got %s", receivedPath)
+	}
+	if !strings.Contains(result, "42") {
+		t.Error("expected result to contain annotation ID")
+	}
+	if receivedBody["text"] != "Deployment started" {
+		t.Errorf("expected text=Deployment started, got %v", receivedBody["text"])
+	}
+	// JSON numbers are float64
+	if receivedBody["dashboardId"] != float64(5) {
+		t.Errorf("expected dashboardId=5, got %v", receivedBody["dashboardId"])
+	}
+	if receivedBody["panelId"] != float64(2) {
+		t.Errorf("expected panelId=2, got %v", receivedBody["panelId"])
+	}
+}
+
+func TestCreateAnnotation_MissingText(t *testing.T) {
+	tool := NewGrafanaTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.CreateAnnotation(context.Background(), "test-incident", map[string]interface{}{
+		"dashboard_id": float64(5),
+	})
+	if err == nil {
+		t.Fatal("expected error for missing text")
+	}
+	if !strings.Contains(err.Error(), "text is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestCreateAnnotation_MinimalArgs(t *testing.T) {
+	var receivedBody map[string]interface{}
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &receivedBody)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"id":1}`)
+	})
+
+	_, err := tool.CreateAnnotation(context.Background(), "test-incident", map[string]interface{}{
+		"text": "Global annotation",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedBody["text"] != "Global annotation" {
+		t.Errorf("expected text, got %v", receivedBody["text"])
+	}
+	// Optional fields should not be present
+	if _, exists := receivedBody["dashboardId"]; exists {
+		t.Error("dashboardId should not be present when not provided")
+	}
+	if _, exists := receivedBody["panelId"]; exists {
+		t.Error("panelId should not be present when not provided")
+	}
+}
+
+func TestCreateAnnotation_NotCached(t *testing.T) {
+	tool, _, counter := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"id":1}`)
+	})
+
+	ctx := context.Background()
+	args := map[string]interface{}{"text": "test annotation"}
+
+	_, err := tool.CreateAnnotation(ctx, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, err = tool.CreateAnnotation(ctx, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if counter.Load() != 2 {
+		t.Errorf("expected 2 HTTP requests (no caching for POST), got %d", counter.Load())
+	}
+}
+
+// --- GetAnnotations tests ---
+
+func TestGetAnnotations_Success(t *testing.T) {
+	var receivedPath string
+	var receivedParams url.Values
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		receivedParams = r.URL.Query()
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[{"id":1,"text":"deploy","dashboardId":5},{"id":2,"text":"incident","dashboardId":5}]`)
+	})
+
+	result, err := tool.GetAnnotations(context.Background(), "test-incident", map[string]interface{}{
+		"from":         float64(1711497600000),
+		"to":           float64(1711501200000),
+		"dashboard_id": float64(5),
+		"limit":        float64(50),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedPath != "/api/annotations" {
+		t.Errorf("expected /api/annotations, got %s", receivedPath)
+	}
+	if receivedParams.Get("from") != "1711497600000" {
+		t.Errorf("expected from param, got %s", receivedParams.Get("from"))
+	}
+	if receivedParams.Get("to") != "1711501200000" {
+		t.Errorf("expected to param, got %s", receivedParams.Get("to"))
+	}
+	if receivedParams.Get("dashboardId") != "5" {
+		t.Errorf("expected dashboardId param, got %s", receivedParams.Get("dashboardId"))
+	}
+	if receivedParams.Get("limit") != "50" {
+		t.Errorf("expected limit param, got %s", receivedParams.Get("limit"))
+	}
+	if !strings.Contains(result, "deploy") {
+		t.Error("expected result to contain annotation data")
+	}
+}
+
+func TestGetAnnotations_WithAllFilters(t *testing.T) {
+	var receivedParams url.Values
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedParams = r.URL.Query()
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[]`)
+	})
+
+	_, err := tool.GetAnnotations(context.Background(), "test-incident", map[string]interface{}{
+		"from":         float64(1000),
+		"to":           float64(2000),
+		"dashboard_id": float64(3),
+		"panel_id":     float64(7),
+		"tags":         "deploy,production",
+		"limit":        float64(100),
+		"type":         "annotation",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedParams.Get("panelId") != "7" {
+		t.Errorf("expected panelId=7, got %s", receivedParams.Get("panelId"))
+	}
+	if receivedParams.Get("tags") != "deploy,production" {
+		t.Errorf("expected tags param, got %s", receivedParams.Get("tags"))
+	}
+	if receivedParams.Get("type") != "annotation" {
+		t.Errorf("expected type=annotation, got %s", receivedParams.Get("type"))
+	}
+}
+
+func TestGetAnnotations_LimitClamped(t *testing.T) {
+	var receivedParams url.Values
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedParams = r.URL.Query()
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[]`)
+	})
+
+	_, err := tool.GetAnnotations(context.Background(), "test-incident", map[string]interface{}{
+		"limit": float64(99999),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedParams.Get("limit") != "5000" {
+		t.Errorf("expected limit clamped to 5000, got %s", receivedParams.Get("limit"))
+	}
+}
+
+func TestGetAnnotations_NoFilters(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[]`)
+	})
+
+	result, err := tool.GetAnnotations(context.Background(), "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "[]" {
+		t.Errorf("expected empty array, got %s", result)
+	}
+}
+
+func TestGetAnnotations_Cached(t *testing.T) {
+	tool, _, counter := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[{"id":1}]`)
+	})
+
+	ctx := context.Background()
+	args := map[string]interface{}{"from": float64(1000), "to": float64(2000)}
+
+	_, err := tool.GetAnnotations(ctx, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, err = tool.GetAnnotations(ctx, "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if counter.Load() != 1 {
+		t.Errorf("expected 1 HTTP request (cache hit), got %d", counter.Load())
+	}
+}

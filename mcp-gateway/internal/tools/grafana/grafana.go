@@ -24,9 +24,10 @@ const (
 	ConfigCacheTTL    = 5 * time.Minute  // Credentials cache TTL
 	ResponseCacheTTL  = 30 * time.Second // Default API response cache TTL
 	CacheCleanupTick  = time.Minute      // Background cleanup interval
-	AlertsCacheTTL    = 15 * time.Second // Alerts and firing instances cache TTL
-	DashboardCacheTTL = 30 * time.Second // Dashboard data cache TTL
-	InventoryCacheTTL = 60 * time.Second // Data sources and static config cache TTL
+	AlertsCacheTTL      = 15 * time.Second // Alerts and firing instances cache TTL
+	DashboardCacheTTL   = 30 * time.Second // Dashboard data cache TTL
+	InventoryCacheTTL   = 60 * time.Second // Data sources and static config cache TTL
+	AnnotationsCacheTTL = 30 * time.Second // Annotations cache TTL
 )
 
 // GrafanaConfig holds Grafana connection configuration
@@ -556,6 +557,249 @@ func (t *GrafanaTool) SilenceAlert(ctx context.Context, incidentID string, args 
 	}
 
 	body, err := t.doPost(ctx, incidentID, "/api/alertmanager/grafana/api/v2/silences", reqBody, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// ListDataSources lists all configured data sources in Grafana.
+// Returns data source metadata including uid, name, type, url (GET /api/datasources).
+func (t *GrafanaTool) ListDataSources(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	body, err := t.cachedGet(ctx, incidentID, "/api/datasources", nil, InventoryCacheTTL, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// QueryDataSource queries a data source via the Grafana unified query API (POST /api/ds/query).
+// Requires datasource_uid, and either queries (raw query objects) or expression.
+// Supports from/to time range as epoch milliseconds or relative strings.
+func (t *GrafanaTool) QueryDataSource(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	dsUID, ok := args["datasource_uid"].(string)
+	if !ok || dsUID == "" {
+		return "", fmt.Errorf("datasource_uid is required")
+	}
+
+	queries, hasQueries := args["queries"]
+	if !hasQueries {
+		return "", fmt.Errorf("queries is required (array of query objects with refId and datasource)")
+	}
+
+	reqBody := map[string]interface{}{
+		"queries": queries,
+	}
+
+	// Optional time range
+	if from, ok := args["from"].(string); ok && from != "" {
+		reqBody["from"] = from
+	}
+	if to, ok := args["to"].(string); ok && to != "" {
+		reqBody["to"] = to
+	}
+
+	body, err := t.doPost(ctx, incidentID, "/api/ds/query", reqBody, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// QueryPrometheus is a convenience wrapper for querying Prometheus-type data sources via Grafana proxy.
+// Supports both instant queries (expr only) and range queries (expr + start + end + step).
+// Uses POST /api/ds/query with Prometheus-specific query structure.
+func (t *GrafanaTool) QueryPrometheus(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	dsUID, ok := args["datasource_uid"].(string)
+	if !ok || dsUID == "" {
+		return "", fmt.Errorf("datasource_uid is required")
+	}
+
+	expr, ok := args["expr"].(string)
+	if !ok || expr == "" {
+		return "", fmt.Errorf("expr is required (PromQL expression)")
+	}
+
+	query := map[string]interface{}{
+		"refId": "A",
+		"datasource": map[string]interface{}{
+			"uid":  dsUID,
+			"type": "prometheus",
+		},
+		"expr": expr,
+	}
+
+	// Range query parameters
+	if start, ok := args["start"].(string); ok && start != "" {
+		query["start"] = start
+	}
+	if end, ok := args["end"].(string); ok && end != "" {
+		query["end"] = end
+	}
+	if step, ok := args["step"].(string); ok && step != "" {
+		query["step"] = step
+	}
+
+	// Instant vs range
+	if instant, ok := args["instant"].(bool); ok {
+		query["instant"] = instant
+	}
+	if rangeQ, ok := args["range"].(bool); ok {
+		query["range"] = rangeQ
+	}
+
+	reqBody := map[string]interface{}{
+		"queries": []interface{}{query},
+	}
+
+	if from, ok := args["from"].(string); ok && from != "" {
+		reqBody["from"] = from
+	}
+	if to, ok := args["to"].(string); ok && to != "" {
+		reqBody["to"] = to
+	}
+
+	body, err := t.doPost(ctx, incidentID, "/api/ds/query", reqBody, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// QueryLoki is a convenience wrapper for querying Loki-type data sources via Grafana proxy.
+// Supports log queries with optional limit, start, end, and direction.
+// Uses POST /api/ds/query with Loki-specific query structure.
+func (t *GrafanaTool) QueryLoki(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	dsUID, ok := args["datasource_uid"].(string)
+	if !ok || dsUID == "" {
+		return "", fmt.Errorf("datasource_uid is required")
+	}
+
+	expr, ok := args["expr"].(string)
+	if !ok || expr == "" {
+		return "", fmt.Errorf("expr is required (LogQL expression)")
+	}
+
+	query := map[string]interface{}{
+		"refId": "A",
+		"datasource": map[string]interface{}{
+			"uid":  dsUID,
+			"type": "loki",
+		},
+		"expr": expr,
+	}
+
+	if limit, ok := args["limit"].(float64); ok && limit > 0 {
+		query["maxLines"] = int(limit)
+	}
+	if direction, ok := args["direction"].(string); ok && direction != "" {
+		query["direction"] = direction
+	}
+	if start, ok := args["start"].(string); ok && start != "" {
+		query["start"] = start
+	}
+	if end, ok := args["end"].(string); ok && end != "" {
+		query["end"] = end
+	}
+
+	reqBody := map[string]interface{}{
+		"queries": []interface{}{query},
+	}
+
+	if from, ok := args["from"].(string); ok && from != "" {
+		reqBody["from"] = from
+	}
+	if to, ok := args["to"].(string); ok && to != "" {
+		reqBody["to"] = to
+	}
+
+	body, err := t.doPost(ctx, incidentID, "/api/ds/query", reqBody, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// CreateAnnotation creates an annotation on a Grafana dashboard or globally.
+// Requires text; optional: dashboard_id, panel_id, tags, time, time_end.
+// This is a write operation - no caching (POST /api/annotations).
+func (t *GrafanaTool) CreateAnnotation(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	text, ok := args["text"].(string)
+	if !ok || text == "" {
+		return "", fmt.Errorf("text is required")
+	}
+
+	reqBody := map[string]interface{}{
+		"text": text,
+	}
+
+	if dashID, ok := args["dashboard_id"].(float64); ok && dashID > 0 {
+		reqBody["dashboardId"] = int(dashID)
+	}
+	if panelID, ok := args["panel_id"].(float64); ok && panelID > 0 {
+		reqBody["panelId"] = int(panelID)
+	}
+	if tags, ok := args["tags"]; ok {
+		reqBody["tags"] = tags
+	}
+	if ts, ok := args["time"].(float64); ok && ts > 0 {
+		reqBody["time"] = int64(ts)
+	}
+	if tsEnd, ok := args["time_end"].(float64); ok && tsEnd > 0 {
+		reqBody["timeEnd"] = int64(tsEnd)
+	}
+
+	body, err := t.doPost(ctx, incidentID, "/api/annotations", reqBody, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// GetAnnotations lists annotations with optional filters.
+// Supports from, to (epoch ms), dashboard_id, panel_id, tags, limit, type (annotation/alert).
+// GET /api/annotations
+func (t *GrafanaTool) GetAnnotations(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	params := url.Values{}
+	if from, ok := args["from"].(float64); ok && from > 0 {
+		params.Set("from", fmt.Sprintf("%d", int64(from)))
+	}
+	if to, ok := args["to"].(float64); ok && to > 0 {
+		params.Set("to", fmt.Sprintf("%d", int64(to)))
+	}
+	if dashID, ok := args["dashboard_id"].(float64); ok && dashID > 0 {
+		params.Set("dashboardId", fmt.Sprintf("%d", int(dashID)))
+	}
+	if panelID, ok := args["panel_id"].(float64); ok && panelID > 0 {
+		params.Set("panelId", fmt.Sprintf("%d", int(panelID)))
+	}
+	if tags, ok := args["tags"].(string); ok && tags != "" {
+		params.Set("tags", tags)
+	}
+	if limit, ok := args["limit"].(float64); ok && limit > 0 {
+		l := int(limit)
+		if l > 5000 {
+			l = 5000
+		}
+		params.Set("limit", fmt.Sprintf("%d", l))
+	}
+	if annType, ok := args["type"].(string); ok && annType != "" {
+		params.Set("type", annType)
+	}
+
+	body, err := t.cachedGet(ctx, incidentID, "/api/annotations", params, AnnotationsCacheTTL, logicalName)
 	if err != nil {
 		return "", err
 	}

@@ -67,14 +67,14 @@ Add a first-class Grafana MCP tool type to the MCP Gateway, providing the AI age
 **Files:**
 - Modify: `mcp-gateway/internal/tools/grafana/grafana.go`
 
-- [ ] Implement `ListDataSources()` - list configured data sources (GET /api/datasources)
-- [ ] Implement `QueryDataSource()` - query a data source via Grafana proxy (POST /api/ds/query) with datasource UID, expression, time range
-- [ ] Implement `QueryPrometheus()` - convenience wrapper for Prometheus-type data sources (instant and range queries via proxy)
-- [ ] Implement `QueryLoki()` - convenience wrapper for Loki-type data sources (log queries via proxy)
-- [ ] Implement `CreateAnnotation()` - create annotation on a dashboard/panel (POST /api/annotations) - no caching
-- [ ] Implement `GetAnnotations()` - list annotations with filters (GET /api/annotations)
-- [ ] Write tests for data source and annotation tools
-- [ ] Run `make test-mcp` - must pass
+- [x] Implement `ListDataSources()` - list configured data sources (GET /api/datasources)
+- [x] Implement `QueryDataSource()` - query a data source via Grafana proxy (POST /api/ds/query) with datasource UID, expression, time range
+- [x] Implement `QueryPrometheus()` - convenience wrapper for Prometheus-type data sources (instant and range queries via proxy)
+- [x] Implement `QueryLoki()` - convenience wrapper for Loki-type data sources (log queries via proxy)
+- [x] Implement `CreateAnnotation()` - create annotation on a dashboard/panel (POST /api/annotations) - no caching
+- [x] Implement `GetAnnotations()` - list annotations with filters (GET /api/annotations)
+- [x] Write tests for data source and annotation tools
+- [x] Run `make test-mcp` - must pass
 
 ### Task 5: Schema and registry integration
 
