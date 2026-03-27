@@ -327,6 +327,11 @@ func TestBuildDSN(t *testing.T) {
 			&CHConfig{Host: "localhost", Port: 8123, Database: "test", Username: "u", Password: "p", SSLEnabled: false, Timeout: 30},
 			[]string{"clickhouse://u:p@localhost:8123/test"},
 		},
+		{
+			"special chars in credentials",
+			&CHConfig{Host: "localhost", Port: 8123, Database: "default", Username: "user@co", Password: "p@ss/w:d", Timeout: 30},
+			[]string{"clickhouse://", "@localhost:8123/default"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -554,8 +559,11 @@ func TestSanitizeStringValue(t *testing.T) {
 		want  string
 	}{
 		{"no special chars", "default", "default"},
-		{"single quote", "it's", "it\\'s"},
-		{"multiple quotes", "a'b'c", "a\\'b\\'c"},
+		{"single quote", "it's", "it''s"},
+		{"multiple quotes", "a'b'c", "a''b''c"},
+		{"backslash", "a\\b", "a\\b"},
+		{"backslash-quote combo", "a\\'b", "a\\''b"},
+		{"empty string", "", ""},
 	}
 
 	for _, tt := range tests {
@@ -1355,5 +1363,253 @@ func TestExecuteQuery_WithLogicalName(t *testing.T) {
 	}
 	if result != expectedResult {
 		t.Errorf("expected cached result %q, got %q", expectedResult, result)
+	}
+}
+
+func TestIsSelectOnly_DeleteAndUpdate(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  bool
+	}{
+		{"delete", "DELETE FROM users WHERE id = 1", false},
+		{"update", "UPDATE users SET name = 'x' WHERE id = 1", false},
+		{"select with delete in string", "SELECT * FROM t WHERE op = 'DELETE'", true},
+		{"select with update in string", "SELECT * FROM t WHERE op = 'UPDATE'", true},
+		{"multi-statement with delete", "SELECT 1; DELETE FROM users", false},
+		{"multi-statement with update", "SELECT 1; UPDATE users SET x = 1", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isSelectOnly(tt.query)
+			if got != tt.want {
+				t.Errorf("isSelectOnly(%q) = %v, want %v", tt.query, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExecuteQuery_CustomLimit(t *testing.T) {
+	var capturedQuery string
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		capturedQuery = query
+		return nil, nil
+	})
+	defer tool.Stop()
+
+	_, err := tool.ExecuteQuery(context.Background(), "test-incident", map[string]interface{}{
+		"query": "SELECT * FROM users",
+		"limit": float64(25),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasSuffix(capturedQuery, " LIMIT 25") {
+		t.Errorf("expected LIMIT 25 appended, got %q", capturedQuery)
+	}
+}
+
+func TestExecuteQuery_TimeoutSeconds(t *testing.T) {
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("expected context to have deadline when timeout_seconds is set")
+		}
+		return nil, nil
+	})
+	defer tool.Stop()
+
+	_, err := tool.ExecuteQuery(context.Background(), "test-incident", map[string]interface{}{
+		"query":           "SELECT 1",
+		"timeout_seconds": float64(10),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExecuteQuery_TimeoutSecondsClamped(t *testing.T) {
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("expected context to have deadline when timeout_seconds is set")
+		}
+		return nil, nil
+	})
+	defer tool.Stop()
+
+	_, err := tool.ExecuteQuery(context.Background(), "test-incident", map[string]interface{}{
+		"query":           "SELECT 1",
+		"timeout_seconds": float64(1), // Below min, should be clamped to 5
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDescribeTable_WithoutDatabase(t *testing.T) {
+	var capturedQuery string
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		capturedQuery = query
+		return nil, nil
+	})
+	defer tool.Stop()
+
+	_, err := tool.DescribeTable(context.Background(), "test-incident", map[string]interface{}{
+		"table_name": "events",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedQuery != "DESCRIBE TABLE events" {
+		t.Errorf("expected 'DESCRIBE TABLE events', got %q", capturedQuery)
+	}
+}
+
+func TestGetPartsInfo_ActiveOnlyFalse(t *testing.T) {
+	var capturedQuery string
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		capturedQuery = query
+		return nil, nil
+	})
+	defer tool.Stop()
+
+	_, err := tool.GetPartsInfo(context.Background(), "test-incident", map[string]interface{}{
+		"table_name":  "events",
+		"active_only": false,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(capturedQuery, "active = 1") {
+		t.Errorf("should not contain 'active = 1' when active_only is false, got %q", capturedQuery)
+	}
+}
+
+func TestGetRunningQueries_HasLimit(t *testing.T) {
+	var capturedQuery string
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		capturedQuery = query
+		return nil, nil
+	})
+	defer tool.Stop()
+
+	_, err := tool.GetRunningQueries(context.Background(), "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedQuery, "LIMIT 100") {
+		t.Errorf("expected default LIMIT in GetRunningQueries, got %q", capturedQuery)
+	}
+}
+
+func TestGetMerges_HasLimit(t *testing.T) {
+	var capturedQuery string
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		capturedQuery = query
+		return nil, nil
+	})
+	defer tool.Stop()
+
+	_, err := tool.GetMerges(context.Background(), "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedQuery, "LIMIT 100") {
+		t.Errorf("expected default LIMIT in GetMerges, got %q", capturedQuery)
+	}
+}
+
+func TestGetReplicationStatus_HasLimit(t *testing.T) {
+	var capturedQuery string
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		capturedQuery = query
+		return nil, nil
+	})
+	defer tool.Stop()
+
+	_, err := tool.GetReplicationStatus(context.Background(), "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedQuery, "LIMIT 100") {
+		t.Errorf("expected default LIMIT in GetReplicationStatus, got %q", capturedQuery)
+	}
+}
+
+func TestGetClusterInfo_HasLimit(t *testing.T) {
+	var capturedQuery string
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		capturedQuery = query
+		return nil, nil
+	})
+	defer tool.Stop()
+
+	_, err := tool.GetClusterInfo(context.Background(), "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedQuery, "LIMIT 100") {
+		t.Errorf("expected default LIMIT in GetClusterInfo, got %q", capturedQuery)
+	}
+}
+
+func TestBuildDSN_URLEncodesCredentials(t *testing.T) {
+	config := &CHConfig{
+		Host:     "localhost",
+		Port:     8123,
+		Database: "default",
+		Username: "user@domain",
+		Password: "p@ss:word/123",
+		Timeout:  30,
+	}
+	dsn := buildDSN(config)
+	if strings.Contains(dsn, "user@domain:p@ss:word/123@") {
+		t.Errorf("DSN contains unencoded special characters: %s", dsn)
+	}
+	if !strings.Contains(dsn, "clickhouse://") {
+		t.Errorf("DSN missing clickhouse:// prefix: %s", dsn)
+	}
+}
+
+func TestParseSettings_WrongTypes(t *testing.T) {
+	config := parseSettings(map[string]interface{}{
+		"ch_host":        123,
+		"ch_port":        "9000",
+		"ch_ssl_enabled": "true",
+		"ch_timeout":     "60",
+	})
+	if config.Host != "" {
+		t.Errorf("expected empty host for wrong type, got %q", config.Host)
+	}
+	if config.Port != DefaultPort {
+		t.Errorf("expected default port for wrong type, got %d", config.Port)
+	}
+	if config.SSLEnabled {
+		t.Error("expected SSLEnabled=false for wrong type")
+	}
+	if config.Timeout != DefaultTimeout {
+		t.Errorf("expected default timeout for wrong type, got %d", config.Timeout)
+	}
+}
+
+func TestParseSettings_PortBoundaries(t *testing.T) {
+	tests := []struct {
+		name string
+		port float64
+		want int
+	}{
+		{"negative port", -1, DefaultPort},
+		{"port above max", 70000, DefaultPort},
+		{"port 65535", 65535, 65535},
+		{"port 1", 1, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := parseSettings(map[string]interface{}{"ch_port": tt.port})
+			if config.Port != tt.want {
+				t.Errorf("parseSettings port %v = %d, want %d", tt.port, config.Port, tt.want)
+			}
+		})
 	}
 }

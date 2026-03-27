@@ -3,12 +3,12 @@ package clickhouse
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/tls"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -38,7 +38,7 @@ const (
 )
 
 // dangerousStmtPattern matches SQL statements that modify data or schema in ClickHouse.
-var dangerousStmtPattern = regexp.MustCompile(`(?i)\b(INSERT|ALTER|DROP|CREATE|TRUNCATE|RENAME|EXCHANGE|GRANT|REVOKE|KILL|SYSTEM|OPTIMIZE|ATTACH|DETACH|MOVE)\b`)
+var dangerousStmtPattern = regexp.MustCompile(`(?i)\b(INSERT|DELETE|UPDATE|ALTER|DROP|CREATE|TRUNCATE|RENAME|EXCHANGE|GRANT|REVOKE|KILL|SYSTEM|OPTIMIZE|ATTACH|DETACH|MOVE)\b`)
 
 // Pre-compiled regex patterns for SQL processing
 var (
@@ -238,8 +238,8 @@ func buildDSN(config *CHConfig) string {
 	}
 
 	return fmt.Sprintf("clickhouse://%s:%s@%s:%d/%s?%s",
-		config.Username,
-		config.Password,
+		url.QueryEscape(config.Username),
+		url.QueryEscape(config.Password),
 		config.Host,
 		config.Port,
 		config.Database,
@@ -260,14 +260,6 @@ func openConn(config *CHConfig) (*sql.DB, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(0)
 	db.SetConnMaxLifetime(time.Duration(config.Timeout) * time.Second)
-
-	// Configure TLS if SSL is enabled
-	if config.SSLEnabled {
-		_ = &tls.Config{
-			InsecureSkipVerify: false,
-			ServerName:         config.Host,
-		}
-	}
 
 	return db, nil
 }
@@ -430,6 +422,14 @@ func (t *ClickHouseTool) ExecuteQuery(ctx context.Context, incidentID string, ar
 		return "", fmt.Errorf("only SELECT queries are allowed (write statements and dangerous operations are blocked)")
 	}
 
+	// Apply per-query timeout if specified
+	if v, ok := args["timeout_seconds"].(float64); ok {
+		timeout := clampTimeout(int(v))
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+		defer cancel()
+	}
+
 	limit := parseLimit(args)
 	if !hasLimitClause(query) {
 		query = strings.TrimRight(query, "; \t\n") + fmt.Sprintf(" LIMIT %d", limit)
@@ -564,6 +564,7 @@ func (t *ClickHouseTool) GetQueryLog(ctx context.Context, incidentID string, arg
 // GetRunningQueries retrieves active queries from system.processes
 func (t *ClickHouseTool) GetRunningQueries(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
 	logicalName := extractLogicalName(args)
+	limit := parseLimit(args)
 
 	conditions := []string{"1=1"}
 
@@ -573,8 +574,8 @@ func (t *ClickHouseTool) GetRunningQueries(ctx context.Context, incidentID strin
 
 	query := fmt.Sprintf(
 		"SELECT query_id, query, user, elapsed, read_rows, read_bytes, memory_usage, is_cancelled "+
-			"FROM system.processes WHERE %s ORDER BY elapsed DESC",
-		strings.Join(conditions, " AND "),
+			"FROM system.processes WHERE %s ORDER BY elapsed DESC LIMIT %d",
+		strings.Join(conditions, " AND "), limit,
 	)
 
 	cacheKey := responseCacheKey("get_running_queries", args)
@@ -595,6 +596,7 @@ func (t *ClickHouseTool) GetRunningQueries(ctx context.Context, incidentID strin
 // GetMerges retrieves active merges from system.merges
 func (t *ClickHouseTool) GetMerges(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
 	logicalName := extractLogicalName(args)
+	limit := parseLimit(args)
 
 	conditions := []string{"1=1"}
 
@@ -607,8 +609,8 @@ func (t *ClickHouseTool) GetMerges(ctx context.Context, incidentID string, args 
 
 	query := fmt.Sprintf(
 		"SELECT database, table, elapsed, progress, num_parts, total_size_bytes_compressed, result_part_name "+
-			"FROM system.merges WHERE %s ORDER BY elapsed DESC",
-		strings.Join(conditions, " AND "),
+			"FROM system.merges WHERE %s ORDER BY elapsed DESC LIMIT %d",
+		strings.Join(conditions, " AND "), limit,
 	)
 
 	cacheKey := responseCacheKey("get_merges", args)
@@ -629,6 +631,7 @@ func (t *ClickHouseTool) GetMerges(ctx context.Context, incidentID string, args 
 // GetReplicationStatus retrieves replication queue from system.replication_queue
 func (t *ClickHouseTool) GetReplicationStatus(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
 	logicalName := extractLogicalName(args)
+	limit := parseLimit(args)
 
 	conditions := []string{"1=1"}
 
@@ -641,8 +644,8 @@ func (t *ClickHouseTool) GetReplicationStatus(ctx context.Context, incidentID st
 
 	query := fmt.Sprintf(
 		"SELECT database, table, type, create_time, num_tries, last_exception, num_postponed, postpone_reason "+
-			"FROM system.replication_queue WHERE %s ORDER BY create_time DESC",
-		strings.Join(conditions, " AND "),
+			"FROM system.replication_queue WHERE %s ORDER BY create_time DESC LIMIT %d",
+		strings.Join(conditions, " AND "), limit,
 	)
 
 	cacheKey := responseCacheKey("get_replication_status", args)
@@ -663,6 +666,7 @@ func (t *ClickHouseTool) GetReplicationStatus(ctx context.Context, incidentID st
 // GetPartsInfo retrieves parts info from system.parts
 func (t *ClickHouseTool) GetPartsInfo(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
 	logicalName := extractLogicalName(args)
+	limit := parseLimit(args)
 
 	tableName, ok := args["table_name"].(string)
 	if !ok || tableName == "" {
@@ -682,8 +686,8 @@ func (t *ClickHouseTool) GetPartsInfo(ctx context.Context, incidentID string, ar
 
 	query := fmt.Sprintf(
 		"SELECT database, table, name, partition, rows, bytes_on_disk, data_compressed_bytes, data_uncompressed_bytes, modification_time, active "+
-			"FROM system.parts WHERE %s ORDER BY modification_time DESC",
-		strings.Join(conditions, " AND "),
+			"FROM system.parts WHERE %s ORDER BY modification_time DESC LIMIT %d",
+		strings.Join(conditions, " AND "), limit,
 	)
 
 	cacheKey := responseCacheKey("get_parts_info", args)
@@ -711,10 +715,12 @@ func (t *ClickHouseTool) GetClusterInfo(ctx context.Context, incidentID string, 
 		conditions = append(conditions, fmt.Sprintf("cluster = '%s'", sanitizeStringValue(v)))
 	}
 
+	limit := parseLimit(args)
+
 	query := fmt.Sprintf(
 		"SELECT cluster, shard_num, replica_num, host_name, host_address, port, is_local "+
-			"FROM system.clusters WHERE %s ORDER BY cluster, shard_num, replica_num",
-		strings.Join(conditions, " AND "),
+			"FROM system.clusters WHERE %s ORDER BY cluster, shard_num, replica_num LIMIT %d",
+		strings.Join(conditions, " AND "), limit,
 	)
 
 	cacheKey := responseCacheKey("get_cluster_info", args)
@@ -747,6 +753,8 @@ func sanitizeIdentifier(name string) string {
 }
 
 // sanitizeStringValue escapes single quotes in string values for safe embedding in queries.
+// Uses standard SQL double-quote escaping ('') which works in all ClickHouse configurations,
+// unlike backslash escaping which depends on allow_backslash_escaping_in_strings.
 func sanitizeStringValue(s string) string {
-	return strings.ReplaceAll(s, "'", "\\'")
+	return strings.ReplaceAll(s, "'", "''")
 }
