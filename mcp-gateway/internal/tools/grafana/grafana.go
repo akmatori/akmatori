@@ -327,3 +327,136 @@ func (t *GrafanaTool) doPost(ctx context.Context, incidentID, path string, reqBo
 
 	return t.doRequest(ctx, config, http.MethodPost, path, nil, strings.NewReader(string(bodyJSON)))
 }
+
+// SearchDashboards searches and lists Grafana dashboards.
+// Supports query, tag, type (dash-db, dash-folder), folder ID, and pagination via limit.
+func (t *GrafanaTool) SearchDashboards(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	params := url.Values{}
+	// Default to dash-db type if not specified
+	params.Set("type", "dash-db")
+
+	if v, ok := args["query"].(string); ok && v != "" {
+		params.Set("query", v)
+	}
+	if v, ok := args["tag"].(string); ok && v != "" {
+		params.Set("tag", v)
+	}
+	if v, ok := args["type"].(string); ok && v != "" {
+		params.Set("type", v)
+	}
+	if v, ok := args["folder_id"].(float64); ok && v > 0 {
+		params.Set("folderIds", fmt.Sprintf("%d", int(v)))
+	}
+	if v, ok := args["limit"].(float64); ok && v > 0 {
+		limit := int(v)
+		if limit > 5000 {
+			limit = 5000
+		}
+		params.Set("limit", fmt.Sprintf("%d", limit))
+	}
+
+	body, err := t.cachedGet(ctx, incidentID, "/api/search", params, DashboardCacheTTL, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// GetDashboardByUID retrieves a full dashboard model by its UID.
+func (t *GrafanaTool) GetDashboardByUID(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	uid, ok := args["uid"].(string)
+	if !ok || uid == "" {
+		return "", fmt.Errorf("uid is required")
+	}
+
+	path := fmt.Sprintf("/api/dashboards/uid/%s", url.PathEscape(uid))
+
+	body, err := t.cachedGet(ctx, incidentID, path, nil, DashboardCacheTTL, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// GetDashboardPanels extracts a summary list of panels from a dashboard for quick overview.
+// Returns panel id, title, type, and datasource for each panel.
+func (t *GrafanaTool) GetDashboardPanels(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	uid, ok := args["uid"].(string)
+	if !ok || uid == "" {
+		return "", fmt.Errorf("uid is required")
+	}
+
+	path := fmt.Sprintf("/api/dashboards/uid/%s", url.PathEscape(uid))
+
+	body, err := t.cachedGet(ctx, incidentID, path, nil, DashboardCacheTTL, logicalName)
+	if err != nil {
+		return "", err
+	}
+
+	// Parse the dashboard response and extract panels
+	var dashResponse struct {
+		Dashboard struct {
+			Panels []json.RawMessage `json:"panels"`
+		} `json:"dashboard"`
+	}
+	if err := json.Unmarshal(body, &dashResponse); err != nil {
+		return "", fmt.Errorf("failed to parse dashboard response: %w", err)
+	}
+
+	type panelSummary struct {
+		ID         interface{} `json:"id"`
+		Title      string      `json:"title"`
+		Type       string      `json:"type"`
+		Datasource interface{} `json:"datasource,omitempty"`
+	}
+
+	var panels []panelSummary
+	for _, raw := range dashResponse.Dashboard.Panels {
+		var p struct {
+			ID         interface{}       `json:"id"`
+			Title      string            `json:"title"`
+			Type       string            `json:"type"`
+			Datasource interface{}       `json:"datasource"`
+			Panels     []json.RawMessage `json:"panels"` // Nested panels in rows
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			continue
+		}
+		panels = append(panels, panelSummary{
+			ID:         p.ID,
+			Title:      p.Title,
+			Type:       p.Type,
+			Datasource: p.Datasource,
+		})
+		// Handle row panels that contain nested panels
+		for _, nestedRaw := range p.Panels {
+			var nested struct {
+				ID         interface{} `json:"id"`
+				Title      string      `json:"title"`
+				Type       string      `json:"type"`
+				Datasource interface{} `json:"datasource"`
+			}
+			if err := json.Unmarshal(nestedRaw, &nested); err != nil {
+				continue
+			}
+			panels = append(panels, panelSummary{
+				ID:         nested.ID,
+				Title:      nested.Title,
+				Type:       nested.Type,
+				Datasource: nested.Datasource,
+			})
+		}
+	}
+
+	result, err := json.Marshal(panels)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal panel list: %w", err)
+	}
+	return string(result), nil
+}

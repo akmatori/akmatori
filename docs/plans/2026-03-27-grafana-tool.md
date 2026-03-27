@@ -44,11 +44,11 @@ Add a first-class Grafana MCP tool type to the MCP Gateway, providing the AI age
 **Files:**
 - Modify: `mcp-gateway/internal/tools/grafana/grafana.go`
 
-- [ ] Implement `SearchDashboards()` - search/list dashboards (GET /api/search with type=dash-db, query, tag, folder filters)
-- [ ] Implement `GetDashboardByUID()` - get full dashboard model by UID (GET /api/dashboards/uid/:uid)
-- [ ] Implement `GetDashboardPanels()` - extract panel list from a dashboard for quick overview
-- [ ] Write tests for each dashboard tool method with httptest mock server
-- [ ] Run `make test-mcp` - must pass
+- [x] Implement `SearchDashboards()` - search/list dashboards (GET /api/search with type=dash-db, query, tag, folder filters)
+- [x] Implement `GetDashboardByUID()` - get full dashboard model by UID (GET /api/dashboards/uid/:uid)
+- [x] Implement `GetDashboardPanels()` - extract panel list from a dashboard for quick overview
+- [x] Write tests for each dashboard tool method with httptest mock server
+- [x] Run `make test-mcp` - must pass
 
 ### Task 3: Alerting tools (Grafana Unified Alerting)
 
