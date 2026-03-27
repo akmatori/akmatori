@@ -979,6 +979,338 @@ func TestExecuteQuery_MockError(t *testing.T) {
 	}
 }
 
+func newToolWithConfigError(errMsg string) *ClickHouseTool {
+	tool := NewClickHouseTool(testLogger(), nil)
+	tool.resolveConfig = func(ctx context.Context, incidentID string, logicalName ...string) (*CHConfig, error) {
+		return nil, fmt.Errorf("%s", errMsg)
+	}
+	return tool
+}
+
+func TestShowDatabases_ConfigError(t *testing.T) {
+	tool := newToolWithConfigError("no credentials")
+	defer tool.Stop()
+
+	_, err := tool.ShowDatabases(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "no credentials") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestShowTables_ConfigError(t *testing.T) {
+	tool := newToolWithConfigError("no credentials")
+	defer tool.Stop()
+
+	_, err := tool.ShowTables(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "no credentials") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestDescribeTable_ConfigError(t *testing.T) {
+	tool := newToolWithConfigError("no credentials")
+	defer tool.Stop()
+
+	_, err := tool.DescribeTable(context.Background(), "test-incident", map[string]interface{}{
+		"table_name": "events",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "no credentials") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestShowDatabases_ExecError(t *testing.T) {
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		return nil, fmt.Errorf("query failed")
+	})
+	defer tool.Stop()
+
+	_, err := tool.ShowDatabases(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "query failed") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestShowTables_ExecError(t *testing.T) {
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		return nil, fmt.Errorf("query failed")
+	})
+	defer tool.Stop()
+
+	_, err := tool.ShowTables(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestDescribeTable_ExecError(t *testing.T) {
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		return nil, fmt.Errorf("query failed")
+	})
+	defer tool.Stop()
+
+	_, err := tool.DescribeTable(context.Background(), "test-incident", map[string]interface{}{
+		"table_name": "events",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetQueryLog_ConfigError(t *testing.T) {
+	tool := newToolWithConfigError("no credentials")
+	defer tool.Stop()
+
+	_, err := tool.GetQueryLog(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetRunningQueries_ConfigError(t *testing.T) {
+	tool := newToolWithConfigError("no credentials")
+	defer tool.Stop()
+
+	_, err := tool.GetRunningQueries(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetMerges_ConfigError(t *testing.T) {
+	tool := newToolWithConfigError("no credentials")
+	defer tool.Stop()
+
+	_, err := tool.GetMerges(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetReplicationStatus_ConfigError(t *testing.T) {
+	tool := newToolWithConfigError("no credentials")
+	defer tool.Stop()
+
+	_, err := tool.GetReplicationStatus(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetPartsInfo_ConfigError(t *testing.T) {
+	tool := newToolWithConfigError("no credentials")
+	defer tool.Stop()
+
+	_, err := tool.GetPartsInfo(context.Background(), "test-incident", map[string]interface{}{
+		"table_name": "events",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetClusterInfo_ConfigError(t *testing.T) {
+	tool := newToolWithConfigError("no credentials")
+	defer tool.Stop()
+
+	_, err := tool.GetClusterInfo(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetQueryLog_ExecError(t *testing.T) {
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		return nil, fmt.Errorf("query failed")
+	})
+	defer tool.Stop()
+
+	_, err := tool.GetQueryLog(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetRunningQueries_ExecError(t *testing.T) {
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		return nil, fmt.Errorf("query failed")
+	})
+	defer tool.Stop()
+
+	_, err := tool.GetRunningQueries(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetMerges_ExecError(t *testing.T) {
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		return nil, fmt.Errorf("query failed")
+	})
+	defer tool.Stop()
+
+	_, err := tool.GetMerges(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetReplicationStatus_ExecError(t *testing.T) {
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		return nil, fmt.Errorf("query failed")
+	})
+	defer tool.Stop()
+
+	_, err := tool.GetReplicationStatus(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetPartsInfo_ExecError(t *testing.T) {
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		return nil, fmt.Errorf("query failed")
+	})
+	defer tool.Stop()
+
+	_, err := tool.GetPartsInfo(context.Background(), "test-incident", map[string]interface{}{
+		"table_name": "events",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetClusterInfo_ExecError(t *testing.T) {
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		return nil, fmt.Errorf("query failed")
+	})
+	defer tool.Stop()
+
+	_, err := tool.GetClusterInfo(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGetQueryLog_NoFilters(t *testing.T) {
+	var capturedQuery string
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		capturedQuery = query
+		return nil, nil
+	})
+	defer tool.Stop()
+
+	_, err := tool.GetQueryLog(context.Background(), "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedQuery, "system.query_log") {
+		t.Errorf("expected system.query_log query, got %q", capturedQuery)
+	}
+	if !strings.Contains(capturedQuery, "LIMIT 100") {
+		t.Errorf("expected default LIMIT, got %q", capturedQuery)
+	}
+}
+
+func TestGetRunningQueries_NoFilter(t *testing.T) {
+	var capturedQuery string
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		capturedQuery = query
+		return nil, nil
+	})
+	defer tool.Stop()
+
+	_, err := tool.GetRunningQueries(context.Background(), "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedQuery, "system.processes") {
+		t.Errorf("expected system.processes query, got %q", capturedQuery)
+	}
+}
+
+func TestGetMerges_NoFilters(t *testing.T) {
+	var capturedQuery string
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		capturedQuery = query
+		return nil, nil
+	})
+	defer tool.Stop()
+
+	_, err := tool.GetMerges(context.Background(), "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedQuery, "system.merges") {
+		t.Errorf("expected system.merges query, got %q", capturedQuery)
+	}
+}
+
+func TestGetReplicationStatus_NoFilters(t *testing.T) {
+	var capturedQuery string
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		capturedQuery = query
+		return nil, nil
+	})
+	defer tool.Stop()
+
+	_, err := tool.GetReplicationStatus(context.Background(), "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedQuery, "system.replication_queue") {
+		t.Errorf("expected system.replication_queue query, got %q", capturedQuery)
+	}
+}
+
+func TestGetPartsInfo_WithDatabase(t *testing.T) {
+	var capturedQuery string
+	tool := newToolWithMock(func(ctx context.Context, config *CHConfig, query string) ([]map[string]interface{}, error) {
+		capturedQuery = query
+		return nil, nil
+	})
+	defer tool.Stop()
+
+	_, err := tool.GetPartsInfo(context.Background(), "test-incident", map[string]interface{}{
+		"table_name": "events",
+		"database":   "analytics",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(capturedQuery, "database = 'analytics'") {
+		t.Errorf("expected database filter, got %q", capturedQuery)
+	}
+}
+
+func TestExecuteQuery_ConfigError(t *testing.T) {
+	tool := newToolWithConfigError("no credentials")
+	defer tool.Stop()
+
+	_, err := tool.ExecuteQuery(context.Background(), "test-incident", map[string]interface{}{
+		"query": "SELECT 1",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "no credentials") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestStripSQLComments(t *testing.T) {
 	tests := []struct {
 		name  string
