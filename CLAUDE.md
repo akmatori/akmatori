@@ -40,7 +40,7 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 │       ├── cache/          # Generic TTL cache
 │       ├── mcpproxy/       # MCP proxy: connection pool + handler for external MCP servers
 │       ├── ratelimit/      # Token bucket rate limiter
-│       └── tools/          # SSH, Zabbix, VictoriaMetrics, PostgreSQL, ClickHouse, Grafana, and HTTP connector implementations
+│       └── tools/          # SSH, Zabbix, VictoriaMetrics, PostgreSQL, ClickHouse, Grafana, Catchpoint, PagerDuty, and HTTP connector implementations
 ├── web/                    # React frontend
 ├── qmd/                    # QMD search sidecar (Dockerfile, config, entrypoint)
 ├── docs/                   # OpenAPI specs (swagger at /api/docs)
@@ -619,6 +619,7 @@ PagerDuty is a first-class MCP tool type following the Catchpoint pattern with t
 - `mcp-gateway/internal/tools/postgresql/` - PostgreSQL read-only query and diagnostics integration
 - `mcp-gateway/internal/tools/clickhouse/` - ClickHouse read-only query and OLAP diagnostics integration
 - `mcp-gateway/internal/tools/grafana/` - Grafana integration with caching and rate limiting (dashboards, alerting, data source proxy, annotations)
+- `mcp-gateway/internal/tools/catchpoint/` - Catchpoint synthetic monitoring integration with caching and rate limiting
 - `mcp-gateway/internal/tools/pagerduty/` - PagerDuty integration with caching and rate limiting (incidents, services, on-call, events)
 - `mcp-gateway/internal/tools/httpconnector/` - Declarative HTTP connector executor with auth injection
 - `mcp-gateway/internal/mcpproxy/` - Connection pool and proxy handler for external MCP servers

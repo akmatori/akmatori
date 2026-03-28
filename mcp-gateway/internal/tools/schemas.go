@@ -960,25 +960,25 @@ func getPagerDutySchema() ToolTypeSchema {
 			{
 				Name:        "get_incident_alerts",
 				Description: "Get alerts grouped under an incident",
-				Parameters:  "incident_id (required), statuses, sort_by, limit, offset",
+				Parameters:  "incident_id (required)",
 				Returns:     "JSON array of alert objects",
 			},
 			{
 				Name:        "get_services",
 				Description: "List services",
-				Parameters:  "query, team_ids, include, limit, offset",
+				Parameters:  "query, limit, offset",
 				Returns:     "JSON array of service objects",
 			},
 			{
 				Name:        "get_on_calls",
 				Description: "Get current on-call users by schedule or escalation policy",
-				Parameters:  "schedule_ids, escalation_policy_ids, since, until, include",
+				Parameters:  "schedule_ids, escalation_policy_ids, since, until",
 				Returns:     "JSON array of on-call objects",
 			},
 			{
 				Name:        "get_escalation_policies",
 				Description: "List escalation policies",
-				Parameters:  "query, team_ids, include, limit, offset",
+				Parameters:  "query, limit, offset",
 				Returns:     "JSON array of escalation policy objects",
 			},
 			{

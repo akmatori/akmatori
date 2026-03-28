@@ -104,6 +104,17 @@ func clampTimeout(timeout int) int {
 	return timeout
 }
 
+// addArrayParam splits a comma-separated string and adds each value as a repeated query parameter.
+// PagerDuty expects array params as repeated keys, e.g. statuses[]=triggered&statuses[]=acknowledged.
+func addArrayParam(params url.Values, key, value string) {
+	for _, v := range strings.Split(value, ",") {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			params.Add(key, v)
+		}
+	}
+}
+
 // getConfig fetches PagerDuty configuration from database with caching.
 func (t *PagerDutyTool) getConfig(ctx context.Context, incidentID string, logicalName ...string) (*PagerDutyConfig, error) {
 	cacheKey := configCacheKey(incidentID)
@@ -137,7 +148,7 @@ func (t *PagerDutyTool) getConfig(ctx context.Context, incidentID string, logica
 	settings := creds.Settings
 
 	if u, ok := settings["pagerduty_url"].(string); ok {
-		config.URL = trimTrailingSlash(u)
+		config.URL = strings.TrimRight(u, "/")
 	}
 
 	if token, ok := settings["pagerduty_api_token"].(string); ok {
@@ -187,18 +198,11 @@ func (t *PagerDutyTool) getCachedProxySettings(ctx context.Context) *database.Pr
 	return proxySettings
 }
 
-// trimTrailingSlash removes a trailing slash from a URL string.
-func trimTrailingSlash(s string) string {
-	if len(s) > 0 && s[len(s)-1] == '/' {
-		return s[:len(s)-1]
-	}
-	return s
-}
-
-// doRequest performs an HTTP request to PagerDuty API with rate limiting
-func (t *PagerDutyTool) doRequest(ctx context.Context, config *PagerDutyConfig, method, path string, queryParams url.Values, body io.Reader) ([]byte, error) {
-	// Validate token before consuming rate limit budget
-	if config.APIToken == "" {
+// doRequestInternal is the single HTTP request method used by all PagerDuty API calls.
+// Set skipAuth=true for endpoints that don't use Token auth (e.g., Events API v2).
+func (t *PagerDutyTool) doRequestInternal(ctx context.Context, config *PagerDutyConfig, method, fullURL string, body io.Reader, extraHeaders map[string]string, skipAuth bool) ([]byte, error) {
+	// Validate token before consuming rate limit budget (unless auth is skipped)
+	if !skipAuth && config.APIToken == "" {
 		return nil, fmt.Errorf("PagerDuty API token is required but not configured")
 	}
 
@@ -209,13 +213,7 @@ func (t *PagerDutyTool) doRequest(ctx context.Context, config *PagerDutyConfig, 
 		}
 	}
 
-	// Build full URL
-	fullURL := config.URL + path
-	if len(queryParams) > 0 {
-		fullURL += "?" + queryParams.Encode()
-	}
-
-	t.logger.Printf("PagerDuty API call: %s %s", method, path)
+	t.logger.Printf("PagerDuty API call: %s %s", method, fullURL)
 
 	// Create HTTP transport with explicit proxy configuration
 	transport := &http.Transport{
@@ -250,9 +248,13 @@ func (t *PagerDutyTool) doRequest(ctx context.Context, config *PagerDutyConfig, 
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// PagerDuty uses Token-based authentication
-	httpReq.Header.Set("Authorization", "Token token="+config.APIToken)
 	httpReq.Header.Set("Content-Type", "application/json")
+	if !skipAuth {
+		httpReq.Header.Set("Authorization", "Token token="+config.APIToken)
+	}
+	for k, v := range extraHeaders {
+		httpReq.Header.Set(k, v)
+	}
 
 	resp, err := client.Do(httpReq)
 	if err != nil {
@@ -278,6 +280,30 @@ func (t *PagerDutyTool) doRequest(ctx context.Context, config *PagerDutyConfig, 
 	}
 
 	return respBody, nil
+}
+
+// buildURL constructs a full URL from config base URL, path, and optional query parameters.
+func buildURL(baseURL, path string, queryParams url.Values) string {
+	fullURL := strings.TrimRight(baseURL, "/") + path
+	if len(queryParams) > 0 {
+		fullURL += "?" + queryParams.Encode()
+	}
+	return fullURL
+}
+
+// doRequest performs an authenticated HTTP request to PagerDuty API with rate limiting.
+func (t *PagerDutyTool) doRequest(ctx context.Context, config *PagerDutyConfig, method, path string, queryParams url.Values, body io.Reader) ([]byte, error) {
+	return t.doRequestInternal(ctx, config, method, buildURL(config.URL, path, queryParams), body, nil, false)
+}
+
+// doRequestWithHeaders performs an authenticated HTTP request with additional headers.
+func (t *PagerDutyTool) doRequestWithHeaders(ctx context.Context, config *PagerDutyConfig, method, path string, queryParams url.Values, body io.Reader, extraHeaders map[string]string) ([]byte, error) {
+	return t.doRequestInternal(ctx, config, method, buildURL(config.URL, path, queryParams), body, extraHeaders, false)
+}
+
+// doRequestNoAuth performs an HTTP request without the Authorization header (for Events API v2).
+func (t *PagerDutyTool) doRequestNoAuth(ctx context.Context, config *PagerDutyConfig, method, path string, queryParams url.Values, body io.Reader) ([]byte, error) {
+	return t.doRequestInternal(ctx, config, method, buildURL(config.URL, path, queryParams), body, nil, true)
 }
 
 // cachedGet performs a cached GET request to PagerDuty API
@@ -326,14 +352,13 @@ func (t *PagerDutyTool) GetIncidents(ctx context.Context, incidentID string, arg
 	params := url.Values{}
 
 	if v, ok := args["statuses"].(string); ok && v != "" {
-		// PagerDuty accepts multiple statuses[] params
-		params.Set("statuses[]", v)
+		addArrayParam(params, "statuses[]", v)
 	}
 	if v, ok := args["urgencies"].(string); ok && v != "" {
-		params.Set("urgencies[]", v)
+		addArrayParam(params, "urgencies[]", v)
 	}
 	if v, ok := args["service_ids"].(string); ok && v != "" {
-		params.Set("service_ids[]", v)
+		addArrayParam(params, "service_ids[]", v)
 	}
 	if v, ok := args["since"].(string); ok && v != "" {
 		params.Set("since", v)
@@ -442,10 +467,10 @@ func (t *PagerDutyTool) GetOnCalls(ctx context.Context, incidentID string, args 
 	params := url.Values{}
 
 	if v, ok := args["schedule_ids"].(string); ok && v != "" {
-		params.Set("schedule_ids[]", v)
+		addArrayParam(params, "schedule_ids[]", v)
 	}
 	if v, ok := args["escalation_policy_ids"].(string); ok && v != "" {
-		params.Set("escalation_policy_ids[]", v)
+		addArrayParam(params, "escalation_policy_ids[]", v)
 	}
 	if v, ok := args["since"].(string); ok && v != "" {
 		params.Set("since", v)
@@ -552,91 +577,6 @@ func (t *PagerDutyTool) updateIncidentStatus(ctx context.Context, incidentID str
 	}
 
 	return string(respBody), nil
-}
-
-// doRequestWithHeaders performs an HTTP request with additional headers
-func (t *PagerDutyTool) doRequestWithHeaders(ctx context.Context, config *PagerDutyConfig, method, path string, queryParams url.Values, body io.Reader, extraHeaders map[string]string) ([]byte, error) {
-	// Validate token before consuming rate limit budget
-	if config.APIToken == "" {
-		return nil, fmt.Errorf("PagerDuty API token is required but not configured")
-	}
-
-	// Apply rate limiting
-	if t.rateLimiter != nil {
-		if err := t.rateLimiter.Wait(ctx); err != nil {
-			return nil, fmt.Errorf("rate limit wait cancelled: %w", err)
-		}
-	}
-
-	// Build full URL
-	fullURL := config.URL + path
-	if len(queryParams) > 0 {
-		fullURL += "?" + queryParams.Encode()
-	}
-
-	t.logger.Printf("PagerDuty API call: %s %s", method, path)
-
-	transport := &http.Transport{
-		DisableKeepAlives: true,
-	}
-
-	if config.UseProxy && config.ProxyURL != "" {
-		proxyURL, err := url.Parse(config.ProxyURL)
-		if err != nil {
-			t.logger.Printf("Invalid proxy URL: %v, proceeding without proxy", err)
-			transport.Proxy = nil
-		} else {
-			transport.Proxy = http.ProxyURL(proxyURL)
-		}
-	} else {
-		transport.Proxy = nil
-	}
-
-	if !config.VerifySSL {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // User-opt-in via pagerduty_verify_ssl setting
-	}
-
-	client := &http.Client{
-		Timeout:   time.Duration(config.Timeout) * time.Second,
-		Transport: transport,
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, method, fullURL, body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	httpReq.Header.Set("Authorization", "Token token="+config.APIToken)
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	for k, v := range extraHeaders {
-		httpReq.Header.Set(k, v)
-	}
-
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	const maxResponseBytes = 5 * 1024 * 1024
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-	if len(respBody) > maxResponseBytes {
-		return nil, fmt.Errorf("response exceeds %d MB limit", maxResponseBytes/(1024*1024))
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		errMsg := string(respBody)
-		if len(errMsg) > 500 {
-			errMsg = errMsg[:500] + "... (truncated)"
-		}
-		return nil, fmt.Errorf("HTTP error %d: %s", resp.StatusCode, errMsg)
-	}
-
-	return respBody, nil
 }
 
 // AcknowledgeIncident acknowledges a PagerDuty incident (write operation, NOT cached)
@@ -774,8 +714,9 @@ func (t *PagerDutyTool) AddIncidentNote(ctx context.Context, incidentID string, 
 	return string(respBody), nil
 }
 
-// EventsAPIURL is the PagerDuty Events API v2 endpoint
-const EventsAPIURL = "https://events.pagerduty.com"
+// EventsAPIURL is the PagerDuty Events API v2 endpoint.
+// This is a var (not const) to allow test overrides with httptest servers.
+var EventsAPIURL = "https://events.pagerduty.com"
 
 // SendEvent sends an event via PagerDuty Events API v2 (write operation, NOT cached)
 func (t *PagerDutyTool) SendEvent(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
@@ -845,6 +786,9 @@ func (t *PagerDutyTool) SendEvent(ctx context.Context, incidentID string, args m
 		if class, ok := args["class"].(string); ok && class != "" {
 			payload["class"] = class
 		}
+		if customDetails, ok := args["custom_details"].(map[string]interface{}); ok && len(customDetails) > 0 {
+			payload["custom_details"] = customDetails
+		}
 
 		reqBody["payload"] = payload
 	}
@@ -859,15 +803,10 @@ func (t *PagerDutyTool) SendEvent(ctx context.Context, incidentID string, args m
 		return "", err
 	}
 
-	// Events API v2 uses a different endpoint
-	eventsURL := EventsAPIURL
-	if eventsOverride, ok := args["events_url"].(string); ok && eventsOverride != "" {
-		eventsURL = trimTrailingSlash(eventsOverride)
-	}
-
-	// Temporarily override config URL for the events API call
+	// Events API v2 uses a fixed endpoint and does NOT use Token auth —
+	// it uses the routing_key in the body. We still need rate limiting and proxy.
 	eventsConfig := &PagerDutyConfig{
-		URL:       eventsURL,
+		URL:       EventsAPIURL,
 		APIToken:  config.APIToken,
 		VerifySSL: config.VerifySSL,
 		Timeout:   config.Timeout,
@@ -875,8 +814,6 @@ func (t *PagerDutyTool) SendEvent(ctx context.Context, incidentID string, args m
 		ProxyURL:  config.ProxyURL,
 	}
 
-	// Events API v2 does NOT use Token auth — it uses the routing_key in the body
-	// We still need rate limiting and proxy, but auth header is not used
 	respBody, err := t.doRequestNoAuth(ctx, eventsConfig, http.MethodPost, "/v2/enqueue", nil, bytes.NewReader(bodyJSON))
 	if err != nil {
 		return "", err
@@ -885,77 +822,3 @@ func (t *PagerDutyTool) SendEvent(ctx context.Context, incidentID string, args m
 	return string(respBody), nil
 }
 
-// doRequestNoAuth performs an HTTP request without the Authorization header (for Events API v2)
-func (t *PagerDutyTool) doRequestNoAuth(ctx context.Context, config *PagerDutyConfig, method, path string, queryParams url.Values, body io.Reader) ([]byte, error) {
-	// Apply rate limiting
-	if t.rateLimiter != nil {
-		if err := t.rateLimiter.Wait(ctx); err != nil {
-			return nil, fmt.Errorf("rate limit wait cancelled: %w", err)
-		}
-	}
-
-	fullURL := config.URL + path
-	if len(queryParams) > 0 {
-		fullURL += "?" + queryParams.Encode()
-	}
-
-	t.logger.Printf("PagerDuty Events API call: %s %s", method, path)
-
-	transport := &http.Transport{
-		DisableKeepAlives: true,
-	}
-
-	if config.UseProxy && config.ProxyURL != "" {
-		proxyURL, err := url.Parse(config.ProxyURL)
-		if err != nil {
-			t.logger.Printf("Invalid proxy URL: %v, proceeding without proxy", err)
-			transport.Proxy = nil
-		} else {
-			transport.Proxy = http.ProxyURL(proxyURL)
-		}
-	} else {
-		transport.Proxy = nil
-	}
-
-	if !config.VerifySSL {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // User-opt-in
-	}
-
-	client := &http.Client{
-		Timeout:   time.Duration(config.Timeout) * time.Second,
-		Transport: transport,
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, method, fullURL, body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Events API v2 only needs Content-Type, no Authorization header
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	const maxResponseBytes = 5 * 1024 * 1024
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-	if len(respBody) > maxResponseBytes {
-		return nil, fmt.Errorf("response exceeds %d MB limit", maxResponseBytes/(1024*1024))
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		errMsg := string(respBody)
-		if len(errMsg) > 500 {
-			errMsg = errMsg[:500] + "... (truncated)"
-		}
-		return nil, fmt.Errorf("HTTP error %d: %s", resp.StatusCode, errMsg)
-	}
-
-	return respBody, nil
-}

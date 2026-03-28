@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/akmatori/mcp-gateway/internal/ratelimit"
 )
@@ -163,21 +162,56 @@ func TestExtractLogicalName(t *testing.T) {
 	}
 }
 
-// --- trimTrailingSlash tests ---
+// --- buildURL tests ---
 
-func TestTrimTrailingSlash(t *testing.T) {
+func TestBuildURL(t *testing.T) {
 	tests := []struct {
-		input, want string
+		name     string
+		base     string
+		path     string
+		params   url.Values
+		expected string
 	}{
-		{"https://api.pagerduty.com/", "https://api.pagerduty.com"},
-		{"https://api.pagerduty.com", "https://api.pagerduty.com"},
-		{"", ""},
+		{"basic", "https://api.pagerduty.com", "/incidents", nil, "https://api.pagerduty.com/incidents"},
+		{"trailing slash on base", "https://api.pagerduty.com/", "/incidents", nil, "https://api.pagerduty.com/incidents"},
+		{"with query params", "https://api.pagerduty.com", "/incidents", url.Values{"limit": {"10"}}, "https://api.pagerduty.com/incidents?limit=10"},
+		{"empty base", "", "/incidents", nil, "/incidents"},
 	}
 	for _, tt := range tests {
-		got := trimTrailingSlash(tt.input)
-		if got != tt.want {
-			t.Errorf("trimTrailingSlash(%q) = %q, want %q", tt.input, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildURL(tt.base, tt.path, tt.params)
+			if got != tt.expected {
+				t.Errorf("buildURL(%q, %q, %v) = %q, want %q", tt.base, tt.path, tt.params, got, tt.expected)
+			}
+		})
+	}
+}
+
+// --- addArrayParam tests ---
+
+func TestAddArrayParam(t *testing.T) {
+	params := url.Values{}
+	addArrayParam(params, "statuses[]", "triggered,acknowledged")
+	values := params["statuses[]"]
+	if len(values) != 2 {
+		t.Fatalf("expected 2 values, got %d: %v", len(values), values)
+	}
+	if values[0] != "triggered" || values[1] != "acknowledged" {
+		t.Errorf("expected [triggered, acknowledged], got %v", values)
+	}
+
+	// Single value
+	params2 := url.Values{}
+	addArrayParam(params2, "statuses[]", "triggered")
+	if len(params2["statuses[]"]) != 1 || params2["statuses[]"][0] != "triggered" {
+		t.Errorf("single value failed: %v", params2["statuses[]"])
+	}
+
+	// Empty value parts are skipped
+	params3 := url.Values{}
+	addArrayParam(params3, "statuses[]", "triggered,,acknowledged")
+	if len(params3["statuses[]"]) != 2 {
+		t.Errorf("expected 2 values (empty skipped), got %d: %v", len(params3["statuses[]"]), params3["statuses[]"])
 	}
 }
 
@@ -934,6 +968,14 @@ func newTestToolWithHeaders(t *testing.T, handler http.HandlerFunc) (*PagerDutyT
 	return tool, server
 }
 
+// overrideEventsURL sets EventsAPIURL to the given URL for the duration of the test.
+func overrideEventsURL(t *testing.T, url string) {
+	t.Helper()
+	original := EventsAPIURL
+	EventsAPIURL = url
+	t.Cleanup(func() { EventsAPIURL = original })
+}
+
 func TestAcknowledgeIncident_Success(t *testing.T) {
 	var receivedMethod, receivedPath, receivedFrom string
 	var receivedBody map[string]interface{}
@@ -1259,6 +1301,7 @@ func TestSendEvent_Trigger_Success(t *testing.T) {
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprint(w, `{"status":"success","dedup_key":"abc123"}`)
 	})
+	overrideEventsURL(t, server.URL)
 
 	result, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
 		"routing_key":  "R0123456789",
@@ -1267,7 +1310,6 @@ func TestSendEvent_Trigger_Success(t *testing.T) {
 		"severity":     "critical",
 		"source":       "prod-web-01",
 		"component":    "web-server",
-		"events_url":   server.URL,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1318,12 +1360,12 @@ func TestSendEvent_Acknowledge_Success(t *testing.T) {
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprint(w, `{"status":"success","dedup_key":"abc123"}`)
 	})
+	overrideEventsURL(t, server.URL)
 
 	_, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
 		"routing_key":  "R0123456789",
 		"event_action": "acknowledge",
 		"dedup_key":    "abc123",
-		"events_url":   server.URL,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1342,12 +1384,12 @@ func TestSendEvent_Resolve_Success(t *testing.T) {
 		w.WriteHeader(http.StatusAccepted)
 		fmt.Fprint(w, `{"status":"success","dedup_key":"abc123"}`)
 	})
+	overrideEventsURL(t, server.URL)
 
 	_, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
 		"routing_key":  "R0123456789",
 		"event_action": "resolve",
 		"dedup_key":    "abc123",
-		"events_url":   server.URL,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1484,11 +1526,12 @@ func TestSendEvent_TriggerDefaults(t *testing.T) {
 		fmt.Fprint(w, `{"status":"success","dedup_key":"def456"}`)
 	})
 
+	overrideEventsURL(t, server.URL)
+
 	_, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
 		"routing_key":  "R0123456789",
 		"event_action": "trigger",
 		"summary":      "Test alert",
-		"events_url":   server.URL,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1514,11 +1557,12 @@ func TestSendEvent_APIError(t *testing.T) {
 		fmt.Fprint(w, `{"status":"invalid event","message":"Event object is invalid"}`)
 	})
 
+	overrideEventsURL(t, server.URL)
+
 	_, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
 		"routing_key":  "R0123456789",
 		"event_action": "trigger",
 		"summary":      "Test",
-		"events_url":   server.URL,
 	})
 	if err == nil {
 		t.Fatal("expected error for API error")
@@ -2144,7 +2188,7 @@ func TestAddIncidentNote_APIError(t *testing.T) {
 	}
 }
 
-func TestSendEvent_EventsURLOverride(t *testing.T) {
+func TestSendEvent_UsesFixedEventsAPIURL(t *testing.T) {
 	var receivedPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedPath = r.URL.Path
@@ -2153,9 +2197,11 @@ func TestSendEvent_EventsURLOverride(t *testing.T) {
 	}))
 	defer server.Close()
 
+	overrideEventsURL(t, server.URL)
+
 	tool := NewPagerDutyTool(testLogger(), nil)
 	config := &PagerDutyConfig{
-		URL:       "http://should-not-be-used",
+		URL:       "http://should-not-be-used-for-events",
 		APIToken:  "test-token",
 		VerifySSL: true,
 		Timeout:   5,
@@ -2169,7 +2215,6 @@ func TestSendEvent_EventsURLOverride(t *testing.T) {
 		"summary":      "Test alert",
 		"source":       "test",
 		"severity":     "critical",
-		"events_url":   server.URL,
 	}
 
 	result, err := tool.SendEvent(context.Background(), "test-incident", args)
@@ -2184,5 +2229,3 @@ func TestSendEvent_EventsURLOverride(t *testing.T) {
 	}
 }
 
-// Verify unused import suppression
-var _ = time.Second
