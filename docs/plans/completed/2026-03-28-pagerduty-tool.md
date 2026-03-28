@@ -127,5 +127,5 @@ Add a PagerDuty tool type to the MCP gateway, enabling the AI agent to query and
 
 ### Task 7: Update documentation
 
-- [ ] Update CLAUDE.md: add PagerDuty to tool references (schemas.go tool list, proxy settings struct, tool implementation reference table)
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update CLAUDE.md: add PagerDuty to tool references (schemas.go tool list, proxy settings struct, tool implementation reference table)
+- [x] Move this plan to `docs/plans/completed/`

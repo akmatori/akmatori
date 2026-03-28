@@ -110,6 +110,7 @@ make verify           # go vet + all tests (pre-commit)
 | `internal/auth` | 81.8% | ✅ |
 | `internal/tools/postgresql` | 79.9% | ✅ |
 | `internal/tools/clickhouse` | 82.8% | ✅ |
+| `internal/tools/pagerduty` | 82.9% | ✅ |
 | `internal/tools/victoriametrics` | 76.2% | ✅ |
 | `internal/mcpproxy` | 70.8% | ✅ |
 | `internal/mcp` | 66.8% | ⚠️ |
@@ -148,8 +149,8 @@ Tools are registered as pi-mono custom tools via `gateway-tools.ts`, communicati
 | Tool | File | Purpose |
 |------|------|---------|
 | `gateway_call` | `src/gateway-tools.ts` | Call any MCP Gateway tool by name with optional instance hint |
-| `list_tool_types` | `src/gateway-tools.ts` | List all available tool types (e.g., `ssh`, `zabbix`, `victoria_metrics`, `postgresql`, `clickhouse`, `grafana`, `qmd`) |
-| `list_tools_for_tool_type` | `src/gateway-tools.ts` | List all tools of a given type (e.g., `ssh`, `zabbix`, `victoria_metrics`, `postgresql`, `clickhouse`, `grafana`) |
+| `list_tool_types` | `src/gateway-tools.ts` | List all available tool types (e.g., `ssh`, `zabbix`, `victoria_metrics`, `postgresql`, `clickhouse`, `grafana`, `pagerduty`, `qmd`) |
+| `list_tools_for_tool_type` | `src/gateway-tools.ts` | List all tools of a given type (e.g., `ssh`, `zabbix`, `victoria_metrics`, `postgresql`, `clickhouse`, `grafana`, `pagerduty`) |
 | `get_tool_detail` | `src/gateway-tools.ts` | Get full JSON schema for a specific tool |
 | `execute_script` | `src/gateway-tools.ts` | Run JavaScript in isolated vm with injected `gateway_call()`, `list_tools_for_tool_type()`, scoped `fs` |
 
@@ -598,6 +599,17 @@ Catchpoint is a first-class MCP tool type with a shared rate limiter and cached 
 - Honor proxy settings only when `ProxySettings.CatchpointEnabled` is true
 - Keep error messages parameter-specific and use `validation.SuggestParam()` for typo hints on required args
 
+### PagerDuty Patterns
+
+PagerDuty is a first-class MCP tool type following the Catchpoint pattern with token auth, caching, and rate limiting.
+
+- Tool namespace: `pagerduty.*`
+- Auth: API token via `Authorization: Token token={api_token}` header
+- Read paths (`get_incidents`, `get_services`, `get_on_calls`, etc.) use `cachedGet(...)` with 15-30s TTL
+- Write paths (`acknowledge_incident`, `resolve_incident`, `reassign_incident`, `add_incident_note`) must not be cached
+- Events API v2 (`send_event`) posts to `https://events.pagerduty.com/v2/enqueue` with separate `routing_key`
+- Honor proxy settings only when `ProxySettings.PagerDutyEnabled` is true
+
 ### Implementation Reference
 
 - `mcp-gateway/internal/cache/cache.go` - Generic TTL cache with background cleanup
@@ -607,6 +619,7 @@ Catchpoint is a first-class MCP tool type with a shared rate limiter and cached 
 - `mcp-gateway/internal/tools/postgresql/` - PostgreSQL read-only query and diagnostics integration
 - `mcp-gateway/internal/tools/clickhouse/` - ClickHouse read-only query and OLAP diagnostics integration
 - `mcp-gateway/internal/tools/grafana/` - Grafana integration with caching and rate limiting (dashboards, alerting, data source proxy, annotations)
+- `mcp-gateway/internal/tools/pagerduty/` - PagerDuty integration with caching and rate limiting (incidents, services, on-call, events)
 - `mcp-gateway/internal/tools/httpconnector/` - Declarative HTTP connector executor with auth injection
 - `mcp-gateway/internal/mcpproxy/` - Connection pool and proxy handler for external MCP servers
 - `mcp-gateway/internal/auth/` - Per-incident tool authorization (allowlist enforcement)
