@@ -16,8 +16,7 @@ import {
   SessionManager,
   SettingsManager,
   DefaultResourceLoader,
-  createCodingTools,
-  createBashTool,
+  createBashToolDefinition,
   type AgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
 import { getModel, type Model, type ThinkingLevel as PiThinkingLevel } from "@mariozechner/pi-ai";
@@ -33,21 +32,28 @@ import { GatewayClient } from "./gateway-client.js";
 import { createGatewayCallTool, createListToolsForToolTypeTool, createGetToolDetailTool, createListToolTypesTool, createExecuteScriptTool } from "./gateway-tools.js";
 
 // ---------------------------------------------------------------------------
-// Tool calling guidelines attached to the bash tool via promptGuidelines
+// Tool calling guidelines attached to the bash tool definition via typed
+// promptGuidelines (ToolDefinition.promptGuidelines: string[]).
 // ---------------------------------------------------------------------------
 
 /**
- * Attached to the bash tool via `promptGuidelines` (pi-mono 0.55.4+) so it
- * appears in the system prompt's Guidelines section automatically when the
- * bash tool is active. If the tool is ever disabled, the guidelines disappear
- * from the prompt automatically.
+ * Guidelines for infrastructure tool usage, attached to the bash tool
+ * ToolDefinition via the typed `promptGuidelines` property (pi-mono 0.59.0+).
+ * These appear in the system prompt's Guidelines section automatically when
+ * the bash tool is active.
+ *
+ * Prior to 0.62.0, we used `(bashTool as any).promptGuidelines` on an
+ * AgentTool instance. Since 0.62.0, built-in tools carry proper
+ * ToolDefinition metadata, so we use `createBashToolDefinition()` which
+ * returns a typed ToolDefinition with a `promptGuidelines: string[]` property.
  */
-const BASH_TOOL_GUIDELINES = `\
-- CRITICAL: You only have 5 tools available: gateway_call, list_tools_for_tool_type, get_tool_detail, list_tool_types, execute_script. ALL infrastructure operations go through gateway_call. NEVER call tool names directly (e.g. victoria_metrics.label_values, ssh.execute_command, zabbix.get_hosts).
-- If you get a "Tool not found" error, you are calling it wrong — use gateway_call instead. Example: gateway_call("victoria_metrics.instant_query", {query: "up"}, "my-vm-instance").
-- Each skill's SKILL.md contains your assigned tools with parameter schemas and gateway_call examples. ALWAYS read the relevant SKILL.md FIRST — it has everything you need.
-- Only use list_tools_for_tool_type / get_tool_detail as a fallback if SKILL.md doesn't cover the tool you need.
-- For batch operations across multiple hosts or complex data processing, use execute_script. It runs JavaScript with built-in gateway_call(), list_tools_for_tool_type(), get_tool_detail(), and synchronous fs (readFileSync, writeFileSync). Do NOT use require() or import() in scripts.`;
+const BASH_TOOL_GUIDELINES: string[] = [
+  "CRITICAL: You only have 5 tools available: gateway_call, list_tools_for_tool_type, get_tool_detail, list_tool_types, execute_script. ALL infrastructure operations go through gateway_call. NEVER call tool names directly (e.g. victoria_metrics.label_values, ssh.execute_command, zabbix.get_hosts).",
+  "If you get a \"Tool not found\" error, you are calling it wrong — use gateway_call instead. Example: gateway_call(\"victoria_metrics.instant_query\", {query: \"up\"}, \"my-vm-instance\").",
+  "Each skill's SKILL.md contains your assigned tools with parameter schemas and gateway_call examples. ALWAYS read the relevant SKILL.md FIRST — it has everything you need.",
+  "Only use list_tools_for_tool_type / get_tool_detail as a fallback if SKILL.md doesn't cover the tool you need.",
+  "For batch operations across multiple hosts or complex data processing, use execute_script. It runs JavaScript with built-in gateway_call(), list_tools_for_tool_type(), get_tool_detail(), and synchronous fs (readFileSync, writeFileSync). Do NOT use require() or import() in scripts.",
+];
 
 // ---------------------------------------------------------------------------
 // Types
@@ -266,10 +272,13 @@ export class AgentRunner {
     });
     await resourceLoader.reload();
 
-    // Create bash tool with spawnHook to inject MCP Gateway env vars per-session.
-    // Attach promptGuidelines (pi-mono 0.55.4+) so infrastructure tool usage
-    // instructions appear in the system prompt's Guidelines section automatically.
-    const bashTool = createBashTool(params.workDir, {
+    // Create a typed bash ToolDefinition with spawnHook to inject MCP Gateway
+    // env vars per-session, and promptGuidelines for system prompt inclusion.
+    // Using createBashToolDefinition() (pi-mono 0.62.0+) returns a proper
+    // ToolDefinition with typed promptGuidelines instead of requiring `as any`.
+    // Passed via customTools so AgentSession picks up both the spawnHook and
+    // the guidelines (the built-in bash tool is overridden by name match).
+    const bashToolDef = createBashToolDefinition(params.workDir, {
       spawnHook: (ctx) => ({
         ...ctx,
         env: {
@@ -279,13 +288,7 @@ export class AgentRunner {
         },
       }),
     });
-    (bashTool as any).promptGuidelines = BASH_TOOL_GUIDELINES;
-
-    // Create coding tools with the same workDir, then replace the default bash tool
-    const codingTools = createCodingTools(params.workDir);
-    const tools = codingTools.map((t) =>
-      t.name === "bash" ? bashTool : t,
-    );
+    bashToolDef.promptGuidelines = BASH_TOOL_GUIDELINES;
 
     // Create gateway client for this session and register gateway tools as custom tools.
     const toolAllowlist = "toolAllowlist" in params ? params.toolAllowlist : undefined;
@@ -311,8 +314,11 @@ export class AgentRunner {
       modelRegistry,
       model,
       thinkingLevel,
-      tools,
-      customTools: [gatewayCallTool, listToolsForToolTypeTool, getToolDetailTool, listToolTypesTool, executeScriptTool],
+      // bashToolDef has specific type parameters (BashToolDetails, BashRenderState)
+      // that are contravariant with ToolDefinition<TSchema, unknown, any> due to
+      // renderCall/renderResult generics. The cast is safe — AgentSession only reads
+      // the definition's name, execute, promptGuidelines, and promptSnippet fields.
+      customTools: [bashToolDef as unknown as import("@mariozechner/pi-coding-agent").ToolDefinition, gatewayCallTool, listToolsForToolTypeTool, getToolDetailTool, listToolTypesTool, executeScriptTool],
       resourceLoader,
       sessionManager,
       settingsManager,

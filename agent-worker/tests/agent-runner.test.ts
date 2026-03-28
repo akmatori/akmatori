@@ -114,13 +114,11 @@ vi.mock("@mariozechner/pi-coding-agent", () => {
       getPathMetadata: vi.fn(() => new Map()),
       extendResources: vi.fn(),
     })),
-    createCodingTools: vi.fn(() => [
-      { name: "bash", definition: { name: "bash" }, execute: vi.fn() },
-      { name: "read", definition: { name: "read" }, execute: vi.fn() },
-    ]),
-    createBashTool: vi.fn((_cwd: string, _opts?: any) => ({
+    createBashToolDefinition: vi.fn((_cwd: string, _opts?: any) => ({
       name: "bash",
-      definition: { name: "bash" },
+      label: "Bash",
+      description: "Execute bash commands",
+      parameters: {},
       execute: vi.fn(),
       _spawnHookOpts: _opts,
     })),
@@ -496,61 +494,68 @@ describe("AgentRunner", () => {
       // where getApiKey() was replaced by getApiKeyAndHeaders().
     });
 
-    it("should pass gateway_call, list_tools_for_tool_type, get_tool_detail, list_tool_types, and execute_script as customTools", async () => {
+    it("should pass bash tool definition and gateway tools as customTools", async () => {
       const params = makeExecuteParams({ incidentId: "inc-tools" });
       await runner.execute(params);
 
       const opts = createAgentSessionCalls[0];
       expect(opts.customTools).toBeDefined();
-      expect(opts.customTools).toHaveLength(5);
+      expect(opts.customTools).toHaveLength(6);
 
       const toolNames = opts.customTools.map((t: any) => t.name);
+      expect(toolNames).toContain("bash");
       expect(toolNames).toContain("gateway_call");
       expect(toolNames).toContain("list_tools_for_tool_type");
       expect(toolNames).toContain("get_tool_detail");
       expect(toolNames).toContain("list_tool_types");
       expect(toolNames).toContain("execute_script");
 
+      // All custom tools must have parameters and execute
       for (const tool of opts.customTools) {
         expect(tool.parameters).toBeDefined();
         expect(typeof tool.execute).toBe("function");
       }
     });
 
-    it("should attach promptGuidelines to the bash tool", async () => {
+    it("should attach typed promptGuidelines array to the bash tool definition", async () => {
       const params = makeExecuteParams();
       await runner.execute(params);
 
       const opts = createAgentSessionCalls[0];
-      const bashTool = opts.tools.find(
-        (t: any) => t.definition?.name === "bash" || t.name === "bash",
+      // Bash tool is now in customTools as a proper ToolDefinition
+      const bashTool = opts.customTools.find(
+        (t: any) => t.name === "bash",
       );
       expect(bashTool).toBeDefined();
       expect(bashTool.promptGuidelines).toBeDefined();
-      expect(typeof bashTool.promptGuidelines).toBe("string");
-      expect(bashTool.promptGuidelines).toContain("gateway_call");
-      expect(bashTool.promptGuidelines).toContain("SKILL.md");
-      expect(bashTool.promptGuidelines).toContain("list_tools_for_tool_type");
-      expect(bashTool.promptGuidelines).not.toContain("python3 -c");
-      expect(bashTool.promptGuidelines).not.toContain("PYTHONPATH");
-      // Task 5: Verify stronger opening line lists all 5 tools
-      expect(bashTool.promptGuidelines).toContain("CRITICAL: You only have 5 tools available");
-      expect(bashTool.promptGuidelines).toContain("execute_script");
-      expect(bashTool.promptGuidelines).toContain("get_tool_detail");
-      expect(bashTool.promptGuidelines).toContain("list_tool_types");
-      // Task 5: Verify "Tool not found" guidance
-      expect(bashTool.promptGuidelines).toContain("Tool not found");
-      expect(bashTool.promptGuidelines).toContain("you are calling it wrong");
+      // promptGuidelines is now a typed string[] (ToolDefinition.promptGuidelines)
+      expect(Array.isArray(bashTool.promptGuidelines)).toBe(true);
+      expect(bashTool.promptGuidelines.length).toBeGreaterThan(0);
+
+      const allGuidelines = bashTool.promptGuidelines.join("\n");
+      expect(allGuidelines).toContain("gateway_call");
+      expect(allGuidelines).toContain("SKILL.md");
+      expect(allGuidelines).toContain("list_tools_for_tool_type");
+      expect(allGuidelines).not.toContain("python3 -c");
+      expect(allGuidelines).not.toContain("PYTHONPATH");
+      // Verify stronger opening line lists all 5 tools
+      expect(allGuidelines).toContain("CRITICAL: You only have 5 tools available");
+      expect(allGuidelines).toContain("execute_script");
+      expect(allGuidelines).toContain("get_tool_detail");
+      expect(allGuidelines).toContain("list_tool_types");
+      // Verify "Tool not found" guidance
+      expect(allGuidelines).toContain("Tool not found");
+      expect(allGuidelines).toContain("you are calling it wrong");
     });
 
-    it("should configure bash spawnHook with MCP env vars", async () => {
+    it("should configure bash spawnHook with MCP env vars via ToolDefinition", async () => {
       const params = makeExecuteParams({ incidentId: "inc-env" });
       await runner.execute(params);
 
       const opts = createAgentSessionCalls[0];
-      // Tools array should contain a bash tool with spawnHook
-      const bashTool = opts.tools.find(
-        (t: any) => t.definition?.name === "bash" || t.name === "bash",
+      // Bash tool definition is in customTools with spawnHook options
+      const bashTool = opts.customTools.find(
+        (t: any) => t.name === "bash",
       );
       expect(bashTool).toBeDefined();
     });
