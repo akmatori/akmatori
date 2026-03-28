@@ -37,6 +37,9 @@ type AlertHandler struct {
 	alertService    services.AlertManager
 	channelResolver *slackutil.ChannelResolver
 
+	// Workspace team ID (required for Streaming API)
+	teamID string
+
 	// Registered adapters by source type
 	adaptersMu sync.RWMutex
 	adapters   map[string]alerts.AlertAdapter
@@ -64,6 +67,11 @@ func NewAlertHandler(
 	}
 
 	return h
+}
+
+// SetTeamID sets the workspace team ID (used by the Streaming API).
+func (h *AlertHandler) SetTeamID(teamID string) {
+	h.teamID = teamID
 }
 
 // RegisterAdapter registers an alert adapter for a source type

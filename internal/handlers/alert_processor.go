@@ -334,6 +334,16 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 	investigationPrompt := h.buildInvestigationPrompt(alert, instance)
 	taskWithGuidance := executor.PrependGuidance(investigationPrompt)
 
+	// Extract Slack user ID for the Streaming API (may be empty for bot-originated alerts)
+	var slackUserID string
+	if uid, ok := alert.RawPayload["slack_user"].(string); ok {
+		slackUserID = uid
+	}
+
+	// Start a streaming message in the Slack thread — bot name blinks while open.
+	// Falls back to a regular thread reply if streaming is unavailable.
+	progressMsgTS, isStreaming := h.startSlackThreadStream(slackChannelID, slackMessageTS, "Thinking...", slackUserID)
+
 	// Use WebSocket-based agent worker
 	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
 		slog.Info("using WebSocket-based agent worker for Slack channel incident", "incident_id", incidentUUID)
@@ -343,10 +353,6 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		if dbSettings, err := database.GetLLMSettings(); err == nil && dbSettings != nil {
 			llmSettings = BuildLLMSettingsForWorker(dbSettings)
 		}
-
-		// Post initial progress message in the Slack thread
-		progressMsgTS := h.postSlackThreadReplyGetTS(slackChannelID, slackMessageTS,
-			"*Investigating...*\n```\nWaiting for output...\n```")
 		lastSlackUpdate := time.Now()
 
 		// Create channels for async result handling
@@ -369,11 +375,11 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 					slog.Error("failed to update incident log", "err", err)
 				}
 
-				// Throttled update of the Slack progress message
-				if progressMsgTS != "" && time.Since(lastSlackUpdate) >= slackProgressInterval {
+				// Throttled update of the Slack progress message.
+				// Skip when streaming is active (chat.update conflicts with streaming state).
+				if !isStreaming && progressMsgTS != "" && time.Since(lastSlackUpdate) >= slackProgressInterval {
 					lastSlackUpdate = time.Now()
 					progressLines := utils.GetLastNLines(strings.TrimSpace(lastStreamedLog), 15)
-					// Leave room for the wrapper text (~40 bytes for "*Investigating...*\n```\n...\n```")
 					progressLines = truncateLogForSlack(progressLines, slackMaxTextBytes-50)
 					h.updateSlackThreadMessage(slackChannelID, progressMsgTS,
 						fmt.Sprintf("*Investigating...*\n```\n%s\n```", progressLines))
@@ -400,7 +406,12 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 				slog.Error("failed to update incident status", "err", updateErr)
 			}
 			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
-			h.postSlackThreadReply(slackChannelID, slackMessageTS, errorMsg)
+			if progressMsgTS != "" {
+				h.stopSlackThreadStream(slackChannelID, progressMsgTS, isStreaming)
+				h.updateSlackThreadMessage(slackChannelID, progressMsgTS, errorMsg)
+			} else {
+				h.postSlackThreadReply(slackChannelID, slackMessageTS, errorMsg)
+			}
 			return
 		}
 
@@ -438,9 +449,10 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 			formattedResponse = "Task completed (no output)"
 		}
 
-		// Update Slack thread - replace progress message with final result
+		// Stop the streaming indicator, then replace with final result
 		h.updateSlackChannelReactions(slackChannelID, slackMessageTS, hasError)
 		if progressMsgTS != "" {
+			h.stopSlackThreadStream(slackChannelID, progressMsgTS, isStreaming)
 			slog.Info("replacing Slack progress message with final response", "ts", progressMsgTS, "response_len", len(formattedResponse), "incident", incidentUUID)
 			h.updateSlackThreadMessage(slackChannelID, progressMsgTS, formattedResponse)
 		} else {
@@ -460,5 +472,10 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		slog.Error("failed to update incident status", "err", updateErr)
 	}
 	h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
-	h.postSlackThreadReply(slackChannelID, slackMessageTS, errorMsg)
+	if progressMsgTS != "" {
+		h.stopSlackThreadStream(slackChannelID, progressMsgTS, isStreaming)
+		h.updateSlackThreadMessage(slackChannelID, progressMsgTS, errorMsg)
+	} else {
+		h.postSlackThreadReply(slackChannelID, slackMessageTS, errorMsg)
+	}
 }

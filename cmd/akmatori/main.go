@@ -200,10 +200,12 @@ func main() {
 		slackHandler.SetAlertHandler(alertHandler)
 		slackHandler.SetAlertService(alertService)
 
-		// Try to get bot user ID for self-message filtering
+		// Try to get bot user ID and team ID for self-message filtering and Streaming API
 		if authTest, err := client.AuthTest(); err == nil {
 			slackHandler.SetBotUserID(authTest.UserID)
-			slog.Info("Slack bot user ID", "user_id", authTest.UserID)
+			slackHandler.SetTeamID(authTest.TeamID)
+			alertHandler.SetTeamID(authTest.TeamID)
+			slog.Info("Slack bot user ID", "user_id", authTest.UserID, "team_id", authTest.TeamID)
 		} else {
 			slog.Warn("could not get bot user ID", "err", err)
 		}

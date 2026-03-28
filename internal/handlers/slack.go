@@ -30,6 +30,7 @@ type SlackHandler struct {
 	alertHandler    *AlertHandler
 	alertService    services.AlertManager
 	botUserID       string // Bot's user ID for self-message filtering
+	teamID          string // Workspace team ID (required for Streaming API)
 
 	// Dedup: prevent double processing when both app_mention and message events fire
 	processedMsgs sync.Map // key: "channel:messageTS" -> struct{}
@@ -72,6 +73,11 @@ func (h *SlackHandler) SetAlertService(alertService services.AlertManager) {
 // SetBotUserID sets the bot's user ID for self-message filtering
 func (h *SlackHandler) SetBotUserID(botUserID string) {
 	h.botUserID = botUserID
+}
+
+// SetTeamID sets the workspace team ID (used by the Streaming API).
+func (h *SlackHandler) SetTeamID(teamID string) {
+	h.teamID = teamID
 }
 
 // LoadAlertChannels loads alert channel configurations from the database

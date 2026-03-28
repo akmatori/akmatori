@@ -111,24 +111,45 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		}
 	}()
 
-	// Post initial progress message
-	_, progressMsgTS, _, err := h.client.SendMessage(
-		channel,
-		slack.MsgOptionText("🔄 *Executing task...*\n```\nWaiting for output...\n```", false),
-		slack.MsgOptionTS(threadID),
-	)
+	// Start a streaming message (makes the bot name "blink" while open).
+	// Falls back to a regular message if the Streaming API is unavailable
+	// (requires Agents & Assistants feature / specific OAuth scopes).
+	var progressMsgTS string
+	var isStreaming bool
+	var streamOpts []slack.MsgOption
+	streamOpts = append(streamOpts, slack.MsgOptionTS(threadID), slack.MsgOptionMarkdownText("Thinking..."))
+	if h.teamID != "" {
+		streamOpts = append(streamOpts, slack.MsgOptionRecipientTeamID(h.teamID))
+	}
+	if user != "" {
+		streamOpts = append(streamOpts, slack.MsgOptionRecipientUserID(user))
+	}
+	_, progressMsgTS, err = h.client.StartStream(channel, streamOpts...)
 	if err != nil {
-		slog.Error("failed to post progress message", "err", err)
-		return
+		slog.Info("streaming not available, falling back to regular message", "err", err)
+		_, progressMsgTS, _, err = h.client.SendMessage(
+			channel,
+			slack.MsgOptionText("Thinking...", false),
+			slack.MsgOptionTS(threadID),
+		)
+		if err != nil {
+			slog.Error("failed to post progress message", "err", err)
+			return
+		}
+	} else {
+		isStreaming = true
 	}
 
 	// Track last update time to implement rate limiting
 	lastUpdate := time.Now()
 	var lastProgressLog string
 
-	// Progress update callback
+	// Progress update callback.
+	// When streaming is active, the bot name is already blinking — skip Slack
+	// message updates (chat.update conflicts with streaming state). Only update
+	// when we fell back to a regular message.
 	onStderrUpdate := func(progressLog string) {
-		if progressLog == "" {
+		if progressLog == "" || isStreaming {
 			return
 		}
 
@@ -222,7 +243,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 
 		if wsErr != nil {
 			slog.Error("failed to start/continue incident via WebSocket", "err", wsErr)
-			h.finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text,
+			h.finishSlackMessage(channel, threadID, progressMsgTS, isStreaming, incidentUUID, user, text,
 				fmt.Sprintf("❌ Agent worker error: %v", wsErr), "", true, "", 0, 0)
 			return
 		}
@@ -255,19 +276,21 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			finalResponse = "✅ Task completed (no output)"
 		}
 
-		h.finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text,
+		h.finishSlackMessage(channel, threadID, progressMsgTS, isStreaming, incidentUUID, user, text,
 			finalResponse, fullLog, hasError, finalSessionID, finalTokensUsed, finalExecutionTimeMs)
 		return
 	}
 
 	// No WebSocket worker available
 	slog.Error("agent worker not connected", "incident_id", incidentUUID)
-	h.finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text,
+	h.finishSlackMessage(channel, threadID, progressMsgTS, isStreaming, incidentUUID, user, text,
 		"❌ Agent worker not connected. Please check that the agent-worker container is running.", "", true, "", 0, 0)
 }
 
-// finishSlackMessage handles the final steps of Slack message processing
-func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text, finalResponse, fullLog string, hasError bool, sessionID string, tokensUsed int, executionTimeMs int64) {
+// finishSlackMessage handles the final steps of Slack message processing.
+// isStreaming indicates whether the progress message was started via StartStream
+// (so StopStream is called before the final UpdateMessage).
+func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS string, isStreaming bool, incidentUUID, user, text, finalResponse, fullLog string, hasError bool, sessionID string, tokensUsed int, executionTimeMs int64) {
 	// Remove processing reaction
 	if removeErr := h.client.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
 		Channel:   channel,
@@ -314,7 +337,12 @@ func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS, inci
 		}
 	}
 
-	// Update the progress message with the final result
+	// Stop the streaming indicator (bot name stops blinking) if we started a stream.
+	if isStreaming {
+		if _, _, stopErr := h.client.StopStream(channel, progressMsgTS); stopErr != nil {
+			slog.Warn("failed to stop stream", "err", stopErr)
+		}
+	}
 	_, _, _, updateErr := h.client.UpdateMessage(
 		channel,
 		progressMsgTS,

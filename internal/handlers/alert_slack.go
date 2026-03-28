@@ -116,6 +116,60 @@ func (h *AlertHandler) postSlackThreadReplyGetTS(channelID, threadTS, message st
 	return ts
 }
 
+// startSlackThreadStream starts a streaming message in a thread, making the
+// bot name blink while the stream is open. Falls back to a regular thread
+// reply if the Streaming API is unavailable. Returns (messageTS, isStreaming).
+func (h *AlertHandler) startSlackThreadStream(channelID, threadTS, text, recipientUserID string) (string, bool) {
+	slackClient := h.slackManager.GetClient()
+	if slackClient == nil {
+		return "", false
+	}
+
+	// Try streaming first (makes bot name blink)
+	var streamOpts []slack.MsgOption
+	streamOpts = append(streamOpts, slack.MsgOptionTS(threadTS), slack.MsgOptionMarkdownText(text))
+	if h.teamID != "" {
+		streamOpts = append(streamOpts, slack.MsgOptionRecipientTeamID(h.teamID))
+	}
+	if recipientUserID != "" {
+		streamOpts = append(streamOpts, slack.MsgOptionRecipientUserID(recipientUserID))
+	}
+	_, ts, err := slackClient.StartStream(channelID, streamOpts...)
+	if err == nil {
+		return ts, true
+	}
+
+	slog.Info("streaming not available, falling back to regular message", "err", err)
+
+	// Fallback to regular thread reply
+	_, ts, err = slackClient.PostMessage(
+		channelID,
+		slack.MsgOptionText(text, false),
+		slack.MsgOptionTS(threadTS),
+	)
+	if err != nil {
+		slog.Warn("error posting thread reply", "err", err)
+		return "", false
+	}
+	return ts, false
+}
+
+// stopSlackThreadStream stops a streaming message so the bot name stops blinking.
+// No-op if isStreaming is false (i.e. we fell back to a regular message).
+func (h *AlertHandler) stopSlackThreadStream(channelID, messageTS string, isStreaming bool) {
+	if !isStreaming {
+		return
+	}
+	slackClient := h.slackManager.GetClient()
+	if slackClient == nil {
+		return
+	}
+
+	if _, _, err := slackClient.StopStream(channelID, messageTS); err != nil {
+		slog.Warn("error stopping stream", "ts", messageTS, "err", err)
+	}
+}
+
 // updateSlackThreadMessage updates an existing Slack message in a channel
 func (h *AlertHandler) updateSlackThreadMessage(channelID, messageTS, message string) {
 	slackClient := h.slackManager.GetClient()
