@@ -2537,8 +2537,405 @@ func (r *Registry) registerClickHouseTools() {
 	r.logger.Println("ClickHouse tools registered (10 methods)")
 }
 
-// registerPagerDutyTools registers PagerDuty tools (stub - implementations added in later task)
+// registerPagerDutyTools registers all PagerDuty tool methods
 func (r *Registry) registerPagerDutyTools() {
 	r.pagerdutyTool = pagerduty.NewPagerDutyTool(r.logger, r.pagerdutyLimit)
-	r.logger.Println("PagerDuty tool created (registration pending)")
+
+	// pagerduty.get_incidents
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "pagerduty.get_incidents",
+			Description: "List PagerDuty incidents with optional filters (status, urgency, service, date range)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"statuses": {
+						Type:        "string",
+						Description: "Filter by status (triggered, acknowledged, resolved)",
+					},
+					"urgencies": {
+						Type:        "string",
+						Description: "Filter by urgency (high, low)",
+					},
+					"service_ids": {
+						Type:        "string",
+						Description: "Filter by service ID",
+					},
+					"since": {
+						Type:        "string",
+						Description: "Start date filter (ISO 8601)",
+					},
+					"until": {
+						Type:        "string",
+						Description: "End date filter (ISO 8601)",
+					},
+					"sort_by": {
+						Type:        "string",
+						Description: "Sort field (e.g. incident_number:asc)",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.pagerdutyTool.GetIncidents(ctx, incidentID, args)
+		},
+	)
+
+	// pagerduty.get_incident
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "pagerduty.get_incident",
+			Description: "Get detailed information for a specific PagerDuty incident",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"incident_id": {
+						Type:        "string",
+						Description: "PagerDuty incident ID (required)",
+					},
+				},
+				Required: []string{"incident_id"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.pagerdutyTool.GetIncident(ctx, incidentID, args)
+		},
+	)
+
+	// pagerduty.get_incident_notes
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "pagerduty.get_incident_notes",
+			Description: "Get notes and timeline entries for a PagerDuty incident",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"incident_id": {
+						Type:        "string",
+						Description: "PagerDuty incident ID (required)",
+					},
+				},
+				Required: []string{"incident_id"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.pagerdutyTool.GetIncidentNotes(ctx, incidentID, args)
+		},
+	)
+
+	// pagerduty.get_incident_alerts
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "pagerduty.get_incident_alerts",
+			Description: "Get alerts grouped under a PagerDuty incident",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"incident_id": {
+						Type:        "string",
+						Description: "PagerDuty incident ID (required)",
+					},
+				},
+				Required: []string{"incident_id"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.pagerdutyTool.GetIncidentAlerts(ctx, incidentID, args)
+		},
+	)
+
+	// pagerduty.get_services
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "pagerduty.get_services",
+			Description: "List PagerDuty services with optional search query",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"query": {
+						Type:        "string",
+						Description: "Search query to filter services by name",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.pagerdutyTool.GetServices(ctx, incidentID, args)
+		},
+	)
+
+	// pagerduty.get_on_calls
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "pagerduty.get_on_calls",
+			Description: "Get current on-call users by schedule or escalation policy",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"schedule_ids": {
+						Type:        "string",
+						Description: "Filter by schedule ID",
+					},
+					"escalation_policy_ids": {
+						Type:        "string",
+						Description: "Filter by escalation policy ID",
+					},
+					"since": {
+						Type:        "string",
+						Description: "Start of on-call window (ISO 8601)",
+					},
+					"until": {
+						Type:        "string",
+						Description: "End of on-call window (ISO 8601)",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.pagerdutyTool.GetOnCalls(ctx, incidentID, args)
+		},
+	)
+
+	// pagerduty.get_escalation_policies
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "pagerduty.get_escalation_policies",
+			Description: "List PagerDuty escalation policies with optional search query",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"query": {
+						Type:        "string",
+						Description: "Search query to filter policies by name",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.pagerdutyTool.GetEscalationPolicies(ctx, incidentID, args)
+		},
+	)
+
+	// pagerduty.list_recent_changes
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "pagerduty.list_recent_changes",
+			Description: "List recent changes across PagerDuty services",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"since": {
+						Type:        "string",
+						Description: "Start date filter (ISO 8601)",
+					},
+					"until": {
+						Type:        "string",
+						Description: "End date filter (ISO 8601)",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.pagerdutyTool.ListRecentChanges(ctx, incidentID, args)
+		},
+	)
+
+	// pagerduty.acknowledge_incident
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "pagerduty.acknowledge_incident",
+			Description: "Acknowledge a PagerDuty incident",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"incident_id": {
+						Type:        "string",
+						Description: "PagerDuty incident ID (required)",
+					},
+					"requester_email": {
+						Type:        "string",
+						Description: "Email address of the user acknowledging the incident (required)",
+					},
+				},
+				Required: []string{"incident_id", "requester_email"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.pagerdutyTool.AcknowledgeIncident(ctx, incidentID, args)
+		},
+	)
+
+	// pagerduty.resolve_incident
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "pagerduty.resolve_incident",
+			Description: "Resolve a PagerDuty incident",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"incident_id": {
+						Type:        "string",
+						Description: "PagerDuty incident ID (required)",
+					},
+					"requester_email": {
+						Type:        "string",
+						Description: "Email address of the user resolving the incident (required)",
+					},
+				},
+				Required: []string{"incident_id", "requester_email"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.pagerdutyTool.ResolveIncident(ctx, incidentID, args)
+		},
+	)
+
+	// pagerduty.reassign_incident
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "pagerduty.reassign_incident",
+			Description: "Reassign a PagerDuty incident to different users or escalation policy",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"incident_id": {
+						Type:        "string",
+						Description: "PagerDuty incident ID (required)",
+					},
+					"requester_email": {
+						Type:        "string",
+						Description: "Email address of the user reassigning the incident (required)",
+					},
+					"assignee_ids": {
+						Type:        "string",
+						Description: "Comma-separated user IDs to assign the incident to (required)",
+					},
+					"escalation_policy_id": {
+						Type:        "string",
+						Description: "Escalation policy ID to assign (optional)",
+					},
+				},
+				Required: []string{"incident_id", "requester_email", "assignee_ids"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.pagerdutyTool.ReassignIncident(ctx, incidentID, args)
+		},
+	)
+
+	// pagerduty.add_incident_note
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "pagerduty.add_incident_note",
+			Description: "Add a note to a PagerDuty incident",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"incident_id": {
+						Type:        "string",
+						Description: "PagerDuty incident ID (required)",
+					},
+					"requester_email": {
+						Type:        "string",
+						Description: "Email address of the user adding the note (required)",
+					},
+					"content": {
+						Type:        "string",
+						Description: "Note content text (required)",
+					},
+				},
+				Required: []string{"incident_id", "requester_email", "content"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.pagerdutyTool.AddIncidentNote(ctx, incidentID, args)
+		},
+	)
+
+	// pagerduty.send_event
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "pagerduty.send_event",
+			Description: "Send an event via PagerDuty Events API v2 (trigger, acknowledge, or resolve)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"routing_key": {
+						Type:        "string",
+						Description: "Events API v2 routing/integration key (required)",
+					},
+					"event_action": {
+						Type:        "string",
+						Description: "Event action: trigger, acknowledge, or resolve (required)",
+					},
+					"dedup_key": {
+						Type:        "string",
+						Description: "Deduplication key (required for acknowledge/resolve)",
+					},
+					"summary": {
+						Type:        "string",
+						Description: "Event summary (required for trigger events)",
+					},
+					"severity": {
+						Type:        "string",
+						Description: "Event severity: critical, error, warning, info (default: error, for trigger events)",
+					},
+					"source": {
+						Type:        "string",
+						Description: "Event source (default: akmatori, for trigger events)",
+					},
+					"component": {
+						Type:        "string",
+						Description: "Component name (optional, for trigger events)",
+					},
+					"group": {
+						Type:        "string",
+						Description: "Logical grouping (optional, for trigger events)",
+					},
+					"class": {
+						Type:        "string",
+						Description: "Event class/type (optional, for trigger events)",
+					},
+				},
+				Required: []string{"routing_key", "event_action"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.pagerdutyTool.SendEvent(ctx, incidentID, args)
+		},
+	)
+
+	r.logger.Println("PagerDuty tools registered (13 methods)")
 }

@@ -96,12 +96,12 @@ Add a PagerDuty tool type to the MCP gateway, enabling the AI agent to query and
 **Files:**
 - Modify: `mcp-gateway/internal/tools/registry.go`
 
-- [ ] Implement `registerPagerDutyTools()` with all tool registrations (InputSchema definitions for each function)
-- [ ] Register all read-only tools: pagerduty.get_incidents, pagerduty.get_incident, pagerduty.get_incident_notes, pagerduty.get_incident_alerts, pagerduty.get_services, pagerduty.get_on_calls, pagerduty.get_escalation_policies, pagerduty.list_recent_changes
-- [ ] Register action tools: pagerduty.acknowledge_incident, pagerduty.resolve_incident, pagerduty.reassign_incident, pagerduty.add_incident_note
-- [ ] Register event tool: pagerduty.send_event
-- [ ] Write tests verifying tool registration count and names
-- [ ] Run `make test-mcp` - must pass before task 5
+- [x] Implement `registerPagerDutyTools()` with all tool registrations (InputSchema definitions for each function)
+- [x] Register all read-only tools: pagerduty.get_incidents, pagerduty.get_incident, pagerduty.get_incident_notes, pagerduty.get_incident_alerts, pagerduty.get_services, pagerduty.get_on_calls, pagerduty.get_escalation_policies, pagerduty.list_recent_changes
+- [x] Register action tools: pagerduty.acknowledge_incident, pagerduty.resolve_incident, pagerduty.reassign_incident, pagerduty.add_incident_note
+- [x] Register event tool: pagerduty.send_event
+- [x] Write tests verifying tool registration count and names
+- [x] Run `make test-mcp` - must pass before task 5
 
 ### Task 5: Proxy settings support
 

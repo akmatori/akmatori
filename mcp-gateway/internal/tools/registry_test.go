@@ -706,3 +706,150 @@ func TestRegisterClickHouseTools_StopCleanup(t *testing.T) {
 	// Stop should not panic even with a live tool
 	registry.Stop()
 }
+
+// --- PagerDuty Tool Registration Tests ---
+
+func TestRegisterPagerDutyTools_AllToolsRegistered(t *testing.T) {
+	stdLogger := log.New(io.Discard, "", 0)
+	server := mcp.NewServer("test", "1.0.0", stdLogger)
+	registry := NewRegistry(server, stdLogger)
+
+	registry.pagerdutyLimit = ratelimit.New(PagerDutyRatePerSecond, PagerDutyBurstCapacity)
+	registry.registerPagerDutyTools()
+
+	expectedTools := []string{
+		"pagerduty.get_incidents",
+		"pagerduty.get_incident",
+		"pagerduty.get_incident_notes",
+		"pagerduty.get_incident_alerts",
+		"pagerduty.get_services",
+		"pagerduty.get_on_calls",
+		"pagerduty.get_escalation_policies",
+		"pagerduty.list_recent_changes",
+		"pagerduty.acknowledge_incident",
+		"pagerduty.resolve_incident",
+		"pagerduty.reassign_incident",
+		"pagerduty.add_incident_note",
+		"pagerduty.send_event",
+	}
+
+	tools := server.Tools()
+	for _, name := range expectedTools {
+		if _, ok := tools[name]; !ok {
+			t.Errorf("expected tool %q to be registered", name)
+		}
+	}
+}
+
+func TestRegisterPagerDutyTools_ToolCount(t *testing.T) {
+	stdLogger := log.New(io.Discard, "", 0)
+	server := mcp.NewServer("test", "1.0.0", stdLogger)
+	registry := NewRegistry(server, stdLogger)
+
+	registry.pagerdutyLimit = ratelimit.New(PagerDutyRatePerSecond, PagerDutyBurstCapacity)
+	registry.registerPagerDutyTools()
+
+	tools := server.Tools()
+	count := 0
+	for name := range tools {
+		if len(name) > 10 && name[:10] == "pagerduty." {
+			count++
+		}
+	}
+	if count != 13 {
+		t.Errorf("expected 13 pagerduty tools, got %d", count)
+	}
+}
+
+func TestRegisterPagerDutyTools_InputSchemas(t *testing.T) {
+	stdLogger := log.New(io.Discard, "", 0)
+	server := mcp.NewServer("test", "1.0.0", stdLogger)
+	registry := NewRegistry(server, stdLogger)
+
+	registry.pagerdutyLimit = ratelimit.New(PagerDutyRatePerSecond, PagerDutyBurstCapacity)
+	registry.registerPagerDutyTools()
+
+	tools := server.Tools()
+
+	// get_incident requires "incident_id"
+	gi := tools["pagerduty.get_incident"]
+	if len(gi.InputSchema.Required) != 1 || gi.InputSchema.Required[0] != "incident_id" {
+		t.Errorf("get_incident: expected required [incident_id], got %v", gi.InputSchema.Required)
+	}
+	if _, ok := gi.InputSchema.Properties["incident_id"]; !ok {
+		t.Error("get_incident: expected 'incident_id' property")
+	}
+
+	// get_incidents has no required params
+	gis := tools["pagerduty.get_incidents"]
+	if len(gis.InputSchema.Required) != 0 {
+		t.Errorf("get_incidents: expected no required params, got %v", gis.InputSchema.Required)
+	}
+	if _, ok := gis.InputSchema.Properties["statuses"]; !ok {
+		t.Error("get_incidents: expected 'statuses' property")
+	}
+
+	// acknowledge_incident requires incident_id and requester_email
+	ai := tools["pagerduty.acknowledge_incident"]
+	if len(ai.InputSchema.Required) != 2 {
+		t.Errorf("acknowledge_incident: expected 2 required params, got %d", len(ai.InputSchema.Required))
+	}
+
+	// reassign_incident requires incident_id, requester_email, assignee_ids
+	ri := tools["pagerduty.reassign_incident"]
+	if len(ri.InputSchema.Required) != 3 {
+		t.Errorf("reassign_incident: expected 3 required params, got %d", len(ri.InputSchema.Required))
+	}
+	if _, ok := ri.InputSchema.Properties["escalation_policy_id"]; !ok {
+		t.Error("reassign_incident: expected 'escalation_policy_id' property")
+	}
+
+	// add_incident_note requires incident_id, requester_email, content
+	an := tools["pagerduty.add_incident_note"]
+	if len(an.InputSchema.Required) != 3 {
+		t.Errorf("add_incident_note: expected 3 required params, got %d", len(an.InputSchema.Required))
+	}
+
+	// send_event requires routing_key and event_action
+	se := tools["pagerduty.send_event"]
+	if len(se.InputSchema.Required) != 2 {
+		t.Errorf("send_event: expected 2 required params, got %d", len(se.InputSchema.Required))
+	}
+	if _, ok := se.InputSchema.Properties["severity"]; !ok {
+		t.Error("send_event: expected 'severity' property")
+	}
+	if _, ok := se.InputSchema.Properties["dedup_key"]; !ok {
+		t.Error("send_event: expected 'dedup_key' property")
+	}
+}
+
+func TestRegisterPagerDutyTools_ListToolsByType(t *testing.T) {
+	stdLogger := log.New(io.Discard, "", 0)
+	server := mcp.NewServer("test", "1.0.0", stdLogger)
+	registry := NewRegistry(server, stdLogger)
+
+	registry.pagerdutyLimit = ratelimit.New(PagerDutyRatePerSecond, PagerDutyBurstCapacity)
+	registry.registerPagerDutyTools()
+
+	results := registry.ListToolsByType("pagerduty")
+	if len(results) != 13 {
+		t.Fatalf("expected 13 pagerduty tools in list, got %d", len(results))
+	}
+	for _, r := range results {
+		if r.ToolType != "pagerduty" {
+			t.Errorf("expected tool_type 'pagerduty', got %q", r.ToolType)
+		}
+	}
+}
+
+func TestRegisterPagerDutyTools_StopCleanup(t *testing.T) {
+	stdLogger := log.New(io.Discard, "", 0)
+	server := mcp.NewServer("test", "1.0.0", stdLogger)
+	registry := NewRegistry(server, stdLogger)
+
+	registry.pagerdutyLimit = ratelimit.New(PagerDutyRatePerSecond, PagerDutyBurstCapacity)
+	registry.registerPagerDutyTools()
+
+	// Stop should not panic even with a live tool
+	registry.Stop()
+}
