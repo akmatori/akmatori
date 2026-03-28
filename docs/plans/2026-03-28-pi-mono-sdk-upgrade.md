@@ -141,10 +141,10 @@ New event types may have been added since 0.58.0 (e.g., improved compaction even
 
 ### Task 9: Verify Acceptance Criteria
 
-- [ ] Run full test suite: `make test-all`
-- [ ] Run linter: `go vet ./...` and `cd agent-worker && npm run build`
-- [ ] Verify all existing agent-worker tests pass with the upgraded SDK
-- [ ] Verify Docker build succeeds: `docker-compose build akmatori-agent`
+- [x] Run full test suite: `make test-all`
+- [x] Run linter: `go vet ./...` and `cd agent-worker && npm run build`
+- [x] Verify all existing agent-worker tests pass with the upgraded SDK
+- [x] Verify Docker build succeeds: `docker-compose build akmatori-agent`
 
 ### Task 10: Update Documentation
 
