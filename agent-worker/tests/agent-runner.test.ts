@@ -714,12 +714,12 @@ describe("AgentRunner", () => {
       expect(output).toContain("🤔 Investigating CPU spike");
     });
 
-    it("should stream auto_compaction_start and auto_compaction_end events", async () => {
+    it("should stream compaction_start and compaction_end events", async () => {
       const onOutput = vi.fn();
       mockSession.prompt.mockImplementationOnce(async () => {
         for (const sub of mockSession._subscribers) {
-          sub({ type: "auto_compaction_start", reason: "context limit" });
-          sub({ type: "auto_compaction_end", aborted: false });
+          sub({ type: "compaction_start", reason: "context limit" });
+          sub({ type: "compaction_end", aborted: false });
         }
       });
 
@@ -731,12 +731,12 @@ describe("AgentRunner", () => {
       expect(output).toContain("compaction complete");
     });
 
-    it("should stream auto_compaction_end with aborted status", async () => {
+    it("should stream compaction_end with aborted status", async () => {
       const onOutput = vi.fn();
       mockSession.prompt.mockImplementationOnce(async () => {
         for (const sub of mockSession._subscribers) {
-          sub({ type: "auto_compaction_start", reason: "overflow" });
-          sub({ type: "auto_compaction_end", aborted: true });
+          sub({ type: "compaction_start", reason: "overflow" });
+          sub({ type: "compaction_end", aborted: true });
         }
       });
 

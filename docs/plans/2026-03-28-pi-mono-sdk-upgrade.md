@@ -49,12 +49,12 @@ Upgrade the agent-worker's pi-mono SDK dependencies from 0.58.1 to 0.63.1 (lates
 - Modify: `agent-worker/package.json`
 - Modify: `agent-worker/package-lock.json` (auto-generated)
 
-- [ ] Update `@mariozechner/pi-coding-agent` from `^0.58.0` to `^0.63.1`
-- [ ] Update `@mariozechner/pi-agent-core` from `^0.58.0` to `^0.63.1`
-- [ ] Update `@mariozechner/pi-ai` from `^0.58.0` to `^0.63.1`
-- [ ] Run `npm install` and resolve any dependency conflicts
-- [ ] Run `npm run build` (tsc) and fix any type errors
-- [ ] Run `make test-agent` to verify existing tests pass
+- [x] Update `@mariozechner/pi-coding-agent` from `^0.58.0` to `^0.63.1`
+- [x] Update `@mariozechner/pi-agent-core` from `^0.58.0` to `^0.63.1`
+- [x] Update `@mariozechner/pi-ai` from `^0.58.0` to `^0.63.1`
+- [x] Run `npm install` and resolve any dependency conflicts
+- [x] Run `npm run build` (tsc) and fix any type errors
+- [x] Run `make test-agent` to verify existing tests pass
 
 ### Task 2: Address Breaking Change - promptSnippet for Custom Tools
 

@@ -517,7 +517,7 @@ export class AgentRunner {
         break;
       }
 
-      case "auto_compaction_start": {
+      case "compaction_start": {
         const reason = (event as any).reason ?? "context limit";
         const compactLine = `\n📦 Compacting context (${reason})...\n`;
         onOutput(compactLine);
@@ -525,7 +525,7 @@ export class AgentRunner {
         break;
       }
 
-      case "auto_compaction_end": {
+      case "compaction_end": {
         const aborted = (event as any).aborted;
         const compactResult = aborted
           ? "\n📦 Context compaction aborted\n"
