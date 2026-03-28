@@ -159,6 +159,8 @@ func (s *ToolService) EnsureToolTypes() error {
 		{Name: "catchpoint", Description: "Catchpoint Digital Experience Monitoring integration"},
 		{Name: "postgresql", Description: "PostgreSQL database integration for read-only queries and diagnostics"},
 		{Name: "grafana", Description: "Grafana observability platform integration"},
+		{Name: "pagerduty", Description: "PagerDuty incident management integration"},
+		{Name: "clickhouse", Description: "ClickHouse read-only query and OLAP diagnostics integration"},
 	}
 
 	for _, tt := range toolTypes {
