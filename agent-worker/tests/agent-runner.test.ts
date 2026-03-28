@@ -337,6 +337,18 @@ describe("AgentRunner", () => {
       expect(mockSessionManager.newSession).toHaveBeenCalledWith({ id: "inc-uuid-abc-123" });
     });
 
+    it("should pass sessionDir to SessionManager.create for workspace isolation", async () => {
+      const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+      const params = makeExecuteParams({ workDir: "/tmp/workspace" });
+      await runner.execute(params);
+
+      // SessionManager.create should receive workDir and sessionDir
+      expect(SessionManager.create).toHaveBeenCalledWith(
+        "/tmp/workspace",
+        "/tmp/workspace/.sessions",
+      );
+    });
+
     it("should NOT call newSession with deterministic ID for resume", async () => {
       const { SessionManager } = await import("@mariozechner/pi-coding-agent");
       const params = makeResumeParams({ incidentId: "inc-resume-456" });
@@ -350,6 +362,17 @@ describe("AgentRunner", () => {
         (SessionManager.continueRecent as any).mock.results.length - 1
       ].value;
       expect(mockSessionManager.newSession).not.toHaveBeenCalled();
+    });
+
+    it("should pass sessionDir to SessionManager.continueRecent for resume", async () => {
+      const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+      const params = makeResumeParams({ workDir: "/tmp/workspace" });
+      await runner.resume(params);
+
+      expect(SessionManager.continueRecent).toHaveBeenCalledWith(
+        "/tmp/workspace",
+        "/tmp/workspace/.sessions",
+      );
     });
 
     it("should call session.prompt with the task", async () => {

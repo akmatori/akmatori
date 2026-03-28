@@ -108,11 +108,11 @@ The JSONL session export (0.61.0) enables exporting investigation history for po
 **Files:**
 - Modify: `agent-worker/src/agent-runner.ts`
 
-- [ ] Investigate if `sessionDir` setting in SettingsManager can replace our manual `SessionManager.create(workDir)` pattern
-- [ ] If beneficial, configure sessionDir via SettingsManager.inMemory() to point sessions to a dedicated subdirectory (e.g., `{workDir}/.sessions/`)
-- [ ] This separates session data from agent workspace files, making cleanup easier
-- [ ] Write tests to verify session files go to the correct directory
-- [ ] Run `make test-agent` to verify tests pass
+- [x] Investigate if `sessionDir` setting in SettingsManager can replace our manual `SessionManager.create(workDir)` pattern
+- [x] If beneficial, configure sessionDir via SettingsManager.inMemory() to point sessions to a dedicated subdirectory (e.g., `{workDir}/.sessions/`)
+- [x] This separates session data from agent workspace files, making cleanup easier
+- [x] Write tests to verify session files go to the correct directory
+- [x] Run `make test-agent` to verify tests pass
 
 ### Task 7: Update BASH_TOOL_GUIDELINES for New Built-in Tool Metadata
 

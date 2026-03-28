@@ -225,9 +225,15 @@ export class AgentRunner {
     // newSession({ id: incidentId }) to use the incident UUID as the pi-mono
     // session ID. This eliminates the separate incident_id ↔ session_id mapping
     // and makes debugging/audit simpler (grep by incident UUID finds everything).
+    //
+    // sessionDir (pi-mono 0.63.0): We pass a dedicated .sessions subdirectory
+    // to isolate pi-mono session JSONL files from the agent's workspace files
+    // (tool outputs, runbooks, SKILL.md, etc.). This makes cleanup easier and
+    // avoids cluttering the workspace root with encoded-cwd session directories.
+    const sessionDir = path.join(params.workDir, ".sessions");
     const sessionManager = isResume
-      ? SessionManager.continueRecent(params.workDir)
-      : SessionManager.create(params.workDir);
+      ? SessionManager.continueRecent(params.workDir, sessionDir)
+      : SessionManager.create(params.workDir, sessionDir);
     if (!isResume) {
       sessionManager.newSession({ id: params.incidentId });
     }
