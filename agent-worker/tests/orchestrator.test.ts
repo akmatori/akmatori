@@ -615,6 +615,7 @@ describe("Orchestrator", () => {
         llm_enabled: true,
         slack_enabled: false,
         zabbix_enabled: false,
+        victoria_metrics_enabled: false,
       };
 
       sendFromServer({
@@ -639,6 +640,7 @@ describe("Orchestrator", () => {
         llm_enabled: true,
         slack_enabled: false,
         zabbix_enabled: false,
+        victoria_metrics_enabled: false,
       };
 
       sendFromServer({

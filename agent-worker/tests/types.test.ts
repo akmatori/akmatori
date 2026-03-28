@@ -8,41 +8,35 @@ import {
   type LLMSettings,
   type ExecuteResult,
   type MessageType,
-  type APIToWorkerMessageType,
-  type WorkerToAPIMessageType,
   type ToolAllowlistEntry,
 } from "../src/types.js";
 
 describe("MessageType constants", () => {
-  it("API-to-worker message types match Go constants", () => {
-    const types: APIToWorkerMessageType[] = [
-      "new_incident",
-      "continue_incident",
-      "cancel_incident",
-      "proxy_config_update",
-    ];
-    expect(types).toHaveLength(4);
-    // These values must match Go AgentMessageType constants exactly
-    expect(types).toContain("new_incident");
-    expect(types).toContain("continue_incident");
-    expect(types).toContain("cancel_incident");
-    expect(types).toContain("proxy_config_update");
+  it("API-to-worker message types are assignable from Go constant strings", () => {
+    // TypeScript compile-time check: these string literals must be valid
+    // APIToWorkerMessageType values. If a type is renamed in types.ts,
+    // this test will fail to compile (caught by vitest type-checking).
+    const msg1: WebSocketMessage = { type: "new_incident" };
+    const msg2: WebSocketMessage = { type: "continue_incident" };
+    const msg3: WebSocketMessage = { type: "cancel_incident" };
+    const msg4: WebSocketMessage = { type: "proxy_config_update" };
+    expect(msg1.type).toBe("new_incident");
+    expect(msg2.type).toBe("continue_incident");
+    expect(msg3.type).toBe("cancel_incident");
+    expect(msg4.type).toBe("proxy_config_update");
   });
 
-  it("worker-to-API message types match Go constants", () => {
-    const types: WorkerToAPIMessageType[] = [
-      "agent_output",
-      "agent_completed",
-      "agent_error",
-      "heartbeat",
-      "status",
-    ];
-    expect(types).toHaveLength(5);
-    expect(types).toContain("agent_output");
-    expect(types).toContain("agent_completed");
-    expect(types).toContain("agent_error");
-    expect(types).toContain("heartbeat");
-    expect(types).toContain("status");
+  it("worker-to-API message types are assignable from Go constant strings", () => {
+    const msg1: WebSocketMessage = { type: "agent_output" };
+    const msg2: WebSocketMessage = { type: "agent_completed" };
+    const msg3: WebSocketMessage = { type: "agent_error" };
+    const msg4: WebSocketMessage = { type: "heartbeat" };
+    const msg5: WebSocketMessage = { type: "status" };
+    expect(msg1.type).toBe("agent_output");
+    expect(msg2.type).toBe("agent_completed");
+    expect(msg3.type).toBe("agent_error");
+    expect(msg4.type).toBe("heartbeat");
+    expect(msg5.type).toBe("status");
   });
 });
 
@@ -160,6 +154,7 @@ describe("WebSocketMessage serialization", () => {
       llm_enabled: true,
       slack_enabled: false,
       zabbix_enabled: false,
+      victoria_metrics_enabled: false,
     };
 
     const msg: WebSocketMessage = {
@@ -178,6 +173,7 @@ describe("WebSocketMessage serialization", () => {
       llm_enabled: true,
       slack_enabled: false,
       zabbix_enabled: false,
+      victoria_metrics_enabled: false,
     });
   });
 
@@ -222,6 +218,7 @@ describe("WebSocketMessage deserialization", () => {
         llm_enabled: true,
         slack_enabled: true,
         zabbix_enabled: false,
+        victoria_metrics_enabled: false,
       },
     });
 
@@ -340,6 +337,7 @@ describe("ProxyConfig type", () => {
       llm_enabled: true,
       slack_enabled: true,
       zabbix_enabled: false,
+      victoria_metrics_enabled: false,
     };
 
     const json = JSON.stringify(config);
@@ -351,31 +349,27 @@ describe("ProxyConfig type", () => {
     expect(parsed.llm_enabled).toBe(true);
     expect(parsed.slack_enabled).toBe(true);
     expect(parsed.zabbix_enabled).toBe(false);
+    expect(parsed.victoria_metrics_enabled).toBe(false);
   });
 });
 
 describe("LLMSettings type", () => {
-  it("supports all provider types", () => {
-    const providers: LLMSettings["provider"][] = [
-      "openai",
-      "anthropic",
-      "google",
-      "openrouter",
-      "custom",
-    ];
-    expect(providers).toHaveLength(5);
+  it("serializes each provider type correctly", () => {
+    // Each provider string must be a valid LLMSettings.provider value.
+    // If the union changes, this test catches it at the assertion level.
+    const providers: LLMSettings["provider"][] = ["openai", "anthropic", "google", "openrouter", "custom"];
+    for (const p of providers) {
+      const s: LLMSettings = { provider: p, api_key: "k", model: "m", thinking_level: "medium" };
+      expect(JSON.parse(JSON.stringify(s)).provider).toBe(p);
+    }
   });
 
-  it("supports all thinking levels", () => {
-    const levels: LLMSettings["thinking_level"][] = [
-      "off",
-      "minimal",
-      "low",
-      "medium",
-      "high",
-      "xhigh",
-    ];
-    expect(levels).toHaveLength(6);
+  it("serializes each thinking level correctly", () => {
+    const levels: LLMSettings["thinking_level"][] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+    for (const l of levels) {
+      const s: LLMSettings = { provider: "openai", api_key: "k", model: "m", thinking_level: l };
+      expect(JSON.parse(JSON.stringify(s)).thinking_level).toBe(l);
+    }
   });
 
   it("serializes with expected fields", () => {

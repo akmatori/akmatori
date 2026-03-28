@@ -103,22 +103,9 @@ export interface AgentRunnerConfig {
  * pi-mono does not have "off" - we map it to "minimal" as the closest.
  */
 export function mapThinkingLevel(level: ThinkingLevel): PiThinkingLevel {
-  switch (level) {
-    case "off":
-      return "minimal";
-    case "minimal":
-      return "minimal";
-    case "low":
-      return "low";
-    case "medium":
-      return "medium";
-    case "high":
-      return "high";
-    case "xhigh":
-      return "xhigh";
-    default:
-      return "medium";
-  }
+  if (level === "off") return "minimal";
+  const valid: PiThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh"];
+  return valid.includes(level as PiThinkingLevel) ? (level as PiThinkingLevel) : "medium";
 }
 
 // ---------------------------------------------------------------------------
@@ -361,9 +348,10 @@ export class AgentRunner {
     try {
       await session.prompt(promptText);
 
+      const sessionExportPath = this.exportSession(sessionManager, params.workDir);
+
       // If the SDK reported an API-level error, propagate it
       if (lastErrorMessage && !responseText) {
-        const sessionExportPath = this.exportSession(sessionManager, params.workDir);
         return {
           session_id: session.sessionId,
           response: responseText,
@@ -382,9 +370,6 @@ export class AgentRunner {
       // investigation summary.
       const finalResponse = session.getLastAssistantText() ?? responseText;
 
-      // Export session as JSONL for post-mortem analysis
-      const sessionExportPath = this.exportSession(sessionManager, params.workDir);
-
       return {
         session_id: session.sessionId,
         response: finalResponse,
@@ -394,7 +379,6 @@ export class AgentRunner {
         session_export: sessionExportPath,
       };
     } catch (err) {
-      // Still attempt export on error for debugging
       const sessionExportPath = this.exportSession(sessionManager, params.workDir);
 
       return {

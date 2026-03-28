@@ -558,6 +558,18 @@ describe("AgentRunner", () => {
         (t: any) => t.name === "bash",
       );
       expect(bashTool).toBeDefined();
+
+      // Verify the spawnHook was passed to createBashToolDefinition
+      const hookOpts = bashTool._spawnHookOpts;
+      expect(hookOpts).toBeDefined();
+      expect(hookOpts.spawnHook).toBeTypeOf("function");
+
+      // Call the spawnHook and verify it injects MCP env vars into subprocess env
+      const hookResult = hookOpts.spawnHook({ env: { PATH: "/usr/bin" } });
+      expect(hookResult.env.MCP_GATEWAY_URL).toBeDefined();
+      expect(hookResult.env.INCIDENT_ID).toBe("inc-env");
+      // Original env vars should be preserved
+      expect(hookResult.env.PATH).toBe("/usr/bin");
     });
 
     it("should use fallback response from getLastAssistantText when no text_delta events", async () => {
@@ -1027,6 +1039,7 @@ describe("AgentRunner", () => {
         llm_enabled: true,
         slack_enabled: false,
         zabbix_enabled: false,
+        victoria_metrics_enabled: false,
       };
 
       let capturedHttpProxy: string | undefined;
@@ -1060,6 +1073,7 @@ describe("AgentRunner", () => {
         llm_enabled: false,
         slack_enabled: true,
         zabbix_enabled: true,
+        victoria_metrics_enabled: false,
       };
 
       let capturedHttpProxy: string | undefined;

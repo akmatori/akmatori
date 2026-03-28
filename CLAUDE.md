@@ -137,9 +137,10 @@ The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK (v0.63.1):
 
 - **ctx.signal forwarding**: Cancellation signals propagate to nested model calls and tool executions
 - **JSONL session export**: Investigation history exported to `{workDir}/session_export.jsonl` for post-mortems
-- **sessionDir isolation**: Session files stored in `{workDir}/.sessions/` subdirectory, separating session data from workspace files
-- **Typed ToolDefinition API**: Built-in tools (bash) use typed `ToolDefinition.promptGuidelines` instead of `as any` casts
-- **Typed session events**: Event handlers use typed fields (`event.summary`, `event.modelId`) instead of `as any` casts
+- **sessionDir isolation**: `SessionManager.create(workDir, sessionDir)` and `SessionManager.continueRecent(workDir, sessionDir)` accept an optional second argument to store session files in `{workDir}/.sessions/`, separating session data from workspace files
+- **Typed ToolDefinition API**: `createBashTool()` + `createCodingTools()` replaced by `createBashToolDefinition()`. The bash tool definition is passed via `customTools` (not `tools`) to `createAgentSession()`, overriding the built-in bash tool by name match. Uses typed `ToolDefinition.promptGuidelines` instead of `as any` casts
+- **promptSnippet requirement**: All custom tools must include a `promptSnippet` string in their ToolDefinition. Without it, the tool is omitted from the system prompt's "Available tools" section (pi-mono 0.59.0+)
+- **Typed session events**: Event types `auto_compaction_start`/`auto_compaction_end` renamed to `compaction_start`/`compaction_end` with typed fields (`event.reason`, `event.aborted`, `event.errorMessage`, `event.willRetry`). Retry events use typed `event.attempt`, `event.maxAttempts`, `event.errorMessage`, `event.success`, `event.finalError` fields
 - **Lazy-loaded provider SDKs**: Faster startup by lazy-loading provider modules
 - **Auto-retry improvements**: Better retry handling for tool-using responses
 - **Multi-edit support**: Agent can edit multiple disjoint regions in a single file operation
