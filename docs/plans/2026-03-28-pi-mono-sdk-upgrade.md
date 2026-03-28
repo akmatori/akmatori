@@ -84,10 +84,10 @@ Since 0.59.0, custom tools without `promptSnippet` are omitted from the system p
 - Modify: `agent-worker/src/agent-runner.ts`
 - Modify: `agent-worker/src/gateway-tools.ts`
 
-- [ ] Verify that the AbortSignal parameter in our custom tool execute() signatures matches the updated SDK type
-- [ ] Ensure our `session.abort()` call in `cancel()` properly triggers signal propagation to active tool calls
-- [ ] Add a test that verifies cancellation propagates to gateway tool calls (mock the gateway client, start execution, cancel, verify signal was aborted)
-- [ ] Run `make test-agent` to verify tests pass
+- [x] Verify that the AbortSignal parameter in our custom tool execute() signatures matches the updated SDK type
+- [x] Ensure our `session.abort()` call in `cancel()` properly triggers signal propagation to active tool calls
+- [x] Add a test that verifies cancellation propagates to gateway tool calls (mock the gateway client, start execution, cancel, verify signal was aborted)
+- [x] Run `make test-agent` to verify tests pass
 
 ### Task 5: Adopt Session Export for Investigation History
 

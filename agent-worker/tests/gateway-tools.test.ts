@@ -942,6 +942,154 @@ describe("gateway_call error messages suppress direct tool hints", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// AbortSignal cancellation propagation (pi-mono 0.63.1 ctx.signal)
+// ---------------------------------------------------------------------------
+
+describe("cancellation propagation via AbortSignal", () => {
+  describe("gateway_call", () => {
+    it("should forward AbortSignal to GatewayClient.call", async () => {
+      const controller = new AbortController();
+      const mockClient = createMockClient();
+      const tool = createGatewayCallTool({ client: mockClient });
+
+      await tool.execute(
+        "tc-sig1",
+        { tool_name: "ssh.execute_command", args: { command: "uptime" } },
+        controller.signal,
+        undefined,
+      );
+
+      expect(mockClient.call).toHaveBeenCalledWith(
+        "ssh.execute_command",
+        { command: "uptime" },
+        undefined,
+        controller.signal,
+      );
+    });
+
+    it("should abort in-flight gateway_call when signal fires", async () => {
+      const controller = new AbortController();
+      const mockClient = createMockClient({
+        call: vi.fn(async (_name, _args, _instance, signal?: AbortSignal) => {
+          // Simulate a long-running call that respects the signal
+          return new Promise<CallResult>((resolve, reject) => {
+            if (signal?.aborted) {
+              reject(new Error("Request aborted"));
+              return;
+            }
+            const onAbort = () => reject(new Error("Request aborted"));
+            signal?.addEventListener("abort", onAbort, { once: true });
+            // Resolve after a delay (if not aborted)
+            setTimeout(() => {
+              signal?.removeEventListener("abort", onAbort);
+              resolve({ data: "should not reach" });
+            }, 5000);
+          });
+        }) as any,
+      });
+      const tool = createGatewayCallTool({ client: mockClient });
+
+      // Start execution, then abort immediately
+      const resultPromise = tool.execute(
+        "tc-sig2",
+        { tool_name: "ssh.execute_command", args: { command: "sleep 60" } },
+        controller.signal,
+        undefined,
+      );
+      controller.abort();
+
+      const result = await resultPromise;
+      expect(result.content[0].text).toContain("Error:");
+      expect(result.content[0].text).toContain("aborted");
+    });
+
+    it("should handle already-aborted signal", async () => {
+      const controller = new AbortController();
+      controller.abort(); // Abort before calling
+
+      const mockClient = createMockClient({
+        call: vi.fn(async (_name, _args, _instance, signal?: AbortSignal) => {
+          if (signal?.aborted) {
+            throw new Error("Request aborted");
+          }
+          return { data: "should not reach" } as CallResult;
+        }) as any,
+      });
+      const tool = createGatewayCallTool({ client: mockClient });
+
+      const result = await tool.execute(
+        "tc-sig3",
+        { tool_name: "ssh.execute_command", args: {} },
+        controller.signal,
+        undefined,
+      );
+
+      expect(result.content[0].text).toContain("Error:");
+      expect(result.content[0].text).toContain("aborted");
+    });
+  });
+
+  describe("list_tools_for_tool_type", () => {
+    it("should forward AbortSignal to GatewayClient.listToolsByType", async () => {
+      const controller = new AbortController();
+      const mockClient = createMockClient();
+      const tool = createListToolsForToolTypeTool({ client: mockClient });
+
+      await tool.execute("tc-sig4", { tool_type: "ssh" }, controller.signal, undefined);
+
+      expect(mockClient.listToolsByType).toHaveBeenCalledWith("ssh", controller.signal);
+    });
+  });
+
+  describe("get_tool_detail", () => {
+    it("should forward AbortSignal to GatewayClient.getToolDetail", async () => {
+      const controller = new AbortController();
+      const mockClient = createMockClient();
+      const tool = createGetToolDetailTool({ client: mockClient });
+
+      await tool.execute("tc-sig5", { tool_name: "ssh.execute_command" }, controller.signal, undefined);
+
+      expect(mockClient.getToolDetail).toHaveBeenCalledWith("ssh.execute_command", controller.signal);
+    });
+  });
+
+  describe("list_tool_types", () => {
+    it("should forward AbortSignal to GatewayClient.listToolTypes", async () => {
+      const controller = new AbortController();
+      const mockClient = createMockClient();
+      const tool = createListToolTypesTool({ client: mockClient });
+
+      await tool.execute("tc-sig6", {} as Record<string, never>, controller.signal, undefined);
+
+      expect(mockClient.listToolTypes).toHaveBeenCalledWith(controller.signal);
+    });
+  });
+
+  describe("execute_script", () => {
+    it("should forward AbortSignal to script executor", async () => {
+      const controller = new AbortController();
+      const mockClient = createMockClient();
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "exec-sig-test-"));
+
+      try {
+        const tool = createExecuteScriptTool({ client: mockClient, workDir: tmpDir });
+
+        const result = await tool.execute(
+          "tc-sig7",
+          { code: 'return "hello"' },
+          controller.signal,
+          undefined,
+        );
+
+        expect(result.content[0].text).toBe("hello");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+  });
+});
+
 describe("ExecuteScriptParams schema", () => {
   it("should require code as string", () => {
     expect(ExecuteScriptParams.properties.code.type).toBe("string");
