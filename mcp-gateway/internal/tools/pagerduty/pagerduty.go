@@ -642,7 +642,7 @@ func (t *PagerDutyTool) ReassignIncident(ctx context.Context, incidentID string,
 	escalationPolicyID, _ := args["escalation_policy_id"].(string)
 
 	incidentBody := map[string]interface{}{
-		"type":        "incident",
+		"type":        "incident_reference",
 		"assignments": assignments,
 	}
 	if escalationPolicyID != "" {
