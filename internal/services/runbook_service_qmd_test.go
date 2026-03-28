@@ -19,7 +19,9 @@ func TestTriggerQMDReindex_Success(t *testing.T) {
 		}
 		called.Add(1)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"updated"}`))
+		if _, err := w.Write([]byte(`{"status":"updated"}`)); err != nil {
+			t.Fatalf("write response failed: %v", err)
+		}
 	}))
 	defer server.Close()
 

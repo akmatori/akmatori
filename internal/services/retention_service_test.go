@@ -119,7 +119,9 @@ func TestRunCleanup_FailedIncidentsAlsoCleanedUp(t *testing.T) {
 	// Create an expired failed incident
 	completedAt := time.Now().AddDate(0, 0, -60)
 	workDir := filepath.Join(dataDir, "failed-uuid-1")
-	os.MkdirAll(workDir, 0755)
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
 	db.Create(&database.Incident{
 		UUID:        "failed-uuid-1",
 		Source:      "test",
@@ -147,7 +149,9 @@ func TestRunCleanup_RunningIncidentsNotDeleted(t *testing.T) {
 
 	// Create an old running incident - should NOT be deleted
 	workDir := filepath.Join(dataDir, "running-uuid-1")
-	os.MkdirAll(workDir, 0755)
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
 	db.Create(&database.Incident{
 		UUID:       "running-uuid-1",
 		Source:     "test",
@@ -180,17 +184,27 @@ func TestRunCleanup_OrphanedDirectories(t *testing.T) {
 	// Create an orphaned directory with a valid UUID name (no matching DB record)
 	orphanUUID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 	orphanDir := filepath.Join(dataDir, orphanUUID)
-	os.MkdirAll(orphanDir, 0755)
-	os.WriteFile(filepath.Join(orphanDir, "data.txt"), []byte("orphaned data"), 0644)
+	if err := os.MkdirAll(orphanDir, 0755); err != nil {
+		t.Fatalf("MkdirAll orphanDir failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(orphanDir, "data.txt"), []byte("orphaned data"), 0644); err != nil {
+		t.Fatalf("WriteFile orphanDir failed: %v", err)
+	}
 	// Backdate to be older than the 1-hour grace period
 	oldTime := time.Now().Add(-2 * time.Hour)
-	os.Chtimes(orphanDir, oldTime, oldTime)
+	if err := os.Chtimes(orphanDir, oldTime, oldTime); err != nil {
+		t.Fatalf("Chtimes orphanDir failed: %v", err)
+	}
 
 	// Create a directory with a valid UUID and matching DB record (should not be deleted)
 	matchedUUID := "b2c3d4e5-f6a7-8901-bcde-f12345678901"
 	matchedDir := filepath.Join(dataDir, matchedUUID)
-	os.MkdirAll(matchedDir, 0755)
-	os.Chtimes(matchedDir, oldTime, oldTime)
+	if err := os.MkdirAll(matchedDir, 0755); err != nil {
+		t.Fatalf("MkdirAll matchedDir failed: %v", err)
+	}
+	if err := os.Chtimes(matchedDir, oldTime, oldTime); err != nil {
+		t.Fatalf("Chtimes matchedDir failed: %v", err)
+	}
 	db.Create(&database.Incident{
 		UUID:       matchedUUID,
 		Source:     "test",
@@ -229,11 +243,19 @@ func TestRunCleanup_NonUUIDDirectoriesIgnored(t *testing.T) {
 	db.Create(&database.RetentionSettings{Enabled: true, RetentionDays: 30, CleanupIntervalHours: 6})
 
 	// Create directories with non-UUID names - should be ignored by orphan cleanup
-	os.MkdirAll(filepath.Join(dataDir, "tmp"), 0755)
-	os.MkdirAll(filepath.Join(dataDir, "not-a-uuid"), 0755)
+	if err := os.MkdirAll(filepath.Join(dataDir, "tmp"), 0755); err != nil {
+		t.Fatalf("MkdirAll tmp failed: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dataDir, "not-a-uuid"), 0755); err != nil {
+		t.Fatalf("MkdirAll not-a-uuid failed: %v", err)
+	}
 	oldTime := time.Now().Add(-2 * time.Hour)
-	os.Chtimes(filepath.Join(dataDir, "tmp"), oldTime, oldTime)
-	os.Chtimes(filepath.Join(dataDir, "not-a-uuid"), oldTime, oldTime)
+	if err := os.Chtimes(filepath.Join(dataDir, "tmp"), oldTime, oldTime); err != nil {
+		t.Fatalf("Chtimes tmp failed: %v", err)
+	}
+	if err := os.Chtimes(filepath.Join(dataDir, "not-a-uuid"), oldTime, oldTime); err != nil {
+		t.Fatalf("Chtimes not-a-uuid failed: %v", err)
+	}
 
 	svc := NewRetentionService(dataDir, db)
 	result, err := svc.RunCleanup()
@@ -263,7 +285,9 @@ func TestRunCleanup_RecentDirectoriesNotOrphaned(t *testing.T) {
 	// Create a recent directory with valid UUID but no DB record - should be skipped (grace period)
 	recentUUID := "c3d4e5f6-a7b8-9012-cdef-123456789012"
 	recentDir := filepath.Join(dataDir, recentUUID)
-	os.MkdirAll(recentDir, 0755)
+	if err := os.MkdirAll(recentDir, 0755); err != nil {
+		t.Fatalf("MkdirAll recentDir failed: %v", err)
+	}
 	// Don't backdate - it's recent, should be protected by grace period
 
 	svc := NewRetentionService(dataDir, db)
@@ -289,10 +313,10 @@ func TestRunCleanup_DisabledRetention(t *testing.T) {
 	// Use a map so GORM persists the explicit false value instead of applying the
 	// model's default:true tag during INSERT.
 	db.Model(&database.RetentionSettings{}).Create(map[string]interface{}{
-		"singleton_key":           "default",
-		"enabled":                 false,
-		"retention_days":          30,
-		"cleanup_interval_hours":  6,
+		"singleton_key":          "default",
+		"enabled":                false,
+		"retention_days":         30,
+		"cleanup_interval_hours": 6,
 	})
 
 	// Create an expired incident
@@ -431,9 +455,15 @@ func TestDirSize(t *testing.T) {
 	dir := t.TempDir()
 
 	// Write some files
-	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello"), 0644)
-	os.MkdirAll(filepath.Join(dir, "sub"), 0755)
-	os.WriteFile(filepath.Join(dir, "sub", "b.txt"), []byte("world!"), 0644)
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("WriteFile a.txt failed: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0755); err != nil {
+		t.Fatalf("MkdirAll sub failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "b.txt"), []byte("world!"), 0644); err != nil {
+		t.Fatalf("WriteFile b.txt failed: %v", err)
+	}
 
 	size, err := dirSize(dir)
 	if err != nil {
@@ -472,10 +502,16 @@ func TestRunCleanup_BothPhasesCombined(t *testing.T) {
 	// Create an orphaned directory with valid UUID
 	orphanUUID := "d4e5f6a7-b8c9-0123-def0-123456789abc"
 	orphanDir := filepath.Join(dataDir, orphanUUID)
-	os.MkdirAll(orphanDir, 0755)
-	os.WriteFile(filepath.Join(orphanDir, "data.txt"), []byte("orphan"), 0644)
+	if err := os.MkdirAll(orphanDir, 0755); err != nil {
+		t.Fatalf("MkdirAll orphanDir failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(orphanDir, "data.txt"), []byte("orphan"), 0644); err != nil {
+		t.Fatalf("WriteFile orphanDir failed: %v", err)
+	}
 	oldTime := time.Now().Add(-2 * time.Hour)
-	os.Chtimes(orphanDir, oldTime, oldTime)
+	if err := os.Chtimes(orphanDir, oldTime, oldTime); err != nil {
+		t.Fatalf("Chtimes orphanDir failed: %v", err)
+	}
 
 	svc := NewRetentionService(dataDir, db)
 	result, err := svc.RunCleanup()
@@ -526,7 +562,9 @@ func TestRunCleanup_FilesInDataDirIgnored(t *testing.T) {
 	db.Create(&database.RetentionSettings{Enabled: true, RetentionDays: 30, CleanupIntervalHours: 6})
 
 	// Create a regular file (not a directory) in dataDir - should be ignored by orphan cleanup
-	os.WriteFile(filepath.Join(dataDir, "some-file.txt"), []byte("test"), 0644)
+	if err := os.WriteFile(filepath.Join(dataDir, "some-file.txt"), []byte("test"), 0644); err != nil {
+		t.Fatalf("WriteFile some-file.txt failed: %v", err)
+	}
 
 	svc := NewRetentionService(dataDir, db)
 	result, err := svc.RunCleanup()
