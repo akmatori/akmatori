@@ -127,6 +127,9 @@ type UpdateProxySettingsRequest struct {
 		Grafana struct {
 			Enabled bool `json:"enabled"`
 		} `json:"grafana"`
+		PagerDuty struct {
+			Enabled bool `json:"enabled"`
+		} `json:"pagerduty"`
 	} `json:"services"`
 }
 

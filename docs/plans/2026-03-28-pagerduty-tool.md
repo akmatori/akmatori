@@ -112,12 +112,12 @@ Add a PagerDuty tool type to the MCP gateway, enabling the AI agent to query and
 - Modify: `web/src/components/ProxySettings.tsx`
 - Modify: `web/src/types/index.ts`
 
-- [ ] Add `PagerDutyEnabled bool` field to ProxySettings in both database model files (mcp-gateway and API server)
-- [ ] Update proxy settings handler to include pagerduty_enabled in read/write
-- [ ] Add PagerDuty toggle to the frontend ProxySettings component (use Bell icon from lucide-react)
-- [ ] Add pagerduty_enabled to the frontend ProxySettingsUpdate type
-- [ ] Write tests for proxy settings handler including pagerduty_enabled field
-- [ ] Run `make test-mcp` and `make test` - must pass before task 6
+- [x] Add `PagerDutyEnabled bool` field to ProxySettings in both database model files (mcp-gateway and API server)
+- [x] Update proxy settings handler to include pagerduty_enabled in read/write
+- [x] Add PagerDuty toggle to the frontend ProxySettings component (use Bell icon from lucide-react)
+- [x] Add pagerduty_enabled to the frontend ProxySettingsUpdate type
+- [x] Write tests for proxy settings handler including pagerduty_enabled field
+- [x] Run `make test-mcp` and `make test` - must pass before task 6
 
 ### Task 6: Verify acceptance criteria
 

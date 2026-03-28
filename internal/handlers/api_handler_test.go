@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/akmatori/akmatori/internal/api"
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/testhelpers"
 )
@@ -377,6 +379,80 @@ func BenchmarkMaskToken(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = maskToken(token)
 	}
+}
+
+// TestUpdateProxySettingsRequest_PagerDutyField verifies PagerDuty field is included in proxy settings request
+func TestUpdateProxySettingsRequest_PagerDutyField(t *testing.T) {
+	jsonBody := `{
+		"proxy_url": "http://proxy:8080",
+		"no_proxy": "localhost",
+		"services": {
+			"llm": {"enabled": true},
+			"slack": {"enabled": true},
+			"zabbix": {"enabled": false},
+			"victoria_metrics": {"enabled": false},
+			"catchpoint": {"enabled": false},
+			"grafana": {"enabled": false},
+			"pagerduty": {"enabled": true}
+		}
+	}`
+
+	r := httptest.NewRequest(http.MethodPut, "/api/settings/proxy", strings.NewReader(jsonBody))
+	r.Header.Set("Content-Type", "application/json")
+
+	var input api.UpdateProxySettingsRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		t.Fatalf("failed to decode request: %v", err)
+	}
+
+	testhelpers.AssertEqual(t, "http://proxy:8080", input.ProxyURL, "proxy_url")
+	testhelpers.AssertEqual(t, "localhost", input.NoProxy, "no_proxy")
+	testhelpers.AssertEqual(t, true, input.Services.LLM.Enabled, "llm enabled")
+	testhelpers.AssertEqual(t, true, input.Services.Slack.Enabled, "slack enabled")
+	testhelpers.AssertEqual(t, false, input.Services.Zabbix.Enabled, "zabbix enabled")
+	testhelpers.AssertEqual(t, false, input.Services.VictoriaMetrics.Enabled, "victoria_metrics enabled")
+	testhelpers.AssertEqual(t, false, input.Services.Catchpoint.Enabled, "catchpoint enabled")
+	testhelpers.AssertEqual(t, false, input.Services.Grafana.Enabled, "grafana enabled")
+	testhelpers.AssertEqual(t, true, input.Services.PagerDuty.Enabled, "pagerduty enabled")
+}
+
+// TestUpdateProxySettingsRequest_PagerDutyDefault verifies PagerDuty defaults to false when omitted
+func TestUpdateProxySettingsRequest_PagerDutyDefault(t *testing.T) {
+	jsonBody := `{
+		"proxy_url": "http://proxy:8080",
+		"no_proxy": "",
+		"services": {
+			"llm": {"enabled": true},
+			"slack": {"enabled": false},
+			"zabbix": {"enabled": false},
+			"victoria_metrics": {"enabled": false},
+			"catchpoint": {"enabled": false},
+			"grafana": {"enabled": false}
+		}
+	}`
+
+	r := httptest.NewRequest(http.MethodPut, "/api/settings/proxy", strings.NewReader(jsonBody))
+	r.Header.Set("Content-Type", "application/json")
+
+	var input api.UpdateProxySettingsRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		t.Fatalf("failed to decode request: %v", err)
+	}
+
+	testhelpers.AssertEqual(t, false, input.Services.PagerDuty.Enabled, "pagerduty should default to false when omitted")
+}
+
+// TestProxySettings_PagerDutyEnabled verifies PagerDuty field on database model
+func TestProxySettings_PagerDutyEnabled(t *testing.T) {
+	settings := database.ProxySettings{
+		ProxyURL:         "http://proxy:8080",
+		PagerDutyEnabled: true,
+		GrafanaEnabled:   false,
+	}
+
+	testhelpers.AssertEqual(t, true, settings.PagerDutyEnabled, "pagerduty enabled")
+	testhelpers.AssertEqual(t, false, settings.GrafanaEnabled, "grafana enabled")
+	testhelpers.AssertEqual(t, true, settings.IsConfigured(), "should be configured with proxy URL")
 }
 
 // BenchmarkSplitPath benchmarks path splitting

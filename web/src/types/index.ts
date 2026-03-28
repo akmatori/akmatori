@@ -145,6 +145,7 @@ export interface ProxySettings {
     victoria_metrics: ProxyServiceConfig;
     catchpoint: ProxyServiceConfig;
     grafana: ProxyServiceConfig;
+    pagerduty: ProxyServiceConfig;
     ssh: ProxyServiceConfig;
   };
 }
@@ -159,6 +160,7 @@ export interface ProxySettingsUpdate {
     victoria_metrics: { enabled: boolean };
     catchpoint: { enabled: boolean };
     grafana: { enabled: boolean };
+    pagerduty: { enabled: boolean };
   };
 }
 
