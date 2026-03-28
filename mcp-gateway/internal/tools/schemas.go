@@ -63,6 +63,7 @@ func GetToolSchemas() map[string]ToolTypeSchema {
 		"catchpoint":       getCatchpointSchema(),
 		"postgresql":       getPostgreSQLSchema(),
 		"clickhouse":       getClickHouseSchema(),
+		"pagerduty":        getPagerDutySchema(),
 	}
 }
 
@@ -897,6 +898,124 @@ func getPostgreSQLSchema() ToolTypeSchema {
 				Description: "Get database-level statistics and cache hit ratio",
 				Parameters:  "",
 				Returns:     "JSON object with database stats",
+			},
+		},
+	}
+}
+
+func getPagerDutySchema() ToolTypeSchema {
+	return ToolTypeSchema{
+		Name:        "pagerduty",
+		Description: "PagerDuty incident management integration. Query and manage incidents, services, on-call schedules, escalation policies, and send events via the PagerDuty API.",
+		Version:     "1.0.0",
+		SettingsSchema: SettingsSchema{
+			Type:     "object",
+			Required: []string{"pagerduty_api_token"},
+			Properties: map[string]PropertySchema{
+				"pagerduty_api_token": {
+					Type:        "string",
+					Description: "PagerDuty REST API token (v2)",
+					Secret:      true,
+				},
+				"pagerduty_url": {
+					Type:        "string",
+					Description: "PagerDuty API base URL",
+					Default:     "https://api.pagerduty.com",
+				},
+				"pagerduty_verify_ssl": {
+					Type:        "boolean",
+					Description: "Verify SSL certificates",
+					Default:     true,
+					Advanced:    true,
+				},
+				"pagerduty_timeout": {
+					Type:        "integer",
+					Description: "API request timeout in seconds",
+					Default:     30,
+					Minimum:     intPtr(5),
+					Maximum:     intPtr(300),
+					Advanced:    true,
+				},
+			},
+		},
+		Functions: []ToolFunction{
+			{
+				Name:        "get_incidents",
+				Description: "List incidents with filters (status, urgency, service, date range)",
+				Parameters:  "statuses, urgencies, service_ids, since, until, sort_by, limit, offset",
+				Returns:     "JSON array of incident objects",
+			},
+			{
+				Name:        "get_incident",
+				Description: "Get incident details by ID",
+				Parameters:  "incident_id (required)",
+				Returns:     "JSON incident object with full details",
+			},
+			{
+				Name:        "get_incident_notes",
+				Description: "Get notes/timeline for an incident",
+				Parameters:  "incident_id (required)",
+				Returns:     "JSON array of note objects",
+			},
+			{
+				Name:        "get_incident_alerts",
+				Description: "Get alerts grouped under an incident",
+				Parameters:  "incident_id (required), statuses, sort_by, limit, offset",
+				Returns:     "JSON array of alert objects",
+			},
+			{
+				Name:        "get_services",
+				Description: "List services",
+				Parameters:  "query, team_ids, include, limit, offset",
+				Returns:     "JSON array of service objects",
+			},
+			{
+				Name:        "get_on_calls",
+				Description: "Get current on-call users by schedule or escalation policy",
+				Parameters:  "schedule_ids, escalation_policy_ids, since, until, include",
+				Returns:     "JSON array of on-call objects",
+			},
+			{
+				Name:        "get_escalation_policies",
+				Description: "List escalation policies",
+				Parameters:  "query, team_ids, include, limit, offset",
+				Returns:     "JSON array of escalation policy objects",
+			},
+			{
+				Name:        "list_recent_changes",
+				Description: "List recent changes across services",
+				Parameters:  "since, until, limit, offset",
+				Returns:     "JSON array of recent change objects",
+			},
+			{
+				Name:        "acknowledge_incident",
+				Description: "Acknowledge an incident",
+				Parameters:  "incident_id (required), requester_email (required)",
+				Returns:     "JSON updated incident object",
+			},
+			{
+				Name:        "resolve_incident",
+				Description: "Resolve an incident",
+				Parameters:  "incident_id (required), requester_email (required)",
+				Returns:     "JSON updated incident object",
+			},
+			{
+				Name:        "reassign_incident",
+				Description: "Reassign an incident to a different user or escalation policy",
+				Parameters:  "incident_id (required), requester_email (required), assignee_ids, escalation_policy_id",
+				Returns:     "JSON updated incident object",
+			},
+			{
+				Name:        "add_incident_note",
+				Description: "Add a note to an incident",
+				Parameters:  "incident_id (required), requester_email (required), content (required)",
+				Returns:     "JSON note object",
+			},
+			{
+				Name:        "send_event",
+				Description: "Send trigger/acknowledge/resolve events via Events API v2",
+				Parameters:  "routing_key (required), event_action (required: trigger/acknowledge/resolve), dedup_key, summary, source, severity, component, group, class, custom_details",
+				Returns:     "JSON with status, message, and dedup_key",
 			},
 		},
 	}

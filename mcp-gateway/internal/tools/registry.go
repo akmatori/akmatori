@@ -18,6 +18,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/tools/clickhouse"
 	"github.com/akmatori/mcp-gateway/internal/tools/grafana"
 	"github.com/akmatori/mcp-gateway/internal/tools/httpconnector"
+	"github.com/akmatori/mcp-gateway/internal/tools/pagerduty"
 	"github.com/akmatori/mcp-gateway/internal/tools/postgresql"
 	"github.com/akmatori/mcp-gateway/internal/tools/ssh"
 	"github.com/akmatori/mcp-gateway/internal/tools/victoriametrics"
@@ -38,6 +39,8 @@ const (
 	GrafanaBurstCapacity     = 20 // burst capacity
 	ClickHouseRatePerSecond  = 10 // requests per second
 	ClickHouseBurstCapacity  = 20 // burst capacity
+	PagerDutyRatePerSecond   = 10 // requests per second
+	PagerDutyBurstCapacity   = 20 // burst capacity
 )
 
 // Registry manages tool registration
@@ -56,6 +59,8 @@ type Registry struct {
 	grafanaLimit     *ratelimit.Limiter
 	clickhouseTool   *clickhouse.ClickHouseTool
 	clickhouseLimit  *ratelimit.Limiter
+	pagerdutyTool    *pagerduty.PagerDutyTool
+	pagerdutyLimit   *ratelimit.Limiter
 
 	// HTTP connector state
 	httpExecutor       *httpconnector.HTTPConnectorExecutor
@@ -125,6 +130,13 @@ func (r *Registry) RegisterAllTools() {
 	// Register ClickHouse tools with rate limiter
 	r.registerClickHouseTools()
 
+	// Create rate limiter for PagerDuty: 10 req/sec, burst 20
+	r.pagerdutyLimit = ratelimit.New(PagerDutyRatePerSecond, PagerDutyBurstCapacity)
+	r.logger.Printf("PagerDuty rate limiter created: %d req/sec, burst %d", PagerDutyRatePerSecond, PagerDutyBurstCapacity)
+
+	// Register PagerDuty tools with rate limiter
+	r.registerPagerDutyTools()
+
 	r.logger.Println("All tools registered")
 }
 
@@ -147,6 +159,9 @@ func (r *Registry) Stop() {
 	}
 	if r.clickhouseTool != nil {
 		r.clickhouseTool.Stop()
+	}
+	if r.pagerdutyTool != nil {
+		r.pagerdutyTool.Stop()
 	}
 	if r.httpExecutor != nil {
 		r.httpExecutor.Stop()
@@ -2520,4 +2535,10 @@ func (r *Registry) registerClickHouseTools() {
 	)
 
 	r.logger.Println("ClickHouse tools registered (10 methods)")
+}
+
+// registerPagerDutyTools registers PagerDuty tools (stub - implementations added in later task)
+func (r *Registry) registerPagerDutyTools() {
+	r.pagerdutyTool = pagerduty.NewPagerDutyTool(r.logger, r.pagerdutyLimit)
+	r.logger.Println("PagerDuty tool created (registration pending)")
 }

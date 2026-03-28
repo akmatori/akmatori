@@ -56,14 +56,14 @@ Add a PagerDuty tool type to the MCP gateway, enabling the AI agent to query and
 - Modify: `mcp-gateway/internal/tools/schemas.go`
 - Modify: `mcp-gateway/internal/tools/registry.go`
 
-- [ ] Add `getPagerDutySchema()` to schemas.go with settings: `pagerduty_api_token` (secret, required), `pagerduty_url` (default `https://api.pagerduty.com`), `pagerduty_verify_ssl`, `pagerduty_timeout`, and function list
-- [ ] Add `"pagerduty": getPagerDutySchema()` to `GetToolSchemas()` map
-- [ ] Add PagerDuty rate limiter constants (10 req/sec, burst 20)
-- [ ] Add `pagerdutyTool` and `pagerdutyLimit` fields to Registry struct
-- [ ] Add `registerPagerDutyTools()` call in `RegisterAllTools()` (stub for now)
-- [ ] Add Stop() cleanup for pagerdutyTool
-- [ ] Write tests for schema validation (settings schema has required fields, functions list is populated)
-- [ ] Run `make test-mcp` - must pass before task 2
+- [x] Add `getPagerDutySchema()` to schemas.go with settings: `pagerduty_api_token` (secret, required), `pagerduty_url` (default `https://api.pagerduty.com`), `pagerduty_verify_ssl`, `pagerduty_timeout`, and function list
+- [x] Add `"pagerduty": getPagerDutySchema()` to `GetToolSchemas()` map
+- [x] Add PagerDuty rate limiter constants (10 req/sec, burst 20)
+- [x] Add `pagerdutyTool` and `pagerdutyLimit` fields to Registry struct
+- [x] Add `registerPagerDutyTools()` call in `RegisterAllTools()` (stub for now)
+- [x] Add Stop() cleanup for pagerdutyTool
+- [x] Write tests for schema validation (settings schema has required fields, functions list is populated)
+- [x] Run `make test-mcp` - must pass before task 2
 
 ### Task 2: Core PagerDuty tool - read-only operations
 
