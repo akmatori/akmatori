@@ -304,6 +304,7 @@ type ProxySettings struct {
 	VictoriaMetricsEnabled bool      `gorm:"default:false" json:"victoria_metrics_enabled"`
 	CatchpointEnabled      bool      `gorm:"default:false" json:"catchpoint_enabled"`
 	GrafanaEnabled         bool      `gorm:"default:false" json:"grafana_enabled"`
+	PagerDutyEnabled       bool      `gorm:"default:false" json:"pagerduty_enabled"`
 	CreatedAt              time.Time `json:"created_at"`
 	UpdatedAt              time.Time `json:"updated_at"`
 }

@@ -71,14 +71,14 @@ Add a PagerDuty tool type to the MCP gateway, enabling the AI agent to query and
 - Create: `mcp-gateway/internal/tools/pagerduty/pagerduty.go`
 - Create: `mcp-gateway/internal/tools/pagerduty/pagerduty_test.go`
 
-- [ ] Create PagerDutyTool struct with configCache, responseCache, rateLimiter, logger (same pattern as Catchpoint)
-- [ ] Implement getConfig() with credential resolution and proxy support
-- [ ] Implement doRequest() with rate limiting, caching, proxy handling, and SSL verification
-- [ ] Implement cachedGet() helper for read paths
-- [ ] Implement read-only functions: GetIncidents, GetIncident, GetIncidentNotes, GetIncidentAlerts, GetServices, GetOnCalls, GetEscalationPolicies, ListRecentChanges
-- [ ] Each function validates required parameters and builds query params
-- [ ] Write tests using httptest server for all read-only operations (success, error, parameter validation)
-- [ ] Run `make test-mcp` - must pass before task 3
+- [x] Create PagerDutyTool struct with configCache, responseCache, rateLimiter, logger (same pattern as Catchpoint)
+- [x] Implement getConfig() with credential resolution and proxy support
+- [x] Implement doRequest() with rate limiting, caching, proxy handling, and SSL verification
+- [x] Implement cachedGet() helper for read paths
+- [x] Implement read-only functions: GetIncidents, GetIncident, GetIncidentNotes, GetIncidentAlerts, GetServices, GetOnCalls, GetEscalationPolicies, ListRecentChanges
+- [x] Each function validates required parameters and builds query params
+- [x] Write tests using httptest server for all read-only operations (success, error, parameter validation)
+- [x] Run `make test-mcp` - must pass before task 3
 
 ### Task 3: Action and event operations
 
