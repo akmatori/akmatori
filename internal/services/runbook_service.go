@@ -222,8 +222,8 @@ func (s *RunbookService) triggerQMDReindex() {
 		return
 	}
 	defer func() {
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
 	}()
 
 	if resp.StatusCode != http.StatusOK {

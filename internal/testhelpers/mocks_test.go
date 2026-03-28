@@ -103,9 +103,15 @@ func TestMockAlertService_Reset(t *testing.T) {
 	mock := NewMockAlertService()
 
 	ctx := context.Background()
-	mock.GetInstance(ctx, "uuid1")
-	mock.GetInstance(ctx, "uuid2")
-	mock.ProcessAlert(ctx, "inst1", nil)
+	if _, err := mock.GetInstance(ctx, "uuid1"); err != nil {
+		t.Fatalf("GetInstance uuid1 failed: %v", err)
+	}
+	if _, err := mock.GetInstance(ctx, "uuid2"); err != nil {
+		t.Fatalf("GetInstance uuid2 failed: %v", err)
+	}
+	if _, err := mock.ProcessAlert(ctx, "inst1", nil); err != nil {
+		t.Fatalf("ProcessAlert failed: %v", err)
+	}
 
 	if len(mock.GetInstanceCalls) != 2 {
 		t.Errorf("expected 2 GetInstance calls before reset")
@@ -292,7 +298,9 @@ func BenchmarkMockAlertService_GetInstance(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		mock.GetInstance(ctx, "bench-uuid")
+		if _, err := mock.GetInstance(ctx, "bench-uuid"); err != nil {
+			b.Fatalf("GetInstance failed: %v", err)
+		}
 	}
 }
 
@@ -304,7 +312,9 @@ func BenchmarkMockAlertService_ProcessAlert(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		mock.ProcessAlert(ctx, "inst", body)
+		if _, err := mock.ProcessAlert(ctx, "inst", body); err != nil {
+			b.Fatalf("ProcessAlert failed: %v", err)
+		}
 	}
 }
 
@@ -321,8 +331,12 @@ func TestMockAlertService_ConcurrentAccess(t *testing.T) {
 
 	ConcurrentTestWithTimeout(t, 5*Second, 10, func(workerID int) {
 		for i := 0; i < 100; i++ {
-			mock.GetInstance(ctx, "concurrent-uuid")
-			mock.ProcessAlert(ctx, "inst", nil)
+			if _, err := mock.GetInstance(ctx, "concurrent-uuid"); err != nil {
+				t.Errorf("worker %d GetInstance failed: %v", workerID, err)
+			}
+			if _, err := mock.ProcessAlert(ctx, "inst", nil); err != nil {
+				t.Errorf("worker %d ProcessAlert failed: %v", workerID, err)
+			}
 		}
 	})
 
