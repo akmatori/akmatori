@@ -2928,6 +2928,10 @@ func (r *Registry) registerPagerDutyTools() {
 						Type:        "string",
 						Description: "Event class/type (optional, for trigger events)",
 					},
+					"custom_details": {
+						Type:        "object",
+						Description: "Additional custom key-value details to include in the event payload (optional, for trigger events)",
+					},
 				},
 				Required: []string{"routing_key", "event_action"},
 			},

@@ -821,6 +821,11 @@ func TestRegisterPagerDutyTools_InputSchemas(t *testing.T) {
 	if _, ok := se.InputSchema.Properties["dedup_key"]; !ok {
 		t.Error("send_event: expected 'dedup_key' property")
 	}
+	if prop, ok := se.InputSchema.Properties["custom_details"]; !ok {
+		t.Error("send_event: expected 'custom_details' property")
+	} else if prop.Type != "object" {
+		t.Errorf("send_event: expected 'custom_details' type 'object', got %q", prop.Type)
+	}
 }
 
 func TestRegisterPagerDutyTools_ListToolsByType(t *testing.T) {
