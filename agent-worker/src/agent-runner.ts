@@ -350,19 +350,6 @@ export class AgentRunner {
 
       const sessionExportPath = this.exportSession(sessionManager, params.workDir);
 
-      // If the SDK reported an API-level error, propagate it
-      if (lastErrorMessage && !responseText) {
-        return {
-          session_id: session.sessionId,
-          response: responseText,
-          full_log: fullLog,
-          error: lastErrorMessage,
-          tokens_used: totalTokens,
-          execution_time_ms: Date.now() - startTime,
-          session_export: sessionExportPath,
-        };
-      }
-
       // Use SDK's getLastAssistantText() for a clean final response.
       // The accumulated responseText includes text from ALL turns (e.g.
       // "I'll investigate...", "Let me gather data...") which pollutes the
@@ -374,6 +361,9 @@ export class AgentRunner {
         session_id: session.sessionId,
         response: finalResponse,
         full_log: fullLog,
+        // Propagate API-level errors (quota, auth, model not found) even when
+        // partial response text was collected from earlier turns.
+        error: lastErrorMessage || undefined,
         tokens_used: totalTokens,
         execution_time_ms: Date.now() - startTime,
         session_export: sessionExportPath,
