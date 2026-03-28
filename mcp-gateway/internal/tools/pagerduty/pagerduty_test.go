@@ -1587,5 +1587,602 @@ func TestAddIncidentNote_NotCached(t *testing.T) {
 	}
 }
 
+// --- doRequestWithHeaders tests ---
+
+func TestDoRequestWithHeaders_EmptyToken(t *testing.T) {
+	tool := NewPagerDutyTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{URL: "http://localhost", APIToken: ""}
+	_, err := tool.doRequestWithHeaders(context.Background(), config, http.MethodPut, "/test", nil, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "API token is required") {
+		t.Errorf("expected token error, got %v", err)
+	}
+}
+
+func TestDoRequestWithHeaders_QueryParams(t *testing.T) {
+	var receivedQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedQuery = r.URL.RawQuery
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer server.Close()
+
+	tool := NewPagerDutyTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{
+		URL:       server.URL,
+		APIToken:  "test-token",
+		VerifySSL: true,
+		Timeout:   5,
+	}
+
+	params := url.Values{"foo": {"bar"}, "baz": {"qux"}}
+	_, err := tool.doRequestWithHeaders(context.Background(), config, http.MethodGet, "/test", params, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(receivedQuery, "foo=bar") {
+		t.Errorf("expected query params, got %q", receivedQuery)
+	}
+}
+
+func TestDoRequestWithHeaders_ExtraHeaders(t *testing.T) {
+	var receivedFrom, receivedCustom string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedFrom = r.Header.Get("From")
+		receivedCustom = r.Header.Get("X-Custom")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer server.Close()
+
+	tool := NewPagerDutyTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{URL: server.URL, APIToken: "test-token", VerifySSL: true, Timeout: 5}
+	headers := map[string]string{
+		"From":     "test@example.com",
+		"X-Custom": "value",
+	}
+
+	_, err := tool.doRequestWithHeaders(context.Background(), config, http.MethodPut, "/test", nil, nil, headers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedFrom != "test@example.com" {
+		t.Errorf("expected From header, got %q", receivedFrom)
+	}
+	if receivedCustom != "value" {
+		t.Errorf("expected X-Custom header, got %q", receivedCustom)
+	}
+}
+
+func TestDoRequestWithHeaders_HTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"error":{"message":"Forbidden"}}`)
+	}))
+	defer server.Close()
+
+	tool := NewPagerDutyTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{URL: server.URL, APIToken: "test-token", VerifySSL: true, Timeout: 5}
+	_, err := tool.doRequestWithHeaders(context.Background(), config, http.MethodPut, "/test", nil, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "HTTP error 403") {
+		t.Errorf("expected HTTP 403 error, got %v", err)
+	}
+}
+
+func TestDoRequestWithHeaders_SSLDisabled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer server.Close()
+
+	tool := NewPagerDutyTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{URL: server.URL, APIToken: "test-token", VerifySSL: false, Timeout: 5}
+	_, err := tool.doRequestWithHeaders(context.Background(), config, http.MethodPut, "/test", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDoRequestWithHeaders_ProxyEnabled(t *testing.T) {
+	tool := NewPagerDutyTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{
+		URL:       "http://localhost:1",
+		APIToken:  "test-token",
+		VerifySSL: true,
+		Timeout:   1,
+		UseProxy:  true,
+		ProxyURL:  "http://proxy.example.com:8080",
+	}
+
+	// The request will fail because the proxy doesn't exist, but we cover the proxy code path
+	_, err := tool.doRequestWithHeaders(context.Background(), config, http.MethodPut, "/test", nil, nil, nil)
+	if err == nil {
+		t.Error("expected error with non-existent proxy")
+	}
+}
+
+func TestDoRequestWithHeaders_InvalidProxyURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer server.Close()
+
+	tool := NewPagerDutyTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{
+		URL:       server.URL,
+		APIToken:  "test-token",
+		VerifySSL: true,
+		Timeout:   5,
+		UseProxy:  true,
+		ProxyURL:  "://invalid-url",
+	}
+
+	// Invalid proxy URL should proceed without proxy and succeed
+	_, err := tool.doRequestWithHeaders(context.Background(), config, http.MethodPut, "/test", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("expected success with invalid proxy URL (fallback to no proxy), got %v", err)
+	}
+}
+
+func TestDoRequestWithHeaders_RateLimiting(t *testing.T) {
+	limiter := ratelimit.New(100, 100)
+	tool := NewPagerDutyTool(testLogger(), limiter)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"ok":true}`)
+	}))
+	defer server.Close()
+
+	config := &PagerDutyConfig{
+		URL:       server.URL,
+		APIToken:  "test-token",
+		VerifySSL: true,
+		Timeout:   5,
+	}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+	defer tool.Stop()
+
+	_, err := tool.doRequestWithHeaders(context.Background(), config, http.MethodPut, "/test", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDoRequestWithHeaders_CancelledContext(t *testing.T) {
+	limiter := ratelimit.New(1, 1)
+	tool := NewPagerDutyTool(testLogger(), limiter)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{
+		URL:       "http://localhost",
+		APIToken:  "test-token",
+		VerifySSL: true,
+		Timeout:   5,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := tool.doRequestWithHeaders(ctx, config, http.MethodPut, "/test", nil, nil, nil)
+	if err == nil {
+		t.Error("expected error with cancelled context")
+	}
+}
+
+func TestDoRequestWithHeaders_ResponseSizeLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		data := strings.Repeat("x", 6*1024*1024)
+		fmt.Fprint(w, data)
+	}))
+	defer server.Close()
+
+	tool := NewPagerDutyTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{URL: server.URL, APIToken: "test-token", VerifySSL: true, Timeout: 10}
+	_, err := tool.doRequestWithHeaders(context.Background(), config, http.MethodPut, "/test", nil, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("expected size limit error, got %v", err)
+	}
+}
+
+// --- doRequestNoAuth tests ---
+
+func TestDoRequestNoAuth_Success(t *testing.T) {
+	var receivedAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{"status":"success","dedup_key":"abc"}`)
+	}))
+	defer server.Close()
+
+	tool := NewPagerDutyTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{
+		URL:       server.URL,
+		APIToken:  "should-not-appear",
+		VerifySSL: true,
+		Timeout:   5,
+	}
+
+	resp, err := tool.doRequestNoAuth(context.Background(), config, http.MethodPost, "/v2/enqueue", nil, strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedAuth != "" {
+		t.Errorf("expected no Authorization header, got %q", receivedAuth)
+	}
+	if !strings.Contains(string(resp), "success") {
+		t.Errorf("expected success response, got %s", resp)
+	}
+}
+
+func TestDoRequestNoAuth_HTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"status":"invalid_event"}`)
+	}))
+	defer server.Close()
+
+	tool := NewPagerDutyTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{URL: server.URL, APIToken: "tok", VerifySSL: true, Timeout: 5}
+	_, err := tool.doRequestNoAuth(context.Background(), config, http.MethodPost, "/v2/enqueue", nil, strings.NewReader(`{}`))
+	if err == nil || !strings.Contains(err.Error(), "HTTP error 400") {
+		t.Errorf("expected HTTP 400 error, got %v", err)
+	}
+}
+
+func TestDoRequestNoAuth_QueryParams(t *testing.T) {
+	var receivedQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedQuery = r.URL.RawQuery
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer server.Close()
+
+	tool := NewPagerDutyTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{URL: server.URL, APIToken: "tok", VerifySSL: true, Timeout: 5}
+	params := url.Values{"key": {"val"}}
+	_, err := tool.doRequestNoAuth(context.Background(), config, http.MethodPost, "/test", params, strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(receivedQuery, "key=val") {
+		t.Errorf("expected query params, got %q", receivedQuery)
+	}
+}
+
+func TestDoRequestNoAuth_SSLDisabled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer server.Close()
+
+	tool := NewPagerDutyTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{URL: server.URL, APIToken: "tok", VerifySSL: false, Timeout: 5}
+	_, err := tool.doRequestNoAuth(context.Background(), config, http.MethodPost, "/test", nil, strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDoRequestNoAuth_ProxyEnabled(t *testing.T) {
+	tool := NewPagerDutyTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{
+		URL:       "http://localhost:1",
+		APIToken:  "tok",
+		VerifySSL: true,
+		Timeout:   1,
+		UseProxy:  true,
+		ProxyURL:  "http://proxy.example.com:8080",
+	}
+
+	_, err := tool.doRequestNoAuth(context.Background(), config, http.MethodPost, "/test", nil, strings.NewReader(`{}`))
+	if err == nil {
+		t.Error("expected error with non-existent proxy")
+	}
+}
+
+func TestDoRequestNoAuth_InvalidProxyURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer server.Close()
+
+	tool := NewPagerDutyTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{
+		URL:       server.URL,
+		APIToken:  "tok",
+		VerifySSL: true,
+		Timeout:   5,
+		UseProxy:  true,
+		ProxyURL:  "://invalid",
+	}
+
+	// Invalid proxy falls back to no proxy
+	_, err := tool.doRequestNoAuth(context.Background(), config, http.MethodPost, "/test", nil, strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("expected success with invalid proxy fallback, got %v", err)
+	}
+}
+
+func TestDoRequestNoAuth_RateLimiting(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer server.Close()
+
+	limiter := ratelimit.New(100, 100)
+	tool := NewPagerDutyTool(testLogger(), limiter)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{URL: server.URL, APIToken: "tok", VerifySSL: true, Timeout: 5}
+	_, err := tool.doRequestNoAuth(context.Background(), config, http.MethodPost, "/test", nil, strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDoRequestNoAuth_CancelledContext(t *testing.T) {
+	limiter := ratelimit.New(1, 1)
+	tool := NewPagerDutyTool(testLogger(), limiter)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{URL: "http://localhost", APIToken: "tok", VerifySSL: true, Timeout: 5}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := tool.doRequestNoAuth(ctx, config, http.MethodPost, "/test", nil, strings.NewReader(`{}`))
+	if err == nil {
+		t.Error("expected error with cancelled context")
+	}
+}
+
+func TestDoRequestNoAuth_ResponseSizeLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		data := strings.Repeat("x", 6*1024*1024)
+		fmt.Fprint(w, data)
+	}))
+	defer server.Close()
+
+	tool := NewPagerDutyTool(testLogger(), nil)
+	defer tool.Stop()
+
+	config := &PagerDutyConfig{URL: server.URL, APIToken: "tok", VerifySSL: true, Timeout: 5}
+	_, err := tool.doRequestNoAuth(context.Background(), config, http.MethodPost, "/test", nil, strings.NewReader(`{}`))
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("expected size limit error, got %v", err)
+	}
+}
+
+// --- doRequest additional tests ---
+
+func TestDoRequest_ProxyEnabled(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"ok":true}`)
+	})
+
+	config := &PagerDutyConfig{
+		URL:       "http://localhost:1",
+		APIToken:  "test-token",
+		VerifySSL: true,
+		Timeout:   1,
+		UseProxy:  true,
+		ProxyURL:  "http://proxy.example.com:8080",
+	}
+
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/test", nil, nil)
+	if err == nil {
+		t.Error("expected error with non-existent proxy")
+	}
+}
+
+func TestDoRequest_InvalidProxyURL(t *testing.T) {
+	tool, server, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"ok":true}`)
+	})
+
+	config := &PagerDutyConfig{
+		URL:       server.URL,
+		APIToken:  "test-token",
+		VerifySSL: true,
+		Timeout:   5,
+		UseProxy:  true,
+		ProxyURL:  "://invalid",
+	}
+
+	// Invalid proxy falls back to no proxy
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/test", nil, nil)
+	if err != nil {
+		t.Fatalf("expected success with invalid proxy fallback, got %v", err)
+	}
+}
+
+func TestDoRequest_LongErrorTruncation(t *testing.T) {
+	tool, server, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, strings.Repeat("error text ", 100))
+	})
+
+	config := &PagerDutyConfig{
+		URL:       server.URL,
+		APIToken:  "test-token",
+		VerifySSL: true,
+		Timeout:   5,
+	}
+
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/test", nil, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "truncated") {
+		t.Errorf("expected truncated error message, got %v", err)
+	}
+}
+
+// --- Additional edge case tests ---
+
+func TestReassignIncident_MissingIncidentID(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	args := map[string]interface{}{
+		"requester_email": "user@example.com",
+		"assignee_ids":    "PUSER1",
+	}
+
+	_, err := tool.ReassignIncident(context.Background(), "test-incident", args)
+	if err == nil || !strings.Contains(err.Error(), "incident_id is required") {
+		t.Errorf("expected incident_id required error, got %v", err)
+	}
+}
+
+func TestReassignIncident_MissingEmail(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	args := map[string]interface{}{
+		"incident_id":  "P123",
+		"assignee_ids": "PUSER1",
+	}
+
+	_, err := tool.ReassignIncident(context.Background(), "test-incident", args)
+	if err == nil || !strings.Contains(err.Error(), "requester_email is required") {
+		t.Errorf("expected requester_email required error, got %v", err)
+	}
+}
+
+func TestReassignIncident_APIError(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		fmt.Fprint(w, `{"error":{"message":"Invalid assignment"}}`)
+	})
+
+	args := map[string]interface{}{
+		"incident_id":     "P123",
+		"requester_email": "user@example.com",
+		"assignee_ids":    "PUSER1",
+	}
+
+	_, err := tool.ReassignIncident(context.Background(), "test-incident", args)
+	if err == nil || !strings.Contains(err.Error(), "HTTP error 422") {
+		t.Errorf("expected HTTP 422 error, got %v", err)
+	}
+}
+
+func TestAddIncidentNote_MissingIncidentID(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	args := map[string]interface{}{
+		"requester_email": "user@example.com",
+		"content":         "test note",
+	}
+
+	_, err := tool.AddIncidentNote(context.Background(), "test-incident", args)
+	if err == nil || !strings.Contains(err.Error(), "incident_id is required") {
+		t.Errorf("expected incident_id required error, got %v", err)
+	}
+}
+
+func TestAddIncidentNote_APIError(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprint(w, `{"error":{"message":"Forbidden"}}`)
+	})
+
+	args := map[string]interface{}{
+		"incident_id":     "P123",
+		"requester_email": "user@example.com",
+		"content":         "test note",
+	}
+
+	_, err := tool.AddIncidentNote(context.Background(), "test-incident", args)
+	if err == nil || !strings.Contains(err.Error(), "HTTP error 403") {
+		t.Errorf("expected HTTP 403 error, got %v", err)
+	}
+}
+
+func TestSendEvent_EventsURLOverride(t *testing.T) {
+	var receivedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{"status":"success","dedup_key":"abc123"}`)
+	}))
+	defer server.Close()
+
+	tool := NewPagerDutyTool(testLogger(), nil)
+	config := &PagerDutyConfig{
+		URL:       "http://should-not-be-used",
+		APIToken:  "test-token",
+		VerifySSL: true,
+		Timeout:   5,
+	}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+	defer tool.Stop()
+
+	args := map[string]interface{}{
+		"routing_key":  "test-key",
+		"event_action": "trigger",
+		"summary":      "Test alert",
+		"source":       "test",
+		"severity":     "critical",
+		"events_url":   server.URL,
+	}
+
+	result, err := tool.SendEvent(context.Background(), "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedPath != "/v2/enqueue" {
+		t.Errorf("expected /v2/enqueue path, got %s", receivedPath)
+	}
+	if !strings.Contains(result, "success") {
+		t.Errorf("expected success in result, got %s", result)
+	}
+}
+
 // Verify unused import suppression
 var _ = time.Second

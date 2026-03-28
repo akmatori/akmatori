@@ -121,9 +121,9 @@ Add a PagerDuty tool type to the MCP gateway, enabling the AI agent to query and
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] Run full test suite: `make test-all`
-- [ ] Run linter: `go vet ./...`
-- [ ] Verify MCP gateway test coverage for pagerduty package meets 80%+
+- [x] Run full test suite: `make test-all`
+- [x] Run linter: `go vet ./...`
+- [x] Verify MCP gateway test coverage for pagerduty package meets 80%+
 
 ### Task 7: Update documentation
 
