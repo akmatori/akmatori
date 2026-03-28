@@ -602,6 +602,29 @@ describe("AgentRunner", () => {
       // Should not throw
       await runner.cancel("nonexistent-incident");
     });
+
+    it("should trigger signal propagation to active tool calls via session.abort()", async () => {
+      // Verify that cancel() calls session.abort() which in pi-mono 0.63.1
+      // propagates the AbortSignal to all active tool execute() calls.
+      const session = createMockSession();
+      let abortCalled = false;
+      session.abort.mockImplementation(async () => {
+        abortCalled = true;
+      });
+      session.prompt.mockImplementation(() => new Promise(() => {})); // hang
+
+      mockSession = session;
+      const execPromise = runner.execute(makeExecuteParams({ incidentId: "inc-signal-prop" }));
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(runner.hasActiveSession("inc-signal-prop")).toBe(true);
+
+      await runner.cancel("inc-signal-prop");
+
+      expect(abortCalled).toBe(true);
+      expect(session.abort).toHaveBeenCalledTimes(1);
+      expect(runner.hasActiveSession("inc-signal-prop")).toBe(false);
+    });
   });
 
   // -----------------------------------------------------------------------
