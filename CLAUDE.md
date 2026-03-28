@@ -110,7 +110,7 @@ make verify           # go vet + all tests (pre-commit)
 | `internal/auth` | 81.8% | ✅ |
 | `internal/tools/postgresql` | 79.9% | ✅ |
 | `internal/tools/clickhouse` | 82.8% | ✅ |
-| `internal/tools/pagerduty` | 82.9% | ✅ |
+| `internal/tools/pagerduty` | 81.3% | ✅ |
 | `internal/tools/victoriametrics` | 76.2% | ✅ |
 | `internal/mcpproxy` | 70.8% | ✅ |
 | `internal/mcp` | 66.8% | ⚠️ |

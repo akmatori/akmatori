@@ -140,6 +140,28 @@ func TestClampTimeout(t *testing.T) {
 	}
 }
 
+func TestClampLimit(t *testing.T) {
+	tests := []struct {
+		name  string
+		input int
+		want  int
+	}{
+		{"zero returns zero", 0, 0},
+		{"negative returns zero", -5, 0},
+		{"within range kept", 50, 50},
+		{"at max kept", 100, 100},
+		{"above max clamped to 100", 500, 100},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := clampLimit(tt.input)
+			if got != tt.want {
+				t.Errorf("clampLimit(%d) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 // --- extractLogicalName tests ---
 
 func TestExtractLogicalName(t *testing.T) {

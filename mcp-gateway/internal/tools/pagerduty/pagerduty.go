@@ -82,6 +82,17 @@ func responseCacheKey(path string, params interface{}) string {
 	return fmt.Sprintf("%s:%s", path, hex.EncodeToString(hash[:8]))
 }
 
+// clampLimit ensures limit does not exceed PagerDuty API maximum of 100.
+func clampLimit(limit int) int {
+	if limit <= 0 {
+		return 0
+	}
+	if limit > 100 {
+		return 100
+	}
+	return limit
+}
+
 // extractLogicalName extracts the optional logical_name from tool arguments.
 func extractLogicalName(args map[string]interface{}) string {
 	if v, ok := args["logical_name"].(string); ok {
@@ -370,7 +381,7 @@ func (t *PagerDutyTool) GetIncidents(ctx context.Context, incidentID string, arg
 		params.Set("sort_by", v)
 	}
 	if v, ok := args["limit"].(float64); ok && v > 0 {
-		params.Set("limit", fmt.Sprintf("%d", int(v)))
+		params.Set("limit", fmt.Sprintf("%d", clampLimit(int(v))))
 	}
 	if v, ok := args["offset"].(float64); ok && v > 0 {
 		params.Set("offset", fmt.Sprintf("%d", int(v)))
@@ -447,7 +458,7 @@ func (t *PagerDutyTool) GetServices(ctx context.Context, incidentID string, args
 		params.Set("query", v)
 	}
 	if v, ok := args["limit"].(float64); ok && v > 0 {
-		params.Set("limit", fmt.Sprintf("%d", int(v)))
+		params.Set("limit", fmt.Sprintf("%d", clampLimit(int(v))))
 	}
 	if v, ok := args["offset"].(float64); ok && v > 0 {
 		params.Set("offset", fmt.Sprintf("%d", int(v)))
@@ -496,7 +507,7 @@ func (t *PagerDutyTool) GetEscalationPolicies(ctx context.Context, incidentID st
 		params.Set("query", v)
 	}
 	if v, ok := args["limit"].(float64); ok && v > 0 {
-		params.Set("limit", fmt.Sprintf("%d", int(v)))
+		params.Set("limit", fmt.Sprintf("%d", clampLimit(int(v))))
 	}
 	if v, ok := args["offset"].(float64); ok && v > 0 {
 		params.Set("offset", fmt.Sprintf("%d", int(v)))
@@ -522,7 +533,7 @@ func (t *PagerDutyTool) ListRecentChanges(ctx context.Context, incidentID string
 		params.Set("until", v)
 	}
 	if v, ok := args["limit"].(float64); ok && v > 0 {
-		params.Set("limit", fmt.Sprintf("%d", int(v)))
+		params.Set("limit", fmt.Sprintf("%d", clampLimit(int(v))))
 	}
 	if v, ok := args["offset"].(float64); ok && v > 0 {
 		params.Set("offset", fmt.Sprintf("%d", int(v)))
