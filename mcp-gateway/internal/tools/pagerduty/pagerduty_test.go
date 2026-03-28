@@ -2,6 +2,7 @@ package pagerduty
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -906,6 +907,683 @@ func TestGetIncidents_ResponseCached(t *testing.T) {
 	// newTestTool counter includes wrapping, use our own
 	if callCount.Load() != 1 {
 		t.Errorf("expected 1 API call (second should be cached), got %d", callCount.Load())
+	}
+}
+
+// --- Action operation tests ---
+
+// newTestToolWithHeaders creates a test tool that also captures request headers and body.
+func newTestToolWithHeaders(t *testing.T, handler http.HandlerFunc) (*PagerDutyTool, *httptest.Server) {
+	t.Helper()
+	server := httptest.NewServer(handler)
+
+	tool := NewPagerDutyTool(testLogger(), nil)
+	config := &PagerDutyConfig{
+		URL:       server.URL,
+		APIToken:  "test-token",
+		VerifySSL: true,
+		Timeout:   5,
+	}
+	tool.configCache.Set(configCacheKey("test-incident"), config)
+
+	t.Cleanup(func() {
+		tool.Stop()
+		server.Close()
+	})
+
+	return tool, server
+}
+
+func TestAcknowledgeIncident_Success(t *testing.T) {
+	var receivedMethod, receivedPath, receivedFrom string
+	var receivedBody map[string]interface{}
+
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		receivedPath = r.URL.Path
+		receivedFrom = r.Header.Get("From")
+		bodyBytes, _ := io.ReadAll(r.Body)
+		json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"incident":{"id":"P123","status":"acknowledged"}}`)
+	})
+
+	result, err := tool.AcknowledgeIncident(context.Background(), "test-incident", map[string]interface{}{
+		"incident_id":     "P123",
+		"requester_email": "user@example.com",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedMethod != http.MethodPut {
+		t.Errorf("expected PUT, got %s", receivedMethod)
+	}
+	if receivedPath != "/incidents/P123" {
+		t.Errorf("expected /incidents/P123, got %s", receivedPath)
+	}
+	if receivedFrom != "user@example.com" {
+		t.Errorf("expected From header user@example.com, got %s", receivedFrom)
+	}
+	if !strings.Contains(result, "acknowledged") {
+		t.Errorf("expected result to contain acknowledged, got %s", result)
+	}
+
+	incident, ok := receivedBody["incident"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected incident in body")
+	}
+	if incident["status"] != "acknowledged" {
+		t.Errorf("expected status acknowledged, got %v", incident["status"])
+	}
+}
+
+func TestAcknowledgeIncident_MissingIncidentID(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	_, err := tool.AcknowledgeIncident(context.Background(), "test-incident", map[string]interface{}{
+		"requester_email": "user@example.com",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing incident_id")
+	}
+	if !strings.Contains(err.Error(), "incident_id is required") {
+		t.Errorf("expected incident_id error, got: %v", err)
+	}
+}
+
+func TestAcknowledgeIncident_MissingEmail(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	_, err := tool.AcknowledgeIncident(context.Background(), "test-incident", map[string]interface{}{
+		"incident_id": "P123",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing requester_email")
+	}
+	if !strings.Contains(err.Error(), "requester_email is required") {
+		t.Errorf("expected requester_email error, got: %v", err)
+	}
+}
+
+func TestResolveIncident_Success(t *testing.T) {
+	var receivedBody map[string]interface{}
+
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"incident":{"id":"P456","status":"resolved"}}`)
+	})
+
+	result, err := tool.ResolveIncident(context.Background(), "test-incident", map[string]interface{}{
+		"incident_id":     "P456",
+		"requester_email": "user@example.com",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(result, "resolved") {
+		t.Errorf("expected result to contain resolved, got %s", result)
+	}
+
+	incident, ok := receivedBody["incident"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected incident in body")
+	}
+	if incident["status"] != "resolved" {
+		t.Errorf("expected status resolved, got %v", incident["status"])
+	}
+}
+
+func TestResolveIncident_APIError(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		fmt.Fprint(w, `{"error":{"message":"Incident already resolved"}}`)
+	})
+
+	_, err := tool.ResolveIncident(context.Background(), "test-incident", map[string]interface{}{
+		"incident_id":     "P456",
+		"requester_email": "user@example.com",
+	})
+	if err == nil {
+		t.Fatal("expected error for conflict")
+	}
+	if !strings.Contains(err.Error(), "409") {
+		t.Errorf("expected 409 error, got: %v", err)
+	}
+}
+
+func TestReassignIncident_Success(t *testing.T) {
+	var receivedBody map[string]interface{}
+	var receivedFrom string
+
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedFrom = r.Header.Get("From")
+		bodyBytes, _ := io.ReadAll(r.Body)
+		json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"incident":{"id":"P789","assignments":[{"assignee":{"id":"PUSER1"}}]}}`)
+	})
+
+	result, err := tool.ReassignIncident(context.Background(), "test-incident", map[string]interface{}{
+		"incident_id":     "P789",
+		"requester_email": "admin@example.com",
+		"assignee_ids":    "PUSER1,PUSER2",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedFrom != "admin@example.com" {
+		t.Errorf("expected From admin@example.com, got %s", receivedFrom)
+	}
+	if !strings.Contains(result, "PUSER1") {
+		t.Errorf("expected result to contain assignee, got %s", result)
+	}
+
+	incident, ok := receivedBody["incident"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected incident in body")
+	}
+	assignments, ok := incident["assignments"].([]interface{})
+	if !ok {
+		t.Fatal("expected assignments array in body")
+	}
+	if len(assignments) != 2 {
+		t.Errorf("expected 2 assignments, got %d", len(assignments))
+	}
+}
+
+func TestReassignIncident_WithEscalationPolicy(t *testing.T) {
+	var receivedBody map[string]interface{}
+
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"incident":{"id":"P789"}}`)
+	})
+
+	_, err := tool.ReassignIncident(context.Background(), "test-incident", map[string]interface{}{
+		"incident_id":          "P789",
+		"requester_email":      "admin@example.com",
+		"assignee_ids":         "PUSER1",
+		"escalation_policy_id": "PEPOL1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	incident, ok := receivedBody["incident"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected incident in body")
+	}
+	ep, ok := incident["escalation_policy"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected escalation_policy in body")
+	}
+	if ep["id"] != "PEPOL1" {
+		t.Errorf("expected escalation policy PEPOL1, got %v", ep["id"])
+	}
+}
+
+func TestReassignIncident_MissingAssignees(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	_, err := tool.ReassignIncident(context.Background(), "test-incident", map[string]interface{}{
+		"incident_id":     "P789",
+		"requester_email": "admin@example.com",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing assignee_ids")
+	}
+	if !strings.Contains(err.Error(), "assignee_ids is required") {
+		t.Errorf("expected assignee_ids error, got: %v", err)
+	}
+}
+
+func TestReassignIncident_EmptyAssignees(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	_, err := tool.ReassignIncident(context.Background(), "test-incident", map[string]interface{}{
+		"incident_id":     "P789",
+		"requester_email": "admin@example.com",
+		"assignee_ids":    "",
+	})
+	if err == nil {
+		t.Fatal("expected error for empty assignee_ids")
+	}
+}
+
+func TestAddIncidentNote_Success(t *testing.T) {
+	var receivedMethod, receivedPath, receivedFrom string
+	var receivedBody map[string]interface{}
+
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		receivedPath = r.URL.Path
+		receivedFrom = r.Header.Get("From")
+		bodyBytes, _ := io.ReadAll(r.Body)
+		json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"note":{"id":"N1","content":"Investigating root cause"}}`)
+	})
+
+	result, err := tool.AddIncidentNote(context.Background(), "test-incident", map[string]interface{}{
+		"incident_id":     "P123",
+		"requester_email": "user@example.com",
+		"content":         "Investigating root cause",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedMethod != http.MethodPost {
+		t.Errorf("expected POST, got %s", receivedMethod)
+	}
+	if receivedPath != "/incidents/P123/notes" {
+		t.Errorf("expected /incidents/P123/notes, got %s", receivedPath)
+	}
+	if receivedFrom != "user@example.com" {
+		t.Errorf("expected From user@example.com, got %s", receivedFrom)
+	}
+	if !strings.Contains(result, "Investigating root cause") {
+		t.Errorf("expected result to contain note content, got %s", result)
+	}
+
+	note, ok := receivedBody["note"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected note in body")
+	}
+	if note["content"] != "Investigating root cause" {
+		t.Errorf("expected content match, got %v", note["content"])
+	}
+}
+
+func TestAddIncidentNote_MissingContent(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	_, err := tool.AddIncidentNote(context.Background(), "test-incident", map[string]interface{}{
+		"incident_id":     "P123",
+		"requester_email": "user@example.com",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing content")
+	}
+	if !strings.Contains(err.Error(), "content is required") {
+		t.Errorf("expected content error, got: %v", err)
+	}
+}
+
+func TestAddIncidentNote_MissingEmail(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	_, err := tool.AddIncidentNote(context.Background(), "test-incident", map[string]interface{}{
+		"incident_id": "P123",
+		"content":     "A note",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing requester_email")
+	}
+	if !strings.Contains(err.Error(), "requester_email is required") {
+		t.Errorf("expected requester_email error, got: %v", err)
+	}
+}
+
+// --- SendEvent tests ---
+
+func TestSendEvent_Trigger_Success(t *testing.T) {
+	var receivedPath string
+	var receivedBody map[string]interface{}
+	var receivedAuth string
+
+	tool, server := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		receivedAuth = r.Header.Get("Authorization")
+		bodyBytes, _ := io.ReadAll(r.Body)
+		json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{"status":"success","dedup_key":"abc123"}`)
+	})
+
+	result, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
+		"routing_key":  "R0123456789",
+		"event_action": "trigger",
+		"summary":      "CPU usage over 90%",
+		"severity":     "critical",
+		"source":       "prod-web-01",
+		"component":    "web-server",
+		"events_url":   server.URL,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedPath != "/v2/enqueue" {
+		t.Errorf("expected /v2/enqueue, got %s", receivedPath)
+	}
+	// Events API should NOT have Authorization header
+	if receivedAuth != "" {
+		t.Errorf("expected no Authorization header for Events API, got %s", receivedAuth)
+	}
+	if !strings.Contains(result, "success") {
+		t.Errorf("expected result to contain success, got %s", result)
+	}
+
+	if receivedBody["routing_key"] != "R0123456789" {
+		t.Errorf("expected routing_key R0123456789, got %v", receivedBody["routing_key"])
+	}
+	if receivedBody["event_action"] != "trigger" {
+		t.Errorf("expected event_action trigger, got %v", receivedBody["event_action"])
+	}
+
+	payload, ok := receivedBody["payload"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected payload in body")
+	}
+	if payload["summary"] != "CPU usage over 90%" {
+		t.Errorf("expected summary match, got %v", payload["summary"])
+	}
+	if payload["severity"] != "critical" {
+		t.Errorf("expected severity critical, got %v", payload["severity"])
+	}
+	if payload["source"] != "prod-web-01" {
+		t.Errorf("expected source prod-web-01, got %v", payload["source"])
+	}
+	if payload["component"] != "web-server" {
+		t.Errorf("expected component web-server, got %v", payload["component"])
+	}
+}
+
+func TestSendEvent_Acknowledge_Success(t *testing.T) {
+	var receivedBody map[string]interface{}
+
+	tool, server := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{"status":"success","dedup_key":"abc123"}`)
+	})
+
+	_, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
+		"routing_key":  "R0123456789",
+		"event_action": "acknowledge",
+		"dedup_key":    "abc123",
+		"events_url":   server.URL,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if receivedBody["event_action"] != "acknowledge" {
+		t.Errorf("expected event_action acknowledge, got %v", receivedBody["event_action"])
+	}
+	if receivedBody["dedup_key"] != "abc123" {
+		t.Errorf("expected dedup_key abc123, got %v", receivedBody["dedup_key"])
+	}
+}
+
+func TestSendEvent_Resolve_Success(t *testing.T) {
+	tool, server := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{"status":"success","dedup_key":"abc123"}`)
+	})
+
+	_, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
+		"routing_key":  "R0123456789",
+		"event_action": "resolve",
+		"dedup_key":    "abc123",
+		"events_url":   server.URL,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSendEvent_MissingRoutingKey(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	_, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
+		"event_action": "trigger",
+		"summary":      "test",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing routing_key")
+	}
+	if !strings.Contains(err.Error(), "routing_key is required") {
+		t.Errorf("expected routing_key error, got: %v", err)
+	}
+}
+
+func TestSendEvent_MissingEventAction(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	_, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
+		"routing_key": "R0123456789",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing event_action")
+	}
+	if !strings.Contains(err.Error(), "event_action is required") {
+		t.Errorf("expected event_action error, got: %v", err)
+	}
+}
+
+func TestSendEvent_InvalidEventAction(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	_, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
+		"routing_key":  "R0123456789",
+		"event_action": "invalid",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid event_action")
+	}
+	if !strings.Contains(err.Error(), "invalid event_action") {
+		t.Errorf("expected invalid event_action error, got: %v", err)
+	}
+}
+
+func TestSendEvent_AcknowledgeMissingDedupKey(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	_, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
+		"routing_key":  "R0123456789",
+		"event_action": "acknowledge",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing dedup_key on acknowledge")
+	}
+	if !strings.Contains(err.Error(), "dedup_key is required") {
+		t.Errorf("expected dedup_key error, got: %v", err)
+	}
+}
+
+func TestSendEvent_ResolveMissingDedupKey(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	_, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
+		"routing_key":  "R0123456789",
+		"event_action": "resolve",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing dedup_key on resolve")
+	}
+	if !strings.Contains(err.Error(), "dedup_key is required") {
+		t.Errorf("expected dedup_key error, got: %v", err)
+	}
+}
+
+func TestSendEvent_TriggerMissingSummary(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	_, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
+		"routing_key":  "R0123456789",
+		"event_action": "trigger",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing summary on trigger")
+	}
+	if !strings.Contains(err.Error(), "summary is required") {
+		t.Errorf("expected summary error, got: %v", err)
+	}
+}
+
+func TestSendEvent_TriggerInvalidSeverity(t *testing.T) {
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	_, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
+		"routing_key":  "R0123456789",
+		"event_action": "trigger",
+		"summary":      "test",
+		"severity":     "extreme",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid severity")
+	}
+	if !strings.Contains(err.Error(), "invalid severity") {
+		t.Errorf("expected severity error, got: %v", err)
+	}
+}
+
+func TestSendEvent_TriggerDefaults(t *testing.T) {
+	var receivedBody map[string]interface{}
+
+	tool, server := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{"status":"success","dedup_key":"def456"}`)
+	})
+
+	_, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
+		"routing_key":  "R0123456789",
+		"event_action": "trigger",
+		"summary":      "Test alert",
+		"events_url":   server.URL,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	payload, ok := receivedBody["payload"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected payload in body")
+	}
+	// Default severity should be "error"
+	if payload["severity"] != "error" {
+		t.Errorf("expected default severity error, got %v", payload["severity"])
+	}
+	// Default source should be "akmatori"
+	if payload["source"] != "akmatori" {
+		t.Errorf("expected default source akmatori, got %v", payload["source"])
+	}
+}
+
+func TestSendEvent_APIError(t *testing.T) {
+	tool, server := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"status":"invalid event","message":"Event object is invalid"}`)
+	})
+
+	_, err := tool.SendEvent(context.Background(), "test-incident", map[string]interface{}{
+		"routing_key":  "R0123456789",
+		"event_action": "trigger",
+		"summary":      "Test",
+		"events_url":   server.URL,
+	})
+	if err == nil {
+		t.Fatal("expected error for API error")
+	}
+	if !strings.Contains(err.Error(), "400") {
+		t.Errorf("expected 400 error, got: %v", err)
+	}
+}
+
+// --- Action operations are NOT cached tests ---
+
+func TestAcknowledgeIncident_NotCached(t *testing.T) {
+	callCount := &atomic.Int32{}
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		callCount.Add(1)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"incident":{"id":"P123","status":"acknowledged"}}`)
+	})
+
+	args := map[string]interface{}{
+		"incident_id":     "P123",
+		"requester_email": "user@example.com",
+	}
+
+	_, err := tool.AcknowledgeIncident(context.Background(), "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, err = tool.AcknowledgeIncident(context.Background(), "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if callCount.Load() != 2 {
+		t.Errorf("expected 2 API calls (actions should NOT be cached), got %d", callCount.Load())
+	}
+}
+
+func TestAddIncidentNote_NotCached(t *testing.T) {
+	callCount := &atomic.Int32{}
+	tool, _ := newTestToolWithHeaders(t, func(w http.ResponseWriter, r *http.Request) {
+		callCount.Add(1)
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"note":{"id":"N1","content":"test"}}`)
+	})
+
+	args := map[string]interface{}{
+		"incident_id":     "P123",
+		"requester_email": "user@example.com",
+		"content":         "test note",
+	}
+
+	_, err := tool.AddIncidentNote(context.Background(), "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, err = tool.AddIncidentNote(context.Background(), "test-incident", args)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if callCount.Load() != 2 {
+		t.Errorf("expected 2 API calls (notes should NOT be cached), got %d", callCount.Load())
 	}
 }
 

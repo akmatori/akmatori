@@ -1,6 +1,7 @@
 package pagerduty
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -11,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/akmatori/mcp-gateway/internal/cache"
@@ -506,4 +508,454 @@ func (t *PagerDutyTool) ListRecentChanges(ctx context.Context, incidentID string
 		return "", err
 	}
 	return string(body), nil
+}
+
+// updateIncidentStatus updates an incident's status (acknowledge/resolve). Write operation, NOT cached.
+func (t *PagerDutyTool) updateIncidentStatus(ctx context.Context, incidentID string, args map[string]interface{}, status string) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	pdIncidentID, ok := args["incident_id"].(string)
+	if !ok || pdIncidentID == "" {
+		return "", fmt.Errorf("incident_id is required%s", validation.SuggestParam("incident_id", args))
+	}
+
+	requesterEmail, ok := args["requester_email"].(string)
+	if !ok || requesterEmail == "" {
+		return "", fmt.Errorf("requester_email is required%s", validation.SuggestParam("requester_email", args))
+	}
+
+	reqBody := map[string]interface{}{
+		"incident": map[string]interface{}{
+			"type":   "incident_reference",
+			"status": status,
+		},
+	}
+
+	bodyJSON, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	config, err := t.getConfig(ctx, incidentID, logicalName)
+	if err != nil {
+		return "", err
+	}
+
+	path := fmt.Sprintf("/incidents/%s", url.PathEscape(pdIncidentID))
+
+	// PagerDuty requires From header for PUT on incidents
+	respBody, err := t.doRequestWithHeaders(ctx, config, http.MethodPut, path, nil, bytes.NewReader(bodyJSON), map[string]string{
+		"From": requesterEmail,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return string(respBody), nil
+}
+
+// doRequestWithHeaders performs an HTTP request with additional headers
+func (t *PagerDutyTool) doRequestWithHeaders(ctx context.Context, config *PagerDutyConfig, method, path string, queryParams url.Values, body io.Reader, extraHeaders map[string]string) ([]byte, error) {
+	// Validate token before consuming rate limit budget
+	if config.APIToken == "" {
+		return nil, fmt.Errorf("PagerDuty API token is required but not configured")
+	}
+
+	// Apply rate limiting
+	if t.rateLimiter != nil {
+		if err := t.rateLimiter.Wait(ctx); err != nil {
+			return nil, fmt.Errorf("rate limit wait cancelled: %w", err)
+		}
+	}
+
+	// Build full URL
+	fullURL := config.URL + path
+	if len(queryParams) > 0 {
+		fullURL += "?" + queryParams.Encode()
+	}
+
+	t.logger.Printf("PagerDuty API call: %s %s", method, path)
+
+	transport := &http.Transport{
+		DisableKeepAlives: true,
+	}
+
+	if config.UseProxy && config.ProxyURL != "" {
+		proxyURL, err := url.Parse(config.ProxyURL)
+		if err != nil {
+			t.logger.Printf("Invalid proxy URL: %v, proceeding without proxy", err)
+			transport.Proxy = nil
+		} else {
+			transport.Proxy = http.ProxyURL(proxyURL)
+		}
+	} else {
+		transport.Proxy = nil
+	}
+
+	if !config.VerifySSL {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // User-opt-in via pagerduty_verify_ssl setting
+	}
+
+	client := &http.Client{
+		Timeout:   time.Duration(config.Timeout) * time.Second,
+		Transport: transport,
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, method, fullURL, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Authorization", "Token token="+config.APIToken)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	for k, v := range extraHeaders {
+		httpReq.Header.Set(k, v)
+	}
+
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	const maxResponseBytes = 5 * 1024 * 1024
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if len(respBody) > maxResponseBytes {
+		return nil, fmt.Errorf("response exceeds %d MB limit", maxResponseBytes/(1024*1024))
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errMsg := string(respBody)
+		if len(errMsg) > 500 {
+			errMsg = errMsg[:500] + "... (truncated)"
+		}
+		return nil, fmt.Errorf("HTTP error %d: %s", resp.StatusCode, errMsg)
+	}
+
+	return respBody, nil
+}
+
+// AcknowledgeIncident acknowledges a PagerDuty incident (write operation, NOT cached)
+func (t *PagerDutyTool) AcknowledgeIncident(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	return t.updateIncidentStatus(ctx, incidentID, args, "acknowledged")
+}
+
+// ResolveIncident resolves a PagerDuty incident (write operation, NOT cached)
+func (t *PagerDutyTool) ResolveIncident(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	return t.updateIncidentStatus(ctx, incidentID, args, "resolved")
+}
+
+// ReassignIncident reassigns a PagerDuty incident to different assignees (write operation, NOT cached)
+func (t *PagerDutyTool) ReassignIncident(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	pdIncidentID, ok := args["incident_id"].(string)
+	if !ok || pdIncidentID == "" {
+		return "", fmt.Errorf("incident_id is required%s", validation.SuggestParam("incident_id", args))
+	}
+
+	requesterEmail, ok := args["requester_email"].(string)
+	if !ok || requesterEmail == "" {
+		return "", fmt.Errorf("requester_email is required%s", validation.SuggestParam("requester_email", args))
+	}
+
+	assigneeIDs, ok := args["assignee_ids"].(string)
+	if !ok || assigneeIDs == "" {
+		return "", fmt.Errorf("assignee_ids is required (comma-separated user IDs)%s", validation.SuggestParam("assignee_ids", args))
+	}
+
+	// Build assignments array
+	ids := strings.Split(assigneeIDs, ",")
+	assignments := make([]map[string]interface{}, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			assignments = append(assignments, map[string]interface{}{
+				"assignee": map[string]interface{}{
+					"id":   id,
+					"type": "user_reference",
+				},
+			})
+		}
+	}
+
+	if len(assignments) == 0 {
+		return "", fmt.Errorf("assignee_ids must contain at least one valid user ID")
+	}
+
+	// Check for optional escalation_policy_id
+	escalationPolicyID, _ := args["escalation_policy_id"].(string)
+
+	incidentBody := map[string]interface{}{
+		"type":        "incident",
+		"assignments": assignments,
+	}
+	if escalationPolicyID != "" {
+		incidentBody["escalation_policy"] = map[string]interface{}{
+			"id":   escalationPolicyID,
+			"type": "escalation_policy_reference",
+		}
+	}
+
+	reqBody := map[string]interface{}{
+		"incident": incidentBody,
+	}
+
+	bodyJSON, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	config, err := t.getConfig(ctx, incidentID, logicalName)
+	if err != nil {
+		return "", err
+	}
+
+	path := fmt.Sprintf("/incidents/%s", url.PathEscape(pdIncidentID))
+
+	respBody, err := t.doRequestWithHeaders(ctx, config, http.MethodPut, path, nil, bytes.NewReader(bodyJSON), map[string]string{
+		"From": requesterEmail,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return string(respBody), nil
+}
+
+// AddIncidentNote adds a note to a PagerDuty incident (write operation, NOT cached)
+func (t *PagerDutyTool) AddIncidentNote(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	pdIncidentID, ok := args["incident_id"].(string)
+	if !ok || pdIncidentID == "" {
+		return "", fmt.Errorf("incident_id is required%s", validation.SuggestParam("incident_id", args))
+	}
+
+	requesterEmail, ok := args["requester_email"].(string)
+	if !ok || requesterEmail == "" {
+		return "", fmt.Errorf("requester_email is required%s", validation.SuggestParam("requester_email", args))
+	}
+
+	content, ok := args["content"].(string)
+	if !ok || content == "" {
+		return "", fmt.Errorf("content is required%s", validation.SuggestParam("content", args))
+	}
+
+	reqBody := map[string]interface{}{
+		"note": map[string]interface{}{
+			"content": content,
+		},
+	}
+
+	bodyJSON, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	config, err := t.getConfig(ctx, incidentID, logicalName)
+	if err != nil {
+		return "", err
+	}
+
+	path := fmt.Sprintf("/incidents/%s/notes", url.PathEscape(pdIncidentID))
+
+	respBody, err := t.doRequestWithHeaders(ctx, config, http.MethodPost, path, nil, bytes.NewReader(bodyJSON), map[string]string{
+		"From": requesterEmail,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return string(respBody), nil
+}
+
+// EventsAPIURL is the PagerDuty Events API v2 endpoint
+const EventsAPIURL = "https://events.pagerduty.com"
+
+// SendEvent sends an event via PagerDuty Events API v2 (write operation, NOT cached)
+func (t *PagerDutyTool) SendEvent(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	routingKey, ok := args["routing_key"].(string)
+	if !ok || routingKey == "" {
+		return "", fmt.Errorf("routing_key is required%s", validation.SuggestParam("routing_key", args))
+	}
+
+	eventAction, ok := args["event_action"].(string)
+	if !ok || eventAction == "" {
+		return "", fmt.Errorf("event_action is required%s", validation.SuggestParam("event_action", args))
+	}
+
+	validActions := map[string]bool{"trigger": true, "acknowledge": true, "resolve": true}
+	if !validActions[eventAction] {
+		return "", fmt.Errorf("invalid event_action '%s': must be one of trigger, acknowledge, resolve", eventAction)
+	}
+
+	reqBody := map[string]interface{}{
+		"routing_key":  routingKey,
+		"event_action": eventAction,
+	}
+
+	// dedup_key is required for acknowledge/resolve
+	dedupKey, _ := args["dedup_key"].(string)
+	if dedupKey != "" {
+		reqBody["dedup_key"] = dedupKey
+	} else if eventAction == "acknowledge" || eventAction == "resolve" {
+		return "", fmt.Errorf("dedup_key is required for %s events", eventAction)
+	}
+
+	// payload is required for trigger events
+	if eventAction == "trigger" {
+		summary, _ := args["summary"].(string)
+		if summary == "" {
+			return "", fmt.Errorf("summary is required for trigger events%s", validation.SuggestParam("summary", args))
+		}
+
+		severity, _ := args["severity"].(string)
+		if severity == "" {
+			severity = "error"
+		}
+		validSeverities := map[string]bool{"critical": true, "error": true, "warning": true, "info": true}
+		if !validSeverities[severity] {
+			return "", fmt.Errorf("invalid severity '%s': must be one of critical, error, warning, info", severity)
+		}
+
+		source, _ := args["source"].(string)
+		if source == "" {
+			source = "akmatori"
+		}
+
+		payload := map[string]interface{}{
+			"summary":  summary,
+			"severity": severity,
+			"source":   source,
+		}
+
+		if component, ok := args["component"].(string); ok && component != "" {
+			payload["component"] = component
+		}
+		if group, ok := args["group"].(string); ok && group != "" {
+			payload["group"] = group
+		}
+		if class, ok := args["class"].(string); ok && class != "" {
+			payload["class"] = class
+		}
+
+		reqBody["payload"] = payload
+	}
+
+	bodyJSON, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	config, err := t.getConfig(ctx, incidentID, logicalName)
+	if err != nil {
+		return "", err
+	}
+
+	// Events API v2 uses a different endpoint
+	eventsURL := EventsAPIURL
+	if eventsOverride, ok := args["events_url"].(string); ok && eventsOverride != "" {
+		eventsURL = trimTrailingSlash(eventsOverride)
+	}
+
+	// Temporarily override config URL for the events API call
+	eventsConfig := &PagerDutyConfig{
+		URL:       eventsURL,
+		APIToken:  config.APIToken,
+		VerifySSL: config.VerifySSL,
+		Timeout:   config.Timeout,
+		UseProxy:  config.UseProxy,
+		ProxyURL:  config.ProxyURL,
+	}
+
+	// Events API v2 does NOT use Token auth — it uses the routing_key in the body
+	// We still need rate limiting and proxy, but auth header is not used
+	respBody, err := t.doRequestNoAuth(ctx, eventsConfig, http.MethodPost, "/v2/enqueue", nil, bytes.NewReader(bodyJSON))
+	if err != nil {
+		return "", err
+	}
+
+	return string(respBody), nil
+}
+
+// doRequestNoAuth performs an HTTP request without the Authorization header (for Events API v2)
+func (t *PagerDutyTool) doRequestNoAuth(ctx context.Context, config *PagerDutyConfig, method, path string, queryParams url.Values, body io.Reader) ([]byte, error) {
+	// Apply rate limiting
+	if t.rateLimiter != nil {
+		if err := t.rateLimiter.Wait(ctx); err != nil {
+			return nil, fmt.Errorf("rate limit wait cancelled: %w", err)
+		}
+	}
+
+	fullURL := config.URL + path
+	if len(queryParams) > 0 {
+		fullURL += "?" + queryParams.Encode()
+	}
+
+	t.logger.Printf("PagerDuty Events API call: %s %s", method, path)
+
+	transport := &http.Transport{
+		DisableKeepAlives: true,
+	}
+
+	if config.UseProxy && config.ProxyURL != "" {
+		proxyURL, err := url.Parse(config.ProxyURL)
+		if err != nil {
+			t.logger.Printf("Invalid proxy URL: %v, proceeding without proxy", err)
+			transport.Proxy = nil
+		} else {
+			transport.Proxy = http.ProxyURL(proxyURL)
+		}
+	} else {
+		transport.Proxy = nil
+	}
+
+	if !config.VerifySSL {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // User-opt-in
+	}
+
+	client := &http.Client{
+		Timeout:   time.Duration(config.Timeout) * time.Second,
+		Transport: transport,
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, method, fullURL, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Events API v2 only needs Content-Type, no Authorization header
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	const maxResponseBytes = 5 * 1024 * 1024
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if len(respBody) > maxResponseBytes {
+		return nil, fmt.Errorf("response exceeds %d MB limit", maxResponseBytes/(1024*1024))
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errMsg := string(respBody)
+		if len(errMsg) > 500 {
+			errMsg = errMsg[:500] + "... (truncated)"
+		}
+		return nil, fmt.Errorf("HTTP error %d: %s", resp.StatusCode, errMsg)
+	}
+
+	return respBody, nil
 }

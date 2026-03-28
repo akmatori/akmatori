@@ -86,10 +86,10 @@ Add a PagerDuty tool type to the MCP gateway, enabling the AI agent to query and
 - Modify: `mcp-gateway/internal/tools/pagerduty/pagerduty.go`
 - Modify: `mcp-gateway/internal/tools/pagerduty/pagerduty_test.go`
 
-- [ ] Implement AcknowledgeIncident, ResolveIncident, ReassignIncident, AddIncidentNote (PUT/POST to REST API v2, no response caching)
-- [ ] Implement SendEvent for Events API v2 (POST to events.pagerduty.com, requires routing_key parameter)
-- [ ] Write tests for all action/event operations (success, validation errors, API errors)
-- [ ] Run `make test-mcp` - must pass before task 4
+- [x] Implement AcknowledgeIncident, ResolveIncident, ReassignIncident, AddIncidentNote (PUT/POST to REST API v2, no response caching)
+- [x] Implement SendEvent for Events API v2 (POST to events.pagerduty.com, requires routing_key parameter)
+- [x] Write tests for all action/event operations (success, validation errors, API errors)
+- [x] Run `make test-mcp` - must pass before task 4
 
 ### Task 4: Register tools in the MCP gateway
 
