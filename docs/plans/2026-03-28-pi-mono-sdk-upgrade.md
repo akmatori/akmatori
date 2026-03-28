@@ -73,10 +73,10 @@ Since 0.59.0, custom tools without `promptSnippet` are omitted from the system p
 **Files:**
 - Modify: `agent-worker/src/agent-runner.ts` (if needed)
 
-- [ ] Verify that our `ModelRegistry` usage (constructor only, no direct getApiKey calls) compiles without changes
-- [ ] If `ModelRegistry` constructor or `AuthStorage.setRuntimeApiKey()` API changed, update accordingly
-- [ ] Check if `getApiKeyAndHeaders()` returns headers that should be forwarded to our proxy configuration
-- [ ] Run `make test-agent` to verify tests pass
+- [x] Verify that our `ModelRegistry` usage (constructor only, no direct getApiKey calls) compiles without changes
+- [x] If `ModelRegistry` constructor or `AuthStorage.setRuntimeApiKey()` API changed, update accordingly
+- [x] Check if `getApiKeyAndHeaders()` returns headers that should be forwarded to our proxy configuration
+- [x] Run `make test-agent` to verify tests pass
 
 ### Task 4: Adopt ctx.signal Cancellation Improvements
 

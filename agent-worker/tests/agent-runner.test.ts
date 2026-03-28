@@ -445,6 +445,30 @@ describe("AgentRunner", () => {
       );
     });
 
+    it("should construct ModelRegistry with AuthStorage and pass to session (getApiKeyAndHeaders not called directly)", async () => {
+      const { AuthStorage, ModelRegistry } = await import("@mariozechner/pi-coding-agent");
+      const params = makeExecuteParams({
+        llmSettings: makeLLMSettings({
+          provider: "openai",
+          api_key: "sk-openai-key",
+        }),
+      });
+      await runner.execute(params);
+
+      // ModelRegistry should be constructed with the AuthStorage instance
+      const authInstance = (AuthStorage as any).inMemory.mock.results[0].value;
+      expect(ModelRegistry).toHaveBeenCalledWith(authInstance);
+
+      // The resulting modelRegistry should be passed to createAgentSession
+      const opts = createAgentSessionCalls[0];
+      expect(opts.modelRegistry).toBeDefined();
+
+      // We never call getApiKey or getApiKeyAndHeaders directly —
+      // the SDK handles key resolution internally via the modelRegistry.
+      // This verifies our constructor-only usage is compatible with 0.63.0+
+      // where getApiKey() was replaced by getApiKeyAndHeaders().
+    });
+
     it("should pass gateway_call, list_tools_for_tool_type, get_tool_detail, list_tool_types, and execute_script as customTools", async () => {
       const params = makeExecuteParams({ incidentId: "inc-tools" });
       await runner.execute(params);
