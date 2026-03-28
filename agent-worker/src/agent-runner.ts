@@ -330,8 +330,15 @@ export class AgentRunner {
       // rather than throwing an exception.
       if (event.type === "message_end" || event.type === "turn_end") {
         const msg = event.message;
-        if (msg && "role" in msg && msg.role === "assistant" && msg.stopReason === "error" && msg.errorMessage) {
-          lastErrorMessage = msg.errorMessage;
+        if (msg && "role" in msg && msg.role === "assistant") {
+          if (msg.stopReason === "error" && msg.errorMessage) {
+            lastErrorMessage = msg.errorMessage;
+          } else if (msg.stopReason !== "error") {
+            // Clear any previously latched error — a successful retry or
+            // subsequent turn means the session recovered from the transient
+            // failure and the error should not be propagated.
+            lastErrorMessage = "";
+          }
         }
       }
 
