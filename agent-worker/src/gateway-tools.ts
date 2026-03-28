@@ -160,6 +160,10 @@ export function createGatewayCallTool(ctx: GatewayToolContext) {
       "Call a tool on the MCP Gateway. Use this to execute infrastructure tools " +
       "(SSH commands, Zabbix queries, VictoriaMetrics queries, etc.) by name. " +
       "Each skill's SKILL.md lists the available tools and their logical instance names.",
+    // promptSnippet is required since pi-mono 0.59.0 for the tool to appear
+    // in the "Available tools" section of the system prompt.
+    promptSnippet:
+      "Call infrastructure tools (SSH, Zabbix, VictoriaMetrics, etc.) on the MCP Gateway by name",
     promptGuidelines: [
       "Use gateway_call to invoke infrastructure tools. Always include the args parameter as an object, even if empty: gateway_call({ tool_name: \"...\", args: {} })",
       "Each skill's SKILL.md lists assigned tools with their logical names and available operations. Read SKILL.md first.",
@@ -228,6 +232,8 @@ export function createListToolsForToolTypeTool(ctx: GatewayToolContext) {
       "List available infrastructure tools on the MCP Gateway filtered by tool type. " +
       "Returns all tools of the specified type with their descriptions and available instances. " +
       "Use this to discover what tools are available before calling them.",
+    promptSnippet:
+      "List available tools filtered by type (e.g. ssh, zabbix, victoria_metrics)",
     promptGuidelines: [
       "Call list_tool_types first to see available tool types. Then list tools by type: list_tools_for_tool_type({ tool_type: \"victoria_metrics\" }).",
       "Example: list_tools_for_tool_type({ tool_type: \"ssh\" }) — lists all SSH tools",
@@ -279,6 +285,8 @@ export function createGetToolDetailTool(ctx: GatewayToolContext) {
     description:
       "Get full details for a specific MCP Gateway tool, including its parameter schema " +
       "and available instances. Use this after list_tools_for_tool_type to understand how to call a tool.",
+    promptSnippet:
+      "Get full parameter schema and instances for a specific MCP Gateway tool",
     promptGuidelines: [
       "Use get_tool_detail to see the full parameter schema for a tool before calling it with gateway_call.",
       "Example: get_tool_detail({ tool_name: \"ssh.execute_command\" }) — shows parameters and instances",
@@ -329,6 +337,8 @@ export function createListToolTypesTool(ctx: GatewayToolContext) {
     description:
       "List all available tool types for this incident. Call this first to see what infrastructure " +
       "tools are available before using list_tools_for_tool_type.",
+    promptSnippet:
+      "List all available tool types for this incident (e.g. ssh, zabbix, victoria_metrics)",
     promptGuidelines: [
       "Call list_tool_types first to see what tool types are available (e.g. ssh, zabbix, victoria_metrics).",
       "Then use list_tools_for_tool_type with a specific type to find individual tools within that type.",
@@ -386,6 +396,8 @@ export function createExecuteScriptTool(ctx: ExecuteScriptToolContext) {
       "Execute JavaScript code in an isolated sandbox with built-in gateway functions and synchronous file I/O. " +
       "Use this for batch operations, complex data processing, or orchestrating multiple tool calls. " +
       "IMPORTANT: require() and import() are NOT available. Use the pre-injected globals: gateway_call(), list_tools_for_tool_type(), get_tool_detail(), console.log(), and the synchronous fs object (readFileSync, writeFileSync, etc.).",
+    promptSnippet:
+      "Execute JavaScript in an isolated sandbox with gateway functions and file I/O for batch operations",
     promptGuidelines: [
       "Use execute_script for batch operations that require multiple gateway_call invocations or data processing.",
       "Top-level await is supported for gateway_call, list_tools_for_tool_type, and get_tool_detail only.",

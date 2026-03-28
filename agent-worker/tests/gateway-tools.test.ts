@@ -70,6 +70,14 @@ describe("createGatewayCallTool", () => {
       expect(tool.parameters.properties.instance).toBeDefined();
     });
 
+    it("should have promptSnippet for system prompt inclusion (required since pi-mono 0.59.0)", () => {
+      const tool = createGatewayCallTool({ client: mockClient });
+
+      expect(tool.promptSnippet).toBeDefined();
+      expect(typeof tool.promptSnippet).toBe("string");
+      expect(tool.promptSnippet!.length).toBeGreaterThan(0);
+    });
+
     it("should have promptGuidelines", () => {
       const tool = createGatewayCallTool({ client: mockClient });
 
@@ -262,6 +270,14 @@ describe("createListToolsForToolTypeTool", () => {
       expect(tool.parameters.properties.query).toBeUndefined();
     });
 
+    it("should have promptSnippet for system prompt inclusion (required since pi-mono 0.59.0)", () => {
+      const tool = createListToolsForToolTypeTool({ client: mockClient });
+
+      expect(tool.promptSnippet).toBeDefined();
+      expect(typeof tool.promptSnippet).toBe("string");
+      expect(tool.promptSnippet!.length).toBeGreaterThan(0);
+    });
+
     it("should have promptGuidelines", () => {
       const tool = createListToolsForToolTypeTool({ client: mockClient });
 
@@ -380,6 +396,14 @@ describe("createGetToolDetailTool", () => {
 
       expect(tool.parameters).toBe(GetToolDetailParams);
       expect(tool.parameters.properties.tool_name).toBeDefined();
+    });
+
+    it("should have promptSnippet for system prompt inclusion (required since pi-mono 0.59.0)", () => {
+      const tool = createGetToolDetailTool({ client: mockClient });
+
+      expect(tool.promptSnippet).toBeDefined();
+      expect(typeof tool.promptSnippet).toBe("string");
+      expect(tool.promptSnippet!.length).toBeGreaterThan(0);
     });
 
     it("should have promptGuidelines", () => {
@@ -508,6 +532,14 @@ describe("createListToolTypesTool", () => {
       expect(Object.keys(tool.parameters.properties ?? {})).toHaveLength(0);
     });
 
+    it("should have promptSnippet for system prompt inclusion (required since pi-mono 0.59.0)", () => {
+      const tool = createListToolTypesTool({ client: mockClient });
+
+      expect(tool.promptSnippet).toBeDefined();
+      expect(typeof tool.promptSnippet).toBe("string");
+      expect(tool.promptSnippet!.length).toBeGreaterThan(0);
+    });
+
     it("should have promptGuidelines", () => {
       const tool = createListToolTypesTool({ client: mockClient });
 
@@ -597,6 +629,14 @@ describe("createExecuteScriptTool", () => {
 
       expect(tool.parameters).toBe(ExecuteScriptParams);
       expect(tool.parameters.properties.code).toBeDefined();
+    });
+
+    it("should have promptSnippet for system prompt inclusion (required since pi-mono 0.59.0)", () => {
+      const tool = createExecuteScriptTool({ client: mockClient, workDir: tmpDir });
+
+      expect(tool.promptSnippet).toBeDefined();
+      expect(typeof tool.promptSnippet).toBe("string");
+      expect(tool.promptSnippet!.length).toBeGreaterThan(0);
     });
 
     it("should have promptGuidelines", () => {

@@ -63,10 +63,10 @@ Upgrade the agent-worker's pi-mono SDK dependencies from 0.58.1 to 0.63.1 (lates
 
 Since 0.59.0, custom tools without `promptSnippet` are omitted from the system prompt. Our tools use `promptGuidelines` (array format) which was introduced in 0.55.4. Verify whether `promptGuidelines` still works as a system prompt inclusion mechanism in 0.63.1, or if `promptSnippet` (string) is now required.
 
-- [ ] After upgrading, run a test to confirm gateway tools appear in the agent's system prompt
-- [ ] If tools are missing from prompt: add `promptSnippet` property to each gateway tool definition (consolidate the `promptGuidelines` array into a single string)
-- [ ] If `promptGuidelines` still works: no changes needed, document this in a code comment
-- [ ] Run `make test-agent` to verify tests pass
+- [x] After upgrading, run a test to confirm gateway tools appear in the agent's system prompt
+- [x] If tools are missing from prompt: add `promptSnippet` property to each gateway tool definition (consolidate the `promptGuidelines` array into a single string)
+- [x] If `promptGuidelines` still works: no changes needed, document this in a code comment
+- [x] Run `make test-agent` to verify tests pass
 
 ### Task 3: Address Breaking Change - ModelRegistry.getApiKeyAndHeaders()
 
