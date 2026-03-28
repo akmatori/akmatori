@@ -121,10 +121,10 @@ The JSONL session export (0.61.0) enables exporting investigation history for po
 
 Since 0.62.0, built-in tools carry their own ToolDefinition metadata used by `buildSystemPrompt()`. Our `BASH_TOOL_GUIDELINES` override (set via `(bashTool as any).promptGuidelines`) may conflict with the new metadata system.
 
-- [ ] Verify that our `promptGuidelines` override on the bash tool still works correctly with the new ToolDefinition system
-- [ ] If the bash tool now uses a proper ToolDefinition type, use the typed API instead of `(bashTool as any).promptGuidelines`
-- [ ] Update any type assertions to use proper SDK types
-- [ ] Run `make test-agent` to verify tests pass
+- [x] Verify that our `promptGuidelines` override on the bash tool still works correctly with the new ToolDefinition system
+- [x] If the bash tool now uses a proper ToolDefinition type, use the typed API instead of `(bashTool as any).promptGuidelines`
+- [x] Update any type assertions to use proper SDK types
+- [x] Run `make test-agent` to verify tests pass
 
 ### Task 8: Verify and Update Event Handling for New Event Types
 

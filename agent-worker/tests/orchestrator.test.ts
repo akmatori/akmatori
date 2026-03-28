@@ -88,13 +88,11 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
     getPathMetadata: vi.fn(() => new Map()),
     extendResources: vi.fn(),
   })),
-  createCodingTools: vi.fn(() => [
-    { name: "bash", definition: { name: "bash" }, execute: vi.fn() },
-    { name: "read", definition: { name: "read" }, execute: vi.fn() },
-  ]),
-  createBashTool: vi.fn((_cwd: string, _opts?: any) => ({
+  createBashToolDefinition: vi.fn((_cwd: string, _opts?: any) => ({
     name: "bash",
-    definition: { name: "bash" },
+    label: "Bash",
+    description: "Execute bash commands",
+    parameters: {},
     execute: vi.fn(),
     _spawnHookOpts: _opts,
   })),
