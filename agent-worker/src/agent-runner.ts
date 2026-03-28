@@ -329,8 +329,8 @@ export class AgentRunner {
       // as a message with stopReason "error" and an errorMessage field,
       // rather than throwing an exception.
       if (event.type === "message_end" || event.type === "turn_end") {
-        const msg = (event as any).message;
-        if (msg?.stopReason === "error" && msg?.errorMessage) {
+        const msg = event.message;
+        if (msg && "role" in msg && msg.role === "assistant" && msg.stopReason === "error" && msg.errorMessage) {
           lastErrorMessage = msg.errorMessage;
         }
       }
