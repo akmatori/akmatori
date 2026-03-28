@@ -615,10 +615,122 @@ func TestClickHouseSchema_Functions(t *testing.T) {
 func TestGetToolSchemas_AllPresent(t *testing.T) {
 	schemas := GetToolSchemas()
 
-	expected := []string{"ssh", "zabbix", "victoria_metrics", "catchpoint", "postgresql", "grafana", "clickhouse"}
+	expected := []string{"ssh", "zabbix", "victoria_metrics", "catchpoint", "postgresql", "grafana", "clickhouse", "pagerduty"}
 	for _, name := range expected {
 		if _, ok := schemas[name]; !ok {
 			t.Errorf("missing schema: %s", name)
+		}
+	}
+}
+
+func TestGetToolSchemas_ContainsPagerDuty(t *testing.T) {
+	schemas := GetToolSchemas()
+
+	if _, ok := schemas["pagerduty"]; !ok {
+		t.Fatal("pagerduty schema not found in GetToolSchemas()")
+	}
+}
+
+func TestGetToolSchema_PagerDuty(t *testing.T) {
+	schema, ok := GetToolSchema("pagerduty")
+	if !ok {
+		t.Fatal("pagerduty schema not found")
+	}
+
+	if schema.Name != "pagerduty" {
+		t.Errorf("expected name 'pagerduty', got %q", schema.Name)
+	}
+
+	if schema.Version != "1.0.0" {
+		t.Errorf("expected version '1.0.0', got %q", schema.Version)
+	}
+}
+
+func TestPagerDutySchema_RequiredFields(t *testing.T) {
+	schema, _ := GetToolSchema("pagerduty")
+
+	if len(schema.SettingsSchema.Required) != 1 || schema.SettingsSchema.Required[0] != "pagerduty_api_token" {
+		t.Errorf("expected required field 'pagerduty_api_token', got %v", schema.SettingsSchema.Required)
+	}
+}
+
+func TestPagerDutySchema_Settings(t *testing.T) {
+	schema, _ := GetToolSchema("pagerduty")
+	props := schema.SettingsSchema.Properties
+
+	expectedFields := []string{"pagerduty_api_token", "pagerduty_url", "pagerduty_verify_ssl", "pagerduty_timeout"}
+	for _, field := range expectedFields {
+		if _, ok := props[field]; !ok {
+			t.Errorf("missing settings field: %s", field)
+		}
+	}
+}
+
+func TestPagerDutySchema_SecretFields(t *testing.T) {
+	schema, _ := GetToolSchema("pagerduty")
+	props := schema.SettingsSchema.Properties
+
+	if !props["pagerduty_api_token"].Secret {
+		t.Error("expected pagerduty_api_token to be marked as secret")
+	}
+}
+
+func TestPagerDutySchema_AdvancedFields(t *testing.T) {
+	schema, _ := GetToolSchema("pagerduty")
+	props := schema.SettingsSchema.Properties
+
+	advancedFields := []string{"pagerduty_verify_ssl", "pagerduty_timeout"}
+	for _, field := range advancedFields {
+		if !props[field].Advanced {
+			t.Errorf("expected %s to be marked as advanced", field)
+		}
+	}
+}
+
+func TestPagerDutySchema_Defaults(t *testing.T) {
+	schema, _ := GetToolSchema("pagerduty")
+	props := schema.SettingsSchema.Properties
+
+	if props["pagerduty_url"].Default != "https://api.pagerduty.com" {
+		t.Errorf("expected pagerduty_url default, got %v", props["pagerduty_url"].Default)
+	}
+
+	if props["pagerduty_verify_ssl"].Default != true {
+		t.Errorf("expected pagerduty_verify_ssl default true, got %v", props["pagerduty_verify_ssl"].Default)
+	}
+
+	if props["pagerduty_timeout"].Default != 30 {
+		t.Errorf("expected pagerduty_timeout default 30, got %v", props["pagerduty_timeout"].Default)
+	}
+}
+
+func TestPagerDutySchema_TimeoutBounds(t *testing.T) {
+	schema, _ := GetToolSchema("pagerduty")
+	timeout := schema.SettingsSchema.Properties["pagerduty_timeout"]
+
+	if timeout.Minimum == nil || *timeout.Minimum != 5 {
+		t.Error("expected pagerduty_timeout minimum 5")
+	}
+	if timeout.Maximum == nil || *timeout.Maximum != 300 {
+		t.Error("expected pagerduty_timeout maximum 300")
+	}
+}
+
+func TestPagerDutySchema_Functions(t *testing.T) {
+	schema, _ := GetToolSchema("pagerduty")
+
+	expectedFunctions := []string{
+		"get_incidents", "get_incident", "get_incident_notes", "get_incident_alerts",
+		"get_services", "get_on_calls", "get_escalation_policies", "list_recent_changes",
+		"acknowledge_incident", "resolve_incident", "reassign_incident", "add_incident_note",
+		"send_event",
+	}
+	if len(schema.Functions) != len(expectedFunctions) {
+		t.Fatalf("expected %d functions, got %d", len(expectedFunctions), len(schema.Functions))
+	}
+	for i, name := range expectedFunctions {
+		if schema.Functions[i].Name != name {
+			t.Errorf("expected function[%d] = %q, got %q", i, name, schema.Functions[i].Name)
 		}
 	}
 }
