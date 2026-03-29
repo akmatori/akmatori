@@ -3789,6 +3789,10 @@ func (r *Registry) registerK8sTools() {
 						Type:        "string",
 						Description: "Label selector to filter namespaces (e.g. 'env=production')",
 					},
+					"field_selector": {
+						Type:        "string",
+						Description: "Field selector to filter namespaces (e.g. 'metadata.name=default')",
+					},
 					"limit": {
 						Type:        "number",
 						Description: "Maximum number of results to return",
@@ -4142,6 +4146,10 @@ func (r *Registry) registerK8sTools() {
 					"label_selector": {
 						Type:        "string",
 						Description: "Label selector to filter nodes",
+					},
+					"field_selector": {
+						Type:        "string",
+						Description: "Field selector to filter nodes (e.g. 'metadata.name=node-1')",
 					},
 					"limit": {
 						Type:        "number",
