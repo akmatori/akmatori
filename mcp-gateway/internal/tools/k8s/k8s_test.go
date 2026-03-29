@@ -2200,6 +2200,40 @@ func TestAPIRequest_SecretsBlocked(t *testing.T) {
 	}
 }
 
+func TestAPIRequest_DangerousSubresourcesBlocked(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("request should not reach server for dangerous subresource paths")
+		w.WriteHeader(http.StatusOK)
+	})
+
+	tests := []struct {
+		name string
+		path string
+		sub  string
+	}{
+		{"proxy pod", "/api/v1/namespaces/default/pods/my-pod/proxy", "proxy"},
+		{"proxy pod subpath", "/api/v1/namespaces/default/pods/my-pod/proxy/admin", "proxy"},
+		{"proxy service", "/api/v1/namespaces/default/services/my-svc/proxy", "proxy"},
+		{"exec pod", "/api/v1/namespaces/default/pods/my-pod/exec", "exec"},
+		{"attach pod", "/api/v1/namespaces/default/pods/my-pod/attach", "attach"},
+		{"portforward pod", "/api/v1/namespaces/default/pods/my-pod/portforward", "portforward"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+				"path": tt.path,
+			})
+			if err == nil {
+				t.Fatal("expected error for dangerous subresource path")
+			}
+			if !strings.Contains(err.Error(), tt.sub) {
+				t.Errorf("expected %s error, got: %v", tt.sub, err)
+			}
+		})
+	}
+}
+
 func TestAPIRequest_ExactApiPath(t *testing.T) {
 	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
