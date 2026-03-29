@@ -148,7 +148,7 @@ func testSlackHandler(botUserID string, alertChannels map[string]*database.Alert
 
 // classifyMessage determines what handleMessage would do with a given event,
 // without actually calling external services. Returns one of:
-// "skip_self", "bot_thread_alert", "human_mention_thread", "ignore_thread",
+// "skip_self", "human_mention_thread", "ignore_thread",
 // "human_top_level_alert", "top_level_alert", "ignore_non_bot", "non_alert_channel"
 func classifyMessage(h *SlackHandler, event *slackevents.MessageEvent) string {
 	// Mirrors the logic in handleMessage
@@ -163,10 +163,10 @@ func classifyMessage(h *SlackHandler, event *slackevents.MessageEvent) string {
 	if isAlert {
 		isBotMessage := event.SubType == "bot_message" || event.BotID != ""
 
-		if event.ThreadTimeStamp != "" {
-			if isBotMessage {
-				return "bot_thread_alert"
-			}
+		isThreadReply := event.ThreadTimeStamp != "" && event.ThreadTimeStamp != event.TimeStamp
+
+		if isThreadReply {
+			// Thread replies: only respond when bot is @mentioned
 			if h.botUserID != "" && event.SubType == "" && event.User != "" &&
 				contains(event.Text, "<@"+h.botUserID+">") {
 				return "human_mention_thread"
@@ -241,10 +241,29 @@ func TestHandleMessage_TopLevelHumanIgnored(t *testing.T) {
 	}
 }
 
-func TestHandleMessage_ThreadReplyBotMessage(t *testing.T) {
+func TestHandleMessage_BotMessage_ThreadTSEqualTS_ProcessedAsTopLevel(t *testing.T) {
 	h := testSlackHandler("U_BOT", map[string]*database.AlertSourceInstance{
 		"C_ALERT": {},
 	})
+	// PagerDuty sets thread_ts == ts on initial messages (thread roots).
+	// These are top-level messages and should be processed as alerts.
+	event := &slackevents.MessageEvent{
+		Channel:         "C_ALERT",
+		BotID:           "B_PAGERDUTY",
+		TimeStamp:       "1707000001.000100",
+		ThreadTimeStamp: "1707000001.000100",
+	}
+	if got := classifyMessage(h, event); got != "top_level_alert" {
+		t.Errorf("got %q, want top_level_alert", got)
+	}
+}
+
+func TestHandleMessage_ThreadReplyBotMessage_Ignored(t *testing.T) {
+	h := testSlackHandler("U_BOT", map[string]*database.AlertSourceInstance{
+		"C_ALERT": {},
+	})
+	// Bot thread replies (PagerDuty escalations, status changes, etc.)
+	// should be ignored — only @mentions trigger a response in threads.
 	event := &slackevents.MessageEvent{
 		Channel:         "C_ALERT",
 		SubType:         "bot_message",
@@ -252,12 +271,12 @@ func TestHandleMessage_ThreadReplyBotMessage(t *testing.T) {
 		TimeStamp:       "1707000002.000200",
 		ThreadTimeStamp: "1707000001.000100",
 	}
-	if got := classifyMessage(h, event); got != "bot_thread_alert" {
-		t.Errorf("got %q, want bot_thread_alert", got)
+	if got := classifyMessage(h, event); got != "ignore_thread" {
+		t.Errorf("got %q, want ignore_thread", got)
 	}
 }
 
-func TestHandleMessage_ThreadReplyBotByBotIDOnly(t *testing.T) {
+func TestHandleMessage_ThreadReplyBotByBotIDOnly_Ignored(t *testing.T) {
 	h := testSlackHandler("U_BOT", map[string]*database.AlertSourceInstance{
 		"C_ALERT": {},
 	})
@@ -267,8 +286,8 @@ func TestHandleMessage_ThreadReplyBotByBotIDOnly(t *testing.T) {
 		TimeStamp:       "1707000002.000200",
 		ThreadTimeStamp: "1707000001.000100",
 	}
-	if got := classifyMessage(h, event); got != "bot_thread_alert" {
-		t.Errorf("got %q, want bot_thread_alert", got)
+	if got := classifyMessage(h, event); got != "ignore_thread" {
+		t.Errorf("got %q, want ignore_thread", got)
 	}
 }
 

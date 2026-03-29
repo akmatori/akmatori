@@ -101,7 +101,7 @@ func TestSlackHandler_MessageClassification_ThreadReplies(t *testing.T) {
 			},
 			isAlertChannel: true,
 			botUserID:      "U_BOT",
-			expected:       "bot_thread_alert",
+			expected:       "ignore_thread",
 		},
 		{
 			name: "human reply without mention in alert channel thread",
