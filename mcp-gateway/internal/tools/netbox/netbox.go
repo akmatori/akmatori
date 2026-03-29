@@ -647,6 +647,16 @@ func (t *NetBoxTool) APIRequest(ctx context.Context, incidentID string, args map
 		path = "/api/" + strings.TrimPrefix(path, "/")
 	}
 
+	// Reject path traversal attempts (consistent with VictoriaMetrics pattern)
+	if strings.Contains(path, "..") {
+		return "", fmt.Errorf("invalid path: must not contain '..' segments")
+	}
+
+	// Reject paths containing query strings or fragments
+	if strings.ContainsAny(path, "?#") {
+		return "", fmt.Errorf("invalid path: must not contain query string or fragment (use query_params instead)")
+	}
+
 	// Ensure path ends with /
 	if !strings.HasSuffix(path, "/") {
 		path += "/"
@@ -658,13 +668,24 @@ func (t *NetBoxTool) APIRequest(ctx context.Context, incidentID string, args map
 	// Add any extra query_params
 	if qp, ok := args["query_params"].(map[string]interface{}); ok {
 		for k, v := range qp {
-			if s, ok := v.(string); ok {
-				params.Set(k, s)
+			switch sv := v.(type) {
+			case string:
+				params.Set(k, sv)
+			case float64:
+				params.Set(k, fmt.Sprintf("%g", sv))
+			case bool:
+				params.Set(k, fmt.Sprintf("%t", sv))
 			}
 		}
 	}
 
-	body, err := t.cachedGet(ctx, incidentID, path, params, DCIMCacheTTL, logicalName)
+	// Select cache TTL based on endpoint path
+	ttl := DCIMCacheTTL
+	if strings.HasPrefix(path, "/api/circuits/") || strings.HasPrefix(path, "/api/tenancy/") {
+		ttl = CircuitCacheTTL
+	}
+
+	body, err := t.cachedGet(ctx, incidentID, path, params, ttl, logicalName)
 	if err != nil {
 		return "", err
 	}
