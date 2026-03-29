@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -988,5 +989,35 @@ func TestK8sSchema_FunctionCount(t *testing.T) {
 
 	if len(schema.Functions) != 17 {
 		t.Errorf("expected 17 functions (all Kubernetes tools), got %d", len(schema.Functions))
+	}
+}
+
+func TestK8sSchema_DualBehaviorDescriptions(t *testing.T) {
+	schema, _ := GetToolSchema("kubernetes")
+
+	// get_pods and get_deployments return a single detail object when 'name' is provided.
+	// The schema descriptions must document this dual behavior to stay in sync with
+	// the implementation in k8s.go (GetPods, GetDeployments).
+	dualBehaviorTools := map[string]bool{
+		"get_pods":        false,
+		"get_deployments": false,
+	}
+
+	for _, fn := range schema.Functions {
+		if _, ok := dualBehaviorTools[fn.Name]; ok {
+			if !strings.Contains(fn.Description, "name") || !strings.Contains(fn.Description, "detail") {
+				t.Errorf("%s: schema description must document dual behavior (single detail when name is provided), got: %q", fn.Name, fn.Description)
+			}
+			if !strings.Contains(fn.Returns, "single") && !strings.Contains(fn.Returns, "detail") {
+				t.Errorf("%s: schema Returns must mention single/detail return type, got: %q", fn.Name, fn.Returns)
+			}
+			dualBehaviorTools[fn.Name] = true
+		}
+	}
+
+	for name, found := range dualBehaviorTools {
+		if !found {
+			t.Errorf("expected to find function %q in schema", name)
+		}
 	}
 }

@@ -415,6 +415,26 @@ func TestDoRequest_ResponseSizeLimit(t *testing.T) {
 	}
 }
 
+func TestDoRequest_SkipSizeCheckWithNegativeMaxBytes(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		// Write >5MB response (would fail with default limit)
+		data := strings.Repeat("x", 6*1024*1024)
+		fmt.Fprint(w, data)
+	})
+
+	config := getTestConfig(tool)
+
+	// Passing -1 should skip the size check and succeed
+	result, err := tool.doRequest(context.Background(), config, http.MethodGet, "/api/v1/namespaces", nil, -1)
+	if err != nil {
+		t.Fatalf("expected success with negative maxBytes (skip size check), got: %v", err)
+	}
+	if len(result) != 6*1024*1024 {
+		t.Errorf("expected full response body, got %d bytes", len(result))
+	}
+}
+
 func TestDoRequest_SSLVerifyDisabled(t *testing.T) {
 	// Use HTTPS test server to verify TLS config
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -463,17 +483,33 @@ func TestDoRequest_ProxyToggle(t *testing.T) {
 		t.Fatalf("unexpected error with proxy disabled: %v", err)
 	}
 
-	// Test proxy enabled: verify proxy URL is configured on the transport
+	// Test proxy enabled: use a separate proxy server that forwards to a distinct target.
+	// The proxy sees the request (plain HTTP so it arrives as an absolute-URI request),
+	// while the target server is on a different address to prove routing went through the proxy.
 	proxyHit := &atomic.Int32{}
-	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		proxyHit.Add(1)
+	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{"items":[]}`)
+	}))
+	defer targetServer.Close()
+
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyHit.Add(1)
+		// Forward the request to the real target
+		resp, pErr := http.Get(r.URL.String())
+		if pErr != nil {
+			http.Error(w, pErr.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		w.WriteHeader(resp.StatusCode)
+		w.Write(body) //nolint:errcheck // test helper
 	}))
 	defer proxyServer.Close()
 
 	configWithProxy := &K8sConfig{
-		URL:      proxyServer.URL, // target same server for simplicity
+		URL:      targetServer.URL,
 		Token:    "test-token",
 		Timeout:  5,
 		UseProxy: true,
@@ -487,6 +523,105 @@ func TestDoRequest_ProxyToggle(t *testing.T) {
 
 	if got := proxyHit.Load(); got == 0 {
 		t.Error("expected proxy server to receive request when UseProxy is true")
+	}
+}
+
+func TestNewNoProxyFunc(t *testing.T) {
+	proxyURL, _ := url.Parse("http://proxy:8080")
+
+	t.Run("empty no_proxy proxies all", func(t *testing.T) {
+		fn := newNoProxyFunc(proxyURL, "")
+		req, _ := http.NewRequest("GET", "http://example.com/test", nil)
+		got, err := fn(req)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != proxyURL {
+			t.Errorf("expected proxy URL, got %v", got)
+		}
+	})
+
+	t.Run("bypassed host returns nil", func(t *testing.T) {
+		fn := newNoProxyFunc(proxyURL, "example.com, other.com")
+		req, _ := http.NewRequest("GET", "http://example.com/test", nil)
+		got, err := fn(req)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != nil {
+			t.Errorf("expected nil (bypass), got %v", got)
+		}
+	})
+
+	t.Run("non-bypassed host uses proxy", func(t *testing.T) {
+		fn := newNoProxyFunc(proxyURL, "internal.local")
+		req, _ := http.NewRequest("GET", "http://external.com/test", nil)
+		got, err := fn(req)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != proxyURL {
+			t.Errorf("expected proxy URL, got %v", got)
+		}
+	})
+
+	t.Run("case insensitive match", func(t *testing.T) {
+		fn := newNoProxyFunc(proxyURL, "Example.COM")
+		req, _ := http.NewRequest("GET", "http://example.com/test", nil)
+		got, err := fn(req)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != nil {
+			t.Errorf("expected nil (bypass), got %v", got)
+		}
+	})
+}
+
+func TestDoRequest_NoProxyBypass(t *testing.T) {
+	proxyHit := &atomic.Int32{}
+	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	}))
+	defer targetServer.Close()
+
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyHit.Add(1)
+		resp, pErr := http.Get(r.URL.String())
+		if pErr != nil {
+			http.Error(w, pErr.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		w.WriteHeader(resp.StatusCode)
+		w.Write(body) //nolint:errcheck // test helper
+	}))
+	defer proxyServer.Close()
+
+	tool := NewK8sTool(testLogger(), nil)
+	defer tool.Stop()
+
+	// Extract hostname from target URL to put in NoProxy
+	targetURL, _ := url.Parse(targetServer.URL)
+
+	config := &K8sConfig{
+		URL:      targetServer.URL,
+		Token:    "test-token",
+		Timeout:  5,
+		UseProxy: true,
+		ProxyURL: proxyServer.URL,
+		NoProxy:  targetURL.Hostname(),
+	}
+
+	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/api/v1/namespaces", nil)
+	if err != nil {
+		t.Fatalf("unexpected error with no_proxy bypass: %v", err)
+	}
+
+	if got := proxyHit.Load(); got != 0 {
+		t.Errorf("expected proxy to be bypassed for no_proxy host, but proxy received %d requests", got)
 	}
 }
 
@@ -601,6 +736,103 @@ func TestCachedGet_URLNotConfigured(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "URL not configured") {
 		t.Errorf("expected URL error, got: %v", err)
+	}
+}
+
+// TestCachedGetGeneric_IsolatedFromDedicatedTools verifies that api_request's generic cache
+// entries do not shadow dedicated tool entries (and vice versa) when the same path is queried.
+func TestCachedGetGeneric_IsolatedFromDedicatedTools(t *testing.T) {
+	requestCount := &atomic.Int32{}
+	tool, server, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		requestCount.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"call":%d}`, requestCount.Load())
+	})
+	_ = server
+
+	ctx := context.Background()
+	incidentID := "test-incident"
+	path := "/api/v1/namespaces/default/events"
+	params := url.Values{}
+
+	// First: call via cachedGetGeneric (api_request path, 60s TTL)
+	body1, err := tool.cachedGetGeneric(ctx, incidentID, path, params, 60*time.Second)
+	if err != nil {
+		t.Fatalf("cachedGetGeneric failed: %v", err)
+	}
+	if !strings.Contains(string(body1), `"call":1`) {
+		t.Fatalf("expected call 1, got: %s", body1)
+	}
+
+	// Second: call via cachedGet (dedicated tool path, 15s TTL)
+	// This should NOT reuse the generic cache entry — it must make a fresh request.
+	body2, err := tool.cachedGet(ctx, incidentID, path, params, 15*time.Second)
+	if err != nil {
+		t.Fatalf("cachedGet failed: %v", err)
+	}
+	if !strings.Contains(string(body2), `"call":2`) {
+		t.Fatalf("expected call 2 (cache miss), got: %s — generic cache leaked into dedicated tool", body2)
+	}
+
+	// Third: call cachedGetGeneric again — should be a cache hit (no new request)
+	body3, err := tool.cachedGetGeneric(ctx, incidentID, path, params, 60*time.Second)
+	if err != nil {
+		t.Fatalf("cachedGetGeneric failed: %v", err)
+	}
+	if !strings.Contains(string(body3), `"call":1`) {
+		t.Fatalf("expected call 1 (cache hit), got: %s", body3)
+	}
+
+	// Verify total request count: 2 (one generic miss, one dedicated miss)
+	if got := requestCount.Load(); got != 2 {
+		t.Errorf("expected 2 HTTP requests, got %d", got)
+	}
+}
+
+func TestCachedGetConfigMapsGeneric_IsolatedFromDedicatedTool(t *testing.T) {
+	requestCount := &atomic.Int32{}
+	tool, server, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		requestCount.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"items":[{"metadata":{"name":"cm-%d"},"data":{"key":"val%d"}}]}`, requestCount.Load(), requestCount.Load())
+	})
+	_ = server
+
+	ctx := context.Background()
+	incidentID := "test-incident"
+	path := "/api/v1/namespaces/default/configmaps"
+	params := url.Values{}
+
+	// First: call via cachedGetConfigMaps (dedicated tool, 120s TTL)
+	body1, err := tool.cachedGetConfigMaps(ctx, incidentID, path, params, 120*time.Second)
+	if err != nil {
+		t.Fatalf("cachedGetConfigMaps failed: %v", err)
+	}
+	if !strings.Contains(string(body1), "cm-1") {
+		t.Fatalf("expected cm-1, got: %s", body1)
+	}
+
+	// Second: call via cachedGetConfigMapsGeneric (api_request path, 60s TTL)
+	// This should NOT reuse the dedicated cache entry.
+	body2, err := tool.cachedGetConfigMapsGeneric(ctx, incidentID, path, params, 60*time.Second)
+	if err != nil {
+		t.Fatalf("cachedGetConfigMapsGeneric failed: %v", err)
+	}
+	if !strings.Contains(string(body2), "cm-2") {
+		t.Fatalf("expected cm-2 (cache miss), got: %s — dedicated cm cache leaked into generic", body2)
+	}
+
+	// Third: call cachedGetConfigMaps again — should be a cache hit
+	body3, err := tool.cachedGetConfigMaps(ctx, incidentID, path, params, 120*time.Second)
+	if err != nil {
+		t.Fatalf("cachedGetConfigMaps failed: %v", err)
+	}
+	if !strings.Contains(string(body3), "cm-1") {
+		t.Fatalf("expected cm-1 (cache hit), got: %s", body3)
+	}
+
+	if got := requestCount.Load(); got != 2 {
+		t.Errorf("expected 2 HTTP requests, got %d", got)
 	}
 }
 
@@ -1880,6 +2112,30 @@ func TestGetConfigMaps_StripsDataAndBinaryData(t *testing.T) {
 	}
 }
 
+func TestGetConfigMaps_LargeResponseStrippedSuccessfully(t *testing.T) {
+	// Simulate a large ConfigMap list response (>5MB) that would fail with the default
+	// size limit but succeeds because cachedGetConfigMaps uses a raised 50 MB limit
+	// and only checks the stripped (metadata-only) result size.
+	largeData := strings.Repeat("x", 6*1024*1024) // 6MB of data per ConfigMap
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `{"items":[{"metadata":{"name":"large-cm"},"data":{"big":"%s"}}]}`, largeData)
+	})
+
+	result, err := tool.GetConfigMaps(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "default",
+	})
+	if err != nil {
+		t.Fatalf("expected success after stripping large data, got: %v", err)
+	}
+	if strings.Contains(result, largeData[:100]) {
+		t.Error("expected data field to be stripped from response")
+	}
+	if !strings.Contains(result, "large-cm") {
+		t.Error("expected metadata to be preserved")
+	}
+}
+
 func TestGetConfigMaps_MissingNamespace(t *testing.T) {
 	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2234,6 +2490,98 @@ func TestAPIRequest_DangerousSubresourcesBlocked(t *testing.T) {
 	}
 }
 
+func TestAPIRequest_ResourceNamedProxyAllowed(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"metadata":{"name":"proxy"}}`)
+	})
+
+	// Resources named "proxy", "exec", etc. should NOT be blocked
+	allowedPaths := []string{
+		"/api/v1/namespaces/default/services/proxy",
+		"/api/v1/namespaces/default/services/exec",
+		"/apis/apps/v1/namespaces/default/deployments/proxy",
+		"/api/v1/nodes/proxy",
+		"/api/v1/namespaces/default/pods/portforward",
+	}
+
+	for _, path := range allowedPaths {
+		t.Run(path, func(t *testing.T) {
+			_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+				"path": path,
+			})
+			if err != nil {
+				t.Errorf("expected resource named after subresource to be allowed, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestDetectDangerousSubresource(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   string
+		expect string
+	}{
+		{"pod exec blocked", "/api/v1/namespaces/default/pods/my-pod/exec", "exec"},
+		{"pod attach blocked", "/api/v1/namespaces/default/pods/my-pod/attach", "attach"},
+		{"pod portforward blocked", "/api/v1/namespaces/default/pods/my-pod/portforward", "portforward"},
+		{"pod proxy blocked", "/api/v1/namespaces/default/pods/my-pod/proxy", "proxy"},
+		{"pod proxy subpath blocked", "/api/v1/namespaces/default/pods/my-pod/proxy/admin", "proxy"},
+		{"service proxy blocked", "/api/v1/namespaces/default/services/my-svc/proxy", "proxy"},
+		{"node proxy blocked", "/api/v1/nodes/my-node/proxy", "proxy"},
+		{"service named proxy allowed", "/api/v1/namespaces/default/services/proxy", ""},
+		{"pod named exec allowed", "/api/v1/namespaces/default/pods/exec", ""},
+		{"deployment named proxy allowed", "/apis/apps/v1/namespaces/default/deployments/proxy", ""},
+		{"node named proxy allowed", "/api/v1/nodes/proxy", ""},
+		{"normal pod path allowed", "/api/v1/namespaces/default/pods/my-pod", ""},
+		{"normal service path allowed", "/api/v1/namespaces/default/services/my-svc", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := detectDangerousSubresource(tt.path)
+			if got != tt.expect {
+				t.Errorf("detectDangerousSubresource(%q) = %q, want %q", tt.path, got, tt.expect)
+			}
+		})
+	}
+}
+
+func TestAPIRequest_DuplicateSlashNormalization(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("request should not reach server for blocked paths with duplicate slashes")
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Duplicate slashes must not bypass security checks
+	tests := []struct {
+		name    string
+		path    string
+		errText string
+	}{
+		{"secrets with double slash", "/api/v1/namespaces/default//secrets/db-creds", "secrets"},
+		{"secrets with triple slash", "/api/v1/namespaces/default///secrets/db-creds", "secrets"},
+		{"exec with double slash", "/api/v1/namespaces/default/pods/my-pod//exec", "exec"},
+		{"proxy with double slash", "/api/v1/namespaces/default/pods/my-pod//proxy", "proxy"},
+		{"attach with double slash", "/api/v1/namespaces/default/pods/my-pod//attach", "attach"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+				"path": tt.path,
+			})
+			if err == nil {
+				t.Fatalf("expected error for path %q, got nil", tt.path)
+			}
+			if !strings.Contains(err.Error(), tt.errText) {
+				t.Errorf("expected error containing %q, got: %v", tt.errText, err)
+			}
+		})
+	}
+}
+
 func TestAPIRequest_ExactApiPath(t *testing.T) {
 	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2327,5 +2675,80 @@ func TestStripConfigMapData_SingleItem(t *testing.T) {
 	}
 	if !strings.Contains(result, "cm-1") {
 		t.Error("expected metadata to be preserved")
+	}
+}
+
+// --- isResourceTypePath tests ---
+
+func TestIsResourceTypePath(t *testing.T) {
+	tests := []struct {
+		name         string
+		path         string
+		resourceType string
+		expect       bool
+	}{
+		// Secrets - should match
+		{"namespaced secrets list", "/api/v1/namespaces/default/secrets", "secrets", true},
+		{"namespaced secrets get", "/api/v1/namespaces/default/secrets/my-secret", "secrets", true},
+		// Secrets - false positives that should NOT match
+		{"service named secrets", "/api/v1/namespaces/default/services/secrets", "secrets", false},
+		{"pod named secrets", "/api/v1/namespaces/default/pods/secrets", "secrets", false},
+		{"deployment named secrets", "/apis/apps/v1/namespaces/default/deployments/secrets", "secrets", false},
+		// ConfigMaps - should match
+		{"namespaced configmaps list", "/api/v1/namespaces/default/configmaps", "configmaps", true},
+		{"namespaced configmaps get", "/api/v1/namespaces/default/configmaps/my-config", "configmaps", true},
+		// ConfigMaps - false positives that should NOT match
+		{"service named configmaps", "/api/v1/namespaces/default/services/configmaps", "configmaps", false},
+		// Cluster-scoped
+		{"cluster-scoped nodes", "/api/v1/nodes", "nodes", true},
+		{"cluster-scoped node get", "/api/v1/nodes/my-node", "nodes", true},
+		// Non-matching
+		{"pods path not secrets", "/api/v1/namespaces/default/pods", "secrets", false},
+		{"empty path", "/api", "secrets", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isResourceTypePath(tt.path, tt.resourceType)
+			if got != tt.expect {
+				t.Errorf("isResourceTypePath(%q, %q) = %v, want %v", tt.path, tt.resourceType, got, tt.expect)
+			}
+		})
+	}
+}
+
+func TestAPIRequest_ServiceNamedSecretsAllowed(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"metadata":{"name":"secrets"}}`)
+	})
+
+	// A service named "secrets" should NOT be blocked
+	result, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/api/v1/namespaces/default/services/secrets",
+	})
+	if err != nil {
+		t.Fatalf("service named 'secrets' should not be blocked, got: %v", err)
+	}
+	if !strings.Contains(result, "secrets") {
+		t.Error("expected response to contain service name")
+	}
+}
+
+func TestAPIRequest_ServiceNamedConfigmapsNotStripped(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"metadata":{"name":"configmaps"},"data":{"key":"value"}}`)
+	})
+
+	// A service named "configmaps" should NOT have data stripped
+	result, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/api/v1/namespaces/default/services/configmaps",
+	})
+	if err != nil {
+		t.Fatalf("service named 'configmaps' should not be blocked, got: %v", err)
+	}
+	if !strings.Contains(result, "value") {
+		t.Error("expected data to NOT be stripped for a service named configmaps")
 	}
 }

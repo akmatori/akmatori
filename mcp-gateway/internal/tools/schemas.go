@@ -1070,14 +1070,14 @@ func getK8sSchema() ToolTypeSchema {
 				Name:        "get_namespaces",
 				Description: "List all namespaces in the cluster",
 				Parameters:  "label_selector, field_selector, limit",
-				Returns:     "JSON array of namespace objects",
+				Returns:     "Kubernetes NamespaceList object with items array",
 			},
 			// Pods
 			{
 				Name:        "get_pods",
-				Description: "List pods in a namespace with optional filters",
+				Description: "List pods in a namespace with optional filters. When 'name' is provided, returns the single pod detail instead of a list.",
 				Parameters:  "namespace (required), name, label_selector, field_selector, limit",
-				Returns:     "JSON array of pod objects",
+				Returns:     "Kubernetes PodList object with items array, or a single pod detail object when name is provided",
 			},
 			{
 				Name:        "get_pod_detail",
@@ -1096,14 +1096,14 @@ func getK8sSchema() ToolTypeSchema {
 				Name:        "get_events",
 				Description: "List events in a namespace (warnings, errors, scheduling events)",
 				Parameters:  "namespace (required), label_selector, field_selector, limit",
-				Returns:     "JSON array of event objects",
+				Returns:     "Kubernetes EventList object with items array",
 			},
 			// Deployments
 			{
 				Name:        "get_deployments",
-				Description: "List deployments in a namespace with optional filters",
+				Description: "List deployments in a namespace with optional filters. When 'name' is provided, returns the single deployment detail instead of a list.",
 				Parameters:  "namespace (required), name, label_selector, field_selector, limit",
-				Returns:     "JSON array of deployment objects",
+				Returns:     "Kubernetes DeploymentList object with items array, or a single deployment detail object when name is provided",
 			},
 			{
 				Name:        "get_deployment_detail",
@@ -1116,35 +1116,35 @@ func getK8sSchema() ToolTypeSchema {
 				Name:        "get_statefulsets",
 				Description: "List statefulsets in a namespace with optional filters",
 				Parameters:  "namespace (required), label_selector, field_selector, limit",
-				Returns:     "JSON array of statefulset objects",
+				Returns:     "Kubernetes StatefulSetList object with items array",
 			},
 			// DaemonSets
 			{
 				Name:        "get_daemonsets",
 				Description: "List daemonsets in a namespace with optional filters",
 				Parameters:  "namespace (required), label_selector, field_selector, limit",
-				Returns:     "JSON array of daemonset objects",
+				Returns:     "Kubernetes DaemonSetList object with items array",
 			},
 			// Jobs
 			{
 				Name:        "get_jobs",
 				Description: "List jobs in a namespace with optional filters",
 				Parameters:  "namespace (required), label_selector, field_selector, limit",
-				Returns:     "JSON array of job objects",
+				Returns:     "Kubernetes JobList object with items array",
 			},
 			// CronJobs
 			{
 				Name:        "get_cronjobs",
 				Description: "List cronjobs in a namespace with optional filters",
 				Parameters:  "namespace (required), label_selector, field_selector, limit",
-				Returns:     "JSON array of cronjob objects",
+				Returns:     "Kubernetes CronJobList object with items array",
 			},
 			// Nodes
 			{
 				Name:        "get_nodes",
 				Description: "List nodes with conditions and allocatable resources",
 				Parameters:  "label_selector, field_selector, limit",
-				Returns:     "JSON array of node objects",
+				Returns:     "Kubernetes NodeList object with items array",
 			},
 			{
 				Name:        "get_node_detail",
@@ -1157,21 +1157,21 @@ func getK8sSchema() ToolTypeSchema {
 				Name:        "get_services",
 				Description: "List services in a namespace",
 				Parameters:  "namespace (required), label_selector, field_selector, limit",
-				Returns:     "JSON array of service objects",
+				Returns:     "Kubernetes ServiceList object with items array",
 			},
 			// ConfigMaps
 			{
 				Name:        "get_configmaps",
 				Description: "List configmaps in a namespace (names and metadata only, not data contents)",
 				Parameters:  "namespace (required), label_selector, field_selector, limit",
-				Returns:     "JSON array of configmap metadata objects",
+				Returns:     "Kubernetes ConfigMapList object with items array (data/binaryData fields stripped)",
 			},
 			// Ingresses
 			{
 				Name:        "get_ingresses",
 				Description: "List ingresses in a namespace",
 				Parameters:  "namespace (required), label_selector, field_selector, limit",
-				Returns:     "JSON array of ingress objects",
+				Returns:     "Kubernetes IngressList object with items array",
 			},
 			// Generic
 			{
