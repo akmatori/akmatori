@@ -157,12 +157,12 @@ NetBox is a CMDB (mostly static data), so longer TTLs are appropriate:
 **Files:**
 - Modify: `mcp-gateway/internal/tools/registry.go`
 
-- [ ] Add rate limiter constants: `NetBoxRatePerSecond = 10`, `NetBoxBurstCapacity = 20`
-- [ ] Add `netboxTool *netbox.NetBoxTool` and `netboxLimit *ratelimit.Limiter` fields to Registry struct
-- [ ] Add `r.netboxLimit = ratelimit.New(...)` and `r.registerNetBoxTools()` in `RegisterAllTools()`
-- [ ] Add `r.netboxTool.Stop()` in the registry `Stop()` method
-- [ ] Implement `registerNetBoxTools()` - register all 21 tools with proper InputSchema definitions
-- [ ] Run `make test-mcp` - must pass before task 7
+- [x] Add rate limiter constants: `NetBoxRatePerSecond = 10`, `NetBoxBurstCapacity = 20`
+- [x] Add `netboxTool *netbox.NetBoxTool` and `netboxLimit *ratelimit.Limiter` fields to Registry struct
+- [x] Add `r.netboxLimit = ratelimit.New(...)` and `r.registerNetBoxTools()` in `RegisterAllTools()`
+- [x] Add `r.netboxTool.Stop()` in the registry `Stop()` method
+- [x] Implement `registerNetBoxTools()` - register all 21 tools with proper InputSchema definitions
+- [x] Run `make test-mcp` - must pass before task 7
 
 ### Task 7: Verify Acceptance Criteria
 

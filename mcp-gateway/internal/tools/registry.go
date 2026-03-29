@@ -18,6 +18,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/tools/clickhouse"
 	"github.com/akmatori/mcp-gateway/internal/tools/grafana"
 	"github.com/akmatori/mcp-gateway/internal/tools/httpconnector"
+	"github.com/akmatori/mcp-gateway/internal/tools/netbox"
 	"github.com/akmatori/mcp-gateway/internal/tools/pagerduty"
 	"github.com/akmatori/mcp-gateway/internal/tools/postgresql"
 	"github.com/akmatori/mcp-gateway/internal/tools/ssh"
@@ -41,6 +42,8 @@ const (
 	ClickHouseBurstCapacity  = 20 // burst capacity
 	PagerDutyRatePerSecond   = 10 // requests per second
 	PagerDutyBurstCapacity   = 20 // burst capacity
+	NetBoxRatePerSecond      = 10 // requests per second
+	NetBoxBurstCapacity      = 20 // burst capacity
 )
 
 // Registry manages tool registration
@@ -61,6 +64,8 @@ type Registry struct {
 	clickhouseLimit  *ratelimit.Limiter
 	pagerdutyTool    *pagerduty.PagerDutyTool
 	pagerdutyLimit   *ratelimit.Limiter
+	netboxTool       *netbox.NetBoxTool
+	netboxLimit      *ratelimit.Limiter
 
 	// HTTP connector state
 	httpExecutor       *httpconnector.HTTPConnectorExecutor
@@ -137,6 +142,13 @@ func (r *Registry) RegisterAllTools() {
 	// Register PagerDuty tools with rate limiter
 	r.registerPagerDutyTools()
 
+	// Create rate limiter for NetBox: 10 req/sec, burst 20
+	r.netboxLimit = ratelimit.New(NetBoxRatePerSecond, NetBoxBurstCapacity)
+	r.logger.Printf("NetBox rate limiter created: %d req/sec, burst %d", NetBoxRatePerSecond, NetBoxBurstCapacity)
+
+	// Register NetBox tools with rate limiter
+	r.registerNetBoxTools()
+
 	r.logger.Println("All tools registered")
 }
 
@@ -162,6 +174,9 @@ func (r *Registry) Stop() {
 	}
 	if r.pagerdutyTool != nil {
 		r.pagerdutyTool.Stop()
+	}
+	if r.netboxTool != nil {
+		r.netboxTool.Stop()
 	}
 	if r.httpExecutor != nil {
 		r.httpExecutor.Stop()
@@ -2942,4 +2957,796 @@ func (r *Registry) registerPagerDutyTools() {
 	)
 
 	r.logger.Println("PagerDuty tools registered (13 methods)")
+}
+
+func (r *Registry) registerNetBoxTools() {
+	r.netboxTool = netbox.NewNetBoxTool(r.logger, r.netboxLimit)
+
+	// netbox.get_devices
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_devices",
+			Description: "List/search NetBox devices with filters (name, site, role, status, tag, platform, tenant, q)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"name": {
+						Type:        "string",
+						Description: "Filter by device name",
+					},
+					"site": {
+						Type:        "string",
+						Description: "Filter by site (slug)",
+					},
+					"role": {
+						Type:        "string",
+						Description: "Filter by device role (slug)",
+					},
+					"status": {
+						Type:        "string",
+						Description: "Filter by status (active, planned, staged, failed, decommissioning, offline)",
+					},
+					"tag": {
+						Type:        "string",
+						Description: "Filter by tag (slug)",
+					},
+					"platform": {
+						Type:        "string",
+						Description: "Filter by platform (slug)",
+					},
+					"tenant": {
+						Type:        "string",
+						Description: "Filter by tenant (slug)",
+					},
+					"q": {
+						Type:        "string",
+						Description: "Search query string",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetDevices(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_device
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_device",
+			Description: "Get detailed information for a specific NetBox device by ID",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"id": {
+						Type:        "number",
+						Description: "Device ID (required)",
+					},
+				},
+				Required: []string{"id"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetDevice(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_interfaces
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_interfaces",
+			Description: "List device interfaces with filters (device, device_id, name, type, enabled)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"device": {
+						Type:        "string",
+						Description: "Filter by device name",
+					},
+					"device_id": {
+						Type:        "number",
+						Description: "Filter by device ID",
+					},
+					"name": {
+						Type:        "string",
+						Description: "Filter by interface name",
+					},
+					"type": {
+						Type:        "string",
+						Description: "Filter by interface type",
+					},
+					"enabled": {
+						Type:        "string",
+						Description: "Filter by enabled status (true/false)",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetInterfaces(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_sites
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_sites",
+			Description: "List NetBox sites with filters (name, region, status, tag, tenant, q)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"name": {
+						Type:        "string",
+						Description: "Filter by site name",
+					},
+					"region": {
+						Type:        "string",
+						Description: "Filter by region (slug)",
+					},
+					"status": {
+						Type:        "string",
+						Description: "Filter by status (active, planned, retired)",
+					},
+					"tag": {
+						Type:        "string",
+						Description: "Filter by tag (slug)",
+					},
+					"tenant": {
+						Type:        "string",
+						Description: "Filter by tenant (slug)",
+					},
+					"q": {
+						Type:        "string",
+						Description: "Search query string",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetSites(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_racks
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_racks",
+			Description: "List NetBox racks with filters (site, name, status, role, tenant, q)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"site": {
+						Type:        "string",
+						Description: "Filter by site (slug)",
+					},
+					"name": {
+						Type:        "string",
+						Description: "Filter by rack name",
+					},
+					"status": {
+						Type:        "string",
+						Description: "Filter by status (active, planned, reserved, deprecated)",
+					},
+					"role": {
+						Type:        "string",
+						Description: "Filter by rack role (slug)",
+					},
+					"tenant": {
+						Type:        "string",
+						Description: "Filter by tenant (slug)",
+					},
+					"q": {
+						Type:        "string",
+						Description: "Search query string",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetRacks(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_cables
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_cables",
+			Description: "List cable connections with filters (device, site, type, status)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"device": {
+						Type:        "string",
+						Description: "Filter by device name",
+					},
+					"site": {
+						Type:        "string",
+						Description: "Filter by site (slug)",
+					},
+					"type": {
+						Type:        "string",
+						Description: "Filter by cable type",
+					},
+					"status": {
+						Type:        "string",
+						Description: "Filter by status (connected, planned, decommissioning)",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetCables(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_device_types
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_device_types",
+			Description: "List device types/models with filters (manufacturer, model, q)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"manufacturer": {
+						Type:        "string",
+						Description: "Filter by manufacturer (slug)",
+					},
+					"model": {
+						Type:        "string",
+						Description: "Filter by model name",
+					},
+					"q": {
+						Type:        "string",
+						Description: "Search query string",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetDeviceTypes(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_ip_addresses
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_ip_addresses",
+			Description: "List/search IP addresses with filters (address, device, interface, vrf, tenant, status, q)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"address": {
+						Type:        "string",
+						Description: "Filter by IP address (CIDR notation, e.g. 10.0.0.1/24)",
+					},
+					"device": {
+						Type:        "string",
+						Description: "Filter by device name",
+					},
+					"interface": {
+						Type:        "string",
+						Description: "Filter by interface name",
+					},
+					"vrf": {
+						Type:        "string",
+						Description: "Filter by VRF name",
+					},
+					"tenant": {
+						Type:        "string",
+						Description: "Filter by tenant (slug)",
+					},
+					"status": {
+						Type:        "string",
+						Description: "Filter by status (active, reserved, deprecated, dhcp, slaac)",
+					},
+					"q": {
+						Type:        "string",
+						Description: "Search query string",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetIPAddresses(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_prefixes
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_prefixes",
+			Description: "List IP prefixes/subnets with filters (prefix, site, vrf, vlan, tenant, status, q)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"prefix": {
+						Type:        "string",
+						Description: "Filter by prefix (CIDR notation, e.g. 10.0.0.0/24)",
+					},
+					"site": {
+						Type:        "string",
+						Description: "Filter by site (slug)",
+					},
+					"vrf": {
+						Type:        "string",
+						Description: "Filter by VRF name",
+					},
+					"vlan": {
+						Type:        "string",
+						Description: "Filter by VLAN ID",
+					},
+					"tenant": {
+						Type:        "string",
+						Description: "Filter by tenant (slug)",
+					},
+					"status": {
+						Type:        "string",
+						Description: "Filter by status (active, container, reserved, deprecated)",
+					},
+					"q": {
+						Type:        "string",
+						Description: "Search query string",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetPrefixes(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_vlans
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_vlans",
+			Description: "List VLANs with filters (vid, name, site, group, tenant, q)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"vid": {
+						Type:        "number",
+						Description: "Filter by VLAN ID number",
+					},
+					"name": {
+						Type:        "string",
+						Description: "Filter by VLAN name",
+					},
+					"site": {
+						Type:        "string",
+						Description: "Filter by site (slug)",
+					},
+					"group": {
+						Type:        "string",
+						Description: "Filter by VLAN group (slug)",
+					},
+					"tenant": {
+						Type:        "string",
+						Description: "Filter by tenant (slug)",
+					},
+					"q": {
+						Type:        "string",
+						Description: "Search query string",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetVLANs(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_vrfs
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_vrfs",
+			Description: "List VRFs with filters (name, tenant, q)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"name": {
+						Type:        "string",
+						Description: "Filter by VRF name",
+					},
+					"tenant": {
+						Type:        "string",
+						Description: "Filter by tenant (slug)",
+					},
+					"q": {
+						Type:        "string",
+						Description: "Search query string",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetVRFs(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_circuits
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_circuits",
+			Description: "List circuits with filters (provider, type, status, tenant, q)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"provider": {
+						Type:        "string",
+						Description: "Filter by circuit provider (slug)",
+					},
+					"type": {
+						Type:        "string",
+						Description: "Filter by circuit type (slug)",
+					},
+					"status": {
+						Type:        "string",
+						Description: "Filter by status (active, planned, provisioning, deprovisioning, decommissioned, offline)",
+					},
+					"tenant": {
+						Type:        "string",
+						Description: "Filter by tenant (slug)",
+					},
+					"q": {
+						Type:        "string",
+						Description: "Search query string",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetCircuits(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_providers
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_providers",
+			Description: "List circuit providers with filters (name, q)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"name": {
+						Type:        "string",
+						Description: "Filter by provider name",
+					},
+					"q": {
+						Type:        "string",
+						Description: "Search query string",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetProviders(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_virtual_machines
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_virtual_machines",
+			Description: "List virtual machines with filters (name, cluster, site, status, role, tenant, q)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"name": {
+						Type:        "string",
+						Description: "Filter by VM name",
+					},
+					"cluster": {
+						Type:        "string",
+						Description: "Filter by cluster name",
+					},
+					"site": {
+						Type:        "string",
+						Description: "Filter by site (slug)",
+					},
+					"status": {
+						Type:        "string",
+						Description: "Filter by status (active, planned, staged, failed, decommissioning, offline)",
+					},
+					"role": {
+						Type:        "string",
+						Description: "Filter by role (slug)",
+					},
+					"tenant": {
+						Type:        "string",
+						Description: "Filter by tenant (slug)",
+					},
+					"q": {
+						Type:        "string",
+						Description: "Search query string",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetVirtualMachines(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_clusters
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_clusters",
+			Description: "List clusters with filters (name, type, group, site, tenant, q)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"name": {
+						Type:        "string",
+						Description: "Filter by cluster name",
+					},
+					"type": {
+						Type:        "string",
+						Description: "Filter by cluster type (slug)",
+					},
+					"group": {
+						Type:        "string",
+						Description: "Filter by cluster group (slug)",
+					},
+					"site": {
+						Type:        "string",
+						Description: "Filter by site (slug)",
+					},
+					"tenant": {
+						Type:        "string",
+						Description: "Filter by tenant (slug)",
+					},
+					"q": {
+						Type:        "string",
+						Description: "Search query string",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetClusters(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_vm_interfaces
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_vm_interfaces",
+			Description: "List VM interfaces with filters (virtual_machine, name, enabled)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"virtual_machine": {
+						Type:        "string",
+						Description: "Filter by virtual machine name",
+					},
+					"name": {
+						Type:        "string",
+						Description: "Filter by interface name",
+					},
+					"enabled": {
+						Type:        "string",
+						Description: "Filter by enabled status (true/false)",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetVMInterfaces(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_tenants
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_tenants",
+			Description: "List tenants with filters (name, group, q)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"name": {
+						Type:        "string",
+						Description: "Filter by tenant name",
+					},
+					"group": {
+						Type:        "string",
+						Description: "Filter by tenant group (slug)",
+					},
+					"q": {
+						Type:        "string",
+						Description: "Search query string",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetTenants(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.get_tenant_groups
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.get_tenant_groups",
+			Description: "List tenant groups with filters (name, q)",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"name": {
+						Type:        "string",
+						Description: "Filter by tenant group name",
+					},
+					"q": {
+						Type:        "string",
+						Description: "Search query string",
+					},
+					"limit": {
+						Type:        "number",
+						Description: "Maximum number of results to return",
+					},
+					"offset": {
+						Type:        "number",
+						Description: "Pagination offset",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.GetTenantGroups(ctx, incidentID, args)
+		},
+	)
+
+	// netbox.api_request
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "netbox.api_request",
+			Description: "Generic read-only API request to any NetBox endpoint. Use for endpoints not covered by specific tools.",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"path": {
+						Type:        "string",
+						Description: "API path (e.g. 'dcim/power-feeds/' or 'ipam/aggregates/'). The /api/ prefix is added automatically.",
+					},
+					"query_params": {
+						Type:        "string",
+						Description: "Optional query parameters as JSON object string (e.g. '{\"status\":\"active\",\"limit\":\"50\"}')",
+					},
+				},
+				Required: []string{"path"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.netboxTool.APIRequest(ctx, incidentID, args)
+		},
+	)
+
+	r.logger.Println("NetBox tools registered (19 methods)")
 }
