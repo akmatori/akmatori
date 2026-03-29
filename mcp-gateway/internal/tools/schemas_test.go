@@ -918,8 +918,8 @@ func TestK8sSchema_SecretFields(t *testing.T) {
 	if !props["k8s_token"].Secret {
 		t.Error("expected k8s_token to be marked as secret")
 	}
-	if !props["k8s_ca_cert"].Secret {
-		t.Error("expected k8s_ca_cert to be marked as secret")
+	if props["k8s_ca_cert"].Secret {
+		t.Error("expected k8s_ca_cert to NOT be marked as secret (CA certs are public)")
 	}
 }
 
