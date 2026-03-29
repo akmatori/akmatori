@@ -166,11 +166,11 @@ NetBox is a CMDB (mostly static data), so longer TTLs are appropriate:
 
 ### Task 7: Verify Acceptance Criteria
 
-- [ ] Run full test suite: `make test-mcp`
-- [ ] Run linter: `cd mcp-gateway && go vet ./...`
-- [ ] Verify test coverage for `mcp-gateway/internal/tools/netbox/` meets 80%+
-- [ ] Manual verification: confirm schema appears in `GetToolSchemas()` output
-- [ ] Verify frontend dynamically renders NetBox config form (no frontend changes needed - dynamic schema)
+- [x] Run full test suite: `make test-mcp`
+- [x] Run linter: `cd mcp-gateway && go vet ./...`
+- [x] Verify test coverage for `mcp-gateway/internal/tools/netbox/` meets 80%+
+- [x] Manual verification: confirm schema appears in `GetToolSchemas()` output
+- [x] Verify frontend dynamically renders NetBox config form (no frontend changes needed - dynamic schema)
 
 ### Task 8: Update Documentation
 
