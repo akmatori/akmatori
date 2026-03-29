@@ -1987,10 +1987,130 @@ func TestAPIRequest_InvalidPath(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error for invalid path")
 			}
-			if !strings.Contains(err.Error(), "must start with /api/ or /apis/") {
-				t.Errorf("expected path validation error, got: %v", err)
+		})
+	}
+}
+
+func TestAPIRequest_PathTraversal(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("request should not reach server for path traversal attempts")
+		w.WriteHeader(http.StatusOK)
+	})
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"dot-dot in path", "/api/v1/../../healthz"},
+		{"dot-dot to metrics", "/api/v1/../metrics"},
+		{"encoded dot-dot", "/api/v1/%2e%2e/healthz"},
+		{"double-encoded dot-dot", "/api/v1/%252e%252e/healthz"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+				"path": tt.path,
+			})
+			if err == nil {
+				t.Fatal("expected error for path traversal")
+			}
+			if !strings.Contains(err.Error(), "..") {
+				t.Errorf("expected path traversal error, got: %v", err)
 			}
 		})
+	}
+}
+
+func TestAPIRequest_QueryStringInPath(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("request should not reach server")
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/api/v1/pods?watch=true",
+	})
+	if err == nil {
+		t.Fatal("expected error for query string in path")
+	}
+	if !strings.Contains(err.Error(), "query string") {
+		t.Errorf("expected query string error, got: %v", err)
+	}
+}
+
+func TestAPIRequest_WatchBlocked(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("request should not reach server for watch requests")
+		w.WriteHeader(http.StatusOK)
+	})
+
+	tests := []struct {
+		name   string
+		params map[string]interface{}
+	}{
+		{"watch string true", map[string]interface{}{"watch": "true"}},
+		{"watch bool true", map[string]interface{}{"watch": true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+				"path":   "/api/v1/pods",
+				"params": tt.params,
+			})
+			if err == nil {
+				t.Fatal("expected error for watch parameter")
+			}
+			if !strings.Contains(err.Error(), "watch") {
+				t.Errorf("expected watch error, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestAPIRequest_ExactApiPath(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"versions":["v1"]}`)
+	})
+
+	// /api and /apis should be accepted as exact paths
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/api",
+	})
+	if err != nil {
+		t.Fatalf("expected /api to be accepted, got: %v", err)
+	}
+
+	_, err = tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/apis",
+	})
+	if err != nil {
+		t.Fatalf("expected /apis to be accepted, got: %v", err)
+	}
+}
+
+func TestAPIRequest_ConfigMapStripping(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"metadata":{"name":"my-config"},"data":{"password":"secret123"},"binaryData":{"cert":"base64data"}}`)
+	})
+
+	result, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/api/v1/namespaces/default/configmaps/my-config",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "secret123") {
+		t.Error("expected configmap data to be stripped via api_request")
+	}
+	if strings.Contains(result, "base64data") {
+		t.Error("expected configmap binaryData to be stripped via api_request")
+	}
+	if !strings.Contains(result, "my-config") {
+		t.Error("expected configmap metadata to be preserved")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -237,6 +238,19 @@ func (t *K8sTool) doRequest(ctx context.Context, config *K8sConfig, method, path
 
 	if !config.VerifySSL {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // User-opt-in via k8s_verify_ssl setting
+	} else if config.CACert != "" {
+		// Load custom CA certificate for clusters using private/internal CAs
+		certPool, err := x509.SystemCertPool()
+		if err != nil {
+			certPool = x509.NewCertPool()
+		}
+		if !certPool.AppendCertsFromPEM([]byte(config.CACert)) {
+			t.logger.Printf("Warning: failed to parse custom CA certificate, using system CAs only")
+		}
+		if transport.TLSClientConfig == nil {
+			transport.TLSClientConfig = &tls.Config{}
+		}
+		transport.TLSClientConfig.RootCAs = certPool
 	}
 
 	client := &http.Client{
@@ -766,9 +780,46 @@ func (t *K8sTool) APIRequest(ctx context.Context, incidentID string, args map[st
 		return "", err
 	}
 
+	// Decode path repeatedly until stable to prevent double-encoding bypass
+	decodedPath := path
+	for {
+		next, err := url.PathUnescape(decodedPath)
+		if err != nil {
+			return "", fmt.Errorf("invalid path: %w", err)
+		}
+		if next == decodedPath {
+			break
+		}
+		decodedPath = next
+	}
+
+	// Reject path traversal attempts
+	if strings.Contains(decodedPath, "..") {
+		return "", fmt.Errorf("invalid path: must not contain '..' segments")
+	}
+
+	// Reject paths containing query strings or fragments
+	if strings.ContainsAny(decodedPath, "?#") {
+		return "", fmt.Errorf("invalid path: must not contain query string or fragment (use params instead)")
+	}
+
+	path = decodedPath
+
 	// Validate path starts with /api or /apis for safety
-	if !strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/apis/") {
+	if path != "/api" && path != "/apis" && !strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/apis/") {
 		return "", fmt.Errorf("path must start with /api/ or /apis/ (got %q)", path)
+	}
+
+	// Block watch parameter to prevent long-polling requests
+	if p, ok := args["params"].(map[string]interface{}); ok {
+		if w, exists := p["watch"]; exists {
+			if ws, ok := w.(string); ok && ws == "true" {
+				return "", fmt.Errorf("watch parameter is not allowed (would create a long-polling request)")
+			}
+			if wb, ok := w.(bool); ok && wb {
+				return "", fmt.Errorf("watch parameter is not allowed (would create a long-polling request)")
+			}
+		}
 	}
 
 	params := url.Values{}
@@ -780,9 +831,16 @@ func (t *K8sTool) APIRequest(ctx context.Context, incidentID string, args map[st
 		}
 	}
 
+	// Apply ConfigMap data stripping when fetching configmap paths via generic API
+	isConfigMapPath := strings.Contains(path, "/configmaps")
+
 	body, err := t.cachedGet(ctx, incidentID, path, params, ResponseCacheTTL, logicalName)
 	if err != nil {
 		return "", err
+	}
+
+	if isConfigMapPath {
+		return stripConfigMapData(body), nil
 	}
 	return string(body), nil
 }

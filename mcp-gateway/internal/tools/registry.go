@@ -3916,6 +3916,10 @@ func (r *Registry) registerK8sTools() {
 						Type:        "string",
 						Description: "Kubernetes namespace (required)",
 					},
+					"label_selector": {
+						Type:        "string",
+						Description: "Label selector to filter events (e.g. 'app=nginx')",
+					},
 					"field_selector": {
 						Type:        "string",
 						Description: "Field selector to filter events (e.g. 'type=Warning')",
