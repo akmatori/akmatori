@@ -286,7 +286,7 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 	// Check if this is a configured alert channel BEFORE filtering bots,
 	// because monitoring integrations post as bots (bot_message subtype)
 	if instance, ok := h.isAlertChannel(event.Channel); ok {
-		slog.Debug("alert channel message received",
+		slog.Info("alert channel message received",
 			"channel", event.Channel,
 			"user", event.User,
 			"bot_id", event.BotID,
@@ -295,31 +295,42 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 			"thread_ts", event.ThreadTimeStamp,
 			"text_preview", truncateForLog(event.Text, 100),
 		)
+		// Skip message_changed events — they carry the edit notification TS
+		// (not the original message TS) so Slack API lookups for the full
+		// message text fail. PagerDuty triggers these when updating message
+		// formatting; the actual alert content arrives via regular message events.
+		if event.SubType == "message_changed" {
+			slog.Debug("skipping message_changed in alert channel",
+				"channel", event.Channel,
+				"ts", event.TimeStamp,
+			)
+			return
+		}
+
 		// Detect bot/integration messages (Zabbix, Alertmanager, etc.)
 		// Some integrations set BotID without bot_message subtype,
 		// others use the bot_message subtype. Accept both.
 		isBotMessage := event.SubType == "bot_message" || event.BotID != ""
 
-		if event.ThreadTimeStamp != "" {
-			// Thread reply in alert channel.
-			if isBotMessage {
-				// Bot thread replies in alert channels are always status updates
-				// (e.g. PagerDuty "Status changed to Acknowledged/Triggered").
-				// The initial alert is always the top-level message, never a thread reply.
-				// Skip unconditionally — the old dedup via alertThreads was racy because
-				// the thread reply could arrive before the top-level message registered.
-				slog.Info("skipping bot thread reply in alert channel",
-					"thread_ts", event.ThreadTimeStamp,
+		isThreadReply := event.ThreadTimeStamp != "" && event.ThreadTimeStamp != event.TimeStamp
+
+		if isThreadReply {
+			// Thread reply in alert channel (thread_ts != ts).
+			// When thread_ts == ts the message is a thread root, not a reply
+			// (PagerDuty sets thread_ts on the initial message itself).
+			// Only respond when the bot is explicitly @mentioned — ignore all
+			// other thread replies (bot status updates, escalations, human chat).
+			if h.botUserID != "" && event.SubType == "" && event.User != "" &&
+				strings.Contains(event.Text, fmt.Sprintf("<@%s>", h.botUserID)) {
+				h.handleBotMentionInThread(event.Channel, event.ThreadTimeStamp, event.TimeStamp, event.Text, event.User)
+			} else {
+				slog.Info("ignoring thread reply in alert channel (no bot mention)",
 					"channel", event.Channel,
+					"thread_ts", event.ThreadTimeStamp,
 					"bot_id", event.BotID,
 					"text_preview", truncateForLog(event.Text, 100),
 				)
-			} else if h.botUserID != "" && event.SubType == "" && event.User != "" &&
-				strings.Contains(event.Text, fmt.Sprintf("<@%s>", h.botUserID)) {
-				// Human user @mentioning the bot in a thread reply.
-				h.handleBotMentionInThread(event.Channel, event.ThreadTimeStamp, event.TimeStamp, event.Text, event.User)
 			}
-			// Ignore other thread replies (regular human chat).
 			return
 		}
 

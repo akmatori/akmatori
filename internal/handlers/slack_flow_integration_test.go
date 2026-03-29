@@ -51,6 +51,19 @@ func TestSlackFlow_EventClassification_Comprehensive(t *testing.T) {
 			expected: "ignore_non_bot",
 		},
 
+		// PagerDuty thread_ts == ts (thread root, not a reply)
+		{
+			name: "pagerduty bot message with thread_ts == ts treated as top-level",
+			event: &slackevents.MessageEvent{
+				Channel:         "C_ALERTS",
+				BotID:           "B_PAGERDUTY",
+				TimeStamp:       "1707000001.000100",
+				ThreadTimeStamp: "1707000001.000100",
+			},
+			botID:    "U_AKMATORI",
+			expected: "top_level_alert",
+		},
+
 		// Thread replies in alert channels
 		{
 			name: "bot thread reply in alert channel",
@@ -61,7 +74,7 @@ func TestSlackFlow_EventClassification_Comprehensive(t *testing.T) {
 				ThreadTimeStamp: "1707000001.000100",
 			},
 			botID:    "U_AKMATORI",
-			expected: "bot_thread_alert",
+			expected: "ignore_thread",
 		},
 		{
 			name: "human reply without mention in alert thread",
