@@ -40,7 +40,7 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 │       ├── cache/          # Generic TTL cache
 │       ├── mcpproxy/       # MCP proxy: connection pool + handler for external MCP servers
 │       ├── ratelimit/      # Token bucket rate limiter
-│       └── tools/          # SSH, Zabbix, VictoriaMetrics, PostgreSQL, ClickHouse, Grafana, Catchpoint, PagerDuty, NetBox, and HTTP connector implementations
+│       └── tools/          # SSH, Zabbix, VictoriaMetrics, PostgreSQL, ClickHouse, Grafana, Catchpoint, PagerDuty, NetBox, Kubernetes, and HTTP connector implementations
 ├── web/                    # React frontend
 ├── qmd/                    # QMD search sidecar (Dockerfile, config, entrypoint)
 ├── docs/                   # OpenAPI specs (swagger at /api/docs)
@@ -112,6 +112,7 @@ make verify           # go vet + all tests (pre-commit)
 | `internal/tools/clickhouse` | 82.8% | ✅ |
 | `internal/tools/pagerduty` | 81.3% | ✅ |
 | `internal/tools/netbox` | 80.6% | ✅ |
+| `internal/tools/k8s` | 82.4% | ✅ |
 | `internal/tools/victoriametrics` | 76.2% | ✅ |
 | `internal/mcpproxy` | 70.8% | ✅ |
 | `internal/mcp` | 66.8% | ⚠️ |
@@ -162,8 +163,8 @@ Tools are registered as pi-mono custom tools via `gateway-tools.ts`, communicati
 | Tool | File | Purpose |
 |------|------|---------|
 | `gateway_call` | `src/gateway-tools.ts` | Call any MCP Gateway tool by name with optional instance hint |
-| `list_tool_types` | `src/gateway-tools.ts` | List all available tool types (e.g., `ssh`, `zabbix`, `victoria_metrics`, `postgresql`, `clickhouse`, `grafana`, `pagerduty`, `netbox`, `qmd`) |
-| `list_tools_for_tool_type` | `src/gateway-tools.ts` | List all tools of a given type (e.g., `ssh`, `zabbix`, `victoria_metrics`, `postgresql`, `clickhouse`, `grafana`, `pagerduty`, `netbox`) |
+| `list_tool_types` | `src/gateway-tools.ts` | List all available tool types (e.g., `ssh`, `zabbix`, `victoria_metrics`, `postgresql`, `clickhouse`, `grafana`, `pagerduty`, `netbox`, `kubernetes`, `qmd`) |
+| `list_tools_for_tool_type` | `src/gateway-tools.ts` | List all tools of a given type (e.g., `ssh`, `zabbix`, `victoria_metrics`, `postgresql`, `clickhouse`, `grafana`, `pagerduty`, `netbox`, `kubernetes`) |
 | `get_tool_detail` | `src/gateway-tools.ts` | Get full JSON schema for a specific tool |
 | `execute_script` | `src/gateway-tools.ts` | Run JavaScript in isolated vm with injected `gateway_call()`, `list_tools_for_tool_type()`, scoped `fs` |
 
@@ -602,6 +603,10 @@ func legacyHandler() { ... }
 | Metrics/history | 30 sec |
 | CMDB device/IP/VM data | 60 sec |
 | CMDB circuits/tenancy | 120 sec |
+| K8s pods/jobs | 30 sec |
+| K8s events/logs | 15 sec |
+| K8s deployments/workloads | 60 sec |
+| K8s nodes/services/namespaces | 120 sec |
 
 ### Catchpoint Patterns
 
@@ -636,6 +641,17 @@ NetBox is a read-only CMDB tool type following the Catchpoint/PagerDuty pattern 
 - Generic `api_request` method allows querying any NetBox API endpoint
 - Honor proxy settings only when `ProxySettings.NetBoxEnabled` is true
 
+### Kubernetes Patterns
+
+Kubernetes is a read-only diagnostics tool type following the NetBox pattern with Bearer token auth, caching, and rate limiting.
+
+- Tool namespace: `kubernetes.*`
+- Auth: Bearer token via `Authorization: Bearer <k8s_token>` header
+- All endpoints are read-only GET requests using `cachedGet(...)` with 15-120s TTL depending on resource volatility
+- Resources: Namespaces, Pods (list/detail/logs), Events, Deployments (list/detail), StatefulSets, DaemonSets, Jobs, CronJobs, Nodes (list/detail), Services, ConfigMaps (metadata only), Ingresses
+- Generic `api_request` method allows querying any K8s API GET endpoint (path must start with `/api` or `/apis`)
+- Honor proxy settings only when `ProxySettings.K8sEnabled` is true
+
 ### Implementation Reference
 
 - `mcp-gateway/internal/cache/cache.go` - Generic TTL cache with background cleanup
@@ -648,6 +664,7 @@ NetBox is a read-only CMDB tool type following the Catchpoint/PagerDuty pattern 
 - `mcp-gateway/internal/tools/catchpoint/` - Catchpoint synthetic monitoring integration with caching and rate limiting
 - `mcp-gateway/internal/tools/pagerduty/` - PagerDuty integration with caching and rate limiting (incidents, services, on-call, events)
 - `mcp-gateway/internal/tools/netbox/` - NetBox CMDB integration with caching and rate limiting (DCIM, IPAM, circuits, virtualization, tenancy)
+- `mcp-gateway/internal/tools/k8s/` - Kubernetes read-only diagnostics with caching and rate limiting (pods, deployments, nodes, services, events, logs)
 - `mcp-gateway/internal/tools/httpconnector/` - Declarative HTTP connector executor with auth injection
 - `mcp-gateway/internal/mcpproxy/` - Connection pool and proxy handler for external MCP servers
 - `mcp-gateway/internal/auth/` - Per-incident tool authorization (allowlist enforcement)
