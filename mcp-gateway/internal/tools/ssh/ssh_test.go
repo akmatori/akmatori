@@ -1,11 +1,16 @@
 package ssh
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"log"
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	gossh "golang.org/x/crypto/ssh"
 )
 
 func TestNewSSHTool(t *testing.T) {
@@ -17,6 +22,70 @@ func TestNewSSHTool(t *testing.T) {
 	}
 	if tool.logger == nil {
 		t.Error("Expected logger to be set")
+	}
+}
+
+func TestDefaultSSHUser(t *testing.T) {
+	tests := []struct {
+		name string
+		user string
+		want string
+	}{
+		{name: "explicit user", user: "ubuntu", want: "ubuntu"},
+		{name: "empty defaults to root", user: "", want: "root"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := defaultSSHUser(tt.user); got != tt.want {
+				t.Fatalf("defaultSSHUser(%q) = %q, want %q", tt.user, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDefaultSSHPort(t *testing.T) {
+	tests := []struct {
+		name string
+		port int
+		want int
+	}{
+		{name: "explicit port", port: 2222, want: 2222},
+		{name: "zero defaults to 22", port: 0, want: 22},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := defaultSSHPort(tt.port); got != tt.want {
+				t.Fatalf("defaultSSHPort(%d) = %d, want %d", tt.port, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewSSHClientConfig(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("GenerateKey() error = %v", err)
+	}
+
+	signer, err := gossh.NewSignerFromSigner(privateKey)
+	if err != nil {
+		t.Fatalf("NewSignerFromSigner() error = %v", err)
+	}
+
+	config := newSSHClientConfig("", signer, 45)
+	if config.User != "root" {
+		t.Fatalf("config.User = %q, want root", config.User)
+	}
+	if len(config.Auth) != 1 {
+		t.Fatalf("len(config.Auth) = %d, want 1", len(config.Auth))
+	}
+	if config.Timeout != 45*time.Second {
+		t.Fatalf("config.Timeout = %v, want %v", config.Timeout, 45*time.Second)
+	}
+	if config.HostKeyCallback == nil {
+		t.Fatal("expected HostKeyCallback to be configured")
 	}
 }
 

@@ -278,6 +278,31 @@ func (t *SSHTool) connect(ctx context.Context, hostConfig *SSHHostConfig, config
 	return t.connectDirect(ctx, hostConfig, config)
 }
 
+func defaultSSHUser(user string) string {
+	if user == "" {
+		return "root"
+	}
+	return user
+}
+
+func defaultSSHPort(port int) int {
+	if port == 0 {
+		return 22
+	}
+	return port
+}
+
+func newSSHClientConfig(user string, signer ssh.Signer, timeoutSeconds int) *ssh.ClientConfig {
+	return &ssh.ClientConfig{
+		User: defaultSSHUser(user),
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeys(signer),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: implement proper host key checking
+		Timeout:         time.Duration(timeoutSeconds) * time.Second,
+	}
+}
+
 // connectDirect establishes a direct SSH connection
 func (t *SSHTool) connectDirect(ctx context.Context, hostConfig *SSHHostConfig, config *SSHConfig) (*ssh.Client, error) {
 	// Get the appropriate key for this host
@@ -291,24 +316,9 @@ func (t *SSHTool) connectDirect(ctx context.Context, hostConfig *SSHHostConfig, 
 		return nil, fmt.Errorf("failed to parse private key: %w", err)
 	}
 
-	user := hostConfig.User
-	if user == "" {
-		user = "root"
-	}
-
-	port := hostConfig.Port
-	if port == 0 {
-		port = 22
-	}
-
-	clientConfig := &ssh.ClientConfig{
-		User: user,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(signer),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: implement proper host key checking
-		Timeout:         time.Duration(config.ConnectionTimeout) * time.Second,
-	}
+	user := defaultSSHUser(hostConfig.User)
+	port := defaultSSHPort(hostConfig.Port)
+	clientConfig := newSSHClientConfig(user, signer, config.ConnectionTimeout)
 
 	addr := fmt.Sprintf("%s:%d", hostConfig.Address, port)
 	t.logger.Printf("Connecting directly to %s as %s", addr, user)
@@ -329,28 +339,13 @@ func (t *SSHTool) connectViaJumphost(ctx context.Context, hostConfig *SSHHostCon
 		return nil, fmt.Errorf("failed to parse private key: %w", err)
 	}
 
-	// Jumphost connection config
 	jumphostUser := hostConfig.JumphostUser
 	if jumphostUser == "" {
 		jumphostUser = hostConfig.User // Fallback to target user
 	}
-	if jumphostUser == "" {
-		jumphostUser = "root"
-	}
-
-	jumphostPort := hostConfig.JumphostPort
-	if jumphostPort == 0 {
-		jumphostPort = 22
-	}
-
-	jumphostConfig := &ssh.ClientConfig{
-		User: jumphostUser,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(signer),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: proper host key checking
-		Timeout:         time.Duration(config.ConnectionTimeout) * time.Second,
-	}
+	jumphostUser = defaultSSHUser(jumphostUser)
+	jumphostPort := defaultSSHPort(hostConfig.JumphostPort)
+	jumphostConfig := newSSHClientConfig(jumphostUser, signer, config.ConnectionTimeout)
 
 	// Step 1: Connect to jumphost
 	jumphostAddr := fmt.Sprintf("%s:%d", hostConfig.JumphostAddress, jumphostPort)
@@ -362,16 +357,8 @@ func (t *SSHTool) connectViaJumphost(ctx context.Context, hostConfig *SSHHostCon
 	}
 
 	// Step 2: Dial through jumphost to target
-	targetUser := hostConfig.User
-	if targetUser == "" {
-		targetUser = "root"
-	}
-
-	targetPort := hostConfig.Port
-	if targetPort == 0 {
-		targetPort = 22
-	}
-
+	targetUser := defaultSSHUser(hostConfig.User)
+	targetPort := defaultSSHPort(hostConfig.Port)
 	targetAddr := fmt.Sprintf("%s:%d", hostConfig.Address, targetPort)
 	t.logger.Printf("Dialing target %s through jumphost", targetAddr)
 
@@ -382,14 +369,7 @@ func (t *SSHTool) connectViaJumphost(ctx context.Context, hostConfig *SSHHostCon
 	}
 
 	// Step 3: Establish SSH client connection over the tunnel
-	targetConfig := &ssh.ClientConfig{
-		User: targetUser,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(signer),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         time.Duration(config.ConnectionTimeout) * time.Second,
-	}
+	targetConfig := newSSHClientConfig(targetUser, signer, config.ConnectionTimeout)
 
 	ncc, chans, reqs, err := ssh.NewClientConn(targetNetConn, targetAddr, targetConfig)
 	if err != nil {
