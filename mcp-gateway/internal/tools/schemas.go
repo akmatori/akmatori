@@ -1101,7 +1101,7 @@ func getK8sSchema() ToolTypeSchema {
 			{
 				Name:        "get_deployments",
 				Description: "List deployments in a namespace with optional filters",
-				Parameters:  "namespace (required), name, label_selector, limit",
+				Parameters:  "namespace (required), name, label_selector, field_selector, limit",
 				Returns:     "JSON array of deployment objects",
 			},
 			{
@@ -1114,28 +1114,28 @@ func getK8sSchema() ToolTypeSchema {
 			{
 				Name:        "get_statefulsets",
 				Description: "List statefulsets in a namespace with optional filters",
-				Parameters:  "namespace (required), label_selector, limit",
+				Parameters:  "namespace (required), label_selector, field_selector, limit",
 				Returns:     "JSON array of statefulset objects",
 			},
 			// DaemonSets
 			{
 				Name:        "get_daemonsets",
 				Description: "List daemonsets in a namespace with optional filters",
-				Parameters:  "namespace (required), label_selector, limit",
+				Parameters:  "namespace (required), label_selector, field_selector, limit",
 				Returns:     "JSON array of daemonset objects",
 			},
 			// Jobs
 			{
 				Name:        "get_jobs",
 				Description: "List jobs in a namespace with optional filters",
-				Parameters:  "namespace (required), label_selector, limit",
+				Parameters:  "namespace (required), label_selector, field_selector, limit",
 				Returns:     "JSON array of job objects",
 			},
 			// CronJobs
 			{
 				Name:        "get_cronjobs",
 				Description: "List cronjobs in a namespace with optional filters",
-				Parameters:  "namespace (required), label_selector, limit",
+				Parameters:  "namespace (required), label_selector, field_selector, limit",
 				Returns:     "JSON array of cronjob objects",
 			},
 			// Nodes

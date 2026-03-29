@@ -810,15 +810,16 @@ func (t *K8sTool) APIRequest(ctx context.Context, incidentID string, args map[st
 		return "", fmt.Errorf("path must start with /api/ or /apis/ (got %q)", path)
 	}
 
-	// Block watch parameter to prevent long-polling requests
+	// Block secrets paths to prevent credential exfiltration
+	isSecretsPath := strings.HasSuffix(path, "/secrets") || strings.Contains(path, "/secrets/")
+	if isSecretsPath {
+		return "", fmt.Errorf("access to secrets is not allowed for security reasons")
+	}
+
+	// Block watch parameter entirely to prevent long-polling requests
 	if p, ok := args["params"].(map[string]interface{}); ok {
-		if w, exists := p["watch"]; exists {
-			if ws, ok := w.(string); ok && ws == "true" {
-				return "", fmt.Errorf("watch parameter is not allowed (would create a long-polling request)")
-			}
-			if wb, ok := w.(bool); ok && wb {
-				return "", fmt.Errorf("watch parameter is not allowed (would create a long-polling request)")
-			}
+		if _, exists := p["watch"]; exists {
+			return "", fmt.Errorf("watch parameter is not allowed (would create a long-polling request)")
 		}
 	}
 

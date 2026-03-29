@@ -2069,6 +2069,9 @@ func TestAPIRequest_WatchBlocked(t *testing.T) {
 	}{
 		{"watch string true", map[string]interface{}{"watch": "true"}},
 		{"watch bool true", map[string]interface{}{"watch": true}},
+		{"watch float64", map[string]interface{}{"watch": float64(1)}},
+		{"watch string false", map[string]interface{}{"watch": "false"}},
+		{"watch bool false", map[string]interface{}{"watch": false}},
 	}
 
 	for _, tt := range tests {
@@ -2082,6 +2085,35 @@ func TestAPIRequest_WatchBlocked(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "watch") {
 				t.Errorf("expected watch error, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestAPIRequest_SecretsBlocked(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("request should not reach server for secrets paths")
+		w.WriteHeader(http.StatusOK)
+	})
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"secrets list", "/api/v1/namespaces/default/secrets"},
+		{"secrets get", "/api/v1/namespaces/default/secrets/my-secret"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+				"path": tt.path,
+			})
+			if err == nil {
+				t.Fatal("expected error for secrets path")
+			}
+			if !strings.Contains(err.Error(), "secrets") {
+				t.Errorf("expected secrets error, got: %v", err)
 			}
 		})
 	}
