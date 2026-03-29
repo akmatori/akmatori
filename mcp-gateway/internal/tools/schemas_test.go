@@ -615,7 +615,7 @@ func TestClickHouseSchema_Functions(t *testing.T) {
 func TestGetToolSchemas_AllPresent(t *testing.T) {
 	schemas := GetToolSchemas()
 
-	expected := []string{"ssh", "zabbix", "victoria_metrics", "catchpoint", "postgresql", "grafana", "clickhouse", "pagerduty", "netbox"}
+	expected := []string{"ssh", "zabbix", "victoria_metrics", "catchpoint", "postgresql", "grafana", "clickhouse", "pagerduty", "netbox", "kubernetes"}
 	for _, name := range expected {
 		if _, ok := schemas[name]; !ok {
 			t.Errorf("missing schema: %s", name)
@@ -856,5 +856,137 @@ func TestNetBoxSchema_FunctionCount(t *testing.T) {
 
 	if len(schema.Functions) != 19 {
 		t.Errorf("expected 19 functions (all NetBox tools), got %d", len(schema.Functions))
+	}
+}
+
+// Kubernetes schema tests
+
+func TestGetToolSchemas_ContainsKubernetes(t *testing.T) {
+	schemas := GetToolSchemas()
+
+	if _, ok := schemas["kubernetes"]; !ok {
+		t.Fatal("kubernetes schema not found in GetToolSchemas()")
+	}
+}
+
+func TestGetToolSchema_Kubernetes(t *testing.T) {
+	schema, ok := GetToolSchema("kubernetes")
+	if !ok {
+		t.Fatal("kubernetes schema not found")
+	}
+
+	if schema.Name != "kubernetes" {
+		t.Errorf("expected name 'kubernetes', got %q", schema.Name)
+	}
+
+	if schema.Version != "1.0.0" {
+		t.Errorf("expected version '1.0.0', got %q", schema.Version)
+	}
+}
+
+func TestK8sSchema_RequiredFields(t *testing.T) {
+	schema, _ := GetToolSchema("kubernetes")
+
+	expectedRequired := []string{"k8s_url", "k8s_token"}
+	if len(schema.SettingsSchema.Required) != len(expectedRequired) {
+		t.Fatalf("expected %d required fields, got %d", len(expectedRequired), len(schema.SettingsSchema.Required))
+	}
+	for i, field := range expectedRequired {
+		if schema.SettingsSchema.Required[i] != field {
+			t.Errorf("expected required[%d] = %q, got %q", i, field, schema.SettingsSchema.Required[i])
+		}
+	}
+}
+
+func TestK8sSchema_Settings(t *testing.T) {
+	schema, _ := GetToolSchema("kubernetes")
+	props := schema.SettingsSchema.Properties
+
+	expectedFields := []string{"k8s_url", "k8s_token", "k8s_ca_cert", "k8s_verify_ssl", "k8s_timeout"}
+	for _, field := range expectedFields {
+		if _, ok := props[field]; !ok {
+			t.Errorf("missing settings field: %s", field)
+		}
+	}
+}
+
+func TestK8sSchema_SecretFields(t *testing.T) {
+	schema, _ := GetToolSchema("kubernetes")
+	props := schema.SettingsSchema.Properties
+
+	if !props["k8s_token"].Secret {
+		t.Error("expected k8s_token to be marked as secret")
+	}
+	if !props["k8s_ca_cert"].Secret {
+		t.Error("expected k8s_ca_cert to be marked as secret")
+	}
+}
+
+func TestK8sSchema_AdvancedFields(t *testing.T) {
+	schema, _ := GetToolSchema("kubernetes")
+	props := schema.SettingsSchema.Properties
+
+	advancedFields := []string{"k8s_ca_cert", "k8s_verify_ssl", "k8s_timeout"}
+	for _, field := range advancedFields {
+		if !props[field].Advanced {
+			t.Errorf("expected %s to be marked as advanced", field)
+		}
+	}
+}
+
+func TestK8sSchema_Defaults(t *testing.T) {
+	schema, _ := GetToolSchema("kubernetes")
+	props := schema.SettingsSchema.Properties
+
+	if props["k8s_verify_ssl"].Default != true {
+		t.Errorf("expected k8s_verify_ssl default true, got %v", props["k8s_verify_ssl"].Default)
+	}
+
+	if props["k8s_timeout"].Default != 30 {
+		t.Errorf("expected k8s_timeout default 30, got %v", props["k8s_timeout"].Default)
+	}
+}
+
+func TestK8sSchema_TimeoutBounds(t *testing.T) {
+	schema, _ := GetToolSchema("kubernetes")
+	timeout := schema.SettingsSchema.Properties["k8s_timeout"]
+
+	if timeout.Minimum == nil || *timeout.Minimum != 5 {
+		t.Error("expected k8s_timeout minimum 5")
+	}
+	if timeout.Maximum == nil || *timeout.Maximum != 300 {
+		t.Error("expected k8s_timeout maximum 300")
+	}
+}
+
+func TestK8sSchema_Functions(t *testing.T) {
+	schema, _ := GetToolSchema("kubernetes")
+
+	expectedFunctions := []string{
+		"get_namespaces",
+		"get_pods", "get_pod_detail", "get_pod_logs",
+		"get_events",
+		"get_deployments", "get_deployment_detail",
+		"get_statefulsets", "get_daemonsets",
+		"get_jobs", "get_cronjobs",
+		"get_nodes", "get_node_detail",
+		"get_services", "get_configmaps", "get_ingresses",
+		"api_request",
+	}
+	if len(schema.Functions) != len(expectedFunctions) {
+		t.Fatalf("expected %d functions, got %d", len(expectedFunctions), len(schema.Functions))
+	}
+	for i, name := range expectedFunctions {
+		if schema.Functions[i].Name != name {
+			t.Errorf("expected function[%d] = %q, got %q", i, name, schema.Functions[i].Name)
+		}
+	}
+}
+
+func TestK8sSchema_FunctionCount(t *testing.T) {
+	schema, _ := GetToolSchema("kubernetes")
+
+	if len(schema.Functions) != 17 {
+		t.Errorf("expected 17 functions (all Kubernetes tools), got %d", len(schema.Functions))
 	}
 }

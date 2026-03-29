@@ -45,12 +45,12 @@ Add a read-only Kubernetes tool type to the MCP Gateway, following the NetBox pa
 - Modify: `mcp-gateway/internal/tools/schemas.go`
 - Modify: `mcp-gateway/internal/database/db.go`
 
-- [ ] Add `K8sEnabled bool` field to `ProxySettings` struct in `database/db.go` with GORM column tag `k8s_enabled`
-- [ ] Add `"kubernetes": getK8sSchema()` entry in `GetToolSchemas()` map in `schemas.go`
-- [ ] Implement `getK8sSchema()` returning full `ToolTypeSchema` with:
+- [x] Add `K8sEnabled bool` field to `ProxySettings` struct in `database/db.go` with GORM column tag `k8s_enabled`
+- [x] Add `"kubernetes": getK8sSchema()` entry in `GetToolSchemas()` map in `schemas.go`
+- [x] Implement `getK8sSchema()` returning full `ToolTypeSchema` with:
   - Settings: `k8s_url` (required), `k8s_token` (required, secret), `k8s_ca_cert` (secret, advanced), `k8s_verify_ssl` (boolean, default true, advanced), `k8s_timeout` (integer, 5-300, default 30, advanced)
   - All tool function definitions listed above
-- [ ] Verify schema loads correctly: `make test-mcp` must pass
+- [x] Verify schema loads correctly: `make test-mcp` must pass
 
 ### Task 2: Core K8s Tool Implementation (Config, HTTP Client, Caching)
 

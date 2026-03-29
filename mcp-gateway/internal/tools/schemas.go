@@ -65,6 +65,7 @@ func GetToolSchemas() map[string]ToolTypeSchema {
 		"clickhouse":       getClickHouseSchema(),
 		"pagerduty":        getPagerDutySchema(),
 		"netbox":           getNetBoxSchema(),
+		"kubernetes":       getK8sSchema(),
 	}
 }
 
@@ -1017,6 +1018,166 @@ func getPagerDutySchema() ToolTypeSchema {
 				Description: "Send trigger/acknowledge/resolve events via Events API v2",
 				Parameters:  "routing_key (required), event_action (required: trigger/acknowledge/resolve), dedup_key, summary, source, severity, component, group, class, custom_details",
 				Returns:     "JSON with status, message, and dedup_key",
+			},
+		},
+	}
+}
+
+func getK8sSchema() ToolTypeSchema {
+	return ToolTypeSchema{
+		Name:        "kubernetes",
+		Description: "Read-only Kubernetes cluster diagnostics. Query pods, nodes, deployments, services, events, and logs for incident investigation without making any mutations.",
+		Version:     "1.0.0",
+		SettingsSchema: SettingsSchema{
+			Type:     "object",
+			Required: []string{"k8s_url", "k8s_token"},
+			Properties: map[string]PropertySchema{
+				"k8s_url": {
+					Type:        "string",
+					Description: "Kubernetes API server URL (e.g. https://k8s.example.com:6443)",
+				},
+				"k8s_token": {
+					Type:        "string",
+					Description: "Kubernetes Bearer token for authentication (service account token)",
+					Secret:      true,
+				},
+				"k8s_ca_cert": {
+					Type:        "string",
+					Description: "PEM-encoded CA certificate for the Kubernetes API server",
+					Secret:      true,
+					Advanced:    true,
+				},
+				"k8s_verify_ssl": {
+					Type:        "boolean",
+					Description: "Verify SSL certificates when connecting to the Kubernetes API",
+					Default:     true,
+					Advanced:    true,
+				},
+				"k8s_timeout": {
+					Type:        "integer",
+					Description: "API request timeout in seconds",
+					Default:     30,
+					Minimum:     intPtr(5),
+					Maximum:     intPtr(300),
+					Advanced:    true,
+				},
+			},
+		},
+		Functions: []ToolFunction{
+			// Namespaces
+			{
+				Name:        "get_namespaces",
+				Description: "List all namespaces in the cluster",
+				Parameters:  "label_selector, limit",
+				Returns:     "JSON array of namespace objects",
+			},
+			// Pods
+			{
+				Name:        "get_pods",
+				Description: "List pods in a namespace with optional filters",
+				Parameters:  "namespace (required), name, label_selector, field_selector, limit",
+				Returns:     "JSON array of pod objects",
+			},
+			{
+				Name:        "get_pod_detail",
+				Description: "Get detailed information about a specific pod including status, containers, and conditions",
+				Parameters:  "namespace (required), name (required)",
+				Returns:     "JSON pod object with full details",
+			},
+			{
+				Name:        "get_pod_logs",
+				Description: "Get logs from a pod's container",
+				Parameters:  "namespace (required), name (required), container, tail_lines (default 100), since_seconds, previous",
+				Returns:     "Plain text log output",
+			},
+			// Events
+			{
+				Name:        "get_events",
+				Description: "List events in a namespace (warnings, errors, scheduling events)",
+				Parameters:  "namespace (required), field_selector, limit",
+				Returns:     "JSON array of event objects",
+			},
+			// Deployments
+			{
+				Name:        "get_deployments",
+				Description: "List deployments in a namespace with optional filters",
+				Parameters:  "namespace (required), name, label_selector, limit",
+				Returns:     "JSON array of deployment objects",
+			},
+			{
+				Name:        "get_deployment_detail",
+				Description: "Get detailed information about a specific deployment including replicas, conditions, and strategy",
+				Parameters:  "namespace (required), name (required)",
+				Returns:     "JSON deployment object with full details",
+			},
+			// StatefulSets
+			{
+				Name:        "get_statefulsets",
+				Description: "List statefulsets in a namespace with optional filters",
+				Parameters:  "namespace (required), label_selector, limit",
+				Returns:     "JSON array of statefulset objects",
+			},
+			// DaemonSets
+			{
+				Name:        "get_daemonsets",
+				Description: "List daemonsets in a namespace with optional filters",
+				Parameters:  "namespace (required), label_selector, limit",
+				Returns:     "JSON array of daemonset objects",
+			},
+			// Jobs
+			{
+				Name:        "get_jobs",
+				Description: "List jobs in a namespace with optional filters",
+				Parameters:  "namespace (required), label_selector, limit",
+				Returns:     "JSON array of job objects",
+			},
+			// CronJobs
+			{
+				Name:        "get_cronjobs",
+				Description: "List cronjobs in a namespace with optional filters",
+				Parameters:  "namespace (required), label_selector, limit",
+				Returns:     "JSON array of cronjob objects",
+			},
+			// Nodes
+			{
+				Name:        "get_nodes",
+				Description: "List nodes with conditions and allocatable resources",
+				Parameters:  "label_selector, limit",
+				Returns:     "JSON array of node objects",
+			},
+			{
+				Name:        "get_node_detail",
+				Description: "Get detailed information about a specific node including conditions, capacity, and taints",
+				Parameters:  "name (required)",
+				Returns:     "JSON node object with full details",
+			},
+			// Services
+			{
+				Name:        "get_services",
+				Description: "List services in a namespace",
+				Parameters:  "namespace (required), label_selector, limit",
+				Returns:     "JSON array of service objects",
+			},
+			// ConfigMaps
+			{
+				Name:        "get_configmaps",
+				Description: "List configmaps in a namespace (names and metadata only, not data contents)",
+				Parameters:  "namespace (required), label_selector, limit",
+				Returns:     "JSON array of configmap metadata objects",
+			},
+			// Ingresses
+			{
+				Name:        "get_ingresses",
+				Description: "List ingresses in a namespace",
+				Parameters:  "namespace (required), label_selector, limit",
+				Returns:     "JSON array of ingress objects",
+			},
+			// Generic
+			{
+				Name:        "api_request",
+				Description: "Generic read-only GET request to any Kubernetes API endpoint",
+				Parameters:  "path (required, must start with /api or /apis), params (optional query parameters)",
+				Returns:     "JSON response from the Kubernetes API",
 			},
 		},
 	}

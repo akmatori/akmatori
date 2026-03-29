@@ -306,6 +306,7 @@ type ProxySettings struct {
 	GrafanaEnabled         bool      `gorm:"default:false" json:"grafana_enabled"`
 	PagerDutyEnabled       bool      `gorm:"default:false" json:"pagerduty_enabled"`
 	NetBoxEnabled          bool      `gorm:"default:false" json:"netbox_enabled"`
+	K8sEnabled             bool      `gorm:"column:k8s_enabled;default:false" json:"k8s_enabled"`
 	CreatedAt              time.Time `json:"created_at"`
 	UpdatedAt              time.Time `json:"updated_at"`
 }
