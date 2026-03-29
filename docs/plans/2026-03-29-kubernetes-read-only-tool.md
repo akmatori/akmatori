@@ -125,11 +125,11 @@ Add a read-only Kubernetes tool type to the MCP Gateway, following the NetBox pa
 
 ### Task 7: Verify Acceptance Criteria
 
-- [ ] Manual test: create a kubernetes tool instance via API, verify schema appears in `GET /api/tool-types`
-- [ ] Run full test suite: `make test-mcp`
-- [ ] Run linter: `cd mcp-gateway && go vet ./...`
-- [ ] Verify test coverage for `k8s` package meets 80%+
-- [ ] Run: `make verify`
+- [x] Manual test: create a kubernetes tool instance via API, verify schema appears in `GET /api/tool-types`
+- [x] Run full test suite: `make test-mcp`
+- [x] Run linter: `cd mcp-gateway && go vet ./...`
+- [x] Verify test coverage for `k8s` package meets 80%+
+- [x] Run: `make verify`
 
 ### Task 8: Update Documentation
 
