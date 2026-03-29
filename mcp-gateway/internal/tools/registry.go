@@ -3957,6 +3957,10 @@ func (r *Registry) registerK8sTools() {
 						Type:        "string",
 						Description: "Label selector to filter deployments (e.g. 'app=nginx')",
 					},
+					"field_selector": {
+						Type:        "string",
+						Description: "Field selector to filter deployments (e.g. 'metadata.name=my-deploy')",
+					},
 					"limit": {
 						Type:        "number",
 						Description: "Maximum number of results to return",
@@ -4011,6 +4015,10 @@ func (r *Registry) registerK8sTools() {
 						Type:        "string",
 						Description: "Label selector to filter statefulsets",
 					},
+					"field_selector": {
+						Type:        "string",
+						Description: "Field selector to filter statefulsets",
+					},
 					"limit": {
 						Type:        "number",
 						Description: "Maximum number of results to return",
@@ -4039,6 +4047,10 @@ func (r *Registry) registerK8sTools() {
 					"label_selector": {
 						Type:        "string",
 						Description: "Label selector to filter daemonsets",
+					},
+					"field_selector": {
+						Type:        "string",
+						Description: "Field selector to filter daemonsets",
 					},
 					"limit": {
 						Type:        "number",
@@ -4069,6 +4081,10 @@ func (r *Registry) registerK8sTools() {
 						Type:        "string",
 						Description: "Label selector to filter jobs",
 					},
+					"field_selector": {
+						Type:        "string",
+						Description: "Field selector to filter jobs",
+					},
 					"limit": {
 						Type:        "number",
 						Description: "Maximum number of results to return",
@@ -4097,6 +4113,10 @@ func (r *Registry) registerK8sTools() {
 					"label_selector": {
 						Type:        "string",
 						Description: "Label selector to filter cronjobs",
+					},
+					"field_selector": {
+						Type:        "string",
+						Description: "Field selector to filter cronjobs",
 					},
 					"limit": {
 						Type:        "number",
