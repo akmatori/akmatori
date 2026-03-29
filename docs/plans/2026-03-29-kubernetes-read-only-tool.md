@@ -72,13 +72,13 @@ Add a read-only Kubernetes tool type to the MCP Gateway, following the NetBox pa
 - Modify: `mcp-gateway/internal/tools/k8s/k8s.go`
 - Modify: `mcp-gateway/internal/tools/k8s/k8s_test.go`
 
-- [ ] Implement `GetNamespaces(ctx, incidentID, args)` — list namespaces (120s cache)
-- [ ] Implement `GetPods(ctx, incidentID, args)` — params: namespace (required), name, label_selector, field_selector, limit (30s cache)
-- [ ] Implement `GetPodDetail(ctx, incidentID, args)` — params: namespace, name (both required) (30s cache)
-- [ ] Implement `GetPodLogs(ctx, incidentID, args)` — params: namespace, name (required), container, tail_lines (default 100), since_seconds, previous (15s cache)
-- [ ] Implement `GetEvents(ctx, incidentID, args)` — params: namespace (required), field_selector, limit (15s cache)
-- [ ] Write tests for each method: success response, missing required params, filtering, pagination via limit, log tail lines
-- [ ] Run `make test-mcp` — must pass
+- [x] Implement `GetNamespaces(ctx, incidentID, args)` — list namespaces (120s cache)
+- [x] Implement `GetPods(ctx, incidentID, args)` — params: namespace (required), name, label_selector, field_selector, limit (30s cache)
+- [x] Implement `GetPodDetail(ctx, incidentID, args)` — params: namespace, name (both required) (30s cache)
+- [x] Implement `GetPodLogs(ctx, incidentID, args)` — params: namespace, name (required), container, tail_lines (default 100), since_seconds, previous (15s cache)
+- [x] Implement `GetEvents(ctx, incidentID, args)` — params: namespace (required), field_selector, limit (15s cache)
+- [x] Write tests for each method: success response, missing required params, filtering, pagination via limit, log tail lines
+- [x] Run `make test-mcp` — must pass
 
 ### Task 4: Workload Methods (Deployments, StatefulSets, DaemonSets, Jobs)
 

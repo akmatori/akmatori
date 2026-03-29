@@ -720,3 +720,449 @@ func TestDoRequest_RateLimiterCancelledContext(t *testing.T) {
 		t.Fatal("expected error for cancelled context")
 	}
 }
+
+// --- GetNamespaces tests ---
+
+func TestGetNamespaces_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/namespaces" {
+			t.Errorf("expected path /api/v1/namespaces, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[{"metadata":{"name":"default"}},{"metadata":{"name":"kube-system"}}]}`)
+	})
+
+	result, err := tool.GetNamespaces(context.Background(), "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "default") {
+		t.Error("expected result to contain 'default'")
+	}
+	if !strings.Contains(result, "kube-system") {
+		t.Error("expected result to contain 'kube-system'")
+	}
+}
+
+func TestGetNamespaces_WithLabelSelector(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("labelSelector") != "env=prod" {
+			t.Errorf("expected labelSelector=env=prod, got %q", r.URL.Query().Get("labelSelector"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+
+	_, err := tool.GetNamespaces(context.Background(), "test-incident", map[string]interface{}{
+		"label_selector": "env=prod",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- GetPods tests ---
+
+func TestGetPods_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/namespaces/default/pods" {
+			t.Errorf("expected path /api/v1/namespaces/default/pods, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[{"metadata":{"name":"pod-1"}}]}`)
+	})
+
+	result, err := tool.GetPods(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "default",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "pod-1") {
+		t.Error("expected result to contain 'pod-1'")
+	}
+}
+
+func TestGetPods_MissingNamespace(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{}`)
+	})
+
+	_, err := tool.GetPods(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing namespace")
+	}
+	if !strings.Contains(err.Error(), "namespace is required") {
+		t.Errorf("expected namespace required error, got: %v", err)
+	}
+}
+
+func TestGetPods_WithNameFilter(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/namespaces/default/pods/my-pod" {
+			t.Errorf("expected path for specific pod, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"metadata":{"name":"my-pod"}}`)
+	})
+
+	result, err := tool.GetPods(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "default",
+		"name":      "my-pod",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "my-pod") {
+		t.Error("expected result to contain 'my-pod'")
+	}
+}
+
+func TestGetPods_WithSelectors(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("labelSelector") != "app=web" {
+			t.Errorf("expected labelSelector=app=web, got %q", r.URL.Query().Get("labelSelector"))
+		}
+		if r.URL.Query().Get("fieldSelector") != "status.phase=Running" {
+			t.Errorf("expected fieldSelector=status.phase=Running, got %q", r.URL.Query().Get("fieldSelector"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+
+	_, err := tool.GetPods(context.Background(), "test-incident", map[string]interface{}{
+		"namespace":      "default",
+		"label_selector": "app=web",
+		"field_selector": "status.phase=Running",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetPods_WithLimit(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("limit") != "10" {
+			t.Errorf("expected limit=10, got %q", r.URL.Query().Get("limit"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+
+	_, err := tool.GetPods(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "default",
+		"limit":     float64(10),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- GetPodDetail tests ---
+
+func TestGetPodDetail_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/namespaces/kube-system/pods/coredns-abc123" {
+			t.Errorf("expected pod detail path, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"metadata":{"name":"coredns-abc123","namespace":"kube-system"},"status":{"phase":"Running"}}`)
+	})
+
+	result, err := tool.GetPodDetail(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "kube-system",
+		"name":      "coredns-abc123",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "coredns-abc123") {
+		t.Error("expected result to contain pod name")
+	}
+	if !strings.Contains(result, "Running") {
+		t.Error("expected result to contain status")
+	}
+}
+
+func TestGetPodDetail_MissingNamespace(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, err := tool.GetPodDetail(context.Background(), "test-incident", map[string]interface{}{
+		"name": "my-pod",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing namespace")
+	}
+	if !strings.Contains(err.Error(), "namespace is required") {
+		t.Errorf("expected namespace required error, got: %v", err)
+	}
+}
+
+func TestGetPodDetail_MissingName(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, err := tool.GetPodDetail(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "default",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing name")
+	}
+	if !strings.Contains(err.Error(), "name is required") {
+		t.Errorf("expected name required error, got: %v", err)
+	}
+}
+
+// --- GetPodLogs tests ---
+
+func TestGetPodLogs_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/namespaces/default/pods/my-pod/log" {
+			t.Errorf("expected log path, got %s", r.URL.Path)
+		}
+		// Default tail_lines=100
+		if r.URL.Query().Get("tailLines") != "100" {
+			t.Errorf("expected default tailLines=100, got %q", r.URL.Query().Get("tailLines"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "2024-01-01 log line 1\n2024-01-01 log line 2\n")
+	})
+
+	result, err := tool.GetPodLogs(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "default",
+		"name":      "my-pod",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "log line 1") {
+		t.Error("expected result to contain log lines")
+	}
+}
+
+func TestGetPodLogs_WithContainer(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("container") != "nginx" {
+			t.Errorf("expected container=nginx, got %q", r.URL.Query().Get("container"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "nginx log")
+	})
+
+	_, err := tool.GetPodLogs(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "default",
+		"name":      "my-pod",
+		"container": "nginx",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetPodLogs_CustomTailLines(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("tailLines") != "50" {
+			t.Errorf("expected tailLines=50, got %q", r.URL.Query().Get("tailLines"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "log output")
+	})
+
+	_, err := tool.GetPodLogs(context.Background(), "test-incident", map[string]interface{}{
+		"namespace":  "default",
+		"name":       "my-pod",
+		"tail_lines": float64(50),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetPodLogs_TailLinesClamped(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("tailLines") != "10000" {
+			t.Errorf("expected tailLines clamped to 10000, got %q", r.URL.Query().Get("tailLines"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "log output")
+	})
+
+	_, err := tool.GetPodLogs(context.Background(), "test-incident", map[string]interface{}{
+		"namespace":  "default",
+		"name":       "my-pod",
+		"tail_lines": float64(50000),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetPodLogs_WithSinceSeconds(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("sinceSeconds") != "3600" {
+			t.Errorf("expected sinceSeconds=3600, got %q", r.URL.Query().Get("sinceSeconds"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "log output")
+	})
+
+	_, err := tool.GetPodLogs(context.Background(), "test-incident", map[string]interface{}{
+		"namespace":     "default",
+		"name":          "my-pod",
+		"since_seconds": float64(3600),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetPodLogs_WithPrevious(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("previous") != "true" {
+			t.Errorf("expected previous=true, got %q", r.URL.Query().Get("previous"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "previous container log")
+	})
+
+	_, err := tool.GetPodLogs(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "default",
+		"name":      "my-pod",
+		"previous":  true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetPodLogs_MissingNamespace(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, err := tool.GetPodLogs(context.Background(), "test-incident", map[string]interface{}{
+		"name": "my-pod",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing namespace")
+	}
+	if !strings.Contains(err.Error(), "namespace is required") {
+		t.Errorf("expected namespace required error, got: %v", err)
+	}
+}
+
+func TestGetPodLogs_MissingName(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, err := tool.GetPodLogs(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "default",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing name")
+	}
+	if !strings.Contains(err.Error(), "name is required") {
+		t.Errorf("expected name required error, got: %v", err)
+	}
+}
+
+// --- GetEvents tests ---
+
+func TestGetEvents_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/namespaces/default/events" {
+			t.Errorf("expected events path, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[{"metadata":{"name":"event-1"},"reason":"BackOff","type":"Warning"}]}`)
+	})
+
+	result, err := tool.GetEvents(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "default",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "BackOff") {
+		t.Error("expected result to contain event reason")
+	}
+	if !strings.Contains(result, "Warning") {
+		t.Error("expected result to contain event type")
+	}
+}
+
+func TestGetEvents_MissingNamespace(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, err := tool.GetEvents(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing namespace")
+	}
+	if !strings.Contains(err.Error(), "namespace is required") {
+		t.Errorf("expected namespace required error, got: %v", err)
+	}
+}
+
+func TestGetEvents_WithFieldSelector(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("fieldSelector") != "type=Warning" {
+			t.Errorf("expected fieldSelector=type=Warning, got %q", r.URL.Query().Get("fieldSelector"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+
+	_, err := tool.GetEvents(context.Background(), "test-incident", map[string]interface{}{
+		"namespace":      "default",
+		"field_selector": "type=Warning",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetEvents_WithLimit(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("limit") != "20" {
+			t.Errorf("expected limit=20, got %q", r.URL.Query().Get("limit"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+
+	_, err := tool.GetEvents(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "default",
+		"limit":     float64(20),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- Logical name routing tests ---
+
+func TestGetPods_WithLogicalName(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+
+	// Pre-populate a config for the logical name
+	cachedConfig, _ := tool.configCache.Get(configCacheKey("test-incident"))
+	tool.configCache.Set(fmt.Sprintf("creds:logical:%s:%s", "kubernetes", "prod-k8s"), cachedConfig)
+
+	_, err := tool.GetPods(context.Background(), "test-incident", map[string]interface{}{
+		"namespace":    "default",
+		"logical_name": "prod-k8s",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
