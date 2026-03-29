@@ -820,6 +820,13 @@ func (t *K8sTool) APIRequest(ctx context.Context, incidentID string, args map[st
 		return "", fmt.Errorf("access to secrets is not allowed for security reasons")
 	}
 
+	// Block dangerous subresource paths
+	for _, sub := range []string{"/proxy", "/exec", "/attach", "/portforward"} {
+		if strings.HasSuffix(path, sub) || strings.Contains(path, sub+"/") {
+			return "", fmt.Errorf("access to %s subresource is not allowed for security reasons", sub[1:])
+		}
+	}
+
 	// Block streaming parameters to prevent long-polling requests
 	if p, ok := args["params"].(map[string]interface{}); ok {
 		if _, exists := p["watch"]; exists {
