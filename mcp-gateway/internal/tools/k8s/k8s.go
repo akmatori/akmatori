@@ -468,6 +468,9 @@ func (t *K8sTool) GetPodLogs(ctx context.Context, incidentID string, args map[st
 	tailLines := 100
 	if v, ok := args["tail_lines"].(float64); ok && v > 0 {
 		tailLines = int(v)
+		if tailLines < 1 {
+			tailLines = 1
+		}
 		if tailLines > 10000 {
 			tailLines = 10000
 		}

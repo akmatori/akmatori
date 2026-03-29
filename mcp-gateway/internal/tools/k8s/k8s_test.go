@@ -1001,6 +1001,26 @@ func TestGetPodLogs_TailLinesClamped(t *testing.T) {
 	}
 }
 
+func TestGetPodLogs_FractionalTailLinesClamped(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		tl := r.URL.Query().Get("tailLines")
+		if tl != "1" {
+			t.Errorf("expected fractional tail_lines clamped to 1, got %q", tl)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "log output")
+	})
+
+	_, err := tool.GetPodLogs(context.Background(), "test-incident", map[string]interface{}{
+		"namespace":  "default",
+		"name":       "my-pod",
+		"tail_lines": float64(0.5),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestGetPodLogs_WithSinceSeconds(t *testing.T) {
 	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("sinceSeconds") != "3600" {

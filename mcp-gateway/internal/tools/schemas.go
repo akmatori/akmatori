@@ -1094,7 +1094,7 @@ func getK8sSchema() ToolTypeSchema {
 			{
 				Name:        "get_events",
 				Description: "List events in a namespace (warnings, errors, scheduling events)",
-				Parameters:  "namespace (required), field_selector, limit",
+				Parameters:  "namespace (required), label_selector, field_selector, limit",
 				Returns:     "JSON array of event objects",
 			},
 			// Deployments
