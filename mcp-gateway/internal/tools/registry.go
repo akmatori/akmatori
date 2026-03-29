@@ -201,8 +201,27 @@ func (r *Registry) Stop() {
 	}
 }
 
+// builtInToolNamespaces contains all namespaces used by built-in tool types.
+// Proxy configs with these namespaces are skipped to prevent bypassing the
+// per-incident tool allowlist.
+var builtInToolNamespaces = map[string]bool{
+	"ssh":              true,
+	"zabbix":           true,
+	"victoria_metrics": true,
+	"catchpoint":       true,
+	"postgresql":       true,
+	"grafana":          true,
+	"clickhouse":       true,
+	"pagerduty":        true,
+	"netbox":           true,
+	"kubernetes":       true,
+	"qmd":             true,
+}
+
 // DefaultMCPProxyLoader loads MCP server configs from the database and converts them
-// to proxy handler registrations.
+// to proxy handler registrations. Configs whose namespace_prefix matches a built-in
+// tool namespace are skipped to avoid overriding built-in tools with proxy namespaces
+// that bypass the per-incident allowlist.
 func DefaultMCPProxyLoader(ctx context.Context) ([]mcpproxy.ServerRegistration, error) {
 	configs, err := database.GetAllEnabledMCPServerConfigs(ctx)
 	if err != nil {
@@ -211,6 +230,11 @@ func DefaultMCPProxyLoader(ctx context.Context) ([]mcpproxy.ServerRegistration, 
 
 	var regs []mcpproxy.ServerRegistration
 	for _, cfg := range configs {
+		if builtInToolNamespaces[cfg.NamespacePrefix] {
+			slog.Warn("skipping MCP proxy config with reserved built-in namespace",
+				"config_id", cfg.ID, "namespace_prefix", cfg.NamespacePrefix)
+			continue
+		}
 		// Convert database Args JSONB to string slice
 		var args []string
 		if cfg.Args != nil {
@@ -438,6 +462,14 @@ func (r *Registry) registerProxyToolsFromHandler() {
 // registerHTTPConnectorTools registers tools for a single HTTP connector.
 // Returns the number of tools registered.
 func (r *Registry) registerHTTPConnectorTools(conn database.HTTPConnector) int {
+	// Defense-in-depth: reject connectors whose namespace collides with a built-in
+	// tool type. The API layer already prevents creation, but stale DB rows or
+	// direct DB inserts could still reach here.
+	if builtInToolNamespaces[conn.ToolTypeName] {
+		r.logger.Printf("Skipping HTTP connector %q: namespace conflicts with built-in tool type", conn.ToolTypeName)
+		return 0
+	}
+
 	// Parse tool definitions from JSONB
 	toolDefs, err := parseHTTPConnectorToolDefs(conn.Tools)
 	if err != nil {
@@ -3809,7 +3841,7 @@ func (r *Registry) registerK8sTools() {
 	r.server.RegisterTool(
 		mcp.Tool{
 			Name:        "kubernetes.get_pods",
-			Description: "List pods in a namespace with optional filters",
+			Description: "List pods in a namespace with optional filters. When 'name' is provided, returns the single pod detail instead of a list.",
 			InputSchema: mcp.InputSchema{
 				Type: "object",
 				Properties: map[string]mcp.Property{
@@ -3819,7 +3851,7 @@ func (r *Registry) registerK8sTools() {
 					},
 					"name": {
 						Type:        "string",
-						Description: "Filter by pod name (exact match)",
+						Description: "Exact pod name. When provided, returns the single pod detail object (equivalent to get_pod_detail)",
 					},
 					"label_selector": {
 						Type:        "string",
@@ -3945,7 +3977,7 @@ func (r *Registry) registerK8sTools() {
 	r.server.RegisterTool(
 		mcp.Tool{
 			Name:        "kubernetes.get_deployments",
-			Description: "List deployments in a namespace with optional filters",
+			Description: "List deployments in a namespace with optional filters. When 'name' is provided, returns the single deployment detail instead of a list.",
 			InputSchema: mcp.InputSchema{
 				Type: "object",
 				Properties: map[string]mcp.Property{
@@ -3955,7 +3987,7 @@ func (r *Registry) registerK8sTools() {
 					},
 					"name": {
 						Type:        "string",
-						Description: "Filter by deployment name (exact match)",
+						Description: "Exact deployment name. When provided, returns the single deployment detail object (equivalent to get_deployment_detail)",
 					},
 					"label_selector": {
 						Type:        "string",

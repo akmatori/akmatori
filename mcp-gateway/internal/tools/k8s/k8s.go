@@ -46,6 +46,7 @@ type K8sConfig struct {
 	Timeout   int
 	UseProxy  bool
 	ProxyURL  string
+	NoProxy   string // Comma-separated hosts/CIDRs to bypass proxy
 }
 
 // K8sTool handles Kubernetes API operations
@@ -169,6 +170,7 @@ func (t *K8sTool) getConfig(ctx context.Context, incidentID string, logicalName 
 	if proxySettings != nil && proxySettings.ProxyURL != "" && proxySettings.K8sEnabled {
 		config.UseProxy = true
 		config.ProxyURL = proxySettings.ProxyURL
+		config.NoProxy = proxySettings.NoProxy
 	}
 
 	// Cache the config
@@ -197,8 +199,9 @@ func (t *K8sTool) getCachedProxySettings(ctx context.Context) *database.ProxySet
 	return proxySettings
 }
 
-// doRequest performs an HTTP request to Kubernetes API with rate limiting
-func (t *K8sTool) doRequest(ctx context.Context, config *K8sConfig, method, path string, queryParams url.Values) ([]byte, error) {
+// doRequest performs an HTTP request to Kubernetes API with rate limiting.
+// An optional maxBytes parameter overrides the default 5 MB response size limit.
+func (t *K8sTool) doRequest(ctx context.Context, config *K8sConfig, method, path string, queryParams url.Values, maxBytes ...int) ([]byte, error) {
 	// Validate token before consuming rate limit budget
 	if config.Token == "" {
 		return nil, fmt.Errorf("Kubernetes API token is required but not configured")
@@ -229,7 +232,7 @@ func (t *K8sTool) doRequest(ctx context.Context, config *K8sConfig, method, path
 			t.logger.Printf("Invalid proxy URL: %v, proceeding without proxy", err)
 			transport.Proxy = nil
 		} else {
-			transport.Proxy = http.ProxyURL(proxyURL)
+			transport.Proxy = newNoProxyFunc(proxyURL, config.NoProxy)
 			t.logger.Printf("K8s using proxy: %s", proxyURL.Host)
 		}
 	} else {
@@ -274,12 +277,23 @@ func (t *K8sTool) doRequest(ctx context.Context, config *K8sConfig, method, path
 	}
 	defer resp.Body.Close()
 
-	const maxResponseBytes = 5 * 1024 * 1024 // 5 MB
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	maxResponseBytes := 5 * 1024 * 1024 // 5 MB default
+	skipSizeCheck := false
+	if len(maxBytes) > 0 {
+		if maxBytes[0] < 0 {
+			// Negative value: read up to a safety ceiling but skip size enforcement.
+			// Caller is responsible for checking the size after post-processing.
+			maxResponseBytes = 200 * 1024 * 1024 // 200 MB safety ceiling
+			skipSizeCheck = true
+		} else if maxBytes[0] > 0 {
+			maxResponseBytes = maxBytes[0]
+		}
+	}
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxResponseBytes)+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
-	if len(respBody) > maxResponseBytes {
+	if !skipSizeCheck && len(respBody) > maxResponseBytes {
 		return nil, fmt.Errorf("response exceeds %d MB limit", maxResponseBytes/(1024*1024))
 	}
 
@@ -295,6 +309,28 @@ func (t *K8sTool) doRequest(ctx context.Context, config *K8sConfig, method, path
 }
 
 // buildURL constructs a full URL from base URL, path, and query parameters
+// newNoProxyFunc returns a proxy function that respects the no_proxy bypass list.
+// Hosts in noProxy (comma-separated) are connected to directly without the proxy.
+func newNoProxyFunc(proxyURL *url.URL, noProxy string) func(*http.Request) (*url.URL, error) {
+	if noProxy == "" {
+		return http.ProxyURL(proxyURL)
+	}
+	bypassed := make(map[string]bool)
+	for _, h := range strings.Split(noProxy, ",") {
+		h = strings.TrimSpace(h)
+		if h != "" {
+			bypassed[strings.ToLower(h)] = true
+		}
+	}
+	return func(req *http.Request) (*url.URL, error) {
+		host := req.URL.Hostname()
+		if bypassed[strings.ToLower(host)] {
+			return nil, nil // direct connection
+		}
+		return proxyURL, nil
+	}
+}
+
 func buildURL(baseURL, path string, params url.Values) string {
 	fullURL := baseURL + path
 	if len(params) > 0 {
@@ -340,6 +376,143 @@ func (t *K8sTool) cachedGet(ctx context.Context, incidentID, path string, queryP
 	t.logger.Printf("Response cached for %s (TTL: %v)", path, ttl)
 
 	return respBody, nil
+}
+
+// cachedGetGeneric performs a cached GET for api_request, using a "generic:" cache key prefix
+// to isolate entries from dedicated tool cache entries. Without this separation, api_request's
+// 60s TTL could shadow shorter TTLs (e.g. 15s for events/logs) when the same path is queried
+// through both api_request and a dedicated tool.
+func (t *K8sTool) cachedGetGeneric(ctx context.Context, incidentID, path string, queryParams url.Values, ttl time.Duration, logicalName ...string) ([]byte, error) {
+	cacheKey := "generic:" + responseCacheKey(path, queryParams)
+	if len(logicalName) > 0 && logicalName[0] != "" {
+		cacheKey = fmt.Sprintf("logical:%s:%s", logicalName[0], cacheKey)
+	} else {
+		cacheKey = fmt.Sprintf("incident:%s:%s", incidentID, cacheKey)
+	}
+
+	if cached, ok := t.responseCache.Get(cacheKey); ok {
+		if result, ok := cached.([]byte); ok {
+			t.logger.Printf("Response cache hit for %s (generic)", path)
+			return result, nil
+		}
+	}
+
+	config, err := t.getConfig(ctx, incidentID, logicalName...)
+	if err != nil {
+		return nil, err
+	}
+
+	if config.URL == "" {
+		return nil, fmt.Errorf("Kubernetes API URL not configured")
+	}
+
+	respBody, err := t.doRequest(ctx, config, http.MethodGet, path, queryParams)
+	if err != nil {
+		return nil, err
+	}
+
+	t.responseCache.SetWithTTL(cacheKey, respBody, ttl)
+	t.logger.Printf("Response cached for %s (generic, TTL: %v)", path, ttl)
+
+	return respBody, nil
+}
+
+// cachedGetConfigMaps performs a cached GET for ConfigMap endpoints, stripping data/binaryData
+// before caching to avoid storing sensitive configuration data and to enforce the metadata-only contract.
+func (t *K8sTool) cachedGetConfigMaps(ctx context.Context, incidentID, path string, queryParams url.Values, ttl time.Duration, logicalName ...string) ([]byte, error) {
+	cacheKey := "cm:" + responseCacheKey(path, queryParams)
+	if len(logicalName) > 0 && logicalName[0] != "" {
+		cacheKey = fmt.Sprintf("logical:%s:%s", logicalName[0], cacheKey)
+	} else {
+		cacheKey = fmt.Sprintf("incident:%s:%s", incidentID, cacheKey)
+	}
+
+	// Check response cache (already stripped)
+	if cached, ok := t.responseCache.Get(cacheKey); ok {
+		if result, ok := cached.([]byte); ok {
+			t.logger.Printf("Response cache hit for %s", path)
+			return result, nil
+		}
+	}
+
+	config, err := t.getConfig(ctx, incidentID, logicalName...)
+	if err != nil {
+		return nil, err
+	}
+
+	if config.URL == "" {
+		return nil, fmt.Errorf("Kubernetes API URL not configured")
+	}
+
+	// Use a raised limit (50 MB) for the raw response since ConfigMap data/binaryData
+	// fields will be stripped before caching. The standard 5 MB limit is too small for
+	// the pre-strip payload, but we still cap at 50 MB to prevent memory exhaustion
+	// from extremely large ConfigMap lists.
+	const maxRawConfigMapBytes = 50 * 1024 * 1024 // 50 MB
+	respBody, err := t.doRequest(ctx, config, http.MethodGet, path, queryParams, maxRawConfigMapBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	// Strip data/binaryData BEFORE caching to enforce metadata-only contract
+	stripped := []byte(stripConfigMapData(respBody))
+
+	// Enforce size limit on the stripped (metadata-only) result, not the raw wire payload
+	const maxStrippedBytes = 5 * 1024 * 1024 // 5 MB
+	if len(stripped) > maxStrippedBytes {
+		return nil, fmt.Errorf("ConfigMap metadata response exceeds %d MB limit after stripping data fields", maxStrippedBytes/(1024*1024))
+	}
+
+	t.responseCache.SetWithTTL(cacheKey, stripped, ttl)
+	t.logger.Printf("Response cached for %s (TTL: %v, configmap data stripped)", path, ttl)
+
+	return stripped, nil
+}
+
+// cachedGetConfigMapsGeneric is like cachedGetConfigMaps but uses a "generic:cm:" cache key prefix
+// to isolate api_request entries from dedicated GetConfigMaps entries. Without this separation,
+// a 120s entry from GetConfigMaps (ServiceCacheTTL) could be served to api_request (ResponseCacheTTL=60s).
+func (t *K8sTool) cachedGetConfigMapsGeneric(ctx context.Context, incidentID, path string, queryParams url.Values, ttl time.Duration, logicalName ...string) ([]byte, error) {
+	cacheKey := "generic:cm:" + responseCacheKey(path, queryParams)
+	if len(logicalName) > 0 && logicalName[0] != "" {
+		cacheKey = fmt.Sprintf("logical:%s:%s", logicalName[0], cacheKey)
+	} else {
+		cacheKey = fmt.Sprintf("incident:%s:%s", incidentID, cacheKey)
+	}
+
+	if cached, ok := t.responseCache.Get(cacheKey); ok {
+		if result, ok := cached.([]byte); ok {
+			t.logger.Printf("Response cache hit for %s (generic configmap)", path)
+			return result, nil
+		}
+	}
+
+	config, err := t.getConfig(ctx, incidentID, logicalName...)
+	if err != nil {
+		return nil, err
+	}
+
+	if config.URL == "" {
+		return nil, fmt.Errorf("Kubernetes API URL not configured")
+	}
+
+	const maxRawConfigMapBytes = 50 * 1024 * 1024 // 50 MB
+	respBody, err := t.doRequest(ctx, config, http.MethodGet, path, queryParams, maxRawConfigMapBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	stripped := []byte(stripConfigMapData(respBody))
+
+	const maxStrippedBytes = 5 * 1024 * 1024 // 5 MB
+	if len(stripped) > maxStrippedBytes {
+		return nil, fmt.Errorf("ConfigMap metadata response exceeds %d MB limit after stripping data fields", maxStrippedBytes/(1024*1024))
+	}
+
+	t.responseCache.SetWithTTL(cacheKey, stripped, ttl)
+	t.logger.Printf("Response cached for %s (generic, TTL: %v, configmap data stripped)", path, ttl)
+
+	return stripped, nil
 }
 
 // requireString extracts a required string parameter from args, returning a validation error if missing
@@ -718,13 +891,11 @@ func (t *K8sTool) GetConfigMaps(ctx context.Context, incidentID string, args map
 	addLimitParam(params, args)
 
 	path := fmt.Sprintf("/api/v1/namespaces/%s/configmaps", url.PathEscape(namespace))
-	body, err := t.cachedGet(ctx, incidentID, path, params, ServiceCacheTTL, logicalName)
+	body, err := t.cachedGetConfigMaps(ctx, incidentID, path, params, ServiceCacheTTL, logicalName)
 	if err != nil {
 		return "", err
 	}
-
-	// Strip data fields from configmaps to avoid exposing sensitive configuration
-	return stripConfigMapData(body), nil
+	return string(body), nil
 }
 
 // stripConfigMapData removes the "data" and "binaryData" fields from each configmap in a list response
@@ -752,6 +923,69 @@ func stripConfigMapData(body []byte) string {
 
 	result, _ := json.Marshal(parsed)
 	return string(result)
+}
+
+// dangerousSubresourceParents maps dangerous K8s subresources to the resource types
+// that support them. This allows us to block subresource access while still allowing
+// resources that happen to be named "proxy", "exec", etc.
+var dangerousSubresourceParents = map[string]map[string]bool{
+	"proxy":       {"pods": true, "services": true, "nodes": true},
+	"exec":        {"pods": true},
+	"attach":      {"pods": true},
+	"portforward": {"pods": true},
+}
+
+// detectDangerousSubresource checks if a path accesses a dangerous K8s subresource.
+// Returns the subresource name if blocked, or empty string if allowed.
+// It distinguishes subresources from resources with the same name by checking
+// path structure: /{type}/{name}/{subresource} vs /{type}/{name-that-matches-subresource}
+func detectDangerousSubresource(path string) string {
+	segments := strings.Split(strings.TrimSuffix(path, "/"), "/")
+	for i, seg := range segments {
+		parents, isDangerous := dangerousSubresourceParents[seg]
+		if !isDangerous || i < 2 {
+			continue
+		}
+		// A subresource follows /{type}/{name}/{subresource}
+		// Check if two positions back is a known parent resource type
+		if parents[segments[i-2]] {
+			return seg
+		}
+	}
+	return ""
+}
+
+// isResourceTypePath checks whether a K8s API path targets the given resource type,
+// as opposed to a resource instance that happens to be named the same.
+// K8s API paths follow these patterns:
+//   - /api/v1/namespaces/{ns}/{type}            (namespaced list)
+//   - /api/v1/namespaces/{ns}/{type}/{name}     (namespaced get)
+//   - /api/v1/{type}                             (cluster-scoped list)
+//   - /api/v1/{type}/{name}                      (cluster-scoped get)
+//   - /apis/{group}/{version}/namespaces/{ns}/{type}[/{name}]
+//
+// The resource type always appears immediately after "namespaces/{ns}" for namespaced
+// resources, or immediately after the API version for cluster-scoped resources.
+// A segment appearing elsewhere (e.g., as a resource name) is not a resource type.
+func isResourceTypePath(path, resourceType string) bool {
+	segments := strings.Split(strings.TrimSuffix(path, "/"), "/")
+	// Find resource type position: immediately after "namespaces/{ns}" or after version segment
+	for i, seg := range segments {
+		if seg == "namespaces" && i+2 < len(segments) {
+			// Namespaced: type is at i+2, name (if any) at i+3
+			return segments[i+2] == resourceType
+		}
+	}
+	// Cluster-scoped: /api/v1/{type}[/{name}] or /apis/{group}/{version}/{type}[/{name}]
+	// For /api/v1/..., type is at index 3
+	// For /apis/{group}/{version}/..., type is at index 4
+	if len(segments) >= 4 && segments[1] == "api" {
+		return segments[3] == resourceType
+	}
+	if len(segments) >= 5 && segments[1] == "apis" {
+		return segments[4] == resourceType
+	}
+	return false
 }
 
 // GetIngresses lists ingresses in a namespace with optional selectors
@@ -809,22 +1043,28 @@ func (t *K8sTool) APIRequest(ctx context.Context, incidentID string, args map[st
 
 	path = decodedPath
 
+	// Normalize duplicate slashes to prevent segment-position bypass.
+	// E.g., "/api/v1/namespaces/default//secrets/db-creds" would produce empty
+	// segments that shift positions, evading isResourceTypePath checks.
+	for strings.Contains(path, "//") {
+		path = strings.ReplaceAll(path, "//", "/")
+	}
+
 	// Validate path starts with /api or /apis for safety
 	if path != "/api" && path != "/apis" && !strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/apis/") {
 		return "", fmt.Errorf("path must start with /api/ or /apis/ (got %q)", path)
 	}
 
-	// Block secrets paths to prevent credential exfiltration
-	isSecretsPath := strings.HasSuffix(path, "/secrets") || strings.Contains(path, "/secrets/")
-	if isSecretsPath {
+	// Block secrets paths to prevent credential exfiltration.
+	// Use segment-aware check to avoid false positives on resources named "secrets"
+	// (e.g., /api/v1/namespaces/default/services/secrets is a service, not a secret).
+	if isResourceTypePath(path, "secrets") {
 		return "", fmt.Errorf("access to secrets is not allowed for security reasons")
 	}
 
-	// Block dangerous subresource paths
-	for _, sub := range []string{"/proxy", "/exec", "/attach", "/portforward"} {
-		if strings.HasSuffix(path, sub) || strings.Contains(path, sub+"/") {
-			return "", fmt.Errorf("access to %s subresource is not allowed for security reasons", sub[1:])
-		}
+	// Block dangerous subresource paths (but not resources named after them)
+	if sub := detectDangerousSubresource(path); sub != "" {
+		return "", fmt.Errorf("access to %s subresource is not allowed for security reasons", sub)
 	}
 
 	// Block streaming parameters to prevent long-polling requests
@@ -853,16 +1093,21 @@ func (t *K8sTool) APIRequest(ctx context.Context, incidentID string, args map[st
 		}
 	}
 
-	// Apply ConfigMap data stripping when fetching configmap paths via generic API
-	isConfigMapPath := strings.HasSuffix(path, "/configmaps") || strings.Contains(path, "/configmaps/")
-
-	body, err := t.cachedGet(ctx, incidentID, path, params, ResponseCacheTTL, logicalName)
-	if err != nil {
-		return "", err
+	// Use metadata-only caching for ConfigMap paths to avoid storing sensitive data.
+	// Use segment-aware check to avoid false positives on resources named "configmaps".
+	// Use "generic:" prefix to isolate from dedicated GetConfigMaps cache (which uses
+	// ServiceCacheTTL=120s vs ResponseCacheTTL=60s here).
+	if isResourceTypePath(path, "configmaps") {
+		body, err := t.cachedGetConfigMapsGeneric(ctx, incidentID, path, params, ResponseCacheTTL, logicalName)
+		if err != nil {
+			return "", err
+		}
+		return string(body), nil
 	}
 
-	if isConfigMapPath {
-		return stripConfigMapData(body), nil
+	body, err := t.cachedGetGeneric(ctx, incidentID, path, params, ResponseCacheTTL, logicalName)
+	if err != nil {
+		return "", err
 	}
 	return string(body), nil
 }

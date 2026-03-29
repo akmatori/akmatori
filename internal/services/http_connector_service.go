@@ -12,7 +12,7 @@ import (
 var reservedToolNamespaces = []string{
 	"ssh", "zabbix", "victoria_metrics", "catchpoint",
 	"postgresql", "grafana", "pagerduty", "clickhouse",
-	"netbox", "kubernetes",
+	"netbox", "kubernetes", "qmd",
 }
 
 // isReservedToolNamespace checks if a name conflicts with a built-in tool namespace.
