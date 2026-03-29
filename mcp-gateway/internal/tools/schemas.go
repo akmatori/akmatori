@@ -1068,7 +1068,7 @@ func getK8sSchema() ToolTypeSchema {
 			{
 				Name:        "get_namespaces",
 				Description: "List all namespaces in the cluster",
-				Parameters:  "label_selector, limit",
+				Parameters:  "label_selector, field_selector, limit",
 				Returns:     "JSON array of namespace objects",
 			},
 			// Pods
@@ -1142,7 +1142,7 @@ func getK8sSchema() ToolTypeSchema {
 			{
 				Name:        "get_nodes",
 				Description: "List nodes with conditions and allocatable resources",
-				Parameters:  "label_selector, limit",
+				Parameters:  "label_selector, field_selector, limit",
 				Returns:     "JSON array of node objects",
 			},
 			{
@@ -1155,21 +1155,21 @@ func getK8sSchema() ToolTypeSchema {
 			{
 				Name:        "get_services",
 				Description: "List services in a namespace",
-				Parameters:  "namespace (required), label_selector, limit",
+				Parameters:  "namespace (required), label_selector, field_selector, limit",
 				Returns:     "JSON array of service objects",
 			},
 			// ConfigMaps
 			{
 				Name:        "get_configmaps",
 				Description: "List configmaps in a namespace (names and metadata only, not data contents)",
-				Parameters:  "namespace (required), label_selector, limit",
+				Parameters:  "namespace (required), label_selector, field_selector, limit",
 				Returns:     "JSON array of configmap metadata objects",
 			},
 			// Ingresses
 			{
 				Name:        "get_ingresses",
 				Description: "List ingresses in a namespace",
-				Parameters:  "namespace (required), label_selector, limit",
+				Parameters:  "namespace (required), label_selector, field_selector, limit",
 				Returns:     "JSON array of ingress objects",
 			},
 			// Generic
