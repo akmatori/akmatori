@@ -4200,6 +4200,10 @@ func (r *Registry) registerK8sTools() {
 						Type:        "string",
 						Description: "Label selector to filter services",
 					},
+					"field_selector": {
+						Type:        "string",
+						Description: "Field selector to filter services (e.g. 'metadata.name=my-svc')",
+					},
 					"limit": {
 						Type:        "number",
 						Description: "Maximum number of results to return",
@@ -4229,6 +4233,10 @@ func (r *Registry) registerK8sTools() {
 						Type:        "string",
 						Description: "Label selector to filter configmaps",
 					},
+					"field_selector": {
+						Type:        "string",
+						Description: "Field selector to filter configmaps (e.g. 'metadata.name=my-cm')",
+					},
 					"limit": {
 						Type:        "number",
 						Description: "Maximum number of results to return",
@@ -4257,6 +4265,10 @@ func (r *Registry) registerK8sTools() {
 					"label_selector": {
 						Type:        "string",
 						Description: "Label selector to filter ingresses",
+					},
+					"field_selector": {
+						Type:        "string",
+						Description: "Field selector to filter ingresses (e.g. 'metadata.name=my-ingress')",
 					},
 					"limit": {
 						Type:        "number",

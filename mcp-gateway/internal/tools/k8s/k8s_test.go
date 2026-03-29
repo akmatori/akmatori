@@ -440,19 +440,18 @@ func TestDoRequest_SSLVerifyDisabled(t *testing.T) {
 }
 
 func TestDoRequest_ProxyToggle(t *testing.T) {
-	// Verify proxy URL is set on transport when UseProxy is true
-	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Test proxy disabled: request goes directly to the target server
+	directServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{"items":[]}`)
 	}))
-	defer proxyServer.Close()
+	defer directServer.Close()
 
 	tool := NewK8sTool(testLogger(), nil)
 	defer tool.Stop()
 
-	// With proxy disabled, the proxy server should NOT receive the request
 	config := &K8sConfig{
-		URL:      proxyServer.URL,
+		URL:      directServer.URL,
 		Token:    "test-token",
 		Timeout:  5,
 		UseProxy: false,
@@ -462,6 +461,32 @@ func TestDoRequest_ProxyToggle(t *testing.T) {
 	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/api/v1/namespaces", nil)
 	if err != nil {
 		t.Fatalf("unexpected error with proxy disabled: %v", err)
+	}
+
+	// Test proxy enabled: verify proxy URL is configured on the transport
+	proxyHit := &atomic.Int32{}
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxyHit.Add(1)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	}))
+	defer proxyServer.Close()
+
+	configWithProxy := &K8sConfig{
+		URL:      proxyServer.URL, // target same server for simplicity
+		Token:    "test-token",
+		Timeout:  5,
+		UseProxy: true,
+		ProxyURL: proxyServer.URL,
+	}
+
+	_, err = tool.doRequest(context.Background(), configWithProxy, http.MethodGet, "/api/v1/namespaces", nil)
+	if err != nil {
+		t.Fatalf("unexpected error with proxy enabled: %v", err)
+	}
+
+	if got := proxyHit.Load(); got == 0 {
+		t.Error("expected proxy server to receive request when UseProxy is true")
 	}
 }
 
@@ -499,7 +524,7 @@ func TestCachedGet_CachesResponse(t *testing.T) {
 }
 
 func TestCachedGet_LogicalNameIsolation(t *testing.T) {
-	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+	tool, _, counter := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{"items":[]}`)
 	})
@@ -522,10 +547,15 @@ func TestCachedGet_LogicalNameIsolation(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Call with logical name
+	// Call with logical name - should NOT be served from the first call's cache
 	_, err = tool.cachedGet(ctx, "test-incident", "/api/v1/namespaces", nil, NSCacheTTL, "prod-k8s")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify both calls hit the server (different cache keys)
+	if got := counter.Load(); got != 2 {
+		t.Errorf("expected 2 server requests (isolated cache keys), got %d", got)
 	}
 }
 
