@@ -1620,3 +1620,110 @@ func TestAddPaginationParams_NilArgs(t *testing.T) {
 		t.Errorf("expected no params for nil args, got %v", params)
 	}
 }
+
+func TestAPIRequest_ArrayQueryParams(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		tags := r.URL.Query()["tag"]
+		if len(tags) != 2 || tags[0] != "web" || tags[1] != "production" {
+			t.Errorf("expected tag=[web, production], got %v", tags)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"results":[]}`)
+	})
+
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/api/dcim/devices/",
+		"query_params": map[string]interface{}{
+			"tag": []interface{}{"web", "production"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAPIRequest_ArrayQueryParamsNumericAndBool(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		ids := r.URL.Query()["id"]
+		if len(ids) != 2 || ids[0] != "1" || ids[1] != "2" {
+			t.Errorf("expected id=[1, 2], got %v", ids)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"results":[]}`)
+	})
+
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/api/dcim/devices/",
+		"query_params": map[string]interface{}{
+			"id": []interface{}{float64(1), float64(2)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAPIRequest_UnsupportedQueryParamType(t *testing.T) {
+	tool := NewNetBoxTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/api/dcim/devices/",
+		"query_params": map[string]interface{}{
+			"bad": map[string]interface{}{"nested": "object"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for unsupported query param type")
+	}
+	if !strings.Contains(err.Error(), "unsupported type") {
+		t.Errorf("expected unsupported type error, got: %v", err)
+	}
+}
+
+func TestAPIRequest_UnsupportedArrayElementType(t *testing.T) {
+	tool := NewNetBoxTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/api/dcim/devices/",
+		"query_params": map[string]interface{}{
+			"tag": []interface{}{map[string]interface{}{"nested": "bad"}},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for unsupported array element type")
+	}
+	if !strings.Contains(err.Error(), "unsupported type in query_params array") {
+		t.Errorf("expected array type error, got: %v", err)
+	}
+}
+
+func TestAPIRequest_BareApiPath(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/" {
+			t.Errorf("expected /api/, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"dcim-url": "/api/dcim/"}`)
+	})
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"bare api", "api"},
+		{"slash api", "/api"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+				"path": tt.path,
+			})
+			if err != nil {
+				t.Fatalf("unexpected error for path %q: %v", tt.path, err)
+			}
+		})
+	}
+}

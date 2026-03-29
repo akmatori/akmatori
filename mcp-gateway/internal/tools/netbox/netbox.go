@@ -647,7 +647,12 @@ func (t *NetBoxTool) APIRequest(ctx context.Context, incidentID string, args map
 	// Ensure path starts with /api/
 	if !strings.HasPrefix(path, "/api/") {
 		path = strings.TrimLeft(path, "/")
-		path = strings.TrimPrefix(path, "api/")
+		// Strip "api/" or bare "api" prefix to avoid double "/api/api/"
+		if path == "api" {
+			path = ""
+		} else {
+			path = strings.TrimPrefix(path, "api/")
+		}
 		path = "/api/" + path
 	}
 
@@ -694,6 +699,21 @@ func (t *NetBoxTool) APIRequest(ctx context.Context, incidentID string, args map
 				params.Set(k, fmt.Sprintf("%d", int(sv)))
 			case bool:
 				params.Set(k, fmt.Sprintf("%t", sv))
+			case []interface{}:
+				for _, elem := range sv {
+					switch ev := elem.(type) {
+					case string:
+						params.Add(k, ev)
+					case float64:
+						params.Add(k, fmt.Sprintf("%d", int(ev)))
+					case bool:
+						params.Add(k, fmt.Sprintf("%t", ev))
+					default:
+						return "", fmt.Errorf("unsupported type in query_params array for key %q", k)
+					}
+				}
+			default:
+				return "", fmt.Errorf("unsupported type for query_params key %q: must be string, number, bool, or array", k)
 			}
 		}
 	}
