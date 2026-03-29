@@ -1044,7 +1044,6 @@ func getK8sSchema() ToolTypeSchema {
 				"k8s_ca_cert": {
 					Type:        "string",
 					Description: "PEM-encoded CA certificate for the Kubernetes API server",
-					Secret:      true,
 					Format:      "textarea",
 					Advanced:    true,
 				},

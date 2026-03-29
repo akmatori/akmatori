@@ -2437,6 +2437,7 @@ func TestAPIRequest_SecretsBlocked(t *testing.T) {
 		name string
 		path string
 	}{
+		{"cluster-wide secrets list", "/api/v1/secrets"},
 		{"secrets list", "/api/v1/namespaces/default/secrets"},
 		{"secrets get", "/api/v1/namespaces/default/secrets/my-secret"},
 	}
