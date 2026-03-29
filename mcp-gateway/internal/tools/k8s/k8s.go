@@ -363,3 +363,136 @@ func addLimitParam(params url.Values, args map[string]interface{}) {
 		params.Set("limit", fmt.Sprintf("%d", limit))
 	}
 }
+
+// GetNamespaces lists all namespaces in the cluster
+func (t *K8sTool) GetNamespaces(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	params := url.Values{}
+	addSelectorParams(params, args)
+	addLimitParam(params, args)
+
+	body, err := t.cachedGet(ctx, incidentID, "/api/v1/namespaces", params, NSCacheTTL, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// GetPods lists pods in a namespace with optional selectors
+func (t *K8sTool) GetPods(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	namespace, err := requireString(args, "namespace")
+	if err != nil {
+		return "", err
+	}
+
+	// If a specific pod name is given, redirect to detail endpoint
+	if name := optionalString(args, "name"); name != "" {
+		path := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s", url.PathEscape(namespace), url.PathEscape(name))
+		body, err := t.cachedGet(ctx, incidentID, path, nil, PodCacheTTL, logicalName)
+		if err != nil {
+			return "", err
+		}
+		return string(body), nil
+	}
+
+	params := url.Values{}
+	addSelectorParams(params, args)
+	addLimitParam(params, args)
+
+	path := fmt.Sprintf("/api/v1/namespaces/%s/pods", url.PathEscape(namespace))
+	body, err := t.cachedGet(ctx, incidentID, path, params, PodCacheTTL, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// GetPodDetail retrieves detailed information about a specific pod
+func (t *K8sTool) GetPodDetail(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	namespace, err := requireString(args, "namespace")
+	if err != nil {
+		return "", err
+	}
+	name, err := requireString(args, "name")
+	if err != nil {
+		return "", err
+	}
+
+	path := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s", url.PathEscape(namespace), url.PathEscape(name))
+	body, err := t.cachedGet(ctx, incidentID, path, nil, PodCacheTTL, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// GetPodLogs retrieves logs from a specific pod container
+func (t *K8sTool) GetPodLogs(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	namespace, err := requireString(args, "namespace")
+	if err != nil {
+		return "", err
+	}
+	name, err := requireString(args, "name")
+	if err != nil {
+		return "", err
+	}
+
+	params := url.Values{}
+
+	if container := optionalString(args, "container"); container != "" {
+		params.Set("container", container)
+	}
+
+	// tail_lines defaults to 100
+	tailLines := 100
+	if v, ok := args["tail_lines"].(float64); ok && v > 0 {
+		tailLines = int(v)
+		if tailLines > 10000 {
+			tailLines = 10000
+		}
+	}
+	params.Set("tailLines", fmt.Sprintf("%d", tailLines))
+
+	if v, ok := args["since_seconds"].(float64); ok && v > 0 {
+		params.Set("sinceSeconds", fmt.Sprintf("%d", int(v)))
+	}
+
+	if v, ok := args["previous"].(bool); ok && v {
+		params.Set("previous", "true")
+	}
+
+	path := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/log", url.PathEscape(namespace), url.PathEscape(name))
+	body, err := t.cachedGet(ctx, incidentID, path, params, LogCacheTTL, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// GetEvents lists events in a namespace
+func (t *K8sTool) GetEvents(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	namespace, err := requireString(args, "namespace")
+	if err != nil {
+		return "", err
+	}
+
+	params := url.Values{}
+	addSelectorParams(params, args)
+	addLimitParam(params, args)
+
+	path := fmt.Sprintf("/api/v1/namespaces/%s/events", url.PathEscape(namespace))
+	body, err := t.cachedGet(ctx, incidentID, path, params, EventCacheTTL, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
