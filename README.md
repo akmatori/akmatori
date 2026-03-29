@@ -20,9 +20,9 @@ Akmatori is an AI-powered AIOps agent that integrates with monitoring systems an
 
 | Provider | Models |
 |----------|--------|
-| **OpenAI** | GPT-4o, GPT-4 Turbo, o1, o3 |
-| **Anthropic** | Claude 3.5 Sonnet, Claude 3 Opus |
-| **Google** | Gemini 2.0, Gemini 1.5 Pro |
+| **OpenAI** | GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex, o4-mini |
+| **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 |
+| **Google** | Gemini 2.5 Pro, 2.5 Flash, 2.0 Flash |
 | **OpenRouter** | Access to 100+ models |
 | **Custom/On-Prem** | GLM, Kimi, Minimax, Mistral, LLaMA, etc. |
 
