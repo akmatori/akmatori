@@ -58,13 +58,13 @@ Add a read-only Kubernetes tool type to the MCP Gateway, following the NetBox pa
 - Create: `mcp-gateway/internal/tools/k8s/k8s.go`
 - Create: `mcp-gateway/internal/tools/k8s/k8s_test.go`
 
-- [ ] Create `k8s` package with `K8sTool` struct containing: logger, configCache (5min TTL), responseCache (default 60s TTL), rateLimiter
-- [ ] Implement `NewK8sTool(logger, limiter)` constructor and `Stop()` cleanup
-- [ ] Implement `getConfig(ctx, incidentID, args)` — resolve credentials from DB via `database.ResolveToolCredentials`, apply proxy settings, cache result
-- [ ] Implement `cachedGet(ctx, config, path, params, ttl)` — HTTP GET with Bearer token auth, TLS config, proxy support, response caching, rate limiting, 5MB response limit
-- [ ] Implement helper: `buildURL(baseURL, path, params)` for query string construction
-- [ ] Write tests: config caching, cache hits/misses, rate limiting wait, proxy toggle, TLS verify toggle, error responses (401, 403, 404, 500), response size limit
-- [ ] Run `make test-mcp` — must pass
+- [x] Create `k8s` package with `K8sTool` struct containing: logger, configCache (5min TTL), responseCache (default 60s TTL), rateLimiter
+- [x] Implement `NewK8sTool(logger, limiter)` constructor and `Stop()` cleanup
+- [x] Implement `getConfig(ctx, incidentID, args)` — resolve credentials from DB via `database.ResolveToolCredentials`, apply proxy settings, cache result
+- [x] Implement `cachedGet(ctx, config, path, params, ttl)` — HTTP GET with Bearer token auth, TLS config, proxy support, response caching, rate limiting, 5MB response limit
+- [x] Implement helper: `buildURL(baseURL, path, params)` for query string construction
+- [x] Write tests: config caching, cache hits/misses, rate limiting wait, proxy toggle, TLS verify toggle, error responses (401, 403, 404, 500), response size limit
+- [x] Run `make test-mcp` — must pass
 
 ### Task 3: Namespace, Pod, and Log Methods
 
