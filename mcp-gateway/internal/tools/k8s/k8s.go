@@ -632,3 +632,157 @@ func (t *K8sTool) GetCronJobs(ctx context.Context, incidentID string, args map[s
 	}
 	return string(body), nil
 }
+
+// GetNodes lists nodes in the cluster with optional selectors
+func (t *K8sTool) GetNodes(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	params := url.Values{}
+	addSelectorParams(params, args)
+	addLimitParam(params, args)
+
+	body, err := t.cachedGet(ctx, incidentID, "/api/v1/nodes", params, NodeCacheTTL, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// GetNodeDetail retrieves detailed information about a specific node
+func (t *K8sTool) GetNodeDetail(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	name, err := requireString(args, "name")
+	if err != nil {
+		return "", err
+	}
+
+	path := fmt.Sprintf("/api/v1/nodes/%s", url.PathEscape(name))
+	body, err := t.cachedGet(ctx, incidentID, path, nil, NodeCacheTTL, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// GetServices lists services in a namespace with optional selectors
+func (t *K8sTool) GetServices(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	namespace, err := requireString(args, "namespace")
+	if err != nil {
+		return "", err
+	}
+
+	params := url.Values{}
+	addSelectorParams(params, args)
+	addLimitParam(params, args)
+
+	path := fmt.Sprintf("/api/v1/namespaces/%s/services", url.PathEscape(namespace))
+	body, err := t.cachedGet(ctx, incidentID, path, params, ServiceCacheTTL, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// GetConfigMaps lists configmaps in a namespace (names/metadata only, no data)
+func (t *K8sTool) GetConfigMaps(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	namespace, err := requireString(args, "namespace")
+	if err != nil {
+		return "", err
+	}
+
+	params := url.Values{}
+	addSelectorParams(params, args)
+	addLimitParam(params, args)
+
+	path := fmt.Sprintf("/api/v1/namespaces/%s/configmaps", url.PathEscape(namespace))
+	body, err := t.cachedGet(ctx, incidentID, path, params, ServiceCacheTTL, logicalName)
+	if err != nil {
+		return "", err
+	}
+
+	// Strip data fields from configmaps to avoid exposing sensitive configuration
+	return stripConfigMapData(body), nil
+}
+
+// stripConfigMapData removes the "data" and "binaryData" fields from each configmap in a list response
+func stripConfigMapData(body []byte) string {
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return string(body) // Return raw if not valid JSON
+	}
+
+	items, ok := parsed["items"].([]interface{})
+	if !ok {
+		// Single item response
+		delete(parsed, "data")
+		delete(parsed, "binaryData")
+		result, _ := json.Marshal(parsed)
+		return string(result)
+	}
+
+	for _, item := range items {
+		if m, ok := item.(map[string]interface{}); ok {
+			delete(m, "data")
+			delete(m, "binaryData")
+		}
+	}
+
+	result, _ := json.Marshal(parsed)
+	return string(result)
+}
+
+// GetIngresses lists ingresses in a namespace with optional selectors
+func (t *K8sTool) GetIngresses(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	namespace, err := requireString(args, "namespace")
+	if err != nil {
+		return "", err
+	}
+
+	params := url.Values{}
+	addSelectorParams(params, args)
+	addLimitParam(params, args)
+
+	path := fmt.Sprintf("/apis/networking.k8s.io/v1/namespaces/%s/ingresses", url.PathEscape(namespace))
+	body, err := t.cachedGet(ctx, incidentID, path, params, ServiceCacheTTL, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+// APIRequest performs a generic GET request to any Kubernetes API endpoint
+func (t *K8sTool) APIRequest(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	path, err := requireString(args, "path")
+	if err != nil {
+		return "", err
+	}
+
+	// Validate path starts with /api or /apis for safety
+	if !strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/apis/") {
+		return "", fmt.Errorf("path must start with /api/ or /apis/ (got %q)", path)
+	}
+
+	params := url.Values{}
+	if p, ok := args["params"].(map[string]interface{}); ok {
+		for k, v := range p {
+			if s, ok := v.(string); ok {
+				params.Set(k, s)
+			}
+		}
+	}
+
+	body, err := t.cachedGet(ctx, incidentID, path, params, ResponseCacheTTL, logicalName)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
