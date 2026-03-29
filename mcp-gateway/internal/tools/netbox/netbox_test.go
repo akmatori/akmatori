@@ -1498,6 +1498,105 @@ func TestAPIRequest_CustomQueryParams(t *testing.T) {
 	}
 }
 
+func TestAPIRequest_PathTraversal(t *testing.T) {
+	tool := NewNetBoxTool(testLogger(), nil)
+	defer tool.Stop()
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"dotdot in middle", "/api/../../admin/"},
+		{"dotdot without api prefix", "../../etc/passwd"},
+		{"dotdot after api", "/api/dcim/../../../admin"},
+		{"dotdot with trailing content", "/api/../../../etc/passwd"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+				"path": tt.path,
+			})
+			if err == nil {
+				t.Fatal("expected error for path traversal attempt")
+			}
+			if !strings.Contains(err.Error(), "..") && !strings.Contains(err.Error(), "invalid path") {
+				t.Errorf("expected path traversal error, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestAPIRequest_RejectsQueryStringInPath(t *testing.T) {
+	tool := NewNetBoxTool(testLogger(), nil)
+	defer tool.Stop()
+
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/api/dcim/devices/?name=test",
+	})
+	if err == nil {
+		t.Fatal("expected error for query string in path")
+	}
+	if !strings.Contains(err.Error(), "query string") {
+		t.Errorf("expected query string error, got: %v", err)
+	}
+}
+
+func TestAPIRequest_NumericQueryParams(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("vid") != "100" {
+			t.Errorf("expected vid=100, got %q", r.URL.Query().Get("vid"))
+		}
+		if r.URL.Query().Get("enabled") != "true" {
+			t.Errorf("expected enabled=true, got %q", r.URL.Query().Get("enabled"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"results":[]}`)
+	})
+
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/api/ipam/vlans/",
+		"query_params": map[string]interface{}{
+			"vid":     float64(100),
+			"enabled": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAPIRequest_CircuitsCacheTTL(t *testing.T) {
+	callCount := &atomic.Int32{}
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		callCount.Add(1)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"results":[]}`)
+	})
+
+	ctx := context.Background()
+
+	// First call hits server
+	_, err := tool.APIRequest(ctx, "test-incident", map[string]interface{}{
+		"path": "/api/circuits/circuits/",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Second call should hit cache
+	_, err = tool.APIRequest(ctx, "test-incident", map[string]interface{}{
+		"path": "/api/circuits/circuits/",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if callCount.Load() != 1 {
+		t.Errorf("expected 1 server call (second should be cached), got %d", callCount.Load())
+	}
+}
+
 func TestAddSearchParams_NilArgs(t *testing.T) {
 	params := url.Values{}
 	addSearchParams(params, nil, "name", "site")
