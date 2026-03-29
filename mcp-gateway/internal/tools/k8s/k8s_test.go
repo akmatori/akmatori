@@ -2090,6 +2090,37 @@ func TestAPIRequest_WatchBlocked(t *testing.T) {
 	}
 }
 
+func TestAPIRequest_FollowBlocked(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("request should not reach server for follow requests")
+		w.WriteHeader(http.StatusOK)
+	})
+
+	tests := []struct {
+		name   string
+		params map[string]interface{}
+	}{
+		{"follow string true", map[string]interface{}{"follow": "true"}},
+		{"follow bool true", map[string]interface{}{"follow": true}},
+		{"follow string false", map[string]interface{}{"follow": "false"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+				"path":   "/api/v1/namespaces/default/pods/my-pod/log",
+				"params": tt.params,
+			})
+			if err == nil {
+				t.Fatal("expected error for follow parameter")
+			}
+			if !strings.Contains(err.Error(), "follow") {
+				t.Errorf("expected follow error, got: %v", err)
+			}
+		})
+	}
+}
+
 func TestAPIRequest_SecretsBlocked(t *testing.T) {
 	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
 		t.Error("request should not reach server for secrets paths")
