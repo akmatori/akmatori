@@ -115,13 +115,13 @@ Add a read-only Kubernetes tool type to the MCP Gateway, following the NetBox pa
 **Files:**
 - Modify: `mcp-gateway/internal/tools/registry.go`
 
-- [ ] Add import for `k8s` package
-- [ ] Add constants: `K8sRatePerSecond = 10`, `K8sBurstCapacity = 20`
-- [ ] Add fields to Registry struct: `k8sTool *k8s.K8sTool`, `k8sLimit *ratelimit.Limiter`
-- [ ] In `RegisterAllTools()`: create rate limiter, call `r.registerK8sTools()`
-- [ ] In `Stop()`: add `r.k8sTool.Stop()` cleanup
-- [ ] Implement `registerK8sTools()` — register all 17 tool methods with MCP Tool definitions (name, description, inputSchema with properties and required fields), wire each to the corresponding K8sTool method
-- [ ] Run `make test-mcp` — must pass
+- [x] Add import for `k8s` package
+- [x] Add constants: `K8sRatePerSecond = 10`, `K8sBurstCapacity = 20`
+- [x] Add fields to Registry struct: `k8sTool *k8s.K8sTool`, `k8sLimit *ratelimit.Limiter`
+- [x] In `RegisterAllTools()`: create rate limiter, call `r.registerK8sTools()`
+- [x] In `Stop()`: add `r.k8sTool.Stop()` cleanup
+- [x] Implement `registerK8sTools()` — register all 17 tool methods with MCP Tool definitions (name, description, inputSchema with properties and required fields), wire each to the corresponding K8sTool method
+- [x] Run `make test-mcp` — must pass
 
 ### Task 7: Verify Acceptance Criteria
 
