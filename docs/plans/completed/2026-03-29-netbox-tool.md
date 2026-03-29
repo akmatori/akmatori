@@ -88,7 +88,7 @@ NetBox is a CMDB (mostly static data), so longer TTLs are appropriate:
 - [x] Add `NetBoxEnabled bool` field to `ProxySettings` struct in `db.go` (with `gorm:"default:false"` tag)
 - [x] Add `getNetBoxSchema()` function in `schemas.go` with settings: `netbox_url` (required), `netbox_api_token` (required, secret), `netbox_verify_ssl` (advanced, default true), `netbox_timeout` (advanced, default 30)
 - [x] Register `"netbox": getNetBoxSchema()` in `GetToolSchemas()`
-- [x] Add all 21 tool functions to the schema's `Functions` slice
+- [x] Add all 19 tool functions to the schema's `Functions` slice
 - [x] Run `make test-mcp` - must pass before task 2
 
 ### Task 2: Core NetBox Tool Implementation
@@ -161,7 +161,7 @@ NetBox is a CMDB (mostly static data), so longer TTLs are appropriate:
 - [x] Add `netboxTool *netbox.NetBoxTool` and `netboxLimit *ratelimit.Limiter` fields to Registry struct
 - [x] Add `r.netboxLimit = ratelimit.New(...)` and `r.registerNetBoxTools()` in `RegisterAllTools()`
 - [x] Add `r.netboxTool.Stop()` in the registry `Stop()` method
-- [x] Implement `registerNetBoxTools()` - register all 21 tools with proper InputSchema definitions
+- [x] Implement `registerNetBoxTools()` - register all 19 tools with proper InputSchema definitions
 - [x] Run `make test-mcp` - must pass before task 7
 
 ### Task 7: Verify Acceptance Criteria

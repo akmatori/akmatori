@@ -442,8 +442,8 @@ func TestAddSearchParams(t *testing.T) {
 	if params.Get("empty") != "" {
 		t.Error("empty string should not be set")
 	}
-	if params.Get("number") != "" {
-		t.Error("non-string value should not be set")
+	if params.Get("number") != "42" {
+		t.Errorf("expected number=42, got %q", params.Get("number"))
 	}
 	if params.Get("missing") != "" {
 		t.Error("missing key should not be set")
@@ -1392,16 +1392,15 @@ func TestDoRequest_WithProxy(t *testing.T) {
 	})
 
 	config := getTestConfig(tool)
-	// Set proxy to a non-existent address; this tests the proxy code path.
-	// The request still succeeds via the test server because Go's httptest server
-	// uses the direct transport for loopback. We just verify no panic or crash.
+	// Set proxy to a non-routable address to exercise the proxy code path.
+	// The request should fail because the proxy is unreachable.
 	config.UseProxy = true
-	config.ProxyURL = "http://127.0.0.1:19999" // non-routable proxy
+	config.ProxyURL = "http://127.0.0.1:19999"
 
-	// The request will fail due to bad proxy, which exercises the proxy path
 	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/api/dcim/devices/", nil)
-	// Either success (unlikely) or error is fine; we're testing the proxy code path executes
-	_ = err
+	if err == nil {
+		t.Fatal("expected error when using unreachable proxy")
+	}
 }
 
 func TestDoRequest_WithInvalidProxyURL(t *testing.T) {
