@@ -174,6 +174,6 @@ NetBox is a CMDB (mostly static data), so longer TTLs are appropriate:
 
 ### Task 8: Update Documentation
 
-- [ ] Update CLAUDE.md: add NetBox to the tool list in "Implementation Reference" section
-- [ ] Update CLAUDE.md: add NetBox patterns note alongside Catchpoint/PagerDuty patterns
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update CLAUDE.md: add NetBox to the tool list in "Implementation Reference" section
+- [x] Update CLAUDE.md: add NetBox patterns note alongside Catchpoint/PagerDuty patterns
+- [x] Move this plan to `docs/plans/completed/`

@@ -622,6 +622,17 @@ PagerDuty is a first-class MCP tool type following the Catchpoint pattern with t
 - Events API v2 (`send_event`) posts to `https://events.pagerduty.com/v2/enqueue` with separate `routing_key`
 - Honor proxy settings only when `ProxySettings.PagerDutyEnabled` is true
 
+### NetBox Patterns
+
+NetBox is a read-only CMDB tool type following the Catchpoint/PagerDuty pattern with token auth, caching, and rate limiting.
+
+- Tool namespace: `netbox.*`
+- Auth: API token via `Authorization: Token <api_token>` header
+- All endpoints are read-only GET requests using `cachedGet(...)` with 60-120s TTL (CMDB data is mostly static)
+- Modules: DCIM (devices, interfaces, sites, racks, cables, device types), IPAM (IPs, prefixes, VLANs, VRFs), Circuits, Virtualization (VMs, clusters, VM interfaces), Tenancy (tenants, tenant groups)
+- Generic `api_request` method allows querying any NetBox API endpoint
+- Honor proxy settings only when `ProxySettings.NetBoxEnabled` is true
+
 ### Implementation Reference
 
 - `mcp-gateway/internal/cache/cache.go` - Generic TTL cache with background cleanup
@@ -633,6 +644,7 @@ PagerDuty is a first-class MCP tool type following the Catchpoint pattern with t
 - `mcp-gateway/internal/tools/grafana/` - Grafana integration with caching and rate limiting (dashboards, alerting, data source proxy, annotations)
 - `mcp-gateway/internal/tools/catchpoint/` - Catchpoint synthetic monitoring integration with caching and rate limiting
 - `mcp-gateway/internal/tools/pagerduty/` - PagerDuty integration with caching and rate limiting (incidents, services, on-call, events)
+- `mcp-gateway/internal/tools/netbox/` - NetBox CMDB integration with caching and rate limiting (DCIM, IPAM, circuits, virtualization, tenancy)
 - `mcp-gateway/internal/tools/httpconnector/` - Declarative HTTP connector executor with auth injection
 - `mcp-gateway/internal/mcpproxy/` - Connection pool and proxy handler for external MCP servers
 - `mcp-gateway/internal/auth/` - Per-incident tool authorization (allowlist enforcement)
