@@ -825,14 +825,21 @@ func (t *K8sTool) APIRequest(ctx context.Context, incidentID string, args map[st
 	params := url.Values{}
 	if p, ok := args["params"].(map[string]interface{}); ok {
 		for k, v := range p {
-			if s, ok := v.(string); ok {
-				params.Set(k, s)
+			switch sv := v.(type) {
+			case string:
+				params.Set(k, sv)
+			case float64:
+				params.Set(k, fmt.Sprintf("%v", sv))
+			case bool:
+				params.Set(k, fmt.Sprintf("%t", sv))
+			default:
+				params.Set(k, fmt.Sprintf("%v", v))
 			}
 		}
 	}
 
 	// Apply ConfigMap data stripping when fetching configmap paths via generic API
-	isConfigMapPath := strings.Contains(path, "/configmaps")
+	isConfigMapPath := strings.HasSuffix(path, "/configmaps") || strings.Contains(path, "/configmaps/")
 
 	body, err := t.cachedGet(ctx, incidentID, path, params, ResponseCacheTTL, logicalName)
 	if err != nil {

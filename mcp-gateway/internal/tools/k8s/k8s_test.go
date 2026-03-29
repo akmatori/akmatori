@@ -1449,6 +1449,24 @@ func TestGetDaemonSets_WithLabelSelector(t *testing.T) {
 	}
 }
 
+func TestGetDaemonSets_WithLimit(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("limit") != "15" {
+			t.Errorf("expected limit=15, got %q", r.URL.Query().Get("limit"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+
+	_, err := tool.GetDaemonSets(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "kube-system",
+		"limit":     float64(15),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // --- GetJobs tests ---
 
 func TestGetJobs_Success(t *testing.T) {
