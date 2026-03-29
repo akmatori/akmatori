@@ -3736,8 +3736,8 @@ func (r *Registry) registerNetBoxTools() {
 						Description: "API path (e.g. 'dcim/power-feeds/' or 'ipam/aggregates/'). The /api/ prefix is added automatically.",
 					},
 					"query_params": {
-						Type:        "string",
-						Description: "Optional query parameters as JSON object string (e.g. '{\"status\":\"active\",\"limit\":\"50\"}')",
+						Type:        "object",
+						Description: "Optional query parameters as key-value pairs (e.g. {\"status\": \"active\", \"limit\": \"50\"})",
 					},
 				},
 				Required: []string{"path"},
