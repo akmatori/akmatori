@@ -648,12 +648,48 @@ func TestGetIPAddresses(t *testing.T) {
 		if r.URL.Path != "/api/ipam/ip-addresses/" {
 			t.Errorf("expected path /api/ipam/ip-addresses/, got %s", r.URL.Path)
 		}
+		if r.URL.Query().Get("address") != "10.0.0.1" {
+			t.Errorf("expected address=10.0.0.1, got %q", r.URL.Query().Get("address"))
+		}
+		if r.URL.Query().Get("vrf") != "production" {
+			t.Errorf("expected vrf=production, got %q", r.URL.Query().Get("vrf"))
+		}
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"results":[]}`)
+		fmt.Fprint(w, `{"count":1,"results":[{"id":1,"address":"10.0.0.1/24"}]}`)
+	})
+
+	result, err := tool.GetIPAddresses(context.Background(), "test-incident", map[string]interface{}{
+		"address": "10.0.0.1",
+		"vrf":     "production",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "10.0.0.1") {
+		t.Error("expected result to contain IP address")
+	}
+}
+
+func TestGetIPAddresses_AllFilters(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		for _, param := range []string{"address", "device", "interface", "vrf", "tenant", "status", "q"} {
+			if q.Get(param) == "" {
+				t.Errorf("expected param %s to be set", param)
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"count":0,"results":[]}`)
 	})
 
 	_, err := tool.GetIPAddresses(context.Background(), "test-incident", map[string]interface{}{
-		"address": "10.0.0.1",
+		"address":   "10.0.0.1",
+		"device":    "web-01",
+		"interface": "eth0",
+		"vrf":       "production",
+		"tenant":    "acme",
+		"status":    "active",
+		"q":         "search",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -665,12 +701,48 @@ func TestGetPrefixes(t *testing.T) {
 		if r.URL.Path != "/api/ipam/prefixes/" {
 			t.Errorf("expected path /api/ipam/prefixes/, got %s", r.URL.Path)
 		}
+		if r.URL.Query().Get("prefix") != "10.0.0.0/24" {
+			t.Errorf("expected prefix=10.0.0.0/24, got %q", r.URL.Query().Get("prefix"))
+		}
+		if r.URL.Query().Get("site") != "dc1" {
+			t.Errorf("expected site=dc1, got %q", r.URL.Query().Get("site"))
+		}
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"results":[]}`)
+		fmt.Fprint(w, `{"count":1,"results":[{"id":1,"prefix":"10.0.0.0/24"}]}`)
+	})
+
+	result, err := tool.GetPrefixes(context.Background(), "test-incident", map[string]interface{}{
+		"prefix": "10.0.0.0/24",
+		"site":   "dc1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "10.0.0.0/24") {
+		t.Error("expected result to contain prefix")
+	}
+}
+
+func TestGetPrefixes_AllFilters(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		for _, param := range []string{"prefix", "site", "vrf", "vlan", "tenant", "status", "q"} {
+			if q.Get(param) == "" {
+				t.Errorf("expected param %s to be set", param)
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"count":0,"results":[]}`)
 	})
 
 	_, err := tool.GetPrefixes(context.Background(), "test-incident", map[string]interface{}{
 		"prefix": "10.0.0.0/24",
+		"site":   "dc1",
+		"vrf":    "production",
+		"vlan":   "100",
+		"tenant": "acme",
+		"status": "active",
+		"q":      "search",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -682,12 +754,47 @@ func TestGetVLANs(t *testing.T) {
 		if r.URL.Path != "/api/ipam/vlans/" {
 			t.Errorf("expected path /api/ipam/vlans/, got %s", r.URL.Path)
 		}
+		if r.URL.Query().Get("vid") != "100" {
+			t.Errorf("expected vid=100, got %q", r.URL.Query().Get("vid"))
+		}
+		if r.URL.Query().Get("name") != "mgmt" {
+			t.Errorf("expected name=mgmt, got %q", r.URL.Query().Get("name"))
+		}
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"results":[]}`)
+		fmt.Fprint(w, `{"count":1,"results":[{"id":1,"vid":100,"name":"mgmt"}]}`)
+	})
+
+	result, err := tool.GetVLANs(context.Background(), "test-incident", map[string]interface{}{
+		"vid":  "100",
+		"name": "mgmt",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "mgmt") {
+		t.Error("expected result to contain VLAN name")
+	}
+}
+
+func TestGetVLANs_AllFilters(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		for _, param := range []string{"vid", "name", "site", "group", "tenant", "q"} {
+			if q.Get(param) == "" {
+				t.Errorf("expected param %s to be set", param)
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"count":0,"results":[]}`)
 	})
 
 	_, err := tool.GetVLANs(context.Background(), "test-incident", map[string]interface{}{
-		"vid": "100",
+		"vid":    "100",
+		"name":   "mgmt",
+		"site":   "dc1",
+		"group":  "core",
+		"tenant": "acme",
+		"q":      "search",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -699,12 +806,66 @@ func TestGetVRFs(t *testing.T) {
 		if r.URL.Path != "/api/ipam/vrfs/" {
 			t.Errorf("expected path /api/ipam/vrfs/, got %s", r.URL.Path)
 		}
+		if r.URL.Query().Get("name") != "production" {
+			t.Errorf("expected name=production, got %q", r.URL.Query().Get("name"))
+		}
+		if r.URL.Query().Get("tenant") != "acme" {
+			t.Errorf("expected tenant=acme, got %q", r.URL.Query().Get("tenant"))
+		}
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"results":[]}`)
+		fmt.Fprint(w, `{"count":1,"results":[{"id":1,"name":"production","rd":"65000:100"}]}`)
+	})
+
+	result, err := tool.GetVRFs(context.Background(), "test-incident", map[string]interface{}{
+		"name":   "production",
+		"tenant": "acme",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "production") {
+		t.Error("expected result to contain VRF name")
+	}
+}
+
+func TestGetVRFs_AllFilters(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		for _, param := range []string{"name", "tenant", "q"} {
+			if q.Get(param) == "" {
+				t.Errorf("expected param %s to be set", param)
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"count":0,"results":[]}`)
 	})
 
 	_, err := tool.GetVRFs(context.Background(), "test-incident", map[string]interface{}{
-		"name": "production",
+		"name":   "production",
+		"tenant": "acme",
+		"q":      "search",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetIPAddresses_WithPagination(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("limit") != "50" {
+			t.Errorf("expected limit=50, got %q", q.Get("limit"))
+		}
+		if q.Get("offset") != "100" {
+			t.Errorf("expected offset=100, got %q", q.Get("offset"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"count":200,"results":[]}`)
+	})
+
+	_, err := tool.GetIPAddresses(context.Background(), "test-incident", map[string]interface{}{
+		"limit":  float64(50),
+		"offset": float64(100),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

@@ -129,12 +129,12 @@ NetBox is a CMDB (mostly static data), so longer TTLs are appropriate:
 **Files:**
 - Modify: `mcp-gateway/internal/tools/netbox/netbox.go`
 
-- [ ] Implement `GetIPAddresses()` - list with filters (address, device, interface, vrf, tenant, status, q)
-- [ ] Implement `GetPrefixes()` - list with filters (prefix, site, vrf, vlan, tenant, status, q)
-- [ ] Implement `GetVLANs()` - list with filters (vid, name, site, group, tenant, q)
-- [ ] Implement `GetVRFs()` - list with filters (name, tenant, q)
-- [ ] Write tests for all IPAM methods
-- [ ] Run `make test-mcp` - must pass before task 5
+- [x] Implement `GetIPAddresses()` - list with filters (address, device, interface, vrf, tenant, status, q)
+- [x] Implement `GetPrefixes()` - list with filters (prefix, site, vrf, vlan, tenant, status, q)
+- [x] Implement `GetVLANs()` - list with filters (vid, name, site, group, tenant, q)
+- [x] Implement `GetVRFs()` - list with filters (name, tenant, q)
+- [x] Write tests for all IPAM methods
+- [x] Run `make test-mcp` - must pass before task 5
 
 ### Task 5: Circuits, Virtualization, and Tenancy Tool Methods
 
