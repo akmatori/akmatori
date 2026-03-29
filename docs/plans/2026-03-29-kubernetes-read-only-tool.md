@@ -101,14 +101,14 @@ Add a read-only Kubernetes tool type to the MCP Gateway, following the NetBox pa
 - Modify: `mcp-gateway/internal/tools/k8s/k8s.go`
 - Modify: `mcp-gateway/internal/tools/k8s/k8s_test.go`
 
-- [ ] Implement `GetNodes(ctx, incidentID, args)` — params: label_selector, limit (120s cache)
-- [ ] Implement `GetNodeDetail(ctx, incidentID, args)` — params: name (required) (120s cache)
-- [ ] Implement `GetServices(ctx, incidentID, args)` — params: namespace (required), label_selector, limit (120s cache)
-- [ ] Implement `GetConfigMaps(ctx, incidentID, args)` — params: namespace (required), label_selector, limit — return names/metadata only, NOT data (120s cache)
-- [ ] Implement `GetIngresses(ctx, incidentID, args)` — params: namespace (required), label_selector, limit (120s cache)
-- [ ] Implement `APIRequest(ctx, incidentID, args)` — params: path (required), params (optional map) — generic GET for any K8s API endpoint (60s cache). Validate path starts with `/api` or `/apis`
-- [ ] Write tests for each method, including APIRequest path validation
-- [ ] Run `make test-mcp` — must pass
+- [x] Implement `GetNodes(ctx, incidentID, args)` — params: label_selector, limit (120s cache)
+- [x] Implement `GetNodeDetail(ctx, incidentID, args)` — params: name (required) (120s cache)
+- [x] Implement `GetServices(ctx, incidentID, args)` — params: namespace (required), label_selector, limit (120s cache)
+- [x] Implement `GetConfigMaps(ctx, incidentID, args)` — params: namespace (required), label_selector, limit — return names/metadata only, NOT data (120s cache)
+- [x] Implement `GetIngresses(ctx, incidentID, args)` — params: namespace (required), label_selector, limit (120s cache)
+- [x] Implement `APIRequest(ctx, incidentID, args)` — params: path (required), params (optional map) — generic GET for any K8s API endpoint (60s cache). Validate path starts with `/api` or `/apis`
+- [x] Write tests for each method, including APIRequest path validation
+- [x] Run `make test-mcp` — must pass
 
 ### Task 6: Registry Integration
 

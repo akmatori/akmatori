@@ -1594,3 +1594,453 @@ func TestGetCronJobs_WithLimit(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// --- GetNodes tests ---
+
+func TestGetNodes_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/nodes" {
+			t.Errorf("expected path /api/v1/nodes, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[{"metadata":{"name":"node-1"}},{"metadata":{"name":"node-2"}}]}`)
+	})
+
+	result, err := tool.GetNodes(context.Background(), "test-incident", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "node-1") {
+		t.Error("expected result to contain 'node-1'")
+	}
+	if !strings.Contains(result, "node-2") {
+		t.Error("expected result to contain 'node-2'")
+	}
+}
+
+func TestGetNodes_WithLabelSelector(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("labelSelector") != "role=worker" {
+			t.Errorf("expected labelSelector=role=worker, got %q", r.URL.Query().Get("labelSelector"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+
+	_, err := tool.GetNodes(context.Background(), "test-incident", map[string]interface{}{
+		"label_selector": "role=worker",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetNodes_WithLimit(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("limit") != "5" {
+			t.Errorf("expected limit=5, got %q", r.URL.Query().Get("limit"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+
+	_, err := tool.GetNodes(context.Background(), "test-incident", map[string]interface{}{
+		"limit": float64(5),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- GetNodeDetail tests ---
+
+func TestGetNodeDetail_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/nodes/worker-node-1" {
+			t.Errorf("expected path /api/v1/nodes/worker-node-1, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"metadata":{"name":"worker-node-1"},"status":{"conditions":[{"type":"Ready","status":"True"}]}}`)
+	})
+
+	result, err := tool.GetNodeDetail(context.Background(), "test-incident", map[string]interface{}{
+		"name": "worker-node-1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "worker-node-1") {
+		t.Error("expected result to contain node name")
+	}
+	if !strings.Contains(result, "Ready") {
+		t.Error("expected result to contain condition")
+	}
+}
+
+func TestGetNodeDetail_MissingName(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, err := tool.GetNodeDetail(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing name")
+	}
+	if !strings.Contains(err.Error(), "name is required") {
+		t.Errorf("expected name required error, got: %v", err)
+	}
+}
+
+// --- GetServices tests ---
+
+func TestGetServices_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/namespaces/default/services" {
+			t.Errorf("expected path /api/v1/namespaces/default/services, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[{"metadata":{"name":"my-service"},"spec":{"type":"ClusterIP"}}]}`)
+	})
+
+	result, err := tool.GetServices(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "default",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "my-service") {
+		t.Error("expected result to contain 'my-service'")
+	}
+}
+
+func TestGetServices_MissingNamespace(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, err := tool.GetServices(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing namespace")
+	}
+	if !strings.Contains(err.Error(), "namespace is required") {
+		t.Errorf("expected namespace required error, got: %v", err)
+	}
+}
+
+func TestGetServices_WithSelectors(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("labelSelector") != "app=web" {
+			t.Errorf("expected labelSelector=app=web, got %q", r.URL.Query().Get("labelSelector"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+
+	_, err := tool.GetServices(context.Background(), "test-incident", map[string]interface{}{
+		"namespace":      "default",
+		"label_selector": "app=web",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetServices_WithLimit(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("limit") != "20" {
+			t.Errorf("expected limit=20, got %q", r.URL.Query().Get("limit"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+
+	_, err := tool.GetServices(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "default",
+		"limit":     float64(20),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- GetConfigMaps tests ---
+
+func TestGetConfigMaps_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/namespaces/default/configmaps" {
+			t.Errorf("expected path /api/v1/namespaces/default/configmaps, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[{"metadata":{"name":"my-config"},"data":{"key1":"value1","key2":"value2"}}]}`)
+	})
+
+	result, err := tool.GetConfigMaps(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "default",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "my-config") {
+		t.Error("expected result to contain 'my-config'")
+	}
+	// Data should be stripped
+	if strings.Contains(result, "value1") {
+		t.Error("expected data values to be stripped from configmap response")
+	}
+}
+
+func TestGetConfigMaps_StripsDataAndBinaryData(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[{"metadata":{"name":"cm-1"},"data":{"secret":"password"},"binaryData":{"cert":"base64data"}}]}`)
+	})
+
+	result, err := tool.GetConfigMaps(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "default",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "password") {
+		t.Error("expected data to be stripped")
+	}
+	if strings.Contains(result, "base64data") {
+		t.Error("expected binaryData to be stripped")
+	}
+	if !strings.Contains(result, "cm-1") {
+		t.Error("expected metadata to be preserved")
+	}
+}
+
+func TestGetConfigMaps_MissingNamespace(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, err := tool.GetConfigMaps(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing namespace")
+	}
+	if !strings.Contains(err.Error(), "namespace is required") {
+		t.Errorf("expected namespace required error, got: %v", err)
+	}
+}
+
+func TestGetConfigMaps_WithLabelSelector(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("labelSelector") != "app=web" {
+			t.Errorf("expected labelSelector=app=web, got %q", r.URL.Query().Get("labelSelector"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+
+	_, err := tool.GetConfigMaps(context.Background(), "test-incident", map[string]interface{}{
+		"namespace":      "default",
+		"label_selector": "app=web",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- GetIngresses tests ---
+
+func TestGetIngresses_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/apis/networking.k8s.io/v1/namespaces/default/ingresses" {
+			t.Errorf("expected ingress path, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[{"metadata":{"name":"my-ingress"},"spec":{"rules":[{"host":"example.com"}]}}]}`)
+	})
+
+	result, err := tool.GetIngresses(context.Background(), "test-incident", map[string]interface{}{
+		"namespace": "default",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "my-ingress") {
+		t.Error("expected result to contain 'my-ingress'")
+	}
+	if !strings.Contains(result, "example.com") {
+		t.Error("expected result to contain host")
+	}
+}
+
+func TestGetIngresses_MissingNamespace(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, err := tool.GetIngresses(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing namespace")
+	}
+	if !strings.Contains(err.Error(), "namespace is required") {
+		t.Errorf("expected namespace required error, got: %v", err)
+	}
+}
+
+func TestGetIngresses_WithSelectors(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("labelSelector") != "tier=frontend" {
+			t.Errorf("expected labelSelector=tier=frontend, got %q", r.URL.Query().Get("labelSelector"))
+		}
+		if r.URL.Query().Get("limit") != "10" {
+			t.Errorf("expected limit=10, got %q", r.URL.Query().Get("limit"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+
+	_, err := tool.GetIngresses(context.Background(), "test-incident", map[string]interface{}{
+		"namespace":      "default",
+		"label_selector": "tier=frontend",
+		"limit":          float64(10),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- APIRequest tests ---
+
+func TestAPIRequest_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/componentstatuses" {
+			t.Errorf("expected path /api/v1/componentstatuses, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[{"metadata":{"name":"scheduler"}}]}`)
+	})
+
+	result, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/api/v1/componentstatuses",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "scheduler") {
+		t.Error("expected result to contain 'scheduler'")
+	}
+}
+
+func TestAPIRequest_WithParams(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("labelSelector") != "app=web" {
+			t.Errorf("expected labelSelector=app=web, got %q", r.URL.Query().Get("labelSelector"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/api/v1/pods",
+		"params": map[string]interface{}{
+			"labelSelector": "app=web",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAPIRequest_ApisPath(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/apis/apps/v1/deployments" {
+			t.Errorf("expected path /apis/apps/v1/deployments, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"items":[]}`)
+	})
+
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/apis/apps/v1/deployments",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAPIRequest_InvalidPath(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"root", "/"},
+		{"healthz", "/healthz"},
+		{"random", "/foo/bar"},
+		{"no leading slash", "api/v1/pods"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+				"path": tt.path,
+			})
+			if err == nil {
+				t.Fatal("expected error for invalid path")
+			}
+			if !strings.Contains(err.Error(), "must start with /api/ or /apis/") {
+				t.Errorf("expected path validation error, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestAPIRequest_MissingPath(t *testing.T) {
+	tool, _, _ := newTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing path")
+	}
+	if !strings.Contains(err.Error(), "path is required") {
+		t.Errorf("expected path required error, got: %v", err)
+	}
+}
+
+// --- stripConfigMapData tests ---
+
+func TestStripConfigMapData_List(t *testing.T) {
+	input := []byte(`{"items":[{"metadata":{"name":"cm-1"},"data":{"key":"val"},"binaryData":{"b":"data"}}]}`)
+	result := stripConfigMapData(input)
+
+	if strings.Contains(result, `"data"`) {
+		t.Error("expected data field to be stripped")
+	}
+	if strings.Contains(result, `"binaryData"`) {
+		t.Error("expected binaryData field to be stripped")
+	}
+	if !strings.Contains(result, "cm-1") {
+		t.Error("expected metadata to be preserved")
+	}
+}
+
+func TestStripConfigMapData_InvalidJSON(t *testing.T) {
+	input := []byte(`not json`)
+	result := stripConfigMapData(input)
+	if result != "not json" {
+		t.Errorf("expected raw input returned for invalid JSON, got %q", result)
+	}
+}
+
+func TestStripConfigMapData_SingleItem(t *testing.T) {
+	input := []byte(`{"metadata":{"name":"cm-1"},"data":{"key":"val"}}`)
+	result := stripConfigMapData(input)
+
+	if strings.Contains(result, `"val"`) {
+		t.Error("expected data field to be stripped from single item")
+	}
+	if !strings.Contains(result, "cm-1") {
+		t.Error("expected metadata to be preserved")
+	}
+}
