@@ -96,18 +96,18 @@ NetBox is a CMDB (mostly static data), so longer TTLs are appropriate:
 **Files:**
 - Create: `mcp-gateway/internal/tools/netbox/netbox.go`
 
-- [ ] Define `NetBoxConfig` struct (URL, APIToken, VerifySSL, Timeout, UseProxy, ProxyURL)
-- [ ] Define `NetBoxTool` struct with logger, configCache (5min), responseCache (60sec), rateLimiter
-- [ ] Implement `NewNetBoxTool(logger, limiter)` constructor
-- [ ] Implement `Stop()` method for cache cleanup
-- [ ] Implement `getConfig()` with credential resolution, proxy support, and caching
-- [ ] Implement `getCachedProxySettings()` with NetBoxEnabled check
-- [ ] Implement `doRequest()` with rate limiting, proxy, TLS, auth (`Token` header), and 5MB response limit
-- [ ] Implement `cachedGet()` wrapper with response caching and TTL support
-- [ ] Implement helper: `addPaginationParams()` (limit, offset)
-- [ ] Implement helper: `addSearchParams()` for common NetBox filters (q, name, tag, tenant, site, region, role)
-- [ ] Write basic constructor and config tests
-- [ ] Run `make test-mcp` - must pass before task 3
+- [x] Define `NetBoxConfig` struct (URL, APIToken, VerifySSL, Timeout, UseProxy, ProxyURL)
+- [x] Define `NetBoxTool` struct with logger, configCache (5min), responseCache (60sec), rateLimiter
+- [x] Implement `NewNetBoxTool(logger, limiter)` constructor
+- [x] Implement `Stop()` method for cache cleanup
+- [x] Implement `getConfig()` with credential resolution, proxy support, and caching
+- [x] Implement `getCachedProxySettings()` with NetBoxEnabled check
+- [x] Implement `doRequest()` with rate limiting, proxy, TLS, auth (`Token` header), and 5MB response limit
+- [x] Implement `cachedGet()` wrapper with response caching and TTL support
+- [x] Implement helper: `addPaginationParams()` (limit, offset)
+- [x] Implement helper: `addSearchParams()` for common NetBox filters (q, name, tag, tenant, site, region, role)
+- [x] Write basic constructor and config tests
+- [x] Run `make test-mcp` - must pass before task 3
 
 ### Task 3: DCIM Tool Methods
 
