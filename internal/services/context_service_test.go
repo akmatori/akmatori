@@ -5,6 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/akmatori/akmatori/internal/database"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 // --- Context Service Validation Tests ---
@@ -387,5 +391,100 @@ func TestValidateFilename_BoundaryLength(t *testing.T) {
 	err = s.ValidateFilename(name256)
 	if err == nil {
 		t.Error("256 char filename should be rejected")
+	}
+}
+
+func setupContextServiceTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	if err := db.AutoMigrate(&database.ContextFile{}); err != nil {
+		t.Fatalf("migrate context_files: %v", err)
+	}
+	database.DB = db
+	return db
+}
+
+func TestContextService_ParseReferences_DeduplicatesMixedFormats(t *testing.T) {
+	setupContextServiceTestDB(t)
+	tmpDir := t.TempDir()
+	s := &ContextService{db: database.DB, contextDir: tmpDir}
+
+	text := strings.Join([]string{
+		"See [[guide.md]] and [[guide.md]] again.",
+		"Asset form [diagram](assets/diagram.png) should also work.",
+		"Repeated asset [diagram copy](assets/diagram.png) should be deduplicated.",
+		"Whitespace [[  notes.txt  ]] should be trimmed.",
+	}, " ")
+
+	got := s.ParseReferences(text)
+	want := []string{"guide.md", "notes.txt", "diagram.png"}
+	if len(got) != len(want) {
+		t.Fatalf("ParseReferences() len = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ParseReferences()[%d] = %q, want %q (full=%v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestContextService_ValidateResolveAndCopyReferences(t *testing.T) {
+	setupContextServiceTestDB(t)
+	tmpDir := t.TempDir()
+	s := &ContextService{db: database.DB, contextDir: tmpDir}
+
+	for _, name := range []string{"guide.md", "diagram.png"} {
+		path := filepath.Join(tmpDir, name)
+		if err := os.WriteFile(path, []byte("content for "+name), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		if err := database.DB.Create(&database.ContextFile{Filename: name, OriginalName: name, MimeType: "text/plain", Size: 1}).Error; err != nil {
+			t.Fatalf("seed context file %s: %v", name, err)
+		}
+	}
+
+	text := "Use [[guide.md]], [diagram](assets/diagram.png), and [[missing.txt]]."
+	valid, missing, found := s.ValidateReferences(text)
+	if valid {
+		t.Fatal("ValidateReferences() valid = true, want false when one file is missing")
+	}
+	if strings.Join(found, ",") != "guide.md,diagram.png" {
+		t.Fatalf("ValidateReferences() found = %v, want [guide.md diagram.png]", found)
+	}
+	if strings.Join(missing, ",") != "missing.txt" {
+		t.Fatalf("ValidateReferences() missing = %v, want [missing.txt]", missing)
+	}
+
+	resolved := s.ResolveReferences(text)
+	if !strings.Contains(resolved, "./context/guide.md") || !strings.Contains(resolved, "./context/missing.txt") {
+		t.Fatalf("ResolveReferences() = %q, want ./context replacements", resolved)
+	}
+
+	markdown := s.ResolveReferencesToMarkdownLinks("See [[guide.md]]")
+	if markdown != "See [guide.md](assets/guide.md)" {
+		t.Fatalf("ResolveReferencesToMarkdownLinks() = %q", markdown)
+	}
+
+	targetDir := t.TempDir()
+	if err := s.CopyReferencedFilesToDir(text, targetDir); err != nil {
+		t.Fatalf("CopyReferencedFilesToDir() error = %v", err)
+	}
+
+	for _, name := range []string{"guide.md", "diagram.png"} {
+		linkPath := filepath.Join(targetDir, "context", name)
+		info, err := os.Lstat(linkPath)
+		if err != nil {
+			t.Fatalf("expected symlink for %s: %v", name, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("%s was not created as symlink", linkPath)
+		}
+	}
+
+	if _, err := os.Lstat(filepath.Join(targetDir, "context", "missing.txt")); !os.IsNotExist(err) {
+		t.Fatalf("missing reference should be skipped, got err=%v", err)
 	}
 }
