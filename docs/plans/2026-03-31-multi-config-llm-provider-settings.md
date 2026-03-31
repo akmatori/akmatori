@@ -55,20 +55,20 @@ Allow multiple LLM configurations per provider type (e.g., two OpenAI setups wit
 - Modify: `internal/handlers/api_settings_llm.go`
 - Modify: `internal/handlers/routes.go` (if routes are defined here)
 
-- [ ] Add `CreateLLMSettingsRequest` struct with fields: Provider (required), Name (required), APIKey, Model, ThinkingLevel, BaseURL
-- [ ] Update `UpdateLLMSettingsRequest` to include optional Name field
-- [ ] Refactor handler to support new REST endpoints:
+- [x] Add `CreateLLMSettingsRequest` struct with fields: Provider (required), Name (required), APIKey, Model, ThinkingLevel, BaseURL
+- [x] Update `UpdateLLMSettingsRequest` to include optional Name field
+- [x] Refactor handler to support new REST endpoints:
   - `GET /api/settings/llm` - list all configs (returns array of configs + which ID is active)
   - `POST /api/settings/llm` - create new config (validates name uniqueness, provider validity)
   - `GET /api/settings/llm/{id}` - get single config
   - `PUT /api/settings/llm/{id}` - update config (partial update, validate name uniqueness if changed)
   - `DELETE /api/settings/llm/{id}` - delete config (reject if active, reject if it is the last config)
   - `PUT /api/settings/llm/{id}/activate` - set config as globally active
-- [ ] GET list response format: `{"configs": [...], "active_id": 3}` where each config includes id, name, provider, model, thinking_level, base_url, is_configured, masked api_key, enabled, created_at, updated_at
-- [ ] Maintain backward compatibility: keep existing `GET /api/settings/llm` working but with new response shape
-- [ ] API key masking on all responses (same as current)
-- [ ] Write handler tests covering: list, create, update, delete, activate, validation errors, name conflicts
-- [ ] Run `make test`
+- [x] GET list response format: `{"configs": [...], "active_id": 3}` where each config includes id, name, provider, model, thinking_level, base_url, is_configured, masked api_key, enabled, created_at, updated_at
+- [x] Maintain backward compatibility: keep existing `GET /api/settings/llm` working but with new response shape
+- [x] API key masking on all responses (same as current)
+- [x] Write handler tests covering: list, create, update, delete, activate, validation errors, name conflicts
+- [x] Run `make test`
 
 ### Task 3: Update incident LLM settings resolution
 
