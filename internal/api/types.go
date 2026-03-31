@@ -95,9 +95,19 @@ type UpdateSlackSettingsRequest struct {
 	Enabled       *bool   `json:"enabled"`
 }
 
-// UpdateLLMSettingsRequest is the request body for PUT /api/settings/llm.
+// CreateLLMSettingsRequest is the request body for POST /api/settings/llm.
+type CreateLLMSettingsRequest struct {
+	Provider      string `json:"provider" validate:"required"`
+	Name          string `json:"name" validate:"required,min=1,max=100"`
+	APIKey        string `json:"api_key"`
+	Model         string `json:"model"`
+	ThinkingLevel string `json:"thinking_level"`
+	BaseURL       string `json:"base_url"`
+}
+
+// UpdateLLMSettingsRequest is the request body for PUT /api/settings/llm/{id}.
 type UpdateLLMSettingsRequest struct {
-	Provider      *string `json:"provider"`
+	Name          *string `json:"name"`
 	APIKey        *string `json:"api_key"`
 	Model         *string `json:"model"`
 	ThinkingLevel *string `json:"thinking_level"`
