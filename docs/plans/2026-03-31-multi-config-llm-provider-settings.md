@@ -101,13 +101,13 @@ Allow multiple LLM configurations per provider type (e.g., two OpenAI setups wit
 
 ### Task 5: Verify acceptance criteria
 
-- [ ] Run full test suite: `make verify`
-- [ ] Run linter: `golangci-lint run`
-- [ ] Multiple configs per provider can be created via API
-- [ ] Only one config is globally active at a time
-- [ ] Switching active config works and is reflected in new incidents
-- [ ] Deleting the active config is prevented
-- [ ] Frontend shows all configs and allows CRUD + switching
+- [x] Run full test suite: `make verify`
+- [x] Run linter: `golangci-lint run` (not installed; go vet passed via make verify)
+- [x] Multiple configs per provider can be created via API
+- [x] Only one config is globally active at a time
+- [x] Switching active config works and is reflected in new incidents
+- [x] Deleting the active config is prevented
+- [x] Frontend shows all configs and allows CRUD + switching
 
 ### Task 6: Update documentation
 
