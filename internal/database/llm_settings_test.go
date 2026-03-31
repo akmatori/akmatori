@@ -224,9 +224,21 @@ func TestMigrateLLMSettingsName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open test database: %v", err)
 	}
-	if err := db.AutoMigrate(&LLMSettings{}); err != nil {
-		t.Fatalf("failed to migrate: %v", err)
-	}
+	// Create table WITHOUT unique index on name to simulate pre-migration state
+	// (pre-migration rows can have duplicate empty names)
+	db.Exec(`CREATE TABLE llm_settings (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name VARCHAR(100) NOT NULL DEFAULT '',
+		provider VARCHAR(50) NOT NULL,
+		api_key TEXT,
+		model VARCHAR(100),
+		thinking_level VARCHAR(50) DEFAULT 'medium',
+		base_url TEXT,
+		enabled BOOLEAN DEFAULT 0,
+		active BOOLEAN DEFAULT 0,
+		created_at DATETIME,
+		updated_at DATETIME
+	)`)
 
 	// Insert rows with empty names (simulating pre-migration state)
 	db.Exec("INSERT INTO llm_settings (name, provider, model, thinking_level, active) VALUES ('', 'openai', 'gpt-4', 'medium', 1)")

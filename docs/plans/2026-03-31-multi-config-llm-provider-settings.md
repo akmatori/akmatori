@@ -75,10 +75,10 @@ Allow multiple LLM configurations per provider type (e.g., two OpenAI setups wit
 **Files:**
 - Modify: `internal/handlers/api_incidents.go`
 
-- [ ] Verify `GetLLMSettings()` still works correctly for incident creation (it should - it returns the active row regardless of provider)
-- [ ] Verify `BuildLLMSettingsForWorker()` still works (no changes expected - it reads from the active config)
-- [ ] Write/update tests to confirm incident creation works when active config is any provider with any name
-- [ ] Run `make test`
+- [x] Verify `GetLLMSettings()` still works correctly for incident creation (it should - it returns the active row regardless of provider)
+- [x] Verify `BuildLLMSettingsForWorker()` still works (no changes expected - it reads from the active config)
+- [x] Write/update tests to confirm incident creation works when active config is any provider with any name
+- [x] Run `make test`
 
 ### Task 4: Update frontend UI
 
