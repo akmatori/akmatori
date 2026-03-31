@@ -134,6 +134,12 @@ func runMigrations(db *gorm.DB) error {
 		return err
 	}
 
+	// Populate Name for existing LLM settings rows that have an empty Name.
+	// This handles the migration from uniqueIndex-on-provider to uniqueIndex-on-name.
+	if err := migrateLLMSettingsName(db); err != nil {
+		return err
+	}
+
 	slog.Info("database migrations completed successfully")
 	return nil
 }
@@ -155,6 +161,25 @@ func migrateOpenAIToLLMEnabled(db *gorm.DB) error {
 		slog.Info("migrated proxy_settings: open_ai_enabled → llm_enabled")
 		return nil
 	})
+}
+
+// migrateLLMSettingsName populates the Name field for existing LLM settings rows
+// that have an empty name (from before the multi-config migration).
+func migrateLLMSettingsName(db *gorm.DB) error {
+	var rows []LLMSettings
+	if err := db.Where("name = '' OR name IS NULL").Find(&rows).Error; err != nil {
+		return fmt.Errorf("query llm_settings with empty name: %w", err)
+	}
+	for _, row := range rows {
+		name := ProviderDisplayName(row.Provider)
+		if err := db.Model(&LLMSettings{}).Where("id = ?", row.ID).Update("name", name).Error; err != nil {
+			return fmt.Errorf("set name for llm_settings id=%d: %w", row.ID, err)
+		}
+	}
+	if len(rows) > 0 {
+		slog.Info("migrated llm_settings: populated Name field", "count", len(rows))
+	}
+	return nil
 }
 
 // InitializeDefaults creates default records if they don't exist
@@ -226,6 +251,7 @@ func seedLLMProviders() error {
 
 	for _, p := range ValidLLMProviders() {
 		row := &LLMSettings{
+			Name:          ProviderDisplayName(p),
 			Provider:      p,
 			Model:         defaultModelsPerProvider[p],
 			ThinkingLevel: ThinkingLevelMedium,
@@ -361,10 +387,10 @@ func GetLLMSettings() (*LLMSettings, error) {
 	return &settings, nil
 }
 
-// GetAllLLMSettings returns all provider settings (one row per provider).
+// GetAllLLMSettings returns all LLM configurations ordered by provider then name.
 func GetAllLLMSettings() ([]LLMSettings, error) {
 	var settings []LLMSettings
-	if err := DB.Order("id asc").Find(&settings).Error; err != nil {
+	if err := DB.Order("provider asc, name asc").Find(&settings).Error; err != nil {
 		return nil, err
 	}
 	return settings, nil
@@ -392,6 +418,49 @@ func SetActiveLLMProvider(provider LLMProvider) error {
 // UpdateLLMSettings updates LLM settings in the database
 func UpdateLLMSettings(settings *LLMSettings) error {
 	return DB.Model(&LLMSettings{}).Where("id = ?", settings.ID).Updates(settings).Error
+}
+
+// GetLLMSettingsByID returns LLM settings for a specific config by ID.
+func GetLLMSettingsByID(id uint) (*LLMSettings, error) {
+	var settings LLMSettings
+	if err := DB.First(&settings, id).Error; err != nil {
+		return nil, err
+	}
+	return &settings, nil
+}
+
+// SetActiveLLMConfig deactivates all LLM configs and activates the one with the given ID.
+func SetActiveLLMConfig(id uint) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&LLMSettings{}).Where("active = ?", true).Update("active", false).Error; err != nil {
+			return err
+		}
+		result := tx.Model(&LLMSettings{}).Where("id = ?", id).Update("active", true)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("LLM config with id %d not found", id)
+		}
+		return nil
+	})
+}
+
+// CreateLLMSettings creates a new LLM settings configuration.
+func CreateLLMSettings(settings *LLMSettings) error {
+	return DB.Create(settings).Error
+}
+
+// DeleteLLMSettings deletes an LLM config by ID. Returns an error if it is the active config.
+func DeleteLLMSettings(id uint) error {
+	var settings LLMSettings
+	if err := DB.First(&settings, id).Error; err != nil {
+		return fmt.Errorf("LLM config with id %d not found", id)
+	}
+	if settings.Active {
+		return fmt.Errorf("cannot delete the active LLM configuration")
+	}
+	return DB.Delete(&LLMSettings{}, id).Error
 }
 
 // GetDB returns the database instance

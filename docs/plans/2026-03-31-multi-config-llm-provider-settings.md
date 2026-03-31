@@ -34,19 +34,19 @@ Allow multiple LLM configurations per provider type (e.g., two OpenAI setups wit
 - Modify: `internal/database/models_settings.go`
 - Modify: `internal/database/db.go`
 
-- [ ] Remove `uniqueIndex` from Provider field on LLMSettings, replace with regular index
-- [ ] Add `Name` field (varchar 100, not null) with uniqueIndex to LLMSettings model
-- [ ] Update `seedLLMProviders()` to set Name from provider display name (e.g., "OpenAI", "Anthropic") for initial seed rows
-- [ ] Add migration logic in `AutoMigrate` to populate Name for existing rows that have empty Name (set Name = titlecase of Provider value)
-- [ ] Replace `GetLLMSettingsByProvider(provider)` with `GetLLMSettingsByID(id uint)` function
-- [ ] Update `GetAllLLMSettings()` to order by provider, then name
-- [ ] Replace `SetActiveLLMProvider(provider)` with `SetActiveLLMConfig(id uint)` that deactivates all rows and activates the row with given ID
-- [ ] Add `DeleteLLMSettings(id uint)` that prevents deleting the active config
-- [ ] Add `CreateLLMSettings(settings *LLMSettings)` function
-- [ ] Update `GetLLMSettings()` (active config fetcher) - no structural changes needed, it already returns the active row
-- [ ] Update LLMSettingsBuilder in `internal/testhelpers/builders.go` to include Name field
-- [ ] Write tests for new DB operations (create, delete, activate by ID, name uniqueness)
-- [ ] Run `make test`
+- [x] Remove `uniqueIndex` from Provider field on LLMSettings, replace with regular index
+- [x] Add `Name` field (varchar 100, not null) with uniqueIndex to LLMSettings model
+- [x] Update `seedLLMProviders()` to set Name from provider display name (e.g., "OpenAI", "Anthropic") for initial seed rows
+- [x] Add migration logic in `AutoMigrate` to populate Name for existing rows that have empty Name (set Name = titlecase of Provider value)
+- [x] Replace `GetLLMSettingsByProvider(provider)` with `GetLLMSettingsByID(id uint)` function
+- [x] Update `GetAllLLMSettings()` to order by provider, then name
+- [x] Replace `SetActiveLLMProvider(provider)` with `SetActiveLLMConfig(id uint)` that deactivates all rows and activates the row with given ID
+- [x] Add `DeleteLLMSettings(id uint)` that prevents deleting the active config
+- [x] Add `CreateLLMSettings(settings *LLMSettings)` function
+- [x] Update `GetLLMSettings()` (active config fetcher) - no structural changes needed, it already returns the active row
+- [x] Update LLMSettingsBuilder in `internal/testhelpers/builders.go` to include Name field
+- [x] Write tests for new DB operations (create, delete, activate by ID, name uniqueness)
+- [x] Run `make test`
 
 ### Task 2: Update API types and handler
 
