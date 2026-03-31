@@ -185,6 +185,12 @@ func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 
+	// Prevent clearing the API key on the active config (would silently break incidents)
+	if req.APIKey != nil && *req.APIKey == "" && settings.Active {
+		api.RespondError(w, http.StatusBadRequest, "Cannot clear the API key on the active configuration")
+		return
+	}
+
 	updates := make(map[string]interface{})
 	if req.Name != nil {
 		updates["name"] = *req.Name
@@ -229,21 +235,10 @@ func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id 
 
 // deleteLLMConfig deletes an LLM configuration by ID.
 func (h *APIHandler) deleteLLMConfig(w http.ResponseWriter, _ *http.Request, id uint) {
-	// Check if this is the last config
-	allSettings, err := database.GetAllLLMSettings()
-	if err != nil {
-		api.RespondError(w, http.StatusInternalServerError, "Failed to check existing configurations")
-		return
-	}
-	if len(allSettings) <= 1 {
-		api.RespondError(w, http.StatusBadRequest, "Cannot delete the last LLM configuration")
-		return
-	}
-
 	if err := database.DeleteLLMSettings(id); err != nil {
 		if containsString(err.Error(), "not found") {
 			api.RespondError(w, http.StatusNotFound, "LLM configuration not found")
-		} else if containsString(err.Error(), "active") {
+		} else if containsString(err.Error(), "active") || containsString(err.Error(), "last") {
 			api.RespondError(w, http.StatusBadRequest, err.Error())
 		} else {
 			api.RespondError(w, http.StatusInternalServerError, "Failed to delete LLM configuration")
@@ -256,6 +251,17 @@ func (h *APIHandler) deleteLLMConfig(w http.ResponseWriter, _ *http.Request, id 
 
 // activateLLMConfig sets an LLM configuration as the globally active one.
 func (h *APIHandler) activateLLMConfig(w http.ResponseWriter, _ *http.Request, id uint) {
+	// Verify the config exists and is usable before activating
+	settings, err := database.GetLLMSettingsByID(id)
+	if err != nil {
+		api.RespondError(w, http.StatusNotFound, "LLM configuration not found")
+		return
+	}
+	if settings.APIKey == "" {
+		api.RespondError(w, http.StatusBadRequest, "Cannot activate a configuration without an API key")
+		return
+	}
+
 	if err := database.SetActiveLLMConfig(id); err != nil {
 		if containsString(err.Error(), "not found") {
 			api.RespondError(w, http.StatusNotFound, "LLM configuration not found")
@@ -265,7 +271,8 @@ func (h *APIHandler) activateLLMConfig(w http.ResponseWriter, _ *http.Request, i
 		return
 	}
 
-	settings, err := database.GetLLMSettingsByID(id)
+	// Re-read to get updated active status
+	settings, err = database.GetLLMSettingsByID(id)
 	if err != nil {
 		api.RespondError(w, http.StatusInternalServerError, "Failed to retrieve activated configuration")
 		return
