@@ -1,6 +1,7 @@
 package database
 
 import (
+	"strings"
 	"testing"
 
 	"gorm.io/driver/sqlite"
@@ -191,6 +192,23 @@ func TestDeleteLLMSettings_NotFound(t *testing.T) {
 	err := DeleteLLMSettings(999)
 	if err == nil {
 		t.Error("expected error for non-existent ID, got nil")
+	}
+}
+
+func TestDeleteLLMSettings_LastConfigRejected(t *testing.T) {
+	setupLLMTestDB(t)
+
+	s := &LLMSettings{Name: "Only Config", Provider: LLMProviderOpenAI, Active: false}
+	if err := CreateLLMSettings(s); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	err := DeleteLLMSettings(s.ID)
+	if err == nil {
+		t.Error("expected error when deleting last config, got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "last") {
+		t.Errorf("expected 'last' in error message, got: %v", err)
 	}
 }
 

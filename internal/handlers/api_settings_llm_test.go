@@ -430,3 +430,55 @@ func TestHandleLLMSettingsByID_Activate_MethodNotAllowed(t *testing.T) {
 		t.Errorf("expected 405, got %d", w.Code)
 	}
 }
+
+func TestHandleLLMSettingsByID_Activate_NoAPIKey(t *testing.T) {
+	h := setupLLMHandlerTest(t)
+	// Create a config without an API key
+	s := &database.LLMSettings{
+		Name:          "Unconfigured",
+		Provider:      database.LLMProviderOpenAI,
+		APIKey:        "",
+		Model:         "gpt-4",
+		ThinkingLevel: database.ThinkingLevelMedium,
+		Enabled:       false,
+	}
+	if err := database.CreateLLMSettings(s); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/settings/llm/%d/activate", s.ID), nil)
+	w := httptest.NewRecorder()
+	h.handleLLMSettingsByID(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for activating unconfigured config, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleLLMSettingsByID_Update_ClearAPIKeyOnActive(t *testing.T) {
+	h := setupLLMHandlerTest(t)
+	c := seedLLMConfig(t, "Active Config", database.LLMProviderOpenAI, true)
+
+	body := `{"api_key":""}`
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/settings/llm/%d", c.ID), bytes.NewBufferString(body))
+	w := httptest.NewRecorder()
+	h.handleLLMSettingsByID(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for clearing API key on active config, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleLLMSettingsByID_Update_ClearAPIKeyOnInactive(t *testing.T) {
+	h := setupLLMHandlerTest(t)
+	c := seedLLMConfig(t, "Inactive Config", database.LLMProviderOpenAI, false)
+
+	body := `{"api_key":""}`
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/settings/llm/%d", c.ID), bytes.NewBufferString(body))
+	w := httptest.NewRecorder()
+	h.handleLLMSettingsByID(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for clearing API key on inactive config, got %d: %s", w.Code, w.Body.String())
+	}
+}

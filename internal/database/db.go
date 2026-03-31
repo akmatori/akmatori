@@ -488,16 +488,26 @@ func CreateLLMSettings(settings *LLMSettings) error {
 	return DB.Create(settings).Error
 }
 
-// DeleteLLMSettings deletes an LLM config by ID. Returns an error if it is the active config.
+// DeleteLLMSettings deletes an LLM config by ID within a transaction.
+// Returns an error if the config is active or is the last remaining config.
 func DeleteLLMSettings(id uint) error {
-	var settings LLMSettings
-	if err := DB.First(&settings, id).Error; err != nil {
-		return fmt.Errorf("LLM config with id %d not found", id)
-	}
-	if settings.Active {
-		return fmt.Errorf("cannot delete the active LLM configuration")
-	}
-	return DB.Delete(&LLMSettings{}, id).Error
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var settings LLMSettings
+		if err := tx.First(&settings, id).Error; err != nil {
+			return fmt.Errorf("LLM config with id %d not found", id)
+		}
+		if settings.Active {
+			return fmt.Errorf("cannot delete the active LLM configuration")
+		}
+		var count int64
+		if err := tx.Model(&LLMSettings{}).Count(&count).Error; err != nil {
+			return fmt.Errorf("failed to count LLM configurations: %w", err)
+		}
+		if count <= 1 {
+			return fmt.Errorf("cannot delete the last LLM configuration")
+		}
+		return tx.Delete(&LLMSettings{}, id).Error
+	})
 }
 
 // GetDB returns the database instance
