@@ -50,6 +50,24 @@ func ValidLLMProviders() []LLMProvider {
 	}
 }
 
+// ProviderDisplayName returns the human-readable display name for a provider.
+func ProviderDisplayName(p LLMProvider) string {
+	switch p {
+	case LLMProviderOpenAI:
+		return "OpenAI"
+	case LLMProviderAnthropic:
+		return "Anthropic"
+	case LLMProviderGoogle:
+		return "Google"
+	case LLMProviderOpenRouter:
+		return "OpenRouter"
+	case LLMProviderCustom:
+		return "Custom"
+	default:
+		return string(p)
+	}
+}
+
 // IsValidLLMProvider checks if a provider string is valid
 func IsValidLLMProvider(provider string) bool {
 	for _, p := range ValidLLMProviders() {
@@ -94,12 +112,13 @@ func IsValidThinkingLevel(level string) bool {
 	return false
 }
 
-// LLMSettings stores per-provider LLM configuration.
-// Each provider (openai, anthropic, etc.) has its own row with separate API key, model, and settings.
-// The Active field indicates which provider is currently selected for use.
+// LLMSettings stores LLM configuration.
+// Multiple configurations can exist per provider (e.g., two OpenAI setups with different models/keys).
+// The Active field indicates which configuration is globally selected for use.
 type LLMSettings struct {
 	ID            uint          `gorm:"primaryKey" json:"id"`
-	Provider      LLMProvider   `gorm:"type:varchar(50);uniqueIndex;not null" json:"provider"`
+	Name          string        `gorm:"type:varchar(100);uniqueIndex;not null" json:"name"`
+	Provider      LLMProvider   `gorm:"type:varchar(50);index;not null" json:"provider"`
 	APIKey        string        `gorm:"type:text" json:"api_key"`
 	Model         string        `gorm:"type:varchar(100)" json:"model"`
 	ThinkingLevel ThinkingLevel `gorm:"type:varchar(50);default:'medium'" json:"thinking_level"`

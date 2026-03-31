@@ -5,8 +5,10 @@ import type {
   Incident,
   SlackSettings,
   SlackSettingsUpdate,
-  LLMSettings,
-  LLMSettingsUpdate,
+  LLMConfig,
+  LLMSettingsListResponse,
+  CreateLLMConfigRequest,
+  UpdateLLMConfigRequest,
   ProxySettings,
   ProxySettingsUpdate,
   GeneralSettings,
@@ -233,12 +235,30 @@ export const slackSettingsApi = {
 
 // LLM Settings API
 export const llmSettingsApi = {
-  get: () => fetchApi<LLMSettings>('/api/settings/llm'),
+  list: () => fetchApi<LLMSettingsListResponse>('/api/settings/llm'),
 
-  update: (settings: LLMSettingsUpdate) =>
-    fetchApi<LLMSettings>('/api/settings/llm', {
+  get: (id: number) => fetchApi<LLMConfig>(`/api/settings/llm/${id}`),
+
+  create: (data: CreateLLMConfigRequest) =>
+    fetchApi<LLMConfig>('/api/settings/llm', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (id: number, data: UpdateLLMConfigRequest) =>
+    fetchApi<LLMConfig>(`/api/settings/llm/${id}`, {
       method: 'PUT',
-      body: JSON.stringify(settings),
+      body: JSON.stringify(data),
+    }),
+
+  delete: (id: number) =>
+    fetchApi<void>(`/api/settings/llm/${id}`, {
+      method: 'DELETE',
+    }),
+
+  activate: (id: number) =>
+    fetchApi<LLMConfig>(`/api/settings/llm/${id}/activate`, {
+      method: 'PUT',
     }),
 };
 
