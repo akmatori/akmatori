@@ -64,13 +64,42 @@ func (h *APIHandler) listLLMConfigs(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	var activeID uint
 	configs := make([]map[string]interface{}, 0, len(allSettings))
 	for _, s := range allSettings {
-		if s.Active {
-			activeID = s.ID
-		}
 		configs = append(configs, llmConfigResponse(&s))
+	}
+	// Derive active_id from the same snapshot used for configs to avoid a
+	// race where a concurrent create+activate between two queries could
+	// return an active_id not present in configs.  The fallback priority
+	// mirrors GetLLMSettings(): active → enabled → first row (lowest PK).
+	var activeID uint
+	if len(allSettings) > 0 {
+		// Mirror GetLLMSettings() resolution: active → enabled → lowest PK.
+		// GetAllLLMSettings() orders by (provider, name), but GetLLMSettings()
+		// uses GORM First() which orders by primary key.  We must pick the
+		// lowest-PK row in each category to match incident dispatch.
+		var firstActive, firstEnabled *database.LLMSettings
+		lowestPK := &allSettings[0]
+		for i := range allSettings {
+			s := &allSettings[i]
+			if s.ID < lowestPK.ID {
+				lowestPK = s
+			}
+			if s.Active && (firstActive == nil || s.ID < firstActive.ID) {
+				firstActive = s
+			}
+			if s.Enabled && (firstEnabled == nil || s.ID < firstEnabled.ID) {
+				firstEnabled = s
+			}
+		}
+		pick := lowestPK
+		if firstEnabled != nil {
+			pick = firstEnabled
+		}
+		if firstActive != nil {
+			pick = firstActive
+		}
+		activeID = pick.ID
 	}
 
 	response := map[string]interface{}{
@@ -153,8 +182,8 @@ func (h *APIHandler) getLLMConfig(w http.ResponseWriter, _ *http.Request, id uin
 
 // updateLLMConfig updates an existing LLM configuration by ID.
 func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id uint) {
-	settings, err := database.GetLLMSettingsByID(id)
-	if err != nil {
+	// Quick existence check (non-authoritative, just for early 404)
+	if _, err := database.GetLLMSettingsByID(id); err != nil {
 		api.RespondError(w, http.StatusNotFound, "LLM configuration not found")
 		return
 	}
@@ -185,12 +214,6 @@ func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 
-	// Prevent clearing the API key on the active config (would silently break incidents)
-	if req.APIKey != nil && *req.APIKey == "" && settings.Active {
-		api.RespondError(w, http.StatusBadRequest, "Cannot clear the API key on the active configuration")
-		return
-	}
-
 	updates := make(map[string]interface{})
 	if req.Name != nil {
 		updates["name"] = *req.Name
@@ -209,25 +232,33 @@ func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id 
 		updates["base_url"] = *req.BaseURL
 	}
 
-	if len(updates) > 0 {
-		if err := database.GetDB().Model(settings).Updates(updates).Error; err != nil {
-			if containsString(err.Error(), "UNIQUE") || containsString(err.Error(), "duplicate key") || containsString(err.Error(), "unique") {
-				msg := "A configuration with that name already exists"
-				if req.Name != nil {
-					msg = fmt.Sprintf("A configuration with name %q already exists", *req.Name)
-				}
-				api.RespondError(w, http.StatusConflict, msg)
-				return
-			}
-			api.RespondError(w, http.StatusInternalServerError, "Failed to update LLM configuration")
+	if len(updates) == 0 {
+		settings, err := database.GetLLMSettingsByID(id)
+		if err != nil {
+			api.RespondError(w, http.StatusInternalServerError, "Failed to retrieve configuration")
 			return
 		}
+		api.RespondJSON(w, http.StatusOK, llmConfigResponse(settings))
+		return
 	}
 
-	// Re-read to get updated values
-	settings, err = database.GetLLMSettingsByID(id)
+	// Atomic update with row lock — validates active+key invariant under lock
+	settings, err := database.UpdateLLMSettings(id, updates)
 	if err != nil {
-		api.RespondError(w, http.StatusInternalServerError, "Failed to retrieve updated configuration")
+		errMsg := err.Error()
+		if containsString(errMsg, "not found") || containsString(errMsg, "record not found") {
+			api.RespondError(w, http.StatusNotFound, "LLM configuration not found")
+		} else if containsString(errMsg, "cannot clear") || containsString(errMsg, "active") {
+			api.RespondError(w, http.StatusBadRequest, "Cannot clear the API key on the active configuration")
+		} else if containsString(errMsg, "UNIQUE") || containsString(errMsg, "duplicate key") || containsString(errMsg, "unique") {
+			msg := "A configuration with that name already exists"
+			if req.Name != nil {
+				msg = fmt.Sprintf("A configuration with name %q already exists", *req.Name)
+			}
+			api.RespondError(w, http.StatusConflict, msg)
+		} else {
+			api.RespondError(w, http.StatusInternalServerError, "Failed to update LLM configuration")
+		}
 		return
 	}
 	api.RespondJSON(w, http.StatusOK, llmConfigResponse(settings))
@@ -251,20 +282,13 @@ func (h *APIHandler) deleteLLMConfig(w http.ResponseWriter, _ *http.Request, id 
 
 // activateLLMConfig sets an LLM configuration as the globally active one.
 func (h *APIHandler) activateLLMConfig(w http.ResponseWriter, _ *http.Request, id uint) {
-	// Verify the config exists and is usable before activating
-	settings, err := database.GetLLMSettingsByID(id)
-	if err != nil {
-		api.RespondError(w, http.StatusNotFound, "LLM configuration not found")
-		return
-	}
-	if settings.APIKey == "" {
-		api.RespondError(w, http.StatusBadRequest, "Cannot activate a configuration without an API key")
-		return
-	}
-
+	// All validation (existence, API key) happens inside the locked transaction
 	if err := database.SetActiveLLMConfig(id); err != nil {
-		if containsString(err.Error(), "not found") {
+		errMsg := err.Error()
+		if containsString(errMsg, "not found") {
 			api.RespondError(w, http.StatusNotFound, "LLM configuration not found")
+		} else if containsString(errMsg, "cannot activate") || containsString(errMsg, "API key") {
+			api.RespondError(w, http.StatusBadRequest, "Cannot activate a configuration without an API key")
 		} else {
 			api.RespondError(w, http.StatusInternalServerError, "Failed to activate configuration")
 		}
@@ -272,7 +296,7 @@ func (h *APIHandler) activateLLMConfig(w http.ResponseWriter, _ *http.Request, i
 	}
 
 	// Re-read to get updated active status
-	settings, err = database.GetLLMSettingsByID(id)
+	settings, err := database.GetLLMSettingsByID(id)
 	if err != nil {
 		api.RespondError(w, http.StatusInternalServerError, "Failed to retrieve activated configuration")
 		return

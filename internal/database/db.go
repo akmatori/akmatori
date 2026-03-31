@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -467,19 +468,38 @@ func GetLLMSettingsByID(id uint) (*LLMSettings, error) {
 }
 
 // SetActiveLLMConfig deactivates all LLM configs and activates the one with the given ID.
+// Uses SELECT FOR UPDATE to prevent concurrent activation races.
+// Returns an error if the target config has no API key (validated under lock).
 func SetActiveLLMConfig(id uint) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
+		// Lock all LLM config rows to serialize concurrent activate/update calls
+		var allConfigs []LLMSettings
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Find(&allConfigs).Error; err != nil {
+			return err
+		}
+		// Find the target config and validate under lock
+		var target *LLMSettings
+		for i := range allConfigs {
+			if allConfigs[i].ID == id {
+				target = &allConfigs[i]
+				break
+			}
+		}
+		if target == nil {
+			return fmt.Errorf("LLM config with id %d not found", id)
+		}
+		if target.APIKey == "" {
+			return fmt.Errorf("cannot activate a configuration without an API key")
+		}
 		if err := tx.Model(&LLMSettings{}).Where("active = ?", true).Update("active", false).Error; err != nil {
 			return err
 		}
-		result := tx.Model(&LLMSettings{}).Where("id = ?", id).Update("active", true)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return fmt.Errorf("LLM config with id %d not found", id)
-		}
-		return nil
+		// Set both active and enabled so the config passes IsActive() checks
+		// used by incident dispatch (BuildLLMSettingsForWorker).
+		return tx.Model(&LLMSettings{}).Where("id = ?", id).Updates(map[string]interface{}{
+			"active":  true,
+			"enabled": true,
+		}).Error
 	})
 }
 
@@ -488,22 +508,62 @@ func CreateLLMSettings(settings *LLMSettings) error {
 	return DB.Create(settings).Error
 }
 
+// UpdateLLMSettings atomically updates an LLM config by ID.
+// Uses SELECT FOR UPDATE to prevent concurrent update/activate races.
+// Returns an error if the update would clear the API key on the active config.
+func UpdateLLMSettings(id uint, updates map[string]interface{}) (*LLMSettings, error) {
+	var result LLMSettings
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		// Lock the target row to serialize with concurrent activate calls
+		var settings LLMSettings
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&settings, id).Error; err != nil {
+			return err
+		}
+		// Prevent clearing the API key on the active config
+		if apiKey, ok := updates["api_key"]; ok {
+			if apiKey == "" && settings.Active {
+				return fmt.Errorf("cannot clear the API key on the active configuration")
+			}
+		}
+		if err := tx.Model(&settings).Updates(updates).Error; err != nil {
+			return err
+		}
+		// Re-read to get final state
+		if err := tx.First(&result, id).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // DeleteLLMSettings deletes an LLM config by ID within a transaction.
 // Returns an error if the config is active or is the last remaining config.
+// Uses SELECT FOR UPDATE to prevent concurrent deletion races.
 func DeleteLLMSettings(id uint) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
-		var settings LLMSettings
-		if err := tx.First(&settings, id).Error; err != nil {
+		// Lock all LLM config rows to serialize concurrent delete/activate calls
+		var allConfigs []LLMSettings
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Find(&allConfigs).Error; err != nil {
+			return fmt.Errorf("failed to lock LLM configurations: %w", err)
+		}
+		var settings *LLMSettings
+		for i := range allConfigs {
+			if allConfigs[i].ID == id {
+				settings = &allConfigs[i]
+				break
+			}
+		}
+		if settings == nil {
 			return fmt.Errorf("LLM config with id %d not found", id)
 		}
 		if settings.Active {
 			return fmt.Errorf("cannot delete the active LLM configuration")
 		}
-		var count int64
-		if err := tx.Model(&LLMSettings{}).Count(&count).Error; err != nil {
-			return fmt.Errorf("failed to count LLM configurations: %w", err)
-		}
-		if count <= 1 {
+		if len(allConfigs) <= 1 {
 			return fmt.Errorf("cannot delete the last LLM configuration")
 		}
 		return tx.Delete(&LLMSettings{}, id).Error

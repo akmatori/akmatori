@@ -21,9 +21,19 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
       setSaving(true);
       setError('');
 
-      await llmSettingsApi.update({
-        api_key: apiKey.trim(),
-      });
+      const response = await llmSettingsApi.list();
+      if (response.active_id) {
+        await llmSettingsApi.update(response.active_id, {
+          api_key: apiKey.trim(),
+        });
+      } else if (response.configs.length > 0) {
+        await llmSettingsApi.update(response.configs[0].id, {
+          api_key: apiKey.trim(),
+        });
+      } else {
+        setError('No LLM configuration found. Please configure one in Settings first.');
+        return;
+      }
 
       setSuccess(true);
       setTimeout(() => {

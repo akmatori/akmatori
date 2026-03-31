@@ -103,8 +103,8 @@ func TestGetLLMSettingsByID_NotFound(t *testing.T) {
 func TestSetActiveLLMConfig(t *testing.T) {
 	setupLLMTestDB(t)
 
-	s1 := &LLMSettings{Name: "Config A", Provider: LLMProviderOpenAI, Active: true}
-	s2 := &LLMSettings{Name: "Config B", Provider: LLMProviderAnthropic, Active: false}
+	s1 := &LLMSettings{Name: "Config A", Provider: LLMProviderOpenAI, APIKey: "sk-key-a", Active: true}
+	s2 := &LLMSettings{Name: "Config B", Provider: LLMProviderAnthropic, APIKey: "sk-key-b", Active: false}
 	if err := CreateLLMSettings(s1); err != nil {
 		t.Fatalf("create s1: %v", err)
 	}
@@ -145,6 +145,56 @@ func TestSetActiveLLMConfig_NotFound(t *testing.T) {
 	err := SetActiveLLMConfig(999)
 	if err == nil {
 		t.Error("expected error for non-existent ID, got nil")
+	}
+}
+
+func TestSetActiveLLMConfig_NoAPIKeyRejected(t *testing.T) {
+	setupLLMTestDB(t)
+
+	s1 := &LLMSettings{Name: "With Key", Provider: LLMProviderOpenAI, APIKey: "sk-key", Active: true}
+	s2 := &LLMSettings{Name: "No Key", Provider: LLMProviderAnthropic, Active: false}
+	if err := CreateLLMSettings(s1); err != nil {
+		t.Fatalf("create s1: %v", err)
+	}
+	if err := CreateLLMSettings(s2); err != nil {
+		t.Fatalf("create s2: %v", err)
+	}
+
+	err := SetActiveLLMConfig(s2.ID)
+	if err == nil {
+		t.Error("expected error when activating config without API key, got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "API key") {
+		t.Errorf("expected 'API key' in error message, got: %v", err)
+	}
+}
+
+func TestSetActiveLLMConfig_EnablesDisabledConfig(t *testing.T) {
+	setupLLMTestDB(t)
+
+	s1 := &LLMSettings{Name: "Active", Provider: LLMProviderOpenAI, APIKey: "sk-key-a", Active: true, Enabled: true}
+	s2 := &LLMSettings{Name: "Disabled", Provider: LLMProviderAnthropic, APIKey: "sk-key-b", Active: false, Enabled: false}
+	if err := CreateLLMSettings(s1); err != nil {
+		t.Fatalf("create s1: %v", err)
+	}
+	if err := CreateLLMSettings(s2); err != nil {
+		t.Fatalf("create s2: %v", err)
+	}
+
+	// Activating a disabled config should succeed and set enabled=true
+	if err := SetActiveLLMConfig(s2.ID); err != nil {
+		t.Fatalf("SetActiveLLMConfig failed: %v", err)
+	}
+
+	b, _ := GetLLMSettingsByID(s2.ID)
+	if !b.Active {
+		t.Error("expected Config B to be active")
+	}
+	if !b.Enabled {
+		t.Error("expected Config B to be enabled after activation")
+	}
+	if !b.IsActive() {
+		t.Error("expected Config B to pass IsActive() check after activation")
 	}
 }
 

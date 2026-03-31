@@ -104,8 +104,9 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
       setConfigs(data.configs || []);
       setActiveId(data.active_id);
       setError(null);
-      const hasConfigured = (data.configs || []).some(c => c.is_configured);
-      onStatusChange?.(hasConfigured ? 'configured' : 'not-configured');
+      const activeConfig = (data.configs || []).find(c => c.id === data.active_id);
+      const isConfigured = activeConfig?.is_configured ?? false;
+      onStatusChange?.(isConfigured ? 'configured' : 'not-configured');
     } catch (err) {
       setError('Failed to load LLM settings');
       console.error(err);
