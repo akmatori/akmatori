@@ -340,6 +340,21 @@ Incident retention is configured via `/api/settings/retention`:
 
 Keep handler validation aligned with `internal/api/types.go` and database defaults.
 
+### LLM Settings API
+
+Multi-config LLM settings allow multiple configurations per provider (e.g., two OpenAI setups with different models/keys). Only one config is globally active at a time.
+
+- `GET /api/settings/llm` → `{"configs": [...], "active_id": 3}` — list all configs with active indicator
+- `POST /api/settings/llm` → create new config (`{provider, name, api_key, model, thinking_level, base_url}`)
+- `GET /api/settings/llm/{id}` → get single config
+- `PUT /api/settings/llm/{id}` → partial update (name uniqueness validated if changed)
+- `DELETE /api/settings/llm/{id}` → delete config (rejected if active or last remaining)
+- `PUT /api/settings/llm/{id}/activate` → set config as globally active
+
+Each config response includes: id, name, provider, model, thinking_level, base_url, is_configured, masked api_key, enabled, created_at, updated_at.
+
+The `LLMSettings` model has a unique `Name` field and allows multiple rows per provider (no unique constraint on Provider).
+
 ## Setup Package (`internal/setup/`)
 
 Zero-config first-run experience:
@@ -397,7 +412,7 @@ alert := testhelpers.NewAlertBuilder().WithName("HighCPU").WithSeverity("critica
 incident := testhelpers.NewIncidentBuilder().WithTitle("DB outage").WithStatus("investigating").Build()
 skill := testhelpers.NewSkillBuilder().WithName("zabbix-analyst").WithCategory("monitoring").Build()
 toolInstance := testhelpers.NewToolInstanceBuilder().WithName("prod-zabbix").WithSetting("url", "https://...").Build()
-llmSettings := testhelpers.NewLLMSettingsBuilder().WithProvider(database.LLMProviderAnthropic).Build()
+llmSettings := testhelpers.NewLLMSettingsBuilder().WithName("My Anthropic").WithProvider(database.LLMProviderAnthropic).Build()
 ```
 
 **Available**: AlertBuilder, IncidentBuilder, SkillBuilder, ToolInstanceBuilder, ToolTypeBuilder, AlertSourceInstanceBuilder, LLMSettingsBuilder, SlackSettingsBuilder, RunbookBuilder, ContextFileBuilder

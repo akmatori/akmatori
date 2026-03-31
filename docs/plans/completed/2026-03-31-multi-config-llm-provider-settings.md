@@ -111,5 +111,5 @@ Allow multiple LLM configurations per provider type (e.g., two OpenAI setups wit
 
 ### Task 6: Update documentation
 
-- [ ] Update CLAUDE.md if internal patterns changed (new API endpoints, model changes)
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update CLAUDE.md if internal patterns changed (new API endpoints, model changes)
+- [x] Move this plan to `docs/plans/completed/`
