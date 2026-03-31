@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/akmatori/akmatori/internal/api"
 	"github.com/akmatori/akmatori/internal/database"
@@ -91,11 +92,12 @@ func (h *APIHandler) createLLMConfig(w http.ResponseWriter, r *http.Request) {
 		api.RespondError(w, http.StatusBadRequest, "provider is required")
 		return
 	}
+	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		api.RespondError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if len(req.Name) > 100 {
+	if utf8.RuneCountInString(req.Name) > 100 {
 		api.RespondError(w, http.StatusBadRequest, "name must be 100 characters or less")
 		return
 	}
@@ -164,11 +166,12 @@ func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id 
 	}
 
 	if req.Name != nil {
+		*req.Name = strings.TrimSpace(*req.Name)
 		if *req.Name == "" {
 			api.RespondError(w, http.StatusBadRequest, "name cannot be empty")
 			return
 		}
-		if len(*req.Name) > 100 {
+		if utf8.RuneCountInString(*req.Name) > 100 {
 			api.RespondError(w, http.StatusBadRequest, "name must be 100 characters or less")
 			return
 		}
