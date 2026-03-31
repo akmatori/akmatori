@@ -99,33 +99,40 @@ export interface CreateIncidentResponse {
 export type LLMProvider = 'openai' | 'anthropic' | 'google' | 'openrouter' | 'custom';
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
-export interface LLMProviderSettings {
-  api_key: string;  // Masked for display
-  model: string;
-  thinking_level: ThinkingLevel;
-  base_url: string;
-  is_configured: boolean;
-}
-
-export interface LLMSettings {
+export interface LLMConfig {
   id: number;
+  name: string;
   provider: LLMProvider;
-  api_key: string;  // Masked for display (active provider)
   model: string;
   thinking_level: ThinkingLevel;
   base_url: string;
+  api_key: string;  // Masked for display
   is_configured: boolean;
-  active_provider: LLMProvider;
-  providers: Record<LLMProvider, LLMProviderSettings>;
+  enabled: boolean;
+  active: boolean;
   created_at: string;
   updated_at: string;
 }
 
-export interface LLMSettingsUpdate {
-  provider?: LLMProvider;
+export interface LLMSettingsListResponse {
+  configs: LLMConfig[];
+  active_id: number;
+}
+
+export interface CreateLLMConfigRequest {
+  provider: string;
+  name: string;
   api_key?: string;
   model?: string;
-  thinking_level?: ThinkingLevel;
+  thinking_level?: string;
+  base_url?: string;
+}
+
+export interface UpdateLLMConfigRequest {
+  name?: string;
+  api_key?: string;
+  model?: string;
+  thinking_level?: string;
   base_url?: string;
 }
 

@@ -308,6 +308,7 @@ type LLMSettingsBuilder struct {
 func NewLLMSettingsBuilder() *LLMSettingsBuilder {
 	return &LLMSettingsBuilder{
 		settings: database.LLMSettings{
+			Name:          "OpenAI",
 			Provider:      database.LLMProviderOpenAI,
 			APIKey:        "test-api-key",
 			Model:         "gpt-4",
@@ -324,6 +325,12 @@ func NewLLMSettingsBuilder() *LLMSettingsBuilder {
 // WithID sets the settings ID
 func (b *LLMSettingsBuilder) WithID(id uint) *LLMSettingsBuilder {
 	b.settings.ID = id
+	return b
+}
+
+// WithName sets the config name
+func (b *LLMSettingsBuilder) WithName(name string) *LLMSettingsBuilder {
+	b.settings.Name = name
 	return b
 }
 

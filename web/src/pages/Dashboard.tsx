@@ -30,12 +30,13 @@ export default function Dashboard() {
 
       const [incidentsData, llmSettings, alertSources] = await Promise.all([
         incidentsApi.list(),
-        llmSettingsApi.get().catch(() => null),
+        llmSettingsApi.list().catch(() => null),
         alertSourcesApi.list().catch(() => []),
       ]);
 
       setIncidents(incidentsData?.data?.slice(0, 5) ?? []);
-      setLlmConfigured(llmSettings?.is_configured ?? false);
+      const activeConfig = llmSettings?.configs?.find(c => c.id === llmSettings.active_id);
+      setLlmConfigured(activeConfig?.is_configured ?? false);
       setAlertSourcesCount(alertSources?.length ?? 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load dashboard');

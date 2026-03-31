@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -100,6 +101,14 @@ func AutoMigrate() error {
 // The caller is responsible for any locking. The provided db handle must be
 // used for all operations so that connection pinning (if any) is preserved.
 func runMigrations(db *gorm.DB) error {
+	// Pre-migration: prepare the llm_settings table for the multi-config schema
+	// change BEFORE AutoMigrate runs. AutoMigrate will try to add a unique index
+	// on the new "name" column, which fails if existing rows all have empty names.
+	// It also won't drop the old unique index on "provider", blocking multi-config.
+	if err := preMigrateLLMSettings(db); err != nil {
+		return err
+	}
+
 	err := db.AutoMigrate(
 		&SystemSetting{},
 		&SlackSettings{},
@@ -138,6 +147,43 @@ func runMigrations(db *gorm.DB) error {
 	return nil
 }
 
+// preMigrateLLMSettings prepares the llm_settings table for the multi-config
+// schema change. This must run BEFORE AutoMigrate because:
+// 1. AutoMigrate adds a uniqueIndex on "name" — fails if existing rows have empty names.
+// 2. AutoMigrate won't drop the old uniqueIndex on "provider" — blocks multi-config.
+func preMigrateLLMSettings(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&LLMSettings{}) {
+		return nil // Fresh install — AutoMigrate will create everything correctly.
+	}
+
+	// Drop old unique index on provider (GORM doesn't drop indexes on AutoMigrate).
+	// Try both PostgreSQL and SQLite naming conventions.
+	for _, idx := range []string{
+		"idx_llm_settings_provider",  // GORM default naming
+		"uni_llm_settings_provider",  // GORM uniqueIndex naming variant
+	} {
+		if db.Migrator().HasIndex(&LLMSettings{}, idx) {
+			if err := db.Exec("DROP INDEX IF EXISTS " + idx).Error; err != nil {
+				slog.Warn("failed to drop old provider unique index", "index", idx, "error", err)
+			} else {
+				slog.Info("dropped old unique index on provider", "index", idx)
+			}
+		}
+	}
+
+	// Add the name column if it doesn't exist, then populate unique names
+	// so AutoMigrate can safely create the unique index.
+	if !db.Migrator().HasColumn(&LLMSettings{}, "name") {
+		if err := db.Exec("ALTER TABLE llm_settings ADD COLUMN name VARCHAR(100) NOT NULL DEFAULT ''").Error; err != nil {
+			return fmt.Errorf("add name column to llm_settings: %w", err)
+		}
+		slog.Info("added name column to llm_settings")
+	}
+
+	// Populate empty names with unique values before AutoMigrate adds the unique index.
+	return migrateLLMSettingsName(db)
+}
+
 // migrateOpenAIToLLMEnabled copies open_ai_enabled values to llm_enabled
 // and drops the old column, all within a transaction to prevent partial state.
 // Concurrency is handled by the session-level advisory lock in AutoMigrate.
@@ -155,6 +201,47 @@ func migrateOpenAIToLLMEnabled(db *gorm.DB) error {
 		slog.Info("migrated proxy_settings: open_ai_enabled → llm_enabled")
 		return nil
 	})
+}
+
+// migrateLLMSettingsName populates the Name field for existing LLM settings rows
+// that have an empty name (from before the multi-config migration). Handles
+// duplicate providers by appending a numeric suffix (e.g. "OpenAI (2)").
+func migrateLLMSettingsName(db *gorm.DB) error {
+	var rows []LLMSettings
+	if err := db.Where("name = '' OR name IS NULL").Find(&rows).Error; err != nil {
+		return fmt.Errorf("query llm_settings with empty name: %w", err)
+	}
+	// Track assigned names to handle duplicate providers.
+	assigned := make(map[string]int)
+	// Pre-load existing non-empty names to avoid collisions.
+	var existing []LLMSettings
+	if err := db.Where("name != '' AND name IS NOT NULL").Find(&existing).Error; err == nil {
+		for _, e := range existing {
+			assigned[e.Name] = 1
+		}
+	}
+	for _, row := range rows {
+		base := ProviderDisplayName(row.Provider)
+		name := base
+		if assigned[name] > 0 {
+			// Find next available suffix.
+			for i := 2; ; i++ {
+				candidate := fmt.Sprintf("%s (%d)", base, i)
+				if assigned[candidate] == 0 {
+					name = candidate
+					break
+				}
+			}
+		}
+		assigned[name] = 1
+		if err := db.Model(&LLMSettings{}).Where("id = ?", row.ID).Update("name", name).Error; err != nil {
+			return fmt.Errorf("set name for llm_settings id=%d: %w", row.ID, err)
+		}
+	}
+	if len(rows) > 0 {
+		slog.Info("migrated llm_settings: populated Name field", "count", len(rows))
+	}
+	return nil
 }
 
 // InitializeDefaults creates default records if they don't exist
@@ -226,6 +313,7 @@ func seedLLMProviders() error {
 
 	for _, p := range ValidLLMProviders() {
 		row := &LLMSettings{
+			Name:          ProviderDisplayName(p),
 			Provider:      p,
 			Model:         defaultModelsPerProvider[p],
 			ThinkingLevel: ThinkingLevelMedium,
@@ -361,37 +449,125 @@ func GetLLMSettings() (*LLMSettings, error) {
 	return &settings, nil
 }
 
-// GetAllLLMSettings returns all provider settings (one row per provider).
+// GetAllLLMSettings returns all LLM configurations ordered by provider then name.
 func GetAllLLMSettings() ([]LLMSettings, error) {
 	var settings []LLMSettings
-	if err := DB.Order("id asc").Find(&settings).Error; err != nil {
+	if err := DB.Order("provider asc, name asc").Find(&settings).Error; err != nil {
 		return nil, err
 	}
 	return settings, nil
 }
 
-// GetLLMSettingsByProvider returns settings for a specific provider.
-func GetLLMSettingsByProvider(provider LLMProvider) (*LLMSettings, error) {
+// GetLLMSettingsByID returns LLM settings for a specific config by ID.
+func GetLLMSettingsByID(id uint) (*LLMSettings, error) {
 	var settings LLMSettings
-	if err := DB.Where("provider = ?", provider).First(&settings).Error; err != nil {
+	if err := DB.First(&settings, id).Error; err != nil {
 		return nil, err
 	}
 	return &settings, nil
 }
 
-// SetActiveLLMProvider marks the given provider as active and deactivates all others.
-func SetActiveLLMProvider(provider LLMProvider) error {
+// SetActiveLLMConfig deactivates all LLM configs and activates the one with the given ID.
+// Uses SELECT FOR UPDATE to prevent concurrent activation races.
+// Returns an error if the target config has no API key (validated under lock).
+func SetActiveLLMConfig(id uint) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
+		// Lock all LLM config rows to serialize concurrent activate/update calls
+		var allConfigs []LLMSettings
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Find(&allConfigs).Error; err != nil {
+			return err
+		}
+		// Find the target config and validate under lock
+		var target *LLMSettings
+		for i := range allConfigs {
+			if allConfigs[i].ID == id {
+				target = &allConfigs[i]
+				break
+			}
+		}
+		if target == nil {
+			return fmt.Errorf("LLM config with id %d not found", id)
+		}
+		if target.APIKey == "" {
+			return fmt.Errorf("cannot activate a configuration without an API key")
+		}
 		if err := tx.Model(&LLMSettings{}).Where("active = ?", true).Update("active", false).Error; err != nil {
 			return err
 		}
-		return tx.Model(&LLMSettings{}).Where("provider = ?", provider).Update("active", true).Error
+		// Set both active and enabled so the config passes IsActive() checks
+		// used by incident dispatch (BuildLLMSettingsForWorker).
+		return tx.Model(&LLMSettings{}).Where("id = ?", id).Updates(map[string]interface{}{
+			"active":  true,
+			"enabled": true,
+		}).Error
 	})
 }
 
-// UpdateLLMSettings updates LLM settings in the database
-func UpdateLLMSettings(settings *LLMSettings) error {
-	return DB.Model(&LLMSettings{}).Where("id = ?", settings.ID).Updates(settings).Error
+// CreateLLMSettings creates a new LLM settings configuration.
+func CreateLLMSettings(settings *LLMSettings) error {
+	return DB.Create(settings).Error
+}
+
+// UpdateLLMSettings atomically updates an LLM config by ID.
+// Uses SELECT FOR UPDATE to prevent concurrent update/activate races.
+// Returns an error if the update would clear the API key on the active config.
+func UpdateLLMSettings(id uint, updates map[string]interface{}) (*LLMSettings, error) {
+	var result LLMSettings
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		// Lock the target row to serialize with concurrent activate calls
+		var settings LLMSettings
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&settings, id).Error; err != nil {
+			return err
+		}
+		// Prevent clearing the API key on the active config
+		if apiKey, ok := updates["api_key"]; ok {
+			if apiKey == "" && settings.Active {
+				return fmt.Errorf("cannot clear the API key on the active configuration")
+			}
+		}
+		if err := tx.Model(&settings).Updates(updates).Error; err != nil {
+			return err
+		}
+		// Re-read to get final state
+		if err := tx.First(&result, id).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// DeleteLLMSettings deletes an LLM config by ID within a transaction.
+// Returns an error if the config is active or is the last remaining config.
+// Uses SELECT FOR UPDATE to prevent concurrent deletion races.
+func DeleteLLMSettings(id uint) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		// Lock all LLM config rows to serialize concurrent delete/activate calls
+		var allConfigs []LLMSettings
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Find(&allConfigs).Error; err != nil {
+			return fmt.Errorf("failed to lock LLM configurations: %w", err)
+		}
+		var settings *LLMSettings
+		for i := range allConfigs {
+			if allConfigs[i].ID == id {
+				settings = &allConfigs[i]
+				break
+			}
+		}
+		if settings == nil {
+			return fmt.Errorf("LLM config with id %d not found", id)
+		}
+		if settings.Active {
+			return fmt.Errorf("cannot delete the active LLM configuration")
+		}
+		if len(allConfigs) <= 1 {
+			return fmt.Errorf("cannot delete the last LLM configuration")
+		}
+		return tx.Delete(&LLMSettings{}, id).Error
+	})
 }
 
 // GetDB returns the database instance
