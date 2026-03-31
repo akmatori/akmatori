@@ -24,6 +24,8 @@ var (
 	mdTableRowPattern = regexp.MustCompile(`(?m)^\|(.+)\|\s*$`)
 	// Markdown horizontal rule: --- or *** or ___
 	mdHRPattern = regexp.MustCompile(`(?m)^[\s]*([-*_]){3,}\s*$`)
+	// Fenced code blocks must pass through untouched.
+	mdFencedCodeBlockPattern = regexp.MustCompile("(?s)```.*?```")
 )
 
 // FormatForSlack converts parsed output to nicely formatted Slack message
@@ -185,6 +187,8 @@ func MarkdownToSlack(text string) string {
 		return text
 	}
 
+	text, codeBlocks := extractFencedCodeBlocks(text)
+
 	// Convert markdown tables to readable plain text
 	text = convertTables(text)
 
@@ -208,6 +212,29 @@ func MarkdownToSlack(text string) string {
 
 	// Convert horizontal rules: --- -> ———
 	text = mdHRPattern.ReplaceAllString(text, "———")
+
+	return restoreFencedCodeBlocks(text, codeBlocks)
+}
+
+func extractFencedCodeBlocks(text string) (string, []string) {
+	codeBlocks := mdFencedCodeBlockPattern.FindAllString(text, -1)
+	if len(codeBlocks) == 0 {
+		return text, nil
+	}
+
+	for i, block := range codeBlocks {
+		placeholder := fmt.Sprintf("@@AKMATORI_CODE_BLOCK_%d@@", i)
+		text = strings.Replace(text, block, placeholder, 1)
+	}
+
+	return text, codeBlocks
+}
+
+func restoreFencedCodeBlocks(text string, codeBlocks []string) string {
+	for i, block := range codeBlocks {
+		placeholder := fmt.Sprintf("@@AKMATORI_CODE_BLOCK_%d@@", i)
+		text = strings.ReplaceAll(text, placeholder, block)
+	}
 
 	return text
 }

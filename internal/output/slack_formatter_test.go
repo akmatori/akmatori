@@ -181,15 +181,45 @@ func TestMarkdownToSlack_MixedContent(t *testing.T) {
 }
 
 func TestMarkdownToSlack_CodeBlocksPreserved(t *testing.T) {
-	input := "Run this:\n```bash\nsysctl -w net.core.somaxconn=65535\n```"
-	got := MarkdownToSlack(input)
-
-	// Code blocks should pass through unchanged
-	if !contains(got, "```bash") {
-		t.Errorf("code block should be preserved, got:\n%s", got)
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+		not   []string
+	}{
+		{
+			name:  "basic fenced block",
+			input: "Run this:\n```bash\nsysctl -w net.core.somaxconn=65535\n```",
+			want: []string{"```bash", "sysctl -w net.core.somaxconn=65535"},
+		},
+		{
+			name:  "markdown syntax inside code block is not rewritten",
+			input: "```md\n## Title\n**bold**\n[link](https://example.com)\n---\n```",
+			want: []string{"## Title", "**bold**", "[link](https://example.com)", "---"},
+			not:  []string{"*Title*", "<https://example.com|link>", "———"},
+		},
+		{
+			name:  "multiple code blocks stay intact while surrounding markdown converts",
+			input: "## Heading\n\n```json\n{\"a\":1}\n```\n\n**outside**\n\n```md\n[raw](https://example.com)\n```",
+			want: []string{"*Heading*", "*outside*", "```json", "{\"a\":1}", "```md", "[raw](https://example.com)"},
+			not:  []string{"<https://example.com|raw>"},
+		},
 	}
-	if !contains(got, "sysctl -w net.core.somaxconn=65535") {
-		t.Errorf("code content should be preserved, got:\n%s", got)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MarkdownToSlack(tt.input)
+			for _, expected := range tt.want {
+				if !contains(got, expected) {
+					t.Errorf("expected output to contain %q, got:\n%s", expected, got)
+				}
+			}
+			for _, forbidden := range tt.not {
+				if contains(got, forbidden) {
+					t.Errorf("expected output to leave code block content untouched; found %q in:\n%s", forbidden, got)
+				}
+			}
+		})
 	}
 }
 
