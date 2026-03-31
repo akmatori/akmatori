@@ -143,7 +143,9 @@ func TestHandleLLMSettings_Create_DefaultThinkingLevel(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if resp["thinking_level"] != "medium" {
 		t.Errorf("expected default thinking_level 'medium', got %v", resp["thinking_level"])
 	}
@@ -205,7 +207,9 @@ func TestHandleLLMSettingsByID_Get(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if resp["name"] != "Test Config" {
 		t.Errorf("expected name 'Test Config', got %v", resp["name"])
 	}
@@ -237,7 +241,9 @@ func TestHandleLLMSettingsByID_Update(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if resp["name"] != "Updated Name" {
 		t.Errorf("expected name 'Updated Name', got %v", resp["name"])
 	}
@@ -355,7 +361,9 @@ func TestHandleLLMSettingsByID_Activate(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if resp["active"] != true {
 		t.Error("expected activated config to have active=true")
 	}
@@ -366,7 +374,9 @@ func TestHandleLLMSettingsByID_Activate(t *testing.T) {
 	h.handleLLMSettings(w, req)
 
 	var listResp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &listResp)
+	if err := json.Unmarshal(w.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
 	if uint(listResp["active_id"].(float64)) != second.ID {
 		t.Errorf("expected active_id %d, got %v", second.ID, listResp["active_id"])
 	}

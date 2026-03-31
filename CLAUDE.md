@@ -351,7 +351,9 @@ Multi-config LLM settings allow multiple configurations per provider (e.g., two 
 - `DELETE /api/settings/llm/{id}` → delete config (rejected if active or last remaining)
 - `PUT /api/settings/llm/{id}/activate` → set config as globally active
 
-Each config response includes: id, name, provider, model, thinking_level, base_url, is_configured, masked api_key, enabled, created_at, updated_at.
+Each config response includes: id, name, provider, model, thinking_level, base_url, is_configured, masked api_key, enabled, active, created_at, updated_at.
+
+Provider is set at creation time and cannot be changed via update. The update endpoint accepts: name, api_key, model, thinking_level, base_url.
 
 The `LLMSettings` model has a unique `Name` field and allows multiple rows per provider (no unique constraint on Provider).
 

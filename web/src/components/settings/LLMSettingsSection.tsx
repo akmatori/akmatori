@@ -51,13 +51,9 @@ const PROVIDER_OPTIONS: { value: LLMProvider; label: string }[] = [
   { value: 'custom', label: 'Custom' },
 ];
 
-const PROVIDER_LABELS: Record<string, string> = {
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  google: 'Google',
-  openrouter: 'OpenRouter',
-  custom: 'Custom',
-};
+const PROVIDER_LABELS: Record<string, string> = Object.fromEntries(
+  PROVIDER_OPTIONS.map((o) => [o.value, o.label])
+);
 
 interface LLMSettingsSectionProps {
   onStatusChange?: (status: 'configured' | 'not-configured') => void;

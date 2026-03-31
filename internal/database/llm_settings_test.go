@@ -104,8 +104,12 @@ func TestSetActiveLLMConfig(t *testing.T) {
 
 	s1 := &LLMSettings{Name: "Config A", Provider: LLMProviderOpenAI, Active: true}
 	s2 := &LLMSettings{Name: "Config B", Provider: LLMProviderAnthropic, Active: false}
-	CreateLLMSettings(s1)
-	CreateLLMSettings(s2)
+	if err := CreateLLMSettings(s1); err != nil {
+		t.Fatalf("create s1: %v", err)
+	}
+	if err := CreateLLMSettings(s2); err != nil {
+		t.Fatalf("create s2: %v", err)
+	}
 
 	// Switch active to Config B
 	if err := SetActiveLLMConfig(s2.ID); err != nil {
@@ -148,8 +152,12 @@ func TestDeleteLLMSettings(t *testing.T) {
 
 	s1 := &LLMSettings{Name: "Active", Provider: LLMProviderOpenAI, Active: true}
 	s2 := &LLMSettings{Name: "Inactive", Provider: LLMProviderAnthropic, Active: false}
-	CreateLLMSettings(s1)
-	CreateLLMSettings(s2)
+	if err := CreateLLMSettings(s1); err != nil {
+		t.Fatalf("create s1: %v", err)
+	}
+	if err := CreateLLMSettings(s2); err != nil {
+		t.Fatalf("create s2: %v", err)
+	}
 
 	// Deleting inactive config should succeed
 	if err := DeleteLLMSettings(s2.ID); err != nil {
@@ -167,7 +175,9 @@ func TestDeleteLLMSettings_ActiveConfigRejected(t *testing.T) {
 	setupLLMTestDB(t)
 
 	s := &LLMSettings{Name: "Active One", Provider: LLMProviderOpenAI, Active: true}
-	CreateLLMSettings(s)
+	if err := CreateLLMSettings(s); err != nil {
+		t.Fatalf("create: %v", err)
+	}
 
 	err := DeleteLLMSettings(s.ID)
 	if err == nil {
@@ -264,6 +274,60 @@ func TestMigrateLLMSettingsName(t *testing.T) {
 	}
 	if rows[2].Name != "My Custom" {
 		t.Errorf("expected third row name unchanged 'My Custom', got %q", rows[2].Name)
+	}
+}
+
+func TestMigrateLLMSettingsName_DuplicateProviders(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("failed to open test database: %v", err)
+	}
+	db.Exec(`CREATE TABLE llm_settings (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name VARCHAR(100) NOT NULL DEFAULT '',
+		provider VARCHAR(50) NOT NULL,
+		api_key TEXT,
+		model VARCHAR(100),
+		thinking_level VARCHAR(50) DEFAULT 'medium',
+		base_url TEXT,
+		enabled BOOLEAN DEFAULT 0,
+		active BOOLEAN DEFAULT 0,
+		created_at DATETIME,
+		updated_at DATETIME
+	)`)
+
+	// Two rows with the same provider and empty names
+	db.Exec("INSERT INTO llm_settings (name, provider, model, thinking_level, active) VALUES ('', 'openai', 'gpt-4', 'medium', 1)")
+	db.Exec("INSERT INTO llm_settings (name, provider, model, thinking_level, active) VALUES ('', 'openai', 'gpt-3.5', 'medium', 0)")
+	db.Exec("INSERT INTO llm_settings (name, provider, model, thinking_level, active) VALUES ('', 'anthropic', 'claude-sonnet-4-6', 'medium', 0)")
+
+	if err := migrateLLMSettingsName(db); err != nil {
+		t.Fatalf("migrateLLMSettingsName failed: %v", err)
+	}
+
+	var rows []LLMSettings
+	db.Order("id asc").Find(&rows)
+
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(rows))
+	}
+	if rows[0].Name != "OpenAI" {
+		t.Errorf("expected first row name 'OpenAI', got %q", rows[0].Name)
+	}
+	if rows[1].Name != "OpenAI (2)" {
+		t.Errorf("expected second row name 'OpenAI (2)', got %q", rows[1].Name)
+	}
+	if rows[2].Name != "Anthropic" {
+		t.Errorf("expected third row name 'Anthropic', got %q", rows[2].Name)
+	}
+
+	// Verify all names are unique
+	names := make(map[string]bool)
+	for _, r := range rows {
+		if names[r.Name] {
+			t.Errorf("duplicate name: %q", r.Name)
+		}
+		names[r.Name] = true
 	}
 }
 

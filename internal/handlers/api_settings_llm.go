@@ -203,7 +203,11 @@ func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id 
 	if len(updates) > 0 {
 		if err := database.GetDB().Model(settings).Updates(updates).Error; err != nil {
 			if containsString(err.Error(), "UNIQUE") || containsString(err.Error(), "duplicate key") || containsString(err.Error(), "unique") {
-				api.RespondError(w, http.StatusConflict, fmt.Sprintf("A configuration with name %q already exists", *req.Name))
+				msg := "A configuration with that name already exists"
+				if req.Name != nil {
+					msg = fmt.Sprintf("A configuration with name %q already exists", *req.Name)
+				}
+				api.RespondError(w, http.StatusConflict, msg)
 				return
 			}
 			api.RespondError(w, http.StatusInternalServerError, "Failed to update LLM configuration")
