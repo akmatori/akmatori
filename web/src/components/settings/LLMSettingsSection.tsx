@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Plus, Trash2, Power, Edit2, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { Save, Plus, Trash2, Edit2, X, ChevronDown, ChevronRight } from 'lucide-react';
 import LoadingSpinner from '../LoadingSpinner';
 import ErrorMessage from '../ErrorMessage';
 import { SuccessMessage } from '../ErrorMessage';
@@ -240,13 +240,9 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
     return <LoadingSpinner />;
   }
 
-  // Group configs by provider
-  const grouped: Record<string, LLMConfig[]> = {};
-  for (const c of configs) {
-    const key = c.provider;
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push(c);
-  }
+  const activeConfig = configs.find(c => c.id === activeId);
+  const otherConfigured = configs.filter(c => c.is_configured && c.id !== activeId);
+  const hasConfigured = configs.some(c => c.is_configured);
 
   const renderForm = () => {
     const isCreate = formMode === 'create';
@@ -451,6 +447,132 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
       {error && <ErrorMessage message={error} />}
       {success && <SuccessMessage message={success} />}
 
+      {/* Create/Edit Form */}
+      {formMode !== 'closed' && renderForm()}
+
+      {/* Active Provider hero card */}
+      {activeConfig && activeConfig.is_configured ? (
+        <div className="rounded-lg border-l-4 border-l-primary-500 border border-gray-200 dark:border-gray-700 bg-primary-50 dark:bg-primary-900/20 p-4">
+          <div className="flex items-center justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-primary-100 dark:bg-primary-800 text-primary-700 dark:text-primary-300">
+                  Active
+                </span>
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                  {PROVIDER_LABELS[activeConfig.provider] || activeConfig.provider}
+                </span>
+              </div>
+              <p className="text-sm font-semibold text-gray-900 dark:text-white mt-1">
+                {activeConfig.name}
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                {activeConfig.model || 'No model set'}
+                {activeConfig.thinking_level && activeConfig.thinking_level !== 'medium' && ` \u00B7 Thinking: ${activeConfig.thinking_level}`}
+                {activeConfig.base_url && ` \u00B7 Custom URL`}
+              </p>
+            </div>
+            <button
+              onClick={() => openEditForm(activeConfig)}
+              disabled={saving || formMode !== 'closed'}
+              className="p-1.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              title="Edit"
+            >
+              <Edit2 className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      ) : activeConfig && !activeConfig.is_configured ? (
+        <div className="rounded-lg border border-yellow-300 dark:border-yellow-600 bg-yellow-50 dark:bg-yellow-900/20 p-4">
+          <p className="text-sm text-yellow-700 dark:text-yellow-400">
+            Your active LLM provider has no API key configured.
+          </p>
+          <button
+            onClick={() => openEditForm(activeConfig)}
+            disabled={saving || formMode !== 'closed'}
+            className="mt-2 text-sm font-medium text-yellow-700 dark:text-yellow-400 underline hover:no-underline"
+          >
+            Configure it now
+          </button>
+        </div>
+      ) : null}
+
+      {/* Other configured providers */}
+      {otherConfigured.length > 0 && (
+        <div>
+          <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+            Other Configured Providers
+          </h3>
+          <div className="space-y-2">
+            {otherConfigured.map((config) => (
+              <div
+                key={config.id}
+                className="relative flex items-center justify-between p-4 rounded-lg border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 transition-colors"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                      {config.name}
+                    </span>
+                    <span className="text-xs text-gray-400 dark:text-gray-500">
+                      {PROVIDER_LABELS[config.provider] || config.provider}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {config.model || 'No model set'}
+                    {config.thinking_level && config.thinking_level !== 'medium' && ` \u00B7 Thinking: ${config.thinking_level}`}
+                    {config.base_url && ` \u00B7 Custom URL`}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 ml-3">
+                  <button
+                    onClick={() => handleActivate(config.id)}
+                    disabled={saving}
+                    className="px-2.5 py-1 rounded text-xs font-medium text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-colors"
+                  >
+                    Activate
+                  </button>
+                  <button
+                    onClick={() => openEditForm(config)}
+                    disabled={saving || formMode !== 'closed'}
+                    className="p-1.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    title="Edit"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  {deleteConfirmId === config.id ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleDelete(config.id)}
+                        disabled={saving}
+                        className="px-2 py-1 rounded text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirmId(null)}
+                        className="px-2 py-1 rounded text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setDeleteConfirmId(config.id)}
+                      disabled={saving || formMode !== 'closed'}
+                      className="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      title="Delete"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Add Configuration button */}
       {formMode === 'closed' && (
         <button onClick={openCreateForm} className="btn btn-primary">
@@ -459,111 +581,9 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
         </button>
       )}
 
-      {/* Create/Edit Form */}
-      {formMode !== 'closed' && renderForm()}
-
-      {/* Config cards grouped by provider */}
-      {Object.entries(grouped).map(([provider, providerConfigs]) => (
-        <div key={provider}>
-          <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-            {PROVIDER_LABELS[provider] || provider}
-          </h3>
-          <div className="space-y-2">
-            {providerConfigs.map((config) => {
-              const isActive = config.id === activeId;
-              return (
-                <div
-                  key={config.id}
-                  className={`relative flex items-center justify-between p-4 rounded-lg border transition-colors ${
-                    isActive
-                      ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-600'
-                      : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
-                  }`}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                        {config.name}
-                      </span>
-                      {isActive && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-primary-100 dark:bg-primary-800 text-primary-700 dark:text-primary-300">
-                          Active
-                        </span>
-                      )}
-                      {config.is_configured ? (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
-                          Configured
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400">
-                          No API key
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                      {config.model || 'No model set'}
-                      {config.thinking_level && config.thinking_level !== 'medium' && ` \u00B7 Thinking: ${config.thinking_level}`}
-                      {config.base_url && ` \u00B7 Custom URL`}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1 ml-3">
-                    {!isActive && (
-                      <button
-                        onClick={() => handleActivate(config.id)}
-                        disabled={saving}
-                        className="p-1.5 rounded text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                        title="Activate"
-                      >
-                        <Power className="w-4 h-4" />
-                      </button>
-                    )}
-                    <button
-                      onClick={() => openEditForm(config)}
-                      disabled={saving || formMode !== 'closed'}
-                      className="p-1.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                      title="Edit"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    {!isActive && (
-                      deleteConfirmId === config.id ? (
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => handleDelete(config.id)}
-                            disabled={saving}
-                            className="px-2 py-1 rounded text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
-                          >
-                            Confirm
-                          </button>
-                          <button
-                            onClick={() => setDeleteConfirmId(null)}
-                            className="px-2 py-1 rounded text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setDeleteConfirmId(config.id)}
-                          disabled={saving || formMode !== 'closed'}
-                          className="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-
-      {configs.length === 0 && formMode === 'closed' && (
+      {!hasConfigured && formMode === 'closed' && (
         <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-6">
-          No LLM configurations yet. Add one to get started.
+          No LLM providers configured yet. Add one to get started.
         </p>
       )}
     </div>

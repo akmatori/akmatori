@@ -109,7 +109,11 @@ func runMigrations(db *gorm.DB) error {
 		return err
 	}
 
-	err := db.AutoMigrate(
+	// Reset GORM session state before AutoMigrate. The preMigrate step
+	// operates on specific tables, leaving internal GORM state (table name,
+	// clauses) that can leak into AutoMigrate's processing of other models
+	// on this pinned connection.
+	err := db.Session(&gorm.Session{NewDB: true}).AutoMigrate(
 		&SystemSetting{},
 		&SlackSettings{},
 		&LLMSettings{},
@@ -156,28 +160,46 @@ func preMigrateLLMSettings(db *gorm.DB) error {
 		return nil // Fresh install — AutoMigrate will create everything correctly.
 	}
 
-	// Drop old unique index on provider (GORM doesn't drop indexes on AutoMigrate).
-	// Try both PostgreSQL and SQLite naming conventions.
-	for _, idx := range []string{
-		"idx_llm_settings_provider",  // GORM default naming
-		"uni_llm_settings_provider",  // GORM uniqueIndex naming variant
-	} {
-		if db.Migrator().HasIndex(&LLMSettings{}, idx) {
-			if err := db.Exec("DROP INDEX IF EXISTS " + idx).Error; err != nil {
-				slog.Warn("failed to drop old provider unique index", "index", idx, "error", err)
-			} else {
-				slog.Info("dropped old unique index on provider", "index", idx)
+	// Wrap all pre-migration DDL in an explicit transaction so it commits
+	// independently — if AutoMigrate later fails, these changes persist.
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		// Drop old unique indexes that block the multi-config schema change.
+		// Use raw DROP INDEX IF EXISTS instead of HasIndex — GORM's HasIndex checks
+		// against the current model struct, which no longer has these fields/tags.
+		for _, idx := range []string{
+			"idx_llm_settings_provider",       // GORM default naming for old provider unique index
+			"uni_llm_settings_provider",       // GORM uniqueIndex naming variant
+			"idx_llm_settings_singleton_key",  // Old singleton pattern unique index
+		} {
+			if err := tx.Exec("DROP INDEX IF EXISTS " + idx).Error; err != nil {
+				slog.Warn("failed to drop old index", "index", idx, "error", err)
 			}
 		}
-	}
 
-	// Add the name column if it doesn't exist, then populate unique names
-	// so AutoMigrate can safely create the unique index.
-	if !db.Migrator().HasColumn(&LLMSettings{}, "name") {
-		if err := db.Exec("ALTER TABLE llm_settings ADD COLUMN name VARCHAR(100) NOT NULL DEFAULT ''").Error; err != nil {
-			return fmt.Errorf("add name column to llm_settings: %w", err)
+		// Drop orphaned columns from the old singleton pattern (singleton_key,
+		// retention_days, cleanup_interval_hours were added by a previous GORM
+		// AutoMigrate when LLMSettings included these fields).
+		for _, col := range []string{"singleton_key", "retention_days", "cleanup_interval_hours"} {
+			if tx.Migrator().HasColumn(&LLMSettings{}, col) {
+				if err := tx.Exec("ALTER TABLE llm_settings DROP COLUMN " + col).Error; err != nil {
+					slog.Warn("failed to drop orphaned column", "column", col, "error", err)
+				} else {
+					slog.Info("dropped orphaned column from llm_settings", "column", col)
+				}
+			}
 		}
-		slog.Info("added name column to llm_settings")
+
+		// Add the name column if it doesn't exist.
+		if !tx.Migrator().HasColumn(&LLMSettings{}, "name") {
+			if err := tx.Exec("ALTER TABLE llm_settings ADD COLUMN name VARCHAR(100) NOT NULL DEFAULT ''").Error; err != nil {
+				return fmt.Errorf("add name column to llm_settings: %w", err)
+			}
+			slog.Info("added name column to llm_settings")
+		}
+
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	// Populate empty names with unique values before AutoMigrate adds the unique index.
@@ -234,7 +256,7 @@ func migrateLLMSettingsName(db *gorm.DB) error {
 			}
 		}
 		assigned[name] = 1
-		if err := db.Model(&LLMSettings{}).Where("id = ?", row.ID).Update("name", name).Error; err != nil {
+		if err := db.Session(&gorm.Session{NewDB: true}).Model(&LLMSettings{}).Where("id = ?", row.ID).Update("name", name).Error; err != nil {
 			return fmt.Errorf("set name for llm_settings id=%d: %w", row.ID, err)
 		}
 	}
