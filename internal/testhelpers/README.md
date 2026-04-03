@@ -1,239 +1,52 @@
-# Test Helpers Package
+# Test Helpers
 
-This package provides reusable testing utilities for Akmatori.
+Reusable test building blocks live in `internal/testhelpers`.
 
-## Builders
+## Preferred patterns
 
-Fluent builders for creating test data:
+- Use builders for readable fixture setup instead of hand-populating large structs.
+- Use `NewHTTPTestContext` for handler tests so request/response assertions stay compact.
+- Use service mocks when the behavior under test is handler/service orchestration, not storage.
+- Use fixtures from `tests/fixtures/` for real payload samples.
+- Add benchmarks only for helpers or hot paths that are easy to compare over time.
 
+## Common helpers
+
+**Builders**
+- `NewSkillBuilder`
+- `NewToolInstanceBuilder`
+- `NewToolTypeBuilder`
+- `NewAlertSourceInstanceBuilder`
+- `NewRunbookBuilder`
+- `NewContextFileBuilder`
+- `NewAlertBuilder`
+- `NewIncidentBuilder`
+
+**HTTP tests**
 ```go
-// Create a skill with tools
-skill := NewSkillBuilder().
-    WithName("zabbix-analyst").
-    WithCategory("monitoring").
-    AsSystem().
-    Build()
-
-// Create an alert source instance
-source := NewAlertSourceInstanceBuilder().
-    WithName("Production Alertmanager").
-    WithWebhookSecret("secret").
-    Build()
-
-// Create a runbook
-runbook := NewRunbookBuilder().
-    WithTitle("Database Failover").
-    WithContent("# Steps...").
-    Build()
-
-// Create a context file
-file := NewContextFileBuilder().
-    WithFilename("architecture.md").
-    AsMarkdown().
-    Build()
-```
-
-Available builders:
-- `SkillBuilder` - Skills with tools
-- `ToolInstanceBuilder` - Tool instances
-- `ToolTypeBuilder` - Tool type definitions
-- `AlertSourceInstanceBuilder` - Alert source instances
-- `LLMSettingsBuilder` - LLM provider settings
-- `SlackSettingsBuilder` - Slack integration settings
-- `RunbookBuilder` - Runbook documents
-- `ContextFileBuilder` - Context files
-- `NormalizedAlertBuilder` - Normalized alerts
-- `IncidentBuilder` - Incidents
-
-## HTTP Testing
-
-```go
-// Fluent HTTP test context
-NewHTTPTestContext(t, "POST", "/api/alerts", nil).
-    WithJSONBody(alertPayload).
+ctx := NewHTTPTestContext(t, http.MethodPost, "/api/alerts", nil).
     WithAPIKey("test-key").
+    WithJSONBody(payload).
     Execute(handler).
-    AssertStatus(http.StatusOK).
-    AssertBodyContains("created")
+    AssertStatus(http.StatusCreated)
 ```
 
-## Assertions
-
-```go
-// JSON assertions
-AssertJSONEqual(t, expected, actual, "response body")
-AssertJSONContainsKey(t, json, "id", "should have id")
-AssertJSONArrayLength(t, json, 3, "should have 3 items")
-
-// Slice/map assertions
-AssertSliceContains(t, items, target, "should contain item")
-AssertMapContainsKey(t, m, "key", "should have key")
-
-// Time assertions
-AssertTimeWithin(t, actual, expected, time.Second, "within 1s")
-
-// Error assertions
-AssertErrorContains(t, err, "not found", "should mention not found")
-AssertPanics(t, func() { ... }, "should panic")
-```
-
-## Concurrent Testing
-
-```go
-// Run function concurrently
-ConcurrentTest(t, 10, func(workerID int) {
-    // Each worker runs this
-})
-
-// With timeout
-ConcurrentTestWithTimeout(t, 5*time.Second, 10, func(workerID int) {
-    // Must complete within 5s
-})
-```
-
-## Environment Helpers
-
-```go
-// Temporarily set env var
-cleanup := WithEnv(t, "DATABASE_URL", "test-db")
-defer cleanup()
-
-// Multiple env vars
-cleanup := WithEnvs(t, map[string]string{
-    "API_KEY": "test",
-    "DEBUG":   "true",
-})
-defer cleanup()
-```
-
-## File Helpers
-
-```go
-// Create temp directory
-dir, cleanup := TempTestDir(t, "test-")
-defer cleanup()
-
-// Write test file
-path := WriteTestFile(t, dir, "config.json", `{"key": "value"}`)
-
-// Assert file state
-AssertFileExists(t, path, "config should exist")
-AssertFileContains(t, path, "key", "should contain key")
-```
-
-## Fixtures
-
-Load test fixtures from `tests/fixtures/`:
-
+**Fixtures**
 ```go
 data := LoadFixture(t, "alerts/alertmanager_firing.json")
+LoadJSONFixture(t, "alerts/alertmanager_firing.json", &payload)
 ```
 
-Available fixtures:
-- `alerts/alertmanager_firing.json`
-- `alerts/datadog_monitor.json`
-- `alerts/grafana_alerting.json`
-- `alerts/newrelic_alert.json`
-- `alerts/opsgenie_alert.json`
-- `alerts/pagerduty_trigger.json`
-- `alerts/sentry_alert.json`
-- `alerts/zabbix_problem.json`
-- `runbooks/database_failover.md`
-
-## Mock Adapter
-
+**Mocks**
 ```go
-adapter := NewMockAlertAdapter("test").
-    WithAlerts(alert1, alert2).
-    WithParseError(nil)
-
-alerts, err := adapter.ParsePayload(body, instance)
-```
-
-## Service Mocks
-
-Thread-safe mocks for testing handlers:
-
-```go
-// Alert service mock
 alertSvc := NewMockAlertService().
     WithInstance("uuid", &instance).
-    WithProcessedAlerts(alert1, alert2)
-
-// Incident service mock
-incidentSvc := NewMockIncidentService().
-    WithIncident("uuid", &incident).
-    WithCreatedIncident(&newIncident)
-
-// Skill service mock
-skillSvc := NewMockSkillService().
-    WithSkill("name", &skill).
-    WithAllSkills(skill1, skill2)
-
-// Check call tracking
-if len(alertSvc.GetInstanceCalls) != 1 { ... }
+    WithProcessedAlerts(alert)
 ```
 
-## Webhook Request Builder
-
-Build webhook requests with signatures:
-
-```go
-// Basic request
-req := NewWebhookRequest(t).
-    WithInstanceUUID("prod-alertmanager").
-    WithJSONBody(payload).
-    Build()
-
-// With Slack signature
-req := NewWebhookRequest(t).
-    WithBody(body).
-    WithSlackSignature("webhook-secret").
-    Build()
-
-// With PagerDuty/Grafana signatures
-req := NewWebhookRequest(t).
-    WithBody(body).
-    WithPagerDutySignature("secret").
-    Build()
-
-// Get request + recorder together
-req, rec := NewWebhookRequest(t).
-    WithInstanceUUID("test").
-    BuildWithRecorder()
-```
-
-## Alert Payload Builders
-
-Build Alertmanager payloads:
-
-```go
-payload := NewAlertmanagerPayload().
-    WithFiringAlert("HighCPU", "critical").
-    WithFiringAlert("LowMemory", "warning").
-    WithResolvedAlert("DiskFull").
-    Build(t)
-```
-
-## Call Counter
-
-Thread-safe counter for tracking function calls:
-
-```go
-counter := NewCallCounter()
-handler := func() { counter.Inc() }
-
-// Use handler...
-
-counter.AssertCount(t, 5, "should be called 5 times")
-```
-
-## Eventually/Retry
-
-For async operations:
-
+**Async assertions**
 ```go
 AssertEventually(t, 5*time.Second, 100*time.Millisecond, func() bool {
-    return service.IsReady()
+    return ready()
 }, "service should become ready")
 ```

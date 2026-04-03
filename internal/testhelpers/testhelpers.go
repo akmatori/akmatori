@@ -52,15 +52,22 @@ func (ctx *HTTPTestContext) WithHeader(key, value string) *HTTPTestContext {
 	return ctx
 }
 
-// WithJSONBody sets JSON body on the request
+// WithJSONBody sets a JSON body on the request while preserving existing headers and context.
 func (ctx *HTTPTestContext) WithJSONBody(v interface{}) *HTTPTestContext {
 	ctx.T.Helper()
+
 	body, err := json.Marshal(v)
 	if err != nil {
 		ctx.T.Fatalf("failed to marshal JSON body: %v", err)
 	}
-	ctx.Request = httptest.NewRequest(ctx.Request.Method, ctx.Request.URL.String(), bytes.NewReader(body))
-	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	req := ctx.Request.Clone(ctx.Request.Context())
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	req.ContentLength = int64(len(body))
+	req.Header = ctx.Request.Header.Clone()
+	req.Header.Set("Content-Type", "application/json")
+	ctx.Request = req
+
 	return ctx
 }
 

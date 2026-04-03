@@ -84,6 +84,33 @@ func TestHTTPTestContext_WithJSONBody(t *testing.T) {
 	if contentType != "application/json" {
 		t.Errorf("expected Content-Type application/json, got %s", contentType)
 	}
+
+	var decoded map[string]string
+	if err := json.NewDecoder(ctx.Request.Body).Decode(&decoded); err != nil {
+		t.Fatalf("failed to decode request body: %v", err)
+	}
+	if decoded["key"] != "value" {
+		t.Fatalf("expected JSON body to contain key=value, got %#v", decoded)
+	}
+}
+
+func TestHTTPTestContext_WithJSONBody_PreservesHeaders(t *testing.T) {
+	ctx := NewHTTPTestContext(t, http.MethodPost, "/test", nil).
+		WithHeader("X-Test-Header", "kept").
+		WithAPIKey("test-key").
+		WithBearerToken("token")
+
+	ctx.WithJSONBody(map[string]string{"ok": "true"})
+
+	if got := ctx.Request.Header.Get("X-Test-Header"); got != "kept" {
+		t.Fatalf("expected custom header to be preserved, got %q", got)
+	}
+	if got := ctx.Request.Header.Get("X-API-Key"); got != "test-key" {
+		t.Fatalf("expected API key header to be preserved, got %q", got)
+	}
+	if got := ctx.Request.Header.Get("Authorization"); got != "Bearer token" {
+		t.Fatalf("expected bearer token header to be preserved, got %q", got)
+	}
 }
 
 func TestHTTPTestContext_DecodeJSON(t *testing.T) {
