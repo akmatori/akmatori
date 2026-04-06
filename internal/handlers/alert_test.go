@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -323,8 +325,13 @@ func TestAlertHandler_getBaseURL(t *testing.T) {
 
 // mockAlertAdapter implements alerts.AlertAdapter for testing
 type mockAlertAdapter struct {
-	sourceType string
-	id         string
+	sourceType    string
+	id            string
+	alerts        []alerts.NormalizedAlert
+	parseErr      error
+	validateErr   error
+	parseCalls    int
+	validateCalls int
 }
 
 func (m *mockAlertAdapter) GetSourceType() string {
@@ -332,11 +339,16 @@ func (m *mockAlertAdapter) GetSourceType() string {
 }
 
 func (m *mockAlertAdapter) ParsePayload(body []byte, instance *database.AlertSourceInstance) ([]alerts.NormalizedAlert, error) {
-	return nil, nil
+	m.parseCalls++
+	if m.parseErr != nil {
+		return nil, m.parseErr
+	}
+	return m.alerts, nil
 }
 
 func (m *mockAlertAdapter) ValidateWebhookSecret(r *http.Request, instance *database.AlertSourceInstance) error {
-	return nil
+	m.validateCalls++
+	return m.validateErr
 }
 
 func (m *mockAlertAdapter) GetDefaultMappings() database.JSONB {
@@ -562,5 +574,210 @@ func TestTruncateWithFooter_TruncatesContent(t *testing.T) {
 		t.Errorf("metrics should always be present in result")
 	}
 }
+
+func TestAlertHandler_SetTeamID(t *testing.T) {
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
+	h.SetTeamID("T123")
+	if h.teamID != "T123" {
+		t.Fatalf("teamID = %q, want %q", h.teamID, "T123")
+	}
+}
+
+func TestAlertHandler_HandleWebhook_ErrorPathsAndSuccess(t *testing.T) {
+	baseInstance := &database.AlertSourceInstance{
+		UUID:    "test-uuid",
+		Name:    "Primary Alertmanager",
+		Enabled: true,
+		AlertSourceType: database.AlertSourceType{
+			Name: "alertmanager",
+		},
+	}
+
+	tests := []struct {
+		name           string
+		path           string
+		service        *mockAlertManager
+		adapter        *mockAlertAdapter
+		body           string
+		reader         io.Reader
+		expectedStatus int
+		wantBody       string
+	}{
+		{
+			name:           "instance not found",
+			path:           "/webhook/alert/missing",
+			service:        &mockAlertManager{getInstanceErr: errors.New("not found")},
+			expectedStatus: http.StatusNotFound,
+			wantBody:       "Instance not found",
+		},
+		{
+			name: "disabled instance",
+			path: "/webhook/alert/test-uuid",
+			service: &mockAlertManager{instance: &database.AlertSourceInstance{
+				UUID:            "test-uuid",
+				Enabled:         false,
+				AlertSourceType: database.AlertSourceType{Name: "alertmanager"},
+			}},
+			expectedStatus: http.StatusForbidden,
+			wantBody:       "Instance disabled",
+		},
+		{
+			name:           "unsupported source type",
+			path:           "/webhook/alert/test-uuid",
+			service:        &mockAlertManager{instance: cloneInstance(baseInstance)},
+			expectedStatus: http.StatusBadRequest,
+			wantBody:       "Unsupported source type",
+		},
+		{
+			name:           "invalid webhook secret",
+			path:           "/webhook/alert/test-uuid",
+			service:        &mockAlertManager{instance: cloneInstance(baseInstance)},
+			adapter:        &mockAlertAdapter{sourceType: "alertmanager", validateErr: errors.New("bad secret")},
+			expectedStatus: http.StatusUnauthorized,
+			wantBody:       "Unauthorized",
+		},
+		{
+			name:           "request body read failure",
+			path:           "/webhook/alert/test-uuid",
+			service:        &mockAlertManager{instance: cloneInstance(baseInstance)},
+			adapter:        &mockAlertAdapter{sourceType: "alertmanager"},
+			reader:         errReader{},
+			expectedStatus: http.StatusBadRequest,
+			wantBody:       "Failed to read request body",
+		},
+		{
+			name:           "invalid payload",
+			path:           "/webhook/alert/test-uuid",
+			service:        &mockAlertManager{instance: cloneInstance(baseInstance)},
+			adapter:        &mockAlertAdapter{sourceType: "alertmanager", parseErr: errors.New("invalid json")},
+			body:           "{bad json}",
+			expectedStatus: http.StatusBadRequest,
+			wantBody:       "Invalid payload",
+		},
+		{
+			name:           "success with empty alert batch",
+			path:           "/webhook/alert/test-uuid",
+			service:        &mockAlertManager{instance: cloneInstance(baseInstance)},
+			adapter:        &mockAlertAdapter{sourceType: "alertmanager", alerts: []alerts.NormalizedAlert{}},
+			body:           `{"status":"ok"}`,
+			expectedStatus: http.StatusOK,
+			wantBody:       "Received 0 alerts",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := NewAlertHandler(nil, nil, nil, nil, nil, tt.service, nil)
+			if tt.adapter != nil {
+				h.RegisterAdapter(tt.adapter)
+			}
+
+			reader := tt.reader
+			if reader == nil {
+				reader = strings.NewReader(tt.body)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, tt.path, reader)
+			w := httptest.NewRecorder()
+
+			h.HandleWebhook(w, req)
+
+			if w.Code != tt.expectedStatus {
+				t.Fatalf("status = %d, want %d; body=%q", w.Code, tt.expectedStatus, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), tt.wantBody) {
+				t.Fatalf("response body = %q, want substring %q", w.Body.String(), tt.wantBody)
+			}
+			if tt.service != nil && tt.service.lastUUID != strings.TrimPrefix(strings.TrimSuffix(tt.path, "/"), "/webhook/alert/") {
+				t.Fatalf("GetInstanceByUUID called with %q, want %q", tt.service.lastUUID, strings.TrimPrefix(strings.TrimSuffix(tt.path, "/"), "/webhook/alert/"))
+			}
+			if tt.adapter != nil {
+				if tt.wantBody == "Unsupported source type" {
+					if tt.adapter.validateCalls != 0 || tt.adapter.parseCalls != 0 {
+						t.Fatalf("unsupported source type should not invoke adapter, got validate=%d parse=%d", tt.adapter.validateCalls, tt.adapter.parseCalls)
+					}
+					return
+				}
+				if tt.wantBody != "Instance not found" && tt.wantBody != "Instance disabled" && tt.adapter.validateCalls == 0 {
+					t.Fatalf("expected ValidateWebhookSecret to be called")
+				}
+				if tt.wantBody == "Invalid payload" || strings.HasPrefix(tt.wantBody, "Received ") {
+					if tt.adapter.parseCalls == 0 {
+						t.Fatalf("expected ParsePayload to be called")
+					}
+				}
+			}
+		})
+	}
+}
+
+func cloneInstance(in *database.AlertSourceInstance) *database.AlertSourceInstance {
+	if in == nil {
+		return nil
+	}
+	copy := *in
+	return &copy
+}
+
+type errReader struct{}
+
+func (errReader) Read(_ []byte) (int, error) {
+	return 0, errors.New("boom")
+}
+
+func (errReader) Close() error { return nil }
+
+type mockAlertManager struct {
+	instance       *database.AlertSourceInstance
+	getInstanceErr error
+	lastUUID       string
+}
+
+func (m *mockAlertManager) ListSourceTypes() ([]database.AlertSourceType, error) {
+	return nil, nil
+}
+func (m *mockAlertManager) ListAlertSourceTypes() ([]database.AlertSourceType, error) {
+	return nil, nil
+}
+func (m *mockAlertManager) GetAlertSourceType(id uint) (*database.AlertSourceType, error) {
+	return nil, nil
+}
+func (m *mockAlertManager) GetAlertSourceTypeByName(name string) (*database.AlertSourceType, error) {
+	return nil, nil
+}
+func (m *mockAlertManager) CreateAlertSourceType(name, displayName, description string, defaultMappings database.JSONB, webhookSecretHeader string) (*database.AlertSourceType, error) {
+	return nil, nil
+}
+func (m *mockAlertManager) EnsureAlertSourceType(name, displayName, description string, defaultMappings database.JSONB, webhookSecretHeader string) (*database.AlertSourceType, error) {
+	return nil, nil
+}
+func (m *mockAlertManager) ListInstances() ([]database.AlertSourceInstance, error) {
+	return nil, nil
+}
+func (m *mockAlertManager) GetInstance(id uint) (*database.AlertSourceInstance, error) {
+	return nil, nil
+}
+func (m *mockAlertManager) GetInstanceByUUID(uuid string) (*database.AlertSourceInstance, error) {
+	m.lastUUID = uuid
+	if m.getInstanceErr != nil {
+		return nil, m.getInstanceErr
+	}
+	return m.instance, nil
+}
+func (m *mockAlertManager) CreateInstance(sourceTypeName, name, description, webhookSecret string, fieldMappings, settings database.JSONB) (*database.AlertSourceInstance, error) {
+	return nil, nil
+}
+func (m *mockAlertManager) CreateInstanceByTypeID(sourceTypeID uint, name, description, webhookSecret string, fieldMappings, settings database.JSONB) (*database.AlertSourceInstance, error) {
+	return nil, nil
+}
+func (m *mockAlertManager) UpdateInstance(uuid string, updates map[string]interface{}) error {
+	return nil
+}
+func (m *mockAlertManager) UpdateInstanceByID(id uint, name, description, webhookSecret string, fieldMappings, settings database.JSONB, enabled bool) error {
+	return nil
+}
+func (m *mockAlertManager) DeleteInstance(uuid string) error    { return nil }
+func (m *mockAlertManager) DeleteInstanceByID(id uint) error    { return nil }
+func (m *mockAlertManager) InitializeDefaultSourceTypes() error { return nil }
 
 // HandleWebhook tests with full dependencies are in integration_test.go
