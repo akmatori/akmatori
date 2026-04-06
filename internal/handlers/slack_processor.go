@@ -231,15 +231,12 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			},
 		}
 
-		// Start or continue incident based on whether we have a session
+		// Always start a fresh agent session — resuming stale sessions causes
+		// "timeout waiting for child process to exit" errors when the original
+		// agent process is no longer running.
+		slog.Info("starting new agent session for incident", "incident_id", incidentUUID)
 		var wsErr error
-		if sessionID != "" {
-			slog.Info("continuing session for incident", "session_id", sessionID, "incident_id", incidentUUID)
-			wsErr = h.agentWSHandler.ContinueIncident(incidentUUID, sessionID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback)
-		} else {
-			slog.Info("starting new agent session for incident", "incident_id", incidentUUID)
-			wsErr = h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback)
-		}
+		wsErr = h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback)
 
 		if wsErr != nil {
 			slog.Error("failed to start/continue incident via WebSocket", "err", wsErr)
