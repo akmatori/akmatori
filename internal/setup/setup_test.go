@@ -31,7 +31,9 @@ func setupTestDB(t *testing.T) func() {
 	return func() {
 		sqlDB, _ := db.DB()
 		if sqlDB != nil {
-			sqlDB.Close()
+			if err := sqlDB.Close(); err != nil {
+				t.Fatalf("Failed to close DB: %v", err)
+			}
 		}
 	}
 }
@@ -147,6 +149,26 @@ func TestResolveAdminPassword_SetupRequired(t *testing.T) {
 	}
 }
 
+func TestResolveAdminPassword_IgnoresEmptyStoredHash(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	if err := database.SetSystemSetting(database.SystemSettingAdminPasswordHash, ""); err != nil {
+		t.Fatalf("Failed to set system setting: %v", err)
+	}
+
+	hash, setupRequired, err := ResolveAdminPassword("")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if !setupRequired {
+		t.Error("Should require setup when stored hash is empty")
+	}
+	if hash != "" {
+		t.Errorf("Expected empty hash when stored hash is empty, got %q", hash)
+	}
+}
+
 func TestCompleteSetup(t *testing.T) {
 	cleanup := setupTestDB(t)
 	defer cleanup()
@@ -198,6 +220,39 @@ func TestIsSetupCompleted_Completed(t *testing.T) {
 
 	if !IsSetupCompleted() {
 		t.Error("Setup should be completed when flag is set")
+	}
+}
+
+func TestIsSetupCompleted_OnlyAcceptsLiteralTrue(t *testing.T) {
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	testCases := []struct {
+		name     string
+		stored   string
+		expected bool
+	}{
+		{name: "literal true", stored: "true", expected: true},
+		{name: "false", stored: "false", expected: false},
+		{name: "uppercase true", stored: "TRUE", expected: false},
+		{name: "empty", stored: "", expected: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := database.DB.Where("key = ?", database.SystemSettingSetupCompleted).Delete(&database.SystemSetting{}).Error; err != nil {
+				t.Fatalf("Failed to reset setup flag: %v", err)
+			}
+			if tc.stored != "" {
+				if err := database.SetSystemSetting(database.SystemSettingSetupCompleted, tc.stored); err != nil {
+					t.Fatalf("Failed to set system setting: %v", err)
+				}
+			}
+
+			if got := IsSetupCompleted(); got != tc.expected {
+				t.Errorf("IsSetupCompleted() = %v, want %v for stored value %q", got, tc.expected, tc.stored)
+			}
+		})
 	}
 }
 
