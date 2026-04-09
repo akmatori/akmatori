@@ -77,51 +77,16 @@ make verify           # go vet + all tests (pre-commit)
 | Frontend (`web/`) | `docker-compose build frontend && docker-compose up -d frontend` |
 | QMD search (`qmd/`) | `docker-compose build qmd && docker-compose up -d qmd` |
 
-## Current Test Coverage (Mar 26, 2026)
+## Current Testing Priorities
 
-### Main Module (`akmatori`)
+Coverage moves quickly; re-run `go test -coverprofile=coverage.out ./...` before quoting numbers.
+Focus new tests on historically weak areas: `internal/handlers`, `internal/services`, `internal/slack`, main-module database paths, and MCP Gateway `internal/tools` / `internal/tools/zabbix`.
 
-| Package | Coverage | Status |
-|---------|----------|--------|
-| `internal/alerts` | 100.0% | ✅ |
-| `internal/alerts/adapters` | 98.4% | ✅ |
-| `internal/utils` | 94.2% | ✅ |
-| `internal/alerts/extraction` | 93.1% | ✅ |
-| `internal/api` | 92.3% | ✅ |
-| `internal/setup` | 84.8% | ✅ |
-| `internal/middleware` | 78.9% | ✅ |
-| `internal/testhelpers` | 76.2% | ✅ |
-| `internal/output` | 68.4% | ✅ |
-| `internal/database` | 52.2% | ⚠️ |
-| `internal/slack` | 32.3% | ⚠️ |
-| `internal/services` | 27.8% | ⚠️ |
-| `internal/handlers` | 17.8% | ⚠️ |
+## Recent Changes (Apr 2026)
 
-### MCP Gateway (`mcp-gateway`)
-
-| Package | Coverage | Status |
-|---------|----------|--------|
-| `internal/cache` | 100.0% | ✅ |
-| `internal/ratelimit` | 100.0% | ✅ |
-| `internal/validation` | 100.0% | ✅ |
-| `internal/tools/httpconnector` | 91.6% | ✅ |
-| `internal/tools/catchpoint` | 83.5% | ✅ |
-| `internal/tools/grafana` | 81.0% | ✅ |
-| `internal/auth` | 81.8% | ✅ |
-| `internal/tools/postgresql` | 79.9% | ✅ |
-| `internal/tools/clickhouse` | 82.8% | ✅ |
-| `internal/tools/pagerduty` | 81.3% | ✅ |
-| `internal/tools/netbox` | 80.6% | ✅ |
-| `internal/tools/k8s` | 82.4% | ✅ |
-| `internal/tools/victoriametrics` | 76.2% | ✅ |
-| `internal/mcpproxy` | 70.8% | ✅ |
-| `internal/mcp` | 66.8% | ⚠️ |
-| `internal/database` | 40.5% | ⚠️ |
-| `internal/tools` | 40.3% | ⚠️ |
-| `internal/tools/ssh` | 33.8% | ⚠️ |
-| `internal/tools/zabbix` | 5.2% | ⚠️ |
-
-**Priority**: handlers, services, zabbix tools (mock external APIs)
+- Slack skill launches now start fresh agent sessions; skill prompt trimming/output-format handling was tightened.
+- Alert webhook error paths, setup-state edge cases, and Slack settings integration helpers all gained focused tests.
+- When updating docs, prefer small pattern notes over long examples so this file stays under the 30k limit.
 
 ## Agent Worker Architecture
 
@@ -388,155 +353,21 @@ At incident creation, the skill's tool instances are resolved into an allowlist 
 
 ## Test Helpers (`internal/testhelpers/`)
 
-### HTTP Testing
+Use the helpers instead of hand-rolled mocks when possible:
 
-```go
-ctx := testhelpers.NewHTTPTestContext(t, http.MethodPost, "/api/v1/alerts", nil)
-ctx.WithAPIKey("key").WithJSONBody(data).ExecuteFunc(handler).AssertStatus(200).AssertBodyContains("success")
-var result Response
-ctx.DecodeJSON(&result)
-```
-
-### Mock Alert Adapter
-
-```go
-mock := testhelpers.NewMockAlertAdapter("prometheus").WithAlerts(
-    testhelpers.NewAlertBuilder().WithName("HighCPU").WithSeverity("critical").Build(),
-)
-// Or with error
-mockErr := testhelpers.NewMockAlertAdapter("datadog").WithParseError(errors.New("invalid"))
-```
-
-### Data Builders
-
-```go
-alert := testhelpers.NewAlertBuilder().WithName("HighCPU").WithSeverity("critical").WithHost("server-1").Build()
-incident := testhelpers.NewIncidentBuilder().WithTitle("DB outage").WithStatus("investigating").Build()
-skill := testhelpers.NewSkillBuilder().WithName("zabbix-analyst").WithCategory("monitoring").Build()
-toolInstance := testhelpers.NewToolInstanceBuilder().WithName("prod-zabbix").WithSetting("url", "https://...").Build()
-llmSettings := testhelpers.NewLLMSettingsBuilder().WithName("My Anthropic").WithProvider(database.LLMProviderAnthropic).Build()
-```
-
-**Available**: AlertBuilder, IncidentBuilder, SkillBuilder, ToolInstanceBuilder, ToolTypeBuilder, AlertSourceInstanceBuilder, LLMSettingsBuilder, SlackSettingsBuilder, RunbookBuilder, ContextFileBuilder
-
-### Assertions
-
-```go
-// Basic
-testhelpers.AssertEqual(t, expected, actual, "msg")
-testhelpers.AssertNil(t, err, "msg")
-testhelpers.AssertNotNil(t, result, "msg")
-testhelpers.AssertContains(t, body, "success", "msg")
-
-// String
-testhelpers.AssertStringPrefix(t, s, "prefix", "msg")
-testhelpers.AssertStringNotEmpty(t, s, "msg")
-
-// Slice/Map (generic)
-testhelpers.AssertSliceLen(t, slice, 5, "msg")
-testhelpers.AssertMapContainsKey(t, m, "key", "msg")
-
-// JSON
-testhelpers.AssertJSONEqual(t, expected, actual, "msg")
-testhelpers.AssertJSONContainsKey(t, jsonStr, "name", "msg")
-
-// Error/Panic
-testhelpers.AssertErrorContains(t, err, "not found", "msg")
-testhelpers.AssertPanics(t, func() { panic("!") }, "msg")
-testhelpers.AssertNoPanic(t, func() { safeFunc() }, "msg")
-
-// HTTP
-testhelpers.AssertStatusCode(t, resp.StatusCode, 200, "msg")
-testhelpers.AssertContentType(t, contentType, "application/json", "msg")
-```
-
-### Async/Retry
-
-```go
-testhelpers.AssertEventually(t, 5*time.Second, 100*time.Millisecond, func() bool {
-    return service.IsReady()
-}, "should become ready")
-
-success := testhelpers.RetryUntil(t, 5*time.Second, 100*time.Millisecond, func() bool {
-    return checkCondition()
-}, "waiting")
-```
-
-### Environment
-
-```go
-cleanup := testhelpers.WithEnv(t, "API_KEY", "test")
-defer cleanup()
-
-cleanup := testhelpers.WithEnvs(t, map[string]string{"KEY1": "val1", "KEY2": "val2"})
-defer cleanup()
-```
-
-### Concurrent Testing
-
-```go
-testhelpers.ConcurrentTest(t, 10, func(workerID int) { /* ... */ })
-testhelpers.ConcurrentTestWithTimeout(t, 5*time.Second, 10, func(workerID int) { /* ... */ })
-```
-
-### Call Counter (Thread-Safe)
-
-```go
-counter := testhelpers.NewCallCounter()
-counter.Inc()
-counter.AssertCount(t, 2, "should be called twice")
-```
-
-### Test Directory Utilities
-
-```go
-dir, cleanup := testhelpers.TempTestDir(t, "mytest-")
-defer cleanup()
-path := testhelpers.WriteTestFile(t, dir, "subdir/test.txt", "content")
-content := testhelpers.ReadTestFile(t, path)
-testhelpers.AssertFileExists(t, path, "msg")
-```
-
-### Fixtures
-
-```go
-payload := testhelpers.LoadFixture(t, "alerts/alertmanager_alert.json")
-testhelpers.LoadJSONFixture(t, "alerts/zabbix_alert.json", &alert)
-```
+- `NewHTTPTestContext(...)` for handler tests
+- `NewMockAlertAdapter(...)` for adapter success/error paths
+- Builders for alerts, incidents, skills, tool instances, LLM settings, Slack settings, runbooks, and context files
+- Assertions for equality, JSON, errors, HTTP responses, and panic/no-panic checks
+- `AssertEventually` / `RetryUntil` for async flows
+- `WithEnv` / `WithEnvs` for temporary env overrides
+- `ConcurrentTest*`, `CallCounter`, temp-dir helpers, and fixture loaders for concurrency + filesystem tests
 
 ## Testing Patterns
 
-### Table-Driven Tests
-
-```go
-tests := []struct{ name, input string; want Severity }{
-    {"critical", "critical", SeverityCritical},
-    {"unknown defaults", "xyz", SeverityWarning},
-}
-for _, tt := range tests {
-    t.Run(tt.name, func(t *testing.T) {
-        if got := mapSeverity(tt.input); got != tt.want {
-            t.Errorf("got %v, want %v", got, tt.want)
-        }
-    })
-}
-```
-
-### Edge Cases to Cover
-
-1. **Empty/nil inputs**: Empty strings, nil maps/slices
-2. **Boundary conditions**: At limits, one over/under
-3. **Unicode**: Non-ASCII, emojis, special chars
-4. **Error conditions**: Invalid inputs, missing fields
-5. **Concurrency**: Thread safety for shared state
-
-### Benchmarks
-
-```bash
-go test -bench=. -benchmem ./internal/alerts/adapters/...
-```
-
-Benchmarked: Alert parsing, JSONB ops, auth middleware, title generation
+- Prefer table-driven tests for parsers, validators, and service branching.
+- Cover empty/nil input, boundaries, Unicode, invalid payloads, and concurrency where state is shared.
+- Add benchmarks only for hot paths such as alert parsing, auth middleware, JSONB-heavy code, and title generation.
 
 ## Logging Convention
 
