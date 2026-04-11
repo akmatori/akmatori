@@ -200,10 +200,20 @@ func ConcurrentTestWithTimeout(t *testing.T, timeout time.Duration, goroutines i
 		close(done)
 	}()
 
+	timer := time.NewTimer(timeout)
+	defer func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+	}()
+
 	select {
 	case <-done:
 		return
-	case <-time.After(timeout):
+	case <-timer.C:
 		t.Fatalf("concurrent test did not complete within %v", timeout)
 	}
 }

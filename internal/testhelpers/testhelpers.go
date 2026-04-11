@@ -433,10 +433,20 @@ func MustCompleteWithin(t *testing.T, timeout time.Duration, fn func()) {
 		close(done)
 	}()
 
+	timer := time.NewTimer(timeout)
+	defer func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+	}()
+
 	select {
 	case <-done:
 		return
-	case <-time.After(timeout):
+	case <-timer.C:
 		t.Fatalf("function did not complete within %v", timeout)
 	}
 }
