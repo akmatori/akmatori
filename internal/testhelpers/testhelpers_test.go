@@ -12,7 +12,7 @@ import (
 
 func TestHTTPTestContext_NewAndExecute(t *testing.T) {
 	ctx := NewHTTPTestContext(t, http.MethodGet, "/test", nil)
-	
+
 	if ctx.T == nil {
 		t.Error("T should not be nil")
 	}
@@ -30,7 +30,7 @@ func TestHTTPTestContext_NewAndExecute(t *testing.T) {
 func TestHTTPTestContext_WithHeader(t *testing.T) {
 	ctx := NewHTTPTestContext(t, http.MethodGet, "/test", nil)
 	ctx.WithHeader("X-Custom", "value")
-	
+
 	if ctx.Request.Header.Get("X-Custom") != "value" {
 		t.Error("header not set correctly")
 	}
@@ -39,7 +39,7 @@ func TestHTTPTestContext_WithHeader(t *testing.T) {
 func TestHTTPTestContext_WithAPIKey(t *testing.T) {
 	ctx := NewHTTPTestContext(t, http.MethodGet, "/test", nil)
 	ctx.WithAPIKey("test-key")
-	
+
 	if ctx.Request.Header.Get("X-API-Key") != "test-key" {
 		t.Error("API key header not set correctly")
 	}
@@ -48,7 +48,7 @@ func TestHTTPTestContext_WithAPIKey(t *testing.T) {
 func TestHTTPTestContext_WithBearerToken(t *testing.T) {
 	ctx := NewHTTPTestContext(t, http.MethodGet, "/test", nil)
 	ctx.WithBearerToken("my-token")
-	
+
 	expected := "Bearer my-token"
 	if ctx.Request.Header.Get("Authorization") != expected {
 		t.Errorf("expected %q, got %q", expected, ctx.Request.Header.Get("Authorization"))
@@ -57,14 +57,14 @@ func TestHTTPTestContext_WithBearerToken(t *testing.T) {
 
 func TestHTTPTestContext_ExecuteFunc(t *testing.T) {
 	ctx := NewHTTPTestContext(t, http.MethodGet, "/test", nil)
-	
+
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("hello")) // ignore error: test ResponseRecorder never fails
 	}
-	
+
 	ctx.ExecuteFunc(handler)
-	
+
 	if ctx.Recorder.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d", ctx.Recorder.Code)
 	}
@@ -75,10 +75,10 @@ func TestHTTPTestContext_ExecuteFunc(t *testing.T) {
 
 func TestHTTPTestContext_WithJSONBody(t *testing.T) {
 	ctx := NewHTTPTestContext(t, http.MethodPost, "/test", nil)
-	
+
 	body := map[string]string{"key": "value"}
 	ctx.WithJSONBody(body)
-	
+
 	contentType := ctx.Request.Header.Get("Content-Type")
 	if contentType != "application/json" {
 		t.Errorf("expected Content-Type application/json, got %s", contentType)
@@ -87,17 +87,17 @@ func TestHTTPTestContext_WithJSONBody(t *testing.T) {
 
 func TestHTTPTestContext_DecodeJSON(t *testing.T) {
 	ctx := NewHTTPTestContext(t, http.MethodGet, "/test", nil)
-	
+
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"}) // ignore error: test ResponseRecorder never fails
 	}
-	
+
 	ctx.ExecuteFunc(handler)
-	
+
 	var result map[string]string
 	ctx.DecodeJSON(&result)
-	
+
 	if result["result"] != "ok" {
 		t.Errorf("expected result 'ok', got %q", result["result"])
 	}
@@ -105,11 +105,11 @@ func TestHTTPTestContext_DecodeJSON(t *testing.T) {
 
 func TestMockAlertAdapter_Basic(t *testing.T) {
 	mock := NewMockAlertAdapter("prometheus")
-	
+
 	if mock.GetSourceType() != "prometheus" {
 		t.Errorf("expected source type 'prometheus', got %s", mock.GetSourceType())
 	}
-	
+
 	alerts, err := mock.ParsePayload([]byte("{}"), nil)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -125,7 +125,7 @@ func TestMockAlertAdapter_Basic(t *testing.T) {
 func TestMockAlertAdapter_WithAlerts(t *testing.T) {
 	alert := NewAlertBuilder().WithName("TestAlert").Build()
 	mock := NewMockAlertAdapter("grafana").WithAlerts(alert)
-	
+
 	alerts, err := mock.ParsePayload(nil, nil)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -141,7 +141,7 @@ func TestMockAlertAdapter_WithAlerts(t *testing.T) {
 func TestMockAlertAdapter_WithParseError(t *testing.T) {
 	expectedErr := errors.New("parse failed")
 	mock := NewMockAlertAdapter("datadog").WithParseError(expectedErr)
-	
+
 	_, err := mock.ParsePayload(nil, nil)
 	if err != expectedErr {
 		t.Errorf("expected error %v, got %v", expectedErr, err)
@@ -150,7 +150,7 @@ func TestMockAlertAdapter_WithParseError(t *testing.T) {
 
 func TestMockAlertAdapter_ValidateWebhookSecret(t *testing.T) {
 	mock := NewMockAlertAdapter("pagerduty")
-	
+
 	err := mock.ValidateWebhookSecret(nil, nil)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -158,11 +158,11 @@ func TestMockAlertAdapter_ValidateWebhookSecret(t *testing.T) {
 	if !mock.ValidateSecretCalled {
 		t.Error("ValidateSecretCalled should be true")
 	}
-	
+
 	// Test with error
 	expectedErr := errors.New("invalid secret")
 	mock.WithValidationError(expectedErr)
-	
+
 	err = mock.ValidateWebhookSecret(nil, nil)
 	if err != expectedErr {
 		t.Errorf("expected error %v, got %v", expectedErr, err)
@@ -180,7 +180,7 @@ func TestNormalizedAlertBuilder(t *testing.T) {
 		WithLabel("team", "sre").
 		WithSummary("CPU usage above 90%").
 		Build()
-	
+
 	if alert.AlertName != "HighCPU" {
 		t.Errorf("expected AlertName 'HighCPU', got %s", alert.AlertName)
 	}
@@ -212,7 +212,7 @@ func TestIncidentBuilder(t *testing.T) {
 		WithStatus(database.IncidentStatusRunning).
 		WithSource("slack").
 		Build()
-	
+
 	if incident.ID != 42 {
 		t.Errorf("expected ID 42, got %d", incident.ID)
 	}
@@ -232,11 +232,11 @@ func TestIncidentBuilder(t *testing.T) {
 
 func TestMustCompleteWithin_Success(t *testing.T) {
 	mockT := &testing.T{}
-	
+
 	MustCompleteWithin(mockT, time.Second, func() {
 		time.Sleep(10 * time.Millisecond)
 	})
-	
+
 	if mockT.Failed() {
 		t.Error("test should not have failed")
 	}
@@ -255,7 +255,7 @@ func TestContainsString(t *testing.T) {
 		{"", "hello", false},
 		{"", "", true},
 	}
-	
+
 	for _, tt := range tests {
 		got := containsString(tt.s, tt.substr)
 		if got != tt.want {
@@ -274,9 +274,9 @@ func BenchmarkHTTPTestContext_New(b *testing.B) {
 func BenchmarkMockAlertAdapter_ParsePayload(b *testing.B) {
 	mock := NewMockAlertAdapter("prometheus").
 		WithAlerts(NewAlertBuilder().Build())
-	
+
 	body := []byte(`{"alerts": [{"labels": {"alertname": "test"}}]}`)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = mock.ParsePayload(body, nil) // ignore: benchmark only measures performance

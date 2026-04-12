@@ -130,8 +130,8 @@ func TestBuildSlackResponse(t *testing.T) {
 			name: "long reasoning does not include early lines",
 			reasoningLog: "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\n" +
 				"line9\nline10\nline11\nline12\nline13\nline14\nline15\nline16\nline17\nline18\nline19\nline20",
-			response:     "Final answer.",
-			wantPrefix:   "line6",
+			response:   "Final answer.",
+			wantPrefix: "line6",
 		},
 		{
 			name:         "whitespace-only reasoning returns response only",
@@ -165,19 +165,9 @@ func TestBuildSlackResponse(t *testing.T) {
 	}
 }
 
-// contains checks if s contains substr
+// contains checks if s contains substr.
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && findSubstring(s, substr)))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(s, substr)
 }
 
 func TestSlackProgressInterval(t *testing.T) {
