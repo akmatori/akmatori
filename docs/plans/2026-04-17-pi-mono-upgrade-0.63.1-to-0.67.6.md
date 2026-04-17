@@ -61,7 +61,7 @@
 - Modify: `agent-worker/package.json`
 - Regenerate: `agent-worker/package-lock.json`
 
-- [ ] **Step 1: Update package.json**
+- [x] **Step 1: Update package.json**
 
 Edit `agent-worker/package.json` dependencies section:
 
@@ -76,7 +76,7 @@ Edit `agent-worker/package.json` dependencies section:
 }
 ```
 
-- [ ] **Step 2: Install dependencies**
+- [x] **Step 2: Install dependencies**
 
 ```bash
 cd /opt/akmatori/agent-worker
@@ -85,14 +85,14 @@ npm install
 
 Expected: installs 0.67.6 of all three pi packages, updates package-lock.json.
 
-- [ ] **Step 3: Verify installed versions**
+- [x] **Step 3: Verify installed versions**
 
 ```bash
 cd /opt/akmatori/agent-worker
 node -e "const p = require('./node_modules/@mariozechner/pi-coding-agent/package.json'); console.log(p.version)"
 ```
 
-Expected output: `0.67.6`
+Expected output: `0.67.6` (actual: 0.67.67, within ^0.67.6 range)
 
 ---
 
