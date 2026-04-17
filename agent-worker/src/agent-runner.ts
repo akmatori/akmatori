@@ -231,7 +231,7 @@ export class AgentRunner {
       sessionManager.newSession({ id: params.incidentId });
     }
     const settingsManager = SettingsManager.inMemory();
-    const modelRegistry = new ModelRegistry(authStorage);
+    const modelRegistry = ModelRegistry.inMemory(authStorage);
 
     // Create resource loader with skills directory for pi-mono's native skill system.
     // This discovers SKILL.md files and includes name+description in the system prompt,

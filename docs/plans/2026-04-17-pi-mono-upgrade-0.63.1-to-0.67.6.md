@@ -101,7 +101,7 @@ Expected output: `0.67.6` (actual: 0.67.67, within ^0.67.6 range)
 **Files:**
 - Modify: `agent-worker/src/agent-runner.ts:234`
 
-- [ ] **Step 1: Verify current usage**
+- [x] **Step 1: Verify current usage**
 
 ```bash
 grep -n "new ModelRegistry" /opt/akmatori/agent-worker/src/agent-runner.ts
@@ -109,7 +109,7 @@ grep -n "new ModelRegistry" /opt/akmatori/agent-worker/src/agent-runner.ts
 
 Expected output: `234:    const modelRegistry = new ModelRegistry(authStorage);`
 
-- [ ] **Step 2: Apply the fix**
+- [x] **Step 2: Apply the fix**
 
 In `agent-worker/src/agent-runner.ts`, change line 234:
 
@@ -123,7 +123,7 @@ const modelRegistry = ModelRegistry.inMemory(authStorage);
 
 `ModelRegistry.inMemory()` returns a registry backed only by built-in model definitions (no `models.json` file). Akmatori passes model config dynamically via `params.llmSettings`, so this is the correct replacement — a file-backed registry is not needed.
 
-- [ ] **Step 3: Build to verify compilation**
+- [x] **Step 3: Build to verify compilation**
 
 ```bash
 cd /opt/akmatori/agent-worker
@@ -132,7 +132,7 @@ npm run build
 
 Expected: TypeScript compilation succeeds with no errors.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 cd /opt/akmatori
@@ -141,7 +141,7 @@ make test-agent
 
 Expected: all agent-worker tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /opt/akmatori

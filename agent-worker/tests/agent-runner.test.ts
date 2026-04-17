@@ -75,7 +75,9 @@ vi.mock("@mariozechner/pi-coding-agent", () => {
         setRuntimeApiKey: vi.fn(),
       })),
     },
-    ModelRegistry: vi.fn().mockImplementation(() => ({})),
+    ModelRegistry: Object.assign(vi.fn().mockImplementation(() => ({})), {
+      inMemory: vi.fn(() => ({})),
+    }),
     SessionManager: {
       inMemory: vi.fn(() => ({
         newSession: vi.fn(),
@@ -470,7 +472,7 @@ describe("AgentRunner", () => {
       );
     });
 
-    it("should construct ModelRegistry with AuthStorage and pass to session (getApiKeyAndHeaders not called directly)", async () => {
+    it("should create ModelRegistry via inMemory() with AuthStorage and pass to session (getApiKeyAndHeaders not called directly)", async () => {
       const { AuthStorage, ModelRegistry } = await import("@mariozechner/pi-coding-agent");
       const params = makeExecuteParams({
         llmSettings: makeLLMSettings({
@@ -480,9 +482,9 @@ describe("AgentRunner", () => {
       });
       await runner.execute(params);
 
-      // ModelRegistry should be constructed with the AuthStorage instance
+      // ModelRegistry.inMemory() should be called with the AuthStorage instance (0.64.0+)
       const authInstance = (AuthStorage as any).inMemory.mock.results[0].value;
-      expect(ModelRegistry).toHaveBeenCalledWith(authInstance);
+      expect((ModelRegistry as any).inMemory).toHaveBeenCalledWith(authInstance);
 
       // The resulting modelRegistry should be passed to createAgentSession
       const opts = createAgentSessionCalls[0];
@@ -490,8 +492,6 @@ describe("AgentRunner", () => {
 
       // We never call getApiKey or getApiKeyAndHeaders directly —
       // the SDK handles key resolution internally via the modelRegistry.
-      // This verifies our constructor-only usage is compatible with 0.63.0+
-      // where getApiKey() was replaced by getApiKeyAndHeaders().
     });
 
     it("should pass bash tool definition and gateway tools as customTools", async () => {
@@ -538,8 +538,8 @@ describe("AgentRunner", () => {
       expect(allGuidelines).toContain("list_tools_for_tool_type");
       expect(allGuidelines).not.toContain("python3 -c");
       expect(allGuidelines).not.toContain("PYTHONPATH");
-      // Verify stronger opening line lists all 5 tools
-      expect(allGuidelines).toContain("CRITICAL: You only have 5 tools available");
+      // Verify opening line lists all 5 tools
+      expect(allGuidelines).toContain("ALL infrastructure operations go through gateway_call");
       expect(allGuidelines).toContain("execute_script");
       expect(allGuidelines).toContain("get_tool_detail");
       expect(allGuidelines).toContain("list_tool_types");

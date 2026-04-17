@@ -58,7 +58,9 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
       setRuntimeApiKey: vi.fn(),
     })),
   },
-  ModelRegistry: vi.fn(() => ({})),
+  ModelRegistry: Object.assign(vi.fn(() => ({})), {
+    inMemory: vi.fn(() => ({})),
+  }),
   SessionManager: {
     inMemory: vi.fn(() => ({
       newSession: vi.fn(),
