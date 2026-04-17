@@ -7,6 +7,7 @@
  */
 
 import { Type, type TSchema, type Static } from "@sinclair/typebox";
+import { defineTool } from "@mariozechner/pi-coding-agent";
 import type { GatewayClient, CallResult, ListToolsResult, ToolDetailResult } from "./gateway-client.js";
 import { ScriptExecutor } from "./script-executor.js";
 
@@ -72,7 +73,7 @@ export type ExecuteScriptInput = Static<typeof ExecuteScriptParams>;
  * `createAgentSession({ customTools: [...] })`.
  */
 export function createGatewayCallTool(ctx: GatewayToolContext) {
-  return {
+  return defineTool({
     name: "gateway_call",
     label: "Gateway Call",
     description:
@@ -131,7 +132,7 @@ export function createGatewayCallTool(ctx: GatewayToolContext) {
         };
       }
     },
-  };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -144,7 +145,7 @@ export function createGatewayCallTool(ctx: GatewayToolContext) {
  * Allows the agent to discover available tools by listing all tools of a given type.
  */
 export function createListToolsForToolTypeTool(ctx: GatewayToolContext) {
-  return {
+  return defineTool({
     name: "list_tools_for_tool_type",
     label: "List Tools For Tool Type",
     description:
@@ -185,7 +186,7 @@ export function createListToolsForToolTypeTool(ctx: GatewayToolContext) {
         };
       }
     },
-  };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -198,7 +199,7 @@ export function createListToolsForToolTypeTool(ctx: GatewayToolContext) {
  * Returns the full JSON schema and available instances for a specific tool.
  */
 export function createGetToolDetailTool(ctx: GatewayToolContext) {
-  return {
+  return defineTool({
     name: "get_tool_detail",
     label: "Get Tool Detail",
     description:
@@ -236,7 +237,7 @@ export function createGetToolDetailTool(ctx: GatewayToolContext) {
         };
       }
     },
-  };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -250,7 +251,7 @@ export function createGetToolDetailTool(ctx: GatewayToolContext) {
  * allowing the agent to see what's available before searching.
  */
 export function createListToolTypesTool(ctx: GatewayToolContext) {
-  return {
+  return defineTool({
     name: "list_tool_types",
     label: "List Tool Types",
     description:
@@ -284,7 +285,7 @@ export function createListToolTypesTool(ctx: GatewayToolContext) {
         };
       }
     },
-  };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -308,7 +309,7 @@ export function createExecuteScriptTool(ctx: ExecuteScriptToolContext) {
     workDir: ctx.workDir,
   });
 
-  return {
+  return defineTool({
     name: "execute_script",
     label: "Execute Script",
     description:
@@ -354,5 +355,5 @@ export function createExecuteScriptTool(ctx: ExecuteScriptToolContext) {
         };
       }
     },
-  };
+  });
 }

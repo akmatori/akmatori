@@ -302,9 +302,8 @@ export class AgentRunner {
       model,
       thinkingLevel,
       // bashToolDef has specific type parameters (BashToolDetails, BashRenderState)
-      // that are contravariant with ToolDefinition<TSchema, unknown, any> due to
-      // renderCall/renderResult generics. The cast is safe — AgentSession only reads
-      // the definition's name, execute, promptGuidelines, and promptSnippet fields.
+      // that are contravariant with ToolDefinition<TSchema, unknown, any> via renderCall/renderResult.
+      // The cast is safe — AgentSession only reads name, execute, promptGuidelines, promptSnippet.
       customTools: [bashToolDef as unknown as import("@mariozechner/pi-coding-agent").ToolDefinition, gatewayCallTool, listToolsForToolTypeTool, getToolDetailTool, listToolTypesTool, executeScriptTool],
       resourceLoader,
       sessionManager,
