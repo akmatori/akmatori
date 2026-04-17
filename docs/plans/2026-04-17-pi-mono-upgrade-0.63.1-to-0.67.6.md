@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** COMPLETED — all 4 tasks done as of 2026-04-17
+
 **Goal:** Upgrade `@mariozechner/pi-coding-agent` (and companion packages) from 0.63.1 to 0.67.6, fix the one breaking API change, adopt `defineTool()` for cleaner custom tool definitions, and rebuild the agent-worker Docker image.
 
 **Architecture:** The upgrade touches only `agent-worker/` — Go API and MCP Gateway are unaffected. The only mandatory code fix is `new ModelRegistry(authStorage)` → `ModelRegistry.inMemory(authStorage)` (0.64.0 breaking change). The `defineTool()` adoption (0.65.0) removes the `as unknown as ToolDefinition` cast in agent-runner.ts and tightens type safety in gateway-tools.ts.

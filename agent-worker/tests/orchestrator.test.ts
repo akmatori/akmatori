@@ -69,10 +69,12 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
     create: vi.fn(() => ({
       newSession: vi.fn(),
       getSessionId: vi.fn(() => "mock-session-456"),
+      getSessionFile: vi.fn(() => undefined),
     })),
     continueRecent: vi.fn(() => ({
       newSession: vi.fn(),
       getSessionId: vi.fn(() => "mock-session-456"),
+      getSessionFile: vi.fn(() => undefined),
     })),
   },
   SettingsManager: {
@@ -762,7 +764,9 @@ describe("Orchestrator", () => {
         (m) => m.type === "agent_completed" && m.incident_id === "incident-settings-001",
       );
 
-      expect(createAgentSession).toHaveBeenCalled();
+      expect(createAgentSession).toHaveBeenCalledWith(
+        expect.objectContaining({ thinkingLevel: "high" }),
+      );
     });
 
     it("should default model to gpt-5.4 when not specified", async () => {
