@@ -125,8 +125,29 @@ func (ctx *HTTPTestContext) AssertHeader(key, expected string) *HTTPTestContext 
 // DecodeJSON decodes response body as JSON
 func (ctx *HTTPTestContext) DecodeJSON(v interface{}) *HTTPTestContext {
 	ctx.T.Helper()
-	if err := json.NewDecoder(ctx.Recorder.Body).Decode(v); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(ctx.Recorder.Body.Bytes())).Decode(v); err != nil {
 		ctx.T.Fatalf("failed to decode JSON response: %v", err)
+	}
+	return ctx
+}
+
+// AssertJSONBody compares the response body against expected JSON while ignoring formatting.
+func (ctx *HTTPTestContext) AssertJSONBody(expected string) *HTTPTestContext {
+	ctx.T.Helper()
+	AssertJSONEqual(ctx.T, expected, ctx.Recorder.Body.String(), "response JSON body")
+	return ctx
+}
+
+// AssertJSONContentType checks that the response is JSON.
+func (ctx *HTTPTestContext) AssertJSONContentType() *HTTPTestContext {
+	ctx.T.Helper()
+	contentType := ctx.Recorder.Header().Get("Content-Type")
+	if contentType == "" {
+		ctx.T.Errorf("expected JSON Content-Type header, got empty value")
+		return ctx
+	}
+	if contentType != "application/json" && !containsString(contentType, "application/json") {
+		ctx.T.Errorf("expected JSON Content-Type header, got %q", contentType)
 	}
 	return ctx
 }

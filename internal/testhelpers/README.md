@@ -28,7 +28,9 @@ ctx := NewHTTPTestContext(t, http.MethodPost, "/api/alerts", nil).
     WithAPIKey("test-key").
     WithJSONBody(payload).
     Execute(handler).
-    AssertStatus(http.StatusCreated)
+    AssertStatus(http.StatusCreated).
+    AssertJSONContentType().
+    AssertJSONBody(`{"ok":true}`)
 ```
 
 **Fixtures**

@@ -131,6 +131,31 @@ func TestHTTPTestContext_DecodeJSON(t *testing.T) {
 	}
 }
 
+func TestHTTPTestContext_AssertJSONBody(t *testing.T) {
+	ctx := NewHTTPTestContext(t, http.MethodGet, "/test", nil)
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"result":"ok","count":2}`))
+	}
+
+	ctx.ExecuteFunc(handler).AssertJSONBody(`{
+		"count": 2,
+		"result": "ok"
+	}`)
+}
+
+func TestHTTPTestContext_AssertJSONContentType(t *testing.T) {
+	ctx := NewHTTPTestContext(t, http.MethodGet, "/test", nil)
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write([]byte(`{"result":"ok"}`))
+	}
+
+	ctx.ExecuteFunc(handler).AssertJSONContentType()
+}
+
 func TestMockAlertAdapter_Basic(t *testing.T) {
 	mock := NewMockAlertAdapter("prometheus")
 
@@ -296,6 +321,18 @@ func TestContainsString(t *testing.T) {
 func BenchmarkHTTPTestContext_New(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		NewHTTPTestContext(&testing.T{}, http.MethodPost, "/api/v1/alerts", nil)
+	}
+}
+
+func BenchmarkHTTPTestContext_AssertJSONBody(b *testing.B) {
+	ctx := NewHTTPTestContext(&testing.T{}, http.MethodGet, "/test", nil)
+	ctx.Recorder.Header().Set("Content-Type", "application/json")
+	ctx.Recorder.Body.WriteString(`{"result":"ok","count":2}`)
+	expected := `{"count":2,"result":"ok"}`
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ctx.AssertJSONBody(expected)
 	}
 }
 
