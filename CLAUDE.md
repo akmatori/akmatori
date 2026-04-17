@@ -8,7 +8,7 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 
 - **5-container Docker architecture**: API, Agent Worker, MCP Gateway, PostgreSQL, QMD (runbook search)
 - **Backend**: Go 1.24+ (API server, MCP gateway)
-- **Agent Worker**: Node.js 22+ / TypeScript using `@mariozechner/pi-coding-agent` SDK (v0.63.1)
+- **Agent Worker**: Node.js 22+ / TypeScript using `@mariozechner/pi-coding-agent` SDK (v0.67.6)
 - **Frontend**: React 19 + TypeScript + Vite + Tailwind
 - **Database**: PostgreSQL 16 with GORM
 - **LLM Providers**: Anthropic, OpenAI, Google, OpenRouter, Custom (configured via web UI)
@@ -90,7 +90,7 @@ Focus new tests on historically weak areas: `internal/handlers`, `internal/servi
 
 ## Agent Worker Architecture
 
-The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK (v0.63.1):
+The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK (v0.67.6):
 
 | Component | File | Purpose |
 |-----------|------|---------|
@@ -100,7 +100,7 @@ The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK (v0.63.1):
 | Tool Formatter | `src/tool-output-formatter.ts` | Formats tool args/output for UI streaming |
 | WS Client | `src/ws-client.ts` | WebSocket to API server |
 
-### SDK Features (v0.63.1)
+### SDK Features (v0.67.6)
 
 - Cancellation signals propagate to nested model calls and tool executions
 - Investigation history exports to `{workDir}/session_export.jsonl`
@@ -108,6 +108,11 @@ The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK (v0.63.1):
 - Custom tools use typed `ToolDefinition` metadata; `promptSnippet` is required for prompt inclusion
 - Typed compaction/retry session events replaced older untyped names
 - Provider SDKs are lazy-loaded; auto-retry and multi-edit are supported
+
+### SDK API Conventions
+
+- `ModelRegistry` has no public constructor since 0.64.0. Always use `ModelRegistry.inMemory(authStorage)`.
+- All `createXxxTool()` factory functions in `gateway-tools.ts` must wrap their return with `defineTool({...})` (imported from `@mariozechner/pi-coding-agent`). The bash tool is the sole exception — it retains `as unknown as ToolDefinition` due to contravariant generics in `renderCall`/`renderResult`.
 
 ### Recent Agent Behavior Notes
 

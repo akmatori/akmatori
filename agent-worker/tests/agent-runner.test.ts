@@ -176,6 +176,14 @@ vi.mock("@mariozechner/pi-ai", () => {
 // Helpers
 // ---------------------------------------------------------------------------
 
+async function waitForCondition(fn: () => boolean, timeoutMs = 1000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!fn()) {
+    if (Date.now() > deadline) throw new Error("Timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 function makeLLMSettings(overrides?: Partial<LLMSettings>): LLMSettings {
   return {
     provider: "anthropic",
@@ -632,8 +640,7 @@ describe("AgentRunner", () => {
       mockSession = session;
       const execPromise = runner.execute(makeExecuteParams({ incidentId: "inc-cancel" }));
 
-      // Small delay to ensure session is registered
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await waitForCondition(() => runner.hasActiveSession("inc-cancel"));
 
       expect(runner.hasActiveSession("inc-cancel")).toBe(true);
 
@@ -661,7 +668,7 @@ describe("AgentRunner", () => {
       mockSession = session;
       const execPromise = runner.execute(makeExecuteParams({ incidentId: "inc-signal-prop" }));
 
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await waitForCondition(() => runner.hasActiveSession("inc-signal-prop"));
       expect(runner.hasActiveSession("inc-signal-prop")).toBe(true);
 
       await runner.cancel("inc-signal-prop");
@@ -686,11 +693,11 @@ describe("AgentRunner", () => {
       // Start two executions
       mockSession = session1;
       runner.execute(makeExecuteParams({ incidentId: "inc-d1" }));
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await waitForCondition(() => runner.hasActiveSession("inc-d1"));
 
       mockSession = session2;
       runner.execute(makeExecuteParams({ incidentId: "inc-d2" }));
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await waitForCondition(() => runner.hasActiveSession("inc-d2"));
 
       await runner.dispose();
 

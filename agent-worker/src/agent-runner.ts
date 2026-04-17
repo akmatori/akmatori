@@ -238,7 +238,7 @@ export class AgentRunner {
     // loading full content on-demand when the agent invokes a skill.
     // Use skillsOverride to filter to only enabled skills — disabled skills may still
     // have SKILL.md files on disk but should not be available to the agent.
-    const enabledSkillNames = "enabledSkills" in params ? params.enabledSkills : undefined;
+    const enabledSkillNames = params.enabledSkills;
     const resourceLoader = new DefaultResourceLoader({
       cwd: params.workDir,
       additionalSkillPaths: this.skillsDir ? [this.skillsDir] : [],
@@ -278,7 +278,7 @@ export class AgentRunner {
     bashToolDef.promptGuidelines = BASH_TOOL_GUIDELINES;
 
     // Create gateway client for this session and register gateway tools as custom tools.
-    const toolAllowlist = "toolAllowlist" in params ? params.toolAllowlist : undefined;
+    const toolAllowlist = params.toolAllowlist;
     const gatewayClient = new GatewayClient({
       gatewayUrl: this.mcpGatewayUrl,
       incidentId: params.incidentId,

@@ -6,7 +6,7 @@
  * via the TypeScript GatewayClient.
  */
 
-import { Type, type TSchema, type Static } from "@sinclair/typebox";
+import { Type, type Static } from "@sinclair/typebox";
 import { defineTool } from "@mariozechner/pi-coding-agent";
 import type { GatewayClient, CallResult, ListToolsResult, ToolDetailResult } from "./gateway-client.js";
 import { ScriptExecutor } from "./script-executor.js";
