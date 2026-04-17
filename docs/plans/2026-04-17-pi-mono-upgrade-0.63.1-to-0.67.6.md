@@ -171,7 +171,7 @@ This is a quality-of-life improvement — it tightens TypeScript inference and e
 - Modify: `agent-worker/src/gateway-tools.ts`
 - Modify: `agent-worker/src/agent-runner.ts` (remove the cast)
 
-- [ ] **Step 1: Add defineTool import to gateway-tools.ts**
+- [x] **Step 1: Add defineTool import to gateway-tools.ts**
 
 At the top of `agent-worker/src/gateway-tools.ts`, add the import alongside existing typebox imports:
 
@@ -179,7 +179,7 @@ At the top of `agent-worker/src/gateway-tools.ts`, add the import alongside exis
 import { defineTool } from "@mariozechner/pi-coding-agent";
 ```
 
-- [ ] **Step 2: Wrap createGatewayCallTool with defineTool**
+- [x] **Step 2: Wrap createGatewayCallTool with defineTool**
 
 Find `createGatewayCallTool` in `gateway-tools.ts`. The function currently returns a plain object. Wrap the return value:
 
@@ -204,7 +204,7 @@ Apply the same `defineTool(...)` wrap to the other four factory functions:
 - `createListToolTypesTool`
 - `createExecuteScriptTool`
 
-- [ ] **Step 3: Remove the cast in agent-runner.ts**
+- [x] **Step 3: Remove the cast in agent-runner.ts**
 
 In `agent-runner.ts` around line 308, the bash tool cast reads:
 
@@ -214,7 +214,7 @@ customTools: [bashToolDef as unknown as import("@mariozechner/pi-coding-agent").
 
 The gateway tools now return properly typed `ToolDefinition` from `defineTool()`. Verify the bash tool cast is still needed (it may be — `createBashToolDefinition` returns specialized generic types). If the TypeScript compiler accepts it without the cast after the upgrade, remove it. If not, keep the cast for the bash tool only.
 
-- [ ] **Step 4: Build**
+- [x] **Step 4: Build**
 
 ```bash
 cd /opt/akmatori/agent-worker
@@ -223,7 +223,7 @@ npm run build
 
 Expected: no TypeScript errors.
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 ```bash
 cd /opt/akmatori
@@ -232,7 +232,7 @@ make test-agent
 
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /opt/akmatori
