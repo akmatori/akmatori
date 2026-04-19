@@ -383,6 +383,49 @@ describe("ScriptExecutor", () => {
         executor.execute('await new Promise(resolve => setTimeout(resolve, 5000)); return "done";'),
       ).rejects.toThrow("timed out");
     }, 10_000);
+
+    it("should not crash with unhandled rejection when timeout fires during in-flight gateway_call", async () => {
+      // Reproduce the crash: script awaits a gateway_call that never settles,
+      // timeout fires, controller.abort() fires the in-flight request's abort
+      // listener which calls reject() on a promise nobody is awaiting anymore.
+      // Without the result.catch(() => {}) fix, this causes an unhandled rejection
+      // that crashes Node.js 22.
+      let resolveGateway!: () => void;
+      const gatewayCallStarted = new Promise<void>((r) => { resolveGateway = r; });
+
+      const { executor } = createExecutor({
+        call: vi.fn((_toolName: string, _args?: Record<string, unknown>, _instance?: string, signal?: AbortSignal) =>
+          new Promise<CallResult>((_resolve, reject) => {
+            resolveGateway(); // notify that the gateway call has started
+            signal?.addEventListener("abort", () => reject(new Error("Request aborted")), { once: true });
+          })
+        ) as any,
+      }, { timeoutMs: 200 });
+
+      const unhandledErrors: Error[] = [];
+      const handler = (err: Error) => unhandledErrors.push(err);
+      process.on("unhandledRejection", handler);
+
+      try {
+        // Script starts a gateway_call that will never resolve (only aborted on timeout)
+        const execution = executor.execute(
+          'await gateway_call("ssh.execute_command", { command: "uptime" }); return "done";',
+        );
+
+        // Wait for the gateway call to actually start before proceeding
+        await gatewayCallStarted;
+
+        // Execution should reject with timeout, not crash the process
+        await expect(execution).rejects.toThrow("timed out");
+
+        // Give microtasks a chance to fire any lingering rejections
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        expect(unhandledErrors).toHaveLength(0);
+      } finally {
+        process.off("unhandledRejection", handler);
+      }
+    }, 10_000);
   });
 
   describe("error handling", () => {

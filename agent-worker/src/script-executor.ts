@@ -274,6 +274,12 @@ export class ScriptExecutor {
         clearTimeout(timeoutId);
         controller.abort(); // no-op if already aborted; ensures cleanup
         signal?.removeEventListener("abort", onExternalAbort);
+        // Suppress unhandled rejections from the VM script's async IIFE.
+        // controller.abort() above fires synchronously, which causes any in-flight
+        // gateway_call() inside the script to reject. If Promise.race already
+        // settled (e.g. timeout won), nobody is awaiting `result` and those
+        // rejections would be unhandled — crashing Node.js 22.
+        (result as Promise<unknown>).catch(() => {});
       }
     } catch (err) {
       // Clean up listeners if an error escapes the inner try block above
