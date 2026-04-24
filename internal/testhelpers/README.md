@@ -8,6 +8,7 @@ Reusable test building blocks live in `internal/testhelpers`.
 - Use `NewHTTPTestContext` for handler tests so request/response assertions stay compact.
 - Use service mocks when the behavior under test is handler/service orchestration, not storage.
 - Use fixtures from `tests/fixtures/` for real payload samples.
+- Keep fixture paths relative to `tests/fixtures/`; helpers intentionally reject absolute paths and `../` traversal.
 - Add benchmarks only for helpers or hot paths that are easy to compare over time.
 
 ## Common helpers

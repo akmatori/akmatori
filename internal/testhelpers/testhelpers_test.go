@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -386,6 +387,26 @@ func TestLoadJSONFixture(t *testing.T) {
 
 	if payload["version"] != "4" {
 		t.Fatalf("expected version 4, got %v", payload["version"])
+	}
+}
+
+func TestFixturePath_RejectsTraversal(t *testing.T) {
+	_, err := fixturePath("../README.md")
+	if err == nil {
+		t.Fatal("expected traversal path to be rejected")
+	}
+	if !strings.Contains(err.Error(), "escapes tests/fixtures") {
+		t.Fatalf("expected traversal error, got %v", err)
+	}
+}
+
+func TestFixturePath_RejectsAbsolutePath(t *testing.T) {
+	_, err := fixturePath("/tmp/not-a-fixture.json")
+	if err == nil {
+		t.Fatal("expected absolute path to be rejected")
+	}
+	if !strings.Contains(err.Error(), "must be relative") {
+		t.Fatalf("expected relative-path error, got %v", err)
 	}
 }
 
