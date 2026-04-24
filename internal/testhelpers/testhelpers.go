@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -223,7 +224,7 @@ func (m *MockAlertAdapter) WithValidationError(err error) *MockAlertAdapter {
 // Test Fixture Helpers
 // ========================================
 
-// fixturePath resolves a fixture path relative to the repository root.
+// fixturePath resolves a fixture path relative to tests/fixtures and rejects traversal outside that root.
 func fixturePath(path string) (string, error) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -231,7 +232,22 @@ func fixturePath(path string) (string, error) {
 	}
 
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", ".."))
-	return filepath.Join(repoRoot, "tests", "fixtures", filepath.Clean(path)), nil
+	fixturesRoot := filepath.Join(repoRoot, "tests", "fixtures")
+
+	if filepath.IsAbs(path) {
+		return "", fmt.Errorf("fixture path must be relative: %s", path)
+	}
+
+	resolved := filepath.Join(fixturesRoot, filepath.Clean(path))
+	rel, err := filepath.Rel(fixturesRoot, resolved)
+	if err != nil {
+		return "", fmt.Errorf("failed to validate fixture path %s: %w", path, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("fixture path escapes tests/fixtures: %s", path)
+	}
+
+	return resolved, nil
 }
 
 // LoadFixture loads a test fixture file from tests/fixtures/.
