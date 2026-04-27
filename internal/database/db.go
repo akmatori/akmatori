@@ -260,9 +260,12 @@ func GetProxySettings() (*ProxySettings, error) {
 	return &settings, nil
 }
 
-// UpdateProxySettings updates proxy settings in the database
+// UpdateProxySettings updates proxy settings in the database.
+// Use Select so false booleans and empty strings are persisted intentionally.
 func UpdateProxySettings(settings *ProxySettings) error {
-	return DB.Model(&ProxySettings{}).Where("id = ?", settings.ID).Updates(settings).Error
+	return DB.Model(&ProxySettings{}).Where("id = ?", settings.ID).
+		Select("proxy_url", "no_proxy", "open_ai_enabled", "slack_enabled", "zabbix_enabled").
+		Updates(settings).Error
 }
 
 // GetOrCreateProxySettings gets existing settings or creates default
