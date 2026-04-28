@@ -3,8 +3,13 @@ package services
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/akmatori/akmatori/internal/database"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 // --- Context Service Validation Tests ---
@@ -387,5 +392,141 @@ func TestValidateFilename_BoundaryLength(t *testing.T) {
 	err = s.ValidateFilename(name256)
 	if err == nil {
 		t.Error("256 char filename should be rejected")
+	}
+}
+
+func setupContextServiceWithDB(t *testing.T) *ContextService {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	if err := db.AutoMigrate(&database.ContextFile{}); err != nil {
+		t.Fatalf("migrate context files: %v", err)
+	}
+
+	originalDB := database.DB
+	database.DB = db
+	t.Cleanup(func() {
+		database.DB = originalDB
+	})
+
+	svc, err := NewContextService(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewContextService() error: %v", err)
+	}
+
+	return svc
+}
+
+func createContextFileFixture(t *testing.T, svc *ContextService, filename string) {
+	t.Helper()
+
+	content := []byte("fixture content for " + filename)
+	if err := os.WriteFile(svc.GetFilePath(filename), content, 0644); err != nil {
+		t.Fatalf("write fixture file %q: %v", filename, err)
+	}
+
+	record := &database.ContextFile{
+		Filename:     filename,
+		OriginalName: filename,
+		MimeType:     "text/plain",
+		Size:         int64(len(content)),
+	}
+	if err := database.GetDB().Create(record).Error; err != nil {
+		t.Fatalf("create context file record %q: %v", filename, err)
+	}
+}
+
+func TestContextService_ReferenceHelpers(t *testing.T) {
+	svc := setupContextServiceWithDB(t)
+
+	tests := []struct {
+		name         string
+		text         string
+		wantRefs     []string
+		wantResolved string
+		wantMarkdown string
+	}{
+		{
+			name:         "deduplicates wiki and asset references",
+			text:         "Use [[runbook.md]], [runbook](assets/runbook.md), [[ config.json ]] and [config](assets/config.json).",
+			wantRefs:     []string{"runbook.md", "config.json"},
+			wantResolved: "Use ./context/runbook.md, [runbook](assets/runbook.md), ./context/ config.json  and [config](assets/config.json).",
+			wantMarkdown: "Use [runbook.md](assets/runbook.md), [runbook](assets/runbook.md), [ config.json ](assets/ config.json ) and [config](assets/config.json).",
+		},
+		{
+			name:         "keeps first-seen order across reference styles",
+			text:         "See [alerts](assets/alerts.log) then [[notes.txt]] and [notes](assets/notes.txt).",
+			wantRefs:     []string{"notes.txt", "alerts.log"},
+			wantResolved: "See [alerts](assets/alerts.log) then ./context/notes.txt and [notes](assets/notes.txt).",
+			wantMarkdown: "See [alerts](assets/alerts.log) then [notes.txt](assets/notes.txt) and [notes](assets/notes.txt).",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := svc.ParseReferences(tt.text); !reflect.DeepEqual(got, tt.wantRefs) {
+				t.Fatalf("ParseReferences() = %v, want %v", got, tt.wantRefs)
+			}
+			if got := svc.ResolveReferences(tt.text); got != tt.wantResolved {
+				t.Errorf("ResolveReferences() = %q, want %q", got, tt.wantResolved)
+			}
+			if got := svc.ResolveReferencesToMarkdownLinks(tt.text); got != tt.wantMarkdown {
+				t.Errorf("ResolveReferencesToMarkdownLinks() = %q, want %q", got, tt.wantMarkdown)
+			}
+		})
+	}
+}
+
+func TestContextService_ValidateReferences(t *testing.T) {
+	svc := setupContextServiceWithDB(t)
+	createContextFileFixture(t, svc, "runbook.md")
+	createContextFileFixture(t, svc, "config.json")
+
+	valid, missing, found := svc.ValidateReferences("Use [[runbook.md]], [[missing.txt]], and [config](assets/config.json).")
+	if valid {
+		t.Fatal("ValidateReferences() valid = true, want false")
+	}
+	if !reflect.DeepEqual(missing, []string{"missing.txt"}) {
+		t.Errorf("missing = %v, want %v", missing, []string{"missing.txt"})
+	}
+	if !reflect.DeepEqual(found, []string{"runbook.md", "config.json"}) {
+		t.Errorf("found = %v, want %v", found, []string{"runbook.md", "config.json"})
+	}
+}
+
+func TestContextService_CopyReferencedFilesToDir(t *testing.T) {
+	svc := setupContextServiceWithDB(t)
+	createContextFileFixture(t, svc, "runbook.md")
+	createContextFileFixture(t, svc, "alerts.log")
+
+	targetDir := t.TempDir()
+	text := "Use [[runbook.md]], [alerts](assets/alerts.log), and [[missing.txt]]."
+	if err := svc.CopyReferencedFilesToDir(text, targetDir); err != nil {
+		t.Fatalf("CopyReferencedFilesToDir() error = %v", err)
+	}
+
+	for _, filename := range []string{"runbook.md", "alerts.log"} {
+		linkPath := filepath.Join(targetDir, "context", filename)
+		info, err := os.Lstat(linkPath)
+		if err != nil {
+			t.Fatalf("Lstat(%q) error = %v", linkPath, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("%q is not a symlink", linkPath)
+		}
+		target, err := os.Readlink(linkPath)
+		if err != nil {
+			t.Fatalf("Readlink(%q) error = %v", linkPath, err)
+		}
+		if target != svc.GetFilePath(filename) {
+			t.Errorf("symlink target = %q, want %q", target, svc.GetFilePath(filename))
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(targetDir, "context", "missing.txt")); !os.IsNotExist(err) {
+		t.Errorf("missing reference should be skipped, stat err = %v", err)
 	}
 }
