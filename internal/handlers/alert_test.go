@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,9 @@ import (
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/services"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestPluralize(t *testing.T) {
@@ -436,10 +440,155 @@ func TestAlertHandler_getBaseURL(t *testing.T) {
 	}
 }
 
+func setupAlertWebhookTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+
+	if err := db.AutoMigrate(&database.AlertSourceType{}, &database.AlertSourceInstance{}); err != nil {
+		t.Fatalf("migrate alert webhook tables: %v", err)
+	}
+
+	originalDB := database.DB
+	database.DB = db
+	t.Cleanup(func() {
+		database.DB = originalDB
+	})
+
+	return db
+}
+
+func createAlertWebhookFixture(t *testing.T, db *gorm.DB) *database.AlertSourceInstance {
+	t.Helper()
+
+	sourceType := database.AlertSourceType{
+		Name:                "grafana",
+		DisplayName:         "Grafana Alerting",
+		Description:         "Test source type",
+		WebhookSecretHeader: "X-Grafana-Secret",
+	}
+	if err := db.Create(&sourceType).Error; err != nil {
+		t.Fatalf("create alert source type: %v", err)
+	}
+
+	instance := &database.AlertSourceInstance{
+		UUID:              "11111111-1111-1111-1111-111111111111",
+		AlertSourceTypeID: sourceType.ID,
+		Name:              "grafana-prod",
+		WebhookSecret:     "super-secret",
+		Enabled:           true,
+	}
+	if err := db.Create(instance).Error; err != nil {
+		t.Fatalf("create alert source instance: %v", err)
+	}
+
+	service := services.NewAlertService()
+	reloaded, err := service.GetInstanceByUUID(instance.UUID)
+	if err != nil {
+		t.Fatalf("reload alert source instance: %v", err)
+	}
+
+	return reloaded
+}
+
+func TestAlertHandler_HandleWebhook_InvalidSecretReturnsUnauthorized(t *testing.T) {
+	db := setupAlertWebhookTestDB(t)
+	instance := createAlertWebhookFixture(t, db)
+
+	adapter := &mockAlertAdapter{
+		sourceType: "grafana",
+		validateWebhookSecretFn: func(r *http.Request, got *database.AlertSourceInstance) error {
+			if got.UUID != instance.UUID {
+				t.Fatalf("instance UUID = %s, want %s", got.UUID, instance.UUID)
+			}
+			return errors.New("invalid secret")
+		},
+		parsePayloadFn: func([]byte, *database.AlertSourceInstance) ([]alerts.NormalizedAlert, error) {
+			t.Fatal("ParsePayload should not be called when secret validation fails")
+			return nil, nil
+		},
+	}
+
+	h := NewAlertHandler(nil, nil, nil, nil, nil, services.NewAlertService(), nil, nil)
+	h.RegisterAdapter(adapter)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/alert/"+instance.UUID, strings.NewReader(`{"status":"firing"}`))
+	w := httptest.NewRecorder()
+
+	h.HandleWebhook(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusUnauthorized, w.Body.String())
+	}
+	if adapter.validateCalls != 1 {
+		t.Fatalf("ValidateWebhookSecret calls = %d, want 1", adapter.validateCalls)
+	}
+	if adapter.parseCalls != 0 {
+		t.Fatalf("ParsePayload calls = %d, want 0", adapter.parseCalls)
+	}
+}
+
+func TestAlertHandler_HandleWebhook_ResolvedAlertReturnsOK(t *testing.T) {
+	db := setupAlertWebhookTestDB(t)
+	instance := createAlertWebhookFixture(t, db)
+
+	adapter := &mockAlertAdapter{
+		sourceType: "grafana",
+		validateWebhookSecretFn: func(r *http.Request, got *database.AlertSourceInstance) error {
+			if got.UUID != instance.UUID {
+				t.Fatalf("instance UUID = %s, want %s", got.UUID, instance.UUID)
+			}
+			return nil
+		},
+		parsePayloadFn: func(body []byte, got *database.AlertSourceInstance) ([]alerts.NormalizedAlert, error) {
+			if strings.TrimSpace(string(body)) != `{"status":"resolved"}` {
+				t.Fatalf("body = %q, want resolved payload", string(body))
+			}
+			if got.UUID != instance.UUID {
+				t.Fatalf("instance UUID = %s, want %s", got.UUID, instance.UUID)
+			}
+			return []alerts.NormalizedAlert{{
+				AlertName:         "Disk usage back to normal",
+				Status:            database.AlertStatusResolved,
+				Severity:          database.AlertSeverityInfo,
+				SourceFingerprint: "grafana:disk:resolved",
+			}}, nil
+		},
+	}
+
+	h := NewAlertHandler(nil, nil, nil, nil, nil, services.NewAlertService(), nil, nil)
+	h.RegisterAdapter(adapter)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/alert/"+instance.UUID, strings.NewReader(`{"status":"resolved"}`))
+	w := httptest.NewRecorder()
+
+	h.HandleWebhook(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if body := strings.TrimSpace(w.Body.String()); body != "Received 1 alerts" {
+		t.Fatalf("body = %q, want %q", body, "Received 1 alerts")
+	}
+	if adapter.validateCalls != 1 {
+		t.Fatalf("ValidateWebhookSecret calls = %d, want 1", adapter.validateCalls)
+	}
+	if adapter.parseCalls != 1 {
+		t.Fatalf("ParsePayload calls = %d, want 1", adapter.parseCalls)
+	}
+}
+
 // mockAlertAdapter implements alerts.AlertAdapter for testing
 type mockAlertAdapter struct {
-	sourceType string
-	id         string
+	sourceType              string
+	id                      string
+	parseCalls              int
+	validateCalls           int
+	parsePayloadFn          func([]byte, *database.AlertSourceInstance) ([]alerts.NormalizedAlert, error)
+	validateWebhookSecretFn func(*http.Request, *database.AlertSourceInstance) error
 }
 
 func (m *mockAlertAdapter) GetSourceType() string {
@@ -447,10 +596,18 @@ func (m *mockAlertAdapter) GetSourceType() string {
 }
 
 func (m *mockAlertAdapter) ParsePayload(body []byte, instance *database.AlertSourceInstance) ([]alerts.NormalizedAlert, error) {
+	m.parseCalls++
+	if m.parsePayloadFn != nil {
+		return m.parsePayloadFn(body, instance)
+	}
 	return nil, nil
 }
 
 func (m *mockAlertAdapter) ValidateWebhookSecret(r *http.Request, instance *database.AlertSourceInstance) error {
+	m.validateCalls++
+	if m.validateWebhookSecretFn != nil {
+		return m.validateWebhookSecretFn(r, instance)
+	}
 	return nil
 }
 
