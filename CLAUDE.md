@@ -67,6 +67,7 @@ cd mcp-gateway && go test ./...
 - Record with `httptest.NewRecorder`
 - Assert status code, JSON body, and error shape
 - Cover invalid JSON, validation failures, and partial-update behavior
+- For settings endpoints, assert masked secrets in responses rather than raw stored values
 
 ### Service tests
 
@@ -79,6 +80,7 @@ cd mcp-gateway && go test ./...
 - Load realistic payloads from `tests/fixtures/` when available
 - Add focused fixture files rather than giant inline JSON blobs
 - Verify both parsed fields and fallback behavior
+- Cover both native references and already-transformed asset links when testing context parsing
 
 ### Database tests
 
@@ -121,6 +123,23 @@ Slack integration supports channel-based alert ingestion, thread follow-ups, and
 - secret masking in API responses
 - partial update semantics for saved credentials
 
+### Settings API conventions
+
+For provider and Slack settings handlers in `internal/handlers/api.go`:
+
+- GET responses should mask secrets and tokens
+- PUT handlers use pointer fields so omitted values are left unchanged
+- validate URLs and enum-like fields before persisting
+- keep response shape stable for the frontend settings screens
+
+### Context file references
+
+`internal/services/context_service.go` is the source of truth for uploaded context assets:
+
+- enforce the filename regex and allowed extension list there
+- keep the 10 MB upload ceiling unless product requirements change
+- preserve both `[[file.ext]]` references and transformed `assets/file.ext` links when parsing content
+
 ### Output parsing
 
 `internal/output/` extracts structured blocks from agent output. Changes here should preserve clean output and structured result parsing.
@@ -131,7 +150,7 @@ Slack integration supports channel-based alert ingestion, thread follow-ups, and
 - OpenAPI source lives in `docs/openapi.yaml`
 - `make verify` runs vet and tests for both the main module and `mcp-gateway`
 - `tests/fixtures/` is the preferred home for reusable payload samples
-- Recent test coverage work includes Slack settings API flows, especially masked secrets, partial updates, and invalid JSON handling
+- Recent test coverage work includes Slack settings API flows, proxy/aggregation settings handlers, context reference parsing helpers, and alert webhook integration behavior
 
 ## Coverage and Quality Work
 
