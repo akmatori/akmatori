@@ -85,6 +85,7 @@ cd mcp-gateway && go test ./...
 ### Database tests
 
 - Keep tests isolated and explicit about setup
+- Prefer `testhelpers.SetupSQLiteTestDB(...)` for in-memory GORM setup and automatic `database.DB` cleanup
 - Assert persisted fields, merge/update behavior, and query filters
 
 ## High-Value Areas

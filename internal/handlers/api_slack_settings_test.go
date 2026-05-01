@@ -8,29 +8,13 @@ import (
 	"testing"
 
 	"github.com/akmatori/akmatori/internal/database"
-	"gorm.io/driver/sqlite"
+	"github.com/akmatori/akmatori/internal/testhelpers"
 	"gorm.io/gorm"
 )
 
 func setupSlackSettingsTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite db: %v", err)
-	}
-
-	if err := db.AutoMigrate(&database.SlackSettings{}); err != nil {
-		t.Fatalf("migrate slack settings: %v", err)
-	}
-
-	originalDB := database.DB
-	database.DB = db
-	t.Cleanup(func() {
-		database.DB = originalDB
-	})
-
-	return db
+	return testhelpers.SetupSQLiteTestDB(t, &database.SlackSettings{})
 }
 
 func createSlackSettingsFixture(t *testing.T, db *gorm.DB) database.SlackSettings {

@@ -21,6 +21,8 @@ import (
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 // ========================================
@@ -193,6 +195,31 @@ func (m *MockAlertAdapter) WithValidationError(err error) *MockAlertAdapter {
 // ========================================
 // Test Fixture Helpers
 // ========================================
+
+// SetupSQLiteTestDB creates an isolated in-memory sqlite database, migrates the
+// provided models, and wires it into database.DB for the lifetime of the test.
+func SetupSQLiteTestDB(t *testing.T, models ...interface{}) *gorm.DB {
+	t.Helper()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+
+	if len(models) > 0 {
+		if err := db.AutoMigrate(models...); err != nil {
+			t.Fatalf("migrate sqlite test db: %v", err)
+		}
+	}
+
+	originalDB := database.DB
+	database.DB = db
+	t.Cleanup(func() {
+		database.DB = originalDB
+	})
+
+	return db
+}
 
 // LoadFixture loads a test fixture file from tests/fixtures/
 func LoadFixture(t *testing.T, path string) []byte {

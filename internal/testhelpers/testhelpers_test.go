@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestHTTPTestContext_NewAndExecute(t *testing.T) {
@@ -264,6 +266,40 @@ func TestContainsString(t *testing.T) {
 	}
 }
 
+func TestSetupSQLiteTestDB(t *testing.T) {
+	originalDB := database.DB
+	t.Run("configures global db for the test", func(t *testing.T) {
+		db := SetupSQLiteTestDB(t, &database.SlackSettings{})
+
+		if db == nil {
+			t.Fatal("expected non-nil test db")
+		}
+		if database.DB != db {
+			t.Fatal("expected database.DB to point at the sqlite test db")
+		}
+
+		if err := db.AutoMigrate(&database.ProxySettings{}); err != nil {
+			t.Fatalf("unexpected auto-migrate failure on returned db: %v", err)
+		}
+	})
+
+	if database.DB != originalDB {
+		t.Fatal("expected database.DB to be restored after subtest cleanup")
+	}
+}
+
+func TestSetupSQLiteTestDB_WithNoModels(t *testing.T) {
+	db := SetupSQLiteTestDB(t)
+
+	if db == nil {
+		t.Fatal("expected non-nil test db")
+	}
+
+	if err := db.Exec("SELECT 1").Error; err != nil {
+		t.Fatalf("expected sqlite db to accept queries: %v", err)
+	}
+}
+
 // Benchmark the HTTP test context creation
 func BenchmarkHTTPTestContext_New(b *testing.B) {
 	for i := 0; i < b.N; i++ {
@@ -291,5 +327,17 @@ func BenchmarkAlertBuilder(b *testing.B) {
 			WithHost("prod-1").
 			WithLabel("env", "prod").
 			Build()
+	}
+}
+
+func BenchmarkSetupSQLiteTestDB(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+		if err != nil {
+			b.Fatalf("open sqlite db: %v", err)
+		}
+		if err := db.AutoMigrate(&database.SlackSettings{}, &database.ProxySettings{}); err != nil {
+			b.Fatalf("migrate sqlite db: %v", err)
+		}
 	}
 }
