@@ -54,11 +54,11 @@ The upgrade touches only `agent-worker/`. Go API server, MCP Gateway, frontend, 
 **Files:**
 - Modify: `agent-worker/src/gateway-tools.ts`
 
-- [ ] Replace `import { Type, type Static } from "@sinclair/typebox";` with `import { Type, type Static } from "typebox";`
-- [ ] Verify all `Type.Object`, `Type.String`, `Type.Optional`, `Type.Record`, `Type.Unknown` calls compile under typebox 1.x. The schema-builder API is unchanged in 1.x; the migration is import-path only.
-- [ ] Run `npm run build` — must succeed with no TypeScript errors.
-- [ ] Run `make test-agent` — all existing gateway-tools tests must still pass.
-- [ ] If any existing test exercises `Static` type inference or schema serialization, add one targeted test that validates a `gateway_call` schema round-trips through `JSON.stringify(schema)` since 0.69.0 explicitly tightens this path.
+- [x] Replace `import { Type, type Static } from "@sinclair/typebox";` with `import { Type, type Static } from "typebox";`
+- [x] Verify all `Type.Object`, `Type.String`, `Type.Optional`, `Type.Record`, `Type.Unknown` calls compile under typebox 1.x. The schema-builder API is unchanged in 1.x; the migration is import-path only.
+- [x] Run `npm run build` — must succeed with no TypeScript errors. (Also fixed an unrelated 0.72.1 breaking change: `DefaultResourceLoader` now requires `agentDir` — wired `getAgentDir()` from `@mariozechner/pi-coding-agent` and updated test mocks.)
+- [x] Run `make test-agent` — all existing gateway-tools tests must still pass.
+- [x] If any existing test exercises `Static` type inference or schema serialization, add one targeted test that validates a `gateway_call` schema round-trips through `JSON.stringify(schema)` since 0.69.0 explicitly tightens this path.
 
 ### Task 3: Add provider retry/timeout settings
 
