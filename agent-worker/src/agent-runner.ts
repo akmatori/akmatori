@@ -17,6 +17,7 @@ import {
   SettingsManager,
   DefaultResourceLoader,
   createBashToolDefinition,
+  getAgentDir,
   type AgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
 import { getModel, type Model, type ThinkingLevel as PiThinkingLevel } from "@mariozechner/pi-ai";
@@ -241,6 +242,7 @@ export class AgentRunner {
     const enabledSkillNames = params.enabledSkills;
     const resourceLoader = new DefaultResourceLoader({
       cwd: params.workDir,
+      agentDir: getAgentDir(),
       additionalSkillPaths: this.skillsDir ? [this.skillsDir] : [],
       noExtensions: true,
       noPromptTemplates: true,

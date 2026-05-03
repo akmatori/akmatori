@@ -125,6 +125,7 @@ vi.mock("@mariozechner/pi-coding-agent", () => {
       _spawnHookOpts: _opts,
     })),
     defineTool: vi.fn((tool: any) => tool),
+    getAgentDir: vi.fn(() => "/tmp/mock-agent-dir"),
   };
 });
 

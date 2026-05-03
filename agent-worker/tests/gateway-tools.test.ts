@@ -879,3 +879,38 @@ describe("ExecuteScriptParams schema", () => {
     expect(ExecuteScriptParams.properties.code.type).toBe("string");
   });
 });
+
+// ---------------------------------------------------------------------------
+// typebox 1.x schema serialization (pi-mono 0.69.0+)
+// ---------------------------------------------------------------------------
+
+describe("typebox 1.x schema JSON serialization", () => {
+  it("should serialize GatewayCallParams to a valid JSON Schema object", () => {
+    const json = JSON.stringify(GatewayCallParams);
+    const parsed = JSON.parse(json);
+
+    expect(parsed.type).toBe("object");
+    expect(parsed.properties).toBeDefined();
+    expect(parsed.properties.tool_name.type).toBe("string");
+    expect(parsed.properties.args).toBeDefined();
+    expect(parsed.properties.instance.type).toBe("string");
+    expect(parsed.required).toEqual(expect.arrayContaining(["tool_name", "args"]));
+    expect(parsed.required).not.toContain("instance");
+  });
+
+  it("should serialize ExecuteScriptParams to a valid JSON Schema object", () => {
+    const parsed = JSON.parse(JSON.stringify(ExecuteScriptParams));
+
+    expect(parsed.type).toBe("object");
+    expect(parsed.properties.code.type).toBe("string");
+    expect(parsed.required).toContain("code");
+  });
+
+  it("should serialize ListToolsForToolTypeParams to a valid JSON Schema object", () => {
+    const parsed = JSON.parse(JSON.stringify(ListToolsForToolTypeParams));
+
+    expect(parsed.type).toBe("object");
+    expect(parsed.properties.tool_type.type).toBe("string");
+    expect(parsed.required).toContain("tool_type");
+  });
+});
