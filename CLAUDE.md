@@ -115,7 +115,7 @@ The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK (v0.72.1):
 - `ModelRegistry` has no public constructor since 0.64.0. Always use `ModelRegistry.inMemory(authStorage)`.
 - All `createXxxTool()` factory functions in `gateway-tools.ts` must wrap their return with `defineTool({...})` (imported from `@mariozechner/pi-coding-agent`). The bash tool is the sole exception — it retains `as unknown as ToolDefinition` due to contravariant generics in `renderCall`/`renderResult`.
 - TypeBox is now imported from `typebox` (1.x), not `@sinclair/typebox` (0.x). The schema-builder API (`Type.Object`, `Type.String`, `Type.Optional`, etc.) is unchanged; only the package name differs.
-- `DefaultResourceLoader` now requires `agentDir`. Use `getAgentDir()` from `@mariozechner/pi-coding-agent` when constructing it directly (e.g., in tests).
+- `DefaultResourceLoader` now requires `agentDir`. Pass `getAgentDir()` from `@mariozechner/pi-coding-agent` whenever constructing it directly (production callsite is `agent-runner.ts`; test mocks must also expose `getAgentDir`).
 
 ### Recent Agent Behavior Notes
 

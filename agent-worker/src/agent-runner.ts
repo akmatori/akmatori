@@ -22,7 +22,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { getModel, type Model, type ThinkingLevel as PiThinkingLevel } from "@mariozechner/pi-ai";
 import { Agent as UndiciAgent, EnvHttpProxyAgent, setGlobalDispatcher } from "undici";
-import type { LLMSettings, ExecuteResult, ProviderRetrySettings, ProxyConfig, ThinkingLevel, ToolAllowlistEntry } from "./types.js";
+import type { LLMSettings, ExecuteResult, ProxyConfig, ThinkingLevel, ToolAllowlistEntry } from "./types.js";
 import {
   formatToolArgs,
   formatToolOutput,
@@ -65,11 +65,11 @@ const BASH_TOOL_GUIDELINES: string[] = [
  * SettingsManager. The 10-minute timeout protects long alert investigations
  * against slow on-prem/OpenRouter models that would otherwise abort mid-stream.
  */
-export const DEFAULT_PROVIDER_RETRY: Required<Pick<ProviderRetrySettings, "timeoutMs" | "maxRetries" | "maxRetryDelayMs">> = {
+const DEFAULT_PROVIDER_RETRY = {
   timeoutMs: 600_000,
   maxRetries: 3,
   maxRetryDelayMs: 60_000,
-};
+} as const;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -246,12 +246,8 @@ export class AgentRunner {
     if (!isResume) {
       sessionManager.newSession({ id: params.incidentId });
     }
-    const providerRetry: ProviderRetrySettings = {
-      ...DEFAULT_PROVIDER_RETRY,
-      ...(params.llmSettings.retry ?? {}),
-    };
     const settingsManager = SettingsManager.inMemory({
-      retry: { provider: providerRetry },
+      retry: { provider: DEFAULT_PROVIDER_RETRY },
     });
     const modelRegistry = ModelRegistry.inMemory(authStorage);
 

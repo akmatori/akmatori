@@ -59,25 +59,12 @@ export type ThinkingLevel =
   | "high"
   | "xhigh";
 
-/**
- * Provider-level retry/timeout controls forwarded to pi-mono's SettingsManager
- * via `retry.provider.*` (pi-mono 0.70.1+). Used to keep slow on-prem/OpenRouter
- * models from aborting during long alert investigations. Currently set from
- * hardcoded defaults inside the agent-worker; not yet exposed via DB/API.
- */
-export interface ProviderRetrySettings {
-  timeoutMs?: number;
-  maxRetries?: number;
-  maxRetryDelayMs?: number;
-}
-
 export interface LLMSettings {
   provider: LLMProvider;
   api_key: string;
   model: string;
   thinking_level: ThinkingLevel;
   base_url?: string;
-  retry?: ProviderRetrySettings;
 }
 
 // ---------------------------------------------------------------------------

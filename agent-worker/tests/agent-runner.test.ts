@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   AgentRunner,
-  DEFAULT_PROVIDER_RETRY,
   mapThinkingLevel,
   resolveModel,
   type ExecuteParams,
@@ -583,30 +582,16 @@ describe("AgentRunner", () => {
       expect(hookResult.env.PATH).toBe("/usr/bin");
     });
 
-    it("should forward default provider retry settings to SettingsManager", async () => {
+    it("should forward hardcoded provider retry settings to SettingsManager", async () => {
       const { SettingsManager } = await import("@mariozechner/pi-coding-agent");
       await runner.execute(makeExecuteParams());
 
       expect((SettingsManager as any).inMemory).toHaveBeenCalledWith({
-        retry: { provider: DEFAULT_PROVIDER_RETRY },
-      });
-    });
-
-    it("should let llmSettings.retry overrides take precedence over defaults", async () => {
-      const { SettingsManager } = await import("@mariozechner/pi-coding-agent");
-      const params = makeExecuteParams({
-        llmSettings: makeLLMSettings({
-          retry: { timeoutMs: 1_200_000, maxRetries: 5 },
-        }),
-      });
-      await runner.execute(params);
-
-      expect((SettingsManager as any).inMemory).toHaveBeenCalledWith({
         retry: {
           provider: {
-            timeoutMs: 1_200_000,
-            maxRetries: 5,
-            maxRetryDelayMs: DEFAULT_PROVIDER_RETRY.maxRetryDelayMs,
+            timeoutMs: 600_000,
+            maxRetries: 3,
+            maxRetryDelayMs: 60_000,
           },
         },
       });
