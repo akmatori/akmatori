@@ -73,11 +73,11 @@ The upgrade touches only `agent-worker/`. Go API server, MCP Gateway, frontend, 
 
 ### Task 4: Rebuild and verify Docker container
 
-- [ ] Run `make verify` (Go vet + all tests).
-- [ ] Run `docker-compose build akmatori-agent` — must succeed.
-- [ ] Run `docker-compose up -d akmatori-agent`.
-- [ ] Run `docker-compose logs --tail=100 akmatori-agent` and confirm no startup errors, no module-resolution failures, no TypeBox warnings.
-- [ ] Confirm `docker-compose exec akmatori-agent node -e "console.log(require('./node_modules/@mariozechner/pi-coding-agent/package.json').version)"` reports `0.72.1` inside the container.
+- [x] Run `make verify` (Go vet + all tests).
+- [x] Run `docker-compose build akmatori-agent` — must succeed.
+- [x] Run `docker-compose up -d akmatori-agent`.
+- [x] Run `docker-compose logs --tail=100 akmatori-agent` and confirm no startup errors, no module-resolution failures, no TypeBox warnings.
+- [x] Confirm `docker-compose exec akmatori-agent node -e "console.log(require('./node_modules/@mariozechner/pi-coding-agent/package.json').version)"` reports `0.72.1` inside the container.
 
 ### Task 5: Update documentation
 
