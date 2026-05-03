@@ -39,15 +39,15 @@ The upgrade touches only `agent-worker/`. Go API server, MCP Gateway, frontend, 
 - Modify: `agent-worker/package.json`
 - Regenerate: `agent-worker/package-lock.json`
 
-- [ ] Update `agent-worker/package.json` dependencies:
+- [x] Update `agent-worker/package.json` dependencies:
   - `@mariozechner/pi-agent-core`: `^0.67.6` → `^0.72.1`
   - `@mariozechner/pi-ai`: `^0.67.6` → `^0.72.1`
   - `@mariozechner/pi-coding-agent`: `^0.67.6` → `^0.72.1`
   - Remove `@sinclair/typebox: ^0.34.48`
   - Add `typebox: ^1.1.24` (matches pi-mono 0.72.1's transitive version)
-- [ ] Run `cd /opt/akmatori/agent-worker && npm install`
-- [ ] Verify resolved versions with `npm ls @mariozechner/pi-coding-agent @mariozechner/pi-ai @mariozechner/pi-agent-core typebox`
-- [ ] Run `npm run build` (expect TypeScript errors in gateway-tools.ts — fixed in Task 2)
+- [x] Run `cd /opt/akmatori/agent-worker && npm install`
+- [x] Verify resolved versions with `npm ls @mariozechner/pi-coding-agent @mariozechner/pi-ai @mariozechner/pi-agent-core typebox`
+- [x] Run `npm run build` (expect TypeScript errors in gateway-tools.ts — fixed in Task 2)
 
 ### Task 2: Migrate gateway-tools.ts to typebox 1.x
 
