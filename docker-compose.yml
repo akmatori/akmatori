@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Secure 5-Container Architecture
 # ================================
 # Network Isolation:
@@ -71,12 +69,12 @@ services:
       context: .
       dockerfile: Dockerfile.api
       args:
-        http_proxy:  ${http_proxy}
-        https_proxy: ${https_proxy}
-        no_proxy:    ${no_proxy}
-        HTTP_PROXY:  ${HTTP_PROXY}
-        HTTPS_PROXY: ${HTTPS_PROXY}
-        NO_PROXY:    ${NO_PROXY}
+        http_proxy:  ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy:    ${no_proxy:-}
+        HTTP_PROXY:  ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY:    ${NO_PROXY:-}
     container_name: akmatori-api
     restart: unless-stopped
     logging:
@@ -113,12 +111,12 @@ services:
       context: ./mcp-gateway
       dockerfile: Dockerfile
       args:
-        http_proxy:  ${http_proxy}
-        https_proxy: ${https_proxy}
-        no_proxy:    ${no_proxy}
-        HTTP_PROXY:  ${HTTP_PROXY}
-        HTTPS_PROXY: ${HTTPS_PROXY}
-        NO_PROXY:    ${NO_PROXY}
+        http_proxy:  ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy:    ${no_proxy:-}
+        HTTP_PROXY:  ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY:    ${NO_PROXY:-}
     container_name: akmatori-mcp-gateway
     restart: unless-stopped
     logging:
@@ -157,12 +155,12 @@ services:
       context: ./agent-worker
       dockerfile: Dockerfile
       args:
-        http_proxy:  ${http_proxy}
-        https_proxy: ${https_proxy}
-        no_proxy:    ${no_proxy}
-        HTTP_PROXY:  ${HTTP_PROXY}
-        HTTPS_PROXY: ${HTTPS_PROXY}
-        NO_PROXY:    ${NO_PROXY}
+        http_proxy:  ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy:    ${no_proxy:-}
+        HTTP_PROXY:  ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY:    ${NO_PROXY:-}
     container_name: akmatori-agent
     restart: unless-stopped
     logging:
@@ -203,12 +201,12 @@ services:
       context: ./qmd
       dockerfile: Dockerfile
       args:
-        http_proxy:  ${http_proxy}
-        https_proxy: ${https_proxy}
-        no_proxy:    ${no_proxy}
-        HTTP_PROXY:  ${HTTP_PROXY}
-        HTTPS_PROXY: ${HTTPS_PROXY}
-        NO_PROXY:    ${NO_PROXY}
+        http_proxy:  ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy:    ${no_proxy:-}
+        HTTP_PROXY:  ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY:    ${NO_PROXY:-}
     container_name: akmatori-qmd
     restart: unless-stopped
     logging:
@@ -238,12 +236,12 @@ services:
       context: ./web
       dockerfile: Dockerfile
       args:
-        http_proxy:  ${http_proxy}
-        https_proxy: ${https_proxy}
-        no_proxy:    ${no_proxy}
-        HTTP_PROXY:  ${HTTP_PROXY}
-        HTTPS_PROXY: ${HTTPS_PROXY}
-        NO_PROXY:    ${NO_PROXY}
+        http_proxy:  ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy:    ${no_proxy:-}
+        HTTP_PROXY:  ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY:    ${NO_PROXY:-}
     container_name: akmatori-frontend
     restart: unless-stopped
     logging:
