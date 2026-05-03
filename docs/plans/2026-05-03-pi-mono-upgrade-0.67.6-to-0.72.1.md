@@ -66,10 +66,10 @@ The upgrade touches only `agent-worker/`. Go API server, MCP Gateway, frontend, 
 - Modify: `agent-worker/src/types.ts` (extend internal LLM config with optional retry config)
 - Modify: `agent-worker/src/agent-runner.ts` (forward retry config to `createAgentSession`)
 
-- [ ] Decide config surface scope: support hardcoded sensible defaults first (timeout 600_000ms = 10min, maxRetries 3) without exposing to DB/API. Only widen surface if user requests.
-- [ ] Pass `retry: { provider: { timeoutMs, maxRetries, maxRetryDelayMs } }` to `createAgentSession({...})`. Verify exact option name in `/opt/pi-mono/packages/coding-agent/src/core/agent-session.ts` for v0.72.1.
-- [ ] Add a unit test in `agent-worker/src/agent-runner.test.ts` that constructs the session config and asserts the retry block is forwarded.
-- [ ] Run `make test-agent` — all tests pass.
+- [x] Decide config surface scope: support hardcoded sensible defaults first (timeout 600_000ms = 10min, maxRetries 3) without exposing to DB/API. Only widen surface if user requests.
+- [x] Pass `retry: { provider: { timeoutMs, maxRetries, maxRetryDelayMs } }` to `createAgentSession({...})`. Verify exact option name in `/opt/pi-mono/packages/coding-agent/src/core/agent-session.ts` for v0.72.1. (Note: in pi-mono 0.72.1 the SDK reads provider retry settings from `SettingsManager.getProviderRetrySettings()` rather than from a top-level `createAgentSession` option, so we forward via `SettingsManager.inMemory({ retry: { provider: {...} } })`.)
+- [x] Add a unit test in `agent-worker/src/agent-runner.test.ts` that constructs the session config and asserts the retry block is forwarded.
+- [x] Run `make test-agent` — all tests pass.
 
 ### Task 4: Rebuild and verify Docker container
 

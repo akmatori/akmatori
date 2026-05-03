@@ -22,7 +22,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { getModel, type Model, type ThinkingLevel as PiThinkingLevel } from "@mariozechner/pi-ai";
 import { Agent as UndiciAgent, EnvHttpProxyAgent, setGlobalDispatcher } from "undici";
-import type { LLMSettings, ExecuteResult, ProxyConfig, ThinkingLevel, ToolAllowlistEntry } from "./types.js";
+import type { LLMSettings, ExecuteResult, ProviderRetrySettings, ProxyConfig, ThinkingLevel, ToolAllowlistEntry } from "./types.js";
 import {
   formatToolArgs,
   formatToolOutput,
@@ -55,6 +55,21 @@ const BASH_TOOL_GUIDELINES: string[] = [
   "Only use list_tools_for_tool_type / get_tool_detail as a fallback if SKILL.md doesn't cover the tool you need.",
   "For batch operations across multiple hosts or complex data processing, use execute_script. It runs JavaScript with built-in gateway_call(), list_tools_for_tool_type(), get_tool_detail(), and synchronous fs (readFileSync, writeFileSync). Do NOT use require() or import() in scripts.",
 ];
+
+// ---------------------------------------------------------------------------
+// Provider retry defaults (pi-mono 0.70.1+ retry.provider.* settings)
+// ---------------------------------------------------------------------------
+
+/**
+ * Default provider-level retry/timeout settings forwarded to pi-mono via
+ * SettingsManager. The 10-minute timeout protects long alert investigations
+ * against slow on-prem/OpenRouter models that would otherwise abort mid-stream.
+ */
+export const DEFAULT_PROVIDER_RETRY: Required<Pick<ProviderRetrySettings, "timeoutMs" | "maxRetries" | "maxRetryDelayMs">> = {
+  timeoutMs: 600_000,
+  maxRetries: 3,
+  maxRetryDelayMs: 60_000,
+};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -231,7 +246,13 @@ export class AgentRunner {
     if (!isResume) {
       sessionManager.newSession({ id: params.incidentId });
     }
-    const settingsManager = SettingsManager.inMemory();
+    const providerRetry: ProviderRetrySettings = {
+      ...DEFAULT_PROVIDER_RETRY,
+      ...(params.llmSettings.retry ?? {}),
+    };
+    const settingsManager = SettingsManager.inMemory({
+      retry: { provider: providerRetry },
+    });
     const modelRegistry = ModelRegistry.inMemory(authStorage);
 
     // Create resource loader with skills directory for pi-mono's native skill system.
