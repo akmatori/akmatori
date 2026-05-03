@@ -84,8 +84,8 @@ The upgrade touches only `agent-worker/`. Go API server, MCP Gateway, frontend, 
 **Files:**
 - Modify: `CLAUDE.md`
 
-- [ ] Update `CLAUDE.md`:
+- [x] Update `CLAUDE.md`:
   - Bump SDK version reference from `v0.67.6` to `v0.72.1`
   - Update "SDK API Conventions" section to mention typebox 1.x and the new import path
   - Add a one-line note about provider retry/timeout controls if Task 3 is shipped
-- [ ] Move this plan from `docs/plans/` to `docs/plans/completed/` with status notes.
+- [x] Move this plan from `docs/plans/` to `docs/plans/completed/` with status notes.
