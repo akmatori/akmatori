@@ -18,10 +18,11 @@ import (
 
 // SlackHandler handles Slack events and commands
 type SlackHandler struct {
-	client         *slack.Client
-	agentExecutor  *executor.Executor
-	agentWSHandler *AgentWSHandler
-	skillService   services.SkillIncidentManager
+	client          *slack.Client
+	agentExecutor   *executor.Executor
+	agentWSHandler  *AgentWSHandler
+	skillService    services.SkillIncidentManager
+	slackSummarizer *services.SlackSummarizer
 
 	// Alert channel support
 	alertChannels   map[string]*database.AlertSourceInstance // channel_id -> instance
@@ -63,6 +64,13 @@ func NewSlackHandler(
 // SetAlertHandler sets the alert handler for processing Slack channel alerts
 func (h *SlackHandler) SetAlertHandler(alertHandler *AlertHandler) {
 	h.alertHandler = alertHandler
+}
+
+// SetSlackSummarizer wires the SlackSummarizer used for compressing final
+// Slack messages. Optional — when unset, the handler falls back to the
+// existing byte-truncation path.
+func (h *SlackHandler) SetSlackSummarizer(s *services.SlackSummarizer) {
+	h.slackSummarizer = s
 }
 
 // SetAlertService sets the alert service for loading alert channel configs

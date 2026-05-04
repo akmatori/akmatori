@@ -175,7 +175,9 @@ func TestTruncateForSlack_Short(t *testing.T) {
 }
 
 func TestTruncateForSlack_Long(t *testing.T) {
-	msg := strings.Repeat("Line of text here.\n", 300) // ~5700 bytes
+	// Build content that always exceeds the cap regardless of how large
+	// slackMaxTextBytes grows in the future.
+	msg := strings.Repeat("Line of text here.\n", (slackMaxTextBytes/19)+200)
 	result := truncateForSlack(msg, slackMaxTextBytes)
 	if len(result) > slackMaxTextBytes {
 		t.Errorf("truncateForSlack() result is %d bytes, want <= %d", len(result), slackMaxTextBytes)
@@ -559,7 +561,9 @@ func TestTruncateWithFooter_NoTruncation(t *testing.T) {
 }
 
 func TestTruncateWithFooter_TruncatesContent(t *testing.T) {
-	content := strings.Repeat("Line of text.\n", 300) // ~4500 bytes
+	// Build content that always exceeds the cap regardless of how large
+	// slackMaxTextBytes grows in the future.
+	content := strings.Repeat("Line of text.\n", (slackMaxTextBytes/14)+200)
 	footer := "\n\n———\n⏱️ Time: 5s\n<http://localhost:3000/incidents/x|View  reasoning log>"
 
 	result := truncateWithFooter(content, footer, slackMaxTextBytes)

@@ -186,6 +186,11 @@ func main() {
 		channelResolver,
 	)
 
+	// Slack summarizer compresses final agent output to fit Slack's byte cap
+	// using the same provider-agnostic worker oneshot path as TitleGenerator.
+	slackSummarizer := services.NewSlackSummarizer(agentWSHandler)
+	alertHandler.SetSlackSummarizer(slackSummarizer)
+
 	// Set up event handler for when Slack connects
 	// Note: We receive the client directly to avoid deadlock (can't call GetClient while holding lock)
 	slackManager.SetEventHandler(func(socketClient *socketmode.Client, client *slack.Client) {
@@ -201,6 +206,7 @@ func main() {
 		// Wire up alert channel support
 		slackHandler.SetAlertHandler(alertHandler)
 		slackHandler.SetAlertService(alertService)
+		slackHandler.SetSlackSummarizer(slackSummarizer)
 
 		// Try to get bot user ID and team ID for self-message filtering and Streaming API
 		if authTest, err := client.AuthTest(); err == nil {

@@ -155,17 +155,17 @@ Output-format/template configuration (concern #3 from the original request) rema
 - Create: `internal/output/slack_budget_test.go`
 - Modify: `internal/handlers/alert.go` — set `slackMaxTextBytes = 8000`; add `slackSummaryMargin` (e.g. 200 bytes) to leave room for the existing footer
 
-- [ ] Implement `SlackSummarizer` that depends on the same `OneShotLLMCaller` interface defined in Task 3 (constructor injection — no new SDK or HTTP client)
-- [ ] In `SummarizeForSlack(ctx, formattedText, maxBytes) (string, error)`:
+- [x] Implement `SlackSummarizer` that depends on the same `OneShotLLMCaller` interface defined in Task 3 (constructor injection — no new SDK or HTTP client)
+- [x] In `SummarizeForSlack(ctx, formattedText, maxBytes) (string, error)`:
   - if `formattedText` already fits the budget: return unchanged (no LLM call)
   - else load `database.GetLLMSettings()` and call `caller.OneShotLLM(ctx, settings, systemPrompt, userPrompt, 600, 0.2)`
   - prompt explicitly preserves status verdict, key actions, and the most actionable recommendation; instructs the model to keep the result under the byte budget and end with a short note pointing to the Akmatori incident UI
   - if the LLM returns over-budget output, run the deterministic fallback below
-- [ ] Provide a deterministic fallback in `slack_budget.go` for when the worker is unavailable / errors / returns over-budget output: collapse the body to the structured `[FINAL_RESULT]` summary line + the first action + the first recommendation, then byte-truncate with the existing footer
-- [ ] Wire summarizer in `cmd/akmatori/main.go` (mirror how TitleGenerator is constructed and injected into handlers); reuse the same `AgentWSHandler` instance as the OneShotLLMCaller
-- [ ] Add table-driven tests for `SummarizeForSlack`: under-budget passthrough (no LLM call asserted via fake caller), over-budget with fake caller returning a fitting summary, over-budget with fake caller returning over-budget output (fallback used), caller error (fallback used), `ErrWorkerNotConnected` (fallback used)
-- [ ] Add tests for the deterministic fallback shortener: structured-block input, free-form input, very small budgets
-- [ ] Run `make test` — must pass before task 7
+- [x] Provide a deterministic fallback in `slack_budget.go` for when the worker is unavailable / errors / returns over-budget output: collapse the body to the structured `[FINAL_RESULT]` summary line + the first action + the first recommendation, then byte-truncate with the existing footer
+- [x] Wire summarizer in `cmd/akmatori/main.go` (mirror how TitleGenerator is constructed and injected into handlers); reuse the same `AgentWSHandler` instance as the OneShotLLMCaller
+- [x] Add table-driven tests for `SummarizeForSlack`: under-budget passthrough (no LLM call asserted via fake caller), over-budget with fake caller returning a fitting summary, over-budget with fake caller returning over-budget output (fallback used), caller error (fallback used), `ErrWorkerNotConnected` (fallback used)
+- [x] Add tests for the deterministic fallback shortener: structured-block input, free-form input, very small budgets
+- [x] Run `make test` — must pass before task 7
 
 ### Task 7: Wire condensed streaming + summarized single message into Slack flows
 
