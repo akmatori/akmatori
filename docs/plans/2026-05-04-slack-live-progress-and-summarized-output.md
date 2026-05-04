@@ -140,11 +140,11 @@ Output-format/template configuration (concern #3 from the original request) rema
 - Modify: `internal/handlers/alert_slack.go` — add `appendSlackThreadStream` wrapper around `slackClient.AppendStream`
 - Modify: `internal/handlers/alert.go` — keep existing constants; add `slackAppendInterval` (e.g. 2s) for native-stream throttle since `appendStream` is cheaper than `chat.update`
 
-- [ ] Implement a `SlackProgressStreamer` struct wrapping `(client, channel, threadTS, isStreaming, lastAppendAt)` that exposes `AppendStatus(text string)` — when `isStreaming` is true, calls `AppendStream` with markdown text; when false, falls back to the existing `chat.update` path (preserves behaviour for older Slack workspaces)
-- [ ] Implement a small parser that converts a delta of agent OnOutput text into condensed status lines: detect "🛠️ Running: ", "✅ Ran: ", and thinking markers ("🤔 …"); emit at most one short status line per tool transition; throttle to `slackAppendInterval` to avoid Slack rate limits
-- [ ] Add table-driven tests for the parser (markers, partial deltas, dedupe of consecutive identical statuses, stripping non-marker lines)
-- [ ] Add tests for `SlackProgressStreamer` using a mocked Slack client (verify `AppendStream` called when streaming, `UpdateMessage` when not, throttle window respected)
-- [ ] Run `make test` — must pass before task 6
+- [x] Implement a `SlackProgressStreamer` struct wrapping `(client, channel, threadTS, isStreaming, lastAppendAt)` that exposes `AppendStatus(text string)` — when `isStreaming` is true, calls `AppendStream` with markdown text; when false, falls back to the existing `chat.update` path (preserves behaviour for older Slack workspaces)
+- [x] Implement a small parser that converts a delta of agent OnOutput text into condensed status lines: detect "🛠️ Running: ", "✅ Ran: ", and thinking markers ("🤔 …"); emit at most one short status line per tool transition; throttle to `slackAppendInterval` to avoid Slack rate limits
+- [x] Add table-driven tests for the parser (markers, partial deltas, dedupe of consecutive identical statuses, stripping non-marker lines)
+- [x] Add tests for `SlackProgressStreamer` using a mocked Slack client (verify `AppendStream` called when streaming, `UpdateMessage` when not, throttle window respected)
+- [x] Run `make test` — must pass before task 6
 
 ### Task 6: Single-message summarized final output via the worker harness
 
