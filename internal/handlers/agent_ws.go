@@ -163,6 +163,12 @@ func (h *AgentWSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 		}
 		h.mu.Unlock()
 		conn.Close()
+
+		// Notify any in-flight oneshot LLM callers that the worker dropped so
+		// they fail fast (with ErrWorkerNotConnected) instead of blocking until
+		// their context deadline.
+		h.failPendingOneshot(ErrWorkerNotConnected.Error())
+
 		slog.Info("agent worker disconnected")
 	}()
 
@@ -216,6 +222,29 @@ func (h *AgentWSHandler) handleMessage(msg AgentMessage) {
 
 	default:
 		slog.Warn("unknown message type from worker", "type", msg.Type)
+	}
+}
+
+// failPendingOneshot delivers an error response to every waiting oneshot
+// caller. Used on worker disconnect so callers do not block until their
+// context deadline. Each pending channel is buffered=1 and only ever receives
+// one response, so a non-blocking send is sufficient.
+func (h *AgentWSHandler) failPendingOneshot(errMsg string) {
+	h.pendingOneshotMu.Lock()
+	pending := h.pendingOneshot
+	h.pendingOneshot = make(map[string]chan *AgentMessage)
+	h.pendingOneshotMu.Unlock()
+
+	for requestID, ch := range pending {
+		resp := &AgentMessage{
+			Type:      AgentMessageTypeOneshotLLMResponse,
+			RequestID: requestID,
+			Error:     errMsg,
+		}
+		select {
+		case ch <- resp:
+		default:
+		}
 	}
 }
 

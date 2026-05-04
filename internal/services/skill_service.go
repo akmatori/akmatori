@@ -37,13 +37,6 @@ func NewSkillService(dataDir string, toolService *ToolService, contextService *C
 	}
 }
 
-// SetOneShotLLMCaller wires the worker-backed LLM caller after construction.
-// Useful for callers that build the SkillService before the agent WebSocket
-// handler is available.
-func (s *SkillService) SetOneShotLLMCaller(caller OneShotLLMCaller) {
-	s.oneShotLLMCaller = caller
-}
-
 // ValidateSkillName validates that skill name follows kebab-case format
 func ValidateSkillName(name string) error {
 	if name == "" {

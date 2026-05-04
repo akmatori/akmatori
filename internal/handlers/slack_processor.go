@@ -17,14 +17,12 @@ import (
 )
 
 // finalizeSlackMessageBody compresses the agent's final response into a
-// single Slack-sized message: it parses any structured blocks, formats them
-// for Slack, runs the SummarizeForSlack flow when over budget, and appends
-// the standard footer (metrics + UI link). When summarizer is nil (early
-// startup), it falls back to the deterministic byte-truncation path.
+// single Slack-sized message: the summarizer parses any structured blocks,
+// formats them for Slack, runs the SummarizeForSlack flow when over budget,
+// and the footer (metrics + UI link) is appended. When summarizer is nil
+// (early startup), it falls back to the deterministic byte-truncation path.
 func finalizeSlackMessageBody(ctx context.Context, summarizer *services.SlackSummarizer, response, incidentUUID string) string {
 	contentOnly, footer := buildSlackFooter(response, incidentUUID)
-	parsed := output.Parse(contentOnly)
-	formatted := output.FormatForSlack(parsed)
 
 	bodyBudget := slackMaxTextBytes - len(footer) - slackSummaryMargin
 	if bodyBudget < 200 {
@@ -32,11 +30,12 @@ func finalizeSlackMessageBody(ctx context.Context, summarizer *services.SlackSum
 	}
 
 	if summarizer != nil {
-		summary, err := summarizer.SummarizeForSlack(ctx, formatted, bodyBudget)
+		summary, err := summarizer.SummarizeForSlack(ctx, contentOnly, bodyBudget)
 		if err == nil && summary != "" {
 			return summary + footer
 		}
 	}
+	formatted := output.FormatForSlack(output.Parse(contentOnly))
 	return truncateWithFooter(formatted, footer, slackMaxTextBytes)
 }
 

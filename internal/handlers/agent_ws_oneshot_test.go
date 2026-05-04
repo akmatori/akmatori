@@ -300,6 +300,48 @@ func formatSummary(i int) string {
 	return "summary-" + string(rune('a'+i))
 }
 
+// TestOneShotLLM_WorkerDisconnectWakesPending verifies that pending callers are
+// unblocked with an error when the worker drops, instead of waiting for the
+// per-call context deadline.
+func TestOneShotLLM_WorkerDisconnectWakesPending(t *testing.T) {
+	handler, conn, cleanup := setupOneshotTest(t)
+	defer cleanup()
+
+	resCh := make(chan error, 1)
+	go func() {
+		// Use a long timeout so the test relies on the disconnect (not the
+		// deadline) to unblock the call.
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_, err := handler.OneShotLLM(ctx, nil, "", "user", 1, 0)
+		resCh <- err
+	}()
+
+	_ = readOneshotRequest(t, conn)
+
+	// Simulate the worker dropping by closing the WebSocket on the worker side.
+	conn.Close()
+
+	select {
+	case err := <-resCh:
+		if err == nil {
+			t.Fatal("expected an error after worker disconnect, got nil")
+		}
+		if !strings.Contains(err.Error(), ErrWorkerNotConnected.Error()) {
+			t.Fatalf("expected disconnect error, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("OneShotLLM did not unblock after worker disconnect")
+	}
+
+	handler.pendingOneshotMu.Lock()
+	pending := len(handler.pendingOneshot)
+	handler.pendingOneshotMu.Unlock()
+	if pending != 0 {
+		t.Errorf("pendingOneshot leaked after disconnect: %d entries", pending)
+	}
+}
+
 func TestHandleOneshotLLMResponse_NoListenerDropsSilently(t *testing.T) {
 	handler := NewAgentWSHandler()
 	// Should not panic, should not deadlock, should not register anything.

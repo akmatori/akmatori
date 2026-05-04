@@ -496,21 +496,6 @@ func TestSlackFlow_BotUserIDConfiguration(t *testing.T) {
 }
 
 // ========================================
-// Timing and Rate Limit Tests
-// ========================================
-
-// TestSlackFlow_ProgressUpdateInterval tests progress update interval configuration
-func TestSlackFlow_ProgressUpdateInterval(t *testing.T) {
-	// Verify interval is reasonable for Slack API rate limits
-	if progressUpdateInterval < 2*time.Second {
-		t.Errorf("progress interval %v may hit Slack rate limits (min 2s recommended)", progressUpdateInterval)
-	}
-	if progressUpdateInterval > 15*time.Second {
-		t.Errorf("progress interval %v too slow for good UX (max 15s recommended)", progressUpdateInterval)
-	}
-}
-
-// ========================================
 // Final Message Summarization Integration Tests
 // ========================================
 
@@ -644,6 +629,14 @@ func TestFinalizeSlackMessageBody_WorkerNotConnectedUsesFallback(t *testing.T) {
 	}
 	if len(got) > slackMaxTextBytes {
 		t.Errorf("result %d bytes exceeds cap %d", len(got), slackMaxTextBytes)
+	}
+	// Deterministic fallback must produce the structured FINAL_RESULT
+	// condensation (status verdict + summary), not just byte-truncated noise.
+	if !strings.Contains(got, "Resolved") {
+		t.Errorf("expected structured fallback to include status verdict, got %q", got)
+	}
+	if !strings.Contains(got, "handled") {
+		t.Errorf("expected structured fallback to include FINAL_RESULT summary, got %q", got)
 	}
 }
 

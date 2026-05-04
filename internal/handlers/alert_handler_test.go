@@ -379,17 +379,6 @@ func TestAlertHandler_MockAdapter(t *testing.T) {
 	testhelpers.AssertEqual(t, "TestAlert", alerts[0].AlertName, "alert name")
 }
 
-// TestAlertHandler_SlackProgressInterval verifies interval constant
-func TestAlertHandler_SlackProgressInterval(t *testing.T) {
-	// Ensure progress interval is reasonable (not too fast, not too slow)
-	if slackProgressInterval < 2*time.Second {
-		t.Errorf("slackProgressInterval too fast: %v (may hit rate limits)", slackProgressInterval)
-	}
-	if slackProgressInterval > 30*time.Second {
-		t.Errorf("slackProgressInterval too slow: %v (poor UX)", slackProgressInterval)
-	}
-}
-
 // min helper for older Go versions
 func min(a, b int) int {
 	if a < b {

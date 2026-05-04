@@ -251,6 +251,7 @@ fmt.Println(parsed.CleanOutput)  // Structured blocks stripped
 | ContextService | `context_service.go` | Context file management |
 | AlertService | `alert_service.go` | Alert processing and normalization |
 | TitleGenerator | `title_generator.go` | AI-powered incident title generation |
+| SlackSummarizer | `slack_summarizer.go` | Provider-agnostic compression of agent output to fit Slack's byte cap, with deterministic structured fallback |
 | RunbookService | `runbook_service.go` | Runbook CRUD and file sync |
 | RetentionService | `retention_service.go` | Automated incident data cleanup (expired + orphaned) |
 
@@ -268,6 +269,7 @@ Handlers depend on interfaces for testability:
 | `RunbookManager` | Runbook CRUD + file sync |
 | `ContextManager` | Context file management |
 | `HTTPConnectorManager` | Declarative HTTP connector CRUD |
+| `OneShotLLMCaller` | Provider-agnostic one-shot LLM completion via the agent worker (lives in `llm_settings.go`); implemented by handlers, consumed by `TitleGenerator`, `extraction.AlertExtractor`, and `SlackSummarizer` |
 
 ## Runbook System (`internal/services/runbook_service.go`)
 

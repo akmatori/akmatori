@@ -16,10 +16,6 @@ import (
 	slackutil "github.com/akmatori/akmatori/internal/slack"
 )
 
-// slackProgressInterval is the minimum time between Slack progress message updates
-// to avoid hitting Slack API rate limits during live investigation streaming.
-const slackProgressInterval = 5 * time.Second
-
 // slackAppendInterval is the minimum time between chat.appendStream calls.
 // AppendStream is cheaper than chat.update (Slack treats it as a streaming
 // fragment rather than a full re-render), so it can be ticked faster while

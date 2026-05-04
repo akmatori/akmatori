@@ -130,7 +130,13 @@ func (s *SlackProgressStreamer) Flush() {
 	s.flushLocked()
 }
 
-// flushLocked sends pendingStatuses to Slack. Caller must hold s.mu.
+// flushLocked snapshots pending statuses, releases the mutex, then issues the
+// Slack HTTP call. Caller must hold s.mu on entry; the lock is released and
+// re-acquired before return so the caller's deferred Unlock still works.
+//
+// Releasing the mutex around the network call prevents an unresponsive Slack
+// API from cascading into AppendStatus callers (the agent worker callback),
+// which would otherwise queue up behind a single in-flight HTTP request.
 func (s *SlackProgressStreamer) flushLocked() {
 	if len(s.pendingStatuses) == 0 {
 		return
@@ -139,21 +145,34 @@ func (s *SlackProgressStreamer) flushLocked() {
 	s.pendingStatuses = nil
 	s.lastAppendAt = time.Now()
 
-	if s.isStreaming {
+	var (
+		isStreaming = s.isStreaming
+		channel     = s.channel
+		messageTS   = s.messageTS
+		body        string
+	)
+	if !isStreaming {
+		s.fallbackLines = append(s.fallbackLines, statuses...)
+		if len(s.fallbackLines) > slackFallbackMaxLines {
+			s.fallbackLines = s.fallbackLines[len(s.fallbackLines)-slackFallbackMaxLines:]
+		}
+		body = fmt.Sprintf("*Investigating...*\n```\n%s\n```", strings.Join(s.fallbackLines, "\n"))
+	}
+	client := s.client
+
+	s.mu.Unlock()
+	defer s.mu.Lock()
+
+	if isStreaming {
 		text := strings.Join(statuses, "\n") + "\n"
-		if _, _, err := s.client.AppendStream(s.channel, s.messageTS, slack.MsgOptionMarkdownText(text)); err != nil {
-			slog.Warn("failed to append stream", "ts", s.messageTS, "err", err)
+		if _, _, err := client.AppendStream(channel, messageTS, slack.MsgOptionMarkdownText(text)); err != nil {
+			slog.Warn("failed to append stream", "ts", messageTS, "err", err)
 		}
 		return
 	}
 
-	s.fallbackLines = append(s.fallbackLines, statuses...)
-	if len(s.fallbackLines) > slackFallbackMaxLines {
-		s.fallbackLines = s.fallbackLines[len(s.fallbackLines)-slackFallbackMaxLines:]
-	}
-	body := fmt.Sprintf("*Investigating...*\n```\n%s\n```", strings.Join(s.fallbackLines, "\n"))
-	if _, _, _, err := s.client.UpdateMessage(s.channel, s.messageTS, slack.MsgOptionText(body, false)); err != nil {
-		slog.Warn("failed to update progress message", "ts", s.messageTS, "err", err)
+	if _, _, _, err := client.UpdateMessage(channel, messageTS, slack.MsgOptionText(body, false)); err != nil {
+		slog.Warn("failed to update progress message", "ts", messageTS, "err", err)
 	}
 }
 

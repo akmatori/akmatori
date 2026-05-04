@@ -2,6 +2,7 @@ package output
 
 import (
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -68,7 +69,7 @@ func condenseFinalResult(fr *FinalResult) string {
 	if status == "" {
 		status = "Result"
 	} else {
-		status = strings.ToUpper(status[:1]) + strings.ToLower(status[1:])
+		status = titleCaseRune(status)
 	}
 	sb.WriteString(emoji)
 	sb.WriteString(" *")
@@ -151,6 +152,17 @@ func truncateBytes(text string, maxBytes int) string {
 		body = body[:idx]
 	}
 	return body + truncationNotice
+}
+
+// titleCaseRune uppercases the first rune of s and lowercases the rest. Uses
+// rune-aware decoding so a multi-byte first character (emoji, accented letter)
+// is never split mid-codepoint.
+func titleCaseRune(s string) string {
+	if s == "" {
+		return s
+	}
+	first, size := utf8.DecodeRuneInString(s)
+	return string(unicode.ToUpper(first)) + strings.ToLower(s[size:])
 }
 
 // safeUTF8Slice slices s to at most n bytes without splitting a multi-byte rune.

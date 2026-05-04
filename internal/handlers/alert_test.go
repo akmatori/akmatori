@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
@@ -27,12 +26,6 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
-}
-
-func TestSlackProgressInterval(t *testing.T) {
-	if slackProgressInterval != 5*time.Second {
-		t.Errorf("slackProgressInterval = %v, want 5s", slackProgressInterval)
-	}
 }
 
 func TestTruncateLogForSlack_ShortLog(t *testing.T) {
