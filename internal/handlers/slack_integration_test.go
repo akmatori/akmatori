@@ -3,7 +3,6 @@ package handlers
 import (
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/slack-go/slack"
@@ -482,20 +481,6 @@ func TestSlackHandler_ThreadTSResolution(t *testing.T) {
 				t.Errorf("threadTS = %q, want %q", threadTS, tt.expectedRoot)
 			}
 		})
-	}
-}
-
-// ========================================
-// Progress Update Interval Test
-// ========================================
-
-func TestSlackHandler_ProgressUpdateInterval(t *testing.T) {
-	// Verify the constant is set to a reasonable value
-	if progressUpdateInterval < time.Second {
-		t.Errorf("progressUpdateInterval too low: %v", progressUpdateInterval)
-	}
-	if progressUpdateInterval > 10*time.Second {
-		t.Errorf("progressUpdateInterval too high: %v", progressUpdateInterval)
 	}
 }
 

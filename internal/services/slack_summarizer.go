@@ -48,29 +48,33 @@ func NewSlackSummarizer(caller OneShotLLMCaller) *SlackSummarizer {
 }
 
 // SummarizeForSlack returns a string guaranteed to fit within maxBytes bytes.
-// When formattedText already fits, it is returned unchanged (no LLM call).
-// Otherwise the configured one-shot LLM is asked to compress it; on any error
-// — including ErrWorkerNotConnected, missing API key, missing settings,
-// over-budget output, or empty response — the deterministic shortener in
-// `internal/output` is used.
+// content is the raw agent response (potentially containing structured
+// [FINAL_RESULT]/[ESCALATE] blocks); the summarizer parses it, formats it for
+// Slack, and only invokes the LLM when the formatted body is over-budget. On
+// any LLM-side error — ErrWorkerNotConnected, missing API key, missing
+// settings, over-budget output, or empty response — the deterministic
+// shortener in `internal/output` runs against the *parsed* structure (so the
+// fallback collapses to the FINAL_RESULT verdict + first action +
+// recommendation, not just byte-truncated formatted text).
 //
 // The error return is reserved for unexpected failures (currently none — the
 // fallback path always produces a payload). It is kept for forward
 // compatibility so callers can choose to surface failures in the future.
-func (s *SlackSummarizer) SummarizeForSlack(ctx context.Context, formattedText string, maxBytes int) (string, error) {
+func (s *SlackSummarizer) SummarizeForSlack(ctx context.Context, content string, maxBytes int) (string, error) {
 	if maxBytes <= 0 {
 		return "", nil
 	}
 
-	if output.WithinSlackBudget(formattedText, maxBytes) {
-		return formattedText, nil
-	}
+	parsed := output.Parse(content)
+	formatted := output.FormatForSlack(parsed)
 
-	parsed := output.Parse(formattedText)
+	if output.WithinSlackBudget(formatted, maxBytes) {
+		return formatted, nil
+	}
 
 	// Try the LLM path; fall back deterministically on any miss.
 	if s.caller != nil {
-		if summary, ok := s.summarizeViaLLM(ctx, formattedText, maxBytes); ok {
+		if summary, ok := s.summarizeViaLLM(ctx, formatted, maxBytes); ok {
 			return summary, nil
 		}
 	}

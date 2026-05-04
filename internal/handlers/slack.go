@@ -38,9 +38,6 @@ type SlackHandler struct {
 
 }
 
-// Progress update interval for Slack messages (rate limiting)
-const progressUpdateInterval = 2 * time.Second
-
 // NewSlackHandler creates a new Slack handler. The supplied caller is forwarded
 // to the alert extractor so it can route extraction calls through the agent
 // worker's provider-agnostic one-shot LLM path.
