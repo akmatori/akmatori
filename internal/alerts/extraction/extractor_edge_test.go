@@ -2,7 +2,6 @@ package extraction
 
 import (
 	"encoding/json"
-	"net/http"
 	"strings"
 	"testing"
 
@@ -12,7 +11,7 @@ import (
 
 // TestCreateFallbackAlert_EdgeCases tests edge cases for fallback alert creation
 func TestCreateFallbackAlert_EdgeCases(t *testing.T) {
-	extractor := NewAlertExtractor()
+	extractor := NewAlertExtractor(nil)
 
 	tests := []struct {
 		name         string
@@ -152,7 +151,7 @@ func TestCreateFallbackAlert_EdgeCases(t *testing.T) {
 
 // TestToNormalizedAlert_EdgeCases tests edge cases for conversion
 func TestToNormalizedAlert_EdgeCases(t *testing.T) {
-	extractor := NewAlertExtractor()
+	extractor := NewAlertExtractor(nil)
 
 	tests := []struct {
 		name           string
@@ -537,23 +536,14 @@ func TestExtractedAlert_JSONFieldNames(t *testing.T) {
 
 // TestNewAlertExtractor_Initialization tests extractor initialization
 func TestNewAlertExtractor_Initialization(t *testing.T) {
-	extractor := NewAlertExtractor()
+	extractor := NewAlertExtractor(nil)
 
 	if extractor == nil {
 		t.Fatal("NewAlertExtractor returned nil")
 	}
 
-	if extractor.httpClient == nil {
-		t.Error("httpClient should be initialized")
-	}
-
-	// Verify timeout is set (type assert to *http.Client)
-	if client, ok := extractor.httpClient.(*http.Client); ok {
-		if client.Timeout == 0 {
-			t.Error("httpClient timeout should be set")
-		}
-	} else {
-		t.Error("expected httpClient to be *http.Client")
+	if extractor.caller != nil {
+		t.Error("caller should be nil when constructed with nil")
 	}
 
 	if extractor.getLLMSettings == nil {
@@ -609,7 +599,7 @@ func TestNormalizeSeverity_AllValues(t *testing.T) {
 
 // BenchmarkCreateFallbackAlert benchmarks fallback alert creation
 func BenchmarkCreateFallbackAlert(b *testing.B) {
-	extractor := NewAlertExtractor()
+	extractor := NewAlertExtractor(nil)
 	msg := "🔥 Production server down on us-east-1\nAffected service: payment-api\nSeverity: critical"
 
 	b.ResetTimer()
@@ -630,7 +620,7 @@ func BenchmarkTruncateMessage(b *testing.B) {
 
 // BenchmarkToNormalizedAlert benchmarks alert conversion
 func BenchmarkToNormalizedAlert(b *testing.B) {
-	extractor := NewAlertExtractor()
+	extractor := NewAlertExtractor(nil)
 	extracted := ExtractedAlert{
 		AlertName:     "High CPU Usage",
 		Severity:      "critical",

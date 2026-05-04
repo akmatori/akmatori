@@ -16,7 +16,7 @@ import (
 
 // TestSlackHandler_NewHandler tests handler creation
 func TestSlackHandler_NewHandler(t *testing.T) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 
 	if h == nil {
 		t.Fatal("NewSlackHandler returned nil")
@@ -31,7 +31,7 @@ func TestSlackHandler_NewHandler(t *testing.T) {
 
 // TestSlackHandler_SetBotUserID tests bot user ID setting
 func TestSlackHandler_SetBotUserID(t *testing.T) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 
 	h.SetBotUserID("U12345678")
 
@@ -42,7 +42,7 @@ func TestSlackHandler_SetBotUserID(t *testing.T) {
 
 // TestSlackHandler_SetAlertHandler tests alert handler setting
 func TestSlackHandler_SetAlertHandler(t *testing.T) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 	alertHandler := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	h.SetAlertHandler(alertHandler)
@@ -54,7 +54,7 @@ func TestSlackHandler_SetAlertHandler(t *testing.T) {
 
 // TestSlackHandler_SetAlertService tests alert service setting
 func TestSlackHandler_SetAlertService(t *testing.T) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 
 	// Setting nil should not panic
 	h.SetAlertService(nil)
@@ -69,7 +69,7 @@ func TestSlackHandler_SetAlertService(t *testing.T) {
 // ========================================
 
 func TestSlackHandler_LoadAlertChannels_NoService(t *testing.T) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 
 	// Should not error when service is nil
 	err := h.LoadAlertChannels()
@@ -341,7 +341,7 @@ func TestExtractSlackMessageText_BlocksIntegration(t *testing.T) {
 // ========================================
 
 func TestSlackHandler_Deduplication_ConcurrentAccess(t *testing.T) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 
 	var wg sync.WaitGroup
 	numGoroutines := 100
@@ -371,7 +371,7 @@ func TestSlackHandler_Deduplication_ConcurrentAccess(t *testing.T) {
 }
 
 func TestSlackHandler_Deduplication_MultipleKeys(t *testing.T) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 
 	keys := []string{
 		"C_ALERT:1707000001.000100",
@@ -399,7 +399,7 @@ func TestSlackHandler_Deduplication_MultipleKeys(t *testing.T) {
 // ========================================
 
 func TestSlackHandler_AlertChannelMapping(t *testing.T) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 
 	// Add some alert channels
 	h.alertChannelsMu.Lock()
@@ -533,7 +533,7 @@ func BenchmarkExtractSlackMessageText_Attachments(b *testing.B) {
 }
 
 func BenchmarkSlackHandler_Deduplication(b *testing.B) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

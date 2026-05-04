@@ -1,78 +1,49 @@
 package extraction
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
-	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/services"
 )
 
-// mockHTTPClient implements HTTPDoer for testing
-type mockHTTPClient struct {
-	response *http.Response
-	err      error
-	requests []*http.Request
+// fakeOneShotLLMCaller is a configurable test double for OneShotLLMCaller.
+type fakeOneShotLLMCaller struct {
+	calls      int32
+	lastSystem string
+	lastUser   string
+	lastMaxTok int
+	lastTemp   float64
+	lastLLM    *services.LLMSettingsForWorker
+	respond    func(ctx context.Context) (string, error)
 }
 
-func (m *mockHTTPClient) Do(req *http.Request) (*http.Response, error) {
-	m.requests = append(m.requests, req)
-	return m.response, m.err
+func (f *fakeOneShotLLMCaller) OneShotLLM(ctx context.Context, llm *services.LLMSettingsForWorker, system, user string, maxTokens int, temperature float64) (string, error) {
+	atomic.AddInt32(&f.calls, 1)
+	f.lastSystem = system
+	f.lastUser = user
+	f.lastMaxTok = maxTokens
+	f.lastTemp = temperature
+	f.lastLLM = llm
+	if f.respond == nil {
+		return "", nil
+	}
+	return f.respond(ctx)
 }
 
-// Helper to create mock OpenAI response
-func createMockOpenAIResponse(content string) *http.Response {
-	body := openAIResponse{
-		ID: "test-id",
-		Choices: []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason"`
-		}{
-			{
-				Message: struct {
-					Content string `json:"content"`
-				}{Content: content},
-				FinishReason: "stop",
-			},
-		},
-	}
-	jsonBody, _ := json.Marshal(body)
-	return &http.Response{
-		StatusCode: 200,
-		Body:       io.NopCloser(bytes.NewReader(jsonBody)),
-	}
-}
-
-// Helper to create mock error response
-func createMockErrorResponse(errMsg string) *http.Response {
-	body := openAIResponse{
-		Error: &struct {
-			Message string `json:"message"`
-			Type    string `json:"type"`
-		}{
-			Message: errMsg,
-			Type:    "api_error",
-		},
-	}
-	jsonBody, _ := json.Marshal(body)
-	return &http.Response{
-		StatusCode: 400,
-		Body:       io.NopCloser(bytes.NewReader(jsonBody)),
-	}
+func (f *fakeOneShotLLMCaller) callCount() int32 {
+	return atomic.LoadInt32(&f.calls)
 }
 
 func TestExtract_LLMSettingsError(t *testing.T) {
-	mockClient := &mockHTTPClient{}
+	caller := &fakeOneShotLLMCaller{}
 	settingsErr := errors.New("database error")
 
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
+	extractor := NewAlertExtractorWithDeps(caller, func() (*database.LLMSettings, error) {
 		return nil, settingsErr
 	})
 
@@ -90,15 +61,20 @@ func TestExtract_LLMSettingsError(t *testing.T) {
 	if alert.RawPayload["extraction_mode"] != "fallback" {
 		t.Error("Expected extraction_mode to be fallback")
 	}
+	if caller.callCount() != 0 {
+		t.Errorf("Expected no LLM calls, got %d", caller.callCount())
+	}
 }
 
 func TestExtract_NoAPIKey(t *testing.T) {
-	mockClient := &mockHTTPClient{}
+	caller := &fakeOneShotLLMCaller{}
 
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
+	extractor := NewAlertExtractorWithDeps(caller, func() (*database.LLMSettings, error) {
 		return &database.LLMSettings{
 			APIKey:   "",
 			Provider: database.LLMProviderOpenAI,
+			Enabled:  true,
+			Active:   true,
 		}, nil
 	})
 
@@ -110,102 +86,44 @@ func TestExtract_NoAPIKey(t *testing.T) {
 	if alert.RawPayload["extraction_mode"] != "fallback" {
 		t.Error("Expected fallback when no API key")
 	}
-	// HTTP client should not have been called
-	if len(mockClient.requests) != 0 {
-		t.Errorf("Expected no HTTP requests, got %d", len(mockClient.requests))
+	if caller.callCount() != 0 {
+		t.Errorf("Expected no LLM calls, got %d", caller.callCount())
 	}
 }
 
-func TestExtract_NonOpenAIProvider(t *testing.T) {
-	mockClient := &mockHTTPClient{}
-
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
+func TestExtract_NilCaller(t *testing.T) {
+	extractor := NewAlertExtractorWithDeps(nil, func() (*database.LLMSettings, error) {
 		return &database.LLMSettings{
 			APIKey:   "test-key",
-			Provider: database.LLMProviderAnthropic,
+			Provider: database.LLMProviderOpenAI,
+			Enabled:  true,
+			Active:   true,
 		}, nil
 	})
 
-	alert, err := extractor.Extract(context.Background(), "Test alert")
+	alert, err := extractor.Extract(context.Background(), "Test alert message")
 
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
 	if alert.RawPayload["extraction_mode"] != "fallback" {
-		t.Error("Expected fallback for non-OpenAI provider")
-	}
-	if len(mockClient.requests) != 0 {
-		t.Errorf("Expected no HTTP requests for non-OpenAI provider")
+		t.Error("Expected fallback when caller is nil")
 	}
 }
 
-func TestExtract_HTTPRequestError(t *testing.T) {
-	mockClient := &mockHTTPClient{
-		err: errors.New("network error"),
-	}
-
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
-		return &database.LLMSettings{
-			APIKey:   "test-key",
-			Provider: database.LLMProviderOpenAI,
-		}, nil
-	})
-
-	alert, err := extractor.Extract(context.Background(), "Test alert")
-
-	if err != nil {
-		t.Fatalf("Expected no error (fallback), got %v", err)
-	}
-	if alert.RawPayload["extraction_mode"] != "fallback" {
-		t.Error("Expected fallback on HTTP error")
-	}
-}
-
-func TestExtract_APIError(t *testing.T) {
-	mockClient := &mockHTTPClient{
-		response: createMockErrorResponse("Rate limit exceeded"),
-	}
-
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
-		return &database.LLMSettings{
-			APIKey:   "test-key",
-			Provider: database.LLMProviderOpenAI,
-		}, nil
-	})
-
-	alert, err := extractor.Extract(context.Background(), "Test alert")
-
-	if err != nil {
-		t.Fatalf("Expected no error (fallback), got %v", err)
-	}
-	if alert.RawPayload["extraction_mode"] != "fallback" {
-		t.Error("Expected fallback on API error")
-	}
-}
-
-func TestExtract_EmptyChoices(t *testing.T) {
-	emptyResponse := openAIResponse{
-		ID: "test-id",
-		Choices: []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason"`
-		}{},
-	}
-	jsonBody, _ := json.Marshal(emptyResponse)
-
-	mockClient := &mockHTTPClient{
-		response: &http.Response{
-			StatusCode: 200,
-			Body:       io.NopCloser(bytes.NewReader(jsonBody)),
+func TestExtract_CallerError(t *testing.T) {
+	caller := &fakeOneShotLLMCaller{
+		respond: func(ctx context.Context) (string, error) {
+			return "", errors.New("network error")
 		},
 	}
 
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
+	extractor := NewAlertExtractorWithDeps(caller, func() (*database.LLMSettings, error) {
 		return &database.LLMSettings{
 			APIKey:   "test-key",
 			Provider: database.LLMProviderOpenAI,
+			Enabled:  true,
+			Active:   true,
 		}, nil
 	})
 
@@ -215,19 +133,75 @@ func TestExtract_EmptyChoices(t *testing.T) {
 		t.Fatalf("Expected no error (fallback), got %v", err)
 	}
 	if alert.RawPayload["extraction_mode"] != "fallback" {
-		t.Error("Expected fallback on empty choices")
+		t.Error("Expected fallback on caller error")
+	}
+}
+
+func TestExtract_WorkerNotConnected(t *testing.T) {
+	caller := &fakeOneShotLLMCaller{
+		respond: func(ctx context.Context) (string, error) {
+			return "", services.ErrWorkerNotConnected
+		},
+	}
+
+	extractor := NewAlertExtractorWithDeps(caller, func() (*database.LLMSettings, error) {
+		return &database.LLMSettings{
+			APIKey:   "test-key",
+			Provider: database.LLMProviderOpenAI,
+			Enabled:  true,
+			Active:   true,
+		}, nil
+	})
+
+	alert, err := extractor.Extract(context.Background(), "Test alert")
+
+	if err != nil {
+		t.Fatalf("Expected no error (fallback), got %v", err)
+	}
+	if alert.RawPayload["extraction_mode"] != "fallback" {
+		t.Error("Expected fallback on ErrWorkerNotConnected")
+	}
+}
+
+func TestExtract_EmptyResponse(t *testing.T) {
+	caller := &fakeOneShotLLMCaller{
+		respond: func(ctx context.Context) (string, error) {
+			return "   ", nil
+		},
+	}
+
+	extractor := NewAlertExtractorWithDeps(caller, func() (*database.LLMSettings, error) {
+		return &database.LLMSettings{
+			APIKey:   "test-key",
+			Provider: database.LLMProviderOpenAI,
+			Enabled:  true,
+			Active:   true,
+		}, nil
+	})
+
+	alert, err := extractor.Extract(context.Background(), "Test alert")
+
+	if err != nil {
+		t.Fatalf("Expected no error (fallback), got %v", err)
+	}
+	if alert.RawPayload["extraction_mode"] != "fallback" {
+		t.Error("Expected fallback on empty caller response")
 	}
 }
 
 func TestExtract_InvalidJSON(t *testing.T) {
-	mockClient := &mockHTTPClient{
-		response: createMockOpenAIResponse("this is not json"),
+	caller := &fakeOneShotLLMCaller{
+		respond: func(ctx context.Context) (string, error) {
+			return "this is not json", nil
+		},
 	}
 
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
+	extractor := NewAlertExtractorWithDeps(caller, func() (*database.LLMSettings, error) {
 		return &database.LLMSettings{
 			APIKey:   "test-key",
 			Provider: database.LLMProviderOpenAI,
+			Enabled:  true,
+			Active:   true,
 		}, nil
 	})
 
@@ -253,14 +227,18 @@ func TestExtract_SuccessfulExtraction(t *testing.T) {
 		"source_system": "Prometheus"
 	}`
 
-	mockClient := &mockHTTPClient{
-		response: createMockOpenAIResponse(extractedJSON),
+	caller := &fakeOneShotLLMCaller{
+		respond: func(ctx context.Context) (string, error) {
+			return extractedJSON, nil
+		},
 	}
 
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
+	extractor := NewAlertExtractorWithDeps(caller, func() (*database.LLMSettings, error) {
 		return &database.LLMSettings{
 			APIKey:   "test-key",
 			Provider: database.LLMProviderOpenAI,
+			Enabled:  true,
+			Active:   true,
 		}, nil
 	})
 
@@ -284,24 +262,81 @@ func TestExtract_SuccessfulExtraction(t *testing.T) {
 	if alert.TargetService != "web-api" {
 		t.Errorf("TargetService = %q, want %q", alert.TargetService, "web-api")
 	}
+
+	if caller.lastMaxTok != 500 {
+		t.Errorf("Expected max_tokens = 500, got %d", caller.lastMaxTok)
+	}
+	if caller.lastTemp != 0.1 {
+		t.Errorf("Expected temperature = 0.1, got %v", caller.lastTemp)
+	}
+	if caller.lastLLM == nil {
+		t.Fatal("Expected forwarded LLM settings, got nil")
+	}
+	if caller.lastLLM.APIKey != "test-key" {
+		t.Errorf("Forwarded API key = %q, want %q", caller.lastLLM.APIKey, "test-key")
+	}
+}
+
+func TestExtract_NonOpenAIProviderRoundTrips(t *testing.T) {
+	extractedJSON := `{
+		"alert_name": "Anthropic-Routed Alert",
+		"severity": "high",
+		"status": "firing"
+	}`
+
+	caller := &fakeOneShotLLMCaller{
+		respond: func(ctx context.Context) (string, error) {
+			return extractedJSON, nil
+		},
+	}
+
+	extractor := NewAlertExtractorWithDeps(caller, func() (*database.LLMSettings, error) {
+		return &database.LLMSettings{
+			APIKey:   "test-key",
+			Provider: database.LLMProviderAnthropic,
+			Model:    "claude-sonnet-4",
+			Enabled:  true,
+			Active:   true,
+		}, nil
+	})
+
+	alert, err := extractor.Extract(context.Background(), "Some alert text")
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+	if alert.RawPayload["extraction_mode"] == "fallback" {
+		t.Fatal("Expected non-OpenAI provider to round-trip through caller, not fall back")
+	}
+	if alert.AlertName != "Anthropic-Routed Alert" {
+		t.Errorf("AlertName = %q, want %q", alert.AlertName, "Anthropic-Routed Alert")
+	}
+	if caller.callCount() != 1 {
+		t.Errorf("Expected 1 caller call, got %d", caller.callCount())
+	}
+	if caller.lastLLM == nil || caller.lastLLM.Provider != string(database.LLMProviderAnthropic) {
+		t.Errorf("Expected provider 'anthropic' to be forwarded, got %+v", caller.lastLLM)
+	}
 }
 
 func TestExtract_JSONWithCodeBlock(t *testing.T) {
-	// OpenAI sometimes wraps JSON in markdown code blocks
 	extractedJSON := "```json\n" + `{
 		"alert_name": "Memory Alert",
 		"severity": "warning",
 		"status": "firing"
 	}` + "\n```"
 
-	mockClient := &mockHTTPClient{
-		response: createMockOpenAIResponse(extractedJSON),
+	caller := &fakeOneShotLLMCaller{
+		respond: func(ctx context.Context) (string, error) {
+			return extractedJSON, nil
+		},
 	}
 
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
+	extractor := NewAlertExtractorWithDeps(caller, func() (*database.LLMSettings, error) {
 		return &database.LLMSettings{
 			APIKey:   "test-key",
 			Provider: database.LLMProviderOpenAI,
+			Enabled:  true,
+			Active:   true,
 		}, nil
 	})
 
@@ -322,14 +357,18 @@ func TestExtract_ResolvedStatus(t *testing.T) {
 		"status": "resolved"
 	}`
 
-	mockClient := &mockHTTPClient{
-		response: createMockOpenAIResponse(extractedJSON),
+	caller := &fakeOneShotLLMCaller{
+		respond: func(ctx context.Context) (string, error) {
+			return extractedJSON, nil
+		},
 	}
 
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
+	extractor := NewAlertExtractorWithDeps(caller, func() (*database.LLMSettings, error) {
 		return &database.LLMSettings{
 			APIKey:   "test-key",
 			Provider: database.LLMProviderOpenAI,
+			Enabled:  true,
+			Active:   true,
 		}, nil
 	})
 
@@ -349,14 +388,18 @@ func TestExtractWithPrompt_CustomPrompt(t *testing.T) {
 		"severity": "high"
 	}`
 
-	mockClient := &mockHTTPClient{
-		response: createMockOpenAIResponse(extractedJSON),
+	caller := &fakeOneShotLLMCaller{
+		respond: func(ctx context.Context) (string, error) {
+			return extractedJSON, nil
+		},
 	}
 
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
+	extractor := NewAlertExtractorWithDeps(caller, func() (*database.LLMSettings, error) {
 		return &database.LLMSettings{
 			APIKey:   "test-key",
 			Provider: database.LLMProviderOpenAI,
+			Enabled:  true,
+			Active:   true,
 		}, nil
 	})
 
@@ -369,93 +412,58 @@ func TestExtractWithPrompt_CustomPrompt(t *testing.T) {
 	if alert.AlertName != "Custom Alert" {
 		t.Errorf("AlertName = %q, want %q", alert.AlertName, "Custom Alert")
 	}
-
-	// Verify the custom prompt was used
-	if len(mockClient.requests) != 1 {
-		t.Fatalf("Expected 1 request, got %d", len(mockClient.requests))
-	}
-	body, _ := io.ReadAll(mockClient.requests[0].Body)
-	if !strings.Contains(string(body), "custom instructions") {
-		t.Error("Expected custom prompt to be used in request")
-	}
-}
-
-func TestExtract_RequestHeaders(t *testing.T) {
-	mockClient := &mockHTTPClient{
-		response: createMockOpenAIResponse(`{"alert_name": "Test"}`),
-	}
-
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
-		return &database.LLMSettings{
-			APIKey:   "sk-test-key-12345",
-			Provider: database.LLMProviderOpenAI,
-		}, nil
-	})
-
-	_, _ = extractor.Extract(context.Background(), "Test")
-
-	if len(mockClient.requests) != 1 {
-		t.Fatalf("Expected 1 request, got %d", len(mockClient.requests))
-	}
-
-	req := mockClient.requests[0]
-
-	// Check Content-Type
-	if req.Header.Get("Content-Type") != "application/json" {
-		t.Errorf("Content-Type = %q, want %q", req.Header.Get("Content-Type"), "application/json")
-	}
-
-	// Check Authorization header
-	authHeader := req.Header.Get("Authorization")
-	if authHeader != "Bearer sk-test-key-12345" {
-		t.Errorf("Authorization = %q, want %q", authHeader, "Bearer sk-test-key-12345")
-	}
-
-	// Check URL
-	if req.URL.String() != "https://api.openai.com/v1/chat/completions" {
-		t.Errorf("URL = %q, want OpenAI chat completions endpoint", req.URL.String())
+	if !strings.Contains(caller.lastUser, "custom instructions") {
+		t.Errorf("Expected custom prompt to be used, got %q", caller.lastUser)
 	}
 }
 
 func TestExtract_LongMessageTruncation(t *testing.T) {
 	longMessage := strings.Repeat("x", 5000)
 
-	mockClient := &mockHTTPClient{
-		response: createMockOpenAIResponse(`{"alert_name": "Long Test"}`),
+	caller := &fakeOneShotLLMCaller{
+		respond: func(ctx context.Context) (string, error) {
+			return `{"alert_name": "Long Test"}`, nil
+		},
 	}
 
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
+	extractor := NewAlertExtractorWithDeps(caller, func() (*database.LLMSettings, error) {
 		return &database.LLMSettings{
 			APIKey:   "test-key",
 			Provider: database.LLMProviderOpenAI,
+			Enabled:  true,
+			Active:   true,
 		}, nil
 	})
 
 	_, _ = extractor.Extract(context.Background(), longMessage)
 
-	if len(mockClient.requests) != 1 {
-		t.Fatalf("Expected 1 request, got %d", len(mockClient.requests))
+	if caller.callCount() != 1 {
+		t.Fatalf("Expected 1 call, got %d", caller.callCount())
 	}
 
-	// Message should be truncated to 3000 chars
-	body, _ := io.ReadAll(mockClient.requests[0].Body)
-	// The 5000 char message should be truncated, not appear in full
-	if strings.Count(string(body), "x") >= 5000 {
+	// The 5000 char message should be truncated, not appear in full in user prompt
+	if strings.Count(caller.lastUser, "x") >= 5000 {
 		t.Error("Expected long message to be truncated")
 	}
 }
 
-func TestExtract_EmptyProviderDefaultsToOpenAI(t *testing.T) {
+func TestExtract_EmptyProviderTreatsAsActiveSettings(t *testing.T) {
+	// Settings with empty provider — BuildLLMSettingsForWorker requires the
+	// settings to be active (Enabled + Active) to forward them.
 	extractedJSON := `{"alert_name": "Empty Provider Test"}`
 
-	mockClient := &mockHTTPClient{
-		response: createMockOpenAIResponse(extractedJSON),
+	caller := &fakeOneShotLLMCaller{
+		respond: func(ctx context.Context) (string, error) {
+			return extractedJSON, nil
+		},
 	}
 
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
+	extractor := NewAlertExtractorWithDeps(caller, func() (*database.LLMSettings, error) {
 		return &database.LLMSettings{
 			APIKey:   "test-key",
-			Provider: "", // Empty provider should be treated as OpenAI
+			Provider: "", // Empty provider
+			Enabled:  true,
+			Active:   true,
 		}, nil
 	})
 
@@ -467,34 +475,34 @@ func TestExtract_EmptyProviderDefaultsToOpenAI(t *testing.T) {
 	if alert.AlertName != "Empty Provider Test" {
 		t.Errorf("AlertName = %q, want %q", alert.AlertName, "Empty Provider Test")
 	}
-	// HTTP request should have been made
-	if len(mockClient.requests) != 1 {
-		t.Errorf("Expected HTTP request for empty provider (OpenAI default)")
+	if caller.callCount() != 1 {
+		t.Errorf("Expected exactly 1 caller call, got %d", caller.callCount())
 	}
 }
 
-func TestExtract_MalformedHTTPResponse(t *testing.T) {
-	mockClient := &mockHTTPClient{
-		response: &http.Response{
-			StatusCode: 200,
-			Body:       io.NopCloser(bytes.NewReader([]byte("not json at all"))),
+func TestExtract_InactiveSettingsFallback(t *testing.T) {
+	caller := &fakeOneShotLLMCaller{
+		respond: func(ctx context.Context) (string, error) {
+			t.Fatal("caller must not be invoked when LLM settings are inactive")
+			return "", nil
 		},
 	}
 
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
+	extractor := NewAlertExtractorWithDeps(caller, func() (*database.LLMSettings, error) {
 		return &database.LLMSettings{
 			APIKey:   "test-key",
 			Provider: database.LLMProviderOpenAI,
+			Enabled:  false,
+			Active:   false,
 		}, nil
 	})
 
 	alert, err := extractor.Extract(context.Background(), "Test")
-
 	if err != nil {
-		t.Fatalf("Expected no error (fallback), got %v", err)
+		t.Fatalf("Expected no error, got %v", err)
 	}
 	if alert.RawPayload["extraction_mode"] != "fallback" {
-		t.Error("Expected fallback on malformed HTTP response")
+		t.Error("Expected fallback when LLM settings inactive")
 	}
 }
 
@@ -503,14 +511,18 @@ func TestExtract_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	mockClient := &mockHTTPClient{
-		err: context.Canceled,
+	caller := &fakeOneShotLLMCaller{
+		respond: func(ctx context.Context) (string, error) {
+			return "", context.Canceled
+		},
 	}
 
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
+	extractor := NewAlertExtractorWithDeps(caller, func() (*database.LLMSettings, error) {
 		return &database.LLMSettings{
 			APIKey:   "test-key",
 			Provider: database.LLMProviderOpenAI,
+			Enabled:  true,
+			Active:   true,
 		}, nil
 	})
 
@@ -534,14 +546,18 @@ func BenchmarkExtract_WithMock(b *testing.B) {
 		"summary": "Test summary"
 	}`
 
-	mockClient := &mockHTTPClient{
-		response: createMockOpenAIResponse(extractedJSON),
+	caller := &fakeOneShotLLMCaller{
+		respond: func(ctx context.Context) (string, error) {
+			return extractedJSON, nil
+		},
 	}
 
-	extractor := NewAlertExtractorWithDeps(mockClient, func() (*database.LLMSettings, error) {
+	extractor := NewAlertExtractorWithDeps(caller, func() (*database.LLMSettings, error) {
 		return &database.LLMSettings{
 			APIKey:   "test-key",
 			Provider: database.LLMProviderOpenAI,
+			Enabled:  true,
+			Active:   true,
 		}, nil
 	})
 
@@ -550,9 +566,6 @@ func BenchmarkExtract_WithMock(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		// Reset the mock for each iteration (recreate response body)
-		mockClient.response = createMockOpenAIResponse(extractedJSON)
-		mockClient.requests = nil
 		_, _ = extractor.Extract(ctx, msg)
 	}
 }
