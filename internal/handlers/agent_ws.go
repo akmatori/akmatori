@@ -90,14 +90,11 @@ type AgentMessage struct {
 	Summary     string  `json:"summary,omitempty"`
 }
 
-// LLMSettingsForWorker holds LLM configuration for agent execution
-type LLMSettingsForWorker struct {
-	Provider      string
-	APIKey        string
-	Model         string
-	ThinkingLevel string
-	BaseURL       string
-}
+// LLMSettingsForWorker is re-exported from services so handler code that
+// referenced it before the lift continues to compile unchanged. The canonical
+// definition (and the OneShotLLMCaller interface that consumes it) lives in
+// internal/services/llm_settings.go.
+type LLMSettingsForWorker = services.LLMSettingsForWorker
 
 // AgentWSHandler handles WebSocket connections from the agent worker
 type AgentWSHandler struct {
@@ -556,20 +553,10 @@ func (h *AgentWSHandler) BroadcastProxyConfig(settings *database.ProxySettings) 
 	return h.SendToWorker(msg)
 }
 
-// BuildLLMSettingsForWorker creates LLMSettingsForWorker from database LLMSettings.
-// Returns nil if settings are nil, disabled, or missing an API key.
-func BuildLLMSettingsForWorker(dbSettings *database.LLMSettings) *LLMSettingsForWorker {
-	if dbSettings == nil || !dbSettings.IsActive() {
-		return nil
-	}
-	return &LLMSettingsForWorker{
-		Provider:      string(dbSettings.Provider),
-		APIKey:        dbSettings.APIKey,
-		Model:         dbSettings.Model,
-		ThinkingLevel: string(dbSettings.ThinkingLevel),
-		BaseURL:       dbSettings.BaseURL,
-	}
-}
+// BuildLLMSettingsForWorker is a thin re-export of the canonical implementation
+// in services so handler-side callers continue to work after the type lift.
+var BuildLLMSettingsForWorker = services.BuildLLMSettingsForWorker
 
-// ErrWorkerNotConnected is returned when no worker is connected
-var ErrWorkerNotConnected = errors.New("agent worker not connected")
+// ErrWorkerNotConnected is re-exported from services so existing handler-side
+// callers continue to compile after the lift.
+var ErrWorkerNotConnected = services.ErrWorkerNotConnected
