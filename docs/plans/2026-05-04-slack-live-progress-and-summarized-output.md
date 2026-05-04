@@ -78,10 +78,10 @@ Output-format/template configuration (concern #3 from the original request) rema
 - Modify: `internal/handlers/agent_ws.go`
 - Modify: `internal/handlers/agent_ws_test.go`
 
-- [ ] Add new constants `AgentMessageTypeOneshotLLMRequest = "oneshot_llm_request"` and `AgentMessageTypeOneshotLLMResponse = "oneshot_llm_response"`
-- [ ] Extend `AgentMessage` with `RequestID string` (omitempty), `System string` (omitempty), `User string` (omitempty), `MaxTokens int`, `Temperature float64`, and `Summary string` (omitempty) — JSON tags use `request_id`, `system`, `user`, `max_tokens`, `temperature`, `summary`
-- [ ] Add a `pendingOneshot map[string]chan *AgentMessage` (with mutex) on `AgentWSHandler` for request → response correlation
-- [ ] Add a method `OneShotLLM(ctx context.Context, llm *LLMSettingsForWorker, system, user string, maxTokens int, temperature float64) (string, error)` that:
+- [x] Add new constants `AgentMessageTypeOneshotLLMRequest = "oneshot_llm_request"` and `AgentMessageTypeOneshotLLMResponse = "oneshot_llm_response"`
+- [x] Extend `AgentMessage` with `RequestID string` (omitempty), `System string` (omitempty), `User string` (omitempty), `MaxTokens int`, `Temperature float64`, and `Summary string` (omitempty) — JSON tags use `request_id`, `system`, `user`, `max_tokens`, `temperature`, `summary`
+- [x] Add a `pendingOneshot map[string]chan *AgentMessage` (with mutex) on `AgentWSHandler` for request → response correlation
+- [x] Add a method `OneShotLLM(ctx context.Context, llm *LLMSettingsForWorker, system, user string, maxTokens int, temperature float64) (string, error)` that:
   - generates a `request_id` (uuid v4)
   - registers a buffered channel in `pendingOneshot[request_id]`
   - constructs `AgentMessage{Type: oneshot_llm_request, RequestID: ..., System: ..., User: ..., MaxTokens: ..., Temperature: ..., Provider/APIKey/Model/ThinkingLevel/BaseURL: from llm}`
@@ -89,10 +89,10 @@ Output-format/template configuration (concern #3 from the original request) rema
   - calls `SendToWorker(...)`, then waits for `<-channel` or `<-ctx.Done()`, with a final fallback timeout (e.g. 60s if ctx has no deadline)
   - on receipt: returns `msg.Summary`, or `error(msg.Error)` if non-empty
   - cleans up `pendingOneshot[request_id]` in a deferred block (always)
-- [ ] In `handleMessage`, route `AgentMessageTypeOneshotLLMResponse` to a new `handleOneshotLLMResponse(msg)` that does a non-blocking send on `pendingOneshot[msg.RequestID]` (drops on no listener, logs at debug)
-- [ ] Return `ErrWorkerNotConnected` from `OneShotLLM` when no worker is connected; callers fall back to deterministic behavior
-- [ ] Add table-driven tests in `agent_ws_test.go` using a fake worker WebSocket: (a) request → response round-trip returns expected summary, (b) error response propagates as Go error, (c) ctx cancellation unblocks the call and cleans up the pending entry, (d) `ErrWorkerNotConnected` when no worker, (e) multiple concurrent requests are routed to the right channels
-- [ ] Run `make test` — must pass before task 3
+- [x] In `handleMessage`, route `AgentMessageTypeOneshotLLMResponse` to a new `handleOneshotLLMResponse(msg)` that does a non-blocking send on `pendingOneshot[msg.RequestID]` (drops on no listener, logs at debug)
+- [x] Return `ErrWorkerNotConnected` from `OneShotLLM` when no worker is connected; callers fall back to deterministic behavior
+- [x] Add table-driven tests in `agent_ws_test.go` using a fake worker WebSocket: (a) request → response round-trip returns expected summary, (b) error response propagates as Go error, (c) ctx cancellation unblocks the call and cleans up the pending entry, (d) `ErrWorkerNotConnected` when no worker, (e) multiple concurrent requests are routed to the right channels
+- [x] Run `make test` — must pass before task 3
 
 ### Task 3: Migrate TitleGenerator to use the worker oneshot path
 
