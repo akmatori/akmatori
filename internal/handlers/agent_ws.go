@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/services"
 	"github.com/akmatori/akmatori/internal/utils"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"gorm.io/gorm"
 )
@@ -24,14 +26,19 @@ const (
 	AgentMessageTypeContinueIncident  AgentMessageType = "continue_incident"
 	AgentMessageTypeCancelIncident    AgentMessageType = "cancel_incident"
 	AgentMessageTypeProxyConfigUpdate AgentMessageType = "proxy_config_update"
+	AgentMessageTypeOneshotLLMRequest AgentMessageType = "oneshot_llm_request"
 
 	// Messages from Agent Worker to API
-	AgentMessageTypeAgentOutput    AgentMessageType = "agent_output"
-	AgentMessageTypeAgentCompleted AgentMessageType = "agent_completed"
-	AgentMessageTypeAgentError     AgentMessageType = "agent_error"
-	AgentMessageTypeHeartbeat      AgentMessageType = "heartbeat"
-	AgentMessageTypeStatus         AgentMessageType = "status"
+	AgentMessageTypeAgentOutput        AgentMessageType = "agent_output"
+	AgentMessageTypeAgentCompleted     AgentMessageType = "agent_completed"
+	AgentMessageTypeAgentError         AgentMessageType = "agent_error"
+	AgentMessageTypeHeartbeat          AgentMessageType = "heartbeat"
+	AgentMessageTypeStatus             AgentMessageType = "status"
+	AgentMessageTypeOneshotLLMResponse AgentMessageType = "oneshot_llm_response"
 )
+
+// oneshotLLMDefaultTimeout is used when callers pass a context with no deadline.
+const oneshotLLMDefaultTimeout = 60 * time.Second
 
 // ProxyConfig holds proxy configuration with per-service toggles
 type ProxyConfig struct {
@@ -73,6 +80,14 @@ type AgentMessage struct {
 
 	// Tool allowlist (sent with new_incident to restrict tool access)
 	ToolAllowlist []services.ToolAllowlistEntry `json:"tool_allowlist,omitempty"`
+
+	// One-shot LLM request/response correlation fields
+	RequestID   string  `json:"request_id,omitempty"`
+	System      string  `json:"system,omitempty"`
+	User        string  `json:"user,omitempty"`
+	MaxTokens   int     `json:"max_tokens,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
+	Summary     string  `json:"summary,omitempty"`
 }
 
 // LLMSettingsForWorker holds LLM configuration for agent execution
@@ -86,12 +101,14 @@ type LLMSettingsForWorker struct {
 
 // AgentWSHandler handles WebSocket connections from the agent worker
 type AgentWSHandler struct {
-	upgrader    websocket.Upgrader
-	mu          sync.RWMutex
-	workerConn  *websocket.Conn
-	workerReady bool
-	callbacks   map[string]IncidentCallback // incident_id -> callback
-	callbackMu  sync.RWMutex
+	upgrader         websocket.Upgrader
+	mu               sync.RWMutex
+	workerConn       *websocket.Conn
+	workerReady      bool
+	callbacks        map[string]IncidentCallback // incident_id -> callback
+	callbackMu       sync.RWMutex
+	pendingOneshot   map[string]chan *AgentMessage // request_id -> response channel
+	pendingOneshotMu sync.Mutex
 }
 
 // IncidentCallback is called when an incident receives updates
@@ -111,7 +128,8 @@ func NewAgentWSHandler() *AgentWSHandler {
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 		},
-		callbacks: make(map[string]IncidentCallback),
+		callbacks:      make(map[string]IncidentCallback),
+		pendingOneshot: make(map[string]chan *AgentMessage),
 	}
 }
 
@@ -196,8 +214,32 @@ func (h *AgentWSHandler) handleMessage(msg AgentMessage) {
 	case AgentMessageTypeAgentError:
 		h.handleAgentError(msg)
 
+	case AgentMessageTypeOneshotLLMResponse:
+		h.handleOneshotLLMResponse(msg)
+
 	default:
 		slog.Warn("unknown message type from worker", "type", msg.Type)
+	}
+}
+
+// handleOneshotLLMResponse routes a oneshot LLM response back to the waiting caller.
+// Drops silently (debug-logged) if no listener is registered for the request_id.
+func (h *AgentWSHandler) handleOneshotLLMResponse(msg AgentMessage) {
+	h.pendingOneshotMu.Lock()
+	ch, exists := h.pendingOneshot[msg.RequestID]
+	h.pendingOneshotMu.Unlock()
+
+	if !exists {
+		slog.Debug("dropping oneshot llm response with no listener", "request_id", msg.RequestID)
+		return
+	}
+
+	// Make a heap copy so the channel reader sees a stable value.
+	respCopy := msg
+	select {
+	case ch <- &respCopy:
+	default:
+		slog.Debug("dropping oneshot llm response: channel full or closed", "request_id", msg.RequestID)
 	}
 }
 
@@ -405,6 +447,78 @@ func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string,
 	}
 
 	return nil
+}
+
+// OneShotLLM sends a one-shot LLM request to the agent worker and waits for a response.
+// Correlates request and response via a generated request_id. Returns ErrWorkerNotConnected
+// when no worker is connected. If ctx has no deadline, applies oneshotLLMDefaultTimeout.
+func (h *AgentWSHandler) OneShotLLM(ctx context.Context, llm *LLMSettingsForWorker, system, user string, maxTokens int, temperature float64) (string, error) {
+	if !h.IsWorkerConnected() {
+		return "", ErrWorkerNotConnected
+	}
+
+	requestID := uuid.New().String()
+	ch := make(chan *AgentMessage, 1)
+
+	h.pendingOneshotMu.Lock()
+	h.pendingOneshot[requestID] = ch
+	h.pendingOneshotMu.Unlock()
+
+	defer func() {
+		h.pendingOneshotMu.Lock()
+		delete(h.pendingOneshot, requestID)
+		h.pendingOneshotMu.Unlock()
+	}()
+
+	msg := AgentMessage{
+		Type:        AgentMessageTypeOneshotLLMRequest,
+		RequestID:   requestID,
+		System:      system,
+		User:        user,
+		MaxTokens:   maxTokens,
+		Temperature: temperature,
+	}
+
+	if llm != nil {
+		msg.Provider = llm.Provider
+		msg.APIKey = llm.APIKey
+		msg.Model = llm.Model
+		msg.ThinkingLevel = llm.ThinkingLevel
+		msg.BaseURL = llm.BaseURL
+	}
+
+	// Reuse the same proxy-settings pattern as StartIncident/ContinueIncident.
+	if proxySettings, err := database.GetOrCreateProxySettings(); err == nil && proxySettings != nil {
+		msg.ProxyConfig = &ProxyConfig{
+			URL:                    proxySettings.ProxyURL,
+			NoProxy:                proxySettings.NoProxy,
+			LLMEnabled:             proxySettings.LLMEnabled,
+			SlackEnabled:           proxySettings.SlackEnabled,
+			ZabbixEnabled:          proxySettings.ZabbixEnabled,
+			VictoriaMetricsEnabled: proxySettings.VictoriaMetricsEnabled,
+		}
+	}
+
+	if err := h.SendToWorker(msg); err != nil {
+		return "", err
+	}
+
+	waitCtx := ctx
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		waitCtx, cancel = context.WithTimeout(ctx, oneshotLLMDefaultTimeout)
+		defer cancel()
+	}
+
+	select {
+	case resp := <-ch:
+		if resp.Error != "" {
+			return "", errors.New(resp.Error)
+		}
+		return resp.Summary, nil
+	case <-waitCtx.Done():
+		return "", waitCtx.Err()
+	}
 }
 
 // CancelIncident sends a cancellation request to the worker
