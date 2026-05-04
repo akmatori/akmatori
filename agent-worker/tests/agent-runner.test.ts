@@ -125,6 +125,7 @@ vi.mock("@mariozechner/pi-coding-agent", () => {
       _spawnHookOpts: _opts,
     })),
     defineTool: vi.fn((tool: any) => tool),
+    getAgentDir: vi.fn(() => "/tmp/mock-agent-dir"),
   };
 });
 
@@ -286,6 +287,19 @@ describe("resolveModel", () => {
     expect(model.id).toBe("anthropic/claude-3.5-sonnet");
     expect(model.provider).toBe("openrouter");
     expect(model.api).toBe("openai-completions");
+  });
+
+  it("should disable long cache retention for unknown custom endpoints", () => {
+    // Many OpenAI-compatible gateways (e.g. Envoy AI Gateway) reject
+    // prompt_cache_key / prompt_cache_retention with a 400, which pi-ai's
+    // overflow detector then misclassifies as a context overflow.
+    const model = resolveModel("custom", "my-model", "https://my-api.example.com");
+    expect((model as { compat?: { supportsLongCacheRetention?: boolean } }).compat?.supportsLongCacheRetention).toBe(false);
+  });
+
+  it("should not force-disable long cache retention for openrouter", () => {
+    const model = resolveModel("openrouter", "anthropic/claude-3.5-sonnet");
+    expect((model as { compat?: { supportsLongCacheRetention?: boolean } }).compat?.supportsLongCacheRetention).toBeUndefined();
   });
 
   it("should use correct API type for known provider with unknown model", () => {
@@ -579,6 +593,21 @@ describe("AgentRunner", () => {
       expect(hookResult.env.INCIDENT_ID).toBe("inc-env");
       // Original env vars should be preserved
       expect(hookResult.env.PATH).toBe("/usr/bin");
+    });
+
+    it("should forward hardcoded provider retry settings to SettingsManager", async () => {
+      const { SettingsManager } = await import("@mariozechner/pi-coding-agent");
+      await runner.execute(makeExecuteParams());
+
+      expect((SettingsManager as any).inMemory).toHaveBeenCalledWith({
+        retry: {
+          provider: {
+            timeoutMs: 600_000,
+            maxRetries: 3,
+            maxRetryDelayMs: 60_000,
+          },
+        },
+      });
     });
 
     it("should use fallback response from getLastAssistantText when no text_delta events", async () => {

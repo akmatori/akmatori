@@ -17,6 +17,7 @@ import {
   SettingsManager,
   DefaultResourceLoader,
   createBashToolDefinition,
+  getAgentDir,
   type AgentSessionEvent,
 } from "@mariozechner/pi-coding-agent";
 import { getModel, type Model, type ThinkingLevel as PiThinkingLevel } from "@mariozechner/pi-ai";
@@ -54,6 +55,21 @@ const BASH_TOOL_GUIDELINES: string[] = [
   "Only use list_tools_for_tool_type / get_tool_detail as a fallback if SKILL.md doesn't cover the tool you need.",
   "For batch operations across multiple hosts or complex data processing, use execute_script. It runs JavaScript with built-in gateway_call(), list_tools_for_tool_type(), get_tool_detail(), and synchronous fs (readFileSync, writeFileSync). Do NOT use require() or import() in scripts.",
 ];
+
+// ---------------------------------------------------------------------------
+// Provider retry defaults (pi-mono 0.70.1+ retry.provider.* settings)
+// ---------------------------------------------------------------------------
+
+/**
+ * Default provider-level retry/timeout settings forwarded to pi-mono via
+ * SettingsManager. The 10-minute timeout protects long alert investigations
+ * against slow on-prem/OpenRouter models that would otherwise abort mid-stream.
+ */
+const DEFAULT_PROVIDER_RETRY = {
+  timeoutMs: 600_000,
+  maxRetries: 3,
+  maxRetryDelayMs: 60_000,
+} as const;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -143,6 +159,13 @@ export function resolveModel(
     custom: "openai-completions",
   };
 
+  // For unknown "custom" endpoints (OpenAI-compatible gateways like Envoy AI Gateway),
+  // disable OpenAI-specific extended cache fields. pi-ai's openai-completions provider
+  // adds prompt_cache_key / prompt_cache_retention="24h" when cacheRetention is "long"
+  // (PI_CACHE_RETENTION=long), and many OpenAI-compatible gateways reject those as
+  // unsupported parameters with a 400.
+  const compat = provider === "custom" ? { supportsLongCacheRetention: false } : undefined;
+
   return {
     id: modelId,
     name: modelId,
@@ -154,6 +177,7 @@ export function resolveModel(
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
     maxTokens: 16_384,
+    ...(compat ? { compat } : {}),
   } as Model<any>;
 }
 
@@ -230,7 +254,9 @@ export class AgentRunner {
     if (!isResume) {
       sessionManager.newSession({ id: params.incidentId });
     }
-    const settingsManager = SettingsManager.inMemory();
+    const settingsManager = SettingsManager.inMemory({
+      retry: { provider: DEFAULT_PROVIDER_RETRY },
+    });
     const modelRegistry = ModelRegistry.inMemory(authStorage);
 
     // Create resource loader with skills directory for pi-mono's native skill system.
@@ -241,6 +267,7 @@ export class AgentRunner {
     const enabledSkillNames = params.enabledSkills;
     const resourceLoader = new DefaultResourceLoader({
       cwd: params.workDir,
+      agentDir: getAgentDir(),
       additionalSkillPaths: this.skillsDir ? [this.skillsDir] : [],
       noExtensions: true,
       noPromptTemplates: true,
