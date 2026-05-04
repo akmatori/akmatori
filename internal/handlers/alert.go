@@ -27,11 +27,17 @@ const slackProgressInterval = 5 * time.Second
 const slackAppendInterval = 2 * time.Second
 
 // slackMaxTextBytes is the maximum byte size for Slack message text.
-// Slack's documented limit is 4000 characters, but chat.update rejects messages
-// well below that threshold (observed msg_too_long at ~3800 bytes). Using 3000
-// bytes provides a safe margin that accounts for multi-byte characters and any
-// Slack-internal overhead.
-const slackMaxTextBytes = 3000
+// Slack's chat.update accepts up to 12,000 bytes for plain mrkdwn messages
+// (40,000 for blocks), but we keep the cap at 8000 to leave generous headroom
+// for multi-byte characters and the trailing footer, and because the
+// summarizer already produces a tight result well under 8000 bytes.
+const slackMaxTextBytes = 8000
+
+// slackSummaryMargin is the byte budget reserved for the trailing footer
+// (metrics line + "View reasoning log" link). The summarizer is asked to keep
+// its output under (slackMaxTextBytes - slackSummaryMargin) so the footer
+// always fits without being clipped.
+const slackSummaryMargin = 200
 
 // AlertHandler handles webhook requests from multiple alert sources
 type AlertHandler struct {
@@ -42,6 +48,7 @@ type AlertHandler struct {
 	skillService    services.SkillIncidentManager
 	alertService    services.AlertManager
 	channelResolver *slackutil.ChannelResolver
+	slackSummarizer *services.SlackSummarizer
 
 	// Workspace team ID (required for Streaming API)
 	teamID string
@@ -78,6 +85,13 @@ func NewAlertHandler(
 // SetTeamID sets the workspace team ID (used by the Streaming API).
 func (h *AlertHandler) SetTeamID(teamID string) {
 	h.teamID = teamID
+}
+
+// SetSlackSummarizer wires the SlackSummarizer used for compressing final
+// Slack messages. Optional — when unset, the handler falls back to the
+// existing byte-truncation path.
+func (h *AlertHandler) SetSlackSummarizer(s *services.SlackSummarizer) {
+	h.slackSummarizer = s
 }
 
 // RegisterAdapter registers an alert adapter for a source type
