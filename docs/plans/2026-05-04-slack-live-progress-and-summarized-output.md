@@ -65,12 +65,12 @@ Output-format/template configuration (concern #3 from the original request) rema
 - Modify: `agent-worker/src/ws-client.ts` — add `sendOneshotResponse(requestId, summary, error?)`
 - Modify: `agent-worker/src/orchestrator.ts` — handle new message type `oneshot_llm_request`
 
-- [ ] Implement `runOneshotLLM(params)` in `oneshot-llm.ts` that takes `{ requestId, system, user, maxTokens, temperature, llmSettings, proxyConfig, signal }`, applies proxy via the shared helper, builds a pi-ai `Context` with one system message + one user message, resolves the model with `resolveModel(...)`, and calls `complete(model, context, { temperature, maxTokens, apiKey, timeoutMs: 30_000, signal })`. Return the assistant text from `result.content`.
-- [ ] In `orchestrator.handleMessage`, route `oneshot_llm_request` to a new `handleOneshotLLM(msg)` that validates `request_id`, extracts `llmSettings` (reuse `extractLLMSettings`), runs `runOneshotLLM` asynchronously, and sends `oneshot_llm_response` via `wsClient.sendOneshotResponse(...)` on success or with `error` on failure
-- [ ] Throw a clear error if `request_id`, `user`, or `llmSettings` is missing — surfaced as the `error` field on the response
-- [ ] Add unit tests for `runOneshotLLM` mocking pi-ai's `complete` (mock the module via vitest's `vi.mock("@mariozechner/pi-ai", ...)`): happy path returns assistant text, propagates `temperature`/`maxTokens` to `complete`, ctx-cancel propagates via AbortSignal, missing fields surface as Error
-- [ ] Add unit test for the orchestrator routing: a `oneshot_llm_request` message produces exactly one `oneshot_llm_response` send with the matching `request_id`
-- [ ] Run `make test-agent` — must pass before task 2
+- [x] Implement `runOneshotLLM(params)` in `oneshot-llm.ts` that takes `{ requestId, system, user, maxTokens, temperature, llmSettings, proxyConfig, signal }`, applies proxy via the shared helper, builds a pi-ai `Context` with one system message + one user message, resolves the model with `resolveModel(...)`, and calls `complete(model, context, { temperature, maxTokens, apiKey, timeoutMs: 30_000, signal })`. Return the assistant text from `result.content`.
+- [x] In `orchestrator.handleMessage`, route `oneshot_llm_request` to a new `handleOneshotLLM(msg)` that validates `request_id`, extracts `llmSettings` (reuse `extractLLMSettings`), runs `runOneshotLLM` asynchronously, and sends `oneshot_llm_response` via `wsClient.sendOneshotResponse(...)` on success or with `error` on failure
+- [x] Throw a clear error if `request_id`, `user`, or `llmSettings` is missing — surfaced as the `error` field on the response
+- [x] Add unit tests for `runOneshotLLM` mocking pi-ai's `complete` (mock the module via vitest's `vi.mock("@mariozechner/pi-ai", ...)`): happy path returns assistant text, propagates `temperature`/`maxTokens` to `complete`, ctx-cancel propagates via AbortSignal, missing fields surface as Error
+- [x] Add unit test for the orchestrator routing: a `oneshot_llm_request` message produces exactly one `oneshot_llm_response` send with the matching `request_id`
+- [x] Run `make test-agent` — must pass before task 2
 
 ### Task 2: API-side WebSocket message types and request/response correlation
 

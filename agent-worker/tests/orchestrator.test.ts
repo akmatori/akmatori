@@ -104,6 +104,8 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
   getAgentDir: vi.fn(() => "/tmp/mock-agent-dir"),
 }));
 
+const completeMock = vi.fn();
+
 vi.mock("@mariozechner/pi-ai", () => ({
   getModel: vi.fn(() => ({
     id: "o4-mini",
@@ -111,7 +113,28 @@ vi.mock("@mariozechner/pi-ai", () => ({
     api: "openai-responses",
     provider: "openai",
   })),
+  complete: (...args: unknown[]) => completeMock(...args),
 }));
+
+function makeAssistantText(text: string) {
+  return {
+    role: "assistant" as const,
+    content: [{ type: "text" as const, text }],
+    api: "openai-responses" as const,
+    provider: "openai" as const,
+    model: "o4-mini",
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop" as const,
+    timestamp: Date.now(),
+  };
+}
 
 
 // ---------------------------------------------------------------------------
@@ -791,6 +814,123 @@ describe("Orchestrator", () => {
 
       // getModel should have been called with "gpt-5.4" (matches database default)
       expect(getModel).toHaveBeenCalledWith("openai", "gpt-5.4");
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Message routing: oneshot_llm_request
+  // -----------------------------------------------------------------------
+
+  describe("oneshot_llm_request routing", () => {
+    it("routes a oneshot_llm_request to a oneshot_llm_response with matching request_id", async () => {
+      completeMock.mockResolvedValueOnce(makeAssistantText("hello world"));
+
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "oneshot_llm_request",
+        request_id: "req-abc",
+        api_key: "sk-key",
+        model: "o4-mini",
+        provider: "openai",
+        thinking_level: "medium",
+        system: "be concise",
+        user: "summarize",
+        max_tokens: 64,
+        temperature: 0.2,
+      });
+
+      const resp = await waitForMessage(
+        (m) => m.type === "oneshot_llm_response" && m.request_id === "req-abc",
+      );
+      expect(resp).toBeDefined();
+      expect(resp!.summary).toBe("hello world");
+      expect(resp!.error).toBeUndefined();
+
+      const responses = allServerMessages.filter(
+        (m) => m.type === "oneshot_llm_response" && m.request_id === "req-abc",
+      );
+      expect(responses).toHaveLength(1);
+      expect(completeMock).toHaveBeenCalledTimes(1);
+      const opts = completeMock.mock.calls[0][2];
+      expect(opts.maxTokens).toBe(64);
+      expect(opts.temperature).toBe(0.2);
+      expect(opts.apiKey).toBe("sk-key");
+    });
+
+    it("sends an error response when LLM settings are missing", async () => {
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "oneshot_llm_request",
+        request_id: "req-no-key",
+        user: "summarize",
+        // no api_key
+      });
+
+      const resp = await waitForMessage(
+        (m) => m.type === "oneshot_llm_response" && m.request_id === "req-no-key",
+      );
+      expect(resp).toBeDefined();
+      expect(resp!.error).toContain("Missing LLM settings");
+    });
+
+    it("sends an error response when user prompt is missing", async () => {
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "oneshot_llm_request",
+        request_id: "req-no-user",
+        api_key: "sk-key",
+        // no user
+      });
+
+      const resp = await waitForMessage(
+        (m) => m.type === "oneshot_llm_response" && m.request_id === "req-no-user",
+      );
+      expect(resp).toBeDefined();
+      expect(resp!.error).toContain("Missing user prompt");
+    });
+
+    it("propagates pi-ai errors as the error field on the response", async () => {
+      completeMock.mockRejectedValueOnce(new Error("provider blew up"));
+
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "oneshot_llm_request",
+        request_id: "req-fail",
+        api_key: "sk-key",
+        user: "summarize",
+      });
+
+      const resp = await waitForMessage(
+        (m) => m.type === "oneshot_llm_response" && m.request_id === "req-fail",
+      );
+      expect(resp).toBeDefined();
+      expect(resp!.error).toContain("provider blew up");
+    });
+
+    it("ignores oneshot_llm_request when request_id is missing", async () => {
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "oneshot_llm_request",
+        api_key: "sk-key",
+        user: "summarize",
+        // no request_id
+      });
+
+      await sleep(200);
+      expect(logs.some((l) => l.includes("missing request_id"))).toBe(true);
+      expect(
+        allServerMessages.some((m) => m.type === "oneshot_llm_response"),
+      ).toBe(false);
     });
   });
 

@@ -7,6 +7,7 @@
 
 import { WebSocketClient } from "./ws-client.js";
 import { AgentRunner, type ExecuteParams, type ResumeParams } from "./agent-runner.js";
+import { runOneshotLLM } from "./oneshot-llm.js";
 import type {
   WebSocketMessage,
   LLMSettings,
@@ -142,6 +143,10 @@ export class Orchestrator {
         this.handleProxyConfigUpdate(msg);
         break;
 
+      case "oneshot_llm_request":
+        this.handleOneshotLLM(msg);
+        break;
+
       default:
         this.log(`Unknown message type: ${msg.type}`);
     }
@@ -250,6 +255,49 @@ export class Orchestrator {
       this.cachedProxyConfig = msg.proxy_config;
       this.log("Proxy configuration updated");
     }
+  }
+
+  private handleOneshotLLM(msg: WebSocketMessage): void {
+    const requestId = msg.request_id;
+    if (!requestId) {
+      this.log("oneshot_llm_request missing request_id, ignoring");
+      return;
+    }
+
+    const respond = (summary: string, errorMsg?: string): void => {
+      this.wsClient.sendOneshotResponse(requestId, summary, errorMsg);
+    };
+
+    const llmSettings = this.extractLLMSettings(msg);
+    if (!llmSettings) {
+      respond("", "Missing LLM settings (no API key or provider)");
+      return;
+    }
+
+    if (!msg.user) {
+      respond("", "Missing user prompt");
+      return;
+    }
+
+    const proxyConfig = msg.proxy_config ?? this.cachedProxyConfig;
+
+    runOneshotLLM({
+      requestId,
+      system: msg.system,
+      user: msg.user,
+      maxTokens: msg.max_tokens,
+      temperature: msg.temperature,
+      llmSettings,
+      proxyConfig,
+    })
+      .then((summary) => {
+        respond(summary);
+      })
+      .catch((err: unknown) => {
+        const errMsg = (err as Error)?.message ?? String(err);
+        this.log(`oneshot_llm_request ${requestId} failed: ${errMsg}`);
+        respond("", errMsg);
+      });
   }
 
   // -------------------------------------------------------------------------
