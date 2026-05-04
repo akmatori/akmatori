@@ -135,6 +135,21 @@ func (h *AlertHandler) startSlackThreadStream(channelID, threadTS, text, recipie
 	return ts, false
 }
 
+// appendSlackThreadStream appends markdown text to an active streaming
+// message. Returns nil error when streaming is disabled (no-op) or the Slack
+// client is unavailable, so callers do not have to special-case those paths.
+func (h *AlertHandler) appendSlackThreadStream(channelID, messageTS, text string) error {
+	if messageTS == "" || text == "" {
+		return nil
+	}
+	slackClient := h.slackManager.GetClient()
+	if slackClient == nil {
+		return nil
+	}
+	_, _, err := slackClient.AppendStream(channelID, messageTS, slack.MsgOptionMarkdownText(text))
+	return err
+}
+
 // stopSlackThreadStream stops a streaming message so the bot name stops blinking.
 // No-op if isStreaming is false (i.e. we fell back to a regular message).
 func (h *AlertHandler) stopSlackThreadStream(channelID, messageTS string, isStreaming bool) {

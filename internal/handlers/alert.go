@@ -20,6 +20,12 @@ import (
 // to avoid hitting Slack API rate limits during live investigation streaming.
 const slackProgressInterval = 5 * time.Second
 
+// slackAppendInterval is the minimum time between chat.appendStream calls.
+// AppendStream is cheaper than chat.update (Slack treats it as a streaming
+// fragment rather than a full re-render), so it can be ticked faster while
+// still respecting Slack's per-method rate limits.
+const slackAppendInterval = 2 * time.Second
+
 // slackMaxTextBytes is the maximum byte size for Slack message text.
 // Slack's documented limit is 4000 characters, but chat.update rejects messages
 // well below that threshold (observed msg_too_long at ~3800 bytes). Using 3000
