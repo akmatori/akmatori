@@ -159,6 +159,13 @@ export function resolveModel(
     custom: "openai-completions",
   };
 
+  // For unknown "custom" endpoints (OpenAI-compatible gateways like Envoy AI Gateway),
+  // disable OpenAI-specific extended cache fields. pi-ai's openai-completions provider
+  // adds prompt_cache_key / prompt_cache_retention="24h" when cacheRetention is "long"
+  // (PI_CACHE_RETENTION=long), and many OpenAI-compatible gateways reject those as
+  // unsupported parameters with a 400.
+  const compat = provider === "custom" ? { supportsLongCacheRetention: false } : undefined;
+
   return {
     id: modelId,
     name: modelId,
@@ -170,6 +177,7 @@ export function resolveModel(
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
     maxTokens: 16_384,
+    ...(compat ? { compat } : {}),
   } as Model<any>;
 }
 
