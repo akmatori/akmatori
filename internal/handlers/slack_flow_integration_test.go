@@ -326,7 +326,7 @@ func TestSlackFlow_ThreadTracking(t *testing.T) {
 
 // TestSlackFlow_DeduplicationRobustness tests deduplication under various conditions
 func TestSlackFlow_DeduplicationRobustness(t *testing.T) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 
 	t.Run("same message different channels", func(t *testing.T) {
 		key1 := "C_ALERTS:1707000001.000100"
@@ -368,7 +368,7 @@ func TestSlackFlow_DeduplicationRobustness(t *testing.T) {
 
 // TestSlackFlow_AlertChannelRefresh tests alert channel refresh behavior
 func TestSlackFlow_AlertChannelRefresh(t *testing.T) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 
 	t.Run("initial empty state", func(t *testing.T) {
 		h.alertChannelsMu.RLock()
@@ -510,7 +510,7 @@ func TestSlackFlow_TruncationBehavior(t *testing.T) {
 
 // TestSlackFlow_AlertHandlerInteraction tests slack handler interaction with alert handler
 func TestSlackFlow_AlertHandlerInteraction(t *testing.T) {
-	slackHandler := NewSlackHandler(nil, nil, nil, nil)
+	slackHandler := NewSlackHandler(nil, nil, nil, nil, nil)
 	alertHandler := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	// Wire them together
@@ -524,7 +524,7 @@ func TestSlackFlow_AlertHandlerInteraction(t *testing.T) {
 
 // TestSlackFlow_BotUserIDConfiguration tests bot user ID configuration
 func TestSlackFlow_BotUserIDConfiguration(t *testing.T) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 
 	t.Run("initial state empty", func(t *testing.T) {
 		testhelpers.AssertEqual(t, "", h.botUserID, "should start empty")
@@ -608,7 +608,7 @@ func BenchmarkSlackFlow_MessageExtraction(b *testing.B) {
 }
 
 func BenchmarkSlackFlow_Deduplication(b *testing.B) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

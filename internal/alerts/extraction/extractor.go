@@ -1,32 +1,36 @@
 package extraction
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/services"
 	"github.com/akmatori/akmatori/internal/utils"
 )
 
-// HTTPDoer abstracts HTTP client for testing
-type HTTPDoer interface {
-	Do(req *http.Request) (*http.Response, error)
-}
+// extractionTimeout is the upper bound for a single extraction call when the
+// caller does not provide its own deadline.
+const extractionTimeout = 30 * time.Second
 
 // LLMSettingsGetter abstracts LLM settings retrieval for testing
 type LLMSettingsGetter func() (*database.LLMSettings, error)
 
-// AlertExtractor extracts alert information from free-form text using AI
+// OneShotLLMCaller is the structural shape of the agent worker one-shot path.
+// It mirrors services.OneShotLLMCaller; we keep a local alias here so the
+// extraction package doesn't have to drag every consumer through services.
+type OneShotLLMCaller = services.OneShotLLMCaller
+
+// AlertExtractor extracts alert information from free-form text using a
+// provider-agnostic one-shot LLM call routed through the agent worker.
 type AlertExtractor struct {
-	httpClient     HTTPDoer
+	caller         OneShotLLMCaller
 	getLLMSettings LLMSettingsGetter
 }
 
@@ -42,49 +46,22 @@ type ExtractedAlert struct {
 	SourceSystem  string `json:"source_system"`
 }
 
-// NewAlertExtractor creates a new alert extractor
-func NewAlertExtractor() *AlertExtractor {
+// NewAlertExtractor creates a new alert extractor that routes LLM calls through
+// the supplied caller. Pass nil to force the deterministic fallback path (used
+// in tests and at startup before the worker is wired up).
+func NewAlertExtractor(caller OneShotLLMCaller) *AlertExtractor {
 	return &AlertExtractor{
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		caller:         caller,
 		getLLMSettings: database.GetLLMSettings,
 	}
 }
 
 // NewAlertExtractorWithDeps creates an extractor with injected dependencies (for testing)
-func NewAlertExtractorWithDeps(httpClient HTTPDoer, getLLMSettings LLMSettingsGetter) *AlertExtractor {
+func NewAlertExtractorWithDeps(caller OneShotLLMCaller, getLLMSettings LLMSettingsGetter) *AlertExtractor {
 	return &AlertExtractor{
-		httpClient:     httpClient,
+		caller:         caller,
 		getLLMSettings: getLLMSettings,
 	}
-}
-
-// OpenAI API structures
-type openAIRequest struct {
-	Model       string          `json:"model"`
-	Messages    []openAIMessage `json:"messages"`
-	MaxTokens   int             `json:"max_tokens"`
-	Temperature float64         `json:"temperature"`
-}
-
-type openAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type openAIResponse struct {
-	ID      string `json:"id"`
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
-	Error *struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-	} `json:"error"`
 }
 
 const defaultExtractionPrompt = `Extract alert information from this Slack message. Return ONLY valid JSON with these fields:
@@ -109,22 +86,25 @@ func (e *AlertExtractor) Extract(ctx context.Context, messageText string) (*aler
 
 // ExtractWithPrompt extracts alert information using a custom prompt
 func (e *AlertExtractor) ExtractWithPrompt(ctx context.Context, messageText, customPrompt string) (*alerts.NormalizedAlert, error) {
-	// Get LLM settings from database
+	if e.caller == nil {
+		slog.Debug("alert extractor has no LLM caller, using fallback")
+		return e.createFallbackAlert(messageText), nil
+	}
+
 	settings, err := e.getLLMSettings()
 	if err != nil {
 		slog.Error("Failed to get LLM settings", "error", err)
 		return e.createFallbackAlert(messageText), nil
 	}
 
-	if settings.APIKey == "" {
+	if settings == nil || settings.APIKey == "" {
 		slog.Info("LLM not configured, using fallback extraction")
 		return e.createFallbackAlert(messageText), nil
 	}
 
-	// This function uses the OpenAI chat completions API directly.
-	// Only proceed if the provider is OpenAI (or empty/default).
-	if settings.Provider != "" && settings.Provider != database.LLMProviderOpenAI {
-		slog.Info("Alert extraction only supports OpenAI provider, using fallback", "current_provider", settings.Provider)
+	worker := services.BuildLLMSettingsForWorker(settings)
+	if worker == nil {
+		slog.Info("LLM settings inactive, using fallback extraction")
 		return e.createFallbackAlert(messageText), nil
 	}
 
@@ -134,66 +114,30 @@ func (e *AlertExtractor) ExtractWithPrompt(ctx context.Context, messageText, cus
 		prompt = defaultExtractionPrompt
 	}
 
-	// Format the prompt with the message
 	userPrompt := fmt.Sprintf(prompt, truncateMessage(messageText, 3000))
 
-	// Build request
-	reqBody := openAIRequest{
-		Model: "gpt-4o-mini", // Use a fast, cheap model for extraction
-		Messages: []openAIMessage{
-			{Role: "user", Content: userPrompt},
-		},
-		MaxTokens:   500,
-		Temperature: 0.1, // Low temperature for consistent extraction
+	callCtx := ctx
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		callCtx, cancel = context.WithTimeout(ctx, extractionTimeout)
+		defer cancel()
 	}
 
-	jsonBody, err := json.Marshal(reqBody)
+	raw, err := e.caller.OneShotLLM(callCtx, worker, "", userPrompt, 500, 0.1)
 	if err != nil {
-		slog.Error("Failed to marshal OpenAI request", "error", err)
+		if errors.Is(err, services.ErrWorkerNotConnected) {
+			slog.Debug("oneshot LLM unavailable for alert extraction, using fallback")
+		} else {
+			slog.Warn("oneshot LLM call failed for alert extraction, using fallback", "err", err)
+		}
 		return e.createFallbackAlert(messageText), nil
 	}
 
-	// Make API request
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		slog.Error("Failed to create OpenAI request", "error", err)
+	content := strings.TrimSpace(raw)
+	if content == "" {
+		slog.Warn("empty oneshot LLM response for alert extraction, using fallback")
 		return e.createFallbackAlert(messageText), nil
 	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+settings.APIKey)
-
-	resp, err := e.httpClient.Do(req)
-	if err != nil {
-		slog.Error("OpenAI API request failed", "error", err)
-		return e.createFallbackAlert(messageText), nil
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		slog.Error("Failed to read OpenAI response", "error", err)
-		return e.createFallbackAlert(messageText), nil
-	}
-
-	var openAIResp openAIResponse
-	if err := json.Unmarshal(body, &openAIResp); err != nil {
-		slog.Error("Failed to parse OpenAI response", "error", err)
-		return e.createFallbackAlert(messageText), nil
-	}
-
-	if openAIResp.Error != nil {
-		slog.Error("OpenAI API error", "message", openAIResp.Error.Message)
-		return e.createFallbackAlert(messageText), nil
-	}
-
-	if len(openAIResp.Choices) == 0 {
-		slog.Warn("No choices in OpenAI response")
-		return e.createFallbackAlert(messageText), nil
-	}
-
-	// Parse the extracted JSON
-	content := strings.TrimSpace(openAIResp.Choices[0].Message.Content)
 
 	// Remove markdown code block if present
 	content = strings.TrimPrefix(content, "```json")
@@ -207,34 +151,28 @@ func (e *AlertExtractor) ExtractWithPrompt(ctx context.Context, messageText, cus
 		return e.createFallbackAlert(messageText), nil
 	}
 
-	// Convert to NormalizedAlert
 	return e.toNormalizedAlert(extracted, messageText), nil
 }
 
 // toNormalizedAlert converts ExtractedAlert to NormalizedAlert
 func (e *AlertExtractor) toNormalizedAlert(extracted ExtractedAlert, originalMessage string) *alerts.NormalizedAlert {
-	// Default alert name if not extracted
 	alertName := extracted.AlertName
 	if alertName == "" {
 		alertName = "Slack Alert"
 	}
 
-	// Parse severity
 	severity := alerts.NormalizeSeverity(extracted.Severity, alerts.DefaultSeverityMapping)
 
-	// Parse status
 	status := database.AlertStatusFiring
 	if strings.ToLower(extracted.Status) == "resolved" {
 		status = database.AlertStatusResolved
 	}
 
-	// Summary fallback
 	summary := extracted.Summary
 	if summary == "" {
 		summary = truncateMessage(originalMessage, 100)
 	}
 
-	// Description fallback
 	description := extracted.Description
 	if description == "" {
 		description = originalMessage
@@ -260,7 +198,6 @@ func (e *AlertExtractor) toNormalizedAlert(extracted ExtractedAlert, originalMes
 
 // createFallbackAlert creates a basic alert when AI extraction fails
 func (e *AlertExtractor) createFallbackAlert(messageText string) *alerts.NormalizedAlert {
-	// Try to extract a title from the first line
 	alertName := "Slack Alert"
 	lines := strings.Split(messageText, "\n")
 	if len(lines) > 0 {
@@ -292,7 +229,6 @@ func truncateMessage(msg string, maxLen int) string {
 	if len(msg) <= maxLen {
 		return msg
 	}
-	// Try to cut at word boundary
 	truncated := msg[:maxLen-3]
 	if idx := strings.LastIndex(truncated, " "); idx > maxLen/2 {
 		return truncated[:idx] + "..."

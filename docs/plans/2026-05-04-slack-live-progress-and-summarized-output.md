@@ -124,13 +124,13 @@ Output-format/template configuration (concern #3 from the original request) rema
 - Modify: `internal/handlers/slack.go` — `NewSlackHandler` accepts an `OneShotLLMCaller` and passes it to `extraction.NewAlertExtractor(caller)`
 - Modify: `cmd/akmatori/main.go` — wire the AgentWSHandler instance into `NewSlackHandler` so it satisfies the OneShotLLMCaller interface
 
-- [ ] Define a local `OneShotLLMCaller` interface in `internal/alerts/extraction` with the same shape used by Task 3 (to avoid creating a new dependency from extraction → services). Verify cycle direction during implementation; duplicate the small interface in `extraction` if needed.
-- [ ] Replace `Extract`/`ExtractWithPrompt` HTTP-call body with a call to `caller.OneShotLLM(ctx, settings, "" /*system*/, userPrompt, 500, 0.1)`. Keep the same prompt template (`defaultExtractionPrompt`), the same `truncateMessage(messageText, 3000)` cap, and the same JSON-parsing logic (strip ```json fences, `json.Unmarshal` into `ExtractedAlert`)
-- [ ] Remove `openAIRequest`/`openAIResponse` types, the `httpClient` field, and the `if settings.Provider != "" && settings.Provider != database.LLMProviderOpenAI { fallback }` early-return so extraction now works with whichever provider is active
-- [ ] Update `NewAlertExtractor()` to take an `OneShotLLMCaller` argument; rework `NewAlertExtractorWithDeps` so the test seam swaps the caller (and the `LLMSettingsGetter`) instead of an `HTTPDoer`
-- [ ] Preserve every existing graceful-fallback path via `createFallbackAlert(...)`: missing API key, missing settings, OneShotLLM error (incl. `ErrWorkerNotConnected`), empty response, malformed JSON
-- [ ] Update existing extractor tests: replace `mockClient` (HTTPDoer) seams with a fake `OneShotLLMCaller`; preserve all behavioural assertions (severity normalization, status normalization, fallback paths, JSON-fence stripping, target host/service mapping). Add a test confirming a non-OpenAI provider (Anthropic) round-trips correctly (no longer falls back)
-- [ ] Run `make test` — must pass before task 5
+- [x] Define a local `OneShotLLMCaller` interface in `internal/alerts/extraction` with the same shape used by Task 3 (to avoid creating a new dependency from extraction → services). Verify cycle direction during implementation; duplicate the small interface in `extraction` if needed.
+- [x] Replace `Extract`/`ExtractWithPrompt` HTTP-call body with a call to `caller.OneShotLLM(ctx, settings, "" /*system*/, userPrompt, 500, 0.1)`. Keep the same prompt template (`defaultExtractionPrompt`), the same `truncateMessage(messageText, 3000)` cap, and the same JSON-parsing logic (strip ```json fences, `json.Unmarshal` into `ExtractedAlert`)
+- [x] Remove `openAIRequest`/`openAIResponse` types, the `httpClient` field, and the `if settings.Provider != "" && settings.Provider != database.LLMProviderOpenAI { fallback }` early-return so extraction now works with whichever provider is active
+- [x] Update `NewAlertExtractor()` to take an `OneShotLLMCaller` argument; rework `NewAlertExtractorWithDeps` so the test seam swaps the caller (and the `LLMSettingsGetter`) instead of an `HTTPDoer`
+- [x] Preserve every existing graceful-fallback path via `createFallbackAlert(...)`: missing API key, missing settings, OneShotLLM error (incl. `ErrWorkerNotConnected`), empty response, malformed JSON
+- [x] Update existing extractor tests: replace `mockClient` (HTTPDoer) seams with a fake `OneShotLLMCaller`; preserve all behavioural assertions (severity normalization, status normalization, fallback paths, JSON-fence stripping, target host/service mapping). Add a test confirming a non-OpenAI provider (Anthropic) round-trips correctly (no longer falls back)
+- [x] Run `make test` — must pass before task 5
 
 ### Task 5: Condensed live progress via chat.appendStream
 

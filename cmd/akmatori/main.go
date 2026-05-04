@@ -195,6 +195,7 @@ func main() {
 			agentExecutor,
 			agentWSHandler,
 			skillService,
+			agentWSHandler,
 		)
 
 		// Wire up alert channel support
