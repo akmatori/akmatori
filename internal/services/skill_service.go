@@ -14,24 +14,34 @@ import (
 // SkillService manages skill spawning and lifecycle
 // Skills use SKILL.md format with YAML frontmatter and user prompt body
 type SkillService struct {
-	db             *gorm.DB
-	dataDir        string // /akmatori - base data directory
-	incidentsDir   string // /akmatori/incidents - incident working directories
-	skillsDir      string // /akmatori/skills - skill definitions with SKILL.md
-	toolService    *ToolService
-	contextService *ContextService
+	db               *gorm.DB
+	dataDir          string // /akmatori - base data directory
+	incidentsDir     string // /akmatori/incidents - incident working directories
+	skillsDir        string // /akmatori/skills - skill definitions with SKILL.md
+	toolService      *ToolService
+	contextService   *ContextService
+	oneShotLLMCaller OneShotLLMCaller // optional; nil = title generation falls back deterministically
 }
 
-// NewSkillService creates a new skill service
-func NewSkillService(dataDir string, toolService *ToolService, contextService *ContextService) *SkillService {
+// NewSkillService creates a new skill service. The oneShotLLMCaller is optional:
+// pass nil to skip LLM-backed title generation (tests, early startup).
+func NewSkillService(dataDir string, toolService *ToolService, contextService *ContextService, oneShotLLMCaller OneShotLLMCaller) *SkillService {
 	return &SkillService{
-		db:             database.GetDB(),
-		dataDir:        dataDir,
-		incidentsDir:   filepath.Join(dataDir, "incidents"),
-		skillsDir:      filepath.Join(dataDir, "skills"),
-		toolService:    toolService,
-		contextService: contextService,
+		db:               database.GetDB(),
+		dataDir:          dataDir,
+		incidentsDir:     filepath.Join(dataDir, "incidents"),
+		skillsDir:        filepath.Join(dataDir, "skills"),
+		toolService:      toolService,
+		contextService:   contextService,
+		oneShotLLMCaller: oneShotLLMCaller,
 	}
+}
+
+// SetOneShotLLMCaller wires the worker-backed LLM caller after construction.
+// Useful for callers that build the SkillService before the agent WebSocket
+// handler is available.
+func (s *SkillService) SetOneShotLLMCaller(caller OneShotLLMCaller) {
+	s.oneShotLLMCaller = caller
 }
 
 // ValidateSkillName validates that skill name follows kebab-case format

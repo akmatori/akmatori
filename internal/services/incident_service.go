@@ -48,7 +48,7 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 
 	// Use fast fallback title immediately to avoid blocking on LLM call.
 	// The LLM-generated title is updated asynchronously in the background.
-	titleGen := NewTitleGenerator()
+	titleGen := NewTitleGenerator(s.oneShotLLMCaller)
 	title := titleGen.GenerateFallbackTitle(ctx.Message, ctx.Source)
 
 	// Create incident record in database with fallback title

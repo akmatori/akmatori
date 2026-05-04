@@ -100,21 +100,21 @@ Output-format/template configuration (concern #3 from the original request) rema
 - Modify: `internal/services/title_generator.go`
 - Modify: `internal/services/title_generator_test.go`
 
-- [ ] Define a new interface in `internal/services` (avoids import cycle since handlers already imports services):
+- [x] Define a new interface in `internal/services` (avoids import cycle since handlers already imports services):
   ```go
   type OneShotLLMCaller interface {
       OneShotLLM(ctx context.Context, llm *LLMSettingsForWorker, system, user string, maxTokens int, temperature float64) (string, error)
   }
   ```
   (The `LLMSettingsForWorker` type is currently in `handlers`; lift it to `services` or duplicate a minimal shape — choose during implementation based on call graph.)
-- [ ] Inject via constructor: `NewTitleGenerator(c OneShotLLMCaller) *TitleGenerator`
-- [ ] Inside `GenerateTitle`, load `database.GetLLMSettings()`, build the worker LLM settings struct (reuse existing helper), and call `caller.OneShotLLM(ctx, settings, systemPrompt, userPrompt, 50, 0.3)` (preserve current 50 max_tokens / 0.3 temperature)
-- [ ] Remove `openAIRequest`/`openAIResponse` types and the `httpClient`; remove the early-return `if settings.Provider != LLMProviderOpenAI { fallback }` check — title generation now works with whichever provider is active
-- [ ] Preserve every existing graceful-fallback path: missing API key → fallback title; OneShotLLM error (incl. `ErrWorkerNotConnected`) → log warn + fallback title; empty / over-length result → trim/fallback
-- [ ] Update the constructor wiring at every callsite (search `NewTitleGenerator(`); for the API server it will pass the AgentWSHandler instance, which satisfies the interface via its `OneShotLLM` method
-- [ ] Update existing TitleGenerator tests: replace HTTP mocks with a fake `OneShotLLMCaller`; add a test confirming a non-OpenAI provider (Anthropic) round-trips correctly (no longer falls back)
-- [ ] Verify all callers of TitleGenerator still compile (`internal/services/...`, `internal/handlers/...`, `cmd/akmatori/...`)
-- [ ] Run `make test` — must pass before task 4
+- [x] Inject via constructor: `NewTitleGenerator(c OneShotLLMCaller) *TitleGenerator`
+- [x] Inside `GenerateTitle`, load `database.GetLLMSettings()`, build the worker LLM settings struct (reuse existing helper), and call `caller.OneShotLLM(ctx, settings, systemPrompt, userPrompt, 50, 0.3)` (preserve current 50 max_tokens / 0.3 temperature)
+- [x] Remove `openAIRequest`/`openAIResponse` types and the `httpClient`; remove the early-return `if settings.Provider != LLMProviderOpenAI { fallback }` check — title generation now works with whichever provider is active
+- [x] Preserve every existing graceful-fallback path: missing API key → fallback title; OneShotLLM error (incl. `ErrWorkerNotConnected`) → log warn + fallback title; empty / over-length result → trim/fallback
+- [x] Update the constructor wiring at every callsite (search `NewTitleGenerator(`); for the API server it will pass the AgentWSHandler instance, which satisfies the interface via its `OneShotLLM` method
+- [x] Update existing TitleGenerator tests: replace HTTP mocks with a fake `OneShotLLMCaller`; add a test confirming a non-OpenAI provider (Anthropic) round-trips correctly (no longer falls back)
+- [x] Verify all callers of TitleGenerator still compile (`internal/services/...`, `internal/handlers/...`, `cmd/akmatori/...`)
+- [x] Run `make test` — must pass before task 4
 
 ### Task 4: Migrate AlertExtractor to use the worker oneshot path
 

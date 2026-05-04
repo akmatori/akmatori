@@ -118,8 +118,14 @@ func main() {
 	}
 	slog.Info("context service initialized", "context_dir", contextService.GetContextDir())
 
+	// Initialize Agent WebSocket handler for orchestrator communication.
+	// Created before SkillService so it can be wired in as the OneShotLLMCaller
+	// (used by TitleGenerator and any other provider-agnostic LLM call sites).
+	agentWSHandler := handlers.NewAgentWSHandler()
+	slog.Info("agent WebSocket handler initialized")
+
 	// Initialize skill service
-	skillService := services.NewSkillService(dataDir, toolService, contextService)
+	skillService := services.NewSkillService(dataDir, toolService, contextService, agentWSHandler)
 	slog.Info("skill service initialized", "data_dir", dataDir)
 
 	// Regenerate all SKILL.md files to ensure they have latest template
@@ -162,11 +168,6 @@ func main() {
 		slog.Warn("could not load Slack settings", "err", err)
 		slackSettings = &database.SlackSettings{Enabled: false}
 	}
-
-	// Initialize Agent WebSocket handler for orchestrator communication
-	// This must be created before Slack event handler so it can be captured in closure
-	agentWSHandler := handlers.NewAgentWSHandler()
-	slog.Info("agent WebSocket handler initialized")
 
 	// Initialize Slack handler (will be used when Slack is enabled)
 	var slackHandler *handlers.SlackHandler
