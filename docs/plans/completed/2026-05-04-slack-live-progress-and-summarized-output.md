@@ -193,8 +193,8 @@ Output-format/template configuration (concern #3 from the original request) rema
 
 ### Task 9: Update documentation
 
-- [ ] Update CLAUDE.md: brief note in the Slack Integration section about the live progress stream (`AppendStream`) and the single-message summarizer; brief note in the Agent Worker Architecture / Services section that TitleGenerator, AlertExtractor, and the new SlackSummarizer all call pi-ai's `complete()` through the agent worker via the `oneshot_llm_request` WebSocket message; update the example `extractor := extraction.NewAlertExtractor()` snippet in the Alert Extraction section to include the new `OneShotLLMCaller` arg — keep it under ~10 lines per the "small pattern notes" rule
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update CLAUDE.md: brief note in the Slack Integration section about the live progress stream (`AppendStream`) and the single-message summarizer; brief note in the Agent Worker Architecture / Services section that TitleGenerator, AlertExtractor, and the new SlackSummarizer all call pi-ai's `complete()` through the agent worker via the `oneshot_llm_request` WebSocket message; update the example `extractor := extraction.NewAlertExtractor()` snippet in the Alert Extraction section to include the new `OneShotLLMCaller` arg — keep it under ~10 lines per the "small pattern notes" rule
+- [x] Move this plan to `docs/plans/completed/`
 
 ## Post-Completion (manual verification, not automated)
 

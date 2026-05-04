@@ -162,6 +162,10 @@ Tools are registered as pi-mono custom tools via `gateway-tools.ts`, communicati
 4. Output streamed back to API via WebSocket
 5. On completion, metrics (tokens, time) reported, session exported to JSONL
 
+### One-Shot LLM Path
+
+For short, non-agent LLM calls (incident titles, alert extraction, Slack final-message summaries) the API sends `oneshot_llm_request` over the same worker WebSocket. The orchestrator routes it through `agent-worker/src/oneshot-llm.ts`, which calls pi-ai's `complete()` with the active LLM settings + proxy config and returns a single `oneshot_llm_response` correlated by `request_id`. `AgentWSHandler.OneShotLLM(...)` is the Go-side caller; `services.OneShotLLMCaller` is the interface that `TitleGenerator`, `extraction.AlertExtractor`, and `SlackSummarizer` all depend on, so every callsite is provider-agnostic and falls back deterministically when the worker is disconnected (`ErrWorkerNotConnected`).
+
 ## Slack Integration (`internal/slack/`)
 
 ### Manager (`manager.go`)
@@ -186,18 +190,23 @@ go manager.WatchForReloads(ctx)
 | @mention in alert thread | Continue investigation with question |
 | @mention in general channel | Direct response (not investigation) |
 
+### Live Progress + Summarized Final Output
+
+- `internal/handlers/slack_progress.go` — `SlackProgressStreamer` emits condensed status lines (running/ran/thinking) via `chat.appendStream` while the agent runs, falling back to `chat.update` when streaming is not active. Throttled by `slackAppendInterval`.
+- `internal/services/slack_summarizer.go` — final agent output is summarized through `OneShotLLMCaller` to fit `slackMaxTextBytes` (8000); `internal/output/slack_budget.go` provides a deterministic byte-truncation fallback when the worker is unavailable or returns over-budget output. The result is posted as a single thread message with the existing footer.
+
 ## Alert Extraction (`internal/alerts/extraction/`)
 
 AI-powered extraction of structured alert data from free-form text:
 
 ```go
-extractor := extraction.NewAlertExtractor()
+extractor := extraction.NewAlertExtractor(oneShotCaller) // OneShotLLMCaller (e.g. AgentWSHandler)
 alert, err := extractor.Extract(ctx, messageText)
 ```
 
-- Uses `gpt-4o-mini` (fast, cheap)
-- Truncates to 3000 chars
-- Graceful fallback on error (first line → alert name, full text → description)
+- Calls pi-ai's `complete()` via the agent worker (`oneshot_llm_request`), so any configured provider works
+- Truncates input to 3000 chars
+- Graceful fallback (first line → alert name, full text → description) when the worker is disconnected, the API key is missing, or JSON parsing fails
 
 ## Output Parser (`internal/output/`)
 
