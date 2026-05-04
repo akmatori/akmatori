@@ -8,7 +8,6 @@ import (
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
-	"github.com/akmatori/akmatori/internal/utils"
 	"github.com/slack-go/slack"
 )
 
@@ -209,19 +208,6 @@ func (h *AlertHandler) updateSlackChannelReactions(channelID, messageTS string, 
 	}); err != nil {
 		slog.Warn("failed to add result reaction", "err", err)
 	}
-}
-
-// buildSlackResponse prepends the last N lines of the reasoning/execution log
-// to the final response so Slack readers can see investigation context.
-func buildSlackResponse(reasoningLog, response string) string {
-	if reasoningLog == "" {
-		return response
-	}
-	context := utils.GetLastNLines(strings.TrimSpace(reasoningLog), 15)
-	if context == "" {
-		return response
-	}
-	return context + "\n\n---\n\n" + response
 }
 
 // updateSlackWithResult posts results to Slack thread

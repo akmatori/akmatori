@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
@@ -16,6 +15,30 @@ import (
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 )
+
+// finalizeSlackMessageBody compresses the agent's final response into a
+// single Slack-sized message: it parses any structured blocks, formats them
+// for Slack, runs the SummarizeForSlack flow when over budget, and appends
+// the standard footer (metrics + UI link). When summarizer is nil (early
+// startup), it falls back to the deterministic byte-truncation path.
+func finalizeSlackMessageBody(ctx context.Context, summarizer *services.SlackSummarizer, response, incidentUUID string) string {
+	contentOnly, footer := buildSlackFooter(response, incidentUUID)
+	parsed := output.Parse(contentOnly)
+	formatted := output.FormatForSlack(parsed)
+
+	bodyBudget := slackMaxTextBytes - len(footer) - slackSummaryMargin
+	if bodyBudget < 200 {
+		bodyBudget = 200
+	}
+
+	if summarizer != nil {
+		summary, err := summarizer.SummarizeForSlack(ctx, formatted, bodyBudget)
+		if err == nil && summary != "" {
+			return summary + footer
+		}
+	}
+	return truncateWithFooter(formatted, footer, slackMaxTextBytes)
+}
 
 // processMessage is the core message processing logic
 func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user string) {
@@ -140,42 +163,10 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		isStreaming = true
 	}
 
-	// Track last update time to implement rate limiting
-	lastUpdate := time.Now()
-	var lastProgressLog string
-
-	// Progress update callback.
-	// When streaming is active, the bot name is already blinking — skip Slack
-	// message updates (chat.update conflicts with streaming state). Only update
-	// when we fell back to a regular message.
-	onStderrUpdate := func(progressLog string) {
-		if progressLog == "" || isStreaming {
-			return
-		}
-
-		if time.Since(lastUpdate) < progressUpdateInterval {
-			return
-		}
-
-		if progressLog == lastProgressLog {
-			return
-		}
-
-		lastUpdate = time.Now()
-		lastProgressLog = progressLog
-
-		// Truncate for Slack's text limit (leave room for wrapper text)
-		truncatedLog := truncateLogForSlack(progressLog, slackMaxTextBytes-50)
-
-		_, _, _, err := h.client.UpdateMessage(
-			channel,
-			progressMsgTS,
-			slack.MsgOptionText(fmt.Sprintf("🔄 *Progress Log:*\n```\n%s\n```", truncatedLog), false),
-		)
-		if err != nil {
-			slog.Error("failed to update progress message", "progress_ts", progressMsgTS, "err", err)
-		}
-	}
+	// SlackProgressStreamer condenses agent OnOutput deltas into short status
+	// lines and forwards them to Slack via chat.appendStream (when streaming
+	// is available) or chat.update (fallback for older workspaces).
+	progressStreamer := NewSlackProgressStreamer(h.client, channel, progressMsgTS, isStreaming, slackAppendInterval)
 
 	taskWithGuidance := executor.PrependGuidance(text)
 
@@ -213,9 +204,8 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 					slog.Error("failed to update incident log", "err", err)
 				}
 
-				// Update Slack progress message with accumulated log
-				// (onStderrUpdate expects the full log for truncation/dedup logic)
-				onStderrUpdate(lastStreamedLog)
+				// Stream condensed progress to Slack (delta only, not full log).
+				progressStreamer.AppendStatus(outputLog)
 			},
 			OnCompleted: func(sid, output string, tokensUsed int, executionTimeMs int64) {
 				finalSessionID = sid
@@ -245,6 +235,9 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		// Wait for completion
 		<-done
 
+		// Flush any buffered progress lines so the last status is not lost.
+		progressStreamer.Flush()
+
 		// Use original sessionID if finalSessionID is empty (for resume cases)
 		if finalSessionID == "" {
 			finalSessionID = sessionID
@@ -256,16 +249,13 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			fullLog += "\n\n--- Final Response ---\n\n" + response
 		}
 
-		// Format response for Slack
+		// Format response for Slack: parse structured blocks, summarize when
+		// over budget, append the footer. Single message; no thread replies.
 		var finalResponse string
 		if hasError {
 			finalResponse = response
 		} else if response != "" {
-			// Extract metrics before formatting so they don't get lost in truncation
-			contentOnly, footer := buildSlackFooter(response, incidentUUID)
-			parsed := output.Parse(contentOnly)
-			formatted := output.FormatForSlack(parsed)
-			finalResponse = truncateWithFooter(formatted, footer, slackMaxTextBytes)
+			finalResponse = finalizeSlackMessageBody(context.Background(), h.slackSummarizer, response, incidentUUID)
 		} else {
 			finalResponse = "✅ Task completed (no output)"
 		}

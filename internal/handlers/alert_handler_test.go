@@ -257,65 +257,6 @@ func TestAlertHandler_GetBaseURL(t *testing.T) {
 	}
 }
 
-// TestBuildSlackResponse_EdgeCases tests slack response building edge cases
-func TestBuildSlackResponse_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name         string
-		reasoningLog string
-		response     string
-		wantContains []string
-		wantEmpty    bool
-	}{
-		{
-			name:         "both empty",
-			reasoningLog: "",
-			response:     "",
-			wantEmpty:    true,
-		},
-		{
-			name:         "only response",
-			reasoningLog: "",
-			response:     "Final answer",
-			wantContains: []string{"Final answer"},
-		},
-		{
-			name:         "only reasoning (whitespace)",
-			reasoningLog: "   ",
-			response:     "Done",
-			wantContains: []string{"Done"},
-		},
-		{
-			name: "exactly 15 lines",
-			reasoningLog: "line1\nline2\nline3\nline4\nline5\n" +
-				"line6\nline7\nline8\nline9\nline10\n" +
-				"line11\nline12\nline13\nline14\nline15",
-			response:     "Result",
-			wantContains: []string{"line1", "line15", "Result"},
-		},
-		{
-			name:         "response with markdown",
-			reasoningLog: "Checking status...",
-			response:     "## Summary\n- Item 1\n- Item 2\n```bash\necho hello\n```",
-			wantContains: []string{"## Summary", "echo hello"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := buildSlackResponse(tt.reasoningLog, tt.response)
-
-			if tt.wantEmpty && result != "" {
-				t.Errorf("expected empty result, got %q", result)
-			}
-
-			for _, want := range tt.wantContains {
-				if !strings.Contains(result, want) {
-					t.Errorf("buildSlackResponse() = %q, want to contain %q", result, want)
-				}
-			}
-		})
-	}
-}
 
 // TestTruncateLogForSlack_Comprehensive tests log truncation comprehensively
 func TestTruncateLogForSlack_Comprehensive(t *testing.T) {

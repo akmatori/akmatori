@@ -175,12 +175,12 @@ Output-format/template configuration (concern #3 from the original request) rema
 - Modify: `internal/handlers/alert_slack.go` — replace `truncateWithFooter` callsites in the final-message path with the summarizer flow (still preserving `buildSlackFooter` as the trailing footer)
 - Modify or create: `internal/handlers/slack_flow_integration_test.go`, `internal/handlers/alert_slack_integration_test.go`
 
-- [ ] Replace the static "Thinking..." flow in `slack_processor.go` `processMessage` and `alert_processor.go` `runSlackChannelInvestigation`: construct a `SlackProgressStreamer`, call its `AppendStatus` from inside `OnOutput` (passes the new delta only, not the full accumulated log)
-- [ ] Replace the final `UpdateMessage(progressMsgTS, finalResponse)` truncation path with: format via `FormatForSlack`, then call `SummarizeForSlack(ctx, formatted, slackMaxTextBytes - footerLen)`, then append the existing `buildSlackFooter` and `UpdateMessage` once. Single message, no thread replies for final output.
-- [ ] In the alert-channel flow, ensure the same single-message logic runs whether we're updating a streaming message or posting a new (non-streamed) reply
-- [ ] Drop the now-unused "last 15 lines reasoning" prefix in `buildSlackResponse` (it was a workaround for the missing live stream — superseded by the live append; the summarizer is responsible for any final reasoning context that fits)
-- [ ] Add integration-style tests that mock both the Slack client and the OneShotLLMCaller and assert: (a) `AppendStream` is called with non-empty status text during a simulated investigation, (b) a long final response triggers the summarizer and produces exactly one `UpdateMessage` call with body+footer ≤ `slackMaxTextBytes`, (c) a short final response bypasses the summarizer and is posted as-is, (d) when the caller returns `ErrWorkerNotConnected` the deterministic fallback is used and a single message is still produced
-- [ ] Run `make test` — must pass before task 8
+- [x] Replace the static "Thinking..." flow in `slack_processor.go` `processMessage` and `alert_processor.go` `runSlackChannelInvestigation`: construct a `SlackProgressStreamer`, call its `AppendStatus` from inside `OnOutput` (passes the new delta only, not the full accumulated log)
+- [x] Replace the final `UpdateMessage(progressMsgTS, finalResponse)` truncation path with: format via `FormatForSlack`, then call `SummarizeForSlack(ctx, formatted, slackMaxTextBytes - footerLen)`, then append the existing `buildSlackFooter` and `UpdateMessage` once. Single message, no thread replies for final output.
+- [x] In the alert-channel flow, ensure the same single-message logic runs whether we're updating a streaming message or posting a new (non-streamed) reply
+- [x] Drop the now-unused "last 15 lines reasoning" prefix in `buildSlackResponse` (it was a workaround for the missing live stream — superseded by the live append; the summarizer is responsible for any final reasoning context that fits)
+- [x] Add integration-style tests that mock both the Slack client and the OneShotLLMCaller and assert: (a) `AppendStream` is called with non-empty status text during a simulated investigation, (b) a long final response triggers the summarizer and produces exactly one `UpdateMessage` call with body+footer ≤ `slackMaxTextBytes`, (c) a short final response bypasses the summarizer and is posted as-is, (d) when the caller returns `ErrWorkerNotConnected` the deterministic fallback is used and a single message is still produced
+- [x] Run `make test` — must pass before task 8
 
 ### Task 8: Verify acceptance criteria
 
