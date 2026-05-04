@@ -157,6 +157,16 @@ export class WebSocketClient {
     });
   }
 
+  /** Send a one-shot LLM response correlated with the originating request. */
+  sendOneshotResponse(requestId: string, summary: string, errorMsg?: string): void {
+    this.send({
+      type: "oneshot_llm_response",
+      request_id: requestId,
+      summary,
+      ...(errorMsg ? { error: errorMsg } : {}),
+    });
+  }
+
   /** Send a heartbeat message. */
   sendHeartbeat(): void {
     this.send({ type: "heartbeat" });
