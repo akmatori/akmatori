@@ -289,6 +289,19 @@ describe("resolveModel", () => {
     expect(model.api).toBe("openai-completions");
   });
 
+  it("should disable long cache retention for unknown custom endpoints", () => {
+    // Many OpenAI-compatible gateways (e.g. Envoy AI Gateway) reject
+    // prompt_cache_key / prompt_cache_retention with a 400, which pi-ai's
+    // overflow detector then misclassifies as a context overflow.
+    const model = resolveModel("custom", "my-model", "https://my-api.example.com");
+    expect((model as { compat?: { supportsLongCacheRetention?: boolean } }).compat?.supportsLongCacheRetention).toBe(false);
+  });
+
+  it("should not force-disable long cache retention for openrouter", () => {
+    const model = resolveModel("openrouter", "anthropic/claude-3.5-sonnet");
+    expect((model as { compat?: { supportsLongCacheRetention?: boolean } }).compat?.supportsLongCacheRetention).toBeUndefined();
+  });
+
   it("should use correct API type for known provider with unknown model", () => {
     const model = resolveModel("google", "gemini-new-model");
     expect(model.api).toBe("google-generative-ai");
