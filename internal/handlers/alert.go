@@ -16,16 +16,29 @@ import (
 	slackutil "github.com/akmatori/akmatori/internal/slack"
 )
 
-// slackProgressInterval is the minimum time between Slack progress message updates
-// to avoid hitting Slack API rate limits during live investigation streaming.
-const slackProgressInterval = 5 * time.Second
+// slackAppendInterval is the minimum time between chat.update calls on the
+// progress message. The streamer only ever holds the latest reasoning line,
+// so this gates how often Slack sees that single line replaced.
+const slackAppendInterval = 2 * time.Second
 
 // slackMaxTextBytes is the maximum byte size for Slack message text.
-// Slack's documented limit is 4000 characters, but chat.update rejects messages
-// well below that threshold (observed msg_too_long at ~3800 bytes). Using 3000
-// bytes provides a safe margin that accounts for multi-byte characters and any
-// Slack-internal overhead.
-const slackMaxTextBytes = 3000
+// chat.postMessage accepts up to ~40,000 chars; we keep the cap tight at
+// 8000 so summaries stay readable and so the SlackSummarizer has a clear
+// budget to compress towards.
+const slackMaxTextBytes = 8000
+
+// slackSummaryMargin is the byte budget reserved for the trailing footer
+// (metrics line + "View reasoning log" link). The summarizer is asked to keep
+// its output under (slackMaxTextBytes - slackSummaryMargin) so the footer
+// always fits without being clipped.
+const slackSummaryMargin = 200
+
+// slackInvestigationDoneMarker / slackInvestigationFailedMarker replace the
+// in-thread progress message once the investigation finishes. The full
+// final body is posted as a separate thread reply so the progress message
+// itself stays a short status line.
+const slackInvestigationDoneMarker = "_Investigation complete — see summary below._"
+const slackInvestigationFailedMarker = "_Investigation failed — see details below._"
 
 // AlertHandler handles webhook requests from multiple alert sources
 type AlertHandler struct {
@@ -36,6 +49,7 @@ type AlertHandler struct {
 	skillService    services.SkillIncidentManager
 	alertService    services.AlertManager
 	channelResolver *slackutil.ChannelResolver
+	slackSummarizer *services.SlackSummarizer
 
 	// Workspace team ID (required for Streaming API)
 	teamID string
@@ -72,6 +86,13 @@ func NewAlertHandler(
 // SetTeamID sets the workspace team ID (used by the Streaming API).
 func (h *AlertHandler) SetTeamID(teamID string) {
 	h.teamID = teamID
+}
+
+// SetSlackSummarizer wires the SlackSummarizer used for compressing final
+// Slack messages. Optional — when unset, the handler falls back to the
+// existing byte-truncation path.
+func (h *AlertHandler) SetSlackSummarizer(s *services.SlackSummarizer) {
+	h.slackSummarizer = s
 }
 
 // RegisterAdapter registers an alert adapter for a source type

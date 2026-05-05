@@ -8,17 +8,17 @@ import (
 )
 
 func TestNewAlertExtractor(t *testing.T) {
-	extractor := NewAlertExtractor()
+	extractor := NewAlertExtractor(nil)
 	if extractor == nil {
 		t.Fatal("NewAlertExtractor() returned nil")
 	}
-	if extractor.httpClient == nil {
-		t.Error("httpClient should not be nil")
+	if extractor.getLLMSettings == nil {
+		t.Error("getLLMSettings should not be nil")
 	}
 }
 
 func TestAlertExtractor_createFallbackAlert(t *testing.T) {
-	extractor := NewAlertExtractor()
+	extractor := NewAlertExtractor(nil)
 
 	tests := []struct {
 		name           string
@@ -97,7 +97,7 @@ func TestAlertExtractor_createFallbackAlert(t *testing.T) {
 }
 
 func TestAlertExtractor_toNormalizedAlert(t *testing.T) {
-	extractor := NewAlertExtractor()
+	extractor := NewAlertExtractor(nil)
 
 	tests := []struct {
 		name            string

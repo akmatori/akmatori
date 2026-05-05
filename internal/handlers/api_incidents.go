@@ -129,6 +129,7 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				var response string
 				var sessionID string
 				var hasError bool
+				var superseded bool
 				var lastStreamedLog string
 				var finalTokensUsed int
 				var finalExecutionTimeMs int64
@@ -152,6 +153,13 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 						hasError = true
 						closeOnce.Do(func() { close(done) })
 					},
+					// If a newer API call displaces us for the same incident_id,
+					// the replacement run owns finalization. Unblock and exit
+					// silently rather than overwrite its result with a failure.
+					OnSuperseded: func() {
+						superseded = true
+						closeOnce.Do(func() { close(done) })
+					},
 				}
 
 				if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback); err != nil {
@@ -164,6 +172,12 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				}
 
 				<-done
+
+				// Replacement run owns DB finalization — exit silently.
+				if superseded {
+					slog.Info("API incident superseded; leaving finalization to the new run", "incident_id", incidentUUID)
+					return
+				}
 
 				fullLog := taskHeader + lastStreamedLog
 				if response != "" {

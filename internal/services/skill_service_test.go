@@ -48,7 +48,7 @@ func newTestSkillService(t *testing.T, db *gorm.DB) *SkillService {
 		t.Fatalf("failed to create context service: %v", err)
 	}
 
-	svc := NewSkillService(dataDir, nil, contextService)
+	svc := NewSkillService(dataDir, nil, contextService, nil)
 	svc.db = db
 
 	// Ensure directories exist

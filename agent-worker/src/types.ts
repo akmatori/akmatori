@@ -15,7 +15,8 @@ export type APIToWorkerMessageType =
   | "new_incident"
   | "continue_incident"
   | "cancel_incident"
-  | "proxy_config_update";
+  | "proxy_config_update"
+  | "oneshot_llm_request";
 
 /** Messages from agent worker to API */
 export type WorkerToAPIMessageType =
@@ -23,7 +24,8 @@ export type WorkerToAPIMessageType =
   | "agent_completed"
   | "agent_error"
   | "heartbeat"
-  | "status";
+  | "status"
+  | "oneshot_llm_response";
 
 export type MessageType = APIToWorkerMessageType | WorkerToAPIMessageType;
 
@@ -117,6 +119,20 @@ export interface WebSocketMessage {
 
   // Tool allowlist (sent with new_incident to restrict tool access)
   tool_allowlist?: ToolAllowlistEntry[];
+
+  // One-shot LLM request/response correlation and payload
+  request_id?: string;
+  system?: string;
+  user?: string;
+  max_tokens?: number;
+  temperature?: number;
+  summary?: string;
+
+  // Per-call run identifier. The API stamps a fresh run_id on every
+  // new_incident / continue_incident; the worker must echo it back on every
+  // agent_output / agent_completed / agent_error frame so the API can drop
+  // late frames from a superseded run.
+  run_id?: string;
 }
 
 // ---------------------------------------------------------------------------
