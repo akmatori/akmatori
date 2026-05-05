@@ -657,11 +657,12 @@ func TestFinalizeSlackMessageBody_NilSummarizerUsesDeterministicTruncation(t *te
 
 // TestSlackProgressStreamer_LiveProgressFromSimulatedInvestigation simulates
 // agent OnOutput deltas during an investigation and verifies that
-// AppendStream is invoked with non-empty status text — the live-progress
-// equivalent of openclaw's chat.appendStream behaviour.
+// UpdateMessage is invoked only for the reasoning (🤔) lines — tool start/end
+// markers are filtered out so the progress message stays a clean single-line
+// status indicator.
 func TestSlackProgressStreamer_LiveProgressFromSimulatedInvestigation(t *testing.T) {
 	fc := &fakeStreamingClient{}
-	streamer := NewSlackProgressStreamer(fc, "C_ALERTS", "1707000001.000100", true, 1*time.Millisecond)
+	streamer := NewSlackProgressStreamer(fc, "C_ALERTS", "1707000001.000100", 1*time.Millisecond)
 
 	// Simulate the agent emitting deltas that match the markers produced by
 	// agent-worker/src/agent-runner.ts.
@@ -674,22 +675,22 @@ func TestSlackProgressStreamer_LiveProgressFromSimulatedInvestigation(t *testing
 	}
 	for _, d := range deltas {
 		streamer.AppendStatus(d)
-		// Wait past the throttle window so each marker emits.
+		// Wait past the throttle window so each thinking line emits.
 		time.Sleep(3 * time.Millisecond)
 	}
 	streamer.Flush()
 
-	calls := fc.snapshotAppend()
+	calls := fc.snapshotUpdate()
 	if len(calls) == 0 {
-		t.Fatalf("expected at least one AppendStream call during investigation")
+		t.Fatalf("expected at least one UpdateMessage call during investigation")
 	}
 	for _, c := range calls {
 		if c.text == "" {
-			t.Errorf("AppendStream called with empty text: %+v", c)
+			t.Errorf("UpdateMessage called with empty text: %+v", c)
 		}
-	}
-	if len(fc.snapshotUpdate()) != 0 {
-		t.Errorf("UpdateMessage must not be called in streaming mode")
+		if !contains(c.text, "🤔") {
+			t.Errorf("UpdateMessage text should be a thinking line, got %q", c.text)
+		}
 	}
 }
 

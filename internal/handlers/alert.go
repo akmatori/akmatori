@@ -16,10 +16,9 @@ import (
 	slackutil "github.com/akmatori/akmatori/internal/slack"
 )
 
-// slackAppendInterval is the minimum time between chat.appendStream calls.
-// AppendStream is cheaper than chat.update (Slack treats it as a streaming
-// fragment rather than a full re-render), so it can be ticked faster while
-// still respecting Slack's per-method rate limits.
+// slackAppendInterval is the minimum time between chat.update calls on the
+// progress message. The streamer only ever holds the latest reasoning line,
+// so this gates how often Slack sees that single line replaced.
 const slackAppendInterval = 2 * time.Second
 
 // slackMaxTextBytes is the maximum byte size for Slack message text.
