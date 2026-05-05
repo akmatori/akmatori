@@ -340,15 +340,9 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 	investigationPrompt := h.buildInvestigationPrompt(alert, instance)
 	taskWithGuidance := executor.PrependGuidance(investigationPrompt)
 
-	// Extract Slack user ID for the Streaming API (may be empty for bot-originated alerts)
-	var slackUserID string
-	if uid, ok := alert.RawPayload["slack_user"].(string); ok {
-		slackUserID = uid
-	}
-
-	// Start a streaming message in the Slack thread — bot name blinks while open.
-	// Falls back to a regular thread reply if streaming is unavailable.
-	progressMsgTS, isStreaming := h.startSlackThreadStream(slackChannelID, slackMessageTS, "Thinking...", slackUserID)
+	// Post the initial "Thinking..." progress message; the streamer will
+	// replace its body with the agent's latest reasoning line via chat.update.
+	progressMsgTS := h.postSlackThreadProgressMessage(slackChannelID, slackMessageTS, "Thinking...")
 
 	// Construct progress streamer for live condensed status updates. Nil if
 	// the Slack client is unavailable; AppendStatus on a nil receiver is a
@@ -423,7 +417,6 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 			}
 			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
 			if progressMsgTS != "" {
-				h.stopSlackThreadStream(slackChannelID, progressMsgTS, isStreaming)
 				h.updateSlackThreadMessage(slackChannelID, progressMsgTS, errorMsg)
 			} else {
 				h.postSlackThreadReply(slackChannelID, slackMessageTS, errorMsg)
@@ -439,13 +432,12 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 
 		// Replacement run owns finalization — exit before touching the DB
 		// or channel reactions. The replacement posts its own progress
-		// message, so clear this run's progress message body and stop its
-		// streaming indicator before returning, otherwise the user sees a
-		// dangling "Thinking..." alongside the replacement's final message.
+		// message, so clear this run's progress message body before
+		// returning, otherwise the user sees a stale thought alongside the
+		// replacement's final message.
 		if superseded {
 			slog.Info("slack channel investigation superseded; leaving finalization to the new run", "incident_id", incidentUUID)
 			if progressMsgTS != "" {
-				h.stopSlackThreadStream(slackChannelID, progressMsgTS, isStreaming)
 				h.updateSlackThreadMessage(slackChannelID, progressMsgTS, "_(superseded by newer activity)_")
 			}
 			return
@@ -479,14 +471,12 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 			formattedResponse = "Task completed (no output)"
 		}
 
-		// Stop the streaming indicator, mark the progress message as
-		// complete, and post the full final body as a fresh thread reply.
-		// chat.update on the streamed message is capped at ~4000 chars
-		// even after chat.stopStream; a new chat.postMessage allows up to
-		// ~40,000 chars so long summaries always reach the user.
+		// Mark the progress message as complete, then post the full final
+		// body as a fresh thread reply. chat.postMessage allows up to
+		// ~40,000 chars so long summaries always reach the user; the
+		// progress message itself stays a short marker.
 		h.updateSlackChannelReactions(slackChannelID, slackMessageTS, hasError)
 		if progressMsgTS != "" {
-			h.stopSlackThreadStream(slackChannelID, progressMsgTS, isStreaming)
 			marker := slackInvestigationDoneMarker
 			if hasError {
 				marker = slackInvestigationFailedMarker
@@ -508,7 +498,6 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 	}
 	h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
 	if progressMsgTS != "" {
-		h.stopSlackThreadStream(slackChannelID, progressMsgTS, isStreaming)
 		h.updateSlackThreadMessage(slackChannelID, progressMsgTS, errorMsg)
 	} else {
 		h.postSlackThreadReply(slackChannelID, slackMessageTS, errorMsg)
