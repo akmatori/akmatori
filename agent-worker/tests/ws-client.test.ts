@@ -144,7 +144,7 @@ describe("WebSocketClient", () => {
   });
 
   describe("sendOutput", () => {
-    it("should send agent_output message", async () => {
+    it("should send agent_output message including run_id when provided", async () => {
       client = new WebSocketClient({
         url: mockServer.url,
         heartbeatIntervalMs: 60_000,
@@ -154,18 +154,17 @@ describe("WebSocketClient", () => {
       await client.connect();
       await sleep(50);
 
-      client.sendOutput("inc-456", "running diagnostics...");
+      client.sendOutput("inc-456", "run-abc", "running diagnostics...");
       await sleep(50);
 
       const parsed = JSON.parse(mockServer.received[0]);
       expect(parsed.type).toBe("agent_output");
       expect(parsed.incident_id).toBe("inc-456");
       expect(parsed.output).toBe("running diagnostics...");
+      expect(parsed.run_id).toBe("run-abc");
     });
-  });
 
-  describe("sendCompleted", () => {
-    it("should send agent_completed message with metrics", async () => {
+    it("should omit run_id when undefined", async () => {
       client = new WebSocketClient({
         url: mockServer.url,
         heartbeatIntervalMs: 60_000,
@@ -175,7 +174,26 @@ describe("WebSocketClient", () => {
       await client.connect();
       await sleep(50);
 
-      client.sendCompleted("inc-789", "sess-001", "Resolved the issue", 1500, 45000);
+      client.sendOutput("inc-456", undefined, "tick");
+      await sleep(50);
+
+      const parsed = JSON.parse(mockServer.received[0]);
+      expect(parsed).not.toHaveProperty("run_id");
+    });
+  });
+
+  describe("sendCompleted", () => {
+    it("should send agent_completed message with metrics and run_id", async () => {
+      client = new WebSocketClient({
+        url: mockServer.url,
+        heartbeatIntervalMs: 60_000,
+        logger: () => {},
+      });
+
+      await client.connect();
+      await sleep(50);
+
+      client.sendCompleted("inc-789", "run-xyz", "sess-001", "Resolved the issue", 1500, 45000);
       await sleep(50);
 
       const parsed = JSON.parse(mockServer.received[0]);
@@ -185,11 +203,12 @@ describe("WebSocketClient", () => {
       expect(parsed.output).toBe("Resolved the issue");
       expect(parsed.tokens_used).toBe(1500);
       expect(parsed.execution_time_ms).toBe(45000);
+      expect(parsed.run_id).toBe("run-xyz");
     });
   });
 
   describe("sendError", () => {
-    it("should send agent_error message", async () => {
+    it("should send agent_error message including run_id when provided", async () => {
       client = new WebSocketClient({
         url: mockServer.url,
         heartbeatIntervalMs: 60_000,
@@ -199,13 +218,14 @@ describe("WebSocketClient", () => {
       await client.connect();
       await sleep(50);
 
-      client.sendError("inc-err", "API key invalid");
+      client.sendError("inc-err", "run-err", "API key invalid");
       await sleep(50);
 
       const parsed = JSON.parse(mockServer.received[0]);
       expect(parsed.type).toBe("agent_error");
       expect(parsed.incident_id).toBe("inc-err");
       expect(parsed.error).toBe("API key invalid");
+      expect(parsed.run_id).toBe("run-err");
     });
   });
 
@@ -224,7 +244,7 @@ describe("WebSocketClient", () => {
       await client.connect();
       await sleep(50);
 
-      client.sendCompleted("inc-1", "sess-1", "done", 500, 10000);
+      client.sendCompleted("inc-1", undefined, "sess-1", "done", 500, 10000);
       await sleep(50);
 
       const raw = mockServer.received[0];
