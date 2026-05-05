@@ -1,15 +1,19 @@
 package handlers
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/services"
 	"github.com/akmatori/akmatori/internal/testhelpers"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 // ========================================
@@ -326,7 +330,7 @@ func TestSlackFlow_ThreadTracking(t *testing.T) {
 
 // TestSlackFlow_DeduplicationRobustness tests deduplication under various conditions
 func TestSlackFlow_DeduplicationRobustness(t *testing.T) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 
 	t.Run("same message different channels", func(t *testing.T) {
 		key1 := "C_ALERTS:1707000001.000100"
@@ -368,7 +372,7 @@ func TestSlackFlow_DeduplicationRobustness(t *testing.T) {
 
 // TestSlackFlow_AlertChannelRefresh tests alert channel refresh behavior
 func TestSlackFlow_AlertChannelRefresh(t *testing.T) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 
 	t.Run("initial empty state", func(t *testing.T) {
 		h.alertChannelsMu.RLock()
@@ -409,56 +413,6 @@ func TestSlackFlow_AlertChannelRefresh(t *testing.T) {
 // ========================================
 // Slack Message Building Integration Tests
 // ========================================
-
-// TestSlackFlow_ResponseFormatting tests response formatting consistency
-func TestSlackFlow_ResponseFormatting(t *testing.T) {
-	tests := []struct {
-		name         string
-		reasoning    string
-		response     string
-		expectations []string
-	}{
-		{
-			name:         "response only",
-			reasoning:    "",
-			response:     "The alert indicates high CPU usage on server-01.",
-			expectations: []string{"high CPU usage", "server-01"},
-		},
-		{
-			name:         "reasoning and response",
-			reasoning:    "Step 1: Check metrics\nStep 2: Identify patterns",
-			response:     "Root cause identified as memory leak.",
-			expectations: []string{"memory leak"},
-		},
-		{
-			name: "long reasoning truncated",
-			reasoning: func() string {
-				lines := ""
-				for i := 0; i < 50; i++ {
-					lines += "Analyzing step " + string(rune('0'+i%10)) + "...\n"
-				}
-				return lines
-			}(),
-			response:     "Investigation complete.",
-			expectations: []string{"Investigation complete"},
-		},
-		{
-			name:         "markdown preserved in response",
-			reasoning:    "Checking...",
-			response:     "## Findings\n- High load\n- Memory pressure\n```\nps aux | head\n```",
-			expectations: []string{"## Findings", "High load", "ps aux"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := buildSlackResponse(tt.reasoning, tt.response)
-			for _, exp := range tt.expectations {
-				testhelpers.AssertContains(t, result, exp, "formatted response")
-			}
-		})
-	}
-}
 
 // TestSlackFlow_TruncationBehavior tests truncation behavior
 func TestSlackFlow_TruncationBehavior(t *testing.T) {
@@ -510,7 +464,7 @@ func TestSlackFlow_TruncationBehavior(t *testing.T) {
 
 // TestSlackFlow_AlertHandlerInteraction tests slack handler interaction with alert handler
 func TestSlackFlow_AlertHandlerInteraction(t *testing.T) {
-	slackHandler := NewSlackHandler(nil, nil, nil, nil)
+	slackHandler := NewSlackHandler(nil, nil, nil, nil, nil)
 	alertHandler := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	// Wire them together
@@ -524,7 +478,7 @@ func TestSlackFlow_AlertHandlerInteraction(t *testing.T) {
 
 // TestSlackFlow_BotUserIDConfiguration tests bot user ID configuration
 func TestSlackFlow_BotUserIDConfiguration(t *testing.T) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 
 	t.Run("initial state empty", func(t *testing.T) {
 		testhelpers.AssertEqual(t, "", h.botUserID, "should start empty")
@@ -542,17 +496,201 @@ func TestSlackFlow_BotUserIDConfiguration(t *testing.T) {
 }
 
 // ========================================
-// Timing and Rate Limit Tests
+// Final Message Summarization Integration Tests
 // ========================================
 
-// TestSlackFlow_ProgressUpdateInterval tests progress update interval configuration
-func TestSlackFlow_ProgressUpdateInterval(t *testing.T) {
-	// Verify interval is reasonable for Slack API rate limits
-	if progressUpdateInterval < 2*time.Second {
-		t.Errorf("progress interval %v may hit Slack rate limits (min 2s recommended)", progressUpdateInterval)
+// fakeFinalizeOneShotCaller is a tiny stub used to drive finalizeSlackMessageBody
+// through the SlackSummarizer without spinning up the agent worker.
+type fakeFinalizeOneShotCaller struct {
+	calls   int
+	respond func() (string, error)
+}
+
+func (f *fakeFinalizeOneShotCaller) OneShotLLM(ctx context.Context, llm *services.LLMSettingsForWorker, system, user string, maxTokens int, temperature float64) (string, error) {
+	f.calls++
+	if f.respond == nil {
+		return "", nil
 	}
-	if progressUpdateInterval > 15*time.Second {
-		t.Errorf("progress interval %v too slow for good UX (max 15s recommended)", progressUpdateInterval)
+	return f.respond()
+}
+
+func setupFinalizeTestDB(t *testing.T) func() {
+	t.Helper()
+	prevDB := database.DB
+	db, err := gorm.Open(sqlite.Open(t.TempDir()+"/test.db"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	if err := db.AutoMigrate(&database.LLMSettings{}, &database.GeneralSettings{}); err != nil {
+		t.Fatalf("migrate sqlite db: %v", err)
+	}
+	database.DB = db
+	return func() { database.DB = prevDB }
+}
+
+func seedFinalizeLLMSettings(t *testing.T) {
+	t.Helper()
+	if err := database.DB.Exec("DELETE FROM llm_settings").Error; err != nil {
+		t.Fatalf("clear llm_settings: %v", err)
+	}
+	if err := database.DB.Create(&database.LLMSettings{
+		Name:     "active-config",
+		Provider: database.LLMProviderAnthropic,
+		APIKey:   "sk-test",
+		Model:    "claude-sonnet-4",
+		Enabled:  true,
+		Active:   true,
+	}).Error; err != nil {
+		t.Fatalf("seed llm_settings: %v", err)
+	}
+}
+
+// TestFinalizeSlackMessageBody_ShortResponseBypassesSummarizer verifies that
+// a short final response is returned with the footer appended without ever
+// invoking the LLM summarizer.
+func TestFinalizeSlackMessageBody_ShortResponseBypassesSummarizer(t *testing.T) {
+	cleanup := setupFinalizeTestDB(t)
+	defer cleanup()
+	seedFinalizeLLMSettings(t)
+
+	caller := &fakeFinalizeOneShotCaller{respond: func() (string, error) {
+		t.Fatal("LLM caller must not be invoked when response fits the budget")
+		return "", nil
+	}}
+	summarizer := services.NewSlackSummarizer(caller)
+
+	got := finalizeSlackMessageBody(context.Background(), summarizer, "Investigation complete. No issues found.", "uuid-short")
+	if !strings.Contains(got, "Investigation complete") {
+		t.Errorf("expected response body in result, got %q", got)
+	}
+	if !strings.Contains(got, "/incidents/uuid-short") {
+		t.Errorf("expected footer link in result, got %q", got)
+	}
+	if len(got) > slackMaxTextBytes {
+		t.Errorf("result %d bytes exceeds cap %d", len(got), slackMaxTextBytes)
+	}
+	if caller.calls != 0 {
+		t.Errorf("expected 0 LLM calls for short response, got %d", caller.calls)
+	}
+}
+
+// TestFinalizeSlackMessageBody_LongResponseTriggersSummarizer verifies that an
+// over-budget final response is compressed via the SlackSummarizer and the
+// returned body fits the slackMaxTextBytes budget.
+func TestFinalizeSlackMessageBody_LongResponseTriggersSummarizer(t *testing.T) {
+	cleanup := setupFinalizeTestDB(t)
+	defer cleanup()
+	seedFinalizeLLMSettings(t)
+
+	long := strings.Repeat("Detailed investigation log line.\n", 500) +
+		"\n[FINAL_RESULT]\nstatus: resolved\nsummary: cluster recovered\n[/FINAL_RESULT]"
+
+	caller := &fakeFinalizeOneShotCaller{respond: func() (string, error) {
+		return "✅ *Resolved*\nCluster recovered after failover.\nView the Akmatori UI for full reasoning log.", nil
+	}}
+	summarizer := services.NewSlackSummarizer(caller)
+
+	got := finalizeSlackMessageBody(context.Background(), summarizer, long, "uuid-long")
+	if caller.calls != 1 {
+		t.Errorf("expected 1 LLM call when response exceeds budget, got %d", caller.calls)
+	}
+	if !strings.Contains(got, "Cluster recovered after failover") {
+		t.Errorf("expected LLM summary in result, got %q", got)
+	}
+	if !strings.Contains(got, "/incidents/uuid-long") {
+		t.Errorf("expected footer link in result, got %q", got)
+	}
+	if len(got) > slackMaxTextBytes {
+		t.Errorf("result %d bytes exceeds cap %d", len(got), slackMaxTextBytes)
+	}
+}
+
+// TestFinalizeSlackMessageBody_WorkerNotConnectedUsesFallback verifies that
+// when the worker is unavailable the deterministic byte-truncation fallback
+// is used and a single in-budget message is still produced.
+func TestFinalizeSlackMessageBody_WorkerNotConnectedUsesFallback(t *testing.T) {
+	cleanup := setupFinalizeTestDB(t)
+	defer cleanup()
+	seedFinalizeLLMSettings(t)
+
+	long := strings.Repeat("x", 12000) + "\n[FINAL_RESULT]\nstatus: resolved\nsummary: handled\n[/FINAL_RESULT]"
+
+	caller := &fakeFinalizeOneShotCaller{respond: func() (string, error) {
+		return "", services.ErrWorkerNotConnected
+	}}
+	summarizer := services.NewSlackSummarizer(caller)
+
+	got := finalizeSlackMessageBody(context.Background(), summarizer, long, "uuid-fallback")
+	if caller.calls != 1 {
+		t.Errorf("expected 1 LLM call attempt before fallback, got %d", caller.calls)
+	}
+	if !strings.Contains(got, "/incidents/uuid-fallback") {
+		t.Errorf("expected footer link in result even on fallback, got %q", got)
+	}
+	if len(got) > slackMaxTextBytes {
+		t.Errorf("result %d bytes exceeds cap %d", len(got), slackMaxTextBytes)
+	}
+	// Deterministic fallback must produce the structured FINAL_RESULT
+	// condensation (status verdict + summary), not just byte-truncated noise.
+	if !strings.Contains(got, "Resolved") {
+		t.Errorf("expected structured fallback to include status verdict, got %q", got)
+	}
+	if !strings.Contains(got, "handled") {
+		t.Errorf("expected structured fallback to include FINAL_RESULT summary, got %q", got)
+	}
+}
+
+// TestFinalizeSlackMessageBody_NilSummarizerUsesDeterministicTruncation
+// ensures that when the summarizer hasn't been wired up yet the deterministic
+// truncation path produces a valid in-budget message.
+func TestFinalizeSlackMessageBody_NilSummarizerUsesDeterministicTruncation(t *testing.T) {
+	long := strings.Repeat("y", 12000)
+
+	got := finalizeSlackMessageBody(context.Background(), nil, long, "uuid-nil")
+	if !strings.Contains(got, "/incidents/uuid-nil") {
+		t.Errorf("expected footer link even without summarizer, got len=%d", len(got))
+	}
+	if len(got) > slackMaxTextBytes {
+		t.Errorf("result %d bytes exceeds cap %d", len(got), slackMaxTextBytes)
+	}
+}
+
+// TestSlackProgressStreamer_LiveProgressFromSimulatedInvestigation simulates
+// agent OnOutput deltas during an investigation and verifies that
+// UpdateMessage is invoked only for the reasoning (🤔) lines — tool start/end
+// markers are filtered out so the progress message stays a clean single-line
+// status indicator.
+func TestSlackProgressStreamer_LiveProgressFromSimulatedInvestigation(t *testing.T) {
+	fc := &fakeStreamingClient{}
+	streamer := NewSlackProgressStreamer(fc, "C_ALERTS", "1707000001.000100", 1*time.Millisecond)
+
+	// Simulate the agent emitting deltas that match the markers produced by
+	// agent-worker/src/agent-runner.ts.
+	deltas := []string{
+		"\n🛠️ Running: gateway_call\n",
+		"Args:\n{\"tool\":\"ssh.execute_command\"}\n",
+		"Output:\nuptime: 5d\n",
+		"\n✅ Ran: gateway_call\n",
+		"\n🤔 considering follow-up\n",
+	}
+	for _, d := range deltas {
+		streamer.AppendStatus(d)
+		// Wait past the throttle window so each thinking line emits.
+		time.Sleep(3 * time.Millisecond)
+	}
+	streamer.Flush()
+
+	calls := fc.snapshotUpdate()
+	if len(calls) == 0 {
+		t.Fatalf("expected at least one UpdateMessage call during investigation")
+	}
+	for _, c := range calls {
+		if c.text == "" {
+			t.Errorf("UpdateMessage called with empty text: %+v", c)
+		}
+		if !contains(c.text, "🤔") {
+			t.Errorf("UpdateMessage text should be a thinking line, got %q", c.text)
+		}
 	}
 }
 
@@ -608,7 +746,7 @@ func BenchmarkSlackFlow_MessageExtraction(b *testing.B) {
 }
 
 func BenchmarkSlackFlow_Deduplication(b *testing.B) {
-	h := NewSlackHandler(nil, nil, nil, nil)
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

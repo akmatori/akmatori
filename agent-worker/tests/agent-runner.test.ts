@@ -223,8 +223,8 @@ function makeResumeParams(overrides?: Partial<ResumeParams>): ResumeParams {
 // ---------------------------------------------------------------------------
 
 describe("mapThinkingLevel", () => {
-  it("should map 'off' to 'minimal'", () => {
-    expect(mapThinkingLevel("off")).toBe("minimal");
+  it("should keep 'off' as 'off' so pi-mono omits reasoning_effort", () => {
+    expect(mapThinkingLevel("off")).toBe("off");
   });
 
   it("should map 'minimal' to 'minimal'", () => {
@@ -705,6 +705,33 @@ describe("AgentRunner", () => {
       expect(abortCalled).toBe(true);
       expect(session.abort).toHaveBeenCalledTimes(1);
       expect(runner.hasActiveSession("inc-signal-prop")).toBe(false);
+    });
+
+    // Models the supersession race: run 1 is in-flight, run 2 has already
+    // installed its session in activeSessions, then run 1's cancel resolves
+    // session.abort(). cancel() must NOT delete run 2's slot — that would
+    // leave the live replacement run untracked so a later
+    // cancel/abortInFlightSession would no-op and overlapping sessions could
+    // recur. The compare-and-delete in cancel() guards against this.
+    it("should not delete activeSessions slot when a replacement session has taken over", async () => {
+      const session1 = createMockSession();
+      const session2 = createMockSession();
+
+      // Cancel awaits session1.abort(); during that await we plant session2
+      // as the current owner of the slot, modelling the orchestrator having
+      // moved on to run 2 while run 1 is still tearing down.
+      session1.abort.mockImplementation(async () => {
+        runner["activeSessions"].set("inc-replace", session2 as any);
+      });
+
+      runner["activeSessions"].set("inc-replace", session1 as any);
+
+      await runner.cancel("inc-replace");
+
+      // session2 must still be the live entry — cancel must not have
+      // clobbered it after session1's abort resolved.
+      expect(runner["activeSessions"].get("inc-replace")).toBe(session2 as any);
+      expect(runner.hasActiveSession("inc-replace")).toBe(true);
     });
   });
 

@@ -18,10 +18,11 @@ import (
 
 // SlackHandler handles Slack events and commands
 type SlackHandler struct {
-	client         *slack.Client
-	agentExecutor  *executor.Executor
-	agentWSHandler *AgentWSHandler
-	skillService   services.SkillIncidentManager
+	client          *slack.Client
+	agentExecutor   *executor.Executor
+	agentWSHandler  *AgentWSHandler
+	skillService    services.SkillIncidentManager
+	slackSummarizer *services.SlackSummarizer
 
 	// Alert channel support
 	alertChannels   map[string]*database.AlertSourceInstance // channel_id -> instance
@@ -37,15 +38,15 @@ type SlackHandler struct {
 
 }
 
-// Progress update interval for Slack messages (rate limiting)
-const progressUpdateInterval = 2 * time.Second
-
-// NewSlackHandler creates a new Slack handler
+// NewSlackHandler creates a new Slack handler. The supplied caller is forwarded
+// to the alert extractor so it can route extraction calls through the agent
+// worker's provider-agnostic one-shot LLM path.
 func NewSlackHandler(
 	client *slack.Client,
 	agentExecutor *executor.Executor,
 	agentWSHandler *AgentWSHandler,
 	skillService services.SkillIncidentManager,
+	oneShotCaller services.OneShotLLMCaller,
 ) *SlackHandler {
 	return &SlackHandler{
 		client:         client,
@@ -53,13 +54,20 @@ func NewSlackHandler(
 		agentWSHandler: agentWSHandler,
 		skillService:   skillService,
 		alertChannels:  make(map[string]*database.AlertSourceInstance),
-		alertExtractor: extraction.NewAlertExtractor(),
+		alertExtractor: extraction.NewAlertExtractor(oneShotCaller),
 	}
 }
 
 // SetAlertHandler sets the alert handler for processing Slack channel alerts
 func (h *SlackHandler) SetAlertHandler(alertHandler *AlertHandler) {
 	h.alertHandler = alertHandler
+}
+
+// SetSlackSummarizer wires the SlackSummarizer used for compressing final
+// Slack messages. Optional — when unset, the handler falls back to the
+// existing byte-truncation path.
+func (h *SlackHandler) SetSlackSummarizer(s *services.SlackSummarizer) {
+	h.slackSummarizer = s
 }
 
 // SetAlertService sets the alert service for loading alert channel configs

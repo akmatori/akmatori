@@ -118,8 +118,14 @@ func main() {
 	}
 	slog.Info("context service initialized", "context_dir", contextService.GetContextDir())
 
+	// Initialize Agent WebSocket handler for orchestrator communication.
+	// Created before SkillService so it can be wired in as the OneShotLLMCaller
+	// (used by TitleGenerator and any other provider-agnostic LLM call sites).
+	agentWSHandler := handlers.NewAgentWSHandler()
+	slog.Info("agent WebSocket handler initialized")
+
 	// Initialize skill service
-	skillService := services.NewSkillService(dataDir, toolService, contextService)
+	skillService := services.NewSkillService(dataDir, toolService, contextService, agentWSHandler)
 	slog.Info("skill service initialized", "data_dir", dataDir)
 
 	// Regenerate all SKILL.md files to ensure they have latest template
@@ -163,11 +169,6 @@ func main() {
 		slackSettings = &database.SlackSettings{Enabled: false}
 	}
 
-	// Initialize Agent WebSocket handler for orchestrator communication
-	// This must be created before Slack event handler so it can be captured in closure
-	agentWSHandler := handlers.NewAgentWSHandler()
-	slog.Info("agent WebSocket handler initialized")
-
 	// Initialize Slack handler (will be used when Slack is enabled)
 	var slackHandler *handlers.SlackHandler
 
@@ -185,6 +186,11 @@ func main() {
 		channelResolver,
 	)
 
+	// Slack summarizer compresses final agent output to fit Slack's byte cap
+	// using the same provider-agnostic worker oneshot path as TitleGenerator.
+	slackSummarizer := services.NewSlackSummarizer(agentWSHandler)
+	alertHandler.SetSlackSummarizer(slackSummarizer)
+
 	// Set up event handler for when Slack connects
 	// Note: We receive the client directly to avoid deadlock (can't call GetClient while holding lock)
 	slackManager.SetEventHandler(func(socketClient *socketmode.Client, client *slack.Client) {
@@ -194,11 +200,13 @@ func main() {
 			agentExecutor,
 			agentWSHandler,
 			skillService,
+			agentWSHandler,
 		)
 
 		// Wire up alert channel support
 		slackHandler.SetAlertHandler(alertHandler)
 		slackHandler.SetAlertService(alertService)
+		slackHandler.SetSlackSummarizer(slackSummarizer)
 
 		// Try to get bot user ID and team ID for self-message filtering and Streaming API
 		if authTest, err := client.AuthTest(); err == nil {

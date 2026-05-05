@@ -104,6 +104,8 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
   getAgentDir: vi.fn(() => "/tmp/mock-agent-dir"),
 }));
 
+const completeMock = vi.fn();
+
 vi.mock("@mariozechner/pi-ai", () => ({
   getModel: vi.fn(() => ({
     id: "o4-mini",
@@ -111,7 +113,28 @@ vi.mock("@mariozechner/pi-ai", () => ({
     api: "openai-responses",
     provider: "openai",
   })),
+  complete: (...args: unknown[]) => completeMock(...args),
 }));
+
+function makeAssistantText(text: string) {
+  return {
+    role: "assistant" as const,
+    content: [{ type: "text" as const, text }],
+    api: "openai-responses" as const,
+    provider: "openai" as const,
+    model: "o4-mini",
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop" as const,
+    timestamp: Date.now(),
+  };
+}
 
 
 // ---------------------------------------------------------------------------
@@ -429,6 +452,199 @@ describe("Orchestrator", () => {
           cwd: "/tmp/test-workspaces/incident-ws-test",
         }),
       );
+    });
+
+    it("should echo run_id on agent_output and agent_completed frames", async () => {
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "new_incident",
+        incident_id: "incident-runid",
+        task: "Test run_id propagation",
+        api_key: "sk-test-key",
+        model: "o4-mini",
+        run_id: "run-aaaa-bbbb",
+      });
+
+      const completedMsg = await waitForMessage(
+        (m) => m.type === "agent_completed" && m.incident_id === "incident-runid",
+      );
+      expect(completedMsg).toBeDefined();
+      expect(completedMsg!.run_id).toBe("run-aaaa-bbbb");
+
+      // Output frames must also carry the same run_id so the API can drop
+      // late frames from a superseded run.
+      const outputMsgs = allServerMessages.filter(
+        (m) => m.type === "agent_output" && m.incident_id === "incident-runid",
+      );
+      expect(outputMsgs.length).toBeGreaterThanOrEqual(1);
+      for (const m of outputMsgs) {
+        expect(m.run_id).toBe("run-aaaa-bbbb");
+      }
+    });
+
+    it("should echo run_id on agent_error when LLM settings are missing", async () => {
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "new_incident",
+        incident_id: "incident-runid-err",
+        task: "Trigger missing-key path",
+        run_id: "run-zzz",
+        // no api_key → orchestrator emits an immediate agent_error
+      });
+
+      const errorMsg = await waitForMessage(
+        (m) => m.type === "agent_error" && m.incident_id === "incident-runid-err",
+      );
+      expect(errorMsg).toBeDefined();
+      expect(errorMsg!.run_id).toBe("run-zzz");
+      expect(errorMsg!.error).toContain("Missing LLM settings");
+    });
+
+    it("should abort the in-flight session before starting a new run with the same incident_id", async () => {
+      // Make the first run hang so the second arrives while it is still active.
+      let resolveFirst: (() => void) | undefined;
+      mockSession.prompt.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveFirst = resolve;
+          }),
+      );
+
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "new_incident",
+        incident_id: "incident-supersede",
+        task: "first run",
+        api_key: "sk-test-key",
+        model: "o4-mini",
+        run_id: "run-1",
+      });
+
+      // Wait until the first run has registered an active session.
+      const runner = orchestrator.getRunner();
+      const start = Date.now();
+      while (!runner.hasActiveSession("incident-supersede") && Date.now() - start < 2000) {
+        await sleep(20);
+      }
+      expect(runner.hasActiveSession("incident-supersede")).toBe(true);
+
+      const firstAbort = mockSession.abort;
+
+      sendFromServer({
+        type: "new_incident",
+        incident_id: "incident-supersede",
+        task: "second run",
+        api_key: "sk-test-key",
+        model: "o4-mini",
+        run_id: "run-2",
+      });
+
+      // The orchestrator must abort the in-flight session before allowing the
+      // replacement to run; otherwise two concurrent sessions share the
+      // activeSessions slot and the first one's finally clobbers the second.
+      const abortStart = Date.now();
+      while (firstAbort.mock.calls.length === 0 && Date.now() - abortStart < 2000) {
+        await sleep(20);
+      }
+      expect(firstAbort).toHaveBeenCalled();
+
+      // Unblock the first run so cleanup completes before the test ends.
+      resolveFirst?.();
+    });
+
+    it("should not bootstrap a second launch while the first launch is still bootstrapping", async () => {
+      // Reproduces the bootstrap-window race: a second new_incident arriving
+      // during the first launch's createAgentSession() must NOT start its
+      // own bootstrap in parallel — both runs would share the same workDir
+      // and tool-call traffic. The launch chain queues the second behind the
+      // first's "registered" signal so abortInFlightSession can target the
+      // first run's session instead of seeing an empty activeSessions.
+      const piMono = await import("@mariozechner/pi-coding-agent");
+      const createAgentSessionMock = piMono.createAgentSession as ReturnType<
+        typeof vi.fn
+      >;
+      createAgentSessionMock.mockClear();
+
+      const sessionA = createMockSession();
+      const sessionB = createMockSession();
+
+      // Hold A's prompt so the run doesn't finish naturally before B arrives.
+      sessionA.prompt.mockImplementationOnce(() => new Promise<void>(() => {}));
+
+      // Hold A's createAgentSession in-flight so B arrives during A's
+      // bootstrap window (after abortInFlightSession but before
+      // activeSessions.set).
+      let releaseA: (() => void) | undefined;
+      let aBootstrapEntered = false;
+      createAgentSessionMock.mockImplementationOnce(async () => {
+        aBootstrapEntered = true;
+        await new Promise<void>((r) => {
+          releaseA = r;
+        });
+        return { session: sessionA };
+      });
+      createAgentSessionMock.mockImplementationOnce(async () => ({
+        session: sessionB,
+      }));
+
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "new_incident",
+        incident_id: "incident-bootstrap-race",
+        task: "first",
+        api_key: "sk-test-key",
+        model: "o4-mini",
+        run_id: "run-1",
+      });
+
+      // Wait until A's bootstrap is in-flight (createAgentSession called and
+      // awaiting our release signal).
+      const enterStart = Date.now();
+      while (!aBootstrapEntered && Date.now() - enterStart < 2000) {
+        await sleep(20);
+      }
+      expect(aBootstrapEntered).toBe(true);
+
+      // Send B while A is still bootstrapping. Without the launch chain B
+      // would race past abortInFlightSession (which sees no active session)
+      // and start its own bootstrap immediately.
+      sendFromServer({
+        type: "new_incident",
+        incident_id: "incident-bootstrap-race",
+        task: "second",
+        api_key: "sk-test-key",
+        model: "o4-mini",
+        run_id: "run-2",
+      });
+
+      // Give B's wrapper microtasks a chance to run. createAgentSession must
+      // still have been called only once — B is queued behind A's
+      // registration.
+      await sleep(200);
+      expect(createAgentSessionMock).toHaveBeenCalledTimes(1);
+      expect(sessionA.abort).not.toHaveBeenCalled();
+
+      // Release A's bootstrap. A registers, B's chain wait unblocks,
+      // abortInFlightSession aborts A, then B bootstraps its own session.
+      releaseA?.();
+
+      const startBootstrap = Date.now();
+      while (
+        createAgentSessionMock.mock.calls.length < 2 &&
+        Date.now() - startBootstrap < 2000
+      ) {
+        await sleep(20);
+      }
+      expect(createAgentSessionMock).toHaveBeenCalledTimes(2);
+      expect(sessionA.abort).toHaveBeenCalled();
     });
 
     it("should pass skillsOverride when enabled_skills is provided", async () => {
@@ -791,6 +1007,123 @@ describe("Orchestrator", () => {
 
       // getModel should have been called with "gpt-5.4" (matches database default)
       expect(getModel).toHaveBeenCalledWith("openai", "gpt-5.4");
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Message routing: oneshot_llm_request
+  // -----------------------------------------------------------------------
+
+  describe("oneshot_llm_request routing", () => {
+    it("routes a oneshot_llm_request to a oneshot_llm_response with matching request_id", async () => {
+      completeMock.mockResolvedValueOnce(makeAssistantText("hello world"));
+
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "oneshot_llm_request",
+        request_id: "req-abc",
+        api_key: "sk-key",
+        model: "o4-mini",
+        provider: "openai",
+        thinking_level: "medium",
+        system: "be concise",
+        user: "summarize",
+        max_tokens: 64,
+        temperature: 0.2,
+      });
+
+      const resp = await waitForMessage(
+        (m) => m.type === "oneshot_llm_response" && m.request_id === "req-abc",
+      );
+      expect(resp).toBeDefined();
+      expect(resp!.summary).toBe("hello world");
+      expect(resp!.error).toBeUndefined();
+
+      const responses = allServerMessages.filter(
+        (m) => m.type === "oneshot_llm_response" && m.request_id === "req-abc",
+      );
+      expect(responses).toHaveLength(1);
+      expect(completeMock).toHaveBeenCalledTimes(1);
+      const opts = completeMock.mock.calls[0][2];
+      expect(opts.maxTokens).toBe(64);
+      expect(opts.temperature).toBe(0.2);
+      expect(opts.apiKey).toBe("sk-key");
+    });
+
+    it("sends an error response when LLM settings are missing", async () => {
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "oneshot_llm_request",
+        request_id: "req-no-key",
+        user: "summarize",
+        // no api_key
+      });
+
+      const resp = await waitForMessage(
+        (m) => m.type === "oneshot_llm_response" && m.request_id === "req-no-key",
+      );
+      expect(resp).toBeDefined();
+      expect(resp!.error).toContain("Missing LLM settings");
+    });
+
+    it("sends an error response when user prompt is missing", async () => {
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "oneshot_llm_request",
+        request_id: "req-no-user",
+        api_key: "sk-key",
+        // no user
+      });
+
+      const resp = await waitForMessage(
+        (m) => m.type === "oneshot_llm_response" && m.request_id === "req-no-user",
+      );
+      expect(resp).toBeDefined();
+      expect(resp!.error).toContain("Missing user prompt");
+    });
+
+    it("propagates pi-ai errors as the error field on the response", async () => {
+      completeMock.mockRejectedValueOnce(new Error("provider blew up"));
+
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "oneshot_llm_request",
+        request_id: "req-fail",
+        api_key: "sk-key",
+        user: "summarize",
+      });
+
+      const resp = await waitForMessage(
+        (m) => m.type === "oneshot_llm_response" && m.request_id === "req-fail",
+      );
+      expect(resp).toBeDefined();
+      expect(resp!.error).toContain("provider blew up");
+    });
+
+    it("ignores oneshot_llm_request when request_id is missing", async () => {
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "oneshot_llm_request",
+        api_key: "sk-key",
+        user: "summarize",
+        // no request_id
+      });
+
+      await sleep(200);
+      expect(logs.some((l) => l.includes("missing request_id"))).toBe(true);
+      expect(
+        allServerMessages.some((m) => m.type === "oneshot_llm_response"),
+      ).toBe(false);
     });
   });
 

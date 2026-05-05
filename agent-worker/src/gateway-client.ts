@@ -194,54 +194,60 @@ export class GatewayClient {
    * If the response is >= 4KB and a workDir is configured, the full output
    * is written to a file and a truncated preview is returned inline.
    */
-  async call(
+  call(
     toolName: string,
     args: Record<string, unknown> = {},
     instanceHint?: string,
     signal?: AbortSignal,
   ): Promise<CallResult> {
-    const params: Record<string, unknown> = {
-      name: toolName,
-      arguments: args,
-    };
-    if (instanceHint) {
-      params.instance = instanceHint;
-    }
+    return orphanSafe(async () => {
+      const params: Record<string, unknown> = {
+        name: toolName,
+        arguments: args,
+      };
+      if (instanceHint) {
+        params.instance = instanceHint;
+      }
 
-    const raw = await this.rpc("tools/call", params, signal);
+      const raw = await this.rpc("tools/call", params, signal);
 
-    // MCP result is { content: [{type, text}], isError? }
-    const data = this.extractResult(raw);
+      // MCP result is { content: [{type, text}], isError? }
+      const data = this.extractResult(raw);
 
-    // Output management: large responses go to file
-    const serialized = typeof data === "string" ? data : JSON.stringify(data);
-    if (serialized.length >= OUTPUT_SIZE_THRESHOLD && this.workDir) {
-      const outputFile = this.writeOutputFile(toolName, serialized);
-      const preview = buildSmartPreview(serialized, outputFile);
-      return { data: preview, outputFile };
-    }
+      // Output management: large responses go to file
+      const serialized = typeof data === "string" ? data : JSON.stringify(data);
+      if (serialized.length >= OUTPUT_SIZE_THRESHOLD && this.workDir) {
+        const outputFile = this.writeOutputFile(toolName, serialized);
+        const preview = buildSmartPreview(serialized, outputFile);
+        return { data: preview, outputFile };
+      }
 
-    return { data };
+      return { data };
+    });
   }
 
   /** List tools filtered by tool type. */
-  async listToolsByType(
+  listToolsByType(
     toolType: string,
     signal?: AbortSignal,
   ): Promise<ListToolsResult> {
-    return (await this.rpc("tools/list_by_type", { tool_type: toolType }, signal)) as ListToolsResult;
+    return orphanSafe(async () =>
+      (await this.rpc("tools/list_by_type", { tool_type: toolType }, signal)) as ListToolsResult,
+    );
   }
 
   /** List all available tool types for this incident. */
-  async listToolTypes(signal?: AbortSignal): Promise<{ types: string[] }> {
-    return (await this.rpc("tools/list_types", {}, signal)) as { types: string[] };
+  listToolTypes(signal?: AbortSignal): Promise<{ types: string[] }> {
+    return orphanSafe(async () =>
+      (await this.rpc("tools/list_types", {}, signal)) as { types: string[] },
+    );
   }
 
   /** Get full detail for a specific tool. */
-  async getToolDetail(toolName: string, signal?: AbortSignal): Promise<ToolDetailResult> {
-    return (await this.rpc("tools/detail", {
-      tool_name: toolName,
-    }, signal)) as ToolDetailResult;
+  getToolDetail(toolName: string, signal?: AbortSignal): Promise<ToolDetailResult> {
+    return orphanSafe(async () =>
+      (await this.rpc("tools/detail", { tool_name: toolName }, signal)) as ToolDetailResult,
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -393,4 +399,18 @@ export class GatewayClient {
       req.end();
     });
   }
+}
+
+/**
+ * Wraps an async work function so that the returned promise has a noop catch
+ * already attached. Awaiters still receive the rejection through their own
+ * catches; orphaned rejections (e.g. fire-and-forget `gateway_call(...)` inside
+ * an agent script, or a concurrent call where `Promise.race` / `Promise.all`
+ * settled with another result first) are absorbed instead of becoming
+ * unhandled, which Node 22 treats as fatal.
+ */
+function orphanSafe<T>(work: () => Promise<T>): Promise<T> {
+  const p = work();
+  p.catch(() => {});
+  return p;
 }
