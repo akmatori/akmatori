@@ -8,7 +8,7 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 
 - **5-container Docker architecture**: API, Agent Worker, MCP Gateway, PostgreSQL, QMD (runbook search)
 - **Backend**: Go 1.24+ (API server, MCP gateway)
-- **Agent Worker**: Node.js 22+ / TypeScript using `@mariozechner/pi-coding-agent` SDK (v0.72.1)
+- **Agent Worker**: Node.js 22+ / TypeScript using `@mariozechner/pi-coding-agent` SDK (v0.73.0)
 - **Frontend**: React 19 + TypeScript + Vite + Tailwind
 - **Database**: PostgreSQL 16 with GORM
 - **LLM Providers**: Anthropic, OpenAI, Google, OpenRouter, Custom (configured via web UI)
@@ -90,7 +90,7 @@ Focus new tests on historically weak areas: `internal/handlers`, `internal/servi
 
 ## Agent Worker Architecture
 
-The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK (v0.72.1):
+The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK (v0.73.0):
 
 | Component | File | Purpose |
 |-----------|------|---------|
@@ -100,7 +100,7 @@ The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK (v0.72.1):
 | Tool Formatter | `src/tool-output-formatter.ts` | Formats tool args/output for UI streaming |
 | WS Client | `src/ws-client.ts` | WebSocket to API server |
 
-### SDK Features (v0.72.1)
+### SDK Features (v0.73.0)
 
 - Cancellation signals propagate to nested model calls and tool executions
 - Investigation history exports to `{workDir}/session_export.jsonl`
@@ -109,6 +109,7 @@ The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK (v0.72.1):
 - Typed compaction/retry session events replaced older untyped names
 - Provider SDKs are lazy-loaded; auto-retry and multi-edit are supported
 - Provider retry/timeout settings (`retry.provider.{timeoutMs,maxRetries,maxRetryDelayMs}`) are forwarded via `SettingsManager.inMemory({...})`; Akmatori uses 10-minute timeouts so slow on-prem/OpenRouter models do not abort during long alert investigations
+- 0.73.0: incremental bash output streaming surfaces via `tool_execution_update` events (already handled by `agent-runner.ts`); Bedrock Opus 4.7 `xhigh` thinking fix is automatic
 
 ### SDK API Conventions
 
