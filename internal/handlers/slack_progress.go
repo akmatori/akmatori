@@ -16,10 +16,10 @@ type slackStreamingClient interface {
 	UpdateMessage(channelID, timestamp string, options ...slack.MsgOption) (string, string, string, error)
 }
 
-// slackThinkingMaxLen is the per-line cap applied to thinking snippets. Slack's
-// chat.update on a streamed message accepts up to ~4000 chars even before
-// chat.stopStream, so this cap exists for UX (a status line should be short),
-// not to satisfy an API limit.
+// slackThinkingMaxLen is the per-line cap applied to thinking snippets. The
+// progress message is a regular chat.postMessage (not a streamed message),
+// so chat.update accepts up to ~40000 chars; this cap exists for UX — a
+// status line should be short — not to satisfy an API limit.
 const slackThinkingMaxLen = 120
 
 // SlackProgressStreamer condenses agent OnOutput deltas into a single status
@@ -43,9 +43,8 @@ type SlackProgressStreamer struct {
 }
 
 // NewSlackProgressStreamer constructs a streamer bound to a specific Slack
-// message. Updates are issued via chat.update regardless of whether the
-// message was created via chat.startStream — the caller still owns the
-// stream lifecycle (StartStream / StopStream) for the blinking indicator.
+// message. Updates are issued via chat.update; the caller is responsible for
+// posting the initial message (typically a plain chat.postMessage).
 func NewSlackProgressStreamer(client slackStreamingClient, channel, messageTS string, appendInterval time.Duration) *SlackProgressStreamer {
 	if appendInterval <= 0 {
 		appendInterval = slackAppendInterval

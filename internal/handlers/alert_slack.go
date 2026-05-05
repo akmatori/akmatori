@@ -96,58 +96,29 @@ func (h *AlertHandler) postSlackThreadReply(channelID, threadTS, message string)
 	}
 }
 
-// startSlackThreadStream starts a streaming message in a thread, making the
-// bot name blink while the stream is open. Falls back to a regular thread
-// reply if the Streaming API is unavailable. Returns (messageTS, isStreaming).
-func (h *AlertHandler) startSlackThreadStream(channelID, threadTS, text, recipientUserID string) (string, bool) {
+// postSlackThreadProgressMessage posts the initial progress message in a
+// thread (e.g. "Thinking...") and returns its timestamp so the streamer can
+// later replace its body via chat.update with the latest reasoning line.
+//
+// We do not use chat.startStream here even though it would make the bot
+// name blink: Slack rejects chat.update on an actively streamed message
+// with `streaming_state_conflict`, which makes the single-line replace
+// behaviour incompatible with streaming. Returns "" if posting fails.
+func (h *AlertHandler) postSlackThreadProgressMessage(channelID, threadTS, text string) string {
 	slackClient := h.slackManager.GetClient()
 	if slackClient == nil {
-		return "", false
+		return ""
 	}
-
-	// Try streaming first (makes bot name blink)
-	var streamOpts []slack.MsgOption
-	streamOpts = append(streamOpts, slack.MsgOptionTS(threadTS), slack.MsgOptionMarkdownText(text))
-	if h.teamID != "" {
-		streamOpts = append(streamOpts, slack.MsgOptionRecipientTeamID(h.teamID))
-	}
-	if recipientUserID != "" {
-		streamOpts = append(streamOpts, slack.MsgOptionRecipientUserID(recipientUserID))
-	}
-	_, ts, err := slackClient.StartStream(channelID, streamOpts...)
-	if err == nil {
-		return ts, true
-	}
-
-	slog.Info("streaming not available, falling back to regular message", "err", err)
-
-	// Fallback to regular thread reply
-	_, ts, err = slackClient.PostMessage(
+	_, ts, err := slackClient.PostMessage(
 		channelID,
 		slack.MsgOptionText(text, false),
 		slack.MsgOptionTS(threadTS),
 	)
 	if err != nil {
-		slog.Warn("error posting thread reply", "err", err)
-		return "", false
+		slog.Warn("error posting progress message", "err", err)
+		return ""
 	}
-	return ts, false
-}
-
-// stopSlackThreadStream stops a streaming message so the bot name stops blinking.
-// No-op if isStreaming is false (i.e. we fell back to a regular message).
-func (h *AlertHandler) stopSlackThreadStream(channelID, messageTS string, isStreaming bool) {
-	if !isStreaming {
-		return
-	}
-	slackClient := h.slackManager.GetClient()
-	if slackClient == nil {
-		return
-	}
-
-	if _, _, err := slackClient.StopStream(channelID, messageTS); err != nil {
-		slog.Warn("error stopping stream", "ts", messageTS, "err", err)
-	}
+	return ts
 }
 
 // updateSlackThreadMessage updates an existing Slack message in a channel

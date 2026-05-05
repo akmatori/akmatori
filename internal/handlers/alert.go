@@ -22,12 +22,9 @@ import (
 const slackAppendInterval = 2 * time.Second
 
 // slackMaxTextBytes is the maximum byte size for Slack message text.
-// chat.postMessage accepts up to ~40,000 chars; chat.update on a streamed
-// message (one created via chat.startStream) is capped at ~4,000 chars even
-// after chat.stopStream — exceeding it returns msg_too_long. The final
-// summary is therefore delivered as a fresh chat.postMessage thread reply
-// rather than as an in-place chat.update of the streamed progress message.
-// 8000 leaves generous headroom while keeping the summary tight for UX.
+// chat.postMessage accepts up to ~40,000 chars; we keep the cap tight at
+// 8000 so summaries stay readable and so the SlackSummarizer has a clear
+// budget to compress towards.
 const slackMaxTextBytes = 8000
 
 // slackSummaryMargin is the byte budget reserved for the trailing footer
@@ -37,9 +34,9 @@ const slackMaxTextBytes = 8000
 const slackSummaryMargin = 200
 
 // slackInvestigationDoneMarker / slackInvestigationFailedMarker replace the
-// streamed progress message after chat.stopStream. The full final body is
-// posted as a separate thread reply because the streamed-message text limit
-// (~4000 chars) is too small to hold typical agent summaries.
+// in-thread progress message once the investigation finishes. The full
+// final body is posted as a separate thread reply so the progress message
+// itself stays a short status line.
 const slackInvestigationDoneMarker = "_Investigation complete — see summary below._"
 const slackInvestigationFailedMarker = "_Investigation failed — see details below._"
 
