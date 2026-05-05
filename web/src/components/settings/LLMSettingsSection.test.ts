@@ -26,7 +26,7 @@ describe('MODEL_SUGGESTIONS', () => {
   it('includes the new OpenRouter aliases', () => {
     expect(ids('openrouter')).toEqual(
       expect.arrayContaining([
-        'anthropic/claude-opus-4-7',
+        'anthropic/claude-opus-4.7',
         'openai/gpt-5.5',
         'google/gemini-3-pro-preview',
       ]),
@@ -37,6 +37,13 @@ describe('MODEL_SUGGESTIONS', () => {
     expect(ids('openai')).toEqual(expect.arrayContaining(['gpt-5.4', 'gpt-5.4-mini']));
     expect(ids('anthropic')).toEqual(expect.arrayContaining(['claude-opus-4-6', 'claude-sonnet-4-6']));
     expect(ids('google')).toEqual(expect.arrayContaining(['gemini-2.5-pro']));
-    expect(ids('openrouter')).toEqual(expect.arrayContaining(['anthropic/claude-sonnet-4-6']));
+    expect(ids('openrouter')).toEqual(expect.arrayContaining(['anthropic/claude-sonnet-4.6']));
+  });
+
+  it('uses dot-form OpenRouter aliases for Anthropic models', () => {
+    const dashForm = /^anthropic\/claude-(opus|sonnet|haiku)-\d+-\d+(-fast)?$/;
+    for (const { value } of MODEL_SUGGESTIONS.openrouter) {
+      expect(value).not.toMatch(dashForm);
+    }
   });
 });

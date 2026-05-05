@@ -56,6 +56,7 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 | Alert adapters (`internal/alerts/adapters/`) | `make test-adapters` |
 | MCP Gateway (`mcp-gateway/`) | `make test-mcp` |
 | Agent worker (`agent-worker/`) | `make test-agent` |
+| Web frontend (`web/`) | `make test-web` |
 | Any Go code | `make test` |
 | Before committing | `make verify` |
 
@@ -63,7 +64,8 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 # Quick reference
 make test-adapters    # ~0.01s
 make test-mcp         # ~0.01s
-make test-all         # All tests including agent-worker
+make test-web         # Web frontend (vitest)
+make test-all         # All tests including agent-worker and web
 make verify           # go vet + all tests (pre-commit)
 ```
 
