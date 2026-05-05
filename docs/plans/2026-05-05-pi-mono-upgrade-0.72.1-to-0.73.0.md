@@ -45,15 +45,15 @@ So the SDK upgrade itself is a version bump only. The substantive work is the mo
 - Modify: `agent-worker/package.json`
 - Regenerate: `agent-worker/package-lock.json`
 
-- [ ] Update `agent-worker/package.json` dependencies:
+- [x] Update `agent-worker/package.json` dependencies:
   - `@mariozechner/pi-agent-core`: `^0.72.1` → `^0.73.0`
   - `@mariozechner/pi-ai`: `^0.72.1` → `^0.73.0`
   - `@mariozechner/pi-coding-agent`: `^0.72.1` → `^0.73.0`
   - Leave `typebox` at `^1.1.24` (no change in 0.73.0)
-- [ ] Run `cd /opt/akmatori/agent-worker && npm install`
-- [ ] Verify resolved versions with `npm ls @mariozechner/pi-coding-agent @mariozechner/pi-ai @mariozechner/pi-agent-core`
-- [ ] Run `npm run build` — must succeed with no TypeScript errors
-- [ ] Run `make test-agent` — all existing tests must pass without modification (no API surface changes affect Akmatori)
+- [x] Run `cd /opt/akmatori/agent-worker && npm install`
+- [x] Verify resolved versions with `npm ls @mariozechner/pi-coding-agent @mariozechner/pi-ai @mariozechner/pi-agent-core`
+- [x] Run `npm run build` — must succeed with no TypeScript errors
+- [x] Run `make test-agent` — all existing tests must pass without modification (no API surface changes affect Akmatori)
 
 ### Task 2: Add frontier-model suggestions in LLM settings UI
 
