@@ -1,4 +1,4 @@
-.PHONY: build run clean test test-all test-adapters test-mcp test-agent test-coverage verify deps help install build-agent
+.PHONY: build run clean test test-all test-adapters test-mcp test-agent test-web test-coverage verify deps help install build-agent
 
 # Binary name
 BINARY_NAME=akmatori
@@ -42,10 +42,11 @@ run: ## Run the application
 test: ## Run all Go tests
 	$(GOTEST) -v ./...
 
-test-all: ## Run all tests including MCP gateway and agent-worker
+test-all: ## Run all tests including MCP gateway, agent-worker, and web frontend
 	$(GOTEST) -v ./...
 	cd mcp-gateway && $(GOTEST) -v ./...
 	cd agent-worker && npm test
+	cd web && npm test
 
 test-adapters: ## Run alert adapter tests only (fast)
 	$(GOTEST) -v ./internal/alerts/adapters/...
@@ -55,6 +56,9 @@ test-mcp: ## Run MCP gateway tests only (fast)
 
 test-agent: ## Run agent-worker tests only
 	cd agent-worker && npm test
+
+test-web: ## Run web frontend tests only
+	cd web && npm test
 
 build-agent: ## Build agent-worker Docker image
 	docker build -t akmatori-agent ./agent-worker
@@ -70,6 +74,7 @@ verify: ## Run pre-commit verification (vet + tests)
 	cd mcp-gateway && $(GOCMD) vet ./...
 	cd mcp-gateway && $(GOTEST) ./...
 	cd agent-worker && npm test
+	cd web && npm test
 
 clean: ## Clean build artifacts
 	$(GOCLEAN)
