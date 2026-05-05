@@ -986,7 +986,7 @@ describe("Orchestrator", () => {
       );
     });
 
-    it("should default model to gpt-5.4 when not specified", async () => {
+    it("should default model to gpt-5.5 when not specified", async () => {
       const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
       const { getModel } = await import("@mariozechner/pi-ai");
 
@@ -1005,8 +1005,8 @@ describe("Orchestrator", () => {
         (m) => m.type === "agent_completed" && m.incident_id === "incident-settings-002",
       );
 
-      // getModel should have been called with "gpt-5.4" (matches database default)
-      expect(getModel).toHaveBeenCalledWith("openai", "gpt-5.4");
+      // getModel should have been called with "gpt-5.5" (matches database default)
+      expect(getModel).toHaveBeenCalledWith("openai", "gpt-5.5");
     });
   });
 

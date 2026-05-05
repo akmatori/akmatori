@@ -463,7 +463,7 @@ export class Orchestrator {
     return {
       provider: (msg.provider as LLMSettings["provider"]) ?? "openai",
       api_key: apiKey,
-      model: msg.model ?? "gpt-5.4",
+      model: msg.model ?? "gpt-5.5",
       thinking_level: this.mapThinkingLevel(msg.thinking_level),
       base_url: msg.base_url,
     };
