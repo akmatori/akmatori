@@ -127,6 +127,12 @@ export interface WebSocketMessage {
   max_tokens?: number;
   temperature?: number;
   summary?: string;
+
+  // Per-call run identifier. The API stamps a fresh run_id on every
+  // new_incident / continue_incident; the worker must echo it back on every
+  // agent_output / agent_completed / agent_error frame so the API can drop
+  // late frames from a superseded run.
+  run_id?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -229,6 +229,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 		var response string
 		var sessionID string
 		var hasError bool
+		var superseded bool
 		var lastStreamedLog string
 		var finalTokensUsed int
 		var finalExecutionTimeMs int64
@@ -257,6 +258,13 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 				hasError = true
 				closeOnce.Do(func() { close(done) })
 			},
+			// If a newer run displaces us for the same incident_id, the
+			// replacement run owns finalization. Unblock and exit silently
+			// instead of writing a failure that races the replacement.
+			OnSuperseded: func() {
+				superseded = true
+				closeOnce.Do(func() { close(done) })
+			},
 		}
 
 		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback); err != nil {
@@ -271,6 +279,12 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 
 		// Wait for completion
 		<-done
+
+		// Replacement run owns finalization — exit before touching the DB or Slack.
+		if superseded {
+			slog.Info("alert investigation superseded; leaving finalization to the new run", "incident_id", incidentUUID)
+			return
+		}
 
 		// Build full log: task header + streamed log + final response
 		fullLog := taskHeader + lastStreamedLog
@@ -362,6 +376,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		var response string
 		var sessionID string
 		var hasError bool
+		var superseded bool
 		var lastStreamedLog string
 		var finalTokensUsed int
 		var finalExecutionTimeMs int64
@@ -391,6 +406,13 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 				hasError = true
 				closeOnce.Do(func() { close(done) })
 			},
+			// If a newer run displaces us for the same incident_id, the
+			// replacement run owns finalization — DB update, Slack message,
+			// channel reaction. Skip everything below to avoid racing it.
+			OnSuperseded: func() {
+				superseded = true
+				closeOnce.Do(func() { close(done) })
+			},
 		}
 
 		if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback); err != nil {
@@ -414,6 +436,20 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 
 		// Flush any buffered progress lines so the last status is not lost.
 		progressStreamer.Flush()
+
+		// Replacement run owns finalization — exit before touching the DB
+		// or channel reactions. The replacement posts its own progress
+		// message, so clear this run's progress message body and stop its
+		// streaming indicator before returning, otherwise the user sees a
+		// dangling "Thinking..." alongside the replacement's final message.
+		if superseded {
+			slog.Info("slack channel investigation superseded; leaving finalization to the new run", "incident_id", incidentUUID)
+			if progressMsgTS != "" {
+				h.stopSlackThreadStream(slackChannelID, progressMsgTS, isStreaming)
+				h.updateSlackThreadMessage(slackChannelID, progressMsgTS, "_(superseded by newer activity)_")
+			}
+			return
+		}
 
 		slog.Info("investigation done", "incident_id", incidentUUID, "has_error", hasError, "response_len", len(response), "session_id", sessionID)
 
@@ -443,15 +479,22 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 			formattedResponse = "Task completed (no output)"
 		}
 
-		// Stop the streaming indicator, then replace with final result
+		// Stop the streaming indicator, mark the progress message as
+		// complete, and post the full final body as a fresh thread reply.
+		// chat.update on the streamed message is capped at ~4000 chars
+		// even after chat.stopStream; a new chat.postMessage allows up to
+		// ~40,000 chars so long summaries always reach the user.
 		h.updateSlackChannelReactions(slackChannelID, slackMessageTS, hasError)
 		if progressMsgTS != "" {
 			h.stopSlackThreadStream(slackChannelID, progressMsgTS, isStreaming)
-			slog.Info("replacing Slack progress message with final response", "ts", progressMsgTS, "response_len", len(formattedResponse), "incident", incidentUUID)
-			h.updateSlackThreadMessage(slackChannelID, progressMsgTS, formattedResponse)
-		} else {
-			h.postSlackThreadReply(slackChannelID, slackMessageTS, formattedResponse)
+			marker := slackInvestigationDoneMarker
+			if hasError {
+				marker = slackInvestigationFailedMarker
+			}
+			h.updateSlackThreadMessage(slackChannelID, progressMsgTS, marker)
 		}
+		slog.Info("posting Slack final summary as new thread reply", "progress_ts", progressMsgTS, "response_len", len(formattedResponse), "incident", incidentUUID)
+		h.postSlackThreadReply(slackChannelID, slackMessageTS, formattedResponse)
 
 		slog.Info("investigation completed for Slack channel alert", "alert", alert.AlertName)
 		return

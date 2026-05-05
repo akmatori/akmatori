@@ -541,6 +541,126 @@ describe("GatewayClient", () => {
       }
     });
   });
+
+  // -----------------------------------------------------------------------
+  // Abort safety
+  // -----------------------------------------------------------------------
+
+  describe("abort safety", () => {
+    // Reproduces the production crash: a gateway call's underlying httpPost
+    // promise rejects synchronously when the AbortSignal fires, and if the
+    // caller has already moved on (e.g., concurrent gateway_call where
+    // Promise.all settled with another rejection, or a fire-and-forget call
+    // inside an agent script) Node 22 treats the rejection as fatal.
+    it("does not crash when an aborted call's promise has no awaiter", async () => {
+      // Slow server that never sends a response — request stays open until
+      // we abort or destroy it.
+      const slowServer = await new Promise<{ url: string; server: http.Server }>((resolve) => {
+        const server = http.createServer((_req, _res) => {
+          // Intentionally never respond.
+        });
+        server.listen(0, "127.0.0.1", () => {
+          const addr = server.address() as { port: number };
+          resolve({ url: `http://127.0.0.1:${addr.port}`, server });
+        });
+      });
+
+      const unhandledRejections: unknown[] = [];
+      const handler = (reason: unknown) => unhandledRejections.push(reason);
+      process.on("unhandledRejection", handler);
+
+      try {
+        const client = new GatewayClient({ gatewayUrl: slowServer.url, incidentId: "inc-1" });
+        const controller = new AbortController();
+
+        // Start the call. Deliberately do NOT await — simulate the orphaned
+        // case where the caller has lost interest (e.g. Promise.all settled
+        // with a different rejection first).
+        const orphan = client.call("ssh.execute_command", {}, undefined, controller.signal);
+
+        // Touch the binding so TS does not flag it as unused; we are
+        // explicitly NOT awaiting to reproduce the orphan scenario.
+        void orphan;
+
+        // Give the request a tick to actually leave the gateway client.
+        await new Promise<void>((r) => setImmediate(r));
+
+        // Abort. With the buggy code this synchronously rejects the inner
+        // httpPost promise with no handler attached → process crashes.
+        controller.abort();
+
+        // Drain microtasks to surface any unhandled rejections.
+        await new Promise<void>((r) => setImmediate(r));
+        await new Promise<void>((r) => setImmediate(r));
+
+        expect(unhandledRejections).toHaveLength(0);
+      } finally {
+        process.off("unhandledRejection", handler);
+        slowServer.server.close();
+      }
+    }, 10_000);
+
+    // Concurrent variant: Promise.all settles with one rejection, the second
+    // call is then aborted. The fix must keep the second rejection from
+    // becoming unhandled even though Promise.all already swallowed it.
+    it("does not crash when concurrent calls reject after Promise.all settles", async () => {
+      let respondFast: ((status: number, body: string) => void) | undefined;
+      const handlers: Array<(status: number, body: string) => void> = [];
+
+      const server = await new Promise<{ url: string; server: http.Server }>((resolve) => {
+        const s = http.createServer((_req, res) => {
+          // Defer response: capture the responder so the test can choose
+          // when each request completes.
+          const respond = (status: number, body: string) => {
+            res.writeHead(status, { "Content-Type": "application/json" });
+            res.end(body);
+          };
+          handlers.push(respond);
+          if (!respondFast) respondFast = respond;
+        });
+        s.listen(0, "127.0.0.1", () => {
+          const addr = s.address() as { port: number };
+          resolve({ url: `http://127.0.0.1:${addr.port}`, server: s });
+        });
+      });
+
+      const unhandledRejections: unknown[] = [];
+      const handler = (reason: unknown) => unhandledRejections.push(reason);
+      process.on("unhandledRejection", handler);
+
+      try {
+        const client = new GatewayClient({ gatewayUrl: server.url, incidentId: "inc-1" });
+        const controller = new AbortController();
+
+        const all = Promise.all([
+          client.call("a.tool", {}, undefined, controller.signal),
+          client.call("b.tool", {}, undefined, controller.signal),
+        ]);
+
+        // Wait until both requests reach the server.
+        while (handlers.length < 2) {
+          await new Promise<void>((r) => setImmediate(r));
+        }
+
+        // Reject one fast (Promise.all fail-fast settles).
+        handlers[0](200, JSON.stringify({ jsonrpc: "2.0", error: { code: -32601, message: "Method not found" }, id: 1 }));
+
+        await expect(all).rejects.toThrow("Method not found");
+
+        // Now abort. The other call's onAbort fires synchronously → rejects
+        // a promise no one is awaiting. Without the fix, Node 22 crashes.
+        controller.abort();
+
+        await new Promise<void>((r) => setImmediate(r));
+        await new Promise<void>((r) => setImmediate(r));
+
+        expect(unhandledRejections).toHaveLength(0);
+      } finally {
+        process.off("unhandledRejection", handler);
+        server.server.close();
+      }
+    }, 10_000);
+  });
 });
 
 // ---------------------------------------------------------------------------

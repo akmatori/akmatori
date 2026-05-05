@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
 )
@@ -400,18 +401,22 @@ func TestHandleHTTPConnectorByID_MethodNotAllowed(t *testing.T) {
 
 // TestTriggerGatewayReload_WithReloader tests that gateway reload is called
 func TestTriggerGatewayReload_WithReloader(t *testing.T) {
-	called := false
+	// triggerGatewayReload runs the reloader in a goroutine, so we use a
+	// channel to synchronize without racing the test's read against the
+	// goroutine's write.
+	called := make(chan struct{}, 1)
 	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	h.SetGatewayReloader(func() error {
-		called = true
+		called <- struct{}{}
 		return nil
 	})
 
 	h.triggerGatewayReload()
 
-	// Give goroutine time to execute
-	for i := 0; i < 100 && !called; i++ {
-		// busy-wait briefly
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("gateway reloader was not invoked")
 	}
 }
 

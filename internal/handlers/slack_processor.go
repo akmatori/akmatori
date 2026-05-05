@@ -188,6 +188,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		var response string
 		var finalSessionID string
 		var hasError bool
+		var superseded bool
 		var lastStreamedLog string
 		var finalTokensUsed int
 		var finalExecutionTimeMs int64
@@ -218,6 +219,15 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 				hasError = true
 				closeOnce.Do(func() { close(done) })
 			},
+			// A second Slack message in the same thread starts a new agent run
+			// for the same incident_id. The replacement run owns finalization
+			// (DB + Slack) — this displaced goroutine must unblock and exit
+			// silently rather than overwrite the replacement's success with
+			// a "superseded" failure.
+			OnSuperseded: func() {
+				superseded = true
+				closeOnce.Do(func() { close(done) })
+			},
 		}
 
 		// Always start a fresh agent session — resuming stale sessions causes
@@ -226,8 +236,9 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		slog.Info("starting new agent session for incident", "incident_id", incidentUUID)
 		if wsErr := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback); wsErr != nil {
 			slog.Error("failed to start/continue incident via WebSocket", "err", wsErr)
+			startErr := fmt.Sprintf("❌ Agent worker error: %v", wsErr)
 			h.finishSlackMessage(channel, threadID, progressMsgTS, isStreaming, incidentUUID, user, text,
-				fmt.Sprintf("❌ Agent worker error: %v", wsErr), "", true, "", 0, 0)
+				startErr, startErr, "", true, "", 0, 0)
 			return
 		}
 
@@ -236,6 +247,29 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 
 		// Flush any buffered progress lines so the last status is not lost.
 		progressStreamer.Flush()
+
+		// If a newer message displaced this run, the replacement run will
+		// finalize the incident in the DB and post its own progress / final
+		// message. Exit early so we do not race the replacement with a
+		// failure update — but first stop streaming and replace this run's
+		// progress message so the user does not see a dangling "Thinking..."
+		// indicator alongside the replacement's message.
+		if superseded {
+			slog.Info("slack run superseded; leaving finalization to the new run", "incident_id", incidentUUID)
+			if isStreaming {
+				if _, _, stopErr := h.client.StopStream(channel, progressMsgTS); stopErr != nil {
+					slog.Warn("failed to stop stream on superseded run", "err", stopErr)
+				}
+			}
+			if _, _, _, updErr := h.client.UpdateMessage(
+				channel,
+				progressMsgTS,
+				slack.MsgOptionText("_(superseded by a newer message in this thread)_", false),
+			); updErr != nil {
+				slog.Warn("failed to update superseded progress message", "err", updErr)
+			}
+			return
+		}
 
 		// Use original sessionID if finalSessionID is empty (for resume cases)
 		if finalSessionID == "" {
@@ -250,6 +284,9 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 
 		// Format response for Slack: parse structured blocks, summarize when
 		// over budget, append the footer. Single message; no thread replies.
+		// Note: finalResponse is the Slack-sized message; response is the raw
+		// agent output that gets stored in the DB so the web UI shows the full
+		// `[FINAL_RESULT]` content rather than the truncated Slack version.
 		var finalResponse string
 		if hasError {
 			finalResponse = response
@@ -260,20 +297,24 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		}
 
 		h.finishSlackMessage(channel, threadID, progressMsgTS, isStreaming, incidentUUID, user, text,
-			finalResponse, fullLog, hasError, finalSessionID, finalTokensUsed, finalExecutionTimeMs)
+			finalResponse, response, fullLog, hasError, finalSessionID, finalTokensUsed, finalExecutionTimeMs)
 		return
 	}
 
 	// No WebSocket worker available
 	slog.Error("agent worker not connected", "incident_id", incidentUUID)
+	errMsg := "❌ Agent worker not connected. Please check that the agent-worker container is running."
 	h.finishSlackMessage(channel, threadID, progressMsgTS, isStreaming, incidentUUID, user, text,
-		"❌ Agent worker not connected. Please check that the agent-worker container is running.", "", true, "", 0, 0)
+		errMsg, errMsg, "", true, "", 0, 0)
 }
 
 // finishSlackMessage handles the final steps of Slack message processing.
 // isStreaming indicates whether the progress message was started via StartStream
-// (so StopStream is called before the final UpdateMessage).
-func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS string, isStreaming bool, incidentUUID, user, text, finalResponse, fullLog string, hasError bool, sessionID string, tokensUsed int, executionTimeMs int64) {
+// (so StopStream is called before the final UpdateMessage). finalResponse is
+// what gets posted to Slack; rawResponse is the full agent output stored in
+// `incident.response` so the web UI shows the complete result, not the
+// Slack-sized summarization.
+func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS string, isStreaming bool, incidentUUID, user, text, finalResponse, rawResponse, fullLog string, hasError bool, sessionID string, tokensUsed int, executionTimeMs int64) {
 	// Remove processing reaction
 	if removeErr := h.client.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
 		Channel:   channel,
@@ -313,7 +354,7 @@ func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS strin
 				user, text, "")
 		}
 
-		if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLogWithContext, finalResponse, tokensUsed, executionTimeMs); updateErr != nil {
+		if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLogWithContext, rawResponse, tokensUsed, executionTimeMs); updateErr != nil {
 			slog.Warn("failed to update incident", "err", updateErr)
 		} else {
 			slog.Info("updated incident", "incident_id", incidentUUID, "status", finalStatus, "session_id", sessionID)
@@ -326,13 +367,27 @@ func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS strin
 			slog.Warn("failed to stop stream", "err", stopErr)
 		}
 	}
-	_, _, _, updateErr := h.client.UpdateMessage(
+	// chat.update on a streamed message is capped at ~4000 chars even after
+	// chat.stopStream, so replace the progress message with a short marker
+	// and post the full final body as a fresh thread reply (chat.postMessage
+	// allows up to ~40,000 chars).
+	marker := slackInvestigationDoneMarker
+	if hasError {
+		marker = slackInvestigationFailedMarker
+	}
+	if _, _, _, markerErr := h.client.UpdateMessage(
 		channel,
 		progressMsgTS,
+		slack.MsgOptionText(marker, false),
+	); markerErr != nil {
+		slog.Warn("failed to mark progress message complete", "err", markerErr)
+	}
+	if _, _, postErr := h.client.PostMessage(
+		channel,
 		slack.MsgOptionText(finalResponse, false),
-	)
-	if updateErr != nil {
-		slog.Error("failed to update final result", "err", updateErr)
+		slack.MsgOptionTS(threadID),
+	); postErr != nil {
+		slog.Error("failed to post final summary thread reply", "err", postErr)
 	}
 }
 

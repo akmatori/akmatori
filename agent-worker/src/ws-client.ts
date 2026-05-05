@@ -121,18 +121,28 @@ export class WebSocketClient {
     this.ws!.send(serializeMessage(msg));
   }
 
-  /** Send streaming output for an incident. */
-  sendOutput(incidentId: string, output: string): void {
+  /**
+   * Send streaming output for an incident. runId echoes the API-stamped
+   * run identifier so the API can drop late frames from a superseded run.
+   * Pass undefined for synthetic outputs that have no associated run.
+   */
+  sendOutput(incidentId: string, runId: string | undefined, output: string): void {
     this.send({
       type: "agent_output",
       incident_id: incidentId,
       output,
+      ...(runId ? { run_id: runId } : {}),
     });
   }
 
-  /** Send completion notification with metrics. */
+  /**
+   * Send completion notification with metrics. runId mirrors the API run_id
+   * so completion for a superseded run is dropped instead of closing the new
+   * waiter's done channel.
+   */
   sendCompleted(
     incidentId: string,
+    runId: string | undefined,
     sessionId: string,
     response: string,
     tokensUsed: number,
@@ -145,15 +155,21 @@ export class WebSocketClient {
       output: response,
       tokens_used: tokensUsed,
       execution_time_ms: executionTimeMs,
+      ...(runId ? { run_id: runId } : {}),
     });
   }
 
-  /** Send error notification for an incident. */
-  sendError(incidentId: string, errorMsg: string): void {
+  /**
+   * Send error notification for an incident. runId mirrors the API run_id
+   * so a superseded-run error is dropped on the API side rather than firing
+   * OnError on the new waiter's callback.
+   */
+  sendError(incidentId: string, runId: string | undefined, errorMsg: string): void {
     this.send({
       type: "agent_error",
       incident_id: incidentId,
       error: errorMsg,
+      ...(runId ? { run_id: runId } : {}),
     });
   }
 

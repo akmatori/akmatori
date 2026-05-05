@@ -87,6 +87,13 @@ export interface ExecuteParams {
   toolAllowlist?: ToolAllowlistEntry[];
   onOutput: (text: string) => void;
   onEvent?: (event: AgentSessionEvent) => void;
+  /**
+   * Called once the session has been added to activeSessions. The orchestrator
+   * uses this to release a per-incident launch chain so the next launch's
+   * abortInFlightSession sees the registered session instead of an empty slot
+   * during the bootstrap window.
+   */
+  onRegistered?: () => void;
 }
 
 export interface ResumeParams {
@@ -102,6 +109,8 @@ export interface ResumeParams {
   toolAllowlist?: ToolAllowlistEntry[];
   onOutput: (text: string) => void;
   onEvent?: (event: AgentSessionEvent) => void;
+  /** See ExecuteParams.onRegistered. */
+  onRegistered?: () => void;
 }
 
 export interface AgentRunnerConfig {
@@ -115,11 +124,16 @@ export interface AgentRunnerConfig {
 // ---------------------------------------------------------------------------
 
 /**
- * Map our ThinkingLevel (which includes "off") to pi-mono's ThinkingLevel.
- * pi-mono does not have "off" - we map it to "minimal" as the closest.
+ * Map our ThinkingLevel to pi-mono's. pi-mono accepts "off" at the
+ * createAgentSession boundary (pi-agent-core ThinkingLevel includes it), even
+ * though pi-ai's narrower ThinkingLevel does not. For OpenAI-compatible
+ * providers without a thinkingLevelMap, pi-mono omits `reasoning_effort`
+ * entirely when level is "off" — which matches what users mean by "off" and
+ * avoids gateways that reject "minimal" (e.g. ai.tools.gcore.com only accepts
+ * high|medium|low|none).
  */
-export function mapThinkingLevel(level: ThinkingLevel): PiThinkingLevel {
-  if (level === "off") return "minimal";
+export function mapThinkingLevel(level: ThinkingLevel): PiThinkingLevel | "off" {
+  if (level === "off") return "off";
   const valid: PiThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh"];
   return valid.includes(level as PiThinkingLevel) ? (level as PiThinkingLevel) : "medium";
 }
@@ -338,6 +352,11 @@ export class AgentRunner {
     });
 
     this.activeSessions.set(params.incidentId, session);
+    // Signal the orchestrator that this launch has registered so it can
+    // release the per-incident launch chain. Subsequent launches that were
+    // queued behind us now see a populated activeSessions slot and their
+    // abortInFlightSession can target this session instead of no-op'ing.
+    params.onRegistered?.();
 
     // Accumulate response and token usage
     let responseText = "";
@@ -415,18 +434,37 @@ export class AgentRunner {
       };
     } finally {
       unsubscribe();
-      this.activeSessions.delete(params.incidentId);
+      // Only delete from activeSessions if THIS session is still the current
+      // entry. When the orchestrator handles a second new_incident for the
+      // same incident_id, it aborts the prior session and stores the
+      // replacement here; if the prior session's finally still ran an
+      // unconditional delete, it would remove the replacement and the next
+      // cancel call would no-op. Same-session compare-and-delete keeps the
+      // map honest under back-to-back starts.
+      if (this.activeSessions.get(params.incidentId) === session) {
+        this.activeSessions.delete(params.incidentId);
+      }
     }
   }
 
   /**
    * Cancel an active execution for an incident.
+   *
+   * Compare-and-delete on the slot: if a replacement run has already
+   * installed itself in activeSessions while this cancel awaited
+   * session.abort(), do NOT delete — that would untrack the live
+   * replacement and let later cancel/supersede requests miss it. The
+   * superseded session's own finally block also compare-and-deletes,
+   * so the slot still gets cleaned up by whichever owner sees itself
+   * still in the map.
    */
   async cancel(incidentId: string): Promise<void> {
     const session = this.activeSessions.get(incidentId);
     if (session) {
       await session.abort();
-      this.activeSessions.delete(incidentId);
+      if (this.activeSessions.get(incidentId) === session) {
+        this.activeSessions.delete(incidentId);
+      }
     }
   }
 
