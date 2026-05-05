@@ -166,18 +166,21 @@ func TestAlertFinalizeSlackMessageBody_ShortResponsePassthrough(t *testing.T) {
 	}
 }
 
-// TestAlertProgressStreamer_AppendsDuringSimulatedInvestigation simulates the
-// alert flow's OnOutput callback piping deltas into the SlackProgressStreamer
-// and asserts that AppendStream is called with non-empty status text.
-func TestAlertProgressStreamer_AppendsDuringSimulatedInvestigation(t *testing.T) {
+// TestAlertProgressStreamer_UpdatesWithLatestThinking simulates the alert
+// flow's OnOutput callback piping deltas into the SlackProgressStreamer and
+// asserts that UpdateMessage carries only the latest reasoning (🤔) line —
+// tool start/end markers are intentionally dropped from the progress UI.
+func TestAlertProgressStreamer_UpdatesWithLatestThinking(t *testing.T) {
 	fc := &fakeStreamingClient{}
-	streamer := NewSlackProgressStreamer(fc, "C_ALERTS", "1707000001.000100", true, 1*time.Millisecond)
+	streamer := NewSlackProgressStreamer(fc, "C_ALERTS", "1707000001.000100", 1*time.Millisecond)
 
-	// Simulate agent OnOutput streaming markers and noise interleaved.
+	// Simulate agent OnOutput streaming markers, thinking, and noise interleaved.
 	chunks := []string{
 		"\n🛠️ Running: gateway_call\n",
 		"Args:\n{}\nOutput:\nrows: 0\n",
+		"\n🤔 inspecting host metrics\n",
 		"\n✅ Ran: gateway_call\n",
+		"\n🤔 narrowing to last 15m window\n",
 	}
 	for _, c := range chunks {
 		streamer.AppendStatus(c)
@@ -185,17 +188,17 @@ func TestAlertProgressStreamer_AppendsDuringSimulatedInvestigation(t *testing.T)
 	}
 	streamer.Flush()
 
-	calls := fc.snapshotAppend()
+	calls := fc.snapshotUpdate()
 	if len(calls) == 0 {
-		t.Fatal("expected AppendStream calls for marker-bearing deltas")
+		t.Fatal("expected UpdateMessage calls for thinking deltas")
 	}
 	for _, c := range calls {
 		if c.text == "" {
-			t.Errorf("AppendStream called with empty text: %+v", c)
+			t.Errorf("UpdateMessage called with empty text: %+v", c)
 		}
-	}
-	if len(fc.snapshotUpdate()) != 0 {
-		t.Errorf("UpdateMessage must not be called when isStreaming=true")
+		if !contains(c.text, "🤔") {
+			t.Errorf("UpdateMessage text should be a thinking line, got %q", c.text)
+		}
 	}
 }
 

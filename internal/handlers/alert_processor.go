@@ -356,7 +356,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 	var progressStreamer *SlackProgressStreamer
 	if progressMsgTS != "" {
 		if slackClient := h.slackManager.GetClient(); slackClient != nil {
-			progressStreamer = NewSlackProgressStreamer(slackClient, slackChannelID, progressMsgTS, isStreaming, slackAppendInterval)
+			progressStreamer = NewSlackProgressStreamer(slackClient, slackChannelID, progressMsgTS, slackAppendInterval)
 		}
 	}
 

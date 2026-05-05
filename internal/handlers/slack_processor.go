@@ -162,10 +162,10 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		isStreaming = true
 	}
 
-	// SlackProgressStreamer condenses agent OnOutput deltas into short status
-	// lines and forwards them to Slack via chat.appendStream (when streaming
-	// is available) or chat.update (fallback for older workspaces).
-	progressStreamer := NewSlackProgressStreamer(h.client, channel, progressMsgTS, isStreaming, slackAppendInterval)
+	// SlackProgressStreamer replaces the progress message body with the
+	// agent's latest reasoning (🤔) line via chat.update; tool start/end
+	// markers are filtered out so the user sees a clean single-line status.
+	progressStreamer := NewSlackProgressStreamer(h.client, channel, progressMsgTS, slackAppendInterval)
 
 	taskWithGuidance := executor.PrependGuidance(text)
 
