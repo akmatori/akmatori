@@ -147,6 +147,15 @@ func runMigrations(db *gorm.DB) error {
 		return err
 	}
 
+	// Normalize OpenRouter model IDs that were seeded by older Akmatori
+	// releases using a dash-form alias (e.g. anthropic/claude-sonnet-4-6) that
+	// was never registered by pi-mono. pi-mono only registers the dot-form
+	// (anthropic/claude-sonnet-4.6), so unmigrated rows would fail at runtime
+	// once an operator added an API key to the seeded OpenRouter row.
+	if err := migrateOpenRouterDashFormModels(db); err != nil {
+		return err
+	}
+
 	slog.Info("database migrations completed successfully")
 	return nil
 }
@@ -266,6 +275,35 @@ func migrateLLMSettingsName(db *gorm.DB) error {
 	return nil
 }
 
+// openRouterDashFormRenames maps stale dash-form OpenRouter model IDs that
+// older Akmatori releases seeded as defaults to the dot-form aliases that
+// pi-mono actually registers. Keep this list narrow: only entries that were
+// previously shipped as defaults belong here, so user-typed values are not
+// silently rewritten unless they exactly match a known stale default.
+var openRouterDashFormRenames = map[string]string{
+	"anthropic/claude-sonnet-4-5": "anthropic/claude-sonnet-4.5",
+	"anthropic/claude-sonnet-4-6": "anthropic/claude-sonnet-4.6",
+}
+
+// migrateOpenRouterDashFormModels rewrites OpenRouter rows still pinned to a
+// previously-seeded dash-form alias to the dot-form alias registered by
+// pi-mono. Idempotent: rows already on the dot-form (or any other value) are
+// untouched.
+func migrateOpenRouterDashFormModels(db *gorm.DB) error {
+	for old, replacement := range openRouterDashFormRenames {
+		result := db.Model(&LLMSettings{}).
+			Where("provider = ? AND model = ?", LLMProviderOpenRouter, old).
+			Update("model", replacement)
+		if result.Error != nil {
+			return fmt.Errorf("rename openrouter model %s → %s: %w", old, replacement, result.Error)
+		}
+		if result.RowsAffected > 0 {
+			slog.Info("migrated openrouter model id", "from", old, "to", replacement, "rows", result.RowsAffected)
+		}
+	}
+	return nil
+}
+
 // InitializeDefaults creates default records if they don't exist
 func InitializeDefaults() error {
 	slog.Info("initializing default database records")
@@ -316,11 +354,15 @@ func InitializeDefaults() error {
 }
 
 // Default models per provider, used when seeding new provider rows.
+// Values must align with the "Recommended" entries in
+// web/src/components/settings/LLMSettingsSection.tsx MODEL_SUGGESTIONS, and
+// must use IDs registered by the active pi-mono SDK (note OpenRouter aliases
+// use dot-form, e.g. anthropic/claude-sonnet-4.6).
 var defaultModelsPerProvider = map[LLMProvider]string{
-	LLMProviderOpenAI:     "gpt-5.4",
+	LLMProviderOpenAI:     "gpt-5.5",
 	LLMProviderAnthropic:  "claude-sonnet-4-6",
-	LLMProviderGoogle:     "gemini-2.5-pro",
-	LLMProviderOpenRouter: "anthropic/claude-sonnet-4-6",
+	LLMProviderGoogle:     "gemini-3-pro-preview",
+	LLMProviderOpenRouter: "openai/gpt-5.5",
 	LLMProviderCustom:     "",
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MODEL_SUGGESTIONS } from './LLMSettingsSection';
+import { MODEL_SUGGESTIONS } from './llmModelSuggestions';
 
 describe('MODEL_SUGGESTIONS', () => {
   const ids = (provider: keyof typeof MODEL_SUGGESTIONS) =>
@@ -44,6 +44,22 @@ describe('MODEL_SUGGESTIONS', () => {
     const dashForm = /^anthropic\/claude-(opus|sonnet|haiku)-\d+-\d+(-fast)?$/;
     for (const { value } of MODEL_SUGGESTIONS.openrouter) {
       expect(value).not.toMatch(dashForm);
+    }
+  });
+
+  it('marks exactly one Recommended entry per non-custom provider', () => {
+    const expected: Record<string, string> = {
+      openai: 'gpt-5.5',
+      anthropic: 'claude-sonnet-4-6',
+      google: 'gemini-3-pro-preview',
+      openrouter: 'openai/gpt-5.5',
+    };
+    for (const [provider, value] of Object.entries(expected)) {
+      const recommended = MODEL_SUGGESTIONS[provider as keyof typeof MODEL_SUGGESTIONS].filter(
+        (s) => s.label.includes('(Recommended)'),
+      );
+      expect(recommended).toHaveLength(1);
+      expect(recommended[0].value).toBe(value);
     }
   });
 });

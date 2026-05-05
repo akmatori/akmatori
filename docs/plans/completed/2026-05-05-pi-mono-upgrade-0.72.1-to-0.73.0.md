@@ -27,7 +27,7 @@ So the SDK upgrade itself is a version bump only. The substantive work is the mo
   - Anthropic: `claude-opus-4-7`
   - OpenAI: `gpt-5.5`, `gpt-5.5-pro`
   - Google: `gemini-3-pro-preview`, `gemini-3.1-pro-preview`, `gemini-3-flash-preview`
-  - OpenRouter aliases: `anthropic/claude-opus-4-7`, `openai/gpt-5.5`, `google/gemini-3-pro-preview`
+  - OpenRouter aliases (dot-form only — dash-form is not registered): `anthropic/claude-opus-4.7`, `anthropic/claude-sonnet-4.6`, `openai/gpt-5.5`, `google/gemini-3.1-pro-preview`, `google/gemini-3-flash-preview`
 
 ## Development Approach
 
@@ -64,7 +64,7 @@ So the SDK upgrade itself is a version bump only. The substantive work is the mo
   - openai: add `{ value: 'gpt-5.5', label: 'gpt-5.5 (Recommended)' }` and `{ value: 'gpt-5.5-pro', label: 'gpt-5.5-pro (Most capable)' }`; downgrade existing `gpt-5.4` label to remove "Recommended"
   - anthropic: add `{ value: 'claude-opus-4-7', label: 'claude-opus-4-7 (Most capable)' }`; demote `claude-opus-4-6` label
   - google: add `{ value: 'gemini-3-pro-preview', label: 'gemini-3-pro-preview (Recommended)' }`, `{ value: 'gemini-3.1-pro-preview', label: 'gemini-3.1-pro-preview (Preview)' }`, `{ value: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview (Fast)' }`; demote `gemini-2.5-pro` label
-  - openrouter: add `{ value: 'anthropic/claude-opus-4-7', ... }`, `{ value: 'openai/gpt-5.5', ... }`, `{ value: 'google/gemini-3-pro-preview', ... }`
+  - openrouter: add `{ value: 'anthropic/claude-opus-4.7', ... }`, `{ value: 'openai/gpt-5.5', ... }`, `{ value: 'google/gemini-3.1-pro-preview', ... }` (dot-form aliases — these are the IDs registered by pi-mono 0.73.0 for OpenRouter)
 - [x] Add/extend a unit test (or component test if one exists) verifying the suggestion list contains the new IDs for each provider; use the project's existing UI testing pattern. If no existing tests cover `MODEL_SUGGESTIONS`, add a minimal test in `web/src/components/settings/` that imports the constant via `export` (export it if needed) and asserts the new IDs are present. (Note: web had no test infra; added vitest as a dev dep, `test` script, and `LLMSettingsSection.test.ts`.)
 - [x] Run web test suite (e.g. `cd /opt/akmatori/web && npm test` or the project equivalent) — must pass.
 

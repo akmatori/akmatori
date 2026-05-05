@@ -5,43 +5,7 @@ import ErrorMessage from '../ErrorMessage';
 import { SuccessMessage } from '../ErrorMessage';
 import { llmSettingsApi } from '../../api/client';
 import type { LLMConfig, LLMProvider, ThinkingLevel } from '../../types';
-
-export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: string }[]> = {
-  openai: [
-    { value: 'gpt-5.5', label: 'gpt-5.5 (Recommended)' },
-    { value: 'gpt-5.5-pro', label: 'gpt-5.5-pro (Most capable)' },
-    { value: 'gpt-5.4', label: 'gpt-5.4' },
-    { value: 'gpt-5.4-mini', label: 'gpt-5.4-mini (Fast)' },
-    { value: 'gpt-5.3-codex', label: 'gpt-5.3-codex' },
-    { value: 'gpt-5-mini', label: 'gpt-5-mini (Budget)' },
-    { value: 'o4-mini', label: 'o4-mini (Reasoning)' },
-  ],
-  anthropic: [
-    { value: 'claude-opus-4-7', label: 'claude-opus-4-7 (Most capable)' },
-    { value: 'claude-opus-4-6', label: 'claude-opus-4-6' },
-    { value: 'claude-sonnet-4-6', label: 'claude-sonnet-4-6 (Recommended)' },
-    { value: 'claude-sonnet-4-5', label: 'claude-sonnet-4-5' },
-    { value: 'claude-haiku-4-5', label: 'claude-haiku-4-5 (Fast)' },
-  ],
-  google: [
-    { value: 'gemini-3-pro-preview', label: 'gemini-3-pro-preview (Recommended)' },
-    { value: 'gemini-3.1-pro-preview', label: 'gemini-3.1-pro-preview (Preview)' },
-    { value: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview (Fast)' },
-    { value: 'gemini-2.5-pro', label: 'gemini-2.5-pro' },
-    { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash' },
-    { value: 'gemini-2.0-flash', label: 'gemini-2.0-flash (Stable)' },
-  ],
-  openrouter: [
-    { value: 'anthropic/claude-opus-4.7', label: 'anthropic/claude-opus-4.7 (Most capable)' },
-    { value: 'openai/gpt-5.5', label: 'openai/gpt-5.5 (Recommended)' },
-    { value: 'google/gemini-3.1-pro-preview', label: 'google/gemini-3.1-pro-preview' },
-    { value: 'anthropic/claude-sonnet-4.6', label: 'anthropic/claude-sonnet-4.6' },
-    { value: 'openai/gpt-5.4', label: 'openai/gpt-5.4' },
-    { value: 'openai/gpt-5.4-mini', label: 'openai/gpt-5.4-mini' },
-    { value: 'google/gemini-2.5-pro', label: 'google/gemini-2.5-pro' },
-  ],
-  custom: [],
-};
+import { MODEL_SUGGESTIONS } from './llmModelSuggestions';
 
 const THINKING_LEVELS: { value: ThinkingLevel; label: string }[] = [
   { value: 'off', label: 'Off' },
@@ -160,10 +124,12 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
 
   const handleFormProviderChange = (provider: LLMProvider) => {
     const suggestions = MODEL_SUGGESTIONS[provider];
+    const recommended = suggestions.find((s) => s.label.includes('(Recommended)'));
+    const fallback = suggestions.length > 0 ? suggestions[0].value : '';
     setForm(prev => ({
       ...prev,
       provider,
-      model: suggestions.length > 0 ? suggestions[0].value : '',
+      model: recommended?.value ?? fallback,
     }));
   };
 
