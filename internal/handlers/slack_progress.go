@@ -20,7 +20,7 @@ type slackStreamingClient interface {
 // progress message is a regular chat.postMessage (not a streamed message),
 // so chat.update accepts up to ~40000 chars; this cap exists for UX — a
 // status line should be short — not to satisfy an API limit.
-const slackThinkingMaxLen = 120
+const slackThinkingMaxLen = 500
 
 // SlackProgressStreamer condenses agent OnOutput deltas into a single status
 // line and replaces the bound Slack message body with the latest reasoning
