@@ -34,7 +34,7 @@ export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: stri
   openrouter: [
     { value: 'anthropic/claude-opus-4.7', label: 'anthropic/claude-opus-4.7 (Most capable)' },
     { value: 'openai/gpt-5.5', label: 'openai/gpt-5.5 (Recommended)' },
-    { value: 'google/gemini-3-pro-preview', label: 'google/gemini-3-pro-preview' },
+    { value: 'google/gemini-3.1-pro-preview', label: 'google/gemini-3.1-pro-preview' },
     { value: 'anthropic/claude-sonnet-4.6', label: 'anthropic/claude-sonnet-4.6' },
     { value: 'openai/gpt-5.4', label: 'openai/gpt-5.4' },
     { value: 'openai/gpt-5.4-mini', label: 'openai/gpt-5.4-mini' },
