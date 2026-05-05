@@ -82,6 +82,6 @@ So the SDK upgrade itself is a version bump only. The substantive work is the mo
 **Files:**
 - Modify: `CLAUDE.md`
 
-- [ ] Update CLAUDE.md SDK version reference from `v0.72.1` to `v0.73.0` (search for "0.72.1" in the Agent Worker Architecture section).
-- [ ] Add a one-line note to the "SDK Features" or "Recent Agent Behavior Notes" section that 0.73.0 brings incremental bash output streaming and Bedrock Opus 4.7 thinking fix — both automatic.
-- [ ] Move this plan from `docs/plans/` to `docs/plans/completed/` after merge.
+- [x] Update CLAUDE.md SDK version reference from `v0.72.1` to `v0.73.0` (search for "0.72.1" in the Agent Worker Architecture section).
+- [x] Add a one-line note to the "SDK Features" or "Recent Agent Behavior Notes" section that 0.73.0 brings incremental bash output streaming and Bedrock Opus 4.7 thinking fix — both automatic.
+- [x] Move this plan from `docs/plans/` to `docs/plans/completed/` after merge.
