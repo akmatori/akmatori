@@ -28,7 +28,7 @@ describe('MODEL_SUGGESTIONS', () => {
       expect.arrayContaining([
         'anthropic/claude-opus-4.7',
         'openai/gpt-5.5',
-        'google/gemini-3-pro-preview',
+        'google/gemini-3.1-pro-preview',
       ]),
     );
   });
