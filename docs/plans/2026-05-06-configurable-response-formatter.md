@@ -111,11 +111,11 @@ When the formatter is disabled, the worker is disconnected, or the LLM call fail
 - Create: `web/src/components/settings/FormattingSettingsSection.tsx`
 - Modify: `web/src/pages/Settings.tsx`
 
-- [ ] Build a settings section mirroring `RetentionSettingsSection.tsx`: enable toggle, multiline prompt textarea (with the default prompt prefilled when empty), max tokens number input, temperature number input, Save button calling `PUT /api/settings/formatting`.
-- [ ] Show inline help text explaining that the formatter receives the agent's full reasoning + final response and the prompt controls the output structure.
-- [ ] Add the section to `Settings.tsx`.
-- [ ] Add a vitest unit test for the component (rendering, submit payload), matching the existing settings-section tests if they exist, otherwise minimal smoke test.
-- [ ] Run `make test-web` — must pass.
+- [x] Build a settings section mirroring `RetentionSettingsSection.tsx`: enable toggle, multiline prompt textarea (with the default prompt prefilled when empty), max tokens number input, temperature number input, Save button calling `PUT /api/settings/formatting`.
+- [x] Show inline help text explaining that the formatter receives the agent's full reasoning + final response and the prompt controls the output structure.
+- [x] Add the section to `Settings.tsx`.
+- [x] Add a vitest unit test for the component (rendering, submit payload), matching the existing settings-section tests if they exist, otherwise minimal smoke test. (Followed the existing `LLMSettingsSection.test.ts` pattern: pure-logic helper module + vitest tests, since the project has no `@testing-library/react` setup. Pulled helpers into `formattingSettingsHelpers.ts` so the component file only exports the React component, satisfying the `react-refresh/only-export-components` rule.)
+- [x] Run `make test-web` — must pass.
 
 ### Task 6: Verify acceptance criteria
 

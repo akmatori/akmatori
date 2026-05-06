@@ -329,6 +329,24 @@ export interface RetentionSettingsUpdate {
   cleanup_interval_hours?: number;
 }
 
+// Formatting Settings
+export interface FormattingSettings {
+  id: number;
+  enabled: boolean;
+  system_prompt: string;
+  max_tokens: number;
+  temperature: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FormattingSettingsUpdate {
+  enabled?: boolean;
+  system_prompt?: string;
+  max_tokens?: number;
+  temperature?: number;
+}
+
 // General Settings
 export interface GeneralSettings {
   id: number;
