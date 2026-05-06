@@ -11,6 +11,7 @@ import (
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/output"
 	"github.com/akmatori/akmatori/internal/services"
+	slackutil "github.com/akmatori/akmatori/internal/slack"
 	"github.com/akmatori/akmatori/internal/utils"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -123,15 +124,19 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		}
 	}
 
-	// Add processing reaction (fire-and-forget, don't block execution)
-	go func() {
-		if err := h.client.AddReaction("hourglass_flowing_sand", slack.ItemRef{
-			Channel:   channel,
-			Timestamp: threadID,
-		}); err != nil {
-			slog.Warn("failed to add reaction", "err", err)
-		}
-	}()
+	// Show "is investigating..." in the thread header and add a hourglass
+	// reaction on the thread root for the duration of the agent run. The
+	// controller owns both signals' lifecycle; defer Stop covers all exit
+	// paths (success, error, supersede) since the handler blocks on <-done
+	// before returning.
+	typing := slackutil.NewTypingController(slackutil.TypingControllerConfig{
+		Client:      h.client,
+		ChannelID:   channel,
+		ThreadTS:    threadID,
+		ReactionRef: slack.ItemRef{Channel: channel, Timestamp: threadID},
+	})
+	typing.Start(context.Background())
+	defer typing.Stop()
 
 	// Post the initial "Thinking..." progress message. We deliberately do
 	// not use chat.startStream here: Slack rejects chat.update on an
@@ -295,13 +300,9 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 // output stored in `incident.response` so the web UI shows the complete
 // result, not the Slack-sized summarization.
 func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS string, incidentUUID, user, text, finalResponse, rawResponse, fullLog string, hasError bool, sessionID string, tokensUsed int, executionTimeMs int64) {
-	// Remove processing reaction
-	if removeErr := h.client.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
-		Channel:   channel,
-		Timestamp: threadID,
-	}); removeErr != nil {
-		slog.Warn("failed to remove reaction", "err", removeErr)
-	}
+	// The hourglass reaction is now removed by the TypingController in
+	// processMessage's deferred Stop; here we only add the terminal
+	// success/error reaction.
 
 	// Add result reaction
 	if hasError {
@@ -385,14 +386,11 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 		threadTS = event.ThreadTimeStamp
 	}
 
-	// Add hourglass reaction immediately so user sees acknowledgement
-	// BEFORE the slow OpenAI extraction call
-	if err := h.client.AddReaction("hourglass_flowing_sand", slack.ItemRef{
-		Channel:   event.Channel,
-		Timestamp: event.TimeStamp,
-	}); err != nil {
-		slog.Warn("failed to add reaction", "err", err)
-	}
+	// The hourglass reaction is now placed by the TypingController in the
+	// downstream Slack-channel-alert investigation flow (alert_processor.go's
+	// runSlackChannelInvestigation). The brief alert-extraction phase below
+	// has no dedicated indicator; the bot's "Thinking..." progress message
+	// lands shortly after as activity feedback.
 
 	// Get custom extraction prompt if configured
 	var customPrompt string
@@ -437,13 +435,9 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 		h.alertHandler.ProcessAlertFromSlackChannel(instance, *normalized, event.Channel, threadTS)
 	} else {
 		slog.Error("AlertHandler not configured, cannot process Slack channel alert")
-		// Remove hourglass and add warning reaction
-		if err := h.client.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
-			Channel:   event.Channel,
-			Timestamp: event.TimeStamp,
-		}); err != nil {
-			slog.Warn("failed to remove hourglass reaction", "err", err)
-		}
+		// No hourglass to remove on this error path — the typing controller
+		// in runSlackChannelInvestigation never started because we never got
+		// there. Just surface the misconfiguration as a warning reaction.
 		if err := h.client.AddReaction("warning", slack.ItemRef{
 			Channel:   event.Channel,
 			Timestamp: event.TimeStamp,

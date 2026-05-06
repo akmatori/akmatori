@@ -198,6 +198,20 @@ go manager.WatchForReloads(ctx)
 - `internal/handlers/slack_progress.go` — `SlackProgressStreamer` emits condensed status lines (running/ran/thinking) via `chat.appendStream` while the agent runs, falling back to `chat.update` when streaming is not active. Throttled by `slackAppendInterval`.
 - `internal/services/slack_summarizer.go` — final agent output is summarized through `OneShotLLMCaller` to fit `slackMaxTextBytes` (8000); `internal/output/slack_budget.go` provides a deterministic byte-truncation fallback when the worker is unavailable or returns over-budget output. The result is posted as a single thread message with the existing footer.
 
+### Typing Indicator (`internal/slack/typing.go`)
+
+`TypingController` owns the lifecycle of the "is investigating..." thread-header banner (`assistant.threads.setStatus`) and the `hourglass_flowing_sand` reaction during agent runs. Constants are hardcoded — there is no DB column or UI for typing config:
+
+- Status text: `"is investigating..."`
+- Reaction emoji: `hourglass_flowing_sand`
+- Keepalive interval: 30s; safety TTL: 60min; circuit-breaker after 2 consecutive setStatus failures (also trips immediately on `feature_not_enabled` / `not_allowed_token_type`, which means the Slack app is not registered as an AI Assistant — the reaction continues working).
+
+Wired into three handler flows; each follows the `Start(ctx)` + `defer Stop()` pattern and relies on the surrounding handler blocking on `<-done` so the deferred Stop fires after the agent run finishes:
+
+- `slack_processor.go::processMessage` (mention/DM flow)
+- `alert_processor.go::runInvestigation` (webhook-alert flow)
+- `alert_processor.go::runSlackChannelInvestigation` (Slack-channel-alert flow)
+
 ## Alert Extraction (`internal/alerts/extraction/`)
 
 AI-powered extraction of structured alert data from free-form text:
