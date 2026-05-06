@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { MessageSquare, Cpu, Bell, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, Globe, Settings2, Trash2 } from 'lucide-react';
+import { MessageSquare, Cpu, Bell, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, Globe, Settings2, Trash2, Sparkles } from 'lucide-react';
 import AlertSourcesManager from '../components/AlertSourcesManager';
 import ProxySettings from '../components/ProxySettings';
 import LLMSettingsSection from '../components/settings/LLMSettingsSection';
 import SlackSettingsSection from '../components/settings/SlackSettingsSection';
 import GeneralSettingsSection from '../components/settings/GeneralSettingsSection';
 import RetentionSettingsSection from '../components/settings/RetentionSettingsSection';
+import FormattingSettingsSection from '../components/settings/FormattingSettingsSection';
 
 // Collapsible Section Component
 function SettingsSection({
@@ -77,6 +78,7 @@ export default function Settings() {
   const [slackStatus, setSlackStatus] = useState<'configured' | 'not-configured' | 'disabled' | undefined>();
   const [generalStatus, setGeneralStatus] = useState<'configured' | undefined>();
   const [retentionStatus, setRetentionStatus] = useState<'configured' | 'disabled' | undefined>();
+  const [formattingStatus, setFormattingStatus] = useState<'configured' | 'disabled' | undefined>();
 
   return (
     <div className="animate-fade-in max-w-3xl mx-auto">
@@ -139,6 +141,16 @@ export default function Settings() {
           status={retentionStatus}
         >
           <RetentionSettingsSection onStatusChange={setRetentionStatus} />
+        </SettingsSection>
+
+        {/* Response Formatting */}
+        <SettingsSection
+          title="Response Formatting"
+          description="Reformat agent responses with an extra LLM pass before storing"
+          icon={Sparkles}
+          status={formattingStatus}
+        >
+          <FormattingSettingsSection onStatusChange={setFormattingStatus} />
         </SettingsSection>
 
         {/* Alert Sources Section */}

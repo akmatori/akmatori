@@ -15,6 +15,8 @@ import type {
   GeneralSettingsUpdate,
   RetentionSettings,
   RetentionSettingsUpdate,
+  FormattingSettings,
+  FormattingSettingsUpdate,
   ContextFile,
   ValidateReferencesResponse,
   CreateIncidentRequest,
@@ -279,6 +281,17 @@ export const retentionSettingsApi = {
 
   update: (settings: RetentionSettingsUpdate) =>
     fetchApi<RetentionSettings>('/api/settings/retention', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    }),
+};
+
+// Formatting Settings API
+export const formattingSettingsApi = {
+  get: () => fetchApi<FormattingSettings>('/api/settings/formatting'),
+
+  update: (settings: FormattingSettingsUpdate) =>
+    fetchApi<FormattingSettings>('/api/settings/formatting', {
       method: 'PUT',
       body: JSON.stringify(settings),
     }),
