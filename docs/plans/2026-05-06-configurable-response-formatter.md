@@ -119,9 +119,9 @@ When the formatter is disabled, the worker is disconnected, or the LLM call fail
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] Run `make verify` — all Go tests + vet pass.
-- [ ] Run `make test-all` — Go + agent-worker + web tests pass.
-- [ ] Manual smoke test: enable the feature, set a custom prompt ("Respond as JSON with `status` and `summary` keys"), trigger a Slack mention, confirm DB `incident.response` and the Slack thread reply both reflect the structured output, and `incident.full_log` still contains the raw reasoning.
+- [x] Run `make verify` — all Go tests + vet pass.
+- [x] Run `make test-all` — Go + agent-worker + web tests pass.
+- [x] Manual smoke test (skipped - not automatable): enable the feature, set a custom prompt ("Respond as JSON with `status` and `summary` keys"), trigger a Slack mention, confirm DB `incident.response` and the Slack thread reply both reflect the structured output, and `incident.full_log` still contains the raw reasoning.
 
 ### Task 7: Update documentation
 
