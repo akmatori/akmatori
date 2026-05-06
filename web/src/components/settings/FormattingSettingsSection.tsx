@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Save, Info } from 'lucide-react';
 import LoadingSpinner from '../LoadingSpinner';
 import ErrorMessage from '../ErrorMessage';
@@ -26,9 +26,15 @@ export default function FormattingSettingsSection({ onStatusChange }: Formatting
   const [systemPrompt, setSystemPrompt] = useState('');
   const [maxTokens, setMaxTokens] = useState(1500);
   const [temperature, setTemperature] = useState(0.2);
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     loadSettings();
+    return () => {
+      if (successTimeoutRef.current !== null) {
+        clearTimeout(successTimeoutRef.current);
+      }
+    };
   }, []);
 
   const loadSettings = async () => {
@@ -75,7 +81,13 @@ export default function FormattingSettingsSection({ onStatusChange }: Formatting
       setTemperature(updated.temperature);
       onStatusChange?.(updated.enabled ? 'configured' : 'disabled');
       setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
+      if (successTimeoutRef.current !== null) {
+        clearTimeout(successTimeoutRef.current);
+      }
+      successTimeoutRef.current = setTimeout(() => {
+        setSuccess(false);
+        successTimeoutRef.current = null;
+      }, 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save formatting settings');
       console.error(err);

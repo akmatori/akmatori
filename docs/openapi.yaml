@@ -954,6 +954,45 @@ paths:
         '200':
           description: Updated proxy settings
 
+  /settings/formatting:
+    get:
+      summary: Get response-formatting settings
+      operationId: getFormattingSettings
+      tags: [Settings]
+      responses:
+        '200':
+          description: Singleton formatting settings record
+    put:
+      summary: Update response-formatting settings
+      operationId: updateFormattingSettings
+      tags: [Settings]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+                  description: When true, the agent's final response is reformatted via a one-shot LLM call before being persisted to incident.response and posted to Slack.
+                system_prompt:
+                  type: string
+                  maxLength: 8192
+                  description: System prompt used by the formatter LLM call.
+                max_tokens:
+                  type: integer
+                  minimum: 1
+                  maximum: 8000
+                temperature:
+                  type: number
+                  minimum: 0
+                  maximum: 2
+      responses:
+        '200':
+          description: Updated formatting settings
+        '400':
+          description: Validation error (max_tokens out of range, temperature out of range, or system_prompt over 8192 bytes)
+
   # ===== Context Files =====
   /context:
     get:

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/akmatori/akmatori/internal/database"
 )
@@ -110,8 +111,8 @@ func (f *ResponseFormatter) Format(ctx context.Context, rawResponse, fullLog str
 // dropped first) so the portion adjacent to the final response is preserved.
 func buildFormatterUserPrompt(rawResponse, fullLog string, maxBytes int) string {
 	const (
-		header        = "Reformat the agent's incident report using the configured output structure. The reasoning trace is provided as supporting context only — do not include it verbatim in the output.\n\n"
-		responseLabel = "--- Raw response ---\n"
+		header         = "Reformat the agent's incident report using the configured output structure. The reasoning trace is provided as supporting context only — do not include it verbatim in the output.\n\n"
+		responseLabel  = "--- Raw response ---\n"
 		reasoningLabel = "\n\n--- Full reasoning ---\n"
 		truncationNote = "[... earlier reasoning truncated ...]\n"
 	)
@@ -137,6 +138,14 @@ func buildFormatterUserPrompt(rawResponse, fullLog string, maxBytes int) string 
 
 	cutoff := len(fullLog) - budgetForLog + len(truncationNote)
 	if cutoff < 0 || cutoff >= len(fullLog) {
+		return header + responseLabel + rawResponse + reasoningLabel + truncationNote
+	}
+	// Advance to the next UTF-8 rune boundary so we never slice mid-rune
+	// and feed invalid UTF-8 to the LLM.
+	for cutoff < len(fullLog) && !utf8.RuneStart(fullLog[cutoff]) {
+		cutoff++
+	}
+	if cutoff >= len(fullLog) {
 		return header + responseLabel + rawResponse + reasoningLabel + truncationNote
 	}
 	tail := fullLog[cutoff:]

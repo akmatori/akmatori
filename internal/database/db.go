@@ -177,9 +177,9 @@ func preMigrateLLMSettings(db *gorm.DB) error {
 		// Use raw DROP INDEX IF EXISTS instead of HasIndex — GORM's HasIndex checks
 		// against the current model struct, which no longer has these fields/tags.
 		for _, idx := range []string{
-			"idx_llm_settings_provider",       // GORM default naming for old provider unique index
-			"uni_llm_settings_provider",       // GORM uniqueIndex naming variant
-			"idx_llm_settings_singleton_key",  // Old singleton pattern unique index
+			"idx_llm_settings_provider",      // GORM default naming for old provider unique index
+			"uni_llm_settings_provider",      // GORM uniqueIndex naming variant
+			"idx_llm_settings_singleton_key", // Old singleton pattern unique index
 		} {
 			if err := tx.Exec("DROP INDEX IF EXISTS " + idx).Error; err != nil {
 				slog.Warn("failed to drop old index", "index", idx, "error", err)

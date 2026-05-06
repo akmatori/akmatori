@@ -296,10 +296,11 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 }
 
 // finishSlackMessage handles the final steps of Slack message processing.
-// finalResponse is what gets posted to Slack; rawResponse is the full agent
-// output stored in `incident.response` so the web UI shows the complete
-// result, not the Slack-sized summarization.
-func (h *SlackHandler) finishSlackMessage(channel, threadID, incidentUUID, user, text, finalResponse, rawResponse, fullLog string, hasError bool, sessionID string, tokensUsed int, executionTimeMs int64) {
+// finalResponse is what gets posted to Slack; dbResponse is the response
+// stored in `incident.response` (the formatted output when the formatter
+// ran, otherwise the raw agent output) so the web UI shows the full result,
+// not the Slack-sized summarization.
+func (h *SlackHandler) finishSlackMessage(channel, threadID, incidentUUID, user, text, finalResponse, dbResponse, fullLog string, hasError bool, sessionID string, tokensUsed int, executionTimeMs int64) {
 	// The hourglass reaction is now removed by the TypingController in
 	// processMessage's deferred Stop; here we only add the terminal
 	// success/error reaction.
@@ -335,7 +336,7 @@ func (h *SlackHandler) finishSlackMessage(channel, threadID, incidentUUID, user,
 				user, text, "")
 		}
 
-		if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLogWithContext, rawResponse, tokensUsed, executionTimeMs); updateErr != nil {
+		if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLogWithContext, dbResponse, tokensUsed, executionTimeMs); updateErr != nil {
 			slog.Warn("failed to update incident", "err", updateErr)
 		} else {
 			slog.Info("updated incident", "incident_id", incidentUUID, "status", finalStatus, "session_id", sessionID)

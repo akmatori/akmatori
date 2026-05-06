@@ -146,16 +146,16 @@ func (LLMSettings) TableName() string {
 // ProxySettings stores HTTP proxy configuration with per-service toggles
 type ProxySettings struct {
 	ID                     uint      `gorm:"primaryKey" json:"id"`
-	ProxyURL               string    `gorm:"type:text" json:"proxy_url"`                    // HTTP/HTTPS proxy URL
-	NoProxy                string    `gorm:"type:text" json:"no_proxy"`                     // Comma-separated hosts to bypass proxy
-	LLMEnabled             bool      `gorm:"column:llm_enabled;default:true" json:"llm_enabled"` // Use proxy for LLM API calls (all providers)
-	SlackEnabled           bool      `gorm:"default:true" json:"slack_enabled"`             // Use proxy for Slack
-	ZabbixEnabled          bool      `gorm:"default:false" json:"zabbix_enabled"`           // Use proxy for Zabbix API
-	VictoriaMetricsEnabled bool      `gorm:"default:false" json:"victoria_metrics_enabled"` // Use proxy for VictoriaMetrics API
-	CatchpointEnabled      bool      `gorm:"default:false" json:"catchpoint_enabled"`       // Use proxy for Catchpoint API
-	GrafanaEnabled         bool      `gorm:"default:false" json:"grafana_enabled"`          // Use proxy for Grafana API
-	PagerDutyEnabled       bool      `gorm:"default:false" json:"pagerduty_enabled"`        // Use proxy for PagerDuty API
-	NetBoxEnabled          bool      `gorm:"default:false" json:"netbox_enabled"`           // Use proxy for NetBox API
+	ProxyURL               string    `gorm:"type:text" json:"proxy_url"`                          // HTTP/HTTPS proxy URL
+	NoProxy                string    `gorm:"type:text" json:"no_proxy"`                           // Comma-separated hosts to bypass proxy
+	LLMEnabled             bool      `gorm:"column:llm_enabled;default:true" json:"llm_enabled"`  // Use proxy for LLM API calls (all providers)
+	SlackEnabled           bool      `gorm:"default:true" json:"slack_enabled"`                   // Use proxy for Slack
+	ZabbixEnabled          bool      `gorm:"default:false" json:"zabbix_enabled"`                 // Use proxy for Zabbix API
+	VictoriaMetricsEnabled bool      `gorm:"default:false" json:"victoria_metrics_enabled"`       // Use proxy for VictoriaMetrics API
+	CatchpointEnabled      bool      `gorm:"default:false" json:"catchpoint_enabled"`             // Use proxy for Catchpoint API
+	GrafanaEnabled         bool      `gorm:"default:false" json:"grafana_enabled"`                // Use proxy for Grafana API
+	PagerDutyEnabled       bool      `gorm:"default:false" json:"pagerduty_enabled"`              // Use proxy for PagerDuty API
+	NetBoxEnabled          bool      `gorm:"default:false" json:"netbox_enabled"`                 // Use proxy for NetBox API
 	K8sEnabled             bool      `gorm:"column:k8s_enabled;default:false" json:"k8s_enabled"` // Use proxy for Kubernetes API
 	CreatedAt              time.Time `json:"created_at"`
 	UpdatedAt              time.Time `json:"updated_at"`
