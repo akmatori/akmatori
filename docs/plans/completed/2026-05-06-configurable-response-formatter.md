@@ -125,5 +125,5 @@ When the formatter is disabled, the worker is disconnected, or the LLM call fail
 
 ### Task 7: Update documentation
 
-- [ ] Update `CLAUDE.md`: add a short bullet under Services for `ResponseFormatter` (file + purpose) and a one-liner under Settings noting the new `formatting_settings` table and `/api/settings/formatting` endpoint.
-- [ ] Move this plan to `docs/plans/completed/`.
+- [x] Update `CLAUDE.md`: add a short bullet under Services for `ResponseFormatter` (file + purpose) and a one-liner under Settings noting the new `formatting_settings` table and `/api/settings/formatting` endpoint.
+- [x] Move this plan to `docs/plans/completed/`.
