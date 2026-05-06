@@ -99,6 +99,9 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	// Retention settings
 	mux.HandleFunc("/api/settings/retention", h.handleRetentionSettings)
 
+	// Formatting settings
+	mux.HandleFunc("/api/settings/formatting", h.handleFormattingSettings)
+
 	// Context files
 	mux.HandleFunc("/api/context", h.handleContext)
 	mux.HandleFunc("/api/context/", h.handleContextByID)
