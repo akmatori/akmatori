@@ -239,14 +239,14 @@ func migrateOpenAIToLLMEnabled(db *gorm.DB) error {
 // duplicate providers by appending a numeric suffix (e.g. "OpenAI (2)").
 func migrateLLMSettingsName(db *gorm.DB) error {
 	var rows []LLMSettings
-	if err := db.Where("name = '' OR name IS NULL").Find(&rows).Error; err != nil {
+	if err := db.Session(&gorm.Session{NewDB: true}).Where("name = '' OR name IS NULL").Find(&rows).Error; err != nil {
 		return fmt.Errorf("query llm_settings with empty name: %w", err)
 	}
 	// Track assigned names to handle duplicate providers.
 	assigned := make(map[string]int)
 	// Pre-load existing non-empty names to avoid collisions.
 	var existing []LLMSettings
-	if err := db.Where("name != '' AND name IS NOT NULL").Find(&existing).Error; err == nil {
+	if err := db.Session(&gorm.Session{NewDB: true}).Where("name != '' AND name IS NOT NULL").Find(&existing).Error; err == nil {
 		for _, e := range existing {
 			assigned[e.Name] = 1
 		}
