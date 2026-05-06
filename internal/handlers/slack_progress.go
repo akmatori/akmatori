@@ -1,68 +1,59 @@
 package handlers
 
 import (
-	"log/slog"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/slack-go/slack"
 )
 
-// slackStreamingClient is the subset of the Slack client API used by
-// SlackProgressStreamer. Defining it as an interface keeps the streamer
-// testable without spinning up a real Slack client.
-type slackStreamingClient interface {
-	UpdateMessage(channelID, timestamp string, options ...slack.MsgOption) (string, string, string, error)
-}
-
-// slackThinkingMaxLen is the per-line cap applied to thinking snippets. The
-// progress message is a regular chat.postMessage (not a streamed message),
-// so chat.update accepts up to ~40000 chars; this cap exists for UX — a
-// status line should be short — not to satisfy an API limit.
+// slackThinkingMaxLen is the per-line cap applied to thinking snippets.
+// Slack's loading_messages cap is well above 500 chars, but a status line
+// should be short for UX reasons.
 const slackThinkingMaxLen = 500
 
 // SlackProgressStreamer condenses agent OnOutput deltas into a single status
-// line and replaces the bound Slack message body with the latest reasoning
-// (🤔) line via chat.update. Tool start/end markers are intentionally
-// dropped — the user only wants to see what the agent is currently thinking.
+// line and forwards the latest reasoning (🤔) line to a sink callback subject
+// to a throttle window. Tool start/end markers are intentionally dropped —
+// only "what is the agent currently thinking" passes through.
+//
+// The sink is typically TypingController.UpdateLoadingMessage, which pushes
+// the line to Slack as the assistant.threads.setStatus loading_messages
+// rotation content. The streamer used to call chat.update directly on a
+// progress message body; that path is gone — the placeholder message stays
+// static during the run.
 //
 // It is safe to call AppendStatus from a single goroutine (the agent worker
 // callback). Concurrent callers are serialized via the internal mutex.
 type SlackProgressStreamer struct {
-	client         slackStreamingClient
-	channel        string
-	messageTS      string
+	sink           func(line string)
 	appendInterval time.Duration
 
 	mu              sync.Mutex
 	lastUpdateAt    time.Time
 	pendingLineBuf  string
-	pendingThinking string // latest thinking line waiting to be pushed to Slack
+	pendingThinking string // latest thinking line waiting to be pushed
 	lastThinking    string // last thinking line we actually pushed (for dedup)
 }
 
-// NewSlackProgressStreamer constructs a streamer bound to a specific Slack
-// message. Updates are issued via chat.update; the caller is responsible for
-// posting the initial message (typically a plain chat.postMessage).
-func NewSlackProgressStreamer(client slackStreamingClient, channel, messageTS string, appendInterval time.Duration) *SlackProgressStreamer {
+// NewSlackProgressStreamer constructs a streamer that forwards condensed
+// reasoning lines to sink. sink may be nil — in that case the streamer
+// becomes a safe no-op (handy when Slack is disabled mid-flight).
+func NewSlackProgressStreamer(sink func(line string), appendInterval time.Duration) *SlackProgressStreamer {
 	if appendInterval <= 0 {
 		appendInterval = slackAppendInterval
 	}
 	return &SlackProgressStreamer{
-		client:         client,
-		channel:        channel,
-		messageTS:      messageTS,
+		sink:           sink,
 		appendInterval: appendInterval,
 	}
 }
 
 // AppendStatus accepts a delta of agent output text, extracts any reasoning
-// (🤔) lines from it, and replaces the Slack message body with the most
-// recent line subject to throttling. Older queued thinking lines are
-// discarded — only the latest matters for a single-line status indicator.
+// (🤔) lines from it, and forwards the most recent line to the sink subject
+// to throttling. Older queued thinking lines are discarded — only the latest
+// matters for a single-line status indicator.
 func (s *SlackProgressStreamer) AppendStatus(delta string) {
-	if s == nil || s.messageTS == "" || s.client == nil {
+	if s == nil || s.sink == nil {
 		return
 	}
 	s.mu.Lock()
@@ -95,7 +86,7 @@ func (s *SlackProgressStreamer) AppendStatus(delta string) {
 // window. It is intended for end-of-stream cleanup so the final status is
 // not lost in the pending buffer.
 func (s *SlackProgressStreamer) Flush() {
-	if s == nil || s.messageTS == "" || s.client == nil {
+	if s == nil || s.sink == nil {
 		return
 	}
 	s.mu.Lock()
@@ -112,14 +103,12 @@ func (s *SlackProgressStreamer) Flush() {
 	s.flushLocked()
 }
 
-// flushLocked snapshots the pending thinking line, releases the mutex, then
-// issues the Slack chat.update call. Caller must hold s.mu on entry; the
-// lock is released and re-acquired before return so the caller's deferred
-// Unlock still works.
+// flushLocked snapshots the pending thinking line and invokes the sink
+// outside the mutex, so a slow sink (e.g. one that blocks on a Slack HTTP
+// call) cannot back up subsequent AppendStatus callers behind it.
 //
-// Releasing the mutex around the network call prevents an unresponsive Slack
-// API from cascading into AppendStatus callers (the agent worker callback),
-// which would otherwise queue up behind a single in-flight HTTP request.
+// Caller must hold s.mu on entry; the lock is released and re-acquired
+// before return so the caller's deferred Unlock still works.
 func (s *SlackProgressStreamer) flushLocked() {
 	if s.pendingThinking == "" || s.pendingThinking == s.lastThinking {
 		s.pendingThinking = ""
@@ -130,23 +119,20 @@ func (s *SlackProgressStreamer) flushLocked() {
 	s.lastThinking = text
 	s.lastUpdateAt = time.Now()
 
-	channel := s.channel
-	messageTS := s.messageTS
-	client := s.client
+	sink := s.sink
 
 	s.mu.Unlock()
 	defer s.mu.Lock()
 
-	if _, _, _, err := client.UpdateMessage(channel, messageTS, slack.MsgOptionText(text, false)); err != nil {
-		slog.Warn("failed to update progress message", "ts", messageTS, "err", err)
-	}
+	sink(text)
 }
 
 // condenseStatusLine inspects a single line of agent output and returns the
 // thinking snippet if the line begins with the 🤔 reasoning marker, or ""
 // otherwise. Tool start/end markers (🛠️ Running:, ✅ Ran:, ❌ Failed:) are
-// intentionally dropped — the Slack progress message is a single-line
-// "what is the agent thinking right now?" status indicator, not a transcript.
+// intentionally dropped — the Slack progress signal is a single-line
+// "what is the agent thinking right now?" status indicator, not a
+// transcript.
 //
 // Marker source: agent-worker/src/agent-runner.ts.
 func condenseStatusLine(line string) string {

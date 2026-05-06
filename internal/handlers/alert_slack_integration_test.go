@@ -168,11 +168,12 @@ func TestAlertFinalizeSlackMessageBody_ShortResponsePassthrough(t *testing.T) {
 
 // TestAlertProgressStreamer_UpdatesWithLatestThinking simulates the alert
 // flow's OnOutput callback piping deltas into the SlackProgressStreamer and
-// asserts that UpdateMessage carries only the latest reasoning (🤔) line —
-// tool start/end markers are intentionally dropped from the progress UI.
+// asserts that the sink callback receives only the latest reasoning (🤔)
+// lines — tool start/end markers are intentionally dropped from the
+// progress UI.
 func TestAlertProgressStreamer_UpdatesWithLatestThinking(t *testing.T) {
-	fc := &fakeStreamingClient{}
-	streamer := NewSlackProgressStreamer(fc, "C_ALERTS", "1707000001.000100", 1*time.Millisecond)
+	cap := &captureSink{}
+	streamer := NewSlackProgressStreamer(cap.sink, 1*time.Millisecond)
 
 	// Simulate agent OnOutput streaming markers, thinking, and noise interleaved.
 	chunks := []string{
@@ -188,16 +189,16 @@ func TestAlertProgressStreamer_UpdatesWithLatestThinking(t *testing.T) {
 	}
 	streamer.Flush()
 
-	calls := fc.snapshotUpdate()
-	if len(calls) == 0 {
-		t.Fatal("expected UpdateMessage calls for thinking deltas")
+	lines := cap.snapshot()
+	if len(lines) == 0 {
+		t.Fatal("expected sink calls for thinking deltas")
 	}
-	for _, c := range calls {
-		if c.text == "" {
-			t.Errorf("UpdateMessage called with empty text: %+v", c)
+	for _, line := range lines {
+		if line == "" {
+			t.Errorf("sink called with empty text")
 		}
-		if !contains(c.text, "🤔") {
-			t.Errorf("UpdateMessage text should be a thinking line, got %q", c.text)
+		if !contains(line, "🤔") {
+			t.Errorf("sink text should be a thinking line, got %q", line)
 		}
 	}
 }

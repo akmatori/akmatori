@@ -96,48 +96,6 @@ func (h *AlertHandler) postSlackThreadReply(channelID, threadTS, message string)
 	}
 }
 
-// postSlackThreadProgressMessage posts the initial progress message in a
-// thread (e.g. "Thinking...") and returns its timestamp so the streamer can
-// later replace its body via chat.update with the latest reasoning line.
-//
-// We do not use chat.startStream here even though it would make the bot
-// name blink: Slack rejects chat.update on an actively streamed message
-// with `streaming_state_conflict`, which makes the single-line replace
-// behaviour incompatible with streaming. Returns "" if posting fails.
-func (h *AlertHandler) postSlackThreadProgressMessage(channelID, threadTS, text string) string {
-	slackClient := h.slackManager.GetClient()
-	if slackClient == nil {
-		return ""
-	}
-	_, ts, err := slackClient.PostMessage(
-		channelID,
-		slack.MsgOptionText(text, false),
-		slack.MsgOptionTS(threadTS),
-	)
-	if err != nil {
-		slog.Warn("error posting progress message", "err", err)
-		return ""
-	}
-	return ts
-}
-
-// updateSlackThreadMessage updates an existing Slack message in a channel
-func (h *AlertHandler) updateSlackThreadMessage(channelID, messageTS, message string) {
-	slackClient := h.slackManager.GetClient()
-	if slackClient == nil {
-		return
-	}
-
-	_, _, _, err := slackClient.UpdateMessage(
-		channelID,
-		messageTS,
-		slack.MsgOptionText(message, false),
-	)
-	if err != nil {
-		slog.Warn("error updating Slack message", "ts", messageTS, "err", err)
-	}
-}
-
 // updateSlackChannelReactions updates reactions on the original Slack message
 func (h *AlertHandler) updateSlackChannelReactions(channelID, messageTS string, hasError bool) {
 	slackClient := h.slackManager.GetClient()

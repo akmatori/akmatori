@@ -11,6 +11,13 @@ import (
 	"github.com/slack-go/slack"
 )
 
+// loadingMessageMaxBytes is Slack's enforced cap on each entry in
+// assistant.threads.setStatus loading_messages. Longer entries return
+// `invalid_arguments` with detail
+// `must be less than 51 characters [json-pointer:/loading_messages/N]`.
+// Use bytes (not runes) because Slack's check is byte-based.
+const loadingMessageMaxBytes = 50
+
 const (
 	DefaultTypingStatusText        = "is investigating..."
 	DefaultTypingReaction          = "hourglass_flowing_sand"
@@ -45,11 +52,17 @@ type TypingControllerConfig struct {
 }
 
 // TypingController shows a "is investigating..." indicator in Slack while an
-// agent run is active. It signals two things in parallel:
+// agent run is active. It signals three things in parallel:
 //
 //   - assistant.threads.setStatus banner in the thread header (best-effort;
 //     silently no-ops when the Slack app does not have the AI Assistant
 //     feature enabled in its manifest).
+//   - assistant.threads.setStatus loading_messages, populated with the
+//     agent's latest reasoning line so Slack's rotating-text indicator
+//     shows what the agent is currently thinking instead of Slack's
+//     generic default phrases. Updated via UpdateLoadingMessage; the
+//     caller (typically SlackProgressStreamer) is responsible for
+//     throttling.
 //   - A reaction emoji on the triggering message, added on Start and removed
 //     on Stop.
 //
@@ -59,6 +72,7 @@ type TypingControllerConfig struct {
 type TypingController interface {
 	Start(ctx context.Context)
 	Stop()
+	UpdateLoadingMessage(line string)
 }
 
 // NewTypingController constructs a controller. Defaults are filled in for
@@ -85,10 +99,11 @@ func NewTypingController(cfg TypingControllerConfig) TypingController {
 type typingController struct {
 	cfg TypingControllerConfig
 
-	mu             sync.Mutex
-	started        bool
-	statusFailures int
-	statusDisabled bool
+	mu                   sync.Mutex
+	started              bool
+	statusFailures       int
+	statusDisabled       bool
+	latestLoadingMessage string
 
 	stopOnce sync.Once
 	done     chan struct{}
@@ -193,10 +208,53 @@ func (t *typingController) keepaliveLoop(ctx context.Context, done <-chan struct
 	}
 }
 
+// UpdateLoadingMessage records a new reasoning line and pushes a fresh
+// setStatus so Slack's loading_messages indicator reflects the agent's
+// current thought. Throttling is the caller's responsibility — this method
+// dedupes consecutive identical lines but otherwise issues one Slack call
+// per non-duplicate input.
+//
+// The leading 🤔 marker the streamer emits is stripped to free up the
+// scarce 50-byte budget Slack imposes on each loading_messages entry.
+// Anything longer than that budget is truncated with an ellipsis.
+func (t *typingController) UpdateLoadingMessage(line string) {
+	if t == nil || t.cfg.Client == nil {
+		return
+	}
+	trimmed := strings.TrimSpace(line)
+	trimmed = strings.TrimPrefix(trimmed, "🤔")
+	trimmed = strings.TrimSpace(trimmed)
+	if trimmed == "" {
+		return
+	}
+	trimmed = truncateForLoadingMessage(trimmed, loadingMessageMaxBytes)
+	t.mu.Lock()
+	if !t.started {
+		t.mu.Unlock()
+		return
+	}
+	if t.latestLoadingMessage == trimmed {
+		t.mu.Unlock()
+		return
+	}
+	t.latestLoadingMessage = trimmed
+	disabled := t.statusDisabled
+	t.mu.Unlock()
+	if disabled {
+		return
+	}
+	go t.fireSetStatus(context.Background(), t.cfg.StatusText)
+}
+
 // fireSetStatus issues a single setStatus call. Errors increment the
 // consecutive-failure counter; on success the counter resets. When the
 // counter crosses MaxStatusFailures the circuit breaker trips and future
 // setStatus calls are skipped (the reaction continues working independently).
+//
+// When status is non-empty and a latestLoadingMessage has been recorded
+// (via UpdateLoadingMessage), the latest line is included as a single
+// loading_messages entry so Slack's rotation indicator reflects the
+// agent's current reasoning instead of Slack's generic default phrases.
 //
 // The ChannelID-or-ThreadTS guard is mostly defensive: setStatus requires
 // both, and we don't want to spam errors when one was never available.
@@ -204,11 +262,23 @@ func (t *typingController) fireSetStatus(ctx context.Context, status string) {
 	if t.cfg.ChannelID == "" || t.cfg.ThreadTS == "" {
 		return
 	}
-	err := t.cfg.Client.SetAssistantThreadsStatusContext(ctx, slack.AssistantThreadsSetStatusParameters{
+
+	params := slack.AssistantThreadsSetStatusParameters{
 		ChannelID: t.cfg.ChannelID,
 		ThreadTS:  t.cfg.ThreadTS,
 		Status:    status,
-	})
+	}
+	// Only include loading_messages on non-clear calls; the empty-status
+	// clear path is for Stop and should send no rotation content.
+	if status != "" {
+		t.mu.Lock()
+		latest := t.latestLoadingMessage
+		t.mu.Unlock()
+		if latest != "" {
+			params.LoadingMessages = []string{latest}
+		}
+	}
+	err := t.cfg.Client.SetAssistantThreadsStatusContext(ctx, params)
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -280,4 +350,23 @@ func isPermanentSetStatusError(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "feature_not_enabled") ||
 		strings.Contains(msg, "not_allowed_token_type")
+}
+
+// truncateForLoadingMessage shortens a string to the byte budget Slack
+// allows per loading_messages entry, appending an ellipsis when truncation
+// occurs. UTF-8 boundaries are respected so we never split a multi-byte
+// rune mid-sequence.
+func truncateForLoadingMessage(line string, max int) string {
+	if max <= 0 || len(line) <= max {
+		return line
+	}
+	const ellipsis = "…" // 3 bytes in UTF-8
+	cutoff := max - len(ellipsis)
+	if cutoff < 1 {
+		cutoff = 1
+	}
+	for cutoff > 0 && (line[cutoff]&0xC0) == 0x80 {
+		cutoff--
+	}
+	return line[:cutoff] + ellipsis
 }
