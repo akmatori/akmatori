@@ -100,10 +100,10 @@ When the formatter is disabled, the worker is disconnected, or the LLM call fail
 - Modify: `cmd/akmatori/main.go` (register `/api/settings/formatting` route)
 - Modify: `docs/` swagger spec if user-facing API surface is documented there
 
-- [ ] Implement `GET /api/settings/formatting` returning the singleton record.
-- [ ] Implement `PUT /api/settings/formatting` accepting partial updates of `enabled`, `system_prompt`, `max_tokens`, `temperature` with validation (`max_tokens` 1..8000, `temperature` 0..2, `system_prompt` length <= 8KB).
-- [ ] Tests covering GET defaults, PUT happy path, validation rejections, and error paths matching the retention handler tests style.
-- [ ] Run `make test` — must pass.
+- [x] Implement `GET /api/settings/formatting` returning the singleton record.
+- [x] Implement `PUT /api/settings/formatting` accepting partial updates of `enabled`, `system_prompt`, `max_tokens`, `temperature` with validation (`max_tokens` 1..8000, `temperature` 0..2, `system_prompt` length <= 8KB).
+- [x] Tests covering GET defaults, PUT happy path, validation rejections, and error paths matching the retention handler tests style. (Route registered in `internal/handlers/api.go` rather than `cmd/akmatori/main.go` — that's where the existing `/api/settings/retention` route lives.)
+- [x] Run `make test` — must pass.
 
 ### Task 5: Web UI settings section
 

@@ -161,6 +161,14 @@ type UpdateRetentionSettingsRequest struct {
 	CleanupIntervalHours *int  `json:"cleanup_interval_hours"`
 }
 
+// UpdateFormattingSettingsRequest is the request body for PUT /api/settings/formatting.
+type UpdateFormattingSettingsRequest struct {
+	Enabled      *bool    `json:"enabled"`
+	SystemPrompt *string  `json:"system_prompt"`
+	MaxTokens    *int     `json:"max_tokens"`
+	Temperature  *float64 `json:"temperature"`
+}
+
 // ========== Alert Source Types ==========
 
 // CreateAlertSourceRequest is the request body for POST /api/alert-sources.
