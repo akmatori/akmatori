@@ -10,6 +10,7 @@ import * as vm from "node:vm";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { GatewayClient } from "./gateway-client.js";
+import { orphanSafe } from "./gateway-client.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -120,35 +121,43 @@ export class ScriptExecutor {
     // context later to prevent direct .constructor access on outer-realm closures.
     // Each checks the internal abort signal before making an RPC so that a
     // timed-out or externally aborted script cannot start new requests.
-    context.__gw_call = async (
+    // orphanSafe wraps the returned promise with a noop catch so a fire-and-forget
+    // gateway_call(...) inside a script does not become an unhandled rejection
+    // when controller.abort() fires in the finally block. Awaiting callers still
+    // observe the rejection through their own await/catch.
+    context.__gw_call = (
       toolName: string,
       args: Record<string, unknown> = {},
       instance?: string,
-    ) => {
-      if (internalSignal.aborted) {
-        throw new Error("Script aborted");
-      }
-      const result = await this.client.call(toolName, args, instance, internalSignal);
-      return result.data;
-    };
-    context.__gw_search = async (toolType: string) => {
-      if (internalSignal.aborted) {
-        throw new Error("Script aborted");
-      }
-      return await this.client.listToolsByType(toolType, internalSignal);
-    };
-    context.__gw_detail = async (toolName: string) => {
-      if (internalSignal.aborted) {
-        throw new Error("Script aborted");
-      }
-      return await this.client.getToolDetail(toolName, internalSignal);
-    };
-    context.__gw_list_types = async () => {
-      if (internalSignal.aborted) {
-        throw new Error("Script aborted");
-      }
-      return await this.client.listToolTypes(internalSignal);
-    };
+    ) =>
+      orphanSafe(async () => {
+        if (internalSignal.aborted) {
+          throw new Error("Script aborted");
+        }
+        const result = await this.client.call(toolName, args, instance, internalSignal);
+        return result.data;
+      });
+    context.__gw_search = (toolType: string) =>
+      orphanSafe(async () => {
+        if (internalSignal.aborted) {
+          throw new Error("Script aborted");
+        }
+        return await this.client.listToolsByType(toolType, internalSignal);
+      });
+    context.__gw_detail = (toolName: string) =>
+      orphanSafe(async () => {
+        if (internalSignal.aborted) {
+          throw new Error("Script aborted");
+        }
+        return await this.client.getToolDetail(toolName, internalSignal);
+      });
+    context.__gw_list_types = () =>
+      orphanSafe(async () => {
+        if (internalSignal.aborted) {
+          throw new Error("Script aborted");
+        }
+        return await this.client.listToolTypes(internalSignal);
+      });
 
     // Console capture
     context.__console_log = (...args: unknown[]) => {
@@ -183,10 +192,14 @@ export class ScriptExecutor {
         var cl = __console_log, cw = __console_warn, ce = __console_error;
         var sfs = __fs, st = __setTimeout, ct = __clearTimeout;
 
-        globalThis.gateway_call = async (name, args, instance) => gc(name, args, instance);
-        globalThis.list_tools_for_tool_type = async (toolType) => gs(toolType);
-        globalThis.list_tool_types = async () => glt();
-        globalThis.get_tool_detail = async (toolName) => gd(toolName);
+        // Non-async wrappers return the underlying orphanSafe promise directly.
+        // Wrapping them in async would create a new follower promise per call,
+        // and a fire-and-forget gateway_call(...) inside a script would leave
+        // that follower as an unhandled rejection when controller.abort() fires.
+        globalThis.gateway_call = (name, args, instance) => gc(name, args, instance);
+        globalThis.list_tools_for_tool_type = (toolType) => gs(toolType);
+        globalThis.list_tool_types = () => glt();
+        globalThis.get_tool_detail = (toolName) => gd(toolName);
         globalThis.console = {
           log: (...a) => cl(...a),
           warn: (...a) => cw(...a),

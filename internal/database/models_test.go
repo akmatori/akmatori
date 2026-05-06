@@ -488,7 +488,7 @@ func TestLLMSettings_MultiProviderConfigs(t *testing.T) {
 			settings: LLMSettings{
 				Provider:      LLMProviderOpenRouter,
 				APIKey:        "sk-or-key",
-				Model:         "anthropic/claude-opus-4-6",
+				Model:         "anthropic/claude-opus-4.6",
 				ThinkingLevel: ThinkingLevelMedium,
 				BaseURL:       "https://openrouter.ai/api/v1",
 				Enabled:       true,

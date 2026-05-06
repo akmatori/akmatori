@@ -8,7 +8,7 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 
 - **5-container Docker architecture**: API, Agent Worker, MCP Gateway, PostgreSQL, QMD (runbook search)
 - **Backend**: Go 1.24+ (API server, MCP gateway)
-- **Agent Worker**: Node.js 22+ / TypeScript using `@mariozechner/pi-coding-agent` SDK (v0.72.1)
+- **Agent Worker**: Node.js 22+ / TypeScript using `@mariozechner/pi-coding-agent` SDK (v0.73.0)
 - **Frontend**: React 19 + TypeScript + Vite + Tailwind
 - **Database**: PostgreSQL 16 with GORM
 - **LLM Providers**: Anthropic, OpenAI, Google, OpenRouter, Custom (configured via web UI)
@@ -56,6 +56,7 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 | Alert adapters (`internal/alerts/adapters/`) | `make test-adapters` |
 | MCP Gateway (`mcp-gateway/`) | `make test-mcp` |
 | Agent worker (`agent-worker/`) | `make test-agent` |
+| Web frontend (`web/`) | `make test-web` |
 | Any Go code | `make test` |
 | Before committing | `make verify` |
 
@@ -63,7 +64,8 @@ Akmatori is an AI-powered AIOps platform that receives alerts from monitoring sy
 # Quick reference
 make test-adapters    # ~0.01s
 make test-mcp         # ~0.01s
-make test-all         # All tests including agent-worker
+make test-web         # Web frontend (vitest)
+make test-all         # All tests including agent-worker and web
 make verify           # go vet + all tests (pre-commit)
 ```
 
@@ -90,7 +92,7 @@ Focus new tests on historically weak areas: `internal/handlers`, `internal/servi
 
 ## Agent Worker Architecture
 
-The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK (v0.72.1):
+The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK (v0.73.0):
 
 | Component | File | Purpose |
 |-----------|------|---------|
@@ -100,7 +102,7 @@ The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK (v0.72.1):
 | Tool Formatter | `src/tool-output-formatter.ts` | Formats tool args/output for UI streaming |
 | WS Client | `src/ws-client.ts` | WebSocket to API server |
 
-### SDK Features (v0.72.1)
+### SDK Features (v0.73.0)
 
 - Cancellation signals propagate to nested model calls and tool executions
 - Investigation history exports to `{workDir}/session_export.jsonl`
@@ -109,6 +111,7 @@ The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK (v0.72.1):
 - Typed compaction/retry session events replaced older untyped names
 - Provider SDKs are lazy-loaded; auto-retry and multi-edit are supported
 - Provider retry/timeout settings (`retry.provider.{timeoutMs,maxRetries,maxRetryDelayMs}`) are forwarded via `SettingsManager.inMemory({...})`; Akmatori uses 10-minute timeouts so slow on-prem/OpenRouter models do not abort during long alert investigations
+- 0.73.0: incremental bash output streaming surfaces via `tool_execution_update` events (already handled by `agent-runner.ts`); Bedrock Opus 4.7 `xhigh` thinking fix is automatic
 
 ### SDK API Conventions
 
@@ -192,8 +195,23 @@ go manager.WatchForReloads(ctx)
 
 ### Live Progress + Summarized Final Output
 
-- `internal/handlers/slack_progress.go` — `SlackProgressStreamer` emits condensed status lines (running/ran/thinking) via `chat.appendStream` while the agent runs, falling back to `chat.update` when streaming is not active. Throttled by `slackAppendInterval`.
+- `internal/handlers/slack_progress.go` — `SlackProgressStreamer` extracts the agent's latest reasoning (🤔) line from output deltas and forwards it to a `sink func(string)` callback subject to `slackAppendInterval` throttling (~2s). In production the sink is `TypingController.UpdateLoadingMessage`, which pipes the line into Slack's `assistant.threads.setStatus` `loading_messages` rotation banner. Tool start/end markers are filtered out. There is no "Thinking…" placeholder message — the typing banner + hourglass reaction are the activity signal during the run, and the final result is posted as a fresh thread reply when the agent completes.
 - `internal/services/slack_summarizer.go` — final agent output is summarized through `OneShotLLMCaller` to fit `slackMaxTextBytes` (8000); `internal/output/slack_budget.go` provides a deterministic byte-truncation fallback when the worker is unavailable or returns over-budget output. The result is posted as a single thread message with the existing footer.
+
+### Typing Indicator (`internal/slack/typing.go`)
+
+`TypingController` owns the lifecycle of the "is investigating..." thread-header banner (`assistant.threads.setStatus`), its `loading_messages` rotation content, and the `hourglass_flowing_sand` reaction during agent runs. Constants are hardcoded — there is no DB column or UI for typing config:
+
+- Status text: `"is investigating..."`
+- Reaction emoji: `hourglass_flowing_sand`
+- `loading_messages` content: `[]string{latest 🤔 line}`, fed via `UpdateLoadingMessage(line)` from `SlackProgressStreamer`. Replaces Slack's default rotation phrases ("searching…", "evaluating…", etc.) with the agent's actual reasoning. Each entry is byte-truncated with a UTF-8-safe ellipsis to `loadingMessageMaxBytes = 50` because Slack rejects longer entries with `invalid_arguments` (response detail: `must be less than 51 characters`). The leading 🤔 marker is stripped to free up space. Empty/whitespace input and consecutive duplicates are dropped — one Slack call per fresh non-duplicate line.
+- Keepalive interval: 30s (also pushes the latest loading message); safety TTL: 60min; circuit-breaker after 2 consecutive setStatus failures (also trips immediately on `feature_not_enabled` / `not_allowed_token_type`, which means the Slack app is not registered as an AI Assistant — the reaction continues working).
+
+Wired into three handler flows; each follows the `Start(ctx)` + `defer Stop()` pattern and relies on the surrounding handler blocking on `<-done` so the deferred Stop fires after the agent run finishes:
+
+- `slack_processor.go::processMessage` (mention/DM flow)
+- `alert_processor.go::runInvestigation` (webhook-alert flow)
+- `alert_processor.go::runSlackChannelInvestigation` (Slack-channel-alert flow)
 
 ## Alert Extraction (`internal/alerts/extraction/`)
 
