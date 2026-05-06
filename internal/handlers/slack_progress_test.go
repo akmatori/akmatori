@@ -1,56 +1,30 @@
 package handlers
 
 import (
-	"errors"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/slack-go/slack"
 )
 
-// fakeStreamingClient captures UpdateMessage calls for tests.
-type fakeStreamingClient struct {
-	mu             sync.Mutex
-	updateCalls    []fakeStreamingCall
-	updateErr      error
-	updateLastText string
+// captureSink is a minimal sink the streamer pushes lines into. It records
+// every line the streamer would forward to TypingController in production.
+type captureSink struct {
+	mu    sync.Mutex
+	lines []string
 }
 
-type fakeStreamingCall struct {
-	channel string
-	ts      string
-	text    string
+func (c *captureSink) sink(line string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lines = append(c.lines, line)
 }
 
-func (f *fakeStreamingClient) UpdateMessage(channelID, timestamp string, options ...slack.MsgOption) (string, string, string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	text := extractMsgOptionText(channelID, options)
-	f.updateCalls = append(f.updateCalls, fakeStreamingCall{channel: channelID, ts: timestamp, text: text})
-	f.updateLastText = text
-	return channelID, timestamp, "", f.updateErr
-}
-
-func (f *fakeStreamingClient) snapshotUpdate() []fakeStreamingCall {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := make([]fakeStreamingCall, len(f.updateCalls))
-	copy(out, f.updateCalls)
+func (c *captureSink) snapshot() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, len(c.lines))
+	copy(out, c.lines)
 	return out
-}
-
-// extractMsgOptionText executes a MsgOption chain against a stub config so
-// we can inspect what text was sent without hitting the network.
-func extractMsgOptionText(channelID string, options []slack.MsgOption) string {
-	_, values, err := slack.UnsafeApplyMsgOptions("xoxb-test", channelID, "https://slack.example/api/", options...)
-	if err != nil {
-		return ""
-	}
-	if v := values.Get("markdown_text"); v != "" {
-		return v
-	}
-	return values.Get("text")
 }
 
 // --- condenseStatusLine -----------------------------------------------------
@@ -107,8 +81,8 @@ func repeat(c byte, n int) string {
 // --- SlackProgressStreamer single-line replace semantics --------------------
 
 func TestSlackProgressStreamer_ToolMarkersDropped(t *testing.T) {
-	fc := &fakeStreamingClient{}
-	s := NewSlackProgressStreamer(fc, "C", "TS", 1*time.Millisecond)
+	cap := &captureSink{}
+	s := NewSlackProgressStreamer(cap.sink, 1*time.Millisecond)
 
 	s.AppendStatus("\n🛠️ Running: gateway_call\n")
 	time.Sleep(3 * time.Millisecond)
@@ -117,114 +91,110 @@ func TestSlackProgressStreamer_ToolMarkersDropped(t *testing.T) {
 	s.AppendStatus("\n❌ Failed: gateway_call\n")
 	s.Flush()
 
-	if got := fc.snapshotUpdate(); len(got) != 0 {
-		t.Errorf("tool markers should produce no UpdateMessage calls, got %+v", got)
+	if got := cap.snapshot(); len(got) != 0 {
+		t.Errorf("tool markers should produce no sink calls, got %+v", got)
 	}
 }
 
 func TestSlackProgressStreamer_ThinkingReplacesInPlace(t *testing.T) {
-	fc := &fakeStreamingClient{}
-	s := NewSlackProgressStreamer(fc, "C123", "TS456", 1*time.Millisecond)
+	cap := &captureSink{}
+	s := NewSlackProgressStreamer(cap.sink, 1*time.Millisecond)
 
 	s.AppendStatus("\n🤔 first thought\n")
 	time.Sleep(3 * time.Millisecond)
 	s.AppendStatus("\n🤔 second thought\n")
 
-	got := fc.snapshotUpdate()
+	got := cap.snapshot()
 	if len(got) != 2 {
-		t.Fatalf("want 2 UpdateMessage calls, got %d (%+v)", len(got), got)
+		t.Fatalf("want 2 sink calls, got %d (%+v)", len(got), got)
 	}
-	if got[0].channel != "C123" || got[0].ts != "TS456" {
-		t.Errorf("first call wrong target: %+v", got[0])
+	if got[0] != "🤔 first thought" {
+		t.Errorf("first sink call = %q, want first thinking line", got[0])
 	}
-	if got[0].text != "🤔 first thought" {
-		t.Errorf("first update text = %q, want first thinking line", got[0].text)
-	}
-	if got[1].text != "🤔 second thought" {
-		t.Errorf("second update text = %q, want second thinking line (single-line replace)", got[1].text)
+	if got[1] != "🤔 second thought" {
+		t.Errorf("second sink call = %q, want second thinking line (single-line replace)", got[1])
 	}
 }
 
 func TestSlackProgressStreamer_NonMarkersDropped(t *testing.T) {
-	fc := &fakeStreamingClient{}
-	s := NewSlackProgressStreamer(fc, "C", "TS", 1*time.Millisecond)
+	cap := &captureSink{}
+	s := NewSlackProgressStreamer(cap.sink, 1*time.Millisecond)
 
 	s.AppendStatus("Some plain reasoning text the model emitted.\n")
 	s.AppendStatus("Args:\nfoo\nOutput:\nbar baz\n")
 
-	if got := fc.snapshotUpdate(); len(got) != 0 {
-		t.Errorf("expected no UpdateMessage calls for non-marker deltas, got %+v", got)
+	if got := cap.snapshot(); len(got) != 0 {
+		t.Errorf("expected no sink calls for non-marker deltas, got %+v", got)
 	}
 }
 
 func TestSlackProgressStreamer_PartialDeltaBuffered(t *testing.T) {
-	fc := &fakeStreamingClient{}
-	s := NewSlackProgressStreamer(fc, "C", "TS", 1*time.Millisecond)
+	cap := &captureSink{}
+	s := NewSlackProgressStreamer(cap.sink, 1*time.Millisecond)
 
 	s.AppendStatus("\n🤔 considering ")
-	if got := fc.snapshotUpdate(); len(got) != 0 {
+	if got := cap.snapshot(); len(got) != 0 {
 		t.Fatalf("expected no emit before line is complete, got %+v", got)
 	}
 	s.AppendStatus("the next step\n")
 
-	got := fc.snapshotUpdate()
-	if len(got) != 1 || got[0].text != "🤔 considering the next step" {
+	got := cap.snapshot()
+	if len(got) != 1 || got[0] != "🤔 considering the next step" {
 		t.Errorf("expected single emit with full thinking line, got %+v", got)
 	}
 }
 
 func TestSlackProgressStreamer_DedupesConsecutive(t *testing.T) {
-	fc := &fakeStreamingClient{}
-	s := NewSlackProgressStreamer(fc, "C", "TS", 1*time.Millisecond)
+	cap := &captureSink{}
+	s := NewSlackProgressStreamer(cap.sink, 1*time.Millisecond)
 
 	s.AppendStatus("\n🤔 same thought\n")
 	time.Sleep(3 * time.Millisecond)
 	s.AppendStatus("\n🤔 same thought\n")
 
-	got := fc.snapshotUpdate()
+	got := cap.snapshot()
 	if len(got) != 1 {
 		t.Errorf("expected dedupe to suppress duplicate thinking line, got %d calls: %+v", len(got), got)
 	}
 }
 
 func TestSlackProgressStreamer_ThrottleWindow_KeepsOnlyLatest(t *testing.T) {
-	fc := &fakeStreamingClient{}
-	s := NewSlackProgressStreamer(fc, "C", "TS", 50*time.Millisecond)
+	cap := &captureSink{}
+	s := NewSlackProgressStreamer(cap.sink, 50*time.Millisecond)
 
 	s.AppendStatus("\n🤔 first\n")
 	// Within throttle window — these should overwrite the buffered line, not queue.
 	s.AppendStatus("\n🤔 second\n")
 	s.AppendStatus("\n🤔 third\n")
 
-	got := fc.snapshotUpdate()
+	got := cap.snapshot()
 	if len(got) != 1 {
 		t.Fatalf("expected 1 emit during throttle window, got %d: %+v", len(got), got)
 	}
-	if got[0].text != "🤔 first" {
-		t.Errorf("first emit unexpected: %q", got[0].text)
+	if got[0] != "🤔 first" {
+		t.Errorf("first emit unexpected: %q", got[0])
 	}
 
 	time.Sleep(60 * time.Millisecond)
 	s.AppendStatus("\n🤔 fourth\n")
-	got = fc.snapshotUpdate()
+	got = cap.snapshot()
 	if len(got) != 2 {
 		t.Fatalf("expected 2 emits after throttle window, got %d: %+v", len(got), got)
 	}
-	// Only the most recent buffered line ("third") should be flushed — not the
-	// queued "second". The "fourth" arrives just after, but in the same tick
-	// it overwrites "third" before flushLocked snapshots, so we expect "fourth"
-	// here. That's the desired single-line-replace semantic.
-	if got[1].text != "🤔 fourth" {
-		t.Errorf("second emit text = %q, want latest thinking line only", got[1].text)
+	// Only the most recent buffered line is flushed; "fourth" arrives just after,
+	// but in the same tick it overwrites "third" before flushLocked snapshots, so
+	// we expect "fourth" here. That's the desired single-line-replace semantic.
+	if got[1] != "🤔 fourth" {
+		t.Errorf("second emit text = %q, want latest thinking line only", got[1])
 	}
 }
 
 // --- Robustness -------------------------------------------------------------
 
-func TestSlackProgressStreamer_NilClient_NoOp(t *testing.T) {
+func TestSlackProgressStreamer_NilStreamer_NoOp(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
-			t.Fatalf("AppendStatus on nil-client streamer panicked: %v", r)
+			t.Fatalf("AppendStatus on nil streamer panicked: %v", r)
 		}
 	}()
 	var s *SlackProgressStreamer
@@ -232,39 +202,29 @@ func TestSlackProgressStreamer_NilClient_NoOp(t *testing.T) {
 	s.Flush()
 }
 
-func TestSlackProgressStreamer_EmptyMessageTS_NoOp(t *testing.T) {
-	fc := &fakeStreamingClient{}
-	s := NewSlackProgressStreamer(fc, "C", "", 1*time.Millisecond)
-	s.AppendStatus("\n🤔 x\n")
-	if len(fc.snapshotUpdate()) != 0 {
-		t.Errorf("expected no calls when messageTS is empty")
-	}
-}
-
-func TestSlackProgressStreamer_UpdateErrorIsLoggedNotPanicked(t *testing.T) {
-	fc := &fakeStreamingClient{updateErr: errors.New("boom")}
-	s := NewSlackProgressStreamer(fc, "C", "TS", 1*time.Millisecond)
-
+func TestSlackProgressStreamer_NilSink_NoOp(t *testing.T) {
+	s := NewSlackProgressStreamer(nil, 1*time.Millisecond)
 	defer func() {
 		if r := recover(); r != nil {
-			t.Fatalf("unexpected panic: %v", r)
+			t.Fatalf("AppendStatus with nil sink panicked: %v", r)
 		}
 	}()
 	s.AppendStatus("\n🤔 x\n")
+	s.Flush()
 }
 
 func TestSlackProgressStreamer_Flush_EmitsBufferedTrailingStatus(t *testing.T) {
-	fc := &fakeStreamingClient{}
-	s := NewSlackProgressStreamer(fc, "C", "TS", 1*time.Millisecond)
+	cap := &captureSink{}
+	s := NewSlackProgressStreamer(cap.sink, 1*time.Millisecond)
 
 	// Thinking line never receives its trailing newline.
 	s.AppendStatus("🤔 considering options")
-	if got := fc.snapshotUpdate(); len(got) != 0 {
+	if got := cap.snapshot(); len(got) != 0 {
 		t.Fatalf("status should remain buffered until Flush, got %+v", got)
 	}
 	s.Flush()
-	got := fc.snapshotUpdate()
-	if len(got) != 1 || got[0].text != "🤔 considering options" {
+	got := cap.snapshot()
+	if len(got) != 1 || got[0] != "🤔 considering options" {
 		t.Errorf("Flush should emit buffered status, got %+v", got)
 	}
 }

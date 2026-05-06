@@ -656,13 +656,13 @@ func TestFinalizeSlackMessageBody_NilSummarizerUsesDeterministicTruncation(t *te
 }
 
 // TestSlackProgressStreamer_LiveProgressFromSimulatedInvestigation simulates
-// agent OnOutput deltas during an investigation and verifies that
-// UpdateMessage is invoked only for the reasoning (🤔) lines — tool start/end
-// markers are filtered out so the progress message stays a clean single-line
-// status indicator.
+// agent OnOutput deltas during an investigation and verifies that the sink
+// callback (typically TypingController.UpdateLoadingMessage) is invoked only
+// for the reasoning (🤔) lines — tool start/end markers are filtered out so
+// the loading_messages rotation stays a clean single-line status indicator.
 func TestSlackProgressStreamer_LiveProgressFromSimulatedInvestigation(t *testing.T) {
-	fc := &fakeStreamingClient{}
-	streamer := NewSlackProgressStreamer(fc, "C_ALERTS", "1707000001.000100", 1*time.Millisecond)
+	cap := &captureSink{}
+	streamer := NewSlackProgressStreamer(cap.sink, 1*time.Millisecond)
 
 	// Simulate the agent emitting deltas that match the markers produced by
 	// agent-worker/src/agent-runner.ts.
@@ -680,16 +680,16 @@ func TestSlackProgressStreamer_LiveProgressFromSimulatedInvestigation(t *testing
 	}
 	streamer.Flush()
 
-	calls := fc.snapshotUpdate()
-	if len(calls) == 0 {
-		t.Fatalf("expected at least one UpdateMessage call during investigation")
+	lines := cap.snapshot()
+	if len(lines) == 0 {
+		t.Fatalf("expected at least one sink call during investigation")
 	}
-	for _, c := range calls {
-		if c.text == "" {
-			t.Errorf("UpdateMessage called with empty text: %+v", c)
+	for _, line := range lines {
+		if line == "" {
+			t.Errorf("sink called with empty text")
 		}
-		if !contains(c.text, "🤔") {
-			t.Errorf("UpdateMessage text should be a thinking line, got %q", c.text)
+		if !contains(line, "🤔") {
+			t.Errorf("sink text should be a thinking line, got %q", line)
 		}
 	}
 }

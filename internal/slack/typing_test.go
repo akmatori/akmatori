@@ -3,6 +3,7 @@ package slack
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -387,6 +388,260 @@ func TestTypingController_NilClientIsNoOp(t *testing.T) {
 	// Should not panic.
 	c.Start(context.Background())
 	c.Stop()
+}
+
+func TestTypingController_UpdateLoadingMessageBeforeStartIsNoOp(t *testing.T) {
+	fc := &fakeTypingClient{}
+	c := newTestController(fc)
+
+	c.UpdateLoadingMessage("🤔 thinking about something")
+
+	time.Sleep(50 * time.Millisecond)
+	statuses, _, _ := fc.snapshot()
+	if len(statuses) != 0 {
+		t.Fatalf("expected no setStatus calls before Start, got %d", len(statuses))
+	}
+}
+
+func TestTypingController_UpdateLoadingMessagePushesFreshSetStatus(t *testing.T) {
+	fc := &fakeTypingClient{}
+	c := newTestController(fc, func(cfg *TypingControllerConfig) {
+		cfg.KeepaliveInterval = 1 * time.Hour // freeze keepalive so we can count cleanly
+	})
+
+	c.Start(context.Background())
+	defer c.Stop()
+	waitForCondition(t, time.Second, func() bool {
+		statuses, adds, _ := fc.snapshot()
+		return len(statuses) >= 1 && len(adds) >= 1
+	}, "initial signals")
+
+	c.UpdateLoadingMessage("🤔 reasoning step one")
+
+	waitForCondition(t, time.Second, func() bool {
+		statuses, _, _ := fc.snapshot()
+		for _, s := range statuses {
+			if len(s.LoadingMessages) == 1 && s.LoadingMessages[0] == "reasoning step one" {
+				return true
+			}
+		}
+		return false
+	}, "setStatus with the loading message arrived")
+}
+
+func TestTypingController_UpdateLoadingMessageDedupesConsecutive(t *testing.T) {
+	fc := &fakeTypingClient{}
+	c := newTestController(fc, func(cfg *TypingControllerConfig) {
+		cfg.KeepaliveInterval = 1 * time.Hour
+	})
+
+	c.Start(context.Background())
+	defer c.Stop()
+	waitForCondition(t, time.Second, func() bool {
+		statuses, _, _ := fc.snapshot()
+		return len(statuses) >= 1
+	}, "initial setStatus")
+
+	c.UpdateLoadingMessage("🤔 same line")
+	c.UpdateLoadingMessage("🤔 same line")
+	c.UpdateLoadingMessage("🤔 same line")
+
+	time.Sleep(80 * time.Millisecond)
+
+	statuses, _, _ := fc.snapshot()
+	withLine := 0
+	for _, s := range statuses {
+		if len(s.LoadingMessages) == 1 && s.LoadingMessages[0] == "same line" {
+			withLine++
+		}
+	}
+	if withLine != 1 {
+		t.Fatalf("expected exactly 1 setStatus carrying the deduped line, got %d", withLine)
+	}
+}
+
+func TestTypingController_UpdateLoadingMessageEmptyIsDropped(t *testing.T) {
+	fc := &fakeTypingClient{}
+	c := newTestController(fc, func(cfg *TypingControllerConfig) {
+		cfg.KeepaliveInterval = 1 * time.Hour
+	})
+
+	c.Start(context.Background())
+	defer c.Stop()
+	waitForCondition(t, time.Second, func() bool {
+		statuses, _, _ := fc.snapshot()
+		return len(statuses) >= 1
+	}, "initial setStatus")
+
+	statusesBefore, _, _ := fc.snapshot()
+	c.UpdateLoadingMessage("")
+	c.UpdateLoadingMessage("   ")
+	c.UpdateLoadingMessage("\n\t  \n")
+	time.Sleep(60 * time.Millisecond)
+
+	statusesAfter, _, _ := fc.snapshot()
+	if len(statusesAfter) != len(statusesBefore) {
+		t.Fatalf("expected no further setStatus calls for empty/whitespace input, before=%d after=%d",
+			len(statusesBefore), len(statusesAfter))
+	}
+}
+
+func TestTypingController_UpdateLoadingMessageSkippedWhenCircuitBreakerTripped(t *testing.T) {
+	fc := &fakeTypingClient{
+		statusErr: slack.SlackErrorResponse{Err: "feature_not_enabled"},
+	}
+	c := newTestController(fc, func(cfg *TypingControllerConfig) {
+		cfg.KeepaliveInterval = 1 * time.Hour
+	})
+
+	c.Start(context.Background())
+	defer c.Stop()
+	waitForCondition(t, time.Second, func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.statusDisabled
+	}, "circuit breaker trips on permanent error")
+
+	statusesBefore, _, _ := fc.snapshot()
+	c.UpdateLoadingMessage("🤔 should be skipped")
+	time.Sleep(60 * time.Millisecond)
+
+	statusesAfter, _, _ := fc.snapshot()
+	if len(statusesAfter) != len(statusesBefore) {
+		t.Fatalf("expected no setStatus after circuit trip, before=%d after=%d",
+			len(statusesBefore), len(statusesAfter))
+	}
+}
+
+func TestTypingController_KeepaliveIncludesLatestLoadingMessage(t *testing.T) {
+	fc := &fakeTypingClient{}
+	c := newTestController(fc, func(cfg *TypingControllerConfig) {
+		cfg.KeepaliveInterval = 15 * time.Millisecond
+	})
+
+	c.Start(context.Background())
+	defer c.Stop()
+
+	c.UpdateLoadingMessage("🤔 latest thought")
+
+	waitForCondition(t, time.Second, func() bool {
+		statuses, _, _ := fc.snapshot()
+		count := 0
+		for _, s := range statuses {
+			if len(s.LoadingMessages) == 1 && s.LoadingMessages[0] == "latest thought" {
+				count++
+			}
+		}
+		// At least 2 setStatus calls carry the loading message: the
+		// event-driven push from UpdateLoadingMessage and one or more
+		// keepalive ticks.
+		return count >= 2
+	}, "keepalive ticks pick up latestLoadingMessage")
+}
+
+func TestTypingController_StopClearSendsNoLoadingMessages(t *testing.T) {
+	fc := &fakeTypingClient{}
+	c := newTestController(fc, func(cfg *TypingControllerConfig) {
+		cfg.KeepaliveInterval = 1 * time.Hour
+	})
+
+	c.Start(context.Background())
+	waitForCondition(t, time.Second, func() bool {
+		statuses, _, _ := fc.snapshot()
+		return len(statuses) >= 1
+	}, "initial setStatus")
+
+	c.UpdateLoadingMessage("🤔 mid-flight")
+	waitForCondition(t, time.Second, func() bool {
+		statuses, _, _ := fc.snapshot()
+		for _, s := range statuses {
+			if len(s.LoadingMessages) == 1 {
+				return true
+			}
+		}
+		return false
+	}, "loading message pushed")
+
+	c.Stop()
+
+	waitForCondition(t, time.Second, func() bool {
+		statuses, _, _ := fc.snapshot()
+		for _, s := range statuses {
+			if s.Status == "" {
+				if len(s.LoadingMessages) != 0 {
+					return false // wrong: clear should carry no loading messages
+				}
+				return true
+			}
+		}
+		return false
+	}, "stop clear sends empty status without loading messages")
+}
+
+func TestTypingController_UpdateLoadingMessageTruncatesLongInput(t *testing.T) {
+	fc := &fakeTypingClient{}
+	c := newTestController(fc, func(cfg *TypingControllerConfig) {
+		cfg.KeepaliveInterval = 1 * time.Hour
+	})
+
+	c.Start(context.Background())
+	defer c.Stop()
+	waitForCondition(t, time.Second, func() bool {
+		statuses, _, _ := fc.snapshot()
+		return len(statuses) >= 1
+	}, "initial setStatus")
+
+	// Slack rejects any loading_messages entry over 50 bytes. Pass a long
+	// reasoning line and assert the wire payload was truncated under cap.
+	long := "🤔 The alert is essentially a test message with no real content; let me search for runbooks first as required."
+	c.UpdateLoadingMessage(long)
+
+	waitForCondition(t, time.Second, func() bool {
+		statuses, _, _ := fc.snapshot()
+		for _, s := range statuses {
+			if len(s.LoadingMessages) == 1 && len(s.LoadingMessages[0]) > 0 && len(s.LoadingMessages[0]) <= loadingMessageMaxBytes {
+				return true
+			}
+		}
+		return false
+	}, "loading message truncated under Slack's 50-byte cap")
+
+	// Verify the truncated line ends with the ellipsis marker.
+	statuses, _, _ := fc.snapshot()
+	var sentLine string
+	for _, s := range statuses {
+		if len(s.LoadingMessages) == 1 {
+			sentLine = s.LoadingMessages[0]
+		}
+	}
+	if !strings.HasSuffix(sentLine, "…") {
+		t.Fatalf("expected truncation ellipsis suffix, got %q (len=%d)", sentLine, len(sentLine))
+	}
+}
+
+func TestTruncateForLoadingMessage(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		max  int
+		want string
+	}{
+		{"short passes through", "hi", 50, "hi"},
+		{"exact fits", "12345", 5, "12345"},
+		{"one over truncates", "1234567", 5, "12…"},
+		{"empty stays empty", "", 50, ""},
+		{"zero max passes through", "anything", 0, "anything"},
+		{"multibyte safe", "ñññññññññ", 5, "ñ…"}, // each ñ is 2 bytes
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateForLoadingMessage(tc.in, tc.max)
+			if got != tc.want {
+				t.Errorf("truncateForLoadingMessage(%q,%d) = %q, want %q",
+					tc.in, tc.max, got, tc.want)
+			}
+		})
+	}
 }
 
 func TestTypingController_DefaultsApplied(t *testing.T) {
