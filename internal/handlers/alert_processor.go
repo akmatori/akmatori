@@ -10,6 +10,8 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/services"
+	slackutil "github.com/akmatori/akmatori/internal/slack"
+	"github.com/slack-go/slack"
 )
 
 func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, normalized alerts.NormalizedAlert) {
@@ -210,6 +212,25 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 	investigationPrompt := h.buildInvestigationPrompt(alert, instance)
 	taskWithGuidance := executor.PrependGuidance(investigationPrompt)
 
+	// Show "is investigating..." in the alert thread for the duration of the
+	// agent run when Slack is configured. The reaction lands on the bot's own
+	// alert message (threadTS). Skipping when threadTS=="" because Slack
+	// posting was disabled or failed earlier.
+	if threadTS != "" {
+		if slackClient := h.slackManager.GetClient(); slackClient != nil {
+			if settings, err := database.GetSlackSettings(); err == nil && settings != nil && settings.AlertsChannel != "" {
+				typing := slackutil.NewTypingController(slackutil.TypingControllerConfig{
+					Client:      slackClient,
+					ChannelID:   settings.AlertsChannel,
+					ThreadTS:    threadTS,
+					ReactionRef: slack.ItemRef{Channel: settings.AlertsChannel, Timestamp: threadTS},
+				})
+				typing.Start(context.Background())
+				defer typing.Stop()
+			}
+		}
+	}
+
 	// Use WebSocket-based agent worker
 	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
 		slog.Info("using WebSocket-based agent worker", "incident_id", incidentUUID)
@@ -352,6 +373,21 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		if slackClient := h.slackManager.GetClient(); slackClient != nil {
 			progressStreamer = NewSlackProgressStreamer(slackClient, slackChannelID, progressMsgTS, slackAppendInterval)
 		}
+	}
+
+	// Show "is investigating..." in the thread header and put a hourglass
+	// reaction on the original Slack-channel alert message for the duration
+	// of the agent run. defer Stop covers all exit paths since the function
+	// blocks on <-done before returning.
+	if slackClient := h.slackManager.GetClient(); slackClient != nil {
+		typing := slackutil.NewTypingController(slackutil.TypingControllerConfig{
+			Client:      slackClient,
+			ChannelID:   slackChannelID,
+			ThreadTS:    slackMessageTS,
+			ReactionRef: slack.ItemRef{Channel: slackChannelID, Timestamp: slackMessageTS},
+		})
+		typing.Start(context.Background())
+		defer typing.Stop()
 	}
 
 	// Use WebSocket-based agent worker

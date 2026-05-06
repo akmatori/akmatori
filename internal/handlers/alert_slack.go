@@ -145,13 +145,8 @@ func (h *AlertHandler) updateSlackChannelReactions(channelID, messageTS string, 
 		return
 	}
 
-	// Remove hourglass reaction
-	if err := slackClient.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
-		Channel:   channelID,
-		Timestamp: messageTS,
-	}); err != nil {
-		slog.Warn("failed to remove hourglass reaction", "err", err)
-	}
+	// The hourglass reaction is now removed by the TypingController in
+	// runSlackChannelInvestigation's deferred Stop.
 
 	// Add result reaction
 	reactionName := "white_check_mark"
