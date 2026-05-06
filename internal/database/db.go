@@ -134,6 +134,7 @@ func runMigrations(db *gorm.DB) error {
 		&HTTPConnector{},
 		&MCPServerConfig{},
 		&RetentionSettings{},
+		&FormattingSettings{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
@@ -342,6 +343,21 @@ func InitializeDefaults() error {
 		}
 		if rs.CreatedAt.Equal(rs.UpdatedAt) {
 			slog.Info("created default retention settings")
+		}
+	}
+
+	// Create default formatting settings if they don't exist.
+	// Same race-tolerant FirstOrCreate pattern as retention settings.
+	{
+		var fs FormattingSettings
+		defaults := DefaultFormattingSettings()
+		if err := DB.Where(FormattingSettings{SingletonKey: "default"}).Attrs(defaults).FirstOrCreate(&fs).Error; err != nil {
+			if rerr := DB.Where(FormattingSettings{SingletonKey: "default"}).First(&fs).Error; rerr != nil {
+				return fmt.Errorf("failed to create default formatting settings: %w (retry: %v)", err, rerr)
+			}
+		}
+		if fs.CreatedAt.Equal(fs.UpdatedAt) {
+			slog.Info("created default formatting settings")
 		}
 	}
 
@@ -743,6 +759,29 @@ func GetOrCreateRetentionSettings() (*RetentionSettings, error) {
 
 // UpdateRetentionSettings updates retention settings in the database
 func UpdateRetentionSettings(settings *RetentionSettings) error {
+	return DB.Save(settings).Error
+}
+
+// GetOrCreateFormattingSettings retrieves or creates formatting settings (singleton).
+// The row is normally seeded by InitializeDefaults at startup; the create path
+// here is only a fallback. If FirstOrCreate races with another caller (both see
+// no row, both INSERT, one hits unique constraint), we fall back to a plain read.
+func GetOrCreateFormattingSettings() (*FormattingSettings, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+	var settings FormattingSettings
+	defaults := DefaultFormattingSettings()
+	if err := DB.Where(FormattingSettings{SingletonKey: "default"}).Attrs(defaults).FirstOrCreate(&settings).Error; err != nil {
+		if rerr := DB.Where(FormattingSettings{SingletonKey: "default"}).First(&settings).Error; rerr != nil {
+			return nil, fmt.Errorf("%w (retry: %v)", err, rerr)
+		}
+	}
+	return &settings, nil
+}
+
+// UpdateFormattingSettings persists changes to the formatting settings singleton.
+func UpdateFormattingSettings(settings *FormattingSettings) error {
 	return DB.Save(settings).Error
 }
 

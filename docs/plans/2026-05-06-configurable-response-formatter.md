@@ -53,12 +53,12 @@ When the formatter is disabled, the worker is disconnected, or the LLM call fail
 - Modify: `cmd/akmatori/main.go` (or wherever `AutoMigrate` is invoked)
 - Modify: `internal/database/models_test.go`
 
-- [ ] Add `FormattingSettings` struct with: `ID`, `SingletonKey` (unique index, default `"default"`), `Enabled` bool (default false), `SystemPrompt` text (with a sensible default), `MaxTokens` int (default 1500), `Temperature` float (default 0.2), `CreatedAt`, `UpdatedAt`. `TableName() string => "formatting_settings"`.
-- [ ] Add `DefaultFormattingSettings()` returning a populated struct (default prompt: instruct the model to produce a clean, structured incident summary preserving status, actions taken, and recommendations).
-- [ ] Add `GetOrCreateFormattingSettings()` and `UpdateFormattingSettings()` helpers, mirroring the retention helpers.
-- [ ] Register the new model in `AutoMigrate`.
-- [ ] Add unit tests covering defaults, GetOrCreate idempotency, and Update round-trip.
-- [ ] Run `make test` — must pass.
+- [x] Add `FormattingSettings` struct with: `ID`, `SingletonKey` (unique index, default `"default"`), `Enabled` bool (default false), `SystemPrompt` text (with a sensible default), `MaxTokens` int (default 1500), `Temperature` float (default 0.2), `CreatedAt`, `UpdatedAt`. `TableName() string => "formatting_settings"`.
+- [x] Add `DefaultFormattingSettings()` returning a populated struct (default prompt: instruct the model to produce a clean, structured incident summary preserving status, actions taken, and recommendations).
+- [x] Add `GetOrCreateFormattingSettings()` and `UpdateFormattingSettings()` helpers, mirroring the retention helpers.
+- [x] Register the new model in `AutoMigrate`.
+- [x] Add unit tests covering defaults, GetOrCreate idempotency, and Update round-trip.
+- [x] Run `make test` — must pass.
 
 ### Task 2: ResponseFormatter service
 
