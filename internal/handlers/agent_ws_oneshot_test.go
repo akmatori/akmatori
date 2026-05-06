@@ -348,14 +348,14 @@ func TestOneShotLLM_WorkerDisconnectWakesPending(t *testing.T) {
 // TestCleanupWorkerConn_PerConnRouting pins down the two reconnect-race
 // orderings the per-conn ownership fix has to handle:
 //
-//   (1) A's cleanup runs after B has replaced workerConn. Pending entries
-//       owned by A MUST still be failed (otherwise A-era callers strand
-//       until ctx.Done()), and pending entries owned by B MUST NOT be
-//       touched.
+//	(1) A's cleanup runs after B has replaced workerConn. Pending entries
+//	    owned by A MUST still be failed (otherwise A-era callers strand
+//	    until ctx.Done()), and pending entries owned by B MUST NOT be
+//	    touched.
 //
-//   (2) The mirror case where A's cleanup runs and a B-era entry has been
-//       registered concurrently in the global map. The B-era entry MUST
-//       NOT be failed by A's cleanup.
+//	(2) The mirror case where A's cleanup runs and a B-era entry has been
+//	    registered concurrently in the global map. The B-era entry MUST
+//	    NOT be failed by A's cleanup.
 //
 // We exercise cleanupWorkerConn directly with both pending entries planted
 // so the routing is deterministic in a single run.
@@ -584,9 +584,11 @@ func TestStartIncident_SupersedingCallbackUnblocksPrevious(t *testing.T) {
 
 	prevDone := make(chan string, 1)
 	prevCb := IncidentCallback{
-		OnOutput:    func(string) { t.Errorf("previous callback should not receive OnOutput after supersession") },
-		OnCompleted: func(string, string, int, int64) { t.Errorf("previous callback should not receive OnCompleted after supersession") },
-		OnError:     func(msg string) { prevDone <- msg },
+		OnOutput: func(string) { t.Errorf("previous callback should not receive OnOutput after supersession") },
+		OnCompleted: func(string, string, int, int64) {
+			t.Errorf("previous callback should not receive OnCompleted after supersession")
+		},
+		OnError: func(msg string) { prevDone <- msg },
 	}
 
 	if err := handler.StartIncident("incident-supersede", "task-1", nil, nil, nil, prevCb); err != nil {

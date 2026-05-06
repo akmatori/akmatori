@@ -257,7 +257,6 @@ func TestAlertHandler_GetBaseURL(t *testing.T) {
 	}
 }
 
-
 // TestTruncateLogForSlack_Comprehensive tests log truncation comprehensively
 func TestTruncateLogForSlack_Comprehensive(t *testing.T) {
 	tests := []struct {
