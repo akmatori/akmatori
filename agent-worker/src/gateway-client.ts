@@ -409,7 +409,7 @@ export class GatewayClient {
  * settled with another result first) are absorbed instead of becoming
  * unhandled, which Node 22 treats as fatal.
  */
-function orphanSafe<T>(work: () => Promise<T>): Promise<T> {
+export function orphanSafe<T>(work: () => Promise<T>): Promise<T> {
   const p = work();
   p.catch(() => {});
   return p;

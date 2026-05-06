@@ -384,6 +384,49 @@ describe("ScriptExecutor", () => {
       ).rejects.toThrow("timed out");
     }, 10_000);
 
+    it("should not crash with unhandled rejection when script fire-and-forgets gateway_call and finishes", async () => {
+      // Reproduces the agent-worker crash: a script invokes gateway_call(...)
+      // without awaiting, returns a value, then controller.abort() in the finally
+      // block aborts the in-flight RPC. The orphaned __gw_call promise rejects
+      // and — before the orphanSafe wrap — became an unhandled rejection that
+      // crashed Node 22.
+      let resolveGateway!: () => void;
+      const gatewayCallStarted = new Promise<void>((r) => { resolveGateway = r; });
+
+      const { executor } = createExecutor({
+        call: vi.fn((_toolName: string, _args?: Record<string, unknown>, _instance?: string, signal?: AbortSignal) =>
+          new Promise<CallResult>((_resolve, reject) => {
+            resolveGateway();
+            signal?.addEventListener("abort", () => reject(new Error("Request aborted")), { once: true });
+          })
+        ) as any,
+      });
+
+      const unhandledErrors: unknown[] = [];
+      const handler = (err: unknown) => unhandledErrors.push(err);
+      process.on("unhandledRejection", handler);
+
+      try {
+        const execution = executor.execute(
+          // Note: no `await` — fire-and-forget. Script returns immediately.
+          'gateway_call("ssh.execute_command", { command: "uptime" }); return "done";',
+        );
+
+        await gatewayCallStarted;
+
+        // Script returns "done"; controller.abort() in finally aborts the orphaned
+        // gateway_call. Without the orphanSafe wrap on __gw_call, this would crash.
+        const result = await execution;
+        expect(result.output).toBe("done");
+
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        expect(unhandledErrors).toHaveLength(0);
+      } finally {
+        process.off("unhandledRejection", handler);
+      }
+    }, 10_000);
+
     it("should not crash with unhandled rejection when timeout fires during in-flight gateway_call", async () => {
       // Reproduce the crash: script awaits a gateway_call that never settles,
       // timeout fires, controller.abort() fires the in-flight request's abort
