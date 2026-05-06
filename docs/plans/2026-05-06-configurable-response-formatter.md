@@ -66,15 +66,15 @@ When the formatter is disabled, the worker is disconnected, or the LLM call fail
 - Create: `internal/services/response_formatter.go`
 - Create: `internal/services/response_formatter_test.go`
 
-- [ ] Implement `ResponseFormatter` with constructor `NewResponseFormatter(caller OneShotLLMCaller) *ResponseFormatter`.
-- [ ] Implement `Format(ctx context.Context, rawResponse, fullLog string) string`:
+- [x] Implement `ResponseFormatter` with constructor `NewResponseFormatter(caller OneShotLLMCaller) *ResponseFormatter`.
+- [x] Implement `Format(ctx context.Context, rawResponse, fullLog string) string`:
   - Loads `FormattingSettings`; if disabled or empty prompt, return `rawResponse`.
   - Loads active `LLMSettings`; if missing or worker disabled, return `rawResponse`.
   - Builds user message containing both the raw response and the full reasoning log clearly delimited (e.g. `--- Raw response ---` and `--- Full reasoning ---` sections), with a soft byte cap to avoid blowing up context (e.g. 60KB, truncating `fullLog` from the start to keep the tail near the final response).
   - Issues `OneShotLLM` with the configured system prompt, `MaxTokens`, `Temperature`. Default 30s timeout if caller has no deadline.
   - On `ErrWorkerNotConnected`, any other error, or empty result, log at appropriate level and return `rawResponse`.
-- [ ] Tests: enabled+success path, disabled (passthrough), missing LLM settings (passthrough), `ErrWorkerNotConnected` (passthrough), generic error (passthrough), empty caller result (passthrough), context-deadline propagation, large `fullLog` truncation.
-- [ ] Run `make test` — must pass.
+- [x] Tests: enabled+success path, disabled (passthrough), missing LLM settings (passthrough), `ErrWorkerNotConnected` (passthrough), generic error (passthrough), empty caller result (passthrough), context-deadline propagation, large `fullLog` truncation.
+- [x] Run `make test` — must pass.
 
 ### Task 3: Wire formatter into incident finalization
 
