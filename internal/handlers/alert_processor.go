@@ -10,6 +10,8 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/services"
+	slackutil "github.com/akmatori/akmatori/internal/slack"
+	"github.com/slack-go/slack"
 )
 
 func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, normalized alerts.NormalizedAlert) {
@@ -210,6 +212,25 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 	investigationPrompt := h.buildInvestigationPrompt(alert, instance)
 	taskWithGuidance := executor.PrependGuidance(investigationPrompt)
 
+	// Show "is investigating..." in the alert thread for the duration of the
+	// agent run when Slack is configured. The reaction lands on the bot's own
+	// alert message (threadTS). Skipping when threadTS=="" because Slack
+	// posting was disabled or failed earlier.
+	if threadTS != "" {
+		if slackClient := h.slackManager.GetClient(); slackClient != nil {
+			if settings, err := database.GetSlackSettings(); err == nil && settings != nil && settings.AlertsChannel != "" {
+				typing := slackutil.NewTypingController(slackutil.TypingControllerConfig{
+					Client:      slackClient,
+					ChannelID:   settings.AlertsChannel,
+					ThreadTS:    threadTS,
+					ReactionRef: slack.ItemRef{Channel: settings.AlertsChannel, Timestamp: threadTS},
+				})
+				typing.Start(context.Background())
+				defer typing.Stop()
+			}
+		}
+	}
+
 	// Use WebSocket-based agent worker
 	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
 		slog.Info("using WebSocket-based agent worker", "incident_id", incidentUUID)
@@ -340,18 +361,28 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 	investigationPrompt := h.buildInvestigationPrompt(alert, instance)
 	taskWithGuidance := executor.PrependGuidance(investigationPrompt)
 
-	// Post the initial "Thinking..." progress message; the streamer will
-	// replace its body with the agent's latest reasoning line via chat.update.
-	progressMsgTS := h.postSlackThreadProgressMessage(slackChannelID, slackMessageTS, "Thinking...")
-
-	// Construct progress streamer for live condensed status updates. Nil if
-	// the Slack client is unavailable; AppendStatus on a nil receiver is a
-	// safe no-op so the rest of the flow stays unchanged.
+	// Show "is investigating..." in the thread header and put a hourglass
+	// reaction on the original Slack-channel alert message for the duration
+	// of the agent run. defer Stop covers all exit paths since the function
+	// blocks on <-done before returning.
+	//
+	// The progress streamer pipes the agent's latest 🤔 reasoning line into
+	// the typing controller's loading_messages, replacing Slack's default
+	// rotating phrases ("searching...", "evaluating...", etc.) with what
+	// the agent is actually thinking. There is no "Thinking..." placeholder
+	// message — the typing banner + reaction are the activity signal; the
+	// final result is posted as a fresh thread reply when the agent finishes.
 	var progressStreamer *SlackProgressStreamer
-	if progressMsgTS != "" {
-		if slackClient := h.slackManager.GetClient(); slackClient != nil {
-			progressStreamer = NewSlackProgressStreamer(slackClient, slackChannelID, progressMsgTS, slackAppendInterval)
-		}
+	if slackClient := h.slackManager.GetClient(); slackClient != nil {
+		typing := slackutil.NewTypingController(slackutil.TypingControllerConfig{
+			Client:      slackClient,
+			ChannelID:   slackChannelID,
+			ThreadTS:    slackMessageTS,
+			ReactionRef: slack.ItemRef{Channel: slackChannelID, Timestamp: slackMessageTS},
+		})
+		typing.Start(context.Background())
+		defer typing.Stop()
+		progressStreamer = NewSlackProgressStreamer(typing.UpdateLoadingMessage, slackAppendInterval)
 	}
 
 	// Use WebSocket-based agent worker
@@ -416,11 +447,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 				slog.Error("failed to update incident status", "err", updateErr)
 			}
 			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
-			if progressMsgTS != "" {
-				h.updateSlackThreadMessage(slackChannelID, progressMsgTS, errorMsg)
-			} else {
-				h.postSlackThreadReply(slackChannelID, slackMessageTS, errorMsg)
-			}
+			h.postSlackThreadReply(slackChannelID, slackMessageTS, errorMsg)
 			return
 		}
 
@@ -430,16 +457,11 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		// Flush any buffered progress lines so the last status is not lost.
 		progressStreamer.Flush()
 
-		// Replacement run owns finalization — exit before touching the DB
-		// or channel reactions. The replacement posts its own progress
-		// message, so clear this run's progress message body before
-		// returning, otherwise the user sees a stale thought alongside the
-		// replacement's final message.
+		// Replacement run owns finalization — exit silently before touching
+		// the DB or channel reactions; the replacement posts its own final
+		// thread reply when it finishes.
 		if superseded {
 			slog.Info("slack channel investigation superseded; leaving finalization to the new run", "incident_id", incidentUUID)
-			if progressMsgTS != "" {
-				h.updateSlackThreadMessage(slackChannelID, progressMsgTS, "_(superseded by newer activity)_")
-			}
 			return
 		}
 
@@ -471,19 +493,12 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 			formattedResponse = "Task completed (no output)"
 		}
 
-		// Mark the progress message as complete, then post the full final
-		// body as a fresh thread reply. chat.postMessage allows up to
-		// ~40,000 chars so long summaries always reach the user; the
-		// progress message itself stays a short marker.
+		// Post the full final body as a fresh thread reply. chat.postMessage
+		// allows up to ~40,000 chars so long summaries always reach the user.
+		// Completion is signaled by the success/error reaction added above
+		// and the typing banner clearing as the deferred Stop fires.
 		h.updateSlackChannelReactions(slackChannelID, slackMessageTS, hasError)
-		if progressMsgTS != "" {
-			marker := slackInvestigationDoneMarker
-			if hasError {
-				marker = slackInvestigationFailedMarker
-			}
-			h.updateSlackThreadMessage(slackChannelID, progressMsgTS, marker)
-		}
-		slog.Info("posting Slack final summary as new thread reply", "progress_ts", progressMsgTS, "response_len", len(formattedResponse), "incident", incidentUUID)
+		slog.Info("posting Slack final summary as new thread reply", "response_len", len(formattedResponse), "incident", incidentUUID)
 		h.postSlackThreadReply(slackChannelID, slackMessageTS, formattedResponse)
 
 		slog.Info("investigation completed for Slack channel alert", "alert", alert.AlertName)
@@ -497,9 +512,5 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		slog.Error("failed to update incident status", "err", updateErr)
 	}
 	h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
-	if progressMsgTS != "" {
-		h.updateSlackThreadMessage(slackChannelID, progressMsgTS, errorMsg)
-	} else {
-		h.postSlackThreadReply(slackChannelID, slackMessageTS, errorMsg)
-	}
+	h.postSlackThreadReply(slackChannelID, slackMessageTS, errorMsg)
 }

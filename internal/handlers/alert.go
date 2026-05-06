@@ -33,13 +33,6 @@ const slackMaxTextBytes = 8000
 // always fits without being clipped.
 const slackSummaryMargin = 200
 
-// slackInvestigationDoneMarker / slackInvestigationFailedMarker replace the
-// in-thread progress message once the investigation finishes. The full
-// final body is posted as a separate thread reply so the progress message
-// itself stays a short status line.
-const slackInvestigationDoneMarker = "_Investigation complete — see summary below._"
-const slackInvestigationFailedMarker = "_Investigation failed — see details below._"
-
 // AlertHandler handles webhook requests from multiple alert sources
 type AlertHandler struct {
 	config          *config.Config

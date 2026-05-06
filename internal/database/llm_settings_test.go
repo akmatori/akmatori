@@ -452,6 +452,79 @@ func TestSeedLLMProviders_SetsNames(t *testing.T) {
 	}
 }
 
+// TestSeedLLMProviders_ModelsMatchUIRecommended locks the seeded model values to the
+// UI's "(Recommended)" entries in web/src/components/settings/LLMSettingsSection.tsx.
+// If the UI changes, update both sides together.
+func TestSeedLLMProviders_ModelsMatchUIRecommended(t *testing.T) {
+	expected := map[LLMProvider]string{
+		LLMProviderOpenAI:     "gpt-5.5",
+		LLMProviderAnthropic:  "claude-sonnet-4-6",
+		LLMProviderGoogle:     "gemini-3-pro-preview",
+		LLMProviderOpenRouter: "openai/gpt-5.5",
+		LLMProviderCustom:     "",
+	}
+	for p, want := range expected {
+		if got := defaultModelsPerProvider[p]; got != want {
+			t.Errorf("provider %s: expected default model %q, got %q", p, want, got)
+		}
+	}
+}
+
+func TestMigrateOpenRouterDashFormModels(t *testing.T) {
+	db := setupLLMTestDB(t)
+
+	// Stale dash-form OpenRouter rows seeded by older Akmatori releases.
+	staleSonnet46 := &LLMSettings{Name: "Stale 4-6", Provider: LLMProviderOpenRouter, Model: "anthropic/claude-sonnet-4-6"}
+	staleSonnet45 := &LLMSettings{Name: "Stale 4-5", Provider: LLMProviderOpenRouter, Model: "anthropic/claude-sonnet-4-5"}
+	// Untouched: OpenRouter row already on a registered alias.
+	freshSonnet46 := &LLMSettings{Name: "Fresh", Provider: LLMProviderOpenRouter, Model: "anthropic/claude-sonnet-4.6"}
+	// Untouched: dash-form on a non-OpenRouter provider (Anthropic native uses dash-form).
+	anthropicNative := &LLMSettings{Name: "Anthropic", Provider: LLMProviderAnthropic, Model: "claude-sonnet-4-6"}
+	// Untouched: OpenRouter row on a model not in the rename list.
+	customRow := &LLMSettings{Name: "Custom", Provider: LLMProviderOpenRouter, Model: "openai/gpt-5.5"}
+
+	for _, row := range []*LLMSettings{staleSonnet46, staleSonnet45, freshSonnet46, anthropicNative, customRow} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatalf("seed row %q: %v", row.Name, err)
+		}
+	}
+
+	if err := migrateOpenRouterDashFormModels(db); err != nil {
+		t.Fatalf("migrateOpenRouterDashFormModels failed: %v", err)
+	}
+
+	want := map[string]string{
+		"Stale 4-6": "anthropic/claude-sonnet-4.6",
+		"Stale 4-5": "anthropic/claude-sonnet-4.5",
+		"Fresh":     "anthropic/claude-sonnet-4.6",
+		"Anthropic": "claude-sonnet-4-6",
+		"Custom":    "openai/gpt-5.5",
+	}
+	for name, expected := range want {
+		var row LLMSettings
+		if err := db.Where("name = ?", name).First(&row).Error; err != nil {
+			t.Fatalf("lookup %q: %v", name, err)
+		}
+		if row.Model != expected {
+			t.Errorf("row %q: expected model %q, got %q", name, expected, row.Model)
+		}
+	}
+
+	// Idempotent: a second run is a no-op.
+	if err := migrateOpenRouterDashFormModels(db); err != nil {
+		t.Fatalf("second migrateOpenRouterDashFormModels failed: %v", err)
+	}
+	for name, expected := range want {
+		var row LLMSettings
+		if err := db.Where("name = ?", name).First(&row).Error; err != nil {
+			t.Fatalf("lookup %q after second run: %v", name, err)
+		}
+		if row.Model != expected {
+			t.Errorf("row %q after second run: expected model %q, got %q", name, expected, row.Model)
+		}
+	}
+}
+
 func TestProviderDisplayName(t *testing.T) {
 	tests := []struct {
 		provider LLMProvider

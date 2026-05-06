@@ -11,6 +11,7 @@ import (
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/output"
 	"github.com/akmatori/akmatori/internal/services"
+	slackutil "github.com/akmatori/akmatori/internal/slack"
 	"github.com/akmatori/akmatori/internal/utils"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -123,36 +124,29 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		}
 	}
 
-	// Add processing reaction (fire-and-forget, don't block execution)
-	go func() {
-		if err := h.client.AddReaction("hourglass_flowing_sand", slack.ItemRef{
-			Channel:   channel,
-			Timestamp: threadID,
-		}); err != nil {
-			slog.Warn("failed to add reaction", "err", err)
-		}
-	}()
+	// Show "is investigating..." in the thread header and add a hourglass
+	// reaction on the thread root for the duration of the agent run. The
+	// controller owns both signals' lifecycle; defer Stop covers all exit
+	// paths (success, error, supersede) since the handler blocks on <-done
+	// before returning.
+	typing := slackutil.NewTypingController(slackutil.TypingControllerConfig{
+		Client:      h.client,
+		ChannelID:   channel,
+		ThreadTS:    threadID,
+		ReactionRef: slack.ItemRef{Channel: channel, Timestamp: threadID},
+	})
+	typing.Start(context.Background())
+	defer typing.Stop()
 
-	// Post the initial "Thinking..." progress message. We deliberately do
-	// not use chat.startStream here: Slack rejects chat.update on an
-	// actively streamed message with `streaming_state_conflict`, which is
-	// incompatible with the single-line replace behaviour the streamer
-	// implements via chat.update.
-	var progressMsgTS string
-	_, progressMsgTS, _, err = h.client.SendMessage(
-		channel,
-		slack.MsgOptionText("Thinking...", false),
-		slack.MsgOptionTS(threadID),
-	)
-	if err != nil {
-		slog.Error("failed to post progress message", "err", err)
-		return
-	}
-
-	// SlackProgressStreamer replaces the progress message body with the
-	// agent's latest reasoning (🤔) line via chat.update; tool start/end
-	// markers are filtered out so the user sees a clean single-line status.
-	progressStreamer := NewSlackProgressStreamer(h.client, channel, progressMsgTS, slackAppendInterval)
+	// SlackProgressStreamer extracts the agent's latest reasoning (🤔)
+	// line from output deltas and forwards it to the TypingController as
+	// the assistant.threads.setStatus loading_messages content. Tool
+	// start/end markers are filtered out so the rotating banner shows a
+	// clean single-line current-thought indicator. There is no Slack
+	// "Thinking..." placeholder message — the typing banner + reaction
+	// are the activity signal; the final result is posted as a fresh
+	// thread reply when the agent finishes.
+	progressStreamer := NewSlackProgressStreamer(typing.UpdateLoadingMessage, slackAppendInterval)
 
 	taskWithGuidance := executor.PrependGuidance(text)
 
@@ -224,7 +218,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		if wsErr := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback); wsErr != nil {
 			slog.Error("failed to start/continue incident via WebSocket", "err", wsErr)
 			startErr := fmt.Sprintf("❌ Agent worker error: %v", wsErr)
-			h.finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text,
+			h.finishSlackMessage(channel, threadID, incidentUUID, user, text,
 				startErr, startErr, "", true, "", 0, 0)
 			return
 		}
@@ -236,20 +230,11 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		progressStreamer.Flush()
 
 		// If a newer message displaced this run, the replacement run will
-		// finalize the incident in the DB and post its own progress / final
-		// message. Exit early so we do not race the replacement with a
-		// failure update — but first replace this run's progress message
-		// so the user does not see a stale thought alongside the
-		// replacement's message.
+		// finalize the incident in the DB and post its own final message.
+		// Exit silently so we do not race the replacement with a failure
+		// update.
 		if superseded {
 			slog.Info("slack run superseded; leaving finalization to the new run", "incident_id", incidentUUID)
-			if _, _, _, updErr := h.client.UpdateMessage(
-				channel,
-				progressMsgTS,
-				slack.MsgOptionText("_(superseded by a newer message in this thread)_", false),
-			); updErr != nil {
-				slog.Warn("failed to update superseded progress message", "err", updErr)
-			}
 			return
 		}
 
@@ -278,7 +263,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			finalResponse = "✅ Task completed (no output)"
 		}
 
-		h.finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text,
+		h.finishSlackMessage(channel, threadID, incidentUUID, user, text,
 			finalResponse, response, fullLog, hasError, finalSessionID, finalTokensUsed, finalExecutionTimeMs)
 		return
 	}
@@ -286,7 +271,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 	// No WebSocket worker available
 	slog.Error("agent worker not connected", "incident_id", incidentUUID)
 	errMsg := "❌ Agent worker not connected. Please check that the agent-worker container is running."
-	h.finishSlackMessage(channel, threadID, progressMsgTS, incidentUUID, user, text,
+	h.finishSlackMessage(channel, threadID, incidentUUID, user, text,
 		errMsg, errMsg, "", true, "", 0, 0)
 }
 
@@ -294,14 +279,10 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 // finalResponse is what gets posted to Slack; rawResponse is the full agent
 // output stored in `incident.response` so the web UI shows the complete
 // result, not the Slack-sized summarization.
-func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS string, incidentUUID, user, text, finalResponse, rawResponse, fullLog string, hasError bool, sessionID string, tokensUsed int, executionTimeMs int64) {
-	// Remove processing reaction
-	if removeErr := h.client.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
-		Channel:   channel,
-		Timestamp: threadID,
-	}); removeErr != nil {
-		slog.Warn("failed to remove reaction", "err", removeErr)
-	}
+func (h *SlackHandler) finishSlackMessage(channel, threadID, incidentUUID, user, text, finalResponse, rawResponse, fullLog string, hasError bool, sessionID string, tokensUsed int, executionTimeMs int64) {
+	// The hourglass reaction is now removed by the TypingController in
+	// processMessage's deferred Stop; here we only add the terminal
+	// success/error reaction.
 
 	// Add result reaction
 	if hasError {
@@ -341,20 +322,10 @@ func (h *SlackHandler) finishSlackMessage(channel, threadID, progressMsgTS strin
 		}
 	}
 
-	// Replace the progress message with a short marker and post the full
-	// final body as a fresh thread reply. chat.postMessage allows up to
-	// ~40,000 chars so long summaries always reach the user.
-	marker := slackInvestigationDoneMarker
-	if hasError {
-		marker = slackInvestigationFailedMarker
-	}
-	if _, _, _, markerErr := h.client.UpdateMessage(
-		channel,
-		progressMsgTS,
-		slack.MsgOptionText(marker, false),
-	); markerErr != nil {
-		slog.Warn("failed to mark progress message complete", "err", markerErr)
-	}
+	// Post the full final body as a fresh thread reply. chat.postMessage
+	// allows up to ~40,000 chars so long summaries always reach the user.
+	// Completion is signaled by the success/error reaction added above and
+	// the typing banner clearing as the run's deferred Stop fires.
 	if _, _, postErr := h.client.PostMessage(
 		channel,
 		slack.MsgOptionText(finalResponse, false),
@@ -385,14 +356,11 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 		threadTS = event.ThreadTimeStamp
 	}
 
-	// Add hourglass reaction immediately so user sees acknowledgement
-	// BEFORE the slow OpenAI extraction call
-	if err := h.client.AddReaction("hourglass_flowing_sand", slack.ItemRef{
-		Channel:   event.Channel,
-		Timestamp: event.TimeStamp,
-	}); err != nil {
-		slog.Warn("failed to add reaction", "err", err)
-	}
+	// The hourglass reaction is now placed by the TypingController in the
+	// downstream Slack-channel-alert investigation flow (alert_processor.go's
+	// runSlackChannelInvestigation). The brief alert-extraction phase below
+	// has no dedicated indicator; the bot's "Thinking..." progress message
+	// lands shortly after as activity feedback.
 
 	// Get custom extraction prompt if configured
 	var customPrompt string
@@ -437,13 +405,9 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 		h.alertHandler.ProcessAlertFromSlackChannel(instance, *normalized, event.Channel, threadTS)
 	} else {
 		slog.Error("AlertHandler not configured, cannot process Slack channel alert")
-		// Remove hourglass and add warning reaction
-		if err := h.client.RemoveReaction("hourglass_flowing_sand", slack.ItemRef{
-			Channel:   event.Channel,
-			Timestamp: event.TimeStamp,
-		}); err != nil {
-			slog.Warn("failed to remove hourglass reaction", "err", err)
-		}
+		// No hourglass to remove on this error path — the typing controller
+		// in runSlackChannelInvestigation never started because we never got
+		// there. Just surface the misconfiguration as a warning reaction.
 		if err := h.client.AddReaction("warning", slack.ItemRef{
 			Channel:   event.Channel,
 			Timestamp: event.TimeStamp,
