@@ -191,6 +191,12 @@ func main() {
 	slackSummarizer := services.NewSlackSummarizer(agentWSHandler)
 	alertHandler.SetSlackSummarizer(slackSummarizer)
 
+	// Response formatter applies the configured global formatting prompt to
+	// the agent's final response before it is persisted and posted to Slack.
+	// Disabled by default — when off, calls passthrough to the raw response.
+	responseFormatter := services.NewResponseFormatter(agentWSHandler)
+	alertHandler.SetResponseFormatter(responseFormatter)
+
 	// Set up event handler for when Slack connects
 	// Note: We receive the client directly to avoid deadlock (can't call GetClient while holding lock)
 	slackManager.SetEventHandler(func(socketClient *socketmode.Client, client *slack.Client) {
@@ -207,6 +213,7 @@ func main() {
 		slackHandler.SetAlertHandler(alertHandler)
 		slackHandler.SetAlertService(alertService)
 		slackHandler.SetSlackSummarizer(slackSummarizer)
+		slackHandler.SetResponseFormatter(responseFormatter)
 
 		// Try to get bot user ID and team ID for self-message filtering and Streaming API
 		if authTest, err := client.AuthTest(); err == nil {

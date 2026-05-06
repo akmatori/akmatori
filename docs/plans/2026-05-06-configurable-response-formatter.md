@@ -84,12 +84,12 @@ When the formatter is disabled, the worker is disconnected, or the LLM call fail
 - Modify: `cmd/akmatori/main.go`
 - Modify: relevant `_test.go` files for the three handler flows
 
-- [ ] In `cmd/akmatori/main.go`, instantiate `ResponseFormatter` (passing the same `agentWSHandler` already used as `OneShotLLMCaller`) and pass it to `SlackHandler` and `AlertHandler` constructors.
-- [ ] Add `responseFormatter *ResponseFormatter` field on `SlackHandler` and `AlertHandler`; update constructors and any handler interfaces in `internal/services/interfaces.go` if needed.
-- [ ] In `slack_processor.go::processMessage` (~line 260): after `<-done` and `progressStreamer.Flush()`, before building `fullLog`, call `formatted := h.responseFormatter.Format(ctx, response, taskHeader+lastStreamedLog)` and use `formatted` everywhere `response` was the input to `UpdateIncidentComplete` and `finalizeSlackMessageBody`. Keep the unformatted `response` in the `fullLog` (so the raw final response remains in `full_log`).
-- [ ] Apply the same change in `alert_processor.go::runInvestigation` (~line 321) and `runSlackChannelInvestigation` (~line 481).
-- [ ] Update existing handler tests to cover: formatter passthrough (default disabled), formatter applied (mock returns transformed text and we assert the DB row + Slack post show that text), formatter fallback on caller error.
-- [ ] Run `make test` — must pass.
+- [x] In `cmd/akmatori/main.go`, instantiate `ResponseFormatter` (passing the same `agentWSHandler` already used as `OneShotLLMCaller`) and pass it to `SlackHandler` and `AlertHandler` constructors.
+- [x] Add `responseFormatter *ResponseFormatter` field on `SlackHandler` and `AlertHandler`; update constructors and any handler interfaces in `internal/services/interfaces.go` if needed. (Used setter `SetResponseFormatter` to mirror the existing `SetSlackSummarizer` pattern and avoid breaking ~30 existing tests that pass nils to the constructors.)
+- [x] In `slack_processor.go::processMessage` (~line 260): after `<-done` and `progressStreamer.Flush()`, before building `fullLog`, call `formatted := h.responseFormatter.Format(ctx, response, taskHeader+lastStreamedLog)` and use `formatted` everywhere `response` was the input to `UpdateIncidentComplete` and `finalizeSlackMessageBody`. Keep the unformatted `response` in the `fullLog` (so the raw final response remains in `full_log`).
+- [x] Apply the same change in `alert_processor.go::runInvestigation` (~line 321) and `runSlackChannelInvestigation` (~line 481).
+- [x] Update existing handler tests to cover: formatter passthrough (default disabled), formatter applied (mock returns transformed text and we assert the DB row + Slack post show that text), formatter fallback on caller error. (Covered via `applyResponseFormatter` helper — the three call sites all delegate to it, so unit tests on the helper exercise the wiring without the WebSocket-worker complexity. Setter wiring also tested.)
+- [x] Run `make test` — must pass.
 
 ### Task 4: REST API endpoint
 

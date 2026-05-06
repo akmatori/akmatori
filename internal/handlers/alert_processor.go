@@ -307,18 +307,25 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 			return
 		}
 
-		// Build full log: task header + streamed log + final response
+		// Apply the configured formatting prompt before persistence and
+		// Slack posting. Passthrough on error/empty or when formatting
+		// is disabled.
+		formattedResponse := applyResponseFormatter(context.Background(), h.responseFormatter, hasError, response, taskHeader+lastStreamedLog)
+
+		// Build full log using the raw response so full_log preserves the
+		// original agent output for debugging.
 		fullLog := taskHeader + lastStreamedLog
 		if response != "" {
 			fullLog += "\n\n--- Final Response ---\n\n" + response
 		}
 
-		// Update incident with full results
+		// Update incident with full results — the formatted response is
+		// what users see in the UI.
 		finalStatus := database.IncidentStatusCompleted
 		if hasError {
 			finalStatus = database.IncidentStatusFailed
 		}
-		if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response, finalTokensUsed, finalExecutionTimeMs); err != nil {
+		if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, formattedResponse, finalTokensUsed, finalExecutionTimeMs); err != nil {
 			slog.Error("failed to update incident complete", "err", err)
 		}
 
@@ -327,8 +334,8 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 		var formattedResp string
 		if hasError {
 			formattedResp = response
-		} else if response != "" {
-			formattedResp = finalizeSlackMessageBody(context.Background(), h.slackSummarizer, response, incidentUUID)
+		} else if formattedResponse != "" {
+			formattedResp = finalizeSlackMessageBody(context.Background(), h.slackSummarizer, formattedResponse, incidentUUID)
 		} else {
 			formattedResp = "Task completed (no output)"
 		}
@@ -467,7 +474,13 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 
 		slog.Info("investigation done", "incident_id", incidentUUID, "has_error", hasError, "response_len", len(response), "session_id", sessionID)
 
-		// Build full log
+		// Apply the configured formatting prompt before persistence and
+		// Slack posting. Passthrough on error/empty or when formatting
+		// is disabled.
+		dbResponse := applyResponseFormatter(context.Background(), h.responseFormatter, hasError, response, taskHeader+lastStreamedLog)
+
+		// Build full log using the raw response so full_log preserves the
+		// original agent output for debugging.
 		fullLog := taskHeader + lastStreamedLog
 		if response != "" {
 			fullLog += "\n\n--- Final Response ---\n\n" + response
@@ -478,7 +491,7 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		if hasError {
 			finalStatus = database.IncidentStatusFailed
 		}
-		if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response, finalTokensUsed, finalExecutionTimeMs); err != nil {
+		if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, dbResponse, finalTokensUsed, finalExecutionTimeMs); err != nil {
 			slog.Error("failed to update incident complete", "err", err)
 		}
 
@@ -487,8 +500,8 @@ func (h *AlertHandler) runSlackChannelInvestigation(
 		var formattedResponse string
 		if hasError {
 			formattedResponse = response
-		} else if response != "" {
-			formattedResponse = finalizeSlackMessageBody(context.Background(), h.slackSummarizer, response, incidentUUID)
+		} else if dbResponse != "" {
+			formattedResponse = finalizeSlackMessageBody(context.Background(), h.slackSummarizer, dbResponse, incidentUUID)
 		} else {
 			formattedResponse = "Task completed (no output)"
 		}

@@ -17,6 +17,19 @@ import (
 	"github.com/slack-go/slack/slackevents"
 )
 
+// applyResponseFormatter runs the configured global formatting prompt
+// against the agent's final response. Skipped on error/empty responses
+// where formatting would be meaningless. Format itself is a passthrough
+// when the formatter is unset, formatting is disabled in DB settings, the
+// LLM is unavailable, or the call fails — so this helper never blocks
+// finalization.
+func applyResponseFormatter(ctx context.Context, formatter *services.ResponseFormatter, hasError bool, response, reasoning string) string {
+	if hasError || response == "" {
+		return response
+	}
+	return formatter.Format(ctx, response, reasoning)
+}
+
 // finalizeSlackMessageBody compresses the agent's final response into a
 // single Slack-sized message: the summarizer parses any structured blocks,
 // formats them for Slack, runs the SummarizeForSlack flow when over budget,
@@ -243,7 +256,14 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			finalSessionID = sessionID
 		}
 
-		// Build full log
+		// Apply the configured formatting prompt before persistence and
+		// before the Slack-side compression. Passthrough on error/empty
+		// or when formatting is disabled.
+		formattedResponse := applyResponseFormatter(context.Background(), h.responseFormatter, hasError, response, taskHeader+lastStreamedLog)
+
+		// Build full log using the raw response so `full_log` always
+		// preserves the original agent output for debugging, regardless
+		// of whether formatting was applied.
 		fullLog := taskHeader + lastStreamedLog
 		if response != "" {
 			fullLog += "\n\n--- Final Response ---\n\n" + response
@@ -251,20 +271,20 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 
 		// Format response for Slack: parse structured blocks, summarize when
 		// over budget, append the footer. Single message; no thread replies.
-		// Note: finalResponse is the Slack-sized message; response is the raw
-		// agent output that gets stored in the DB so the web UI shows the full
-		// `[FINAL_RESULT]` content rather than the truncated Slack version.
+		// Note: finalResponse is the Slack-sized message; formattedResponse
+		// is the (optionally reformatted) agent output that gets stored in
+		// the DB so the web UI shows the structured response.
 		var finalResponse string
 		if hasError {
 			finalResponse = response
-		} else if response != "" {
-			finalResponse = finalizeSlackMessageBody(context.Background(), h.slackSummarizer, response, incidentUUID)
+		} else if formattedResponse != "" {
+			finalResponse = finalizeSlackMessageBody(context.Background(), h.slackSummarizer, formattedResponse, incidentUUID)
 		} else {
 			finalResponse = "✅ Task completed (no output)"
 		}
 
 		h.finishSlackMessage(channel, threadID, incidentUUID, user, text,
-			finalResponse, response, fullLog, hasError, finalSessionID, finalTokensUsed, finalExecutionTimeMs)
+			finalResponse, formattedResponse, fullLog, hasError, finalSessionID, finalTokensUsed, finalExecutionTimeMs)
 		return
 	}
 
