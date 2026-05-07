@@ -146,16 +146,16 @@ func (LLMSettings) TableName() string {
 // ProxySettings stores HTTP proxy configuration with per-service toggles
 type ProxySettings struct {
 	ID                     uint      `gorm:"primaryKey" json:"id"`
-	ProxyURL               string    `gorm:"type:text" json:"proxy_url"`                    // HTTP/HTTPS proxy URL
-	NoProxy                string    `gorm:"type:text" json:"no_proxy"`                     // Comma-separated hosts to bypass proxy
-	LLMEnabled             bool      `gorm:"column:llm_enabled;default:true" json:"llm_enabled"` // Use proxy for LLM API calls (all providers)
-	SlackEnabled           bool      `gorm:"default:true" json:"slack_enabled"`             // Use proxy for Slack
-	ZabbixEnabled          bool      `gorm:"default:false" json:"zabbix_enabled"`           // Use proxy for Zabbix API
-	VictoriaMetricsEnabled bool      `gorm:"default:false" json:"victoria_metrics_enabled"` // Use proxy for VictoriaMetrics API
-	CatchpointEnabled      bool      `gorm:"default:false" json:"catchpoint_enabled"`       // Use proxy for Catchpoint API
-	GrafanaEnabled         bool      `gorm:"default:false" json:"grafana_enabled"`          // Use proxy for Grafana API
-	PagerDutyEnabled       bool      `gorm:"default:false" json:"pagerduty_enabled"`        // Use proxy for PagerDuty API
-	NetBoxEnabled          bool      `gorm:"default:false" json:"netbox_enabled"`           // Use proxy for NetBox API
+	ProxyURL               string    `gorm:"type:text" json:"proxy_url"`                          // HTTP/HTTPS proxy URL
+	NoProxy                string    `gorm:"type:text" json:"no_proxy"`                           // Comma-separated hosts to bypass proxy
+	LLMEnabled             bool      `gorm:"column:llm_enabled;default:true" json:"llm_enabled"`  // Use proxy for LLM API calls (all providers)
+	SlackEnabled           bool      `gorm:"default:true" json:"slack_enabled"`                   // Use proxy for Slack
+	ZabbixEnabled          bool      `gorm:"default:false" json:"zabbix_enabled"`                 // Use proxy for Zabbix API
+	VictoriaMetricsEnabled bool      `gorm:"default:false" json:"victoria_metrics_enabled"`       // Use proxy for VictoriaMetrics API
+	CatchpointEnabled      bool      `gorm:"default:false" json:"catchpoint_enabled"`             // Use proxy for Catchpoint API
+	GrafanaEnabled         bool      `gorm:"default:false" json:"grafana_enabled"`                // Use proxy for Grafana API
+	PagerDutyEnabled       bool      `gorm:"default:false" json:"pagerduty_enabled"`              // Use proxy for PagerDuty API
+	NetBoxEnabled          bool      `gorm:"default:false" json:"netbox_enabled"`                 // Use proxy for NetBox API
 	K8sEnabled             bool      `gorm:"column:k8s_enabled;default:false" json:"k8s_enabled"` // Use proxy for Kubernetes API
 	CreatedAt              time.Time `json:"created_at"`
 	UpdatedAt              time.Time `json:"updated_at"`
@@ -259,5 +259,53 @@ func DefaultRetentionSettings() *RetentionSettings {
 		Enabled:              true,
 		RetentionDays:        90,
 		CleanupIntervalHours: 6,
+	}
+}
+
+// DefaultFormattingPrompt is the system prompt used by the response formatter
+// when no operator-supplied prompt is configured. It instructs the LLM to
+// produce a clean, structured incident summary that preserves status, actions
+// taken, and recommendations.
+const DefaultFormattingPrompt = `You are a senior incident-response writer. Reformat the agent's investigation into a clean, structured incident summary aimed at on-call engineers.
+
+Use the full reasoning trace as context but base the user-facing output on the agent's final response. Do not invent facts that are not supported by the trace.
+
+Output sections (omit a section only if there is nothing to say):
+- Status: one short line (resolved / unresolved / escalated, plus headline impact).
+- Summary: 1-3 sentences describing what happened and the suspected root cause.
+- Actions taken: bullet list of concrete steps the agent performed.
+- Recommendations / Next steps: bullet list of what a human should do next.
+
+Keep the tone factual and concise. Use plain prose and bullet lists; do not wrap the response in code fences. Preserve any specific identifiers (hosts, services, timestamps, error codes) the agent mentioned.`
+
+// FormattingSettings stores the global response-formatter prompt that runs as
+// a one-shot LLM call after each incident finishes investigating. The
+// formatted text replaces incident.response, while incident.full_log keeps the
+// raw reasoning. SingletonKey with a unique index ensures only one row exists.
+type FormattingSettings struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	SingletonKey string    `gorm:"uniqueIndex;default:'default';not null" json:"-"`
+	Enabled      bool      `gorm:"default:false" json:"enabled"`
+	SystemPrompt string    `gorm:"type:text" json:"system_prompt"`
+	MaxTokens    int       `gorm:"default:1500" json:"max_tokens"`
+	Temperature  float64   `gorm:"default:0.2" json:"temperature"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+func (FormattingSettings) TableName() string {
+	return "formatting_settings"
+}
+
+// DefaultFormattingSettings returns the default formatting settings values.
+// Disabled by default so existing behaviour (raw agent response) is preserved
+// until an operator opts in via the UI.
+func DefaultFormattingSettings() *FormattingSettings {
+	return &FormattingSettings{
+		SingletonKey: "default",
+		Enabled:      false,
+		SystemPrompt: DefaultFormattingPrompt,
+		MaxTokens:    1500,
+		Temperature:  0.2,
 	}
 }

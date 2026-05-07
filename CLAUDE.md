@@ -272,6 +272,7 @@ fmt.Println(parsed.CleanOutput)  // Structured blocks stripped
 | SlackSummarizer | `slack_summarizer.go` | Provider-agnostic compression of agent output to fit Slack's byte cap, with deterministic structured fallback |
 | RunbookService | `runbook_service.go` | Runbook CRUD and file sync |
 | RetentionService | `retention_service.go` | Automated incident data cleanup (expired + orphaned) |
+| ResponseFormatter | `response_formatter.go` | Optional one-shot LLM reformat of agent output (raw response + full reasoning) before it lands in `incident.response` and Slack; passthrough fallback when disabled, worker offline, or LLM call fails |
 
 ### Service Interfaces (`internal/services/interfaces.go`)
 
@@ -343,6 +344,10 @@ Incident retention is configured via `/api/settings/retention`:
 - Validation: `retention_days` must be `1..3650`, `cleanup_interval_hours` must be `1..8760`
 
 Keep handler validation aligned with `internal/api/types.go` and database defaults.
+
+### Formatting Settings API
+
+Optional post-processing of the agent's final response is configured via `/api/settings/formatting` (singleton `formatting_settings` table). `GET` returns the record; `PUT` accepts partial updates of `enabled`, `system_prompt`, `max_tokens` (1..8000), and `temperature` (0..2); `system_prompt` is capped at 8KB. When `enabled=true`, `ResponseFormatter` reformats `incident.response` via a one-shot LLM call before persistence and Slack delivery; `incident.full_log` keeps the unformatted reasoning.
 
 ### LLM Settings API
 

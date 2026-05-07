@@ -21,6 +21,7 @@ type APIHandler struct {
 	runbookService       services.RunbookManager
 	httpConnectorService services.HTTPConnectorManager
 	mcpServerService     services.MCPServerManager
+	responseFormatter    *services.ResponseFormatter
 	alertChannelReloader func()       // called after alert source create/update/delete to reload Slack channel mappings
 	gatewayReloader      func() error // called after HTTP connector CRUD to reload gateway tools
 	mcpServerReloader    func() error // called after MCP server CRUD to reload gateway MCP proxy tools
@@ -46,6 +47,14 @@ func NewAPIHandler(skillService services.SkillIncidentManager, toolService servi
 // to reload Slack channel mappings at runtime.
 func (h *APIHandler) SetAlertChannelReloader(fn func()) {
 	h.alertChannelReloader = fn
+}
+
+// SetResponseFormatter wires the ResponseFormatter used to apply the
+// configured global formatting prompt to the agent's final response before
+// it is persisted. Optional — when unset (or formatting is disabled),
+// the raw agent response flows through unchanged.
+func (h *APIHandler) SetResponseFormatter(f *services.ResponseFormatter) {
+	h.responseFormatter = f
 }
 
 // SetGatewayReloader sets the callback invoked after HTTP connector create/update/delete
@@ -98,6 +107,9 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 
 	// Retention settings
 	mux.HandleFunc("/api/settings/retention", h.handleRetentionSettings)
+
+	// Formatting settings
+	mux.HandleFunc("/api/settings/formatting", h.handleFormattingSettings)
 
 	// Context files
 	mux.HandleFunc("/api/context", h.handleContext)

@@ -190,19 +190,19 @@ func TestMarkdownToSlack_CodeBlocksPreserved(t *testing.T) {
 		{
 			name:  "basic fenced block",
 			input: "Run this:\n```bash\nsysctl -w net.core.somaxconn=65535\n```",
-			want: []string{"```bash", "sysctl -w net.core.somaxconn=65535"},
+			want:  []string{"```bash", "sysctl -w net.core.somaxconn=65535"},
 		},
 		{
 			name:  "markdown syntax inside code block is not rewritten",
 			input: "```md\n## Title\n**bold**\n[link](https://example.com)\n---\n```",
-			want: []string{"## Title", "**bold**", "[link](https://example.com)", "---"},
-			not:  []string{"*Title*", "<https://example.com|link>", "———"},
+			want:  []string{"## Title", "**bold**", "[link](https://example.com)", "---"},
+			not:   []string{"*Title*", "<https://example.com|link>", "———"},
 		},
 		{
 			name:  "multiple code blocks stay intact while surrounding markdown converts",
 			input: "## Heading\n\n```json\n{\"a\":1}\n```\n\n**outside**\n\n```md\n[raw](https://example.com)\n```",
-			want: []string{"*Heading*", "*outside*", "```json", "{\"a\":1}", "```md", "[raw](https://example.com)"},
-			not:  []string{"<https://example.com|raw>"},
+			want:  []string{"*Heading*", "*outside*", "```json", "{\"a\":1}", "```md", "[raw](https://example.com)"},
+			not:   []string{"<https://example.com|raw>"},
 		},
 	}
 

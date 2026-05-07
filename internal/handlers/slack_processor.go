@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
@@ -16,6 +18,35 @@ import (
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 )
+
+// applyResponseFormatter runs the configured global formatting prompt
+// against the agent's final response. Skipped on error/empty responses
+// where formatting would be meaningless. Format itself is a passthrough
+// when the formatter is unset, formatting is disabled in DB settings, the
+// LLM is unavailable, or the call fails — so this helper never blocks
+// finalization.
+func applyResponseFormatter(ctx context.Context, formatter *services.ResponseFormatter, hasError bool, response, reasoning string) string {
+	if hasError || response == "" {
+		return response
+	}
+	return formatter.Format(ctx, response, reasoning)
+}
+
+// appendFinalizeMetrics re-attaches the execution-time/token footer that
+// the OnCompleted callback path no longer carries (so the configurable
+// response formatter never sees the metrics line). The footer is
+// deterministically derived from tokensUsed/executionTimeMs and lands at
+// the end of the stored DB response and the Slack final-message body, so
+// buildSlackFooter still extracts ⏱️ Time / 🎯 Tokens correctly even when
+// the formatter LLM rewrote the body. Skipped on error/empty responses
+// where metrics are not meaningful (matching the historical behavior of
+// OnError, which set the response without a metrics line).
+func appendFinalizeMetrics(response string, executionTimeMs int64, tokensUsed int, hasError bool) string {
+	if hasError || response == "" {
+		return response
+	}
+	return utils.AppendMetrics(response, time.Duration(executionTimeMs)*time.Millisecond, tokensUsed)
+}
 
 // finalizeSlackMessageBody compresses the agent's final response into a
 // single Slack-sized message: the summarizer parses any structured blocks,
@@ -169,7 +200,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		var response string
 		var finalSessionID string
 		var hasError bool
-		var superseded bool
+		var superseded atomic.Bool
 		var lastStreamedLog string
 		var finalTokensUsed int
 		var finalExecutionTimeMs int64
@@ -205,8 +236,17 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			// (DB + Slack) — this displaced goroutine must unblock and exit
 			// silently rather than overwrite the replacement's success with
 			// a "superseded" failure.
+			//
+			// Discard the typing controller (instead of letting the deferred
+			// Stop fire) so the cleanup path does not issue setStatus("") +
+			// RemoveReaction against the shared (channel, threadTS) — the
+			// replacement run has already started its own typing controller
+			// on the same thread and clearing here would erase its banner
+			// and hourglass mid-run. The deferred Stop becomes a no-op via
+			// the controller's shared stopOnce.
 			OnSuperseded: func() {
-				superseded = true
+				superseded.Store(true)
+				typing.Discard()
 				closeOnce.Do(func() { close(done) })
 			},
 		}
@@ -215,7 +255,8 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		// "timeout waiting for child process to exit" errors when the original
 		// agent process is no longer running.
 		slog.Info("starting new agent session for incident", "incident_id", incidentUUID)
-		if wsErr := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback); wsErr != nil {
+		runID, wsErr := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback)
+		if wsErr != nil {
 			slog.Error("failed to start/continue incident via WebSocket", "err", wsErr)
 			startErr := fmt.Sprintf("❌ Agent worker error: %v", wsErr)
 			h.finishSlackMessage(channel, threadID, incidentUUID, user, text,
@@ -233,7 +274,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		// finalize the incident in the DB and post its own final message.
 		// Exit silently so we do not race the replacement with a failure
 		// update.
-		if superseded {
+		if superseded.Load() {
 			slog.Info("slack run superseded; leaving finalization to the new run", "incident_id", incidentUUID)
 			return
 		}
@@ -243,28 +284,69 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			finalSessionID = sessionID
 		}
 
-		// Build full log
+		// Apply the configured formatting prompt before persistence and
+		// before the Slack-side compression. Passthrough on error/empty
+		// or when formatting is disabled.
+		formattedResponse := applyResponseFormatter(context.Background(), h.responseFormatter, hasError, response, taskHeader+lastStreamedLog)
+
+		// Re-attach the metrics footer AFTER formatting so the LLM never
+		// sees it (and therefore cannot strip or rewrite ⏱️ Time / 🎯
+		// Tokens). The deterministic footer lands at the end of the
+		// stored DB response and the Slack final-message body, where
+		// buildSlackFooter extracts it for the trailing metrics line.
+		formattedWithMetrics := appendFinalizeMetrics(formattedResponse, finalExecutionTimeMs, finalTokensUsed, hasError)
+		rawWithMetrics := appendFinalizeMetrics(response, finalExecutionTimeMs, finalTokensUsed, hasError)
+
+		// Build full log using the raw response (with metrics) so
+		// `full_log` always preserves the original agent output for
+		// debugging, regardless of whether formatting was applied.
 		fullLog := taskHeader + lastStreamedLog
-		if response != "" {
-			fullLog += "\n\n--- Final Response ---\n\n" + response
+		if rawWithMetrics != "" {
+			fullLog += "\n\n--- Final Response ---\n\n" + rawWithMetrics
 		}
 
 		// Format response for Slack: parse structured blocks, summarize when
-		// over budget, append the footer. Single message; no thread replies.
-		// Note: finalResponse is the Slack-sized message; response is the raw
-		// agent output that gets stored in the DB so the web UI shows the full
-		// `[FINAL_RESULT]` content rather than the truncated Slack version.
+		// over budget, append the footer. Run the summarizer BEFORE
+		// ReleaseRun so the slack-summarizer LLM call (which can take
+		// several seconds) is also covered by the entry-still-in-map
+		// invariant — a newer Start/Continue arriving during this call
+		// can still fire OnSuperseded on the displaced waiter, and the
+		// subsequent ReleaseRun returns false so the stale finalize is
+		// abandoned. Only the final fast steps (DB update + chat.postMessage)
+		// run after ReleaseRun.
+		// Note: finalResponse is the Slack-sized message; formattedWithMetrics
+		// is the (optionally reformatted) agent output that gets stored in
+		// the DB so the web UI shows the structured response.
 		var finalResponse string
 		if hasError {
 			finalResponse = response
-		} else if response != "" {
-			finalResponse = finalizeSlackMessageBody(context.Background(), h.slackSummarizer, response, incidentUUID)
+		} else if formattedWithMetrics != "" {
+			finalResponse = finalizeSlackMessageBody(context.Background(), h.slackSummarizer, formattedWithMetrics, incidentUUID)
 		} else {
 			finalResponse = "✅ Task completed (no output)"
 		}
 
+		// Claim ownership of finalization atomically. If a second message
+		// landed in this thread while the formatter or slack summarizer
+		// were running, the new run owns the DB row and Slack thread —
+		// overwriting either with the stale result would race the
+		// replacement.
+		//
+		// Discard the typing controller in the displaced path too: the
+		// replacement's sendIncidentMessage may not have fired our
+		// OnSuperseded yet (it fires after the map swap, and we win the
+		// race to ReleaseRun), so without an explicit Discard here the
+		// deferred typing.Stop() would issue setStatus("") + RemoveReaction
+		// against the shared thread and erase the replacement run's banner
+		// + hourglass.
+		if !h.agentWSHandler.ReleaseRun(incidentUUID, runID) {
+			typing.Discard()
+			slog.Info("slack run displaced during finalization; leaving DB + Slack post to the new run", "incident_id", incidentUUID)
+			return
+		}
+
 		h.finishSlackMessage(channel, threadID, incidentUUID, user, text,
-			finalResponse, response, fullLog, hasError, finalSessionID, finalTokensUsed, finalExecutionTimeMs)
+			finalResponse, formattedWithMetrics, fullLog, hasError, finalSessionID, finalTokensUsed, finalExecutionTimeMs)
 		return
 	}
 
@@ -276,10 +358,11 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 }
 
 // finishSlackMessage handles the final steps of Slack message processing.
-// finalResponse is what gets posted to Slack; rawResponse is the full agent
-// output stored in `incident.response` so the web UI shows the complete
-// result, not the Slack-sized summarization.
-func (h *SlackHandler) finishSlackMessage(channel, threadID, incidentUUID, user, text, finalResponse, rawResponse, fullLog string, hasError bool, sessionID string, tokensUsed int, executionTimeMs int64) {
+// finalResponse is what gets posted to Slack; dbResponse is the response
+// stored in `incident.response` (the formatted output when the formatter
+// ran, otherwise the raw agent output) so the web UI shows the full result,
+// not the Slack-sized summarization.
+func (h *SlackHandler) finishSlackMessage(channel, threadID, incidentUUID, user, text, finalResponse, dbResponse, fullLog string, hasError bool, sessionID string, tokensUsed int, executionTimeMs int64) {
 	// The hourglass reaction is now removed by the TypingController in
 	// processMessage's deferred Stop; here we only add the terminal
 	// success/error reaction.
@@ -315,7 +398,7 @@ func (h *SlackHandler) finishSlackMessage(channel, threadID, incidentUUID, user,
 				user, text, "")
 		}
 
-		if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLogWithContext, rawResponse, tokensUsed, executionTimeMs); updateErr != nil {
+		if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLogWithContext, dbResponse, tokensUsed, executionTimeMs); updateErr != nil {
 			slog.Warn("failed to update incident", "err", updateErr)
 		} else {
 			slog.Info("updated incident", "incident_id", incidentUUID, "status", finalStatus, "session_id", sessionID)

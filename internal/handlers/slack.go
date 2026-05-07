@@ -18,11 +18,12 @@ import (
 
 // SlackHandler handles Slack events and commands
 type SlackHandler struct {
-	client          *slack.Client
-	agentExecutor   *executor.Executor
-	agentWSHandler  *AgentWSHandler
-	skillService    services.SkillIncidentManager
-	slackSummarizer *services.SlackSummarizer
+	client            *slack.Client
+	agentExecutor     *executor.Executor
+	agentWSHandler    *AgentWSHandler
+	skillService      services.SkillIncidentManager
+	slackSummarizer   *services.SlackSummarizer
+	responseFormatter *services.ResponseFormatter
 
 	// Alert channel support
 	alertChannels   map[string]*database.AlertSourceInstance // channel_id -> instance
@@ -68,6 +69,14 @@ func (h *SlackHandler) SetAlertHandler(alertHandler *AlertHandler) {
 // existing byte-truncation path.
 func (h *SlackHandler) SetSlackSummarizer(s *services.SlackSummarizer) {
 	h.slackSummarizer = s
+}
+
+// SetResponseFormatter wires the ResponseFormatter used to apply the
+// configured global formatting prompt to the agent's final response.
+// Optional — when unset (or when formatting is disabled in settings), the
+// raw agent response flows through unchanged.
+func (h *SlackHandler) SetResponseFormatter(f *services.ResponseFormatter) {
+	h.responseFormatter = f
 }
 
 // SetAlertService sets the alert service for loading alert channel configs

@@ -35,14 +35,15 @@ const slackSummaryMargin = 200
 
 // AlertHandler handles webhook requests from multiple alert sources
 type AlertHandler struct {
-	config          *config.Config
-	slackManager    *slackutil.Manager
-	agentExecutor   *executor.Executor
-	agentWSHandler  *AgentWSHandler
-	skillService    services.SkillIncidentManager
-	alertService    services.AlertManager
-	channelResolver *slackutil.ChannelResolver
-	slackSummarizer *services.SlackSummarizer
+	config            *config.Config
+	slackManager      *slackutil.Manager
+	agentExecutor     *executor.Executor
+	agentWSHandler    *AgentWSHandler
+	skillService      services.SkillIncidentManager
+	alertService      services.AlertManager
+	channelResolver   *slackutil.ChannelResolver
+	slackSummarizer   *services.SlackSummarizer
+	responseFormatter *services.ResponseFormatter
 
 	// Workspace team ID (required for Streaming API)
 	teamID string
@@ -86,6 +87,14 @@ func (h *AlertHandler) SetTeamID(teamID string) {
 // existing byte-truncation path.
 func (h *AlertHandler) SetSlackSummarizer(s *services.SlackSummarizer) {
 	h.slackSummarizer = s
+}
+
+// SetResponseFormatter wires the ResponseFormatter used to apply the
+// configured global formatting prompt to the agent's final response before
+// it is persisted and posted to Slack. Optional — when unset (or formatting
+// is disabled), the raw agent response flows through unchanged.
+func (h *AlertHandler) SetResponseFormatter(f *services.ResponseFormatter) {
+	h.responseFormatter = f
 }
 
 // RegisterAdapter registers an alert adapter for a source type

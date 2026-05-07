@@ -182,6 +182,60 @@ func TestTypingController_StopIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestTypingController_DiscardSkipsSlackCleanup(t *testing.T) {
+	fc := &fakeTypingClient{}
+	c := newTestController(fc, func(cfg *TypingControllerConfig) {
+		cfg.KeepaliveInterval = 1 * time.Hour
+	})
+
+	c.Start(context.Background())
+	waitForCondition(t, time.Second, func() bool {
+		statuses, adds, _ := fc.snapshot()
+		return len(statuses) >= 1 && len(adds) >= 1
+	}, "initial signals")
+
+	c.Discard()
+	// The deferred Stop pattern: callers Discard then later Stop via defer.
+	// The shared stopOnce must guarantee Stop becomes a no-op.
+	c.Stop()
+
+	time.Sleep(80 * time.Millisecond)
+
+	statuses, _, removes := fc.snapshot()
+	for _, s := range statuses {
+		if s.Status == "" {
+			t.Fatalf("Discard must not issue setStatus(\"\"); the replacement controller owns the thread state")
+		}
+	}
+	if len(removes) != 0 {
+		t.Fatalf("Discard must not RemoveReaction; the replacement controller owns the reaction. got %d", len(removes))
+	}
+}
+
+func TestTypingController_DiscardStopsKeepalive(t *testing.T) {
+	fc := &fakeTypingClient{}
+	c := newTestController(fc, func(cfg *TypingControllerConfig) {
+		cfg.KeepaliveInterval = 5 * time.Millisecond
+	})
+
+	c.Start(context.Background())
+	waitForCondition(t, time.Second, func() bool {
+		statuses, _, _ := fc.snapshot()
+		return len(statuses) >= 2
+	}, "keepalive ticks before discard")
+
+	c.Discard()
+
+	statusesBefore, _, _ := fc.snapshot()
+	time.Sleep(60 * time.Millisecond)
+	statusesAfter, _, _ := fc.snapshot()
+
+	if len(statusesAfter) != len(statusesBefore) {
+		t.Fatalf("expected no further setStatus after Discard, before=%d after=%d",
+			len(statusesBefore), len(statusesAfter))
+	}
+}
+
 func TestTypingController_StopBeforeStartIsNoOp(t *testing.T) {
 	fc := &fakeTypingClient{}
 	c := newTestController(fc)
@@ -576,6 +630,149 @@ func TestTypingController_StopClearSendsNoLoadingMessages(t *testing.T) {
 		}
 		return false
 	}, "stop clear sends empty status without loading messages")
+}
+
+// TestTypingController_UpdateLoadingMessageNoOpAfterDiscard verifies that a
+// late progress flush after Discard cannot push a stale reasoning line on
+// top of the replacement run's banner. Without this, the displaced run's
+// progressStreamer.Flush() (called BEFORE the superseded check in
+// slack_processor.go / alert_processor.go) would issue one last setStatus
+// against the shared thread, overwriting the new run's current thought.
+func TestTypingController_UpdateLoadingMessageNoOpAfterDiscard(t *testing.T) {
+	fc := &fakeTypingClient{}
+	c := newTestController(fc, func(cfg *TypingControllerConfig) {
+		cfg.KeepaliveInterval = 1 * time.Hour
+	})
+
+	c.Start(context.Background())
+	waitForCondition(t, time.Second, func() bool {
+		statuses, adds, _ := fc.snapshot()
+		return len(statuses) >= 1 && len(adds) >= 1
+	}, "initial signals")
+
+	c.Discard()
+
+	statusesBefore, _, _ := fc.snapshot()
+	c.UpdateLoadingMessage("🤔 stale flush from displaced run")
+	time.Sleep(80 * time.Millisecond)
+
+	statusesAfter, _, _ := fc.snapshot()
+	if len(statusesAfter) != len(statusesBefore) {
+		t.Fatalf("UpdateLoadingMessage must be inert after Discard; before=%d after=%d",
+			len(statusesBefore), len(statusesAfter))
+	}
+}
+
+// TestTypingController_UpdateLoadingMessageNoOpAfterStop verifies the same
+// inert-after-teardown contract for Stop: any UpdateLoadingMessage call
+// arriving after Stop has tripped is silently dropped instead of issuing a
+// new setStatus that would race the in-flight clear call.
+func TestTypingController_UpdateLoadingMessageNoOpAfterStop(t *testing.T) {
+	fc := &fakeTypingClient{}
+	c := newTestController(fc, func(cfg *TypingControllerConfig) {
+		cfg.KeepaliveInterval = 1 * time.Hour
+	})
+
+	c.Start(context.Background())
+	waitForCondition(t, time.Second, func() bool {
+		statuses, adds, _ := fc.snapshot()
+		return len(statuses) >= 1 && len(adds) >= 1
+	}, "initial signals")
+
+	c.Stop()
+	// Drain the cleanup goroutine so Stop's clear setStatus has been recorded.
+	waitForCondition(t, time.Second, func() bool {
+		statuses, _, _ := fc.snapshot()
+		for _, s := range statuses {
+			if s.Status == "" {
+				return true
+			}
+		}
+		return false
+	}, "stop clear setStatus recorded")
+
+	statusesBefore, _, _ := fc.snapshot()
+	c.UpdateLoadingMessage("🤔 too late")
+	time.Sleep(80 * time.Millisecond)
+
+	statusesAfter, _, _ := fc.snapshot()
+	if len(statusesAfter) != len(statusesBefore) {
+		t.Fatalf("UpdateLoadingMessage must be inert after Stop; before=%d after=%d",
+			len(statusesBefore), len(statusesAfter))
+	}
+}
+
+// TestTypingController_FireSetStatusBailsAfterDiscard covers the in-flight
+// goroutine race the *AfterDiscard tests above do NOT exercise: a keepalive
+// tick that won case <-ticker.C: before done was closed, an
+// UpdateLoadingMessage goroutine that started before Discard, or the
+// initial Start goroutine when Discard fires immediately. In all those
+// scenarios the goroutine has already been launched and is about to call
+// fireSetStatus when stopped flips to true. fireSetStatus must short-circuit
+// before reaching SetAssistantThreadsStatusContext so the displaced run
+// cannot push one last status to the shared (channel, threadTS) and erase
+// the replacement controller's banner. The Stop clear path (status=="") is
+// exempt because Stop's cleanup goroutine fires it AFTER setting stopped.
+func TestTypingController_FireSetStatusBailsAfterDiscard(t *testing.T) {
+	fc := &fakeTypingClient{}
+	c := newTestController(fc, func(cfg *TypingControllerConfig) {
+		cfg.KeepaliveInterval = 1 * time.Hour // freeze keepalive
+	})
+
+	c.Start(context.Background())
+	waitForCondition(t, time.Second, func() bool {
+		statuses, adds, _ := fc.snapshot()
+		return len(statuses) >= 1 && len(adds) >= 1
+	}, "initial signals")
+
+	c.Discard()
+
+	statusesBefore, _, _ := fc.snapshot()
+	// Simulate an already-launched goroutine reaching fireSetStatus after
+	// Discard tripped stopped=true. Calling fireSetStatus directly mirrors
+	// what the keepalive's case <-ticker.C: branch does after losing the
+	// select race, what UpdateLoadingMessage's spawned goroutine does after
+	// the lock-free dispatch, and what Start's initial goroutine does on
+	// an immediately-discarded controller.
+	c.fireSetStatus(context.Background(), DefaultTypingStatusText)
+
+	statusesAfter, _, _ := fc.snapshot()
+	if len(statusesAfter) != len(statusesBefore) {
+		t.Fatalf("fireSetStatus must bail when stopped is set; before=%d after=%d",
+			len(statusesBefore), len(statusesAfter))
+	}
+}
+
+// TestTypingController_FireSetStatusClearStillFiresAfterStop pins the
+// invariant that the empty-status clear path is NOT short-circuited by
+// stopped=true — Stop's cleanup goroutine sets stopped first and then
+// fires fireSetStatus(ctx, "") to wipe the banner. Regression guard for
+// the race-fix above accidentally dropping this call.
+func TestTypingController_FireSetStatusClearStillFiresAfterStop(t *testing.T) {
+	fc := &fakeTypingClient{}
+	c := newTestController(fc, func(cfg *TypingControllerConfig) {
+		cfg.KeepaliveInterval = 1 * time.Hour
+	})
+
+	c.Start(context.Background())
+	waitForCondition(t, time.Second, func() bool {
+		statuses, adds, _ := fc.snapshot()
+		return len(statuses) >= 1 && len(adds) >= 1
+	}, "initial signals")
+
+	c.Stop()
+
+	waitForCondition(t, time.Second, func() bool {
+		statuses, _, removes := fc.snapshot()
+		var sawClear bool
+		for _, s := range statuses {
+			if s.Status == "" {
+				sawClear = true
+				break
+			}
+		}
+		return sawClear && len(removes) >= 1
+	}, "Stop's clear setStatus must still fire after stopped=true")
 }
 
 func TestTypingController_UpdateLoadingMessageTruncatesLongInput(t *testing.T) {

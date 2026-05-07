@@ -124,10 +124,19 @@ type pendingOneshotEntry struct {
 // agent_completed / agent_error frame, and the dispatch path drops frames
 // whose run_id does not match — a superseded run can therefore keep emitting
 // late frames without leaking them into the new waiter's callback.
+//
+// finalized switches to true once OnCompleted has fired. The entry is then
+// retained in the map until the waiter goroutine calls ReleaseRun, which
+// keeps OnSuperseded reachable while the waiter is still running its
+// post-completion work (e.g. blocked in the response formatter). Without
+// this, a newer Start/Continue arriving during finalization could not signal
+// the displaced waiter, and a stale finalize could overwrite the
+// replacement run's result.
 type incidentCallbackEntry struct {
-	callback IncidentCallback
-	conn     *websocket.Conn
-	runID    string
+	callback  IncidentCallback
+	conn      *websocket.Conn
+	runID     string
+	finalized bool
 }
 
 // AgentWSHandler handles WebSocket connections from the agent worker
@@ -281,19 +290,30 @@ func (h *AgentWSHandler) cleanupWorkerConn(conn *websocket.Conn) {
 }
 
 // failCallbacksForConn invokes OnError on every incident callback that was
-// registered against the given conn, then removes the entry from the map.
-// Callbacks owned by other (replacement) conns are left untouched. OnError
-// implementations in this codebase only close a sync.Once-guarded done
-// channel, so they're non-blocking; we still call them outside callbackMu
-// to avoid forcing future callback bodies into a locked critical section.
+// registered against the given conn, then marks the entry finalized so the
+// waiter goroutine can claim ownership of the failure DB write via
+// ReleaseRun. Callbacks owned by other (replacement) conns are left
+// untouched. Entries already marked finalized (OnCompleted fired) are also
+// left in place: the waiter still needs to run its post-completion work
+// and call ReleaseRun, and firing OnError on a finalized run would corrupt
+// its captured response. Keeping the entry around (instead of deleting it)
+// matches dispatchOnCompleted's contract — a concurrently-arriving
+// Start/Continue can still displace the entry and fire OnSuperseded, while
+// a normal disconnect-induced error lets ReleaseRun succeed so the waiter
+// finalizes the incident as failed in the DB. OnError implementations in
+// this codebase only close a sync.Once-guarded done channel, so they're
+// non-blocking; we still call them outside callbackMu to avoid forcing
+// future callback bodies into a locked critical section.
 func (h *AgentWSHandler) failCallbacksForConn(conn *websocket.Conn, errMsg string) {
 	h.callbackMu.Lock()
 	var failed []IncidentCallback
 	for incidentID, entry := range h.callbacks {
-		if entry.conn == conn {
-			failed = append(failed, entry.callback)
-			delete(h.callbacks, incidentID)
+		if entry.conn != conn || entry.finalized {
+			continue
 		}
+		failed = append(failed, entry.callback)
+		entry.finalized = true
+		h.callbacks[incidentID] = entry
 	}
 	h.callbackMu.Unlock()
 
@@ -411,6 +431,16 @@ func (h *AgentWSHandler) dispatchOnOutput(msg AgentMessage) bool {
 			"current_run_id", entry.runID)
 		return true
 	}
+	if entry.finalized {
+		// Late output after OnCompleted has already fired. Drop it: the
+		// waiter has captured its final response and is in finalization;
+		// appending here would race the DB write or leak stale text into
+		// the next run's full_log.
+		slog.Debug("dropping agent_output for finalized run",
+			"incident_id", msg.IncidentID,
+			"msg_run_id", msg.RunID)
+		return true
+	}
 	if entry.callback.OnOutput != nil {
 		entry.callback.OnOutput(msg.Output)
 	}
@@ -425,14 +455,18 @@ func (h *AgentWSHandler) dispatchOnOutput(msg AgentMessage) bool {
 // Like handleAgentOutput, the callback is invoked while the write lock is
 // still held so a concurrent sendIncidentMessage cannot swap the entry and
 // fire OnSuperseded between snapshot and call.
+//
+// The OnCompleted callback receives the raw msg.Output (no metrics line).
+// Metrics are appended in the handler's finalization path AFTER the
+// configurable response formatter runs, so the formatter LLM cannot strip
+// or rewrite the time/tokens line and the deterministic footer derived
+// from msg.TokensUsed/msg.ExecutionTimeMs always lands in `incident.response`
+// and the Slack footer. The DB fallback path below (no live callback) keeps
+// appending metrics directly because there is no formatter step there.
 func (h *AgentWSHandler) handleAgentCompleted(msg AgentMessage) {
 	slog.Info("incident completed", "incident_id", msg.IncidentID, "session_id", msg.SessionID, "tokens_used", msg.TokensUsed, "execution_time_ms", msg.ExecutionTimeMs)
 
-	// Append metrics to response (for display in reasoning log and Slack)
-	executionTime := time.Duration(msg.ExecutionTimeMs) * time.Millisecond
-	responseWithMetrics := utils.AppendMetrics(msg.Output, executionTime, msg.TokensUsed)
-
-	if h.dispatchOnCompleted(msg, responseWithMetrics) {
+	if h.dispatchOnCompleted(msg, msg.Output) {
 		return
 	}
 
@@ -450,7 +484,16 @@ func (h *AgentWSHandler) handleAgentCompleted(msg AgentMessage) {
 	}
 
 	// No callback registered and no run_id (legacy worker / synthetic
-	// test event): update database directly as fallback.
+	// test event): update database directly as fallback. Append metrics
+	// here because this path does not run the response formatter. Skip
+	// the metrics line when msg.Output is empty so this fallback path
+	// matches the callback path's appendFinalizeMetrics contract — empty
+	// success keeps an empty incident.response in both paths.
+	var responseWithMetrics string
+	if msg.Output != "" {
+		executionTime := time.Duration(msg.ExecutionTimeMs) * time.Millisecond
+		responseWithMetrics = utils.AppendMetrics(msg.Output, executionTime, msg.TokensUsed)
+	}
 	now := time.Now()
 	if err := database.GetDB().Model(&database.Incident{}).
 		Where("uuid = ?", msg.IncidentID).
@@ -467,11 +510,21 @@ func (h *AgentWSHandler) handleAgentCompleted(msg AgentMessage) {
 }
 
 // dispatchOnCompleted delivers a completion frame to the registered callback
-// and removes the entry from the map, all under a single write-lock critical
+// and marks the entry finalized, all under a single write-lock critical
 // section. Returns true when a callback was registered (whether the frame was
 // delivered or dropped as a superseded-run frame); the caller then skips the
 // legacy DB fallback. Returns false when no callback is registered.
-func (h *AgentWSHandler) dispatchOnCompleted(msg AgentMessage, responseWithMetrics string) bool {
+//
+// `output` is the raw agent output (no metrics line). The handler-level
+// finalize path appends the metrics footer after the response formatter runs.
+//
+// The entry is intentionally retained in the map after OnCompleted: the
+// waiter goroutine may run additional post-completion work (e.g. the
+// configurable response formatter LLM call) before its final DB write, and
+// keeping the entry around lets a concurrently-arriving Start/Continue fire
+// OnSuperseded on the displaced callback. The waiter calls ReleaseRun
+// before its final DB write to claim ownership atomically.
+func (h *AgentWSHandler) dispatchOnCompleted(msg AgentMessage, output string) bool {
 	h.callbackMu.Lock()
 	defer h.callbackMu.Unlock()
 	entry, exists := h.callbacks[msg.IncidentID]
@@ -480,17 +533,26 @@ func (h *AgentWSHandler) dispatchOnCompleted(msg AgentMessage, responseWithMetri
 	}
 	if entry.runID != "" && msg.RunID != "" && entry.runID != msg.RunID {
 		// Late completion from a superseded run. Don't invoke the new
-		// callback's OnCompleted, don't remove the new entry from the map.
+		// callback's OnCompleted, don't touch the new entry.
 		slog.Debug("dropping agent_completed from superseded run",
 			"incident_id", msg.IncidentID,
 			"msg_run_id", msg.RunID,
 			"current_run_id", entry.runID)
 		return true
 	}
-	if entry.callback.OnCompleted != nil {
-		entry.callback.OnCompleted(msg.SessionID, responseWithMetrics, msg.TokensUsed, msg.ExecutionTimeMs)
+	if entry.finalized {
+		// Duplicate completion frame for an already-finalized run. Ignore
+		// silently; the waiter has already captured its response.
+		slog.Debug("dropping duplicate agent_completed for finalized run",
+			"incident_id", msg.IncidentID,
+			"msg_run_id", msg.RunID)
+		return true
 	}
-	delete(h.callbacks, msg.IncidentID)
+	if entry.callback.OnCompleted != nil {
+		entry.callback.OnCompleted(msg.SessionID, output, msg.TokensUsed, msg.ExecutionTimeMs)
+	}
+	entry.finalized = true
+	h.callbacks[msg.IncidentID] = entry
 	return true
 }
 
@@ -536,8 +598,14 @@ func (h *AgentWSHandler) handleAgentError(msg AgentMessage) {
 }
 
 // dispatchOnError mirrors dispatchOnCompleted for error frames: deliver the
-// frame and remove the entry from the map under a single write-lock critical
-// section.
+// frame and mark the entry finalized under a single write-lock critical
+// section. The entry is intentionally retained so the waiter can still call
+// ReleaseRun atomically before its final DB write — without that, a normal
+// agent_error would leave the waiter unable to distinguish "I just failed"
+// from "I was superseded", and finalization would be skipped entirely.
+// A concurrently-arriving Start/Continue can still displace this entry and
+// fire OnSuperseded so the waiter exits silently, matching the OnCompleted
+// path's contract.
 func (h *AgentWSHandler) dispatchOnError(msg AgentMessage) bool {
 	h.callbackMu.Lock()
 	defer h.callbackMu.Unlock()
@@ -552,10 +620,21 @@ func (h *AgentWSHandler) dispatchOnError(msg AgentMessage) bool {
 			"current_run_id", entry.runID)
 		return true
 	}
+	if entry.finalized {
+		// A late error frame after OnCompleted already finalized this run.
+		// Drop it — overwriting the waiter's captured response with the
+		// error text would corrupt finalization.
+		slog.Debug("dropping agent_error for finalized run",
+			"incident_id", msg.IncidentID,
+			"msg_run_id", msg.RunID,
+			"err", msg.Error)
+		return true
+	}
 	if entry.callback.OnError != nil {
 		entry.callback.OnError(msg.Error)
 	}
-	delete(h.callbacks, msg.IncidentID)
+	entry.finalized = true
+	h.callbacks[msg.IncidentID] = entry
 	return true
 }
 
@@ -581,8 +660,11 @@ func (h *AgentWSHandler) SendToWorker(msg AgentMessage) error {
 	return h.workerConn.WriteMessage(websocket.TextMessage, data)
 }
 
-// StartIncident sends a new incident to the agent worker
-func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []services.ToolAllowlistEntry, callback IncidentCallback) error {
+// StartIncident sends a new incident to the agent worker. Returns the
+// generated run_id alongside any error so the caller can later identify its
+// own run (e.g. via ReleaseRun) without racing concurrent registrations on
+// the same incident_id.
+func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []services.ToolAllowlistEntry, callback IncidentCallback) (string, error) {
 	msg := AgentMessage{
 		Type:          AgentMessageTypeNewIncident,
 		IncidentID:    incidentID,
@@ -615,8 +697,9 @@ func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettings
 	return h.sendIncidentMessage(incidentID, callback, msg)
 }
 
-// ContinueIncident sends a follow-up message to an existing incident
-func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []services.ToolAllowlistEntry, callback IncidentCallback) error {
+// ContinueIncident sends a follow-up message to an existing incident. See
+// StartIncident for the run_id return contract.
+func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []services.ToolAllowlistEntry, callback IncidentCallback) (string, error) {
 	msg := AgentMessage{
 		Type:          AgentMessageTypeContinueIncident,
 		IncidentID:    incidentID,
@@ -650,6 +733,27 @@ func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string,
 	return h.sendIncidentMessage(incidentID, callback, msg)
 }
 
+// ReleaseRun atomically removes the callback entry for incidentID iff it is
+// still owned by the supplied runID. Callers (the per-run waiter goroutine)
+// invoke this immediately before their final DB write to claim ownership of
+// finalization. A false return means a newer Start/Continue has displaced
+// us during post-completion work — the caller MUST exit silently and let
+// the replacement run own finalization, or the new run's status / response
+// could be overwritten by a stale write.
+func (h *AgentWSHandler) ReleaseRun(incidentID, runID string) bool {
+	h.callbackMu.Lock()
+	defer h.callbackMu.Unlock()
+	entry, exists := h.callbacks[incidentID]
+	if !exists {
+		return false
+	}
+	if entry.runID != runID {
+		return false
+	}
+	delete(h.callbacks, incidentID)
+	return true
+}
+
 // sendIncidentMessage atomically captures workerConn, registers the callback
 // against THAT conn, and writes the message — all under h.mu. Tying the
 // callback to the conn closes the disconnect-leak window: cleanupWorkerConn
@@ -672,43 +776,62 @@ func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string,
 // for incident_id route to the new callback only — without this signal the
 // displaced goroutine would block on its done channel forever and disconnect
 // cleanup could not reach it (the entry was overwritten in place).
-func (h *AgentWSHandler) sendIncidentMessage(incidentID string, callback IncidentCallback, msg AgentMessage) error {
+func (h *AgentWSHandler) sendIncidentMessage(incidentID string, callback IncidentCallback, msg AgentMessage) (string, error) {
 	runID := uuid.NewString()
 	msg.RunID = runID
 
 	data, err := json.Marshal(msg)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	h.mu.Lock()
 	conn := h.workerConn
 	if conn == nil {
 		h.mu.Unlock()
-		return ErrWorkerNotConnected
+		return "", ErrWorkerNotConnected
 	}
+	// Hold callbackMu through the write so the swap and the write succeed or
+	// fail atomically with respect to other goroutines. Two races are closed
+	// at once:
+	//
+	//   (1) Dispatcher race: if we wrote first and swapped second, an early
+	//       agent_output / agent_completed / agent_error frame echoed back by
+	//       the worker would be observed by the reader goroutine before the
+	//       new callback is in place. The frame carries the new run_id but
+	//       the map still holds the previous run's entry, so dispatch drops
+	//       it as "from a superseded run" — silently losing early streamed
+	//       output, or worse, the only completion / error frame.
+	//
+	//   (2) Failed-write rollback: if we swapped first (without holding
+	//       callbackMu through the write) and the write later failed, the
+	//       displaced waiter could race past ReleaseRun (observe Run 2's
+	//       runID, return false, exit silently) and would already be gone by
+	//       the time we tried to restore `previous`. Holding callbackMu
+	//       through the write blocks ReleaseRun until we either commit (swap
+	//       stays) or roll back (previous restored), so the displaced run
+	//       always observes a coherent state.
+	//
+	// WriteMessage on a websocket.Conn does not call back into our code and
+	// does not block on anything we hold, so there is no deadlock risk.
+	// Incident start is infrequent — the same trade-off the dispatch path
+	// already accepts when it holds callbackMu.RLock through OnOutput.
 	h.callbackMu.Lock()
 	previous, hadPrevious := h.callbacks[incidentID]
 	h.callbacks[incidentID] = incidentCallbackEntry{callback: callback, conn: conn, runID: runID}
-	h.callbackMu.Unlock()
 	if writeErr := conn.WriteMessage(websocket.TextMessage, data); writeErr != nil {
-		h.callbackMu.Lock()
-		// Restore the displaced entry so its waiter can still be reached by
-		// later agent events or disconnect cleanup. Restoring is only correct
-		// if no concurrent registration has overwritten our slot in the
-		// meantime — in that race, the newest entry wins and we must not
-		// clobber it.
-		if cur, ok := h.callbacks[incidentID]; ok && cur.conn == conn && cur.runID == runID {
-			if hadPrevious {
-				h.callbacks[incidentID] = previous
-			} else {
-				delete(h.callbacks, incidentID)
-			}
+		// Roll back the swap before any other goroutine can observe Run 2's
+		// entry. The displaced run continues to own its finalization.
+		if hadPrevious {
+			h.callbacks[incidentID] = previous
+		} else {
+			delete(h.callbacks, incidentID)
 		}
 		h.callbackMu.Unlock()
 		h.mu.Unlock()
-		return writeErr
+		return "", writeErr
 	}
+	h.callbackMu.Unlock()
 	h.mu.Unlock()
 
 	// Fire the displaced callback outside both locks. OnSuperseded is the
@@ -716,7 +839,10 @@ func (h *AgentWSHandler) sendIncidentMessage(incidentID string, callback Inciden
 	// without writing a failure to the DB or Slack, since the replacement run
 	// will finalize the incident. OnError is the legacy fallback so callers
 	// that have not yet adopted OnSuperseded still unblock (with the same
-	// ErrIncidentSuperseded sentinel).
+	// ErrIncidentSuperseded sentinel). The previous entry may already be
+	// finalized (OnCompleted fired but ReleaseRun not yet called) — in that
+	// case OnSuperseded sets the displaced waiter's `superseded` flag, and
+	// the waiter's call to ReleaseRun returns false so it exits silently.
 	if hadPrevious {
 		switch {
 		case previous.callback.OnSuperseded != nil:
@@ -725,7 +851,7 @@ func (h *AgentWSHandler) sendIncidentMessage(incidentID string, callback Inciden
 			previous.callback.OnError(ErrIncidentSuperseded.Error())
 		}
 	}
-	return nil
+	return runID, nil
 }
 
 // OneShotLLM sends a one-shot LLM request to the agent worker and waits for a response.
