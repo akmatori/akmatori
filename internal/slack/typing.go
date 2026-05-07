@@ -68,10 +68,22 @@ type TypingControllerConfig struct {
 //
 // Lifecycle: call Start once, then Stop once. Both are non-blocking; Slack
 // HTTP calls run in goroutines so a slow API never blocks the caller. Stop is
-// idempotent.
+// idempotent. Discard is an alternative to Stop for displaced runs: it tears
+// down the internal loops without clearing the Slack-side state (status
+// banner + reaction), so a replacement controller's signals on the same
+// channel/thread are not erased. Discard and Stop share the same
+// once-guard — calling either one makes subsequent calls of either no-ops.
+// After Stop or Discard the controller is inert: UpdateLoadingMessage
+// becomes a no-op so a late progress flush on a displaced run cannot push
+// stale text on top of the replacement run's banner. Non-clear
+// setStatus calls also bail inside fireSetStatus when stopped is set, so
+// in-flight goroutines (UpdateLoadingMessage's spawned goroutine, the
+// initial Start goroutine, or a keepalive tick that won the select race
+// before done was closed) cannot push a stale banner update either.
 type TypingController interface {
 	Start(ctx context.Context)
 	Stop()
+	Discard()
 	UpdateLoadingMessage(line string)
 }
 
@@ -101,6 +113,7 @@ type typingController struct {
 
 	mu                   sync.Mutex
 	started              bool
+	stopped              bool
 	statusFailures       int
 	statusDisabled       bool
 	latestLoadingMessage string
@@ -146,6 +159,20 @@ func (t *typingController) Start(ctx context.Context) {
 }
 
 func (t *typingController) Stop() {
+	t.stop(true)
+}
+
+// Discard tears down the internal loops without clearing the Slack-side
+// state. Used when a replacement controller has taken over the same
+// channel/thread — issuing setStatus("") + RemoveReaction here would erase
+// the replacement's banner and hourglass. After Discard, any subsequent
+// Stop() (e.g. via the caller's deferred cleanup) is a no-op due to the
+// shared stopOnce.
+func (t *typingController) Discard() {
+	t.stop(false)
+}
+
+func (t *typingController) stop(clearSlackState bool) {
 	if t == nil || t.cfg.Client == nil {
 		return
 	}
@@ -157,6 +184,12 @@ func (t *typingController) Stop() {
 			t.mu.Unlock()
 			return
 		}
+		// Mark stopped so UpdateLoadingMessage becomes a no-op for any late
+		// callers (e.g. progressStreamer.Flush firing after Discard on a
+		// displaced run). Without this, a buffered final reasoning line
+		// could push one last setStatus that overwrites the replacement
+		// run's banner content.
+		t.stopped = true
 		doneCh := t.done
 		ttlTimer := t.ttlTimer
 		t.ttlTimer = nil
@@ -167,6 +200,10 @@ func (t *typingController) Stop() {
 		}
 		if ttlTimer != nil {
 			ttlTimer.Stop()
+		}
+
+		if !clearSlackState {
+			return
 		}
 
 		// Cleanup HTTP calls happen in a goroutine for the same reason as
@@ -229,7 +266,7 @@ func (t *typingController) UpdateLoadingMessage(line string) {
 	}
 	trimmed = truncateForLoadingMessage(trimmed, loadingMessageMaxBytes)
 	t.mu.Lock()
-	if !t.started {
+	if !t.started || t.stopped {
 		t.mu.Unlock()
 		return
 	}
@@ -270,8 +307,22 @@ func (t *typingController) fireSetStatus(ctx context.Context, status string) {
 	}
 	// Only include loading_messages on non-clear calls; the empty-status
 	// clear path is for Stop and should send no rotation content.
+	//
+	// Bail on non-clear calls when the controller has already stopped.
+	// This catches three races against Stop/Discard: a keepalive tick
+	// that won the select case <-ticker.C: branch before done was closed,
+	// an UpdateLoadingMessage goroutine that started before teardown, and
+	// the initial Start goroutine when Discard fires immediately. Without
+	// this check, a displaced run can push one last setStatus to the
+	// shared (channel, threadTS) and overwrite the replacement
+	// controller's banner. The status=="" path is exempt because Stop's
+	// cleanup goroutine fires it AFTER setting stopped=true.
 	if status != "" {
 		t.mu.Lock()
+		if t.stopped {
+			t.mu.Unlock()
+			return
+		}
 		latest := t.latestLoadingMessage
 		t.mu.Unlock()
 		if latest != "" {

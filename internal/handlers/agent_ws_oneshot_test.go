@@ -489,7 +489,10 @@ func readNewIncidentRequest(t *testing.T, conn *websocket.Conn) AgentMessage {
 // TestStartIncident_WorkerDisconnectFiresOnError verifies that callers blocking
 // on <-done are unblocked via OnError when the worker drops mid-investigation.
 // Without per-conn callback ownership, cleanupWorkerConn left h.callbacks
-// untouched and Slack/alert/API flows would hang indefinitely.
+// untouched and Slack/alert/API flows would hang indefinitely. After the
+// disconnect-induced OnError fires the entry must be marked finalized but
+// retained in the map so the waiter can claim ownership of the failure DB
+// write via ReleaseRun (mirroring the OnCompleted contract).
 func TestStartIncident_WorkerDisconnectFiresOnError(t *testing.T) {
 	handler, conn, cleanup := setupOneshotTest(t)
 	defer cleanup()
@@ -505,7 +508,8 @@ func TestStartIncident_WorkerDisconnectFiresOnError(t *testing.T) {
 		},
 	}
 
-	if err := handler.StartIncident("incident-disconnect", "task", nil, nil, nil, cb); err != nil {
+	runID, err := handler.StartIncident("incident-disconnect", "task", nil, nil, nil, cb)
+	if err != nil {
 		t.Fatalf("StartIncident: %v", err)
 	}
 
@@ -528,11 +532,25 @@ func TestStartIncident_WorkerDisconnectFiresOnError(t *testing.T) {
 		t.Fatal("OnError was not invoked after worker disconnect — callback leaked")
 	}
 
+	// Entry must remain so the waiter can ReleaseRun, but be flagged finalized
+	// so a future agent event cannot retrigger OnError on a closed done chan.
+	handler.callbackMu.RLock()
+	entry, stillThere := handler.callbacks["incident-disconnect"]
+	handler.callbackMu.RUnlock()
+	if !stillThere {
+		t.Fatal("callback entry should remain after disconnect cleanup so the waiter can ReleaseRun")
+	}
+	if !entry.finalized {
+		t.Error("entry should be marked finalized after disconnect-induced OnError")
+	}
+	if !handler.ReleaseRun("incident-disconnect", runID) {
+		t.Error("ReleaseRun should succeed after disconnect-induced OnError so the waiter can finalize the failure")
+	}
 	handler.callbackMu.RLock()
 	remaining := len(handler.callbacks)
 	handler.callbackMu.RUnlock()
 	if remaining != 0 {
-		t.Errorf("callbacks map should be empty after cleanup, got %d entries", remaining)
+		t.Errorf("callbacks map should be empty after ReleaseRun, got %d entries", remaining)
 	}
 }
 
@@ -557,9 +575,12 @@ func TestStartIncident_NoWorkerReturnsError(t *testing.T) {
 
 	handler := NewAgentWSHandler()
 	cb := IncidentCallback{}
-	err = handler.StartIncident("incident-no-worker", "task", nil, nil, nil, cb)
+	runID, err := handler.StartIncident("incident-no-worker", "task", nil, nil, nil, cb)
 	if !errors.Is(err, ErrWorkerNotConnected) {
 		t.Fatalf("expected ErrWorkerNotConnected, got %v", err)
+	}
+	if runID != "" {
+		t.Errorf("expected empty runID on ErrWorkerNotConnected, got %q", runID)
 	}
 	handler.callbackMu.RLock()
 	remaining := len(handler.callbacks)
@@ -591,7 +612,7 @@ func TestStartIncident_SupersedingCallbackUnblocksPrevious(t *testing.T) {
 		OnError: func(msg string) { prevDone <- msg },
 	}
 
-	if err := handler.StartIncident("incident-supersede", "task-1", nil, nil, nil, prevCb); err != nil {
+	if _, err := handler.StartIncident("incident-supersede", "task-1", nil, nil, nil, prevCb); err != nil {
 		t.Fatalf("first StartIncident: %v", err)
 	}
 	firstReq := readNewIncidentRequest(t, conn)
@@ -608,7 +629,7 @@ func TestStartIncident_SupersedingCallbackUnblocksPrevious(t *testing.T) {
 		OnError:     func(msg string) { t.Errorf("new callback should not receive OnError: %q", msg) },
 	}
 
-	if err := handler.StartIncident("incident-supersede", "task-2", nil, nil, nil, newCb); err != nil {
+	if _, err := handler.StartIncident("incident-supersede", "task-2", nil, nil, nil, newCb); err != nil {
 		t.Fatalf("second StartIncident: %v", err)
 	}
 	secondReq := readNewIncidentRequest(t, conn)
@@ -688,11 +709,26 @@ func TestStartIncident_SupersedingCallbackUnblocksPrevious(t *testing.T) {
 		t.Fatal("new callback did not receive OnCompleted for the current run_id")
 	}
 
+	// After OnCompleted the entry stays in the map (finalized=true) so a
+	// concurrently-arriving Start/Continue can still fire OnSuperseded on the
+	// displaced waiter. The waiter cleans the slot via ReleaseRun.
 	handler.callbackMu.RLock()
-	_, stillPresent := handler.callbacks["incident-supersede"]
+	entry, stillPresent := handler.callbacks["incident-supersede"]
 	handler.callbackMu.RUnlock()
-	if stillPresent {
-		t.Error("callback should be removed after handleAgentCompleted")
+	if !stillPresent {
+		t.Fatal("callback entry should remain after handleAgentCompleted (waiter owns release)")
+	}
+	if !entry.finalized {
+		t.Error("entry should be marked finalized after handleAgentCompleted")
+	}
+	if !handler.ReleaseRun("incident-supersede", newRunID) {
+		t.Error("ReleaseRun for the current run_id should succeed")
+	}
+	handler.callbackMu.RLock()
+	_, presentAfterRelease := handler.callbacks["incident-supersede"]
+	handler.callbackMu.RUnlock()
+	if presentAfterRelease {
+		t.Error("callback entry should be removed after ReleaseRun")
 	}
 }
 
@@ -729,7 +765,7 @@ func TestHandleAgentOutput_SupersedeWaitsForInFlightCallback(t *testing.T) {
 		},
 	}
 
-	if err := handler.StartIncident("incident-toctou", "task-1", nil, nil, nil, prevCb); err != nil {
+	if _, err := handler.StartIncident("incident-toctou", "task-1", nil, nil, nil, prevCb); err != nil {
 		t.Fatalf("first StartIncident: %v", err)
 	}
 	firstReq := readNewIncidentRequest(t, conn)
@@ -760,7 +796,8 @@ func TestHandleAgentOutput_SupersedeWaitsForInFlightCallback(t *testing.T) {
 	// (line below readNewIncidentRequest) once StartIncident returns.
 	secondStarted := make(chan error, 1)
 	go func() {
-		secondStarted <- handler.StartIncident("incident-toctou", "task-2", nil, nil, nil, IncidentCallback{})
+		_, err := handler.StartIncident("incident-toctou", "task-2", nil, nil, nil, IncidentCallback{})
+		secondStarted <- err
 	}()
 
 	// While OnOutput is still in flight, OnSuperseded must NOT fire — the fix
@@ -818,13 +855,13 @@ func TestStartIncident_SupersedingPrefersOnSuperseded(t *testing.T) {
 		OnSuperseded: func() { supersededFired <- struct{}{} },
 	}
 
-	if err := handler.StartIncident("incident-prefer-supersede", "task-1", nil, nil, nil, prevCb); err != nil {
+	if _, err := handler.StartIncident("incident-prefer-supersede", "task-1", nil, nil, nil, prevCb); err != nil {
 		t.Fatalf("first StartIncident: %v", err)
 	}
 	_ = readNewIncidentRequest(t, conn)
 
 	newCb := IncidentCallback{}
-	if err := handler.StartIncident("incident-prefer-supersede", "task-2", nil, nil, nil, newCb); err != nil {
+	if _, err := handler.StartIncident("incident-prefer-supersede", "task-2", nil, nil, nil, newCb); err != nil {
 		t.Fatalf("second StartIncident: %v", err)
 	}
 	_ = readNewIncidentRequest(t, conn)
@@ -938,6 +975,51 @@ func TestHandleAgentCompleted_NoCallbackWithRunIDDrops(t *testing.T) {
 	}
 }
 
+// TestHandleAgentCompleted_LegacyFallback_EmptyOutputSkipsMetrics verifies
+// that when the legacy no-callback fallback persists an empty msg.Output,
+// it does NOT append the deterministic metrics footer to the DB row. The
+// callback-based finalize path drops metrics on empty success too
+// (appendFinalizeMetrics short-circuits on `response == ""`); the two paths
+// must stay in sync so a query against `incident.response` returns the
+// same shape regardless of which finalize path executed.
+func TestHandleAgentCompleted_LegacyFallback_EmptyOutputSkipsMetrics(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&database.Incident{}); err != nil {
+		t.Fatalf("migrate incident: %v", err)
+	}
+	prevDB := database.DB
+	database.DB = db
+	t.Cleanup(func() { database.DB = prevDB })
+
+	if err := db.Create(&database.Incident{
+		UUID:   "incident-legacy-empty",
+		Status: database.IncidentStatusRunning,
+	}).Error; err != nil {
+		t.Fatalf("seed incident: %v", err)
+	}
+
+	handler := NewAgentWSHandler()
+	handler.handleAgentCompleted(AgentMessage{
+		Type:            AgentMessageTypeAgentCompleted,
+		IncidentID:      "incident-legacy-empty",
+		Output:          "",
+		SessionID:       "session-legacy",
+		TokensUsed:      100,
+		ExecutionTimeMs: 5_000,
+	})
+
+	var got database.Incident
+	if err := db.Where("uuid = ?", "incident-legacy-empty").First(&got).Error; err != nil {
+		t.Fatalf("re-read incident: %v", err)
+	}
+	if got.Response != "" {
+		t.Errorf("legacy fallback must not append metrics to empty response (matching callback path): got %q", got.Response)
+	}
+}
+
 // TestHandleAgentError_NoCallbackWithRunIDDrops verifies the same drop-on-
 // late-frame contract for error frames: a late error from a superseded run
 // must not flip the incident to FAILED after the replacement run completed.
@@ -978,6 +1060,179 @@ func TestHandleAgentError_NoCallbackWithRunIDDrops(t *testing.T) {
 	}
 	if got.Response != "real response" {
 		t.Errorf("response overwritten by stale error: got %q", got.Response)
+	}
+}
+
+// TestReleaseRun_DisplacedDuringFinalizationReturnsFalse pins the contract
+// behind the codex finding: when a Slack/alert flow runs the configurable
+// response formatter after agent_completed, dispatchOnCompleted must keep the
+// callback entry around so a concurrently-arriving Start fires OnSuperseded
+// AND so the waiter's ReleaseRun returns false (instead of silently letting
+// the stale finalize overwrite the replacement run's result).
+func TestReleaseRun_DisplacedDuringFinalizationReturnsFalse(t *testing.T) {
+	handler, conn, cleanup := setupOneshotTest(t)
+	defer cleanup()
+
+	prevDone := make(chan struct{}, 1)
+	prevCompleted := make(chan string, 1)
+	prevCb := IncidentCallback{
+		OnCompleted:  func(_, response string, _ int, _ int64) { prevCompleted <- response },
+		OnSuperseded: func() { prevDone <- struct{}{} },
+	}
+
+	prevRunID, err := handler.StartIncident("incident-finalize-race", "task-1", nil, nil, nil, prevCb)
+	if err != nil {
+		t.Fatalf("first StartIncident: %v", err)
+	}
+	_ = readNewIncidentRequest(t, conn)
+	if prevRunID == "" {
+		t.Fatal("StartIncident must return the registered run_id")
+	}
+
+	// Simulate agent_completed for the first run. With the finalized-entry
+	// fix this must NOT remove the slot — the entry stays so a newer
+	// StartIncident can still fire OnSuperseded on the displaced waiter.
+	handler.handleAgentCompleted(AgentMessage{
+		Type:       AgentMessageTypeAgentCompleted,
+		IncidentID: "incident-finalize-race",
+		Output:     "first response",
+		SessionID:  "session-1",
+		RunID:      prevRunID,
+	})
+	select {
+	case <-prevCompleted:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("OnCompleted did not fire for the first run")
+	}
+
+	handler.callbackMu.RLock()
+	entry, present := handler.callbacks["incident-finalize-race"]
+	handler.callbackMu.RUnlock()
+	if !present {
+		t.Fatal("entry should remain in the callback map after OnCompleted (waiter owns release)")
+	}
+	if !entry.finalized {
+		t.Error("entry should be marked finalized after OnCompleted")
+	}
+
+	// A second StartIncident lands while the (simulated) waiter is still in
+	// post-completion work. It must displace the previous entry and fire
+	// OnSuperseded on the displaced callback, even though that callback has
+	// already received OnCompleted.
+	newCb := IncidentCallback{}
+	if _, err := handler.StartIncident("incident-finalize-race", "task-2", nil, nil, nil, newCb); err != nil {
+		t.Fatalf("second StartIncident: %v", err)
+	}
+	_ = readNewIncidentRequest(t, conn)
+
+	select {
+	case <-prevDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnSuperseded did not fire on the displaced (finalized) callback — the formatter race window is unguarded")
+	}
+
+	// The displaced waiter's ReleaseRun must return false so its caller exits
+	// silently and does not overwrite the replacement run's result.
+	if handler.ReleaseRun("incident-finalize-race", prevRunID) {
+		t.Error("ReleaseRun for the displaced run_id must return false; otherwise the stale finalize wins")
+	}
+}
+
+// TestReleaseRun_OwningRunSucceeds verifies the success path: a waiter that
+// was not displaced calls ReleaseRun with its own run_id and receives true,
+// which is the gate it uses to commit the final DB write + Slack post.
+func TestReleaseRun_OwningRunSucceeds(t *testing.T) {
+	handler, conn, cleanup := setupOneshotTest(t)
+	defer cleanup()
+
+	completed := make(chan struct{}, 1)
+	cb := IncidentCallback{
+		OnCompleted: func(string, string, int, int64) { completed <- struct{}{} },
+	}
+
+	runID, err := handler.StartIncident("incident-finalize-ok", "task", nil, nil, nil, cb)
+	if err != nil {
+		t.Fatalf("StartIncident: %v", err)
+	}
+	_ = readNewIncidentRequest(t, conn)
+
+	handler.handleAgentCompleted(AgentMessage{
+		Type:       AgentMessageTypeAgentCompleted,
+		IncidentID: "incident-finalize-ok",
+		Output:     "ok",
+		SessionID:  "s",
+		RunID:      runID,
+	})
+	<-completed
+
+	if !handler.ReleaseRun("incident-finalize-ok", runID) {
+		t.Error("ReleaseRun for the owning run_id must succeed")
+	}
+	if handler.ReleaseRun("incident-finalize-ok", runID) {
+		t.Error("second ReleaseRun call must return false (entry already removed)")
+	}
+}
+
+// TestFailCallbacksForConn_SkipsFinalizedEntries verifies that a worker
+// disconnect arriving after dispatchOnCompleted (entry still in map,
+// finalized=true) does NOT fire OnError on the displaced waiter's callback —
+// firing OnError there would overwrite the captured success response with
+// an error. The waiter still owns ReleaseRun for cleanup.
+func TestFailCallbacksForConn_SkipsFinalizedEntries(t *testing.T) {
+	handler := NewAgentWSHandler()
+
+	server := httptest.NewServer(http.HandlerFunc(handler.HandleWebSocket))
+	defer server.Close()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	wsConn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer wsConn.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for !handler.IsWorkerConnected() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	handler.mu.Lock()
+	serverConn := handler.workerConn
+	handler.mu.Unlock()
+	if serverConn == nil {
+		t.Fatal("expected workerConn after dial")
+	}
+
+	errorFired := make(chan string, 1)
+	completedFired := make(chan struct{}, 1)
+	cb := IncidentCallback{
+		OnCompleted: func(string, string, int, int64) { completedFired <- struct{}{} },
+		OnError:     func(msg string) { errorFired <- msg },
+	}
+
+	handler.callbackMu.Lock()
+	handler.callbacks["incident-finalized-disconnect"] = incidentCallbackEntry{
+		callback:  cb,
+		conn:      serverConn,
+		runID:     "run-1",
+		finalized: true,
+	}
+	handler.callbackMu.Unlock()
+
+	handler.cleanupWorkerConn(serverConn)
+
+	select {
+	case <-completedFired:
+		t.Fatal("OnCompleted should not fire from cleanupWorkerConn")
+	case msg := <-errorFired:
+		t.Fatalf("OnError fired on a finalized entry — would corrupt the captured success response: %q", msg)
+	case <-time.After(150 * time.Millisecond):
+		// expected: finalized entry is left alone
+	}
+
+	handler.callbackMu.RLock()
+	_, stillThere := handler.callbacks["incident-finalized-disconnect"]
+	handler.callbackMu.RUnlock()
+	if !stillThere {
+		t.Error("finalized entry should remain after disconnect cleanup so the waiter can ReleaseRun")
 	}
 }
 
@@ -1059,12 +1314,15 @@ func TestCleanupWorkerConn_PerConnCallbackRouting(t *testing.T) {
 	}
 
 	handler.callbackMu.Lock()
-	if _, present := handler.callbacks["a-incident"]; present {
-		t.Error("A-owned callback should be deleted after cleanup")
+	if entryA, present := handler.callbacks["a-incident"]; !present {
+		t.Error("A-owned callback entry should remain so the waiter can ReleaseRun the failure")
+	} else if !entryA.finalized {
+		t.Error("A-owned callback entry should be marked finalized after disconnect cleanup")
 	}
 	if _, present := handler.callbacks["b-incident"]; !present {
 		t.Error("B-owned callback should remain after A's cleanup")
 	}
+	delete(handler.callbacks, "a-incident")
 	delete(handler.callbacks, "b-incident")
 	handler.callbackMu.Unlock()
 }

@@ -256,6 +256,7 @@ func main() {
 	httpConnectorService := services.NewHTTPConnectorService()
 	mcpServerService := services.NewMCPServerService()
 	apiHandler := handlers.NewAPIHandler(skillService, toolService, contextService, alertService, agentExecutor, agentWSHandler, slackManager, runbookService, httpConnectorService, mcpServerService)
+	apiHandler.SetResponseFormatter(responseFormatter)
 
 	// Wire alert channel reload: when alert sources are created/updated/deleted via API,
 	// reload the Slack handler's channel mappings so changes take effect immediately.

@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/api"
@@ -129,7 +131,7 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				var response string
 				var sessionID string
 				var hasError bool
-				var superseded bool
+				var superseded atomic.Bool
 				var lastStreamedLog string
 				var finalTokensUsed int
 				var finalExecutionTimeMs int64
@@ -157,12 +159,13 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 					// the replacement run owns finalization. Unblock and exit
 					// silently rather than overwrite its result with a failure.
 					OnSuperseded: func() {
-						superseded = true
+						superseded.Store(true)
 						closeOnce.Do(func() { close(done) })
 					},
 				}
 
-				if err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback); err != nil {
+				runID, err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback)
+				if err != nil {
 					slog.Error("failed to start incident via WebSocket", "err", err)
 					errorMsg := fmt.Sprintf("Failed to start incident: %v", err)
 					if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg, 0, 0); updateErr != nil {
@@ -174,24 +177,46 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				<-done
 
 				// Replacement run owns DB finalization — exit silently.
-				if superseded {
+				if superseded.Load() {
 					slog.Info("API incident superseded; leaving finalization to the new run", "incident_id", incidentUUID)
 					return
 				}
 
-				fullLog := taskHeader + lastStreamedLog
-				if response != "" {
-					fullLog += "\n\n--- Final Response ---\n\n" + response
+				// Apply the configured formatting prompt before persistence.
+				// Passthrough on error/empty or when formatting is disabled.
+				formattedResponse := applyResponseFormatter(context.Background(), h.responseFormatter, hasError, response, taskHeader+lastStreamedLog)
+
+				// Re-attach the metrics footer AFTER formatting so the LLM
+				// never sees it (and therefore cannot strip or rewrite ⏱️
+				// Time / 🎯 Tokens). The deterministic footer is derived
+				// from finalTokensUsed/finalExecutionTimeMs and lands at
+				// the end of `incident.response`, so the web UI's metrics
+				// line stays correct even when the formatter rewrote the
+				// body.
+				formattedWithMetrics := appendFinalizeMetrics(formattedResponse, finalExecutionTimeMs, finalTokensUsed, hasError)
+				rawWithMetrics := appendFinalizeMetrics(response, finalExecutionTimeMs, finalTokensUsed, hasError)
+
+				// Claim ownership of finalization atomically. A second API
+				// call for the same incident_id displaces this run; without
+				// the ReleaseRun guard we'd race the replacement's DB write.
+				if !h.agentWSHandler.ReleaseRun(incidentUUID, runID) {
+					slog.Info("API incident displaced during finalization; leaving DB write to the new run", "incident_id", incidentUUID)
+					return
 				}
 
+				// Build full log using the raw response (with metrics) so
+				// full_log preserves the original agent output for debugging.
+				fullLog := taskHeader + lastStreamedLog
+				if rawWithMetrics != "" {
+					fullLog += "\n\n--- Final Response ---\n\n" + rawWithMetrics
+				}
+
+				finalStatus := database.IncidentStatusCompleted
 				if hasError {
-					if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, sessionID, fullLog, response, finalTokensUsed, finalExecutionTimeMs); err != nil {
-						slog.Error("failed to update incident complete", "err", err)
-					}
-				} else {
-					if err := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, sessionID, fullLog, response, finalTokensUsed, finalExecutionTimeMs); err != nil {
-						slog.Error("failed to update incident complete", "err", err)
-					}
+					finalStatus = database.IncidentStatusFailed
+				}
+				if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, formattedWithMetrics, finalTokensUsed, finalExecutionTimeMs); err != nil {
+					slog.Error("failed to update incident complete", "err", err)
 				}
 
 				slog.Info("API incident completed via WebSocket", "incident_id", incidentUUID)

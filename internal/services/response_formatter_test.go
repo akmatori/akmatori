@@ -86,20 +86,25 @@ func TestResponseFormatter_DisabledPassthrough(t *testing.T) {
 	}
 }
 
-func TestResponseFormatter_EmptyPromptPassthrough(t *testing.T) {
+func TestResponseFormatter_EmptyPromptUsesDefaultPrompt(t *testing.T) {
 	setupFormatterTestDB(t)
 	seedFormatterSettings(t, database.FormattingSettings{Enabled: true, SystemPrompt: "   \n\t  ", MaxTokens: 1000, Temperature: 0.2})
 	seedFormatterLLM(t, defaultLLMForFormatter())
 
 	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
-		t.Fatal("LLM caller must not be invoked when system prompt is empty/whitespace")
-		return "", nil
+		return "formatted-default", nil
 	}}
 
 	f := NewResponseFormatter(caller)
 	got := f.Format(context.Background(), "raw output", "full log")
-	if got != "raw output" {
-		t.Errorf("expected passthrough, got %q", got)
+	if got != "formatted-default" {
+		t.Errorf("expected formatted output via default prompt, got %q", got)
+	}
+	if caller.callCount() != 1 {
+		t.Fatalf("expected 1 LLM call when prompt is blank (default applied), got %d", caller.callCount())
+	}
+	if caller.lastSystem != strings.TrimSpace(database.DefaultFormattingPrompt) {
+		t.Errorf("expected blank stored prompt to fall back to DefaultFormattingPrompt, got %q", caller.lastSystem)
 	}
 }
 
@@ -363,6 +368,90 @@ func TestResponseFormatter_TruncatesLargeFullLog(t *testing.T) {
 	if strings.Contains(prompt, opener) {
 		t.Errorf("expected earliest reasoning marker %q to be dropped after truncation", opener)
 	}
+}
+
+func TestResponseFormatter_TruncatesLargeRawResponse(t *testing.T) {
+	setupFormatterTestDB(t)
+	seedFormatterSettings(t, database.FormattingSettings{Enabled: true, SystemPrompt: "Reformat.", MaxTokens: 1000, Temperature: 0.2})
+	seedFormatterLLM(t, defaultLLMForFormatter())
+
+	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
+		return "ok", nil
+	}}
+
+	// Build a raw response that alone exceeds the cap. The opener marker must
+	// be dropped (head truncated) and the trailer marker preserved so the
+	// final answer stays inside the budget the LLM sees.
+	opener := "RAW-OPENER-MUST-BE-DROPPED"
+	filler := strings.Repeat("rawfiller ", 12000)
+	trailer := "RAW-TRAILER-MUST-BE-KEPT"
+	rawResp := opener + filler + trailer
+
+	f := NewResponseFormatter(caller)
+	if got := f.Format(context.Background(), rawResp, "step 1"); got != "ok" {
+		t.Fatalf("unexpected output: %q", got)
+	}
+	prompt := caller.lastUser
+	if len(prompt) > responseFormatterMaxInputBytes {
+		t.Errorf("expected user prompt to stay within the input cap; got %d bytes (cap %d)", len(prompt), responseFormatterMaxInputBytes)
+	}
+	if !strings.Contains(prompt, trailer) {
+		t.Errorf("expected raw response trailer %q to survive truncation", trailer)
+	}
+	if strings.Contains(prompt, opener) {
+		t.Errorf("expected raw response opener %q to be dropped after truncation", opener)
+	}
+	if !strings.Contains(prompt, "earlier response truncated") {
+		t.Errorf("expected response-truncation note when raw response overflows the cap")
+	}
+}
+
+// TestResponseFormatter_DropsReasoningWhenBudgetSmallerThanTruncationNote
+// pins the codex finding: when rawResponse leaves a positive but sub-note-sized
+// remainder for reasoning, the assembled prompt must still respect maxBytes.
+// The earlier implementation appended the full truncationNote anyway, which
+// pushed the prompt over the cap.
+func TestResponseFormatter_DropsReasoningWhenBudgetSmallerThanTruncationNote(t *testing.T) {
+	caller := &fakeOneShotLLMCaller{}
+
+	// Choose a maxBytes / rawResponse pair so 0 < budgetForLog < len(truncationNote).
+	// truncationNote = "[... earlier reasoning truncated ...]\n" (38 bytes).
+	const maxBytes = 1000
+	const truncationNote = "[... earlier reasoning truncated ...]\n"
+	overhead := lenFormatterOverheadWithReasoning()
+	// Aim for budgetForLog = 10 → rawResponse length = maxBytes - overhead - 10.
+	rawLen := maxBytes - overhead - 10
+	if rawLen <= 0 {
+		t.Fatalf("test setup: maxBytes (%d) too small for overhead (%d)", maxBytes, overhead)
+	}
+	rawResp := strings.Repeat("a", rawLen)
+	fullLog := strings.Repeat("b", 5000)
+
+	prompt := buildFormatterUserPrompt(rawResp, fullLog, maxBytes)
+	if len(prompt) > maxBytes {
+		t.Errorf("prompt exceeded maxBytes: got %d, cap %d", len(prompt), maxBytes)
+	}
+	// The reasoning section must be dropped entirely — neither the label nor
+	// the note belongs in the output when the remainder cannot even fit the note.
+	if strings.Contains(prompt, "--- Full reasoning ---") {
+		t.Error("expected reasoning section to be dropped when budget < truncation note")
+	}
+	if strings.Contains(prompt, truncationNote) {
+		t.Error("expected truncation note to be omitted when reasoning section is dropped")
+	}
+	_ = caller
+}
+
+// lenFormatterOverheadWithReasoning mirrors the fixed prompt scaffolding used
+// by buildFormatterUserPrompt when reasoning is included. Kept in sync with
+// the constants there so the budget arithmetic in tests stays accurate.
+func lenFormatterOverheadWithReasoning() int {
+	const (
+		header         = "Reformat the agent's incident report using the configured output structure. The reasoning trace is provided as supporting context only — do not include it verbatim in the output.\n\n"
+		responseLabel  = "--- Raw response ---\n"
+		reasoningLabel = "\n\n--- Full reasoning ---\n"
+	)
+	return len(header) + len(responseLabel) + len(reasoningLabel)
 }
 
 func TestResponseFormatter_OmitsReasoningSectionWhenEmpty(t *testing.T) {
