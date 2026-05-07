@@ -263,3 +263,68 @@ func TestAlertHandler_SetResponseFormatter(t *testing.T) {
 		t.Errorf("SetResponseFormatter did not wire the formatter onto the handler")
 	}
 }
+
+// TestAPIHandler_SetResponseFormatter verifies that the setter wires the
+// formatter onto the APIHandler so the POST /api/incidents finalization
+// path applies the configured formatting prompt before persistence.
+func TestAPIHandler_SetResponseFormatter(t *testing.T) {
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	if h.responseFormatter != nil {
+		t.Fatal("expected responseFormatter to start nil before SetResponseFormatter")
+	}
+
+	formatter := services.NewResponseFormatter(&fakeFormatterCaller{})
+	h.SetResponseFormatter(formatter)
+	if h.responseFormatter != formatter {
+		t.Errorf("SetResponseFormatter did not wire the formatter onto the handler")
+	}
+}
+
+// TestAppendFinalizeMetrics_FormattedResponsePreservesFooter pins the
+// contract behind the codex finding: the formatter LLM may freely rewrite
+// the agent's response body, but the deterministic ⏱️ Time / 🎯 Tokens
+// line must still land at the end of the finalized response so
+// buildSlackFooter can extract the metrics into the Slack footer and the
+// web UI shows execution metrics regardless of what the formatter emits.
+func TestAppendFinalizeMetrics_FormattedResponsePreservesFooter(t *testing.T) {
+	formattedBody := `{"status":"resolved","summary":"All clear."}`
+	got := appendFinalizeMetrics(formattedBody, 41_300, 126_028, false)
+
+	// Body is preserved verbatim — the formatter's structured output is
+	// not rewritten by the metrics-append step.
+	if !strings.Contains(got, formattedBody) {
+		t.Errorf("formatted body missing from result: %q", got)
+	}
+	// Metrics line is appended verbatim using the metrics suffix that
+	// buildSlackFooter recognizes (LastIndex of "\n---\n⏱️").
+	if !strings.HasSuffix(got, "\n---\n⏱️ Time: 41.3s | 🎯 Tokens: 126,028") {
+		t.Errorf("metrics suffix missing or malformed: %q", got)
+	}
+
+	// The metrics line travels through buildSlackFooter unchanged so the
+	// Slack footer reproduces ⏱️ Time / 🎯 Tokens even when the formatter
+	// completely rewrote the agent output.
+	contentOnly, footer := buildSlackFooter(got, "uuid-fmt")
+	if strings.Contains(contentOnly, "⏱️") {
+		t.Errorf("buildSlackFooter left metrics inside the body: %q", contentOnly)
+	}
+	if !strings.Contains(footer, "⏱️ Time: 41.3s") {
+		t.Errorf("Slack footer dropped the time metric: %q", footer)
+	}
+	if !strings.Contains(footer, "🎯 Tokens: 126,028") {
+		t.Errorf("Slack footer dropped the tokens metric: %q", footer)
+	}
+}
+
+// TestAppendFinalizeMetrics_SkipsErrorsAndEmpty verifies the guard against
+// appending a metrics footer to error / empty responses, where execution
+// time / tokens are not meaningful (the OnError callback path historically
+// produced responses without a metrics line).
+func TestAppendFinalizeMetrics_SkipsErrorsAndEmpty(t *testing.T) {
+	if got := appendFinalizeMetrics("❌ Error: agent crashed", 5_000, 100, true); got != "❌ Error: agent crashed" {
+		t.Errorf("error response must not gain a metrics footer: %q", got)
+	}
+	if got := appendFinalizeMetrics("", 5_000, 100, false); got != "" {
+		t.Errorf("empty response must remain empty: %q", got)
+	}
+}

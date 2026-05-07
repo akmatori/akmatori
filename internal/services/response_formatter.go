@@ -56,9 +56,16 @@ func (f *ResponseFormatter) Format(ctx context.Context, rawResponse, fullLog str
 		return rawResponse
 	}
 
+	// The settings UI advertises "leave blank to use the default prompt"; honor
+	// that here by falling back to DefaultFormattingPrompt when the operator
+	// saved an empty/whitespace value. Disabling the formatter entirely is
+	// expressed via Enabled=false, not via a blank prompt.
 	systemPrompt := strings.TrimSpace(settings.SystemPrompt)
 	if systemPrompt == "" {
-		return rawResponse
+		systemPrompt = strings.TrimSpace(database.DefaultFormattingPrompt)
+		if systemPrompt == "" {
+			return rawResponse
+		}
 	}
 
 	llmSettings, err := database.GetLLMSettings()
@@ -109,12 +116,15 @@ func (f *ResponseFormatter) Format(ctx context.Context, rawResponse, fullLog str
 // raw-response and reasoning sections. When the combined size exceeds
 // maxBytes, the reasoning trace is truncated from the start (oldest content
 // dropped first) so the portion adjacent to the final response is preserved.
+// If the raw response alone exceeds the budget, it is truncated from the
+// start as well so the assembled prompt stays within maxBytes.
 func buildFormatterUserPrompt(rawResponse, fullLog string, maxBytes int) string {
 	const (
-		header         = "Reformat the agent's incident report using the configured output structure. The reasoning trace is provided as supporting context only — do not include it verbatim in the output.\n\n"
-		responseLabel  = "--- Raw response ---\n"
-		reasoningLabel = "\n\n--- Full reasoning ---\n"
-		truncationNote = "[... earlier reasoning truncated ...]\n"
+		header                 = "Reformat the agent's incident report using the configured output structure. The reasoning trace is provided as supporting context only — do not include it verbatim in the output.\n\n"
+		responseLabel          = "--- Raw response ---\n"
+		reasoningLabel         = "\n\n--- Full reasoning ---\n"
+		truncationNote         = "[... earlier reasoning truncated ...]\n"
+		responseTruncationNote = "[... earlier response truncated ...]\n"
 	)
 
 	if maxBytes <= 0 {
@@ -122,9 +132,25 @@ func buildFormatterUserPrompt(rawResponse, fullLog string, maxBytes int) string 
 	}
 
 	overhead := len(header) + len(responseLabel) + len(reasoningLabel)
+	hasReasoning := strings.TrimSpace(fullLog) != ""
+	if !hasReasoning {
+		overhead = len(header) + len(responseLabel)
+	}
+
+	// First, ensure the raw response fits within its share of the budget. If
+	// the response alone overflows maxBytes, truncate it from the start so
+	// the trailing summary (which is what the agent emits last and the
+	// formatter most needs) is preserved. After truncation, the reasoning
+	// section may still receive some budget if room remains.
+	responseBudget := maxBytes - overhead
+	if responseBudget < 0 {
+		responseBudget = 0
+	}
+	rawResponse = truncateFromStart(rawResponse, responseBudget, responseTruncationNote)
+
 	budgetForLog := maxBytes - overhead - len(rawResponse)
 
-	if strings.TrimSpace(fullLog) == "" {
+	if !hasReasoning {
 		return header + responseLabel + rawResponse
 	}
 
@@ -134,6 +160,15 @@ func buildFormatterUserPrompt(rawResponse, fullLog string, maxBytes int) string 
 
 	if len(fullLog) <= budgetForLog {
 		return header + responseLabel + rawResponse + reasoningLabel + fullLog
+	}
+
+	// If the remaining budget cannot even fit the truncation note alone,
+	// drop the reasoning section entirely rather than overflow maxBytes.
+	// Without this guard the cutoff >= len(fullLog) branch below would
+	// emit reasoningLabel+truncationNote whose combined length exceeds
+	// budgetForLog, blowing the input cap that callers depend on.
+	if budgetForLog < len(truncationNote) {
+		return header + responseLabel + rawResponse
 	}
 
 	cutoff := len(fullLog) - budgetForLog + len(truncationNote)
@@ -150,4 +185,30 @@ func buildFormatterUserPrompt(rawResponse, fullLog string, maxBytes int) string 
 	}
 	tail := fullLog[cutoff:]
 	return fmt.Sprintf("%s%s%s%s%s%s", header, responseLabel, rawResponse, reasoningLabel, truncationNote, tail)
+}
+
+// truncateFromStart returns s unchanged when len(s) <= budget; otherwise it
+// drops the leading portion (rune-aligned) and prepends note so the tail —
+// the final summary the formatter needs most — is preserved within budget.
+func truncateFromStart(s string, budget int, note string) string {
+	if budget <= 0 || len(s) <= budget {
+		if budget <= 0 {
+			return ""
+		}
+		return s
+	}
+	if len(note) >= budget {
+		return s[len(s)-budget:]
+	}
+	cutoff := len(s) - (budget - len(note))
+	if cutoff < 0 {
+		cutoff = 0
+	}
+	for cutoff < len(s) && !utf8.RuneStart(s[cutoff]) {
+		cutoff++
+	}
+	if cutoff >= len(s) {
+		return note
+	}
+	return note + s[cutoff:]
 }
