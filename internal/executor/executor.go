@@ -144,8 +144,8 @@ func PrependGuidance(task string) string {
 IMPORTANT: Before using any infrastructure tools, you MUST search for relevant runbooks first.
 Issue ONE qmd.query with TWO sub-queries. The FIRST entry in "searches" is automatically
 weighted 2x by QMD's RRF fusion — put the verbatim alert text there:
-- sub-query 1 (verbatim, 2x weighted): the "Original alert text" excerpt provided in the
-  alert message above (or the alert summary if no original text was provided), trimmed to
+- sub-query 1 (verbatim, 2x weighted): the "Original alert text" excerpt from the
+  incident task below (or the alert summary if no original text was provided), trimmed to
   ~250 characters.
 - sub-query 2 (keywords): 3-5 short keywords from the alert name. Drop hyphens, host names, qualifiers.
 Example keywords: "Nginx-cache test resource connection refused on edge host" → "nginx cache connection refused"

@@ -45,7 +45,7 @@ func TestDefaultIncidentManagerPrompt_MandatoryRunbookSearch(t *testing.T) {
 		// doesn't surface memory documents during the "search runbooks
 		// first" workflow.
 		{"runbook collection scope", `"collection": "runbooks"`},
-		{"skip only on error", "Skip this step ONLY if QMD search returns an error (not if results are empty)"},
+		{"empty not a skip reason", "Empty results are NOT a reason to skip"},
 		{"primary guide", "PRIMARY investigation guide"},
 	}
 

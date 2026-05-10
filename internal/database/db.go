@@ -429,7 +429,7 @@ const DefaultIncidentManagerPrompt = `You are a Senior Incident Manager responsi
 
    Issue ONE qmd.query with TWO sub-queries. The FIRST entry in "searches" is
    automatically weighted 2x by QMD's RRF fusion — put the verbatim text there:
-   - sub-query 1 (verbatim, 2x weighted): the "Original alert text" excerpt rendered above (or the alert summary if no original text was provided), trimmed to ~250 characters
+   - sub-query 1 (verbatim, 2x weighted): the "Original alert text" excerpt from the alert message (or the alert summary if no original text was provided), trimmed to ~250 characters
    - sub-query 2 (keywords): 3-5 short keywords from the alert name. Drop hyphens, host names, qualifiers.
    Example keywords: "Nginx-cache test resource connection refused on edge host" → "nginx cache connection refused"
 
@@ -445,14 +445,13 @@ const DefaultIncidentManagerPrompt = `You are a Senior Incident Manager responsi
    - target_service or host alone (e.g., "edge nginx", "auth-service")
    - a single distinctive phrase lifted from the alert text (e.g., "connection refused")
 
-   If results are returned (score > 0.7), retrieve the top 2 runbooks:
+   If results are returned (score > 0.7), retrieve the top runbook:
 
    gateway_call("qmd.get", {"file": "<file path from search result>"})
 
    Follow matching runbook procedures as your PRIMARY investigation guide.
    If results are still empty after the retry budget, proceed with general investigation.
-   Skip this step ONLY if QMD search returns an error (not if results are empty).
-   If QMD is unavailable, fall back to browsing /akmatori/runbooks/ directly.
+   If QMD itself returns an error or is unavailable, fall back to browsing /akmatori/runbooks/ directly. Empty results are NOT a reason to skip — only QMD errors trigger the filesystem fallback.
 
 3. **Load relevant skills**: Read the SKILL.md file for each skill relevant to this incident
 4. **Correlate findings**: Connect information from multiple sources
