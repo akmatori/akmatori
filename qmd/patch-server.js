@@ -4,10 +4,20 @@
 // CRUD to keep the search index current. Upstream QMD doesn't expose this
 // route, so without this patch every call returns 404 and the index drifts.
 //
-// The handler runs `qmd update` (refresh lex index) followed by `qmd embed`
-// (refresh vector index). Without the embed step, freshly-added runbooks are
-// invisible to vec/hyde search until the container restarts. qmd embed is
-// idempotent and ETag-cached, so unchanged docs are a near-no-op.
+// Two-stage flow:
+//   1) `qmd update` (fast: refreshes BM25 lex index from disk)  — synchronous;
+//      success/failure surfaces in the HTTP response so callers can detect
+//      fast-path breakage immediately.
+//   2) `qmd embed`  (slow: refreshes vector index, can take seconds-to-minutes)
+//      — runs in the background AFTER the 200 response is sent. The Go-side
+//      clients fire /update from a goroutine and use a short HTTP timeout;
+//      embedding inline would cause spurious context-deadline warnings on
+//      every CRUD even though the lex index update succeeded.
+//
+// Embed concurrency: a single in-flight flag (__qmdEmbedInFlight) suppresses
+// duplicate concurrent embed processes. qmd embed is ETag-cached and idempotent
+// — the running process will pick up any newly-staged docs from a colliding
+// /update call, so dropping the duplicate is safe.
 //
 // We anchor the insertion immediately before the existing "/health" handler.
 // The injected handler shells out via execFile("qmd", [...]) — fixed argv,
@@ -51,16 +61,24 @@ const injection =
     `${indent}            log(\`\${ts()} POST /update FAILED at update stage (\${Date.now() - reqStart}ms)\`);\n` +
     `${indent}            return;\n` +
     `${indent}        }\n` +
+    // Ack the lex-index refresh synchronously, then run the slow vector-index
+    // refresh in the background. See file header for the rationale.
+    `${indent}        const embedSkipped = globalThis.__qmdEmbedInFlight === true;\n` +
+    `${indent}        nodeRes.writeHead(200, { "Content-Type": "application/json" });\n` +
+    `${indent}        nodeRes.end(JSON.stringify({ status: "ok", updateOutput: updStdout.trim(), embedQueued: !embedSkipped }));\n` +
+    `${indent}        log(\`\${ts()} POST /update update-stage ok (\${Date.now() - reqStart}ms)\${embedSkipped ? "; embed already in flight, skipped" : ""}\`);\n` +
+    `${indent}        if (embedSkipped) {\n` +
+    `${indent}            return;\n` +
+    `${indent}        }\n` +
+    `${indent}        globalThis.__qmdEmbedInFlight = true;\n` +
+    `${indent}        const embedStart = Date.now();\n` +
     `${indent}        execFile("qmd", ["embed"], { timeout: 600000 }, (embErr, embStdout, embStderr) => {\n` +
+    `${indent}            globalThis.__qmdEmbedInFlight = false;\n` +
     `${indent}            if (embErr) {\n` +
-    `${indent}                nodeRes.writeHead(500, { "Content-Type": "application/json" });\n` +
-    `${indent}                nodeRes.end(JSON.stringify({ error: String(embErr), stderr: embStderr, stage: "embed", updateOutput: updStdout.trim() }));\n` +
-    `${indent}                log(\`\${ts()} POST /update FAILED at embed stage (\${Date.now() - reqStart}ms)\`);\n` +
+    `${indent}                log(\`\${ts()} /update embed-stage FAILED (\${Date.now() - embedStart}ms): \${String(embErr)} stderr=\${String(embStderr || "").trim()}\`);\n` +
     `${indent}                return;\n` +
     `${indent}            }\n` +
-    `${indent}            nodeRes.writeHead(200, { "Content-Type": "application/json" });\n` +
-    `${indent}            nodeRes.end(JSON.stringify({ status: "ok", updateOutput: updStdout.trim(), embedOutput: embStdout.trim() }));\n` +
-    `${indent}            log(\`\${ts()} POST /update (\${Date.now() - reqStart}ms)\`);\n` +
+    `${indent}            log(\`\${ts()} /update embed-stage ok (\${Date.now() - embedStart}ms)\`);\n` +
     `${indent}        });\n` +
     `${indent}    });\n` +
     `${indent}    return;\n` +

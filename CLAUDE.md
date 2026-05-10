@@ -311,7 +311,7 @@ Runbooks (SOPs) guide AI agent investigations. Stored in PostgreSQL, synced as m
 
 **Agent Access**: The seeded `incident-manager` prompt (`DefaultIncidentManagerPrompt` in `internal/database/db.go`) instructs the agent to issue ONE `gateway_call("qmd.query", ...)` against `collections: ["runbooks"]` with THREE `searches[]` entries — `{lex, vec, hyde}`, each carrying the same one-sentence natural-language alert summary. QMD fuses the three result sets via Reciprocal Rank Fusion. Up to 2 retries with different angles (3 total calls). Filesystem fallback to `/akmatori/runbooks/` only on QMD error, not empty results. The QMD sidecar image bakes in the embedding + reranker GGUFs (~940 MB) and runs `qmd embed` on startup so vector + HyDE retrieval are live out of the box. The `executor.PrependGuidance` user-turn reminder mirrors this shape — keep them in sync.
 
-**QMD Re-indexing**: `SyncRunbookFiles()` triggers a non-blocking HTTP POST to QMD's `/update` endpoint after writing files, keeping the search index current.
+**QMD Re-indexing**: `SyncRunbookFiles()` (and `MemoryService.SyncMemoryFiles()`) triggers a non-blocking HTTP POST to QMD's `/update` endpoint after writing files. The patched route in `qmd/patch-server.js` runs `qmd update` synchronously (fast lex-index refresh; outcome reflected in the HTTP response), then kicks off `qmd embed` (slow vector-index refresh) in the background under an in-flight gate that suppresses duplicate concurrent embed processes. The Go-side 10s client timeout is therefore enough to cover the lex update; embed progress is logged in the QMD container.
 
 ### QMD Search Service
 
