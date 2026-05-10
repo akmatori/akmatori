@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
@@ -443,6 +444,57 @@ func TestAlertHandler_buildInvestigationPrompt(t *testing.T) {
 		})
 	}
 
+	// Source line is rendered only when BOTH the alert source type Name and
+	// the instance Name are populated. Half-populated state should not leak
+	// dangling slashes/spaces into the prompt.
+	t.Run("source line omitted when type name empty", func(t *testing.T) {
+		result := h.buildInvestigationPrompt(
+			alerts.NormalizedAlert{AlertName: "X"},
+			&database.AlertSourceInstance{
+				Name: "channel-prod",
+				AlertSourceType: database.AlertSourceType{
+					Name:        "",
+					DisplayName: "Slack Channel",
+				},
+			},
+		)
+		if strings.Contains(result, "Source:") {
+			t.Errorf("prompt should not contain Source: line when type Name is empty, got %q", result)
+		}
+	})
+
+	t.Run("source line omitted when instance name empty", func(t *testing.T) {
+		result := h.buildInvestigationPrompt(
+			alerts.NormalizedAlert{AlertName: "X"},
+			&database.AlertSourceInstance{
+				Name: "",
+				AlertSourceType: database.AlertSourceType{
+					Name:        "zabbix",
+					DisplayName: "Zabbix",
+				},
+			},
+		)
+		if strings.Contains(result, "Source:") {
+			t.Errorf("prompt should not contain Source: line when instance Name is empty, got %q", result)
+		}
+	})
+
+	t.Run("source line omitted when both empty", func(t *testing.T) {
+		result := h.buildInvestigationPrompt(
+			alerts.NormalizedAlert{AlertName: "X"},
+			&database.AlertSourceInstance{
+				Name: "",
+				AlertSourceType: database.AlertSourceType{
+					Name:        "",
+					DisplayName: "Custom",
+				},
+			},
+		)
+		if strings.Contains(result, "Source:") {
+			t.Errorf("prompt should not contain Source: line when both names empty, got %q", result)
+		}
+	})
+
 	// Targeted assertion: alerts without original_message must not render the
 	// "Original alert text:" block.
 	t.Run("absent original_message omits block", func(t *testing.T) {
@@ -486,7 +538,6 @@ func TestAlertHandler_buildInvestigationPrompt(t *testing.T) {
 		if !strings.Contains(result, "Original alert text:") {
 			t.Fatalf("prompt should contain Original alert text block, got %q", result)
 		}
-		// The truncated payload itself must be exactly 1500 bytes ending in "...".
 		idx := strings.Index(result, "Original alert text:\n")
 		if idx < 0 {
 			t.Fatal("could not locate original-alert block")
@@ -498,6 +549,7 @@ func TestAlertHandler_buildInvestigationPrompt(t *testing.T) {
 			t.Fatalf("could not locate end of original alert block, body=%q", body)
 		}
 		truncated := body[:end]
+		// All-ASCII input: rune-aware truncation lands at exactly 1500 bytes.
 		if len(truncated) != 1500 {
 			t.Errorf("truncated length = %d, want 1500", len(truncated))
 		}
@@ -517,6 +569,18 @@ func TestExtractOriginalMessage(t *testing.T) {
 		{
 			name:    "missing key",
 			payload: map[string]interface{}{"other": "x"},
+			max:     100,
+			want:    "",
+		},
+		{
+			name:    "nil payload map",
+			payload: nil,
+			max:     100,
+			want:    "",
+		},
+		{
+			name:    "nil value at key",
+			payload: map[string]interface{}{"original_message": nil},
 			max:     100,
 			want:    "",
 		},
@@ -545,10 +609,40 @@ func TestExtractOriginalMessage(t *testing.T) {
 			want:    "short",
 		},
 		{
+			name:    "exact length under limit",
+			payload: map[string]interface{}{"original_message": "abcde"},
+			max:     5,
+			want:    "abcde",
+		},
+		{
+			name:    "one over limit truncates with ellipsis",
+			payload: map[string]interface{}{"original_message": "abcdef"},
+			max:     5,
+			want:    "ab...",
+		},
+		{
 			name:    "truncates with ellipsis",
 			payload: map[string]interface{}{"original_message": strings.Repeat("a", 20)},
 			max:     10,
 			want:    strings.Repeat("a", 7) + "...",
+		},
+		{
+			name:    "max equals ellipsis length returns prefix without ellipsis",
+			payload: map[string]interface{}{"original_message": "abcdef"},
+			max:     3,
+			want:    "abc",
+		},
+		{
+			name:    "max smaller than ellipsis length returns plain prefix",
+			payload: map[string]interface{}{"original_message": "abcdef"},
+			max:     2,
+			want:    "ab",
+		},
+		{
+			name:    "max=0 leaves message untouched",
+			payload: map[string]interface{}{"original_message": "abcdef"},
+			max:     0,
+			want:    "abcdef",
 		},
 	}
 
@@ -560,6 +654,27 @@ func TestExtractOriginalMessage(t *testing.T) {
 			}
 		})
 	}
+
+	// UTF-8 truncation must not split runes — multi-byte characters at the
+	// cap (common in Slack-channel alerts) would otherwise produce invalid
+	// UTF-8 in the rendered prompt.
+	t.Run("multi-byte rune at boundary is not split", func(t *testing.T) {
+		// "ééé" = 6 bytes (each é = 0xC3 0xA9). With max=5, naive byte
+		// truncation would cut mid-rune at byte 4 of "ééé..." (after
+		// reserving 3 bytes for the ellipsis). The rune-aware path must
+		// back up to a rune boundary.
+		input := strings.Repeat("é", 50) // 100 bytes
+		got := extractOriginalMessage(map[string]interface{}{"original_message": input}, 10)
+		if !utf8.ValidString(got) {
+			t.Errorf("extractOriginalMessage() returned invalid UTF-8: %q (bytes=%v)", got, []byte(got))
+		}
+		if !strings.HasSuffix(got, "...") {
+			t.Errorf("expected ellipsis suffix on truncated UTF-8 string, got %q", got)
+		}
+		if len(got) > 10 {
+			t.Errorf("expected len(got)<=10, got %d (%q)", len(got), got)
+		}
+	})
 }
 
 // --- buildSlackFooter tests ---

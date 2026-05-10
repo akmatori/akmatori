@@ -133,21 +133,33 @@ func buildSafeEnvironment() []string {
 // PrependGuidance adds the current time, task framing, and runbook-first
 // instruction to a task. The runbook search reminder is placed in the user
 // message (not just the system prompt) because models follow user-turn
-// instructions more reliably than long system prompt sections.
+// instructions more reliably than long system prompt sections. The
+// multi-sub-query call shape mirrors the runbook-search section of
+// DefaultIncidentManagerPrompt — keep them in sync so the system prompt
+// and the user-turn reminder agree on the verbatim 2x-weighted strategy.
 func PrependGuidance(task string) string {
 	currentTime := time.Now().UTC().Format("2006-01-02 15:04:05 UTC")
 	return fmt.Sprintf(`Current time: %s
 
 IMPORTANT: Before using any infrastructure tools, you MUST search for relevant runbooks first.
-Use short, simple keywords (3-5 words). Remove hyphens, extra qualifiers, and host names.
-Example: alert "Nginx-cache test resource connection refused on edge host" → search "nginx cache connection refused"
+Issue ONE qmd.query with TWO sub-queries. The FIRST entry in "searches" is automatically
+weighted 2x by QMD's RRF fusion — put the verbatim alert text there:
+- sub-query 1 (verbatim, 2x weighted): the "Original alert text" excerpt provided in the
+  alert message above (or the alert summary if no original text was provided), trimmed to
+  ~250 characters.
+- sub-query 2 (keywords): 3-5 short keywords from the alert name. Drop hyphens, host names, qualifiers.
+Example keywords: "Nginx-cache test resource connection refused on edge host" → "nginx cache connection refused"
 
-  gateway_call("qmd.query", {"collection": "runbooks", "searches": [{"type": "lex", "query": "<short keywords>"}], "limit": 5})
+  gateway_call("qmd.query", {"collection": "runbooks", "searches": [{"type": "lex", "query": "<verbatim alert excerpt up to 250 chars>"}, {"type": "lex", "query": "<short keywords>"}], "limit": 5})
 
 The "collection": "runbooks" filter scopes the search away from cross-incident
 memory documents — use memory.search / memory.get for those.
 
-If no results, retry with fewer/different keywords. If results have score > 0.7, retrieve the runbook:
+If results are empty, retry with a different angle. Cap total qmd.query calls at 3 (the
+initial call plus up to 2 retries). Useful retry angles: source_system / sender phrases,
+target_service or host alone, a single distinctive phrase from the alert text.
+
+If results have score > 0.7, retrieve the top runbook:
   gateway_call("qmd.get", {"file": "<path from results>"})
 Follow matching runbook procedures as your PRIMARY investigation guide.
 

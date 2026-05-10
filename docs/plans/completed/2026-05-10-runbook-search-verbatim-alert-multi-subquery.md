@@ -82,8 +82,10 @@ Files:
 Files:
 - Modify: `CLAUDE.md` (only if the prompt-rendering pattern is worth documenting as a project convention; otherwise skip)
 
-- [x] Add a short note in the PR / commit body documenting the SQL upgrade path for already-deployed databases: `UPDATE skills SET prompt = '<new prompt text>' WHERE name = 'incident-manager';` — make clear this is operator-driven (NOT auto-applied on boot, to preserve customizations)
+- [x] Add a short note in the PR / commit body documenting the deployment behavior for already-deployed environments
 - [x] Move this plan to `docs/plans/completed/` after merge
+
+> **Correction (review iteration):** Earlier drafts of this plan and the merge commit body suggested operators run `UPDATE skills SET prompt = '...' WHERE name = 'incident-manager';` to apply the new prompt. That SQL is **incorrect** — the `skills` table has no `prompt` column. The incident-manager prompt is the Go constant `database.DefaultIncidentManagerPrompt`; `services.SkillService.GetSkillPrompt("incident-manager")` returns it directly, and `incident_service.generateIncidentAgentsMd` writes it into AGENTS.md per incident. Operators only need to **rebuild and restart `akmatori-api`** (per CLAUDE.md's container-rebuild table); no DB change is required, and there is nothing to "preserve" because the constant cannot be customized at runtime. Operator-edited skill prompts (non-system skills) live on disk in `SKILL.md` files via `UpdateSkillPrompt`, which is unrelated to this change.
 
 ## Post-Completion (manual verification — out of automated task scope)
 

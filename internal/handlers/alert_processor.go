@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode/utf8"
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
@@ -15,6 +16,15 @@ import (
 	slackutil "github.com/akmatori/akmatori/internal/slack"
 	"github.com/slack-go/slack"
 )
+
+// originalAlertTextMaxBytes caps how much of the verbatim alert text
+// (raw_payload.original_message, populated by the Slack alert extractor) is
+// rendered into the investigation prompt. Long Slack messages are truncated
+// with a UTF-8-safe ellipsis. The system prompt instructs the agent to pass
+// only the first ~250 chars of this excerpt as the verbatim QMD sub-query;
+// keeping more here gives the agent room to choose a distinctive slice on
+// retries without re-fetching the source message.
+const originalAlertTextMaxBytes = 1500
 
 func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, normalized alerts.NormalizedAlert) {
 	if normalized.Status == database.AlertStatusResolved {
@@ -170,9 +180,12 @@ func (h *AlertHandler) ProcessAlertFromSlackChannel(
 // extractOriginalMessage returns the verbatim original alert message stored in
 // payload["original_message"] (set by the alert extractor in
 // internal/alerts/extraction/extractor.go), trimmed of surrounding whitespace
-// and byte-truncated with a "..." suffix when it exceeds max bytes. Returns ""
-// when the field is missing, empty, or not a string.
-func extractOriginalMessage(payload map[string]interface{}, max int) string {
+// and truncated with a "..." suffix when it exceeds maxBytes. Truncation is
+// rune-aware so multi-byte characters at the cap (common in Slack-channel
+// alerts) are not split, matching the UTF-8-safe pattern used elsewhere in
+// this codebase (see internal/slack/typing.go). Returns "" when the field is
+// missing, empty, or not a string.
+func extractOriginalMessage(payload map[string]interface{}, maxBytes int) string {
 	raw, ok := payload["original_message"]
 	if !ok {
 		return ""
@@ -185,15 +198,18 @@ func extractOriginalMessage(payload map[string]interface{}, max int) string {
 	if s == "" {
 		return ""
 	}
-	if max > 0 && len(s) > max {
-		const ellipsis = "..."
-		cut := max - len(ellipsis)
-		if cut < 0 {
-			cut = 0
-		}
-		s = s[:cut] + ellipsis
+	if maxBytes <= 0 || len(s) <= maxBytes {
+		return s
 	}
-	return s
+	const ellipsis = "..."
+	if maxBytes <= len(ellipsis) {
+		return s[:maxBytes]
+	}
+	cut := maxBytes - len(ellipsis)
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + ellipsis
 }
 
 func (h *AlertHandler) buildInvestigationPrompt(alert alerts.NormalizedAlert, instance *database.AlertSourceInstance) string {
@@ -214,7 +230,12 @@ Description: %s`,
 		alert.Description,
 	)
 
-	if instance.AlertSourceType.Name != "" || instance.Name != "" {
+	// Source identifies the upstream alerting system + instance so the agent
+	// can disambiguate which integration a runbook should target. Both the
+	// type and instance Name columns are NOT NULL in the schema, but render
+	// only when both are populated to avoid emitting "Source:  / inst" or
+	// "Source: type / " stubs if the relation is somehow incomplete.
+	if instance.AlertSourceType.Name != "" && instance.Name != "" {
 		prompt += fmt.Sprintf("\nSource: %s / %s", instance.AlertSourceType.Name, instance.Name)
 	}
 
@@ -226,7 +247,7 @@ Description: %s`,
 		prompt += fmt.Sprintf("\nRunbook: %s", alert.RunbookURL)
 	}
 
-	if original := extractOriginalMessage(alert.RawPayload, 1500); original != "" {
+	if original := extractOriginalMessage(alert.RawPayload, originalAlertTextMaxBytes); original != "" {
 		prompt += "\n\nOriginal alert text:\n" + original
 	}
 

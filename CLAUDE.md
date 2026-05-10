@@ -309,7 +309,7 @@ Runbooks (SOPs) guide AI agent investigations. Stored in PostgreSQL, synced as m
 
 **File Sync**: On any CRUD operation, `SyncRunbookFiles()` writes all runbooks as `{id}-{slug}.md` and removes stale files.
 
-**Agent Access**: Agent uses `gateway_call("qmd.query", ...)` to semantically search runbooks, with filesystem fallback if QMD is unavailable.
+**Agent Access**: The seeded `incident-manager` prompt (`DefaultIncidentManagerPrompt` in `internal/database/db.go`) instructs the agent to issue ONE `gateway_call("qmd.query", ...)` against `collection: "runbooks"` with TWO `searches[]` entries — sub-query 1 is the verbatim "Original alert text" excerpt (auto-2x-weighted by RRF fusion) and sub-query 2 is short keywords from the alert name. Up to 2 retries with different angles (3 total calls). Filesystem fallback to `/akmatori/runbooks/` only on QMD error, not empty results. The `executor.PrependGuidance` user-turn reminder mirrors this shape — keep them in sync.
 
 **QMD Re-indexing**: `SyncRunbookFiles()` triggers a non-blocking HTTP POST to QMD's `/update` endpoint after writing files, keeping the search index current.
 
