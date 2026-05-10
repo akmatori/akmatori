@@ -68,10 +68,10 @@ Files:
 Files:
 - Modify: `internal/executor/executor.go` (lines 133-170)
 
-- [ ] update the doc-comment on `PrependGuidance` to describe the `{lex, vec, hyde}` triplet shape (drop the "verbatim 2x-weighted" wording)
-- [ ] rewrite the function body to emit the same triplet gateway_call example as `DefaultIncidentManagerPrompt`, using `"collections": ["runbooks"]`
-- [ ] keep: the current-time prefix, the IMPORTANT framing, the 3-total-call cap, score > 0.7 gate, qmd.get follow-up, retry-angle hints, and the trailing `task` interpolation
-- [ ] run `go test ./internal/executor/...` — expected to FAIL here (we update tests in Task 4)
+- [x] update the doc-comment on `PrependGuidance` to describe the `{lex, vec, hyde}` triplet shape (drop the "verbatim 2x-weighted" wording)
+- [x] rewrite the function body to emit the same triplet gateway_call example as `DefaultIncidentManagerPrompt`, using `"collections": ["runbooks"]`
+- [x] keep: the current-time prefix, the IMPORTANT framing, the 3-total-call cap, score > 0.7 gate, qmd.get follow-up, retry-angle hints, and the trailing `task` interpolation
+- [x] run `go test ./internal/executor/...` — expected to FAIL here (we update tests in Task 4)
 
 ### Task 4: Update prompt and executor tests for triplet shape
 
