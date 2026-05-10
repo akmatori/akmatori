@@ -324,6 +324,10 @@ QMD is a hybrid search engine (BM25 + vector + LLM reranking) running as a Docke
 - **REST endpoints**: `/health` (GET, container health check), `/update` (POST, trigger re-index)
 - **MCP tools**: `qmd.query` (search), `qmd.get` (retrieve), `qmd.multi_get`, `qmd.status` — registered automatically on gateway startup via `mcpproxy`
 - **Bypass**: QMD proxy tools bypass the per-incident tool allowlist (registered proxy namespaces and multi-segment namespaces with dots bypass)
+- **Baked-in models**: The Docker image pre-downloads the embedding (~300 MB) and reranker (~640 MB) GGUFs at build time via `qmd/precache-models.mjs`, so `qmd embed` runs offline on first start.
+- **Startup embedding**: `qmd/entrypoint.sh` runs `qmd embed` (idempotent, ETag-checked) on every container start to keep the vector index current with mounted runbook/memory files. The MCP server starts after embedding completes (first-time cold start can take several minutes; subsequent starts are near-instant).
+- **Upstream patches**: The Dockerfile applies two `sed` patches to upstream QMD — `QMD_BIND_HOST` env support, and flipping the MCP `query` tool's `rerank` schema default from `true` to `false`. Each patch is paired with a `grep -q` verification so future upstream changes fail the build loudly rather than silently no-op.
+- **Volume note**: The `qmd_cache` named volume (mounted at `/root/.cache/qmd/`) holds embedded chunks and the model cache. On upgrades to the baked-models image, existing installs should run `docker compose down qmd && docker volume rm akmatori_qmd_cache && docker compose up -d qmd` once so the baked-in weights aren't shadowed by a pre-existing empty cache.
 
 ## Memory System (`internal/services/memory_service.go`, `mcp-gateway/internal/tools/memory/`)
 

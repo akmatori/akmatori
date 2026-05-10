@@ -72,7 +72,7 @@ Akmatori is an AI-powered AIOps agent that integrates with monitoring systems an
 
 ## Architecture
 
-Akmatori uses a secure 4-container architecture:
+Akmatori uses a secure 5-container architecture:
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
@@ -86,15 +86,15 @@ Akmatori uses a secure 4-container architecture:
 │  Slack Bot      │◀───▶┌─────────────────┐     ┌─────────────────┐
 │                 │     │  Agent Worker   │◀───▶│   MCP Gateway   │
 └─────────────────┘     │  (pi-mono)      │     │  (SSH, APIs)    │
-                        └────────┬────────┘     └─────────────────┘
-                                 │
-                                 ▼
-                        ┌─────────────────┐
-                        │  LLM Providers  │
-                        │  (OpenAI,       │
-                        │   Anthropic,    │
-                        │   Google, etc.) │
-                        └─────────────────┘
+                        └────────┬────────┘     └────────┬────────┘
+                                 │                       │
+                                 ▼                       ▼
+                        ┌─────────────────┐     ┌─────────────────┐
+                        │  LLM Providers  │     │      QMD        │
+                        │  (OpenAI,       │     │  Hybrid search  │
+                        │   Anthropic,    │     │  (BM25 + vec +  │
+                        │   Google, etc.) │     │   HyDE + RRF)   │
+                        └─────────────────┘     └─────────────────┘
 ```
 
 **Security by design:**

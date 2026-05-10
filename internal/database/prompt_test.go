@@ -87,7 +87,7 @@ func TestDefaultIncidentManagerPrompt_NoSeparateRunbooksSection(t *testing.T) {
 // runbook-search step instructs the agent to issue a single qmd.query with a
 // {lex, vec, hyde} triplet sub-query shape (all three carrying the same
 // natural-language alert summary) with up-to-2 retries capped at 3 total calls.
-// See plan: docs/plans/2026-05-10-qmd-semantic-search-triplet.md
+// See plan: docs/plans/completed/2026-05-10-qmd-semantic-search-triplet.md
 func TestDefaultIncidentManagerPrompt_RunbookSearchSection(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -96,7 +96,7 @@ func TestDefaultIncidentManagerPrompt_RunbookSearchSection(t *testing.T) {
 		{"lex sub-query", `"type": "lex"`},
 		{"vec sub-query", `"type": "vec"`},
 		{"hyde sub-query", `"type": "hyde"`},
-		{"natural-language summary", "natural-language"},
+		{"natural-language placeholder", "<one-sentence natural-language alert summary>"},
 		{"limit 5", `"limit": 5`},
 		{"runbooks collections scope", `"collections": ["runbooks"]`},
 		{"max 3 calls cue", "Cap total qmd.query calls at 3"},
@@ -112,5 +112,30 @@ func TestDefaultIncidentManagerPrompt_RunbookSearchSection(t *testing.T) {
 				t.Errorf("DefaultIncidentManagerPrompt should contain %q", tt.contains)
 			}
 		})
+	}
+}
+
+// TestDefaultIncidentManagerPrompt_SingleQMDQueryWithOrderedTriplet pins the
+// structural invariant that the runbook-search step issues exactly ONE
+// gateway_call("qmd.query", ...) with the three sub-queries in lex→vec→hyde
+// order inside a single searches[] array. The substring assertions in the
+// other tests would still pass if a future edit split the call into three
+// separate qmd.query invocations or reordered the modes — this test catches
+// that drift.
+func TestDefaultIncidentManagerPrompt_SingleQMDQueryWithOrderedTriplet(t *testing.T) {
+	// Exactly one runbook-search qmd.query call (the test gateway_call("qmd.get", ...)
+	// also exists in the prompt but uses a different tool name).
+	if got := strings.Count(DefaultIncidentManagerPrompt, `gateway_call("qmd.query"`); got != 1 {
+		t.Errorf("expected exactly 1 gateway_call(\"qmd.query\"...) in prompt, got %d", got)
+	}
+
+	lexIdx := strings.Index(DefaultIncidentManagerPrompt, `"type": "lex"`)
+	vecIdx := strings.Index(DefaultIncidentManagerPrompt, `"type": "vec"`)
+	hydeIdx := strings.Index(DefaultIncidentManagerPrompt, `"type": "hyde"`)
+	if lexIdx < 0 || vecIdx < 0 || hydeIdx < 0 {
+		t.Fatalf("missing one of the three sub-query type markers: lex=%d vec=%d hyde=%d", lexIdx, vecIdx, hydeIdx)
+	}
+	if !(lexIdx < vecIdx && vecIdx < hydeIdx) {
+		t.Errorf("triplet must appear in lex→vec→hyde order, got lex=%d vec=%d hyde=%d", lexIdx, vecIdx, hydeIdx)
 	}
 }
