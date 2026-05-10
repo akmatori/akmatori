@@ -15,9 +15,13 @@
 //      every CRUD even though the lex index update succeeded.
 //
 // Embed concurrency: a single in-flight flag (__qmdEmbedInFlight) suppresses
-// duplicate concurrent embed processes. qmd embed is ETag-cached and idempotent
-// — the running process will pick up any newly-staged docs from a colliding
-// /update call, so dropping the duplicate is safe.
+// duplicate concurrent embed processes. When /update arrives while an embed
+// is running, we set __qmdEmbedRerunPending so the running embed schedules
+// exactly one more pass on completion. Without this, docs added to the lex
+// index after the running embed's initial getPendingEmbeddingDocs() snapshot
+// would stay unembedded until the next CRUD — `generateEmbeddings` builds its
+// work list once at start and does NOT re-scan mid-run. Successive /update
+// bursts collapse to a single rerun because the flag is a boolean.
 //
 // We anchor the insertion immediately before the existing "/health" handler.
 // The injected handler shells out via execFile("qmd", [...]) — fixed argv,
@@ -63,23 +67,35 @@ const injection =
     `${indent}        }\n` +
     // Ack the lex-index refresh synchronously, then run the slow vector-index
     // refresh in the background. See file header for the rationale.
-    `${indent}        const embedSkipped = globalThis.__qmdEmbedInFlight === true;\n` +
+    `${indent}        const embedRunning = globalThis.__qmdEmbedInFlight === true;\n` +
+    `${indent}        if (embedRunning) {\n` +
+    `${indent}            globalThis.__qmdEmbedRerunPending = true;\n` +
+    `${indent}        }\n` +
     `${indent}        nodeRes.writeHead(200, { "Content-Type": "application/json" });\n` +
-    `${indent}        nodeRes.end(JSON.stringify({ status: "ok", updateOutput: updStdout.trim(), embedQueued: !embedSkipped }));\n` +
-    `${indent}        log(\`\${ts()} POST /update update-stage ok (\${Date.now() - reqStart}ms)\${embedSkipped ? "; embed already in flight, skipped" : ""}\`);\n` +
-    `${indent}        if (embedSkipped) {\n` +
+    `${indent}        nodeRes.end(JSON.stringify({ status: "ok", updateOutput: updStdout.trim(), embedDeferred: embedRunning }));\n` +
+    `${indent}        log(\`\${ts()} POST /update update-stage ok (\${Date.now() - reqStart}ms)\${embedRunning ? "; embed already in flight, rerun queued" : ""}\`);\n` +
+    `${indent}        if (embedRunning) {\n` +
     `${indent}            return;\n` +
     `${indent}        }\n` +
-    `${indent}        globalThis.__qmdEmbedInFlight = true;\n` +
-    `${indent}        const embedStart = Date.now();\n` +
-    `${indent}        execFile("qmd", ["embed"], { timeout: 600000 }, (embErr, embStdout, embStderr) => {\n` +
-    `${indent}            globalThis.__qmdEmbedInFlight = false;\n` +
-    `${indent}            if (embErr) {\n` +
-    `${indent}                log(\`\${ts()} /update embed-stage FAILED (\${Date.now() - embedStart}ms): \${String(embErr)} stderr=\${String(embStderr || "").trim()}\`);\n` +
-    `${indent}                return;\n` +
-    `${indent}            }\n` +
-    `${indent}            log(\`\${ts()} /update embed-stage ok (\${Date.now() - embedStart}ms)\`);\n` +
-    `${indent}        });\n` +
+    `${indent}        const runEmbed = () => {\n` +
+    `${indent}            globalThis.__qmdEmbedInFlight = true;\n` +
+    `${indent}            const embedStart = Date.now();\n` +
+    `${indent}            execFile("qmd", ["embed"], { timeout: 600000 }, (embErr, embStdout, embStderr) => {\n` +
+    `${indent}                if (embErr) {\n` +
+    `${indent}                    log(\`\${ts()} /update embed-stage FAILED (\${Date.now() - embedStart}ms): \${String(embErr)} stderr=\${String(embStderr || "").trim()}\`);\n` +
+    `${indent}                } else {\n` +
+    `${indent}                    log(\`\${ts()} /update embed-stage ok (\${Date.now() - embedStart}ms)\`);\n` +
+    `${indent}                }\n` +
+    `${indent}                if (globalThis.__qmdEmbedRerunPending === true) {\n` +
+    `${indent}                    globalThis.__qmdEmbedRerunPending = false;\n` +
+    `${indent}                    log(\`\${ts()} /update embed-stage rerunning to pick up docs queued during last run\`);\n` +
+    `${indent}                    runEmbed();\n` +
+    `${indent}                    return;\n` +
+    `${indent}                }\n` +
+    `${indent}                globalThis.__qmdEmbedInFlight = false;\n` +
+    `${indent}            });\n` +
+    `${indent}        };\n` +
+    `${indent}        runEmbed();\n` +
     `${indent}    });\n` +
     `${indent}    return;\n` +
     `${indent}}\n` +
