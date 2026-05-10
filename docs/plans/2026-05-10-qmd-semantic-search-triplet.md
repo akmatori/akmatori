@@ -109,10 +109,10 @@ Files: none (operational task)
 
 ### Task 7: Verify acceptance criteria
 
-- [ ] run `make verify` from `/opt/akmatori` — full Go test suite + vet must pass
-- [ ] run `go test ./internal/database/... -run RunbookSearch` — must pass
-- [ ] run `go test ./internal/executor/...` — must pass
-- [ ] confirm prompt changes are coherent: re-read `DefaultIncidentManagerPrompt` and `PrependGuidance` side-by-side for in-sync triplet wording
+- [x] run `make verify` from `/opt/akmatori` — full Go test suite + vet must pass (Go + mcp-gateway + agent-worker (336 tests) + web (18 tests) all green)
+- [x] run `go test ./internal/database/... -run RunbookSearch` — must pass (passed)
+- [x] run `go test ./internal/executor/...` — must pass (passed)
+- [x] confirm prompt changes are coherent: re-read `DefaultIncidentManagerPrompt` (internal/database/db.go:427-454) and `PrependGuidance` (internal/executor/executor.go:133-170) side-by-side for in-sync triplet wording (verified: same triplet shape, `collections: ["runbooks"]`, RRF wording, score > 0.7 gate, 3-call cap, identical retry angles; PrependGuidance doc-comment explicitly references the in-sync requirement)
 
 ### Task 8: Update documentation and finalize
 
