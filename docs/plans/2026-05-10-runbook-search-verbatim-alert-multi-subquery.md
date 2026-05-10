@@ -51,12 +51,12 @@ Files:
 Files:
 - Modify: `internal/database/db.go`
 
-- [ ] Replace lines 427-447 of `DefaultIncidentManagerPrompt` with a multi-sub-query strategy section that: (a) instructs the agent to issue ONE `qmd.query` with TWO `searches[]` entries — sub-query 1 verbatim (2× weight) from the rendered "Original alert text" excerpt or summary, truncated to ~250 chars; sub-query 2 short keywords from the alert name; (b) keeps the `"collection": "runbooks"` requirement and the rationale comment about memory.search separation; (c) adds the up-to-2 retry guidance with example angles (source_system/sender phrases, target_service/host alone, single distinctive phrase); (d) caps total `qmd.query` calls at 3; (e) keeps the existing `gateway_call("qmd.get", ...)` follow-up when score > 0.7 and the QMD-error fallback to `/akmatori/runbooks/`
-- [ ] Preserve numbering and surrounding sections (item 2 stays "MANDATORY - Search runbooks FIRST"; items 3-6 unchanged)
-- [ ] Keep the verbatim `gateway_call(...)` example block formatting consistent with existing prompt style (indentation, code-fence-free, two-space leading indent inside the bullet)
-- [ ] Add a focused test in `internal/database/db_test.go` (or extend an existing test in that file if one references `DefaultIncidentManagerPrompt`) asserting the constant contains the new multi-sub-query markers: `"sub-query 1"` (or whatever exact phrasing is chosen), `"limit\": 5"`, `"collection\": \"runbooks\""`, and a max-3-retries cue. If no test file exists for `db.go` constants, create `internal/database/db_prompt_test.go` with a single `TestDefaultIncidentManagerPrompt_RunbookSearchSection` table-driven assertion
-- [ ] Run `go test ./internal/database/ -run IncidentManagerPrompt` — must pass before Task 3
-- [ ] Run `make verify` — must pass before Task 3
+- [x] Replace lines 427-447 of `DefaultIncidentManagerPrompt` with a multi-sub-query strategy section that: (a) instructs the agent to issue ONE `qmd.query` with TWO `searches[]` entries — sub-query 1 verbatim (2× weight) from the rendered "Original alert text" excerpt or summary, truncated to ~250 chars; sub-query 2 short keywords from the alert name; (b) keeps the `"collection": "runbooks"` requirement and the rationale comment about memory.search separation; (c) adds the up-to-2 retry guidance with example angles (source_system/sender phrases, target_service/host alone, single distinctive phrase); (d) caps total `qmd.query` calls at 3; (e) keeps the existing `gateway_call("qmd.get", ...)` follow-up when score > 0.7 and the QMD-error fallback to `/akmatori/runbooks/`
+- [x] Preserve numbering and surrounding sections (item 2 stays "MANDATORY - Search runbooks FIRST"; items 3-6 unchanged)
+- [x] Keep the verbatim `gateway_call(...)` example block formatting consistent with existing prompt style (indentation, code-fence-free, two-space leading indent inside the bullet)
+- [x] Add a focused test in `internal/database/db_test.go` (or extend an existing test in that file if one references `DefaultIncidentManagerPrompt`) asserting the constant contains the new multi-sub-query markers: `"sub-query 1"` (or whatever exact phrasing is chosen), `"limit\": 5"`, `"collection\": \"runbooks\""`, and a max-3-retries cue. If no test file exists for `db.go` constants, create `internal/database/db_prompt_test.go` with a single `TestDefaultIncidentManagerPrompt_RunbookSearchSection` table-driven assertion
+- [x] Run `go test ./internal/database/ -run IncidentManagerPrompt` — must pass before Task 3
+- [x] Run `make verify` — must pass before Task 3
 
 ### Task 3: Verify acceptance criteria
 

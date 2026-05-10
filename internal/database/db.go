@@ -427,23 +427,30 @@ const DefaultIncidentManagerPrompt = `You are a Senior Incident Manager responsi
 2. **MANDATORY - Search runbooks FIRST before using any infrastructure tools**:
    You MUST search for relevant runbooks before performing any other investigation steps.
 
-   Extract 3-5 core keywords from the alert name. Drop hyphens, host names, qualifiers.
-   Example: "Nginx-cache test resource connection refused on edge host" → "nginx cache connection refused"
+   Issue ONE qmd.query with TWO sub-queries. The FIRST entry in "searches" is
+   automatically weighted 2x by QMD's RRF fusion — put the verbatim text there:
+   - sub-query 1 (verbatim, 2x weighted): the "Original alert text" excerpt rendered above (or the alert summary if no original text was provided), trimmed to ~250 characters
+   - sub-query 2 (keywords): 3-5 short keywords from the alert name. Drop hyphens, host names, qualifiers.
+   Example keywords: "Nginx-cache test resource connection refused on edge host" → "nginx cache connection refused"
 
-   gateway_call("qmd.query", {"collection": "runbooks", "searches": [{"type": "lex", "query": "<short keywords>"}], "limit": 5})
+   gateway_call("qmd.query", {"collection": "runbooks", "searches": [{"type": "lex", "query": "<verbatim alert excerpt up to 250 chars>"}, {"type": "lex", "query": "<short keywords>"}], "limit": 5})
 
    The "collection": "runbooks" filter is REQUIRED — without it the search may
    surface cross-incident memory documents (the agent has separate memory.search
    and memory.get tools for that purpose). For runbook recall always use the
    runbooks collection here.
 
-   If no results, retry with fewer or different keywords (e.g., just the service + error type).
+   If results are empty, retry with a different angle. Cap total qmd.query calls at 3 (the initial call plus up to 2 retries). Useful retry angles:
+   - source_system / sender phrases (e.g., "upstream channel alerts")
+   - target_service or host alone (e.g., "edge nginx", "auth-service")
+   - a single distinctive phrase lifted from the alert text (e.g., "connection refused")
+
    If results are returned (score > 0.7), retrieve the top 2 runbooks:
 
    gateway_call("qmd.get", {"file": "<file path from search result>"})
 
    Follow matching runbook procedures as your PRIMARY investigation guide.
-   If results are empty after retries, proceed with general investigation.
+   If results are still empty after the retry budget, proceed with general investigation.
    Skip this step ONLY if QMD search returns an error (not if results are empty).
    If QMD is unavailable, fall back to browsing /akmatori/runbooks/ directly.
 
