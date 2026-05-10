@@ -60,10 +60,10 @@ Files:
 
 ### Task 3: Verify acceptance criteria
 
-- [ ] Run `make verify` (golangci-lint + full Go test suite) — must pass
-- [ ] Run `make test-adapters` and `make test-mcp` — must pass (no changes there, but these are cheap and confirm no incidental break)
-- [ ] Confirm `internal/handlers/alert_processor.go` change covers both `processAlert` and `ProcessAlertFromSlackChannel` flows by grepping for callers of `buildInvestigationPrompt` (expected: lines 213 and 417)
-- [ ] Confirm no new dependencies were added (`go.mod` unchanged)
+- [x] Run `make verify` (golangci-lint + full Go test suite) — must pass
+- [x] Run `make test-adapters` and `make test-mcp` — must pass (no changes there, but these are cheap and confirm no incidental break)
+- [x] Confirm `internal/handlers/alert_processor.go` change covers both `processAlert` and `ProcessAlertFromSlackChannel` flows by grepping for callers of `buildInvestigationPrompt` (actual lines 251 in `runInvestigation` and 455 in `runSlackChannelInvestigation` — both flows route through the modified helper)
+- [x] Confirm no new dependencies were added (`go.mod` unchanged)
 
 ### Task 4: Rebuild docker containers and verify they started
 
