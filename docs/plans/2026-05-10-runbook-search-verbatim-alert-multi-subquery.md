@@ -70,12 +70,12 @@ Files:
 Files:
 - None (deployment step)
 
-- [ ] Run `docker-compose build akmatori-api` (only the API server changed; per CLAUDE.md other containers are unaffected by changes in `cmd/` and `internal/`)
-- [ ] Run `docker-compose up -d akmatori-api` to recreate the container with the new image
-- [ ] Run `docker-compose ps` and confirm `akmatori-api` is in the `Up` / `running` state with no restart loop
-- [ ] Run `docker-compose logs --tail=100 akmatori-api` and confirm: no panic/fatal lines, the HTTP server log line is present, and DB migrations completed cleanly
-- [ ] Hit `GET http://localhost:<api-port>/api/health` (or the equivalent health endpoint exposed by the deployment) and confirm 200 OK
-- [ ] Confirm the other containers (`akmatori-agent`, `mcp-gateway`, `frontend`, `qmd`, `db`) remain `Up` after the API restart via `docker-compose ps`
+- [x] Run `docker-compose build akmatori-api` (only the API server changed; per CLAUDE.md other containers are unaffected by changes in `cmd/` and `internal/`)
+- [x] Run `docker-compose up -d akmatori-api` to recreate the container with the new image
+- [x] Run `docker-compose ps` and confirm `akmatori-api` is in the `Up` / `running` state with no restart loop
+- [x] Run `docker-compose logs --tail=100 akmatori-api` and confirm: no panic/fatal lines, the HTTP server log line is present, and DB migrations completed cleanly (verified: "starting HTTP server" port=3000, "database migrations completed successfully", no panic/fatal; pre-existing retention_service FK errors unrelated to this change)
+- [x] Hit `GET http://localhost:<api-port>/api/health` (or the equivalent health endpoint exposed by the deployment) and confirm 200 OK (verified `/health` returns 200 with `{"status":"ok","version":"1.0.0"}`; `/api/health` requires auth)
+- [x] Confirm the other containers (`akmatori-agent`, `mcp-gateway`, `frontend`, `qmd`, `db`) remain `Up` after the API restart via `docker-compose ps`
 
 ### Task 5: Update documentation and stage deployment notes
 
