@@ -376,6 +376,54 @@ func TestAlertHandler_buildInvestigationPrompt(t *testing.T) {
 				"Please:",
 			},
 		},
+		{
+			name: "alert with original_message and source",
+			alert: alerts.NormalizedAlert{
+				AlertName:   "StreamHealthAlert",
+				TargetHost:  "edge-01",
+				Severity:    database.AlertSeverityCritical,
+				Summary:     "Live streaming degraded",
+				Description: "Frame loss above threshold",
+				RawPayload: map[string]interface{}{
+					"original_message": "New notification from stream-health monitor: viewers dropping",
+				},
+			},
+			instance: &database.AlertSourceInstance{
+				Name: "channel-prod",
+				AlertSourceType: database.AlertSourceType{
+					Name:        "slack-channel",
+					DisplayName: "Slack Channel",
+				},
+			},
+			wantContains: []string{
+				"Source: slack-channel / channel-prod",
+				"Original alert text:",
+				"New notification from stream-health monitor",
+			},
+		},
+		{
+			name: "alert without original_message has no original block",
+			alert: alerts.NormalizedAlert{
+				AlertName:   "ZabbixHighLoad",
+				TargetHost:  "db-01",
+				Severity:    database.AlertSeverityWarning,
+				Summary:     "Load average 5",
+				Description: "Sustained for 10m",
+				RawPayload:  map[string]interface{}{},
+			},
+			instance: &database.AlertSourceInstance{
+				Name: "prod-zabbix",
+				AlertSourceType: database.AlertSourceType{
+					Name:        "zabbix",
+					DisplayName: "Zabbix",
+				},
+			},
+			wantContains: []string{
+				"ZabbixHighLoad",
+				"Source: zabbix / prod-zabbix",
+				"Zabbix",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -391,6 +439,124 @@ func TestAlertHandler_buildInvestigationPrompt(t *testing.T) {
 			// Verify it's always non-empty (has investigation instructions)
 			if result == "" {
 				t.Error("buildInvestigationPrompt() returned empty string")
+			}
+		})
+	}
+
+	// Targeted assertion: alerts without original_message must not render the
+	// "Original alert text:" block.
+	t.Run("absent original_message omits block", func(t *testing.T) {
+		result := h.buildInvestigationPrompt(
+			alerts.NormalizedAlert{
+				AlertName: "PlainAlert",
+				RawPayload: map[string]interface{}{
+					"other": "value",
+				},
+			},
+			&database.AlertSourceInstance{
+				Name: "inst",
+				AlertSourceType: database.AlertSourceType{
+					Name:        "type",
+					DisplayName: "Type",
+				},
+			},
+		)
+		if strings.Contains(result, "Original alert text:") {
+			t.Errorf("prompt should not contain Original alert text block, got %q", result)
+		}
+	})
+
+	t.Run("long original_message is truncated with ellipsis", func(t *testing.T) {
+		long := strings.Repeat("x", 5000)
+		result := h.buildInvestigationPrompt(
+			alerts.NormalizedAlert{
+				AlertName: "LongMessage",
+				RawPayload: map[string]interface{}{
+					"original_message": long,
+				},
+			},
+			&database.AlertSourceInstance{
+				Name: "inst",
+				AlertSourceType: database.AlertSourceType{
+					Name:        "type",
+					DisplayName: "Type",
+				},
+			},
+		)
+		if !strings.Contains(result, "Original alert text:") {
+			t.Fatalf("prompt should contain Original alert text block, got %q", result)
+		}
+		// The truncated payload itself must be exactly 1500 bytes ending in "...".
+		idx := strings.Index(result, "Original alert text:\n")
+		if idx < 0 {
+			t.Fatal("could not locate original-alert block")
+		}
+		body := result[idx+len("Original alert text:\n"):]
+		// The block ends with the trailing "Please:" section after a blank line.
+		end := strings.Index(body, "\n\nPlease:")
+		if end < 0 {
+			t.Fatalf("could not locate end of original alert block, body=%q", body)
+		}
+		truncated := body[:end]
+		if len(truncated) != 1500 {
+			t.Errorf("truncated length = %d, want 1500", len(truncated))
+		}
+		if !strings.HasSuffix(truncated, "...") {
+			t.Errorf("truncated value should end with ellipsis, got %q", truncated[len(truncated)-10:])
+		}
+	})
+}
+
+func TestExtractOriginalMessage(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload map[string]interface{}
+		max     int
+		want    string
+	}{
+		{
+			name:    "missing key",
+			payload: map[string]interface{}{"other": "x"},
+			max:     100,
+			want:    "",
+		},
+		{
+			name:    "non-string value",
+			payload: map[string]interface{}{"original_message": 42},
+			max:     100,
+			want:    "",
+		},
+		{
+			name:    "empty string",
+			payload: map[string]interface{}{"original_message": "   "},
+			max:     100,
+			want:    "",
+		},
+		{
+			name:    "trims whitespace",
+			payload: map[string]interface{}{"original_message": "  hello world  "},
+			max:     100,
+			want:    "hello world",
+		},
+		{
+			name:    "no truncation when within limit",
+			payload: map[string]interface{}{"original_message": "short"},
+			max:     100,
+			want:    "short",
+		},
+		{
+			name:    "truncates with ellipsis",
+			payload: map[string]interface{}{"original_message": strings.Repeat("a", 20)},
+			max:     10,
+			want:    strings.Repeat("a", 7) + "...",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractOriginalMessage(tt.payload, tt.max)
+			if got != tt.want {
+				t.Errorf("extractOriginalMessage() = %q, want %q", got, tt.want)
 			}
 		})
 	}

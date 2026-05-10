@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -166,6 +167,35 @@ func (h *AlertHandler) ProcessAlertFromSlackChannel(
 	go h.runSlackChannelInvestigation(incidentUUID, normalized, instance, slackChannelID, slackMessageTS)
 }
 
+// extractOriginalMessage returns the verbatim original alert message stored in
+// payload["original_message"] (set by the alert extractor in
+// internal/alerts/extraction/extractor.go), trimmed of surrounding whitespace
+// and byte-truncated with a "..." suffix when it exceeds max bytes. Returns ""
+// when the field is missing, empty, or not a string.
+func extractOriginalMessage(payload map[string]interface{}, max int) string {
+	raw, ok := payload["original_message"]
+	if !ok {
+		return ""
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return ""
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if max > 0 && len(s) > max {
+		const ellipsis = "..."
+		cut := max - len(ellipsis)
+		if cut < 0 {
+			cut = 0
+		}
+		s = s[:cut] + ellipsis
+	}
+	return s
+}
+
 func (h *AlertHandler) buildInvestigationPrompt(alert alerts.NormalizedAlert, instance *database.AlertSourceInstance) string {
 	prompt := fmt.Sprintf(`Investigate this %s alert:
 
@@ -184,12 +214,20 @@ Description: %s`,
 		alert.Description,
 	)
 
+	if instance.AlertSourceType.Name != "" || instance.Name != "" {
+		prompt += fmt.Sprintf("\nSource: %s / %s", instance.AlertSourceType.Name, instance.Name)
+	}
+
 	if alert.MetricName != "" {
 		prompt += fmt.Sprintf("\nMetric: %s = %s", alert.MetricName, alert.MetricValue)
 	}
 
 	if alert.RunbookURL != "" {
 		prompt += fmt.Sprintf("\nRunbook: %s", alert.RunbookURL)
+	}
+
+	if original := extractOriginalMessage(alert.RawPayload, 1500); original != "" {
+		prompt += "\n\nOriginal alert text:\n" + original
 	}
 
 	prompt += `

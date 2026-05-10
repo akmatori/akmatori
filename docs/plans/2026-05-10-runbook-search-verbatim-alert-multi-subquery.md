@@ -38,13 +38,13 @@ Files:
 - Modify: `internal/handlers/alert_processor.go`
 - Modify: `internal/handlers/alert_test.go`
 
-- [ ] Add a small unexported helper `extractOriginalMessage(payload map[string]interface{}, max int) string` near `buildInvestigationPrompt` that returns the string value of `payload["original_message"]` trimmed and byte-truncated with an ellipsis when it exceeds `max`; returns "" when missing/empty/non-string
-- [ ] In `buildInvestigationPrompt`, after the existing `Description: …` line and before the `Please:` checklist, append a `Source: <source_system> / <source_instance>` line (use `instance.AlertSourceType.Name` and `instance.Name`); skip the line if both are empty
-- [ ] Append an `Original alert text:\n<truncated>` block when `extractOriginalMessage(alert.RawPayload, 1500)` returns non-empty; include a leading blank line so it sits as its own paragraph
-- [ ] Extend `TestAlertHandler_buildInvestigationPrompt` in `internal/handlers/alert_test.go` with two new table cases: (a) `RawPayload` containing `original_message` → assert the rendered prompt contains `"Source:"`, `"Original alert text:"`, and the first portion of the message text; (b) absent/empty `original_message` → assert the rendered prompt does NOT contain `"Original alert text:"` and matches existing behavior aside from the optional `Source:` line
-- [ ] Add a third case asserting truncation at the 1500-byte cap with the ellipsis suffix on a long message
-- [ ] Run `go test ./internal/handlers/ -run BuildInvestigationPrompt` — must pass before Task 2
-- [ ] Run `make test` — must pass before Task 2
+- [x] Add a small unexported helper `extractOriginalMessage(payload map[string]interface{}, max int) string` near `buildInvestigationPrompt` that returns the string value of `payload["original_message"]` trimmed and byte-truncated with an ellipsis when it exceeds `max`; returns "" when missing/empty/non-string
+- [x] In `buildInvestigationPrompt`, after the existing `Description: …` line and before the `Please:` checklist, append a `Source: <source_system> / <source_instance>` line (use `instance.AlertSourceType.Name` and `instance.Name`); skip the line if both are empty
+- [x] Append an `Original alert text:\n<truncated>` block when `extractOriginalMessage(alert.RawPayload, 1500)` returns non-empty; include a leading blank line so it sits as its own paragraph
+- [x] Extend `TestAlertHandler_buildInvestigationPrompt` in `internal/handlers/alert_test.go` with two new table cases: (a) `RawPayload` containing `original_message` → assert the rendered prompt contains `"Source:"`, `"Original alert text:"`, and the first portion of the message text; (b) absent/empty `original_message` → assert the rendered prompt does NOT contain `"Original alert text:"` and matches existing behavior aside from the optional `Source:` line
+- [x] Add a third case asserting truncation at the 1500-byte cap with the ellipsis suffix on a long message
+- [x] Run `go test ./internal/handlers/ -run BuildInvestigationPrompt` — must pass before Task 2
+- [x] Run `make test` — must pass before Task 2
 
 ### Task 2: Rewrite DefaultIncidentManagerPrompt runbook-search section
 
