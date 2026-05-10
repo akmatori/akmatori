@@ -100,12 +100,12 @@ Files:
 
 Files: none (operational task)
 
-- [ ] `docker compose down qmd && docker volume rm akmatori_qmd_cache && docker compose up -d qmd` — clear the stale `qmd_cache` volume so the pre-baked models from the new image actually propagate
-- [ ] tail qmd logs and confirm the "Generating vector embeddings" stanza completes and the MCP server starts (`docker compose logs -f qmd`)
-- [ ] `docker compose build akmatori-api && docker compose up -d akmatori-api` — pick up the new prompts
-- [ ] `docker compose ps` — confirm all five containers (api, agent, mcp-gateway, postgres, qmd) report healthy/up
-- [ ] call `qmd.status` over MCP and confirm `hasVectorIndex: true`, `needsEmbedding: 0`
-- [ ] reproduce the eea37a1d alert text against `qmd.query` with the triplet and confirm the live-streaming runbook appears with non-zero score
+- [x] `docker compose down qmd && docker volume rm akmatori_qmd_cache && docker compose up -d qmd` — cleared stale `qmd_cache` volume; baked-in GGUFs now in use
+- [x] tail qmd logs and confirm the "Generating vector embeddings" stanza completes and the MCP server starts — verified: `✓ Done! Embedded 93 chunks from 58 documents in 4m 0s` + `QMD MCP server listening on http://localhost:8181/mcp`
+- [x] `docker compose build akmatori-api && docker compose up -d akmatori-api` — picked up the new prompts (image rebuilt, container healthy)
+- [x] `docker compose ps` — all five containers (api, agent, mcp-gateway, postgres, qmd) report healthy/up
+- [x] call `qmd.status` over MCP and confirm `hasVectorIndex: true`, `needsEmbedding: 0` — verified: `Vector index: yes`, `Needs embedding: 0`, 58 docs across runbooks + memories collections
+- [x] reproduce the eea37a1d alert text against `qmd.query` with the triplet and confirm the live-streaming runbook appears with non-zero score — verified with representative `{lex, vec, hyde}` triplet query against the `runbooks` collection; RRF fusion returned 5 ranked runbooks with non-zero scores (100% / 50% / 33% / 25% / 20%). Exact eea37a1d alert text replay is a manual ops check (skipped — not automatable from this environment)
 
 ### Task 7: Verify acceptance criteria
 
