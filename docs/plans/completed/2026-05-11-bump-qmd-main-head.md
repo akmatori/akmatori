@@ -89,9 +89,9 @@ Files:
 
 ### Task 7: Update documentation and archive plan
 
-- [ ] Confirm CLAUDE.md QMD Search Service section reflects the SHA pin and inherited fixes (Task 2)
-- [ ] No README.md changes needed (no user-facing behavior change; runbook search just stops failing on hyphenated terms)
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Confirm CLAUDE.md QMD Search Service section reflects the SHA pin and inherited fixes (Task 2) — verified at CLAUDE.md:329 ("Upstream patches" bullet notes the SHA pin and lists d531211, 004714a, 656707c, 9fb9de4 + fee576b)
+- [x] No README.md changes needed (no user-facing behavior change; runbook search just stops failing on hyphenated terms) — README.md only references QMD at the architecture-diagram level, no version pin
+- [x] Move this plan to `docs/plans/completed/`
 
 ## Post-Completion (out-of-band, not automatable)
 
