@@ -65,9 +65,9 @@ Files:
 Files:
 - No code modifications
 
-- [ ] From inside `akmatori-mcp-gateway`, POST a `qmd.query` with a `vec`-type search whose query contains a hyphenated term (e.g., `"Italy EU-TTP CDN outlier alarm"`) against the runbooks collection
-- [ ] Confirm the response is a JSON-RPC result with a `results` array (possibly empty), NOT a JSON-RPC error containing `Negation (-term) is not supported in vec/hyde queries`
-- [ ] Repeat once with a `hyde`-type search to cover the second code path the original bug hit
+- [x] From inside `akmatori-mcp-gateway`, POST a `qmd.query` with a `vec`-type search whose query contains a hyphenated term (e.g., `"Italy EU-TTP CDN outlier alarm"`) against the runbooks collection
+- [x] Confirm the response is a JSON-RPC result with a `results` array (possibly empty), NOT a JSON-RPC error containing `Negation (-term) is not supported in vec/hyde queries` — vec query returned `{"jsonrpc":"2.0","id":1,"result":{"content":[...]}}` with "Found 3 results"
+- [x] Repeat once with a `hyde`-type search to cover the second code path the original bug hit — hyde query also returned a successful result with "Found 3 results"
 
 ### Task 5: Run existing Akmatori test suites
 
