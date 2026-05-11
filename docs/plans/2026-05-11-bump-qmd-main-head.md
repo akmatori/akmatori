@@ -74,9 +74,9 @@ Files:
 Files:
 - No code modifications
 
-- [ ] `make test-mcp` — passes (gateway-side proxy + memory tests)
-- [ ] `make test` — passes (Go suite, including `internal/services/runbook_service_qmd_test.go`, `internal/database/prompt_test.go`, `internal/executor/executor_test.go`)
-- [ ] No new failures vs main; suites should be unaffected because no Go source changed, but a clean run confirms the contract with QMD's MCP surface still holds
+- [x] `make test-mcp` — passes (gateway-side proxy + memory tests)
+- [x] `make test` — passes (Go suite, including `internal/services/runbook_service_qmd_test.go`, `internal/database/prompt_test.go`, `internal/executor/executor_test.go`)
+- [x] No new failures vs main; suites should be unaffected because no Go source changed, but a clean run confirms the contract with QMD's MCP surface still holds
 
 ### Task 6: Verify acceptance criteria
 
