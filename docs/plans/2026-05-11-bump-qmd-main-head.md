@@ -55,10 +55,10 @@ Files:
 Files:
 - No code modifications
 
-- [ ] `docker compose down qmd`
-- [ ] `docker volume rm akmatori_qmd_cache`
-- [ ] `docker compose up -d qmd`
-- [ ] Tail `docker compose logs -f qmd` until `qmd embed` finishes and the HTTP server is listening on `0.0.0.0:8181` (first start after bump may take several minutes — this is expected per the baked-models entrypoint)
+- [x] `docker compose down qmd`
+- [x] `docker volume rm akmatori_qmd_cache`
+- [x] `docker compose up -d qmd`
+- [x] Tail `docker compose logs -f qmd` until `qmd embed` finishes and the HTTP server is listening on `0.0.0.0:8181` (first start after bump may take several minutes — this is expected per the baked-models entrypoint) — embedded 176 chunks from 122 documents in 7m 30s; MCP HTTP server listening on port 8181; container healthy
 
 ### Task 4: Verify the negation-regex regression is fixed
 
