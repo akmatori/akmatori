@@ -347,7 +347,7 @@ Cross-incident memory: long-lived facts the agent and operators accumulate. Same
 
 **Auto-extraction**: `MemoryExtractor.Extract()` fires from `UpdateIncidentComplete` in a goroutine when status flips to `completed`. One-shot LLM call distills the incident response/log tail into upsert/delete edits; idempotent via `CountByIncidentUUID` cursor.
 
-**Slack feedback capture**: Non-mention thread replies on incident threads route through `FeedbackClassifier` (one-shot LLM, strict JSON, threshold 0.6). Confident hits are persisted as scope=global feedback memories with a thumbs-up reaction + brief threaded ack. Silent on negatives. Wired in `internal/handlers/slack_feedback.go`; mention path is unchanged (still routes to investigation continuation).
+**Slack feedback capture**: Non-mention thread replies on incident threads route through `FeedbackClassifier` (one-shot LLM, strict JSON, threshold 0.6). Confident hits are persisted as scope=global feedback memories with a thumbs-up reaction + brief threaded ack. Silent on negatives. Wired in `internal/handlers/slack_feedback.go`; mention path on incident threads classifies first; confident feedback short-circuits to persist + 👍 + ack, otherwise falls through to investigation continuation.
 
 ## API Package (`internal/api/`)
 

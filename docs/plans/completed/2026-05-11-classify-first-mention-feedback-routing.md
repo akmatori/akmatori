@@ -81,8 +81,8 @@ Files:
 
 ### Task 5: Update documentation
 
-- [ ] If the CLAUDE.md "Slack feedback capture" paragraph (under Memory System) still says "mention path is unchanged (still routes to investigation continuation)", update it to: "mention path on incident threads classifies first; confident feedback short-circuits to persist + 👍 + ack, otherwise falls through to investigation continuation."
-- [ ] Move this plan to `docs/plans/completed/` after merge.
+- [x] If the CLAUDE.md "Slack feedback capture" paragraph (under Memory System) still says "mention path is unchanged (still routes to investigation continuation)", update it to: "mention path on incident threads classifies first; confident feedback short-circuits to persist + 👍 + ack, otherwise falls through to investigation continuation."
+- [x] Move this plan to `docs/plans/completed/` after merge.
 
 ## Post-Completion (manual verification, run by the human reviewer)
 
