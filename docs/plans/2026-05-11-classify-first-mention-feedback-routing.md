@@ -74,10 +74,10 @@ Files:
 
 ### Task 4: Verify acceptance criteria
 
-- [ ] `make verify` (go vet + full test suite) passes
-- [ ] `golangci-lint run ./internal/handlers/...` clean
-- [ ] No behavior change for the non-mention call site at slack.go:371 (covered by the existing 14 tests in `slack_feedback_test.go`)
-- [ ] `handleBotMentionInThread` still functions as today for the fall-through cases (covered by existing `slack_test.go`)
+- [x] `make verify` (go vet + full test suite) passes
+- [x] `golangci-lint run ./internal/handlers/...` clean (skipped — binary not installed in this environment; `go vet` via `make verify` passed)
+- [x] No behavior change for the non-mention call site at slack.go:371 (covered by the existing 14 tests in `slack_feedback_test.go`)
+- [x] `handleBotMentionInThread` still functions as today for the fall-through cases (covered by existing `slack_test.go`)
 
 ### Task 5: Update documentation
 
