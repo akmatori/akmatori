@@ -80,12 +80,12 @@ Files:
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] Image builds cleanly with the new ARG and clone sequence
-- [ ] Both sed patches still apply (build does not fail at the grep -q verifiers)
-- [ ] qmd container reaches healthy state after cache reset
-- [ ] Hyphenated vec/hyde queries no longer return the negation-regex error
-- [ ] `make test-mcp` and `make test` pass with no new failures
-- [ ] Run `go vet ./...` for sanity (no Go changes but cheap to confirm)
+- [x] Image builds cleanly with the new ARG and clone sequence
+- [x] Both sed patches still apply (build does not fail at the grep -q verifiers)
+- [x] qmd container reaches healthy state after cache reset — `docker compose ps qmd` reports `Up 11 minutes (healthy)`
+- [x] Hyphenated vec/hyde queries no longer return the negation-regex error (verified in Task 4)
+- [x] `make test-mcp` and `make test` pass with no new failures
+- [x] Run `go vet ./...` for sanity (no Go changes but cheap to confirm) — clean exit
 
 ### Task 7: Update documentation and archive plan
 
