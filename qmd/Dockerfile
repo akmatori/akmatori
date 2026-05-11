@@ -4,9 +4,16 @@ FROM node:22-slim
 RUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# Clone QMD source at pinned version, install + build
-ARG QMD_VERSION=v2.1.0
-RUN git clone --branch ${QMD_VERSION} --depth 1 https://github.com/tobi/qmd.git /opt/qmd
+# Clone QMD source at pinned version, install + build.
+# Pinned to a main-branch SHA rather than a tag because the hyphen-validation
+# fix (d531211) and hybrid-RRF weighting fix (004714a) are not yet in any
+# tagged release.
+ARG QMD_VERSION=746beedb4863524d337332109dc624a0be0b5aa7
+RUN git init /opt/qmd && \
+    cd /opt/qmd && \
+    git remote add origin https://github.com/tobi/qmd.git && \
+    git fetch --depth 1 origin ${QMD_VERSION} && \
+    git checkout FETCH_HEAD
 WORKDIR /opt/qmd
 # Remove bun lock files so bin/qmd's runtime detection picks node (not bun)
 RUN rm -f bun.lock bun.lockb && npm install && npm run build && npm link

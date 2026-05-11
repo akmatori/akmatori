@@ -36,10 +36,10 @@ This is an infrastructure pin bump — only `qmd/Dockerfile` and `CLAUDE.md` cha
 Files:
 - Modify: `qmd/Dockerfile`
 
-- [ ] Replace `ARG QMD_VERSION=v2.1.0` with `ARG QMD_VERSION=746beedb4863524d337332109dc624a0be0b5aa7` and add a short comment explaining why the pin is a SHA rather than a tag (hyphen-validation fix d531211 and hybrid-RRF weighting fix 004714a not yet in any tagged release)
-- [ ] Replace `RUN git clone --branch ${QMD_VERSION} --depth 1 https://github.com/tobi/qmd.git /opt/qmd` with the `git init` + `remote add origin` + `fetch --depth 1 origin ${QMD_VERSION}` + `checkout FETCH_HEAD` sequence so a specific commit (not just a tag/branch) can be shallow-cloned
-- [ ] Leave lines 11–24 unchanged (bun.lock removal, npm install/build/link, both sed patches, both grep -q verifiers)
-- [ ] Build the image: `docker compose build qmd` — expect clone succeeds, npm install/build/link succeeds, both sed patches apply, both grep -q verifiers pass, precache-models.mjs runs, patch-server.js reports success
+- [x] Replace `ARG QMD_VERSION=v2.1.0` with `ARG QMD_VERSION=746beedb4863524d337332109dc624a0be0b5aa7` and add a short comment explaining why the pin is a SHA rather than a tag (hyphen-validation fix d531211 and hybrid-RRF weighting fix 004714a not yet in any tagged release)
+- [x] Replace `RUN git clone --branch ${QMD_VERSION} --depth 1 https://github.com/tobi/qmd.git /opt/qmd` with the `git init` + `remote add origin` + `fetch --depth 1 origin ${QMD_VERSION}` + `checkout FETCH_HEAD` sequence so a specific commit (not just a tag/branch) can be shallow-cloned
+- [x] Leave lines 11–24 unchanged (bun.lock removal, npm install/build/link, both sed patches, both grep -q verifiers)
+- [x] Build the image: `docker compose build qmd` — expect clone succeeds, npm install/build/link succeeds, both sed patches apply, both grep -q verifiers pass, precache-models.mjs runs, patch-server.js reports success
 
 ### Task 2: Update CLAUDE.md QMD Search Service section
 
