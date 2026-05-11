@@ -339,6 +339,37 @@ func TestHandleMessage_ThreadReplyHumanMention_FeedbackShortCircuits(t *testing.
 	}
 }
 
+// TestHandleAppMention_ThreadReply_RoutesThroughClassifier verifies that an
+// alert-channel thread @mention arriving as an AppMentionEvent (not MessageEvent)
+// still reaches the classify-first router. Slack delivers both events for the
+// same @mention and they race on the dedup key; whichever wins decides routing.
+// Without the early route at the top of handleAppMention, AppMentionEvent would
+// claim the dedup key first and bypass the classifier entirely.
+func TestHandleAppMention_ThreadReply_RoutesThroughClassifier(t *testing.T) {
+	fx := newRouteFixture(t, "1707000001.000100")
+	fx.handler.alertChannels = map[string]*database.AlertSourceInstance{
+		"C_ALERT": {},
+	}
+
+	event := &slackevents.AppMentionEvent{
+		Channel:         "C_ALERT",
+		User:            "U_HUMAN",
+		Text:            "<@BOT> the data dir is /mnt/data, not /var/lib",
+		TimeStamp:       "1707000003.000300",
+		ThreadTimeStamp: "1707000001.000100",
+	}
+
+	fx.handler.handleAppMention(event)
+
+	testhelpers.AssertEventually(t, 2*time.Second, 10*time.Millisecond, func() bool {
+		return fx.mockMem.lastUpsertedSnap() != nil
+	}, "memory should be upserted via handleAppMention → router path")
+
+	if got := fx.agentCallCount(); got != 0 {
+		t.Errorf("agent fall-through called %d times on confident feedback, want 0", got)
+	}
+}
+
 func TestHandleMessage_ThreadReplyHumanNoMention(t *testing.T) {
 	h := testSlackHandler("U_BOT", map[string]*database.AlertSourceInstance{
 		"C_ALERT": {},

@@ -238,6 +238,18 @@ func (h *SlackHandler) handleEventsAPI(event slackevents.EventsAPIEvent) {
 
 // handleAppMention processes app mention events
 func (h *SlackHandler) handleAppMention(event *slackevents.AppMentionEvent) {
+	// Alert-channel thread @mention from a human: delegate to the classify-
+	// first router so the FeedbackClassifier runs regardless of which Slack
+	// event (app_mention vs message) reaches the dispatcher first. Both
+	// events fire and race on the same dedup key; without this branch the
+	// classifier is silently bypassed whenever app_mention wins.
+	if _, isAlert := h.isAlertChannel(event.Channel); isAlert &&
+		event.ThreadTimeStamp != "" && event.ThreadTimeStamp != event.TimeStamp &&
+		event.User != "" && event.User != h.botUserID {
+		h.routeBotMentionThreadReply(event.Channel, event.ThreadTimeStamp, event.TimeStamp, event.Text, event.User)
+		return
+	}
+
 	// Dedup: skip if already processed via handleMessage (both events can fire)
 	dedupeKey := event.Channel + ":" + event.TimeStamp
 	if _, loaded := h.processedMsgs.LoadOrStore(dedupeKey, struct{}{}); loaded {
