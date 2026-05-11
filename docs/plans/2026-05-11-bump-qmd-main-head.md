@@ -46,9 +46,9 @@ Files:
 Files:
 - Modify: `CLAUDE.md` (QMD Search Service "Upstream patches" bullet around line 329)
 
-- [ ] Update the "Upstream patches" bullet to note that we now track a pinned main SHA rather than v2.1.0 (the two sed patches and their grep -q verifiers are unchanged in meaning)
-- [ ] Add a sibling bullet (or appended sentence) summarizing the inherited unreleased fixes brought in by the SHA pin: hyphen validation (d531211), hybrid-RRF weighting (004714a), Node 22 ESM normalization (656707c), handelize case preservation (9fb9de4 + fee576b). One short line — future readers need to know why the pin is a SHA, not why each fix matters
-- [ ] Keep the bullet concise to respect the CLAUDE.md size budget
+- [x] Update the "Upstream patches" bullet to note that we now track a pinned main SHA rather than v2.1.0 (the two sed patches and their grep -q verifiers are unchanged in meaning)
+- [x] Add a sibling bullet (or appended sentence) summarizing the inherited unreleased fixes brought in by the SHA pin: hyphen validation (d531211), hybrid-RRF weighting (004714a), Node 22 ESM normalization (656707c), handelize case preservation (9fb9de4 + fee576b). One short line — future readers need to know why the pin is a SHA, not why each fix matters
+- [x] Keep the bullet concise to respect the CLAUDE.md size budget
 
 ### Task 3: Roll out the bumped sidecar and reset the embed cache
 
