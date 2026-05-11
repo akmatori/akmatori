@@ -13,7 +13,9 @@ RUN git init /opt/qmd && \
     cd /opt/qmd && \
     git remote add origin https://github.com/tobi/qmd.git && \
     git fetch --depth 1 origin ${QMD_VERSION} && \
-    git checkout FETCH_HEAD
+    git checkout FETCH_HEAD && \
+    # Fail loudly if QMD_VERSION was overridden with a tag/branch rather than a SHA.
+    test "$(git rev-parse HEAD)" = "${QMD_VERSION}"
 WORKDIR /opt/qmd
 # Remove bun lock files so bin/qmd's runtime detection picks node (not bun)
 RUN rm -f bun.lock bun.lockb && npm install && npm run build && npm link
@@ -22,8 +24,8 @@ RUN rm -f bun.lock bun.lockb && npm install && npm run build && npm link
 # Upstream hardcodes "localhost" — we need 0.0.0.0 for Docker networking
 RUN sed -i 's/httpServer.listen(port, "localhost"/httpServer.listen(port, process.env.QMD_BIND_HOST || "localhost"/' dist/mcp/server.js && \
     # Default LLM reranking to OFF — there is no local LLM in this container.
-    # MCP `query` tool now exposes `rerank` natively (v2.1.0), so we just flip
-    # the schema default from true to false. Callers can still opt in.
+    # MCP `query` tool exposes `rerank` natively (since v2.1.0), so we just
+    # flip the schema default from true to false. Callers can still opt in.
     sed -i 's/rerank: z\.boolean()\.optional()\.default(true)/rerank: z.boolean().optional().default(false)/' dist/mcp/server.js && \
     # Verify both patches applied (sed silently no-ops on unmatched patterns;
     # future QMD upgrades will fail loudly here if anchors drift).
