@@ -47,9 +47,9 @@ Files:
 
 ### Task 3: Verify acceptance criteria
 
-- [ ] Run `make verify` (go vet + full test suite) — must pass
-- [ ] Run `golangci-lint run` on the touched packages — clean
-- [ ] Manually diff `PrependGuidance` output against the new `DefaultIncidentManagerPrompt` retry block to confirm wording stays aligned
+- [x] Run `make verify` (go vet + full test suite) — must pass
+- [x] Run `golangci-lint run` on the touched packages — clean (golangci-lint not installed in env; `go vet ./internal/executor/... ./internal/database/...` ran clean as part of `make verify`)
+- [x] Manually diff `PrependGuidance` output against the new `DefaultIncidentManagerPrompt` retry block to confirm wording stays aligned
 
 ### Task 4: Update documentation and archive plan
 
