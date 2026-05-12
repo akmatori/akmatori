@@ -53,8 +53,8 @@ Files:
 
 ### Task 4: Update documentation and archive plan
 
-- [ ] No CLAUDE.md update needed — the runbook-search shape and the `keep them in sync` invariant are already documented
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] No CLAUDE.md update needed — the runbook-search shape and the `keep them in sync` invariant are already documented
+- [x] Move this plan to `docs/plans/completed/`
 
 ## Post-Completion Validation (manual, not automatable)
 
