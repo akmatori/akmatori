@@ -62,10 +62,10 @@ Files:
 
 ### Task 4: Verify acceptance criteria
 
-- [ ] Run `make verify` (go vet + full Go test suite) — must be green
-- [ ] Run `make test-mcp` to confirm the gateway-side schemas are still aligned with what the prompt now claims
-- [ ] Manually inspect the rendered output for one skill of each new type by invoking the existing test path or a temporary test to print `generateSkillMd(...)`; confirm the `**Parameters:**` and `Usage (via gateway_call):` blocks match the four reference types byte-for-byte (leading newline, footer, fence placement)
-- [ ] Confirm the `default` branch at line 449 still exists and is reachable for `http_connector` (and any future type)
+- [x] Run `make verify` (go vet + full Go test suite) — must be green
+- [x] Run `make test-mcp` to confirm the gateway-side schemas are still aligned with what the prompt now claims
+- [x] Manually inspect the rendered output for one skill of each new type by invoking the existing test path or a temporary test to print `generateSkillMd(...)`; confirm the `**Parameters:**` and `Usage (via gateway_call):` blocks match the four reference types byte-for-byte (leading newline, footer, fence placement) — covered by `TestGenerateToolUsageExample_NewToolTypes` assertions on `**Parameters:**`, `(* = required)`, and `Usage (via gateway_call):` markers; source review of lines 380-640 confirms identical fmt.Sprintf shape across reference and new cases
+- [x] Confirm the `default` branch at line 449 still exists and is reachable for `http_connector` (and any future type) — branch lives at line 641 after the six new cases; reachability covered by `TestGenerateToolUsageExample_UnknownToolType`
 
 ### Task 5: Update documentation
 
