@@ -564,6 +564,80 @@ gateway_call("clickhouse.get_parts_info", {"table_name": "events", "active_only"
 gateway_call("clickhouse.get_cluster_info", {}, "%s")
 `+"```"+`
 `, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
+	case "netbox":
+		return fmt.Sprintf(`
+**Parameters:**
+- `+"`get_devices`"+`: name, site, role, status, tag, platform, tenant, q, limit, offset
+- `+"`get_device`"+`: id*
+- `+"`get_interfaces`"+`: device, device_id, name, type, enabled, limit, offset
+- `+"`get_sites`"+`: name, region, status, tag, tenant, q, limit, offset
+- `+"`get_racks`"+`: site, name, status, role, tenant, q, limit, offset
+- `+"`get_cables`"+`: device, site, type, status, limit, offset
+- `+"`get_device_types`"+`: manufacturer, model, q, limit, offset
+- `+"`get_ip_addresses`"+`: address, device, interface, vrf, tenant, status, q, limit, offset
+- `+"`get_prefixes`"+`: prefix, site, vrf, vlan, tenant, status, q, limit, offset
+- `+"`get_vlans`"+`: vid, name, site, group, tenant, q, limit, offset
+- `+"`get_vrfs`"+`: name, tenant, q, limit, offset
+- `+"`get_circuits`"+`: provider, type, status, tenant, q, limit, offset
+- `+"`get_providers`"+`: name, q, limit, offset
+- `+"`get_virtual_machines`"+`: name, cluster, site, status, role, tenant, q, limit, offset
+- `+"`get_clusters`"+`: name, type, group, site, tenant, q, limit, offset
+- `+"`get_vm_interfaces`"+`: virtual_machine, name, enabled, limit, offset
+- `+"`get_tenants`"+`: name, group, q, limit, offset
+- `+"`get_tenant_groups`"+`: name, q, limit, offset
+- `+"`api_request`"+`: path* | query_params, limit, offset
+(* = required)
+
+All endpoints are read-only.
+
+Usage (via gateway_call):
+`+"```"+`
+gateway_call("netbox.get_devices", {"status": "active", "site": "dc-1"}, "%s")
+gateway_call("netbox.get_device", {"id": 42}, "%s")
+gateway_call("netbox.get_interfaces", {"device": "edge-router-1"}, "%s")
+gateway_call("netbox.get_ip_addresses", {"address": "10.0.0.1/24"}, "%s")
+gateway_call("netbox.get_prefixes", {"site": "dc-1"}, "%s")
+gateway_call("netbox.get_virtual_machines", {"cluster": "prod-cluster"}, "%s")
+gateway_call("netbox.get_circuits", {"provider": "lumen"}, "%s")
+gateway_call("netbox.api_request", {"path": "dcim/power-feeds/", "query_params": {"status": "active"}}, "%s")
+`+"```"+`
+`, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
+	case "kubernetes":
+		return fmt.Sprintf(`
+**Parameters:**
+- `+"`get_namespaces`"+`: label_selector, field_selector, limit
+- `+"`get_pods`"+`: namespace* | name, label_selector, field_selector, limit
+- `+"`get_pod_detail`"+`: namespace*, name*
+- `+"`get_pod_logs`"+`: namespace*, name* | container, tail_lines, since_seconds, previous
+- `+"`get_events`"+`: namespace* | label_selector, field_selector, limit
+- `+"`get_deployments`"+`: namespace* | name, label_selector, field_selector, limit
+- `+"`get_deployment_detail`"+`: namespace*, name*
+- `+"`get_statefulsets`"+`: namespace* | label_selector, field_selector, limit
+- `+"`get_daemonsets`"+`: namespace* | label_selector, field_selector, limit
+- `+"`get_jobs`"+`: namespace* | label_selector, field_selector, limit
+- `+"`get_cronjobs`"+`: namespace* | label_selector, field_selector, limit
+- `+"`get_nodes`"+`: label_selector, field_selector, limit
+- `+"`get_node_detail`"+`: name*
+- `+"`get_services`"+`: namespace* | label_selector, field_selector, limit
+- `+"`get_configmaps`"+`: namespace* | label_selector, field_selector, limit
+- `+"`get_ingresses`"+`: namespace* | label_selector, field_selector, limit
+- `+"`api_request`"+`: path* | params
+(* = required)
+
+All endpoints are read-only GET requests.
+
+Usage (via gateway_call):
+`+"```"+`
+gateway_call("kubernetes.get_namespaces", {}, "%s")
+gateway_call("kubernetes.get_pods", {"namespace": "default", "label_selector": "app=api"}, "%s")
+gateway_call("kubernetes.get_pod_detail", {"namespace": "default", "name": "api-7d9f5b4c-x2k4z"}, "%s")
+gateway_call("kubernetes.get_pod_logs", {"namespace": "default", "name": "api-7d9f5b4c-x2k4z", "tail_lines": 200}, "%s")
+gateway_call("kubernetes.get_events", {"namespace": "default", "field_selector": "type=Warning"}, "%s")
+gateway_call("kubernetes.get_deployments", {"namespace": "default"}, "%s")
+gateway_call("kubernetes.get_nodes", {}, "%s")
+gateway_call("kubernetes.get_node_detail", {"name": "node-1"}, "%s")
+`+"```"+`
+`, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
 	default:
 		return fmt.Sprintf("Use `gateway_call(\"%s.<tool_method>\", {<args>}, \"%s\")` to call this tool's methods.\n", typeName, logicalName)
 	}

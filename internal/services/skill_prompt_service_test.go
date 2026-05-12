@@ -535,6 +535,18 @@ func TestGenerateToolUsageExample_NewToolTypes(t *testing.T) {
 			expectMethods:  []string{"clickhouse.execute_query", "clickhouse.describe_table", "clickhouse.get_parts_info"},
 			expectRequired: []string{"query*", "table_name*"},
 		},
+		{
+			toolType:       "netbox",
+			logicalName:    "prod-netbox",
+			expectMethods:  []string{"netbox.get_devices", "netbox.get_device", "netbox.api_request"},
+			expectRequired: []string{"id*", "path*"},
+		},
+		{
+			toolType:       "kubernetes",
+			logicalName:    "prod-k8s",
+			expectMethods:  []string{"kubernetes.get_pods", "kubernetes.get_pod_logs", "kubernetes.get_node_detail"},
+			expectRequired: []string{"namespace*", "name*", "path*"},
+		},
 	}
 
 	for _, tc := range cases {

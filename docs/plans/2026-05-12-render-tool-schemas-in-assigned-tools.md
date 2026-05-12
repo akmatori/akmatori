@@ -55,10 +55,10 @@ Files:
 - Modify: `internal/services/skill_prompt_service.go`
 - Modify: `internal/services/skill_service_test.go`
 
-- [ ] Add `case "netbox":` rendering all 19 netbox methods in `**Parameters:**` (DCIM get_devices/get_device/get_interfaces/get_sites/get_racks/get_cables/get_device_types, IPAM get_ip_addresses/get_prefixes/get_vlans/get_vrfs, get_circuits/get_providers, Virtualization get_virtual_machines/get_clusters/get_vm_interfaces, Tenancy get_tenants/get_tenant_groups, api_request); cap the fenced example block at 6-8 representative methods to stay readable
-- [ ] Add `case "kubernetes":` rendering the 17 kubernetes methods (get_namespaces, get_pods, get_pod_detail, get_pod_logs, get_events, get_deployments, get_deployment_detail, get_statefulsets, get_daemonsets, get_jobs, get_cronjobs, get_nodes, get_node_detail, get_services, get_configmaps, get_ingresses, api_request); pick 6-8 representative examples for the fenced block
-- [ ] Extend table-driven tests to cover one method assertion per new type (e.g. `netbox.get_devices`, `kubernetes.get_pods`, `namespace*`)
-- [ ] Run `make test` and `go test ./internal/services/... -run SkillPrompt -count=1` — must pass before task 4
+- [x] Add `case "netbox":` rendering all 19 netbox methods in `**Parameters:**` (DCIM get_devices/get_device/get_interfaces/get_sites/get_racks/get_cables/get_device_types, IPAM get_ip_addresses/get_prefixes/get_vlans/get_vrfs, get_circuits/get_providers, Virtualization get_virtual_machines/get_clusters/get_vm_interfaces, Tenancy get_tenants/get_tenant_groups, api_request); cap the fenced example block at 6-8 representative methods to stay readable
+- [x] Add `case "kubernetes":` rendering the 17 kubernetes methods (get_namespaces, get_pods, get_pod_detail, get_pod_logs, get_events, get_deployments, get_deployment_detail, get_statefulsets, get_daemonsets, get_jobs, get_cronjobs, get_nodes, get_node_detail, get_services, get_configmaps, get_ingresses, api_request); pick 6-8 representative examples for the fenced block
+- [x] Extend table-driven tests to cover one method assertion per new type (e.g. `netbox.get_devices`, `kubernetes.get_pods`, `namespace*`)
+- [x] Run `make test` and `go test ./internal/services/... -run SkillPrompt -count=1` — must pass before task 4
 
 ### Task 4: Verify acceptance criteria
 
