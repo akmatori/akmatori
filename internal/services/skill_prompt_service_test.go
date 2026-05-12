@@ -510,42 +510,103 @@ func TestGenerateToolUsageExample_NewToolTypes(t *testing.T) {
 		logicalName    string
 		expectMethods  []string
 		expectRequired []string
+		expectFooter   string
+		expectLiteral  []string
 	}{
 		{
-			toolType:       "grafana",
-			logicalName:    "prod-grafana",
-			expectMethods:  []string{"grafana.get_dashboard", "grafana.query_prometheus", "grafana.list_data_sources"},
+			toolType:    "grafana",
+			logicalName: "prod-grafana",
+			expectMethods: []string{
+				"grafana.search_dashboards",
+				"grafana.get_dashboard",
+				"grafana.get_dashboard_panels",
+				"grafana.list_data_sources",
+				"grafana.query_prometheus",
+				"grafana.query_loki",
+				"grafana.get_alert_rules",
+				"grafana.get_alert_instances",
+			},
 			expectRequired: []string{"uid*", "datasource_uid*", "expr*"},
 		},
 		{
-			toolType:       "catchpoint",
-			logicalName:    "prod-catchpoint",
-			expectMethods:  []string{"catchpoint.get_alerts", "catchpoint.get_alert_details", "catchpoint.acknowledge_alerts"},
+			toolType:    "catchpoint",
+			logicalName: "prod-catchpoint",
+			expectMethods: []string{
+				"catchpoint.get_alerts",
+				"catchpoint.get_alert_details",
+				"catchpoint.get_tests",
+				"catchpoint.get_test_performance",
+				"catchpoint.get_test_errors",
+				"catchpoint.get_internet_outages",
+				"catchpoint.get_nodes",
+				"catchpoint.acknowledge_alerts",
+			},
 			expectRequired: []string{"alert_ids*", "action*", "test_ids*"},
 		},
 		{
-			toolType:       "pagerduty",
-			logicalName:    "prod-pagerduty",
-			expectMethods:  []string{"pagerduty.get_incidents", "pagerduty.acknowledge_incident", "pagerduty.send_event"},
+			toolType:    "pagerduty",
+			logicalName: "prod-pagerduty",
+			expectMethods: []string{
+				"pagerduty.get_incidents",
+				"pagerduty.get_incident",
+				"pagerduty.get_incident_notes",
+				"pagerduty.get_services",
+				"pagerduty.get_on_calls",
+				"pagerduty.acknowledge_incident",
+				"pagerduty.add_incident_note",
+				"pagerduty.send_event",
+			},
 			expectRequired: []string{"incident_id*", "requester_email*", "routing_key*", "event_action*"},
+			// Catches accidental edits to the `%%` escape in send_event's summary.
+			expectLiteral: []string{`"summary": "Disk usage > 90%"`},
 		},
 		{
-			toolType:       "clickhouse",
-			logicalName:    "prod-clickhouse",
-			expectMethods:  []string{"clickhouse.execute_query", "clickhouse.describe_table", "clickhouse.get_parts_info"},
+			toolType:    "clickhouse",
+			logicalName: "prod-clickhouse",
+			expectMethods: []string{
+				"clickhouse.execute_query",
+				"clickhouse.show_databases",
+				"clickhouse.describe_table",
+				"clickhouse.get_query_log",
+				"clickhouse.get_running_queries",
+				"clickhouse.get_merges",
+				"clickhouse.get_parts_info",
+				"clickhouse.get_cluster_info",
+			},
 			expectRequired: []string{"query*", "table_name*"},
+			expectFooter:   "All queries are read-only",
 		},
 		{
-			toolType:       "netbox",
-			logicalName:    "prod-netbox",
-			expectMethods:  []string{"netbox.get_devices", "netbox.get_device", "netbox.api_request"},
+			toolType:    "netbox",
+			logicalName: "prod-netbox",
+			expectMethods: []string{
+				"netbox.get_devices",
+				"netbox.get_device",
+				"netbox.get_interfaces",
+				"netbox.get_ip_addresses",
+				"netbox.get_prefixes",
+				"netbox.get_virtual_machines",
+				"netbox.get_circuits",
+				"netbox.api_request",
+			},
 			expectRequired: []string{"id*", "path*"},
+			expectFooter:   "All endpoints are read-only.",
 		},
 		{
-			toolType:       "kubernetes",
-			logicalName:    "prod-k8s",
-			expectMethods:  []string{"kubernetes.get_pods", "kubernetes.get_pod_logs", "kubernetes.get_node_detail"},
+			toolType:    "kubernetes",
+			logicalName: "prod-k8s",
+			expectMethods: []string{
+				"kubernetes.get_namespaces",
+				"kubernetes.get_pods",
+				"kubernetes.get_pod_detail",
+				"kubernetes.get_pod_logs",
+				"kubernetes.get_events",
+				"kubernetes.get_deployments",
+				"kubernetes.get_nodes",
+				"kubernetes.get_node_detail",
+			},
 			expectRequired: []string{"namespace*", "name*", "path*"},
+			expectFooter:   "All endpoints are read-only GET requests.",
 		},
 	}
 
@@ -561,17 +622,21 @@ func TestGenerateToolUsageExample_NewToolTypes(t *testing.T) {
 
 			example := generateToolUsageExample(tool)
 
-			if !strings.Contains(example, "**Parameters:**") {
-				t.Errorf("expected **Parameters:** section for %s, got: %s", tc.toolType, example)
+			if got := strings.Count(example, "**Parameters:**"); got != 1 {
+				t.Errorf("expected exactly one **Parameters:** section for %s, got %d: %s", tc.toolType, got, example)
 			}
 			if !strings.Contains(example, "(* = required)") {
 				t.Errorf("expected '(* = required)' footer for %s, got: %s", tc.toolType, example)
 			}
-			if !strings.Contains(example, "Usage (via gateway_call):") {
-				t.Errorf("expected 'Usage (via gateway_call):' heading for %s, got: %s", tc.toolType, example)
+			if got := strings.Count(example, "Usage (via gateway_call):"); got != 1 {
+				t.Errorf("expected exactly one 'Usage (via gateway_call):' heading for %s, got %d: %s", tc.toolType, got, example)
 			}
 			if !strings.Contains(example, `"`+tc.logicalName+`"`) {
 				t.Errorf("expected logical name %q in example for %s, got: %s", tc.logicalName, tc.toolType, example)
+			}
+			// Detect fmt.Sprintf placeholder/argument count mismatches in any new case.
+			if strings.Contains(example, "%!") {
+				t.Errorf("rendered example for %s contains a fmt formatting error marker (%%!...): %s", tc.toolType, example)
 			}
 			for _, m := range tc.expectMethods {
 				if !strings.Contains(example, m) {
@@ -581,6 +646,14 @@ func TestGenerateToolUsageExample_NewToolTypes(t *testing.T) {
 			for _, req := range tc.expectRequired {
 				if !strings.Contains(example, req) {
 					t.Errorf("expected required-param marker %s in %s example, got: %s", req, tc.toolType, example)
+				}
+			}
+			if tc.expectFooter != "" && !strings.Contains(example, tc.expectFooter) {
+				t.Errorf("expected footer note %q in %s example, got: %s", tc.expectFooter, tc.toolType, example)
+			}
+			for _, lit := range tc.expectLiteral {
+				if !strings.Contains(example, lit) {
+					t.Errorf("expected literal %q in %s example, got: %s", lit, tc.toolType, example)
 				}
 			}
 		})
