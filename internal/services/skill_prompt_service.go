@@ -446,6 +446,65 @@ gateway_call("postgresql.get_locks", {"blocked_only": true}, "%s")
 gateway_call("postgresql.get_database_stats", {}, "%s")
 `+"```"+`
 `, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
+	case "grafana":
+		return fmt.Sprintf(`
+**Parameters:**
+- `+"`search_dashboards`"+`: query, tag, type, folder_id, limit
+- `+"`get_dashboard`"+`: uid*
+- `+"`get_dashboard_panels`"+`: uid*
+- `+"`get_alert_rules`"+`: (no parameters)
+- `+"`get_alert_instances`"+`: filter, silenced, inhibited, active
+- `+"`get_alert_rule`"+`: uid*
+- `+"`silence_alert`"+`: matchers*, starts_at*, ends_at*, created_by*, comment*
+- `+"`list_data_sources`"+`: (no parameters)
+- `+"`query_data_source`"+`: datasource_uid*, queries* | from, to
+- `+"`query_prometheus`"+`: datasource_uid*, expr* | start, end, step, instant, range, from, to
+- `+"`query_loki`"+`: datasource_uid*, expr* | limit, direction, start, end, from, to
+- `+"`create_annotation`"+`: text* | dashboard_id, panel_id, tags, time, time_end
+- `+"`get_annotations`"+`: from, to, dashboard_id, panel_id, tags, limit, type
+(* = required)
+
+Usage (via gateway_call):
+`+"```"+`
+gateway_call("grafana.search_dashboards", {"query": "api latency"}, "%s")
+gateway_call("grafana.get_dashboard", {"uid": "abc123"}, "%s")
+gateway_call("grafana.get_dashboard_panels", {"uid": "abc123"}, "%s")
+gateway_call("grafana.list_data_sources", {}, "%s")
+gateway_call("grafana.query_prometheus", {"datasource_uid": "prom-uid", "expr": "up", "instant": true}, "%s")
+gateway_call("grafana.query_loki", {"datasource_uid": "loki-uid", "expr": "{app=\"api\"} |= \"error\"", "limit": 100}, "%s")
+gateway_call("grafana.get_alert_rules", {}, "%s")
+gateway_call("grafana.get_alert_instances", {"active": true}, "%s")
+`+"```"+`
+`, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
+	case "catchpoint":
+		return fmt.Sprintf(`
+**Parameters:**
+- `+"`get_alerts`"+`: severity, start_time, end_time, test_ids, page_number, page_size
+- `+"`get_alert_details`"+`: alert_ids*
+- `+"`get_test_performance`"+`: test_ids* | start_time, end_time, metrics, dimensions
+- `+"`get_test_performance_raw`"+`: test_ids* | start_time, end_time, node_ids, page_number, page_size
+- `+"`get_tests`"+`: test_ids, test_type, folder_id, status, page_number, page_size
+- `+"`get_test_details`"+`: test_ids*
+- `+"`get_test_errors`"+`: test_ids, start_time, end_time, page_number, page_size
+- `+"`get_internet_outages`"+`: start_time, end_time, asn, country, page_number, page_size
+- `+"`get_nodes`"+`: page_number, page_size
+- `+"`get_node_alerts`"+`: node_ids, start_time, end_time, page_number, page_size
+- `+"`acknowledge_alerts`"+`: alert_ids*, action* | assignee
+- `+"`run_instant_test`"+`: test_id*
+(* = required)
+
+Usage (via gateway_call):
+`+"```"+`
+gateway_call("catchpoint.get_alerts", {"severity": "critical"}, "%s")
+gateway_call("catchpoint.get_alert_details", {"alert_ids": "12345,67890"}, "%s")
+gateway_call("catchpoint.get_tests", {}, "%s")
+gateway_call("catchpoint.get_test_performance", {"test_ids": "12345", "metrics": "response_time,availability"}, "%s")
+gateway_call("catchpoint.get_test_errors", {"test_ids": "12345"}, "%s")
+gateway_call("catchpoint.get_internet_outages", {"country": "US"}, "%s")
+gateway_call("catchpoint.get_nodes", {}, "%s")
+gateway_call("catchpoint.acknowledge_alerts", {"alert_ids": "12345", "action": "acknowledge"}, "%s")
+`+"```"+`
+`, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
 	default:
 		return fmt.Sprintf("Use `gateway_call(\"%s.<tool_method>\", {<args>}, \"%s\")` to call this tool's methods.\n", typeName, logicalName)
 	}

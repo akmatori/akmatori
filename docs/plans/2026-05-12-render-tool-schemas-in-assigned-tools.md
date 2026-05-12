@@ -31,11 +31,11 @@ Files:
 - Modify: `internal/services/skill_prompt_service.go`
 - Modify: `internal/services/skill_service_test.go`
 
-- [ ] Add `case "grafana":` before the `default` branch, rendering the 13 grafana methods (search_dashboards, get_dashboard, get_dashboard_panels, get_alert_rules, get_alert_instances, get_alert_rule, silence_alert, list_data_sources, query_data_source, query_prometheus, query_loki, create_annotation, get_annotations) per the existing format
-- [ ] Add `case "catchpoint":` rendering the 12 catchpoint methods (get_alerts, get_alert_details, get_test_performance, get_test_performance_raw, get_tests, get_test_details, get_test_errors, get_internet_outages, get_nodes, get_node_alerts, acknowledge_alerts, run_instant_test)
-- [ ] Pick 6-8 representative `gateway_call(...)` examples per type for the fenced block (full method list lives in `**Parameters:**`)
-- [ ] Add or extend a table-driven test in `skill_service_test.go` asserting that for each new type, the rendered output contains the type name, at least one method name (e.g. `grafana.get_dashboard`, `catchpoint.get_alerts`), a required-param marker (`uid*`, `alert_ids*`), and a `gateway_call(...)` example using the logical name
-- [ ] Run `make test` and `go test ./internal/services/... -run SkillPrompt -count=1` — must pass before task 2
+- [x] Add `case "grafana":` before the `default` branch, rendering the 13 grafana methods (search_dashboards, get_dashboard, get_dashboard_panels, get_alert_rules, get_alert_instances, get_alert_rule, silence_alert, list_data_sources, query_data_source, query_prometheus, query_loki, create_annotation, get_annotations) per the existing format
+- [x] Add `case "catchpoint":` rendering the 12 catchpoint methods (get_alerts, get_alert_details, get_test_performance, get_test_performance_raw, get_tests, get_test_details, get_test_errors, get_internet_outages, get_nodes, get_node_alerts, acknowledge_alerts, run_instant_test)
+- [x] Pick 6-8 representative `gateway_call(...)` examples per type for the fenced block (full method list lives in `**Parameters:**`)
+- [x] Add or extend a table-driven test in `skill_service_test.go` asserting that for each new type, the rendered output contains the type name, at least one method name (e.g. `grafana.get_dashboard`, `catchpoint.get_alerts`), a required-param marker (`uid*`, `alert_ids*`), and a `gateway_call(...)` example using the logical name
+- [x] Run `make test` and `go test ./internal/services/... -run SkillPrompt -count=1` — must pass before task 2
 
 ### Task 2: Add pagerduty and clickhouse cases
 

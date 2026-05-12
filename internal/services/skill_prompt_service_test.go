@@ -500,6 +500,69 @@ func TestExtractToolDetails_VictoriaMetricsTool(t *testing.T) {
 	}
 }
 
+// TestGenerateToolUsageExample_NewToolTypes asserts that grafana, catchpoint,
+// pagerduty, clickhouse, netbox, and kubernetes render full parameter schemas
+// and gateway_call examples in the Assigned Tools section instead of falling
+// through to the one-line default branch.
+func TestGenerateToolUsageExample_NewToolTypes(t *testing.T) {
+	cases := []struct {
+		toolType       string
+		logicalName    string
+		expectMethods  []string
+		expectRequired []string
+	}{
+		{
+			toolType:       "grafana",
+			logicalName:    "prod-grafana",
+			expectMethods:  []string{"grafana.get_dashboard", "grafana.query_prometheus", "grafana.list_data_sources"},
+			expectRequired: []string{"uid*", "datasource_uid*", "expr*"},
+		},
+		{
+			toolType:       "catchpoint",
+			logicalName:    "prod-catchpoint",
+			expectMethods:  []string{"catchpoint.get_alerts", "catchpoint.get_alert_details", "catchpoint.acknowledge_alerts"},
+			expectRequired: []string{"alert_ids*", "action*", "test_ids*"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.toolType, func(t *testing.T) {
+			tool := database.ToolInstance{
+				ID:          10,
+				Name:        tc.logicalName,
+				LogicalName: tc.logicalName,
+				Settings:    database.JSONB{},
+				ToolType:    database.ToolType{ID: 10, Name: tc.toolType},
+			}
+
+			example := generateToolUsageExample(tool)
+
+			if !strings.Contains(example, "**Parameters:**") {
+				t.Errorf("expected **Parameters:** section for %s, got: %s", tc.toolType, example)
+			}
+			if !strings.Contains(example, "(* = required)") {
+				t.Errorf("expected '(* = required)' footer for %s, got: %s", tc.toolType, example)
+			}
+			if !strings.Contains(example, "Usage (via gateway_call):") {
+				t.Errorf("expected 'Usage (via gateway_call):' heading for %s, got: %s", tc.toolType, example)
+			}
+			if !strings.Contains(example, `"`+tc.logicalName+`"`) {
+				t.Errorf("expected logical name %q in example for %s, got: %s", tc.logicalName, tc.toolType, example)
+			}
+			for _, m := range tc.expectMethods {
+				if !strings.Contains(example, m) {
+					t.Errorf("expected method %s in %s example, got: %s", m, tc.toolType, example)
+				}
+			}
+			for _, req := range tc.expectRequired {
+				if !strings.Contains(example, req) {
+					t.Errorf("expected required-param marker %s in %s example, got: %s", req, tc.toolType, example)
+				}
+			}
+		})
+	}
+}
+
 func TestGenerateToolUsageExample_UnknownToolType(t *testing.T) {
 	tool := database.ToolInstance{
 		ID:          5,
