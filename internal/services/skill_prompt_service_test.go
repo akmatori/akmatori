@@ -523,6 +523,18 @@ func TestGenerateToolUsageExample_NewToolTypes(t *testing.T) {
 			expectMethods:  []string{"catchpoint.get_alerts", "catchpoint.get_alert_details", "catchpoint.acknowledge_alerts"},
 			expectRequired: []string{"alert_ids*", "action*", "test_ids*"},
 		},
+		{
+			toolType:       "pagerduty",
+			logicalName:    "prod-pagerduty",
+			expectMethods:  []string{"pagerduty.get_incidents", "pagerduty.acknowledge_incident", "pagerduty.send_event"},
+			expectRequired: []string{"incident_id*", "requester_email*", "routing_key*", "event_action*"},
+		},
+		{
+			toolType:       "clickhouse",
+			logicalName:    "prod-clickhouse",
+			expectMethods:  []string{"clickhouse.execute_query", "clickhouse.describe_table", "clickhouse.get_parts_info"},
+			expectRequired: []string{"query*", "table_name*"},
+		},
 	}
 
 	for _, tc := range cases {

@@ -505,6 +505,65 @@ gateway_call("catchpoint.get_nodes", {}, "%s")
 gateway_call("catchpoint.acknowledge_alerts", {"alert_ids": "12345", "action": "acknowledge"}, "%s")
 `+"```"+`
 `, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
+	case "pagerduty":
+		return fmt.Sprintf(`
+**Parameters:**
+- `+"`get_incidents`"+`: statuses, urgencies, service_ids, since, until, sort_by, limit, offset
+- `+"`get_incident`"+`: incident_id*
+- `+"`get_incident_notes`"+`: incident_id*
+- `+"`get_incident_alerts`"+`: incident_id*
+- `+"`get_services`"+`: query, limit, offset
+- `+"`get_on_calls`"+`: schedule_ids, escalation_policy_ids, since, until
+- `+"`get_escalation_policies`"+`: query, limit, offset
+- `+"`list_recent_changes`"+`: since, until, limit, offset
+- `+"`acknowledge_incident`"+`: incident_id*, requester_email*
+- `+"`resolve_incident`"+`: incident_id*, requester_email*
+- `+"`reassign_incident`"+`: incident_id*, requester_email*, assignee_ids* | escalation_policy_id
+- `+"`add_incident_note`"+`: incident_id*, requester_email*, content*
+- `+"`send_event`"+`: routing_key*, event_action* | dedup_key, summary, severity, source, component, group, class, custom_details
+(* = required)
+
+Usage (via gateway_call):
+`+"```"+`
+gateway_call("pagerduty.get_incidents", {"statuses": "triggered,acknowledged"}, "%s")
+gateway_call("pagerduty.get_incident", {"incident_id": "PABC123"}, "%s")
+gateway_call("pagerduty.get_incident_notes", {"incident_id": "PABC123"}, "%s")
+gateway_call("pagerduty.get_services", {"query": "api"}, "%s")
+gateway_call("pagerduty.get_on_calls", {"escalation_policy_ids": "PXYZ987"}, "%s")
+gateway_call("pagerduty.acknowledge_incident", {"incident_id": "PABC123", "requester_email": "oncall@example.com"}, "%s")
+gateway_call("pagerduty.add_incident_note", {"incident_id": "PABC123", "requester_email": "oncall@example.com", "content": "Investigating elevated 5xx rate"}, "%s")
+gateway_call("pagerduty.send_event", {"routing_key": "R0UTINGKEY", "event_action": "trigger", "summary": "Disk usage > 90%%", "severity": "warning"}, "%s")
+`+"```"+`
+`, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
+	case "clickhouse":
+		return fmt.Sprintf(`
+**Parameters:**
+- `+"`execute_query`"+`: query* | limit, timeout_seconds
+- `+"`show_databases`"+`: (no parameters)
+- `+"`show_tables`"+`: database
+- `+"`describe_table`"+`: table_name* | database
+- `+"`get_query_log`"+`: min_duration_ms, limit, query_kind
+- `+"`get_running_queries`"+`: min_elapsed_seconds
+- `+"`get_merges`"+`: table, database
+- `+"`get_replication_status`"+`: table, database
+- `+"`get_parts_info`"+`: table_name* | database, active_only
+- `+"`get_cluster_info`"+`: cluster
+(* = required)
+
+All queries are read-only — SELECT, WITH, SHOW, DESCRIBE, EXPLAIN, EXISTS only.
+
+Usage (via gateway_call):
+`+"```"+`
+gateway_call("clickhouse.execute_query", {"query": "SELECT count() FROM system.parts WHERE active"}, "%s")
+gateway_call("clickhouse.show_databases", {}, "%s")
+gateway_call("clickhouse.describe_table", {"table_name": "events"}, "%s")
+gateway_call("clickhouse.get_query_log", {"min_duration_ms": 1000, "limit": 50}, "%s")
+gateway_call("clickhouse.get_running_queries", {"min_elapsed_seconds": 5}, "%s")
+gateway_call("clickhouse.get_merges", {}, "%s")
+gateway_call("clickhouse.get_parts_info", {"table_name": "events", "active_only": true}, "%s")
+gateway_call("clickhouse.get_cluster_info", {}, "%s")
+`+"```"+`
+`, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
 	default:
 		return fmt.Sprintf("Use `gateway_call(\"%s.<tool_method>\", {<args>}, \"%s\")` to call this tool's methods.\n", typeName, logicalName)
 	}

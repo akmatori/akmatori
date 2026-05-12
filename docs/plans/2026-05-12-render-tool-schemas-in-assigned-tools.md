@@ -43,11 +43,11 @@ Files:
 - Modify: `internal/services/skill_prompt_service.go`
 - Modify: `internal/services/skill_service_test.go`
 
-- [ ] Add `case "pagerduty":` rendering the 13 pagerduty methods (get_incidents, get_incident, get_incident_notes, get_incident_alerts, get_services, get_on_calls, get_escalation_policies, list_recent_changes, acknowledge_incident, resolve_incident, reassign_incident, add_incident_note, send_event)
-- [ ] Add `case "clickhouse":` rendering the 10 clickhouse methods (execute_query, show_databases, show_tables, describe_table, get_query_log, get_running_queries, get_merges, get_replication_status, get_parts_info, get_cluster_info)
-- [ ] Pick 6-8 representative `gateway_call(...)` examples per type for the fenced block
-- [ ] Extend table-driven tests to cover one method assertion per new type (e.g. `pagerduty.acknowledge_incident`, `clickhouse.execute_query`)
-- [ ] Run `make test` and `go test ./internal/services/... -run SkillPrompt -count=1` — must pass before task 3
+- [x] Add `case "pagerduty":` rendering the 13 pagerduty methods (get_incidents, get_incident, get_incident_notes, get_incident_alerts, get_services, get_on_calls, get_escalation_policies, list_recent_changes, acknowledge_incident, resolve_incident, reassign_incident, add_incident_note, send_event)
+- [x] Add `case "clickhouse":` rendering the 10 clickhouse methods (execute_query, show_databases, show_tables, describe_table, get_query_log, get_running_queries, get_merges, get_replication_status, get_parts_info, get_cluster_info)
+- [x] Pick 6-8 representative `gateway_call(...)` examples per type for the fenced block
+- [x] Extend table-driven tests to cover one method assertion per new type (e.g. `pagerduty.acknowledge_incident`, `clickhouse.execute_query`)
+- [x] Run `make test` and `go test ./internal/services/... -run SkillPrompt -count=1` — must pass before task 3
 
 ### Task 3: Add netbox and kubernetes cases
 
