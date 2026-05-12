@@ -101,8 +101,7 @@ func TestDefaultIncidentManagerPrompt_RunbookSearchSection(t *testing.T) {
 		{"runbooks collections scope", `"collections": ["runbooks"]`},
 		{"max 3 calls cue", "Cap total qmd.query calls at 3"},
 		{"retry guidance", "up to 2 retries"},
-		{"retry angle source_system", "source_system"},
-		{"retry angle target_service", "target_service"},
+		{"retry #2 fallback target_service", "target_service"},
 		{"score gate", "score > 0.7"},
 	}
 
@@ -137,5 +136,23 @@ func TestDefaultIncidentManagerPrompt_SingleQMDQueryWithOrderedTriplet(t *testin
 	}
 	if !(lexIdx < vecIdx && vecIdx < hydeIdx) {
 		t.Errorf("triplet must appear in lex→vec→hyde order, got lex=%d vec=%d hyde=%d", lexIdx, vecIdx, hydeIdx)
+	}
+}
+
+// TestDefaultIncidentManagerPrompt_RequiresSourcePhraseOnRetry pins the
+// conditional MUST that retry #1 quote a verbatim sender/source/channel phrase
+// from the Original alert text: block. Mirrors
+// TestPrependGuidance_RequiresSourcePhraseOnRetry in internal/executor — both
+// prompts are kept in sync per the "keep them in sync" invariant noted in
+// executor.go's PrependGuidance comment.
+func TestDefaultIncidentManagerPrompt_RequiresSourcePhraseOnRetry(t *testing.T) {
+	for _, want := range []string{
+		"Original alert text:",
+		"retry #1 MUST",
+		"verbatim",
+	} {
+		if !strings.Contains(DefaultIncidentManagerPrompt, want) {
+			t.Errorf("DefaultIncidentManagerPrompt should contain %q", want)
+		}
 	}
 }

@@ -40,10 +40,10 @@ Files:
 Files:
 - Modify: `internal/database/db.go`
 
-- [ ] Replace the retry-angle block (lines 443-446) with the same wording substitution made in Task 1, preserving the surrounding indentation style of `DefaultIncidentManagerPrompt`
-- [ ] Verify the `// keep them in sync` invariant: the retry guidance text in `db.go` matches `executor.go` (modulo formatting)
-- [ ] Add or extend a test in `internal/database/` that asserts `DefaultIncidentManagerPrompt` contains the same `"Original alert text:"`, `"retry #1 MUST"`, and `"verbatim"` substrings (mirroring the executor test)
-- [ ] Run `go test ./internal/database/...` and `go test ./internal/executor/...` — all green
+- [x] Replace the retry-angle block (lines 443-446) with the same wording substitution made in Task 1, preserving the surrounding indentation style of `DefaultIncidentManagerPrompt`
+- [x] Verify the `// keep them in sync` invariant: the retry guidance text in `db.go` matches `executor.go` (modulo formatting)
+- [x] Add or extend a test in `internal/database/` that asserts `DefaultIncidentManagerPrompt` contains the same `"Original alert text:"`, `"retry #1 MUST"`, and `"verbatim"` substrings (mirroring the executor test)
+- [x] Run `go test ./internal/database/...` and `go test ./internal/executor/...` — all green
 
 ### Task 3: Verify acceptance criteria
 

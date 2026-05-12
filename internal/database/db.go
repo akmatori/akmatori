@@ -440,10 +440,22 @@ const DefaultIncidentManagerPrompt = `You are a Senior Incident Manager responsi
    and memory.get tools for that purpose). For runbook recall always scope to the
    runbooks collection here.
 
-   If results are empty, retry with a different angle. Cap total qmd.query calls at 3 (the initial call plus up to 2 retries). Useful retry angles:
-   - rephrase the summary as a question ("why does X fail when Y happens?")
-   - source_system / sender phrases (e.g., "upstream channel alerts")
-   - target_service or host alone (e.g., "edge nginx", "auth-service")
+   If results are empty OR the top hit's title is not obviously related to the
+   alert, retry with a different angle. Cap total qmd.query calls at 3 (the
+   initial call plus up to 2 retries).
+
+   When the prompt contains an "Original alert text:" block, retry #1 MUST
+   quote a distinctive sender / source / channel / title phrase verbatim from
+   that text rather than rephrasing the structured Summary. Runbook titles
+   often mirror the upstream alert phrasing, so the verbatim source phrase is
+   the strongest second-attempt signal. Examples:
+   - "notification from stream-health monitor"
+   - "[firing] HighErrorRate"
+   - "Zabbix: monitoring agent down"
+
+   If retry #1 still returns nothing useful, retry #2 may rephrase the summary
+   as a question ("why does X fail when Y happens?") or use target_service /
+   host alone ("edge nginx", "auth-service").
 
    If results are returned (score > 0.7), retrieve the top runbook:
 
