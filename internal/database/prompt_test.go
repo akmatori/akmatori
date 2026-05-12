@@ -101,7 +101,7 @@ func TestDefaultIncidentManagerPrompt_RunbookSearchSection(t *testing.T) {
 		{"runbooks collections scope", `"collections": ["runbooks"]`},
 		{"max 3 calls cue", "Cap total qmd.query calls at 3"},
 		{"retry guidance", "up to 2 retries"},
-		{"retry #2 fallback target_service", "target_service"},
+		{"target_service mentioned as retry angle", "target_service"},
 		{"score gate", "score > 0.7"},
 	}
 
@@ -145,14 +145,15 @@ func TestDefaultIncidentManagerPrompt_SingleQMDQueryWithOrderedTriplet(t *testin
 // TestPrependGuidance_RequiresSourcePhraseOnRetry in internal/executor — both
 // prompts are kept in sync per the "keep them in sync" invariant noted in
 // executor.go's PrependGuidance comment.
+//
+// Asserted as a single normalized clause (not three independent substrings)
+// so the rule can't be silently weakened by scattering the tokens — e.g.,
+// dropping MUST to "may", removing the gate, or moving "verbatim" to an
+// unrelated sentence.
 func TestDefaultIncidentManagerPrompt_RequiresSourcePhraseOnRetry(t *testing.T) {
-	for _, want := range []string{
-		"Original alert text:",
-		"retry #1 MUST",
-		"verbatim",
-	} {
-		if !strings.Contains(DefaultIncidentManagerPrompt, want) {
-			t.Errorf("DefaultIncidentManagerPrompt should contain %q", want)
-		}
+	normalized := strings.Join(strings.Fields(DefaultIncidentManagerPrompt), " ")
+	want := `When the prompt contains an "Original alert text:" block, retry #1 MUST quote a distinctive sender / source / channel / title phrase verbatim`
+	if !strings.Contains(normalized, want) {
+		t.Errorf("DefaultIncidentManagerPrompt missing conditional verbatim-quote clause\nwant: %s", want)
 	}
 }
