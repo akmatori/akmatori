@@ -533,6 +533,9 @@ func (t *JiraTool) GetIssueTransitions(ctx context.Context, incidentID string, a
 }
 
 // GetIssueChangelog lists changelog entries for an issue.
+// Jira Cloud (v3) exposes /issue/{key}/changelog; Jira Server / DC (v2) historically lacks
+// that endpoint, so we fall back to GET /issue/{key}?expand=changelog and return the issue
+// object (caller reads the `changelog` field).
 func (t *JiraTool) GetIssueChangelog(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
 	logicalName := extractLogicalName(args)
 
@@ -547,9 +550,15 @@ func (t *JiraTool) GetIssueChangelog(ctx context.Context, incidentID string, arg
 	}
 
 	params := url.Values{}
-	addPagingParams(params, args)
+	var path string
+	if config.APIVersion == "2" {
+		params.Set("expand", "changelog")
+		path = apiPath("2", "/issue/"+url.PathEscape(key))
+	} else {
+		addPagingParams(params, args)
+		path = apiPath(config.APIVersion, "/issue/"+url.PathEscape(key)+"/changelog")
+	}
 
-	path := apiPath(config.APIVersion, "/issue/"+url.PathEscape(key)+"/changelog")
 	body, err := t.cachedGet(ctx, incidentID, path, params, ChangelogCacheTTL, logicalName)
 	if err != nil {
 		return "", err
@@ -616,7 +625,12 @@ func (t *JiraTool) SearchUsers(ctx context.Context, incidentID string, args map[
 	}
 
 	params := url.Values{}
-	params.Set("query", query)
+	// Jira Cloud (v3) uses ?query=...; Server/DC (v2) uses ?username=... on the same endpoint.
+	if config.APIVersion == "2" {
+		params.Set("username", query)
+	} else {
+		params.Set("query", query)
+	}
 	addPagingParams(params, args)
 
 	body, err := t.cachedGet(ctx, incidentID, apiPath(config.APIVersion, "/user/search"), params, UserCacheTTL, logicalName)
@@ -751,6 +765,36 @@ func priorityRef(v interface{}) interface{} {
 	return nil
 }
 
+// adfTextDoc wraps a plain string into a minimal Atlassian Document Format (ADF) document.
+// Jira Cloud REST v3 requires comment and description bodies to be ADF objects rather than
+// plain strings; this helper produces the simplest equivalent so agents can pass strings.
+func adfTextDoc(text string) map[string]interface{} {
+	return map[string]interface{}{
+		"type":    "doc",
+		"version": 1,
+		"content": []interface{}{
+			map[string]interface{}{
+				"type": "paragraph",
+				"content": []interface{}{
+					map[string]interface{}{"type": "text", "text": text},
+				},
+			},
+		},
+	}
+}
+
+// bodyForVersion returns the appropriate body shape for Jira v2 (plain string) vs v3 (ADF object).
+// On v3 a string is auto-wrapped as ADF; maps (presumed ADF or v2 raw shape) are passed through.
+func bodyForVersion(body interface{}, apiVersion string) interface{} {
+	if apiVersion != "3" {
+		return body
+	}
+	if s, ok := body.(string); ok {
+		return adfTextDoc(s)
+	}
+	return body
+}
+
 // stringSlice converts a []interface{} of strings into []string, dropping non-strings and blanks.
 func stringSlice(v interface{}) []string {
 	arr, ok := v.([]interface{})
@@ -803,7 +847,7 @@ func (t *JiraTool) AddComment(ctx context.Context, incidentID string, args map[s
 	}
 
 	path := apiPath(config.APIVersion, "/issue/"+url.PathEscape(key)+"/comment")
-	payload := map[string]interface{}{"body": bodyArg}
+	payload := map[string]interface{}{"body": bodyForVersion(bodyArg, config.APIVersion)}
 
 	respBody, err := t.doWrite(ctx, config, http.MethodPost, path, payload)
 	if err != nil {
@@ -839,7 +883,7 @@ func (t *JiraTool) TransitionIssue(ctx context.Context, incidentID string, args 
 		payload["update"] = map[string]interface{}{
 			"comment": []interface{}{
 				map[string]interface{}{
-					"add": map[string]interface{}{"body": comment},
+					"add": map[string]interface{}{"body": bodyForVersion(comment, config.APIVersion)},
 				},
 			},
 		}
@@ -891,7 +935,7 @@ func (t *JiraTool) CreateIssue(ctx context.Context, incidentID string, args map[
 		switch dv := desc.(type) {
 		case string:
 			if strings.TrimSpace(dv) != "" {
-				fields["description"] = dv
+				fields["description"] = bodyForVersion(dv, config.APIVersion)
 			}
 		case map[string]interface{}:
 			if len(dv) > 0 {

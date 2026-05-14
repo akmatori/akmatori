@@ -808,6 +808,31 @@ func TestGetIssueChangelog_Success(t *testing.T) {
 	}
 }
 
+func TestGetIssueChangelog_APIVersion2_UsesExpandFallback(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		// v2 Server/DC lacks /issue/{key}/changelog; fall back to /issue/{key}?expand=changelog
+		if r.URL.Path != "/rest/api/2/issue/FOO-1" {
+			t.Errorf("path = %q, want v2 issue path", r.URL.Path)
+		}
+		if r.URL.Query().Get("expand") != "changelog" {
+			t.Errorf("expected expand=changelog, got %q", r.URL.Query().Get("expand"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"key":"FOO-1","changelog":{"histories":[]}}`)
+	})
+	getTestConfig(tool).APIVersion = "2"
+
+	out, err := tool.GetIssueChangelog(context.Background(), "test-incident", map[string]interface{}{
+		"key": "FOO-1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "changelog") {
+		t.Errorf("expected response to contain changelog field, got %q", out)
+	}
+}
+
 func TestGetIssueChangelog_MissingKey(t *testing.T) {
 	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {})
 	_, err := tool.GetIssueChangelog(context.Background(), "test-incident", map[string]interface{}{})
@@ -881,6 +906,31 @@ func TestSearchUsers_Success(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `[]`)
 	})
+
+	_, err := tool.SearchUsers(context.Background(), "test-incident", map[string]interface{}{
+		"query": "alice",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSearchUsers_APIVersion2_UsesUsernameParam(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/2/user/search" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		// v2 Jira Server/DC ignores ?query=...; the correct parameter is ?username=...
+		if got := r.URL.Query().Get("username"); got != "alice" {
+			t.Errorf("expected username=alice, got %q (query=%q)", got, r.URL.Query().Get("query"))
+		}
+		if r.URL.Query().Get("query") != "" {
+			t.Errorf("v2 should not send ?query=, got %q", r.URL.Query().Get("query"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[]`)
+	})
+	getTestConfig(tool).APIVersion = "2"
 
 	_, err := tool.SearchUsers(context.Background(), "test-incident", map[string]interface{}{
 		"query": "alice",
@@ -1010,32 +1060,31 @@ func TestAPIRequest_UnsupportedParamType(t *testing.T) {
 	}
 }
 
-// --- Cache TTL assertions ---
+// --- Read-method smoke coverage ---
 
-func TestReadMethods_UseCorrectCacheTTLs(t *testing.T) {
+// TestReadMethods_ExecuteWithoutError is a smoke test: each read method runs to completion
+// against a generic 200/`{}` server with default args. It does NOT verify per-method cache
+// TTLs (the in-memory cache type exposes no TTL accessor); cache wiring is asserted by the
+// per-method success tests above through observed parameter and path behaviour.
+func TestReadMethods_ExecuteWithoutError(t *testing.T) {
 	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{}`)
 	})
 	ctx := context.Background()
 
-	// SearchIssues -> SearchCacheTTL (15s)
 	if _, err := tool.SearchIssues(ctx, "test-incident", map[string]interface{}{"jql": "x"}); err != nil {
 		t.Fatalf("SearchIssues: %v", err)
 	}
-	// GetIssue -> IssueCacheTTL (30s)
 	if _, err := tool.GetIssue(ctx, "test-incident", map[string]interface{}{"key": "FOO-1"}); err != nil {
 		t.Fatalf("GetIssue: %v", err)
 	}
-	// GetIssueChangelog -> ChangelogCacheTTL (60s)
 	if _, err := tool.GetIssueChangelog(ctx, "test-incident", map[string]interface{}{"key": "FOO-1"}); err != nil {
 		t.Fatalf("GetIssueChangelog: %v", err)
 	}
-	// GetProjects -> ProjectCacheTTL (120s)
 	if _, err := tool.GetProjects(ctx, "test-incident", map[string]interface{}{}); err != nil {
 		t.Fatalf("GetProjects: %v", err)
 	}
-	// SearchUsers -> UserCacheTTL (60s)
 	if _, err := tool.SearchUsers(ctx, "test-incident", map[string]interface{}{"query": "x"}); err != nil {
 		t.Fatalf("SearchUsers: %v", err)
 	}
@@ -1121,7 +1170,38 @@ func newWriteTestTool(t *testing.T, handler http.HandlerFunc) (*JiraTool, *httpt
 
 // --- AddComment tests ---
 
-func TestAddComment_Success(t *testing.T) {
+// extractADFText pulls the leaf text out of a minimal ADF doc produced by adfTextDoc.
+// Returns "" if the structure does not match the expected single-paragraph shape.
+func extractADFText(t *testing.T, doc interface{}) string {
+	t.Helper()
+	m, ok := doc.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	if m["type"] != "doc" {
+		return ""
+	}
+	content, ok := m["content"].([]interface{})
+	if !ok || len(content) == 0 {
+		return ""
+	}
+	para, ok := content[0].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	inner, ok := para["content"].([]interface{})
+	if !ok || len(inner) == 0 {
+		return ""
+	}
+	leaf, ok := inner[0].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	s, _ := leaf["text"].(string)
+	return s
+}
+
+func TestAddComment_Success_V3WrapsStringAsADF(t *testing.T) {
 	var receivedMethod, receivedPath, receivedAuth string
 	var receivedBody map[string]interface{}
 
@@ -1130,9 +1210,11 @@ func TestAddComment_Success(t *testing.T) {
 		receivedPath = r.URL.Path
 		receivedAuth = r.Header.Get("Authorization")
 		bodyBytes, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(bodyBytes, &receivedBody)
+		if err := json.Unmarshal(bodyBytes, &receivedBody); err != nil {
+			t.Fatalf("request body was not valid JSON: %v", err)
+		}
 		w.WriteHeader(http.StatusCreated)
-		fmt.Fprint(w, `{"id":"10001","body":"hello"}`)
+		fmt.Fprint(w, `{"id":"10001"}`)
 	})
 
 	out, err := tool.AddComment(context.Background(), "test-incident", map[string]interface{}{
@@ -1151,11 +1233,41 @@ func TestAddComment_Success(t *testing.T) {
 	if receivedAuth == "" {
 		t.Error("missing Authorization header")
 	}
-	if receivedBody["body"] != "hello" {
-		t.Errorf("body = %v, want 'hello'", receivedBody["body"])
+	if got := extractADFText(t, receivedBody["body"]); got != "hello" {
+		t.Errorf("expected body auto-wrapped as ADF text 'hello', got %v", receivedBody["body"])
 	}
 	if !strings.Contains(out, `"id":"10001"`) {
 		t.Errorf("expected response to contain id, got %q", out)
+	}
+}
+
+func TestAddComment_Success_V2PassesStringThrough(t *testing.T) {
+	var receivedPath string
+	var receivedBody map[string]interface{}
+
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		bodyBytes, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(bodyBytes, &receivedBody); err != nil {
+			t.Fatalf("request body was not valid JSON: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"id":"10001"}`)
+	})
+	getTestConfig(tool).APIVersion = "2"
+
+	_, err := tool.AddComment(context.Background(), "test-incident", map[string]interface{}{
+		"key":  "FOO-1",
+		"body": "hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedPath != "/rest/api/2/issue/FOO-1/comment" {
+		t.Errorf("path = %q, want v2 path", receivedPath)
+	}
+	if receivedBody["body"] != "hello" {
+		t.Errorf("v2 body should pass through verbatim as string, got %T %v", receivedBody["body"], receivedBody["body"])
 	}
 }
 
@@ -1294,8 +1406,12 @@ func TestTransitionIssue_Success(t *testing.T) {
 		t.Fatalf("expected 1 update.comment entry, got %v", update["comment"])
 	}
 	add, ok := comments[0].(map[string]interface{})["add"].(map[string]interface{})
-	if !ok || add["body"] != "deploying fix" {
-		t.Errorf("expected comment body 'deploying fix', got %v", comments[0])
+	if !ok {
+		t.Fatalf("expected comments[0].add object, got %v", comments[0])
+	}
+	// v3 (default test config) auto-wraps the comment string as ADF.
+	if got := extractADFText(t, add["body"]); got != "deploying fix" {
+		t.Errorf("expected ADF-wrapped comment body 'deploying fix', got %v", add["body"])
 	}
 
 	fields, ok := receivedBody["fields"].(map[string]interface{})
@@ -1425,8 +1541,9 @@ func TestCreateIssue_Success(t *testing.T) {
 	if fields["summary"] != "Overridden" {
 		t.Errorf("expected raw fields override, got summary = %v", fields["summary"])
 	}
-	if fields["description"] != "Details" {
-		t.Errorf("description = %v", fields["description"])
+	// v3 auto-wraps string descriptions as ADF.
+	if got := extractADFText(t, fields["description"]); got != "Details" {
+		t.Errorf("expected ADF-wrapped description 'Details', got %v", fields["description"])
 	}
 	assignee, ok := fields["assignee"].(map[string]interface{})
 	if !ok || assignee["accountId"] != "acct-123" {
@@ -1465,6 +1582,7 @@ func TestCreateIssue_APIVersion2_UsesAssigneeName(t *testing.T) {
 		"project_key": "FOO",
 		"issue_type":  "Bug",
 		"summary":     "Boom",
+		"description": "Plain text on v2",
 		"assignee":    "alice",
 	})
 	if err != nil {
@@ -1474,6 +1592,67 @@ func TestCreateIssue_APIVersion2_UsesAssigneeName(t *testing.T) {
 	assignee, ok := fields["assignee"].(map[string]interface{})
 	if !ok || assignee["name"] != "alice" {
 		t.Errorf("expected v2 assignee name=alice, got %v", fields["assignee"])
+	}
+	if fields["description"] != "Plain text on v2" {
+		t.Errorf("v2 description should pass through as string, got %T %v", fields["description"], fields["description"])
+	}
+}
+
+func TestCreateIssue_DescriptionADFPassthrough(t *testing.T) {
+	var receivedBody map[string]interface{}
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{}`)
+	})
+
+	adf := map[string]interface{}{
+		"type":    "doc",
+		"version": float64(1),
+		"content": []interface{}{},
+	}
+	_, err := tool.CreateIssue(context.Background(), "test-incident", map[string]interface{}{
+		"project_key": "FOO",
+		"issue_type":  "Bug",
+		"summary":     "Boom",
+		"description": adf,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	fields := receivedBody["fields"].(map[string]interface{})
+	desc, ok := fields["description"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected description to be ADF object passthrough, got %T", fields["description"])
+	}
+	if desc["type"] != "doc" {
+		t.Errorf("expected ADF doc, got %v", desc["type"])
+	}
+}
+
+func TestTransitionIssue_V2_PlainStringComment(t *testing.T) {
+	var receivedBody map[string]interface{}
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	getTestConfig(tool).APIVersion = "2"
+
+	_, err := tool.TransitionIssue(context.Background(), "test-incident", map[string]interface{}{
+		"key":           "FOO-1",
+		"transition_id": "31",
+		"comment":       "fixed",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	update := receivedBody["update"].(map[string]interface{})
+	comments := update["comment"].([]interface{})
+	add := comments[0].(map[string]interface{})["add"].(map[string]interface{})
+	if add["body"] != "fixed" {
+		t.Errorf("v2 comment body should be plain string, got %T %v", add["body"], add["body"])
 	}
 }
 
