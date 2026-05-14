@@ -1,7 +1,8 @@
 FROM node:22-slim
 
-# Install curl (health checks) and git (clone source)
-RUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates && \
+# Install curl (health checks), git (clone source), and python3/make/g++ for
+# node-gyp to compile tree-sitter-go from source on arches without prebuilds.
+RUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates python3 make g++ && \
     rm -rf /var/lib/apt/lists/*
 
 # Clone QMD source at pinned version, install + build.
