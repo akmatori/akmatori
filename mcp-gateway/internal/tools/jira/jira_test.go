@@ -3,12 +3,14 @@ package jira
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1036,5 +1038,607 @@ func TestReadMethods_UseCorrectCacheTTLs(t *testing.T) {
 	// SearchUsers -> UserCacheTTL (60s)
 	if _, err := tool.SearchUsers(ctx, "test-incident", map[string]interface{}{"query": "x"}); err != nil {
 		t.Fatalf("SearchUsers: %v", err)
+	}
+}
+
+// --- Write-method helper tests ---
+
+func TestAssigneeRef(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   interface{}
+		version string
+		want    interface{}
+	}{
+		{"v3 string", "alice-id", "3", map[string]interface{}{"accountId": "alice-id"}},
+		{"v2 string", "alice", "2", map[string]interface{}{"name": "alice"}},
+		{"empty string", "  ", "3", nil},
+		{"map passthrough", map[string]interface{}{"emailAddress": "a@b"}, "3", map[string]interface{}{"emailAddress": "a@b"}},
+		{"nil", nil, "3", nil},
+		{"wrong type", 42, "3", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := assigneeRef(tt.input, tt.version)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("assigneeRef = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPriorityRef(t *testing.T) {
+	tests := []struct {
+		name  string
+		input interface{}
+		want  interface{}
+	}{
+		{"string", "High", map[string]interface{}{"name": "High"}},
+		{"empty string", "   ", nil},
+		{"map passthrough", map[string]interface{}{"id": "1"}, map[string]interface{}{"id": "1"}},
+		{"nil", nil, nil},
+		{"wrong type", 10, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := priorityRef(tt.input)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("priorityRef = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStringSlice(t *testing.T) {
+	tests := []struct {
+		name  string
+		input interface{}
+		want  []string
+	}{
+		{"strings", []interface{}{"a", "b", "c"}, []string{"a", "b", "c"}},
+		{"trim and drop empty", []interface{}{" a ", "", "  "}, []string{"a"}},
+		{"non-string elements dropped", []interface{}{"a", 42, true}, []string{"a"}},
+		{"wrong type returns nil", "a,b,c", nil},
+		{"nil returns nil", nil, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stringSlice(tt.input)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("stringSlice = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// newWriteTestTool creates a JiraTool with AllowWrites=true for write-method success-path testing.
+func newWriteTestTool(t *testing.T, handler http.HandlerFunc) (*JiraTool, *httptest.Server, *atomic.Int32) {
+	t.Helper()
+	tool, server, counter := newTestTool(t, AuthTypeCloudBasic, handler)
+	getTestConfig(tool).AllowWrites = true
+	return tool, server, counter
+}
+
+// --- AddComment tests ---
+
+func TestAddComment_Success(t *testing.T) {
+	var receivedMethod, receivedPath, receivedAuth string
+	var receivedBody map[string]interface{}
+
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		receivedPath = r.URL.Path
+		receivedAuth = r.Header.Get("Authorization")
+		bodyBytes, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"id":"10001","body":"hello"}`)
+	})
+
+	out, err := tool.AddComment(context.Background(), "test-incident", map[string]interface{}{
+		"key":  "FOO-1",
+		"body": "hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedMethod != http.MethodPost {
+		t.Errorf("expected POST, got %s", receivedMethod)
+	}
+	if receivedPath != "/rest/api/3/issue/FOO-1/comment" {
+		t.Errorf("path = %q", receivedPath)
+	}
+	if receivedAuth == "" {
+		t.Error("missing Authorization header")
+	}
+	if receivedBody["body"] != "hello" {
+		t.Errorf("body = %v, want 'hello'", receivedBody["body"])
+	}
+	if !strings.Contains(out, `"id":"10001"`) {
+		t.Errorf("expected response to contain id, got %q", out)
+	}
+}
+
+func TestAddComment_ADFObjectPassthrough(t *testing.T) {
+	var receivedBody map[string]interface{}
+
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{}`)
+	})
+
+	adf := map[string]interface{}{
+		"version": float64(1),
+		"type":    "doc",
+		"content": []interface{}{},
+	}
+	_, err := tool.AddComment(context.Background(), "test-incident", map[string]interface{}{
+		"key":  "FOO-1",
+		"body": adf,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	gotBody, ok := receivedBody["body"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected body to be ADF object, got %T", receivedBody["body"])
+	}
+	if gotBody["type"] != "doc" {
+		t.Errorf("expected ADF doc, got %v", gotBody["type"])
+	}
+}
+
+func TestAddComment_WriteGateBlocks(t *testing.T) {
+	tool, _, counter := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server when writes are disabled")
+	})
+	// Default: AllowWrites=false.
+
+	_, err := tool.AddComment(context.Background(), "test-incident", map[string]interface{}{
+		"key":  "FOO-1",
+		"body": "hello",
+	})
+	if err == nil {
+		t.Fatal("expected write-gate error")
+	}
+	if !strings.Contains(err.Error(), "jira_allow_writes") {
+		t.Errorf("expected jira_allow_writes mention, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "writes disabled") {
+		t.Errorf("expected 'writes disabled', got: %v", err)
+	}
+	if counter.Load() != 0 {
+		t.Errorf("expected 0 server calls, got %d", counter.Load())
+	}
+}
+
+func TestAddComment_MissingKey(t *testing.T) {
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+	_, err := tool.AddComment(context.Background(), "test-incident", map[string]interface{}{
+		"body": "hello",
+	})
+	if err == nil || !strings.Contains(err.Error(), "key is required") {
+		t.Errorf("expected key required error, got %v", err)
+	}
+}
+
+func TestAddComment_MissingBody(t *testing.T) {
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+	cases := []map[string]interface{}{
+		{"key": "FOO-1"},                                       // missing body
+		{"key": "FOO-1", "body": ""},                           // empty string
+		{"key": "FOO-1", "body": "   "},                        // whitespace
+		{"key": "FOO-1", "body": map[string]interface{}{}},     // empty object
+		{"key": "FOO-1", "body": 42},                           // wrong type
+	}
+	for i, args := range cases {
+		_, err := tool.AddComment(context.Background(), "test-incident", args)
+		if err == nil {
+			t.Errorf("case %d: expected error", i)
+		}
+	}
+}
+
+// --- TransitionIssue tests ---
+
+func TestTransitionIssue_Success(t *testing.T) {
+	var receivedMethod, receivedPath string
+	var receivedBody map[string]interface{}
+
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		receivedPath = r.URL.Path
+		bodyBytes, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	_, err := tool.TransitionIssue(context.Background(), "test-incident", map[string]interface{}{
+		"key":           "FOO-1",
+		"transition_id": "31",
+		"comment":       "deploying fix",
+		"fields": map[string]interface{}{
+			"resolution": map[string]interface{}{"name": "Done"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedMethod != http.MethodPost {
+		t.Errorf("expected POST, got %s", receivedMethod)
+	}
+	if receivedPath != "/rest/api/3/issue/FOO-1/transitions" {
+		t.Errorf("path = %q", receivedPath)
+	}
+
+	tr, ok := receivedBody["transition"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected transition object in body")
+	}
+	if tr["id"] != "31" {
+		t.Errorf("transition.id = %v, want 31", tr["id"])
+	}
+
+	update, ok := receivedBody["update"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected update.comment in body")
+	}
+	comments, ok := update["comment"].([]interface{})
+	if !ok || len(comments) != 1 {
+		t.Fatalf("expected 1 update.comment entry, got %v", update["comment"])
+	}
+	add, ok := comments[0].(map[string]interface{})["add"].(map[string]interface{})
+	if !ok || add["body"] != "deploying fix" {
+		t.Errorf("expected comment body 'deploying fix', got %v", comments[0])
+	}
+
+	fields, ok := receivedBody["fields"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected fields in body")
+	}
+	if _, ok := fields["resolution"]; !ok {
+		t.Error("expected resolution in fields")
+	}
+}
+
+func TestTransitionIssue_NoComment(t *testing.T) {
+	var receivedBody map[string]interface{}
+
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	_, err := tool.TransitionIssue(context.Background(), "test-incident", map[string]interface{}{
+		"key":           "FOO-1",
+		"transition_id": "31",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, exists := receivedBody["update"]; exists {
+		t.Error("expected update to be omitted when no comment provided")
+	}
+	if _, exists := receivedBody["fields"]; exists {
+		t.Error("expected fields to be omitted when not provided")
+	}
+}
+
+func TestTransitionIssue_WriteGateBlocks(t *testing.T) {
+	tool, _, counter := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	_, err := tool.TransitionIssue(context.Background(), "test-incident", map[string]interface{}{
+		"key":           "FOO-1",
+		"transition_id": "31",
+	})
+	if err == nil || !strings.Contains(err.Error(), "jira_allow_writes") {
+		t.Fatalf("expected write-gate error, got %v", err)
+	}
+	if counter.Load() != 0 {
+		t.Errorf("expected 0 server calls, got %d", counter.Load())
+	}
+}
+
+func TestTransitionIssue_MissingArgs(t *testing.T) {
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	cases := []struct {
+		name string
+		args map[string]interface{}
+		want string
+	}{
+		{"no key", map[string]interface{}{"transition_id": "31"}, "key is required"},
+		{"no transition_id", map[string]interface{}{"key": "FOO-1"}, "transition_id is required"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.TransitionIssue(context.Background(), "test-incident", tt.args)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("expected %q, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
+// --- CreateIssue tests ---
+
+func TestCreateIssue_Success(t *testing.T) {
+	var receivedMethod, receivedPath string
+	var receivedBody map[string]interface{}
+
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		receivedPath = r.URL.Path
+		bodyBytes, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"id":"10002","key":"FOO-2"}`)
+	})
+
+	out, err := tool.CreateIssue(context.Background(), "test-incident", map[string]interface{}{
+		"project_key": "FOO",
+		"issue_type":  "Bug",
+		"summary":     "Boom",
+		"description": "Details",
+		"assignee":    "acct-123",
+		"priority":    "High",
+		"labels":      []interface{}{"prod", "urgent"},
+		"fields": map[string]interface{}{
+			"customfield_10001": "extra",
+			"summary":           "Overridden", // raw fields override convenience
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedMethod != http.MethodPost {
+		t.Errorf("expected POST, got %s", receivedMethod)
+	}
+	if receivedPath != "/rest/api/3/issue" {
+		t.Errorf("path = %q", receivedPath)
+	}
+
+	fields, ok := receivedBody["fields"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected fields in body")
+	}
+	project, ok := fields["project"].(map[string]interface{})
+	if !ok || project["key"] != "FOO" {
+		t.Errorf("project = %v", fields["project"])
+	}
+	issuetype, ok := fields["issuetype"].(map[string]interface{})
+	if !ok || issuetype["name"] != "Bug" {
+		t.Errorf("issuetype = %v", fields["issuetype"])
+	}
+	// raw fields.summary overrode convenience summary
+	if fields["summary"] != "Overridden" {
+		t.Errorf("expected raw fields override, got summary = %v", fields["summary"])
+	}
+	if fields["description"] != "Details" {
+		t.Errorf("description = %v", fields["description"])
+	}
+	assignee, ok := fields["assignee"].(map[string]interface{})
+	if !ok || assignee["accountId"] != "acct-123" {
+		t.Errorf("expected v3 assignee accountId, got %v", fields["assignee"])
+	}
+	priority, ok := fields["priority"].(map[string]interface{})
+	if !ok || priority["name"] != "High" {
+		t.Errorf("priority = %v", fields["priority"])
+	}
+	labels, ok := fields["labels"].([]interface{})
+	if !ok || len(labels) != 2 || labels[0] != "prod" || labels[1] != "urgent" {
+		t.Errorf("labels = %v", fields["labels"])
+	}
+	if fields["customfield_10001"] != "extra" {
+		t.Errorf("expected customfield_10001 to be set from raw fields, got %v", fields["customfield_10001"])
+	}
+	if !strings.Contains(out, "FOO-2") {
+		t.Errorf("expected FOO-2 in response, got %q", out)
+	}
+}
+
+func TestCreateIssue_APIVersion2_UsesAssigneeName(t *testing.T) {
+	var receivedBody map[string]interface{}
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/2/issue" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		bodyBytes, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{}`)
+	})
+	getTestConfig(tool).APIVersion = "2"
+
+	_, err := tool.CreateIssue(context.Background(), "test-incident", map[string]interface{}{
+		"project_key": "FOO",
+		"issue_type":  "Bug",
+		"summary":     "Boom",
+		"assignee":    "alice",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	fields := receivedBody["fields"].(map[string]interface{})
+	assignee, ok := fields["assignee"].(map[string]interface{})
+	if !ok || assignee["name"] != "alice" {
+		t.Errorf("expected v2 assignee name=alice, got %v", fields["assignee"])
+	}
+}
+
+func TestCreateIssue_WriteGateBlocks(t *testing.T) {
+	tool, _, counter := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	_, err := tool.CreateIssue(context.Background(), "test-incident", map[string]interface{}{
+		"project_key": "FOO",
+		"issue_type":  "Bug",
+		"summary":     "Boom",
+	})
+	if err == nil || !strings.Contains(err.Error(), "jira_allow_writes") {
+		t.Fatalf("expected write-gate error, got %v", err)
+	}
+	if counter.Load() != 0 {
+		t.Errorf("expected 0 server calls, got %d", counter.Load())
+	}
+}
+
+func TestCreateIssue_MissingArgs(t *testing.T) {
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	cases := []struct {
+		name string
+		args map[string]interface{}
+		want string
+	}{
+		{"no project_key", map[string]interface{}{"issue_type": "Bug", "summary": "x"}, "project_key is required"},
+		{"no issue_type", map[string]interface{}{"project_key": "FOO", "summary": "x"}, "issue_type is required"},
+		{"no summary", map[string]interface{}{"project_key": "FOO", "issue_type": "Bug"}, "summary is required"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.CreateIssue(context.Background(), "test-incident", tt.args)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("expected %q, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
+// --- UpdateIssue tests ---
+
+func TestUpdateIssue_Success(t *testing.T) {
+	var receivedMethod, receivedPath string
+	var receivedBody map[string]interface{}
+
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		receivedPath = r.URL.Path
+		bodyBytes, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(bodyBytes, &receivedBody)
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	_, err := tool.UpdateIssue(context.Background(), "test-incident", map[string]interface{}{
+		"key": "FOO-1",
+		"fields": map[string]interface{}{
+			"summary": "New title",
+			"labels":  []interface{}{"updated"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedMethod != http.MethodPut {
+		t.Errorf("expected PUT, got %s", receivedMethod)
+	}
+	if receivedPath != "/rest/api/3/issue/FOO-1" {
+		t.Errorf("path = %q", receivedPath)
+	}
+	fields, ok := receivedBody["fields"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected fields in body")
+	}
+	if fields["summary"] != "New title" {
+		t.Errorf("summary = %v", fields["summary"])
+	}
+}
+
+func TestUpdateIssue_WriteGateBlocks(t *testing.T) {
+	tool, _, counter := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	_, err := tool.UpdateIssue(context.Background(), "test-incident", map[string]interface{}{
+		"key":    "FOO-1",
+		"fields": map[string]interface{}{"summary": "x"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "jira_allow_writes") {
+		t.Fatalf("expected write-gate error, got %v", err)
+	}
+	if counter.Load() != 0 {
+		t.Errorf("expected 0 server calls, got %d", counter.Load())
+	}
+}
+
+func TestUpdateIssue_MissingArgs(t *testing.T) {
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	cases := []struct {
+		name string
+		args map[string]interface{}
+		want string
+	}{
+		{"no key", map[string]interface{}{"fields": map[string]interface{}{"summary": "x"}}, "key is required"},
+		{"no fields", map[string]interface{}{"key": "FOO-1"}, "fields is required"},
+		{"empty fields", map[string]interface{}{"key": "FOO-1", "fields": map[string]interface{}{}}, "at least one field"},
+		{"wrong fields type", map[string]interface{}{"key": "FOO-1", "fields": "summary=foo"}, "fields is required"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.UpdateIssue(context.Background(), "test-incident", tt.args)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("expected %q, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestUpdateIssue_HTTPError(t *testing.T) {
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"errors":{"summary":"too long"}}`)
+	})
+
+	_, err := tool.UpdateIssue(context.Background(), "test-incident", map[string]interface{}{
+		"key":    "FOO-1",
+		"fields": map[string]interface{}{"summary": "x"},
+	})
+	if err == nil {
+		t.Fatal("expected HTTP error")
+	}
+	if !strings.Contains(err.Error(), "HTTP error 400") {
+		t.Errorf("expected 400 error, got: %v", err)
+	}
+}
+
+// --- Write methods are not cached ---
+
+func TestWriteMethods_NotCached(t *testing.T) {
+	callCount := &atomic.Int32{}
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		callCount.Add(1)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{}`)
+	})
+
+	args := map[string]interface{}{
+		"key":  "FOO-1",
+		"body": "comment",
+	}
+
+	for i := 0; i < 3; i++ {
+		if _, err := tool.AddComment(context.Background(), "test-incident", args); err != nil {
+			t.Fatalf("AddComment %d: %v", i, err)
+		}
+	}
+	if callCount.Load() != 3 {
+		t.Errorf("expected 3 server calls (writes never cached), got %d", callCount.Load())
 	}
 }

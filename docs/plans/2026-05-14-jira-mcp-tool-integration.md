@@ -130,12 +130,12 @@ Files:
 Files:
 - Modify: `mcp-gateway/internal/tools/jira/jira.go`
 
-- [ ] `AddComment()` — `key` (required), `body` (required); `requireWrites` check first; not cached
-- [ ] `TransitionIssue()` — `key` (required), `transition_id` (required), optional `comment`, optional `fields`; `requireWrites`; not cached
-- [ ] `CreateIssue()` — `project_key` (required), `issue_type` (required), `summary` (required), optional `description`, `assignee`, `priority`, `labels`, raw `fields` object passthrough; `requireWrites`; not cached
-- [ ] `UpdateIssue()` — `key` (required), `fields` (required object); `requireWrites`; not cached
-- [ ] Tests: each method validates required args, write-gate error when `AllowWrites=false`, success case posts correct JSON body + auth header
-- [ ] Run `make test-mcp` — must pass before Task 5
+- [x] `AddComment()` — `key` (required), `body` (required); `requireWrites` check first; not cached
+- [x] `TransitionIssue()` — `key` (required), `transition_id` (required), optional `comment`, optional `fields`; `requireWrites`; not cached
+- [x] `CreateIssue()` — `project_key` (required), `issue_type` (required), `summary` (required), optional `description`, `assignee`, `priority`, `labels`, raw `fields` object passthrough; `requireWrites`; not cached
+- [x] `UpdateIssue()` — `key` (required), `fields` (required object); `requireWrites`; not cached
+- [x] Tests: each method validates required args, write-gate error when `AllowWrites=false`, success case posts correct JSON body + auth header
+- [x] Run `make test-mcp` — must pass before Task 5
 
 ### Task 5: Registry integration
 

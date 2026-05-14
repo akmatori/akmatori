@@ -1,6 +1,7 @@
 package jira
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -695,4 +696,264 @@ func (t *JiraTool) APIRequest(ctx context.Context, incidentID string, args map[s
 		return "", err
 	}
 	return string(body), nil
+}
+
+// doWrite performs a write (non-GET) request to Jira after checking the write gate.
+// Returns the raw response bytes. Write paths are never cached.
+func (t *JiraTool) doWrite(ctx context.Context, config *JiraConfig, method, path string, payload interface{}) ([]byte, error) {
+	if err := requireWrites(config); err != nil {
+		return nil, err
+	}
+
+	var reader io.Reader
+	if payload != nil {
+		bodyJSON, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request body: %w", err)
+		}
+		reader = bytes.NewReader(bodyJSON)
+	}
+
+	return t.doRequest(ctx, config, method, path, nil, reader)
+}
+
+// assigneeRef coerces an assignee arg into the JSON shape Jira expects.
+// String values become {"accountId": value} for v3 / {"name": value} for v2.
+// Map values are passed through unchanged so callers can supply any custom shape.
+func assigneeRef(v interface{}, apiVersion string) interface{} {
+	switch sv := v.(type) {
+	case string:
+		if strings.TrimSpace(sv) == "" {
+			return nil
+		}
+		if apiVersion == "2" {
+			return map[string]interface{}{"name": sv}
+		}
+		return map[string]interface{}{"accountId": sv}
+	case map[string]interface{}:
+		return sv
+	}
+	return nil
+}
+
+// priorityRef coerces a priority arg into the JSON shape Jira expects.
+// String values become {"name": value}; map values are passed through unchanged.
+func priorityRef(v interface{}) interface{} {
+	switch sv := v.(type) {
+	case string:
+		if strings.TrimSpace(sv) == "" {
+			return nil
+		}
+		return map[string]interface{}{"name": sv}
+	case map[string]interface{}:
+		return sv
+	}
+	return nil
+}
+
+// stringSlice converts a []interface{} of strings into []string, dropping non-strings and blanks.
+func stringSlice(v interface{}) []string {
+	arr, ok := v.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, elem := range arr {
+		if s, ok := elem.(string); ok {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
+// AddComment posts a comment on an issue. Write operation, gated by jira_allow_writes; not cached.
+// `body` may be a string (passed through verbatim — works for v2; v3 callers should pass an ADF object)
+// or a map (passed through unchanged for ADF on v3).
+func (t *JiraTool) AddComment(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	key, ok := args["key"].(string)
+	if !ok || strings.TrimSpace(key) == "" {
+		return "", fmt.Errorf("key is required%s", validation.SuggestParam("key", args))
+	}
+
+	bodyArg, hasBody := args["body"]
+	if !hasBody {
+		return "", fmt.Errorf("body is required%s", validation.SuggestParam("body", args))
+	}
+	switch bv := bodyArg.(type) {
+	case string:
+		if strings.TrimSpace(bv) == "" {
+			return "", fmt.Errorf("body is required (empty string)")
+		}
+	case map[string]interface{}:
+		if len(bv) == 0 {
+			return "", fmt.Errorf("body is required (empty object)")
+		}
+	default:
+		return "", fmt.Errorf("body must be a string or object (ADF), got %T", bodyArg)
+	}
+
+	config, err := t.getConfig(ctx, incidentID, logicalName)
+	if err != nil {
+		return "", err
+	}
+
+	path := apiPath(config.APIVersion, "/issue/"+url.PathEscape(key)+"/comment")
+	payload := map[string]interface{}{"body": bodyArg}
+
+	respBody, err := t.doWrite(ctx, config, http.MethodPost, path, payload)
+	if err != nil {
+		return "", err
+	}
+	return string(respBody), nil
+}
+
+// TransitionIssue moves an issue through its workflow. Write operation, gated by jira_allow_writes; not cached.
+func (t *JiraTool) TransitionIssue(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	key, ok := args["key"].(string)
+	if !ok || strings.TrimSpace(key) == "" {
+		return "", fmt.Errorf("key is required%s", validation.SuggestParam("key", args))
+	}
+
+	transitionID, ok := args["transition_id"].(string)
+	if !ok || strings.TrimSpace(transitionID) == "" {
+		return "", fmt.Errorf("transition_id is required%s", validation.SuggestParam("transition_id", args))
+	}
+
+	config, err := t.getConfig(ctx, incidentID, logicalName)
+	if err != nil {
+		return "", err
+	}
+
+	payload := map[string]interface{}{
+		"transition": map[string]interface{}{"id": transitionID},
+	}
+
+	if comment, ok := args["comment"].(string); ok && strings.TrimSpace(comment) != "" {
+		payload["update"] = map[string]interface{}{
+			"comment": []interface{}{
+				map[string]interface{}{
+					"add": map[string]interface{}{"body": comment},
+				},
+			},
+		}
+	}
+
+	if fields, ok := args["fields"].(map[string]interface{}); ok && len(fields) > 0 {
+		payload["fields"] = fields
+	}
+
+	path := apiPath(config.APIVersion, "/issue/"+url.PathEscape(key)+"/transitions")
+	respBody, err := t.doWrite(ctx, config, http.MethodPost, path, payload)
+	if err != nil {
+		return "", err
+	}
+	return string(respBody), nil
+}
+
+// CreateIssue creates a new issue. Write operation, gated by jira_allow_writes; not cached.
+// Convenience params (summary, description, assignee, priority, labels) are merged with the
+// optional raw `fields` object — the raw `fields` keys win on conflict so callers can override.
+func (t *JiraTool) CreateIssue(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	projectKey, ok := args["project_key"].(string)
+	if !ok || strings.TrimSpace(projectKey) == "" {
+		return "", fmt.Errorf("project_key is required%s", validation.SuggestParam("project_key", args))
+	}
+	issueType, ok := args["issue_type"].(string)
+	if !ok || strings.TrimSpace(issueType) == "" {
+		return "", fmt.Errorf("issue_type is required%s", validation.SuggestParam("issue_type", args))
+	}
+	summary, ok := args["summary"].(string)
+	if !ok || strings.TrimSpace(summary) == "" {
+		return "", fmt.Errorf("summary is required%s", validation.SuggestParam("summary", args))
+	}
+
+	config, err := t.getConfig(ctx, incidentID, logicalName)
+	if err != nil {
+		return "", err
+	}
+
+	fields := map[string]interface{}{
+		"project":   map[string]interface{}{"key": projectKey},
+		"issuetype": map[string]interface{}{"name": issueType},
+		"summary":   summary,
+	}
+
+	if desc, ok := args["description"]; ok {
+		switch dv := desc.(type) {
+		case string:
+			if strings.TrimSpace(dv) != "" {
+				fields["description"] = dv
+			}
+		case map[string]interface{}:
+			if len(dv) > 0 {
+				fields["description"] = dv
+			}
+		}
+	}
+	if ref := assigneeRef(args["assignee"], config.APIVersion); ref != nil {
+		fields["assignee"] = ref
+	}
+	if ref := priorityRef(args["priority"]); ref != nil {
+		fields["priority"] = ref
+	}
+	if labels := stringSlice(args["labels"]); len(labels) > 0 {
+		fields["labels"] = labels
+	}
+
+	if raw, ok := args["fields"].(map[string]interface{}); ok {
+		for k, v := range raw {
+			fields[k] = v
+		}
+	}
+
+	payload := map[string]interface{}{"fields": fields}
+	path := apiPath(config.APIVersion, "/issue")
+
+	respBody, err := t.doWrite(ctx, config, http.MethodPost, path, payload)
+	if err != nil {
+		return "", err
+	}
+	return string(respBody), nil
+}
+
+// UpdateIssue updates fields on an existing issue. Write operation, gated by jira_allow_writes; not cached.
+// The `fields` arg is required and is forwarded verbatim as the request body's `fields` object.
+func (t *JiraTool) UpdateIssue(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
+	logicalName := extractLogicalName(args)
+
+	key, ok := args["key"].(string)
+	if !ok || strings.TrimSpace(key) == "" {
+		return "", fmt.Errorf("key is required%s", validation.SuggestParam("key", args))
+	}
+
+	fields, ok := args["fields"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("fields is required and must be an object%s", validation.SuggestParam("fields", args))
+	}
+	if len(fields) == 0 {
+		return "", fmt.Errorf("fields must contain at least one field to update")
+	}
+
+	config, err := t.getConfig(ctx, incidentID, logicalName)
+	if err != nil {
+		return "", err
+	}
+
+	payload := map[string]interface{}{"fields": fields}
+	path := apiPath(config.APIVersion, "/issue/"+url.PathEscape(key))
+
+	respBody, err := t.doWrite(ctx, config, http.MethodPut, path, payload)
+	if err != nil {
+		return "", err
+	}
+	return string(respBody), nil
 }
