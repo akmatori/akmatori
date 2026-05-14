@@ -26,7 +26,9 @@ Akmatori is an AI-powered AIOps agent that integrates with monitoring systems an
 | **OpenRouter** | Access to 100+ models |
 | **Custom/On-Prem** | GLM, Kimi, Minimax, Mistral, LLaMA, etc. |
 
-## Quick Start
+## Install (end users)
+
+The recommended install flow pulls pre-built multi-arch images from GHCR — no `git clone`, no local build. QMD's ~940 MB of embedding/reranker GGUFs are baked into the published image, so you fetch them once with `docker compose pull` instead of downloading them during a build.
 
 ### Prerequisites
 
@@ -34,41 +36,108 @@ Akmatori is an AI-powered AIOps agent that integrates with monitoring systems an
 - LLM API key (OpenAI, Anthropic, Google, or OpenRouter)
 - Slack App (optional, for Slack integration)
 
-### Installation
+### Install
 
-1. Clone the repository:
+1. Download the release assets (compose file + nginx config):
    ```bash
-   git clone https://github.com/akmatori/akmatori.git
-   cd akmatori
+   mkdir akmatori && cd akmatori
+   curl -fsSLO https://github.com/akmatori/akmatori/releases/latest/download/docker-compose.yml
+   mkdir proxy && curl -fsSL -o proxy/nginx.conf \
+     https://github.com/akmatori/akmatori/releases/latest/download/nginx.conf
    ```
 
-2. Create and configure environment file:
+2. (Optional) Create an `.env` to pin a specific version or configure a corporate proxy:
    ```bash
-   cp .env.example .env
-   ```
-
-   Edit `.env` and set secure passwords:
-   ```bash
+   cat > .env <<'EOF'
    ADMIN_PASSWORD=your-secure-password
    POSTGRES_PASSWORD=your-db-password
+   # AKMATORI_VERSION=1.2.0
+   # HTTP_PROXY=http://proxy.corp:3128
+   # HTTPS_PROXY=http://proxy.corp:3128
+   EOF
    ```
 
-3. Start the services (first run builds containers, takes 3-5 minutes):
+   `AKMATORI_VERSION` defaults to `latest`. See the "Behind an HTTP proxy" section below for proxy details.
+
+3. Pull and start:
    ```bash
-   docker-compose up -d
+   docker compose pull
+   docker compose up -d
    ```
 
 4. Verify all containers are running:
    ```bash
-   docker-compose ps
+   docker compose ps
    ```
-   All 5 services should show "Up" status.
+   All 5 services should show "Up" status. QMD's first cold start can take a few minutes while it loads the baked-in models.
 
 5. Access the web dashboard at `http://localhost:8080`
    - **Username:** `admin`
    - **Password:** the `ADMIN_PASSWORD` you set in `.env`
 
 6. Configure your LLM provider in **Settings → LLM Provider**
+
+### Upgrade
+
+Bump `AKMATORI_VERSION` in `.env` (or leave it unset to track `latest`) and:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+## Behind an HTTP proxy
+
+There are two independent concerns: pulling images through the proxy (a Docker daemon setting) and the running services egressing through the proxy at runtime (a compose `environment:` setting). Both must be configured or you'll get stuck partway through.
+
+### A. Pulling images through the proxy
+
+This is a Docker daemon-level setting — compose can't fix it from inside the file.
+
+**Linux + systemd:**
+
+```ini
+# /etc/systemd/system/docker.service.d/http-proxy.conf
+[Service]
+Environment="HTTP_PROXY=http://proxy.corp:3128"
+Environment="HTTPS_PROXY=http://proxy.corp:3128"
+Environment="NO_PROXY=localhost,127.0.0.1,.svc,.local"
+```
+
+Then:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+```
+
+**Docker Desktop (macOS / Windows):** Settings → Resources → Proxies.
+
+**Allowlist note:** your corporate proxy allowlist must include `pkg-containers.githubusercontent.com` alongside `ghcr.io`. GHCR stores image manifests on `ghcr.io` and the actual blob layers on `pkg-containers.githubusercontent.com` — the most common GHCR-through-corporate-proxy footgun is "manifest pulls but blob downloads hang."
+
+### B. Runtime egress through the proxy
+
+Set `HTTP_PROXY` / `HTTPS_PROXY` once in your `.env` (or in the shell that runs `docker compose up`); the `api`, `mcp-gateway`, `agent`, and `qmd` containers inherit them via the compose file. The default `NO_PROXY` bypasses internal service-to-service traffic (api↔postgres, agent↔gateway, gateway↔qmd, etc.) so internal hops never hit the corporate proxy.
+
+```dotenv
+# .env
+HTTP_PROXY=http://proxy.corp:3128
+HTTPS_PROXY=http://proxy.corp:3128
+# NO_PROXY defaults to the internal service names; override only if you need to add hosts.
+```
+
+## Maintainer / development
+
+If you're working on Akmatori itself and want to build from source instead of pulling published images, use the dev override which restores the per-service `build:` blocks:
+
+```bash
+git clone https://github.com/akmatori/akmatori.git
+cd akmatori
+cp .env.example .env   # edit ADMIN_PASSWORD / POSTGRES_PASSWORD
+make dev               # docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+`make dev` is the canonical maintainer entry point. The base `docker-compose.yml` alone has only `image:` references (the end-user pull flow); the `docker-compose.dev.yml` override adds the `build:` blocks back. Without the `-f docker-compose.dev.yml` argument, `docker compose build` is a no-op against a release install.
 
 ## Architecture
 

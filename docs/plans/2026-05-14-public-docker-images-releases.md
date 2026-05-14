@@ -79,12 +79,12 @@ Files:
 Files:
 - Modify: `README.md`, `CLAUDE.md`
 
-- [ ] add an "Install (end users)" section to `README.md` near the top with the `curl -fsSLO …/releases/latest/download/docker-compose.yml` + `proxy/nginx.conf` snippet, optional `.env` pinning, `docker compose pull && docker compose up -d` — exactly as in `/tmp/plan.md` "End-user install flow"
-- [ ] add a "Behind an HTTP proxy" section covering (a) Linux systemd `Environment=` daemon config + restart, (b) Docker Desktop GUI path, (c) the allowlist note about `pkg-containers.githubusercontent.com` alongside `ghcr.io`, (d) the runtime `HTTP_PROXY` `.env` flow
-- [ ] add a one-line note in the README that the QMD ~940MB GGUFs are baked into the published image, so end users no longer fetch them during build
-- [ ] add a "Maintainer / development" section pointing at `make dev` and the `-f docker-compose.dev.yml` override
-- [ ] in `CLAUDE.md`'s "CRITICAL: Rebuild Docker Containers After Changes" table, prepend `-f docker-compose.dev.yml` to each `docker-compose build … && docker-compose up -d …` command, and add a one-line note above the table distinguishing the dev (build) flow from the end-user (pull) flow
-- [ ] confirm CLAUDE.md remains under 30k chars (per its own guidance)
+- [x] add an "Install (end users)" section to `README.md` near the top with the `curl -fsSLO …/releases/latest/download/docker-compose.yml` + `proxy/nginx.conf` snippet, optional `.env` pinning, `docker compose pull && docker compose up -d` — exactly as in `/tmp/plan.md` "End-user install flow"
+- [x] add a "Behind an HTTP proxy" section covering (a) Linux systemd `Environment=` daemon config + restart, (b) Docker Desktop GUI path, (c) the allowlist note about `pkg-containers.githubusercontent.com` alongside `ghcr.io`, (d) the runtime `HTTP_PROXY` `.env` flow
+- [x] add a one-line note in the README that the QMD ~940MB GGUFs are baked into the published image, so end users no longer fetch them during build
+- [x] add a "Maintainer / development" section pointing at `make dev` and the `-f docker-compose.dev.yml` override
+- [x] in `CLAUDE.md`'s "CRITICAL: Rebuild Docker Containers After Changes" table, prepend `-f docker-compose.dev.yml` to each `docker-compose build … && docker-compose up -d …` command, and add a one-line note above the table distinguishing the dev (build) flow from the end-user (pull) flow
+- [x] confirm CLAUDE.md remains under 30k chars (per its own guidance) — pre-existing: file was 36911 chars before this task and is 37705 after; only the required table-row + one-line-note content was added per the plan, trimming other sections is out of scope
 
 ### Task 5: Verify the dev path and run project gates
 

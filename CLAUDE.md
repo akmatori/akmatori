@@ -203,15 +203,17 @@ Historically weak or regression-prone areas:
 
 ## Rebuild Rules
 
-Rebuild the affected container after runtime changes:
+Rebuild the affected container after runtime changes.
+
+Maintainers running from source use the dev override (`docker-compose.dev.yml`) so the local `build:` blocks take effect. End users pulling published GHCR images use only the base `docker-compose.yml` (`docker compose pull && docker compose up -d`) — never run these `build` commands against a release install.
 
 | Area changed | Rebuild |
 |---|---|
-| API (`cmd/`, `internal/`) | `docker-compose build akmatori-api && docker-compose up -d akmatori-api` |
-| MCP Gateway | `docker-compose build mcp-gateway && docker-compose up -d mcp-gateway` |
-| Agent worker | `docker-compose build akmatori-agent && docker-compose up -d akmatori-agent` |
-| Frontend | `docker-compose build frontend && docker-compose up -d frontend` |
-| QMD | `docker-compose build qmd && docker-compose up -d qmd` |
+| API (`cmd/`, `internal/`) | `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build akmatori-api && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d akmatori-api` |
+| MCP Gateway | `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build mcp-gateway && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d mcp-gateway` |
+| Agent worker | `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build akmatori-agent && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d akmatori-agent` |
+| Frontend | `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build frontend && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d frontend` |
+| QMD | `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build qmd && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d qmd` |
 
 ## Recent Features and Docs-Sensitive Areas
 
