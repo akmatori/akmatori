@@ -15,6 +15,11 @@
 # - ADMIN_PASSWORD is set via the web UI on first access (setup wizard)
 # - JWT_SECRET is auto-generated and stored in the database
 
+# Pin the Compose project name so resource names like `akmatori_qmd_cache` are
+# stable regardless of the install directory name (Compose v2 otherwise derives
+# the project name from the working directory).
+name: akmatori
+
 services:
   # Init service to create data directories with correct permissions
   # Also auto-generates a postgres password if one doesn't exist yet

@@ -90,6 +90,14 @@ jobs:
           outputs: type=image,name=${{ env.IMAGE_NAMESPACE }}/${{ matrix.service }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.service }}-${{ matrix.arch }}
           cache-to: type=gha,scope=${{ matrix.service }}-${{ matrix.arch }},mode=max
+          # Disable provenance/SBOM for the per-arch push-by-digest build. The
+          # matrix splits architectures across runners, so per-arch attestations
+          # would record different builder identities; merging them under one
+          # manifest list also surfaces phantom `unknown/unknown` platform
+          # entries to older Docker clients. Per Docker's multi-platform CI
+          # guide, attestations must be added separately if desired.
+          provenance: false
+          sbom: false
 
       - name: Export digest
         run: |
@@ -104,6 +112,9 @@ jobs:
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
+          # Allow "Re-run failed jobs" to replace an existing artifact from a
+          # prior attempt instead of erroring out on the duplicate name.
+          overwrite: true
 
   manifest:
     name: Manifest ${{ matrix.service }}
