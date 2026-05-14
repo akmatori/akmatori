@@ -63,7 +63,7 @@ function createMockSession() {
 let mockSession = createMockSession();
 let createAgentSessionCalls: any[] = [];
 
-vi.mock("@mariozechner/pi-coding-agent", () => {
+vi.mock("@earendil-works/pi-coding-agent", () => {
   return {
     createAgentSession: vi.fn(async (opts: any) => {
       createAgentSessionCalls.push(opts);
@@ -129,7 +129,7 @@ vi.mock("@mariozechner/pi-coding-agent", () => {
   };
 });
 
-vi.mock("@mariozechner/pi-ai", () => {
+vi.mock("@earendil-works/pi-ai", () => {
   return {
     getModel: vi.fn((provider: string, modelId: string) => {
       // Return a mock model for known combinations
@@ -349,7 +349,7 @@ describe("AgentRunner", () => {
     });
 
     it("should use incident ID as deterministic session ID for new sessions", async () => {
-      const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+      const { SessionManager } = await import("@earendil-works/pi-coding-agent");
       const params = makeExecuteParams({ incidentId: "inc-uuid-abc-123" });
       await runner.execute(params);
 
@@ -364,7 +364,7 @@ describe("AgentRunner", () => {
     });
 
     it("should pass sessionDir to SessionManager.create for workspace isolation", async () => {
-      const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+      const { SessionManager } = await import("@earendil-works/pi-coding-agent");
       const params = makeExecuteParams({ workDir: "/tmp/workspace" });
       await runner.execute(params);
 
@@ -376,7 +376,7 @@ describe("AgentRunner", () => {
     });
 
     it("should NOT call newSession with deterministic ID for resume", async () => {
-      const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+      const { SessionManager } = await import("@earendil-works/pi-coding-agent");
       const params = makeResumeParams({ incidentId: "inc-resume-456" });
       await runner.resume(params);
 
@@ -391,7 +391,7 @@ describe("AgentRunner", () => {
     });
 
     it("should pass sessionDir to SessionManager.continueRecent for resume", async () => {
-      const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+      const { SessionManager } = await import("@earendil-works/pi-coding-agent");
       const params = makeResumeParams({ workDir: "/tmp/workspace" });
       await runner.resume(params);
 
@@ -481,7 +481,7 @@ describe("AgentRunner", () => {
     });
 
     it("should set runtime API key on AuthStorage", async () => {
-      const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
+      const { AuthStorage } = await import("@earendil-works/pi-coding-agent");
       const params = makeExecuteParams({
         llmSettings: makeLLMSettings({
           provider: "anthropic",
@@ -499,7 +499,7 @@ describe("AgentRunner", () => {
     });
 
     it("should create ModelRegistry via inMemory() with AuthStorage and pass to session (getApiKeyAndHeaders not called directly)", async () => {
-      const { AuthStorage, ModelRegistry } = await import("@mariozechner/pi-coding-agent");
+      const { AuthStorage, ModelRegistry } = await import("@earendil-works/pi-coding-agent");
       const params = makeExecuteParams({
         llmSettings: makeLLMSettings({
           provider: "openai",
@@ -599,7 +599,7 @@ describe("AgentRunner", () => {
     });
 
     it("should forward hardcoded provider retry settings to SettingsManager", async () => {
-      const { SettingsManager } = await import("@mariozechner/pi-coding-agent");
+      const { SettingsManager } = await import("@earendil-works/pi-coding-agent");
       await runner.execute(makeExecuteParams());
 
       expect((SettingsManager as any).inMemory).toHaveBeenCalledWith({
@@ -1020,7 +1020,7 @@ describe("AgentRunner", () => {
       fs.writeFileSync(fakeSessionFile, '{"type":"header","id":"h1"}\n{"type":"message","role":"user","content":"test"}\n');
 
       // Make SessionManager.create return a mock with getSessionFile pointing to fake file
-      const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+      const { SessionManager } = await import("@earendil-works/pi-coding-agent");
       (SessionManager.create as any).mockReturnValueOnce({
         newSession: vi.fn(),
         getSessionId: vi.fn(() => "mock-session-123"),
@@ -1049,7 +1049,7 @@ describe("AgentRunner", () => {
       const fakeSessionFile = path.join(tmpDir, "session.jsonl");
       fs.writeFileSync(fakeSessionFile, '{"type":"header","id":"h1"}\n');
 
-      const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+      const { SessionManager } = await import("@earendil-works/pi-coding-agent");
       (SessionManager.create as any).mockReturnValueOnce({
         newSession: vi.fn(),
         getSessionId: vi.fn(() => "mock-session-123"),
@@ -1076,7 +1076,7 @@ describe("AgentRunner", () => {
     });
 
     it("should not fail execution when session export fails", async () => {
-      const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+      const { SessionManager } = await import("@earendil-works/pi-coding-agent");
       (SessionManager.create as any).mockReturnValueOnce({
         newSession: vi.fn(),
         getSessionId: vi.fn(() => "mock-session-123"),
@@ -1115,7 +1115,7 @@ describe("AgentRunner", () => {
       let capturedDispatcher: string | undefined;
 
       // Capture env vars and dispatcher during session creation
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       (createAgentSession as any).mockImplementationOnce(async () => {
         capturedHttpProxy = process.env.HTTP_PROXY;
         capturedHttpsProxy = process.env.HTTPS_PROXY;
@@ -1146,7 +1146,7 @@ describe("AgentRunner", () => {
       let capturedHttpProxy: string | undefined;
       let capturedDispatcher: string | undefined;
 
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       (createAgentSession as any).mockImplementationOnce(async () => {
         capturedHttpProxy = process.env.HTTP_PROXY;
         const undici = await import("undici");
@@ -1168,7 +1168,7 @@ describe("AgentRunner", () => {
       let capturedHttpProxy: string | undefined;
       let capturedDispatcher: string | undefined;
 
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       (createAgentSession as any).mockImplementationOnce(async () => {
         capturedHttpProxy = process.env.HTTP_PROXY;
         const undici = await import("undici");
@@ -1205,7 +1205,7 @@ describe("AgentRunner", () => {
       process.env.no_proxy = "";
 
       const captured: Record<string, string | undefined> = {};
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       (createAgentSession as any).mockImplementationOnce(async () => {
         captured.HTTP_PROXY = process.env.HTTP_PROXY;
         captured.HTTPS_PROXY = process.env.HTTPS_PROXY;

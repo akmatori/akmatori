@@ -49,7 +49,7 @@ function createMockSession() {
 
 let mockSession = createMockSession();
 
-vi.mock("@mariozechner/pi-coding-agent", () => ({
+vi.mock("@earendil-works/pi-coding-agent", () => ({
   createAgentSession: vi.fn(async () => ({
     session: mockSession,
   })),
@@ -106,7 +106,7 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
 
 const completeMock = vi.fn();
 
-vi.mock("@mariozechner/pi-ai", () => ({
+vi.mock("@earendil-works/pi-ai", () => ({
   getModel: vi.fn(() => ({
     id: "o4-mini",
     name: "o4-mini",
@@ -430,7 +430,7 @@ describe("Orchestrator", () => {
     });
 
     it("should use workspace dir with incident ID", async () => {
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
 
       await orchestrator.start();
       await waitForMessage((m) => m.type === "status");
@@ -565,7 +565,7 @@ describe("Orchestrator", () => {
       // and tool-call traffic. The launch chain queues the second behind the
       // first's "registered" signal so abortInFlightSession can target the
       // first run's session instead of seeing an empty activeSessions.
-      const piMono = await import("@mariozechner/pi-coding-agent");
+      const piMono = await import("@earendil-works/pi-coding-agent");
       const createAgentSessionMock = piMono.createAgentSession as ReturnType<
         typeof vi.fn
       >;
@@ -648,7 +648,7 @@ describe("Orchestrator", () => {
     });
 
     it("should pass skillsOverride when enabled_skills is provided", async () => {
-      const { DefaultResourceLoader } = await import("@mariozechner/pi-coding-agent");
+      const { DefaultResourceLoader } = await import("@earendil-works/pi-coding-agent");
 
       await orchestrator.start();
       await waitForMessage((m) => m.type === "status");
@@ -683,7 +683,7 @@ describe("Orchestrator", () => {
     });
 
     it("should not set skillsOverride when enabled_skills is absent", async () => {
-      const { DefaultResourceLoader } = await import("@mariozechner/pi-coding-agent");
+      const { DefaultResourceLoader } = await import("@earendil-works/pi-coding-agent");
 
       await orchestrator.start();
       await waitForMessage((m) => m.type === "status");
@@ -850,7 +850,7 @@ describe("Orchestrator", () => {
     });
 
     it("should use cached proxy config for new incidents when not provided in message", async () => {
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
 
       await orchestrator.start();
       await waitForMessage((m) => m.type === "status");
@@ -913,7 +913,7 @@ describe("Orchestrator", () => {
 
   describe("error propagation", () => {
     it("should send error when runner throws", async () => {
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
       (createAgentSession as any).mockRejectedValueOnce(new Error("Auth failed"));
 
       await orchestrator.start();
@@ -963,7 +963,7 @@ describe("Orchestrator", () => {
 
   describe("LLM settings extraction", () => {
     it("should map thinking_level to thinking_level", async () => {
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
 
       await orchestrator.start();
       await waitForMessage((m) => m.type === "status");
@@ -987,8 +987,8 @@ describe("Orchestrator", () => {
     });
 
     it("should default model to gpt-5.5 when not specified", async () => {
-      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
-      const { getModel } = await import("@mariozechner/pi-ai");
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
+      const { getModel } = await import("@earendil-works/pi-ai");
 
       await orchestrator.start();
       await waitForMessage((m) => m.type === "status");

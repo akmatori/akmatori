@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const completeMock = vi.fn();
 
-vi.mock("@mariozechner/pi-ai", () => ({
+vi.mock("@earendil-works/pi-ai", () => ({
   complete: (...args: unknown[]) => completeMock(...args),
   getModel: vi.fn(() => undefined),
 }));

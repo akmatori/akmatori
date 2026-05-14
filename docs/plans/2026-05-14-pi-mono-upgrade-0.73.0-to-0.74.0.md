@@ -79,10 +79,10 @@ Files:
 - Modify: `agent-worker/tests/oneshot-llm.test.ts`
 - Modify: `agent-worker/tests/orchestrator.test.ts`
 
-- [ ] In each test file, replace `@mariozechner/pi-coding-agent` → `@earendil-works/pi-coding-agent` (replace_all) — covers both `vi.mock(...)` calls and dynamic `await import(...)` lookups
-- [ ] In each test file, replace `@mariozechner/pi-ai` → `@earendil-works/pi-ai` (replace_all)
-- [ ] Run `cd /opt/akmatori/agent-worker && npm test` — all existing tests must pass without modification of assertions (no API surface changes affect Akmatori)
-- [ ] Run `make test-agent` from repo root as the canonical CI gate — must pass
+- [x] In each test file, replace `@mariozechner/pi-coding-agent` → `@earendil-works/pi-coding-agent` (replace_all) — covers both `vi.mock(...)` calls and dynamic `await import(...)` lookups
+- [x] In each test file, replace `@mariozechner/pi-ai` → `@earendil-works/pi-ai` (replace_all)
+- [x] Run `cd /opt/akmatori/agent-worker && npm test` — all existing tests must pass without modification of assertions (no API surface changes affect Akmatori)
+- [x] Run `make test-agent` from repo root as the canonical CI gate — must pass
 
 ### Task 4: Update Dockerfile and CLAUDE.md references
 
