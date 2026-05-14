@@ -152,11 +152,11 @@ Files:
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] Run `make test-mcp`
-- [ ] Run `cd mcp-gateway && go vet ./...`
-- [ ] Verify `mcp-gateway/internal/tools/jira/` test coverage ≥ 80%
-- [ ] Run `make verify` from repo root
-- [ ] Confirm Jira schema appears in `GetToolSchemas()` output (no frontend work needed — settings UI is schema-driven)
+- [x] Run `make test-mcp`
+- [x] Run `cd mcp-gateway && go vet ./...`
+- [x] Verify `mcp-gateway/internal/tools/jira/` test coverage ≥ 80% (achieved 81.6%)
+- [x] Run `make verify` from repo root
+- [x] Confirm Jira schema appears in `GetToolSchemas()` output (no frontend work needed — settings UI is schema-driven)
 
 ### Task 7: Update documentation
 
