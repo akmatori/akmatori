@@ -616,7 +616,7 @@ func TestClickHouseSchema_Functions(t *testing.T) {
 func TestGetToolSchemas_AllPresent(t *testing.T) {
 	schemas := GetToolSchemas()
 
-	expected := []string{"ssh", "zabbix", "victoria_metrics", "catchpoint", "postgresql", "grafana", "clickhouse", "pagerduty", "netbox", "kubernetes"}
+	expected := []string{"ssh", "zabbix", "victoria_metrics", "catchpoint", "postgresql", "grafana", "clickhouse", "pagerduty", "netbox", "kubernetes", "jira"}
 	for _, name := range expected {
 		if _, ok := schemas[name]; !ok {
 			t.Errorf("missing schema: %s", name)
@@ -989,6 +989,211 @@ func TestK8sSchema_FunctionCount(t *testing.T) {
 
 	if len(schema.Functions) != 17 {
 		t.Errorf("expected 17 functions (all Kubernetes tools), got %d", len(schema.Functions))
+	}
+}
+
+// Jira schema tests
+
+func TestGetToolSchemas_ContainsJira(t *testing.T) {
+	schemas := GetToolSchemas()
+
+	if _, ok := schemas["jira"]; !ok {
+		t.Fatal("jira schema not found in GetToolSchemas()")
+	}
+}
+
+func TestGetToolSchema_Jira(t *testing.T) {
+	schema, ok := GetToolSchema("jira")
+	if !ok {
+		t.Fatal("jira schema not found")
+	}
+
+	if schema.Name != "jira" {
+		t.Errorf("expected name 'jira', got %q", schema.Name)
+	}
+
+	if schema.Version != "1.0.0" {
+		t.Errorf("expected version '1.0.0', got %q", schema.Version)
+	}
+}
+
+func TestJiraSchema_RequiredFields(t *testing.T) {
+	schema, _ := GetToolSchema("jira")
+
+	expectedRequired := []string{"jira_url", "jira_auth_type", "jira_api_token"}
+	if len(schema.SettingsSchema.Required) != len(expectedRequired) {
+		t.Fatalf("expected %d required fields, got %d", len(expectedRequired), len(schema.SettingsSchema.Required))
+	}
+	for i, field := range expectedRequired {
+		if schema.SettingsSchema.Required[i] != field {
+			t.Errorf("expected required[%d] = %q, got %q", i, field, schema.SettingsSchema.Required[i])
+		}
+	}
+}
+
+func TestJiraSchema_Settings(t *testing.T) {
+	schema, _ := GetToolSchema("jira")
+	props := schema.SettingsSchema.Properties
+
+	expectedFields := []string{
+		"jira_url", "jira_auth_type", "jira_username", "jira_api_token",
+		"jira_api_version", "jira_allow_writes", "jira_verify_ssl", "jira_timeout",
+	}
+	for _, field := range expectedFields {
+		if _, ok := props[field]; !ok {
+			t.Errorf("missing settings field: %s", field)
+		}
+	}
+}
+
+func TestJiraSchema_SecretFields(t *testing.T) {
+	schema, _ := GetToolSchema("jira")
+	props := schema.SettingsSchema.Properties
+
+	if !props["jira_api_token"].Secret {
+		t.Error("expected jira_api_token to be marked as secret")
+	}
+}
+
+func TestJiraSchema_AdvancedFields(t *testing.T) {
+	schema, _ := GetToolSchema("jira")
+	props := schema.SettingsSchema.Properties
+
+	advancedFields := []string{"jira_verify_ssl", "jira_timeout"}
+	for _, field := range advancedFields {
+		if !props[field].Advanced {
+			t.Errorf("expected %s to be marked as advanced", field)
+		}
+	}
+}
+
+func TestJiraSchema_AuthTypeEnum(t *testing.T) {
+	schema, _ := GetToolSchema("jira")
+	authType := schema.SettingsSchema.Properties["jira_auth_type"]
+
+	expectedEnum := []string{"cloud_basic", "server_bearer", "basic"}
+	if len(authType.Enum) != len(expectedEnum) {
+		t.Fatalf("expected %d enum values, got %d", len(expectedEnum), len(authType.Enum))
+	}
+	for i, v := range expectedEnum {
+		if authType.Enum[i] != v {
+			t.Errorf("expected enum[%d] = %q, got %q", i, v, authType.Enum[i])
+		}
+	}
+
+	if authType.Default != "cloud_basic" {
+		t.Errorf("expected default 'cloud_basic', got %v", authType.Default)
+	}
+}
+
+func TestJiraSchema_APIVersionEnum(t *testing.T) {
+	schema, _ := GetToolSchema("jira")
+	apiVersion := schema.SettingsSchema.Properties["jira_api_version"]
+
+	expectedEnum := []string{"2", "3"}
+	if len(apiVersion.Enum) != len(expectedEnum) {
+		t.Fatalf("expected %d enum values, got %d", len(expectedEnum), len(apiVersion.Enum))
+	}
+	for i, v := range expectedEnum {
+		if apiVersion.Enum[i] != v {
+			t.Errorf("expected enum[%d] = %q, got %q", i, v, apiVersion.Enum[i])
+		}
+	}
+
+	if apiVersion.Default != "3" {
+		t.Errorf("expected default '3', got %v", apiVersion.Default)
+	}
+}
+
+func TestJiraSchema_AllowWritesDefault(t *testing.T) {
+	schema, _ := GetToolSchema("jira")
+	allowWrites := schema.SettingsSchema.Properties["jira_allow_writes"]
+
+	if allowWrites.Default != false {
+		t.Errorf("expected jira_allow_writes default false, got %v", allowWrites.Default)
+	}
+
+	if allowWrites.Warning == "" {
+		t.Error("expected jira_allow_writes to have a Warning text describing the implications")
+	}
+}
+
+func TestJiraSchema_Defaults(t *testing.T) {
+	schema, _ := GetToolSchema("jira")
+	props := schema.SettingsSchema.Properties
+
+	if props["jira_verify_ssl"].Default != true {
+		t.Errorf("expected jira_verify_ssl default true, got %v", props["jira_verify_ssl"].Default)
+	}
+
+	if props["jira_timeout"].Default != 30 {
+		t.Errorf("expected jira_timeout default 30, got %v", props["jira_timeout"].Default)
+	}
+}
+
+func TestJiraSchema_TimeoutBounds(t *testing.T) {
+	schema, _ := GetToolSchema("jira")
+	timeout := schema.SettingsSchema.Properties["jira_timeout"]
+
+	if timeout.Minimum == nil || *timeout.Minimum != 5 {
+		t.Error("expected jira_timeout minimum 5")
+	}
+	if timeout.Maximum == nil || *timeout.Maximum != 300 {
+		t.Error("expected jira_timeout maximum 300")
+	}
+}
+
+func TestJiraSchema_Functions(t *testing.T) {
+	schema, _ := GetToolSchema("jira")
+
+	expectedFunctions := []string{
+		// Read
+		"search_issues", "get_issue", "get_issue_comments", "get_issue_transitions",
+		"get_issue_changelog", "get_projects", "get_project", "search_users", "api_request",
+		// Write
+		"add_comment", "transition_issue", "create_issue", "update_issue",
+	}
+	if len(schema.Functions) != len(expectedFunctions) {
+		t.Fatalf("expected %d functions, got %d", len(expectedFunctions), len(schema.Functions))
+	}
+	for i, name := range expectedFunctions {
+		if schema.Functions[i].Name != name {
+			t.Errorf("expected function[%d] = %q, got %q", i, name, schema.Functions[i].Name)
+		}
+	}
+}
+
+func TestJiraSchema_FunctionCount(t *testing.T) {
+	schema, _ := GetToolSchema("jira")
+
+	if len(schema.Functions) != 13 {
+		t.Errorf("expected 13 functions (9 read + 4 write), got %d", len(schema.Functions))
+	}
+}
+
+func TestJiraSchema_WriteFunctionsNoteAllowWrites(t *testing.T) {
+	schema, _ := GetToolSchema("jira")
+
+	writeFunctions := map[string]bool{
+		"add_comment":      false,
+		"transition_issue": false,
+		"create_issue":     false,
+		"update_issue":     false,
+	}
+
+	for _, fn := range schema.Functions {
+		if _, ok := writeFunctions[fn.Name]; ok {
+			if !strings.Contains(fn.Description, "jira_allow_writes") {
+				t.Errorf("%s: description must mention jira_allow_writes (so operators see the fix path), got: %q", fn.Name, fn.Description)
+			}
+			writeFunctions[fn.Name] = true
+		}
+	}
+
+	for name, found := range writeFunctions {
+		if !found {
+			t.Errorf("expected to find write function %q in schema", name)
+		}
 	}
 }
 

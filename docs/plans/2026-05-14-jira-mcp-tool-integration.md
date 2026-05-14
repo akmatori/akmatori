@@ -83,12 +83,12 @@ Files:
 - Modify: `mcp-gateway/internal/database/db.go`
 - Modify: `mcp-gateway/internal/tools/schemas.go`
 
-- [ ] Add `JiraEnabled bool` to `ProxySettings` with `gorm:"default:false" json:"jira_enabled"`
-- [ ] Add `getJiraSchema()` in `schemas.go` with required fields `jira_url`, `jira_auth_type` (enum: `cloud_basic`, `server_bearer`, `basic`), `jira_api_token`; optional `jira_username` (required for `cloud_basic`/`basic`), `jira_api_version` (enum `"2"`/`"3"`, default `"3"`), `jira_allow_writes` (boolean, default `false`, with `Warning` text explaining write operations will be enabled), `jira_verify_ssl` (advanced, default `true`), `jira_timeout` (advanced, default `30`, min 5, max 300)
-- [ ] List all 13 `Functions` entries (9 read + 4 write); write entries note "requires jira_allow_writes=true" in their `Description`
-- [ ] Register `"jira": getJiraSchema()` in `GetToolSchemas()`
-- [ ] Write schema tests (validation of required fields, enum values, write entries present)
-- [ ] Run `make test-mcp` — must pass before Task 2
+- [x] Add `JiraEnabled bool` to `ProxySettings` with `gorm:"default:false" json:"jira_enabled"`
+- [x] Add `getJiraSchema()` in `schemas.go` with required fields `jira_url`, `jira_auth_type` (enum: `cloud_basic`, `server_bearer`, `basic`), `jira_api_token`; optional `jira_username` (required for `cloud_basic`/`basic`), `jira_api_version` (enum `"2"`/`"3"`, default `"3"`), `jira_allow_writes` (boolean, default `false`, with `Warning` text explaining write operations will be enabled), `jira_verify_ssl` (advanced, default `true`), `jira_timeout` (advanced, default `30`, min 5, max 300)
+- [x] List all 13 `Functions` entries (9 read + 4 write); write entries note "requires jira_allow_writes=true" in their `Description`
+- [x] Register `"jira": getJiraSchema()` in `GetToolSchemas()`
+- [x] Write schema tests (validation of required fields, enum values, write entries present)
+- [x] Run `make test-mcp` — must pass before Task 2
 
 ### Task 2: Core Jira tool implementation
 

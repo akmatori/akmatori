@@ -307,6 +307,7 @@ type ProxySettings struct {
 	PagerDutyEnabled       bool      `gorm:"default:false" json:"pagerduty_enabled"`
 	NetBoxEnabled          bool      `gorm:"default:false" json:"netbox_enabled"`
 	K8sEnabled             bool      `gorm:"column:k8s_enabled;default:false" json:"k8s_enabled"`
+	JiraEnabled            bool      `gorm:"default:false" json:"jira_enabled"`
 	CreatedAt              time.Time `json:"created_at"`
 	UpdatedAt              time.Time `json:"updated_at"`
 }

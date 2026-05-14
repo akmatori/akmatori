@@ -66,6 +66,7 @@ func GetToolSchemas() map[string]ToolTypeSchema {
 		"pagerduty":        getPagerDutySchema(),
 		"netbox":           getNetBoxSchema(),
 		"kubernetes":       getK8sSchema(),
+		"jira":             getJiraSchema(),
 	}
 }
 
@@ -1337,6 +1338,148 @@ func getNetBoxSchema() ToolTypeSchema {
 				Description: "Generic read-only API request to any NetBox endpoint",
 				Parameters:  "path (required), query_params, limit, offset",
 				Returns:     "JSON response from the NetBox API",
+			},
+		},
+	}
+}
+
+func getJiraSchema() ToolTypeSchema {
+	return ToolTypeSchema{
+		Name:        "jira",
+		Description: "Jira issue tracker integration. Supports both Atlassian Cloud (REST API v3) and self-hosted Jira Server / Data Center (REST API v2). Read methods (search, issue detail, comments, transitions, changelog, projects, users) are always available; write methods (add_comment, transition_issue, create_issue, update_issue) require jira_allow_writes=true.",
+		Version:     "1.0.0",
+		SettingsSchema: SettingsSchema{
+			Type:     "object",
+			Required: []string{"jira_url", "jira_auth_type", "jira_api_token"},
+			Properties: map[string]PropertySchema{
+				"jira_url": {
+					Type:        "string",
+					Description: "Jira base URL (e.g. https://your-org.atlassian.net for Cloud, or https://jira.example.com for self-hosted)",
+					Example:     "https://your-org.atlassian.net",
+				},
+				"jira_auth_type": {
+					Type:        "string",
+					Description: "Authentication scheme. Use 'cloud_basic' for Atlassian Cloud (email + API token), 'server_bearer' for self-hosted Personal Access Tokens, or 'basic' for generic username + password/token Basic auth.",
+					Enum:        []string{"cloud_basic", "server_bearer", "basic"},
+					Default:     "cloud_basic",
+				},
+				"jira_username": {
+					Type:        "string",
+					Description: "Username or email (required for cloud_basic and basic auth). For Atlassian Cloud this is the account email.",
+				},
+				"jira_api_token": {
+					Type:        "string",
+					Description: "API token. For Atlassian Cloud, generate at id.atlassian.com. For self-hosted Jira Server/DC use a Personal Access Token (server_bearer) or password (basic).",
+					Secret:      true,
+				},
+				"jira_api_version": {
+					Type:        "string",
+					Description: "Jira REST API version. Use '3' for Atlassian Cloud (default), '2' for self-hosted Jira Server / Data Center.",
+					Enum:        []string{"2", "3"},
+					Default:     "3",
+				},
+				"jira_allow_writes": {
+					Type:        "boolean",
+					Description: "Allow write operations (add_comment, transition_issue, create_issue, update_issue). Disabled by default for safety.",
+					Default:     false,
+					Warning:     "Enabling this allows the agent to add comments, transition issues, and create/update issues in this Jira instance.",
+				},
+				"jira_verify_ssl": {
+					Type:        "boolean",
+					Description: "Verify SSL certificates",
+					Default:     true,
+					Advanced:    true,
+				},
+				"jira_timeout": {
+					Type:        "integer",
+					Description: "API request timeout in seconds",
+					Default:     30,
+					Minimum:     intPtr(5),
+					Maximum:     intPtr(300),
+					Advanced:    true,
+				},
+			},
+		},
+		Functions: []ToolFunction{
+			// Read-only
+			{
+				Name:        "search_issues",
+				Description: "Search issues with a JQL query. Supports paging via start_at / max_results.",
+				Parameters:  "jql (required), fields, expand, start_at, max_results",
+				Returns:     "JSON object with issues array and paging metadata",
+			},
+			{
+				Name:        "get_issue",
+				Description: "Get a single issue by key or ID",
+				Parameters:  "key (required), expand, fields",
+				Returns:     "JSON issue object with full details",
+			},
+			{
+				Name:        "get_issue_comments",
+				Description: "Get comments for an issue",
+				Parameters:  "key (required), start_at, max_results",
+				Returns:     "JSON object with comments array and paging metadata",
+			},
+			{
+				Name:        "get_issue_transitions",
+				Description: "List available workflow transitions for an issue",
+				Parameters:  "key (required)",
+				Returns:     "JSON object with transitions array",
+			},
+			{
+				Name:        "get_issue_changelog",
+				Description: "Get the changelog (history of field changes) for an issue",
+				Parameters:  "key (required), start_at, max_results",
+				Returns:     "JSON object with changelog histories array",
+			},
+			{
+				Name:        "get_projects",
+				Description: "Search and list Jira projects",
+				Parameters:  "query, start_at, max_results",
+				Returns:     "JSON object with project values array",
+			},
+			{
+				Name:        "get_project",
+				Description: "Get a single Jira project by key or ID",
+				Parameters:  "key (required)",
+				Returns:     "JSON project object with full details",
+			},
+			{
+				Name:        "search_users",
+				Description: "Search Jira users by query",
+				Parameters:  "query (required), start_at, max_results",
+				Returns:     "JSON array of user objects",
+			},
+			{
+				Name:        "api_request",
+				Description: "Generic read-only GET request to any Jira REST endpoint (path must start with /rest/)",
+				Parameters:  "path (required), params (optional query parameters)",
+				Returns:     "JSON response from the Jira API",
+			},
+			// Write (requires jira_allow_writes=true)
+			{
+				Name:        "add_comment",
+				Description: "Add a comment to an issue. Requires jira_allow_writes=true on the instance.",
+				Parameters:  "key (required), body (required)",
+				Returns:     "JSON comment object",
+			},
+			{
+				Name:        "transition_issue",
+				Description: "Move an issue through a workflow transition. Requires jira_allow_writes=true on the instance.",
+				Parameters:  "key (required), transition_id (required), comment, fields",
+				Returns:     "JSON status object",
+			},
+			{
+				Name:        "create_issue",
+				Description: "Create a new issue. Requires jira_allow_writes=true on the instance.",
+				Parameters:  "project_key (required), issue_type (required), summary (required), description, assignee, priority, labels, fields",
+				Returns:     "JSON created issue object (id, key, self)",
+			},
+			{
+				Name:        "update_issue",
+				Description: "Update fields on an existing issue. Requires jira_allow_writes=true on the instance.",
+				Parameters:  "key (required), fields (required)",
+				Returns:     "JSON status object",
 			},
 		},
 	}
