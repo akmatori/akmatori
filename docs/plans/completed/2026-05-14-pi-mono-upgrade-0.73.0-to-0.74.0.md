@@ -98,7 +98,7 @@ Files:
 
 ### Task 5: Verify acceptance criteria
 
-- [ ] Run `make verify` from repo root (Go vet + agent-worker tests + frontend tests) — must pass
-- [ ] Run `cd /opt/akmatori/agent-worker && npm run build` once more and confirm no leftover `@mariozechner/pi-*` references in `dist/`: `grep -r "@mariozechner/pi-" agent-worker/dist agent-worker/src` should match nothing
-- [ ] Run `grep -r "@mariozechner/pi-" agent-worker/{src,tests}` — must return zero matches (the `@mariozechner/clipboard` transitive dep does not live under `agent-worker/`)
-- [ ] Move this plan from `docs/plans/` to `docs/plans/completed/` after merge
+- [x] Run `make verify` from repo root (Go vet + agent-worker tests + frontend tests) — must pass
+- [x] Run `cd /opt/akmatori/agent-worker && npm run build` once more and confirm no leftover `@mariozechner/pi-*` references in `dist/`: `grep -r "@mariozechner/pi-" agent-worker/dist agent-worker/src` should match nothing
+- [x] Run `grep -r "@mariozechner/pi-" agent-worker/{src,tests}` — must return zero matches (the `@mariozechner/clipboard` transitive dep does not live under `agent-worker/`)
+- [x] Move this plan from `docs/plans/` to `docs/plans/completed/` after merge
