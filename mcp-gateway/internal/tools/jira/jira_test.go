@@ -1003,9 +1003,12 @@ func TestAPIRequest_RejectsPathTraversal(t *testing.T) {
 	cases := []string{
 		"/rest/../etc/passwd",
 		"/rest/api/3/%2e%2e/admin",
+		"/rest/api/3/%252e%252e/admin", // double-encoded
 		"/rest/api/3/issue?jql=foo",
 		"/rest/api/3/issue#fragment",
-		"/api/3/myself", // wrong prefix
+		"/api/3/myself",                       // wrong prefix
+		"/rest/api/3/issue/%0D%0AHeader:%20x", // CRLF injection
+		"/rest/api/3/issue/foo bar",           // whitespace
 	}
 	for _, p := range cases {
 		t.Run(p, func(t *testing.T) {
@@ -1693,6 +1696,34 @@ func TestCreateIssue_MissingArgs(t *testing.T) {
 			_, err := tool.CreateIssue(context.Background(), "test-incident", tt.args)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("expected %q, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestCreateIssue_InvalidDescriptionType(t *testing.T) {
+	tool, _, _ := newWriteTestTool(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("should not reach server")
+	})
+
+	cases := []struct {
+		name string
+		desc interface{}
+	}{
+		{"number", float64(42)},
+		{"bool", true},
+		{"array", []interface{}{"line1", "line2"}},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tool.CreateIssue(context.Background(), "test-incident", map[string]interface{}{
+				"project_key": "FOO",
+				"issue_type":  "Bug",
+				"summary":     "x",
+				"description": tt.desc,
+			})
+			if err == nil || !strings.Contains(err.Error(), "description must be a string or object") {
+				t.Errorf("expected description type error, got %v", err)
 			}
 		})
 	}

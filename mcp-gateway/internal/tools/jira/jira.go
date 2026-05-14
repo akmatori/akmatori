@@ -671,6 +671,12 @@ func (t *JiraTool) APIRequest(ctx context.Context, incidentID string, args map[s
 	if strings.ContainsAny(decoded, "?#") {
 		return "", fmt.Errorf("invalid path: must not contain query string or fragment (use params instead)")
 	}
+	for i := 0; i < len(decoded); i++ {
+		c := decoded[i]
+		if c < 0x20 || c == 0x7F || c == ' ' {
+			return "", fmt.Errorf("invalid path: must not contain control characters or whitespace")
+		}
+	}
 	if !strings.HasPrefix(decoded, "/rest/") {
 		return "", fmt.Errorf("invalid path: must start with /rest/")
 	}
@@ -941,6 +947,8 @@ func (t *JiraTool) CreateIssue(ctx context.Context, incidentID string, args map[
 			if len(dv) > 0 {
 				fields["description"] = dv
 			}
+		default:
+			return "", fmt.Errorf("description must be a string or object (ADF), got %T", desc)
 		}
 	}
 	if ref := assigneeRef(args["assignee"], config.APIVersion); ref != nil {
