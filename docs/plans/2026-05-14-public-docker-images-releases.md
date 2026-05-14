@@ -38,15 +38,15 @@ Source design doc: `/tmp/plan.md` (decisions already confirmed by the user; this
 Files:
 - Create: `.github/workflows/release.yml`
 
-- [ ] create `.github/` and `.github/workflows/` directories
-- [ ] write `release.yml` with triggers `push.tags: ['v*']`, `push.branches: [main]`, and `workflow_dispatch`
-- [ ] set `permissions: { contents: write, packages: write }` at the workflow level
-- [ ] define a `build` job with matrix `service` ∈ {api, mcp-gateway, agent, qmd, frontend} × `arch` ∈ {amd64, arm64}; `runs-on: ubuntu-latest` for amd64 and `ubuntu-24.04-arm` for arm64; steps: checkout, `docker/setup-buildx-action@v3`, `docker/login-action@v3` to ghcr.io with `${{ secrets.GITHUB_TOKEN }}`, `docker/metadata-action@v5` per service, `docker/build-push-action@v6` with `platforms: linux/<arch>`, `outputs: type=image,push-by-digest=true,name-canonical=true`, `cache-from`/`cache-to: type=gha,scope=${service}-${arch}`; emit each pushed digest as a job output
-- [ ] map each service to its build context + Dockerfile correctly (`api` → `.` / `Dockerfile.api`, `mcp-gateway` → `./mcp-gateway`, `agent` → `./agent-worker`, `qmd` → `./qmd`, `frontend` → `./web`)
-- [ ] define a `manifest` job, `needs: build`, matrix on `service` only (5 parallel); pull both arch digests from the matching `build` outputs; `docker buildx imagetools create` to stitch a multi-arch manifest under every tag emitted by `metadata-action`
-- [ ] define a `release` job, `needs: manifest`, `if: startsWith(github.ref, 'refs/tags/v')`; uses `softprops/action-gh-release@v2` with `generate_release_notes: true`; attaches `docker-compose.yml` and `proxy/nginx.conf` as release assets
-- [ ] run `actionlint` (or equivalent local YAML linter) on the file
-- [ ] verify with `yq` / `python -c "import yaml; yaml.safe_load(open('.github/workflows/release.yml'))"` that the YAML parses
+- [x] create `.github/` and `.github/workflows/` directories
+- [x] write `release.yml` with triggers `push.tags: ['v*']`, `push.branches: [main]`, and `workflow_dispatch`
+- [x] set `permissions: { contents: write, packages: write }` at the workflow level
+- [x] define a `build` job with matrix `service` ∈ {api, mcp-gateway, agent, qmd, frontend} × `arch` ∈ {amd64, arm64}; `runs-on: ubuntu-latest` for amd64 and `ubuntu-24.04-arm` for arm64; steps: checkout, `docker/setup-buildx-action@v3`, `docker/login-action@v3` to ghcr.io with `${{ secrets.GITHUB_TOKEN }}`, `docker/metadata-action@v5` per service, `docker/build-push-action@v6` with `platforms: linux/<arch>`, `outputs: type=image,push-by-digest=true,name-canonical=true`, `cache-from`/`cache-to: type=gha,scope=${service}-${arch}`; emit each pushed digest as a job output
+- [x] map each service to its build context + Dockerfile correctly (`api` → `.` / `Dockerfile.api`, `mcp-gateway` → `./mcp-gateway`, `agent` → `./agent-worker`, `qmd` → `./qmd`, `frontend` → `./web`)
+- [x] define a `manifest` job, `needs: build`, matrix on `service` only (5 parallel); pull both arch digests from the matching `build` outputs; `docker buildx imagetools create` to stitch a multi-arch manifest under every tag emitted by `metadata-action`
+- [x] define a `release` job, `needs: manifest`, `if: startsWith(github.ref, 'refs/tags/v')`; uses `softprops/action-gh-release@v2` with `generate_release_notes: true`; attaches `docker-compose.yml` and `proxy/nginx.conf` as release assets
+- [x] run `actionlint` (or equivalent local YAML linter) on the file
+- [x] verify with `yq` / `python -c "import yaml; yaml.safe_load(open('.github/workflows/release.yml'))"` that the YAML parses
 
 ### Task 2: Add the dev compose override and modify the main compose file
 
