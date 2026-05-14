@@ -318,10 +318,13 @@ describe("AgentRunner", () => {
     mockSession = createMockSession();
     createAgentSessionCalls = [];
     runner = new AgentRunner({ mcpGatewayUrl: "http://mcp-gateway:8080" });
-    // Reset env
+    // Reset env (both case variants — proxy.ts syncs both)
     delete process.env.HTTP_PROXY;
     delete process.env.HTTPS_PROXY;
     delete process.env.NO_PROXY;
+    delete process.env.http_proxy;
+    delete process.env.https_proxy;
+    delete process.env.no_proxy;
   });
 
   afterEach(() => {
@@ -1157,8 +1160,8 @@ describe("AgentRunner", () => {
       expect(capturedDispatcher).toBe("Agent");
     });
 
-    it("should clear proxy env vars and reset dispatcher when no proxy config provided", async () => {
-      // Set some proxy vars first
+    it("should restore container env (empty in test) and reset dispatcher when no proxy config provided", async () => {
+      // Set some stale proxy vars first
       process.env.HTTP_PROXY = "http://old-proxy:1234";
       process.env.HTTPS_PROXY = "http://old-proxy:1234";
 
@@ -1175,8 +1178,53 @@ describe("AgentRunner", () => {
 
       await runner.execute(makeExecuteParams({ proxyConfig: undefined }));
 
+      // proxy.ts snapshots HTTP_PROXY at module load. In the test process the
+      // env is unset at load time, so the snapshot is "" and applyProxyConfig
+      // restores that here — i.e. the stale value set above is discarded.
       expect(capturedHttpProxy).toBe("");
       expect(capturedDispatcher).toBe("Agent");
     });
+
+    it("should sync both upper- and lower-case env vars so undici sees a consistent value", async () => {
+      // Regression: undici's EnvHttpProxyAgent uses `??` (not `||`) when
+      // reading env, so a lowercase empty string would silently shadow a
+      // populated uppercase env var. proxy.ts must keep both case variants in
+      // lock-step on every applyProxyConfig call.
+      const proxyConfig: ProxyConfig = {
+        url: "http://proxy.example.com:8080",
+        no_proxy: "localhost,127.0.0.1",
+        llm_enabled: true,
+        slack_enabled: false,
+        zabbix_enabled: false,
+        victoria_metrics_enabled: false,
+      };
+
+      // Simulate the compose-injected lowercase empty defaults before the run
+      process.env.http_proxy = "";
+      process.env.https_proxy = "";
+      process.env.no_proxy = "";
+
+      const captured: Record<string, string | undefined> = {};
+      const { createAgentSession } = await import("@mariozechner/pi-coding-agent");
+      (createAgentSession as any).mockImplementationOnce(async () => {
+        captured.HTTP_PROXY = process.env.HTTP_PROXY;
+        captured.HTTPS_PROXY = process.env.HTTPS_PROXY;
+        captured.NO_PROXY = process.env.NO_PROXY;
+        captured.http_proxy = process.env.http_proxy;
+        captured.https_proxy = process.env.https_proxy;
+        captured.no_proxy = process.env.no_proxy;
+        return { session: mockSession, extensionsResult: {} };
+      });
+
+      await runner.execute(makeExecuteParams({ proxyConfig }));
+
+      expect(captured.HTTP_PROXY).toBe("http://proxy.example.com:8080");
+      expect(captured.http_proxy).toBe("http://proxy.example.com:8080");
+      expect(captured.HTTPS_PROXY).toBe("http://proxy.example.com:8080");
+      expect(captured.https_proxy).toBe("http://proxy.example.com:8080");
+      expect(captured.NO_PROXY).toBe("localhost,127.0.0.1");
+      expect(captured.no_proxy).toBe("localhost,127.0.0.1");
+    });
+
   });
 });

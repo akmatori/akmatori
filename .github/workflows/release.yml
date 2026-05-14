@@ -185,6 +185,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          # Semver prerelease tags (anything with a hyphen after the version,
+          # e.g. v1.0.0-rc.1, v1.0.0-beta.2) must not be promoted to the
+          # GitHub "latest release" view, otherwise the install snippet
+          # `/releases/latest/download/docker-compose.yml` would serve the
+          # RC's compose file to end users. Mirrors the docker tag scheme
+          # where metadata-action's `latest=auto` flavor already excludes
+          # prerelease tags from the `:latest` docker tag.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
           files: |
             docker-compose.yml
             proxy/nginx.conf

@@ -132,6 +132,8 @@ HTTPS_PROXY=http://proxy.corp:3128
 # NO_PROXY defaults to the internal service names; override only if you need to add hosts.
 ```
 
+The runtime `HTTP_PROXY` covers the API server's outbound calls (Slack), the agent worker's LLM API calls, QMD's outbound HTTP, and the MCP Gateway's HTTP-connector tools and external MCP-server connections. The MCP Gateway's built-in monitoring/CMDB tools (Zabbix, Grafana, VictoriaMetrics, PagerDuty, NetBox, Kubernetes, Catchpoint, Jira) ignore the env-var proxy by design and have their own per-tool proxy toggle in **Settings → Proxy** — enable those if your monitoring endpoints also need to go through the corporate proxy.
+
 ## Maintainer / development
 
 If you're working on Akmatori itself and want to build from source instead of pulling published images, use the dev override which restores the per-service `build:` blocks:
