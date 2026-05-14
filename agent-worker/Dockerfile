@@ -1,6 +1,6 @@
 # Dockerfile for akmatori-agent worker
 # This container runs:
-# - Node.js agent worker using @mariozechner/pi-coding-agent SDK
+# - Node.js agent worker using @earendil-works/pi-coding-agent SDK
 # - Connects to API via WebSocket for incident orchestration
 # - Calls MCP Gateway over HTTP for tool execution (SSH, Zabbix)
 #

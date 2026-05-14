@@ -90,11 +90,11 @@ Files:
 - Modify: `agent-worker/Dockerfile`
 - Modify: `CLAUDE.md`
 
-- [ ] Update the header comment in `agent-worker/Dockerfile`: `@mariozechner/pi-coding-agent SDK` → `@earendil-works/pi-coding-agent SDK`
-- [ ] In `CLAUDE.md`, update the `Agent Worker` line that pins the SDK version: `pi-coding-agent` (`v0.73.0`) → `pi-coding-agent` (`v0.74.0`)
-- [ ] In `CLAUDE.md`, update the SDK Notes section if it references `@mariozechner/*` paths; add a one-line note that pi-mono packages have moved to the `@earendil-works/*` scope as of v0.74.0
-- [ ] Confirm `wc -c CLAUDE.md` is still under 30000 bytes (per the file's own rule)
-- [ ] No tests required — pure documentation
+- [x] Update the header comment in `agent-worker/Dockerfile`: `@mariozechner/pi-coding-agent SDK` → `@earendil-works/pi-coding-agent SDK`
+- [x] In `CLAUDE.md`, update the `Agent Worker` line that pins the SDK version: `pi-coding-agent` (`v0.73.0`) → `pi-coding-agent` (`v0.74.0`)
+- [x] In `CLAUDE.md`, update the SDK Notes section if it references `@mariozechner/*` paths; add a one-line note that pi-mono packages have moved to the `@earendil-works/*` scope as of v0.74.0
+- [x] Confirm `wc -c CLAUDE.md` is still under 30000 bytes (per the file's own rule)
+- [x] No tests required — pure documentation
 
 ### Task 5: Verify acceptance criteria
 

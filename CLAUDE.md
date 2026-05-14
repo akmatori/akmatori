@@ -8,7 +8,7 @@ Akmatori is an AI-powered AIOps platform for SRE teams. It ingests alerts from m
 
 - Docker deployment: API, Agent Worker, MCP Gateway, PostgreSQL, QMD
 - Backend: Go 1.24+
-- Agent Worker: Node.js 22+ / TypeScript with `@mariozechner/pi-coding-agent` (`v0.73.0`)
+- Agent Worker: Node.js 22+ / TypeScript with `@earendil-works/pi-coding-agent` (`v0.74.0`)
 - Frontend: React 19 + TypeScript + Vite + Tailwind
 - Database: PostgreSQL 16 + GORM
 - LLM providers: Anthropic, OpenAI, Google, OpenRouter, custom/on-prem
@@ -164,8 +164,9 @@ Do not teach agents to call tool implementations directly. They should go throug
 
 Akmatori intentionally keeps working when optional AI pieces fail. When adding AI-dependent behavior, define the fallback path at the same time.
 
-## SDK Notes (`@mariozechner/pi-coding-agent`)
+## SDK Notes (`@earendil-works/pi-coding-agent`)
 
+- As of v0.74.0, pi-mono packages moved from the `@mariozechner/*` scope to `@earendil-works/*` (pi-coding-agent, pi-ai, pi-agent-core)
 - Use `ModelRegistry.inMemory(authStorage)`; there is no public `ModelRegistry` constructor
 - Tool factories in `gateway-tools.ts` should return `defineTool({...})`
 - The bash tool remains the local exception because of TypeScript variance friction
