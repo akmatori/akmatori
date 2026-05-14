@@ -1,4 +1,4 @@
-.PHONY: build run clean test test-all test-adapters test-mcp test-agent test-web test-coverage verify deps help install build-agent
+.PHONY: build run clean test test-all test-adapters test-mcp test-agent test-web test-coverage verify deps help install build-agent dev
 
 # Binary name
 BINARY_NAME=akmatori
@@ -99,6 +99,9 @@ docker-build: ## Build Docker image
 
 docker-run: ## Run Docker container
 	docker run --env-file .env akmatori:latest
+
+dev: ## Build and run the stack from local source (maintainer flow)
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 docker-up: ## Start all containers with docker-compose (includes directory init)
 	docker-compose up -d

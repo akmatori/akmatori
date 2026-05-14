@@ -68,11 +68,11 @@ Files:
 Files:
 - Modify: `Makefile`, `.env.example`
 
-- [ ] add a `dev` target in the Makefile that runs `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build` with a `## Build and run the stack from local source (maintainer flow)` help comment
-- [ ] add `dev` to the `.PHONY` line
-- [ ] leave `verify`, `test`, `test-*`, `build`, etc. untouched
-- [ ] append four commented-out lines to `.env.example`: `# AKMATORI_VERSION=1.2.0`, `# HTTP_PROXY=http://proxy.corp:3128`, `# HTTPS_PROXY=http://proxy.corp:3128`, `# NO_PROXY=... # see README "Corporate proxy" section`, each with a one-line comment above it explaining its role
-- [ ] run `make help` and confirm the new `dev` target shows up in the generated help
+- [x] add a `dev` target in the Makefile that runs `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build` with a `## Build and run the stack from local source (maintainer flow)` help comment
+- [x] add `dev` to the `.PHONY` line
+- [x] leave `verify`, `test`, `test-*`, `build`, etc. untouched
+- [x] append four commented-out lines to `.env.example`: `# AKMATORI_VERSION=1.2.0`, `# HTTP_PROXY=http://proxy.corp:3128`, `# HTTPS_PROXY=http://proxy.corp:3128`, `# NO_PROXY=... # see README "Corporate proxy" section`, each with a one-line comment above it explaining its role
+- [x] run `make help` and confirm the new `dev` target shows up in the generated help
 
 ### Task 4: Update README.md and CLAUDE.md
 
