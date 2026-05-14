@@ -512,3 +512,529 @@ func TestCachedGet_LogicalNameIsolation(t *testing.T) {
 		t.Fatalf("logical-name-keyed call failed: %v", err)
 	}
 }
+
+// --- Helper tests for read methods ---
+
+func TestFieldsParam(t *testing.T) {
+	tests := []struct {
+		name string
+		args map[string]interface{}
+		want string
+	}{
+		{"absent", map[string]interface{}{}, ""},
+		{"string", map[string]interface{}{"fields": "summary,status"}, "summary,status"},
+		{"string trims", map[string]interface{}{"fields": "  summary,status  "}, "summary,status"},
+		{"array joined", map[string]interface{}{"fields": []interface{}{"summary", "status"}}, "summary,status"},
+		{"array trims and skips empty", map[string]interface{}{"fields": []interface{}{"summary ", "", " status"}}, "summary,status"},
+		{"wrong type returns empty", map[string]interface{}{"fields": 42}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := fieldsParam(tt.args, "fields"); got != tt.want {
+				t.Errorf("fieldsParam = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAddPagingParams(t *testing.T) {
+	params := url.Values{}
+	addPagingParams(params, map[string]interface{}{
+		"start_at":    float64(50),
+		"max_results": float64(250),
+	})
+	if got := params.Get("startAt"); got != "50" {
+		t.Errorf("startAt = %q, want 50", got)
+	}
+	if got := params.Get("maxResults"); got != "100" {
+		t.Errorf("maxResults = %q, want 100 (clamped)", got)
+	}
+
+	// Zero / negative are omitted.
+	params2 := url.Values{}
+	addPagingParams(params2, map[string]interface{}{
+		"start_at":    float64(-1),
+		"max_results": float64(0),
+	})
+	if params2.Get("startAt") != "" {
+		t.Errorf("expected no startAt for negative input")
+	}
+	if params2.Get("maxResults") != "" {
+		t.Errorf("expected no maxResults for zero input")
+	}
+}
+
+// --- SearchIssues tests ---
+
+func TestSearchIssues_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/search" {
+			t.Errorf("path = %q, want /rest/api/3/search", r.URL.Path)
+		}
+		q := r.URL.Query()
+		if q.Get("jql") != "project = FOO" {
+			t.Errorf("jql = %q, want project = FOO", q.Get("jql"))
+		}
+		if q.Get("fields") != "summary,status" {
+			t.Errorf("fields = %q, want summary,status", q.Get("fields"))
+		}
+		if q.Get("expand") != "names" {
+			t.Errorf("expand = %q, want names", q.Get("expand"))
+		}
+		if q.Get("startAt") != "10" {
+			t.Errorf("startAt = %q, want 10", q.Get("startAt"))
+		}
+		if q.Get("maxResults") != "100" {
+			t.Errorf("maxResults = %q, want 100 (clamped)", q.Get("maxResults"))
+		}
+		if r.Header.Get("Authorization") == "" {
+			t.Error("missing Authorization header")
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"issues":[{"key":"FOO-1"}]}`)
+	})
+
+	out, err := tool.SearchIssues(context.Background(), "test-incident", map[string]interface{}{
+		"jql":         "project = FOO",
+		"fields":      []interface{}{"summary", "status"},
+		"expand":      "names",
+		"start_at":    float64(10),
+		"max_results": float64(500), // should clamp
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, `"FOO-1"`) {
+		t.Errorf("expected response to contain FOO-1, got %q", out)
+	}
+}
+
+func TestSearchIssues_MissingJQL(t *testing.T) {
+	tool, _, counter := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	_, err := tool.SearchIssues(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing jql")
+	}
+	if !strings.Contains(err.Error(), "jql is required") {
+		t.Errorf("expected jql required error, got: %v", err)
+	}
+	if counter.Load() != 0 {
+		t.Errorf("expected no server calls for invalid args, got %d", counter.Load())
+	}
+}
+
+func TestSearchIssues_HTTPError(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"errorMessages":["bad jql"]}`)
+	})
+
+	_, err := tool.SearchIssues(context.Background(), "test-incident", map[string]interface{}{
+		"jql": "bogus !!",
+	})
+	if err == nil {
+		t.Fatal("expected HTTP error")
+	}
+	if !strings.Contains(err.Error(), "HTTP error 400") {
+		t.Errorf("expected 400, got: %v", err)
+	}
+}
+
+func TestSearchIssues_APIVersion2(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeServerBearer, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/2/search" {
+			t.Errorf("path = %q, want /rest/api/2/search", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{}`)
+	})
+	// Override cached config to v2.
+	cfg := getTestConfig(tool)
+	cfg.APIVersion = "2"
+
+	_, err := tool.SearchIssues(context.Background(), "test-incident", map[string]interface{}{
+		"jql": "project = X",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- GetIssue tests ---
+
+func TestGetIssue_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/issue/FOO-1" {
+			t.Errorf("path = %q, want /rest/api/3/issue/FOO-1", r.URL.Path)
+		}
+		if r.URL.Query().Get("expand") != "changelog" {
+			t.Errorf("expand = %q", r.URL.Query().Get("expand"))
+		}
+		if r.URL.Query().Get("fields") != "summary" {
+			t.Errorf("fields = %q", r.URL.Query().Get("fields"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"key":"FOO-1"}`)
+	})
+
+	out, err := tool.GetIssue(context.Background(), "test-incident", map[string]interface{}{
+		"key":    "FOO-1",
+		"expand": "changelog",
+		"fields": "summary",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "FOO-1") {
+		t.Errorf("expected FOO-1 in response, got %q", out)
+	}
+}
+
+func TestGetIssue_MissingKey(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {})
+	_, err := tool.GetIssue(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing key")
+	}
+	if !strings.Contains(err.Error(), "key is required") {
+		t.Errorf("expected key required error, got: %v", err)
+	}
+}
+
+func TestGetIssue_KeyEscaped(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		// Path should contain the percent-encoded form.
+		if !strings.HasPrefix(r.URL.EscapedPath(), "/rest/api/3/issue/") {
+			t.Errorf("escaped path = %q", r.URL.EscapedPath())
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{}`)
+	})
+	if _, err := tool.GetIssue(context.Background(), "test-incident", map[string]interface{}{
+		"key": "FOO BAR/1",
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- GetIssueComments tests ---
+
+func TestGetIssueComments_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/issue/FOO-1/comment" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.URL.Query().Get("startAt") != "5" {
+			t.Errorf("startAt = %q", r.URL.Query().Get("startAt"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"comments":[]}`)
+	})
+
+	out, err := tool.GetIssueComments(context.Background(), "test-incident", map[string]interface{}{
+		"key":      "FOO-1",
+		"start_at": float64(5),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "comments") {
+		t.Errorf("expected comments in response, got %q", out)
+	}
+}
+
+func TestGetIssueComments_MissingKey(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {})
+	_, err := tool.GetIssueComments(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing key")
+	}
+}
+
+// --- GetIssueTransitions tests ---
+
+func TestGetIssueTransitions_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/issue/FOO-1/transitions" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"transitions":[{"id":"31","name":"Done"}]}`)
+	})
+
+	out, err := tool.GetIssueTransitions(context.Background(), "test-incident", map[string]interface{}{
+		"key": "FOO-1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, `"name":"Done"`) {
+		t.Errorf("expected transitions JSON, got %q", out)
+	}
+}
+
+func TestGetIssueTransitions_MissingKey(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {})
+	_, err := tool.GetIssueTransitions(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing key")
+	}
+}
+
+// --- GetIssueChangelog tests ---
+
+func TestGetIssueChangelog_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/issue/FOO-1/changelog" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.URL.Query().Get("maxResults") != "50" {
+			t.Errorf("maxResults = %q", r.URL.Query().Get("maxResults"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"values":[]}`)
+	})
+
+	_, err := tool.GetIssueChangelog(context.Background(), "test-incident", map[string]interface{}{
+		"key":         "FOO-1",
+		"max_results": float64(50),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetIssueChangelog_MissingKey(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {})
+	_, err := tool.GetIssueChangelog(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing key")
+	}
+}
+
+// --- GetProjects tests ---
+
+func TestGetProjects_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/project/search" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.URL.Query().Get("query") != "platform" {
+			t.Errorf("query = %q", r.URL.Query().Get("query"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"values":[]}`)
+	})
+
+	_, err := tool.GetProjects(context.Background(), "test-incident", map[string]interface{}{
+		"query": "platform",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- GetProject tests ---
+
+func TestGetProject_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/project/FOO" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"key":"FOO"}`)
+	})
+
+	out, err := tool.GetProject(context.Background(), "test-incident", map[string]interface{}{
+		"key": "FOO",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, `"FOO"`) {
+		t.Errorf("expected FOO in response, got %q", out)
+	}
+}
+
+func TestGetProject_MissingKey(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {})
+	_, err := tool.GetProject(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing key")
+	}
+}
+
+// --- SearchUsers tests ---
+
+func TestSearchUsers_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/user/search" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.URL.Query().Get("query") != "alice" {
+			t.Errorf("query = %q", r.URL.Query().Get("query"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[]`)
+	})
+
+	_, err := tool.SearchUsers(context.Background(), "test-incident", map[string]interface{}{
+		"query": "alice",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSearchUsers_MissingQuery(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {})
+	_, err := tool.SearchUsers(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing query")
+	}
+}
+
+// --- APIRequest tests ---
+
+func TestAPIRequest_Success(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/myself" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.URL.Query().Get("expand") != "groups" {
+			t.Errorf("expand = %q", r.URL.Query().Get("expand"))
+		}
+		if r.URL.Query().Get("limit") != "25" {
+			t.Errorf("limit = %q", r.URL.Query().Get("limit"))
+		}
+		if r.URL.Query().Get("active") != "true" {
+			t.Errorf("active = %q", r.URL.Query().Get("active"))
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"accountId":"abc"}`)
+	})
+
+	out, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/rest/api/3/myself",
+		"params": map[string]interface{}{
+			"expand": "groups",
+			"limit":  float64(25),
+			"active": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "accountId") {
+		t.Errorf("expected accountId in response, got %q", out)
+	}
+}
+
+func TestAPIRequest_MissingPath(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {})
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing path")
+	}
+	if !strings.Contains(err.Error(), "path is required") {
+		t.Errorf("expected path required error, got: %v", err)
+	}
+}
+
+func TestAPIRequest_RejectsPathTraversal(t *testing.T) {
+	tool, _, counter := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	cases := []string{
+		"/rest/../etc/passwd",
+		"/rest/api/3/%2e%2e/admin",
+		"/rest/api/3/issue?jql=foo",
+		"/rest/api/3/issue#fragment",
+		"/api/3/myself", // wrong prefix
+	}
+	for _, p := range cases {
+		t.Run(p, func(t *testing.T) {
+			_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+				"path": p,
+			})
+			if err == nil {
+				t.Errorf("expected error for path %q", p)
+			}
+		})
+	}
+	if counter.Load() != 0 {
+		t.Errorf("expected no server calls for rejected paths, got %d", counter.Load())
+	}
+}
+
+func TestAPIRequest_ArrayParam(t *testing.T) {
+	var capturedExpand []string
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		capturedExpand = r.URL.Query()["expand"]
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{}`)
+	})
+
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/rest/api/3/myself",
+		"params": map[string]interface{}{
+			"expand": []interface{}{"groups", "applicationRoles"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(capturedExpand) != 2 || capturedExpand[0] != "groups" || capturedExpand[1] != "applicationRoles" {
+		t.Errorf("expected expand=[groups, applicationRoles], got %v", capturedExpand)
+	}
+}
+
+func TestAPIRequest_UnsupportedParamType(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {})
+	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
+		"path": "/rest/api/3/myself",
+		"params": map[string]interface{}{
+			"bad": map[string]interface{}{"nested": "value"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for unsupported param type")
+	}
+	if !strings.Contains(err.Error(), "unsupported type") {
+		t.Errorf("expected unsupported type error, got: %v", err)
+	}
+}
+
+// --- Cache TTL assertions ---
+
+func TestReadMethods_UseCorrectCacheTTLs(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{}`)
+	})
+	ctx := context.Background()
+
+	// SearchIssues -> SearchCacheTTL (15s)
+	if _, err := tool.SearchIssues(ctx, "test-incident", map[string]interface{}{"jql": "x"}); err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	// GetIssue -> IssueCacheTTL (30s)
+	if _, err := tool.GetIssue(ctx, "test-incident", map[string]interface{}{"key": "FOO-1"}); err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	// GetIssueChangelog -> ChangelogCacheTTL (60s)
+	if _, err := tool.GetIssueChangelog(ctx, "test-incident", map[string]interface{}{"key": "FOO-1"}); err != nil {
+		t.Fatalf("GetIssueChangelog: %v", err)
+	}
+	// GetProjects -> ProjectCacheTTL (120s)
+	if _, err := tool.GetProjects(ctx, "test-incident", map[string]interface{}{}); err != nil {
+		t.Fatalf("GetProjects: %v", err)
+	}
+	// SearchUsers -> UserCacheTTL (60s)
+	if _, err := tool.SearchUsers(ctx, "test-incident", map[string]interface{}{"query": "x"}); err != nil {
+		t.Fatalf("SearchUsers: %v", err)
+	}
+}

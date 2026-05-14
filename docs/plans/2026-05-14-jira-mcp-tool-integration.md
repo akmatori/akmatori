@@ -113,17 +113,17 @@ Files:
 Files:
 - Modify: `mcp-gateway/internal/tools/jira/jira.go`
 
-- [ ] `SearchIssues()` — `jql` (required), `fields`, `expand`, `start_at`, `max_results`; clamp `max_results` to 100; cached 15s
-- [ ] `GetIssue()` — `key` (required), optional `expand`, `fields`; cached 30s
-- [ ] `GetIssueComments()` — `key`, paging; cached 30s
-- [ ] `GetIssueTransitions()` — `key`; cached 30s
-- [ ] `GetIssueChangelog()` — `key`, paging; cached 60s
-- [ ] `GetProjects()` — `query`, paging; cached 120s
-- [ ] `GetProject()` — `key`; cached 120s
-- [ ] `SearchUsers()` — `query`, paging; cached 60s
-- [ ] `APIRequest()` — `path` (required, must start with `/rest/`), optional `params`; cached 30s; rejects non-GET via method param fixed to GET
-- [ ] Tests for each method with `httptest.NewServer` mocking the Jira API (success + error cases, params + auth header assertions)
-- [ ] Run `make test-mcp` — must pass before Task 4
+- [x] `SearchIssues()` — `jql` (required), `fields`, `expand`, `start_at`, `max_results`; clamp `max_results` to 100; cached 15s
+- [x] `GetIssue()` — `key` (required), optional `expand`, `fields`; cached 30s
+- [x] `GetIssueComments()` — `key`, paging; cached 30s
+- [x] `GetIssueTransitions()` — `key`; cached 30s
+- [x] `GetIssueChangelog()` — `key`, paging; cached 60s
+- [x] `GetProjects()` — `query`, paging; cached 120s
+- [x] `GetProject()` — `key`; cached 120s
+- [x] `SearchUsers()` — `query`, paging; cached 60s
+- [x] `APIRequest()` — `path` (required, must start with `/rest/`), optional `params`; cached 30s; rejects non-GET via method param fixed to GET
+- [x] Tests for each method with `httptest.NewServer` mocking the Jira API (success + error cases, params + auth header assertions)
+- [x] Run `make test-mcp` — must pass before Task 4
 
 ### Task 4: Write tool methods (gated)
 
