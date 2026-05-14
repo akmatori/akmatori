@@ -232,6 +232,34 @@ func TestRequireWrites(t *testing.T) {
 	}
 }
 
+func TestVerifyWriteGate_NilDBRejectsCachedFalse(t *testing.T) {
+	// When database.DB is nil (tests / dev), verifyWriteGate falls back to the cached
+	// config: a cached AllowWrites=false must reject with the writes-disabled error.
+	// (In production with a live DB, the gate is always re-read from the DB regardless
+	// of the cached value so toggle changes propagate immediately in both directions.)
+	tool := NewJiraTool(testLogger(), nil)
+	t.Cleanup(tool.Stop)
+
+	_, err := tool.verifyWriteGate(context.Background(), "test-incident", "", &JiraConfig{AllowWrites: false})
+	if err == nil {
+		t.Fatal("expected error when DB is nil and cached AllowWrites=false")
+	}
+	if !strings.Contains(err.Error(), "writes disabled") {
+		t.Errorf("expected 'writes disabled', got: %v", err)
+	}
+}
+
+func TestVerifyWriteGate_NilDBAllowsCachedTrue(t *testing.T) {
+	// Unit tests run without database.DB; verifyWriteGate must fall back to the cached
+	// value so existing write-method tests (which pre-populate the cache) still work.
+	tool := NewJiraTool(testLogger(), nil)
+	t.Cleanup(tool.Stop)
+
+	if _, err := tool.verifyWriteGate(context.Background(), "test-incident", "", &JiraConfig{AllowWrites: true}); err != nil {
+		t.Errorf("expected nil DB to fall back to cached AllowWrites=true, got: %v", err)
+	}
+}
+
 // --- authHeader tests ---
 
 func TestAuthHeader_CloudBasic(t *testing.T) {
@@ -808,17 +836,57 @@ func TestGetIssueChangelog_Success(t *testing.T) {
 	}
 }
 
-func TestGetIssueChangelog_APIVersion2_UsesExpandFallback(t *testing.T) {
+func TestGetIssueChangelog_APIVersion2_UsesDedicatedEndpoint(t *testing.T) {
+	// Modern Jira Server/DC (8.x+) exposes /rest/api/2/issue/{key}/changelog which
+	// natively supports paging — we hit that first without falling back.
 	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
-		// v2 Server/DC lacks /issue/{key}/changelog; fall back to /issue/{key}?expand=changelog
-		if r.URL.Path != "/rest/api/2/issue/FOO-1" {
-			t.Errorf("path = %q, want v2 issue path", r.URL.Path)
+		if r.URL.Path != "/rest/api/2/issue/FOO-1/changelog" {
+			t.Errorf("path = %q, want v2 dedicated changelog path", r.URL.Path)
 		}
-		if r.URL.Query().Get("expand") != "changelog" {
-			t.Errorf("expected expand=changelog, got %q", r.URL.Query().Get("expand"))
+		if r.URL.Query().Get("startAt") != "10" {
+			t.Errorf("expected startAt=10, got %q", r.URL.Query().Get("startAt"))
+		}
+		if r.URL.Query().Get("maxResults") != "25" {
+			t.Errorf("expected maxResults=25, got %q", r.URL.Query().Get("maxResults"))
 		}
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"key":"FOO-1","changelog":{"histories":[]}}`)
+		fmt.Fprint(w, `{"values":[],"startAt":10,"maxResults":25,"total":0}`)
+	})
+	getTestConfig(tool).APIVersion = "2"
+
+	out, err := tool.GetIssueChangelog(context.Background(), "test-incident", map[string]interface{}{
+		"key":         "FOO-1",
+		"start_at":    float64(10),
+		"max_results": float64(25),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, `"values"`) {
+		t.Errorf("expected response to contain values field, got %q", out)
+	}
+}
+
+func TestGetIssueChangelog_APIVersion2_FallsBackOn404(t *testing.T) {
+	// Older Jira Server (pre-8.x) returns 404 on /issue/{key}/changelog; we then
+	// fall back to /issue/{key}?expand=changelog, extract changelog.histories, and
+	// normalize to a v3-style {values, startAt, maxResults, total, isLast} envelope.
+	var firstCall, secondCall string
+	calls := 0
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		switch calls {
+		case 1:
+			firstCall = r.URL.Path
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"errorMessages":["not found"]}`)
+		case 2:
+			secondCall = r.URL.Path + "?" + r.URL.RawQuery
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{"key":"FOO-1","changelog":{"histories":[{"id":"1"},{"id":"2"}]}}`)
+		default:
+			t.Errorf("unexpected extra call: %s", r.URL.Path)
+		}
 	})
 	getTestConfig(tool).APIVersion = "2"
 
@@ -828,8 +896,212 @@ func TestGetIssueChangelog_APIVersion2_UsesExpandFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(out, "changelog") {
-		t.Errorf("expected response to contain changelog field, got %q", out)
+	if firstCall != "/rest/api/2/issue/FOO-1/changelog" {
+		t.Errorf("first call = %q, want dedicated endpoint", firstCall)
+	}
+	if !strings.HasPrefix(secondCall, "/rest/api/2/issue/FOO-1?") || !strings.Contains(secondCall, "expand=changelog") {
+		t.Errorf("second call = %q, want expand=changelog fallback", secondCall)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("response is not valid JSON: %v\n%s", err, out)
+	}
+	values, ok := resp["values"].([]interface{})
+	if !ok {
+		t.Fatalf("expected values array in normalized envelope, got %v", resp)
+	}
+	if len(values) != 2 {
+		t.Errorf("expected 2 history entries, got %d", len(values))
+	}
+	if total, _ := resp["total"].(float64); total != 2 {
+		t.Errorf("expected total=2, got %v", resp["total"])
+	}
+	if isLast, _ := resp["isLast"].(bool); !isLast {
+		t.Errorf("expected isLast=true, got %v", resp["isLast"])
+	}
+	if strings.Contains(out, `"key":"FOO-1"`) {
+		t.Errorf("normalized envelope should not leak full issue document, got %q", out)
+	}
+}
+
+func TestGetIssueChangelog_APIVersion2_FallsBackOn404_AppliesPaging(t *testing.T) {
+	// On the v2 fallback path, paging args must be applied client-side over the
+	// full histories array so callers don't get identical cached responses for
+	// different page requests.
+	calls := 0
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"errorMessages":["not found"]}`)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"changelog":{"histories":[{"id":"1"},{"id":"2"},{"id":"3"},{"id":"4"},{"id":"5"}]}}`)
+	})
+	getTestConfig(tool).APIVersion = "2"
+
+	out, err := tool.GetIssueChangelog(context.Background(), "test-incident", map[string]interface{}{
+		"key":         "FOO-1",
+		"start_at":    float64(1),
+		"max_results": float64(2),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, out)
+	}
+	values, _ := resp["values"].([]interface{})
+	if len(values) != 2 {
+		t.Fatalf("expected 2 values, got %d (%v)", len(values), values)
+	}
+	first, _ := values[0].(map[string]interface{})
+	if first["id"] != "2" {
+		t.Errorf("expected first entry id=2 after start_at=1, got %v", first["id"])
+	}
+	second, _ := values[1].(map[string]interface{})
+	if second["id"] != "3" {
+		t.Errorf("expected second entry id=3, got %v", second["id"])
+	}
+	if total, _ := resp["total"].(float64); total != 5 {
+		t.Errorf("expected total=5, got %v", resp["total"])
+	}
+	if isLast, _ := resp["isLast"].(bool); isLast {
+		t.Errorf("expected isLast=false at start_at=1, got %v", resp["isLast"])
+	}
+	if start, _ := resp["startAt"].(float64); start != 1 {
+		t.Errorf("expected startAt=1, got %v", resp["startAt"])
+	}
+	if max, _ := resp["maxResults"].(float64); max != 2 {
+		t.Errorf("expected maxResults=2, got %v", resp["maxResults"])
+	}
+}
+
+func TestGetIssueChangelog_APIVersion2_FallsBackOn404_PreservesEmbeddedTotal(t *testing.T) {
+	// On older Jira Server, the embedded changelog (via ?expand=changelog) reports
+	// its own total even when the histories array is capped. Surface the embedded
+	// total so the agent can see entries exist upstream, but isLast must reflect
+	// LOCAL exhaustion — the fallback can't paginate beyond what's embedded, so
+	// once the caller has read all local entries, the contract has to say so.
+	calls := 0
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"errorMessages":["not found"]}`)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		// Embedded changelog reports total=42 but only ships 2 histories.
+		fmt.Fprint(w, `{"changelog":{"startAt":0,"maxResults":100,"total":42,"histories":[{"id":"1"},{"id":"2"}]}}`)
+	})
+	getTestConfig(tool).APIVersion = "2"
+
+	out, err := tool.GetIssueChangelog(context.Background(), "test-incident", map[string]interface{}{
+		"key": "FOO-1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, out)
+	}
+	if total, _ := resp["total"].(float64); total != 42 {
+		t.Errorf("expected total=42 (from embedded changelog), got %v", resp["total"])
+	}
+	if isLast, _ := resp["isLast"].(bool); !isLast {
+		t.Errorf("expected isLast=true once the local slice (2 entries) is exhausted at startAt=0, got %v", resp["isLast"])
+	}
+}
+
+func TestGetIssueChangelog_APIVersion2_FallsBackOn404_PagingBeyondLocalIsLast(t *testing.T) {
+	// When the caller paginates past the embedded slice (e.g. start_at=100 against
+	// a 2-entry local histories), the fallback must return empty values WITH
+	// isLast=true. Returning isLast=false alongside an empty values array would
+	// trick the agent into looping forever, since the dedicated /changelog
+	// endpoint (the only way to fetch entries beyond the embed) 404s here.
+	calls := 0
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"errorMessages":["not found"]}`)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"changelog":{"startAt":0,"maxResults":100,"total":42,"histories":[{"id":"1"},{"id":"2"}]}}`)
+	})
+	getTestConfig(tool).APIVersion = "2"
+
+	out, err := tool.GetIssueChangelog(context.Background(), "test-incident", map[string]interface{}{
+		"key":         "FOO-1",
+		"start_at":    float64(100),
+		"max_results": float64(50),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, out)
+	}
+	values, _ := resp["values"].([]interface{})
+	if len(values) != 0 {
+		t.Errorf("expected empty values when start_at exceeds local histories, got %d", len(values))
+	}
+	if isLast, _ := resp["isLast"].(bool); !isLast {
+		t.Errorf("expected isLast=true to stop pagination loops when no more local entries exist, got %v", resp["isLast"])
+	}
+	if total, _ := resp["total"].(float64); total != 42 {
+		t.Errorf("expected total=42 (still surfaced from embed), got %v", resp["total"])
+	}
+}
+
+func TestGetIssueChangelog_APIVersion2_NonNotFoundError(t *testing.T) {
+	// A non-404 error on the dedicated endpoint should propagate (no fallback).
+	calls := 0
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `{"errorMessages":["boom"]}`)
+	})
+	getTestConfig(tool).APIVersion = "2"
+
+	_, err := tool.GetIssueChangelog(context.Background(), "test-incident", map[string]interface{}{
+		"key": "FOO-1",
+	})
+	if err == nil {
+		t.Fatal("expected error to propagate without fallback")
+	}
+	if calls != 1 {
+		t.Errorf("expected exactly 1 call on non-404, got %d", calls)
+	}
+}
+
+func TestGetIssueChangelog_APIVersion3_DoesNotFallBackOn404(t *testing.T) {
+	// On v3 (Cloud), there is no v2 fallback — a 404 should propagate.
+	calls := 0
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"errorMessages":["not found"]}`)
+	})
+
+	_, err := tool.GetIssueChangelog(context.Background(), "test-incident", map[string]interface{}{
+		"key": "FOO-1",
+	})
+	if err == nil {
+		t.Fatal("expected error to propagate without fallback on v3")
+	}
+	if calls != 1 {
+		t.Errorf("expected exactly 1 call on v3, got %d", calls)
 	}
 }
 
@@ -860,6 +1132,102 @@ func TestGetProjects_Success(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetProjects_APIVersion2_ClientSideFilterAndPaging(t *testing.T) {
+	// Server/DC v2 uses /project (no native filter/paging). The tool fetches the
+	// full list and applies `query` + start_at/max_results client-side, normalizing
+	// to the v3-style {values, startAt, maxResults, total, isLast} shape.
+	var receivedQuery url.Values
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/2/project" {
+			t.Errorf("path = %q, want /rest/api/2/project", r.URL.Path)
+		}
+		receivedQuery = r.URL.Query()
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[
+			{"key":"FOO","name":"Foo Platform"},
+			{"key":"BAR","name":"Bar Service"},
+			{"key":"FOOBAR","name":"FooBar Combined"},
+			{"key":"QUX","name":"Qux Project"}
+		]`)
+	})
+	getTestConfig(tool).APIVersion = "2"
+
+	// query=foo should match Foo Platform, FooBar Combined (case-insensitive on name/key).
+	out, err := tool.GetProjects(context.Background(), "test-incident", map[string]interface{}{
+		"query":       "foo",
+		"start_at":    float64(0),
+		"max_results": float64(1),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// /project must not receive any query/paging — filtering happens client-side.
+	if receivedQuery.Get("query") != "" || receivedQuery.Get("startAt") != "" || receivedQuery.Get("maxResults") != "" {
+		t.Errorf("v2 /project should be called without params, got %v", receivedQuery)
+	}
+
+	var parsed struct {
+		StartAt    int                      `json:"startAt"`
+		MaxResults int                      `json:"maxResults"`
+		Total      int                      `json:"total"`
+		IsLast     bool                     `json:"isLast"`
+		Values     []map[string]interface{} `json:"values"`
+	}
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("failed to parse normalized response: %v\nresponse: %s", err, out)
+	}
+	if parsed.Total != 2 {
+		t.Errorf("total = %d, want 2 (matches: FOO + FOOBAR)", parsed.Total)
+	}
+	if parsed.MaxResults != 1 {
+		t.Errorf("maxResults = %d, want 1", parsed.MaxResults)
+	}
+	if len(parsed.Values) != 1 {
+		t.Fatalf("values length = %d, want 1 (paging window)", len(parsed.Values))
+	}
+	if parsed.Values[0]["key"] != "FOO" {
+		t.Errorf("first value key = %v, want FOO", parsed.Values[0]["key"])
+	}
+	if parsed.IsLast {
+		t.Errorf("isLast = true, want false (still 1 match remaining)")
+	}
+}
+
+func TestGetProjects_APIVersion2_PagingSecondPage(t *testing.T) {
+	tool, _, _ := newTestTool(t, AuthTypeCloudBasic, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[{"key":"A","name":"A"},{"key":"B","name":"B"},{"key":"C","name":"C"}]`)
+	})
+	getTestConfig(tool).APIVersion = "2"
+
+	out, err := tool.GetProjects(context.Background(), "test-incident", map[string]interface{}{
+		"start_at":    float64(2),
+		"max_results": float64(10),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var parsed struct {
+		StartAt int                      `json:"startAt"`
+		Total   int                      `json:"total"`
+		IsLast  bool                     `json:"isLast"`
+		Values  []map[string]interface{} `json:"values"`
+	}
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("failed to parse normalized response: %v", err)
+	}
+	if parsed.Total != 3 {
+		t.Errorf("total = %d, want 3", parsed.Total)
+	}
+	if len(parsed.Values) != 1 || parsed.Values[0]["key"] != "C" {
+		t.Errorf("values = %v, want [C]", parsed.Values)
+	}
+	if !parsed.IsLast {
+		t.Errorf("isLast = false, want true (window covers tail)")
 	}
 }
 

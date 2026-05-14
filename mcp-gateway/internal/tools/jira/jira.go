@@ -141,12 +141,50 @@ func apiPath(version, suffix string) string {
 	return "/rest/api/" + version + suffix
 }
 
-// requireWrites returns an error when AllowWrites is disabled.
+// writesDisabledErr returns the canonical error message shown when a write is rejected.
+func writesDisabledErr() error {
+	return fmt.Errorf("writes disabled for this Jira instance; enable jira_allow_writes to allow")
+}
+
+// requireWrites returns an error when AllowWrites on the supplied config is disabled.
+// Used by verifyWriteGate's fall-through path when no live database is available
+// (tests / dev) — production write checks always go through verifyWriteGate, which
+// re-reads the gate from the DB regardless of the cached value.
 func requireWrites(config *JiraConfig) error {
 	if config == nil || !config.AllowWrites {
-		return fmt.Errorf("writes disabled for this Jira instance; enable jira_allow_writes to allow")
+		return writesDisabledErr()
 	}
 	return nil
+}
+
+// verifyWriteGate confirms writes are allowed by always re-reading the Jira
+// credentials from the database, bypassing the 5-minute config cache. It returns
+// a fresh *JiraConfig built from the just-fetched credentials so the caller's
+// write uses the latest URL / auth / gate state — important when an operator
+// flips jira_allow_writes and rotates the URL or token in the same change. The
+// shared response/config cache is refreshed with the fresh config so subsequent
+// reads also pick it up. When database.DB is nil (unit tests) we fall back to
+// the cached config so existing test fixtures keep working without a live DB.
+func (t *JiraTool) verifyWriteGate(ctx context.Context, incidentID, logicalName string, cached *JiraConfig) (*JiraConfig, error) {
+	if database.DB == nil {
+		return cached, requireWrites(cached)
+	}
+	creds, err := database.ResolveToolCredentials(ctx, incidentID, "jira", nil, logicalName)
+	if err != nil {
+		return cached, fmt.Errorf("failed to verify Jira write gate: %w", err)
+	}
+
+	fresh := t.buildConfigFromSettings(ctx, creds.Settings)
+	cacheKey := configCacheKey(incidentID)
+	if logicalName != "" {
+		cacheKey = fmt.Sprintf("creds:logical:%s:%s", "jira", logicalName)
+	}
+	t.configCache.Set(cacheKey, fresh)
+
+	if !fresh.AllowWrites {
+		return fresh, writesDisabledErr()
+	}
+	return fresh, nil
 }
 
 // getConfig fetches Jira configuration from the database with caching.
@@ -172,6 +210,19 @@ func (t *JiraTool) getConfig(ctx context.Context, incidentID string, logicalName
 		return nil, fmt.Errorf("failed to get Jira credentials: %w", err)
 	}
 
+	config := t.buildConfigFromSettings(ctx, creds.Settings)
+
+	t.configCache.Set(cacheKey, config)
+	t.logger.Printf("Config cached for key %s", cacheKey)
+
+	return config, nil
+}
+
+// buildConfigFromSettings constructs a *JiraConfig from a ResolveToolCredentials
+// Settings map, applying defaults and the current proxy settings. Shared by
+// getConfig and verifyWriteGate so a write that re-reads the gate also picks up
+// fresh URL / auth / proxy state from the same DB lookup.
+func (t *JiraTool) buildConfigFromSettings(ctx context.Context, settings map[string]interface{}) *JiraConfig {
 	config := &JiraConfig{
 		AuthType:    AuthTypeCloudBasic,
 		APIVersion:  "3",
@@ -179,8 +230,6 @@ func (t *JiraTool) getConfig(ctx context.Context, incidentID string, logicalName
 		Timeout:     30,
 		AllowWrites: false,
 	}
-
-	settings := creds.Settings
 
 	if u, ok := settings["jira_url"].(string); ok {
 		config.URL = strings.TrimRight(u, "/")
@@ -222,10 +271,7 @@ func (t *JiraTool) getConfig(ctx context.Context, incidentID string, logicalName
 		config.ProxyURL = proxySettings.ProxyURL
 	}
 
-	t.configCache.Set(cacheKey, config)
-	t.logger.Printf("Config cached for key %s", cacheKey)
-
-	return config, nil
+	return config
 }
 
 // getCachedProxySettings fetches proxy settings with caching.
@@ -533,9 +579,14 @@ func (t *JiraTool) GetIssueTransitions(ctx context.Context, incidentID string, a
 }
 
 // GetIssueChangelog lists changelog entries for an issue.
-// Jira Cloud (v3) exposes /issue/{key}/changelog; Jira Server / DC (v2) historically lacks
-// that endpoint, so we fall back to GET /issue/{key}?expand=changelog and return the issue
-// object (caller reads the `changelog` field).
+// On both v3 (Cloud) and v2 (Jira Server/DC 8.x+), the dedicated /issue/{key}/changelog
+// endpoint natively supports start_at / max_results paging and is tried first. On older
+// Jira Server (pre-8.x) that endpoint returns 404, and we fall back to
+// GET /issue/{key}?expand=changelog. The fallback issue document carries the full
+// `changelog.histories` array with no native paging, so we extract the histories,
+// apply start_at / max_results client-side, and normalize to a v3-style
+// `{values, startAt, maxResults, total, isLast}` envelope so the public contract holds
+// regardless of deployment.
 func (t *JiraTool) GetIssueChangelog(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
 	logicalName := extractLogicalName(args)
 
@@ -549,24 +600,104 @@ func (t *JiraTool) GetIssueChangelog(ctx context.Context, incidentID string, arg
 		return "", err
 	}
 
-	params := url.Values{}
-	var path string
-	if config.APIVersion == "2" {
-		params.Set("expand", "changelog")
-		path = apiPath("2", "/issue/"+url.PathEscape(key))
-	} else {
-		addPagingParams(params, args)
-		path = apiPath(config.APIVersion, "/issue/"+url.PathEscape(key)+"/changelog")
+	pagedParams := url.Values{}
+	addPagingParams(pagedParams, args)
+	pagedPath := apiPath(config.APIVersion, "/issue/"+url.PathEscape(key)+"/changelog")
+	body, err := t.cachedGet(ctx, incidentID, pagedPath, pagedParams, ChangelogCacheTTL, logicalName)
+	if err == nil {
+		return string(body), nil
 	}
 
-	body, err := t.cachedGet(ctx, incidentID, path, params, ChangelogCacheTTL, logicalName)
+	if config.APIVersion != "2" || !strings.Contains(err.Error(), "HTTP error 404") {
+		return "", err
+	}
+
+	fallbackParams := url.Values{}
+	fallbackParams.Set("expand", "changelog")
+	fallbackPath := apiPath("2", "/issue/"+url.PathEscape(key))
+	body, err = t.cachedGet(ctx, incidentID, fallbackPath, fallbackParams, ChangelogCacheTTL, logicalName)
 	if err != nil {
 		return "", err
 	}
-	return string(body), nil
+
+	var issue struct {
+		Changelog struct {
+			Total     *int                     `json:"total"`
+			Histories []map[string]interface{} `json:"histories"`
+		} `json:"changelog"`
+	}
+	if err := json.Unmarshal(body, &issue); err != nil {
+		return "", fmt.Errorf("failed to parse /issue?expand=changelog response: %w", err)
+	}
+	histories := issue.Changelog.Histories
+	if histories == nil {
+		histories = []map[string]interface{}{}
+	}
+	// Trust the embedded total when present and larger than what we received: on
+	// Jira Server versions that cap the embedded changelog, the issue payload still
+	// reports the true count via changelog.total. Surfacing the true total lets
+	// the agent see when entries beyond what's embedded exist (though only the
+	// dedicated /changelog endpoint can actually fetch them, hence this fallback
+	// only landing here when that 404s).
+	total := len(histories)
+	if issue.Changelog.Total != nil && *issue.Changelog.Total > total {
+		total = *issue.Changelog.Total
+	}
+	startAt, maxResults := changelogPagingArgs(args)
+	paged := sliceHistories(histories, startAt, maxResults)
+	// isLast is computed against the local histories array, not the embedded
+	// total: once startAt has covered everything we received, this endpoint has
+	// no more entries to give the caller — incrementing startAt further would
+	// just return empty slices forever. Honouring the paging contract means
+	// signalling end-of-stream as soon as the local slice is exhausted.
+	out := map[string]interface{}{
+		"startAt":    startAt,
+		"maxResults": maxResults,
+		"total":      total,
+		"isLast":     startAt+len(paged) >= len(histories),
+		"values":     paged,
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal changelog response: %w", err)
+	}
+	return string(raw), nil
 }
 
-// GetProjects lists projects via /project/search.
+// changelogPagingArgs extracts and clamps start_at / max_results for client-side paging
+// on the v2 fallback path. max_results defaults to 100 (Jira's default for the dedicated
+// changelog endpoint) and is clamped to 100.
+func changelogPagingArgs(args map[string]interface{}) (startAt, maxResults int) {
+	if v, ok := args["start_at"].(float64); ok && v >= 0 {
+		startAt = int(v)
+	}
+	maxResults = 100
+	if v, ok := args["max_results"].(float64); ok && v > 0 {
+		maxResults = clampLimit(int(v))
+	}
+	return startAt, maxResults
+}
+
+// sliceHistories returns the [startAt, startAt+maxResults) window over changelog histories.
+func sliceHistories(histories []map[string]interface{}, startAt, maxResults int) []map[string]interface{} {
+	if startAt >= len(histories) {
+		return []map[string]interface{}{}
+	}
+	end := startAt + maxResults
+	if end > len(histories) {
+		end = len(histories)
+	}
+	return histories[startAt:end]
+}
+
+// GetProjects lists projects.
+// Cloud (v3) uses /project/search which natively supports `query`, `start_at`, and
+// `max_results`; arguments are forwarded to the API. Server/DC (v2) exposes
+// /project, which returns the full unpaged array with no native filter or paging,
+// so we fetch the full list, then apply `query` (case-insensitive substring match
+// on project name/key) and paging client-side. Both branches normalize the response
+// to a v3-style `{values, startAt, maxResults, total, isLast}` object so the schema
+// contract holds regardless of deployment.
 func (t *JiraTool) GetProjects(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
 	logicalName := extractLogicalName(args)
 
@@ -575,17 +706,87 @@ func (t *JiraTool) GetProjects(ctx context.Context, incidentID string, args map[
 		return "", err
 	}
 
+	if config.APIVersion == "2" {
+		body, err := t.cachedGet(ctx, incidentID, apiPath("2", "/project"), nil, ProjectCacheTTL, logicalName)
+		if err != nil {
+			return "", err
+		}
+		var projects []map[string]interface{}
+		if err := json.Unmarshal(body, &projects); err != nil {
+			return "", fmt.Errorf("failed to parse /project response: %w", err)
+		}
+		query, _ := args["query"].(string)
+		filtered := filterProjects(projects, query)
+		startAt, maxResults := projectPagingArgs(args)
+		paged := sliceProjects(filtered, startAt, maxResults)
+		out := map[string]interface{}{
+			"startAt":    startAt,
+			"maxResults": maxResults,
+			"total":      len(filtered),
+			"isLast":     startAt+len(paged) >= len(filtered),
+			"values":     paged,
+		}
+		raw, err := json.Marshal(out)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal projects response: %w", err)
+		}
+		return string(raw), nil
+	}
+
 	params := url.Values{}
 	if v, ok := args["query"].(string); ok && v != "" {
 		params.Set("query", v)
 	}
 	addPagingParams(params, args)
-
 	body, err := t.cachedGet(ctx, incidentID, apiPath(config.APIVersion, "/project/search"), params, ProjectCacheTTL, logicalName)
 	if err != nil {
 		return "", err
 	}
 	return string(body), nil
+}
+
+// filterProjects applies a case-insensitive substring match on project name/key.
+// Empty/whitespace query returns the input unchanged.
+func filterProjects(projects []map[string]interface{}, query string) []map[string]interface{} {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return projects
+	}
+	qLower := strings.ToLower(q)
+	out := make([]map[string]interface{}, 0, len(projects))
+	for _, p := range projects {
+		name, _ := p["name"].(string)
+		key, _ := p["key"].(string)
+		if strings.Contains(strings.ToLower(name), qLower) || strings.Contains(strings.ToLower(key), qLower) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// projectPagingArgs extracts and clamps start_at / max_results for client-side paging.
+// max_results defaults to 50 (Jira's default for /project/search) and is clamped to 100.
+func projectPagingArgs(args map[string]interface{}) (startAt, maxResults int) {
+	if v, ok := args["start_at"].(float64); ok && v >= 0 {
+		startAt = int(v)
+	}
+	maxResults = 50
+	if v, ok := args["max_results"].(float64); ok && v > 0 {
+		maxResults = clampLimit(int(v))
+	}
+	return startAt, maxResults
+}
+
+// sliceProjects returns the [startAt, startAt+maxResults) window over projects.
+func sliceProjects(projects []map[string]interface{}, startAt, maxResults int) []map[string]interface{} {
+	if startAt >= len(projects) {
+		return []map[string]interface{}{}
+	}
+	end := startAt + maxResults
+	if end > len(projects) {
+		end = len(projects)
+	}
+	return projects[startAt:end]
 }
 
 // GetProject retrieves a single project by key (or ID).
@@ -718,13 +919,13 @@ func (t *JiraTool) APIRequest(ctx context.Context, incidentID string, args map[s
 	return string(body), nil
 }
 
-// doWrite performs a write (non-GET) request to Jira after checking the write gate.
-// Returns the raw response bytes. Write paths are never cached.
+// doWrite performs a write (non-GET) request to Jira using the supplied config.
+// Returns the raw response bytes. Write paths are never cached. Callers MUST
+// have already verified the write gate via verifyWriteGate and built `path` /
+// `payload` from the fresh config that verifyWriteGate returned, so that a
+// simultaneous URL / auth / api_version change all take effect on the very
+// first write rather than the one after the 5-minute config cache expires.
 func (t *JiraTool) doWrite(ctx context.Context, config *JiraConfig, method, path string, payload interface{}) ([]byte, error) {
-	if err := requireWrites(config); err != nil {
-		return nil, err
-	}
-
 	var reader io.Reader
 	if payload != nil {
 		bodyJSON, err := json.Marshal(payload)
@@ -851,11 +1052,15 @@ func (t *JiraTool) AddComment(ctx context.Context, incidentID string, args map[s
 	if err != nil {
 		return "", err
 	}
+	fresh, err := t.verifyWriteGate(ctx, incidentID, logicalName, config)
+	if err != nil {
+		return "", err
+	}
 
-	path := apiPath(config.APIVersion, "/issue/"+url.PathEscape(key)+"/comment")
-	payload := map[string]interface{}{"body": bodyForVersion(bodyArg, config.APIVersion)}
+	path := apiPath(fresh.APIVersion, "/issue/"+url.PathEscape(key)+"/comment")
+	payload := map[string]interface{}{"body": bodyForVersion(bodyArg, fresh.APIVersion)}
 
-	respBody, err := t.doWrite(ctx, config, http.MethodPost, path, payload)
+	respBody, err := t.doWrite(ctx, fresh, http.MethodPost, path, payload)
 	if err != nil {
 		return "", err
 	}
@@ -880,6 +1085,10 @@ func (t *JiraTool) TransitionIssue(ctx context.Context, incidentID string, args 
 	if err != nil {
 		return "", err
 	}
+	fresh, err := t.verifyWriteGate(ctx, incidentID, logicalName, config)
+	if err != nil {
+		return "", err
+	}
 
 	payload := map[string]interface{}{
 		"transition": map[string]interface{}{"id": transitionID},
@@ -889,7 +1098,7 @@ func (t *JiraTool) TransitionIssue(ctx context.Context, incidentID string, args 
 		payload["update"] = map[string]interface{}{
 			"comment": []interface{}{
 				map[string]interface{}{
-					"add": map[string]interface{}{"body": bodyForVersion(comment, config.APIVersion)},
+					"add": map[string]interface{}{"body": bodyForVersion(comment, fresh.APIVersion)},
 				},
 			},
 		}
@@ -899,8 +1108,8 @@ func (t *JiraTool) TransitionIssue(ctx context.Context, incidentID string, args 
 		payload["fields"] = fields
 	}
 
-	path := apiPath(config.APIVersion, "/issue/"+url.PathEscape(key)+"/transitions")
-	respBody, err := t.doWrite(ctx, config, http.MethodPost, path, payload)
+	path := apiPath(fresh.APIVersion, "/issue/"+url.PathEscape(key)+"/transitions")
+	respBody, err := t.doWrite(ctx, fresh, http.MethodPost, path, payload)
 	if err != nil {
 		return "", err
 	}
@@ -930,6 +1139,10 @@ func (t *JiraTool) CreateIssue(ctx context.Context, incidentID string, args map[
 	if err != nil {
 		return "", err
 	}
+	fresh, err := t.verifyWriteGate(ctx, incidentID, logicalName, config)
+	if err != nil {
+		return "", err
+	}
 
 	fields := map[string]interface{}{
 		"project":   map[string]interface{}{"key": projectKey},
@@ -941,7 +1154,7 @@ func (t *JiraTool) CreateIssue(ctx context.Context, incidentID string, args map[
 		switch dv := desc.(type) {
 		case string:
 			if strings.TrimSpace(dv) != "" {
-				fields["description"] = bodyForVersion(dv, config.APIVersion)
+				fields["description"] = bodyForVersion(dv, fresh.APIVersion)
 			}
 		case map[string]interface{}:
 			if len(dv) > 0 {
@@ -951,7 +1164,7 @@ func (t *JiraTool) CreateIssue(ctx context.Context, incidentID string, args map[
 			return "", fmt.Errorf("description must be a string or object (ADF), got %T", desc)
 		}
 	}
-	if ref := assigneeRef(args["assignee"], config.APIVersion); ref != nil {
+	if ref := assigneeRef(args["assignee"], fresh.APIVersion); ref != nil {
 		fields["assignee"] = ref
 	}
 	if ref := priorityRef(args["priority"]); ref != nil {
@@ -968,9 +1181,9 @@ func (t *JiraTool) CreateIssue(ctx context.Context, incidentID string, args map[
 	}
 
 	payload := map[string]interface{}{"fields": fields}
-	path := apiPath(config.APIVersion, "/issue")
+	path := apiPath(fresh.APIVersion, "/issue")
 
-	respBody, err := t.doWrite(ctx, config, http.MethodPost, path, payload)
+	respBody, err := t.doWrite(ctx, fresh, http.MethodPost, path, payload)
 	if err != nil {
 		return "", err
 	}
@@ -999,11 +1212,15 @@ func (t *JiraTool) UpdateIssue(ctx context.Context, incidentID string, args map[
 	if err != nil {
 		return "", err
 	}
+	fresh, err := t.verifyWriteGate(ctx, incidentID, logicalName, config)
+	if err != nil {
+		return "", err
+	}
 
 	payload := map[string]interface{}{"fields": fields}
-	path := apiPath(config.APIVersion, "/issue/"+url.PathEscape(key))
+	path := apiPath(fresh.APIVersion, "/issue/"+url.PathEscape(key))
 
-	respBody, err := t.doWrite(ctx, config, http.MethodPut, path, payload)
+	respBody, err := t.doWrite(ctx, fresh, http.MethodPut, path, payload)
 	if err != nil {
 		return "", err
 	}
