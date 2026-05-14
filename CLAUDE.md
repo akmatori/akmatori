@@ -2,540 +2,231 @@
 
 ## Project Overview
 
-Akmatori is an AI-powered AIOps platform that receives alerts from monitoring systems (Zabbix, Alertmanager, PagerDuty, Grafana, Datadog), analyzes them using multi-provider LLM agents (via the pi-mono coding-agent SDK), and executes automated remediation.
+Akmatori is an AI-powered AIOps platform for SRE teams. It ingests alerts from monitoring systems, analyzes them with multi-provider LLM agents, and can execute remediation through approval-gated tools.
 
-## Architecture
+## Stack and Runtime
 
-- **5-container Docker architecture**: API, Agent Worker, MCP Gateway, PostgreSQL, QMD (runbook search)
-- **Backend**: Go 1.24+ (API server, MCP gateway)
-- **Agent Worker**: Node.js 22+ / TypeScript using `@mariozechner/pi-coding-agent` SDK (v0.73.0)
-- **Frontend**: React 19 + TypeScript + Vite + Tailwind
-- **Database**: PostgreSQL 16 with GORM
-- **LLM Providers**: Anthropic, OpenAI, Google, OpenRouter, Custom (configured via web UI)
+- Docker deployment: API, Agent Worker, MCP Gateway, PostgreSQL, QMD
+- Backend: Go 1.24+
+- Agent Worker: Node.js 22+ / TypeScript with `@mariozechner/pi-coding-agent` (`v0.73.0`)
+- Frontend: React 19 + TypeScript + Vite + Tailwind
+- Database: PostgreSQL 16 + GORM
+- LLM providers: Anthropic, OpenAI, Google, OpenRouter, custom/on-prem
 
-## Key Directories
+## Repository Layout
 
-```
-/opt/akmatori/
-├── cmd/akmatori/           # Main API server entry point
-├── internal/
-│   ├── alerts/adapters/    # Alert source adapters (Zabbix, Alertmanager, etc.)
-│   ├── alerts/extraction/  # AI-powered alert extraction from free-form text
-│   ├── api/                # Request/response helpers, pagination
-│   ├── database/           # GORM models and database logic
-│   ├── handlers/           # HTTP/WebSocket handlers
-│   ├── middleware/         # Auth, CORS middleware
-│   ├── output/             # Agent output parsing (structured blocks)
-│   ├── logging/           # Structured logging (slog) initialization
-│   ├── services/           # Business logic layer (+ interfaces.go for testability)
-│   ├── setup/              # Zero-config first-run setup
-│   ├── slack/              # Slack integration (Socket Mode, hot-reload)
-│   ├── testhelpers/        # Test utilities, builders, mocks
-│   └── utils/              # Utility functions
-├── agent-worker/           # Node.js/TypeScript agent worker
-│   └── src/                # TypeScript source (gateway-client, gateway-tools, script-executor)
-├── mcp-gateway/            # MCP protocol gateway (separate Go module)
-│   └── internal/
-│       ├── auth/           # Per-incident tool authorization (allowlist enforcement)
-│       ├── cache/          # Generic TTL cache
-│       ├── mcpproxy/       # MCP proxy: connection pool + handler for external MCP servers
-│       ├── ratelimit/      # Token bucket rate limiter
-│       └── tools/          # SSH, Zabbix, VictoriaMetrics, PostgreSQL, ClickHouse, Grafana, Catchpoint, PagerDuty, NetBox, Kubernetes, Jira, and HTTP connector implementations
-├── web/                    # React frontend
-├── qmd/                    # QMD search sidecar (Dockerfile, config, entrypoint)
-├── docs/                   # OpenAPI specs (swagger at /api/docs)
-└── tests/fixtures/         # Test payloads and mock data
+```text
+cmd/akmatori/               main API entrypoint
+internal/alerts/adapters/   inbound alert adapters
+internal/alerts/extraction/ one-shot LLM alert extraction
+internal/api/               API request/response helpers
+internal/database/          GORM models and DB logic
+internal/handlers/          HTTP, WebSocket, Slack handlers
+internal/logging/           slog setup
+internal/output/            structured agent output parsing
+internal/services/          business logic and interfaces
+internal/setup/             first-run bootstrap
+internal/slack/             Slack client, typing, reload logic
+internal/testhelpers/       builders, fixtures, mocks
+agent-worker/src/           worker orchestrator and tool bridge
+mcp-gateway/internal/       tool auth, rate limiting, MCP proxy, tool impls
+qmd/                        runbook search sidecar
+docs/                       OpenAPI specs
+tests/fixtures/             payloads and test data
+web/                        React frontend
 ```
 
-## CRITICAL: Always Verify Changes with Tests
+## Core Architecture
 
-**After ANY code change, run the appropriate test command:**
+### Backend flow
 
-| After changing... | Run command |
-|-------------------|-------------|
-| Alert adapters (`internal/alerts/adapters/`) | `make test-adapters` |
-| MCP Gateway (`mcp-gateway/`) | `make test-mcp` |
-| Agent worker (`agent-worker/`) | `make test-agent` |
-| Web frontend (`web/`) | `make test-web` |
-| Any Go code | `make test` |
-| Before committing | `make verify` |
+1. Adapters or Slack create/continue incidents.
+2. Handlers call services through interfaces from `internal/services/interfaces.go`.
+3. Agent runs happen through the worker WebSocket.
+4. Tool execution goes through MCP Gateway with incident-scoped auth.
+5. Final output is parsed, optionally reformatted, stored, and sent back to UI/Slack.
 
-```bash
-# Quick reference
-make test-adapters    # ~0.01s
-make test-mcp         # ~0.01s
-make test-web         # Web frontend (vitest)
-make test-all         # All tests including agent-worker and web
-make verify           # go vet + all tests (pre-commit)
-```
+### Agent Worker flow
 
-## CRITICAL: Rebuild Docker Containers After Changes
+1. API sends `new_incident`, `continue_incident`, or `oneshot_llm_request`.
+2. `agent-worker/src/orchestrator.ts` routes the message.
+3. `agent-runner.ts` creates pi-mono sessions for full investigations.
+4. `oneshot-llm.ts` handles short provider-agnostic completions.
+5. Results stream back over WebSocket; session exports land in the worker work dir.
 
-| After changing... | Rebuild command |
-|-------------------|-----------------|
-| API server (`cmd/`, `internal/`) | `docker-compose build akmatori-api && docker-compose up -d akmatori-api` |
-| MCP Gateway (`mcp-gateway/`) | `docker-compose build mcp-gateway && docker-compose up -d mcp-gateway` |
-| Agent worker (`agent-worker/`) | `docker-compose build akmatori-agent && docker-compose up -d akmatori-agent` |
-| Frontend (`web/`) | `docker-compose build frontend && docker-compose up -d frontend` |
-| QMD search (`qmd/`) | `docker-compose build qmd && docker-compose up -d qmd` |
+### MCP Gateway flow
 
-## Current Testing Priorities
+1. Agent reads generated `SKILL.md` guidance.
+2. Agent calls `gateway_call(toolName, args, instanceHint?)`.
+3. Worker sends JSON-RPC to MCP Gateway with `X-Incident-ID`.
+4. Gateway resolves routing, enforces allowlists, executes, and returns output.
 
-Coverage moves quickly; re-run `go test -coverprofile=coverage.out ./...` before quoting numbers.
-Focus new tests on historically weak areas: `internal/handlers`, `internal/services`, `internal/slack`, main-module database paths, and MCP Gateway `internal/tools` / `internal/tools/zabbix`.
+## Current Behavior You Must Preserve
 
-## Recent Changes (Apr-May 2026)
+### One-shot LLM path
 
-- QMD is on v2.1.0; runbook sync now POSTs QMD `/update` after file writes so search stays fresh.
-- Slack skill launches now start fresh agent sessions; prompt trimming and output-format handling were tightened.
-- Response formatting settings and the one-shot LLM path are live; keep docs aligned with `/api/settings/formatting` and `/api/settings/llm` behavior.
-- Keep this file concise: prefer short rules/patterns over long examples so it stays under 30k chars.
+Use the one-shot path for short non-agent calls such as:
+- incident title generation
+- free-form alert extraction
+- Slack final-message summarization
+- response formatting
+- feedback classification and memory extraction helpers
 
-## Agent Worker Architecture
+Rules:
+- API frame type is `oneshot_llm_request`
+- Worker replies with `oneshot_llm_response`
+- Go callers should depend on `services.OneShotLLMCaller`, not concrete worker code
+- If the worker is disconnected, callers must fail gracefully and use deterministic fallbacks
 
-The `agent-worker/` uses `@mariozechner/pi-coding-agent` SDK (v0.73.0):
+### Response formatting
 
-| Component | File | Purpose |
-|-----------|------|---------|
-| Entry Point | `src/index.ts` | Reads config, starts orchestrator |
-| Orchestrator | `src/orchestrator.ts` | Routes WebSocket messages |
-| Agent Runner | `src/agent-runner.ts` | Creates pi-mono sessions |
-| Tool Formatter | `src/tool-output-formatter.ts` | Formats tool args/output for UI streaming |
-| WS Client | `src/ws-client.ts` | WebSocket to API server |
+Formatting settings live behind `/api/settings/formatting`.
 
-### SDK Features (v0.73.0)
+Rules:
+- `ResponseFormatter` is optional and must be passthrough-safe
+- skip formatting on explicit error responses
+- preserve raw fallback behavior when worker or LLM formatting fails
+- handler wiring happens via `SetResponseFormatter(...)`
 
-- Cancellation propagates through nested model calls and tool runs.
-- Investigation history exports to `{workDir}/session_export.jsonl`; sessions can live in `{workDir}/.sessions/`.
-- Custom tools must use typed `ToolDefinition` metadata and include `promptSnippet`.
-- Provider SDKs are lazy-loaded; retry/timeout settings are forwarded via `SettingsManager.inMemory({...})`. Akmatori uses 10-minute provider timeouts for slow on-prem/OpenRouter models.
-- Incremental bash output arrives via `tool_execution_update`; Bedrock Opus 4.7 `xhigh` thinking works without local patches.
+### Runbooks and QMD
 
-### SDK API Conventions
+Runbooks are stored in Postgres and synced to markdown files.
 
-- `ModelRegistry` has no public constructor since 0.64.0. Always use `ModelRegistry.inMemory(authStorage)`.
-- All `createXxxTool()` factory functions in `gateway-tools.ts` must wrap their return with `defineTool({...})` (imported from `@mariozechner/pi-coding-agent`). The bash tool is the sole exception — it retains `as unknown as ToolDefinition` due to contravariant generics in `renderCall`/`renderResult`.
-- TypeBox is now imported from `typebox` (1.x), not `@sinclair/typebox` (0.x). The schema-builder API (`Type.Object`, `Type.String`, `Type.Optional`, etc.) is unchanged; only the package name differs.
-- `DefaultResourceLoader` now requires `agentDir`. Pass `getAgentDir()` from `@mariozechner/pi-coding-agent` whenever constructing it directly (production callsite is `agent-runner.ts`; test mocks must also expose `getAgentDir`).
+Rules:
+- after runbook writes, trigger QMD reindex with `POST /update`
+- keep DB state and on-disk runbook files in sync
+- if you change runbook sync behavior, update tests around QMD reindexing
 
-### Recent Agent Behavior Notes
+### Slack investigation UX
 
-- Fresh incidents start new agent sessions; only explicit resume flows call `continueRecent(...)`
-- Agents should read the relevant `SKILL.md` first because it carries output-format instructions and `gateway_call(...)` examples
+Rules:
+- long investigations use the Slack typing/banner flow, not a placeholder reply
+- typing state is driven by `assistant.threads.setStatus` plus the hourglass reaction
+- progress banner content comes from the latest reasoning line via `SlackProgressStreamer`
+- final thread output is summarized to fit Slack byte limits
+- mention handling is classify-first: confident operator feedback is stored as memory; other mentions continue the investigation
 
-### Tool Architecture (TypeScript Gateway Tools)
+### Memory system
 
-Tools are registered in `gateway-tools.ts` and talk to the MCP Gateway through `GatewayClient`:
+Rules:
+- incident learnings are extracted into long-lived memory through `MemoryExtractor`
+- memory syncing is scope-aware and manifest-driven
+- memory upserts must stay idempotent by incident identity or semantic name where applicable
 
-1. `generateSkillMd()` writes `gateway_call(...)` examples with logical instance names.
-2. The agent reads SKILL.md and calls `gateway_call("ssh.execute_command", {command: "uptime"}, "prod-ssh")`.
-3. `GatewayClient` POSTs JSON-RPC with the `X-Incident-ID` header; the gateway resolves instance routing, authorizes, and executes.
-4. Large responses (>4KB) spill to `{workDir}/tool_outputs/` with an inline preview.
+## Important Files by Responsibility
 
-### Gateway Tools
+### Handlers
 
-| Tool | File | Purpose |
-|------|------|---------|
-| `gateway_call` | `src/gateway-tools.ts` | Call any MCP Gateway tool by name with optional instance hint |
-| `list_tool_types` | `src/gateway-tools.ts` | List all available tool types (e.g., `ssh`, `zabbix`, `victoria_metrics`, `postgresql`, `clickhouse`, `grafana`, `pagerduty`, `netbox`, `kubernetes`, `jira`, `qmd`) |
-| `list_tools_for_tool_type` | `src/gateway-tools.ts` | List all tools of a given type (e.g., `ssh`, `zabbix`, `victoria_metrics`, `postgresql`, `clickhouse`, `grafana`, `pagerduty`, `netbox`, `kubernetes`, `jira`) |
-| `get_tool_detail` | `src/gateway-tools.ts` | Get full JSON schema for a specific tool |
-| `execute_script` | `src/gateway-tools.ts` | Run JavaScript in isolated vm with injected `gateway_call()`, `list_tools_for_tool_type()`, scoped `fs` |
+- `internal/handlers/agent_ws.go` - worker transport and message types
+- `internal/handlers/api.go` - REST route wiring
+- `internal/handlers/api_settings_formatting*.go` - formatting settings API
+- `internal/handlers/alert_processor.go` - main investigation path
+- `internal/handlers/slack_processor.go` - Slack message and mention handling
+- `internal/handlers/slack_progress.go` - reasoning-line streaming for Slack banner
 
-**Note**: Tool discovery is type-based, not query-based. Use `list_tool_types` first, then `list_tools_for_tool_type({ tool_type: "ssh" })`.
+### Services
 
-**Note**: Tool schemas do NOT include routing parameters (`tool_instance_id`, `logical_name`). Instance routing is handled by `gateway_call`'s `instance` parameter. If an agent tries to call a tool directly (e.g., `ssh.execute_command`), the error message guides it to use `gateway_call` instead.
+- `internal/services/interfaces.go` - dependency interfaces used by handlers
+- `internal/services/runbook_service.go` - runbook CRUD plus QMD sync and reindex
+- `internal/services/response_formatter.go` - optional response rewrite stage
+- `internal/services/memory_service.go` - cross-incident memory CRUD and sync
+- `internal/services/memory_extractor.go` - memory distillation from completed incidents
+- `internal/services/title_generator.go` - one-shot title generation
+- `internal/services/slack_summarizer.go` - Slack-safe final output compression
 
-### Supporting Modules
+### Agent worker
 
-| Module | File | Purpose |
-|--------|------|---------|
-| GatewayClient | `src/gateway-client.ts` | JSON-RPC 2.0 HTTP client with output management and allowlist support |
-| ScriptExecutor | `src/script-executor.ts` | Isolated `vm` runtime with 5-minute timeout, scoped fs, captured console |
+- `agent-worker/src/orchestrator.ts` - routing of worker message types
+- `agent-worker/src/agent-runner.ts` - pi-mono session lifecycle
+- `agent-worker/src/oneshot-llm.ts` - single-call LLM helper
+- `agent-worker/src/gateway-tools.ts` - tool registration and `gateway_call`
+- `agent-worker/src/tool-output-formatter.ts` - streamed tool formatting
 
-### Message Flow
+## Code Patterns
 
-1. API sends `new_incident` or `continue_incident` via WebSocket
-2. Orchestrator extracts LLM settings and proxy config
-3. AgentRunner creates pi-mono session with multi-provider auth
-4. Output streamed back to API via WebSocket
-5. On completion, metrics (tokens, time) reported, session exported to JSONL
+### Prefer interfaces at handler boundaries
 
-### One-Shot LLM Path
+Handlers should depend on interfaces from `internal/services/interfaces.go`. If you add a new service dependency, wire it behind an interface first so handlers stay testable.
 
-For short, non-agent LLM calls (incident titles, alert extraction, Slack final-message summaries) the API sends `oneshot_llm_request` over the same worker WebSocket. The orchestrator routes it through `agent-worker/src/oneshot-llm.ts`, which calls pi-ai's `complete()` with the active LLM settings + proxy config and returns a single `oneshot_llm_response` correlated by `request_id`. `AgentWSHandler.OneShotLLM(...)` is the Go-side caller; `services.OneShotLLMCaller` is the interface that `TitleGenerator`, `extraction.AlertExtractor`, and `SlackSummarizer` all depend on, so every callsite is provider-agnostic and falls back deterministically when the worker is disconnected (`ErrWorkerNotConnected`).
+### Keep one-shot features provider-agnostic
 
-## Slack Integration (`internal/slack/`)
+If a feature only needs a single completion, do not spin up a full agent session. Route it through `OneShotLLMCaller` and keep fallback behavior explicit.
 
-### Manager (`manager.go`)
+### Keep Slack output budgeted
 
-`slack.NewManager()` owns the Socket Mode client, hot-reload flow (`TriggerReload` / `WatchForReloads`), proxy wiring, and thread-safe `GetClient()` access.
+Slack has hard byte limits. Any new Slack-facing summary or banner text must truncate safely and degrade cleanly.
 
-### Event Types
+### Keep tool routing indirect
 
-| Event | Behavior |
-|-------|----------|
-| Bot message in alert channel | Create incident, start investigation |
-| @mention in alert thread | Classify first; confident operator feedback → persist memory + 👍 + ack; otherwise continue investigation |
-| @mention in general channel | Direct response (not investigation) |
+Do not teach agents to call tool implementations directly. They should go through `gateway_call`, with routing handled by logical instance names or instance hints.
 
-### Live Progress + Summarized Final Output
+### Preserve graceful degradation
 
-- `internal/handlers/slack_progress.go` — `SlackProgressStreamer` extracts the agent's latest reasoning (🤔) line from output deltas and forwards it to a `sink func(string)` callback subject to `slackAppendInterval` throttling (~2s). In production the sink is `TypingController.UpdateLoadingMessage`, which pipes the line into Slack's `assistant.threads.setStatus` `loading_messages` rotation banner. Tool start/end markers are filtered out. There is no "Thinking…" placeholder message — the typing banner + hourglass reaction are the activity signal during the run, and the final result is posted as a fresh thread reply when the agent completes.
-- `internal/services/slack_summarizer.go` — final agent output is summarized through `OneShotLLMCaller` to fit `slackMaxTextBytes` (8000); `internal/output/slack_budget.go` provides a deterministic byte-truncation fallback when the worker is unavailable or returns over-budget output. The result is posted as a single thread message with the existing footer.
+Akmatori intentionally keeps working when optional AI pieces fail. When adding AI-dependent behavior, define the fallback path at the same time.
 
-### Typing Indicator (`internal/slack/typing.go`)
+## SDK Notes (`@mariozechner/pi-coding-agent`)
 
-`TypingController` owns the lifecycle of the "is investigating..." thread-header banner (`assistant.threads.setStatus`), its `loading_messages` rotation content, and the `hourglass_flowing_sand` reaction during agent runs. Constants are hardcoded — there is no DB column or UI for typing config:
+- Use `ModelRegistry.inMemory(authStorage)`; there is no public `ModelRegistry` constructor
+- Tool factories in `gateway-tools.ts` should return `defineTool({...})`
+- The bash tool remains the local exception because of TypeScript variance friction
+- `typebox` is imported from `typebox`, not `@sinclair/typebox`
+- `DefaultResourceLoader` requires `agentDir`; pass `getAgentDir()` in production and mocks
+- Provider SDKs are lazy-loaded; Akmatori forwards retry and timeout settings and uses long provider timeouts for slow models
 
-- Status text: `"is investigating..."`
-- Reaction emoji: `hourglass_flowing_sand`
-- `loading_messages` content: `[]string{latest 🤔 line}`, fed via `UpdateLoadingMessage(line)` from `SlackProgressStreamer`. Replaces Slack's default rotation phrases ("searching…", "evaluating…", etc.) with the agent's actual reasoning. Each entry is byte-truncated with a UTF-8-safe ellipsis to `loadingMessageMaxBytes = 50` because Slack rejects longer entries with `invalid_arguments` (response detail: `must be less than 51 characters`). The leading 🤔 marker is stripped to free up space. Empty/whitespace input and consecutive duplicates are dropped — one Slack call per fresh non-duplicate line.
-- Keepalive interval: 30s (also pushes the latest loading message); safety TTL: 60min; circuit-breaker after 2 consecutive setStatus failures (also trips immediately on `feature_not_enabled` / `not_allowed_token_type`, which means the Slack app is not registered as an AI Assistant — the reaction continues working).
+## Testing Rules
 
-Wired into three handler flows; each follows the `Start(ctx)` + `defer Stop()` pattern and relies on the surrounding handler blocking on `<-done` so the deferred Stop fires after the agent run finishes:
+### Minimum verification
 
-- `slack_processor.go::processMessage` (mention/DM flow)
-- `alert_processor.go::runInvestigation` (webhook-alert flow)
-- `alert_processor.go::runSlackChannelInvestigation` (Slack-channel-alert flow)
+After changing code, run the smallest relevant test target and then the broad suite required by the change.
 
-## Alert Extraction (`internal/alerts/extraction/`)
+| Area changed | Primary command |
+|---|---|
+| Go backend | `make test` |
+| Alert adapters | `make test-adapters` |
+| MCP Gateway | `make test-mcp` |
+| Agent worker | `make test-agent` |
+| Frontend | `make test-web` |
+| Pre-commit full gate | `make verify` |
 
-AI-powered extraction of structured alert data from free-form text:
+Extra rule:
+- before quoting coverage, re-run `go test -coverprofile=coverage.out ./...`
 
-```go
-extractor := extraction.NewAlertExtractor(oneShotCaller) // OneShotLLMCaller (e.g. AgentWSHandler)
-alert, err := extractor.Extract(ctx, messageText)
-```
+### Current testing focus
 
-- Calls pi-ai's `complete()` via the agent worker (`oneshot_llm_request`), so any configured provider works
-- Truncates input to 3000 chars
-- Graceful fallback (first line → alert name, full text → description) when the worker is disconnected, the API key is missing, or JSON parsing fails
+Historically weak or regression-prone areas:
+- `internal/handlers`
+- `internal/services`
+- `internal/slack`
+- main-module database logic
+- `mcp-gateway/internal/tools`
+- `mcp-gateway/internal/tools/zabbix`
 
-## Output Parser (`internal/output/`)
+## Rebuild Rules
 
-Parses `[FINAL_RESULT]`, `[ESCALATE]`, and `[PROGRESS]` blocks from agent output. Use `output.Parse(...)`; `parsed.CleanOutput` removes structured sections, while `parsed.FinalResult` / `parsed.Escalation` expose typed data.
+Rebuild the affected container after runtime changes:
 
-## Services (`internal/services/`)
+| Area changed | Rebuild |
+|---|---|
+| API (`cmd/`, `internal/`) | `docker-compose build akmatori-api && docker-compose up -d akmatori-api` |
+| MCP Gateway | `docker-compose build mcp-gateway && docker-compose up -d mcp-gateway` |
+| Agent worker | `docker-compose build akmatori-agent && docker-compose up -d akmatori-agent` |
+| Frontend | `docker-compose build frontend && docker-compose up -d frontend` |
+| QMD | `docker-compose build qmd && docker-compose up -d qmd` |
 
-| Service | File(s) | Purpose |
-|---------|---------|---------|
-| SkillService | `skill_service.go`, `skill_file_sync.go`, `skill_prompt_service.go`, `incident_service.go` | Skill CRUD, file sync, prompt building, incident lifecycle |
-| ToolService | `tool_service.go` | Tool instances, SSH key management |
-| ContextService | `context_service.go` | Context file management |
-| AlertService | `alert_service.go` | Alert processing and normalization |
-| TitleGenerator | `title_generator.go` | AI-powered incident title generation |
-| SlackSummarizer | `slack_summarizer.go` | Provider-agnostic compression of agent output to fit Slack's byte cap, with deterministic structured fallback |
-| RunbookService | `runbook_service.go` | Runbook CRUD and file sync |
-| MemoryService | `memory_service.go` | Cross-incident memory CRUD + per-scope MEMORY.md sync |
-| MemoryExtractor | `memory_extractor.go` | One-shot LLM distillation of completed incidents into long-lived memory (idempotent by `incident_uuid`) |
-| FeedbackClassifier | `feedback_classifier.go` | One-shot LLM classifier deciding whether a Slack thread reply is operator feedback worth storing |
-| RetentionService | `retention_service.go` | Automated incident data cleanup (expired + orphaned) |
-| ResponseFormatter | `response_formatter.go` | Optional one-shot LLM reformat of agent output (raw response + full reasoning) before it lands in `incident.response` and Slack; passthrough fallback when disabled, worker offline, or LLM call fails |
+## Recent Features and Docs-Sensitive Areas
 
-### Service Interfaces (`internal/services/interfaces.go`)
+Keep this file aligned with these current realities:
+- QMD is on `v2.1.0`; runbook sync triggers `/update` reindexing
+- fresh Slack skill launches start fresh agent sessions unless the flow explicitly resumes
+- response formatting settings are live and backed by `/api/settings/formatting`
+- one-shot LLM calls share the worker transport and current provider settings
+- Slack loading banners use real reasoning lines instead of generic placeholder text
+- cross-incident memory extraction and scoped MEMORY sync are part of the normal incident lifecycle
 
-Handlers depend on interfaces for testability:
+## When Editing This File
 
-| Interface | Purpose |
-|-----------|---------|
-| `SkillManager` | Skill CRUD + lifecycle |
-| `IncidentManager` | Incident spawn/update/get |
-| `SkillIncidentManager` | Combines SkillManager + IncidentManager (used by handlers) |
-| `ToolManager` | Tool instance CRUD + SSH keys |
-| `AlertManager` | Alert source operations |
-| `RunbookManager` | Runbook CRUD + file sync |
-| `MemoryManager` | Cross-incident memory CRUD + idempotent `UpsertByName` + scope manifest sync |
-| `ContextManager` | Context file management |
-| `HTTPConnectorManager` | Declarative HTTP connector CRUD |
-| `OneShotLLMCaller` | Provider-agnostic one-shot LLM completion via the agent worker (lives in `llm_settings.go`); implemented by handlers, consumed by `TitleGenerator`, `extraction.AlertExtractor`, and `SlackSummarizer` |
-
-## Runbook System (`internal/services/runbook_service.go`)
-
-Runbooks (SOPs) guide AI agent investigations. Stored in PostgreSQL, synced as markdown to `/akmatori/runbooks/`.
-
-**Flow**: DB → markdown files → agent reads during investigation
-
-**API**: REST at `/api/runbooks`
-- `GET /api/runbooks` - List all
-- `POST /api/runbooks` - Create (`{title, content}`)
-- `GET /api/runbooks/{id}` - Get one
-- `PUT /api/runbooks/{id}` - Update
-- `DELETE /api/runbooks/{id}` - Delete
-
-**File Sync**: On any CRUD operation, `SyncRunbookFiles()` writes all runbooks as `{id}-{slug}.md` and removes stale files.
-
-**Agent Access**: The seeded `incident-manager` prompt (`DefaultIncidentManagerPrompt` in `internal/database/db.go`) instructs the agent to issue ONE `gateway_call("qmd.query", ...)` against `collections: ["runbooks"]` with THREE `searches[]` entries — `{lex, vec, hyde}`, each carrying the same one-sentence natural-language alert summary. QMD fuses the three result sets via Reciprocal Rank Fusion. Up to 2 retries with different angles (3 total calls). Filesystem fallback to `/akmatori/runbooks/` only on QMD error, not empty results. The QMD sidecar image bakes in the embedding + reranker GGUFs (~940 MB) and runs `qmd embed` on startup so vector + HyDE retrieval are live out of the box. The `executor.PrependGuidance` user-turn reminder mirrors this shape — keep them in sync.
-
-**QMD Re-indexing**: `SyncRunbookFiles()` (and `MemoryService.SyncMemoryFiles()`) triggers a non-blocking HTTP POST to QMD's `/update` endpoint after writing files. The patched route in `qmd/patch-server.js` runs `qmd update` synchronously (fast lex-index refresh; outcome reflected in the HTTP response), then kicks off `qmd embed` (slow vector-index refresh) in the background under an in-flight gate that suppresses duplicate concurrent embed processes. The Go-side 10s client timeout is therefore enough to cover the lex update; embed progress is logged in the QMD container.
-
-### QMD Search Service
-
-QMD is a hybrid search engine (BM25 + vector + LLM reranking) running as a Docker sidecar. It indexes runbook markdown files and exposes tools via MCP HTTP server.
-
-- **Config**: `qmd/qmd-config.yml` defines the `runbooks` and `memories` collections
-- **Docker service**: `qmd` on `codex-network` + `api-internal`, port 8181 (internal only)
-- **Environment variable**: `QMD_URL` (default: `http://qmd:8181`) — configured on both the API server (for re-index triggers) and the MCP Gateway (for auto-registration as proxy)
-- **Environment variable**: `QMD_BIND_HOST` (default: `localhost`, set to `0.0.0.0` in Docker) — bind address for the QMD HTTP server
-- **REST endpoints**: `/health` (GET, container health check), `/update` (POST, trigger re-index)
-- **MCP tools**: `qmd.query` (search), `qmd.get` (retrieve), `qmd.multi_get`, `qmd.status` — registered automatically on gateway startup via `mcpproxy`
-- **Bypass**: QMD proxy tools bypass the per-incident tool allowlist (registered proxy namespaces and multi-segment namespaces with dots bypass)
-- **Baked-in models**: The Docker image pre-downloads the embedding (~300 MB) and reranker (~640 MB) GGUFs at build time via `qmd/precache-models.mjs`, so `qmd embed` runs offline on first start.
-- **Startup embedding**: `qmd/entrypoint.sh` runs `qmd embed` (idempotent, ETag-checked) on every container start to keep the vector index current with mounted runbook/memory files. The MCP server starts after embedding completes (first-time cold start can take several minutes; subsequent starts are near-instant).
-- **Upstream patches**: The Dockerfile pins a main HEAD SHA (not a tag) and applies two `sed` patches to upstream QMD — `QMD_BIND_HOST` env support, and flipping the MCP `query` tool's `rerank` schema default from `true` to `false`. Each patch is paired with a `grep -q` verification so future upstream changes fail the build loudly rather than silently no-op. The SHA pin captures unreleased fixes: hyphen validation in vec/hyde (d531211), hybrid-RRF weighting (004714a), Node 22 ESM normalization (656707c), and handelize case preservation (9fb9de4 + fee576b).
-- **Volume note**: The `qmd_cache` named volume (mounted at `/root/.cache/qmd/`) holds embedded chunks and the model cache. On upgrades to the baked-models image, existing installs should run `docker compose down qmd && docker volume rm akmatori_qmd_cache && docker compose up -d qmd` once so the baked-in weights aren't shadowed by a pre-existing empty cache.
-
-## Memory System (`internal/services/memory_service.go`, `mcp-gateway/internal/tools/memory/`)
-
-Cross-incident memory: long-lived facts the agent and operators accumulate. Same DB → markdown → QMD shape as runbooks; separate `memories` QMD collection.
-
-**Storage**: PostgreSQL `memories` table (model in `internal/database/models_context.go`). Filesystem mirror at `/akmatori/memory/<scope>/{MEMORY.md,<id>-<name>.md}`. Mounted on api + agent + qmd containers (NOT mcp-gateway — by design, memory tools are QMD-only).
-
-**Scopes**: `"global"` (always injected into incident-manager `AGENTS.md`) or `<skill_name>` (injected into that skill's `SKILL.md`). Scope is a string identity, not a foreign key — skills can be renamed/deleted without breaking memory.
-
-**Types** (codified as Go consts in `internal/services/memory_types.go`): `host`, `incident_pattern`, `tool_quirk`, `feedback`. The same consts feed validation, prompt rendering, and the extractor's JSON schema.
-
-**API**: REST at `/api/memories` (list/scope+type filters, create, get/update/delete) and `/api/memories/scopes`. Operator UI feedback at `POST /api/incidents/{uuid}/feedback` writes scope=global, type=feedback memories.
-
-**Agent recall**: `gateway_call("memory.search", {query, scope?, type?, limit?})` and `gateway_call("memory.get", {file, lines?})` — registered in `mcp-gateway/internal/tools/memory/`. Both proxy to QMD's `qmd.query` / `qmd.get` against the `memories` collection. The `memory` namespace bypasses the per-incident allowlist (`AddProxyNamespace("memory")`), so any agent can recall any time.
-
-**Per-scope manifests**: `MEMORY.md` per scope, hard-capped at 200 lines / 25KB with explicit truncation marker. Injected verbatim into AGENTS.md (global) and SKILL.md (skill scope) via `renderMemoryRecallSection` in `skill_prompt_service.go`.
-
-**Auto-extraction**: `MemoryExtractor.Extract()` fires from `UpdateIncidentComplete` in a goroutine when status flips to `completed`. One-shot LLM call distills the incident response/log tail into upsert/delete edits; idempotent via `CountByIncidentUUID` cursor.
-
-**Slack feedback capture**: Non-mention thread replies on incident threads route through `FeedbackClassifier` (one-shot LLM, strict JSON, threshold 0.6). Confident hits are persisted as scope=global feedback memories with a thumbs-up reaction + brief threaded ack. Silent on negatives. Wired in `internal/handlers/slack_feedback.go`; mention path on incident threads classifies first; confident feedback short-circuits to persist + 👍 + ack, otherwise falls through to investigation continuation.
-
-## API Package (`internal/api/`)
-
-Standardized helpers: `api.RespondJSON`, `api.RespondError`, `api.RespondErrorWithCode`, and `api.DecodeJSON`. Use `RespondErrorWithCode` when the frontend needs a stable machine-readable error code.
-
-**API Documentation**: Swagger UI at `/api/docs` when enabled
-
-### Retention Settings API
-
-Incident retention is configured via `/api/settings/retention`:
-
-- `GET /api/settings/retention` → returns the singleton `retention_settings` record
-- `PUT /api/settings/retention` → partial update of `enabled`, `retention_days`, `cleanup_interval_hours`
-- Validation: `retention_days` must be `1..3650`, `cleanup_interval_hours` must be `1..8760`
-
-Keep handler validation aligned with `internal/api/types.go` and database defaults.
-
-### Formatting Settings API
-
-Optional post-processing of the agent's final response is configured via `/api/settings/formatting` (singleton `formatting_settings` table). `GET` returns the record; `PUT` accepts partial updates of `enabled`, `system_prompt`, `max_tokens` (1..8000), and `temperature` (0..2); `system_prompt` is capped at 8KB. When `enabled=true`, `ResponseFormatter` reformats `incident.response` via a one-shot LLM call before persistence and Slack delivery; `incident.full_log` keeps the unformatted reasoning.
-
-### LLM Settings API
-
-Multi-config LLM settings allow multiple configurations per provider (e.g., two OpenAI setups with different models/keys). Only one config is globally active at a time.
-
-- `GET /api/settings/llm` → `{"configs": [...], "active_id": 3}` — list all configs with active indicator
-- `POST /api/settings/llm` → create new config (`{provider, name, api_key, model, thinking_level, base_url}`)
-- `GET /api/settings/llm/{id}` → get single config
-- `PUT /api/settings/llm/{id}` → partial update (name uniqueness validated if changed)
-- `DELETE /api/settings/llm/{id}` → delete config (rejected if active or last remaining)
-- `PUT /api/settings/llm/{id}/activate` → set config as globally active
-
-Each config response includes: id, name, provider, model, thinking_level, base_url, is_configured, masked api_key, enabled, active, created_at, updated_at.
-
-Provider is set at creation time and cannot be changed via update. The update endpoint accepts: name, api_key, model, thinking_level, base_url.
-
-The `LLMSettings` model has a unique `Name` field and allows multiple rows per provider (no unique constraint on Provider).
-
-## Setup Package (`internal/setup/`)
-
-Zero-config first-run experience:
-1. No `.env` required for `docker compose up`
-2. Credential resolution: env → DB → generate/setup wizard
-3. First access triggers setup wizard for admin password
-
-## Tool Instance Routing
-
-Skills target specific tool instances via logical name or numeric ID:
-
-```yaml
-# In SKILL.md
-tools:
-  - type: zabbix
-    logical_name: prod-zabbix  # Human-readable logical name (preferred)
-    instance_id: 1
-  - type: ssh
-    logical_name: prod-ssh
-    instance_id: 2
-  - type: clickhouse
-    logical_name: prod-clickhouse
-    instance_id: 3
-```
-
-Resolution priority: explicit instance ID > logical name > first enabled instance of type.
-
-At incident creation, the skill's tool instances are resolved into an allowlist passed to the MCP Gateway. The gateway enforces authorization on every tool call — unauthorized instances return JSON-RPC error -32600.
-
-## Test Helpers (`internal/testhelpers/`)
-
-Use the shared helpers instead of hand-rolled setup/assertion code when possible.
-
-- `NewHTTPTestContext(...)` for handler tests
-- `NewMockAlertAdapter(...)` for adapter success/error paths
-- Builders for alerts, incidents, skills, tool/tool-type instances, alert sources, LLM settings, Slack settings, runbooks, and context files
-- Assertions for equality, JSON, errors, HTTP responses, and panic/no-panic checks
-- `AssertEventually` / `RetryUntil` for async flows
-- `WithEnv` / `WithEnvs` for temporary env overrides
-- `ConcurrentTest*`, `CallCounter`, temp-dir helpers, and fixture loaders for concurrency + filesystem tests
-
-## Testing Patterns
-
-- Prefer table-driven tests for parsers, validators, and service branching.
-- Cover empty/nil input, boundaries, Unicode, invalid payloads, and concurrency where state is shared.
-- Add benchmarks only for hot paths such as alert parsing, auth middleware, JSONB-heavy code, and title generation.
-
-## Logging Convention
-
-All logging uses structured `log/slog` JSON via `logging.Init()` in `cmd/akmatori/main.go`. Never use `log.Printf` / `log.Fatalf` / `log.Println`; prefer `slog.Info/Warn/Error` with key-value pairs.
-
-## Code Quality & Linting
-
-```bash
-go vet ./...              # Fast check
-golangci-lint run         # PREFERRED - respects //nolint directives
-```
-
-**Note**: Standalone `staticcheck` uses different directive format (`//lint:ignore`), so prefer `golangci-lint`.
-
-### Error Handling & Go Idioms
-
-- Always check returned errors, including HTTP writes and non-critical external API calls.
-- In tests, use `t.Fatal` before dereferencing nil dependencies.
-- `range` over a nil map/slice is safe, and `len(nil)` is `0`; avoid redundant nil guards.
-
-### Nolint Directives
-
-For intentionally kept unused code:
-
-```go
-//nolint:unused // Legacy fallback - may be re-enabled
-func legacyHandler() { ... }
-```
-
-## CRITICAL: External API Integration
-
-**Never flood customer systems with API requests.**
-
-### Requirements
-
-1. **Rate limiting**: Default 10 req/sec, burst 20
-2. **Caching**: Credentials 5min, responses 15-60sec
-3. **Batching**: Use `get_items_batch()` not loops
-
-### Cache TTLs
-
-| Data Type | TTL |
-|-----------|-----|
-| Credentials/Config | 5 min |
-| Auth tokens | 30 min |
-| Host/inventory data | 30-60 sec |
-| Problems/alerts | 15 sec |
-| Metrics/history | 30 sec |
-| CMDB device/IP/VM data | 60 sec |
-| CMDB circuits/tenancy | 120 sec |
-| K8s pods/jobs | 30 sec |
-| K8s events/logs | 15 sec |
-| K8s deployments/workloads | 60 sec |
-| K8s nodes/services/namespaces | 120 sec |
-
-### Catchpoint Patterns
-
-Catchpoint is a first-class MCP tool type with a shared rate limiter and cached GET helpers.
-
-- Tool namespace: `catchpoint.*`
-- Read paths use `cachedGet(...)`; write paths (`acknowledge_alerts`, `run_instant_test`) must not be cached
-- Reuse `addPaginationParams()` and `addTimeParams()` for optional query args
-- `page_size` must be clamped to the API max of `100`
-- Honor proxy settings only when `ProxySettings.CatchpointEnabled` is true
-- Keep error messages parameter-specific and use `validation.SuggestParam()` for typo hints on required args
-
-### PagerDuty Patterns
-
-PagerDuty is a first-class MCP tool type following the Catchpoint pattern with token auth, caching, and rate limiting.
-
-- Tool namespace: `pagerduty.*`
-- Auth: API token via `Authorization: Token token={api_token}` header
-- Read paths (`get_incidents`, `get_services`, `get_on_calls`, etc.) use `cachedGet(...)` with 15-30s TTL
-- Write paths (`acknowledge_incident`, `resolve_incident`, `reassign_incident`, `add_incident_note`) must not be cached
-- Events API v2 (`send_event`) posts to `https://events.pagerduty.com/v2/enqueue` with separate `routing_key`
-- Honor proxy settings only when `ProxySettings.PagerDutyEnabled` is true
-
-### NetBox Patterns
-
-NetBox is a read-only CMDB tool type following the Catchpoint/PagerDuty pattern with token auth, caching, and rate limiting.
-
-- Tool namespace: `netbox.*`
-- Auth: API token via `Authorization: Token <api_token>` header
-- All endpoints are read-only GET requests using `cachedGet(...)` with 60-120s TTL (CMDB data is mostly static)
-- Modules: DCIM (devices, interfaces, sites, racks, cables, device types), IPAM (IPs, prefixes, VLANs, VRFs), Circuits, Virtualization (VMs, clusters, VM interfaces), Tenancy (tenants, tenant groups)
-- Generic `api_request` method allows querying any NetBox API endpoint
-- Honor proxy settings only when `ProxySettings.NetBoxEnabled` is true
-
-### Kubernetes Patterns
-
-Kubernetes is a read-only diagnostics tool type following the NetBox pattern with Bearer token auth, caching, and rate limiting.
-
-- Tool namespace: `kubernetes.*`
-- Auth: Bearer token via `Authorization: Bearer <k8s_token>` header
-- All endpoints are read-only GET requests using `cachedGet(...)` with 15-120s TTL depending on resource volatility
-- Resources: Namespaces, Pods (list/detail/logs), Events, Deployments (list/detail), StatefulSets, DaemonSets, Jobs, CronJobs, Nodes (list/detail), Services, ConfigMaps (metadata only), Ingresses
-- Generic `api_request` method allows querying any K8s API GET endpoint (path must start with `/api` or `/apis`)
-- Honor proxy settings only when `ProxySettings.K8sEnabled` is true
-
-### Jira Patterns
-
-Jira is a hybrid read/write tool type supporting both Atlassian Cloud and self-hosted Jira Server/Data Center, following the NetBox/PagerDuty pattern with caching, rate limiting, and proxy support.
-
-- Tool namespace: `jira.*`
-- Deployments: Atlassian Cloud (`/rest/api/3`) and self-hosted Jira Server/Data Center (`/rest/api/2`); `jira_api_version` selects the base path (default `"3"`)
-- Auth: three modes via `jira_auth_type` — `cloud_basic` (email + API token over Basic auth, for Cloud), `server_bearer` (Personal Access Token via `Authorization: Bearer …`, for Server/DC), `basic` (generic username + password/token over Basic auth)
-- Read paths (`search_issues`, `get_issue`, `get_issue_comments`, `get_issue_transitions`, `get_issue_changelog`, `get_projects`, `get_project`, `search_users`, `api_request`) use `cachedGet(...)` with 15-120s TTL depending on volatility
-- Write paths (`add_comment`, `transition_issue`, `create_issue`, `update_issue`) are gated by per-instance `jira_allow_writes` (default `false`); when disabled they short-circuit with an explicit error naming the setting. Writes are never cached.
-- Generic `api_request` method allows GET passthrough to any `/rest/...` endpoint
-- Honor proxy settings only when `ProxySettings.JiraEnabled` is true
-
-### Implementation Reference
-
-- `mcp-gateway/internal/cache/cache.go` - Generic TTL cache with background cleanup
-- `mcp-gateway/internal/ratelimit/limiter.go` - Token bucket rate limiter
-- `mcp-gateway/internal/tools/zabbix/` - Zabbix integration with caching and rate limiting
-- `mcp-gateway/internal/tools/victoriametrics/` - VictoriaMetrics integration with caching and rate limiting
-- `mcp-gateway/internal/tools/postgresql/` - PostgreSQL read-only query and diagnostics integration
-- `mcp-gateway/internal/tools/clickhouse/` - ClickHouse read-only query and OLAP diagnostics integration
-- `mcp-gateway/internal/tools/grafana/` - Grafana integration with caching and rate limiting (dashboards, alerting, data source proxy, annotations)
-- `mcp-gateway/internal/tools/catchpoint/` - Catchpoint synthetic monitoring integration with caching and rate limiting
-- `mcp-gateway/internal/tools/pagerduty/` - PagerDuty integration with caching and rate limiting (incidents, services, on-call, events)
-- `mcp-gateway/internal/tools/netbox/` - NetBox CMDB integration with caching and rate limiting (DCIM, IPAM, circuits, virtualization, tenancy)
-- `mcp-gateway/internal/tools/k8s/` - Kubernetes read-only diagnostics with caching and rate limiting (pods, deployments, nodes, services, events, logs)
-- `mcp-gateway/internal/tools/jira/` - Jira integration (Cloud + Server/DC) with caching, rate limiting, and write-gated mutations (search, issues, comments, transitions, projects, users)
-- `mcp-gateway/internal/tools/httpconnector/` - Declarative HTTP connector executor with auth injection
-- `mcp-gateway/internal/mcpproxy/` - Connection pool and proxy handler for external MCP servers
-- `mcp-gateway/internal/auth/` - Per-incident tool authorization (allowlist enforcement)
-- `mcp-gateway/internal/validation/` - Parameter validation with typo suggestions for better error messages
-
-### What NOT To Do
-
-Do not make per-item external API calls in loops when a batched cached helper exists (for example, prefer `GetItemsBatch` over repeated `GetItems`).
-
-### Before Adding New External Integrations
-
-- [ ] Does this code have rate limiting?
-- [ ] Are read operations cached?
-- [ ] Can multiple requests be batched?
-- [ ] What happens if called 100x in a loop?
-
-## Do NOT
-
-- Skip running tests after changes
-- Commit without `make verify`
-- Add features without tests
-- Call external APIs without rate limiting
-- Make unbounded API calls in loops
-- Skip caching for read operations
-- Use nolint to hide actual bugs
-- Leave tests that depend on external services (use mocks)
+- keep it concise and operational
+- prefer rules over long examples
+- remove duplicates instead of appending similar guidance
+- verify size before committing: `wc -c CLAUDE.md`
+- hard limit: `CLAUDE.md` must stay under 30000 bytes
