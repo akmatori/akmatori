@@ -46,11 +46,9 @@ The recommended install flow pulls pre-built multi-arch images from GHCR — no 
      https://github.com/akmatori/akmatori/releases/latest/download/nginx.conf
    ```
 
-2. (Optional) Create an `.env` to pin a specific version or configure a corporate proxy:
+2. (Optional) Create an `.env` to pin a specific version or configure a corporate proxy. All secrets (`POSTGRES_PASSWORD`, `JWT_SECRET`, and the admin password) are auto-generated on first run, so the file is only needed for the overrides shown below:
    ```bash
    cat > .env <<'EOF'
-   ADMIN_PASSWORD=your-secure-password
-   POSTGRES_PASSWORD=your-db-password
    # AKMATORI_VERSION=1.2.0
    # HTTP_PROXY=http://proxy.corp:3128
    # HTTPS_PROXY=http://proxy.corp:3128
@@ -71,9 +69,7 @@ The recommended install flow pulls pre-built multi-arch images from GHCR — no 
    ```
    All 5 services should show "Up" status. QMD's first cold start can take a few minutes while it loads the baked-in models.
 
-5. Access the web dashboard at `http://localhost:8080`
-   - **Username:** `admin`
-   - **Password:** the `ADMIN_PASSWORD` you set in `.env`
+5. Access the web dashboard at `http://localhost:8080` (username `admin`). The first visit runs a one-time setup wizard that lets you set the admin password.
 
 6. Configure your LLM provider in **Settings → LLM Provider**
 
@@ -85,6 +81,16 @@ Bump `AKMATORI_VERSION` in `.env` (or leave it unset to track `latest`) and:
 docker compose pull
 docker compose up -d
 ```
+
+**One-time migration from a source-built install:** earlier releases downloaded QMD's embedding/reranker GGUFs at runtime into the `akmatori_qmd_cache` named volume. The published image bakes those weights in, so an existing non-empty cache volume can shadow them. On the first upgrade to a published-image install, reset the QMD cache once:
+
+```bash
+docker compose down qmd
+docker volume rm akmatori_qmd_cache
+docker compose up -d qmd
+```
+
+Skip this step on a fresh install — the volume doesn't exist yet.
 
 ## Behind an HTTP proxy
 

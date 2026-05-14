@@ -10,6 +10,13 @@ permissions:
   contents: write
   packages: write
 
+# Serialize per ref so two pushes to the same branch (or two dispatches of the
+# same tag) can't race on the floating tags (`:main`, `:latest`, `:X.Y`, …) or
+# on `docker buildx imagetools create` against the same manifest reference.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAMESPACE: ghcr.io/akmatori
