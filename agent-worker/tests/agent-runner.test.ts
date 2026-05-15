@@ -1195,6 +1195,46 @@ describe("AgentRunner", () => {
         }
       });
 
+      it("tolerates null entries in providers without throwing TypeError", async () => {
+        // Regression: an operator-maintained models.json could legally set
+        // `providers.custom: null` or `providers.akmatori-custom: null`. The
+        // previous code cast through `... | undefined` and indexed without a
+        // null guard, throwing "Cannot read properties of null" on the next
+        // session start. Verify both slots tolerate null values.
+        fs.mkdirSync(tmpAgentDir, { recursive: true });
+        const modelsPath = path.join(tmpAgentDir, "models.json");
+        fs.writeFileSync(
+          modelsPath,
+          JSON.stringify({
+            providers: {
+              custom: null,
+              "akmatori-custom": null,
+            },
+          }),
+        );
+
+        await expect(
+          runner.execute(
+            makeExecuteParams({
+              llmSettings: makeLLMSettings({
+                provider: "custom",
+                api_key: "akmatori-key",
+                model: "akmatori-model",
+                base_url: "https://akmatori.example/v1",
+              }),
+            }),
+          ),
+        ).resolves.not.toThrow();
+
+        const config = JSON.parse(fs.readFileSync(modelsPath, "utf-8")) as {
+          providers: Record<string, unknown>;
+        };
+        // The akmatori-custom slot was null (not operator-owned object), so
+        // we are free to overwrite it with our managed entry.
+        expect(typeof config.providers["akmatori-custom"]).toBe("object");
+        expect(config.providers["akmatori-custom"]).not.toBeNull();
+      });
+
       it("skips write when custom provider has no base_url and warns instead", async () => {
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
         try {

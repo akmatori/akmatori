@@ -32,11 +32,16 @@ RUN npm run build
 FROM node:22-bookworm
 
 # Install system dependencies needed by pi-mono's bash tool and the
-# subagent search workflow (ripgrep + fzf back the runbook/memory recon
-# subagents that replaced the QMD sidecar).
+# subagent search workflow. ripgrep + fzf back the runbook/memory recon
+# subagents that replaced the QMD sidecar. fd-find provides the `fdfind`
+# binary that pi-mono's `find` tool spawns (it accepts both `fd` and
+# `fdfind` via systemBinaryNames); without it pi-mono falls back to
+# downloading fd from GitHub at runtime, which fails in air-gapped
+# deployments.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ripgrep \
     fzf \
+    fd-find \
     git \
     jq \
     ca-certificates \

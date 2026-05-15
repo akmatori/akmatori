@@ -427,9 +427,15 @@ function writeCustomProviderModelsJson(
 
   const before = JSON.stringify(providers);
 
-  const existingAkmatoriSlot = providers[AKMATORI_CUSTOM_PROVIDER_KEY] as
-    | { [AKMATORI_MANAGED_MARKER]?: boolean }
-    | undefined;
+  // Operator-supplied JSONC could legally set a provider slot to `null` (or
+  // any non-object). The `as ... | undefined` cast only narrows away the
+  // undefined branch — at runtime the value could still be null/string/etc.,
+  // so guard with an explicit object check before indexing into it.
+  const akmatoriSlotRaw = providers[AKMATORI_CUSTOM_PROVIDER_KEY];
+  const existingAkmatoriSlot =
+    typeof akmatoriSlotRaw === "object" && akmatoriSlotRaw !== null
+      ? (akmatoriSlotRaw as { [AKMATORI_MANAGED_MARKER]?: boolean })
+      : undefined;
   const akmatoriSlotIsOperatorOwned =
     existingAkmatoriSlot !== undefined && !existingAkmatoriSlot[AKMATORI_MANAGED_MARKER];
 
@@ -437,7 +443,11 @@ function writeCustomProviderModelsJson(
   // marker. Now that we use a dedicated slot, drop any stale marker-bearing
   // `custom` entry so it cannot mislead an operator inspecting the file.
   // Unmarked `custom` entries are operator state and stay untouched.
-  const existingCustom = providers.custom as { [AKMATORI_MANAGED_MARKER]?: boolean } | undefined;
+  const customRaw = providers.custom;
+  const existingCustom =
+    typeof customRaw === "object" && customRaw !== null
+      ? (customRaw as { [AKMATORI_MANAGED_MARKER]?: boolean })
+      : undefined;
   if (existingCustom !== undefined && existingCustom[AKMATORI_MANAGED_MARKER] === true) {
     delete providers.custom;
   }
