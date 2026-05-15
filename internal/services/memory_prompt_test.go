@@ -43,12 +43,14 @@ func TestRenderMemoryRecallSection_WithManifest(t *testing.T) {
 	got := svc.renderMemoryRecallSection(MemoryScopeGlobal)
 	for _, want := range []string{
 		"## Cross-incident Memory",
-		"`gateway_call(\"memory.search\"",
-		"`gateway_call(\"memory.get\"",
-		// Regression guard: the gateway tool requires `file`, not `path`.
-		// Earlier the recall instruction said {path: "…"} which the tool
-		// rejected as missing the `file` argument.
-		"{file:",
+		// Recall is delegated to the memory-searcher subagent.
+		`"agent": "memory-searcher"`,
+		"subagent(",
+		// Record durable findings subsection invokes memory-writer.
+		"### Record durable findings",
+		`"agent": "memory-writer"`,
+		// Write instruction names the scope explicitly.
+		`"scope": "global"`,
 		"prod-db",
 		"data dir on /mnt/data",
 	} {
@@ -56,8 +58,28 @@ func TestRenderMemoryRecallSection_WithManifest(t *testing.T) {
 			t.Errorf("expected substring %q, got:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "{path:") {
-		t.Errorf("recall instruction must not say {path:…} — the tool requires {file:…}; got:\n%s", got)
+	// Regression: legacy gateway tool names must not survive the subagent migration.
+	for _, banned := range []string{
+		"gateway_call(\"memory.search\"",
+		"gateway_call(\"memory.get\"",
+		"memory.search",
+		"memory.get",
+	} {
+		if strings.Contains(got, banned) {
+			t.Errorf("recall section must not contain legacy tool reference %q; got:\n%s", banned, got)
+		}
+	}
+}
+
+// TestRenderMemoryRecallSection_ScopedToSkillUsesSkillScope verifies the
+// memory-writer instruction bakes in the caller's scope so the agent doesn't
+// have to guess. The "global" scope is exercised by the WithManifest test
+// above; this test pins skill-scope behavior.
+func TestRenderMemoryRecallSection_ScopedToSkillUsesSkillScope(t *testing.T) {
+	svc := newSkillServiceForPromptTest(t)
+	got := svc.renderMemoryRecallSection("redis-skill")
+	if !strings.Contains(got, `"scope": "redis-skill"`) {
+		t.Errorf("expected memory-writer scope to be \"redis-skill\", got:\n%s", got)
 	}
 }
 

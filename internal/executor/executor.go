@@ -134,28 +134,22 @@ func buildSafeEnvironment() []string {
 // instruction to a task. The runbook search reminder is placed in the user
 // message (not just the system prompt) because models follow user-turn
 // instructions more reliably than long system prompt sections. The
-// {lex, vec, hyde} triplet call shape mirrors the runbook-search section of
+// runbook-searcher subagent shape mirrors the runbook-search section of
 // DefaultIncidentManagerPrompt — keep them in sync so the system prompt and
-// the user-turn reminder agree on the triplet strategy and RRF fusion.
+// the user-turn reminder agree on the subagent name and retry budget.
 func PrependGuidance(task string) string {
 	currentTime := time.Now().UTC().Format("2006-01-02 15:04:05 UTC")
 	return fmt.Sprintf(`Current time: %s
 
 IMPORTANT: Before using any infrastructure tools, you MUST search for relevant runbooks first.
-Issue ONE qmd.query with THREE sub-queries — a {lex, vec, hyde} triplet. All three
-sub-queries carry the SAME natural-language one-sentence summary of the alert (what is
-broken, where, and the most distinctive symptom). QMD fuses the three rankings via
-Reciprocal Rank Fusion, so the lexical, semantic, and HyDE query-expansion angles all
-contribute to the final ranking.
+Delegate the search to the runbook-searcher subagent. It runs in its own scoped
+subprocess against the read-only runbook library mounted at /akmatori/runbooks/
+and returns the top candidate file paths with short excerpts.
 
-  gateway_call("qmd.query", {"collections": ["runbooks"], "searches": [{"type": "lex", "query": "<one-sentence natural-language alert summary>"}, {"type": "vec", "query": "<same one-sentence summary>"}, {"type": "hyde", "query": "<same one-sentence summary>"}], "limit": 5})
+  subagent({"agent": "runbook-searcher", "task": "<one-sentence natural-language alert summary plus verbatim source phrase when present>"})
 
-The "collections": ["runbooks"] filter scopes the search away from cross-incident
-memory documents — use memory.search / memory.get for those.
-
-If results are empty OR the top hit's title is not obviously related to the alert,
-retry with a different angle. Cap total qmd.query calls at 3 (the initial call plus
-up to 2 retries).
+The "task" must include a one-sentence natural-language summary of the alert (what
+is broken, where, and the most distinctive symptom).
 
 When the prompt contains an "Original alert text:" block, retry #1 MUST quote a
 distinctive sender / source / channel / title phrase verbatim from that text rather
@@ -168,11 +162,12 @@ signal. Examples:
 
 If retry #1 still returns nothing useful, retry #2 may rephrase the summary as a
 question ("why does X fail when Y happens?") or use target_service / host alone
-("edge nginx", "auth-service").
+("edge nginx", "auth-service"). Cap total runbook-searcher invocations at 3 (the
+initial call plus up to 2 retries).
 
-If results have score > 0.7, retrieve the top runbook:
-  gateway_call("qmd.get", {"file": "<path from results>"})
-Follow matching runbook procedures as your PRIMARY investigation guide.
+When the subagent returns candidate paths, read the most relevant runbook directly
+from /akmatori/runbooks/. Follow matching runbook procedures as your PRIMARY
+investigation guide.
 
 Please help with the following incident or request:
 

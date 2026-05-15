@@ -190,19 +190,36 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 }
 
 // memoryRecallInstruction is the always-on guidance prepended to every scope's
-// memory section. It points the agent at the gateway tools and reminds it to
-// cite sources. Keep this string in sync with the tool names registered in
-// mcp-gateway/internal/tools/memory (Task 5).
+// memory section. It delegates recall to the memory-searcher subagent, which
+// runs in its own scoped subprocess against /akmatori/memory/.
 const memoryRecallInstruction = "Before answering questions about prior incidents, hosts, tool quirks, or operator " +
-	"feedback, run `gateway_call(\"memory.search\", {query: \"…\"})` and use `gateway_call(\"memory.get\", {file: \"…\"})` for full bodies. " +
+	"feedback, delegate the recall to the memory-searcher subagent. It runs in its own scoped subprocess against " +
+	"/akmatori/memory/ and returns top file paths with brief excerpts. Read full files directly with the local read " +
+	"tool when needed.\n\n" +
+	"`subagent({\"agent\": \"memory-searcher\", \"task\": \"<what you want to recall — host name, error pattern, tool quirk, feedback topic>\"})`\n\n" +
 	"Cite `Source: <name>` when it helps."
+
+// memoryWriteInstructionTemplate is the end-of-investigation guidance that
+// asks the agent to record durable cross-incident facts via the memory-writer
+// subagent. The first %s is the scope slug (global for AGENTS.md, skill name
+// for SKILL.md); the second %s is the scope slug repeated inside the example.
+const memoryWriteInstructionTemplate = "When the investigation surfaces durable cross-incident facts (host quirks, " +
+	"recurring incident patterns, tool quirks, validated runbook gaps, or operator feedback) that will speed up " +
+	"future troubleshooting, record them by invoking the memory-writer subagent. Pass the full reasoning log as " +
+	"`task` along with the directive to save ONLY important, non-obvious information. Use scope `\"%s\"` and the " +
+	"originating incident UUID:\n\n" +
+	"`subagent({\"agent\": \"memory-writer\", \"task\": \"<full reasoning log and instruction to save only important information that will help speed up troubleshooting next time>\", \"scope\": \"%s\", \"incident\": \"<this incident's UUID>\"})`\n\n" +
+	"memory-writer is idempotent — if a memory with the same semantic name already exists, it updates in place. " +
+	"Skip the call when nothing durable was learned."
 
 // renderMemoryRecallSection returns the recall instruction plus the on-disk
 // MEMORY.md manifest for the given scope ("global" for AGENTS.md, the skill
-// name for SKILL.md). When the manifest is missing or unreadable, only the
-// recall instruction is returned — the agent can still call memory.search
-// and discover entries dynamically. Returns an empty string only when the
-// service has no memoryDir configured (defensive; should not happen in prod).
+// name for SKILL.md), followed by the Record durable findings subsection that
+// invokes the memory-writer subagent. When the manifest is missing or
+// unreadable, only the recall + write instructions are returned — the agent
+// can still call memory-searcher and discover entries dynamically. Returns an
+// empty string only when the service has no memoryDir configured (defensive;
+// should not happen in prod).
 func (s *SkillService) renderMemoryRecallSection(scope string) string {
 	if s.memoryDir == "" {
 		return ""
@@ -223,13 +240,17 @@ func (s *SkillService) renderMemoryRecallSection(scope string) string {
 	} else {
 		b.WriteString("\n_No memories indexed for this scope yet._\n")
 	}
+
+	b.WriteString("\n### Record durable findings\n\n")
+	b.WriteString(fmt.Sprintf(memoryWriteInstructionTemplate, scope, scope))
+	b.WriteString("\n")
 	return b.String()
 }
 
 // readMemoryManifest returns the on-disk MEMORY.md for a scope, or an empty
 // string when the file is missing/unreadable. Errors are logged at debug
 // (not warn) because first-run is normal and the agent has a sensible
-// fallback (call memory.search dynamically).
+// fallback (delegate recall to the memory-searcher subagent).
 func (s *SkillService) readMemoryManifest(scope string) string {
 	if s.memoryDir == "" || scope == "" {
 		return ""

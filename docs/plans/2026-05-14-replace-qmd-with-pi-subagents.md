@@ -75,11 +75,11 @@ Delete the QMD container and the gateway-side runbook/memory proxies. Mount the 
 - Modify: `internal/services/skill_prompt_service.go` — replace `memory.search`/`memory.get` recall instruction with `subagent({agent: "memory-searcher", task: "…"})`, AND add an end-of-investigation instruction to call `subagent({agent: "memory-writer", task: "<full reasoning log and instruction to save only important infomation that will help to speed up troubleshooting next time>", scope: "…", incident: "<uuid>"})` when the agent learns durable cross-incident facts (hosts, recurring patterns, tool quirks)
 - Modify: `internal/database/prompt_test.go`, `internal/executor/executor_test.go`, `internal/services/memory_prompt_test.go` — drop `qmd.*` / `memory.search` / `memory.get` references; add positive assertions for `runbook-searcher`, `memory-searcher`, and `memory-writer`
 
-- [ ] rewrite the "MANDATORY - Search runbooks FIRST" section to invoke `subagent` with the runbook-searcher agent; keep the fallback-to-`/akmatori/runbooks/` line as a hard fail path
-- [ ] rewrite the memory recall instruction in `skill_prompt_service.go` to invoke `subagent` with the memory-searcher agent
-- [ ] add a new "Record durable findings" section in `skill_prompt_service.go` that instructs the agent to invoke `memory-writer` with the full reasoning log plus a save-only-important-info directive, naming the scope and incident UUID
-- [ ] update all three prompt tests to assert the new subagent names and absence of `qmd.*` / `memory.*` tool names
-- [ ] run `make test` — must pass before task 4
+- [x] rewrite the "MANDATORY - Search runbooks FIRST" section to invoke `subagent` with the runbook-searcher agent; keep the fallback-to-`/akmatori/runbooks/` line as a hard fail path
+- [x] rewrite the memory recall instruction in `skill_prompt_service.go` to invoke `subagent` with the memory-searcher agent
+- [x] add a new "Record durable findings" section in `skill_prompt_service.go` that instructs the agent to invoke `memory-writer` with the full reasoning log plus a save-only-important-info directive, naming the scope and incident UUID
+- [x] update all three prompt tests to assert the new subagent names and absence of `qmd.*` / `memory.*` tool names
+- [x] run `make test` — must pass before task 4
 
 ### Task 4: Add file→DB memory ingestion and replace MemoryExtractor with it
 

@@ -5,27 +5,19 @@ import (
 	"testing"
 )
 
-// TestPrependGuidance_ScopesRunbookSearchToRunbooksCollection guards against
-// the runbook-search guidance regressing to an unscoped qmd.query. With the
-// memories collection now indexed by QMD, an unscoped search would surface
-// memory documents during the "search runbooks first" workflow and the
-// agent might fetch/follow them as runbooks.
-//
-// It also pins the {lex, vec, hyde} triplet shape so the user-turn reminder
-// stays in sync with DefaultIncidentManagerPrompt's runbook-search section:
-// a single qmd.query carrying THREE searches[] entries — one per retrieval
-// mode (lex/vec/hyde), all three carrying the same natural-language alert
-// summary, fused by QMD via RRF, with retry guidance capped at 3 total calls.
-func TestPrependGuidance_ScopesRunbookSearchToRunbooksCollection(t *testing.T) {
+// TestPrependGuidance_DelegatesToRunbookSearcherSubagent guards against the
+// runbook-search guidance regressing to a direct tool call. After the QMD
+// subagent migration, the user-turn reminder must delegate the runbook search
+// to the runbook-searcher subagent and stay in sync with
+// DefaultIncidentManagerPrompt's runbook-search section.
+func TestPrependGuidance_DelegatesToRunbookSearcherSubagent(t *testing.T) {
 	out := PrependGuidance("test task")
 	for _, want := range []string{
-		`gateway_call("qmd.query"`,
-		`"collections": ["runbooks"]`,
-		`"type": "lex"`,
-		`"type": "vec"`,
-		`"type": "hyde"`,
-		`gateway_call("qmd.get"`,
-		"Cap total qmd.query calls at 3",
+		`subagent(`,
+		`"agent": "runbook-searcher"`,
+		`/akmatori/runbooks/`,
+		"Cap total runbook-searcher invocations at 3",
+		"up to 2 retries",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("PrependGuidance() missing %q\nfull output:\n%s", want, out)
@@ -37,27 +29,32 @@ func TestPrependGuidance_ScopesRunbookSearchToRunbooksCollection(t *testing.T) {
 	}
 }
 
-// TestPrependGuidance_SingleQMDQueryWithOrderedTriplet pins the structural
-// invariant that the user-turn reminder issues exactly ONE
-// gateway_call("qmd.query", ...) with the three sub-queries in lex→vec→hyde
-// order. The substring assertions above would still pass if a future edit
-// split the call into three separate qmd.query invocations or reordered the
-// modes — this test catches that drift.
-func TestPrependGuidance_SingleQMDQueryWithOrderedTriplet(t *testing.T) {
+// TestPrependGuidance_NoLegacyQMDOrMemoryToolReferences pins the absence of
+// the retired gateway tool names after the subagent migration.
+func TestPrependGuidance_NoLegacyQMDOrMemoryToolReferences(t *testing.T) {
+	out := PrependGuidance("test task")
+	for _, banned := range []string{
+		"qmd.query",
+		"qmd.get",
+		"memory.search",
+		"memory.get",
+	} {
+		if strings.Contains(out, banned) {
+			t.Errorf("PrependGuidance() must not contain legacy tool reference %q\nfull output:\n%s", banned, out)
+		}
+	}
+}
+
+// TestPrependGuidance_SingleRunbookSearcherInvocation pins the structural
+// invariant that the user-turn reminder shows exactly ONE
+// subagent({"agent": "runbook-searcher", ...}) example. The substring
+// assertions above would still pass if a future edit split the example into
+// multiple per-retry invocations.
+func TestPrependGuidance_SingleRunbookSearcherInvocation(t *testing.T) {
 	out := PrependGuidance("test task")
 
-	if got := strings.Count(out, `gateway_call("qmd.query"`); got != 1 {
-		t.Errorf("expected exactly 1 gateway_call(\"qmd.query\"...) in guidance, got %d", got)
-	}
-
-	lexIdx := strings.Index(out, `"type": "lex"`)
-	vecIdx := strings.Index(out, `"type": "vec"`)
-	hydeIdx := strings.Index(out, `"type": "hyde"`)
-	if lexIdx < 0 || vecIdx < 0 || hydeIdx < 0 {
-		t.Fatalf("missing one of the three sub-query type markers: lex=%d vec=%d hyde=%d", lexIdx, vecIdx, hydeIdx)
-	}
-	if !(lexIdx < vecIdx && vecIdx < hydeIdx) {
-		t.Errorf("triplet must appear in lex→vec→hyde order, got lex=%d vec=%d hyde=%d", lexIdx, vecIdx, hydeIdx)
+	if got := strings.Count(out, `"agent": "runbook-searcher"`); got != 1 {
+		t.Errorf("expected exactly 1 subagent({\"agent\": \"runbook-searcher\"...}) example in guidance, got %d", got)
 	}
 }
 
