@@ -146,18 +146,14 @@ Delegate the search to the runbook-searcher subagent. It runs in its own scoped
 subprocess against the read-only runbook library mounted at /akmatori/runbooks/
 and returns the top candidate file paths with short excerpts.
 
-  subagent({"agent": "runbook-searcher", "task": "<one-sentence natural-language alert summary plus verbatim source phrase when present>"})
+  subagent({"agent": "runbook-searcher", "task": "<full Original alert text when present, otherwise a one-sentence natural-language summary of the alert>"})
 
-The "task" must include a one-sentence natural-language summary of the alert (what
-is broken, where, and the most distinctive symptom).
-
-When the prompt contains an "Original alert text:" block, include a distinctive
-sender / source / channel / title phrase verbatim from that text so the subagent
-can match runbook titles that mirror the upstream alert phrasing. Examples of
-distinctive verbatim phrases:
-  - "notification from stream-health monitor"
-  - "[firing] HighErrorRate"
-  - "Zabbix: monitoring agent down"
+When the prompt contains an "Original alert text:" block, pass that block verbatim
+as the "task" — the runbook-searcher subagent will extract distinctive keywords
+(sender, source, channel, error string, host) from it on its own. When no
+"Original alert text:" block is present, fall back to a one-sentence
+natural-language summary of the alert (what is broken, where, and the most
+distinctive symptom).
 
 If the first invocation returns "No runbooks matched" or the top candidate is
 not obviously related, you MAY retry with a different angle (target_service /

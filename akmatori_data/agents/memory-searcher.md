@@ -27,17 +27,24 @@ Directory shape:
   match skill names.
 
 Input you will receive:
-- A short natural-language description of what the caller wants to recall
-  (host name, error pattern, tool quirk, operator-feedback topic).
+- Either the full original alert text (a verbatim alert payload — may contain
+  channel-name prefixes, "[FIRING]" tags, JSON-like fragments, host/service
+  identifiers, or multi-line content), or a short natural-language description
+  of what the caller wants to recall (host name, error pattern, tool quirk,
+  operator-feedback topic).
 
 Strategy:
-1. Skim each scope's `MEMORY.md` for a quick overview: use `ls` with
+1. If the input is a verbatim alert payload, extract a handful of distinctive
+   keywords first (host, service name, error string, sender/source). Do not
+   feed the entire payload to `grep` verbatim — pick the most discriminating
+   tokens.
+2. Skim each scope's `MEMORY.md` for a quick overview: use `ls` with
    `path: "/akmatori/memory/"` then `read` the relevant
    `/akmatori/memory/<scope>/MEMORY.md` file.
-2. Use the `grep` tool with distinctive keywords and
+3. Use the `grep` tool with distinctive keywords and
    `path: "/akmatori/memory/"`. Try 2-3 keyword angles (host, service, error
    string, feedback verb) before stopping.
-3. Use the `read` tool on promising files only enough to confirm relevance
+4. Use the `read` tool on promising files only enough to confirm relevance
    — don't dump entire bodies back.
 
 Output format:

@@ -99,7 +99,8 @@ func TestDefaultIncidentManagerPrompt_RunbookSearcherRetryBudget(t *testing.T) {
 		name     string
 		contains string
 	}{
-		{"natural-language placeholder", "<one-sentence natural-language alert summary"},
+		{"full-alert-text placeholder", "<full Original alert text when present"},
+		{"natural-language fallback", "one-sentence natural-language summary"},
 		{"max 3 calls cue", "Cap total runbook-searcher invocations at 3"},
 		{"retry guidance", "up to 2 retries"},
 		{"target_service mentioned as retry angle", "target_service"},
@@ -125,21 +126,21 @@ func TestDefaultIncidentManagerPrompt_SingleRunbookSearcherInvocation(t *testing
 	}
 }
 
-// TestDefaultIncidentManagerPrompt_RequiresSourcePhraseOnRetry pins the
-// conditional MUST that retry #1 quote a verbatim sender/source/channel phrase
-// from the Original alert text: block. Mirrors
-// TestPrependGuidance_RequiresSourcePhraseOnRetry in internal/executor — both
-// prompts are kept in sync per the "keep them in sync" invariant noted in
-// executor.go's PrependGuidance comment.
+// TestDefaultIncidentManagerPrompt_PassesFullAlertTextToSubagent pins the
+// conditional clause that asks the agent to pass the full "Original alert
+// text:" block verbatim as the subagent task. The runbook-searcher subagent
+// extracts distinctive keywords on its own, so the parent agent does not
+// need to embed example phrases in the prompt. Mirrors
+// TestPrependGuidance_PassesFullAlertTextToSubagent in internal/executor —
+// both prompts are kept in sync per the "keep them in sync" invariant noted
+// in executor.go's PrependGuidance comment.
 //
-// Asserted as a single normalized clause (not three independent substrings)
-// so the rule can't be silently weakened by scattering the tokens — e.g.,
-// dropping MUST to "may", removing the gate, or moving "verbatim" to an
-// unrelated sentence.
-func TestDefaultIncidentManagerPrompt_RequiresSourcePhraseOnRetry(t *testing.T) {
+// Asserted as a single normalized clause (not independent substrings) so
+// the rule can't be silently weakened by scattering the tokens.
+func TestDefaultIncidentManagerPrompt_PassesFullAlertTextToSubagent(t *testing.T) {
 	normalized := strings.Join(strings.Fields(DefaultIncidentManagerPrompt), " ")
-	want := `When the prompt contains an "Original alert text:" block, include a distinctive sender / source / channel / title phrase verbatim`
+	want := `When the prompt contains an "Original alert text:" block, pass that block verbatim as the "task"`
 	if !strings.Contains(normalized, want) {
-		t.Errorf("DefaultIncidentManagerPrompt missing conditional verbatim-quote clause\nwant: %s", want)
+		t.Errorf("DefaultIncidentManagerPrompt missing full-alert-text pass-through clause\nwant: %s", want)
 	}
 }

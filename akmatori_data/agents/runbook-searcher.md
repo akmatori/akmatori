@@ -19,18 +19,24 @@ Hard scope rules:
   `ls`, and `read` tools instead.
 
 Input you will receive:
-- A short natural-language description of an alert (what is broken, where, the
-  most distinctive symptom). Treat the input as the search target.
+- Either the full original alert text (a verbatim alert payload — may contain
+  channel-name prefixes, "[FIRING]" tags, JSON-like fragments, host/service
+  identifiers, or multi-line content), or a short natural-language description
+  of an alert. Treat the input as the search target.
 
 Strategy:
-1. Use the `grep` tool with the alert summary's distinctive keywords (service
-   name, error string, host/cluster identifier) and `path: "/akmatori/runbooks/"`.
+1. If the input is a verbatim alert payload, extract a handful of distinctive
+   keywords first (sender / source / channel, service name, error string,
+   host or cluster identifier). Do not feed the entire payload to `grep`
+   verbatim — pick the most discriminating tokens.
+2. Use the `grep` tool with those distinctive keywords and
+   `path: "/akmatori/runbooks/"`.
    Prefer multi-keyword queries over a single long phrase. Try 2-3 keyword
    angles before giving up.
-2. If `grep` yields nothing useful, fall back to `find` with
+3. If `grep` yields nothing useful, fall back to `find` with
    `pattern: "**/*.md"` and `path: "/akmatori/runbooks/"`, plus `ls` with
    `path: "/akmatori/runbooks/"` to scan filenames.
-3. For each candidate, use the `read` tool to read just enough lines to
+4. For each candidate, use the `read` tool to read just enough lines to
    confirm relevance (do not dump entire runbooks back to the caller).
 
 Output format:

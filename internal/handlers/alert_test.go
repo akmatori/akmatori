@@ -383,7 +383,7 @@ func TestAlertHandler_buildInvestigationPrompt(t *testing.T) {
 				AlertName:   "StreamHealthAlert",
 				TargetHost:  "edge-01",
 				Severity:    database.AlertSeverityCritical,
-				Summary:     "Live streaming degraded",
+				Summary:     "Video stream health degraded",
 				Description: "Frame loss above threshold",
 				RawPayload: map[string]interface{}{
 					"original_message": "New notification from stream-health monitor: viewers dropping",
@@ -599,7 +599,7 @@ func TestAlertHandler_buildInvestigationPrompt(t *testing.T) {
 		result := h.buildInvestigationPrompt(
 			alerts.NormalizedAlert{
 				AlertName:   "StreamMonitorAlert",
-				Description: "Live streaming viewer count dropped below SLO",
+				Description: "Video stream viewer count dropped below SLO",
 				RawPayload: map[string]interface{}{
 					"original_message": raw,
 				},

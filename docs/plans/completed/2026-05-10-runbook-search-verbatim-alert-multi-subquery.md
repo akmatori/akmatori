@@ -89,8 +89,8 @@ Files:
 
 ## Post-Completion (manual verification — out of automated task scope)
 
-- Replay the original Slack-channel alert that produced incident `c1eff0bc`. In the new incident's execution log, confirm:
-  - The investigation prompt includes `Source:` and `Original alert text:` sections containing `"New notification from stream-health monitor"`
+- Replay an original slack-channel alert whose `raw_payload.original_message` carries a distinctive sender phrase. In the new incident's execution log, confirm:
+  - The investigation prompt includes `Source:` and `Original alert text:` sections containing the verbatim original message
   - The first `qmd.query` call now carries a `searches[]` entry with the verbatim alert excerpt as the first (2×-weighted) sub-query
   - The response includes the matching runbook in the top results
 - Spot-check a non-Slack alert (Zabbix or Alertmanager webhook) where `raw_payload.original_message` is absent — prompt should match prior output aside from the optional `Source:` line

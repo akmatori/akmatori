@@ -129,7 +129,7 @@ export interface AgentRunnerConfig {
  * though pi-ai's narrower ThinkingLevel does not. For OpenAI-compatible
  * providers without a thinkingLevelMap, pi-mono omits `reasoning_effort`
  * entirely when level is "off" — which matches what users mean by "off" and
- * avoids gateways that reject "minimal" (e.g. ai.tools.example.com only accepts
+ * avoids OpenAI-compatible gateways that reject "minimal" (some only accept
  * high|medium|low|none).
  */
 export function mapThinkingLevel(level: ThinkingLevel): PiThinkingLevel | "off" {

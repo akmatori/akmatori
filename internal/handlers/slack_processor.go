@@ -508,9 +508,9 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 func (h *SlackHandler) extractFullMessageText(event *slackevents.MessageEvent) string {
 	// Always try to fetch the full message from the Slack API. The Events API
 	// MessageEvent only contains event.Text (a plain-text summary) and does NOT
-	// include Blocks or Attachments. Bots and integrations (channel relays, Zabbix, Datadog,
-	// etc.) often put the real alert content in blocks/attachments while event.Text
-	// is just a short preview like "New notification from …".
+	// include Blocks or Attachments. Bots and integrations (channel relays, Zabbix,
+	// Datadog, etc.) often put the real alert content in blocks/attachments while
+	// event.Text is just a short preview like "New notification from …".
 	fullText := h.fetchFullMessageText(event)
 	if fullText != "" {
 		return fullText

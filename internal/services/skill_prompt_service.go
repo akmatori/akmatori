@@ -199,7 +199,9 @@ const memoryRecallInstruction = "Before answering questions about prior incident
 	"feedback, delegate the recall to the memory-searcher subagent. It runs in its own scoped subprocess against " +
 	"/akmatori/memory/ and returns top file paths with brief excerpts. Read full files directly with the local read " +
 	"tool when needed.\n\n" +
-	"`subagent({\"agent\": \"memory-searcher\", \"task\": \"<what you want to recall — host name, error pattern, tool quirk, feedback topic>\"})`\n\n" +
+	"`subagent({\"agent\": \"memory-searcher\", \"task\": \"<full Original alert text when present, otherwise the topic you want to recall — host name, error pattern, tool quirk, feedback topic>\"})`\n\n" +
+	"When the prompt contains an \"Original alert text:\" block, pass that block verbatim as the task — the " +
+	"memory-searcher subagent will extract distinctive keywords on its own.\n\n" +
 	"Cite `Source: <name>` when it helps."
 
 // memoryWriteInstructionTemplate is the end-of-investigation guidance that

@@ -2,7 +2,7 @@
 
 ## Overview
 
-When QMD's initial runbook search returns no usable hit, the agent's retry #1 currently rephrases the same structured summary instead of quoting the distinctive sender/source/channel phrase from the original alert text. This causes alerts like "New notification from stream-health monitor" to miss the matching runbook on the second try. The fix is a prompt change in two synchronized locations plus a regression test.
+When QMD's initial runbook search returns no usable hit, the agent's retry #1 currently rephrases the same structured summary instead of quoting the distinctive sender/source/channel phrase from the original alert text. This causes slack-channel alerts whose distinctive content lives in the sender phrase to miss the matching runbook on the second try. The fix is a prompt change in two synchronized locations plus a regression test.
 
 ## Context
 
@@ -59,5 +59,5 @@ Files:
 ## Post-Completion Validation (manual, not automatable)
 
 - Rebuild API container: `docker-compose build akmatori-api && docker-compose up -d akmatori-api` (agent-worker not affected — prompt is built API-side)
-- Replay or trigger a fresh slack-channel investigation with the slack-channel "stream-health monitor alerts" payload (or the incident e3880769 context) and confirm retry #1 quotes the upstream channel sender phrase verbatim and the agent retrieves runbook #10
+- Replay or trigger a fresh slack-channel investigation whose original alert text carries a distinctive sender/source phrase, and confirm retry #1 quotes that sender phrase verbatim and the agent retrieves the matching runbook
 - Confirm non-alert flows (Slack mentions / DMs with no `Original alert text:` block) behave identically — the new clause is gated on that marker
