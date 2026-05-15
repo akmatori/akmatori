@@ -61,7 +61,7 @@ test-web: ## Run web frontend tests only
 	cd web && npm test
 
 build-agent: ## Build agent-worker Docker image
-	docker build -t akmatori-agent ./agent-worker
+	docker build -t akmatori-agent -f ./agent-worker/Dockerfile .
 
 test-coverage: ## Run tests with coverage
 	$(GOTEST) -v -coverprofile=coverage.out ./...

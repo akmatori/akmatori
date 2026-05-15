@@ -115,10 +115,13 @@ func (s *MemoryService) UpdateMemory(id uint, m *database.Memory) (*database.Mem
 // both miss the lookup and then one Create would fail with a unique-constraint
 // error, dropping the later update on a path that's contractually idempotent.
 //
-// On conflict, type/description/body/incident_uuid/created_by are all
-// overwritten with the new request — every caller of UpsertByName supplies
-// a complete record, so there's no "merge selectively" semantic. The
-// existing row's ID and created_at are preserved.
+// On conflict, type/description/body/incident_uuid are overwritten with the
+// new request — every caller of UpsertByName supplies a complete record, so
+// there's no "merge selectively" semantic. The existing row's ID and
+// created_at are preserved. created_by is intentionally excluded from the
+// conflict update so operator authorship stays sticky: an agent re-ingest
+// cannot silently flip `operator` rows to `agent` (see upsertByNameNoSync
+// comments and TestIngestFromDisk_AgentRewriteDoesNotOverwriteOperatorAuthorship).
 //
 // Both PostgreSQL and SQLite (≥3.24) support the ON CONFLICT clause used here.
 func (s *MemoryService) UpsertByName(m *database.Memory) (*database.Memory, error) {

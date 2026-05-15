@@ -1,0 +1,54 @@
+# Repo-root .dockerignore.
+# Several Dockerfiles (Dockerfile.api, agent-worker/Dockerfile) now build with
+# the repo root as their context; everything in this file is excluded from
+# the build context tarball Docker streams to the daemon.
+
+# Local-only operator data (incidents, secrets, generated runbook/memory dumps).
+# The agent-worker Dockerfile re-includes akmatori_data/agents/ explicitly
+# because the system-supplied subagent .md files live there and must be baked
+# into the image.
+akmatori_data/*
+!akmatori_data/agents/
+akmatori_data/agents/*
+!akmatori_data/agents/*.md
+
+# VCS / metadata
+.git
+.gitignore
+.dockerignore
+.github/
+
+# Editor / OS junk
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Node and frontend build artifacts (per-Dockerfile builds reinstall as needed)
+**/node_modules
+**/dist
+agent-worker/dist
+web/dist
+
+# Go build artifacts and coverage output
+/akmatori
+/mcp-gateway/mcp-gateway
+*.test
+*.out
+coverage.html
+
+# Local env / secrets
+.env
+.env.local
+.env.example
+
+# Logs and dev scratch
+*.log
+.claude/
+.ralphex/
+
+# Frontend node_modules / build output
+web/node_modules

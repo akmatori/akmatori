@@ -42,7 +42,10 @@ jobs:
             context: ./mcp-gateway
             dockerfile: ./mcp-gateway/Dockerfile
           - service: agent
-            context: ./agent-worker
+            # Build from repo root so the Dockerfile can COPY akmatori_data/agents/*.md
+            # into the image alongside agent-worker/. The host bind mount that
+            # delivered those files in dev installs is empty on GHCR-pull deployments.
+            context: .
             dockerfile: ./agent-worker/Dockerfile
           - service: frontend
             context: ./web

@@ -36,8 +36,11 @@ services:
 
   akmatori-agent:
     build:
-      context: ./agent-worker
-      dockerfile: Dockerfile
+      # Repo-root context so the Dockerfile can COPY akmatori_data/agents/*.md
+      # into the image (system-supplied subagent definitions). The host bind
+      # mount of those files remains as an operator-override path.
+      context: .
+      dockerfile: agent-worker/Dockerfile
       args:
         http_proxy:  ${http_proxy:-}
         https_proxy: ${https_proxy:-}

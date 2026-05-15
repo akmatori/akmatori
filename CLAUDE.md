@@ -96,7 +96,7 @@ Rules:
 - keep DB state and on-disk runbook files in sync (the runbook service writes both directions)
 - the incident-manager prompt invokes `subagent({agent: "runbook-searcher", task: ...})` for SOP lookup — do not introduce direct grep loops in the main agent
 - memory recall goes through `memory-searcher`; durable findings get written by `memory-writer` near end-of-investigation
-- the memory-writer subagent must be invoked with `{agent: "memory-writer", task, scope, incident}` — scope and incident are required so `IngestFromDisk` upserts route to the correct row
+- the memory-writer subagent is invoked with `{agent: "memory-writer", task}` only — pi-subagents silently drops any extra top-level keys, so scope and incident UUID are embedded as the first two header lines of `task` (`Scope: <slug>\nIncident UUID: <uuid>\n\n<reasoning>`); the subagent parses them out before writing so `IngestFromDisk` upserts route to the correct row
 - on incident completion the API runs `MemoryService.IngestFromDisk` to materialize new memory files into Postgres (idempotent by scope + `name:` slug); operator-authored rows carry `created_by: operator` in their frontmatter and ingest preserves that
 
 ### Slack investigation UX

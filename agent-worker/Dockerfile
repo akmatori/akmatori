@@ -13,15 +13,17 @@ FROM node:22-bookworm AS builder
 
 WORKDIR /app
 
-# Copy package files first for layer caching
-COPY package.json package-lock.json ./
+# Copy package files first for layer caching.
+# Build context is the repo root so we can also pull akmatori_data/agents/
+# into the runtime stage; that means every path here is repo-rooted.
+COPY agent-worker/package.json agent-worker/package-lock.json ./
 
 # Install all dependencies (including devDependencies for build)
 RUN npm ci
 
 # Copy source code
-COPY tsconfig.json ./
-COPY src/ ./src/
+COPY agent-worker/tsconfig.json ./
+COPY agent-worker/src/ ./src/
 
 # Build TypeScript
 RUN npm run build
@@ -57,7 +59,7 @@ RUN mkdir -p /home/agent/.pi /opt/pi-extensions/pi-subagents /workspaces && \
 WORKDIR /home/agent/app
 
 # Copy package files and install production dependencies only
-COPY package.json package-lock.json ./
+COPY agent-worker/package.json agent-worker/package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 # Materialise the pi-subagents extension into the image. Copying the full
@@ -65,6 +67,13 @@ RUN npm ci --omit=dev && npm cache clean --force
 # `pi.extensions` manifest (./src/extension/index.ts).
 RUN cp -r node_modules/pi-subagents/. /opt/pi-extensions/pi-subagents/ && \
     chown -R agent:agent /opt/pi-extensions
+
+# Bake Akmatori's system-supplied subagent definitions into the pi-subagents
+# builtin agents directory so they are discoverable in end-user installs that
+# never populate the host-side ./akmatori_data/agents/ bind mount. The host
+# mount remains as an operator-override path: user agents loaded from
+# ~/.pi/agent/agents/ override these builtins by name (mergeAgentsForScope).
+COPY --chown=agent:agent akmatori_data/agents/*.md /opt/pi-extensions/pi-subagents/agents/
 
 # Copy built JavaScript from builder
 COPY --from=builder /app/dist/ ./dist/
