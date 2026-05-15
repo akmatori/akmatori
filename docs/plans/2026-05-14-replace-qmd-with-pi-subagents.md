@@ -142,8 +142,8 @@ Delete the QMD container and the gateway-side runbook/memory proxies. Mount the 
 
 ### Task 8: Verify acceptance criteria
 
-- [ ] run `make verify` (full backend + lint gate)
-- [ ] run `make test-agent` (agent-worker tests)
-- [ ] run `make test-mcp` (gateway tests)
-- [ ] rebuild affected containers: `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build akmatori-api mcp-gateway akmatori-agent && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d`
-- [ ] `grep -rn "qmd\|QMD" --include='*.go' --include='*.ts' --include='*.yml' --include='*.md' .` returns no functional references (only changelog/plan history)
+- [x] run `make verify` (full backend + lint gate) — passed (go vet, full Go test suite, agent-worker vitest 339/339, web vitest 18/18)
+- [x] run `make test-agent` (agent-worker tests) — 11 test files, 339 tests passing
+- [x] run `make test-mcp` (gateway tests) — all gateway packages green
+- [x] rebuild affected containers (skipped — deployment action, run manually: `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build akmatori-api mcp-gateway akmatori-agent && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d`)
+- [x] `grep -rn "qmd\|QMD" --include='*.go' --include='*.ts' --include='*.yml' --include='*.md' .` — only changelog/plan history hits remain (`docs/plans/**`), plus CLAUDE.md's "QMD is gone" note, regression-test pins of `qmd.query`/`qmd.get` absence in `internal/{database/prompt_test.go,executor/executor_test.go}`, and one comment in `agent-worker/tests/extension-loader.test.ts` referencing the migration plan
