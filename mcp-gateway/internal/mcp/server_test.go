@@ -745,39 +745,39 @@ func TestAuthorization_ProxyToolBypassesAllowlist(t *testing.T) {
 	}
 }
 
-func TestAuthorization_QMDProxyToolBypassesAllowlist(t *testing.T) {
+func TestAuthorization_SingleSegmentProxyToolBypassesAllowlist(t *testing.T) {
 	s := newTestServer()
 	authorizer := auth.NewAuthorizer(time.Hour)
 	defer authorizer.Stop()
 	s.SetAuthorizer(authorizer)
 
-	// Register QMD as a proxy namespace (single-segment, no dot in namespace).
+	// Register a single-segment proxy namespace (no dot in namespace).
 	// In production, this is done by registerProxyToolsFromHandler in the registry.
-	s.AddProxyNamespace("qmd")
+	s.AddProxyNamespace("sysproxy")
 
 	s.RegisterTool(Tool{
-		Name:        "qmd.query",
-		Description: "Search runbooks using QMD",
+		Name:        "sysproxy.query",
+		Description: "System proxy tool",
 		InputSchema: InputSchema{Type: "object"},
 	}, echoHandler)
 
-	// Set allowlist that only includes SSH — no QMD entries
-	authorizer.SetAllowlist("incident-qmd", []auth.AllowlistEntry{
+	// Set allowlist that only includes SSH — no proxy entries
+	authorizer.SetAllowlist("incident-sysproxy", []auth.AllowlistEntry{
 		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
 	})
 
-	// qmd.query bypasses the allowlist because "qmd" is a registered proxy namespace
+	// sysproxy.query bypasses the allowlist because "sysproxy" is a registered proxy namespace
 	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
-		CallToolParams{Name: "qmd.query", Arguments: map[string]interface{}{
+		CallToolParams{Name: "sysproxy.query", Arguments: map[string]interface{}{
 			"searches": []map[string]interface{}{{"type": "lex", "query": "database"}},
 		}},
 		map[string]string{
-			"X-Incident-ID": "incident-qmd",
+			"X-Incident-ID": "incident-sysproxy",
 		},
 	)
 
 	if resp.Error != nil {
-		t.Fatalf("expected qmd.query to bypass allowlist, got error: %s", resp.Error.Message)
+		t.Fatalf("expected sysproxy.query to bypass allowlist, got error: %s", resp.Error.Message)
 	}
 }
 
@@ -981,23 +981,23 @@ func TestHandleListToolsByType_ProxyNamespaceBypassesAllowlistFilter(t *testing.
 	defer authorizer.Stop()
 	s.SetAuthorizer(authorizer)
 
-	// Register "qmd" as a proxy namespace
-	s.AddProxyNamespace("qmd")
+	// Register "sysproxy" as a proxy namespace
+	s.AddProxyNamespace("sysproxy")
 
 	s.SetDiscoverer(&mockDiscoverer{
 		tools: []ToolListItem{
-			{Name: "qmd.query", Description: "Search runbooks", ToolType: "qmd"},
+			{Name: "sysproxy.query", Description: "System proxy tool", ToolType: "sysproxy"},
 		},
 	})
 
-	// Only allow SSH — QMD is NOT in allowlist
+	// Only allow SSH — sysproxy is NOT in allowlist
 	allowlist := []auth.AllowlistEntry{
 		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
 	}
 	allowlistJSON, _ := json.Marshal(allowlist)
 
 	resp := sendJSONRPCWithHeaders(t, s, "tools/list_by_type",
-		ListToolsByTypeParams{ToolType: "qmd"},
+		ListToolsByTypeParams{ToolType: "sysproxy"},
 		map[string]string{
 			"X-Incident-ID":    "incident-proxy-filter",
 			"X-Tool-Allowlist": string(allowlistJSON),
@@ -1011,9 +1011,9 @@ func TestHandleListToolsByType_ProxyNamespaceBypassesAllowlistFilter(t *testing.
 	var result ListToolsByTypeResult
 	json.Unmarshal(resultBytes, &result)
 
-	// QMD should appear despite not being in allowlist (proxy namespace bypass)
+	// sysproxy should appear despite not being in allowlist (proxy namespace bypass)
 	if len(result.Tools) != 1 {
-		t.Errorf("expected 1 tool (qmd proxy bypass), got %d", len(result.Tools))
+		t.Errorf("expected 1 tool (sysproxy proxy bypass), got %d", len(result.Tools))
 	}
 }
 
@@ -1283,20 +1283,20 @@ func TestHandleListToolTypes_EmptyTypes(t *testing.T) {
 	}
 }
 
-func TestHandleListToolTypes_QMDProxyBypassesAllowlist(t *testing.T) {
+func TestHandleListToolTypes_SingleSegmentProxyBypassesAllowlist(t *testing.T) {
 	s := newTestServer()
 	authorizer := auth.NewAuthorizer(time.Hour)
 	defer authorizer.Stop()
 	s.SetAuthorizer(authorizer)
 
-	// QMD is a proxy namespace — it should appear in list_tool_types even when
+	// sysproxy is a proxy namespace — it should appear in list_tool_types even when
 	// the incident allowlist does not include it.
-	s.AddProxyNamespace("qmd")
+	s.AddProxyNamespace("sysproxy")
 	s.SetDiscoverer(&mockDiscoverer{
-		availableTypes: []string{"ssh", "zabbix", "qmd"},
+		availableTypes: []string{"ssh", "zabbix", "sysproxy"},
 	})
 
-	// Allowlist only contains ssh — no qmd entry
+	// Allowlist only contains ssh — no sysproxy entry
 	allowlist := []auth.AllowlistEntry{
 		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
 	}
@@ -1304,7 +1304,7 @@ func TestHandleListToolTypes_QMDProxyBypassesAllowlist(t *testing.T) {
 
 	resp := sendJSONRPCWithHeaders(t, s, "tools/list_types", nil,
 		map[string]string{
-			"X-Incident-ID":    "incident-qmd-types",
+			"X-Incident-ID":    "incident-sysproxy-types",
 			"X-Tool-Allowlist": string(allowlistJSON),
 		},
 	)
@@ -1321,7 +1321,7 @@ func TestHandleListToolTypes_QMDProxyBypassesAllowlist(t *testing.T) {
 		t.Fatalf("failed to unmarshal result: %v", err)
 	}
 
-	// Should include ssh (in allowlist) and qmd (proxy namespace bypass), but not zabbix
+	// Should include ssh (in allowlist) and sysproxy (proxy namespace bypass), but not zabbix
 	typeSet := map[string]bool{}
 	for _, tp := range result.Types {
 		typeSet[tp] = true
@@ -1330,14 +1330,14 @@ func TestHandleListToolTypes_QMDProxyBypassesAllowlist(t *testing.T) {
 	if !typeSet["ssh"] {
 		t.Error("ssh should be included (in allowlist)")
 	}
-	if !typeSet["qmd"] {
-		t.Error("qmd should be included (proxy namespace bypasses allowlist)")
+	if !typeSet["sysproxy"] {
+		t.Error("sysproxy should be included (proxy namespace bypasses allowlist)")
 	}
 	if typeSet["zabbix"] {
 		t.Error("zabbix should be filtered out (not in allowlist and not a proxy namespace)")
 	}
 	if len(result.Types) != 2 {
-		t.Errorf("expected 2 types (ssh, qmd), got %d: %v", len(result.Types), result.Types)
+		t.Errorf("expected 2 types (ssh, sysproxy), got %d: %v", len(result.Types), result.Types)
 	}
 }
 

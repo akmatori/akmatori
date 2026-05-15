@@ -18,8 +18,8 @@ const (
 	// DefaultProxyBurstCapacity is the default burst capacity per external MCP server.
 	DefaultProxyBurstCapacity = 20
 	// DefaultSystemRetryInterval is the retry interval for failed system registrations
-	// (e.g., QMD not ready at startup). Shorter than the general schema refresh interval
-	// because system services are expected to come up quickly.
+	// (e.g., a system MCP server not ready at startup). Shorter than the general schema
+	// refresh interval because system services are expected to come up quickly.
 	DefaultSystemRetryInterval = 30 * time.Second
 )
 
@@ -142,8 +142,7 @@ func (h *ProxyHandler) Reload(ctx context.Context, loader MCPServerConfigLoader)
 }
 
 // RegisterSystemServer registers a system-level MCP server that persists across Reload calls.
-// Use this for infrastructure services like QMD that are configured via environment variables
-// rather than the database.
+// Use this for infrastructure services configured via environment variables rather than the database.
 func (h *ProxyHandler) RegisterSystemServer(ctx context.Context, reg ServerRegistration) error {
 	h.mu.Lock()
 	h.systemRegistrations = append(h.systemRegistrations, reg)
@@ -255,7 +254,7 @@ func (h *ProxyHandler) CallTool(ctx context.Context, toolName string, args map[s
 }
 
 // findSystemRegistrationByTool finds a system registration whose namespace prefix
-// matches the tool name (e.g., "qmd" matches "qmd.query").
+// matches the tool name (e.g., "sysproxy" matches "sysproxy.query").
 func (h *ProxyHandler) findSystemRegistrationByTool(toolName string) (ServerRegistration, bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -379,12 +378,12 @@ func (h *ProxyHandler) ToolCount() int {
 
 // StartSchemaRefreshLoop starts periodic schema refresh for all registered MCP servers.
 // When new tools are discovered, the tool map is updated automatically.
-// It also retries failed system registrations (e.g., QMD not ready at startup).
+// It also retries failed system registrations (e.g., a system MCP server not ready at startup).
 func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 	h.pool.StartSchemaRefreshLoop(interval)
 
 	// Retry failed system registrations on a shorter interval than general schema refresh.
-	// System services like QMD are expected to come up quickly; no need to wait 5 minutes.
+	// System services are expected to come up quickly; no need to wait 5 minutes.
 	go h.retryFailedSystemRegistrations(h.systemRetryInterval)
 
 	// Also set up a refresh callback to update our tool map when schemas change
@@ -402,7 +401,7 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 				break
 			}
 		}
-		// Also check system registrations (e.g., QMD)
+		// Also check system registrations
 		if prefix == "" {
 			for _, reg := range h.systemRegistrations {
 				if reg.InstanceID == instanceID {
@@ -456,7 +455,7 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 
 // retryFailedSystemRegistrations periodically checks for system registrations
 // that don't have active pool connections and re-attempts registration.
-// This handles the case where a system service (e.g., QMD) wasn't ready at gateway startup.
+// This handles the case where a system service wasn't ready at gateway startup.
 func (h *ProxyHandler) retryFailedSystemRegistrations(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

@@ -119,10 +119,10 @@ Delete the QMD container and the gateway-side runbook/memory proxies. Mount the 
 - Modify: `mcp-gateway/cmd/gateway/main.go` — delete the `RegisterMemoryTools` call and the `if qmdURL := os.Getenv("QMD_URL")` block; remove the `strings` import if it becomes unused
 - Modify: any registry / authorizer tests that referenced qmd or memory namespaces
 
-- [ ] delete the memory tool package and all references
-- [ ] delete the QMD system-proxy registration and memory-tool registration in gateway main
-- [ ] update affected gateway tests to drop qmd/memory expectations
-- [ ] run `make test-mcp` — must pass before task 7
+- [x] delete the memory tool package and all references
+- [x] delete the QMD system-proxy registration and memory-tool registration in gateway main
+- [x] update affected gateway tests to drop qmd/memory expectations
+- [x] run `make test-mcp` — must pass before task 7
 
 ### Task 7: Remove the QMD service from infrastructure and docs
 

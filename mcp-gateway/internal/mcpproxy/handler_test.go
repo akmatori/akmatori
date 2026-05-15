@@ -888,8 +888,8 @@ func TestRegisterSystemServer_DiscoverTools(t *testing.T) {
 
 	reg := ServerRegistration{
 		InstanceID:      SystemInstanceIDBase,
-		NamespacePrefix: "qmd",
-		Config:          MCPServerConfig{Transport: TransportSSE, URL: srv.URL, NamespacePrefix: "qmd"},
+		NamespacePrefix: "sysproxy",
+		Config:          MCPServerConfig{Transport: TransportSSE, URL: srv.URL, NamespacePrefix: "sysproxy"},
 	}
 
 	err := handler.RegisterSystemServer(context.Background(), reg)
@@ -901,32 +901,32 @@ func TestRegisterSystemServer_DiscoverTools(t *testing.T) {
 		t.Errorf("expected 3 tools, got %d", handler.ToolCount())
 	}
 
-	if !handler.IsProxyTool("qmd.query") {
-		t.Error("expected qmd.query to be a proxy tool")
+	if !handler.IsProxyTool("sysproxy.query") {
+		t.Error("expected sysproxy.query to be a proxy tool")
 	}
-	if !handler.IsProxyTool("qmd.get") {
-		t.Error("expected qmd.get to be a proxy tool")
+	if !handler.IsProxyTool("sysproxy.get") {
+		t.Error("expected sysproxy.get to be a proxy tool")
 	}
-	if !handler.IsProxyTool("qmd.status") {
-		t.Error("expected qmd.status to be a proxy tool")
+	if !handler.IsProxyTool("sysproxy.status") {
+		t.Error("expected sysproxy.status to be a proxy tool")
 	}
 }
 
 func TestRegisterSystemServer_SurvivesReload(t *testing.T) {
-	qmdTools := []mcp.Tool{
+	sysTools := []mcp.Tool{
 		{Name: "query", Description: "Search documents"},
 	}
 	dbTools := []mcp.Tool{
 		{Name: "create_issue", Description: "Create issue"},
 	}
 
-	qmdSrv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+	sysSrv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
 		if req.Method == "tools/list" {
-			return mcp.NewResponse(req.ID, mcp.ListToolsResult{Tools: qmdTools})
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{Tools: sysTools})
 		}
 		return mcp.NewResponse(req.ID, nil)
 	})
-	defer qmdSrv.Close()
+	defer sysSrv.Close()
 
 	dbSrv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
 		if req.Method == "tools/list" {
@@ -944,13 +944,13 @@ func TestRegisterSystemServer_SurvivesReload(t *testing.T) {
 	handler := NewProxyHandler(pool, nil)
 	defer handler.Stop()
 
-	// Register system server (QMD)
-	qmdReg := ServerRegistration{
+	// Register system server
+	sysReg := ServerRegistration{
 		InstanceID:      SystemInstanceIDBase,
-		NamespacePrefix: "qmd",
-		Config:          MCPServerConfig{Transport: TransportSSE, URL: qmdSrv.URL, NamespacePrefix: "qmd"},
+		NamespacePrefix: "sysproxy",
+		Config:          MCPServerConfig{Transport: TransportSSE, URL: sysSrv.URL, NamespacePrefix: "sysproxy"},
 	}
-	err := handler.RegisterSystemServer(context.Background(), qmdReg)
+	err := handler.RegisterSystemServer(context.Background(), sysReg)
 	if err != nil {
 		t.Fatalf("RegisterSystemServer failed: %v", err)
 	}
@@ -978,8 +978,8 @@ func TestRegisterSystemServer_SurvivesReload(t *testing.T) {
 	}
 
 	// Both DB and system tools should exist after reload
-	if !handler.IsProxyTool("qmd.query") {
-		t.Error("expected qmd.query to survive reload")
+	if !handler.IsProxyTool("sysproxy.query") {
+		t.Error("expected sysproxy.query to survive reload")
 	}
 	if !handler.IsProxyTool("ext.github.create_issue") {
 		t.Error("expected ext.github.create_issue after reload")
@@ -997,13 +997,13 @@ func TestRegisterSystemServer_ConnectionError(t *testing.T) {
 
 	reg := ServerRegistration{
 		InstanceID:      SystemInstanceIDBase,
-		NamespacePrefix: "qmd",
+		NamespacePrefix: "sysproxy",
 		Config:          MCPServerConfig{Transport: TransportSSE, URL: "http://localhost:0"},
 	}
 
 	err := handler.RegisterSystemServer(context.Background(), reg)
 	if err == nil {
-		t.Fatal("expected error when QMD is unreachable")
+		t.Fatal("expected error when system server is unreachable")
 	}
 
 	// System registration is still stored for retry on reload
@@ -1016,19 +1016,19 @@ func TestRegisterSystemServer_ConnectionError(t *testing.T) {
 }
 
 func TestRetryFailedSystemRegistrations(t *testing.T) {
-	// Simulate QMD being unavailable initially, then becoming available.
+	// Simulate a system server being unavailable initially, then becoming available.
 	var connectAttempts int32
-	qmdTools := []mcp.Tool{
+	sysTools := []mcp.Tool{
 		{Name: "query", Description: "Search documents"},
 	}
 
-	qmdSrv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
+	sysSrv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
 		if req.Method == "tools/list" {
-			return mcp.NewResponse(req.ID, mcp.ListToolsResult{Tools: qmdTools})
+			return mcp.NewResponse(req.ID, mcp.ListToolsResult{Tools: sysTools})
 		}
 		return mcp.NewResponse(req.ID, nil)
 	})
-	defer qmdSrv.Close()
+	defer sysSrv.Close()
 
 	pool := newTestPool(func(ctx context.Context, conn *MCPConnection) error {
 		attempt := atomic.AddInt32(&connectAttempts, 1)
@@ -1049,11 +1049,11 @@ func TestRetryFailedSystemRegistrations(t *testing.T) {
 
 	reg := ServerRegistration{
 		InstanceID:      SystemInstanceIDBase,
-		NamespacePrefix: "qmd",
-		Config:          MCPServerConfig{Transport: TransportSSE, URL: qmdSrv.URL, NamespacePrefix: "qmd"},
+		NamespacePrefix: "sysproxy",
+		Config:          MCPServerConfig{Transport: TransportSSE, URL: sysSrv.URL, NamespacePrefix: "sysproxy"},
 	}
 
-	// Initial registration fails (QMD not ready)
+	// Initial registration fails (system server not ready)
 	err := handler.RegisterSystemServer(context.Background(), reg)
 	if err == nil {
 		t.Fatal("expected error on first registration attempt")
@@ -1075,14 +1075,14 @@ func TestRetryFailedSystemRegistrations(t *testing.T) {
 		}
 		select {
 		case <-deadline:
-			t.Fatal("retry did not register QMD tools within timeout")
+			t.Fatal("retry did not register system tools within timeout")
 		default:
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
 
-	if !handler.IsProxyTool("qmd.query") {
-		t.Error("expected qmd.query to be registered after retry")
+	if !handler.IsProxyTool("sysproxy.query") {
+		t.Error("expected sysproxy.query to be registered after retry")
 	}
 }
 

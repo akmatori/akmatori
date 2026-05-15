@@ -262,11 +262,11 @@ func TestAuthorizer_ConcurrentAccess(t *testing.T) {
 }
 
 func TestAuthorizer_ProxyToolType_BypassesAllowlist(t *testing.T) {
-	// QMD and other MCP proxy tools use dotted namespaces (e.g., "qmd.query").
-	// The authorization bypass happens at the server level (server.go), not in
-	// the Authorizer itself. This test documents that the Authorizer correctly
-	// rejects unknown tool types — the server skips calling IsAuthorized for
-	// proxy tools entirely.
+	// MCP proxy tools use dotted namespaces (e.g., "ext.github.list_repos") or
+	// explicitly registered single-segment proxy namespaces. The authorization
+	// bypass happens at the server level (server.go), not in the Authorizer
+	// itself. This test documents that the Authorizer correctly rejects unknown
+	// tool types — the server skips calling IsAuthorized for proxy tools entirely.
 	a := NewAuthorizer(time.Hour)
 	defer a.Stop()
 
@@ -275,10 +275,10 @@ func TestAuthorizer_ProxyToolType_BypassesAllowlist(t *testing.T) {
 		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
 	})
 
-	// Authorizer itself doesn't know about proxy tools — it rejects "qmd" as a tool type
+	// Authorizer itself doesn't know about proxy tools — it rejects "sysproxy" as a tool type
 	// because it's not in the allowlist. The bypass is at the server layer.
-	if a.IsAuthorized("incident-1", "qmd", 0, "") {
-		t.Error("authorizer should reject unknown tool type 'qmd' — bypass is at server layer")
+	if a.IsAuthorized("incident-1", "sysproxy", 0, "") {
+		t.Error("authorizer should reject unknown tool type 'sysproxy' — bypass is at server layer")
 	}
 
 	// Standard tool types work as expected

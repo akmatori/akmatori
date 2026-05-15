@@ -1010,16 +1010,16 @@ func defaultConnect(ctx context.Context, conn *MCPConnection) error {
 }
 
 // connectSSE validates the SSE endpoint is reachable.
-// It first tries an MCP Streamable HTTP initialize handshake (required by servers
-// like QMD). If that fails, it falls back to a basic reachability check for
-// legacy SSE servers.
+// It first tries an MCP Streamable HTTP initialize handshake (required by
+// streamable HTTP MCP servers). If that fails, it falls back to a basic
+// reachability check for legacy SSE servers.
 func connectSSE(ctx context.Context, conn *MCPConnection) error {
 	if conn.config.URL == "" {
 		return fmt.Errorf("URL is required for SSE transport")
 	}
 
 	// Try MCP Streamable HTTP initialize handshake first.
-	// Servers like QMD require this to establish a session before accepting tool calls.
+	// Streamable HTTP servers require this to establish a session before accepting tool calls.
 	initErr := tryMCPInitialize(ctx, conn)
 	if initErr == nil {
 		return nil

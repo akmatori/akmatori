@@ -306,7 +306,7 @@ func (s *Server) handleCallTool(ctx context.Context, req *Request, incidentID st
 	// MCP proxy tools bypass the per-incident allowlist because they are system-level
 	// tools not managed by the skill-based assignment system. Proxy tools are identified by:
 	// 1. Multi-segment namespaces containing dots (e.g., "ext.github")
-	// 2. Explicitly registered proxy namespaces (e.g., "qmd" for single-segment proxies)
+	// 2. Explicitly registered proxy namespaces (single-segment proxies)
 	if s.authorizer != nil && incidentID != "" {
 		toolType, _ := ParseToolName(params.Name)
 		if !strings.Contains(toolType, ".") && !s.isProxyNamespace(toolType) {
