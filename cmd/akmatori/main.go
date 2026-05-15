@@ -135,9 +135,6 @@ func main() {
 	// regenerated SKILL.md files would bake in the stale view and stay
 	// stale until the next restart or manual skill edit.
 	memoryService := services.NewMemoryService(dataDir)
-	if qmdURL := os.Getenv("QMD_URL"); qmdURL != "" {
-		memoryService.SetQMDURL(qmdURL)
-	}
 	if err := memoryService.SyncMemoryFiles(); err != nil {
 		slog.Warn("failed to sync memory files", "err", err)
 	}
@@ -158,10 +155,6 @@ func main() {
 	// Initialize Runbook service. Runbooks aren't embedded in SKILL.md,
 	// so their sync order doesn't affect skill regeneration above.
 	runbookService := services.NewRunbookService(dataDir)
-	if qmdURL := os.Getenv("QMD_URL"); qmdURL != "" {
-		runbookService.SetQMDURL(qmdURL)
-		slog.Info("runbook + memory services configured with QMD re-indexing", "qmd_url", qmdURL)
-	}
 	slog.Info("runbook service initialized")
 
 	// Sync runbook files on startup

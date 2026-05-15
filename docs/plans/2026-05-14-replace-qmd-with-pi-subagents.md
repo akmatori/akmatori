@@ -107,9 +107,9 @@ Delete the QMD container and the gateway-side runbook/memory proxies. Mount the 
 - Modify: `internal/services/memory_service_sync_test.go`, `internal/services/runbook_service_test.go` — drop QMD-reindex expectations
 - Modify: `cmd/akmatori/main.go` — drop the two `os.Getenv("QMD_URL")` blocks and the slog line
 
-- [ ] strip QMD reindex wiring from runbook + memory services and update their tests so they no longer expect reindex side effects
-- [ ] remove QMD env handling from `cmd/akmatori/main.go`
-- [ ] run `make test` — must pass before task 6
+- [x] strip QMD reindex wiring from runbook + memory services and update their tests so they no longer expect reindex side effects
+- [x] remove QMD env handling from `cmd/akmatori/main.go`
+- [x] run `make test` — must pass before task 6
 
 ### Task 6: Remove QMD from MCP Gateway
 

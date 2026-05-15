@@ -1,14 +1,10 @@
 package services
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
 	"gopkg.in/yaml.v3"
@@ -138,35 +134,6 @@ func TestMemoryService_Sync_ScopeRenamePurgesOldDir(t *testing.T) {
 	}
 }
 
-func TestMemoryService_Sync_TriggersQMDReindex(t *testing.T) {
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/update" {
-			t.Errorf("unexpected path %q", r.URL.Path)
-		}
-		if r.Method != http.MethodPost {
-			t.Errorf("unexpected method %q", r.Method)
-		}
-		calls.Add(1)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	svc := setupMemoryServiceTest(t)
-	svc.SetQMDURL(server.URL)
-	svc.httpClient = server.Client()
-
-	if _, err := svc.CreateMemory(validMemory("hello")); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-
-	// QMD POST is async — give it a bounded amount of time to land.
-	deadline := waitFor(func() bool { return calls.Load() >= 1 })
-	if !deadline {
-		t.Fatalf("expected at least one QMD /update POST, got %d", calls.Load())
-	}
-}
-
 func TestRenderManifest_TruncatesAtLineCap(t *testing.T) {
 	entries := make([]database.Memory, manifestMaxLines+50)
 	for i := range entries {
@@ -220,7 +187,7 @@ func TestRenderMemoryFile_FrontmatterIsValidYAML(t *testing.T) {
 	// Regression: previously frontmatter was hand-formatted with raw
 	// fmt.Fprintf, so a description containing YAML-significant characters
 	// (colons, brackets, quotes) made the file invalid YAML and broke
-	// QMD's frontmatter consumers.
+	// downstream consumers.
 	cases := []struct {
 		name        string
 		description string
@@ -306,17 +273,4 @@ func readFile(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(b)
-}
-
-// waitFor polls cond up to ~1s; returns true if it became true.
-// Used because the QMD POST is fired in a goroutine.
-func waitFor(cond func() bool) bool {
-	deadline := time.Now().Add(1 * time.Second)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return true
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return cond()
 }

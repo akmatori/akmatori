@@ -4,15 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
 	"gopkg.in/yaml.v3"
@@ -21,15 +18,12 @@ import (
 )
 
 // MemoryService manages cross-incident memory CRUD and on-disk synchronization.
-// Mirrors RunbookService: PostgreSQL is source of truth, files mirror to
-// /akmatori/memory/<scope>/<id>-<slug>.md plus a per-scope MEMORY.md manifest,
-// QMD re-indexes after every sync.
+// PostgreSQL is the source of truth; files mirror to
+// /akmatori/memory/<scope>/<id>-<slug>.md plus a per-scope MEMORY.md manifest.
 type MemoryService struct {
-	db         *gorm.DB
-	memoryDir  string
-	syncMu     sync.Mutex
-	qmdURL     string
-	httpClient *http.Client
+	db        *gorm.DB
+	memoryDir string
+	syncMu    sync.Mutex
 }
 
 // NewMemoryService creates a new memory service rooted at <dataDir>/memory.
@@ -41,15 +35,7 @@ func NewMemoryService(dataDir string) *MemoryService {
 	return &MemoryService{
 		db:        database.GetDB(),
 		memoryDir: dir,
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
 	}
-}
-
-// SetQMDURL configures the QMD service URL used to trigger re-indexes.
-func (s *MemoryService) SetQMDURL(url string) {
-	s.qmdURL = strings.TrimRight(url, "/")
 }
 
 // MemoryDir returns the root memory directory (used by tests and the gateway tool).
@@ -337,30 +323,8 @@ func SlugifyMemoryName(s string) string {
 	return out
 }
 
-// triggerQMDReindex POSTs to QMD's /update endpoint. Mirrors RunbookService.
-func (s *MemoryService) triggerQMDReindex() {
-	if s.qmdURL == "" {
-		return
-	}
-	url := s.qmdURL + "/update"
-	resp, err := s.httpClient.Post(url, "application/json", nil)
-	if err != nil {
-		slog.Warn("failed to trigger QMD re-index for memory", "url", url, "error", err)
-		return
-	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-	}()
-	if resp.StatusCode != http.StatusOK {
-		slog.Warn("QMD re-index returned non-200 status for memory", "url", url, "status", resp.StatusCode)
-		return
-	}
-	slog.Info("QMD re-index triggered for memory")
-}
-
-// Manifest caps. Slack/QMD are happiest when manifests stay small; a hard byte
-// cap also protects the prompt from runaway growth as memory accumulates.
+// Manifest caps. Manifests are injected into prompts and stay small; a hard
+// byte cap also protects the prompt from runaway growth as memory accumulates.
 const (
 	manifestMaxLines = 200
 	manifestMaxBytes = 25 * 1024
@@ -373,8 +337,7 @@ const (
 //	<memoryDir>/<scope>/<id>-<name>.md      — one file per memory, with
 //	                                          YAML frontmatter and body.
 //
-// Stale scope directories and files are removed. After a successful write,
-// QMD is asked to re-index in a non-blocking goroutine.
+// Stale scope directories and files are removed.
 func (s *MemoryService) SyncMemoryFiles() error {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
@@ -427,7 +390,6 @@ func (s *MemoryService) SyncMemoryFiles() error {
 		slog.Warn("failed to clean stale memory scope dirs", "err", err)
 	}
 
-	go s.triggerQMDReindex()
 	return nil
 }
 
@@ -634,7 +596,7 @@ func stripBodyHeader(body, name, description string) string {
 // handles quoting and escaping for values containing YAML-significant chars
 // (colons, quotes, brackets) — interpolating m.Description raw into the
 // frontmatter would let a description like "prod-db: data dir moved" turn
-// the file into invalid YAML and break QMD's frontmatter consumers.
+// the file into invalid YAML and break downstream consumers.
 type memoryFrontmatter struct {
 	Name         string `yaml:"name"`
 	Description  string `yaml:"description"`
@@ -645,12 +607,12 @@ type memoryFrontmatter struct {
 }
 
 // renderMemoryFile produces the full markdown body for a single memory file.
-// YAML frontmatter contains the metadata QMD's lex/vector indexers will surface.
+// YAML frontmatter contains the metadata subagent searchers will surface.
 func renderMemoryFile(m database.Memory) string {
 	fm := memoryFrontmatter{
 		Name: m.Name,
 		// Flatten newlines so the frontmatter stays single-line per field —
-		// QMD's lex indexer reads the rendered file and a single-line
+		// downstream consumers read the rendered file and a single-line
 		// description keeps each entry on one indexable row.
 		Description:  strings.ReplaceAll(m.Description, "\n", " "),
 		Type:         m.Type,
@@ -685,7 +647,7 @@ func renderMemoryFile(m database.Memory) string {
 // manifestMaxLines / manifestMaxBytes — the manifest is injected into prompts,
 // so it MUST stay small even as memory accumulates. When an entry would push
 // the manifest past either cap, we stop and emit a truncation marker telling
-// the agent to use memory.search for the rest.
+// the agent to use the memory-searcher subagent for the rest.
 func renderManifest(scope string, entries []database.Memory) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Memory Manifest — scope: %s\n\n", scope)
@@ -715,13 +677,13 @@ func renderManifest(scope string, entries []database.Memory) string {
 	}
 
 	if truncated > 0 {
-		fmt.Fprintf(&b, "\n_… %d more memories truncated. Use `gateway_call(\"memory.search\", {…})` to find them._\n", truncated)
+		fmt.Fprintf(&b, "\n_… %d more memories truncated. Use the memory-searcher subagent to find them._\n", truncated)
 	}
 
 	// If the table never emitted a row (e.g., header alone exceeded the cap),
 	// keep at least the header for diagnostic clarity.
 	if b.Len() == header {
-		b.WriteString("_Manifest exceeded byte cap; use memory.search to access entries._\n")
+		b.WriteString("_Manifest exceeded byte cap; use the memory-searcher subagent to access entries._\n")
 	}
 
 	return b.String()
