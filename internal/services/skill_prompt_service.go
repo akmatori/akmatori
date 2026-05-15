@@ -184,7 +184,10 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 		}
 	}
 
-	memorySection := s.renderMemoryRecallSection(name)
+	// SKILL.md is rendered once per skill (not per incident), so the
+	// incident UUID is unknown here. The agent derives it from its CWD at
+	// runtime via the placeholder.
+	memorySection := s.renderMemoryRecallSection(name, "")
 
 	return fmt.Sprintf("---\n%s---\n\n%s%s%s\n", string(yamlBytes), resolvedBody, memorySection, toolsSection.String())
 }
@@ -201,16 +204,29 @@ const memoryRecallInstruction = "Before answering questions about prior incident
 
 // memoryWriteInstructionTemplate is the end-of-investigation guidance that
 // asks the agent to record durable cross-incident facts via the memory-writer
-// subagent. The first %s is the scope slug (global for AGENTS.md, skill name
-// for SKILL.md); the second %s is the scope slug repeated inside the example.
+// subagent. The first %s is the scope slug; the second %s is the same scope
+// slug repeated inside the call example; the third %s is the incident UUID
+// (or a literal placeholder if not known at render time, e.g. for SKILL.md
+// which is shared across incidents).
+//
+// The pi-subagents `subagent` tool schema only forwards `agent`, `task`, and
+// a fixed set of control fields — any extra top-level keys like `scope` or
+// `incident` are silently dropped. The scope and incident UUID are therefore
+// embedded INSIDE the task string and the memory-writer subagent extracts
+// them from its task body.
 const memoryWriteInstructionTemplate = "When the investigation surfaces durable cross-incident facts (host quirks, " +
 	"recurring incident patterns, tool quirks, validated runbook gaps, or operator feedback) that will speed up " +
-	"future troubleshooting, record them by invoking the memory-writer subagent. Pass the full reasoning log as " +
-	"`task` along with the directive to save ONLY important, non-obvious information. Use scope `\"%s\"` and the " +
-	"originating incident UUID:\n\n" +
-	"`subagent({\"agent\": \"memory-writer\", \"task\": \"<full reasoning log and instruction to save only important information that will help speed up troubleshooting next time>\", \"scope\": \"%s\", \"incident\": \"<this incident's UUID>\"})`\n\n" +
+	"future troubleshooting, record them by invoking the memory-writer subagent. The memory-writer expects the " +
+	"task body to start with `Scope: <scope>` and `Incident UUID: <uuid>` header lines, followed by the reasoning " +
+	"log and the directive to save ONLY important, non-obvious information. Use scope `\"%s\"`:\n\n" +
+	"`subagent({\"agent\": \"memory-writer\", \"task\": \"Scope: %s\\nIncident UUID: %s\\n\\n<full reasoning log and instruction to save only important information that will help speed up troubleshooting next time>\"})`\n\n" +
 	"memory-writer is idempotent — if a memory with the same semantic name already exists, it updates in place. " +
 	"Skip the call when nothing durable was learned."
+
+// incidentUUIDFromCwdPlaceholder is substituted for the incident UUID in
+// scopes where the UUID is unknown at render time (SKILL.md is shared across
+// incidents). The agent derives the UUID from its workspace directory.
+const incidentUUIDFromCwdPlaceholder = "<your incident UUID, i.e. the basename of your /workspaces/<uuid> working directory>"
 
 // renderMemoryRecallSection returns the recall instruction plus the on-disk
 // MEMORY.md manifest for the given scope ("global" for AGENTS.md, the skill
@@ -220,7 +236,12 @@ const memoryWriteInstructionTemplate = "When the investigation surfaces durable 
 // can still call memory-searcher and discover entries dynamically. Returns an
 // empty string only when the service has no memoryDir configured (defensive;
 // should not happen in prod).
-func (s *SkillService) renderMemoryRecallSection(scope string) string {
+//
+// incidentUUID is substituted into the memory-writer call example when known
+// at render time (per-incident AGENTS.md). For shared SKILL.md renders the
+// caller passes "" and the placeholder asks the agent to derive the UUID
+// from its workspace directory.
+func (s *SkillService) renderMemoryRecallSection(scope string, incidentUUID string) string {
 	if s.memoryDir == "" {
 		return ""
 	}
@@ -241,8 +262,12 @@ func (s *SkillService) renderMemoryRecallSection(scope string) string {
 		b.WriteString("\n_No memories indexed for this scope yet._\n")
 	}
 
+	uuidArg := incidentUUID
+	if uuidArg == "" {
+		uuidArg = incidentUUIDFromCwdPlaceholder
+	}
 	b.WriteString("\n### Record durable findings\n\n")
-	b.WriteString(fmt.Sprintf(memoryWriteInstructionTemplate, scope, scope))
+	b.WriteString(fmt.Sprintf(memoryWriteInstructionTemplate, scope, scope, uuidArg))
 	b.WriteString("\n")
 	return b.String()
 }

@@ -186,8 +186,14 @@ func TestMemoryService_UpsertByName_Idempotent(t *testing.T) {
 	if updated.Description != "v2 desc" || updated.Body != "v2 body" {
 		t.Fatalf("upsert didn't update fields: %+v", updated)
 	}
-	if updated.IncidentUUID != "incident-42" || updated.CreatedBy != MemoryCreatedByAgent {
-		t.Fatalf("upsert didn't carry origin fields: %+v", updated)
+	if updated.IncidentUUID != "incident-42" {
+		t.Fatalf("upsert didn't update incident_uuid: %+v", updated)
+	}
+	// created_by is intentionally sticky on conflict: the first row was
+	// authored by the operator (validMemory default) and a follow-up
+	// agent-flavored upsert must not silently flip authorship.
+	if updated.CreatedBy != MemoryCreatedByOperator {
+		t.Fatalf("upsert overwrote operator authorship on conflict: %+v", updated)
 	}
 
 	all, err := svc.ListMemories("", "")

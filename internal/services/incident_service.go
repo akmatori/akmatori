@@ -40,7 +40,7 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 
 	// Generate AGENTS.md at workspace root (pi-mono reads agentDir from cwd)
 	agentsMdPath := filepath.Join(incidentDir, "AGENTS.md")
-	if err := s.generateIncidentAgentsMd(agentsMdPath); err != nil {
+	if err := s.generateIncidentAgentsMd(agentsMdPath, incidentUUID); err != nil {
 		return "", "", fmt.Errorf("failed to generate AGENTS.md: %w", err)
 	}
 
@@ -99,7 +99,10 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 // facts and operator feedback before any tool call. Full bodies are fetched
 // on demand via the memory-searcher subagent or a direct read of the
 // matching file under /akmatori/memory/<scope>/.
-func (s *SkillService) generateIncidentAgentsMd(path string) error {
+//
+// incidentUUID is substituted into the memory-writer call example so the
+// model can quote it verbatim instead of having to derive it from CWD.
+func (s *SkillService) generateIncidentAgentsMd(path string, incidentUUID string) error {
 	// Get incident manager prompt from the system skill
 	prompt, err := s.GetSkillPrompt("incident-manager")
 	if err != nil {
@@ -111,7 +114,7 @@ func (s *SkillService) generateIncidentAgentsMd(path string) error {
 	sb.WriteString("# Incident Manager\n\n")
 	sb.WriteString(prompt)
 	sb.WriteString("\n")
-	sb.WriteString(s.renderMemoryRecallSection(MemoryScopeGlobal))
+	sb.WriteString(s.renderMemoryRecallSection(MemoryScopeGlobal, incidentUUID))
 
 	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
 		return fmt.Errorf("failed to write AGENTS.md: %w", err)

@@ -324,8 +324,18 @@ func (s *MemoryService) SyncMemoryFiles() error {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
 
-	if err := os.MkdirAll(s.memoryDir, 0755); err != nil {
+	// /akmatori/memory is shared between the API (UID 1000) and the agent
+	// worker (UID 1001, different group) — the memory-writer subagent writes
+	// directly into the scope directories the API creates here. Default 0755
+	// dirs / 0644 files would block the agent's "other" writes, so widen to
+	// 0777 / 0666 explicitly. init-dirs runs `chmod -R g+rwX,o+rwX
+	// /akmatori/memory` once at compose-up; this MkdirAll + chmod keeps the
+	// widening idempotent for scope directories the API creates later.
+	if err := os.MkdirAll(s.memoryDir, 0777); err != nil {
 		return fmt.Errorf("failed to create memory directory: %w", err)
+	}
+	if err := os.Chmod(s.memoryDir, 0777); err != nil {
+		slog.Warn("failed to widen memory directory permissions", "dir", s.memoryDir, "err", err)
 	}
 
 	var memories []database.Memory
@@ -342,8 +352,12 @@ func (s *MemoryService) SyncMemoryFiles() error {
 	for scope, entries := range byScope {
 		expectedScopes[scope] = true
 		scopeDir := filepath.Join(s.memoryDir, scope)
-		if err := os.MkdirAll(scopeDir, 0755); err != nil {
+		if err := os.MkdirAll(scopeDir, 0777); err != nil {
 			return fmt.Errorf("failed to create scope dir %s: %w", scope, err)
+		}
+		// MkdirAll honors the process umask, so re-chmod to the intended mode.
+		if err := os.Chmod(scopeDir, 0777); err != nil {
+			slog.Warn("failed to widen scope dir permissions", "scope", scope, "err", err)
 		}
 
 		expectedFiles := map[string]bool{manifestFile: true}
@@ -352,14 +366,14 @@ func (s *MemoryService) SyncMemoryFiles() error {
 			expectedFiles[fileName] = true
 			body := renderMemoryFile(m)
 			path := filepath.Join(scopeDir, fileName)
-			if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+			if err := os.WriteFile(path, []byte(body), 0666); err != nil {
 				return fmt.Errorf("failed to write memory file %s: %w", path, err)
 			}
 		}
 
 		manifest := renderManifest(scope, entries)
 		manifestPath := filepath.Join(scopeDir, manifestFile)
-		if err := os.WriteFile(manifestPath, []byte(manifest), 0644); err != nil {
+		if err := os.WriteFile(manifestPath, []byte(manifest), 0666); err != nil {
 			return fmt.Errorf("failed to write manifest %s: %w", manifestPath, err)
 		}
 
@@ -551,6 +565,13 @@ func canonicalIngestName(filename, name string) bool {
 // (which then triggers a single-row SyncMemoryFiles) and IngestFromDisk
 // (which batches one sync at the end of the walk to avoid O(N²) disk churn,
 // since each per-row sync re-reads the whole table and rewrites every file).
+//
+// created_by is intentionally NOT in DoUpdates: on conflict the existing
+// authorship is preserved so an agent re-ingest of an operator-authored slug
+// cannot silently flip the row from `operator` to `agent`. New rows still get
+// their created_by set via the INSERT path. Operator edits flow through
+// MemoryService.Update (a plain UPDATE), so this restriction only affects
+// the ingest/upsert collision case.
 func (s *MemoryService) upsertByNameNoSync(m *database.Memory) (*database.Memory, error) {
 	if err := s.validate(m); err != nil {
 		return nil, err
@@ -561,7 +582,7 @@ func (s *MemoryService) upsertByNameNoSync(m *database.Memory) (*database.Memory
 	if err := s.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "scope"}, {Name: "name"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"type", "description", "body", "incident_uuid", "created_by", "updated_at",
+			"type", "description", "body", "incident_uuid", "updated_at",
 		}),
 	}).Create(m).Error; err != nil {
 		return nil, fmt.Errorf("failed to upsert memory: %w", err)

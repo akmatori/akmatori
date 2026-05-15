@@ -345,6 +345,64 @@ func TestIngestFromDisk_PreservesOperatorCreatedBy(t *testing.T) {
 	}
 }
 
+// TestIngestFromDisk_AgentRewriteDoesNotOverwriteOperatorAuthorship guards
+// the upsert path: when an operator-authored row already exists in the DB
+// and the agent later writes a fresh file with the same scope+name but
+// `created_by: agent`, the upsert MUST preserve the existing
+// `created_by: operator` value. The previous behavior included created_by in
+// the DoUpdates clause and silently flipped operator memories to agent every
+// time the agent re-wrote them.
+func TestIngestFromDisk_AgentRewriteDoesNotOverwriteOperatorAuthorship(t *testing.T) {
+	svc := setupMemoryServiceTest(t)
+	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
+
+	// Step 1: seed an operator memory in DB (mirrors the UI feedback path).
+	op := &database.Memory{
+		Scope:        MemoryScopeGlobal,
+		Type:         MemoryTypeFeedback,
+		Name:         "rename-host-before-upgrade",
+		Description:  "operator says: rename zabbix host before any upgrade",
+		Body:         "operator's original notes",
+		IncidentUUID: "op-inc",
+		CreatedBy:    MemoryCreatedByOperator,
+	}
+	if _, err := svc.UpsertByName(op); err != nil {
+		t.Fatalf("seed operator row: %v", err)
+	}
+
+	// Step 2: agent writes a fresh file at the same scope+name with
+	// created_by: agent — simulating the memory-writer subagent revisiting
+	// the same slug during a later incident.
+	writeMemoryFile(t, dir,
+		"rename-host-before-upgrade",
+		"agent-rewritten summary",
+		MemoryTypeFeedback, MemoryScopeGlobal, "agent-inc",
+		"agent's updated body with newer context",
+	)
+
+	// Step 3: ingest picks up the agent file.
+	if err := svc.IngestFromDisk(context.Background()); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	mems, _ := svc.ListMemoriesByScope(MemoryScopeGlobal)
+	if len(mems) != 1 {
+		t.Fatalf("expected 1 row, got %d: %+v", len(mems), mems)
+	}
+	if mems[0].CreatedBy != MemoryCreatedByOperator {
+		t.Errorf("agent re-ingest flipped authorship: created_by=%q, want %q",
+			mems[0].CreatedBy, MemoryCreatedByOperator)
+	}
+	// Content (body / description / incident_uuid) is expected to update —
+	// only authorship is sticky.
+	if !strings.Contains(mems[0].Body, "agent's updated body") {
+		t.Errorf("body should still update on conflict: %q", mems[0].Body)
+	}
+	if !strings.Contains(mems[0].Description, "agent-rewritten summary") {
+		t.Errorf("description should still update on conflict: %q", mems[0].Description)
+	}
+}
+
 // TestIngestFromDisk_PrefersAgentFilenameOverCanonical asserts that when both
 // `<name>.md` (agent's fresh write) and `<id>-<name>.md` (prior canonical
 // snapshot) exist in the same scope dir, the agent's newer content wins —

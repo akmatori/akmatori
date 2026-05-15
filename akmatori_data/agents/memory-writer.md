@@ -19,12 +19,23 @@ Hard scope rules:
   stop without writing.
 
 Input you will receive:
-- `task`: the full reasoning log plus instruction to save only durable,
-  non-obvious facts that will speed up future troubleshooting (recurring host
-  quirks, tool quirks, validated incident patterns, operator feedback).
-- `scope`: the scope slug. Use `global` for cross-incident facts; otherwise a
-  skill name. Must match the slug pattern `^[a-z0-9]+(?:-[a-z0-9]+)*$`.
-- `incident`: the originating incident UUID (string).
+- `task`: a single string whose first two lines MUST be:
+  - `Scope: <scope slug>` — use `global` for cross-incident facts; otherwise a
+    skill name. Must match the slug pattern `^[a-z0-9]+(?:-[a-z0-9]+)*$`.
+  - `Incident UUID: <uuid>` — the originating incident UUID. If the caller
+    embedded a placeholder like `<your incident UUID, …>`, derive the real
+    UUID from your working directory (`/workspaces/<uuid>` — the basename is
+    the UUID) before writing files.
+  Everything after those two header lines is the full reasoning log plus the
+  directive to save only durable, non-obvious facts that will speed up future
+  troubleshooting (recurring host quirks, tool quirks, validated incident
+  patterns, operator feedback).
+
+Refuse to write any file if the scope header is missing or fails the slug
+pattern, or if the incident UUID is empty after placeholder resolution — reply
+with "missing scope/incident in task header" and stop. The pi-subagents tool
+ONLY forwards `task` from the caller, so scope and incident MUST come from the
+task header — do NOT look for top-level `scope` or `incident` parameters.
 
 What to write:
 1. Distill the task into AT MOST a handful of memory entries. Skip anything

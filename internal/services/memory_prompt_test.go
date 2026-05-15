@@ -40,7 +40,7 @@ func TestRenderMemoryRecallSection_WithManifest(t *testing.T) {
 	svc := newSkillServiceForPromptTest(t)
 	writeManifest(t, svc, MemoryScopeGlobal, "# Memory Manifest — scope: global\n\n| name | type | description |\n| --- | --- | --- |\n| `prod-db` | host | data dir on /mnt/data |\n")
 
-	got := svc.renderMemoryRecallSection(MemoryScopeGlobal)
+	got := svc.renderMemoryRecallSection(MemoryScopeGlobal, "")
 	for _, want := range []string{
 		"## Cross-incident Memory",
 		// Recall is delegated to the memory-searcher subagent.
@@ -49,8 +49,8 @@ func TestRenderMemoryRecallSection_WithManifest(t *testing.T) {
 		// Record durable findings subsection invokes memory-writer.
 		"### Record durable findings",
 		`"agent": "memory-writer"`,
-		// Write instruction names the scope explicitly.
-		`"scope": "global"`,
+		// Write instruction names the scope explicitly inside the task body.
+		`Scope: global`,
 		"prod-db",
 		"data dir on /mnt/data",
 	} {
@@ -77,16 +77,36 @@ func TestRenderMemoryRecallSection_WithManifest(t *testing.T) {
 // above; this test pins skill-scope behavior.
 func TestRenderMemoryRecallSection_ScopedToSkillUsesSkillScope(t *testing.T) {
 	svc := newSkillServiceForPromptTest(t)
-	got := svc.renderMemoryRecallSection("redis-skill")
-	if !strings.Contains(got, `"scope": "redis-skill"`) {
-		t.Errorf("expected memory-writer scope to be \"redis-skill\", got:\n%s", got)
+	got := svc.renderMemoryRecallSection("redis-skill", "")
+	if !strings.Contains(got, `Scope: redis-skill`) {
+		t.Errorf("expected memory-writer scope to be redis-skill in task body, got:\n%s", got)
+	}
+	// SKILL.md is shared across incidents → must use the CWD-derivation placeholder.
+	if !strings.Contains(got, "your incident UUID") {
+		t.Errorf("SKILL.md scope renders should fall back to the CWD UUID placeholder, got:\n%s", got)
+	}
+}
+
+// TestRenderMemoryRecallSection_InjectsIncidentUUIDForAgentsMd guards the
+// per-incident path: when AGENTS.md is rendered the actual incident UUID is
+// substituted into the memory-writer task example so the model doesn't have
+// to derive it from CWD. SKILL.md uses "" and falls back to the placeholder
+// (covered above).
+func TestRenderMemoryRecallSection_InjectsIncidentUUIDForAgentsMd(t *testing.T) {
+	svc := newSkillServiceForPromptTest(t)
+	got := svc.renderMemoryRecallSection(MemoryScopeGlobal, "deadbeef-1234-5678-9abc-def012345678")
+	if !strings.Contains(got, "Incident UUID: deadbeef-1234-5678-9abc-def012345678") {
+		t.Errorf("expected literal incident UUID in task body, got:\n%s", got)
+	}
+	if strings.Contains(got, "your incident UUID") {
+		t.Errorf("placeholder must NOT appear when a real UUID is known: %s", got)
 	}
 }
 
 func TestRenderMemoryRecallSection_NoManifest(t *testing.T) {
 	svc := newSkillServiceForPromptTest(t)
 
-	got := svc.renderMemoryRecallSection(MemoryScopeGlobal)
+	got := svc.renderMemoryRecallSection(MemoryScopeGlobal, "")
 	if !strings.Contains(got, "## Cross-incident Memory") {
 		t.Errorf("expected header even when no manifest exists, got:\n%s", got)
 	}
@@ -100,7 +120,7 @@ func TestRenderMemoryRecallSection_NoManifest(t *testing.T) {
 
 func TestRenderMemoryRecallSection_EmptyMemoryDir(t *testing.T) {
 	svc := &SkillService{} // no memoryDir
-	if got := svc.renderMemoryRecallSection(MemoryScopeGlobal); got != "" {
+	if got := svc.renderMemoryRecallSection(MemoryScopeGlobal, ""); got != "" {
 		t.Errorf("expected empty string when memoryDir not configured, got %q", got)
 	}
 }
@@ -170,7 +190,7 @@ func TestGenerateIncidentAgentsMd_InjectsGlobalManifest(t *testing.T) {
 	writeManifest(t, svc, MemoryScopeGlobal, "manifest for global scope")
 
 	out := filepath.Join(tmp, "AGENTS.md")
-	if err := svc.generateIncidentAgentsMd(out); err != nil {
+	if err := svc.generateIncidentAgentsMd(out, "test-incident-uuid"); err != nil {
 		t.Fatalf("generate AGENTS.md: %v", err)
 	}
 	got := readFile(t, out)
@@ -258,7 +278,7 @@ func TestGenerateIncidentAgentsMd_NoManifestFallsBackGracefully(t *testing.T) {
 		memoryDir:    filepath.Join(tmp, "memory"),
 	}
 	out := filepath.Join(tmp, "AGENTS.md")
-	if err := svc.generateIncidentAgentsMd(out); err != nil {
+	if err := svc.generateIncidentAgentsMd(out, "test-incident-uuid"); err != nil {
 		t.Fatalf("generate AGENTS.md: %v", err)
 	}
 	got := readFile(t, out)
