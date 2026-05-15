@@ -509,10 +509,15 @@ func writeMemoryFileInRoot(root *os.Root, name string, data []byte) error {
 // caller (UpdateIncidentComplete) tolerates being called more than once for
 // the same incident.
 //
-// CreatedBy defaults to "agent" (the memory-writer subagent produces these
-// files), but a frontmatter `created_by: operator` value is preserved so a
-// SyncMemoryFiles round-trip of operator-authored rows doesn't silently flip
-// authorship to agent on the next ingest.
+// CreatedBy is forced to "agent" for every parsed file regardless of what the
+// frontmatter claims. The memory directory is rw-mounted into the agent worker
+// so a prompt-injected memory-writer could write `created_by: operator` to
+// escalate authorship; the file-level field is untrusted. Operator authorship
+// is still preserved at the DB level because upsertByNameNoSync's DoUpdates
+// excludes created_by, so an operator-authored row that already exists in DB
+// (created via the API's authenticated CreateMemory / UpsertByName paths) is
+// never flipped to agent on re-ingest of its SyncMemoryFiles-written canonical
+// file.
 //
 // All files are read and parsed first, then upserted in a single batch. The
 // per-row UpsertByName path otherwise triggers SyncMemoryFiles, which renames
@@ -619,9 +624,11 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 				slog.Warn("memory ingest: parse file", "path", rel, "err", err)
 				continue
 			}
-			if mem.CreatedBy == "" {
-				mem.CreatedBy = MemoryCreatedByAgent
-			}
+			// Force agent authorship: the file's frontmatter is agent-controlled
+			// and cannot be trusted to claim operator authorship. Operator
+			// authorship is preserved at the DB level via upsertByNameNoSync's
+			// DoUpdates exclusion of created_by — see this function's doc comment.
+			mem.CreatedBy = MemoryCreatedByAgent
 
 			entry := &parsedEntry{mem: mem, canonical: canonicalIngestName(f.Name(), mem.Name)}
 			if idx, ok := seenInScope[mem.Name]; ok {

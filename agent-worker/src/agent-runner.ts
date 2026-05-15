@@ -312,11 +312,19 @@ function stripJsonComments(input: string): string {
     .replace(/"(?:\\.|[^"\\])*"|,(\s*[}\]])/g, (m, tail) => tail ?? (m[0] === '"' ? m : ""));
 }
 
+let writeFileAtomicCounter = 0;
+
 function writeFileAtomic(filePath: string, contents: string): void {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
-  const tmp = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-  fs.writeFileSync(tmp, contents, { mode: 0o600 });
+  // tmp path uses pid + hrtime + an in-process counter so two parallel sessions
+  // calling writeFileAtomic on the same final path within the same millisecond
+  // cannot collide on the tmp name. Pid + Date.now() alone would let the second
+  // writer truncate the first writer's tmp file mid-write (fs.writeFileSync
+  // opens with the default 'w' flag — no O_EXCL), corrupting the rename target.
+  const unique = `${process.hrtime.bigint()}.${++writeFileAtomicCounter}`;
+  const tmp = `${filePath}.tmp.${process.pid}.${unique}`;
+  fs.writeFileSync(tmp, contents, { mode: 0o600, flag: "wx" });
   fs.renameSync(tmp, filePath);
 }
 

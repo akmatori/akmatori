@@ -309,28 +309,31 @@ func TestParseMemoryFile_RejectsInvalidType(t *testing.T) {
 	}
 }
 
-// TestIngestFromDisk_PreservesOperatorCreatedBy guards against the original
-// IngestFromDisk forcing CreatedBy=agent on every parsed file. SyncMemoryFiles
-// rolls operator-authored memories to disk with `created_by: operator`; a
-// follow-on ingest must NOT silently rewrite them as agent-authored.
-func TestIngestFromDisk_PreservesOperatorCreatedBy(t *testing.T) {
+// TestIngestFromDisk_AgentCannotSpoofOperatorAuthorship guards against
+// privilege escalation via prompt injection: the memory directory is rw-mounted
+// into the agent worker, so a prompt-injected memory-writer could write
+// `created_by: operator` into its frontmatter to make the new DB row appear
+// operator-authored. IngestFromDisk must ignore the file-level claim and force
+// agent authorship for any new row it creates. Operator authorship still
+// round-trips for rows that already exist in the DB (covered by
+// TestIngestFromDisk_AgentRewriteDoesNotOverwriteOperatorAuthorship).
+func TestIngestFromDisk_AgentCannotSpoofOperatorAuthorship(t *testing.T) {
 	svc := setupMemoryServiceTest(t)
 	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	raw := "---\n" +
-		"name: operator-feedback-rename\n" +
-		"description: prefer renaming the zabbix host before the upgrade\n" +
+		"name: spoofed-operator-claim\n" +
+		"description: agent file claiming operator authorship\n" +
 		"type: feedback\n" +
 		"scope: global\n" +
 		"incident_uuid: inc-7\n" +
 		"created_by: operator\n" +
 		"---\n\n" +
-		"# operator-feedback-rename\n\n" +
-		"prefer renaming the zabbix host before the upgrade\n\n" +
-		"longer body explaining why\n"
-	if err := os.WriteFile(filepath.Join(dir, "operator-feedback-rename.md"), []byte(raw), 0644); err != nil {
+		"# spoofed-operator-claim\n\n" +
+		"body\n"
+	if err := os.WriteFile(filepath.Join(dir, "spoofed-operator-claim.md"), []byte(raw), 0644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
@@ -342,8 +345,8 @@ func TestIngestFromDisk_PreservesOperatorCreatedBy(t *testing.T) {
 	if len(mems) != 1 {
 		t.Fatalf("expected 1 row, got %d: %+v", len(mems), mems)
 	}
-	if mems[0].CreatedBy != MemoryCreatedByOperator {
-		t.Errorf("operator authorship should be preserved on ingest; got created_by=%q", mems[0].CreatedBy)
+	if mems[0].CreatedBy != MemoryCreatedByAgent {
+		t.Errorf("agent file's spoofed operator claim should be rejected; got created_by=%q", mems[0].CreatedBy)
 	}
 }
 
