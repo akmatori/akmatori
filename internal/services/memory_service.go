@@ -122,32 +122,14 @@ func (s *MemoryService) UpdateMemory(id uint, m *database.Memory) (*database.Mem
 //
 // Both PostgreSQL and SQLite (≥3.24) support the ON CONFLICT clause used here.
 func (s *MemoryService) UpsertByName(m *database.Memory) (*database.Memory, error) {
-	if err := s.validate(m); err != nil {
+	saved, err := s.upsertByNameNoSync(m)
+	if err != nil {
 		return nil, err
-	}
-	m.Scope = strings.TrimSpace(m.Scope)
-	m.Name = strings.TrimSpace(m.Name)
-
-	if err := s.db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "scope"}, {Name: "name"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"type", "description", "body", "incident_uuid", "created_by", "updated_at",
-		}),
-	}).Create(m).Error; err != nil {
-		return nil, fmt.Errorf("failed to upsert memory: %w", err)
-	}
-
-	// Re-read so callers receive the canonical row. After ON CONFLICT
-	// DO UPDATE, m.ID is reliably set on insert but the post-update
-	// state varies by driver — a fresh SELECT keeps the contract uniform.
-	var saved database.Memory
-	if err := s.db.Where("scope = ? AND name = ?", m.Scope, m.Name).First(&saved).Error; err != nil {
-		return nil, fmt.Errorf("failed to read upserted memory: %w", err)
 	}
 	if err := s.SyncMemoryFiles(); err != nil {
 		return nil, fmt.Errorf("memory upserted but file sync failed: %w", err)
 	}
-	return &saved, nil
+	return saved, nil
 }
 
 // DeleteMemory removes a memory by ID and re-syncs files.
@@ -565,10 +547,10 @@ func canonicalIngestName(filename, name string) bool {
 	return true
 }
 
-// upsertByNameNoSync is UpsertByName without the trailing SyncMemoryFiles.
-// IngestFromDisk batches a single sync at the end of the walk to avoid
-// O(N²) disk churn (each per-row sync re-reads the whole table and rewrites
-// every file).
+// upsertByNameNoSync is the shared upsert primitive used by both UpsertByName
+// (which then triggers a single-row SyncMemoryFiles) and IngestFromDisk
+// (which batches one sync at the end of the walk to avoid O(N²) disk churn,
+// since each per-row sync re-reads the whole table and rewrites every file).
 func (s *MemoryService) upsertByNameNoSync(m *database.Memory) (*database.Memory, error) {
 	if err := s.validate(m); err != nil {
 		return nil, err
@@ -656,8 +638,16 @@ func stripBodyHeader(body, name, description string) string {
 
 	desc := strings.ReplaceAll(strings.TrimSpace(description), "\n", " ")
 	if desc != "" && strings.HasPrefix(body, desc) {
-		body = body[len(desc):]
-		body = strings.TrimLeft(body, " \t\n\r")
+		rest := body[len(desc):]
+		// Only treat the prefix as the rendered description echo when it
+		// ends at a line boundary. renderMemoryFile always emits the
+		// description on its own line (`%s\n\n`), so if the body begins
+		// with the description as a topic sentence that continues onto
+		// the same line, we must leave it alone — stripping it would
+		// silently corrupt the agent's intended prose.
+		if len(rest) == 0 || rest[0] == '\n' || rest[0] == '\r' {
+			body = strings.TrimLeft(rest, " \t\n\r")
+		}
 	}
 	// Trim trailing whitespace so a roundtrip (parse → render) doesn't keep
 	// accumulating a blank line on every cycle. renderMemoryFile re-adds the

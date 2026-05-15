@@ -30,6 +30,7 @@ internal/slack/             Slack client, typing, reload logic
 internal/testhelpers/       builders, fixtures, mocks
 agent-worker/src/           worker orchestrator and tool bridge
 mcp-gateway/internal/       tool auth, rate limiting, MCP proxy, tool impls
+akmatori_data/agents/       system-supplied pi-mono subagent definitions
 docs/                       OpenAPI specs
 tests/fixtures/             payloads and test data
 web/                        React frontend

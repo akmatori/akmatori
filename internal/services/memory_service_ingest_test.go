@@ -271,6 +271,26 @@ func TestParseMemoryFile_HandlesQuotedDescription(t *testing.T) {
 	}
 }
 
+// TestParseMemoryFile_PreservesBodyStartingWithDescriptionText guards against
+// stripBodyHeader chopping the body in the middle of a sentence when the
+// agent's prose legitimately begins with the description text and continues
+// on the same line. The echo-strip must only fire when the description sits
+// on its own line (the shape renderMemoryFile produces).
+func TestParseMemoryFile_PreservesBodyStartingWithDescriptionText(t *testing.T) {
+	// Body begins with the description as a topic sentence that keeps going
+	// on the same line — no blank line after the description text. The
+	// parser must NOT eat the leading bytes.
+	raw := "---\nname: topic\ndescription: data dir moved\ntype: host\nscope: global\n---\n\n" +
+		"# topic\n\ndata dir moved to /mnt/data and now also tracks WAL on /mnt/wal.\n"
+	mem, err := parseMemoryFile([]byte(raw), MemoryScopeGlobal)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !strings.HasPrefix(mem.Body, "data dir moved to /mnt/data") {
+		t.Errorf("body was truncated by stripBodyHeader: %q", mem.Body)
+	}
+}
+
 func TestParseMemoryFile_RejectsMissingFrontmatter(t *testing.T) {
 	if _, err := parseMemoryFile([]byte("no frontmatter here"), MemoryScopeGlobal); err == nil {
 		t.Fatal("expected error on missing frontmatter")
