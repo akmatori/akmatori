@@ -58,19 +58,19 @@ func TestPrependGuidance_SingleRunbookSearcherInvocation(t *testing.T) {
 	}
 }
 
-// TestPrependGuidance_RequiresSourcePhraseOnRetry pins the conditional MUST
-// that retry #1 quote a verbatim sender/source/channel phrase from the
-// Original alert text: block. Without this rule, retry #1 tends to rephrase
-// the same structured summary and miss runbooks whose titles mirror the
-// upstream alert phrasing (e.g., "upstream channel alerts").
+// TestPrependGuidance_RequiresSourcePhraseClause pins the conditional clause
+// that asks the agent to include a verbatim sender/source/channel phrase from
+// the Original alert text: block. Without this rule, the first invocation
+// tends to rephrase the structured summary and miss runbooks whose titles
+// mirror the upstream alert phrasing (e.g., "upstream channel alerts").
 //
-// Asserted as a single normalized clause (not three independent substrings)
-// so the rule can't be silently weakened by scattering the tokens — e.g.,
-// dropping MUST to "may", removing the gate, or moving "verbatim" to an
-// unrelated sentence.
-func TestPrependGuidance_RequiresSourcePhraseOnRetry(t *testing.T) {
+// Asserted as a single normalized clause (not independent substrings) so the
+// rule can't be silently weakened by scattering the tokens. Stays in sync with
+// the equivalent assertion in internal/database/prompt_test.go so the
+// user-turn reminder and the system prompt give the same instruction.
+func TestPrependGuidance_RequiresSourcePhraseClause(t *testing.T) {
 	normalized := strings.Join(strings.Fields(PrependGuidance("test task")), " ")
-	want := `When the prompt contains an "Original alert text:" block, retry #1 MUST quote a distinctive sender / source / channel / title phrase verbatim`
+	want := `When the prompt contains an "Original alert text:" block, include a distinctive sender / source / channel / title phrase verbatim`
 	if !strings.Contains(normalized, want) {
 		t.Errorf("PrependGuidance() missing conditional verbatim-quote clause\nwant: %s\ngot (normalized):\n%s", want, normalized)
 	}

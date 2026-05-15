@@ -34,6 +34,15 @@ function log(msg: string): void {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
+  // Files and directories created by this process (and by subagent child `pi`
+  // subprocesses, which inherit the umask via fork) need to be writable by the
+  // API container (UID 1000) — the agent runs as UID 1001 and the two share no
+  // group. Without umask 0, new memory scope dirs land as 0755 owned by 1001
+  // and the API's SyncMemoryFiles cannot rewrite them into the canonical
+  // `<id>-<name>.md` layout. The agent container is single-user so loosening
+  // the in-container mode bits has no extra exposure.
+  process.umask(0o000);
+
   log("Starting Agent Worker...");
   log(`  API_WS_URL:     ${API_WS_URL}`);
   log(`  MCP_GATEWAY_URL: ${MCP_GATEWAY_URL}`);

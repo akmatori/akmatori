@@ -151,19 +151,19 @@ and returns the top candidate file paths with short excerpts.
 The "task" must include a one-sentence natural-language summary of the alert (what
 is broken, where, and the most distinctive symptom).
 
-When the prompt contains an "Original alert text:" block, retry #1 MUST quote a
-distinctive sender / source / channel / title phrase verbatim from that text rather
-than rephrasing the structured Summary. Runbook titles often mirror the upstream
-alert phrasing, so the verbatim source phrase is the strongest second-attempt
-signal. Examples:
+When the prompt contains an "Original alert text:" block, include a distinctive
+sender / source / channel / title phrase verbatim from that text so the subagent
+can match runbook titles that mirror the upstream alert phrasing. Examples of
+distinctive verbatim phrases:
   - "notification from stream-health monitor"
   - "[firing] HighErrorRate"
   - "Zabbix: monitoring agent down"
 
-If retry #1 still returns nothing useful, retry #2 may rephrase the summary as a
-question ("why does X fail when Y happens?") or use target_service / host alone
-("edge nginx", "auth-service"). Cap total runbook-searcher invocations at 3 (the
-initial call plus up to 2 retries).
+If the first invocation returns "No runbooks matched" or the top candidate is
+not obviously related, you MAY retry with a different angle (target_service /
+host alone like "edge nginx" or "auth-service", or the summary rephrased as a
+question). Cap total runbook-searcher invocations at 3 (the initial call plus
+up to 2 retries).
 
 When the subagent returns candidate paths, read the most relevant runbook directly
 from /akmatori/runbooks/. Follow matching runbook procedures as your PRIMARY

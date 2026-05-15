@@ -35,11 +35,14 @@ What to write:
    `zabbix-host-rename-tool-quirk`).
 3. Pick a `type` from: `host`, `incident_pattern`, `tool_quirk`, `feedback`.
 4. Search `/akmatori/memory/<scope>/` (with `rg "^name: <slug>$"` plus `ls`
-   for filename match) for an existing file with that name. If one exists,
-   UPDATE it in place (preserve `incident_uuid` of the earliest occurrence
-   unless the new incident clearly supersedes it). Otherwise CREATE a new
-   file named `<name>.md`. The API canonicalises filenames to `<id>-<name>.md`
-   on the next sync, so do not pick a numeric `<id>` prefix yourself.
+   for filename match) for an existing file with that name. Always (re)write
+   the fresh content to `/akmatori/memory/<scope>/<name>.md` — DO NOT edit the
+   canonical `<id>-<name>.md` file in place. That canonical form is owned by
+   the API process and the ingester treats the bare `<name>.md` as the
+   authoritative new write, regenerating the canonical on the next sync. If
+   the existing entry has a meaningful `incident_uuid` already and the current
+   incident does not clearly supersede it, copy that earlier `incident_uuid`
+   forward into the new file's frontmatter.
 
 File format (must match exactly so the ingester parses it):
 
