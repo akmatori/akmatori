@@ -46,12 +46,12 @@ Delete the QMD container and the gateway-side runbook/memory proxies. Mount the 
 - Modify: `docker-compose.yml` (add `./akmatori_data/agents:/home/agent/.pi/agent/agents:ro` and `./akmatori_data/extensions:/home/agent/.pi/agent/extensions:ro` mounts on `akmatori-agent`; change `./akmatori_data/memory:/akmatori/memory:ro` to `:rw` on the agent container only; update `init-dirs` to `mkdir -p` the new `agents` and `extensions` dirs)
 - Create: pi-subagents extension placed at `/home/agent/.pi/agent/extensions/pi-subagents/index.ts` inside the image (via the Dockerfile install step)
 
-- [ ] add `pi-subagents` to `agent-worker/package.json` dependencies and run `npm install` to refresh the lock file
-- [ ] update `agent-worker/Dockerfile` runtime stage so the pi-subagents extension is materialised at `/home/agent/.pi/agent/extensions/pi-subagents/index.ts`, `pi` from `node_modules/.bin` is on `PATH`, and `apt-get install -y ripgrep fzf`
-- [ ] in `agent-runner.ts`, change `noExtensions: true` to `noExtensions: false` and verify the loader picks up the extension
-- [ ] add the agents and extensions mounts to `docker-compose.yml`, switch the agent's memory mount to `:rw`, and update `init-dirs` to create `agents/` and `extensions/`
-- [ ] write a vitest assertion in `agent-worker` that verifies the resource loader, given a tmpdir with one extension file, loads it (no longer skips by default)
-- [ ] run `make test-agent` — must pass before task 2
+- [x] add `pi-subagents` to `agent-worker/package.json` dependencies and run `npm install` to refresh the lock file
+- [x] update `agent-worker/Dockerfile` runtime stage so the pi-subagents extension is materialised at `/home/agent/.pi/agent/extensions/pi-subagents/index.ts`, `pi` from `node_modules/.bin` is on `PATH`, and `apt-get install -y ripgrep fzf` (materialised at `/opt/pi-extensions/pi-subagents` instead — the host-mounted extensions dir would otherwise shadow `~/.pi/agent/extensions`; loaded via `additionalExtensionPaths`)
+- [x] in `agent-runner.ts`, change `noExtensions: true` to `noExtensions: false` and verify the loader picks up the extension
+- [x] add the agents and extensions mounts to `docker-compose.yml`, switch the agent's memory mount to `:rw`, and update `init-dirs` to create `agents/` and `extensions/`
+- [x] write a vitest assertion in `agent-worker` that verifies the resource loader, given a tmpdir with one extension file, loads it (no longer skips by default)
+- [x] run `make test-agent` — must pass before task 2
 
 ### Task 2: Define runbook-searcher, memory-searcher, and memory-writer subagents
 

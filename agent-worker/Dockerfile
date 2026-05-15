@@ -29,9 +29,12 @@ RUN npm run build
 # Runtime stage
 FROM node:22-bookworm
 
-# Install system dependencies needed by pi-mono's bash tool
+# Install system dependencies needed by pi-mono's bash tool and the
+# subagent search workflow (ripgrep + fzf back the runbook/memory recon
+# subagents that replaced the QMD sidecar).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ripgrep \
+    fzf \
     git \
     jq \
     ca-certificates \
@@ -43,15 +46,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd -g 1001 agent && \
     useradd -u 1001 -g agent -m -s /bin/bash agent
 
-# Create working directories
-RUN mkdir -p /home/agent/.pi /workspaces && \
-    chown -R agent:agent /home/agent /workspaces
+# Create working directories. The pi-subagents extension is materialised
+# under /opt/pi-extensions/pi-subagents rather than ~/.pi/agent/extensions so
+# the host bind-mount on /home/agent/.pi/agent/extensions (operator-supplied
+# extensions) does not shadow it. The agent-runner passes this path via
+# additionalExtensionPaths to the pi-mono resource loader.
+RUN mkdir -p /home/agent/.pi /opt/pi-extensions/pi-subagents /workspaces && \
+    chown -R agent:agent /home/agent /workspaces /opt/pi-extensions
 
 WORKDIR /home/agent/app
 
 # Copy package files and install production dependencies only
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
+
+# Materialise the pi-subagents extension into the image. Copying the full
+# package preserves package.json so pi-mono's resource loader honours its
+# `pi.extensions` manifest (./src/extension/index.ts).
+RUN cp -r node_modules/pi-subagents/. /opt/pi-extensions/pi-subagents/ && \
+    chown -R agent:agent /opt/pi-extensions
 
 # Copy built JavaScript from builder
 COPY --from=builder /app/dist/ ./dist/
@@ -62,7 +75,10 @@ RUN chown -R agent:agent /home/agent/app
 # Switch to non-root user
 USER agent
 
-# Environment variables (defaults, can be overridden)
+# Environment variables (defaults, can be overridden).
+# Put the local node_modules/.bin on PATH so subagent subprocesses can spawn
+# the bundled `pi` CLI without an absolute path.
+ENV PATH=/home/agent/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENV API_WS_URL=ws://akmatori-api:3000/ws/agent
 ENV MCP_GATEWAY_URL=http://mcp-gateway:8080
 ENV WORKSPACE_DIR=/workspaces

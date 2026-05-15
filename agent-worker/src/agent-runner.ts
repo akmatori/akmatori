@@ -278,12 +278,18 @@ export class AgentRunner {
     // loading full content on-demand when the agent invokes a skill.
     // Use skillsOverride to filter to only enabled skills — disabled skills may still
     // have SKILL.md files on disk but should not be available to the agent.
+    //
+    // Extensions are enabled so pi-mono picks up pi-subagents (baked into the image
+    // at /opt/pi-extensions/pi-subagents — outside the host-mounted extensions
+    // directory so it can't be shadowed by an empty operator mount). That registers
+    // the `subagent` tool used by runbook-searcher / memory-searcher / memory-writer.
     const enabledSkillNames = params.enabledSkills;
     const resourceLoader = new DefaultResourceLoader({
       cwd: params.workDir,
       agentDir: getAgentDir(),
       additionalSkillPaths: this.skillsDir ? [this.skillsDir] : [],
-      noExtensions: true,
+      additionalExtensionPaths: ["/opt/pi-extensions/pi-subagents"],
+      noExtensions: false,
       noPromptTemplates: true,
       noThemes: true,
       ...(enabledSkillNames && enabledSkillNames.length > 0
