@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -224,6 +225,8 @@ func (m *MockAlertAdapter) WithValidationError(err error) *MockAlertAdapter {
 // Test Fixture Helpers
 // ========================================
 
+var fixtureCache sync.Map
+
 // fixturePath resolves a fixture path relative to tests/fixtures and rejects traversal outside that root.
 func fixturePath(path string) (string, error) {
 	_, currentFile, _, ok := runtime.Caller(0)
@@ -251,6 +254,9 @@ func fixturePath(path string) (string, error) {
 }
 
 // LoadFixture loads a test fixture file from tests/fixtures/.
+//
+// Cached fixture bytes are cloned before returning so callers can safely mutate
+// the returned slice without affecting other tests.
 func LoadFixture(t *testing.T, path string) []byte {
 	t.Helper()
 
@@ -259,12 +265,17 @@ func LoadFixture(t *testing.T, path string) []byte {
 		t.Fatalf("failed to resolve fixture %s: %v", path, err)
 	}
 
+	if cached, ok := fixtureCache.Load(fixtureFile); ok {
+		return bytes.Clone(cached.([]byte))
+	}
+
 	data, err := os.ReadFile(fixtureFile)
 	if err != nil {
 		t.Fatalf("failed to load fixture %s (%s): %v", path, fixtureFile, err)
 	}
 
-	return data
+	fixtureCache.Store(fixtureFile, bytes.Clone(data))
+	return bytes.Clone(data)
 }
 
 // LoadJSONFixture loads and unmarshals a JSON fixture

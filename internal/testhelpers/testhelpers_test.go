@@ -390,6 +390,24 @@ func TestLoadJSONFixture(t *testing.T) {
 	}
 }
 
+func TestLoadFixture_ReturnsIndependentCopy(t *testing.T) {
+	first := LoadFixture(t, "alerts/alertmanager_firing.json")
+	if len(first) == 0 {
+		t.Fatal("expected fixture data")
+	}
+
+	original := first[0]
+	first[0] = '{'
+
+	second := LoadFixture(t, "alerts/alertmanager_firing.json")
+	if len(second) == 0 {
+		t.Fatal("expected fixture data on second load")
+	}
+	if second[0] != original {
+		t.Fatalf("expected second fixture load to return an untouched copy, got %q want %q", second[0], original)
+	}
+}
+
 func TestFixturePath_RejectsTraversal(t *testing.T) {
 	_, err := fixturePath("../README.md")
 	if err == nil {
