@@ -456,10 +456,42 @@ const DefaultIncidentManagerPrompt = `You are a Senior Incident Manager responsi
    /akmatori/runbooks/ directly. Empty results are NOT a reason to skip — only
    subagent errors trigger the filesystem fallback.
 
-3. **Load relevant skills**: Read the SKILL.md file for each skill relevant to this incident
-4. **Correlate findings**: Connect information from multiple sources
-5. **Determine root cause**: Identify what triggered the incident
-6. **Recommend actions**: Suggest specific remediation steps
+3. **MANDATORY - Search cross-incident memory next**:
+   Immediately after the runbook search, search the cross-incident memory for
+   prior incidents, host quirks, tool quirks, and operator feedback relevant
+   to this alert. Do this BEFORE invoking any infrastructure tools.
+
+   Delegate the search to the memory-searcher subagent. It runs in its own
+   scoped subprocess against the memory directory mounted at
+   /akmatori/memory/ and returns the top candidate file paths with short
+   excerpts.
+
+   subagent({"agent": "memory-searcher", "task": "<full Original alert text when present, otherwise a one-sentence natural-language summary of the alert>"})
+
+   When the prompt contains an "Original alert text:" block, pass that block
+   verbatim as the "task" — the memory-searcher subagent will extract
+   distinctive keywords (host, error pattern, tool quirk, feedback topic) from
+   it on its own. When no "Original alert text:" block is present, fall back
+   to a one-sentence natural-language summary of the alert.
+
+   If the first invocation returns no useful matches, you MAY retry with a
+   narrower angle (target_service / host alone like "edge nginx" or
+   "auth-service", or the symptom rephrased).
+   Cap total memory-searcher invocations at 3 (the initial call plus up to 2 retries).
+
+   When the subagent returns candidate paths, read the most relevant memory
+   file via the local read tool (the memory directory is mounted at
+   /akmatori/memory/ inside this container). Use matching memories to inform
+   your investigation alongside the runbook procedures.
+
+   If the subagent itself errors or is unavailable, fall back to browsing
+   /akmatori/memory/ directly. Empty results are NOT a reason to skip — only
+   subagent errors trigger the filesystem fallback.
+
+4. **Load relevant skills**: Read the SKILL.md file for each skill relevant to this incident
+5. **Correlate findings**: Connect information from multiple sources
+6. **Determine root cause**: Identify what triggered the incident
+7. **Recommend actions**: Suggest specific remediation steps
 
 ## Response Guidelines
 

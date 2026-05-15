@@ -134,17 +134,19 @@ func buildSafeEnvironment() []string {
 // instruction to a task. The runbook search reminder is placed in the user
 // message (not just the system prompt) because models follow user-turn
 // instructions more reliably than long system prompt sections. The
-// runbook-searcher subagent shape mirrors the runbook-search section of
-// DefaultIncidentManagerPrompt — keep them in sync so the system prompt and
-// the user-turn reminder agree on the subagent name and retry budget.
+// runbook-searcher and memory-searcher subagent shapes mirror the same steps
+// in DefaultIncidentManagerPrompt — keep them in sync so the system prompt
+// and the user-turn reminder agree on the subagent names and retry budgets.
 func PrependGuidance(task string) string {
 	currentTime := time.Now().UTC().Format("2006-01-02 15:04:05 UTC")
 	return fmt.Sprintf(`Current time: %s
 
-IMPORTANT: Before using any infrastructure tools, you MUST search for relevant runbooks first.
-Delegate the search to the runbook-searcher subagent. It runs in its own scoped
-subprocess against the read-only runbook library mounted at /akmatori/runbooks/
-and returns the top candidate file paths with short excerpts.
+IMPORTANT: Before using any infrastructure tools, you MUST first search runbooks,
+then search cross-incident memory.
+
+Step 1 — Delegate the runbook search to the runbook-searcher subagent. It runs
+in its own scoped subprocess against the read-only runbook library mounted at
+/akmatori/runbooks/ and returns the top candidate file paths with short excerpts.
 
   subagent({"agent": "runbook-searcher", "task": "<full Original alert text when present, otherwise a one-sentence natural-language summary of the alert>"})
 
@@ -164,6 +166,22 @@ up to 2 retries).
 When the subagent returns candidate paths, read the most relevant runbook directly
 from /akmatori/runbooks/. Follow matching runbook procedures as your PRIMARY
 investigation guide.
+
+Step 2 — Immediately after the runbook search, delegate a cross-incident memory
+search to the memory-searcher subagent. It runs in its own scoped subprocess
+against the memory directory mounted at /akmatori/memory/ and returns the top
+candidate file paths with short excerpts.
+
+  subagent({"agent": "memory-searcher", "task": "<full Original alert text when present, otherwise a one-sentence natural-language summary of the alert>"})
+
+Use the SAME task string you used for the runbook search — the memory-searcher
+subagent extracts its own keywords (host, error pattern, tool quirk, feedback
+topic). Cap total memory-searcher invocations at 3 (the initial call plus up
+to 2 retries).
+
+When the subagent returns candidate paths, read the most relevant memory file
+directly from /akmatori/memory/ and apply matching prior-incident learnings,
+host quirks, and operator feedback alongside the runbook procedures.
 
 Please help with the following incident or request:
 

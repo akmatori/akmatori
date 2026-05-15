@@ -75,3 +75,49 @@ func TestPrependGuidance_PassesFullAlertTextToSubagent(t *testing.T) {
 		t.Errorf("PrependGuidance() missing full-alert-text pass-through clause\nwant: %s\ngot (normalized):\n%s", want, normalized)
 	}
 }
+
+// TestPrependGuidance_DelegatesToMemorySearcherSubagent pins that the
+// user-turn reminder also asks the agent to invoke the memory-searcher
+// subagent right after the runbook search, with the same alert text. Kept
+// in sync with the memory-search section of DefaultIncidentManagerPrompt.
+func TestPrependGuidance_DelegatesToMemorySearcherSubagent(t *testing.T) {
+	out := PrependGuidance("test task")
+	for _, want := range []string{
+		`"agent": "memory-searcher"`,
+		`/akmatori/memory/`,
+		"Cap total memory-searcher invocations at 3",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("PrependGuidance() missing %q\nfull output:\n%s", want, out)
+		}
+	}
+}
+
+// TestPrependGuidance_SingleMemorySearcherInvocation pins that the reminder
+// shows exactly ONE subagent({"agent": "memory-searcher", ...}) example.
+func TestPrependGuidance_SingleMemorySearcherInvocation(t *testing.T) {
+	out := PrependGuidance("test task")
+	if got := strings.Count(out, `"agent": "memory-searcher"`); got != 1 {
+		t.Errorf("expected exactly 1 subagent({\"agent\": \"memory-searcher\"...}) example in guidance, got %d", got)
+	}
+}
+
+// TestPrependGuidance_MemorySearchAfterRunbookSearch verifies that the
+// runbook-search reminder appears before the memory-search reminder, and
+// that both appear before the task body.
+func TestPrependGuidance_MemorySearchAfterRunbookSearch(t *testing.T) {
+	out := PrependGuidance("test task")
+	runbookIdx := strings.Index(out, `"agent": "runbook-searcher"`)
+	memoryIdx := strings.Index(out, `"agent": "memory-searcher"`)
+	taskIdx := strings.Index(out, "test task")
+
+	if runbookIdx == -1 || memoryIdx == -1 || taskIdx == -1 {
+		t.Fatalf("missing required sections: runbook=%d memory=%d task=%d", runbookIdx, memoryIdx, taskIdx)
+	}
+	if runbookIdx >= memoryIdx {
+		t.Errorf("runbook reminder must appear before memory reminder (runbook=%d memory=%d)", runbookIdx, memoryIdx)
+	}
+	if memoryIdx >= taskIdx {
+		t.Errorf("memory reminder must appear before the task body (memory=%d task=%d)", memoryIdx, taskIdx)
+	}
+}

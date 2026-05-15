@@ -144,3 +144,61 @@ func TestDefaultIncidentManagerPrompt_PassesFullAlertTextToSubagent(t *testing.T
 		t.Errorf("DefaultIncidentManagerPrompt missing full-alert-text pass-through clause\nwant: %s", want)
 	}
 }
+
+// TestDefaultIncidentManagerPrompt_ContainsMemorySearcherSubagent pins the
+// memory-search workflow step: after the runbook search, the agent must
+// delegate a cross-incident memory search to the memory-searcher subagent
+// with the full alert text as the task.
+func TestDefaultIncidentManagerPrompt_ContainsMemorySearcherSubagent(t *testing.T) {
+	tests := []struct {
+		name     string
+		contains string
+	}{
+		{"memory-searcher agent name", `"agent": "memory-searcher"`},
+		{"memory directory fallback", `/akmatori/memory/`},
+		{"max 3 memory calls cue", "Cap total memory-searcher invocations at 3"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !strings.Contains(DefaultIncidentManagerPrompt, tt.contains) {
+				t.Errorf("DefaultIncidentManagerPrompt should contain %q", tt.contains)
+			}
+		})
+	}
+}
+
+// TestDefaultIncidentManagerPrompt_MemorySearchAfterRunbookSearch verifies
+// the workflow order: runbook search runs first, memory search runs right
+// after it, and both run before "Load relevant skills".
+func TestDefaultIncidentManagerPrompt_MemorySearchAfterRunbookSearch(t *testing.T) {
+	runbookIdx := strings.Index(DefaultIncidentManagerPrompt, "MANDATORY - Search runbooks FIRST")
+	memoryIdx := strings.Index(DefaultIncidentManagerPrompt, "MANDATORY - Search cross-incident memory next")
+	skillsIdx := strings.Index(DefaultIncidentManagerPrompt, "Load relevant skills")
+
+	if runbookIdx == -1 {
+		t.Fatal("prompt must contain mandatory runbook search step")
+	}
+	if memoryIdx == -1 {
+		t.Fatal("prompt must contain mandatory memory search step")
+	}
+	if skillsIdx == -1 {
+		t.Fatal("prompt must contain load relevant skills step")
+	}
+	if runbookIdx >= memoryIdx {
+		t.Error("runbook search must appear before memory search")
+	}
+	if memoryIdx >= skillsIdx {
+		t.Error("memory search must appear before load relevant skills")
+	}
+}
+
+// TestDefaultIncidentManagerPrompt_SingleMemorySearcherInvocation pins the
+// structural invariant that the memory-search step shows exactly ONE
+// subagent({"agent": "memory-searcher", ...}) example. Mirrors the
+// equivalent runbook-searcher invariant above.
+func TestDefaultIncidentManagerPrompt_SingleMemorySearcherInvocation(t *testing.T) {
+	if got := strings.Count(DefaultIncidentManagerPrompt, `"agent": "memory-searcher"`); got != 1 {
+		t.Errorf("expected exactly 1 subagent({\"agent\": \"memory-searcher\"...}) example in prompt, got %d", got)
+	}
+}
