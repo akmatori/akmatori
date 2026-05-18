@@ -298,6 +298,14 @@ func main() {
 	apiHandler.SetChannelManager(channelService)
 	apiHandler.SetProviderRegistry(providerRegistry)
 
+	// Cron runner: scheduler + CRUD for /api/cron-jobs. Started below after
+	// HTTP routes are registered so the runner only begins ticking once the
+	// rest of the API surface is in place. agentWSHandler is reused as the
+	// OneShotLLMCaller — cron oneshot ticks share the worker transport that
+	// title generation, response formatting, and feedback classification use.
+	cronRunner := services.NewCronRunner(channelService, providerRegistry, agentWSHandler)
+	apiHandler.SetCronJobManager(cronRunner)
+
 	// Wire listener channel reload: when channels (or, transitionally, alert
 	// sources) are created/updated/deleted via API, reload the Slack handler's
 	// channel mappings so changes take effect immediately.
@@ -381,6 +389,13 @@ func main() {
 
 	// Start watching for Slack settings reload requests
 	go slackManager.WatchForReloads(ctx)
+
+	// Start the cron runner so scheduled jobs begin ticking. Start is a no-op
+	// when called twice; cancellation flows through ctx so SIGTERM shuts the
+	// scheduler down cleanly before the HTTP server exits.
+	if err := cronRunner.Start(ctx); err != nil {
+		slog.Warn("failed to start cron runner", "err", err)
+	}
 
 	// Start Slack Socket Mode if enabled
 	if slackEnabled {

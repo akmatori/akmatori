@@ -166,6 +166,18 @@ type ProviderRegistry interface {
 	List() []database.MessagingProvider
 }
 
+// CronJobManager is the handler-facing CRUD + manual-fire surface for cron
+// jobs. It is satisfied by *CronRunner; handlers depend on this interface so
+// tests can stub it without spinning up a scheduler.
+type CronJobManager interface {
+	ListJobs() ([]database.CronJob, error)
+	GetJobByUUID(uuid string) (*database.CronJob, error)
+	CreateJob(name, description, schedule, prompt string, mode database.CronJobMode, channelUUID string, enabled bool) (*database.CronJob, error)
+	UpdateJob(uuid string, patch CronJobUpdate) (*database.CronJob, error)
+	DeleteJob(uuid string) error
+	RunNow(uuid string) error
+}
+
 // MCPServerManager defines the interface for MCP server configuration CRUD operations.
 type MCPServerManager interface {
 	CreateMCPServer(config *database.MCPServerConfig) (*database.MCPServerConfig, error)

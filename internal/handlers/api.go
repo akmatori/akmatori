@@ -24,6 +24,7 @@ type APIHandler struct {
 	mcpServerService     services.MCPServerManager
 	channelService       services.ChannelManager
 	providerRegistry     services.ProviderRegistry
+	cronService          services.CronJobManager
 	responseFormatter    *services.ResponseFormatter
 	alertChannelReloader func()       // called after alert source create/update/delete to reload Slack channel mappings
 	gatewayReloader      func() error // called after HTTP connector CRUD to reload gateway tools
@@ -88,6 +89,13 @@ func (h *APIHandler) SetProviderRegistry(reg services.ProviderRegistry) {
 	h.providerRegistry = reg
 }
 
+// SetCronJobManager wires the CronJobManager that backs /api/cron-jobs.
+// Optional — when unset the cron endpoints return 503 so the rest of the API
+// boots without the scheduler (per CLAUDE.md graceful-degradation rule).
+func (h *APIHandler) SetCronJobManager(svc services.CronJobManager) {
+	h.cronService = svc
+}
+
 // reloadAlertChannels triggers the alert channel reload callback if set
 func (h *APIHandler) reloadAlertChannels() {
 	if h.alertChannelReloader != nil {
@@ -120,6 +128,10 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/integrations/", h.handleIntegrationByUUID)
 	mux.HandleFunc("/api/channels", h.handleChannels)
 	mux.HandleFunc("/api/channels/", h.handleChannelByUUID)
+
+	// Cron jobs (scheduled LLM or agent runs that post to a Channel)
+	mux.HandleFunc("/api/cron-jobs", h.handleCronJobs)
+	mux.HandleFunc("/api/cron-jobs/", h.handleCronJobByUUID)
 
 	// LLM settings
 	mux.HandleFunc("/api/settings/llm", h.handleLLMSettings)

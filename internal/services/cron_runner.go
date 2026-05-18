@@ -1,0 +1,589 @@
+package services
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/akmatori/akmatori/internal/database"
+	"github.com/google/uuid"
+	"github.com/robfig/cron/v3"
+	"gorm.io/gorm"
+)
+
+// ErrCronJobNotFound is returned by CronRunner lookups when no CronJob row
+// matches the supplied UUID. Surfacing a typed error lets handlers translate
+// it to 404 without leaking GORM into the handler layer.
+var ErrCronJobNotFound = errors.New("cron job not found")
+
+// ErrInvalidCronSchedule is returned when a write-time schedule fails to parse
+// against the standard 5-field crontab grammar (m h dom mon dow). The error
+// message includes the parser's failure so the UI can surface it to operators.
+var ErrInvalidCronSchedule = errors.New("invalid cron schedule")
+
+// cronOneshotTimeout is the deadline applied to a single oneshot LLM tick. The
+// agent worker forwards retry/timeout settings of its own, but the runner caps
+// here so a hung worker cannot indefinitely block the cron entry.
+const cronOneshotTimeout = 2 * time.Minute
+
+// cronProviderResolveDefault is the messaging provider consulted when a cron
+// job's Channel cannot be loaded — keeps oneshot ticks falling back to the
+// workspace default rather than crashing the runner.
+const cronProviderResolveDefault = database.MessagingProviderSlack
+
+// CronJobUpdate is the patch shape applied to UpdateJob. Pointer fields make
+// partial updates explicit so the handler can submit just the operator-edited
+// columns rather than re-sending the entire row.
+type CronJobUpdate struct {
+	Name        *string
+	Description *string
+	Schedule    *string
+	Prompt      *string
+	Mode        *database.CronJobMode
+	ChannelUUID *string
+	Enabled     *bool
+}
+
+// cronScheduler is the slice of robfig/cron/v3.*Cron the runner depends on so
+// tests can swap a fake (or a no-op) without touching real wall-clock time.
+type cronScheduler interface {
+	AddFunc(spec string, cmd func()) (cron.EntryID, error)
+	Remove(id cron.EntryID)
+	Entry(id cron.EntryID) cron.Entry
+	Start()
+	Stop() context.Context
+}
+
+// CronRunner owns the in-process cron scheduler and exposes the CronManager
+// surface for the HTTP API. The scheduler is started in main() and runs for
+// the lifetime of the process; CRUD calls re-register entries so changes take
+// effect immediately without an API restart.
+//
+// Field ordering: ChannelManager + ProviderRegistry are wired before Start so
+// the tick path can resolve channels at fire time (operators may rename or
+// reassign channels while the runner is live). The OneShotLLMCaller is the
+// same worker-backed helper used by TitleGenerator / FeedbackClassifier; nil
+// means oneshot ticks fall back to a deterministic error string.
+type CronRunner struct {
+	db        *gorm.DB
+	channels  ChannelManager
+	registry  ProviderRegistry
+	caller    OneShotLLMCaller
+	scheduler cronScheduler
+	parser    cron.Parser
+
+	mu      sync.Mutex
+	entries map[uint]cron.EntryID // cronJob.ID -> scheduler entry
+	started bool
+	stopFn  context.CancelFunc
+}
+
+// NewCronRunner constructs a CronRunner bound to the global DB and supplied
+// dependencies. The scheduler is created in standard (5-field) parse mode so
+// "*/2 * * * *" works without seconds.
+func NewCronRunner(channels ChannelManager, registry ProviderRegistry, caller OneShotLLMCaller) *CronRunner {
+	return newCronRunnerWithDeps(database.GetDB(), channels, registry, caller, cron.New())
+}
+
+// newCronRunnerWithDeps is the test seam: injects the DB, the scheduler, and
+// the dependencies so unit tests can drive the runner without touching the
+// global DB / wall-clock cron.
+func newCronRunnerWithDeps(db *gorm.DB, channels ChannelManager, registry ProviderRegistry, caller OneShotLLMCaller, scheduler cronScheduler) *CronRunner {
+	return &CronRunner{
+		db:        db,
+		channels:  channels,
+		registry:  registry,
+		caller:    caller,
+		scheduler: scheduler,
+		parser:    cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
+		entries:   map[uint]cron.EntryID{},
+	}
+}
+
+// Start loads every enabled CronJob row, registers each in the scheduler, and
+// begins ticking. Calling Start more than once is a no-op so main() can
+// safely defer cancellation without worrying about double-start.
+//
+// The returned context is used only for cancellation: when the supplied
+// parent is cancelled (or Stop is called), the scheduler is stopped and the
+// runner stops firing ticks. Existing in-flight ticks are not interrupted —
+// they complete on their own and write their LastRunStatus row.
+func (r *CronRunner) Start(parent context.Context) error {
+	r.mu.Lock()
+	if r.started {
+		r.mu.Unlock()
+		return nil
+	}
+	r.started = true
+	r.mu.Unlock()
+
+	var jobs []database.CronJob
+	if err := r.db.Where("enabled = ?", true).Find(&jobs).Error; err != nil {
+		return fmt.Errorf("load cron jobs: %w", err)
+	}
+	for _, job := range jobs {
+		if err := r.register(job); err != nil {
+			slog.Warn("failed to register cron job", "uuid", job.UUID, "err", err)
+			continue
+		}
+	}
+
+	r.scheduler.Start()
+
+	ctx, cancel := context.WithCancel(parent)
+	r.mu.Lock()
+	r.stopFn = cancel
+	r.mu.Unlock()
+
+	go func() {
+		<-ctx.Done()
+		r.Stop()
+	}()
+	return nil
+}
+
+// Stop halts the scheduler. Safe to call multiple times.
+func (r *CronRunner) Stop() {
+	r.mu.Lock()
+	if !r.started {
+		r.mu.Unlock()
+		return
+	}
+	r.started = false
+	stop := r.stopFn
+	r.stopFn = nil
+	r.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
+	r.scheduler.Stop()
+}
+
+// register adds (or replaces) a scheduler entry for the supplied job. Holds
+// the runner lock so concurrent reloads do not double-register.
+func (r *CronRunner) register(job database.CronJob) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.registerLocked(job)
+}
+
+func (r *CronRunner) registerLocked(job database.CronJob) error {
+	// Replace any prior entry for this job. Safe even when absent.
+	if prior, ok := r.entries[job.ID]; ok {
+		r.scheduler.Remove(prior)
+		delete(r.entries, job.ID)
+	}
+	if !job.Enabled {
+		return nil
+	}
+	schedule, err := r.parser.Parse(job.Schedule)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidCronSchedule, err)
+	}
+	jobID := job.ID
+	entry, err := r.scheduler.AddFunc(job.Schedule, func() {
+		r.fire(jobID)
+	})
+	if err != nil {
+		return fmt.Errorf("schedule cron job: %w", err)
+	}
+	r.entries[job.ID] = entry
+
+	// Update NextRunAt so the API can render the next firing time without
+	// having to re-parse the schedule on every read. Use the scheduler's
+	// Schedule.Next so the value matches what robfig/cron will actually fire.
+	next := schedule.Next(time.Now())
+	if err := r.db.Model(&database.CronJob{}).Where("id = ?", job.ID).Update("next_run_at", next).Error; err != nil {
+		slog.Warn("failed to update next_run_at", "id", job.ID, "err", err)
+	}
+	return nil
+}
+
+// Reload re-registers a job after CRUD. It is safe to call with a job that no
+// longer exists (Delete path) — the existing entry is removed and no new one
+// is added.
+func (r *CronRunner) Reload(jobID uint) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var job database.CronJob
+	err := r.db.First(&job, jobID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		if prior, ok := r.entries[jobID]; ok {
+			r.scheduler.Remove(prior)
+			delete(r.entries, jobID)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("reload cron job %d: %w", jobID, err)
+	}
+	return r.registerLocked(job)
+}
+
+// fire executes a single tick for the supplied job ID. Reloads the row each
+// time so an in-flight edit (channel change, prompt change, disable) takes
+// effect on the very next firing.
+func (r *CronRunner) fire(jobID uint) {
+	var job database.CronJob
+	if err := r.db.Preload("Channel.Integration").First(&job, jobID).Error; err != nil {
+		slog.Warn("cron tick: job vanished", "id", jobID, "err", err)
+		return
+	}
+	if !job.Enabled {
+		return
+	}
+	r.execute(&job)
+}
+
+// RunNow fires a manual tick for the supplied UUID. Returns ErrCronJobNotFound
+// when the row is absent so the handler can surface a 404.
+func (r *CronRunner) RunNow(uuidStr string) error {
+	var job database.CronJob
+	err := r.db.Preload("Channel.Integration").Where("uuid = ?", uuidStr).First(&job).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrCronJobNotFound
+		}
+		return fmt.Errorf("load cron job %s: %w", uuidStr, err)
+	}
+	r.execute(&job)
+	return nil
+}
+
+// execute runs a single tick and persists the result. Mode dispatch keeps the
+// oneshot and (future) agent paths isolated; per Task 7 only oneshot is wired
+// here and the agent path returns an explicit error until Task 8.
+func (r *CronRunner) execute(job *database.CronJob) {
+	switch job.Mode {
+	case database.CronJobModeOneshot, "":
+		r.executeOneshot(job)
+	case database.CronJobModeAgent:
+		r.recordResult(job, database.CronJobRunStatusError, "agent mode not implemented yet")
+	default:
+		r.recordResult(job, database.CronJobRunStatusError, fmt.Sprintf("unknown cron mode %q", job.Mode))
+	}
+}
+
+// executeOneshot routes a oneshot LLM call through the worker, formats the
+// raw text and posts it to the cron's Channel via the messaging provider.
+// Every failure mode (missing channel, missing provider, transport error,
+// LLM error) is captured as LastRunError so operators can debug without
+// tailing API logs.
+func (r *CronRunner) executeOneshot(job *database.CronJob) {
+	if r.channels == nil || r.registry == nil {
+		r.recordResult(job, database.CronJobRunStatusError, "cron runner is missing channel/provider wiring")
+		return
+	}
+	channel, err := r.resolveChannel(job)
+	if err != nil {
+		r.recordResult(job, database.CronJobRunStatusError, err.Error())
+		return
+	}
+	provider, err := r.registry.Get(channel.Integration.Provider)
+	if err != nil {
+		r.recordResult(job, database.CronJobRunStatusError, fmt.Sprintf("provider unavailable: %v", err))
+		return
+	}
+
+	text, err := r.callOneshot(job)
+	if err != nil {
+		r.recordResult(job, database.CronJobRunStatusError, err.Error())
+		return
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		r.recordResult(job, database.CronJobRunStatusError, "oneshot LLM returned empty response")
+		return
+	}
+
+	body := formatCronOneshotMessage(job, text)
+	if _, err := provider.PostMessage(context.Background(), channel, body); err != nil {
+		r.recordResult(job, database.CronJobRunStatusError, fmt.Sprintf("post message: %v", err))
+		return
+	}
+	r.recordResult(job, database.CronJobRunStatusOK, "")
+}
+
+// resolveChannel returns the Channel the supplied cron job should post into.
+// Per the MVP, every cron job has an explicit ChannelID; if absent we fall
+// back to the per-provider default so misconfiguration does not silently
+// drop the post.
+func (r *CronRunner) resolveChannel(job *database.CronJob) (*database.Channel, error) {
+	if job.Channel != nil && job.Channel.ID != 0 {
+		return job.Channel, nil
+	}
+	if job.ChannelID != nil {
+		ch, err := r.loadChannelByID(*job.ChannelID)
+		if err == nil {
+			return ch, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
+	ch, err := r.channels.ResolveDefault(cronProviderResolveDefault)
+	if err != nil {
+		if errors.Is(err, ErrChannelNotFound) {
+			return nil, fmt.Errorf("no channel configured for cron job and no default available")
+		}
+		return nil, err
+	}
+	return ch, nil
+}
+
+// loadChannelByID is a small helper around the DB so the resolver can keep its
+// error branches readable.
+func (r *CronRunner) loadChannelByID(id uint) (*database.Channel, error) {
+	var ch database.Channel
+	if err := r.db.Preload("Integration").First(&ch, id).Error; err != nil {
+		return nil, err
+	}
+	return &ch, nil
+}
+
+// callOneshot wraps OneShotLLMCaller with a timeout and graceful fallback.
+// When the caller is nil (Cron runner started without a worker) or returns
+// ErrWorkerNotConnected, surface a clear message so the LastRunError row
+// distinguishes "worker offline" from "LLM rejected our prompt".
+func (r *CronRunner) callOneshot(job *database.CronJob) (string, error) {
+	if r.caller == nil {
+		return "", fmt.Errorf("oneshot LLM caller not configured")
+	}
+	settings, err := database.GetLLMSettings()
+	if err != nil {
+		return "", fmt.Errorf("load LLM settings: %w", err)
+	}
+	worker := BuildLLMSettingsForWorker(settings)
+	if worker == nil {
+		return "", fmt.Errorf("LLM provider not configured or disabled")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), cronOneshotTimeout)
+	defer cancel()
+
+	systemPrompt := "You are an assistant helping with scheduled status reports. Respond concisely with the requested information."
+	raw, err := r.caller.OneShotLLM(ctx, worker, systemPrompt, job.Prompt, 1024, 0.2)
+	if err != nil {
+		if errors.Is(err, ErrWorkerNotConnected) {
+			return "", fmt.Errorf("agent worker not connected")
+		}
+		return "", err
+	}
+	return raw, nil
+}
+
+// formatCronOneshotMessage prepends a small header so the channel reader can
+// see which cron produced the message. The body itself is whatever the LLM
+// returned (already trimmed by the caller).
+func formatCronOneshotMessage(job *database.CronJob, body string) string {
+	name := strings.TrimSpace(job.Name)
+	if name == "" {
+		name = "Scheduled report"
+	}
+	return fmt.Sprintf("*%s*\n%s", name, body)
+}
+
+// recordResult persists the outcome of a tick. Uses Updates with a map so
+// LastRunError can be cleared (assigned to "") when a tick succeeds.
+// NextRunAt is recomputed when possible so the API does not show a stale
+// firing time after a manual RunNow.
+func (r *CronRunner) recordResult(job *database.CronJob, status string, errMsg string) {
+	now := time.Now()
+	updates := map[string]interface{}{
+		"last_run_at":     now,
+		"last_run_status": status,
+		"last_run_error":  errMsg,
+	}
+	if schedule, err := r.parser.Parse(job.Schedule); err == nil {
+		updates["next_run_at"] = schedule.Next(now)
+	}
+	if err := r.db.Model(&database.CronJob{}).Where("id = ?", job.ID).Updates(updates).Error; err != nil {
+		slog.Warn("failed to persist cron tick result", "id", job.ID, "err", err)
+		return
+	}
+	if status == database.CronJobRunStatusError {
+		slog.Warn("cron tick failed", "uuid", job.UUID, "name", job.Name, "err", errMsg)
+	} else {
+		slog.Info("cron tick completed", "uuid", job.UUID, "name", job.Name)
+	}
+}
+
+// ========== CRUD ==========
+
+// ListJobs returns every CronJob ordered by name. Preloads Channel + its
+// Integration so the API response can render the post destination without an
+// N+1 query.
+func (r *CronRunner) ListJobs() ([]database.CronJob, error) {
+	var jobs []database.CronJob
+	if err := r.db.Preload("Channel.Integration").Order("name asc").Find(&jobs).Error; err != nil {
+		return nil, fmt.Errorf("list cron jobs: %w", err)
+	}
+	return jobs, nil
+}
+
+// GetJobByUUID resolves a CronJob by its public UUID handle. Returns
+// ErrCronJobNotFound when missing so handlers can return 404.
+func (r *CronRunner) GetJobByUUID(uuidStr string) (*database.CronJob, error) {
+	var job database.CronJob
+	err := r.db.Preload("Channel.Integration").Where("uuid = ?", uuidStr).First(&job).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrCronJobNotFound
+		}
+		return nil, fmt.Errorf("get cron job %s: %w", uuidStr, err)
+	}
+	return &job, nil
+}
+
+// CreateJob inserts a new CronJob row, registers it with the scheduler, and
+// returns the persisted row. Empty channelUUID is accepted; the runner falls
+// back to the workspace default at tick time.
+func (r *CronRunner) CreateJob(name, description, schedule, prompt string, mode database.CronJobMode, channelUUID string, enabled bool) (*database.CronJob, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("cron job name cannot be empty")
+	}
+	schedule = strings.TrimSpace(schedule)
+	if err := r.validateSchedule(schedule); err != nil {
+		return nil, err
+	}
+	if mode == "" {
+		mode = database.CronJobModeOneshot
+	}
+	if !database.IsValidCronJobMode(string(mode)) {
+		return nil, fmt.Errorf("invalid cron mode %q", mode)
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return nil, fmt.Errorf("cron job prompt cannot be empty")
+	}
+
+	var channelID *uint
+	if channelUUID != "" {
+		ch, err := r.channels.GetChannelByUUID(channelUUID)
+		if err != nil {
+			return nil, err
+		}
+		id := ch.ID
+		channelID = &id
+	}
+
+	row := &database.CronJob{
+		UUID:        uuid.New().String(),
+		Name:        name,
+		Description: description,
+		Schedule:    schedule,
+		Prompt:      prompt,
+		Mode:        mode,
+		ChannelID:   channelID,
+		Enabled:     enabled,
+	}
+	if err := r.db.Create(row).Error; err != nil {
+		return nil, fmt.Errorf("create cron job: %w", err)
+	}
+	if err := r.Reload(row.ID); err != nil {
+		slog.Warn("failed to schedule newly created cron job", "uuid", row.UUID, "err", err)
+	}
+	return r.GetJobByUUID(row.UUID)
+}
+
+// UpdateJob applies the supplied patch. Re-registers the scheduler entry so a
+// schedule change, channel change, or enable/disable takes effect on the next
+// firing without an API restart.
+func (r *CronRunner) UpdateJob(uuidStr string, patch CronJobUpdate) (*database.CronJob, error) {
+	job, err := r.GetJobByUUID(uuidStr)
+	if err != nil {
+		return nil, err
+	}
+
+	updates := map[string]interface{}{}
+	if patch.Name != nil {
+		trimmed := strings.TrimSpace(*patch.Name)
+		if trimmed == "" {
+			return nil, fmt.Errorf("cron job name cannot be empty")
+		}
+		updates["name"] = trimmed
+	}
+	if patch.Description != nil {
+		updates["description"] = *patch.Description
+	}
+	if patch.Schedule != nil {
+		schedule := strings.TrimSpace(*patch.Schedule)
+		if err := r.validateSchedule(schedule); err != nil {
+			return nil, err
+		}
+		updates["schedule"] = schedule
+	}
+	if patch.Prompt != nil {
+		if strings.TrimSpace(*patch.Prompt) == "" {
+			return nil, fmt.Errorf("cron job prompt cannot be empty")
+		}
+		updates["prompt"] = *patch.Prompt
+	}
+	if patch.Mode != nil {
+		if !database.IsValidCronJobMode(string(*patch.Mode)) {
+			return nil, fmt.Errorf("invalid cron mode %q", *patch.Mode)
+		}
+		updates["mode"] = *patch.Mode
+	}
+	if patch.ChannelUUID != nil {
+		if *patch.ChannelUUID == "" {
+			updates["channel_id"] = nil
+		} else {
+			ch, err := r.channels.GetChannelByUUID(*patch.ChannelUUID)
+			if err != nil {
+				return nil, err
+			}
+			updates["channel_id"] = ch.ID
+		}
+	}
+	if patch.Enabled != nil {
+		updates["enabled"] = *patch.Enabled
+	}
+	if len(updates) == 0 {
+		return job, nil
+	}
+	if err := r.db.Model(&database.CronJob{}).Where("id = ?", job.ID).Updates(updates).Error; err != nil {
+		return nil, fmt.Errorf("update cron job: %w", err)
+	}
+	if err := r.Reload(job.ID); err != nil {
+		slog.Warn("failed to reload cron job after update", "uuid", job.UUID, "err", err)
+	}
+	return r.GetJobByUUID(job.UUID)
+}
+
+// DeleteJob removes a CronJob row and unregisters its scheduler entry.
+func (r *CronRunner) DeleteJob(uuidStr string) error {
+	job, err := r.GetJobByUUID(uuidStr)
+	if err != nil {
+		return err
+	}
+	if err := r.db.Delete(&database.CronJob{}, job.ID).Error; err != nil {
+		return fmt.Errorf("delete cron job: %w", err)
+	}
+	if err := r.Reload(job.ID); err != nil {
+		slog.Warn("failed to unregister cron job after delete", "uuid", job.UUID, "err", err)
+	}
+	return nil
+}
+
+// validateSchedule parses spec against the runner's standard 5-field parser
+// and returns ErrInvalidCronSchedule when the parser rejects it. Surfaces the
+// parser's own message so operators see "Expected 5 fields, found 4" rather
+// than a generic "invalid".
+func (r *CronRunner) validateSchedule(spec string) error {
+	if spec == "" {
+		return fmt.Errorf("%w: schedule cannot be empty", ErrInvalidCronSchedule)
+	}
+	if _, err := r.parser.Parse(spec); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidCronSchedule, err)
+	}
+	return nil
+}
+
+// ensure CronRunner satisfies the CronJobManager interface so wiring
+// mismatches surface at compile-time.
+var _ CronJobManager = (*CronRunner)(nil)

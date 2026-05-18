@@ -136,13 +136,13 @@ Introduce a first-class Channel concept (under provider Integrations) that trigg
 - Create: `internal/services/cron_runner.go`, `internal/handlers/api_cron_jobs.go`
 - Modify: `internal/services/interfaces.go`, `internal/handlers/api.go`, `cmd/akmatori/main.go`, `go.mod`
 
-- [ ] add `github.com/robfig/cron/v3` to go.mod
-- [ ] implement `CronRunner` with `Start(ctx)` (loads enabled `CronJob` rows and registers each), `Reload(jobID)` (re-registers after CRUD), schedule validation at write-time, and `NextRunAt` computation
-- [ ] oneshot tick path: call `OneShotLLMCaller` with the cron's prompt, format the result, post to the cron's `Channel` via `ProviderRegistry`; update `LastRunAt`/`LastRunStatus`/`LastRunError`
-- [ ] CRUD endpoints: `GET/POST /api/cron-jobs`, `GET/PUT/DELETE /api/cron-jobs/{uuid}`, `POST /api/cron-jobs/{uuid}/run` (manual fire); validate cron expression at write time
-- [ ] wire `CronRunner.Start` in `cmd/akmatori/main.go` after DB + handlers, before HTTP listen; ensure shutdown cancels the runner
-- [ ] add tests: cron schedule validation rejects bad expressions; oneshot tick posts to the configured Channel; manual-fire endpoint returns success and runs the job; runner survives provider error and records `LastRunStatus=error`
-- [ ] run `make test` — must pass before Task 8
+- [x] add `github.com/robfig/cron/v3` to go.mod
+- [x] implement `CronRunner` with `Start(ctx)` (loads enabled `CronJob` rows and registers each), `Reload(jobID)` (re-registers after CRUD), schedule validation at write-time, and `NextRunAt` computation
+- [x] oneshot tick path: call `OneShotLLMCaller` with the cron's prompt, format the result, post to the cron's `Channel` via `ProviderRegistry`; update `LastRunAt`/`LastRunStatus`/`LastRunError`
+- [x] CRUD endpoints: `GET/POST /api/cron-jobs`, `GET/PUT/DELETE /api/cron-jobs/{uuid}`, `POST /api/cron-jobs/{uuid}/run` (manual fire); validate cron expression at write time
+- [x] wire `CronRunner.Start` in `cmd/akmatori/main.go` after DB + handlers, before HTTP listen; ensure shutdown cancels the runner
+- [x] add tests: cron schedule validation rejects bad expressions; oneshot tick posts to the configured Channel; manual-fire endpoint returns success and runs the job; runner survives provider error and records `LastRunStatus=error`
+- [x] run `make test` — must pass before Task 8
 
 ### Task 8: Cron agent mode
 
