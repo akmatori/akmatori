@@ -1,9 +1,12 @@
 package services
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 // --- AlertService Unit Tests (no database required) ---
@@ -14,6 +17,169 @@ func TestNewAlertService(t *testing.T) {
 	s := NewAlertService()
 	if s == nil {
 		t.Fatal("NewAlertService returned nil")
+	}
+}
+
+func setupAlertServiceDB(t *testing.T) *AlertService {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	if err := db.AutoMigrate(&database.AlertSourceType{}, &database.AlertSourceInstance{}); err != nil {
+		t.Fatalf("migrate alert source tables: %v", err)
+	}
+	database.DB = db
+	return NewAlertService()
+}
+
+func TestAlertService_InitializeDefaultSourceTypes_IdempotentAndUpdates(t *testing.T) {
+	service := setupAlertServiceDB(t)
+
+	if err := service.InitializeDefaultSourceTypes(); err != nil {
+		t.Fatalf("InitializeDefaultSourceTypes() first run: %v", err)
+	}
+
+	var count int64
+	if err := database.DB.Model(&database.AlertSourceType{}).Count(&count).Error; err != nil {
+		t.Fatalf("count source types: %v", err)
+	}
+	if count != 6 {
+		t.Fatalf("source type count after first run = %d, want 6", count)
+	}
+
+	if err := database.DB.Model(&database.AlertSourceType{}).
+		Where("name = ?", "alertmanager").
+		Updates(map[string]interface{}{
+			"display_name":          "stale name",
+			"webhook_secret_header": "X-Stale-Secret",
+		}).Error; err != nil {
+		t.Fatalf("seed stale source type fields: %v", err)
+	}
+
+	if err := service.InitializeDefaultSourceTypes(); err != nil {
+		t.Fatalf("InitializeDefaultSourceTypes() second run: %v", err)
+	}
+	if err := database.DB.Model(&database.AlertSourceType{}).Count(&count).Error; err != nil {
+		t.Fatalf("count source types after second run: %v", err)
+	}
+	if count != 6 {
+		t.Fatalf("source type count after second run = %d, want 6", count)
+	}
+
+	alertmanager, err := service.GetAlertSourceTypeByName("alertmanager")
+	if err != nil {
+		t.Fatalf("GetAlertSourceTypeByName(alertmanager): %v", err)
+	}
+	if alertmanager.DisplayName != "Prometheus Alertmanager" {
+		t.Errorf("display name = %q, want Prometheus Alertmanager", alertmanager.DisplayName)
+	}
+	if alertmanager.WebhookSecretHeader != "X-Alertmanager-Secret" {
+		t.Errorf("webhook secret header = %q, want X-Alertmanager-Secret", alertmanager.WebhookSecretHeader)
+	}
+	if got := alertmanager.DefaultFieldMappings["alert_name"]; got != "labels.alertname" {
+		t.Errorf("alertmanager alert_name mapping = %v, want labels.alertname", got)
+	}
+}
+
+func TestAlertService_InstanceCRUD(t *testing.T) {
+	service := setupAlertServiceDB(t)
+	sourceType, err := service.CreateAlertSourceType(
+		"custom_webhook",
+		"Custom Webhook",
+		"Receives custom webhook alerts",
+		database.JSONB{"alert_name": "title"},
+		"X-Custom-Secret",
+	)
+	if err != nil {
+		t.Fatalf("CreateAlertSourceType(): %v", err)
+	}
+
+	instance, err := service.CreateInstance(
+		"custom_webhook",
+		"Production custom webhook",
+		"Primary custom webhook source",
+		"secret-1",
+		database.JSONB{"severity": "priority"},
+		database.JSONB{"region": "eu"},
+	)
+	if err != nil {
+		t.Fatalf("CreateInstance(): %v", err)
+	}
+	if instance.UUID == "" {
+		t.Fatal("CreateInstance() returned empty UUID")
+	}
+	if instance.AlertSourceType.ID != sourceType.ID {
+		t.Fatalf("preloaded source type ID = %d, want %d", instance.AlertSourceType.ID, sourceType.ID)
+	}
+	if !instance.Enabled {
+		t.Fatal("new alert source instance should be enabled by default")
+	}
+
+	byUUID, err := service.GetInstanceByUUID(instance.UUID)
+	if err != nil {
+		t.Fatalf("GetInstanceByUUID(): %v", err)
+	}
+	if byUUID.Name != "Production custom webhook" {
+		t.Errorf("name by UUID = %q", byUUID.Name)
+	}
+	if byUUID.AlertSourceType.Name != "custom_webhook" {
+		t.Errorf("preloaded source type name = %q", byUUID.AlertSourceType.Name)
+	}
+
+	if err := service.UpdateInstanceByID(
+		instance.ID,
+		"Updated custom webhook",
+		"Updated description",
+		"secret-2",
+		database.JSONB{"alert_name": "payload.title"},
+		database.JSONB{"region": "us"},
+		false,
+	); err != nil {
+		t.Fatalf("UpdateInstanceByID(): %v", err)
+	}
+	updated, err := service.GetInstance(instance.ID)
+	if err != nil {
+		t.Fatalf("GetInstance() after update: %v", err)
+	}
+	if updated.Name != "Updated custom webhook" {
+		t.Errorf("updated name = %q", updated.Name)
+	}
+	if updated.Enabled {
+		t.Error("updated instance should be disabled")
+	}
+	if got := updated.FieldMappings["alert_name"]; got != "payload.title" {
+		t.Errorf("updated alert_name mapping = %v, want payload.title", got)
+	}
+
+	listed, err := service.ListInstances()
+	if err != nil {
+		t.Fatalf("ListInstances(): %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("ListInstances() length = %d, want 1", len(listed))
+	}
+	if listed[0].AlertSourceType.Name != "custom_webhook" {
+		t.Errorf("listed source type name = %q", listed[0].AlertSourceType.Name)
+	}
+
+	if err := service.DeleteInstanceByID(instance.ID); err != nil {
+		t.Fatalf("DeleteInstanceByID(): %v", err)
+	}
+	if _, err := service.GetInstance(instance.ID); err == nil {
+		t.Fatal("GetInstance() after delete returned nil error, want not found")
+	}
+}
+
+func TestAlertService_CreateInstance_MissingSourceType(t *testing.T) {
+	service := setupAlertServiceDB(t)
+
+	_, err := service.CreateInstance("missing", "Broken source", "", "secret", nil, nil)
+	if err == nil {
+		t.Fatal("CreateInstance() error = nil, want missing source type error")
+	}
+	if !strings.Contains(err.Error(), "alert source type not found: missing") {
+		t.Fatalf("CreateInstance() error = %q, want missing source type context", err)
 	}
 }
 
