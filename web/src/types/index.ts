@@ -251,6 +251,80 @@ export interface ScriptInfo {
   modified_at: string;
 }
 
+// Messaging integrations & channels
+
+export type MessagingProvider = 'slack' | 'telegram';
+
+export interface Integration {
+  id: number;
+  uuid: string;
+  provider: MessagingProvider;
+  name: string;
+  credentials: Record<string, any>;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateIntegrationRequest {
+  provider: MessagingProvider;
+  name: string;
+  credentials?: Record<string, any>;
+  enabled?: boolean;
+}
+
+export interface UpdateIntegrationRequest {
+  name?: string;
+  credentials?: Record<string, any>;
+  enabled?: boolean;
+}
+
+export interface Channel {
+  id: number;
+  uuid: string;
+  integration_id: number;
+  external_id: string;
+  display_name: string;
+  can_post: boolean;
+  can_listen: boolean;
+  is_default_post: boolean;
+  extraction_prompt: string;
+  process_human_messages: boolean;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  integration?: Integration;
+}
+
+export interface CreateChannelRequest {
+  integration_uuid: string;
+  external_id: string;
+  display_name?: string;
+  can_post: boolean;
+  can_listen: boolean;
+  is_default_post?: boolean;
+  extraction_prompt?: string;
+  process_human_messages?: boolean;
+  enabled?: boolean;
+}
+
+export interface UpdateChannelRequest {
+  external_id?: string;
+  display_name?: string;
+  can_post?: boolean;
+  can_listen?: boolean;
+  is_default_post?: boolean;
+  extraction_prompt?: string;
+  process_human_messages?: boolean;
+  enabled?: boolean;
+}
+
+export interface ListChannelsFilter {
+  integration_uuid?: string;
+  can_post?: boolean;
+  can_listen?: boolean;
+}
+
 // Alert Source Types (for webhook configuration)
 export interface AlertSourceType {
   id: number;
@@ -259,6 +333,7 @@ export interface AlertSourceType {
   description: string;
   default_field_mappings: Record<string, string>;
   webhook_secret_header: string;
+  deprecated?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -272,10 +347,12 @@ export interface AlertSourceInstance {
   webhook_secret: string;
   field_mappings: Record<string, string>;
   settings: Record<string, any>;
+  notification_channel_id?: number | null;
   enabled: boolean;
   created_at: string;
   updated_at: string;
   alert_source_type?: AlertSourceType;
+  notification_channel?: Channel | null;
 }
 
 export interface CreateAlertSourceRequest {
@@ -285,6 +362,7 @@ export interface CreateAlertSourceRequest {
   webhook_secret?: string;
   field_mappings?: Record<string, string>;
   settings?: Record<string, any>;
+  notification_channel_uuid?: string | null;
 }
 
 export interface UpdateAlertSourceRequest {
@@ -294,6 +372,7 @@ export interface UpdateAlertSourceRequest {
   field_mappings?: Record<string, string>;
   settings?: Record<string, any>;
   enabled?: boolean;
+  notification_channel_uuid?: string | null;
 }
 
 // SSH Keys (for SSH tool management)

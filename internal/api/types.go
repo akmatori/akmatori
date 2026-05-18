@@ -175,23 +175,30 @@ type UpdateFormattingSettingsRequest struct {
 // ========== Alert Source Types ==========
 
 // CreateAlertSourceRequest is the request body for POST /api/alert-sources.
+// NotificationChannelUUID is optional; when set, the alert source routes
+// outbound posts to the referenced Channel instead of the provider default.
 type CreateAlertSourceRequest struct {
-	SourceTypeName string         `json:"source_type_name" validate:"required"`
-	Name           string         `json:"name" validate:"required,min=1"`
-	Description    string         `json:"description"`
-	WebhookSecret  string         `json:"webhook_secret"`
-	FieldMappings  database.JSONB `json:"field_mappings"`
-	Settings       database.JSONB `json:"settings"`
+	SourceTypeName          string         `json:"source_type_name" validate:"required"`
+	Name                    string         `json:"name" validate:"required,min=1"`
+	Description             string         `json:"description"`
+	WebhookSecret           string         `json:"webhook_secret"`
+	FieldMappings           database.JSONB `json:"field_mappings"`
+	Settings                database.JSONB `json:"settings"`
+	NotificationChannelUUID *string        `json:"notification_channel_uuid"`
 }
 
 // UpdateAlertSourceRequest is the request body for PUT /api/alert-sources/:uuid.
+// NotificationChannelUUID is a tri-state: omitted = no change, empty string or
+// JSON null = clear the existing routing override (revert to default), non-empty
+// = set to that Channel UUID.
 type UpdateAlertSourceRequest struct {
-	Name          *string         `json:"name"`
-	Description   *string         `json:"description"`
-	WebhookSecret *string         `json:"webhook_secret"`
-	FieldMappings *database.JSONB `json:"field_mappings"`
-	Settings      *database.JSONB `json:"settings"`
-	Enabled       *bool           `json:"enabled"`
+	Name                    *string         `json:"name"`
+	Description             *string         `json:"description"`
+	WebhookSecret           *string         `json:"webhook_secret"`
+	FieldMappings           *database.JSONB `json:"field_mappings"`
+	Settings                *database.JSONB `json:"settings"`
+	Enabled                 *bool           `json:"enabled"`
+	NotificationChannelUUID *string         `json:"notification_channel_uuid"`
 }
 
 // ========== Context Types ==========

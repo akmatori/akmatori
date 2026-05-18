@@ -110,13 +110,13 @@ Introduce a first-class Channel concept (under provider Integrations) that trigg
 - Create: `web/src/components/settings/IntegrationsManager.tsx`, `web/src/components/channels/ChannelsManager.tsx`, `web/src/components/channels/ChannelPicker.tsx`
 - Modify: `web/src/components/alerts/AlertSourceForm.tsx`, `web/src/components/settings/SlackSettingsSection.tsx` (collapse into Integrations), router config
 
-- [ ] build `IntegrationsManager` with "Add Slack" enabled and "Add Telegram" disabled with a "coming soon" tooltip; credentials form per provider
-- [ ] build `ChannelsManager` cross-provider table with role chips (post/listen/default badges); add/edit form with provider picker + `external_id` input
-- [ ] build `ChannelPicker` dropdown filtered by `can_post=true`, showing provider icon + display name
-- [ ] update `AlertSourceForm`: drop the `slack_channel`-specific branch; add `ChannelPicker` bound to `notification_channel_id`; leave webhook-source types unchanged
-- [ ] add routes `/settings/integrations`, `/settings/channels`; `/settings/slack` redirects to `/settings/integrations`
-- [ ] add vitest tests for `ChannelPicker` (filters, defaults), `ChannelsManager` (role chips render correctly), and the migrated `AlertSourceForm`
-- [ ] run `make test-web` — must pass before Task 6
+- [x] build `IntegrationsManager` with "Add Slack" enabled and "Add Telegram" disabled with a "coming soon" tooltip; credentials form per provider
+- [x] build `ChannelsManager` cross-provider table with role chips (post/listen/default badges); add/edit form with provider picker + `external_id` input
+- [x] build `ChannelPicker` dropdown filtered by `can_post=true`, showing provider icon + display name
+- [x] update `AlertSourceForm`: drop the `slack_channel`-specific branch; add `ChannelPicker` bound to `notification_channel_id`; leave webhook-source types unchanged
+- [x] add routes `/settings/integrations`, `/settings/channels`; `/settings/slack` redirects to `/settings/integrations`
+- [x] add vitest tests for `ChannelPicker` (filters, defaults), `ChannelsManager` (role chips render correctly), and the migrated `AlertSourceForm`
+- [x] run `make test-web` — must pass before Task 6
 
 ### Task 6: Inbound listener migration
 

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -13,6 +13,8 @@ import Tools from './pages/Tools';
 import ContextFiles from './pages/ContextFiles';
 import Runbooks from './pages/Runbooks';
 import Settings from './pages/Settings';
+import IntegrationsPage from './pages/IntegrationsPage';
+import ChannelsPage from './pages/ChannelsPage';
 
 function App() {
   return (
@@ -35,6 +37,9 @@ function App() {
                       <Route path="/tools" element={<Tools />} />
                       <Route path="/context" element={<ContextFiles />} />
                       <Route path="/runbooks" element={<Runbooks />} />
+                      <Route path="/settings/integrations" element={<IntegrationsPage />} />
+                      <Route path="/settings/channels" element={<ChannelsPage />} />
+                      <Route path="/settings/slack" element={<Navigate to="/settings/integrations" replace />} />
                       <Route path="/settings" element={<Settings />} />
                     </Routes>
                   </Layout>

@@ -5,6 +5,13 @@ import type {
   Incident,
   SlackSettings,
   SlackSettingsUpdate,
+  Integration,
+  CreateIntegrationRequest,
+  UpdateIntegrationRequest,
+  Channel,
+  CreateChannelRequest,
+  UpdateChannelRequest,
+  ListChannelsFilter,
   LLMConfig,
   LLMSettingsListResponse,
   CreateLLMConfigRequest,
@@ -422,6 +429,61 @@ export const scriptsApi = {
   // Delete all scripts
   deleteAll: (skillName: string) =>
     fetchApi<{ message: string; skill_name: string }>(`/api/skills/${encodeURIComponent(skillName)}/scripts`, {
+      method: 'DELETE',
+    }),
+};
+
+// Integrations API
+export const integrationsApi = {
+  list: () => fetchApi<Integration[]>('/api/integrations'),
+
+  get: (uuid: string) => fetchApi<Integration>(`/api/integrations/${uuid}`),
+
+  create: (data: CreateIntegrationRequest) =>
+    fetchApi<Integration>('/api/integrations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (uuid: string, data: UpdateIntegrationRequest) =>
+    fetchApi<Integration>(`/api/integrations/${uuid}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (uuid: string) =>
+    fetchApi<void>(`/api/integrations/${uuid}`, {
+      method: 'DELETE',
+    }),
+};
+
+// Channels API
+export const channelsApi = {
+  list: (filter?: ListChannelsFilter) => {
+    const params = new URLSearchParams();
+    if (filter?.integration_uuid) params.set('integration_uuid', filter.integration_uuid);
+    if (filter?.can_post !== undefined) params.set('can_post', String(filter.can_post));
+    if (filter?.can_listen !== undefined) params.set('can_listen', String(filter.can_listen));
+    const qs = params.toString();
+    return fetchApi<Channel[]>(`/api/channels${qs ? `?${qs}` : ''}`);
+  },
+
+  get: (uuid: string) => fetchApi<Channel>(`/api/channels/${uuid}`),
+
+  create: (data: CreateChannelRequest) =>
+    fetchApi<Channel>('/api/channels', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (uuid: string, data: UpdateChannelRequest) =>
+    fetchApi<Channel>(`/api/channels/${uuid}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (uuid: string) =>
+    fetchApi<void>(`/api/channels/${uuid}`, {
       method: 'DELETE',
     }),
 };

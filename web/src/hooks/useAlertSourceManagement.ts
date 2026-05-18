@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { alertSourceTypesApi, alertSourcesApi } from '../api/client';
-import type { AlertSourceType, AlertSourceInstance } from '../types';
+import { alertSourceTypesApi, alertSourcesApi, channelsApi } from '../api/client';
+import type { AlertSourceType, AlertSourceInstance, Channel } from '../types';
+import { visibleAlertSourceTypes } from '../components/alerts/alertSourceHelpers';
 
 interface AlertSourceFormData {
   source_type_name: string;
@@ -9,6 +10,7 @@ interface AlertSourceFormData {
   webhook_secret: string;
   field_mappings: Record<string, string>;
   settings: Record<string, any>;
+  notification_channel_uuid: string | null;
   enabled: boolean;
 }
 
@@ -19,12 +21,14 @@ const EMPTY_FORM: AlertSourceFormData = {
   webhook_secret: '',
   field_mappings: {},
   settings: {},
+  notification_channel_uuid: null,
   enabled: true,
 };
 
 export function useAlertSourceManagement() {
   const [sources, setSources] = useState<AlertSourceInstance[]>([]);
   const [sourceTypes, setSourceTypes] = useState<AlertSourceType[]>([]);
+  const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [editingSource, setEditingSource] = useState<AlertSourceInstance | null>(null);
@@ -37,12 +41,14 @@ export function useAlertSourceManagement() {
     try {
       setLoading(true);
       setError('');
-      const [sourcesData, typesData] = await Promise.all([
+      const [sourcesData, typesData, channelsData] = await Promise.all([
         alertSourcesApi.list(),
         alertSourceTypesApi.list(),
+        channelsApi.list().catch(() => [] as Channel[]),
       ]);
       setSources(sourcesData);
       setSourceTypes(typesData);
+      setChannels(channelsData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
     } finally {
@@ -54,28 +60,38 @@ export function useAlertSourceManagement() {
     loadData();
   }, [loadData]);
 
+  const channelUUIDByID = useCallback(
+    (id: number | null | undefined) => {
+      if (!id) return null;
+      return channels.find((c) => c.id === id)?.uuid ?? null;
+    },
+    [channels],
+  );
+
   const handleCreate = useCallback(() => {
     setIsCreating(true);
-    setFormData({
-      ...EMPTY_FORM,
-      source_type_name: sourceTypes[0]?.name || '',
-    });
+    const firstType = visibleAlertSourceTypes(sourceTypes)[0]?.name ?? '';
+    setFormData({ ...EMPTY_FORM, source_type_name: firstType });
     setEditingSource(null);
   }, [sourceTypes]);
 
-  const handleEdit = useCallback((source: AlertSourceInstance) => {
-    setEditingSource(source);
-    setFormData({
-      source_type_name: source.alert_source_type?.name || '',
-      name: source.name,
-      description: source.description,
-      webhook_secret: source.webhook_secret,
-      field_mappings: source.field_mappings || {},
-      settings: source.settings || {},
-      enabled: source.enabled,
-    });
-    setIsCreating(false);
-  }, []);
+  const handleEdit = useCallback(
+    (source: AlertSourceInstance) => {
+      setEditingSource(source);
+      setFormData({
+        source_type_name: source.alert_source_type?.name || '',
+        name: source.name,
+        description: source.description,
+        webhook_secret: source.webhook_secret,
+        field_mappings: source.field_mappings || {},
+        settings: source.settings || {},
+        notification_channel_uuid: channelUUIDByID(source.notification_channel_id ?? null),
+        enabled: source.enabled,
+      });
+      setIsCreating(false);
+    },
+    [channelUUIDByID],
+  );
 
   const handleSave = useCallback(async () => {
     try {
@@ -86,14 +102,6 @@ export function useAlertSourceManagement() {
         return;
       }
 
-      if (formData.source_type_name === 'slack_channel') {
-        const channelId = formData.settings?.slack_channel_id as string;
-        if (!channelId?.trim()) {
-          setError('Slack Channel ID is required');
-          return;
-        }
-      }
-
       if (isCreating) {
         await alertSourcesApi.create({
           source_type_name: formData.source_type_name,
@@ -102,6 +110,7 @@ export function useAlertSourceManagement() {
           webhook_secret: formData.webhook_secret,
           field_mappings: formData.field_mappings,
           settings: formData.settings,
+          notification_channel_uuid: formData.notification_channel_uuid,
         });
       } else if (editingSource) {
         await alertSourcesApi.update(editingSource.uuid, {
@@ -111,6 +120,7 @@ export function useAlertSourceManagement() {
           field_mappings: formData.field_mappings,
           settings: formData.settings,
           enabled: formData.enabled,
+          notification_channel_uuid: formData.notification_channel_uuid ?? '',
         });
       }
 
@@ -123,17 +133,20 @@ export function useAlertSourceManagement() {
     }
   }, [formData, isCreating, editingSource, loadData]);
 
-  const handleDelete = useCallback(async (uuid: string) => {
-    if (!confirm('Are you sure you want to delete this alert source?')) return;
+  const handleDelete = useCallback(
+    async (uuid: string) => {
+      if (!confirm('Are you sure you want to delete this alert source?')) return;
 
-    try {
-      setError('');
-      await alertSourcesApi.delete(uuid);
-      loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete alert source');
-    }
-  }, [loadData]);
+      try {
+        setError('');
+        await alertSourcesApi.delete(uuid);
+        loadData();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to delete alert source');
+      }
+    },
+    [loadData],
+  );
 
   const handleCancel = useCallback(() => {
     setIsCreating(false);
@@ -142,7 +155,7 @@ export function useAlertSourceManagement() {
   }, []);
 
   const toggleExpand = useCallback((uuid: string) => {
-    setExpandedSource(prev => prev === uuid ? null : uuid);
+    setExpandedSource((prev) => (prev === uuid ? null : uuid));
   }, []);
 
   const copyWebhookUrl = useCallback(async (uuid: string) => {
@@ -161,6 +174,7 @@ export function useAlertSourceManagement() {
   return {
     sources,
     sourceTypes,
+    channels,
     loading,
     error,
     editingSource,

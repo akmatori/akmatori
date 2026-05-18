@@ -1,11 +1,40 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/akmatori/akmatori/internal/api"
+	"github.com/akmatori/akmatori/internal/services"
 )
+
+// alertChannelErr carries an HTTP status + user-facing message produced when
+// resolving a notification_channel_uuid; keeping the pair together avoids
+// scattering status decisions across multiple call sites.
+type alertChannelErr struct {
+	status int
+	msg    string
+}
+
+// resolveNotificationChannel looks up a Channel by its public UUID and returns
+// its primary key for use in the alert source's notification_channel_id FK.
+// Missing channel surfaces as 400 (operator-visible validation), missing
+// channel service surfaces as 503 (server misconfiguration).
+func (h *APIHandler) resolveNotificationChannel(uuidStr string) (*uint, *alertChannelErr) {
+	if h.channelService == nil {
+		return nil, &alertChannelErr{status: http.StatusServiceUnavailable, msg: "Channel service is not configured"}
+	}
+	ch, err := h.channelService.GetChannelByUUID(strings.TrimSpace(uuidStr))
+	if err != nil {
+		if errors.Is(err, services.ErrChannelNotFound) {
+			return nil, &alertChannelErr{status: http.StatusBadRequest, msg: "notification_channel_uuid does not match any channel"}
+		}
+		return nil, &alertChannelErr{status: http.StatusInternalServerError, msg: "Failed to resolve notification channel"}
+	}
+	id := ch.ID
+	return &id, nil
+}
 
 // isDuplicateNameErr reports whether err is a database unique-constraint
 // violation on the alert source name. Both Postgres (GORM) and SQLite
@@ -73,6 +102,18 @@ func (h *APIHandler) handleAlertSources(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 
+		// Resolve optional notification_channel_uuid up-front so we can
+		// reject unknown channel UUIDs without creating the alert source.
+		var notifChannelID *uint
+		if req.NotificationChannelUUID != nil && strings.TrimSpace(*req.NotificationChannelUUID) != "" {
+			id, herr := h.resolveNotificationChannel(*req.NotificationChannelUUID)
+			if herr != nil {
+				api.RespondError(w, herr.status, herr.msg)
+				return
+			}
+			notifChannelID = id
+		}
+
 		instance, err := h.alertService.CreateInstance(req.SourceTypeName, req.Name, req.Description, req.WebhookSecret, req.FieldMappings, req.Settings)
 		if err != nil {
 			if isDuplicateNameErr(err) {
@@ -81,6 +122,18 @@ func (h *APIHandler) handleAlertSources(w http.ResponseWriter, r *http.Request) 
 			}
 			api.RespondError(w, http.StatusInternalServerError, "Failed to create alert source")
 			return
+		}
+
+		if notifChannelID != nil {
+			if err := h.alertService.UpdateInstance(instance.UUID, map[string]interface{}{
+				"notification_channel_id": *notifChannelID,
+			}); err != nil {
+				api.RespondError(w, http.StatusInternalServerError, "Failed to set notification channel")
+				return
+			}
+			if refreshed, gerr := h.alertService.GetInstanceByUUID(instance.UUID); gerr == nil {
+				instance = refreshed
+			}
 		}
 
 		api.RespondJSON(w, http.StatusCreated, instance)
@@ -148,6 +201,23 @@ func (h *APIHandler) handleAlertSourceByUUID(w http.ResponseWriter, r *http.Requ
 					api.RespondError(w, http.StatusBadRequest, "slack_channel_id is required in settings for slack_channel source type")
 					return
 				}
+			}
+		}
+
+		// notification_channel_uuid is tri-state: omitted (nil pointer) leaves
+		// the existing FK untouched; explicit empty string clears it; a valid
+		// UUID resolves to a Channel and sets it.
+		if req.NotificationChannelUUID != nil {
+			trimmed := strings.TrimSpace(*req.NotificationChannelUUID)
+			if trimmed == "" {
+				updates["notification_channel_id"] = nil
+			} else {
+				id, herr := h.resolveNotificationChannel(trimmed)
+				if herr != nil {
+					api.RespondError(w, herr.status, herr.msg)
+					return
+				}
+				updates["notification_channel_id"] = *id
 			}
 		}
 
