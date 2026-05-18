@@ -151,7 +151,10 @@ type AgentWSHandler struct {
 	pendingOneshotMu sync.Mutex
 }
 
-// IncidentCallback is called when an incident receives updates.
+// IncidentCallback is re-exported from services so handler code that
+// referenced it before the lift continues to compile unchanged. The canonical
+// definition (and the IncidentRunner interface that consumes it) lives in
+// internal/services/llm_settings.go.
 //
 // OnSuperseded fires when a newer StartIncident/ContinueIncident displaces
 // this callback for the same incident_id (e.g. a second Slack message lands
@@ -161,12 +164,7 @@ type AgentWSHandler struct {
 // exit silently rather than commit a failure that races the replacement's
 // success. When OnSuperseded is nil, sendIncidentMessage falls back to
 // firing OnError with ErrIncidentSuperseded so legacy callers still unblock.
-type IncidentCallback struct {
-	OnOutput     func(output string)
-	OnCompleted  func(sessionID, response string, tokensUsed int, executionTimeMs int64)
-	OnError      func(errorMsg string)
-	OnSuperseded func()
-}
+type IncidentCallback = services.IncidentCallback
 
 // NewAgentWSHandler creates a new agent WebSocket handler
 func NewAgentWSHandler() *AgentWSHandler {

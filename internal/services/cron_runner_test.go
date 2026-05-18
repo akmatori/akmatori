@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -174,6 +175,168 @@ func (f *fakeProviderRegistry) List() []database.MessagingProvider {
 	return []database.MessagingProvider{database.MessagingProviderSlack}
 }
 
+// fakeSkillIncidentManager is the test double for SkillIncidentManager.
+// Only the methods exercised by the cron agent path are implemented; the rest
+// panic so a stray call from new code fails the test loudly. The handler
+// surface records SpawnIncidentManager calls so tests can assert the cron
+// path stamps source_kind=cron/source_uuid=<job.uuid> on the Incident row.
+type fakeSkillIncidentManager struct {
+	spawnCalls       []IncidentContext
+	spawnIncidentID  string
+	spawnErr         error
+	updateStatusErr  error
+	updateCompleteErr error
+
+	mu              sync.Mutex
+	updates         []fakeIncidentUpdate
+	enabledSkills   []string
+	toolAllowlist   []ToolAllowlistEntry
+}
+
+type fakeIncidentUpdate struct {
+	uuid     string
+	status   database.IncidentStatus
+	response string
+	fullLog  string
+}
+
+func (f *fakeSkillIncidentManager) SpawnIncidentManager(ctx *IncidentContext) (string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.spawnErr != nil {
+		return "", "", f.spawnErr
+	}
+	if ctx != nil {
+		f.spawnCalls = append(f.spawnCalls, *ctx)
+	}
+	if f.spawnIncidentID == "" {
+		f.spawnIncidentID = "test-incident-uuid"
+	}
+	return f.spawnIncidentID, "/tmp/" + f.spawnIncidentID, nil
+}
+func (f *fakeSkillIncidentManager) UpdateIncidentStatus(uuid string, status database.IncidentStatus, _ string, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updates = append(f.updates, fakeIncidentUpdate{uuid: uuid, status: status})
+	return f.updateStatusErr
+}
+func (f *fakeSkillIncidentManager) UpdateIncidentComplete(uuid string, status database.IncidentStatus, _ string, fullLog string, response string, _ int, _ int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updates = append(f.updates, fakeIncidentUpdate{uuid: uuid, status: status, response: response, fullLog: fullLog})
+	return f.updateCompleteErr
+}
+func (f *fakeSkillIncidentManager) UpdateIncidentLog(string, string) error    { return nil }
+func (f *fakeSkillIncidentManager) GetIncident(string) (*database.Incident, error) { return nil, nil }
+func (f *fakeSkillIncidentManager) AppendSubagentLog(string, string, string) error { return nil }
+
+func (f *fakeSkillIncidentManager) CreateSkill(string, string, string, string) (*database.Skill, error) {
+	panic("not implemented")
+}
+func (f *fakeSkillIncidentManager) UpdateSkill(string, string, string, bool) (*database.Skill, error) {
+	panic("not implemented")
+}
+func (f *fakeSkillIncidentManager) DeleteSkill(string) error              { panic("not implemented") }
+func (f *fakeSkillIncidentManager) ListSkills() ([]database.Skill, error) { panic("not implemented") }
+func (f *fakeSkillIncidentManager) ListEnabledSkills() ([]database.Skill, error) {
+	panic("not implemented")
+}
+func (f *fakeSkillIncidentManager) GetEnabledSkillNames() []string { return f.enabledSkills }
+func (f *fakeSkillIncidentManager) GetToolAllowlist() []ToolAllowlistEntry {
+	return f.toolAllowlist
+}
+func (f *fakeSkillIncidentManager) GetSkill(string) (*database.Skill, error)  { panic("not implemented") }
+func (f *fakeSkillIncidentManager) AssignTools(string, []uint) error          { panic("not implemented") }
+func (f *fakeSkillIncidentManager) GetSkillDir(string) string                 { panic("not implemented") }
+func (f *fakeSkillIncidentManager) GetSkillScriptsDir(string) string          { panic("not implemented") }
+func (f *fakeSkillIncidentManager) GetSkillPrompt(string) (string, error)     { panic("not implemented") }
+func (f *fakeSkillIncidentManager) UpdateSkillPrompt(string, string) error    { panic("not implemented") }
+func (f *fakeSkillIncidentManager) RegenerateSkillMd(string) error            { panic("not implemented") }
+func (f *fakeSkillIncidentManager) SyncSkillsFromFilesystem() error           { panic("not implemented") }
+func (f *fakeSkillIncidentManager) ListSkillScripts(string) ([]string, error) { panic("not implemented") }
+func (f *fakeSkillIncidentManager) ClearSkillScripts(string) error            { panic("not implemented") }
+func (f *fakeSkillIncidentManager) GetSkillScript(string, string) (*ScriptInfo, error) {
+	panic("not implemented")
+}
+func (f *fakeSkillIncidentManager) UpdateSkillScript(string, string, string) error {
+	panic("not implemented")
+}
+func (f *fakeSkillIncidentManager) DeleteSkillScript(string, string) error { panic("not implemented") }
+
+// fakeIncidentRunner drives the cron agent path deterministically: tests
+// configure how StartIncident responds (success/error/superseded), and the
+// fake fires the corresponding callback synchronously so the cron runner's
+// done channel closes without spinning up a real worker WebSocket.
+type fakeIncidentRunner struct {
+	mu           sync.Mutex
+	connected    bool
+	startCalls   []fakeStartCall
+	startErr     error
+	releaseFalse bool
+	// behavior controls what the runner does after StartIncident registers
+	// the callback. Default: invoke OnCompleted with a canned response.
+	behavior func(callback IncidentCallback)
+}
+
+type fakeStartCall struct {
+	incidentID string
+	task       string
+	llm        *LLMSettingsForWorker
+	skills     []string
+	tools      []ToolAllowlistEntry
+	runID      string
+}
+
+func newFakeIncidentRunner() *fakeIncidentRunner {
+	return &fakeIncidentRunner{
+		connected: true,
+		behavior: func(cb IncidentCallback) {
+			if cb.OnOutput != nil {
+				cb.OnOutput("streaming output\n")
+			}
+			if cb.OnCompleted != nil {
+				cb.OnCompleted("session-1", "Final cron summary", 42, 1234)
+			}
+		},
+	}
+}
+
+func (f *fakeIncidentRunner) IsWorkerConnected() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.connected
+}
+
+func (f *fakeIncidentRunner) StartIncident(incidentID, task string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []ToolAllowlistEntry, callback IncidentCallback) (string, error) {
+	f.mu.Lock()
+	if f.startErr != nil {
+		err := f.startErr
+		f.mu.Unlock()
+		return "", err
+	}
+	runID := fmt.Sprintf("run-%d", len(f.startCalls)+1)
+	f.startCalls = append(f.startCalls, fakeStartCall{
+		incidentID: incidentID,
+		task:       task,
+		llm:        llm,
+		skills:     enabledSkills,
+		tools:      toolAllowlist,
+		runID:      runID,
+	})
+	behavior := f.behavior
+	f.mu.Unlock()
+	if behavior != nil {
+		behavior(callback)
+	}
+	return runID, nil
+}
+
+func (f *fakeIncidentRunner) ReleaseRun(string, string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.releaseFalse
+}
+
 // ===== setup =====
 
 func setupCronRunnerTest(t *testing.T) (*CronRunner, *gorm.DB, *fakeScheduler, *recordingChannelManager, *recordingProvider) {
@@ -232,8 +395,10 @@ func setupCronRunnerTest(t *testing.T) (*CronRunner, *gorm.DB, *fakeScheduler, *
 	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
 		return "ok response", nil
 	}}
+	skills := &fakeSkillIncidentManager{}
+	agentRunner := newFakeIncidentRunner()
 
-	runner := newCronRunnerWithDeps(db, chMgr, reg, caller, sched)
+	runner := newCronRunnerWithDeps(db, chMgr, reg, caller, skills, agentRunner, sched)
 	return runner, db, sched, chMgr, prov
 }
 
@@ -455,10 +620,90 @@ func TestCronRunner_OneshotTick_RecordsLLMError(t *testing.T) {
 	}
 }
 
-func TestCronRunner_OneshotTick_AgentModeMarksError(t *testing.T) {
-	runner, db, _, chMgr, _ := setupCronRunnerTest(t)
+// ===== agent tick =====
+
+// TestCronRunner_AgentTick_SpawnsIncidentWithCronProvenance verifies the cron
+// agent path stamps source_kind="cron" + source_uuid=<job.uuid> on the
+// Incident row so the UI can link an investigation back to the scheduled job
+// that triggered it.
+func TestCronRunner_AgentTick_SpawnsIncidentWithCronProvenance(t *testing.T) {
+	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("status", "", "*/2 * * * *", "Investigate", database.CronJobModeAgent, chUUID, true)
+	skills := runner.skills.(*fakeSkillIncidentManager)
+
+	job, err := runner.CreateJob("daily report", "", "*/2 * * * *", "Investigate disks", database.CronJobModeAgent, chUUID, true)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := runner.RunNow(job.UUID); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if len(skills.spawnCalls) != 1 {
+		t.Fatalf("expected one SpawnIncidentManager call, got %d", len(skills.spawnCalls))
+	}
+	spawn := skills.spawnCalls[0]
+	if spawn.SourceKind != database.IncidentSourceKindCron {
+		t.Errorf("source_kind = %q, want %q", spawn.SourceKind, database.IncidentSourceKindCron)
+	}
+	if spawn.SourceUUID != job.UUID {
+		t.Errorf("source_uuid = %q, want %q", spawn.SourceUUID, job.UUID)
+	}
+	if spawn.Source != "cron" {
+		t.Errorf("source = %q, want cron", spawn.Source)
+	}
+}
+
+// TestCronRunner_AgentTick_PostsFinalSummaryToChannel verifies the agent path
+// posts the agent's final response to the cron's Channel and records
+// LastRunStatus=ok.
+func TestCronRunner_AgentTick_PostsFinalSummaryToChannel(t *testing.T) {
+	runner, db, _, chMgr, prov := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+
+	job, err := runner.CreateJob("morning report", "", "*/2 * * * *", "Summarize incidents", database.CronJobModeAgent, chUUID, true)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := runner.RunNow(job.UUID); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	prov.mu.Lock()
+	posts := append([]recordedPost(nil), prov.posts...)
+	prov.mu.Unlock()
+
+	if len(posts) != 1 {
+		t.Fatalf("expected one PostMessage call, got %d", len(posts))
+	}
+	if posts[0].channel.UUID != chUUID {
+		t.Errorf("post landed on wrong channel: %s", posts[0].channel.UUID)
+	}
+	if !contains(posts[0].text, "Final cron summary") {
+		t.Errorf("post body missing agent response: %q", posts[0].text)
+	}
+	if !contains(posts[0].text, "morning report") {
+		t.Errorf("post body missing cron name header: %q", posts[0].text)
+	}
+
+	var got database.CronJob
+	if err := db.First(&got, "uuid = ?", job.UUID).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.LastRunStatus != database.CronJobRunStatusOK {
+		t.Errorf("LastRunStatus = %q, want ok", got.LastRunStatus)
+	}
+}
+
+// TestCronRunner_AgentTick_RecordsWorkerNotConnected verifies a tick fired
+// while the agent worker is offline records LastRunStatus=error without
+// crashing the runner.
+func TestCronRunner_AgentTick_RecordsWorkerNotConnected(t *testing.T) {
+	runner, db, _, chMgr, prov := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	runner.runner.(*fakeIncidentRunner).connected = false
+
+	job, err := runner.CreateJob("morning report", "", "*/2 * * * *", "Summarize incidents", database.CronJobModeAgent, chUUID, true)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -471,7 +716,113 @@ func TestCronRunner_OneshotTick_AgentModeMarksError(t *testing.T) {
 		t.Fatalf("reload: %v", err)
 	}
 	if got.LastRunStatus != database.CronJobRunStatusError {
-		t.Errorf("LastRunStatus = %q, want error (agent mode pending Task 8)", got.LastRunStatus)
+		t.Errorf("LastRunStatus = %q, want error", got.LastRunStatus)
+	}
+	if !contains(got.LastRunError, "worker not connected") {
+		t.Errorf("LastRunError = %q, want worker-disconnect message", got.LastRunError)
+	}
+	prov.mu.Lock()
+	defer prov.mu.Unlock()
+	if len(prov.posts) != 0 {
+		t.Errorf("expected no posts when worker offline, got %d", len(prov.posts))
+	}
+}
+
+// TestCronRunner_AgentTick_RecordsAgentError verifies a failing agent run
+// (OnError callback) records LastRunStatus=error, surfaces the error into
+// the channel message, and does not crash the runner.
+func TestCronRunner_AgentTick_RecordsAgentError(t *testing.T) {
+	runner, db, _, chMgr, prov := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	runner.runner.(*fakeIncidentRunner).behavior = func(cb IncidentCallback) {
+		if cb.OnError != nil {
+			cb.OnError("agent crashed mid-investigation")
+		}
+	}
+
+	job, err := runner.CreateJob("morning report", "", "*/2 * * * *", "Investigate", database.CronJobModeAgent, chUUID, true)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := runner.RunNow(job.UUID); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	var got database.CronJob
+	if err := db.First(&got, "uuid = ?", job.UUID).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.LastRunStatus != database.CronJobRunStatusError {
+		t.Errorf("LastRunStatus = %q, want error", got.LastRunStatus)
+	}
+	if !contains(got.LastRunError, "agent crashed") {
+		t.Errorf("LastRunError = %q, want agent error captured", got.LastRunError)
+	}
+
+	prov.mu.Lock()
+	defer prov.mu.Unlock()
+	if len(prov.posts) != 1 {
+		t.Fatalf("expected one channel post (failure surfaced to channel), got %d", len(prov.posts))
+	}
+	if !contains(prov.posts[0].text, "Investigation failed") {
+		t.Errorf("post body missing failure header: %q", prov.posts[0].text)
+	}
+}
+
+// TestCronRunner_AgentTick_RecordsStartIncidentError verifies that a failed
+// StartIncident (e.g. transport write error) records LastRunStatus=error and
+// does not deadlock waiting for callbacks.
+func TestCronRunner_AgentTick_RecordsStartIncidentError(t *testing.T) {
+	runner, db, _, chMgr, _ := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	runner.runner.(*fakeIncidentRunner).startErr = errors.New("transport closed")
+
+	job, err := runner.CreateJob("morning report", "", "*/2 * * * *", "Investigate", database.CronJobModeAgent, chUUID, true)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := runner.RunNow(job.UUID); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	var got database.CronJob
+	if err := db.First(&got, "uuid = ?", job.UUID).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.LastRunStatus != database.CronJobRunStatusError {
+		t.Errorf("LastRunStatus = %q, want error", got.LastRunStatus)
+	}
+	if !contains(got.LastRunError, "transport closed") {
+		t.Errorf("LastRunError = %q, want StartIncident failure captured", got.LastRunError)
+	}
+}
+
+// TestCronRunner_AgentTick_MissingWiringMarksError verifies a cron runner
+// constructed without skill/runner wiring (e.g. early startup) records a
+// clean error rather than crashing.
+func TestCronRunner_AgentTick_MissingWiringMarksError(t *testing.T) {
+	runner, db, _, chMgr, _ := setupCronRunnerTest(t)
+	runner.skills = nil
+	runner.runner = nil
+	chUUID := chMgr.channels[0].UUID
+
+	job, err := runner.CreateJob("morning report", "", "*/2 * * * *", "Investigate", database.CronJobModeAgent, chUUID, true)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := runner.RunNow(job.UUID); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	var got database.CronJob
+	if err := db.First(&got, "uuid = ?", job.UUID).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.LastRunStatus != database.CronJobRunStatusError {
+		t.Errorf("LastRunStatus = %q, want error", got.LastRunStatus)
+	}
+	if !contains(got.LastRunError, "agent runner wiring") {
+		t.Errorf("LastRunError = %q, want wiring-missing message", got.LastRunError)
 	}
 }
 

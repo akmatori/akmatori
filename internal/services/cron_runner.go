@@ -67,12 +67,17 @@ type cronScheduler interface {
 // the tick path can resolve channels at fire time (operators may rename or
 // reassign channels while the runner is live). The OneShotLLMCaller is the
 // same worker-backed helper used by TitleGenerator / FeedbackClassifier; nil
-// means oneshot ticks fall back to a deterministic error string.
+// means oneshot ticks fall back to a deterministic error string. The
+// SkillIncidentManager + IncidentRunner are consulted only for agent-mode
+// ticks (Task 8); leaving them nil keeps oneshot-mode crons running while
+// agent-mode crons surface a clean "agent runner not wired" error.
 type CronRunner struct {
 	db        *gorm.DB
 	channels  ChannelManager
 	registry  ProviderRegistry
 	caller    OneShotLLMCaller
+	skills    SkillIncidentManager
+	runner    IncidentRunner
 	scheduler cronScheduler
 	parser    cron.Parser
 
@@ -85,19 +90,21 @@ type CronRunner struct {
 // NewCronRunner constructs a CronRunner bound to the global DB and supplied
 // dependencies. The scheduler is created in standard (5-field) parse mode so
 // "*/2 * * * *" works without seconds.
-func NewCronRunner(channels ChannelManager, registry ProviderRegistry, caller OneShotLLMCaller) *CronRunner {
-	return newCronRunnerWithDeps(database.GetDB(), channels, registry, caller, cron.New())
+func NewCronRunner(channels ChannelManager, registry ProviderRegistry, caller OneShotLLMCaller, skills SkillIncidentManager, runner IncidentRunner) *CronRunner {
+	return newCronRunnerWithDeps(database.GetDB(), channels, registry, caller, skills, runner, cron.New())
 }
 
 // newCronRunnerWithDeps is the test seam: injects the DB, the scheduler, and
 // the dependencies so unit tests can drive the runner without touching the
 // global DB / wall-clock cron.
-func newCronRunnerWithDeps(db *gorm.DB, channels ChannelManager, registry ProviderRegistry, caller OneShotLLMCaller, scheduler cronScheduler) *CronRunner {
+func newCronRunnerWithDeps(db *gorm.DB, channels ChannelManager, registry ProviderRegistry, caller OneShotLLMCaller, skills SkillIncidentManager, runner IncidentRunner, scheduler cronScheduler) *CronRunner {
 	return &CronRunner{
 		db:        db,
 		channels:  channels,
 		registry:  registry,
 		caller:    caller,
+		skills:    skills,
+		runner:    runner,
 		scheduler: scheduler,
 		parser:    cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
 		entries:   map[uint]cron.EntryID{},
@@ -256,14 +263,14 @@ func (r *CronRunner) RunNow(uuidStr string) error {
 }
 
 // execute runs a single tick and persists the result. Mode dispatch keeps the
-// oneshot and (future) agent paths isolated; per Task 7 only oneshot is wired
-// here and the agent path returns an explicit error until Task 8.
+// oneshot and agent paths isolated so a regression in one cannot break the
+// other.
 func (r *CronRunner) execute(job *database.CronJob) {
 	switch job.Mode {
 	case database.CronJobModeOneshot, "":
 		r.executeOneshot(job)
 	case database.CronJobModeAgent:
-		r.recordResult(job, database.CronJobRunStatusError, "agent mode not implemented yet")
+		r.executeAgent(job)
 	default:
 		r.recordResult(job, database.CronJobRunStatusError, fmt.Sprintf("unknown cron mode %q", job.Mode))
 	}
@@ -307,6 +314,198 @@ func (r *CronRunner) executeOneshot(job *database.CronJob) {
 		return
 	}
 	r.recordResult(job, database.CronJobRunStatusOK, "")
+}
+
+// executeAgent runs a single cron tick through the full incident-manager
+// agent. The flow mirrors handlers/alert_processor.go but is deliberately
+// stripped down: there is no Slack typing controller, progress streamer, or
+// summarizer to budget — a cron tick posts a single fresh message to the
+// configured channel when the run finishes. Provenance is recorded on the
+// Incident row via source_kind="cron" + source_uuid=<cron_job.uuid>, so the
+// timeline UI can group cron-spawned investigations.
+//
+// Failure modes are all captured as LastRunError so operators can debug
+// without tailing API logs: missing dependencies, channel/provider
+// resolution, worker disconnect, agent worker errors, and provider posting
+// errors each fall into a distinct branch. Anything that crashes the agent
+// run records LastRunStatus=error rather than propagating up — the runner
+// must survive a misbehaving tick.
+func (r *CronRunner) executeAgent(job *database.CronJob) {
+	if r.channels == nil || r.registry == nil {
+		r.recordResult(job, database.CronJobRunStatusError, "cron runner is missing channel/provider wiring")
+		return
+	}
+	if r.skills == nil || r.runner == nil {
+		r.recordResult(job, database.CronJobRunStatusError, "cron runner is missing agent runner wiring")
+		return
+	}
+
+	channel, err := r.resolveChannel(job)
+	if err != nil {
+		r.recordResult(job, database.CronJobRunStatusError, err.Error())
+		return
+	}
+	provider, err := r.registry.Get(channel.Integration.Provider)
+	if err != nil {
+		r.recordResult(job, database.CronJobRunStatusError, fmt.Sprintf("provider unavailable: %v", err))
+		return
+	}
+	if !r.runner.IsWorkerConnected() {
+		r.recordResult(job, database.CronJobRunStatusError, "agent worker not connected")
+		return
+	}
+
+	// Spawn the incident-manager. The IncidentContext stamps source_kind=cron
+	// and source_uuid=<cron_job.uuid> so the resulting Incident row links
+	// back to this scheduled job in the UI.
+	incCtx := &IncidentContext{
+		Source:     "cron",
+		SourceID:   job.UUID,
+		SourceKind: database.IncidentSourceKindCron,
+		SourceUUID: job.UUID,
+		Context: database.JSONB{
+			"cron_job_uuid":     job.UUID,
+			"cron_job_name":     job.Name,
+			"cron_job_schedule": job.Schedule,
+			"cron_job_prompt":   job.Prompt,
+		},
+		Message: fmt.Sprintf("Cron: %s", job.Name),
+	}
+	incidentUUID, _, err := r.skills.SpawnIncidentManager(incCtx)
+	if err != nil {
+		r.recordResult(job, database.CronJobRunStatusError, fmt.Sprintf("spawn incident: %v", err))
+		return
+	}
+	if err := r.skills.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
+		slog.Warn("cron agent: failed to update incident status", "incident", incidentUUID, "err", err)
+	}
+
+	// Reuse global agent settings (skills, tool allowlist, LLM). Per-cron
+	// overrides are out of scope for this iteration per the plan.
+	var llmSettings *LLMSettingsForWorker
+	if dbSettings, err := database.GetLLMSettings(); err == nil && dbSettings != nil {
+		llmSettings = BuildLLMSettingsForWorker(dbSettings)
+	}
+	skillNames := r.skills.GetEnabledSkillNames()
+	toolAllowlist := r.skills.GetToolAllowlist()
+
+	taskHeader := fmt.Sprintf("Cron Investigation: %s\nSchedule: %s\n\n--- Execution Log ---\n\n", job.Name, job.Schedule)
+
+	// Async result handling — matches alert_processor.go pattern. closeOnce
+	// guards the done channel so a stray OnError after OnCompleted does not
+	// double-close.
+	done := make(chan struct{})
+	var closeOnce sync.Once
+	var response string
+	var sessionID string
+	var hasError bool
+	var supersededFlag bool
+	var errorMsg string
+	var lastStreamedLog string
+	var finalTokensUsed int
+	var finalExecutionTimeMs int64
+
+	callback := IncidentCallback{
+		OnOutput: func(output string) {
+			lastStreamedLog += output
+			if err := r.skills.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog); err != nil {
+				slog.Warn("cron agent: failed to update incident log", "incident", incidentUUID, "err", err)
+			}
+		},
+		OnCompleted: func(sid, output string, tokensUsed int, executionTimeMs int64) {
+			sessionID = sid
+			response = output
+			finalTokensUsed = tokensUsed
+			finalExecutionTimeMs = executionTimeMs
+			closeOnce.Do(func() { close(done) })
+		},
+		OnError: func(em string) {
+			hasError = true
+			errorMsg = em
+			response = fmt.Sprintf("Error: %s", em)
+			closeOnce.Do(func() { close(done) })
+		},
+		OnSuperseded: func() {
+			supersededFlag = true
+			closeOnce.Do(func() { close(done) })
+		},
+	}
+
+	runID, err := r.runner.StartIncident(incidentUUID, job.Prompt, llmSettings, skillNames, toolAllowlist, callback)
+	if err != nil {
+		errStr := fmt.Sprintf("start incident: %v", err)
+		if updateErr := r.skills.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errStr, 0, 0); updateErr != nil {
+			slog.Warn("cron agent: failed to update incident on start error", "incident", incidentUUID, "err", updateErr)
+		}
+		r.recordResult(job, database.CronJobRunStatusError, errStr)
+		return
+	}
+
+	<-done
+
+	// A superseded run hands ownership to the replacement; exit silently so
+	// the replacement run owns the DB finalize + channel post.
+	if supersededFlag {
+		slog.Info("cron agent: investigation superseded; leaving finalization to the new run", "incident", incidentUUID)
+		return
+	}
+
+	// Claim ownership of finalization. A newer Start/Continue that arrived
+	// between OnCompleted and here invalidates this run — return without
+	// touching the DB or posting to the channel.
+	if !r.runner.ReleaseRun(incidentUUID, runID) {
+		slog.Info("cron agent: investigation displaced during finalization", "incident", incidentUUID)
+		return
+	}
+
+	fullLog := taskHeader + lastStreamedLog
+	if response != "" {
+		fullLog += "\n\n--- Final Response ---\n\n" + response
+	}
+
+	finalStatus := database.IncidentStatusCompleted
+	if hasError {
+		finalStatus = database.IncidentStatusFailed
+	}
+	if err := r.skills.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, response, finalTokensUsed, finalExecutionTimeMs); err != nil {
+		slog.Warn("cron agent: failed to update incident complete", "incident", incidentUUID, "err", err)
+	}
+
+	// Post the final summary to the cron's channel as a fresh message. On
+	// error, surface the failure into the channel so operators see the cron
+	// tick failed without having to open the incident.
+	body := formatCronAgentMessage(job, response, hasError, errorMsg)
+	if _, err := provider.PostMessage(context.Background(), channel, body); err != nil {
+		r.recordResult(job, database.CronJobRunStatusError, fmt.Sprintf("post message: %v", err))
+		return
+	}
+	if hasError {
+		r.recordResult(job, database.CronJobRunStatusError, errorMsg)
+		return
+	}
+	r.recordResult(job, database.CronJobRunStatusOK, "")
+}
+
+// formatCronAgentMessage renders the channel-bound summary for an agent-mode
+// cron tick. On error the body still gets a header so the channel reader sees
+// which cron failed; on success it carries the agent's final response.
+func formatCronAgentMessage(job *database.CronJob, response string, hasError bool, errorMsg string) string {
+	name := strings.TrimSpace(job.Name)
+	if name == "" {
+		name = "Scheduled investigation"
+	}
+	if hasError {
+		msg := strings.TrimSpace(errorMsg)
+		if msg == "" {
+			msg = "Investigation failed"
+		}
+		return fmt.Sprintf("*%s*\nInvestigation failed: %s", name, msg)
+	}
+	body := strings.TrimSpace(response)
+	if body == "" {
+		body = "Investigation completed (no output)"
+	}
+	return fmt.Sprintf("*%s*\n%s", name, body)
 }
 
 // resolveChannel returns the Channel the supplied cron job should post into.

@@ -149,10 +149,10 @@ Introduce a first-class Channel concept (under provider Integrations) that trigg
 **Files:**
 - Modify: `internal/services/cron_runner.go`, `internal/handlers/alert_processor.go` (extract reusable agent-spawn helper if not already factored)
 
-- [ ] agent tick path: spawn the incident-manager skill via `SkillService.SpawnIncidentManager`, mirroring `alert_processor.go:28-98`; create an `Incident` row with `source_kind="cron"` and `source_uuid=<cron_job.uuid>`; on completion, post the final summary to the cron's Channel
-- [ ] reuse global agent settings (skills, tool allowlist, LLM settings) — per-cron overrides are out of scope
-- [ ] add tests: agent-mode cron creates an Incident with the correct provenance; final summary lands on the configured Channel; tick failure records `LastRunStatus=error` without crashing the runner
-- [ ] run `make test` — must pass before Task 9
+- [x] agent tick path: spawn the incident-manager skill via `SkillService.SpawnIncidentManager`, mirroring `alert_processor.go:28-98`; create an `Incident` row with `source_kind="cron"` and `source_uuid=<cron_job.uuid>`; on completion, post the final summary to the cron's Channel
+- [x] reuse global agent settings (skills, tool allowlist, LLM settings) — per-cron overrides are out of scope
+- [x] add tests: agent-mode cron creates an Incident with the correct provenance; final summary lands on the configured Channel; tick failure records `LastRunStatus=error` without crashing the runner
+- [x] run `make test` — must pass before Task 9
 
 ### Task 9: Frontend cron pages
 

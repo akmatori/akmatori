@@ -52,3 +52,31 @@ func BuildLLMSettingsForWorker(dbSettings *database.LLMSettings) *LLMSettingsFor
 type OneShotLLMCaller interface {
 	OneShotLLM(ctx context.Context, llm *LLMSettingsForWorker, system, user string, maxTokens int, temperature float64) (string, error)
 }
+
+// IncidentCallback collects the streaming events emitted while an agent run is
+// executing. The handler-side AgentWSHandler aliases this struct; the lift
+// into services lets non-handler packages (e.g. CronRunner) start an incident
+// without importing internal/handlers.
+//
+// OnSuperseded fires when a newer StartIncident/ContinueIncident displaces
+// this callback for the same incident_id. The displaced run has been handed
+// off to the new callback — the new run will finalize the incident — so the
+// old goroutine should unblock and exit silently rather than commit a
+// failure that races the replacement's success.
+type IncidentCallback struct {
+	OnOutput     func(output string)
+	OnCompleted  func(sessionID, response string, tokensUsed int, executionTimeMs int64)
+	OnError      func(errorMsg string)
+	OnSuperseded func()
+}
+
+// IncidentRunner is the cron/alert-spawn-facing slice of the agent worker
+// transport. It is satisfied by *handlers.AgentWSHandler; the services layer
+// consumes the interface so CronRunner stays test-friendly (a fake runner
+// implements StartIncident/ReleaseRun and drives callbacks deterministically
+// without spinning up a real WebSocket).
+type IncidentRunner interface {
+	IsWorkerConnected() bool
+	StartIncident(incidentID, task string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []ToolAllowlistEntry, callback IncidentCallback) (string, error)
+	ReleaseRun(incidentID, runID string) bool
+}
