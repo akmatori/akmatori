@@ -44,6 +44,13 @@ type AlertHandler struct {
 	channelResolver   *slackutil.ChannelResolver
 	slackSummarizer   *services.SlackSummarizer
 	responseFormatter *services.ResponseFormatter
+	channelService    services.ChannelManager
+	providerRegistry  services.ProviderRegistry
+
+	// legacyFallbackWarnOnce gates the "no Channel rows; falling back to
+	// SlackSettings.AlertsChannel" deprecation log so a busy webhook does
+	// not spam the same warning on every alert.
+	legacyFallbackWarnOnce sync.Once
 
 	// Workspace team ID (required for Streaming API)
 	teamID string
@@ -95,6 +102,20 @@ func (h *AlertHandler) SetSlackSummarizer(s *services.SlackSummarizer) {
 // is disabled), the raw agent response flows through unchanged.
 func (h *AlertHandler) SetResponseFormatter(f *services.ResponseFormatter) {
 	h.responseFormatter = f
+}
+
+// SetChannelService wires the ChannelManager used to resolve outbound channels
+// from alert source instances. When unset, the handler falls back to the
+// legacy SlackSettings.AlertsChannel read path.
+func (h *AlertHandler) SetChannelService(c services.ChannelManager) {
+	h.channelService = c
+}
+
+// SetProviderRegistry wires the ProviderRegistry used to route outbound posts
+// to the channel's provider. When unset (or no provider is registered for the
+// channel's provider), the handler falls back to the existing slack client.
+func (h *AlertHandler) SetProviderRegistry(r services.ProviderRegistry) {
+	h.providerRegistry = r
 }
 
 // RegisterAdapter registers an alert adapter for a source type

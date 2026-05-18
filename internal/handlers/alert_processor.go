@@ -47,8 +47,10 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 
 	// Create incident context from alert data
 	incidentCtx := &services.IncidentContext{
-		Source:   instance.AlertSourceType.Name,
-		SourceID: normalized.SourceFingerprint,
+		Source:     instance.AlertSourceType.Name,
+		SourceID:   normalized.SourceFingerprint,
+		SourceKind: database.IncidentSourceKindAlert,
+		SourceUUID: instance.UUID,
 		Context: database.JSONB{
 			"alert_name":         normalized.AlertName,
 			"severity":           string(normalized.Severity),
@@ -81,10 +83,10 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 	slog.Info("created incident for alert", "incident_id", incidentUUID)
 
 	// Post to Slack
-	var threadTS string
+	var channelID, threadTS string
 	if h.isSlackEnabled() {
 		var err error
-		threadTS, err = h.postAlertToSlack(normalized, instance)
+		channelID, threadTS, err = h.postAlertToSlack(normalized, instance)
 		if err != nil {
 			slog.Warn("failed to post alert to Slack", "err", err)
 		}
@@ -94,7 +96,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 	if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
 		slog.Warn("failed to update incident status", "err", err)
 	}
-	go h.runInvestigation(incidentUUID, normalized, instance, threadTS)
+	go h.runInvestigation(incidentUUID, normalized, instance, channelID, threadTS)
 }
 
 // ProcessAlertFromSlackChannel processes an alert that originated from a Slack channel
@@ -125,8 +127,10 @@ func (h *AlertHandler) ProcessAlertFromSlackChannel(
 
 	// Create incident context from alert data
 	incidentCtx := &services.IncidentContext{
-		Source:   instance.AlertSourceType.Name,
-		SourceID: normalized.SourceFingerprint,
+		Source:     instance.AlertSourceType.Name,
+		SourceID:   normalized.SourceFingerprint,
+		SourceKind: database.IncidentSourceKindAlert,
+		SourceUUID: instance.UUID,
 		Context: database.JSONB{
 			"alert_name":         normalized.AlertName,
 			"severity":           string(normalized.Severity),
@@ -280,7 +284,7 @@ Be specific and actionable. Reference any relevant data sources or scripts you u
 	return prompt
 }
 
-func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, threadTS string) {
+func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, channelID, threadTS string) {
 	slog.Info("starting investigation for alert", "alert_name", alert.AlertName, "incident_id", incidentUUID)
 
 	// Build investigation prompt
@@ -297,18 +301,16 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 	// fires setStatus("") + RemoveReaction against the shared thread and
 	// erases the replacement run's banner + hourglass.
 	var typing slackutil.TypingController
-	if threadTS != "" {
+	if threadTS != "" && channelID != "" {
 		if slackClient := h.slackManager.GetClient(); slackClient != nil {
-			if settings, err := database.GetSlackSettings(); err == nil && settings != nil && settings.AlertsChannel != "" {
-				typing = slackutil.NewTypingController(slackutil.TypingControllerConfig{
-					Client:      slackClient,
-					ChannelID:   settings.AlertsChannel,
-					ThreadTS:    threadTS,
-					ReactionRef: slack.ItemRef{Channel: settings.AlertsChannel, Timestamp: threadTS},
-				})
-				typing.Start(context.Background())
-				defer typing.Stop()
-			}
+			typing = slackutil.NewTypingController(slackutil.TypingControllerConfig{
+				Client:      slackClient,
+				ChannelID:   channelID,
+				ThreadTS:    threadTS,
+				ReactionRef: slack.ItemRef{Channel: channelID, Timestamp: threadTS},
+			})
+			typing.Start(context.Background())
+			defer typing.Stop()
 		}
 	}
 
@@ -383,7 +385,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg, 0, 0); updateErr != nil {
 				slog.Error("failed to update incident status", "err", updateErr)
 			}
-			h.updateSlackWithResult(threadTS, errorMsg, true)
+			h.updateSlackWithResult(channelID, threadTS, errorMsg, true)
 			return
 		}
 
@@ -463,7 +465,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 			slog.Error("failed to update incident complete", "err", err)
 		}
 
-		h.updateSlackWithResult(threadTS, formattedResp, hasError)
+		h.updateSlackWithResult(channelID, threadTS, formattedResp, hasError)
 
 		slog.Info("investigation completed for alert via WebSocket", "alert_name", alert.AlertName)
 		return
@@ -475,7 +477,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 	if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg, 0, 0); updateErr != nil {
 		slog.Error("failed to update incident status", "err", updateErr)
 	}
-	h.updateSlackWithResult(threadTS, errorMsg, true)
+	h.updateSlackWithResult(channelID, threadTS, errorMsg, true)
 }
 
 // runSlackChannelInvestigation runs investigation and posts results to the Slack thread

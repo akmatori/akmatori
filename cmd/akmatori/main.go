@@ -17,6 +17,7 @@ import (
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/handlers"
 	"github.com/akmatori/akmatori/internal/logging"
+	"github.com/akmatori/akmatori/internal/messaging"
 	"github.com/akmatori/akmatori/internal/middleware"
 	"github.com/akmatori/akmatori/internal/services"
 	"github.com/akmatori/akmatori/internal/setup"
@@ -210,6 +211,18 @@ func main() {
 	// Disabled by default — when off, calls passthrough to the raw response.
 	responseFormatter := services.NewResponseFormatter(agentWSHandler)
 	alertHandler.SetResponseFormatter(responseFormatter)
+
+	// Channel service + messaging provider registry wire outbound posting to
+	// the new Integration/Channel rows. The slack provider is registered with
+	// the live manager so it reads the current client at call time (manager
+	// swaps clients on credential reload). Until operators migrate, alerts
+	// fall back to the legacy SlackSettings.AlertsChannel read inside
+	// alert_slack.go.
+	channelService := services.NewChannelService()
+	providerRegistry := messaging.NewRegistry()
+	providerRegistry.Register(messaging.NewSlackProvider(slackManager))
+	alertHandler.SetChannelService(channelService)
+	alertHandler.SetProviderRegistry(providerRegistry)
 
 	// Set up event handler for when Slack connects
 	// Note: We receive the client directly to avoid deadlock (can't call GetClient while holding lock)

@@ -16,10 +16,12 @@ import (
 
 // IncidentContext contains context for spawning an incident manager
 type IncidentContext struct {
-	Source   string         // e.g., "slack", "zabbix"
-	SourceID string         // e.g., thread_ts, alert_id
-	Context  database.JSONB // Event details
-	Message  string         // Original message/alert text for title generation
+	Source     string         // e.g., "slack", "zabbix"
+	SourceID   string         // e.g., thread_ts, alert_id
+	SourceKind string         // Trigger kind: "alert" | "cron" | "slack_mention"
+	SourceUUID string         // UUID of the triggering entity (alert source instance, cron job, ...)
+	Context    database.JSONB // Event details
+	Message    string         // Original message/alert text for title generation
 }
 
 // SpawnIncidentManager creates a new incident manager instance
@@ -57,6 +59,8 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 		UUID:       incidentUUID,
 		Source:     ctx.Source,
 		SourceID:   ctx.SourceID,
+		SourceKind: ctx.SourceKind,
+		SourceUUID: ctx.SourceUUID,
 		Title:      title,
 		Status:     database.IncidentStatusPending,
 		Context:    ctx.Context,

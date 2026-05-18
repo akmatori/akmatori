@@ -204,6 +204,39 @@ func TestSpawnIncidentManager_DatabaseRecord(t *testing.T) {
 	}
 }
 
+// TestSpawnIncidentManager_SourceKindAndUUID_Persisted verifies that the new
+// provenance fields propagated through IncidentContext land on the Incident
+// row so downstream surfaces (REST listing, cron join) can filter by trigger.
+func TestSpawnIncidentManager_SourceKindAndUUID_Persisted(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+
+	asUUID := "11111111-2222-3333-4444-555555555555"
+	ctx := &IncidentContext{
+		Source:     "zabbix",
+		SourceID:   "evt-9",
+		SourceKind: database.IncidentSourceKindAlert,
+		SourceUUID: asUUID,
+		Message:    "Alert provenance test",
+	}
+
+	uuid, _, err := svc.SpawnIncidentManager(ctx)
+	if err != nil {
+		t.Fatalf("SpawnIncidentManager failed: %v", err)
+	}
+
+	var incident database.Incident
+	if err := db.Where("uuid = ?", uuid).First(&incident).Error; err != nil {
+		t.Fatalf("failed to find incident: %v", err)
+	}
+	if incident.SourceKind != database.IncidentSourceKindAlert {
+		t.Errorf("SourceKind = %q, want %q", incident.SourceKind, database.IncidentSourceKindAlert)
+	}
+	if incident.SourceUUID != asUUID {
+		t.Errorf("SourceUUID = %q, want %q", incident.SourceUUID, asUUID)
+	}
+}
+
 func TestSpawnIncidentManager_ShortMessage_NoBackgroundTitleGen(t *testing.T) {
 	db := setupIncidentTestDB(t)
 	svc := newIncidentTestService(t, db)

@@ -120,8 +120,9 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 
 		// Spawn incident manager for this event
 		incidentCtx := &services.IncidentContext{
-			Source:   "slack",
-			SourceID: threadID,
+			Source:     "slack",
+			SourceID:   threadID,
+			SourceKind: database.IncidentSourceKindSlackMention,
 			Context: database.JSONB{
 				"channel": channel,
 				"user":    user,

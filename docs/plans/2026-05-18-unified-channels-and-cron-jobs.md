@@ -84,11 +84,11 @@ Introduce a first-class Channel concept (under provider Integrations) that trigg
 **Files:**
 - Modify: `internal/handlers/alert_slack.go`, `internal/handlers/alert_processor.go`
 
-- [ ] replace direct `GetSlackSettings().AlertsChannel` lookup with `ChannelService.ResolveForAlertSource(asi)` → `ProviderRegistry.Get(channel.Integration.Provider).PostMessage(ctx, channel, ...)`
-- [ ] keep `SlackSettings.AlertsChannel` as a read-only fallback when no Channel rows exist (graceful degradation); log a one-time deprecation warning
-- [ ] set `incidents.source_kind="alert"` and `source_uuid=<alert_source_instance.uuid>` on creation
-- [ ] update existing tests in `internal/handlers/alert_slack_integration_test.go` and add new tests covering: alert source with explicit `notification_channel_id` routes to that channel; alert source without channel uses default; missing default falls back to legacy `SlackSettings.AlertsChannel`
-- [ ] run `make test` — must pass before Task 4
+- [x] replace direct `GetSlackSettings().AlertsChannel` lookup with `ChannelService.ResolveForAlertSource(asi)` → `ProviderRegistry.Get(channel.Integration.Provider).PostMessage(ctx, channel, ...)`
+- [x] keep `SlackSettings.AlertsChannel` as a read-only fallback when no Channel rows exist (graceful degradation); log a one-time deprecation warning
+- [x] set `incidents.source_kind="alert"` and `source_uuid=<alert_source_instance.uuid>` on creation
+- [x] update existing tests in `internal/handlers/alert_slack_integration_test.go` and add new tests covering: alert source with explicit `notification_channel_id` routes to that channel; alert source without channel uses default; missing default falls back to legacy `SlackSettings.AlertsChannel`
+- [x] run `make test` — must pass before Task 4
 
 ### Task 4: Integrations + Channels CRUD API
 
