@@ -146,6 +146,11 @@ func (h *APIHandler) handleIntegrations(w http.ResponseWriter, r *http.Request) 
 			api.RespondError(w, integrationErrStatus(err), err.Error())
 			return
 		}
+		// Credentials and the enabled flag on an Integration drive whether the
+		// Slack manager connects and which listener channels are active. Fire
+		// both reload paths so a freshly-added Slack integration takes effect
+		// without restarting the API.
+		h.afterIntegrationMutation(row.Provider)
 		api.RespondJSON(w, http.StatusCreated, toIntegrationResponse(row))
 
 	default:
@@ -190,17 +195,42 @@ func (h *APIHandler) handleIntegrationByUUID(w http.ResponseWriter, r *http.Requ
 			api.RespondError(w, integrationErrStatus(err), err.Error())
 			return
 		}
+		// Credential rotations and enabled toggles affect the live Slack
+		// connection and which listener channels are loaded; trigger both
+		// reload paths so the change is observable without restart.
+		h.afterIntegrationMutation(row.Provider)
 		api.RespondJSON(w, http.StatusOK, toIntegrationResponse(row))
 
 	case http.MethodDelete:
+		// Capture the provider before delete so we can decide whether the
+		// Slack manager needs a reload after the row is gone.
+		row, lookupErr := h.channelService.GetIntegrationByUUID(uuid)
 		if err := h.channelService.DeleteIntegration(uuid); err != nil {
 			api.RespondError(w, integrationErrStatus(err), err.Error())
 			return
 		}
+		var provider database.MessagingProvider
+		if lookupErr == nil && row != nil {
+			provider = row.Provider
+		}
+		h.afterIntegrationMutation(provider)
 		api.RespondNoContent(w)
 
 	default:
 		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
+	}
+}
+
+// afterIntegrationMutation fans the post-CRUD signals out so the runtime
+// picks up credential, enabled, and existence changes without an API restart.
+// Listener channels filter by Integration.Enabled in LoadListenerChannels so
+// any provider's CRUD potentially affects the listener map; the slack manager
+// reload only matters when the touched integration is slack (or might have
+// been — provider can be empty when the row is gone before lookup).
+func (h *APIHandler) afterIntegrationMutation(provider database.MessagingProvider) {
+	h.reloadAlertChannels()
+	if h.slackManager != nil && (provider == "" || provider == database.MessagingProviderSlack) {
+		h.slackManager.TriggerReload()
 	}
 }
 

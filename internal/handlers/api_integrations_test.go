@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/messaging"
@@ -426,6 +427,87 @@ func TestHandleIntegrations_Create_PropagatesValidationError(t *testing.T) {
 	h.handleIntegrations(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for plain validation message, got %d", w.Code)
+	}
+}
+
+// TestHandleIntegrations_Create_TriggersAlertChannelReload asserts that
+// creating a Slack integration fires the listener-channel reload callback so
+// channels gated on Integration.Enabled get re-evaluated against the new row
+// without an API restart.
+func TestHandleIntegrations_Create_TriggersAlertChannelReload(t *testing.T) {
+	mgr := &mockChannelManager{}
+	h := newHandlerWithChannelManager(mgr)
+	reloaded := make(chan struct{}, 1)
+	h.SetAlertChannelReloader(func() { reloaded <- struct{}{} })
+
+	body, _ := json.Marshal(CreateIntegrationRequest{
+		Provider:    "slack",
+		Name:        "Slack Prod",
+		Credentials: database.JSONB{"bot_token": "xoxb-test"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/integrations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.handleIntegrations(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	select {
+	case <-reloaded:
+		// expected
+	case <-time.After(time.Second):
+		t.Fatal("expected alert channel reloader to fire after integration create")
+	}
+}
+
+// TestHandleIntegrationByUUID_Update_TriggersReload asserts that an integration
+// PUT triggers the listener-channel reload so a credential rotation or enabled
+// toggle is reflected in the running Slack handler.
+func TestHandleIntegrationByUUID_Update_TriggersReload(t *testing.T) {
+	mgr := &mockChannelManager{integrations: []database.Integration{{ID: 1, UUID: "u1", Provider: database.MessagingProviderSlack, Name: "old"}}}
+	h := newHandlerWithChannelManager(mgr)
+	reloaded := make(chan struct{}, 1)
+	h.SetAlertChannelReloader(func() { reloaded <- struct{}{} })
+
+	newName := "Renamed"
+	body, _ := json.Marshal(UpdateIntegrationRequest{Name: &newName})
+	req := httptest.NewRequest(http.MethodPut, "/api/integrations/u1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.handleIntegrationByUUID(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	select {
+	case <-reloaded:
+	case <-time.After(time.Second):
+		t.Fatal("expected alert channel reloader to fire after integration update")
+	}
+}
+
+// TestHandleIntegrationByUUID_Delete_TriggersReload asserts that deleting an
+// integration triggers the listener-channel reload — the cascade-delete on the
+// service side removes listener channels in the DB, but the in-memory map
+// would otherwise keep posting events to channels that no longer exist.
+func TestHandleIntegrationByUUID_Delete_TriggersReload(t *testing.T) {
+	mgr := &mockChannelManager{integrations: []database.Integration{{ID: 1, UUID: "u1", Provider: database.MessagingProviderSlack}}}
+	h := newHandlerWithChannelManager(mgr)
+	reloaded := make(chan struct{}, 1)
+	h.SetAlertChannelReloader(func() { reloaded <- struct{}{} })
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/integrations/u1", nil)
+	w := httptest.NewRecorder()
+	h.handleIntegrationByUUID(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+	select {
+	case <-reloaded:
+	case <-time.After(time.Second):
+		t.Fatal("expected alert channel reloader to fire after integration delete")
 	}
 }
 

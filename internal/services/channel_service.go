@@ -119,7 +119,22 @@ func (s *ChannelService) UpdateIntegration(uuidStr string, name *string, credent
 		updates["name"] = trimmed
 	}
 	if credentials != nil {
-		updates["credentials"] = credentials
+		// Merge the supplied keys into the existing credential blob so
+		// rotating one secret (e.g. bot_token) doesn't erase the others.
+		// Empty-string values are treated as "no change" since the UI
+		// strips blanks from edit submissions; explicit clears would have
+		// to land via a different code path (delete + recreate).
+		merged := database.JSONB{}
+		for k, v := range row.Credentials {
+			merged[k] = v
+		}
+		for k, v := range credentials {
+			if s, ok := v.(string); ok && s == "" {
+				continue
+			}
+			merged[k] = v
+		}
+		updates["credentials"] = merged
 	}
 	if enabled != nil {
 		updates["enabled"] = *enabled

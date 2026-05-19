@@ -167,6 +167,55 @@ func TestAlertHandler_ResolveOutboundSlackChannel_NoLegacyFallback(t *testing.T)
 	}
 }
 
+// TestAlertHandler_ResolveOutboundSlackChannel_SkipsNonSlackProvider asserts
+// that an AlertSourceInstance whose NotificationChannelID points at a
+// non-slack channel (e.g. a Telegram channel) does NOT get returned for slack
+// posting. ChannelService.ResolveForAlertSource honours an explicit
+// notification_channel_id without filtering by provider, so without this
+// guard the Slack post path would attempt to deliver a Telegram chat ID to
+// the Slack API and silently misroute the alert.
+func TestAlertHandler_ResolveOutboundSlackChannel_SkipsNonSlackProvider(t *testing.T) {
+	db, cleanup := setupChannelRoutingDB(t)
+	defer cleanup()
+
+	telegram := &database.Integration{
+		UUID:     uuid.New().String(),
+		Provider: database.MessagingProviderTelegram,
+		Name:     "telegram bot",
+		Enabled:  true,
+	}
+	if err := db.Create(telegram).Error; err != nil {
+		t.Fatalf("create telegram integration: %v", err)
+	}
+	tgChannel := &database.Channel{
+		UUID:          uuid.New().String(),
+		IntegrationID: telegram.ID,
+		ExternalID:    "tg-1234",
+		DisplayName:   "team chat",
+		CanPost:       true,
+		IsDefaultPost: false,
+		Enabled:       true,
+	}
+	if err := db.Create(tgChannel).Error; err != nil {
+		t.Fatalf("create telegram channel: %v", err)
+	}
+
+	asi := &database.AlertSourceInstance{
+		UUID:                  uuid.New().String(),
+		Name:                  "tg-asi",
+		NotificationChannelID: &tgChannel.ID,
+	}
+
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
+	h.SetChannelService(services.NewChannelService())
+
+	channel, channelID := h.resolveOutboundSlackChannel(asi)
+	if channel != nil || channelID != "" {
+		t.Errorf("expected slack resolver to skip telegram-typed channel, got channel=%v channelID=%q",
+			channel, channelID)
+	}
+}
+
 func TestAlertHandler_ResolveOutboundSlackChannel_NoDestination(t *testing.T) {
 	_, cleanup := setupChannelRoutingDB(t)
 	defer cleanup()

@@ -644,6 +644,69 @@ func TestChannelService_UpdateIntegration_PatchesFields(t *testing.T) {
 	}
 }
 
+// TestChannelService_UpdateIntegration_MergesCredentials asserts that updating
+// a subset of credential keys leaves the other keys untouched. The UI strips
+// blank fields from edit submissions, so the service must treat a partial
+// credentials payload as a merge rather than a full replace; otherwise
+// rotating one secret (e.g. bot_token) would erase signing_secret and
+// app_token from the row.
+func TestChannelService_UpdateIntegration_MergesCredentials(t *testing.T) {
+	svc, _ := setupChannelServiceTest(t)
+	original := database.JSONB{
+		"bot_token":      "xoxb-old",
+		"signing_secret": "sig",
+		"app_token":      "xapp-old",
+	}
+	integration, err := svc.CreateIntegration(database.MessagingProviderSlack, "Slack", original, true)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// UI sends only the changed key.
+	partial := database.JSONB{"bot_token": "xoxb-new"}
+	got, err := svc.UpdateIntegration(integration.UUID, nil, partial, nil)
+	if err != nil {
+		t.Fatalf("UpdateIntegration: %v", err)
+	}
+	if got.Credentials["bot_token"] != "xoxb-new" {
+		t.Errorf("bot_token = %v, want xoxb-new", got.Credentials["bot_token"])
+	}
+	if got.Credentials["signing_secret"] != "sig" {
+		t.Errorf("signing_secret = %v, want preserved 'sig' (merge must not drop other keys)", got.Credentials["signing_secret"])
+	}
+	if got.Credentials["app_token"] != "xapp-old" {
+		t.Errorf("app_token = %v, want preserved 'xapp-old' (merge must not drop other keys)", got.Credentials["app_token"])
+	}
+}
+
+// TestChannelService_UpdateIntegration_EmptyCredentialIgnored confirms that
+// an explicitly empty string in the patch is treated as "no change" rather
+// than as a clear. The UI strips empty fields, but a request that still
+// carries them must not zero out the stored secret.
+func TestChannelService_UpdateIntegration_EmptyCredentialIgnored(t *testing.T) {
+	svc, _ := setupChannelServiceTest(t)
+	original := database.JSONB{
+		"bot_token":      "xoxb-keep",
+		"signing_secret": "sig-keep",
+	}
+	integration, err := svc.CreateIntegration(database.MessagingProviderSlack, "Slack", original, true)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	patch := database.JSONB{"bot_token": ""}
+	got, err := svc.UpdateIntegration(integration.UUID, nil, patch, nil)
+	if err != nil {
+		t.Fatalf("UpdateIntegration: %v", err)
+	}
+	if got.Credentials["bot_token"] != "xoxb-keep" {
+		t.Errorf("bot_token = %v, want preserved 'xoxb-keep' (empty value must be ignored)", got.Credentials["bot_token"])
+	}
+	if got.Credentials["signing_secret"] != "sig-keep" {
+		t.Errorf("signing_secret = %v, want preserved 'sig-keep'", got.Credentials["signing_secret"])
+	}
+}
+
 // TestChannelService_UpdateIntegration_RejectsBlankName rejects whitespace-only
 // names with a plain validation error.
 func TestChannelService_UpdateIntegration_RejectsBlankName(t *testing.T) {
