@@ -23,6 +23,7 @@ internal/api/               API request/response helpers
 internal/database/          GORM models and DB logic
 internal/handlers/          HTTP, WebSocket, Slack handlers
 internal/logging/           slog setup
+internal/messaging/         provider abstraction (Slack, Telegram stub)
 internal/output/            structured agent output parsing
 internal/services/          business logic and interfaces
 internal/setup/             first-run bootstrap
@@ -116,6 +117,31 @@ Rules:
 - memory syncing is scope-aware and manifest-driven
 - memory upserts must stay idempotent by `name:` slug + scope
 
+### Channels, Integrations, and outbound routing
+
+Operators configure a messaging `Integration` (provider credentials) and one or more `Channel` rows under it. Triggers — alert sources, cron jobs, the workspace default — reference Channels by UUID. Slack is implemented; Telegram is a registry stub so the data model is ready when it lands.
+
+Rules:
+- outbound posting goes through `ProviderRegistry.Get(channel.Integration.Provider).PostMessage(ctx, channel, ...)`, never the legacy `SlackSettings.AlertsChannel`
+- alert routing uses `ChannelService.ResolveForAlertSource(asi)`: explicit `notification_channel_id` wins, otherwise fall back to the provider's `is_default_post=true` Channel
+- at most one `is_default_post=true` per provider (enforced by a partial-unique index and a service-layer check)
+- inbound listening reads `Channel.ExtractionPrompt` and `Channel.ProcessHumanMessages`, not alert-source `Settings` JSONB; `slack_processor.go` must honour this
+- `Channel.CanPost` / `Channel.CanListen` capability flags gate which triggers may reference a channel
+- the `slack_channel` AlertSourceInstance type is deprecated and hidden from the UI; do not reintroduce it for new flows
+- Telegram requests must surface `ErrNotImplemented` from the registry — never silently no-op
+
+### Cron jobs
+
+Cron jobs run on a per-job schedule, target a Channel, and execute either a one-shot LLM call or a full agent investigation.
+
+Rules:
+- `oneshot` mode: route through `OneShotLLMCaller` and post the formatted result to `Channel` via the registry
+- `agent` mode: spawn the incident-manager skill mirroring `alert_processor.go`; create an `Incident` with `source_kind="cron"` and `source_uuid=<cron_job.uuid>` so provenance is queryable
+- cron expressions are validated at write time; invalid schedules surface as 400
+- `CronRunner` survives tick failures and records `LastRunStatus=error` + `LastRunError`; never let one bad job take the runner down
+- crons inherit global LLM/skill/tool settings — per-cron overrides are intentionally out of scope
+- manual fire is `POST /api/cron-jobs/{uuid}/run`; CRUD reloads the runner so schedule changes apply without restart
+
 ## Important Files by Responsibility
 
 ### Handlers
@@ -123,8 +149,12 @@ Rules:
 - `internal/handlers/agent_ws.go` - worker transport and message types
 - `internal/handlers/api.go` - REST route wiring
 - `internal/handlers/api_settings_formatting*.go` - formatting settings API
-- `internal/handlers/alert_processor.go` - main investigation path
-- `internal/handlers/slack_processor.go` - Slack message and mention handling
+- `internal/handlers/api_integrations.go` - Integrations CRUD
+- `internal/handlers/api_channels.go` - Channels CRUD (with filters)
+- `internal/handlers/api_cron_jobs.go` - Cron jobs CRUD + manual `/run` fire
+- `internal/handlers/alert_processor.go` - main investigation path; sets `source_kind`/`source_uuid`
+- `internal/handlers/alert_slack.go` - outbound routing via `ChannelService` + `ProviderRegistry`
+- `internal/handlers/slack_processor.go` - Slack message and mention handling; reads `Channel.ExtractionPrompt`
 - `internal/handlers/slack_progress.go` - reasoning-line streaming for Slack banner
 
 ### Services
@@ -135,6 +165,9 @@ Rules:
 - `internal/services/memory_service.go` - cross-incident memory CRUD, DB↔disk sync, and `IngestFromDisk`
 - `internal/services/title_generator.go` - one-shot title generation
 - `internal/services/slack_summarizer.go` - Slack-safe final output compression
+- `internal/services/channel_service.go` - Integrations/Channels CRUD, `ResolveDefault`, `ResolveForAlertSource`
+- `internal/services/cron_runner.go` - cron scheduler, oneshot + agent tick paths, reload-on-CRUD
+- `internal/messaging/` - `Provider`, `ProviderRegistry`, slack provider, telegram stub
 - `akmatori_data/agents/` - `runbook-searcher`, `memory-searcher`, `memory-writer` subagent definitions
 
 ### Agent worker
@@ -162,6 +195,10 @@ Slack has hard byte limits. Any new Slack-facing summary or banner text must tru
 ### Keep tool routing indirect
 
 Do not teach agents to call tool implementations directly. They should go through `gateway_call`, with routing handled by logical instance names or instance hints.
+
+### Keep messaging provider-agnostic
+
+Do not call Slack APIs directly from handlers or services. Resolve a `Channel`, fetch the provider through `ProviderRegistry.Get(...)`, and call `PostMessage` / `PostThreadReply` / `UpdateMessage`. When you add a new messaging provider, register it in `internal/messaging/` and the rest of the system should pick it up by provider name without further changes.
 
 ### Preserve graceful degradation
 
@@ -229,6 +266,8 @@ Keep this file aligned with these current realities:
 - response formatting settings are live and backed by `/api/settings/formatting`
 - one-shot LLM calls share the worker transport and current provider settings
 - Slack loading banners use real reasoning lines instead of generic placeholder text
+- messaging is now Integrations + Channels; outbound posting routes through `ProviderRegistry`; the legacy `SlackSettings.AlertsChannel` fallback is gone and `/api/settings/slack` returns 410 Gone
+- cron jobs (`/api/cron-jobs`) schedule oneshot LLM ticks or full agent investigations against a Channel; `CronRunner` boots from `cmd/akmatori/main.go`
 
 ## When Editing This File
 

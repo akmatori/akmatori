@@ -187,10 +187,10 @@ Introduce a first-class Channel concept (under provider Integrations) that trigg
 
 ### Task 12: Update documentation
 
-- [ ] update `CLAUDE.md`: replace "Outbound posting is global" assumption; add Channels/Integrations/Cron sections to "Important Files by Responsibility"; add a Rules section on Provider abstraction and Channel resolution
-- [ ] update `README.md` user-facing sections on Slack setup to point at Integrations + Channels flow; document cron jobs feature briefly
-- [ ] update OpenAPI specs in `docs/` (already touched in Task 4) — final cross-check against shipped routes
-- [ ] verify `wc -c CLAUDE.md` stays under 30000 bytes
+- [x] update `CLAUDE.md`: replace "Outbound posting is global" assumption; add Channels/Integrations/Cron sections to "Important Files by Responsibility"; add a Rules section on Provider abstraction and Channel resolution
+- [x] update `README.md` user-facing sections on Slack setup to point at Integrations + Channels flow; document cron jobs feature briefly
+- [x] update OpenAPI specs in `docs/` (already touched in Task 4) — final cross-check against shipped routes
+- [x] verify `wc -c CLAUDE.md` stays under 30000 bytes
 
 ## Post-Completion (manual verification, per /tmp/plan.md)
 

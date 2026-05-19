@@ -1011,50 +1011,34 @@ paths:
   # ===== Settings =====
   /settings/slack:
     get:
-      summary: Get Slack settings (deprecated)
+      summary: Get Slack settings (removed)
       description: |
-        Deprecated. When the Integrations + Channels infrastructure is wired
-        this endpoint returns 308 Permanent Redirect to /api/integrations.
-        Older deployments without an Integration row continue to read the
-        legacy SlackSettings shape until Task 10 of the unified-channels plan
-        removes the fallback.
+        Removed in the unified-channels rollout. Always returns 410 Gone.
+        Use `/api/integrations` and `/api/channels` to manage Slack
+        credentials and posting/listening destinations.
       deprecated: true
       operationId: getSlackSettings
       tags: [Settings]
       responses:
-        '200':
-          description: Legacy Slack settings (tokens masked)
-        '308':
-          description: Redirect clients to /api/integrations
+        '410':
+          description: Endpoint removed; configure Slack via /api/integrations and /api/channels.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
     put:
-      summary: Update Slack settings (deprecated)
+      summary: Update Slack settings (removed)
       description: |
-        Deprecated. Returns 308 to /api/integrations when the new channel
-        infrastructure is wired. Use the Integrations + Channels CRUD APIs.
+        Removed in the unified-channels rollout. Always returns 410 Gone.
+        Use the Integrations + Channels CRUD APIs.
       deprecated: true
       operationId: updateSlackSettings
       tags: [Settings]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                bot_token:
-                  type: string
-                signing_secret:
-                  type: string
-                app_token:
-                  type: string
-                alerts_channel:
-                  type: string
-                enabled:
-                  type: boolean
       responses:
-        '200':
-          description: Updated settings
-        '308':
-          description: Redirect clients to /api/integrations
+        '410':
+          description: Endpoint removed; configure Slack via /api/integrations and /api/channels.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
 
   /settings/llm:
     get:

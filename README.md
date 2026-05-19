@@ -8,7 +8,8 @@ Akmatori is an AI-powered AIOps agent that integrates with monitoring systems an
 
 - **Multi-LLM Support**: Use OpenAI, Anthropic, Google, OpenRouter, or on-premise models (GLM, Kimi, Minimax, Mistral, LLaMA)
 - **Multi-Source Alert Ingestion**: Receive alerts from Alertmanager, PagerDuty, Grafana, Datadog, Zabbix, and Slack channels
-- **Slack Integration**: Post incidents to channels, receive commands, and provide real-time updates
+- **Messaging Integrations & Channels**: Configure one or more messaging providers (Slack today, Telegram on the roadmap) under Settings → Integrations, then attach Channels with capability flags (post / listen / default) that alert sources and cron jobs reference by UUID
+- **Cron Jobs**: Schedule recurring tasks that post LLM summaries to a Channel — pick a 5-field cron expression, write a prompt, and choose `oneshot` (single LLM call) or `agent` (full incident-manager investigation)
 - **AI-Powered Automation**: Analyze incidents and execute remediation skills using your preferred LLM
 - **[Agent Skills](https://github.com/agentskills/agentskills) Format**: Skills follow the open Agent Skills specification for portability across AI agents
 - **Tools Management**: Configure reusable tools (SSH, Python scripts, API clients) for skills
@@ -72,6 +73,12 @@ The recommended install flow pulls pre-built multi-arch images from GHCR — no 
 5. Access the web dashboard at `http://localhost:8080` (username `admin`). The first visit runs a one-time setup wizard that lets you set the admin password.
 
 6. Configure your LLM provider in **Settings → LLM Provider**
+
+7. (Optional) Connect Slack:
+   - **Settings → Integrations → Add Slack** to register your bot/signing/app tokens.
+   - **Settings → Channels → Add Channel** to attach posting and listening destinations. Tick `is_default_post` on the channel that should receive alerts when an alert source does not pin one explicitly. `can_post` / `can_listen` decide whether the channel appears in the alert-source picker or is monitored for inbound mentions.
+
+8. (Optional) Schedule recurring runs in **Cron Jobs**: pick a schedule, write a prompt, choose `oneshot` for a quick LLM summary or `agent` for a full investigation, and point it at one of your Channels.
 
 ### Upgrade
 
