@@ -26,15 +26,16 @@ func NewChannelResolver(client *slack.Client) *ChannelResolver {
 
 // ResolveChannel resolves a channel name or ID to a channel ID
 // Accepts:
-// - Channel ID (C01234567890)
+// - Channel ID (C01234567890 or G01234567890)
 // - Channel name (#alerts or alerts)
 // Returns the channel ID and an error if not found
 func (r *ChannelResolver) ResolveChannel(nameOrID string) (string, error) {
+	nameOrID = strings.TrimSpace(nameOrID)
 	if nameOrID == "" {
 		return "", fmt.Errorf("channel name/ID is empty")
 	}
 
-	// If it looks like a channel ID (starts with C and is alphanumeric), return as-is
+	// If it looks like a channel ID, return as-is.
 	if isChannelID(nameOrID) {
 		return nameOrID, nil
 	}
@@ -115,13 +116,13 @@ func (r *ChannelResolver) ClearCache() {
 	slog.Info("Cleared channel resolution cache")
 }
 
-// isChannelID checks if a string looks like a Slack channel ID
-// Channel IDs start with C and are followed by alphanumeric characters
+// isChannelID checks if a string looks like a Slack channel ID.
+// Public channel IDs start with C; private channel IDs start with G.
 func isChannelID(s string) bool {
 	if len(s) < 9 || len(s) > 15 {
 		return false
 	}
-	if !strings.HasPrefix(s, "C") {
+	if !strings.HasPrefix(s, "C") && !strings.HasPrefix(s, "G") {
 		return false
 	}
 	// Check if rest is alphanumeric

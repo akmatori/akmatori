@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -114,6 +115,47 @@ func TestFeedbackClassifier_NoCallerIsSilent(t *testing.T) {
 	}
 }
 
+func TestFeedbackClassifier_NilReceiverIsSilent(t *testing.T) {
+	var c *FeedbackClassifier
+	_, err := c.Classify(context.Background(), "msg", &database.Incident{})
+	if err != ErrWorkerNotConnected {
+		t.Errorf("nil classifier should report worker disconnected, got %v", err)
+	}
+}
+
+func TestFeedbackClassifier_NilIncidentErrorsBeforeLLMCall(t *testing.T) {
+	caller := setupClassifierTest(t)
+	c := NewFeedbackClassifier(caller)
+
+	_, err := c.Classify(context.Background(), "the data dir is /mnt/data", nil)
+	if err == nil || !strings.Contains(err.Error(), "incident is nil") {
+		t.Fatalf("expected nil incident error, got %v", err)
+	}
+	if caller.callCount() != 0 {
+		t.Errorf("nil incident should skip LLM call entirely, got %d calls", caller.callCount())
+	}
+}
+
+func TestFeedbackClassifier_LLMErrorIsWrapped(t *testing.T) {
+	caller := setupClassifierTest(t)
+	llmErr := errors.New("provider timeout")
+	caller.respond = func(ctx context.Context) (string, error) {
+		return "", llmErr
+	}
+	c := NewFeedbackClassifier(caller)
+
+	_, err := c.Classify(context.Background(), "postgres data dir is /mnt/data", &database.Incident{Title: "Postgres outage"})
+	if !errors.Is(err, llmErr) {
+		t.Fatalf("expected wrapped provider error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "classify: llm call") {
+		t.Errorf("expected classify context in error, got %v", err)
+	}
+	if caller.callCount() != 1 {
+		t.Errorf("expected 1 LLM call, got %d", caller.callCount())
+	}
+}
+
 func TestFeedbackClassifier_EmptyMessageIsNotCalled(t *testing.T) {
 	caller := setupClassifierTest(t)
 	c := NewFeedbackClassifier(caller)
@@ -217,6 +259,13 @@ func TestBuildFeedbackUserPrompt_HandlesEmptyResponse(t *testing.T) {
 	got := buildFeedbackUserPrompt("hello", &database.Incident{Title: "T"})
 	if !strings.Contains(got, "(no agent response yet)") {
 		t.Errorf("expected placeholder for empty response: %s", got)
+	}
+}
+
+func TestBuildFeedbackUserPrompt_HandlesEmptyTitle(t *testing.T) {
+	got := buildFeedbackUserPrompt("hello", &database.Incident{Response: "agent response"})
+	if !strings.Contains(got, "Incident title: (no title)") {
+		t.Errorf("expected placeholder for empty title: %s", got)
 	}
 }
 

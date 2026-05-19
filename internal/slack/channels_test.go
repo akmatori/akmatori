@@ -13,10 +13,12 @@ func TestIsChannelID_ValidChannelID(t *testing.T) {
 		want  bool
 	}{
 		{"standard channel ID", "C01234567890", true},
+		{"private channel ID", "G01234567890", true},
 		{"short channel ID", "C01234567", true},
 		{"max length channel ID", "C012345678901234", false}, // too long (16 chars)
 		{"all numbers after C", "C1234567890", true},
-		{"mixed alphanumeric", "C0ABC123DEF", true},
+		{"mixed alphanumeric public", "C0ABC123DEF", true},
+		{"mixed alphanumeric private", "G0ABC123DEF", true},
 	}
 
 	for _, tt := range tests {
@@ -63,14 +65,26 @@ func TestChannelResolver_ResolveChannel_AlreadyChannelID(t *testing.T) {
 		cache:  make(map[string]string),
 	}
 
-	channelID := "C01234567890"
-	result, err := resolver.ResolveChannel(channelID)
-
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "public channel", input: "C01234567890", want: "C01234567890"},
+		{name: "private channel", input: "G01234567890", want: "G01234567890"},
+		{name: "trims surrounding whitespace", input: "  C01234567890  ", want: "C01234567890"},
 	}
-	if result != channelID {
-		t.Errorf("got %q, want %q", result, channelID)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := resolver.ResolveChannel(tt.input)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if result != tt.want {
+				t.Errorf("ResolveChannel(%q) = %q, want %q", tt.input, result, tt.want)
+			}
+		})
 	}
 }
 
@@ -80,10 +94,14 @@ func TestChannelResolver_ResolveChannel_EmptyInput(t *testing.T) {
 		cache:  make(map[string]string),
 	}
 
-	_, err := resolver.ResolveChannel("")
-
-	if err == nil {
-		t.Error("expected error for empty input, got nil")
+	tests := []string{"", "   ", "\n\t"}
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			_, err := resolver.ResolveChannel(input)
+			if err == nil {
+				t.Errorf("ResolveChannel(%q) expected error, got nil", input)
+			}
+		})
 	}
 }
 
