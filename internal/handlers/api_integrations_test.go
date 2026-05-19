@@ -726,6 +726,40 @@ func TestHandleIntegrations_MasksCredentialsInResponses(t *testing.T) {
 	}
 }
 
+// TestHandleIntegrations_MasksUnknownProviderSecrets verifies the
+// substring-matching masking catches credential keys that no provider has yet
+// registered. Future providers (Telegram, on-prem bots, etc.) whose secret
+// keys aren't enumerated must still be redacted on the wire.
+func TestHandleIntegrations_MasksUnknownProviderSecrets(t *testing.T) {
+	creds := database.JSONB{
+		"telegram_bot_token": "tg-LONG-SECRET-9999",
+		"some_password":      "supersecret-7777",
+		"private_key":        "PRIVATE-KEY-AAAA",
+		"webhook_url":        "https://example.com/hook?secret=BBBB",
+		"workspace_id":       "T01234567",
+	}
+	mgr := &mockChannelManager{integrations: []database.Integration{{ID: 1, UUID: "u1", Provider: database.MessagingProviderSlack, Name: "Slack", Credentials: creds, Enabled: true}}}
+	h := newHandlerWithChannelManager(mgr)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/integrations", nil)
+	w := httptest.NewRecorder()
+	h.handleIntegrations(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	for _, raw := range []string{"tg-LONG-SECRET-9999", "supersecret-7777", "PRIVATE-KEY-AAAA", "secret=BBBB"} {
+		if strings.Contains(body, raw) {
+			t.Fatalf("response leaked raw secret %q (substring matcher missed it): %s", raw, body)
+		}
+	}
+	// Non-secret identifier should remain in plaintext so the UI can render
+	// "configured workspace: T01234567".
+	if !strings.Contains(body, "T01234567") {
+		t.Fatalf("expected non-secret identifier to remain in plaintext: %s", body)
+	}
+}
+
 // TestHandleIntegrationByUUID_Delete_PropagatesNotFound surfaces a 404 when
 // the service reports the integration is gone.
 func TestHandleIntegrationByUUID_Delete_PropagatesNotFound(t *testing.T) {

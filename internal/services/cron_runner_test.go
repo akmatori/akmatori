@@ -1401,6 +1401,41 @@ func TestCronRunner_OneshotTick_LoadChannelByIDStale(t *testing.T) {
 	}
 }
 
+// TestCronRunner_FormatMessages_RespectsByteCap verifies the cron formatter
+// truncates oversized agent/oneshot bodies so a runaway LLM response cannot
+// exceed Slack's chat.postMessage limit. Without the cap the slack provider
+// would either silently truncate or fail with a 400.
+func TestCronRunner_FormatMessages_RespectsByteCap(t *testing.T) {
+	job := &database.CronJob{Name: "Daily report"}
+	huge := strings.Repeat("a", cronChannelMaxMessageBytes*2)
+
+	out := formatCronOneshotMessage(job, huge)
+	if len(out) > cronChannelMaxMessageBytes {
+		t.Fatalf("oneshot message %d bytes exceeds cap %d", len(out), cronChannelMaxMessageBytes)
+	}
+	if !strings.Contains(out, "*Daily report*") {
+		t.Errorf("expected header preserved after truncation: %q", out)
+	}
+	if !strings.Contains(out, "truncated") {
+		t.Errorf("expected truncation marker in oneshot output")
+	}
+
+	agentOut := formatCronAgentMessage(job, huge, false, "")
+	if len(agentOut) > cronChannelMaxMessageBytes {
+		t.Fatalf("agent message %d bytes exceeds cap %d", len(agentOut), cronChannelMaxMessageBytes)
+	}
+	if !strings.Contains(agentOut, "truncated") {
+		t.Errorf("expected truncation marker in agent output")
+	}
+
+	// Short input must pass through unchanged so normal traffic is unaffected.
+	short := "OK"
+	got := formatCronOneshotMessage(job, short)
+	if !strings.Contains(got, "OK") || strings.Contains(got, "truncated") {
+		t.Errorf("short input unexpectedly modified: %q", got)
+	}
+}
+
 // TestCronRunner_NewCronRunner_ConstructorReturnsRunner is a smoke check that
 // the production constructor wires every dependency through.
 func TestCronRunner_NewCronRunner_ConstructorReturnsRunner(t *testing.T) {

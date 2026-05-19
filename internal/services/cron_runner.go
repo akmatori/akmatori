@@ -535,7 +535,10 @@ func (r *CronRunner) executeAgent(job *database.CronJob) {
 
 // formatCronAgentMessage renders the channel-bound summary for an agent-mode
 // cron tick. On error the body still gets a header so the channel reader sees
-// which cron failed; on success it carries the agent's final response.
+// which cron failed; on success it carries the agent's final response. The
+// body is byte-capped so a verbose agent transcript cannot exceed Slack's
+// chat.postMessage limit; truncation appends a short suffix so the operator
+// can tell their output was clipped.
 func formatCronAgentMessage(job *database.CronJob, response string, hasError bool, errorMsg string) string {
 	name := strings.TrimSpace(job.Name)
 	if name == "" {
@@ -546,13 +549,13 @@ func formatCronAgentMessage(job *database.CronJob, response string, hasError boo
 		if msg == "" {
 			msg = "Investigation failed"
 		}
-		return fmt.Sprintf("*%s*\nInvestigation failed: %s", name, msg)
+		return capCronMessageBytes(fmt.Sprintf("*%s*\nInvestigation failed: %s", name, msg))
 	}
 	body := strings.TrimSpace(response)
 	if body == "" {
 		body = "Investigation completed (no output)"
 	}
-	return fmt.Sprintf("*%s*\n%s", name, body)
+	return capCronMessageBytes(fmt.Sprintf("*%s*\n%s", name, body))
 }
 
 // resolveChannel returns the Channel the supplied cron job should post into.
@@ -669,13 +672,46 @@ func (r *CronRunner) callOneshot(job *database.CronJob) (string, error) {
 
 // formatCronOneshotMessage prepends a small header so the channel reader can
 // see which cron produced the message. The body itself is whatever the LLM
-// returned (already trimmed by the caller).
+// returned (already trimmed by the caller). Capped to cronChannelMaxMessageBytes
+// so a runaway LLM response cannot exceed Slack's chat.postMessage limit.
 func formatCronOneshotMessage(job *database.CronJob, body string) string {
 	name := strings.TrimSpace(job.Name)
 	if name == "" {
 		name = "Scheduled report"
 	}
-	return fmt.Sprintf("*%s*\n%s", name, body)
+	return capCronMessageBytes(fmt.Sprintf("*%s*\n%s", name, body))
+}
+
+// cronChannelMaxMessageBytes caps the byte size of an outbound cron message.
+// Slack's chat.postMessage hard limit is ~40,000 bytes; we keep the cap at
+// 8000 to match the alert/Slack flow's slackMaxTextBytes so cron messages
+// stay readable in a long thread and so the operator sees their output
+// truncated before Slack truncates it silently.
+const cronChannelMaxMessageBytes = 8000
+
+// capCronMessageBytes truncates the supplied message to fit
+// cronChannelMaxMessageBytes, appending a clipped-marker so the operator can
+// tell the body was cut. Avoids slicing in the middle of a multi-byte rune.
+func capCronMessageBytes(msg string) string {
+	if len(msg) <= cronChannelMaxMessageBytes {
+		return msg
+	}
+	const suffix = "\n\n_...truncated. See full response in the UI._"
+	cutoff := cronChannelMaxMessageBytes - len(suffix)
+	if cutoff < 100 {
+		cutoff = 100
+	}
+	truncated := msg[:cutoff]
+	// Backtrack to the last full rune boundary so we never slice a UTF-8
+	// continuation byte.
+	for cutoff > 0 && (truncated[cutoff-1]&0xC0) == 0x80 {
+		cutoff--
+		truncated = msg[:cutoff]
+	}
+	if idx := strings.LastIndex(truncated, "\n"); idx > cutoff/2 {
+		truncated = truncated[:idx]
+	}
+	return truncated + suffix
 }
 
 // recordResult persists the outcome of a tick. Uses Updates with a map so

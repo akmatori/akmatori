@@ -459,6 +459,13 @@ func (s *ChannelService) ResolveForAlertSource(asi *database.AlertSourceInstance
 // guard widens to all integrations sharing the same provider. excludeID lets
 // the update path skip the row being modified (otherwise re-saving a default
 // channel would fail its own check).
+//
+// The count is NOT filtered by integrations.enabled — a disabled integration's
+// default-post row still blocks creation under a different integration so that
+// re-enabling the prior integration cannot produce two concurrent default-post
+// channels for the same provider (ResolveDefault would then non-deterministically
+// pick one). The returned error names the conflicting integration so the
+// operator can unset the old default before adding a new one.
 func (s *ChannelService) assertNoOtherDefaultPostTx(tx *gorm.DB, integrationID uint, excludeID uint) error {
 	var integration database.Integration
 	if err := tx.First(&integration, integrationID).Error; err != nil {

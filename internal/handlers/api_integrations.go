@@ -10,16 +10,35 @@ import (
 	"github.com/akmatori/akmatori/internal/services"
 )
 
-// integrationCredentialMaskFields lists the credential keys that should be
-// masked when an Integration row is returned over the API. Operator inputs
-// (tokens, secrets) are accepted on write but never echoed back in plaintext —
-// the same posture the retired /api/settings/slack endpoint maintained.
-var integrationCredentialMaskFields = []string{
-	"bot_token",
-	"signing_secret",
-	"app_token",
-	"api_token",
-	"webhook_secret",
+// integrationCredentialSecretSubstrings lists credential key substrings that
+// indicate the value carries a secret and must be masked before being returned
+// over the API. Operator inputs (tokens, secrets) are accepted on write but
+// never echoed back in plaintext — the same posture the retired
+// /api/settings/slack endpoint maintained.
+//
+// Substring matching (case-insensitive) lets any future provider whose secret
+// key contains "token"/"secret"/"password"/"key" be masked automatically
+// without having to enumerate every provider-specific name here. An explicit
+// allow-list (below) skips known-non-secret fields that happen to match a
+// substring (e.g. "key_id" labels, not the key itself).
+var integrationCredentialSecretSubstrings = []string{
+	"token",
+	"secret",
+	"password",
+	"passwd",
+	"apikey",
+	"api_key",
+	"webhook",
+	"private",
+	"credential",
+}
+
+// integrationCredentialPlaintextKeys names credential keys that look secret-ish
+// (matching a substring above) but are intentionally returned in plaintext —
+// either because they are identifiers, not secrets, or because the UI relies
+// on rendering them.
+var integrationCredentialPlaintextKeys = map[string]struct{}{
+	"is_configured": {},
 }
 
 // integrationResponse is the API-facing shape of an Integration row. It
@@ -37,9 +56,9 @@ type integrationResponse struct {
 }
 
 // toIntegrationResponse returns a redacted view of the supplied integration
-// suitable for API responses. Credential values for keys listed in
-// integrationCredentialMaskFields are replaced with maskToken so that the
-// UI can render "configured: yes" without ever exposing the plaintext secret.
+// suitable for API responses. Credential values whose key matches
+// shouldMaskCredentialField are replaced with maskToken so that the UI can
+// render "configured: yes" without ever exposing the plaintext secret.
 func toIntegrationResponse(row *database.Integration) integrationResponse {
 	resp := integrationResponse{
 		ID:          row.ID,
@@ -63,10 +82,16 @@ func toIntegrationResponse(row *database.Integration) integrationResponse {
 }
 
 // shouldMaskCredentialField reports whether the given credential key carries a
-// secret that must be masked before going on the wire.
+// secret that must be masked before going on the wire. Match is
+// case-insensitive substring against integrationCredentialSecretSubstrings, with
+// an explicit allow-list of look-alike-but-not-secret keys.
 func shouldMaskCredentialField(key string) bool {
-	for _, k := range integrationCredentialMaskFields {
-		if k == key {
+	if _, ok := integrationCredentialPlaintextKeys[key]; ok {
+		return false
+	}
+	lower := strings.ToLower(key)
+	for _, fragment := range integrationCredentialSecretSubstrings {
+		if strings.Contains(lower, fragment) {
 			return true
 		}
 	}

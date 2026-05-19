@@ -336,6 +336,19 @@ func migrateSlackChannelAlertSourcesToChannels(db *gorm.DB) error {
 			} else if lookup.Error != nil {
 				return fmt.Errorf("lookup existing listener channel: %w", lookup.Error)
 			} else {
+				// Pre-existing default-post channels do not normally also carry
+				// listener capability; surface the dual-role promotion so the
+				// operator can review whether that is intentional. The role is
+				// still applied so a partial-prior-migration completes idempotently.
+				if existing.IsDefaultPost {
+					slog.Warn("migration promoting a default-post channel to also act as a listener; review the channel's roles",
+						"channel_id", existing.ID,
+						"channel_uuid", existing.UUID,
+						"integration_id", existing.IntegrationID,
+						"external_id", existing.ExternalID,
+						"alert_source_instance_id", inst.ID,
+					)
+				}
 				updates := map[string]interface{}{
 					"can_listen":             true,
 					"extraction_prompt":      extractionPrompt,

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -184,8 +185,13 @@ func main() {
 		slackSettings = &database.SlackSettings{Enabled: false}
 	}
 
-	// Initialize Slack handler (will be used when Slack is enabled)
-	var slackHandler *handlers.SlackHandler
+	// Initialize Slack handler (will be used when Slack is enabled).
+	// Stored in an atomic.Pointer because it is written from the slackManager
+	// event-handler goroutine (on socket-mode connect or credential reload) and
+	// read from HTTP request goroutines via the SetAlertChannelReloader
+	// closure. Without the atomic, the read+write pair is a data race that the
+	// race detector flags and that could surface as a torn pointer in production.
+	var slackHandler atomic.Pointer[handlers.SlackHandler]
 
 	// Initialize Alert handler (needed before Slack handler setup)
 	// Initialize channel resolver (will be set when Slack connects)
@@ -231,7 +237,7 @@ func main() {
 	// Note: We receive the client directly to avoid deadlock (can't call GetClient while holding lock)
 	slackManager.SetEventHandler(func(socketClient *socketmode.Client, client *slack.Client) {
 		// Create handler with current client
-		slackHandler = handlers.NewSlackHandler(
+		handler := handlers.NewSlackHandler(
 			client,
 			agentExecutor,
 			agentWSHandler,
@@ -240,23 +246,23 @@ func main() {
 		)
 
 		// Wire up alert channel support
-		slackHandler.SetAlertHandler(alertHandler)
-		slackHandler.SetAlertService(alertService)
+		handler.SetAlertHandler(alertHandler)
+		handler.SetAlertService(alertService)
 		// ChannelService is the source of truth for listener channels after
 		// Task 6 of the unified-channels plan; LoadListenerChannels reads
 		// from the channels table.
-		slackHandler.SetChannelService(channelService)
-		slackHandler.SetSlackSummarizer(slackSummarizer)
-		slackHandler.SetResponseFormatter(responseFormatter)
+		handler.SetChannelService(channelService)
+		handler.SetSlackSummarizer(slackSummarizer)
+		handler.SetResponseFormatter(responseFormatter)
 		// Wire LLM-classified Slack feedback capture: thread replies on incident
 		// threads run through the classifier and persist as global feedback memory.
-		slackHandler.SetMemoryManager(memoryService)
-		slackHandler.SetFeedbackClassifier(services.NewFeedbackClassifier(agentWSHandler))
+		handler.SetMemoryManager(memoryService)
+		handler.SetFeedbackClassifier(services.NewFeedbackClassifier(agentWSHandler))
 
 		// Try to get bot user ID and team ID for self-message filtering and Streaming API
 		if authTest, err := client.AuthTest(); err == nil {
-			slackHandler.SetBotUserID(authTest.UserID)
-			slackHandler.SetTeamID(authTest.TeamID)
+			handler.SetBotUserID(authTest.UserID)
+			handler.SetTeamID(authTest.TeamID)
 			alertHandler.SetTeamID(authTest.TeamID)
 			slog.Info("Slack bot user ID", "user_id", authTest.UserID, "team_id", authTest.TeamID)
 		} else {
@@ -264,11 +270,16 @@ func main() {
 		}
 
 		// Load listener channel configurations from the channels table.
-		if err := slackHandler.LoadListenerChannels(); err != nil {
+		if err := handler.LoadListenerChannels(); err != nil {
 			slog.Warn("failed to load listener channels", "err", err)
 		}
 
-		slackHandler.HandleSocketMode(socketClient)
+		// Publish the fully-initialised handler atomically so the API
+		// reloader closure observes a complete value (no torn pointer or
+		// partially-wired handler).
+		slackHandler.Store(handler)
+
+		handler.HandleSocketMode(socketClient)
 		slog.Info("Slack components initialized (with listener channel support)")
 	})
 
@@ -315,8 +326,8 @@ func main() {
 	// sources) are created/updated/deleted via API, reload the Slack handler's
 	// channel mappings so changes take effect immediately.
 	apiHandler.SetAlertChannelReloader(func() {
-		if slackHandler != nil {
-			slackHandler.ReloadListenerChannels()
+		if handler := slackHandler.Load(); handler != nil {
+			handler.ReloadListenerChannels()
 		}
 	})
 
