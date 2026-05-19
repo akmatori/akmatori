@@ -53,8 +53,13 @@ func (s *fakeScheduler) Entry(id cron.EntryID) cron.Entry {
 	return cron.Entry{ID: id}
 }
 
-func (s *fakeScheduler) Start()                 { s.mu.Lock(); s.started = true; s.mu.Unlock() }
-func (s *fakeScheduler) Stop() context.Context  { s.mu.Lock(); s.stopped = true; s.mu.Unlock(); return context.Background() }
+func (s *fakeScheduler) Start() { s.mu.Lock(); s.started = true; s.mu.Unlock() }
+func (s *fakeScheduler) Stop() context.Context {
+	s.mu.Lock()
+	s.stopped = true
+	s.mu.Unlock()
+	return context.Background()
+}
 func (s *fakeScheduler) fire(id cron.EntryID) {
 	s.mu.Lock()
 	fn, ok := s.jobs[id]
@@ -128,9 +133,9 @@ func (r *recordingChannelManager) ResolveForAlertSource(*database.AlertSourceIns
 // recordingProvider captures PostMessage calls. The fake registry returns it
 // for slack so executeOneshot can route through the standard provider API.
 type recordingProvider struct {
-	mu       sync.Mutex
-	posts    []recordedPost
-	postErr  error
+	mu      sync.Mutex
+	posts   []recordedPost
+	postErr error
 }
 
 type recordedPost struct {
@@ -182,16 +187,16 @@ func (f *fakeProviderRegistry) List() []database.MessagingProvider {
 // surface records SpawnIncidentManager calls so tests can assert the cron
 // path stamps source_kind=cron/source_uuid=<job.uuid> on the Incident row.
 type fakeSkillIncidentManager struct {
-	spawnCalls       []IncidentContext
-	spawnIncidentID  string
-	spawnErr         error
-	updateStatusErr  error
+	spawnCalls        []IncidentContext
+	spawnIncidentID   string
+	spawnErr          error
+	updateStatusErr   error
 	updateCompleteErr error
 
-	mu              sync.Mutex
-	updates         []fakeIncidentUpdate
-	enabledSkills   []string
-	toolAllowlist   []ToolAllowlistEntry
+	mu            sync.Mutex
+	updates       []fakeIncidentUpdate
+	enabledSkills []string
+	toolAllowlist []ToolAllowlistEntry
 }
 
 type fakeIncidentUpdate struct {
@@ -227,7 +232,7 @@ func (f *fakeSkillIncidentManager) UpdateIncidentComplete(uuid string, status da
 	f.updates = append(f.updates, fakeIncidentUpdate{uuid: uuid, status: status, response: response, fullLog: fullLog})
 	return f.updateCompleteErr
 }
-func (f *fakeSkillIncidentManager) UpdateIncidentLog(string, string) error    { return nil }
+func (f *fakeSkillIncidentManager) UpdateIncidentLog(string, string) error         { return nil }
 func (f *fakeSkillIncidentManager) GetIncident(string) (*database.Incident, error) { return nil, nil }
 func (f *fakeSkillIncidentManager) AppendSubagentLog(string, string, string) error { return nil }
 
@@ -246,16 +251,20 @@ func (f *fakeSkillIncidentManager) GetEnabledSkillNames() []string { return f.en
 func (f *fakeSkillIncidentManager) GetToolAllowlist() []ToolAllowlistEntry {
 	return f.toolAllowlist
 }
-func (f *fakeSkillIncidentManager) GetSkill(string) (*database.Skill, error)  { panic("not implemented") }
-func (f *fakeSkillIncidentManager) AssignTools(string, []uint) error          { panic("not implemented") }
-func (f *fakeSkillIncidentManager) GetSkillDir(string) string                 { panic("not implemented") }
-func (f *fakeSkillIncidentManager) GetSkillScriptsDir(string) string          { panic("not implemented") }
-func (f *fakeSkillIncidentManager) GetSkillPrompt(string) (string, error)     { panic("not implemented") }
-func (f *fakeSkillIncidentManager) UpdateSkillPrompt(string, string) error    { panic("not implemented") }
-func (f *fakeSkillIncidentManager) RegenerateSkillMd(string) error            { panic("not implemented") }
-func (f *fakeSkillIncidentManager) SyncSkillsFromFilesystem() error           { panic("not implemented") }
-func (f *fakeSkillIncidentManager) ListSkillScripts(string) ([]string, error) { panic("not implemented") }
-func (f *fakeSkillIncidentManager) ClearSkillScripts(string) error            { panic("not implemented") }
+func (f *fakeSkillIncidentManager) GetSkill(string) (*database.Skill, error) {
+	panic("not implemented")
+}
+func (f *fakeSkillIncidentManager) AssignTools(string, []uint) error       { panic("not implemented") }
+func (f *fakeSkillIncidentManager) GetSkillDir(string) string              { panic("not implemented") }
+func (f *fakeSkillIncidentManager) GetSkillScriptsDir(string) string       { panic("not implemented") }
+func (f *fakeSkillIncidentManager) GetSkillPrompt(string) (string, error)  { panic("not implemented") }
+func (f *fakeSkillIncidentManager) UpdateSkillPrompt(string, string) error { panic("not implemented") }
+func (f *fakeSkillIncidentManager) RegenerateSkillMd(string) error         { panic("not implemented") }
+func (f *fakeSkillIncidentManager) SyncSkillsFromFilesystem() error        { panic("not implemented") }
+func (f *fakeSkillIncidentManager) ListSkillScripts(string) ([]string, error) {
+	panic("not implemented")
+}
+func (f *fakeSkillIncidentManager) ClearSkillScripts(string) error { panic("not implemented") }
 func (f *fakeSkillIncidentManager) GetSkillScript(string, string) (*ScriptInfo, error) {
 	panic("not implemented")
 }
@@ -562,6 +571,7 @@ func TestCronRunner_RunNow_FiresImmediately(t *testing.T) {
 	if err := runner.RunNow(job.UUID); err != nil {
 		t.Fatalf("run now: %v", err)
 	}
+	runner.WaitForInflight()
 	prov.mu.Lock()
 	defer prov.mu.Unlock()
 	if len(prov.posts) != 1 {
@@ -643,6 +653,7 @@ func TestCronRunner_AgentTick_SpawnsIncidentWithCronProvenance(t *testing.T) {
 	if err := runner.RunNow(job.UUID); err != nil {
 		t.Fatalf("run: %v", err)
 	}
+	runner.WaitForInflight()
 
 	if len(skills.spawnCalls) != 1 {
 		t.Fatalf("expected one SpawnIncidentManager call, got %d", len(skills.spawnCalls))
@@ -673,6 +684,7 @@ func TestCronRunner_AgentTick_PostsFinalSummaryToChannel(t *testing.T) {
 	if err := runner.RunNow(job.UUID); err != nil {
 		t.Fatalf("run: %v", err)
 	}
+	runner.WaitForInflight()
 
 	prov.mu.Lock()
 	posts := append([]recordedPost(nil), prov.posts...)
@@ -715,6 +727,7 @@ func TestCronRunner_AgentTick_RecordsWorkerNotConnected(t *testing.T) {
 	if err := runner.RunNow(job.UUID); err != nil {
 		t.Fatalf("run: %v", err)
 	}
+	runner.WaitForInflight()
 
 	var got database.CronJob
 	if err := db.First(&got, "uuid = ?", job.UUID).Error; err != nil {
@@ -752,6 +765,7 @@ func TestCronRunner_AgentTick_RecordsAgentError(t *testing.T) {
 	if err := runner.RunNow(job.UUID); err != nil {
 		t.Fatalf("run: %v", err)
 	}
+	runner.WaitForInflight()
 
 	var got database.CronJob
 	if err := db.First(&got, "uuid = ?", job.UUID).Error; err != nil {
@@ -789,6 +803,7 @@ func TestCronRunner_AgentTick_RecordsStartIncidentError(t *testing.T) {
 	if err := runner.RunNow(job.UUID); err != nil {
 		t.Fatalf("run: %v", err)
 	}
+	runner.WaitForInflight()
 
 	var got database.CronJob
 	if err := db.First(&got, "uuid = ?", job.UUID).Error; err != nil {
@@ -818,6 +833,7 @@ func TestCronRunner_AgentTick_MissingWiringMarksError(t *testing.T) {
 	if err := runner.RunNow(job.UUID); err != nil {
 		t.Fatalf("run: %v", err)
 	}
+	runner.WaitForInflight()
 
 	var got database.CronJob
 	if err := db.First(&got, "uuid = ?", job.UUID).Error; err != nil {
@@ -1047,6 +1063,37 @@ func TestCronRunner_CreateJob_UnknownChannelUUID(t *testing.T) {
 	_, err := runner.CreateJob("nightly", "", "0 9 * * *", "Summarize", database.CronJobModeOneshot, "ghost", true)
 	if !errors.Is(err, ErrChannelNotFound) {
 		t.Errorf("err = %v, want ErrChannelNotFound", err)
+	}
+}
+
+// TestCronRunner_CreateJob_RejectsNonPostableChannel guards the capability
+// gating contract from CLAUDE.md: a cron job (a posting trigger) cannot
+// reference a listen-only Channel. The check runs at write time so the
+// operator sees a clean validation error rather than a silent fall-through to
+// the default at fire time.
+func TestCronRunner_CreateJob_RejectsNonPostableChannel(t *testing.T) {
+	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
+	chMgr.channels[0].CanPost = false
+	chUUID := chMgr.channels[0].UUID
+	_, err := runner.CreateJob("nightly", "", "0 9 * * *", "Summarize", database.CronJobModeOneshot, chUUID, true)
+	if !errors.Is(err, ErrChannelNotPostable) {
+		t.Errorf("err = %v, want ErrChannelNotPostable", err)
+	}
+}
+
+// TestCronRunner_UpdateJob_RejectsNonPostableChannel mirrors the create-time
+// guard on the update path so a cron job cannot be re-pointed at a
+// listen-only channel after creation.
+func TestCronRunner_UpdateJob_RejectsNonPostableChannel(t *testing.T) {
+	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
+	postable := chMgr.channels[0].UUID
+	job, err := runner.CreateJob("nightly", "", "0 9 * * *", "Summarize", database.CronJobModeOneshot, postable, true)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	chMgr.channels[0].CanPost = false
+	if _, err := runner.UpdateJob(job.UUID, CronJobUpdate{ChannelUUID: &postable}); !errors.Is(err, ErrChannelNotPostable) {
+		t.Errorf("err = %v, want ErrChannelNotPostable", err)
 	}
 }
 
@@ -1379,4 +1426,3 @@ func TestCronRunner_NewCronRunner_ConstructorReturnsRunner(t *testing.T) {
 		t.Error("scheduler not wired")
 	}
 }
-

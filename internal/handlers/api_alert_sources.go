@@ -32,6 +32,9 @@ func (h *APIHandler) resolveNotificationChannel(uuidStr string) (*uint, *alertCh
 		}
 		return nil, &alertChannelErr{status: http.StatusInternalServerError, msg: "Failed to resolve notification channel"}
 	}
+	if !ch.CanPost {
+		return nil, &alertChannelErr{status: http.StatusBadRequest, msg: "notification_channel_uuid points at a channel that cannot post (CanPost=false)"}
+	}
 	id := ch.ID
 	return &id, nil
 }

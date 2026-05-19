@@ -167,14 +167,66 @@ func TestAlertHandler_ResolveOutboundSlackChannel_NoLegacyFallback(t *testing.T)
 	}
 }
 
-// TestAlertHandler_ResolveOutboundSlackChannel_SkipsNonSlackProvider asserts
-// that an AlertSourceInstance whose NotificationChannelID points at a
-// non-slack channel (e.g. a Telegram channel) does NOT get returned for slack
-// posting. ChannelService.ResolveForAlertSource honours an explicit
-// notification_channel_id without filtering by provider, so without this
-// guard the Slack post path would attempt to deliver a Telegram chat ID to
-// the Slack API and silently misroute the alert.
-func TestAlertHandler_ResolveOutboundSlackChannel_SkipsNonSlackProvider(t *testing.T) {
+// TestAlertHandler_ResolveOutboundSlackChannel_NonSlackFallsBackToDefault
+// covers the cross-provider mismatch path: an AlertSourceInstance whose
+// NotificationChannelID points at a non-slack channel (e.g. a Telegram
+// channel) must not return the wrong-provider channel for slack posting.
+// Instead, when a default Slack channel exists, fall back to it so the alert
+// still surfaces somewhere rather than being silently dropped.
+func TestAlertHandler_ResolveOutboundSlackChannel_NonSlackFallsBackToDefault(t *testing.T) {
+	db, cleanup := setupChannelRoutingDB(t)
+	defer cleanup()
+
+	_, defaultCh, _ := seedIntegrationWithChannels(t, db)
+
+	telegram := &database.Integration{
+		UUID:     uuid.New().String(),
+		Provider: database.MessagingProviderTelegram,
+		Name:     "telegram bot",
+		Enabled:  true,
+	}
+	if err := db.Create(telegram).Error; err != nil {
+		t.Fatalf("create telegram integration: %v", err)
+	}
+	tgChannel := &database.Channel{
+		UUID:          uuid.New().String(),
+		IntegrationID: telegram.ID,
+		ExternalID:    "tg-1234",
+		DisplayName:   "team chat",
+		CanPost:       true,
+		IsDefaultPost: false,
+		Enabled:       true,
+	}
+	if err := db.Create(tgChannel).Error; err != nil {
+		t.Fatalf("create telegram channel: %v", err)
+	}
+
+	asi := &database.AlertSourceInstance{
+		UUID:                  uuid.New().String(),
+		Name:                  "tg-asi",
+		NotificationChannelID: &tgChannel.ID,
+	}
+
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
+	h.SetChannelService(services.NewChannelService())
+
+	channel, channelID := h.resolveOutboundSlackChannel(asi)
+	if channel == nil {
+		t.Fatal("expected default slack fallback, got nil")
+	}
+	if channel.ID != defaultCh.ID {
+		t.Errorf("channel.ID = %d, want %d (default slack)", channel.ID, defaultCh.ID)
+	}
+	if channelID != "C_DEFAULT" {
+		t.Errorf("channelID = %q, want C_DEFAULT (default slack)", channelID)
+	}
+}
+
+// TestAlertHandler_ResolveOutboundSlackChannel_NonSlackNoDefaultDropsPost
+// covers the cross-provider mismatch path when no default Slack channel
+// exists: the post is dropped rather than misrouted. There is nowhere safe
+// to fall through to in this case.
+func TestAlertHandler_ResolveOutboundSlackChannel_NonSlackNoDefaultDropsPost(t *testing.T) {
 	db, cleanup := setupChannelRoutingDB(t)
 	defer cleanup()
 
@@ -211,7 +263,7 @@ func TestAlertHandler_ResolveOutboundSlackChannel_SkipsNonSlackProvider(t *testi
 
 	channel, channelID := h.resolveOutboundSlackChannel(asi)
 	if channel != nil || channelID != "" {
-		t.Errorf("expected slack resolver to skip telegram-typed channel, got channel=%v channelID=%q",
+		t.Errorf("expected slack resolver to drop telegram-typed channel with no default, got channel=%v channelID=%q",
 			channel, channelID)
 	}
 }

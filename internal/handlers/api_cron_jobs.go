@@ -17,22 +17,22 @@ import (
 // going on the wire — the model alone would echo bot_token / signing_secret /
 // app_token in plaintext via the eager Preload("Channel.Integration") chain.
 type cronJobResponse struct {
-	ID            uint                   `json:"id"`
-	UUID          string                 `json:"uuid"`
-	Name          string                 `json:"name"`
-	Description   string                 `json:"description"`
-	Schedule      string                 `json:"schedule"`
-	Prompt        string                 `json:"prompt"`
-	Mode          database.CronJobMode   `json:"mode"`
-	ChannelID     *uint                  `json:"channel_id"`
-	Enabled       bool                   `json:"enabled"`
-	LastRunAt     *time.Time             `json:"last_run_at,omitempty"`
-	LastRunStatus string                 `json:"last_run_status"`
-	LastRunError  string                 `json:"last_run_error"`
-	NextRunAt     *time.Time             `json:"next_run_at,omitempty"`
-	CreatedAt     time.Time              `json:"created_at"`
-	UpdatedAt     time.Time              `json:"updated_at"`
-	Channel       *channelResponse       `json:"channel,omitempty"`
+	ID            uint                 `json:"id"`
+	UUID          string               `json:"uuid"`
+	Name          string               `json:"name"`
+	Description   string               `json:"description"`
+	Schedule      string               `json:"schedule"`
+	Prompt        string               `json:"prompt"`
+	Mode          database.CronJobMode `json:"mode"`
+	ChannelID     *uint                `json:"channel_id"`
+	Enabled       bool                 `json:"enabled"`
+	LastRunAt     *time.Time           `json:"last_run_at,omitempty"`
+	LastRunStatus string               `json:"last_run_status"`
+	LastRunError  string               `json:"last_run_error"`
+	NextRunAt     *time.Time           `json:"next_run_at,omitempty"`
+	CreatedAt     time.Time            `json:"created_at"`
+	UpdatedAt     time.Time            `json:"updated_at"`
+	Channel       *channelResponse     `json:"channel,omitempty"`
 }
 
 func toCronJobResponse(row *database.CronJob) cronJobResponse {
@@ -168,7 +168,10 @@ func (h *APIHandler) handleCronJobByUUID(w http.ResponseWriter, r *http.Request)
 				api.RespondError(w, cronErrStatus(err), err.Error())
 				return
 			}
-			api.RespondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+			// 202: the tick was accepted and is running in the background.
+			// Operators poll LastRunStatus / LastRunError on the row for the
+			// outcome.
+			api.RespondJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
 		default:
 			api.RespondError(w, http.StatusNotFound, "Not found")
 		}
@@ -231,9 +234,16 @@ func cronErrStatus(err error) int {
 	case errors.Is(err, services.ErrChannelNotFound),
 		errors.Is(err, services.ErrIntegrationNotFound):
 		return http.StatusBadRequest
-	case errors.Is(err, services.ErrInvalidCronSchedule):
+	case errors.Is(err, services.ErrInvalidCronSchedule),
+		errors.Is(err, services.ErrChannelNotPostable):
 		return http.StatusBadRequest
 	default:
+		// Duplicate cron job name violates the uniqueIndex on cron_jobs.name —
+		// translate to 409 so the UI can surface a clean validation message
+		// rather than rendering a server-error banner.
+		if isDuplicateNameErr(err) {
+			return http.StatusConflict
+		}
 		if isCronClientError(err) {
 			return http.StatusBadRequest
 		}

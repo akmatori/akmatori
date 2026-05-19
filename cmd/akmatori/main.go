@@ -219,6 +219,11 @@ func main() {
 	channelService := services.NewChannelService()
 	providerRegistry := messaging.NewRegistry()
 	providerRegistry.Register(messaging.NewSlackProvider(slackManager))
+	// Telegram is registered as a stub so the registry distinguishes
+	// "known provider, not yet implemented" (ErrNotImplemented) from
+	// "unknown provider" (ErrProviderNotRegistered). Without this, a
+	// Telegram-configured Channel would silently no-op at post time.
+	providerRegistry.Register(messaging.NewTelegramProvider())
 	alertHandler.SetChannelService(channelService)
 	alertHandler.SetProviderRegistry(providerRegistry)
 

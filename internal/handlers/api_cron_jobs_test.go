@@ -282,8 +282,8 @@ func TestHandleCronJobByUUID_RunNow(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.handleCronJobByUUID(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
 	}
 	if mgr.lastRunUUID != "u1" {
 		t.Errorf("RunNow uuid = %q, want u1", mgr.lastRunUUID)

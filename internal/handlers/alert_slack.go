@@ -37,14 +37,22 @@ func (h *AlertHandler) resolveOutboundSlackChannel(asi *database.AlertSourceInst
 	// ResolveForAlertSource honours an explicit AlertSourceInstance.NotificationChannelID
 	// without filtering by provider, so the resolved row could belong to a
 	// non-slack integration (e.g. Telegram). Posting it through the Slack
-	// client would silently misroute the alert; bail out instead and let the
-	// caller fall back to skipping the Slack post.
+	// client would silently misroute the alert. Fall through to the Slack
+	// per-provider default so the alert still surfaces somewhere rather than
+	// being silently dropped.
 	if ch.Integration.Provider != database.MessagingProviderSlack {
-		slog.Warn("alert source points at a non-slack channel; skipping slack post",
+		slog.Warn("alert source points at a non-slack channel; falling back to default Slack channel",
 			"channel_uuid", ch.UUID,
 			"provider", ch.Integration.Provider,
 		)
-		return nil, ""
+		fallback, ferr := h.channelService.ResolveDefault(database.MessagingProviderSlack)
+		if ferr != nil {
+			if !errors.Is(ferr, services.ErrChannelNotFound) {
+				slog.Warn("resolve default slack channel failed", "err", ferr)
+			}
+			return nil, ""
+		}
+		ch = fallback
 	}
 	return ch, h.resolveSlackExternalID(ch.ExternalID)
 }

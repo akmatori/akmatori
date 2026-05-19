@@ -93,6 +93,38 @@ func TestHandleAlertSources_Create_SetsNotificationChannelFromUUID(t *testing.T)
 	}
 }
 
+// TestHandleAlertSources_Create_RejectsNonPostableChannel covers the
+// CanPost capability gating: an alert source cannot reference a listen-only
+// channel as its notification destination. CLAUDE.md says: "Channel.CanPost /
+// Channel.CanListen capability flags gate which triggers may reference a
+// channel." The check runs at write time so the operator sees a clean 400
+// rather than a silent fall-through to the default at fire time.
+func TestHandleAlertSources_Create_RejectsNonPostableChannel(t *testing.T) {
+	alertMgr := &notifAlertManager{}
+	chMgr := &mockChannelManager{
+		channels: []database.Channel{
+			{ID: 99, UUID: "ch-listen", IntegrationID: 1, ExternalID: "C_LISTEN", CanPost: false, CanListen: true},
+		},
+	}
+	h := NewAPIHandler(nil, nil, nil, alertMgr, nil, nil, nil, nil, nil, nil, nil)
+	h.SetChannelManager(chMgr)
+
+	body := map[string]interface{}{
+		"source_type_name":          "alertmanager",
+		"name":                      "Prod AM",
+		"notification_channel_uuid": "ch-listen",
+	}
+	raw, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/alert-sources", bytes.NewReader(raw))
+	w := httptest.NewRecorder()
+	h.handleAlertSources(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for non-postable channel, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestHandleAlertSources_Create_RejectsUnknownChannelUUID(t *testing.T) {
 	h, _, _ := newAlertSourcesHandler(t)
 

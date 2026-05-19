@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
@@ -24,6 +25,13 @@ var ErrCronJobNotFound = errors.New("cron job not found")
 // against the standard 5-field crontab grammar (m h dom mon dow). The error
 // message includes the parser's failure so the UI can surface it to operators.
 var ErrInvalidCronSchedule = errors.New("invalid cron schedule")
+
+// ErrChannelNotPostable is returned when a cron job or alert source tries to
+// reference a Channel without the CanPost capability. Catching this at write
+// time gives a clean validation error rather than a silent fall-through at
+// fire time. Mirrors CLAUDE.md's "CanPost / CanListen capability flags gate
+// which triggers may reference a channel" rule.
+var ErrChannelNotPostable = errors.New("channel cannot be used for outbound posts (CanPost=false)")
 
 // cronOneshotTimeout is the deadline applied to a single oneshot LLM tick. The
 // agent worker forwards retry/timeout settings of its own, but the runner caps
@@ -87,10 +95,11 @@ type CronRunner struct {
 	scheduler cronScheduler
 	parser    cron.Parser
 
-	mu      sync.Mutex
-	entries map[uint]cron.EntryID // cronJob.ID -> scheduler entry
-	started bool
-	stopFn  context.CancelFunc
+	mu       sync.Mutex
+	entries  map[uint]cron.EntryID // cronJob.ID -> scheduler entry
+	started  bool
+	stopFn   context.CancelFunc
+	inflight sync.WaitGroup // tracks ticks dispatched by RunNow so tests + Stop can join
 }
 
 // NewCronRunner constructs a CronRunner bound to the global DB and supplied
@@ -261,11 +270,11 @@ func (r *CronRunner) fire(jobID uint) {
 }
 
 // RunNow fires a manual tick for the supplied UUID. Returns ErrCronJobNotFound
-// when the row is absent so the handler can surface a 404. The call runs the
-// tick to completion synchronously — tick results land on the row via
-// recordResult before this returns. For agent-mode jobs the wait can be
-// minutes, so HTTP callers should treat the manual-fire endpoint as a long
-// poll rather than a fire-and-forget queue.
+// when the row is absent so the handler can surface a 404. The actual tick
+// runs in a detached goroutine so the HTTP caller does not block on a
+// multi-minute agent investigation; tick results land on the row via
+// recordResult and operators can poll LastRunStatus / LastRunError for the
+// outcome.
 func (r *CronRunner) RunNow(uuidStr string) error {
 	var job database.CronJob
 	err := r.db.Preload("Channel.Integration").Where("uuid = ?", uuidStr).First(&job).Error
@@ -275,8 +284,19 @@ func (r *CronRunner) RunNow(uuidStr string) error {
 		}
 		return fmt.Errorf("load cron job %s: %w", uuidStr, err)
 	}
-	r.execute(&job)
+	r.inflight.Add(1)
+	go func() {
+		defer r.inflight.Done()
+		r.execute(&job)
+	}()
 	return nil
+}
+
+// WaitForInflight blocks until every tick previously dispatched by RunNow has
+// completed. Production callers do not need this; tests use it as a sync point
+// because RunNow is fire-and-forget.
+func (r *CronRunner) WaitForInflight() {
+	r.inflight.Wait()
 }
 
 // execute runs a single tick and persists the result. Mode dispatch keeps the
@@ -450,7 +470,12 @@ func (r *CronRunner) executeAgent(job *database.CronJob) {
 		},
 	}
 
-	runID, err := r.runner.StartIncident(incidentUUID, job.Prompt, llmSettings, skillNames, toolAllowlist, callback)
+	// Mirror alert_processor.go / slack_processor.go: prepend the runbook +
+	// cross-incident memory search guidance so the incident-manager agent
+	// follows the same SOP regardless of how it was spawned. Without this the
+	// cron-spawned investigation skips runbook recall entirely.
+	taskWithGuidance := executor.PrependGuidance(job.Prompt)
+	runID, err := r.runner.StartIncident(incidentUUID, taskWithGuidance, llmSettings, skillNames, toolAllowlist, callback)
 	if err != nil {
 		errStr := fmt.Sprintf("start incident: %v", err)
 		if updateErr := r.skills.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errStr, 0, 0); updateErr != nil {
@@ -535,11 +560,21 @@ func formatCronAgentMessage(job *database.CronJob, response string, hasError boo
 // per-provider default so a disabled or non-posting channel does not silently
 // black-hole the message. Matches the semantics of
 // ChannelService.ResolveForAlertSource for the outbound-alert path.
+//
+// Fallback provider selection: prefer the explicit channel's Integration
+// provider when the cron job referenced one (so a disabled Telegram channel
+// falls back to the Telegram default, not Slack). When no explicit channel is
+// referenced at all, default to Slack since that is the operator's most
+// common configuration.
 func (r *CronRunner) resolveChannel(job *database.CronJob) (*database.Channel, error) {
 	if ch := r.usableExplicitChannel(job); ch != nil {
 		return ch, nil
 	}
-	ch, err := r.channels.ResolveDefault(cronProviderResolveDefault)
+	fallbackProvider := cronProviderResolveDefault
+	if explicit := r.loadExplicitChannelAny(job); explicit != nil && explicit.Integration.Provider != "" {
+		fallbackProvider = explicit.Integration.Provider
+	}
+	ch, err := r.channels.ResolveDefault(fallbackProvider)
 	if err != nil {
 		if errors.Is(err, ErrChannelNotFound) {
 			return nil, fmt.Errorf("no channel configured for cron job and no default available")
@@ -547,6 +582,24 @@ func (r *CronRunner) resolveChannel(job *database.CronJob) (*database.Channel, e
 		return nil, err
 	}
 	return ch, nil
+}
+
+// loadExplicitChannelAny returns the cron's explicit Channel regardless of
+// whether it is currently usable for posting. Used by resolveChannel to learn
+// the operator's intended provider when falling back to that provider's
+// workspace default. Nil return means no explicit channel was configured.
+func (r *CronRunner) loadExplicitChannelAny(job *database.CronJob) *database.Channel {
+	switch {
+	case job.Channel != nil && job.Channel.ID != 0:
+		return job.Channel
+	case job.ChannelID != nil:
+		ch, err := r.loadChannelByID(*job.ChannelID)
+		if err != nil {
+			return nil
+		}
+		return ch
+	}
+	return nil
 }
 
 // usableExplicitChannel returns the cron's explicit Channel when present AND
@@ -704,6 +757,9 @@ func (r *CronRunner) CreateJob(name, description, schedule, prompt string, mode 
 		if err != nil {
 			return nil, err
 		}
+		if !ch.CanPost {
+			return nil, ErrChannelNotPostable
+		}
 		id := ch.ID
 		channelID = &id
 	}
@@ -783,6 +839,9 @@ func (r *CronRunner) UpdateJob(uuidStr string, patch CronJobUpdate) (*database.C
 			ch, err := r.channels.GetChannelByUUID(*patch.ChannelUUID)
 			if err != nil {
 				return nil, err
+			}
+			if !ch.CanPost {
+				return nil, ErrChannelNotPostable
 			}
 			updates["channel_id"] = ch.ID
 		}
