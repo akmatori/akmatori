@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -438,7 +439,7 @@ func (r *CronRunner) executeAgent(job *database.CronJob) {
 	var response string
 	var sessionID string
 	var hasError bool
-	var supersededFlag bool
+	var supersededFlag atomic.Bool
 	var errorMsg string
 	var lastStreamedLog string
 	var finalTokensUsed int
@@ -465,7 +466,7 @@ func (r *CronRunner) executeAgent(job *database.CronJob) {
 			closeOnce.Do(func() { close(done) })
 		},
 		OnSuperseded: func() {
-			supersededFlag = true
+			supersededFlag.Store(true)
 			closeOnce.Do(func() { close(done) })
 		},
 	}
@@ -489,7 +490,7 @@ func (r *CronRunner) executeAgent(job *database.CronJob) {
 
 	// A superseded run hands ownership to the replacement; exit silently so
 	// the replacement run owns the DB finalize + channel post.
-	if supersededFlag {
+	if supersededFlag.Load() {
 		slog.Info("cron agent: investigation superseded; leaving finalization to the new run", "incident", incidentUUID)
 		return
 	}
