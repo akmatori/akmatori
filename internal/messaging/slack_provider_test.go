@@ -3,6 +3,9 @@ package messaging
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -135,5 +138,67 @@ func TestSlackProvider_UpdateMessage_RequiresMessageID(t *testing.T) {
 	p := newSlackProviderFromClient(&fakeSlackClient{})
 	if err := p.UpdateMessage(context.Background(), &database.Channel{ExternalID: "C123"}, "", "updated"); err == nil {
 		t.Errorf("UpdateMessage with empty ID error = nil, want error")
+	}
+}
+
+// stubSlackManager hands back a controlled *slack.Client so tests can drive
+// the live-client path of NewSlackProvider (including the slackClientShim).
+type stubSlackManager struct{ c *slack.Client }
+
+func (s *stubSlackManager) GetClient() *slack.Client { return s.c }
+
+// TestSlackProvider_NewSlackProvider_NilClientFromManager exercises the
+// "manager present but client absent" branch of the constructor closure. The
+// existing TestSlackProvider_PostMessage_NoClient only covers the
+// manager==nil branch; this completes coverage of the closure's nil checks.
+func TestSlackProvider_NewSlackProvider_NilClientFromManager(t *testing.T) {
+	mgr := &stubSlackManager{c: nil}
+	p := NewSlackProvider(mgr)
+	if _, err := p.PostMessage(context.Background(), &database.Channel{ExternalID: "C123"}, "hi"); err == nil {
+		t.Errorf("PostMessage with manager-returns-nil-client error = nil, want error")
+	}
+}
+
+// TestSlackProvider_NewSlackProvider_LiveClient drives the production
+// constructor end-to-end against a mock Slack HTTP server so the
+// slackClientShim wrapper methods (PostMessageContext, UpdateMessageContext)
+// execute. Without this test the shim methods stay at 0% coverage despite
+// being on the only path used in production.
+func TestSlackProvider_NewSlackProvider_LiveClient(t *testing.T) {
+	var lastPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lastPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/chat.postMessage"):
+			_, _ = w.Write([]byte(`{"ok":true,"channel":"C123","ts":"1700000123.000400"}`))
+		case strings.HasSuffix(r.URL.Path, "/chat.update"):
+			_, _ = w.Write([]byte(`{"ok":true,"channel":"C123","ts":"1700000123.000400","text":"updated"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"ok":false,"error":"unknown_method"}`))
+		}
+	}))
+	defer srv.Close()
+
+	c := slack.New("xoxb-test", slack.OptionAPIURL(srv.URL+"/"))
+	p := NewSlackProvider(&stubSlackManager{c: c})
+
+	posted, err := p.PostMessage(context.Background(), &database.Channel{ExternalID: "C123"}, "hello")
+	if err != nil {
+		t.Fatalf("PostMessage error = %v", err)
+	}
+	if posted.MessageID != "1700000123.000400" {
+		t.Errorf("PostMessage MessageID = %q, want 1700000123.000400", posted.MessageID)
+	}
+	if !strings.HasSuffix(lastPath, "/chat.postMessage") {
+		t.Errorf("expected slack.New client to hit /chat.postMessage, got %q", lastPath)
+	}
+
+	if err := p.UpdateMessage(context.Background(), &database.Channel{ExternalID: "C123"}, "1700000123.000400", "updated"); err != nil {
+		t.Fatalf("UpdateMessage error = %v", err)
+	}
+	if !strings.HasSuffix(lastPath, "/chat.update") {
+		t.Errorf("expected slack.New client to hit /chat.update, got %q", lastPath)
 	}
 }

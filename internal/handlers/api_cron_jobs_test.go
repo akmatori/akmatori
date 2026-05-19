@@ -329,3 +329,132 @@ func TestHandleCronJobs_Create_InternalErrorSurface(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// TestHandleCronJobs_List_ServiceError surfaces ListJobs failures as 500.
+func TestHandleCronJobs_List_ServiceError(t *testing.T) {
+	mgr := &mockCronJobManager{listErr: errors.New("db down")}
+	h := newHandlerWithCronManager(mgr)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cron-jobs", nil)
+	w := httptest.NewRecorder()
+	h.handleCronJobs(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", w.Code)
+	}
+}
+
+// TestHandleCronJobs_Create_InvalidJSON guards against malformed payloads.
+func TestHandleCronJobs_Create_InvalidJSON(t *testing.T) {
+	h := newHandlerWithCronManager(&mockCronJobManager{})
+	req := httptest.NewRequest(http.MethodPost, "/api/cron-jobs", bytes.NewReader([]byte("not json")))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.handleCronJobs(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+// TestHandleCronJobs_MethodNotAllowed rejects unsupported verbs.
+func TestHandleCronJobs_MethodNotAllowed(t *testing.T) {
+	h := newHandlerWithCronManager(&mockCronJobManager{})
+	req := httptest.NewRequest(http.MethodPatch, "/api/cron-jobs", nil)
+	w := httptest.NewRecorder()
+	h.handleCronJobs(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", w.Code)
+	}
+}
+
+// TestHandleCronJobByUUID_MethodNotAllowed rejects unsupported verbs on the
+// per-row endpoint.
+func TestHandleCronJobByUUID_MethodNotAllowed(t *testing.T) {
+	h := newHandlerWithCronManager(&mockCronJobManager{jobs: []database.CronJob{{UUID: "u1"}}})
+	req := httptest.NewRequest(http.MethodPatch, "/api/cron-jobs/u1", nil)
+	w := httptest.NewRecorder()
+	h.handleCronJobByUUID(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", w.Code)
+	}
+}
+
+// TestHandleCronJobByUUID_UnknownSubpath returns 404 when the suffix is not
+// one of the registered sub-routes.
+func TestHandleCronJobByUUID_UnknownSubpath(t *testing.T) {
+	h := newHandlerWithCronManager(&mockCronJobManager{})
+	req := httptest.NewRequest(http.MethodPost, "/api/cron-jobs/u1/halt", nil)
+	w := httptest.NewRecorder()
+	h.handleCronJobByUUID(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+// TestHandleCronJobByUUID_EmptyUUID rejects requests with an empty path
+// segment.
+func TestHandleCronJobByUUID_EmptyUUID(t *testing.T) {
+	h := newHandlerWithCronManager(&mockCronJobManager{})
+	req := httptest.NewRequest(http.MethodGet, "/api/cron-jobs/", nil)
+	w := httptest.NewRecorder()
+	h.handleCronJobByUUID(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+// TestHandleCronJobByUUID_Update_InvalidJSON guards malformed PUT payloads.
+func TestHandleCronJobByUUID_Update_InvalidJSON(t *testing.T) {
+	h := newHandlerWithCronManager(&mockCronJobManager{jobs: []database.CronJob{{UUID: "u1"}}})
+	req := httptest.NewRequest(http.MethodPut, "/api/cron-jobs/u1", bytes.NewReader([]byte("not json")))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.handleCronJobByUUID(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+// TestHandleCronJobByUUID_Update_PropagatesModePatch verifies the API maps the
+// mode field through to the service layer.
+func TestHandleCronJobByUUID_Update_PropagatesModePatch(t *testing.T) {
+	mgr := &mockCronJobManager{jobs: []database.CronJob{{UUID: "u1", Name: "X", Mode: database.CronJobModeOneshot}}}
+	h := newHandlerWithCronManager(mgr)
+
+	mode := "agent"
+	body, _ := json.Marshal(UpdateCronJobRequest{Mode: &mode})
+	req := httptest.NewRequest(http.MethodPut, "/api/cron-jobs/u1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.handleCronJobByUUID(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if mgr.lastPatch == nil || mgr.lastPatch.Mode == nil || *mgr.lastPatch.Mode != database.CronJobModeAgent {
+		t.Errorf("mode patch not propagated: %+v", mgr.lastPatch)
+	}
+}
+
+// TestHandleCronJobByUUID_Delete_NotFound surfaces ErrCronJobNotFound as 404.
+func TestHandleCronJobByUUID_Delete_NotFound(t *testing.T) {
+	mgr := &mockCronJobManager{deleteErr: services.ErrCronJobNotFound}
+	h := newHandlerWithCronManager(mgr)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/cron-jobs/ghost", nil)
+	w := httptest.NewRecorder()
+	h.handleCronJobByUUID(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+// TestHandleCronJobByUUID_ServiceUnavailable returns 503 when the cron service
+// is unset.
+func TestHandleCronJobByUUID_ServiceUnavailable(t *testing.T) {
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/cron-jobs/u1", nil)
+	w := httptest.NewRecorder()
+	h.handleCronJobByUUID(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", w.Code)
+	}
+}

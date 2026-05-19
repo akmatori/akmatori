@@ -179,11 +179,11 @@ Introduce a first-class Channel concept (under provider Integrations) that trigg
 
 ### Task 11: Verify acceptance criteria
 
-- [ ] run full backend suite: `make test`
-- [ ] run frontend suite: `make test-web`
-- [ ] run adapter and MCP suites: `make test-adapters`, `make test-mcp`
-- [ ] run linter / full gate: `make verify`
-- [ ] run `go test -coverprofile=coverage.out ./...` and verify coverage for `internal/services/channel_service.go`, `internal/services/cron_runner.go`, `internal/messaging/`, `internal/handlers/api_integrations.go`, `internal/handlers/api_channels.go`, `internal/handlers/api_cron_jobs.go` is at or above 80%
+- [x] run full backend suite: `make test`
+- [x] run frontend suite: `make test-web`
+- [x] run adapter and MCP suites: `make test-adapters`, `make test-mcp`
+- [x] run linter / full gate: `make verify`
+- [x] run `go test -coverprofile=coverage.out ./...` and verify coverage for `internal/services/channel_service.go` (85.2%), `internal/services/cron_runner.go` (81.1%), `internal/messaging/` (88.9% pkg; slack_provider 84.9%, registry 95.7%, telegram_stub 100%), `internal/handlers/api_integrations.go` (93.7%), `internal/handlers/api_channels.go` (81.4%), `internal/handlers/api_cron_jobs.go` (93.6%) — all at or above 80%
 
 ### Task 12: Update documentation
 

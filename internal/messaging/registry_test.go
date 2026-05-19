@@ -92,6 +92,9 @@ func TestRegistry_List_IsSorted(t *testing.T) {
 func TestTelegramProvider_AllMethodsReturnNotImplemented(t *testing.T) {
 	p := NewTelegramProvider()
 
+	if got := p.Name(); got != database.MessagingProviderTelegram {
+		t.Errorf("Name = %q, want %q", got, database.MessagingProviderTelegram)
+	}
 	if _, err := p.PostMessage(context.Background(), &database.Channel{}, "hello"); !errors.Is(err, ErrNotImplemented) {
 		t.Errorf("PostMessage error = %v, want ErrNotImplemented", err)
 	}

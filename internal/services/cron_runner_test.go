@@ -916,3 +916,351 @@ func startCount(s *fakeScheduler) int {
 	return 0
 }
 
+// TestCronRunner_ListJobs_ReturnsRowsSorted verifies the listing surface used
+// by GET /api/cron-jobs returns rows ordered by name with channel preloaded.
+func TestCronRunner_ListJobs_ReturnsRowsSorted(t *testing.T) {
+	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+
+	if _, err := runner.CreateJob("B job", "", "*/5 * * * *", "p", database.CronJobModeOneshot, chUUID, true); err != nil {
+		t.Fatalf("seed B: %v", err)
+	}
+	if _, err := runner.CreateJob("A job", "", "*/5 * * * *", "p", database.CronJobModeOneshot, chUUID, true); err != nil {
+		t.Fatalf("seed A: %v", err)
+	}
+
+	rows, err := runner.ListJobs()
+	if err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(rows))
+	}
+	if rows[0].Name != "A job" || rows[1].Name != "B job" {
+		t.Errorf("order = [%s, %s], want [A job, B job]", rows[0].Name, rows[1].Name)
+	}
+}
+
+// TestCronRunner_CreateJob_AcceptsEmptyChannelUUID exercises the resolver
+// fallback path where ChannelID is left nil so the runner falls back to the
+// per-provider default at tick time.
+func TestCronRunner_CreateJob_AcceptsEmptyChannelUUID(t *testing.T) {
+	runner, _, _, _, _ := setupCronRunnerTest(t)
+	job, err := runner.CreateJob("nightly", "", "0 9 * * *", "Summarize", database.CronJobModeOneshot, "", true)
+	if err != nil {
+		t.Fatalf("CreateJob: %v", err)
+	}
+	if job.ChannelID != nil {
+		t.Errorf("ChannelID = %v, want nil", job.ChannelID)
+	}
+}
+
+// TestCronRunner_CreateJob_UnknownChannelUUID surfaces ErrChannelNotFound from
+// the channel manager.
+func TestCronRunner_CreateJob_UnknownChannelUUID(t *testing.T) {
+	runner, _, _, _, _ := setupCronRunnerTest(t)
+	_, err := runner.CreateJob("nightly", "", "0 9 * * *", "Summarize", database.CronJobModeOneshot, "ghost", true)
+	if !errors.Is(err, ErrChannelNotFound) {
+		t.Errorf("err = %v, want ErrChannelNotFound", err)
+	}
+}
+
+// TestCronRunner_CreateJob_RejectsEmptyPrompt rejects payloads with no prompt
+// so a tick cannot fire against an empty request.
+func TestCronRunner_CreateJob_RejectsEmptyPrompt(t *testing.T) {
+	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	if _, err := runner.CreateJob("nightly", "", "0 9 * * *", "   ", database.CronJobModeOneshot, chUUID, true); err == nil {
+		t.Error("CreateJob blank prompt error = nil, want validation error")
+	}
+}
+
+// TestCronRunner_UpdateJob_RejectsBlankNameAndPrompt covers the
+// patch-validation paths.
+func TestCronRunner_UpdateJob_RejectsBlankNameAndPrompt(t *testing.T) {
+	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	job, err := runner.CreateJob("nightly", "", "0 9 * * *", "p", database.CronJobModeOneshot, chUUID, true)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	blank := "   "
+	if _, err := runner.UpdateJob(job.UUID, CronJobUpdate{Name: &blank}); err == nil {
+		t.Error("UpdateJob blank name error = nil, want validation error")
+	}
+	if _, err := runner.UpdateJob(job.UUID, CronJobUpdate{Prompt: &blank}); err == nil {
+		t.Error("UpdateJob blank prompt error = nil, want validation error")
+	}
+}
+
+// TestCronRunner_UpdateJob_RejectsInvalidMode covers the mode whitelist check.
+func TestCronRunner_UpdateJob_RejectsInvalidMode(t *testing.T) {
+	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	job, err := runner.CreateJob("nightly", "", "0 9 * * *", "p", database.CronJobModeOneshot, chUUID, true)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	exotic := database.CronJobMode("exotic")
+	if _, err := runner.UpdateJob(job.UUID, CronJobUpdate{Mode: &exotic}); err == nil {
+		t.Error("UpdateJob invalid mode error = nil, want validation error")
+	}
+}
+
+// TestCronRunner_UpdateJob_ChannelUUIDClearAndReassign verifies that passing an
+// empty channel_uuid clears the FK, and that reassigning resolves a fresh
+// channel via the channel manager.
+func TestCronRunner_UpdateJob_ChannelUUIDClearAndReassign(t *testing.T) {
+	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	job, err := runner.CreateJob("nightly", "", "0 9 * * *", "p", database.CronJobModeOneshot, chUUID, true)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if job.ChannelID == nil {
+		t.Fatal("expected ChannelID after create with explicit channel")
+	}
+
+	empty := ""
+	cleared, err := runner.UpdateJob(job.UUID, CronJobUpdate{ChannelUUID: &empty})
+	if err != nil {
+		t.Fatalf("UpdateJob clear channel: %v", err)
+	}
+	if cleared.ChannelID != nil {
+		t.Errorf("ChannelID after clear = %v, want nil", cleared.ChannelID)
+	}
+
+	reassigned, err := runner.UpdateJob(job.UUID, CronJobUpdate{ChannelUUID: &chUUID})
+	if err != nil {
+		t.Fatalf("UpdateJob reassign channel: %v", err)
+	}
+	if reassigned.ChannelID == nil {
+		t.Errorf("ChannelID after reassign = nil, want non-nil")
+	}
+}
+
+// TestCronRunner_UpdateJob_RejectsUnknownChannel surfaces ErrChannelNotFound
+// when the operator points at a non-existent channel.
+func TestCronRunner_UpdateJob_RejectsUnknownChannel(t *testing.T) {
+	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	job, err := runner.CreateJob("nightly", "", "0 9 * * *", "p", database.CronJobModeOneshot, chUUID, true)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	ghost := "ghost-channel"
+	if _, err := runner.UpdateJob(job.UUID, CronJobUpdate{ChannelUUID: &ghost}); !errors.Is(err, ErrChannelNotFound) {
+		t.Errorf("err = %v, want ErrChannelNotFound", err)
+	}
+}
+
+// TestCronRunner_UpdateJob_NotFound returns ErrCronJobNotFound when the cron
+// job UUID does not exist.
+func TestCronRunner_UpdateJob_NotFound(t *testing.T) {
+	runner, _, _, _, _ := setupCronRunnerTest(t)
+	if _, err := runner.UpdateJob("ghost", CronJobUpdate{}); !errors.Is(err, ErrCronJobNotFound) {
+		t.Errorf("err = %v, want ErrCronJobNotFound", err)
+	}
+}
+
+// TestCronRunner_UpdateJob_NoFieldsReturnsRow covers the no-op patch branch.
+func TestCronRunner_UpdateJob_NoFieldsReturnsRow(t *testing.T) {
+	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	job, err := runner.CreateJob("nightly", "", "0 9 * * *", "p", database.CronJobModeOneshot, chUUID, true)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	got, err := runner.UpdateJob(job.UUID, CronJobUpdate{})
+	if err != nil {
+		t.Fatalf("UpdateJob no-op: %v", err)
+	}
+	if got.UUID != job.UUID {
+		t.Errorf("UUID = %q, want %q", got.UUID, job.UUID)
+	}
+}
+
+// TestCronRunner_DeleteJob_NotFound surfaces ErrCronJobNotFound when the UUID
+// is absent.
+func TestCronRunner_DeleteJob_NotFound(t *testing.T) {
+	runner, _, _, _, _ := setupCronRunnerTest(t)
+	if err := runner.DeleteJob("ghost"); !errors.Is(err, ErrCronJobNotFound) {
+		t.Errorf("err = %v, want ErrCronJobNotFound", err)
+	}
+}
+
+// TestCronRunner_Reload_RemovesEntryWhenRowDeleted exercises the path where
+// Reload is invoked for a job whose row has been deleted out from under the
+// runner — should silently remove the scheduler entry.
+func TestCronRunner_Reload_RemovesEntryWhenRowDeleted(t *testing.T) {
+	runner, db, sched, chMgr, _ := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	job, err := runner.CreateJob("nightly", "", "0 9 * * *", "p", database.CronJobModeOneshot, chUUID, true)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if sched.entryCount() != 1 {
+		t.Fatalf("entry count after create = %d, want 1", sched.entryCount())
+	}
+	// Hard-delete the row out from under the runner (bypassing DeleteJob's
+	// Reload call) so we can test the Reload-not-found branch directly.
+	if err := db.Unscoped().Delete(&database.CronJob{}, job.ID).Error; err != nil {
+		t.Fatalf("hard delete: %v", err)
+	}
+	if err := runner.Reload(job.ID); err != nil {
+		t.Fatalf("Reload after row deleted: %v", err)
+	}
+	if sched.entryCount() != 0 {
+		t.Errorf("entry count after reload = %d, want 0", sched.entryCount())
+	}
+}
+
+// TestCronRunner_Fire_SkipsDisabledJob ensures that an in-flight disable takes
+// effect on the very next firing — the tick early-returns before posting.
+func TestCronRunner_Fire_SkipsDisabledJob(t *testing.T) {
+	runner, db, sched, chMgr, prov := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	job, err := runner.CreateJob("nightly", "", "*/5 * * * *", "p", database.CronJobModeOneshot, chUUID, true)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Disable the row directly so the scheduler still holds the entry but the
+	// fire callback exits at the enabled-check.
+	if err := db.Model(&database.CronJob{}).Where("id = ?", job.ID).Update("enabled", false).Error; err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	for id := range sched.jobs {
+		sched.fire(id)
+	}
+	prov.mu.Lock()
+	defer prov.mu.Unlock()
+	if len(prov.posts) != 0 {
+		t.Errorf("expected no posts when job disabled mid-flight, got %d", len(prov.posts))
+	}
+}
+
+// TestCronRunner_Fire_VanishedJob covers the branch where the cron job row was
+// hard-deleted but the scheduler still holds a stale entry; the fire callback
+// must warn and return without crashing.
+func TestCronRunner_Fire_VanishedJob(t *testing.T) {
+	runner, db, sched, chMgr, prov := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	job, err := runner.CreateJob("nightly", "", "*/5 * * * *", "p", database.CronJobModeOneshot, chUUID, true)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := db.Unscoped().Delete(&database.CronJob{}, job.ID).Error; err != nil {
+		t.Fatalf("hard delete: %v", err)
+	}
+	for id := range sched.jobs {
+		sched.fire(id)
+	}
+	prov.mu.Lock()
+	defer prov.mu.Unlock()
+	if len(prov.posts) != 0 {
+		t.Errorf("expected no posts after vanish, got %d", len(prov.posts))
+	}
+}
+
+// TestCronRunner_OneshotTick_FallsBackToDefaultChannel verifies the resolver
+// path that picks the workspace default when the cron job has no explicit
+// channel.
+func TestCronRunner_OneshotTick_FallsBackToDefaultChannel(t *testing.T) {
+	runner, _, sched, chMgr, prov := setupCronRunnerTest(t)
+	// CreateJob without a channel — runner should resolve via channels.ResolveDefault.
+	if _, err := runner.CreateJob("nightly", "", "*/5 * * * *", "Summarize", database.CronJobModeOneshot, "", true); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	for id := range sched.jobs {
+		sched.fire(id)
+	}
+	prov.mu.Lock()
+	defer prov.mu.Unlock()
+	if len(prov.posts) != 1 {
+		t.Fatalf("expected one post via default fallback, got %d", len(prov.posts))
+	}
+	if prov.posts[0].channel.UUID != chMgr.channels[0].UUID {
+		t.Errorf("post landed on %q, want default channel %q", prov.posts[0].channel.UUID, chMgr.channels[0].UUID)
+	}
+}
+
+// TestCronRunner_OneshotTick_MissingDefaultRecordsError covers the resolver
+// branch where no channel is configured for the cron and the workspace has no
+// default — surfaces a clear error message.
+func TestCronRunner_OneshotTick_MissingDefaultRecordsError(t *testing.T) {
+	runner, db, sched, chMgr, _ := setupCronRunnerTest(t)
+	chMgr.resolveDefault = nil
+	chMgr.resolveErr = nil
+
+	if _, err := runner.CreateJob("nightly", "", "*/5 * * * *", "Summarize", database.CronJobModeOneshot, "", true); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	for id := range sched.jobs {
+		sched.fire(id)
+	}
+
+	var got database.CronJob
+	if err := db.First(&got, "uuid = ?", findOnlyJobUUID(t, db)).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.LastRunStatus != database.CronJobRunStatusError {
+		t.Errorf("LastRunStatus = %q, want error", got.LastRunStatus)
+	}
+	if !contains(got.LastRunError, "no channel configured") {
+		t.Errorf("LastRunError = %q, want no-channel message", got.LastRunError)
+	}
+}
+
+// TestCronRunner_OneshotTick_LoadChannelByIDStale exercises the resolveChannel
+// branch where a cron job has ChannelID set but the row was deleted (FK gone);
+// the resolver falls back to the default rather than crashing.
+func TestCronRunner_OneshotTick_LoadChannelByIDStale(t *testing.T) {
+	runner, db, sched, chMgr, prov := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	job, err := runner.CreateJob("nightly", "", "*/5 * * * *", "Summarize", database.CronJobModeOneshot, chUUID, true)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Drop the channel from the DB; preloaded copy stays on the job from
+	// initial fire's Preload, but the resolver loads fresh, so simulate a stale
+	// preload by setting ChannelID to a missing FK after Channel was loaded.
+	staleID := uint(99999)
+	if err := db.Model(&database.CronJob{}).Where("id = ?", job.ID).Update("channel_id", staleID).Error; err != nil {
+		t.Fatalf("stale FK: %v", err)
+	}
+
+	for id := range sched.jobs {
+		sched.fire(id)
+	}
+	prov.mu.Lock()
+	defer prov.mu.Unlock()
+	if len(prov.posts) != 1 {
+		t.Fatalf("expected one post via default fallback, got %d", len(prov.posts))
+	}
+}
+
+// TestCronRunner_NewCronRunner_ConstructorReturnsRunner is a smoke check that
+// the production constructor wires every dependency through.
+func TestCronRunner_NewCronRunner_ConstructorReturnsRunner(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("sqlite: %v", err)
+	}
+	database.DB = db
+
+	runner := NewCronRunner(
+		&recordingChannelManager{},
+		&fakeProviderRegistry{},
+		&fakeOneShotLLMCaller{},
+		&fakeSkillIncidentManager{},
+		newFakeIncidentRunner(),
+	)
+	if runner == nil {
+		t.Fatal("NewCronRunner returned nil")
+	}
+	if runner.scheduler == nil {
+		t.Error("scheduler not wired")
+	}
+}
+

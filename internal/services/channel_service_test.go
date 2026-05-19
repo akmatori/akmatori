@@ -369,3 +369,326 @@ func TestChannelService_DeleteIntegration_CascadesChannels(t *testing.T) {
 		t.Errorf("DeleteIntegration left %d channels behind, want 0", remaining)
 	}
 }
+
+// TestChannelService_ListIntegrations_Sorted asserts the surface returns rows
+// in (provider, name) order so the UI listing is deterministic.
+func TestChannelService_ListIntegrations_Sorted(t *testing.T) {
+	svc, db := setupChannelServiceTest(t)
+	if _, err := svc.CreateIntegration(database.MessagingProviderSlack, "Slack B", nil, true); err != nil {
+		t.Fatalf("seed B: %v", err)
+	}
+	if _, err := svc.CreateIntegration(database.MessagingProviderSlack, "Slack A", nil, true); err != nil {
+		t.Fatalf("seed A: %v", err)
+	}
+	rows, err := svc.ListIntegrations()
+	if err != nil {
+		t.Fatalf("ListIntegrations: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(rows))
+	}
+	if rows[0].Name != "Slack A" || rows[1].Name != "Slack B" {
+		t.Errorf("ListIntegrations order = [%s, %s], want [Slack A, Slack B]", rows[0].Name, rows[1].Name)
+	}
+	_ = db
+}
+
+// TestChannelService_GetIntegrationByUUID_NotFound surfaces ErrIntegrationNotFound
+// rather than wrapping the GORM error.
+func TestChannelService_GetIntegrationByUUID_NotFound(t *testing.T) {
+	svc, _ := setupChannelServiceTest(t)
+	_, err := svc.GetIntegrationByUUID("does-not-exist")
+	if !errors.Is(err, ErrIntegrationNotFound) {
+		t.Fatalf("error = %v, want ErrIntegrationNotFound", err)
+	}
+}
+
+// TestChannelService_UpdateIntegration_PatchesFields exercises the partial
+// update path: changing name, credentials, and enabled in one PUT.
+func TestChannelService_UpdateIntegration_PatchesFields(t *testing.T) {
+	svc, _ := setupChannelServiceTest(t)
+	integration, err := svc.CreateIntegration(database.MessagingProviderSlack, "Slack", database.JSONB{"bot_token": "old"}, true)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	newName := "Slack Renamed"
+	newCreds := database.JSONB{"bot_token": "new"}
+	off := false
+	got, err := svc.UpdateIntegration(integration.UUID, &newName, newCreds, &off)
+	if err != nil {
+		t.Fatalf("UpdateIntegration: %v", err)
+	}
+	if got.Name != "Slack Renamed" {
+		t.Errorf("Name = %q, want Slack Renamed", got.Name)
+	}
+	if got.Enabled {
+		t.Errorf("Enabled = true, want false")
+	}
+	if got.Credentials["bot_token"] != "new" {
+		t.Errorf("Credentials.bot_token = %v, want new", got.Credentials["bot_token"])
+	}
+}
+
+// TestChannelService_UpdateIntegration_RejectsBlankName rejects whitespace-only
+// names with a plain validation error.
+func TestChannelService_UpdateIntegration_RejectsBlankName(t *testing.T) {
+	svc, _ := setupChannelServiceTest(t)
+	integration, err := svc.CreateIntegration(database.MessagingProviderSlack, "Slack", nil, true)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	blank := "   "
+	if _, err := svc.UpdateIntegration(integration.UUID, &blank, nil, nil); err == nil {
+		t.Error("UpdateIntegration blank name error = nil, want validation error")
+	}
+}
+
+// TestChannelService_UpdateIntegration_NoOpReturnsRow covers the "no fields
+// changed" branch where the row is returned without a write.
+func TestChannelService_UpdateIntegration_NoOpReturnsRow(t *testing.T) {
+	svc, _ := setupChannelServiceTest(t)
+	integration, err := svc.CreateIntegration(database.MessagingProviderSlack, "Slack", nil, true)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := svc.UpdateIntegration(integration.UUID, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("UpdateIntegration: %v", err)
+	}
+	if got.UUID != integration.UUID {
+		t.Errorf("UUID = %q, want %q", got.UUID, integration.UUID)
+	}
+}
+
+// TestChannelService_UpdateIntegration_NotFound surfaces ErrIntegrationNotFound
+// when the target UUID does not exist.
+func TestChannelService_UpdateIntegration_NotFound(t *testing.T) {
+	svc, _ := setupChannelServiceTest(t)
+	name := "X"
+	_, err := svc.UpdateIntegration("ghost", &name, nil, nil)
+	if !errors.Is(err, ErrIntegrationNotFound) {
+		t.Errorf("error = %v, want ErrIntegrationNotFound", err)
+	}
+}
+
+// TestChannelService_GetChannelByUUID_NotFound surfaces ErrChannelNotFound
+// rather than wrapping the GORM error.
+func TestChannelService_GetChannelByUUID_NotFound(t *testing.T) {
+	svc, _ := setupChannelServiceTest(t)
+	_, err := svc.GetChannelByUUID("does-not-exist")
+	if !errors.Is(err, ErrChannelNotFound) {
+		t.Errorf("error = %v, want ErrChannelNotFound", err)
+	}
+}
+
+// TestChannelService_ListChannels_FilterByIntegrationUUID narrows by the
+// parent integration. Two integrations seeded so the filter is meaningful.
+func TestChannelService_ListChannels_FilterByIntegrationUUID(t *testing.T) {
+	svc, db := setupChannelServiceTest(t)
+	intA := seedSlackIntegration(t, db)
+	intB := &database.Integration{
+		UUID:     uuid.New().String(),
+		Provider: database.MessagingProviderSlack,
+		Name:     "Slack B",
+		Enabled:  true,
+	}
+	if err := db.Create(intB).Error; err != nil {
+		t.Fatalf("seed intB: %v", err)
+	}
+	if _, err := svc.CreateChannel(&database.Channel{IntegrationID: intA.ID, ExternalID: "C-a", CanPost: true}); err != nil {
+		t.Fatalf("seed A channel: %v", err)
+	}
+	if _, err := svc.CreateChannel(&database.Channel{IntegrationID: intB.ID, ExternalID: "C-b", CanPost: true}); err != nil {
+		t.Fatalf("seed B channel: %v", err)
+	}
+
+	rows, err := svc.ListChannels(ListChannelsFilter{IntegrationUUID: intB.UUID})
+	if err != nil {
+		t.Fatalf("ListChannels: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ExternalID != "C-b" {
+		t.Errorf("rows = %+v, want only C-b", rows)
+	}
+}
+
+// TestChannelService_ListChannels_FilterByIntegrationUUID_NotFound surfaces
+// ErrIntegrationNotFound when the requested parent does not exist.
+func TestChannelService_ListChannels_FilterByIntegrationUUID_NotFound(t *testing.T) {
+	svc, _ := setupChannelServiceTest(t)
+	_, err := svc.ListChannels(ListChannelsFilter{IntegrationUUID: "ghost"})
+	if !errors.Is(err, ErrIntegrationNotFound) {
+		t.Errorf("err = %v, want ErrIntegrationNotFound", err)
+	}
+}
+
+// TestChannelService_ListChannels_FilterByCanPost confirms the boolean filter
+// flows through to the underlying query.
+func TestChannelService_ListChannels_FilterByCanPost(t *testing.T) {
+	svc, db := setupChannelServiceTest(t)
+	integration := seedSlackIntegration(t, db)
+	if _, err := svc.CreateChannel(&database.Channel{IntegrationID: integration.ID, ExternalID: "C-poster", CanPost: true}); err != nil {
+		t.Fatalf("seed poster: %v", err)
+	}
+	if _, err := svc.CreateChannel(&database.Channel{IntegrationID: integration.ID, ExternalID: "C-listener", CanListen: true}); err != nil {
+		t.Fatalf("seed listener: %v", err)
+	}
+
+	yes := true
+	rows, err := svc.ListChannels(ListChannelsFilter{CanPost: &yes})
+	if err != nil {
+		t.Fatalf("ListChannels: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ExternalID != "C-poster" {
+		t.Errorf("rows = %+v, want only poster", rows)
+	}
+}
+
+// TestChannelService_UpdateChannel_PatchesNonDefaultFields exercises the
+// non-IsDefaultPost update branches: display name, can_listen, extraction
+// prompt, process_human_messages, enabled.
+func TestChannelService_UpdateChannel_PatchesNonDefaultFields(t *testing.T) {
+	svc, db := setupChannelServiceTest(t)
+	integration := seedSlackIntegration(t, db)
+	channel, err := svc.CreateChannel(&database.Channel{
+		IntegrationID: integration.ID,
+		ExternalID:    "C-listen",
+		CanListen:     true,
+		Enabled:       true,
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	newExternal := "C-listen-renamed"
+	newDisplay := "Listener"
+	canPost := true
+	canListen := false
+	prompt := "Extract X from message"
+	process := true
+	enabled := false
+	got, err := svc.UpdateChannel(channel.UUID, ChannelUpdate{
+		ExternalID:           &newExternal,
+		DisplayName:          &newDisplay,
+		CanPost:              &canPost,
+		CanListen:            &canListen,
+		ExtractionPrompt:     &prompt,
+		ProcessHumanMessages: &process,
+		Enabled:              &enabled,
+	})
+	if err != nil {
+		t.Fatalf("UpdateChannel: %v", err)
+	}
+	if got.ExternalID != newExternal {
+		t.Errorf("ExternalID = %q, want %q", got.ExternalID, newExternal)
+	}
+	if got.DisplayName != newDisplay {
+		t.Errorf("DisplayName = %q, want %q", got.DisplayName, newDisplay)
+	}
+	if !got.CanPost {
+		t.Errorf("CanPost = false, want true")
+	}
+	if got.CanListen {
+		t.Errorf("CanListen = true, want false")
+	}
+	if got.ExtractionPrompt != prompt {
+		t.Errorf("ExtractionPrompt = %q, want %q", got.ExtractionPrompt, prompt)
+	}
+	if !got.ProcessHumanMessages {
+		t.Errorf("ProcessHumanMessages = false, want true")
+	}
+	if got.Enabled {
+		t.Errorf("Enabled = true, want false")
+	}
+}
+
+// TestChannelService_UpdateChannel_RejectsBlankExternalID guards the validation
+// branch.
+func TestChannelService_UpdateChannel_RejectsBlankExternalID(t *testing.T) {
+	svc, db := setupChannelServiceTest(t)
+	integration := seedSlackIntegration(t, db)
+	channel, err := svc.CreateChannel(&database.Channel{
+		IntegrationID: integration.ID,
+		ExternalID:    "C-listen",
+		CanListen:     true,
+		Enabled:       true,
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	blank := "   "
+	if _, err := svc.UpdateChannel(channel.UUID, ChannelUpdate{ExternalID: &blank}); err == nil {
+		t.Errorf("UpdateChannel blank external_id error = nil, want validation error")
+	}
+}
+
+// TestChannelService_UpdateChannel_NoOpReturnsRow covers the "no patch supplied"
+// branch.
+func TestChannelService_UpdateChannel_NoOpReturnsRow(t *testing.T) {
+	svc, db := setupChannelServiceTest(t)
+	integration := seedSlackIntegration(t, db)
+	channel, err := svc.CreateChannel(&database.Channel{
+		IntegrationID: integration.ID,
+		ExternalID:    "C-listen",
+		CanListen:     true,
+		Enabled:       true,
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	got, err := svc.UpdateChannel(channel.UUID, ChannelUpdate{})
+	if err != nil {
+		t.Fatalf("UpdateChannel no-op: %v", err)
+	}
+	if got.UUID != channel.UUID {
+		t.Errorf("UUID = %q, want %q", got.UUID, channel.UUID)
+	}
+}
+
+// TestChannelService_UpdateChannel_NotFound returns ErrChannelNotFound for
+// unknown UUID.
+func TestChannelService_UpdateChannel_NotFound(t *testing.T) {
+	svc, _ := setupChannelServiceTest(t)
+	if _, err := svc.UpdateChannel("ghost", ChannelUpdate{}); !errors.Is(err, ErrChannelNotFound) {
+		t.Errorf("err = %v, want ErrChannelNotFound", err)
+	}
+}
+
+// TestChannelService_DeleteChannel_RemovesRow exercises the happy path.
+func TestChannelService_DeleteChannel_RemovesRow(t *testing.T) {
+	svc, db := setupChannelServiceTest(t)
+	integration := seedSlackIntegration(t, db)
+	channel, err := svc.CreateChannel(&database.Channel{
+		IntegrationID: integration.ID,
+		ExternalID:    "C-incidents",
+		CanPost:       true,
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := svc.DeleteChannel(channel.UUID); err != nil {
+		t.Fatalf("DeleteChannel: %v", err)
+	}
+	if _, err := svc.GetChannelByUUID(channel.UUID); !errors.Is(err, ErrChannelNotFound) {
+		t.Errorf("after delete, get err = %v, want ErrChannelNotFound", err)
+	}
+}
+
+// TestChannelService_DeleteChannel_NotFound surfaces ErrChannelNotFound when
+// the target UUID is absent.
+func TestChannelService_DeleteChannel_NotFound(t *testing.T) {
+	svc, _ := setupChannelServiceTest(t)
+	if err := svc.DeleteChannel("ghost"); !errors.Is(err, ErrChannelNotFound) {
+		t.Errorf("err = %v, want ErrChannelNotFound", err)
+	}
+}
+
+// TestChannelService_DeleteIntegration_NotFound covers the not-found path on
+// the delete surface.
+func TestChannelService_DeleteIntegration_NotFound(t *testing.T) {
+	svc, _ := setupChannelServiceTest(t)
+	if err := svc.DeleteIntegration("ghost"); !errors.Is(err, ErrIntegrationNotFound) {
+		t.Errorf("err = %v, want ErrIntegrationNotFound", err)
+	}
+}

@@ -504,3 +504,96 @@ func TestHandleIntegrations_AcceptsRegistryProviderEvenIfModelDoesNot(t *testing
 		t.Fatalf("expected 201, got %d", w.Code)
 	}
 }
+
+// TestHandleIntegrations_Create_InvalidJSON returns 400 for malformed bodies.
+func TestHandleIntegrations_Create_InvalidJSON(t *testing.T) {
+	h := newHandlerWithChannelManager(&mockChannelManager{})
+	req := httptest.NewRequest(http.MethodPost, "/api/integrations", bytes.NewReader([]byte("not json")))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.handleIntegrations(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+// TestHandleIntegrations_MethodNotAllowed rejects unsupported verbs on the
+// collection endpoint.
+func TestHandleIntegrations_MethodNotAllowed(t *testing.T) {
+	h := newHandlerWithChannelManager(&mockChannelManager{})
+	req := httptest.NewRequest(http.MethodPatch, "/api/integrations", nil)
+	w := httptest.NewRecorder()
+	h.handleIntegrations(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", w.Code)
+	}
+}
+
+// TestHandleIntegrationByUUID_ServiceUnavailable returns 503 when the channel
+// service is not wired.
+func TestHandleIntegrationByUUID_ServiceUnavailable(t *testing.T) {
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/integrations/u1", nil)
+	w := httptest.NewRecorder()
+	h.handleIntegrationByUUID(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", w.Code)
+	}
+}
+
+// TestHandleIntegrationByUUID_InvalidUUID rejects paths with embedded slashes
+// rather than treating them as nested resources.
+func TestHandleIntegrationByUUID_InvalidUUID(t *testing.T) {
+	h := newHandlerWithChannelManager(&mockChannelManager{})
+	req := httptest.NewRequest(http.MethodGet, "/api/integrations/u1/extra", nil)
+	w := httptest.NewRecorder()
+	h.handleIntegrationByUUID(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+// TestHandleIntegrationByUUID_Update_InvalidJSON guards the PUT decode path.
+func TestHandleIntegrationByUUID_Update_InvalidJSON(t *testing.T) {
+	h := newHandlerWithChannelManager(&mockChannelManager{integrations: []database.Integration{{UUID: "u1"}}})
+	req := httptest.NewRequest(http.MethodPut, "/api/integrations/u1", bytes.NewReader([]byte("not json")))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.handleIntegrationByUUID(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+// TestHandleIntegrationByUUID_Update_PropagatesCredentials confirms the JSONB
+// blob travels intact from request body to the service layer patch.
+func TestHandleIntegrationByUUID_Update_PropagatesCredentials(t *testing.T) {
+	mgr := &mockChannelManager{integrations: []database.Integration{{ID: 1, UUID: "u1", Provider: database.MessagingProviderSlack}}}
+	h := newHandlerWithChannelManager(mgr)
+
+	creds := database.JSONB{"bot_token": "xoxb-new"}
+	body, _ := json.Marshal(UpdateIntegrationRequest{Credentials: &creds})
+	req := httptest.NewRequest(http.MethodPut, "/api/integrations/u1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.handleIntegrationByUUID(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if mgr.lastUpdateCreds["bot_token"] != "xoxb-new" {
+		t.Errorf("credentials not propagated: %+v", mgr.lastUpdateCreds)
+	}
+}
+
+// TestHandleIntegrationByUUID_Delete_PropagatesNotFound surfaces a 404 when
+// the service reports the integration is gone.
+func TestHandleIntegrationByUUID_Delete_PropagatesNotFound(t *testing.T) {
+	mgr := &mockChannelManager{deleteIntegrationErr: services.ErrIntegrationNotFound}
+	h := newHandlerWithChannelManager(mgr)
+	req := httptest.NewRequest(http.MethodDelete, "/api/integrations/ghost", nil)
+	w := httptest.NewRecorder()
+	h.handleIntegrationByUUID(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
