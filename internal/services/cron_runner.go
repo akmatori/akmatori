@@ -30,6 +30,12 @@ var ErrInvalidCronSchedule = errors.New("invalid cron schedule")
 // here so a hung worker cannot indefinitely block the cron entry.
 const cronOneshotTimeout = 2 * time.Minute
 
+// cronChannelPostTimeout caps how long the outbound provider call can block
+// the tick goroutine. A hung Slack API call (network outage, rate limit) would
+// otherwise pin the per-job goroutine indefinitely; capping at 30s keeps the
+// runner ticking and surfaces a clear LastRunError when the provider stalls.
+const cronChannelPostTimeout = 30 * time.Second
+
 // cronProviderResolveDefault is the messaging provider consulted when a cron
 // job's Channel cannot be loaded — keeps oneshot ticks falling back to the
 // workspace default rather than crashing the runner.
@@ -320,7 +326,9 @@ func (r *CronRunner) executeOneshot(job *database.CronJob) {
 	}
 
 	body := formatCronOneshotMessage(job, text)
-	if _, err := provider.PostMessage(context.Background(), channel, body); err != nil {
+	postCtx, cancel := context.WithTimeout(context.Background(), cronChannelPostTimeout)
+	defer cancel()
+	if _, err := provider.PostMessage(postCtx, channel, body); err != nil {
 		r.recordResult(job, database.CronJobRunStatusError, fmt.Sprintf("post message: %v", err))
 		return
 	}
@@ -486,7 +494,9 @@ func (r *CronRunner) executeAgent(job *database.CronJob) {
 	// error, surface the failure into the channel so operators see the cron
 	// tick failed without having to open the incident.
 	body := formatCronAgentMessage(job, response, hasError, errorMsg)
-	if _, err := provider.PostMessage(context.Background(), channel, body); err != nil {
+	postCtx, cancel := context.WithTimeout(context.Background(), cronChannelPostTimeout)
+	defer cancel()
+	if _, err := provider.PostMessage(postCtx, channel, body); err != nil {
 		r.recordResult(job, database.CronJobRunStatusError, fmt.Sprintf("post message: %v", err))
 		return
 	}

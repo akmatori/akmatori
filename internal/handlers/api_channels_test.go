@@ -267,6 +267,31 @@ func TestHandleChannelByUUID_Update(t *testing.T) {
 	}
 }
 
+// TestHandleChannelByUUID_Update_RejectsBadSlackExternalID mirrors the
+// create-time guard: an operator renaming a Slack channel must not slip in
+// commas or spaces that the legacy comma-delimited listener parsing would
+// then split across channels.
+func TestHandleChannelByUUID_Update_RejectsBadSlackExternalID(t *testing.T) {
+	mgr := &mockChannelManager{channels: []database.Channel{{
+		ID: 1, UUID: "c1",
+		Integration: database.Integration{ID: 7, Provider: database.MessagingProviderSlack},
+	}}}
+	h := newHandlerWithChannelManager(mgr)
+
+	bad := "#a, #b"
+	body, _ := json.Marshal(UpdateChannelRequest{ExternalID: &bad})
+	req := httptest.NewRequest(http.MethodPut, "/api/channels/c1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.handleChannelByUUID(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid slack external_id, got %d: %s", w.Code, w.Body.String())
+	}
+	if mgr.lastUpdateChannel != nil {
+		t.Fatalf("UpdateChannel should not be invoked on validation failure, got patch %+v", mgr.lastUpdateChannel)
+	}
+}
+
 // TestHandleChannelByUUID_Update_DuplicateDefault returns 409 when the
 // service-layer guard rejects a second per-provider default.
 func TestHandleChannelByUUID_Update_DuplicateDefault(t *testing.T) {

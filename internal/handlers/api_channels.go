@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,6 +10,25 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/services"
 )
+
+// errInvalidSlackExternalID is the typed error returned by the provider-aware
+// external_id validator so callers (create + update paths) share a single
+// error string instead of duplicating the literal at each call site.
+var errInvalidSlackExternalID = errors.New("slack external_id must not contain spaces or commas")
+
+// validateProviderExternalID applies provider-specific syntax checks to a
+// channel's external_id. Returns nil when no provider-level constraint
+// applies. The Slack guard rejects spaces and commas because the legacy
+// loader path splits comma-delimited handles and Slack itself disallows
+// whitespace in channel IDs / names.
+func validateProviderExternalID(provider database.MessagingProvider, externalID string) error {
+	if provider == database.MessagingProviderSlack {
+		if strings.ContainsAny(externalID, " ,") {
+			return errInvalidSlackExternalID
+		}
+	}
+	return nil
+}
 
 // channelResponse is the API-facing view of a database.Channel row. The
 // channel itself has no secret fields but eagerly preloads its parent
@@ -139,11 +159,9 @@ func (h *APIHandler) handleChannels(w http.ResponseWriter, r *http.Request) {
 		// already enforces non-empty, but Slack-channel handles also must
 		// not be pure whitespace nor contain commas (which would break
 		// downstream multi-channel parsing in the legacy code path).
-		if integration.Provider == database.MessagingProviderSlack {
-			if strings.ContainsAny(req.ExternalID, " ,") {
-				api.RespondError(w, http.StatusBadRequest, "slack external_id must not contain spaces or commas")
-				return
-			}
+		if err := validateProviderExternalID(integration.Provider, req.ExternalID); err != nil {
+			api.RespondError(w, http.StatusBadRequest, err.Error())
+			return
 		}
 
 		enabled := true
@@ -206,6 +224,22 @@ func (h *APIHandler) handleChannelByUUID(w http.ResponseWriter, r *http.Request)
 		if err := api.DecodeJSON(r, &req); err != nil {
 			api.RespondError(w, http.StatusBadRequest, err.Error())
 			return
+		}
+		// Mirror the create-time provider-specific external_id check so a
+		// rename can't smuggle in spaces or commas that would break downstream
+		// parsing. Look up the existing channel for its Integration.Provider —
+		// PUT does not re-parent the channel, so the resolved provider is
+		// stable.
+		if req.ExternalID != nil {
+			existing, err := h.channelService.GetChannelByUUID(uuid)
+			if err != nil {
+				api.RespondError(w, integrationErrStatus(err), err.Error())
+				return
+			}
+			if err := validateProviderExternalID(existing.Integration.Provider, *req.ExternalID); err != nil {
+				api.RespondError(w, http.StatusBadRequest, err.Error())
+				return
+			}
 		}
 		patch := services.ChannelUpdate{
 			ExternalID:           req.ExternalID,

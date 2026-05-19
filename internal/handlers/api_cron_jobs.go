@@ -4,11 +4,69 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/akmatori/akmatori/internal/api"
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/services"
 )
+
+// cronJobResponse is the API-facing view of a CronJob row. It mirrors the
+// model's exported JSON fields but routes the preloaded Channel through
+// channelResponse so the embedded Integration.Credentials are masked before
+// going on the wire — the model alone would echo bot_token / signing_secret /
+// app_token in plaintext via the eager Preload("Channel.Integration") chain.
+type cronJobResponse struct {
+	ID            uint                   `json:"id"`
+	UUID          string                 `json:"uuid"`
+	Name          string                 `json:"name"`
+	Description   string                 `json:"description"`
+	Schedule      string                 `json:"schedule"`
+	Prompt        string                 `json:"prompt"`
+	Mode          database.CronJobMode   `json:"mode"`
+	ChannelID     *uint                  `json:"channel_id"`
+	Enabled       bool                   `json:"enabled"`
+	LastRunAt     *time.Time             `json:"last_run_at,omitempty"`
+	LastRunStatus string                 `json:"last_run_status"`
+	LastRunError  string                 `json:"last_run_error"`
+	NextRunAt     *time.Time             `json:"next_run_at,omitempty"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
+	Channel       *channelResponse       `json:"channel,omitempty"`
+}
+
+func toCronJobResponse(row *database.CronJob) cronJobResponse {
+	resp := cronJobResponse{
+		ID:            row.ID,
+		UUID:          row.UUID,
+		Name:          row.Name,
+		Description:   row.Description,
+		Schedule:      row.Schedule,
+		Prompt:        row.Prompt,
+		Mode:          row.Mode,
+		ChannelID:     row.ChannelID,
+		Enabled:       row.Enabled,
+		LastRunAt:     row.LastRunAt,
+		LastRunStatus: row.LastRunStatus,
+		LastRunError:  row.LastRunError,
+		NextRunAt:     row.NextRunAt,
+		CreatedAt:     row.CreatedAt,
+		UpdatedAt:     row.UpdatedAt,
+	}
+	if row.Channel != nil && row.Channel.ID != 0 {
+		masked := toChannelResponse(row.Channel)
+		resp.Channel = &masked
+	}
+	return resp
+}
+
+func toCronJobResponses(rows []database.CronJob) []cronJobResponse {
+	out := make([]cronJobResponse, len(rows))
+	for i := range rows {
+		out[i] = toCronJobResponse(&rows[i])
+	}
+	return out
+}
 
 // CreateCronJobRequest is the request body for POST /api/cron-jobs. Mode and
 // channel are optional at the API layer — the service defaults Mode to
@@ -51,7 +109,7 @@ func (h *APIHandler) handleCronJobs(w http.ResponseWriter, r *http.Request) {
 			api.RespondError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		api.RespondJSON(w, http.StatusOK, rows)
+		api.RespondJSON(w, http.StatusOK, toCronJobResponses(rows))
 
 	case http.MethodPost:
 		var req CreateCronJobRequest
@@ -76,7 +134,7 @@ func (h *APIHandler) handleCronJobs(w http.ResponseWriter, r *http.Request) {
 			api.RespondError(w, cronErrStatus(err), err.Error())
 			return
 		}
-		api.RespondJSON(w, http.StatusCreated, row)
+		api.RespondJSON(w, http.StatusCreated, toCronJobResponse(row))
 
 	default:
 		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -124,7 +182,7 @@ func (h *APIHandler) handleCronJobByUUID(w http.ResponseWriter, r *http.Request)
 			api.RespondError(w, cronErrStatus(err), err.Error())
 			return
 		}
-		api.RespondJSON(w, http.StatusOK, row)
+		api.RespondJSON(w, http.StatusOK, toCronJobResponse(row))
 
 	case http.MethodPut:
 		var req UpdateCronJobRequest
@@ -149,7 +207,7 @@ func (h *APIHandler) handleCronJobByUUID(w http.ResponseWriter, r *http.Request)
 			api.RespondError(w, cronErrStatus(err), err.Error())
 			return
 		}
-		api.RespondJSON(w, http.StatusOK, row)
+		api.RespondJSON(w, http.StatusOK, toCronJobResponse(row))
 
 	case http.MethodDelete:
 		if err := h.cronService.DeleteJob(uuid); err != nil {

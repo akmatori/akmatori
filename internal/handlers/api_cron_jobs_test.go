@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -456,5 +457,62 @@ func TestHandleCronJobByUUID_ServiceUnavailable(t *testing.T) {
 	h.handleCronJobByUUID(w, req)
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503, got %d", w.Code)
+	}
+}
+
+// TestHandleCronJobs_ListMasksIntegrationCredentials asserts that
+// /api/cron-jobs does not echo plaintext Slack tokens back to the client.
+// The model layer eagerly preloads Channel.Integration via the runner, and
+// Integration.Credentials is a JSONB blob — without explicit masking the
+// bot_token / signing_secret / app_token would land on the wire.
+func TestHandleCronJobs_ListMasksIntegrationCredentials(t *testing.T) {
+	mgr := &mockCronJobManager{jobs: []database.CronJob{{
+		UUID: "u1",
+		Name: "Daily",
+		Channel: &database.Channel{
+			ID:            10,
+			UUID:          "ch1",
+			IntegrationID: 5,
+			ExternalID:    "C12345",
+			DisplayName:   "#alerts",
+			Integration: database.Integration{
+				ID:       5,
+				UUID:     "intg-1",
+				Provider: database.MessagingProviderSlack,
+				Name:     "Slack",
+				Credentials: database.JSONB{
+					"bot_token":      "xoxb-secret-token",
+					"signing_secret": "sssh",
+					"app_token":      "xapp-token",
+				},
+			},
+		},
+	}}}
+	h := newHandlerWithCronManager(mgr)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/cron-jobs", nil)
+	w := httptest.NewRecorder()
+	h.handleCronJobs(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	body := w.Body.String()
+	for _, secret := range []string{"xoxb-secret-token", "sssh", "xapp-token"} {
+		if strings.Contains(body, secret) {
+			t.Errorf("response leaked secret %q: %s", secret, body)
+		}
+	}
+
+	var got []cronJobResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got) != 1 || got[0].Channel == nil || got[0].Channel.Integration == nil {
+		t.Fatalf("expected one row with integration, got %+v", got)
+	}
+	maskedToken, _ := got[0].Channel.Integration.Credentials["bot_token"].(string)
+	if maskedToken == "xoxb-secret-token" {
+		t.Errorf("bot_token not masked: %q", maskedToken)
 	}
 }
