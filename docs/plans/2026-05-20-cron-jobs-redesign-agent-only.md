@@ -89,13 +89,13 @@ Files:
 - Modify: `internal/handlers/api_cron_jobs.go`
 - Modify: `internal/handlers/api_cron_jobs_test.go` if present (add otherwise)
 
-- [ ] remove `Description` and `Mode` from `cronJobResponse`, `CreateCronJobRequest`, `UpdateCronJobRequest`
-- [ ] add `IsSystem bool` and `Tools []toolInstanceSummary` (id/uuid/logical_name/tool_type) to `cronJobResponse`
-- [ ] add `ToolInstanceUUIDs []string` to both request bodies (omitempty)
-- [ ] thread the new params through `services.CronJobUpdate` and the create call
-- [ ] map `ErrSystemCronImmutable` → 409 in `cronErrStatus`
-- [ ] tests: create job with tools → response carries them; update job swaps tools; DELETE on system cron returns 409; create body that still sets `mode`/`description` is ignored (extra fields don't error — JSON decoder allows it; assert behavior is "no-op")
-- [ ] run `make test` — must pass before Task 5
+- [x] remove `Description` and `Mode` from `cronJobResponse`, `CreateCronJobRequest`, `UpdateCronJobRequest` (already absent from prior tasks; verified by new TestCronJobResponse_OmitsLegacyFields + TestHandleCronJobs_Create_RejectsLegacyModeAndDescription)
+- [x] add `IsSystem bool` and `Tools []toolInstanceSummary` (id/name/logical_name/tool_type/enabled) to `cronJobResponse` (ToolInstance has no UUID column in this codebase; summary uses id/name to match the existing handler convention)
+- [x] add `ToolInstanceIDs []uint` to both request bodies (omitempty; pointer-slice on update for "leave alone" vs "clear" distinction); request shape uses `tool_instance_ids` to match the existing `/api/skills/:name/tools` request body (Task 3 noted the plan's "UUID" naming was a slip)
+- [x] thread the new params through `services.CronJobUpdate` and the create call
+- [x] map `ErrSystemCronImmutable` → 409 in `cronErrStatus`
+- [x] tests: create job with tools → response carries them; update job swaps tools; PUT without `tool_instance_ids` leaves the patch nil (untouched); DELETE on system cron returns 409; create body that sets legacy `mode`/`description` is REJECTED with 400 (api.DecodeJSON uses DisallowUnknownFields — stricter than the plan's "ignored" assumption, but a cleaner contract); response shape never echoes legacy fields
+- [x] run `make test` — touched-area tests green; pre-existing TestAlertService_InitializeDefaultSourceTypes_IdempotentAndUpdates + TestAPIHandler_HandleAlertSources_CreateValidationAndConflict failures remain unrelated to this task
 
 ### Task 5: memory-writer subagent — support deletion
 
