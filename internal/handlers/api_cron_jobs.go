@@ -16,22 +16,40 @@ import (
 // channelResponse so the embedded Integration.Credentials are masked before
 // going on the wire — the model alone would echo bot_token / signing_secret /
 // app_token in plaintext via the eager Preload("Channel.Integration") chain.
+//
+// Tools surfaces the per-cron allowlist as a slim summary (id, name,
+// logical_name, tool_type) so the UI can render assigned tools without
+// pulling each ToolInstance's Settings JSONB — the latter can carry secrets
+// (SSH keys, API tokens) that have no business on the cron-jobs endpoint.
 type cronJobResponse struct {
-	ID            uint             `json:"id"`
-	UUID          string           `json:"uuid"`
-	Name          string           `json:"name"`
-	Schedule      string           `json:"schedule"`
-	Prompt        string           `json:"prompt"`
-	IsSystem      bool             `json:"is_system"`
-	ChannelID     *uint            `json:"channel_id"`
-	Enabled       bool             `json:"enabled"`
-	LastRunAt     *time.Time       `json:"last_run_at,omitempty"`
-	LastRunStatus string           `json:"last_run_status"`
-	LastRunError  string           `json:"last_run_error"`
-	NextRunAt     *time.Time       `json:"next_run_at,omitempty"`
-	CreatedAt     time.Time        `json:"created_at"`
-	UpdatedAt     time.Time        `json:"updated_at"`
-	Channel       *channelResponse `json:"channel,omitempty"`
+	ID            uint                  `json:"id"`
+	UUID          string                `json:"uuid"`
+	Name          string                `json:"name"`
+	Schedule      string                `json:"schedule"`
+	Prompt        string                `json:"prompt"`
+	IsSystem      bool                  `json:"is_system"`
+	ChannelID     *uint                 `json:"channel_id"`
+	Enabled       bool                  `json:"enabled"`
+	LastRunAt     *time.Time            `json:"last_run_at,omitempty"`
+	LastRunStatus string                `json:"last_run_status"`
+	LastRunError  string                `json:"last_run_error"`
+	NextRunAt     *time.Time            `json:"next_run_at,omitempty"`
+	CreatedAt     time.Time             `json:"created_at"`
+	UpdatedAt     time.Time             `json:"updated_at"`
+	Channel       *channelResponse      `json:"channel,omitempty"`
+	Tools         []toolInstanceSummary `json:"tools"`
+}
+
+// toolInstanceSummary is the slim, secret-free projection of a
+// database.ToolInstance exposed on the cron-jobs endpoint. It deliberately
+// omits Settings (which can hold tokens / SSH keys) and embeds only the
+// ToolType name rather than the full row.
+type toolInstanceSummary struct {
+	ID          uint   `json:"id"`
+	Name        string `json:"name"`
+	LogicalName string `json:"logical_name"`
+	ToolType    string `json:"tool_type"`
+	Enabled     bool   `json:"enabled"`
 }
 
 func toCronJobResponse(row *database.CronJob) cronJobResponse {
@@ -50,12 +68,27 @@ func toCronJobResponse(row *database.CronJob) cronJobResponse {
 		NextRunAt:     row.NextRunAt,
 		CreatedAt:     row.CreatedAt,
 		UpdatedAt:     row.UpdatedAt,
+		Tools:         toToolInstanceSummaries(row.Tools),
 	}
 	if row.Channel != nil && row.Channel.ID != 0 {
 		masked := toChannelResponse(row.Channel)
 		resp.Channel = &masked
 	}
 	return resp
+}
+
+func toToolInstanceSummaries(rows []database.ToolInstance) []toolInstanceSummary {
+	out := make([]toolInstanceSummary, len(rows))
+	for i := range rows {
+		out[i] = toolInstanceSummary{
+			ID:          rows[i].ID,
+			Name:        rows[i].Name,
+			LogicalName: rows[i].LogicalName,
+			ToolType:    rows[i].ToolType.Name,
+			Enabled:     rows[i].Enabled,
+		}
+	}
+	return out
 }
 
 func toCronJobResponses(rows []database.CronJob) []cronJobResponse {
@@ -69,23 +102,35 @@ func toCronJobResponses(rows []database.CronJob) []cronJobResponse {
 // CreateCronJobRequest is the request body for POST /api/cron-jobs. Channel is
 // optional at the API layer — when omitted the service leaves ChannelID nil so
 // the runner falls back to the workspace default at tick time.
+//
+// ToolInstanceIDs is the per-cron tool allowlist; empty / omitted means the
+// cron-agent runs with no infrastructure tools (memory + runbooks only).
+// The shape matches /api/skills/:name/tools (tool_instance_ids) — tool
+// instances are addressed by integer ID throughout this codebase.
 type CreateCronJobRequest struct {
-	Name        string `json:"name"`
-	Schedule    string `json:"schedule"`
-	Prompt      string `json:"prompt"`
-	ChannelUUID string `json:"channel_uuid,omitempty"`
-	Enabled     *bool  `json:"enabled,omitempty"`
+	Name            string `json:"name"`
+	Schedule        string `json:"schedule"`
+	Prompt          string `json:"prompt"`
+	ChannelUUID     string `json:"channel_uuid,omitempty"`
+	Enabled         *bool  `json:"enabled,omitempty"`
+	ToolInstanceIDs []uint `json:"tool_instance_ids,omitempty"`
 }
 
 // UpdateCronJobRequest is the request body for PUT /api/cron-jobs/{uuid}.
 // Pointer fields keep partial updates ergonomic; passing channel_uuid="" on a
 // PUT explicitly clears the channel association.
+//
+// ToolInstanceIDs is a pointer to a slice so the handler can distinguish
+// "leave tools alone" (field absent / nil) from "clear the allowlist"
+// (explicit empty slice). Without the indirection a missing field would be
+// indistinguishable from one that explicitly empties the per-cron tools.
 type UpdateCronJobRequest struct {
-	Name        *string `json:"name,omitempty"`
-	Schedule    *string `json:"schedule,omitempty"`
-	Prompt      *string `json:"prompt,omitempty"`
-	ChannelUUID *string `json:"channel_uuid,omitempty"`
-	Enabled     *bool   `json:"enabled,omitempty"`
+	Name            *string `json:"name,omitempty"`
+	Schedule        *string `json:"schedule,omitempty"`
+	Prompt          *string `json:"prompt,omitempty"`
+	ChannelUUID     *string `json:"channel_uuid,omitempty"`
+	Enabled         *bool   `json:"enabled,omitempty"`
+	ToolInstanceIDs *[]uint `json:"tool_instance_ids,omitempty"`
 }
 
 // handleCronJobs dispatches GET /api/cron-jobs and POST /api/cron-jobs.
@@ -120,7 +165,7 @@ func (h *APIHandler) handleCronJobs(w http.ResponseWriter, r *http.Request) {
 			req.Prompt,
 			req.ChannelUUID,
 			enabled,
-			nil,
+			req.ToolInstanceIDs,
 		)
 		if err != nil {
 			api.RespondError(w, cronErrStatus(err), err.Error())
@@ -186,11 +231,12 @@ func (h *APIHandler) handleCronJobByUUID(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		patch := services.CronJobUpdate{
-			Name:        req.Name,
-			Schedule:    req.Schedule,
-			Prompt:      req.Prompt,
-			ChannelUUID: req.ChannelUUID,
-			Enabled:     req.Enabled,
+			Name:            req.Name,
+			Schedule:        req.Schedule,
+			Prompt:          req.Prompt,
+			ChannelUUID:     req.ChannelUUID,
+			Enabled:         req.Enabled,
+			ToolInstanceIDs: req.ToolInstanceIDs,
 		}
 		row, err := h.cronService.UpdateJob(uuid, patch)
 		if err != nil {
@@ -218,6 +264,12 @@ func cronErrStatus(err error) int {
 	switch {
 	case errors.Is(err, services.ErrCronJobNotFound):
 		return http.StatusNotFound
+	case errors.Is(err, services.ErrSystemCronImmutable):
+		// 409 Conflict: the row exists and is well-formed, but its IsSystem
+		// flag forbids deletion. Operators can disable system rows via PUT
+		// instead; the UI surfaces this with a "system" pill + disabled
+		// delete button.
+		return http.StatusConflict
 	case errors.Is(err, services.ErrChannelNotFound),
 		errors.Is(err, services.ErrIntegrationNotFound):
 		return http.StatusBadRequest
