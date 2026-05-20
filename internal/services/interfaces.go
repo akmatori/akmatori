@@ -34,6 +34,7 @@ type SkillManager interface {
 // IncidentManager defines the interface for incident spawn, update, and retrieval.
 type IncidentManager interface {
 	SpawnIncidentManager(ctx *IncidentContext) (string, string, error)
+	SpawnAgentInvocation(rootSkillName string, ctx *IncidentContext) (string, string, error)
 	UpdateIncidentStatus(incidentUUID string, status database.IncidentStatus, sessionID string, fullLog string) error
 	UpdateIncidentComplete(incidentUUID string, status database.IncidentStatus, sessionID string, fullLog string, response string, tokensUsed int, executionTimeMs int64) error
 	UpdateIncidentLog(incidentUUID string, fullLog string) error
@@ -169,10 +170,15 @@ type ProviderRegistry interface {
 // CronJobManager is the handler-facing CRUD + manual-fire surface for cron
 // jobs. It is satisfied by *CronRunner; handlers depend on this interface so
 // tests can stub it without spinning up a scheduler.
+//
+// toolInstanceIDs on CreateJob is the per-cron tool allowlist (cron jobs ship
+// with their own subset of the global tool catalog rather than inheriting the
+// alert-driven incident-manager allowlist). Empty slice means the cron-agent
+// runs with no infrastructure tools (memory + runbooks only).
 type CronJobManager interface {
 	ListJobs() ([]database.CronJob, error)
 	GetJobByUUID(uuid string) (*database.CronJob, error)
-	CreateJob(name, schedule, prompt string, channelUUID string, enabled bool) (*database.CronJob, error)
+	CreateJob(name, schedule, prompt string, channelUUID string, enabled bool, toolInstanceIDs []uint) (*database.CronJob, error)
 	UpdateJob(uuid string, patch CronJobUpdate) (*database.CronJob, error)
 	DeleteJob(uuid string) error
 	RunNow(uuid string) error

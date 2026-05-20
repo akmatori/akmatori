@@ -120,6 +120,7 @@ func (h *APIHandler) handleCronJobs(w http.ResponseWriter, r *http.Request) {
 			req.Prompt,
 			req.ChannelUUID,
 			enabled,
+			nil,
 		)
 		if err != nil {
 			api.RespondError(w, cronErrStatus(err), err.Error())

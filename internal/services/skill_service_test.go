@@ -154,9 +154,9 @@ func TestGenerateIncidentAgentsMd_ContainsPrompt(t *testing.T) {
 	svc := newTestSkillService(t, db)
 
 	tmpFile := filepath.Join(t.TempDir(), "AGENTS.md")
-	err := svc.generateIncidentAgentsMd(tmpFile, "test-incident-uuid")
+	err := svc.generateAgentsMd(tmpFile, "incident-manager", "test-incident-uuid")
 	if err != nil {
-		t.Fatalf("generateIncidentAgentsMd failed: %v", err)
+		t.Fatalf("generateAgentsMd failed: %v", err)
 	}
 
 	content, err := os.ReadFile(tmpFile)
@@ -182,9 +182,9 @@ func TestGenerateIncidentAgentsMd_NoStructuredOutputProtocol(t *testing.T) {
 	svc := newTestSkillService(t, db)
 
 	tmpFile := filepath.Join(t.TempDir(), "AGENTS.md")
-	err := svc.generateIncidentAgentsMd(tmpFile, "test-incident-uuid")
+	err := svc.generateAgentsMd(tmpFile, "incident-manager", "test-incident-uuid")
 	if err != nil {
-		t.Fatalf("generateIncidentAgentsMd failed: %v", err)
+		t.Fatalf("generateAgentsMd failed: %v", err)
 	}
 
 	content, err := os.ReadFile(tmpFile)
@@ -219,9 +219,9 @@ func TestGenerateIncidentAgentsMd_NoSkillsEmbedded(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMd), 0644)
 
 	tmpFile := filepath.Join(t.TempDir(), "AGENTS.md")
-	err := svc.generateIncidentAgentsMd(tmpFile, "test-incident-uuid")
+	err := svc.generateAgentsMd(tmpFile, "incident-manager", "test-incident-uuid")
 	if err != nil {
-		t.Fatalf("generateIncidentAgentsMd failed: %v", err)
+		t.Fatalf("generateAgentsMd failed: %v", err)
 	}
 
 	content, err := os.ReadFile(tmpFile)
@@ -255,9 +255,9 @@ func TestGenerateIncidentAgentsMd_ExcludesIncidentManager(t *testing.T) {
 	})
 
 	tmpFile := filepath.Join(t.TempDir(), "AGENTS.md")
-	err := svc.generateIncidentAgentsMd(tmpFile, "test-incident-uuid")
+	err := svc.generateAgentsMd(tmpFile, "incident-manager", "test-incident-uuid")
 	if err != nil {
-		t.Fatalf("generateIncidentAgentsMd failed: %v", err)
+		t.Fatalf("generateAgentsMd failed: %v", err)
 	}
 
 	content, err := os.ReadFile(tmpFile)

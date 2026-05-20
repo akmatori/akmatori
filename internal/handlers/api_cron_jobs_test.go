@@ -29,6 +29,7 @@ type mockCronJobManager struct {
 	lastCreated *database.CronJob
 	lastPatch   *services.CronJobUpdate
 	lastRunUUID string
+	lastToolIDs []uint
 }
 
 func (m *mockCronJobManager) ListJobs() ([]database.CronJob, error) {
@@ -51,7 +52,8 @@ func (m *mockCronJobManager) GetJobByUUID(uuid string) (*database.CronJob, error
 	return nil, services.ErrCronJobNotFound
 }
 
-func (m *mockCronJobManager) CreateJob(name, schedule, prompt string, channelUUID string, enabled bool) (*database.CronJob, error) {
+func (m *mockCronJobManager) CreateJob(name, schedule, prompt string, channelUUID string, enabled bool, toolInstanceIDs []uint) (*database.CronJob, error) {
+	m.lastToolIDs = toolInstanceIDs
 	if m.createErr != nil {
 		return nil, m.createErr
 	}

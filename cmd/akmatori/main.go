@@ -314,12 +314,10 @@ func main() {
 
 	// Cron runner: scheduler + CRUD for /api/cron-jobs. Started below after
 	// HTTP routes are registered so the runner only begins ticking once the
-	// rest of the API surface is in place. agentWSHandler is reused as both
-	// the OneShotLLMCaller (oneshot ticks share the same worker transport as
-	// title generation / response formatting / feedback classification) and
-	// the IncidentRunner (agent-mode ticks spawn investigations through the
-	// same WebSocket as alert/Slack flows).
-	cronRunner := services.NewCronRunner(channelService, providerRegistry, agentWSHandler, skillService, agentWSHandler)
+	// rest of the API surface is in place. agentWSHandler is the IncidentRunner
+	// — every cron tick spawns a cron-agent investigation through the same
+	// WebSocket as alert/Slack flows.
+	cronRunner := services.NewCronRunner(channelService, providerRegistry, skillService, agentWSHandler)
 	apiHandler.SetCronJobManager(cronRunner)
 
 	// Wire listener channel reload: when channels (or, transitionally, alert

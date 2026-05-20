@@ -504,12 +504,12 @@ func (r *recordingSkillService) CreateSkill(string, string, string, string) (*da
 func (r *recordingSkillService) UpdateSkill(string, string, string, bool) (*database.Skill, error) {
 	return nil, nil
 }
-func (r *recordingSkillService) DeleteSkill(string) error                  { return nil }
-func (r *recordingSkillService) ListSkills() ([]database.Skill, error)     { return nil, nil }
+func (r *recordingSkillService) DeleteSkill(string) error              { return nil }
+func (r *recordingSkillService) ListSkills() ([]database.Skill, error) { return nil, nil }
 func (r *recordingSkillService) ListEnabledSkills() ([]database.Skill, error) {
 	return nil, nil
 }
-func (r *recordingSkillService) GetEnabledSkillNames() []string            { return nil }
+func (r *recordingSkillService) GetEnabledSkillNames() []string { return nil }
 func (r *recordingSkillService) GetToolAllowlist() []services.ToolAllowlistEntry {
 	return nil
 }
@@ -532,15 +532,18 @@ func (r *recordingSkillService) DeleteSkillScript(string, string) error         
 func (r *recordingSkillService) SpawnIncidentManager(*services.IncidentContext) (string, string, error) {
 	return "", "", nil
 }
+func (r *recordingSkillService) SpawnAgentInvocation(string, *services.IncidentContext) (string, string, error) {
+	return "", "", nil
+}
 func (r *recordingSkillService) UpdateIncidentStatus(string, database.IncidentStatus, string, string) error {
 	return nil
 }
 func (r *recordingSkillService) UpdateIncidentComplete(string, database.IncidentStatus, string, string, string, int, int64) error {
 	return nil
 }
-func (r *recordingSkillService) UpdateIncidentLog(string, string) error           { return nil }
-func (r *recordingSkillService) GetIncident(string) (*database.Incident, error)   { return nil, nil }
-func (r *recordingSkillService) AppendSubagentLog(string, string, string) error   { return nil }
+func (r *recordingSkillService) UpdateIncidentLog(string, string) error         { return nil }
+func (r *recordingSkillService) GetIncident(string) (*database.Incident, error) { return nil, nil }
+func (r *recordingSkillService) AppendSubagentLog(string, string, string) error { return nil }
 
 // newMemoryAPIHandlerWithSkill wires both a memory mock and a skill
 // regeneration recorder. Used by tests that need to verify skill-scoped

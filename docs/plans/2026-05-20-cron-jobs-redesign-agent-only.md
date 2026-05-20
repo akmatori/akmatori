@@ -71,17 +71,17 @@ Files:
 - Modify: `internal/services/interfaces.go` — update `CronJobManager` signature (drop description from CreateJob, accept tool instance UUIDs; same for `CronJobUpdate`)
 - Modify: `internal/services/incident_service.go` — factor a shared `generateAgentsMd(path, rootSkillName, incidentUUID)` so the cron-agent path injects its own root skill
 
-- [ ] delete `executeOneshot`, `callOneshot`, `formatCronOneshotMessage`, `cronOneshotTimeout` constants; rename `executeAgent` → `execute`
-- [ ] in `execute`, swap `SpawnIncidentManager` → new `SpawnAgentInvocation(rootSkillName="cron-agent", ctx)` so the AGENTS.md root prompt is cron-agent's instead of incident-manager's; keep `source_kind="cron"` + `source_uuid=<cron.uuid>`
-- [ ] replace `r.skills.GetToolAllowlist()` with a per-cron lookup that reads `job.Tools` (preloaded via `Preload("Tools.ToolType")`) and maps each enabled `ToolInstance` to `ToolAllowlistEntry{InstanceID, LogicalName, ToolType}`
-- [ ] introduce `ErrSystemCronImmutable` returned from `DeleteJob` when `job.IsSystem`
-- [ ] update `CreateJob` / `UpdateJob` signatures: remove `description` param, accept `toolInstanceUUIDs []string`; resolve UUIDs through `ToolManager.GetToolInstanceByUUID` (add a small helper there if missing) and replace `job.Tools` via `Association("Tools").Replace(...)`; operator-created jobs always have IsSystem=false
-- [ ] tests:
+- [x] delete `executeOneshot`, `callOneshot`, `formatCronOneshotMessage`, `cronOneshotTimeout` constants; rename `executeAgent` → `execute`
+- [x] in `execute`, swap `SpawnIncidentManager` → new `SpawnAgentInvocation(rootSkillName="cron-agent", ctx)` so the AGENTS.md root prompt is cron-agent's instead of incident-manager's; keep `source_kind="cron"` + `source_uuid=<cron.uuid>`
+- [x] replace `r.skills.GetToolAllowlist()` with a per-cron lookup that reads `job.Tools` (preloaded via `Preload("Tools.ToolType")`) and maps each enabled `ToolInstance` to `ToolAllowlistEntry{InstanceID, LogicalName, ToolType}`
+- [x] introduce `ErrSystemCronImmutable` returned from `DeleteJob` when `job.IsSystem`
+- [x] update `CreateJob` / `UpdateJob` signatures: remove `description` param, accept `toolInstanceIDs []uint` (tool instances are addressed by integer ID in this codebase — the plan's "UUID" naming was a slip; HTTP-level identifier shape is Task 4); replace `job.Tools` via `Association("Tools").Replace(...)`; operator-created jobs always have IsSystem=false
+- [x] tests:
   - oneshot mode is gone (no `executeOneshot`)
   - tick uses cron-agent skill name + per-cron tool allowlist (not the global one)
   - `DeleteJob` of a system row returns `ErrSystemCronImmutable`; `UpdateJob` of a system row updating only `Enabled` succeeds
   - per-cron tools flow into `StartIncident`'s `toolAllowlist` argument
-- [ ] run `make test` — must pass before Task 4
+- [x] run `make test` — must pass before Task 4 (cron + spawn tests green; pre-existing TestAlertService_InitializeDefaultSourceTypes_IdempotentAndUpdates + TestAPIHandler_HandleAlertSources_CreateValidationAndConflict failures remain unrelated)
 
 ### Task 4: HTTP API — drop description/mode, accept tool_instance_uuids, expose is_system, block system delete
 

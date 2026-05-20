@@ -24,9 +24,27 @@ type IncidentContext struct {
 	Message    string         // Original message/alert text for title generation
 }
 
-// SpawnIncidentManager creates a new incident manager instance
-// Creates AGENTS.md at workspace root (pi-mono reads it from cwd upward)
+// SpawnIncidentManager creates a new incident-manager-rooted agent invocation.
+// Kept as a named entrypoint so existing handler call sites (alerts, Slack
+// mentions, manual incidents) stay unchanged; cron runs go through
+// SpawnAgentInvocation directly with a different rootSkillName.
 func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, string, error) {
+	return s.SpawnAgentInvocation("incident-manager", ctx)
+}
+
+// SpawnAgentInvocation creates a new agent run rooted in the named system
+// skill. The root skill's prompt becomes the AGENTS.md root (the file pi-mono
+// reads when starting a session); cross-incident memory recall is appended
+// below the prompt so the agent has an always-up-to-date global manifest
+// regardless of which root prompt it ran under.
+//
+// rootSkillName is one of:
+//   - "incident-manager" — alert/Slack/manual investigations (default path)
+//   - "cron-agent"       — scheduled cron-driven runs (post-redesign)
+//
+// Returns the new incident UUID + working directory so the caller can stream
+// updates back through it.
+func (s *SkillService) SpawnAgentInvocation(rootSkillName string, ctx *IncidentContext) (string, string, error) {
 	// Generate UUID for this incident
 	incidentUUID := uuid.New().String()
 
@@ -42,7 +60,7 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 
 	// Generate AGENTS.md at workspace root (pi-mono reads agentDir from cwd)
 	agentsMdPath := filepath.Join(incidentDir, "AGENTS.md")
-	if err := s.generateIncidentAgentsMd(agentsMdPath, incidentUUID); err != nil {
+	if err := s.generateAgentsMd(agentsMdPath, rootSkillName, incidentUUID); err != nil {
 		return "", "", fmt.Errorf("failed to generate AGENTS.md: %w", err)
 	}
 
@@ -93,29 +111,39 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 	return incidentUUID, incidentDir, nil
 }
 
-// generateIncidentAgentsMd generates the AGENTS.md file for incident manager
-// pi-mono reads this file from the workspace root (agentDir parameter)
-// Skills are discovered by pi-mono's DefaultResourceLoader via additionalSkillPaths,
-// so only the incident manager prompt is written here.
+// generateAgentsMd renders the AGENTS.md file for a fresh agent invocation.
+// pi-mono reads this file from the workspace root (agentDir parameter); the
+// rootSkillName drives both the header title and the prompt body so a cron
+// run gets the "cron-agent" prompt while an alert-driven run keeps the
+// "incident-manager" framing. Skills are discovered by pi-mono's
+// DefaultResourceLoader via additionalSkillPaths, so only the root prompt is
+// written here.
 //
-// The cross-incident "global" memory manifest is appended below the prompt so
-// the incident manager sees a small, always-up-to-date summary of long-lived
-// facts and operator feedback before any tool call. Full bodies are fetched
-// on demand via the memory-searcher subagent or a direct read of the
-// matching file under /akmatori/memory/<scope>/.
+// The cross-incident "global" memory manifest is appended below the prompt
+// regardless of root skill so the agent sees a small, always-up-to-date
+// summary of long-lived facts and operator feedback before any tool call.
+// Full bodies are fetched on demand via the memory-searcher subagent.
 //
 // incidentUUID is substituted into the memory-writer call example so the
 // model can quote it verbatim instead of having to derive it from CWD.
-func (s *SkillService) generateIncidentAgentsMd(path string, incidentUUID string) error {
-	// Get incident manager prompt from the system skill
-	prompt, err := s.GetSkillPrompt("incident-manager")
+func (s *SkillService) generateAgentsMd(path string, rootSkillName string, incidentUUID string) error {
+	// Get the root system skill's prompt. Falls back to the hardcoded default
+	// when the on-disk skill row is absent (fresh install pre-seed) so the
+	// agent still receives a usable instruction.
+	prompt, err := s.GetSkillPrompt(rootSkillName)
 	if err != nil {
-		// Fallback to default if skill file doesn't exist yet
-		prompt = database.DefaultIncidentManagerPrompt
+		switch rootSkillName {
+		case "cron-agent":
+			prompt = database.DefaultCronAgentPrompt
+		default:
+			prompt = database.DefaultIncidentManagerPrompt
+		}
 	}
 
 	var sb strings.Builder
-	sb.WriteString("# Incident Manager\n\n")
+	sb.WriteString("# ")
+	sb.WriteString(rootSkillHeader(rootSkillName))
+	sb.WriteString("\n\n")
 	sb.WriteString(prompt)
 	sb.WriteString("\n")
 	sb.WriteString(s.renderMemoryRecallSection(MemoryScopeGlobal, incidentUUID))
@@ -125,6 +153,18 @@ func (s *SkillService) generateIncidentAgentsMd(path string, incidentUUID string
 	}
 
 	return nil
+}
+
+// rootSkillHeader returns the human-readable AGENTS.md header for the supplied
+// system skill name. Centralised so any future system skill bootstraps with
+// the same title pattern as the two existing roots.
+func rootSkillHeader(rootSkillName string) string {
+	switch rootSkillName {
+	case "cron-agent":
+		return "Cron Agent"
+	default:
+		return "Incident Manager"
+	}
 }
 
 // UpdateIncidentStatus updates the status of an incident.

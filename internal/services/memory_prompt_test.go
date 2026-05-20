@@ -190,7 +190,7 @@ func TestGenerateIncidentAgentsMd_InjectsGlobalManifest(t *testing.T) {
 	writeManifest(t, svc, MemoryScopeGlobal, "manifest for global scope")
 
 	out := filepath.Join(tmp, "AGENTS.md")
-	if err := svc.generateIncidentAgentsMd(out, "test-incident-uuid"); err != nil {
+	if err := svc.generateAgentsMd(out, "incident-manager", "test-incident-uuid"); err != nil {
 		t.Fatalf("generate AGENTS.md: %v", err)
 	}
 	got := readFile(t, out)
@@ -278,7 +278,7 @@ func TestGenerateIncidentAgentsMd_NoManifestFallsBackGracefully(t *testing.T) {
 		memoryDir:    filepath.Join(tmp, "memory"),
 	}
 	out := filepath.Join(tmp, "AGENTS.md")
-	if err := svc.generateIncidentAgentsMd(out, "test-incident-uuid"); err != nil {
+	if err := svc.generateAgentsMd(out, "incident-manager", "test-incident-uuid"); err != nil {
 		t.Fatalf("generate AGENTS.md: %v", err)
 	}
 	got := readFile(t, out)

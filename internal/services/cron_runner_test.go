@@ -131,7 +131,7 @@ func (r *recordingChannelManager) ResolveForAlertSource(*database.AlertSourceIns
 }
 
 // recordingProvider captures PostMessage calls. The fake registry returns it
-// for slack so executeOneshot can route through the standard provider API.
+// for slack so the cron tick path can route through the standard provider API.
 type recordingProvider struct {
 	mu      sync.Mutex
 	posts   []recordedPost
@@ -184,10 +184,11 @@ func (f *fakeProviderRegistry) List() []database.MessagingProvider {
 // fakeSkillIncidentManager is the test double for SkillIncidentManager.
 // Only the methods exercised by the cron agent path are implemented; the rest
 // panic so a stray call from new code fails the test loudly. The handler
-// surface records SpawnIncidentManager calls so tests can assert the cron
-// path stamps source_kind=cron/source_uuid=<job.uuid> on the Incident row.
+// surface records SpawnAgentInvocation calls so tests can assert the cron
+// path stamps source_kind=cron/source_uuid=<job.uuid> on the Incident row
+// AND that it spawns the cron-agent root skill rather than incident-manager.
 type fakeSkillIncidentManager struct {
-	spawnCalls        []IncidentContext
+	spawnCalls        []fakeSpawnCall
 	spawnIncidentID   string
 	spawnErr          error
 	updateStatusErr   error
@@ -199,6 +200,15 @@ type fakeSkillIncidentManager struct {
 	toolAllowlist []ToolAllowlistEntry
 }
 
+// fakeSpawnCall captures the rootSkillName + IncidentContext pair a tick
+// sent into the spawn surface. Recording both is what lets tests pin the
+// "cron-agent" framing — without the rootSkillName a regression that
+// fell back to incident-manager would still satisfy provenance assertions.
+type fakeSpawnCall struct {
+	rootSkillName string
+	ctx           IncidentContext
+}
+
 type fakeIncidentUpdate struct {
 	uuid     string
 	status   database.IncidentStatus
@@ -207,13 +217,17 @@ type fakeIncidentUpdate struct {
 }
 
 func (f *fakeSkillIncidentManager) SpawnIncidentManager(ctx *IncidentContext) (string, string, error) {
+	return f.SpawnAgentInvocation("incident-manager", ctx)
+}
+
+func (f *fakeSkillIncidentManager) SpawnAgentInvocation(rootSkillName string, ctx *IncidentContext) (string, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.spawnErr != nil {
 		return "", "", f.spawnErr
 	}
 	if ctx != nil {
-		f.spawnCalls = append(f.spawnCalls, *ctx)
+		f.spawnCalls = append(f.spawnCalls, fakeSpawnCall{rootSkillName: rootSkillName, ctx: *ctx})
 	}
 	if f.spawnIncidentID == "" {
 		f.spawnIncidentID = "test-incident-uuid"
@@ -359,6 +373,9 @@ func setupCronRunnerTest(t *testing.T) (*CronRunner, *gorm.DB, *fakeScheduler, *
 		&database.Integration{},
 		&database.Channel{},
 		&database.CronJob{},
+		&database.CronJobTool{},
+		&database.ToolType{},
+		&database.ToolInstance{},
 		&database.LLMSettings{},
 	); err != nil {
 		t.Fatalf("automigrate: %v", err)
@@ -406,13 +423,10 @@ func setupCronRunnerTest(t *testing.T) (*CronRunner, *gorm.DB, *fakeScheduler, *
 	prov := &recordingProvider{}
 	reg := &fakeProviderRegistry{provider: prov}
 	sched := newFakeScheduler()
-	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
-		return "ok response", nil
-	}}
 	skills := &fakeSkillIncidentManager{}
 	agentRunner := newFakeIncidentRunner()
 
-	runner := newCronRunnerWithDeps(db, chMgr, reg, caller, skills, agentRunner, sched)
+	runner := newCronRunnerWithDeps(db, chMgr, reg, skills, agentRunner, sched)
 	return runner, db, sched, chMgr, prov
 }
 
@@ -422,7 +436,7 @@ func TestCronRunner_CreateJob_ValidatesSchedule(t *testing.T) {
 	runner, _, _, _, _ := setupCronRunnerTest(t)
 	chUUID := runner.channels.(*recordingChannelManager).channels[0].UUID
 
-	_, err := runner.CreateJob("daily report", "not a cron", "report status", chUUID, true)
+	_, err := runner.CreateJob("daily report", "not a cron", "report status", chUUID, true, nil)
 	if err == nil || !errors.Is(err, ErrInvalidCronSchedule) {
 		t.Fatalf("expected ErrInvalidCronSchedule, got %v", err)
 	}
@@ -432,7 +446,7 @@ func TestCronRunner_CreateJob_RejectsEmptyName(t *testing.T) {
 	runner, _, _, _, _ := setupCronRunnerTest(t)
 	chUUID := runner.channels.(*recordingChannelManager).channels[0].UUID
 
-	_, err := runner.CreateJob("   ", "*/2 * * * *", "report status", chUUID, true)
+	_, err := runner.CreateJob("   ", "*/2 * * * *", "report status", chUUID, true, nil)
 	if err == nil {
 		t.Fatal("expected name validation error, got nil")
 	}
@@ -442,7 +456,7 @@ func TestCronRunner_UpdateJob_ScheduleAndChannelTakeEffect(t *testing.T) {
 	runner, _, sched, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
 
-	job, err := runner.CreateJob("nightly", "*/5 * * * *", "x", chUUID, true)
+	job, err := runner.CreateJob("nightly", "*/5 * * * *", "x", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -469,7 +483,7 @@ func TestCronRunner_UpdateJob_RejectsBadSchedule(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
 
-	job, err := runner.CreateJob("nightly", "*/5 * * * *", "x", chUUID, true)
+	job, err := runner.CreateJob("nightly", "*/5 * * * *", "x", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -483,7 +497,7 @@ func TestCronRunner_DeleteJob_RemovesScheduledEntry(t *testing.T) {
 	runner, _, sched, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
 
-	job, err := runner.CreateJob("nightly", "*/5 * * * *", "x", chUUID, true)
+	job, err := runner.CreateJob("nightly", "*/5 * * * *", "x", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -511,7 +525,7 @@ func TestCronRunner_RunNow_FiresImmediately(t *testing.T) {
 	runner, _, _, chMgr, prov := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
 
-	job, err := runner.CreateJob("status", "*/10 * * * *", "Summarize", chUUID, true)
+	job, err := runner.CreateJob("status", "*/10 * * * *", "Summarize", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -542,7 +556,7 @@ func TestCronRunner_Tick_RecordsProviderError(t *testing.T) {
 	chUUID := chMgr.channels[0].UUID
 	prov.postErr = errors.New("network unreachable")
 
-	if _, err := runner.CreateJob("status", "*/2 * * * *", "Summarize", chUUID, true); err != nil {
+	if _, err := runner.CreateJob("status", "*/2 * * * *", "Summarize", chUUID, true, nil); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	for id := range sched.jobs {
@@ -572,7 +586,7 @@ func TestCronRunner_AgentTick_SpawnsIncidentWithCronProvenance(t *testing.T) {
 	chUUID := chMgr.channels[0].UUID
 	skills := runner.skills.(*fakeSkillIncidentManager)
 
-	job, err := runner.CreateJob("daily report", "*/2 * * * *", "Investigate disks", chUUID, true)
+	job, err := runner.CreateJob("daily report", "*/2 * * * *", "Investigate disks", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -582,17 +596,20 @@ func TestCronRunner_AgentTick_SpawnsIncidentWithCronProvenance(t *testing.T) {
 	runner.WaitForInflight()
 
 	if len(skills.spawnCalls) != 1 {
-		t.Fatalf("expected one SpawnIncidentManager call, got %d", len(skills.spawnCalls))
+		t.Fatalf("expected one SpawnAgentInvocation call, got %d", len(skills.spawnCalls))
 	}
 	spawn := skills.spawnCalls[0]
-	if spawn.SourceKind != database.IncidentSourceKindCron {
-		t.Errorf("source_kind = %q, want %q", spawn.SourceKind, database.IncidentSourceKindCron)
+	if spawn.rootSkillName != "cron-agent" {
+		t.Errorf("rootSkillName = %q, want cron-agent", spawn.rootSkillName)
 	}
-	if spawn.SourceUUID != job.UUID {
-		t.Errorf("source_uuid = %q, want %q", spawn.SourceUUID, job.UUID)
+	if spawn.ctx.SourceKind != database.IncidentSourceKindCron {
+		t.Errorf("source_kind = %q, want %q", spawn.ctx.SourceKind, database.IncidentSourceKindCron)
 	}
-	if spawn.Source != "cron" {
-		t.Errorf("source = %q, want cron", spawn.Source)
+	if spawn.ctx.SourceUUID != job.UUID {
+		t.Errorf("source_uuid = %q, want %q", spawn.ctx.SourceUUID, job.UUID)
+	}
+	if spawn.ctx.Source != "cron" {
+		t.Errorf("source = %q, want cron", spawn.ctx.Source)
 	}
 }
 
@@ -603,7 +620,7 @@ func TestCronRunner_AgentTick_PostsFinalSummaryToChannel(t *testing.T) {
 	runner, db, _, chMgr, prov := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
 
-	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Summarize incidents", chUUID, true)
+	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Summarize incidents", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -646,7 +663,7 @@ func TestCronRunner_AgentTick_RecordsWorkerNotConnected(t *testing.T) {
 	chUUID := chMgr.channels[0].UUID
 	runner.runner.(*fakeIncidentRunner).connected = false
 
-	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Summarize incidents", chUUID, true)
+	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Summarize incidents", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -684,7 +701,7 @@ func TestCronRunner_AgentTick_RecordsAgentError(t *testing.T) {
 		}
 	}
 
-	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Investigate", chUUID, true)
+	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Investigate", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -722,7 +739,7 @@ func TestCronRunner_AgentTick_RecordsStartIncidentError(t *testing.T) {
 	chUUID := chMgr.channels[0].UUID
 	runner.runner.(*fakeIncidentRunner).startErr = errors.New("transport closed")
 
-	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Investigate", chUUID, true)
+	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Investigate", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -752,7 +769,7 @@ func TestCronRunner_AgentTick_MissingWiringMarksError(t *testing.T) {
 	runner.runner = nil
 	chUUID := chMgr.channels[0].UUID
 
-	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Investigate", chUUID, true)
+	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Investigate", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -770,6 +787,213 @@ func TestCronRunner_AgentTick_MissingWiringMarksError(t *testing.T) {
 	}
 	if !contains(got.LastRunError, "agent runner wiring") {
 		t.Errorf("LastRunError = %q, want wiring-missing message", got.LastRunError)
+	}
+}
+
+// TestCronRunner_AgentTick_UsesCronAgentSkillAndPerCronTools verifies the
+// redesigned agent path:
+//   - StartIncident receives skillNames=[cron-agent] (the root prompt — not
+//     the global enabled-skills set).
+//   - StartIncident receives a tool allowlist derived from the cron's own
+//     Tools m2m, NOT the global SkillIncidentManager.GetToolAllowlist() that
+//     alert-driven incidents use.
+//
+// Together these two assertions pin the "cron jobs run agent-only with their
+// own tool allowlist" contract from the redesign.
+func TestCronRunner_AgentTick_UsesCronAgentSkillAndPerCronTools(t *testing.T) {
+	runner, db, _, chMgr, _ := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	agentRunner := runner.runner.(*fakeIncidentRunner)
+	skills := runner.skills.(*fakeSkillIncidentManager)
+	// Salt the global allowlist with a sentinel entry — if the runner ever
+	// falls back to GetToolAllowlist() the assertions below catch it.
+	skills.enabledSkills = []string{"unused-global-skill"}
+	skills.toolAllowlist = []ToolAllowlistEntry{{InstanceID: 999, LogicalName: "should-not-flow"}}
+
+	// Seed two tool instances: one enabled (must flow) and one disabled
+	// (must be filtered out so an operator-disabled tool cannot get smuggled
+	// past the gateway via a stale cron assignment).
+	toolType := database.ToolType{Name: "ssh"}
+	if err := db.Create(&toolType).Error; err != nil {
+		t.Fatalf("seed tool type: %v", err)
+	}
+	enabledTool := database.ToolInstance{ToolTypeID: toolType.ID, Name: "prod-ssh", LogicalName: "prod-ssh", Enabled: true}
+	if err := db.Create(&enabledTool).Error; err != nil {
+		t.Fatalf("seed enabled tool: %v", err)
+	}
+	disabledTool := database.ToolInstance{ToolTypeID: toolType.ID, Name: "stale-ssh", LogicalName: "stale-ssh"}
+	if err := db.Create(&disabledTool).Error; err != nil {
+		t.Fatalf("seed disabled tool: %v", err)
+	}
+	if err := db.Model(&database.ToolInstance{}).Where("id = ?", disabledTool.ID).Update("enabled", false).Error; err != nil {
+		t.Fatalf("disable tool: %v", err)
+	}
+
+	job, err := runner.CreateJob("status report", "*/5 * * * *", "Summarize", chUUID, true, []uint{enabledTool.ID, disabledTool.ID})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := runner.RunNow(job.UUID); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	runner.WaitForInflight()
+
+	agentRunner.mu.Lock()
+	defer agentRunner.mu.Unlock()
+	if len(agentRunner.startCalls) != 1 {
+		t.Fatalf("expected one StartIncident call, got %d", len(agentRunner.startCalls))
+	}
+	call := agentRunner.startCalls[0]
+	if len(call.skills) != 1 || call.skills[0] != "cron-agent" {
+		t.Errorf("StartIncident skills = %v, want [cron-agent]", call.skills)
+	}
+	if len(call.tools) != 1 {
+		t.Fatalf("StartIncident toolAllowlist = %d entries, want 1 (only enabled tool)", len(call.tools))
+	}
+	if call.tools[0].InstanceID != enabledTool.ID {
+		t.Errorf("StartIncident toolAllowlist[0].InstanceID = %d, want %d", call.tools[0].InstanceID, enabledTool.ID)
+	}
+	if call.tools[0].LogicalName != "prod-ssh" {
+		t.Errorf("StartIncident toolAllowlist[0].LogicalName = %q, want prod-ssh", call.tools[0].LogicalName)
+	}
+	if call.tools[0].ToolType != "ssh" {
+		t.Errorf("StartIncident toolAllowlist[0].ToolType = %q, want ssh", call.tools[0].ToolType)
+	}
+	// Sanity check: the global allowlist sentinel must NOT have leaked through.
+	for _, e := range call.tools {
+		if e.InstanceID == 999 {
+			t.Fatalf("global allowlist leaked into cron tick: %+v", e)
+		}
+	}
+}
+
+// TestCronRunner_CreateJob_RejectsUnknownToolID guards the resolveToolInstances
+// validation: an unknown tool ID surfaces as a typed error rather than
+// silently dropping the tool from the allowlist.
+func TestCronRunner_CreateJob_RejectsUnknownToolID(t *testing.T) {
+	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	_, err := runner.CreateJob("ghost-tool", "*/5 * * * *", "p", chUUID, true, []uint{99999})
+	if err == nil || !strings.Contains(err.Error(), "tool instance 99999 not found") {
+		t.Fatalf("err = %v, want tool-not-found", err)
+	}
+}
+
+// TestCronRunner_UpdateJob_ReplacesToolAllowlist verifies that passing a
+// fresh ToolInstanceIDs slice on UpdateJob replaces the prior assignment
+// rather than appending to it — operators must be able to fully revoke a
+// previously-granted tool without an explicit DELETE.
+func TestCronRunner_UpdateJob_ReplacesToolAllowlist(t *testing.T) {
+	runner, db, _, chMgr, _ := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+
+	toolType := database.ToolType{Name: "ssh"}
+	if err := db.Create(&toolType).Error; err != nil {
+		t.Fatalf("seed tool type: %v", err)
+	}
+	first := database.ToolInstance{ToolTypeID: toolType.ID, Name: "alpha", LogicalName: "alpha", Enabled: true}
+	second := database.ToolInstance{ToolTypeID: toolType.ID, Name: "beta", LogicalName: "beta", Enabled: true}
+	if err := db.Create(&first).Error; err != nil {
+		t.Fatalf("seed alpha: %v", err)
+	}
+	if err := db.Create(&second).Error; err != nil {
+		t.Fatalf("seed beta: %v", err)
+	}
+
+	job, err := runner.CreateJob("swap-tools", "*/5 * * * *", "p", chUUID, true, []uint{first.ID})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if len(job.Tools) != 1 || job.Tools[0].ID != first.ID {
+		t.Fatalf("initial Tools = %+v, want exactly [alpha]", job.Tools)
+	}
+
+	swap := []uint{second.ID}
+	updated, err := runner.UpdateJob(job.UUID, CronJobUpdate{ToolInstanceIDs: &swap})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if len(updated.Tools) != 1 || updated.Tools[0].ID != second.ID {
+		t.Errorf("post-update Tools = %+v, want exactly [beta]", updated.Tools)
+	}
+
+	// Empty slice must clear the allowlist entirely (passing nil is the
+	// distinct "leave tools alone" branch and is exercised by the no-op test).
+	empty := []uint{}
+	cleared, err := runner.UpdateJob(job.UUID, CronJobUpdate{ToolInstanceIDs: &empty})
+	if err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if len(cleared.Tools) != 0 {
+		t.Errorf("post-clear Tools = %+v, want empty", cleared.Tools)
+	}
+}
+
+// TestCronRunner_DeleteJob_SystemRowImmutable verifies that operator
+// DELETE on a seeded system cron returns ErrSystemCronImmutable rather than
+// removing the row — dreaming-style maintenance jobs (memory-curator and
+// any future REM/deep phases) must survive a routine prune.
+func TestCronRunner_DeleteJob_SystemRowImmutable(t *testing.T) {
+	runner, db, _, _, _ := setupCronRunnerTest(t)
+	systemJob := database.CronJob{
+		UUID:     uuid.New().String(),
+		Name:     "memory-curator",
+		Schedule: "0 2 * * *",
+		Prompt:   "consolidate memory",
+		IsSystem: true,
+		Enabled:  false,
+	}
+	if err := db.Create(&systemJob).Error; err != nil {
+		t.Fatalf("seed system cron: %v", err)
+	}
+	// GORM treats IsSystem=true as the default true alongside the zero-value
+	// bool quirk, so reload to be sure the row really is flagged system.
+	if err := db.Model(&database.CronJob{}).Where("id = ?", systemJob.ID).Update("is_system", true).Error; err != nil {
+		t.Fatalf("pin is_system: %v", err)
+	}
+
+	if err := runner.DeleteJob(systemJob.UUID); !errors.Is(err, ErrSystemCronImmutable) {
+		t.Fatalf("DeleteJob system row err = %v, want ErrSystemCronImmutable", err)
+	}
+	// Row must still exist.
+	var reloaded database.CronJob
+	if err := db.First(&reloaded, systemJob.ID).Error; err != nil {
+		t.Fatalf("system cron must still exist after blocked delete: %v", err)
+	}
+}
+
+// TestCronRunner_UpdateJob_SystemRow_EnableOnlySucceeds asserts that
+// operators can still toggle a seeded system cron's Enabled flag (and
+// channel binding) without tripping the system-immutability guard. The
+// guard fires only on DeleteJob; UpdateJob deliberately keeps system rows
+// operator-controllable so dreaming-style crons can be turned on/off.
+func TestCronRunner_UpdateJob_SystemRow_EnableOnlySucceeds(t *testing.T) {
+	runner, db, _, _, _ := setupCronRunnerTest(t)
+	systemJob := database.CronJob{
+		UUID:     uuid.New().String(),
+		Name:     "memory-curator",
+		Schedule: "0 2 * * *",
+		Prompt:   "consolidate memory",
+		IsSystem: true,
+		Enabled:  false,
+	}
+	if err := db.Create(&systemJob).Error; err != nil {
+		t.Fatalf("seed system cron: %v", err)
+	}
+	if err := db.Model(&database.CronJob{}).Where("id = ?", systemJob.ID).Update("is_system", true).Error; err != nil {
+		t.Fatalf("pin is_system: %v", err)
+	}
+
+	enabled := true
+	updated, err := runner.UpdateJob(systemJob.UUID, CronJobUpdate{Enabled: &enabled})
+	if err != nil {
+		t.Fatalf("enable system cron: %v", err)
+	}
+	if !updated.Enabled {
+		t.Errorf("post-update Enabled = false, want true")
+	}
+	if !updated.IsSystem {
+		t.Errorf("UpdateJob must not clear IsSystem flag")
 	}
 }
 
@@ -874,7 +1098,7 @@ func TestCronRunner_ResolveChannel_FallsBackWhenExplicitDisabled(t *testing.T) {
 	disabled.Enabled = false
 	chMgr.channels = append(chMgr.channels, disabled)
 
-	if _, err := runner.CreateJob("status", "*/2 * * * *", "Summarize", disabled.UUID, true); err != nil {
+	if _, err := runner.CreateJob("status", "*/2 * * * *", "Summarize", disabled.UUID, true, nil); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	for id := range sched.jobs {
@@ -949,10 +1173,10 @@ func TestCronRunner_ListJobs_ReturnsRowsSorted(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
 
-	if _, err := runner.CreateJob("B job", "*/5 * * * *", "p", chUUID, true); err != nil {
+	if _, err := runner.CreateJob("B job", "*/5 * * * *", "p", chUUID, true, nil); err != nil {
 		t.Fatalf("seed B: %v", err)
 	}
-	if _, err := runner.CreateJob("A job", "*/5 * * * *", "p", chUUID, true); err != nil {
+	if _, err := runner.CreateJob("A job", "*/5 * * * *", "p", chUUID, true, nil); err != nil {
 		t.Fatalf("seed A: %v", err)
 	}
 
@@ -973,7 +1197,7 @@ func TestCronRunner_ListJobs_ReturnsRowsSorted(t *testing.T) {
 // per-provider default at tick time.
 func TestCronRunner_CreateJob_AcceptsEmptyChannelUUID(t *testing.T) {
 	runner, _, _, _, _ := setupCronRunnerTest(t)
-	job, err := runner.CreateJob("nightly", "0 9 * * *", "Summarize", "", true)
+	job, err := runner.CreateJob("nightly", "0 9 * * *", "Summarize", "", true, nil)
 	if err != nil {
 		t.Fatalf("CreateJob: %v", err)
 	}
@@ -986,7 +1210,7 @@ func TestCronRunner_CreateJob_AcceptsEmptyChannelUUID(t *testing.T) {
 // the channel manager.
 func TestCronRunner_CreateJob_UnknownChannelUUID(t *testing.T) {
 	runner, _, _, _, _ := setupCronRunnerTest(t)
-	_, err := runner.CreateJob("nightly", "0 9 * * *", "Summarize", "ghost", true)
+	_, err := runner.CreateJob("nightly", "0 9 * * *", "Summarize", "ghost", true, nil)
 	if !errors.Is(err, ErrChannelNotFound) {
 		t.Errorf("err = %v, want ErrChannelNotFound", err)
 	}
@@ -1001,7 +1225,7 @@ func TestCronRunner_CreateJob_RejectsNonPostableChannel(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chMgr.channels[0].CanPost = false
 	chUUID := chMgr.channels[0].UUID
-	_, err := runner.CreateJob("nightly", "0 9 * * *", "Summarize", chUUID, true)
+	_, err := runner.CreateJob("nightly", "0 9 * * *", "Summarize", chUUID, true, nil)
 	if !errors.Is(err, ErrChannelNotPostable) {
 		t.Errorf("err = %v, want ErrChannelNotPostable", err)
 	}
@@ -1013,7 +1237,7 @@ func TestCronRunner_CreateJob_RejectsNonPostableChannel(t *testing.T) {
 func TestCronRunner_UpdateJob_RejectsNonPostableChannel(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	postable := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "0 9 * * *", "Summarize", postable, true)
+	job, err := runner.CreateJob("nightly", "0 9 * * *", "Summarize", postable, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1028,7 +1252,7 @@ func TestCronRunner_UpdateJob_RejectsNonPostableChannel(t *testing.T) {
 func TestCronRunner_CreateJob_RejectsEmptyPrompt(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	if _, err := runner.CreateJob("nightly", "0 9 * * *", "   ", chUUID, true); err == nil {
+	if _, err := runner.CreateJob("nightly", "0 9 * * *", "   ", chUUID, true, nil); err == nil {
 		t.Error("CreateJob blank prompt error = nil, want validation error")
 	}
 }
@@ -1040,7 +1264,7 @@ func TestCronRunner_CreateJob_RejectsEmptyPrompt(t *testing.T) {
 func TestCronRunner_CreateJob_HonorsEnabledFalse(t *testing.T) {
 	runner, db, sched, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("disabled-on-create", "0 9 * * *", "Summarize", chUUID, false)
+	job, err := runner.CreateJob("disabled-on-create", "0 9 * * *", "Summarize", chUUID, false, nil)
 	if err != nil {
 		t.Fatalf("CreateJob: %v", err)
 	}
@@ -1067,7 +1291,7 @@ func TestCronRunner_CreateJob_HonorsEnabledFalse(t *testing.T) {
 func TestCronRunner_UpdateJob_RejectsBlankNameAndPrompt(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true)
+	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1087,7 +1311,7 @@ func TestCronRunner_UpdateJob_RejectsBlankNameAndPrompt(t *testing.T) {
 func TestCronRunner_UpdateJob_ChannelUUIDClearAndReassign(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true)
+	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1118,7 +1342,7 @@ func TestCronRunner_UpdateJob_ChannelUUIDClearAndReassign(t *testing.T) {
 func TestCronRunner_UpdateJob_RejectsUnknownChannel(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true)
+	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1141,7 +1365,7 @@ func TestCronRunner_UpdateJob_NotFound(t *testing.T) {
 func TestCronRunner_UpdateJob_NoFieldsReturnsRow(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true)
+	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1169,7 +1393,7 @@ func TestCronRunner_DeleteJob_NotFound(t *testing.T) {
 func TestCronRunner_Reload_RemovesEntryWhenRowDeleted(t *testing.T) {
 	runner, db, sched, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true)
+	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1194,7 +1418,7 @@ func TestCronRunner_Reload_RemovesEntryWhenRowDeleted(t *testing.T) {
 func TestCronRunner_Fire_SkipsDisabledJob(t *testing.T) {
 	runner, db, sched, chMgr, prov := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "*/5 * * * *", "p", chUUID, true)
+	job, err := runner.CreateJob("nightly", "*/5 * * * *", "p", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1219,7 +1443,7 @@ func TestCronRunner_Fire_SkipsDisabledJob(t *testing.T) {
 func TestCronRunner_Fire_VanishedJob(t *testing.T) {
 	runner, db, sched, chMgr, prov := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "*/5 * * * *", "p", chUUID, true)
+	job, err := runner.CreateJob("nightly", "*/5 * * * *", "p", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1242,7 +1466,7 @@ func TestCronRunner_Fire_VanishedJob(t *testing.T) {
 func TestCronRunner_OneshotTick_FallsBackToDefaultChannel(t *testing.T) {
 	runner, _, sched, chMgr, prov := setupCronRunnerTest(t)
 	// CreateJob without a channel — runner should resolve via channels.ResolveDefault.
-	if _, err := runner.CreateJob("nightly", "*/5 * * * *", "Summarize", "", true); err != nil {
+	if _, err := runner.CreateJob("nightly", "*/5 * * * *", "Summarize", "", true, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	for id := range sched.jobs {
@@ -1266,7 +1490,7 @@ func TestCronRunner_OneshotTick_MissingDefaultRecordsError(t *testing.T) {
 	chMgr.resolveDefault = nil
 	chMgr.resolveErr = nil
 
-	if _, err := runner.CreateJob("nightly", "*/5 * * * *", "Summarize", "", true); err != nil {
+	if _, err := runner.CreateJob("nightly", "*/5 * * * *", "Summarize", "", true, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	for id := range sched.jobs {
@@ -1291,7 +1515,7 @@ func TestCronRunner_OneshotTick_MissingDefaultRecordsError(t *testing.T) {
 func TestCronRunner_OneshotTick_LoadChannelByIDStale(t *testing.T) {
 	runner, db, sched, chMgr, prov := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "*/5 * * * *", "Summarize", chUUID, true)
+	job, err := runner.CreateJob("nightly", "*/5 * * * *", "Summarize", chUUID, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1314,37 +1538,28 @@ func TestCronRunner_OneshotTick_LoadChannelByIDStale(t *testing.T) {
 }
 
 // TestCronRunner_FormatMessages_RespectsByteCap verifies the cron formatter
-// truncates oversized agent/oneshot bodies so a runaway LLM response cannot
-// exceed Slack's chat.postMessage limit. Without the cap the slack provider
-// would either silently truncate or fail with a 400.
+// truncates oversized agent bodies so a runaway LLM response cannot exceed
+// Slack's chat.postMessage limit. Without the cap the slack provider would
+// either silently truncate or fail with a 400.
 func TestCronRunner_FormatMessages_RespectsByteCap(t *testing.T) {
 	job := &database.CronJob{Name: "Daily report"}
 	huge := strings.Repeat("a", cronChannelMaxMessageBytes*2)
 
-	out := formatCronOneshotMessage(job, huge)
-	if len(out) > cronChannelMaxMessageBytes {
-		t.Fatalf("oneshot message %d bytes exceeds cap %d", len(out), cronChannelMaxMessageBytes)
-	}
-	if !strings.Contains(out, "*Daily report*") {
-		t.Errorf("expected header preserved after truncation: %q", out)
-	}
-	if !strings.Contains(out, "truncated") {
-		t.Errorf("expected truncation marker in oneshot output")
-	}
-
 	agentOut := formatCronAgentMessage(job, huge, false, "")
 	if len(agentOut) > cronChannelMaxMessageBytes {
 		t.Fatalf("agent message %d bytes exceeds cap %d", len(agentOut), cronChannelMaxMessageBytes)
+	}
+	if !strings.Contains(agentOut, "*Daily report*") {
+		t.Errorf("expected header preserved after truncation: %q", agentOut)
 	}
 	if !strings.Contains(agentOut, "truncated") {
 		t.Errorf("expected truncation marker in agent output")
 	}
 
 	// Short input must pass through unchanged so normal traffic is unaffected.
-	short := "OK"
-	got := formatCronOneshotMessage(job, short)
-	if !strings.Contains(got, "OK") || strings.Contains(got, "truncated") {
-		t.Errorf("short input unexpectedly modified: %q", got)
+	short := formatCronAgentMessage(job, "OK", false, "")
+	if !strings.Contains(short, "OK") || strings.Contains(short, "truncated") {
+		t.Errorf("short input unexpectedly modified: %q", short)
 	}
 }
 
@@ -1362,7 +1577,6 @@ func TestCronRunner_NewCronRunner_ConstructorReturnsRunner(t *testing.T) {
 	runner := NewCronRunner(
 		&recordingChannelManager{},
 		&fakeProviderRegistry{},
-		&fakeOneShotLLMCaller{},
 		&fakeSkillIncidentManager{},
 		newFakeIncidentRunner(),
 	)
