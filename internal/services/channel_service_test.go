@@ -494,7 +494,6 @@ func TestChannelService_DeleteIntegration_ClearsTriggerFKs(t *testing.T) {
 		Name:      "cron-job",
 		Schedule:  "* * * * *",
 		Prompt:    "do thing",
-		Mode:      database.CronJobModeOneshot,
 		ChannelID: &channel.ID,
 	}
 	if err := db.Create(cron).Error; err != nil {

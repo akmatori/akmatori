@@ -109,6 +109,16 @@ func runMigrations(db *gorm.DB) error {
 		return err
 	}
 
+	// Pre-migration: drop the legacy `mode` and `description` columns from
+	// cron_jobs. The redesigned cron path uses a single agent execution mode
+	// (driven by the cron-agent system skill) and there is no description
+	// field. Any existing rows are normalized to mode='agent' before the
+	// column is dropped so a downstream rollback would not silently reintroduce
+	// a oneshot dispatch path.
+	if err := preMigrateCronJobsDropLegacyColumns(db); err != nil {
+		return err
+	}
+
 	// Reset GORM session state before AutoMigrate. The preMigrate step
 	// operates on specific tables, leaving internal GORM state (table name,
 	// clauses) that can leak into AutoMigrate's processing of other models
@@ -140,6 +150,7 @@ func runMigrations(db *gorm.DB) error {
 		&Integration{},
 		&Channel{},
 		&CronJob{},
+		&CronJobTool{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
@@ -188,6 +199,45 @@ func runMigrations(db *gorm.DB) error {
 
 	slog.Info("database migrations completed successfully")
 	return nil
+}
+
+// preMigrateCronJobsDropLegacyColumns removes the legacy `mode` and
+// `description` columns from cron_jobs. The agent-only cron redesign collapses
+// the previous oneshot/agent dispatch into a single agent path, so any
+// pre-existing rows are first normalized to mode='agent' and then the
+// columns are dropped. The function is idempotent: a fresh install where the
+// columns never existed becomes a no-op, and a re-run after a successful drop
+// is also a no-op.
+func preMigrateCronJobsDropLegacyColumns(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&CronJob{}) {
+		return nil
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		hasMode := tx.Migrator().HasColumn(&CronJob{}, "mode")
+		hasDescription := tx.Migrator().HasColumn(&CronJob{}, "description")
+		if !hasMode && !hasDescription {
+			return nil
+		}
+		if hasMode {
+			// Coerce any non-agent rows to agent before the column disappears.
+			// Done as a plain UPDATE so the operation is visible in the SQL
+			// audit trail and does not depend on the now-removed model field.
+			if err := tx.Exec("UPDATE cron_jobs SET mode = 'agent' WHERE mode IS NULL OR mode <> 'agent'").Error; err != nil {
+				return fmt.Errorf("normalize cron_jobs.mode: %w", err)
+			}
+			if err := tx.Exec("ALTER TABLE cron_jobs DROP COLUMN mode").Error; err != nil {
+				return fmt.Errorf("drop cron_jobs.mode column: %w", err)
+			}
+			slog.Info("dropped cron_jobs.mode column (agent-only redesign)")
+		}
+		if hasDescription {
+			if err := tx.Exec("ALTER TABLE cron_jobs DROP COLUMN description").Error; err != nil {
+				return fmt.Errorf("drop cron_jobs.description column: %w", err)
+			}
+			slog.Info("dropped cron_jobs.description column (agent-only redesign)")
+		}
+		return nil
+	})
 }
 
 // preMigrateLLMSettings prepares the llm_settings table for the multi-config

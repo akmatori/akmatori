@@ -55,10 +55,8 @@ const cronProviderResolveDefault = database.MessagingProviderSlack
 // columns rather than re-sending the entire row.
 type CronJobUpdate struct {
 	Name        *string
-	Description *string
 	Schedule    *string
 	Prompt      *string
-	Mode        *database.CronJobMode
 	ChannelUUID *string
 	Enabled     *bool
 }
@@ -300,18 +298,12 @@ func (r *CronRunner) WaitForInflight() {
 	r.inflight.Wait()
 }
 
-// execute runs a single tick and persists the result. Mode dispatch keeps the
-// oneshot and agent paths isolated so a regression in one cannot break the
-// other.
+// execute runs a single tick and persists the result. The redesigned cron
+// path always runs a full agent investigation via the cron-agent system skill;
+// Task 3 will rename executeAgent to execute and inline the body, but Task 1
+// keeps both names so the surrounding refactor lands incrementally.
 func (r *CronRunner) execute(job *database.CronJob) {
-	switch job.Mode {
-	case database.CronJobModeOneshot, "":
-		r.executeOneshot(job)
-	case database.CronJobModeAgent:
-		r.executeAgent(job)
-	default:
-		r.recordResult(job, database.CronJobRunStatusError, fmt.Sprintf("unknown cron mode %q", job.Mode))
-	}
+	r.executeAgent(job)
 }
 
 // executeOneshot routes a oneshot LLM call through the worker, formats the
@@ -770,7 +762,7 @@ func (r *CronRunner) GetJobByUUID(uuidStr string) (*database.CronJob, error) {
 // CreateJob inserts a new CronJob row, registers it with the scheduler, and
 // returns the persisted row. Empty channelUUID is accepted; the runner falls
 // back to the workspace default at tick time.
-func (r *CronRunner) CreateJob(name, description, schedule, prompt string, mode database.CronJobMode, channelUUID string, enabled bool) (*database.CronJob, error) {
+func (r *CronRunner) CreateJob(name, schedule, prompt string, channelUUID string, enabled bool) (*database.CronJob, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("cron job name cannot be empty")
@@ -778,12 +770,6 @@ func (r *CronRunner) CreateJob(name, description, schedule, prompt string, mode 
 	schedule = strings.TrimSpace(schedule)
 	if err := r.validateSchedule(schedule); err != nil {
 		return nil, err
-	}
-	if mode == "" {
-		mode = database.CronJobModeOneshot
-	}
-	if !database.IsValidCronJobMode(string(mode)) {
-		return nil, fmt.Errorf("invalid cron mode %q", mode)
 	}
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("cron job prompt cannot be empty")
@@ -803,14 +789,12 @@ func (r *CronRunner) CreateJob(name, description, schedule, prompt string, mode 
 	}
 
 	row := &database.CronJob{
-		UUID:        uuid.New().String(),
-		Name:        name,
-		Description: description,
-		Schedule:    schedule,
-		Prompt:      prompt,
-		Mode:        mode,
-		ChannelID:   channelID,
-		Enabled:     enabled,
+		UUID:      uuid.New().String(),
+		Name:      name,
+		Schedule:  schedule,
+		Prompt:    prompt,
+		ChannelID: channelID,
+		Enabled:   enabled,
 	}
 	if err := r.db.Create(row).Error; err != nil {
 		return nil, fmt.Errorf("create cron job: %w", err)
@@ -848,9 +832,6 @@ func (r *CronRunner) UpdateJob(uuidStr string, patch CronJobUpdate) (*database.C
 		}
 		updates["name"] = trimmed
 	}
-	if patch.Description != nil {
-		updates["description"] = *patch.Description
-	}
 	if patch.Schedule != nil {
 		schedule := strings.TrimSpace(*patch.Schedule)
 		if err := r.validateSchedule(schedule); err != nil {
@@ -863,12 +844,6 @@ func (r *CronRunner) UpdateJob(uuidStr string, patch CronJobUpdate) (*database.C
 			return nil, fmt.Errorf("cron job prompt cannot be empty")
 		}
 		updates["prompt"] = *patch.Prompt
-	}
-	if patch.Mode != nil {
-		if !database.IsValidCronJobMode(string(*patch.Mode)) {
-			return nil, fmt.Errorf("invalid cron mode %q", *patch.Mode)
-		}
-		updates["mode"] = *patch.Mode
 	}
 	if patch.ChannelUUID != nil {
 		if *patch.ChannelUUID == "" {

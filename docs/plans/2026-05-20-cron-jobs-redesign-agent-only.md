@@ -41,12 +41,12 @@ Files:
 - Modify: `internal/database/db.go` (AutoMigrate hook + raw SQL migration helper)
 - Modify: `internal/database/models_cron_test.go` if present, or add one alongside
 
-- [ ] remove `Description` and `Mode` fields from `CronJob`; remove `CronJobMode`, `CronJobModeOneshot`, `CronJobModeAgent`, `IsValidCronJobMode` constants
-- [ ] add `IsSystem bool` column to `CronJob` (default false; gormtag `default:false`)
-- [ ] add many-to-many relation `Tools []ToolInstance` via new `cron_job_tools` join table (mirror `skill_tools` shape: cron_job_id + tool_instance_id, both primary key)
-- [ ] write a one-shot migration step in `db.go` that runs BEFORE AutoMigrate's column drop: set all rows with `mode != 'agent'` to `mode=agent` (in case anyone had oneshot), then drop columns `description` and `mode` from `cron_jobs` if they exist
-- [ ] write unit test that confirms `CronJob` round-trips through GORM with `IsSystem` + `Tools` populated
-- [ ] run `make test` — must pass before Task 2
+- [x] remove `Description` and `Mode` fields from `CronJob`; remove `CronJobMode`, `CronJobModeOneshot`, `CronJobModeAgent`, `IsValidCronJobMode` constants
+- [x] add `IsSystem bool` column to `CronJob` (default false; gormtag `default:false`)
+- [x] add many-to-many relation `Tools []ToolInstance` via new `cron_job_tools` join table (mirror `skill_tools` shape: cron_job_id + tool_instance_id, both primary key)
+- [x] write a one-shot migration step in `db.go` that runs BEFORE AutoMigrate's column drop: set all rows with `mode != 'agent'` to `mode=agent` (in case anyone had oneshot), then drop columns `description` and `mode` from `cron_jobs` if they exist
+- [x] write unit test that confirms `CronJob` round-trips through GORM with `IsSystem` + `Tools` populated
+- [x] run `make test` — must pass before Task 2
 
 ### Task 2: cron-agent system skill + system cron seed
 

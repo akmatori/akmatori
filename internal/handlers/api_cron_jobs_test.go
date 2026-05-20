@@ -51,18 +51,16 @@ func (m *mockCronJobManager) GetJobByUUID(uuid string) (*database.CronJob, error
 	return nil, services.ErrCronJobNotFound
 }
 
-func (m *mockCronJobManager) CreateJob(name, description, schedule, prompt string, mode database.CronJobMode, channelUUID string, enabled bool) (*database.CronJob, error) {
+func (m *mockCronJobManager) CreateJob(name, schedule, prompt string, channelUUID string, enabled bool) (*database.CronJob, error) {
 	if m.createErr != nil {
 		return nil, m.createErr
 	}
 	row := &database.CronJob{
-		UUID:        "uuid-" + name,
-		Name:        name,
-		Description: description,
-		Schedule:    schedule,
-		Prompt:      prompt,
-		Mode:        mode,
-		Enabled:     enabled,
+		UUID:     "uuid-" + name,
+		Name:     name,
+		Schedule: schedule,
+		Prompt:   prompt,
+		Enabled:  enabled,
 	}
 	m.lastCreated = row
 	m.jobs = append(m.jobs, *row)
@@ -161,7 +159,6 @@ func TestHandleCronJobs_Create(t *testing.T) {
 		Name:     "Daily",
 		Schedule: "0 9 * * *",
 		Prompt:   "Report",
-		Mode:     "oneshot",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/cron-jobs", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -173,9 +170,6 @@ func TestHandleCronJobs_Create(t *testing.T) {
 	}
 	if mgr.lastCreated == nil || mgr.lastCreated.Name != "Daily" {
 		t.Fatalf("CreateJob not invoked correctly: %+v", mgr.lastCreated)
-	}
-	if mgr.lastCreated.Mode != database.CronJobModeOneshot {
-		t.Errorf("mode not propagated: %q", mgr.lastCreated.Mode)
 	}
 }
 
@@ -412,26 +406,6 @@ func TestHandleCronJobByUUID_Update_InvalidJSON(t *testing.T) {
 	h.handleCronJobByUUID(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
-	}
-}
-
-// TestHandleCronJobByUUID_Update_PropagatesModePatch verifies the API maps the
-// mode field through to the service layer.
-func TestHandleCronJobByUUID_Update_PropagatesModePatch(t *testing.T) {
-	mgr := &mockCronJobManager{jobs: []database.CronJob{{UUID: "u1", Name: "X", Mode: database.CronJobModeOneshot}}}
-	h := newHandlerWithCronManager(mgr)
-
-	mode := "agent"
-	body, _ := json.Marshal(UpdateCronJobRequest{Mode: &mode})
-	req := httptest.NewRequest(http.MethodPut, "/api/cron-jobs/u1", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	h.handleCronJobByUUID(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	if mgr.lastPatch == nil || mgr.lastPatch.Mode == nil || *mgr.lastPatch.Mode != database.CronJobModeAgent {
-		t.Errorf("mode patch not propagated: %+v", mgr.lastPatch)
 	}
 }
 

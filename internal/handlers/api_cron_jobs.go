@@ -17,22 +17,21 @@ import (
 // going on the wire — the model alone would echo bot_token / signing_secret /
 // app_token in plaintext via the eager Preload("Channel.Integration") chain.
 type cronJobResponse struct {
-	ID            uint                 `json:"id"`
-	UUID          string               `json:"uuid"`
-	Name          string               `json:"name"`
-	Description   string               `json:"description"`
-	Schedule      string               `json:"schedule"`
-	Prompt        string               `json:"prompt"`
-	Mode          database.CronJobMode `json:"mode"`
-	ChannelID     *uint                `json:"channel_id"`
-	Enabled       bool                 `json:"enabled"`
-	LastRunAt     *time.Time           `json:"last_run_at,omitempty"`
-	LastRunStatus string               `json:"last_run_status"`
-	LastRunError  string               `json:"last_run_error"`
-	NextRunAt     *time.Time           `json:"next_run_at,omitempty"`
-	CreatedAt     time.Time            `json:"created_at"`
-	UpdatedAt     time.Time            `json:"updated_at"`
-	Channel       *channelResponse     `json:"channel,omitempty"`
+	ID            uint             `json:"id"`
+	UUID          string           `json:"uuid"`
+	Name          string           `json:"name"`
+	Schedule      string           `json:"schedule"`
+	Prompt        string           `json:"prompt"`
+	IsSystem      bool             `json:"is_system"`
+	ChannelID     *uint            `json:"channel_id"`
+	Enabled       bool             `json:"enabled"`
+	LastRunAt     *time.Time       `json:"last_run_at,omitempty"`
+	LastRunStatus string           `json:"last_run_status"`
+	LastRunError  string           `json:"last_run_error"`
+	NextRunAt     *time.Time       `json:"next_run_at,omitempty"`
+	CreatedAt     time.Time        `json:"created_at"`
+	UpdatedAt     time.Time        `json:"updated_at"`
+	Channel       *channelResponse `json:"channel,omitempty"`
 }
 
 func toCronJobResponse(row *database.CronJob) cronJobResponse {
@@ -40,10 +39,9 @@ func toCronJobResponse(row *database.CronJob) cronJobResponse {
 		ID:            row.ID,
 		UUID:          row.UUID,
 		Name:          row.Name,
-		Description:   row.Description,
 		Schedule:      row.Schedule,
 		Prompt:        row.Prompt,
-		Mode:          row.Mode,
+		IsSystem:      row.IsSystem,
 		ChannelID:     row.ChannelID,
 		Enabled:       row.Enabled,
 		LastRunAt:     row.LastRunAt,
@@ -68,16 +66,13 @@ func toCronJobResponses(rows []database.CronJob) []cronJobResponse {
 	return out
 }
 
-// CreateCronJobRequest is the request body for POST /api/cron-jobs. Mode and
-// channel are optional at the API layer — the service defaults Mode to
-// oneshot and leaves ChannelID nil so the runner falls back to the workspace
-// default at tick time.
+// CreateCronJobRequest is the request body for POST /api/cron-jobs. Channel is
+// optional at the API layer — when omitted the service leaves ChannelID nil so
+// the runner falls back to the workspace default at tick time.
 type CreateCronJobRequest struct {
 	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
 	Schedule    string `json:"schedule"`
 	Prompt      string `json:"prompt"`
-	Mode        string `json:"mode,omitempty"`
 	ChannelUUID string `json:"channel_uuid,omitempty"`
 	Enabled     *bool  `json:"enabled,omitempty"`
 }
@@ -87,10 +82,8 @@ type CreateCronJobRequest struct {
 // PUT explicitly clears the channel association.
 type UpdateCronJobRequest struct {
 	Name        *string `json:"name,omitempty"`
-	Description *string `json:"description,omitempty"`
 	Schedule    *string `json:"schedule,omitempty"`
 	Prompt      *string `json:"prompt,omitempty"`
-	Mode        *string `json:"mode,omitempty"`
 	ChannelUUID *string `json:"channel_uuid,omitempty"`
 	Enabled     *bool   `json:"enabled,omitempty"`
 }
@@ -123,10 +116,8 @@ func (h *APIHandler) handleCronJobs(w http.ResponseWriter, r *http.Request) {
 		}
 		row, err := h.cronService.CreateJob(
 			req.Name,
-			req.Description,
 			req.Schedule,
 			req.Prompt,
-			database.CronJobMode(req.Mode),
 			req.ChannelUUID,
 			enabled,
 		)
@@ -195,15 +186,10 @@ func (h *APIHandler) handleCronJobByUUID(w http.ResponseWriter, r *http.Request)
 		}
 		patch := services.CronJobUpdate{
 			Name:        req.Name,
-			Description: req.Description,
 			Schedule:    req.Schedule,
 			Prompt:      req.Prompt,
 			ChannelUUID: req.ChannelUUID,
 			Enabled:     req.Enabled,
-		}
-		if req.Mode != nil {
-			mode := database.CronJobMode(*req.Mode)
-			patch.Mode = &mode
 		}
 		row, err := h.cronService.UpdateJob(uuid, patch)
 		if err != nil {

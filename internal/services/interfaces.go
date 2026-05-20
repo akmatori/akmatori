@@ -172,7 +172,7 @@ type ProviderRegistry interface {
 type CronJobManager interface {
 	ListJobs() ([]database.CronJob, error)
 	GetJobByUUID(uuid string) (*database.CronJob, error)
-	CreateJob(name, description, schedule, prompt string, mode database.CronJobMode, channelUUID string, enabled bool) (*database.CronJob, error)
+	CreateJob(name, schedule, prompt string, channelUUID string, enabled bool) (*database.CronJob, error)
 	UpdateJob(uuid string, patch CronJobUpdate) (*database.CronJob, error)
 	DeleteJob(uuid string) error
 	RunNow(uuid string) error
