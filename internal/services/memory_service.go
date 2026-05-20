@@ -562,6 +562,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 	type parsedEntry struct {
 		mem       *database.Memory
 		canonical bool // true if filename matches `<id>-<name>.md`
+		tombstone bool // true if frontmatter carried `deleted: true`
 	}
 	var parsed []*parsedEntry
 	for _, scopeEnt := range scopeEntries {
@@ -619,28 +620,37 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 			if !ok {
 				continue
 			}
-			mem, err := parseMemoryFile(data, scope)
+			mem, tombstone, err := parseMemoryFile(data, scope)
 			if err != nil {
 				slog.Warn("memory ingest: parse file", "path", rel, "err", err)
 				continue
 			}
-			// Force agent authorship: the file's frontmatter is agent-controlled
-			// and cannot be trusted to claim operator authorship. Operator
-			// authorship is preserved at the DB level via upsertByNameNoSync's
-			// DoUpdates exclusion of created_by — see this function's doc comment.
-			mem.CreatedBy = MemoryCreatedByAgent
+			if !tombstone {
+				// Force agent authorship: the file's frontmatter is agent-
+				// controlled and cannot be trusted to claim operator
+				// authorship. Operator authorship is preserved at the DB
+				// level via upsertByNameNoSync's DoUpdates exclusion of
+				// created_by — see this function's doc comment.
+				mem.CreatedBy = MemoryCreatedByAgent
+			}
 
-			entry := &parsedEntry{mem: mem, canonical: canonicalIngestName(f.Name(), mem.Name)}
+			entry := &parsedEntry{mem: mem, canonical: canonicalIngestName(f.Name(), mem.Name), tombstone: tombstone}
 			if idx, ok := seenInScope[mem.Name]; ok {
 				prior := parsed[idx]
-				// Keep the existing entry only if it's already the agent's
-				// (non-canonical) write. Replace it when the prior was the
-				// canonical snapshot and the new file is the agent's write,
-				// or when both are the same form (later wins, stable for
-				// re-ingest determinism).
-				if prior.canonical && !entry.canonical {
+				switch {
+				case entry.tombstone:
+					// Agent's deletion intent always wins, regardless of
+					// which file (canonical or bare) the tombstone landed on.
 					parsed[idx] = entry
-				} else if prior.canonical == entry.canonical {
+				case prior.tombstone:
+					// Existing tombstone wins; a sibling non-tombstone file
+					// is a stale snapshot that the post-batch sync will purge.
+				case prior.canonical && !entry.canonical:
+					// Prefer the agent's freshly written `<name>.md` over a
+					// prior canonical `<id>-<name>.md` snapshot.
+					parsed[idx] = entry
+				case prior.canonical == entry.canonical:
+					// Same form, later wins (stable for re-ingest determinism).
 					parsed[idx] = entry
 				}
 				continue
@@ -651,9 +661,24 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 	}
 
 	ingested := 0
+	deleted := 0
 	for _, entry := range parsed {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if entry.tombstone {
+			n, err := s.deleteByScopeAndNameNoSync(entry.mem.Scope, entry.mem.Name)
+			if err != nil {
+				slog.Warn("memory ingest: tombstone delete", "scope", entry.mem.Scope, "name", entry.mem.Name, "err", err)
+				continue
+			}
+			if n > 0 {
+				deleted++
+			}
+			// Always count as a change so the post-batch sync runs and the
+			// tombstone file itself is purged from disk even when the DB row
+			// had already been removed by an earlier ingest.
+			continue
 		}
 		if _, err := s.upsertByNameNoSync(entry.mem); err != nil {
 			slog.Warn("memory ingest: upsert", "scope", entry.mem.Scope, "name", entry.mem.Name, "err", err)
@@ -664,15 +689,35 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 
 	// Single sync after the batch instead of one per row: SyncMemoryFiles
 	// reads the full memories table and rewrites every file, so calling it
-	// inside the loop turned ingest into O(N²) disk churn.
-	if ingested > 0 {
+	// inside the loop turned ingest into O(N²) disk churn. A sync after
+	// deletions cleans up both the bare `<name>.md` tombstone the agent
+	// wrote and the prior canonical `<id>-<name>.md` snapshot, since
+	// neither matches an existing row in expectedFiles.
+	if ingested > 0 || deleted > 0 || len(parsed) > 0 {
 		if err := s.SyncMemoryFiles(); err != nil {
 			slog.Warn("memory ingest: post-batch sync failed", "err", err)
 		}
 	}
 
-	slog.Info("memory ingest complete", "ingested", ingested)
+	slog.Info("memory ingest complete", "ingested", ingested, "deleted", deleted)
 	return nil
+}
+
+// deleteByScopeAndNameNoSync removes the memory row keyed by (scope, name)
+// without triggering SyncMemoryFiles. Returns the number of rows deleted (0
+// when no matching row exists — a tombstone for an unknown slug is a no-op,
+// not an error, so the post-batch sync still purges the orphaned file).
+func (s *MemoryService) deleteByScopeAndNameNoSync(scope, name string) (int64, error) {
+	scope = strings.TrimSpace(scope)
+	name = strings.TrimSpace(name)
+	if scope == "" || name == "" {
+		return 0, fmt.Errorf("scope and name required for tombstone delete")
+	}
+	result := s.db.Where("scope = ? AND name = ?", scope, name).Delete(&database.Memory{})
+	if result.Error != nil {
+		return 0, fmt.Errorf("delete memory by scope/name: %w", result.Error)
+	}
+	return result.RowsAffected, nil
 }
 
 // readDirFromRoot is a thin wrapper around root.Open + Readdir that mirrors
@@ -809,32 +854,45 @@ func (s *MemoryService) upsertByNameNoSync(m *database.Memory) (*database.Memory
 // into a Memory ready for UpsertByName. The scope argument is the on-disk
 // directory the file came from; if the file's frontmatter scope is empty or
 // mismatches, the on-disk scope wins (the directory layout is authoritative).
-func parseMemoryFile(data []byte, scope string) (*database.Memory, error) {
+//
+// When the frontmatter contains `deleted: true`, the file is parsed as a
+// tombstone: only scope and name are populated on the returned Memory and the
+// second return value is true. Description/type/body are not required and any
+// values present are ignored — the caller deletes the corresponding DB row.
+func parseMemoryFile(data []byte, scope string) (*database.Memory, bool, error) {
 	src := strings.TrimLeft(string(data), " \t\r\n")
 	const fence = "---"
 	if !strings.HasPrefix(src, fence) {
-		return nil, fmt.Errorf("missing opening frontmatter fence")
+		return nil, false, fmt.Errorf("missing opening frontmatter fence")
 	}
 	rest := strings.TrimLeft(src[len(fence):], "\r\n")
 	end := strings.Index(rest, "\n"+fence)
 	if end < 0 {
-		return nil, fmt.Errorf("missing closing frontmatter fence")
+		return nil, false, fmt.Errorf("missing closing frontmatter fence")
 	}
 	fmBytes := rest[:end]
 	body := strings.TrimLeft(rest[end+len("\n"+fence):], "\r\n")
 
 	var fm memoryFrontmatter
 	if err := yaml.Unmarshal([]byte(fmBytes), &fm); err != nil {
-		return nil, fmt.Errorf("parse frontmatter: %w", err)
+		return nil, false, fmt.Errorf("parse frontmatter: %w", err)
 	}
 	if strings.TrimSpace(fm.Name) == "" {
-		return nil, fmt.Errorf("frontmatter missing name")
+		return nil, false, fmt.Errorf("frontmatter missing name")
 	}
+
+	if fm.Deleted {
+		return &database.Memory{
+			Scope: scope,
+			Name:  strings.TrimSpace(fm.Name),
+		}, true, nil
+	}
+
 	if strings.TrimSpace(fm.Description) == "" {
-		return nil, fmt.Errorf("frontmatter missing description")
+		return nil, false, fmt.Errorf("frontmatter missing description")
 	}
 	if !ValidMemoryType(fm.Type) {
-		return nil, fmt.Errorf("invalid memory type %q", fm.Type)
+		return nil, false, fmt.Errorf("invalid memory type %q", fm.Type)
 	}
 
 	// Strip the `# <name>` header and the description echo so the persisted
@@ -849,7 +907,7 @@ func parseMemoryFile(data []byte, scope string) (*database.Memory, error) {
 		Body:         body,
 		IncidentUUID: strings.TrimSpace(fm.IncidentUUID),
 		CreatedBy:    strings.TrimSpace(fm.CreatedBy),
-	}, nil
+	}, false, nil
 }
 
 // stripBodyHeader removes the `# <name>` heading and the description echo
@@ -891,13 +949,19 @@ func stripBodyHeader(body, name, description string) string {
 // (colons, quotes, brackets) — interpolating m.Description raw into the
 // frontmatter would let a description like "prod-db: data dir moved" turn
 // the file into invalid YAML and break downstream consumers.
+//
+// The Deleted field is set to true by the memory-writer subagent when it is
+// asked to remove a memory (Action: delete <slug>). IngestFromDisk uses that
+// marker to delete the corresponding DB row and clean up both the bare
+// `<name>.md` tombstone and the canonical `<id>-<name>.md` snapshot.
 type memoryFrontmatter struct {
 	Name         string `yaml:"name"`
-	Description  string `yaml:"description"`
-	Type         string `yaml:"type"`
-	Scope        string `yaml:"scope"`
+	Description  string `yaml:"description,omitempty"`
+	Type         string `yaml:"type,omitempty"`
+	Scope        string `yaml:"scope,omitempty"`
 	IncidentUUID string `yaml:"incident_uuid,omitempty"`
 	CreatedBy    string `yaml:"created_by,omitempty"`
+	Deleted      bool   `yaml:"deleted,omitempty"`
 }
 
 // renderMemoryFile produces the full markdown body for a single memory file.

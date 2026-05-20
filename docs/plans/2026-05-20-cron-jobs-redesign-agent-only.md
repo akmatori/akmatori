@@ -104,10 +104,10 @@ Files:
 - Modify: `internal/services/memory_service.go` and/or `memory_service_ingest_test.go` to handle empty/tombstone files if needed
 - Modify: existing memory-writer subagent tests under `internal/services/`
 
-- [ ] extend the subagent contract: an additional optional first-line directive `Action: delete <slug>` (one per call) instructs the subagent to remove `/akmatori/memory/<scope>/<slug>.md` (and the canonical `<id>-<slug>.md` if present) via the existing local `bash`-free tool surface (use `edit` to overwrite with an empty front-matter tombstone, then have IngestFromDisk delete the row when a tombstone marker `deleted: true` is present)
-- [ ] update `MemoryService.IngestFromDisk` to recognize `deleted: true` in frontmatter and `DELETE` the corresponding row + remove both the bare and canonical file once the DB row is gone
-- [ ] tests: round-trip — write a memory, then have memory-writer write a tombstone, run IngestFromDisk, assert DB row is gone and both files cleaned
-- [ ] run `make test` — must pass before Task 6
+- [x] extend the subagent contract: `memory-writer.md` now documents an optional `Action: delete <slug>` line in the task body; the subagent emits a tombstone at `<scope>/<slug>.md` containing only `name:` + `deleted: true` frontmatter (used `write` rather than `edit` because the tombstone is a fresh file at a slot the prior sync had already purged — the plan's "edit" suggestion was a tool-name slip, the semantics match)
+- [x] update `MemoryService.IngestFromDisk` to recognize `deleted: true` in frontmatter and `DELETE` the corresponding row + remove both the bare and canonical file once the DB row is gone (parser returns a tombstone flag; ingest dedup makes tombstones always win against a sibling canonical snapshot; the post-batch SyncMemoryFiles purges both the bare tombstone and the prior `<id>-<slug>.md` because neither is in expectedFiles)
+- [x] tests: round-trip — write a memory, then have memory-writer write a tombstone, run IngestFromDisk, assert DB row is gone and both files cleaned (TestIngestFromDisk_TombstoneDeletesRowAndFiles + TestIngestFromDisk_TombstoneAndCanonicalSameScope + TestIngestFromDisk_TombstoneForUnknownSlugIsNoOp + TestParseMemoryFile_Tombstone* + subagent_files_test now asserts the prompt contains "Action: delete" and "deleted: true")
+- [x] run `make test` — touched-area tests green; pre-existing TestAlertService_InitializeDefaultSourceTypes_IdempotentAndUpdates + TestAPIHandler_HandleAlertSources_CreateValidationAndConflict failures remain unrelated to this task
 
 ### Task 6: Frontend — CronJobForm/list updates
 

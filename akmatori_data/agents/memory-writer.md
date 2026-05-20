@@ -32,6 +32,12 @@ Input you will receive:
   directive to save only durable, non-obvious facts that will speed up future
   troubleshooting (recurring host quirks, tool quirks, validated incident
   patterns, operator feedback).
+- Optionally, the task may include one or more `Action: delete <slug>` lines
+  AFTER the two required headers (one slug per line, slug must match the same
+  pattern). Each such line instructs you to retire that memory under the
+  declared scope. See the "Deletion" section below for the exact tombstone
+  shape — write a tombstone file rather than calling any delete tool, because
+  the API ingests the tombstone and removes the row + cleans up files.
 
 Refuse to write any file if the scope header is missing or fails the slug
 pattern, or if the incident UUID is empty after placeholder resolution — reply
@@ -85,11 +91,36 @@ Constraints:
 - Use YAML-safe quoting if the description contains `:` or `'` or `"`.
 - Do NOT touch `/akmatori/memory/<scope>/MEMORY.md` — the API regenerates it.
 
+Deletion (when the task carries `Action: delete <slug>` lines):
+
+1. For each `Action: delete <slug>` line, write a tombstone file at
+   `/akmatori/memory/<scope>/<slug>.md` containing ONLY the frontmatter:
+
+   ```
+   ---
+   name: <slug>
+   deleted: true
+   ---
+   ```
+
+   No body, no `# <slug>` heading — just the three-line frontmatter and a
+   trailing newline. Use the `write` tool. If a canonical `<id>-<slug>.md`
+   exists alongside, leave it alone; the API's ingester removes both files
+   after the row is deleted from Postgres.
+2. Resolve every tombstone path before writing and refuse anything that
+   escapes `/akmatori/memory/<scope>/` (same scope-safety rules as for
+   creates).
+3. Do NOT mix a create/update and a delete for the same slug in the same
+   call — pick one. If the caller asked for both, treat the delete as
+   authoritative and skip the create.
+4. List each tombstone you wrote in the "Memories written" section as
+   `<scope>/<slug>.md — deleted — one-line reason`.
+
 Output format when finished:
 
 ## Memories written
-- `<scope>/<filename>` — created|updated — one-line reason
-- `<scope>/<filename>` — created|updated — one-line reason
+- `<scope>/<filename>` — created|updated|deleted — one-line reason
+- `<scope>/<filename>` — created|updated|deleted — one-line reason
 
 ## Skipped
 - Brief notes on anything intentionally NOT written (already obvious, too

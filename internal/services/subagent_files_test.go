@@ -64,6 +64,11 @@ func TestSubagentDefinitionFiles(t *testing.T) {
 				"out of scope",
 				"incident_uuid",
 				MemoryCreatedByAgent,
+				// Deletion contract — the memory-curator system cron relies
+				// on this being present so the cron-agent can ask for a
+				// tombstone via "Action: delete <slug>".
+				"Action: delete",
+				"deleted: true",
 			},
 		},
 	}

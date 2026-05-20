@@ -258,9 +258,12 @@ func TestParseMemoryFile_HandlesQuotedDescription(t *testing.T) {
 	// quotes. The parser must unwrap them faithfully so a round-trip
 	// description is preserved.
 	raw := "---\nname: quoted\ndescription: 'prod-db: data dir moved to /mnt/data'\ntype: host\nscope: global\nincident_uuid: inc-x\ncreated_by: agent\n---\n\n# quoted\n\nprod-db: data dir moved to /mnt/data\n\nbody\n"
-	mem, err := parseMemoryFile([]byte(raw), MemoryScopeGlobal)
+	mem, tombstone, err := parseMemoryFile([]byte(raw), MemoryScopeGlobal)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
+	}
+	if tombstone {
+		t.Fatalf("non-deleted file was parsed as tombstone")
 	}
 	if mem.Description != "prod-db: data dir moved to /mnt/data" {
 		t.Errorf("description unwrap failed: %q", mem.Description)
@@ -284,9 +287,12 @@ func TestParseMemoryFile_PreservesBodyStartingWithDescriptionText(t *testing.T) 
 	// parser must NOT eat the leading bytes.
 	raw := "---\nname: topic\ndescription: data dir moved\ntype: host\nscope: global\n---\n\n" +
 		"# topic\n\ndata dir moved to /mnt/data and now also tracks WAL on /mnt/wal.\n"
-	mem, err := parseMemoryFile([]byte(raw), MemoryScopeGlobal)
+	mem, tombstone, err := parseMemoryFile([]byte(raw), MemoryScopeGlobal)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
+	}
+	if tombstone {
+		t.Fatalf("non-deleted file was parsed as tombstone")
 	}
 	if !strings.HasPrefix(mem.Body, "data dir moved to /mnt/data") {
 		t.Errorf("body was truncated by stripBodyHeader: %q", mem.Body)
@@ -294,18 +300,43 @@ func TestParseMemoryFile_PreservesBodyStartingWithDescriptionText(t *testing.T) 
 }
 
 func TestParseMemoryFile_RejectsMissingFrontmatter(t *testing.T) {
-	if _, err := parseMemoryFile([]byte("no frontmatter here"), MemoryScopeGlobal); err == nil {
+	if _, _, err := parseMemoryFile([]byte("no frontmatter here"), MemoryScopeGlobal); err == nil {
 		t.Fatal("expected error on missing frontmatter")
 	}
-	if _, err := parseMemoryFile([]byte("---\nname: x\n"), MemoryScopeGlobal); err == nil {
+	if _, _, err := parseMemoryFile([]byte("---\nname: x\n"), MemoryScopeGlobal); err == nil {
 		t.Fatal("expected error on unclosed frontmatter")
 	}
 }
 
 func TestParseMemoryFile_RejectsInvalidType(t *testing.T) {
 	raw := "---\nname: bad\ndescription: x\ntype: invalid\nscope: global\n---\n\nbody\n"
-	if _, err := parseMemoryFile([]byte(raw), MemoryScopeGlobal); err == nil {
+	if _, _, err := parseMemoryFile([]byte(raw), MemoryScopeGlobal); err == nil {
 		t.Fatal("expected error on invalid type")
+	}
+}
+
+func TestParseMemoryFile_TombstoneRequiresOnlyName(t *testing.T) {
+	// A tombstone file from the memory-writer subagent declares the slug to
+	// delete via `deleted: true`. Type/description/body are not required and
+	// any values present are ignored — IngestFromDisk uses (scope, name) to
+	// locate and delete the corresponding row.
+	raw := "---\nname: delete-me\ndeleted: true\n---\n"
+	mem, tombstone, err := parseMemoryFile([]byte(raw), MemoryScopeGlobal)
+	if err != nil {
+		t.Fatalf("parse tombstone: %v", err)
+	}
+	if !tombstone {
+		t.Fatalf("expected tombstone=true")
+	}
+	if mem.Name != "delete-me" || mem.Scope != MemoryScopeGlobal {
+		t.Errorf("tombstone identity wrong: scope=%q name=%q", mem.Scope, mem.Name)
+	}
+}
+
+func TestParseMemoryFile_TombstoneRejectsMissingName(t *testing.T) {
+	raw := "---\ndeleted: true\n---\n"
+	if _, _, err := parseMemoryFile([]byte(raw), MemoryScopeGlobal); err == nil {
+		t.Fatal("expected error on tombstone without name")
 	}
 }
 
@@ -819,5 +850,110 @@ func TestSyncMemoryFiles_SkipsScopeDirReplacedWithSymlink(t *testing.T) {
 	entries, _ := os.ReadDir(sensitive)
 	if len(entries) != 0 {
 		t.Errorf("symlink target was written into: %v", entries)
+	}
+}
+
+// writeTombstoneFile drops a `deleted: true` memory file at <dir>/<name>.md
+// matching what the memory-writer subagent emits when asked to remove a slug.
+func writeTombstoneFile(t *testing.T, dir, name string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	content := "---\nname: " + name + "\ndeleted: true\n---\n"
+	path := filepath.Join(dir, name+".md")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write tombstone %s: %v", path, err)
+	}
+	return path
+}
+
+// TestIngestFromDisk_TombstoneDeletesRowAndFiles asserts the round-trip the
+// memory-writer subagent relies on for `Action: delete <slug>`: after the
+// agent overwrites the canonical file with a tombstone, IngestFromDisk must
+// remove the DB row and the post-batch SyncMemoryFiles must purge both the
+// bare `<slug>.md` tombstone and the prior `<id>-<slug>.md` snapshot.
+func TestIngestFromDisk_TombstoneDeletesRowAndFiles(t *testing.T) {
+	svc := setupMemoryServiceTest(t)
+	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
+
+	// Step 1: agent writes a memory the normal way and ingest persists it.
+	writeMemoryFile(t, dir, "stale-fact", "fact to be retracted", MemoryTypeHost, MemoryScopeGlobal, "inc-1", "body to remove")
+	if err := svc.IngestFromDisk(context.Background()); err != nil {
+		t.Fatalf("seed ingest: %v", err)
+	}
+	mems, _ := svc.ListMemoriesByScope(MemoryScopeGlobal)
+	if len(mems) != 1 {
+		t.Fatalf("expected 1 row after seed, got %d: %+v", len(mems), mems)
+	}
+	canonical := filepath.Join(dir, fmt.Sprintf("%d-stale-fact.md", mems[0].ID))
+	if _, err := os.Stat(canonical); err != nil {
+		t.Fatalf("canonical file missing after seed sync: %v", err)
+	}
+
+	// Step 2: agent writes a tombstone at <slug>.md (mirrors the subagent's
+	// edit-to-empty-frontmatter behavior). The canonical snapshot still
+	// exists alongside it.
+	writeTombstoneFile(t, dir, "stale-fact")
+
+	// Step 3: ingest picks up the tombstone, deletes the DB row, and the
+	// post-batch sync purges both the tombstone and the canonical file.
+	if err := svc.IngestFromDisk(context.Background()); err != nil {
+		t.Fatalf("tombstone ingest: %v", err)
+	}
+	if mems, _ := svc.ListMemoriesByScope(MemoryScopeGlobal); len(mems) != 0 {
+		t.Fatalf("expected 0 rows after tombstone, got %d: %+v", len(mems), mems)
+	}
+	if _, err := os.Stat(canonical); !os.IsNotExist(err) {
+		t.Errorf("canonical file should be purged after tombstone ingest; stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "stale-fact.md")); !os.IsNotExist(err) {
+		t.Errorf("bare tombstone file should be purged after ingest; stat err=%v", err)
+	}
+}
+
+// TestIngestFromDisk_TombstoneAndCanonicalSameScope ensures the dedup pass
+// inside IngestFromDisk lets the tombstone win even when the canonical
+// snapshot is read first (lex-sort: `99-foo.md` < `foo.md`). Without the
+// tombstone-wins-always rule, the parser could end up upserting the snapshot
+// instead of deleting the row.
+func TestIngestFromDisk_TombstoneAndCanonicalSameScope(t *testing.T) {
+	svc := setupMemoryServiceTest(t)
+	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Drop a canonical snapshot with a numeric prefix that sorts before "foo.md".
+	canonical := "---\nname: foo\ndescription: about to delete\ntype: host\nscope: global\nincident_uuid: inc-1\ncreated_by: agent\n---\n\n# foo\n\nabout to delete\n\nbody\n"
+	if err := os.WriteFile(filepath.Join(dir, "1-foo.md"), []byte(canonical), 0644); err != nil {
+		t.Fatalf("seed canonical: %v", err)
+	}
+	writeTombstoneFile(t, dir, "foo")
+
+	if err := svc.IngestFromDisk(context.Background()); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if mems, _ := svc.ListMemoriesByScope(MemoryScopeGlobal); len(mems) != 0 {
+		t.Fatalf("tombstone+canonical should resolve to deletion, got %d rows: %+v", len(mems), mems)
+	}
+}
+
+// TestIngestFromDisk_TombstoneForUnknownSlugIsNoOp asserts that a tombstone
+// targeting a slug with no matching DB row does not error and still results
+// in the tombstone file being purged from disk.
+func TestIngestFromDisk_TombstoneForUnknownSlugIsNoOp(t *testing.T) {
+	svc := setupMemoryServiceTest(t)
+	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
+	writeTombstoneFile(t, dir, "never-existed")
+
+	if err := svc.IngestFromDisk(context.Background()); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if mems, _ := svc.ListMemoriesByScope(MemoryScopeGlobal); len(mems) != 0 {
+		t.Fatalf("expected no rows, got %+v", mems)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "never-existed.md")); !os.IsNotExist(err) {
+		t.Errorf("orphan tombstone should be purged from disk; stat err=%v", err)
 	}
 }
