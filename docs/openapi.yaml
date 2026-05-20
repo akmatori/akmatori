@@ -182,21 +182,21 @@ components:
     CronJob:
       type: object
       description: |
-        A scheduled task. Each job runs on its own cron expression, executes
-        either a one-shot LLM call or a full agent investigation, and posts
-        results to a Channel.
+        A scheduled task. Each job runs on its own cron expression and always
+        executes as a full agent investigation under the `cron-agent` system
+        skill, posting results to a Channel. System cron jobs (`is_system=true`)
+        are seeded at boot and cannot be deleted.
       properties:
         id: {type: integer}
         uuid: {type: string, format: uuid}
         name: {type: string}
-        description: {type: string}
         schedule:
           type: string
           description: Standard 5-field cron expression (m h dom mon dow)
         prompt: {type: string}
-        mode:
-          type: string
-          enum: [oneshot, agent]
+        is_system:
+          type: boolean
+          description: When true, this row was seeded by the platform and cannot be deleted (returns 409). All other fields remain editable.
         channel_id: {type: integer, nullable: true}
         enabled: {type: boolean}
         last_run_at: {type: string, format: date-time, nullable: true}
@@ -204,8 +204,23 @@ components:
         last_run_error: {type: string}
         next_run_at: {type: string, format: date-time, nullable: true}
         channel: {$ref: '#/components/schemas/Channel'}
+        tools:
+          type: array
+          description: Per-cron tool allowlist. The cron-agent invocation is restricted to these ToolInstances; the global skill/tool settings are NOT inherited. Settings JSONB is intentionally omitted from this slim projection to keep secrets off the wire.
+          items:
+            $ref: '#/components/schemas/CronJobToolSummary'
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+
+    CronJobToolSummary:
+      type: object
+      description: Slim, secret-free projection of a ToolInstance exposed on the cron-jobs endpoint.
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        logical_name: {type: string}
+        tool_type: {type: string}
+        enabled: {type: boolean}
 
     PaginationMeta:
       type: object
@@ -1523,23 +1538,27 @@ paths:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [name, schedule, prompt]
               properties:
                 name: {type: string}
-                description: {type: string}
                 schedule:
                   type: string
                   description: Standard 5-field cron expression (m h dom mon dow)
                 prompt: {type: string}
-                mode:
-                  type: string
-                  enum: [oneshot, agent]
-                  default: oneshot
                 channel_uuid:
                   type: string
                   format: uuid
                   description: Optional channel to post to. Defaults to the workspace default channel.
                 enabled: {type: boolean, default: true}
+                tool_instance_ids:
+                  type: array
+                  description: Per-cron tool allowlist passed to the cron-agent invocation. Omitted or empty means the agent runs with no infrastructure tools (memory + runbooks only).
+                  items: {type: integer}
+              description: |
+                Unknown fields (e.g. the legacy `mode` or `description`) are
+                rejected with 400 — the handler decodes with
+                `DisallowUnknownFields`.
       responses:
         '201':
           description: Cron job created
@@ -1547,7 +1566,12 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/CronJob'}
         '400':
-          description: Validation error (bad schedule, missing channel, ...)
+          description: Validation error (bad schedule, missing channel, unknown field, ...)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Duplicate cron job name.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -1574,24 +1598,31 @@ paths:
       summary: Update cron job
       operationId: updateCronJob
       tags: [Cron Jobs]
+      description: |
+        Partial patch — only fields present in the body are applied. To leave
+        the per-cron tool allowlist alone, omit `tool_instance_ids`; pass an
+        explicit empty array to clear it. System cron jobs (`is_system=true`)
+        accept all field updates including `enabled`, but cannot be deleted.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               properties:
                 name: {type: string}
-                description: {type: string}
                 schedule: {type: string}
                 prompt: {type: string}
-                mode:
-                  type: string
-                  enum: [oneshot, agent]
                 channel_uuid:
                   type: string
                   format: uuid
+                  description: Pass an empty string to explicitly clear the channel association.
                 enabled: {type: boolean}
+                tool_instance_ids:
+                  type: array
+                  items: {type: integer}
+                  description: When present, replaces the cron-agent tool allowlist. Omit to leave existing tools untouched; pass `[]` to clear.
       responses:
         '200':
           description: Updated cron job
@@ -1599,9 +1630,17 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/CronJob'}
         '400':
-          description: Validation error
+          description: Validation error (bad schedule, unknown field, missing channel, ...)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: Duplicate name conflict.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
     delete:
       summary: Delete cron job
       operationId: deleteCronJob
@@ -1611,6 +1650,13 @@ paths:
           description: Cron job deleted
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            System cron job (`is_system=true`) cannot be deleted. Operators can
+            disable it instead via PUT.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
 
   /cron-jobs/{uuid}/run:
     parameters:
