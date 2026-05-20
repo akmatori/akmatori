@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -445,6 +446,18 @@ func InitializeDefaults() error {
 		return fmt.Errorf("failed to initialize system skill: %w", err)
 	}
 
+	// Initialize the cron-agent system skill — the root prompt the redesigned
+	// cron path runs as instead of incident-manager.
+	if err := InitializeCronAgentSkill(); err != nil {
+		return fmt.Errorf("failed to initialize cron-agent skill: %w", err)
+	}
+
+	// Seed non-deletable system cron jobs (e.g. memory-curator). Operator can
+	// re-enable; the row itself is idempotently re-seeded on every boot.
+	if err := SeedSystemCronJobs(); err != nil {
+		return fmt.Errorf("failed to seed system cron jobs: %w", err)
+	}
+
 	return nil
 }
 
@@ -587,6 +600,194 @@ Escalate to human operators when:
 - Data loss or corruption is suspected
 - The problem persists after attempted remediation
 - You lack the necessary skills or access to resolve the issue`
+
+// DefaultCronAgentPrompt is the root prompt for the cron-agent system skill.
+// It mirrors the incident-manager bootstrap but is scoped to scheduled,
+// agent-driven runs rather than incident triage: the agent orients itself,
+// optionally consults runbooks, recalls cross-incident memory, executes its
+// allowlisted tools, and (when the run surfaces durable findings) records
+// them via the memory-writer subagent. The prompt deliberately omits Slack
+// thread / triage framing so a cron run is not confused with an alert-driven
+// investigation.
+const DefaultCronAgentPrompt = `You are the Cron Agent — a scheduled, autonomous operator running a single self-contained task on a recurring cadence. Your job is to follow the task prompt exactly, use only the tools assigned to this cron job, and produce a concise final summary that will be posted to the configured channel.
+
+## Workflow
+
+1. **Orient**: Read the task prompt carefully. Identify what you are being asked to produce (a status check, a consolidation pass, a recurring report, a maintenance action). You are not triaging an incident — there is no on-call audience and no acknowledgement to chase.
+
+2. **Optional — Search runbooks** when the prompt references a procedure or named system:
+   If the task explicitly invokes a runbook ("follow runbook X", "check the database health procedure") or otherwise names a system that may have documented steps, delegate the lookup to the runbook-searcher subagent.
+
+   subagent({"agent": "runbook-searcher", "task": "<one-sentence summary of what you are looking for>"})
+
+   Skip this step entirely for tasks that do not reference documented procedures (memory consolidation, scheduled metric snapshots, etc.).
+
+3. **Recall cross-incident memory** when prior runs may have surfaced relevant context:
+   Delegate to the memory-searcher subagent against /akmatori/memory/.
+
+   subagent({"agent": "memory-searcher", "task": "<topic, host, or symptom you want to recall>"})
+
+   Read the most relevant file via the local read tool. If memory-searcher errors, fall back to browsing /akmatori/memory/ directly. Skip when the task has no plausible memory dependency.
+
+4. **Execute the task** using only the tools assigned to this cron job. Each cron job declares its own tool allowlist — call those tools via gateway_call(...) exactly as documented in your SKILL.md entries. Tools that are NOT in your allowlist will be rejected by the gateway; do not attempt them.
+
+5. **Record durable findings via memory-writer** when the run surfaces durable cross-system facts that will speed up future troubleshooting OR when the task itself instructs you to write/dedupe/delete memory entries.
+
+   subagent({"agent": "memory-writer", "task": "Scope: <scope>\nIncident UUID: <uuid>\n\n<reasoning, then explicit Action: upsert <slug> with body OR Action: delete <slug>>"})
+
+   The memory-writer is idempotent and supports both upserts and deletions. Use Action: delete <slug> to remove a stale or duplicate memory entry. Skip the call when nothing durable was learned and the task did not ask for a memory mutation.
+
+6. **Produce the final summary**: End your run with a concise summary of what you did and what (if anything) the operator should look at. The summary is posted as-is to the cron's configured channel, so keep it scannable: a one-line headline, optional bullet detail, and a single explicit next step when needed.
+
+## Response Guidelines
+
+- Be concise — a scheduled report is read at a glance, not parsed line by line.
+- Include specific metrics, file counts, or memory slugs when they are material.
+- When the task is "no-op" (nothing changed since last run), say so explicitly rather than padding the response.
+- Do NOT frame the output as an incident triage. There is no on-call rotation, no severity, no escalation path.
+
+## What Cron Agent does NOT do
+
+- Does not page humans or open tickets unless the assigned tools include a paging/ticketing tool AND the task prompt explicitly asks for it.
+- Does not retry indefinitely; one tick is one execution.
+- Does not edit incident-manager state, alert sources, or other crons.`
+
+// InitializeCronAgentSkill creates the cron-agent system skill if it doesn't
+// exist, mirroring InitializeSystemSkill's pattern. The cron-agent prompt is
+// hardcoded (DefaultCronAgentPrompt) and the row is marked IsSystem=true so
+// the skill cannot be deleted by operators.
+func InitializeCronAgentSkill() error {
+	slog.Info("checking for cron-agent system skill")
+
+	var skill Skill
+	result := DB.Where("name = ?", "cron-agent").First(&skill)
+
+	if result.Error == nil {
+		if !skill.IsSystem {
+			DB.Model(&skill).Update("is_system", true)
+			slog.Info("updated cron-agent skill to system skill")
+		}
+		return nil
+	}
+
+	skill = Skill{
+		Name:        "cron-agent",
+		Description: "Core system skill for scheduled cron-driven agent runs",
+		Category:    "system",
+		IsSystem:    true,
+		Enabled:     true,
+	}
+
+	if err := DB.Create(&skill).Error; err != nil {
+		return fmt.Errorf("failed to create cron-agent skill: %w", err)
+	}
+
+	slog.Info("created cron-agent system skill", "id", skill.ID)
+	return nil
+}
+
+// memoryCuratorCronName is the canonical name of the seeded memory-curator
+// system cron. Lifted into a constant so tests can pin idempotency without
+// duplicating the literal.
+const memoryCuratorCronName = "memory-curator"
+
+// memoryCuratorCronPrompt is the task body for the nightly memory-curator
+// system cron. It instructs the cron-agent to dedupe and consolidate the
+// global-scope memory entries via the memory-writer subagent. The prompt
+// asks the agent to keep its mutations explicit (each Action: upsert/delete
+// is a separate memory-writer call) so an operator reading the post-run
+// summary in the channel can audit what changed without tailing logs.
+const memoryCuratorCronPrompt = `You are running the nightly memory consolidation pass over the global cross-incident memory scope (/akmatori/memory/global/).
+
+Goal: keep the global memory scope tight and high-signal. Concretely:
+
+1. Use the memory-searcher subagent to list current entries — search broadly enough to surface duplicates, near-duplicates, and stale rows.
+2. For each duplicate or near-duplicate cluster, decide which entry to keep (prefer the most specific, most recent, most operator-validated wording) and which to remove.
+3. For each kept entry that should incorporate facts from a soon-to-be-deleted duplicate, prepare a merged body.
+4. Apply mutations one at a time via the memory-writer subagent:
+   - Action: upsert <slug> — write the merged or refreshed body (memory-writer is idempotent and overwrites by name).
+   - Action: delete <slug> — remove a duplicate or obsolete entry.
+5. End with a concise summary of the pass: how many entries scanned, how many merged, how many deleted. List the affected slugs.
+
+Use Scope: global and the cron run's incident UUID for every memory-writer call. Do not touch any scope other than global.
+
+If memory-searcher returns no entries or no clear duplicates, exit with a one-line "no-op: nothing to consolidate" summary.`
+
+// memoryCuratorCronSchedule is the canonical schedule for the memory-curator
+// system cron (daily at 02:00). Hoisted to a constant so tests can pin it.
+const memoryCuratorCronSchedule = "0 2 * * *"
+
+// SeedSystemCronJobs idempotently seeds the non-deletable system cron jobs.
+// Each row is keyed by Name + IsSystem=true. On first seed the row is created
+// disabled (operator opts in). On subsequent runs the IMMUTABLE fields
+// (Schedule, Prompt, IsSystem) are re-asserted so an operator's manual edit
+// of a system row does not drift the canonical content, while the OPERATOR-
+// owned fields (Enabled, ChannelID) are preserved across restarts.
+//
+// Exported so callers outside the database package (e.g. service-package
+// tests) can re-run the seed without duplicating the row layout.
+func SeedSystemCronJobs() error {
+	type seedRow struct {
+		Name     string
+		Schedule string
+		Prompt   string
+	}
+	seeds := []seedRow{
+		{
+			Name:     memoryCuratorCronName,
+			Schedule: memoryCuratorCronSchedule,
+			Prompt:   memoryCuratorCronPrompt,
+		},
+	}
+
+	for _, s := range seeds {
+		var existing CronJob
+		err := DB.Where("name = ?", s.Name).First(&existing).Error
+		if err == nil {
+			// Row exists — re-assert the immutable canonical fields and the
+			// system flag without touching operator-owned Enabled / ChannelID.
+			updates := map[string]interface{}{
+				"schedule":  s.Schedule,
+				"prompt":    s.Prompt,
+				"is_system": true,
+			}
+			if err := DB.Model(&CronJob{}).Where("id = ?", existing.ID).Updates(updates).Error; err != nil {
+				return fmt.Errorf("re-seed system cron %s: %w", s.Name, err)
+			}
+			continue
+		}
+		if err != gorm.ErrRecordNotFound {
+			return fmt.Errorf("lookup system cron %s: %w", s.Name, err)
+		}
+
+		row := &CronJob{
+			UUID:     generateCronJobUUID(),
+			Name:     s.Name,
+			Schedule: s.Schedule,
+			Prompt:   s.Prompt,
+			IsSystem: true,
+			Enabled:  false, // operator opts in
+		}
+		if err := DB.Create(row).Error; err != nil {
+			return fmt.Errorf("seed system cron %s: %w", s.Name, err)
+		}
+		// GORM v2 omits zero-value bools from INSERT, so the column-level
+		// default:true would flip the seeded Enabled=false back to true. Pin
+		// it explicitly so a fresh install does NOT auto-run the system cron
+		// before the operator reviews it.
+		if err := DB.Model(row).Update("enabled", false).Error; err != nil {
+			return fmt.Errorf("pin seeded system cron %s to disabled: %w", s.Name, err)
+		}
+		slog.Info("seeded system cron job", "name", s.Name, "enabled", false)
+	}
+	return nil
+}
+
+// generateCronJobUUID returns a fresh uuid string for a seeded cron row.
+// Kept as a tiny helper so the seed path reads declaratively.
+func generateCronJobUUID() string {
+	return uuid.New().String()
+}
 
 // InitializeSystemSkill creates the incident-manager system skill if it doesn't exist
 func InitializeSystemSkill() error {

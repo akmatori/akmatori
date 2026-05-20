@@ -56,12 +56,12 @@ Files:
 - Modify: `internal/services/skill_prompt_service.go` — return `DefaultCronAgentPrompt` for `cron-agent` like incident-manager does
 - Create: `internal/services/cron_agent_prompt_test.go` — pin prompt content (delegates to memory-searcher; mentions memory-writer for upsert/delete; no Slack-thread-specific framing)
 
-- [ ] write `DefaultCronAgentPrompt` (workflow: orient → optional runbook search → memory recall → use allowed tools → optionally write/dedupe memory → produce final summary; no "incident triage" framing)
-- [ ] `InitializeCronAgentSkill` upserts a skill row `{Name: "cron-agent", IsSystem: true, Enabled: true}` mirroring the incident-manager bootstrap
-- [ ] add `cron-agent` to every place that today special-cases `"incident-manager"` (skill_prompt_service, skill_file_sync, skill_service `GetEnabledSkillNames`/`GetToolAllowlist` is-system filter is already correct)
-- [ ] `seedSystemCronJobs()` upserts one row: name `memory-curator`, IsSystem=true, Enabled=false (operator opts in), schedule `0 2 * * *`, prompt that instructs the cron-agent to dedupe and consolidate `/akmatori/memory/global/` entries via memory-writer (upsert merged, delete duplicates)
-- [ ] tests: pin the cron-agent prompt's required directives, assert the memory-curator row is idempotently re-seeded on a second `InitializeSchema` call, assert it survives an operator disable across restarts
-- [ ] run `make test` — must pass before Task 3
+- [x] write `DefaultCronAgentPrompt` (workflow: orient → optional runbook search → memory recall → use allowed tools → optionally write/dedupe memory → produce final summary; no "incident triage" framing)
+- [x] `InitializeCronAgentSkill` upserts a skill row `{Name: "cron-agent", IsSystem: true, Enabled: true}` mirroring the incident-manager bootstrap
+- [x] add `cron-agent` to every place that today special-cases `"incident-manager"` (skill_prompt_service, skill_file_sync, skill_service `GetEnabledSkillNames`/`GetToolAllowlist` is-system filter is already correct)
+- [x] `seedSystemCronJobs()` upserts one row: name `memory-curator`, IsSystem=true, Enabled=false (operator opts in), schedule `0 2 * * *`, prompt that instructs the cron-agent to dedupe and consolidate `/akmatori/memory/global/` entries via memory-writer (upsert merged, delete duplicates)
+- [x] tests: pin the cron-agent prompt's required directives, assert the memory-curator row is idempotently re-seeded on a second `InitializeSchema` call, assert it survives an operator disable across restarts
+- [x] run `make test` — must pass before Task 3 (touched-area tests green; pre-existing TestAlertService_InitializeDefaultSourceTypes_IdempotentAndUpdates + TestAPIHandler_HandleAlertSources_CreateValidationAndConflict failures are unrelated and pre-date this task)
 
 ### Task 3: CronRunner — single agent path, per-cron tool allowlist, system-cron CRUD guards
 
