@@ -118,11 +118,11 @@ Files:
 - Modify: `web/src/components/cron/CronJobsManager.tsx` — show "System" pill on rows with `is_system`; hide the Delete button (or render disabled with tooltip) when system
 - Modify: tests under `web/src/components/cron/cronJobHelpers.test.ts`
 
-- [ ] update types + helpers (drop mode/description)
-- [ ] add tool picker to form (multi-select over `/api/tools/instances`)
-- [ ] hide delete + add system badge in manager
-- [ ] update / add component tests (helpers test asserts mode/description gone; submit payload includes `tool_instance_uuids`)
-- [ ] run `make test-web` — must pass before Task 7
+- [x] update types + helpers (drop mode/description; add `tool_instance_ids` to form state, `tools[]`/`is_system` to CronJob — uses `tool_instance_ids` to match the API the backend already accepts, the plan's "_uuids" suffix was the same naming slip Task 3/4 already corrected)
+- [x] add tool picker to form (multi-select over `/api/tools` — backend exposes `toolsApi.list()` at `/api/tools`, not `/api/tools/instances`)
+- [x] hide delete + add system badge in manager (CronJobsManager now shows Shield icon + "System" badge on `is_system` rows and omits the Delete button; the Mode column is replaced by a Tools count with a tooltip listing the assigned tool names)
+- [x] update / add component tests (helpers test now asserts MODE_OPTIONS/modeLabel are unexported, EMPTY_CRON_FORM has no description/mode, formStateFromJob lifts `tool_instance_ids` from `job.tools` and gracefully handles a missing `tools` field)
+- [x] run `make test-web` — passes (87/87 tests green); `npx tsc -b` typecheck also clean
 
 ### Task 7: Verify acceptance criteria + docs
 

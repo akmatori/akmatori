@@ -1,26 +1,24 @@
-import type { CronJob, CronJobMode, CronRunStatus } from '../../types';
+import type { CronJob, CronRunStatus } from '../../types';
 
 // CronJobFormState is the in-memory shape of the CronJobForm component. Kept
 // in this helper module so the manager's save callback can type its input
 // without importing the React component file.
 export interface CronJobFormState {
   name: string;
-  description: string;
   schedule: string;
   prompt: string;
-  mode: CronJobMode;
   channel_uuid: string | null;
   enabled: boolean;
+  tool_instance_ids: number[];
 }
 
 export const EMPTY_CRON_FORM: CronJobFormState = {
   name: '',
-  description: '',
   schedule: '*/15 * * * *',
   prompt: '',
-  mode: 'oneshot',
   channel_uuid: null,
   enabled: true,
+  tool_instance_ids: [],
 };
 
 // formStateFromJob lifts an existing CronJob row into the form's local state.
@@ -29,12 +27,11 @@ export const EMPTY_CRON_FORM: CronJobFormState = {
 export function formStateFromJob(job: CronJob): CronJobFormState {
   return {
     name: job.name,
-    description: job.description,
     schedule: job.schedule,
     prompt: job.prompt,
-    mode: job.mode,
     channel_uuid: job.channel?.uuid ?? null,
     enabled: job.enabled,
+    tool_instance_ids: (job.tools ?? []).map((t) => t.id),
   };
 }
 
@@ -66,34 +63,6 @@ export function matchesPreset(spec: string): string {
   const trimmed = spec.trim();
   if (SCHEDULE_PRESETS.find((p) => p.value === trimmed)) return trimmed;
   return ADVANCED_SCHEDULE_VALUE;
-}
-
-// Mode options surfaced as a radio group in the form.
-export interface ModeOption {
-  value: CronJobMode;
-  label: string;
-  description: string;
-}
-
-export const MODE_OPTIONS: ModeOption[] = [
-  {
-    value: 'oneshot',
-    label: 'One-shot LLM call',
-    description:
-      'Runs a single LLM completion with the prompt and posts the response to the channel.',
-  },
-  {
-    value: 'agent',
-    label: 'Full agent investigation',
-    description:
-      'Spawns an incident-manager investigation. Posts the final summary when the investigation completes.',
-  },
-];
-
-// modeLabel returns the human-friendly label for a mode value. Falls back to
-// the raw string so unknown values stay visible rather than rendering blank.
-export function modeLabel(mode: CronJobMode | string): string {
-  return MODE_OPTIONS.find((m) => m.value === mode)?.label ?? mode;
 }
 
 // Cron field parsing — the form lives entirely on the client so we need a

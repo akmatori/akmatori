@@ -357,18 +357,26 @@ export interface UpdateAlertSourceRequest {
 
 // Cron Jobs
 
-export type CronJobMode = 'oneshot' | 'agent';
-
 export type CronRunStatus = '' | 'ok' | 'error';
+
+// CronJobTool is the slim per-cron tool view returned on /api/cron-jobs.
+// The backend omits Settings (which can hold secrets) and embeds only the
+// ToolType name. Mirrors `toolInstanceSummary` in api_cron_jobs.go.
+export interface CronJobTool {
+  id: number;
+  name: string;
+  logical_name: string;
+  tool_type: string;
+  enabled: boolean;
+}
 
 export interface CronJob {
   id: number;
   uuid: string;
   name: string;
-  description: string;
   schedule: string;
   prompt: string;
-  mode: CronJobMode;
+  is_system: boolean;
   channel_id?: number | null;
   enabled: boolean;
   last_run_at?: string | null;
@@ -378,26 +386,25 @@ export interface CronJob {
   created_at: string;
   updated_at: string;
   channel?: Channel | null;
+  tools: CronJobTool[];
 }
 
 export interface CreateCronJobRequest {
   name: string;
-  description?: string;
   schedule: string;
   prompt: string;
-  mode?: CronJobMode;
   channel_uuid?: string;
   enabled?: boolean;
+  tool_instance_ids?: number[];
 }
 
 export interface UpdateCronJobRequest {
   name?: string;
-  description?: string;
   schedule?: string;
   prompt?: string;
-  mode?: CronJobMode;
   channel_uuid?: string;
   enabled?: boolean;
+  tool_instance_ids?: number[];
 }
 
 // SSH Keys (for SSH tool management)

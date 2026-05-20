@@ -1,12 +1,12 @@
 import { useMemo, useState, useEffect } from 'react';
-import { Save, X, Power, PowerOff } from 'lucide-react';
+import { Save, X, Power, PowerOff, Wrench } from 'lucide-react';
 import ChannelPicker from '../channels/ChannelPicker';
-import type { CronJob } from '../../types';
+import { toolsApi } from '../../api/client';
+import type { CronJob, ToolInstance } from '../../types';
 import {
   SCHEDULE_PRESETS,
   ADVANCED_SCHEDULE_VALUE,
   matchesPreset,
-  MODE_OPTIONS,
   validateCronExpression,
   nextRun,
   formatRelativeTime,
@@ -31,6 +31,9 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toolInstances, setToolInstances] = useState<ToolInstance[]>([]);
+  const [toolsLoading, setToolsLoading] = useState(true);
+  const [toolsError, setToolsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (initial) {
@@ -38,6 +41,27 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
       setScheduleMode(matchesPreset(initial.schedule));
     }
   }, [initial]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setToolsLoading(true);
+        setToolsError(null);
+        const rows = await toolsApi.list();
+        if (!cancelled) setToolInstances(rows);
+      } catch (err) {
+        if (!cancelled) {
+          setToolsError(err instanceof Error ? err.message : 'Failed to load tools');
+        }
+      } finally {
+        if (!cancelled) setToolsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const validation = useMemo(() => validateCronExpression(form.schedule), [form.schedule]);
   const nextRunPreview = useMemo(() => {
@@ -50,6 +74,15 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
     if (value !== ADVANCED_SCHEDULE_VALUE) {
       setForm((f) => ({ ...f, schedule: value }));
     }
+  };
+
+  const toggleTool = (id: number) => {
+    setForm((f) => ({
+      ...f,
+      tool_instance_ids: f.tool_instance_ids.includes(id)
+        ? f.tool_instance_ids.filter((x) => x !== id)
+        : [...f.tool_instance_ids, id],
+    }));
   };
 
   const submit = async () => {
@@ -76,6 +109,8 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
     }
   };
 
+  const enabledTools = toolInstances.filter((t) => t.enabled);
+
   return (
     <div className="p-6 bg-gray-50 dark:bg-gray-900/50 rounded-lg border border-gray-200 dark:border-gray-700 animate-fade-in">
       <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">
@@ -93,19 +128,6 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
             placeholder="e.g., Morning incident digest"
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Description
-          </label>
-          <input
-            type="text"
-            className="input-field"
-            placeholder="Optional — shown in the cron list"
-            value={form.description}
-            onChange={(e) => setForm({ ...form, description: e.target.value })}
           />
         </div>
 
@@ -151,47 +173,68 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
           </label>
           <textarea
             className="input-field min-h-[120px] font-mono"
-            placeholder="What should the cron ask?  e.g. 'List incidents opened in the last 24 hours and summarise root causes'"
+            placeholder="What should the cron-agent do?  e.g. 'List incidents opened in the last 24 hours and summarise root causes'"
             value={form.prompt}
             onChange={(e) => setForm({ ...form, prompt: e.target.value })}
           />
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            One-shot mode: prompt is sent as a single LLM completion. Agent mode: prompt is the
-            initial task handed to the incident-manager skill.
+            The prompt is handed to the cron-agent skill as its initial task. The agent uses the
+            tools you assign below plus memory + runbook recall.
           </p>
         </div>
 
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Mode <span className="text-red-500">*</span>
+            Tools
           </label>
-          <div className="space-y-2">
-            {MODE_OPTIONS.map((opt) => (
-              <label
-                key={opt.value}
-                className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                  form.mode === opt.value
-                    ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="cron-mode"
-                  value={opt.value}
-                  checked={form.mode === opt.value}
-                  onChange={() => setForm({ ...form, mode: opt.value })}
-                  className="mt-1"
-                />
-                <div>
-                  <div className="text-sm font-medium text-gray-900 dark:text-white">
-                    {opt.label}
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{opt.description}</div>
-                </div>
-              </label>
-            ))}
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 max-h-48 overflow-y-auto bg-white dark:bg-gray-800">
+            {toolsLoading ? (
+              <div className="text-center py-4 text-sm text-gray-500 dark:text-gray-400">
+                Loading tools…
+              </div>
+            ) : toolsError ? (
+              <div className="text-center py-4 text-sm text-red-600 dark:text-red-400">
+                {toolsError}
+              </div>
+            ) : enabledTools.length === 0 ? (
+              <div className="text-center py-4">
+                <Wrench className="w-6 h-6 mx-auto text-gray-400 mb-1" />
+                <p className="text-gray-500 dark:text-gray-400 text-sm">No tools available</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {enabledTools.map((tool) => (
+                  <label
+                    key={tool.id}
+                    className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-all ${
+                      form.tool_instance_ids.includes(tool.id)
+                        ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                        : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.tool_instance_ids.includes(tool.id)}
+                      onChange={() => toggleTool(tool.id)}
+                      className="w-4 h-4"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-gray-900 dark:text-white text-sm truncate">
+                        {tool.name}
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                        {tool.tool_type?.name ?? '—'}
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Each cron has its own allowlist — independent of the incident-manager's global tool
+            set.
+          </p>
         </div>
 
         <ChannelPicker

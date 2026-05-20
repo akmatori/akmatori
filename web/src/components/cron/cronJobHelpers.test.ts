@@ -3,8 +3,6 @@ import {
   SCHEDULE_PRESETS,
   ADVANCED_SCHEDULE_VALUE,
   matchesPreset,
-  MODE_OPTIONS,
-  modeLabel,
   parseCron,
   validateCronExpression,
   nextRun,
@@ -14,16 +12,16 @@ import {
   EMPTY_CRON_FORM,
   formStateFromJob,
 } from './cronJobHelpers';
+import * as helpers from './cronJobHelpers';
 import type { CronJob } from '../../types';
 
 const makeJob = (overrides: Partial<CronJob>): CronJob => ({
   id: overrides.id ?? 1,
   uuid: overrides.uuid ?? 'cron-1',
   name: overrides.name ?? 'Test cron',
-  description: overrides.description ?? '',
   schedule: overrides.schedule ?? '*/5 * * * *',
   prompt: overrides.prompt ?? 'do the thing',
-  mode: overrides.mode ?? 'oneshot',
+  is_system: overrides.is_system ?? false,
   channel_id: overrides.channel_id ?? null,
   enabled: overrides.enabled ?? true,
   last_run_at: overrides.last_run_at ?? null,
@@ -33,6 +31,7 @@ const makeJob = (overrides: Partial<CronJob>): CronJob => ({
   created_at: '',
   updated_at: '',
   channel: overrides.channel ?? null,
+  tools: overrides.tools ?? [],
 });
 
 describe('SCHEDULE_PRESETS', () => {
@@ -64,15 +63,22 @@ describe('matchesPreset', () => {
   });
 });
 
-describe('MODE_OPTIONS', () => {
-  it('lists exactly oneshot and agent so the radio group renders both modes', () => {
-    expect(MODE_OPTIONS.map((m) => m.value)).toEqual(['oneshot', 'agent']);
+describe('legacy mode/description helpers are removed', () => {
+  // Task 6 of the cron redesign drops oneshot mode and the description field
+  // entirely. The helper module must no longer expose MODE_OPTIONS / modeLabel,
+  // because keeping them around invites the manager/form to bind to dead state.
+  it('exports no MODE_OPTIONS', () => {
+    expect((helpers as Record<string, unknown>).MODE_OPTIONS).toBeUndefined();
   });
 
-  it('modeLabel resolves both modes and falls back to the raw value for unknowns', () => {
-    expect(modeLabel('oneshot')).toBe('One-shot LLM call');
-    expect(modeLabel('agent')).toBe('Full agent investigation');
-    expect(modeLabel('weird')).toBe('weird');
+  it('exports no modeLabel', () => {
+    expect((helpers as Record<string, unknown>).modeLabel).toBeUndefined();
+  });
+
+  it('EMPTY_CRON_FORM has no description or mode fields', () => {
+    const form = EMPTY_CRON_FORM as unknown as Record<string, unknown>;
+    expect(form.description).toBeUndefined();
+    expect(form.mode).toBeUndefined();
   });
 });
 
@@ -130,10 +136,6 @@ describe('nextRun', () => {
     const from = new Date('2026-05-18T10:03:30Z');
     const next = nextRun('*/5 * * * *', from);
     expect(next).not.toBeNull();
-    // Next */5 minute after 10:03:30 (UTC) — depends on local TZ used by Date.
-    // Use a self-consistent check: the returned time must be strictly after
-    // `from`, in the future, and its minute must be divisible by 5 in the
-    // local timezone the Date methods use.
     expect(next!.getTime()).toBeGreaterThan(from.getTime());
     expect(next!.getMinutes() % 5).toBe(0);
   });
@@ -222,13 +224,13 @@ describe('lastRunBadge', () => {
 });
 
 describe('EMPTY_CRON_FORM', () => {
-  it('defaults mode to oneshot and enabled to true', () => {
-    expect(EMPTY_CRON_FORM.mode).toBe('oneshot');
-    expect(EMPTY_CRON_FORM.enabled).toBe(true);
-  });
-
   it('uses a valid default schedule so the next-run preview renders immediately', () => {
     expect(validateCronExpression(EMPTY_CRON_FORM.schedule).valid).toBe(true);
+  });
+
+  it('starts with no tools and enabled=true', () => {
+    expect(EMPTY_CRON_FORM.tool_instance_ids).toEqual([]);
+    expect(EMPTY_CRON_FORM.enabled).toBe(true);
   });
 });
 
@@ -237,10 +239,8 @@ describe('formStateFromJob', () => {
     const state = formStateFromJob(
       makeJob({
         name: 'Morning digest',
-        description: 'Daily SRE update',
         schedule: '0 9 * * *',
         prompt: 'Summarise last 24 hours',
-        mode: 'agent',
         enabled: false,
         channel: {
           id: 1,
@@ -260,14 +260,34 @@ describe('formStateFromJob', () => {
       }),
     );
     expect(state.name).toBe('Morning digest');
-    expect(state.mode).toBe('agent');
     expect(state.channel_uuid).toBe('ch-uuid');
     expect(state.enabled).toBe(false);
+    expect(state.tool_instance_ids).toEqual([]);
   });
 
   it('leaves channel_uuid null when the job has no channel association', () => {
     const state = formStateFromJob(makeJob({ channel: null }));
     expect(state.channel_uuid).toBeNull();
+  });
+
+  it('lifts the assigned tool IDs into tool_instance_ids in order', () => {
+    const state = formStateFromJob(
+      makeJob({
+        tools: [
+          { id: 7, name: 'zbx', logical_name: 'zbx', tool_type: 'zabbix', enabled: true },
+          { id: 3, name: 'grafana', logical_name: 'grafana', tool_type: 'grafana', enabled: true },
+        ],
+      }),
+    );
+    expect(state.tool_instance_ids).toEqual([7, 3]);
+  });
+
+  it('treats a row with no tools field as an empty allowlist (defensive against older API responses)', () => {
+    const job = makeJob({});
+    // Simulate an older / partial server response that omitted the tools array.
+    const stripped = { ...job, tools: undefined as unknown as CronJob['tools'] };
+    const state = formStateFromJob(stripped as CronJob);
+    expect(state.tool_instance_ids).toEqual([]);
   });
 });
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Trash2, Edit2, Play, Power, PowerOff } from 'lucide-react';
+import { Plus, Trash2, Edit2, Play, Power, PowerOff, Shield, Wrench } from 'lucide-react';
 import LoadingSpinner from '../LoadingSpinner';
 import ErrorMessage from '../ErrorMessage';
 import { cronJobsApi } from '../../api/client';
@@ -7,7 +7,6 @@ import type { CronJob } from '../../types';
 import CronJobForm from './CronJobForm';
 import {
   lastRunBadge,
-  modeLabel,
   formatRelativeTime,
   type CronJobFormState,
 } from './cronJobHelpers';
@@ -57,22 +56,20 @@ export default function CronJobsManager() {
     if (isCreating) {
       await cronJobsApi.create({
         name: form.name.trim(),
-        description: form.description.trim() || undefined,
         schedule: form.schedule.trim(),
         prompt: form.prompt,
-        mode: form.mode,
         channel_uuid: form.channel_uuid ?? '',
         enabled: form.enabled,
+        tool_instance_ids: form.tool_instance_ids,
       });
     } else if (editing) {
       await cronJobsApi.update(editing.uuid, {
         name: form.name.trim(),
-        description: form.description,
         schedule: form.schedule.trim(),
         prompt: form.prompt,
-        mode: form.mode,
         channel_uuid: form.channel_uuid ?? '',
         enabled: form.enabled,
+        tool_instance_ids: form.tool_instance_ids,
       });
     }
     cancel();
@@ -152,7 +149,7 @@ export default function CronJobsManager() {
                   Channel
                 </th>
                 <th className="py-2 px-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  Mode
+                  Tools
                 </th>
                 <th className="py-2 px-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
                   Status
@@ -174,17 +171,24 @@ export default function CronJobsManager() {
                 const nextRunText = job.next_run_at
                   ? formatRelativeTime(new Date(job.next_run_at))
                   : '—';
+                const toolCount = job.tools?.length ?? 0;
                 return (
                   <tr key={job.uuid} className="border-b border-gray-100 dark:border-gray-800">
                     <td className="py-3 px-3">
-                      <div className="text-sm font-medium text-gray-900 dark:text-white">
-                        {job.name}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium text-gray-900 dark:text-white">
+                          {job.name}
+                        </span>
+                        {job.is_system && (
+                          <span
+                            className="badge badge-primary text-xs"
+                            title="System cron — managed by Akmatori; can be disabled but not deleted."
+                          >
+                            <Shield className="w-3 h-3" />
+                            System
+                          </span>
+                        )}
                       </div>
-                      {job.description && (
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
-                          {job.description}
-                        </div>
-                      )}
                     </td>
                     <td className="py-3 px-3">
                       <code className="text-xs text-gray-700 dark:text-gray-300">
@@ -198,7 +202,17 @@ export default function CronJobsManager() {
                       <span className="text-sm text-gray-700 dark:text-gray-300">{channelText}</span>
                     </td>
                     <td className="py-3 px-3">
-                      <span className="badge badge-default">{modeLabel(job.mode)}</span>
+                      {toolCount === 0 ? (
+                        <span className="text-xs text-gray-400 dark:text-gray-500">None</span>
+                      ) : (
+                        <span
+                          className="badge badge-default text-xs"
+                          title={(job.tools ?? []).map((t) => t.name).join(', ')}
+                        >
+                          <Wrench className="w-3 h-3" />
+                          {toolCount} tool{toolCount > 1 ? 's' : ''}
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2">
@@ -236,13 +250,15 @@ export default function CronJobsManager() {
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button
-                          className="btn btn-ghost p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
-                          onClick={() => remove(job.uuid)}
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {!job.is_system && (
+                          <button
+                            className="btn btn-ghost p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                            onClick={() => remove(job.uuid)}
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
