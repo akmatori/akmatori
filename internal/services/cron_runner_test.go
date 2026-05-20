@@ -1460,10 +1460,10 @@ func TestCronRunner_Fire_VanishedJob(t *testing.T) {
 	}
 }
 
-// TestCronRunner_OneshotTick_FallsBackToDefaultChannel verifies the resolver
+// TestCronRunner_AgentTick_FallsBackToDefaultChannel verifies the resolver
 // path that picks the workspace default when the cron job has no explicit
 // channel.
-func TestCronRunner_OneshotTick_FallsBackToDefaultChannel(t *testing.T) {
+func TestCronRunner_AgentTick_FallsBackToDefaultChannel(t *testing.T) {
 	runner, _, sched, chMgr, prov := setupCronRunnerTest(t)
 	// CreateJob without a channel — runner should resolve via channels.ResolveDefault.
 	if _, err := runner.CreateJob("nightly", "*/5 * * * *", "Summarize", "", true, nil); err != nil {
@@ -1482,10 +1482,10 @@ func TestCronRunner_OneshotTick_FallsBackToDefaultChannel(t *testing.T) {
 	}
 }
 
-// TestCronRunner_OneshotTick_MissingDefaultRecordsError covers the resolver
+// TestCronRunner_AgentTick_MissingDefaultRecordsError covers the resolver
 // branch where no channel is configured for the cron and the workspace has no
 // default — surfaces a clear error message.
-func TestCronRunner_OneshotTick_MissingDefaultRecordsError(t *testing.T) {
+func TestCronRunner_AgentTick_MissingDefaultRecordsError(t *testing.T) {
 	runner, db, sched, chMgr, _ := setupCronRunnerTest(t)
 	chMgr.resolveDefault = nil
 	chMgr.resolveErr = nil
@@ -1509,10 +1509,10 @@ func TestCronRunner_OneshotTick_MissingDefaultRecordsError(t *testing.T) {
 	}
 }
 
-// TestCronRunner_OneshotTick_LoadChannelByIDStale exercises the resolveChannel
+// TestCronRunner_AgentTick_LoadChannelByIDStale exercises the resolveChannel
 // branch where a cron job has ChannelID set but the row was deleted (FK gone);
 // the resolver falls back to the default rather than crashing.
-func TestCronRunner_OneshotTick_LoadChannelByIDStale(t *testing.T) {
+func TestCronRunner_AgentTick_LoadChannelByIDStale(t *testing.T) {
 	runner, db, sched, chMgr, prov := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
 	job, err := runner.CreateJob("nightly", "*/5 * * * *", "Summarize", chUUID, true, nil)

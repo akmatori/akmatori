@@ -48,8 +48,8 @@ var ErrSystemCronImmutable = errors.New("system cron jobs cannot be deleted")
 const cronChannelPostTimeout = 30 * time.Second
 
 // cronProviderResolveDefault is the messaging provider consulted when a cron
-// job's Channel cannot be loaded — keeps oneshot ticks falling back to the
-// workspace default rather than crashing the runner.
+// job's Channel cannot be loaded — keeps ticks falling back to the workspace
+// default rather than crashing the runner.
 const cronProviderResolveDefault = database.MessagingProviderSlack
 
 // CronJobUpdate is the patch shape applied to UpdateJob. Pointer fields make

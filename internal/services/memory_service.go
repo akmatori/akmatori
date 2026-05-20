@@ -882,9 +882,19 @@ func parseMemoryFile(data []byte, scope string) (*database.Memory, bool, error) 
 	}
 
 	if fm.Deleted {
+		// Defense in depth: the deletion path bypasses upsert's validate(), so
+		// reject tombstones whose name is not a slug-safe identifier. The SQL
+		// is parameterized so injection is not possible, but a name like
+		// "../foo" or one containing whitespace points the agent at a row that
+		// the canonical path could never have written. Refusing parse here
+		// makes the tombstone a no-op rather than a silent miss.
+		tombstoneName := strings.TrimSpace(fm.Name)
+		if !validMemoryName(tombstoneName) {
+			return nil, false, fmt.Errorf("invalid tombstone name %q", tombstoneName)
+		}
 		return &database.Memory{
 			Scope: scope,
-			Name:  strings.TrimSpace(fm.Name),
+			Name:  tombstoneName,
 		}, true, nil
 	}
 

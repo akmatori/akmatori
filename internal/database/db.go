@@ -741,15 +741,19 @@ func SeedSystemCronJobs() error {
 	}
 
 	for _, s := range seeds {
+		// Operators may have created a non-system row with the same name (legacy
+		// rename collisions, accidental shadow). Scope the lookup to
+		// is_system=true so the seed never silently hijacks an operator row by
+		// flipping its is_system flag + overwriting its schedule/prompt.
 		var existing CronJob
-		err := DB.Where("name = ?", s.Name).First(&existing).Error
+		err := DB.Where("name = ? AND is_system = ?", s.Name, true).First(&existing).Error
 		if err == nil {
-			// Row exists — re-assert the immutable canonical fields and the
-			// system flag without touching operator-owned Enabled / ChannelID.
+			// Row exists — re-assert the immutable canonical fields without
+			// touching operator-owned Enabled / ChannelID. is_system is left
+			// out of Updates because the lookup already pins it to true.
 			updates := map[string]interface{}{
-				"schedule":  s.Schedule,
-				"prompt":    s.Prompt,
-				"is_system": true,
+				"schedule": s.Schedule,
+				"prompt":   s.Prompt,
 			}
 			if err := DB.Model(&CronJob{}).Where("id = ?", existing.ID).Updates(updates).Error; err != nil {
 				return fmt.Errorf("re-seed system cron %s: %w", s.Name, err)
@@ -758,6 +762,19 @@ func SeedSystemCronJobs() error {
 		}
 		if err != gorm.ErrRecordNotFound {
 			return fmt.Errorf("lookup system cron %s: %w", s.Name, err)
+		}
+
+		// Refuse to create when a non-system row shadows the slot — operator
+		// rename is the safe recovery path. Surfacing this loudly beats either
+		// silently promoting the row or silently skipping the seed.
+		var shadow int64
+		if err := DB.Model(&CronJob{}).Where("name = ?", s.Name).Count(&shadow).Error; err != nil {
+			return fmt.Errorf("shadow check for system cron %s: %w", s.Name, err)
+		}
+		if shadow > 0 {
+			slog.Warn("system cron seed skipped: non-system row shadows the name",
+				"name", s.Name)
+			continue
 		}
 
 		row := &CronJob{

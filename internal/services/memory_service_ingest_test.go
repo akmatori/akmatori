@@ -340,6 +340,25 @@ func TestParseMemoryFile_TombstoneRejectsMissingName(t *testing.T) {
 	}
 }
 
+// TestParseMemoryFile_TombstoneRejectsInvalidSlug locks the defense-in-depth
+// check on tombstone names. Although the SQL DELETE is parameterized, a
+// non-slug `name:` (e.g. "../foo" or whitespace-bearing strings) could point at
+// rows the canonical write path could never have created. Rejecting at parse
+// time turns a poisoned tombstone into a no-op rather than a silent miss.
+func TestParseMemoryFile_TombstoneRejectsInvalidSlug(t *testing.T) {
+	cases := []string{
+		"---\nname: ../escape\ndeleted: true\n---\n",
+		"---\nname: bad name\ndeleted: true\n---\n",
+		"---\nname: \"   \"\ndeleted: true\n---\n",
+		"---\nname: UPPERCASE\ndeleted: true\n---\n",
+	}
+	for _, raw := range cases {
+		if _, _, err := parseMemoryFile([]byte(raw), MemoryScopeGlobal); err == nil {
+			t.Errorf("expected error on tombstone with non-slug name; payload=%q", raw)
+		}
+	}
+}
+
 // TestIngestFromDisk_AgentCannotSpoofOperatorAuthorship guards against
 // privilege escalation via prompt injection: the memory directory is rw-mounted
 // into the agent worker, so a prompt-injected memory-writer could write

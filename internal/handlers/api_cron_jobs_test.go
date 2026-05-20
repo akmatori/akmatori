@@ -257,6 +257,43 @@ func TestHandleCronJobByUUID_Update(t *testing.T) {
 	}
 }
 
+// TestHandleCronJobByUUID_Update_RejectsLegacyModeAndDescription mirrors the
+// POST-side guard on the partial-update path. A stale UI patching {"mode":...}
+// or {"description":...} would silently no-op without DisallowUnknownFields;
+// holding 400 on both ends prevents the legacy fields from leaking back via a
+// future request-struct regression.
+func TestHandleCronJobByUUID_Update_RejectsLegacyModeAndDescription(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "legacy mode field",
+			body: `{"mode":"oneshot"}`,
+		},
+		{
+			name: "legacy description field",
+			body: `{"description":"stale"}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := &mockCronJobManager{jobs: []database.CronJob{{UUID: "u1", Name: "Daily"}}}
+			h := newHandlerWithCronManager(mgr)
+			req := httptest.NewRequest(http.MethodPut, "/api/cron-jobs/u1", bytes.NewReader([]byte(tc.body)))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			h.handleCronJobByUUID(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+			if mgr.lastPatch != nil {
+				t.Errorf("update should not have fired on legacy field: %+v", mgr.lastPatch)
+			}
+		})
+	}
+}
+
 func TestHandleCronJobByUUID_Delete(t *testing.T) {
 	mgr := &mockCronJobManager{jobs: []database.CronJob{{UUID: "u1"}}}
 	h := newHandlerWithCronManager(mgr)
