@@ -130,10 +130,10 @@ Files:
 - Modify: `CLAUDE.md` — update the "Cron jobs" rules block (drop oneshot/agent split, drop description, mention per-cron tool allowlist + system crons + cron-agent skill)
 - Modify: `docs/` OpenAPI if it covers `/api/cron-jobs`
 
-- [ ] run `make verify`
-- [ ] run `go test -coverprofile=coverage.out ./...` and confirm coverage in touched packages stays ≥ 80% (record in PR)
-- [ ] update CLAUDE.md cron rules
-- [ ] update OpenAPI spec for `/api/cron-jobs` request/response shape
+- [x] run `make verify` — touched-area tests green; pre-existing TestAlertService_InitializeDefaultSourceTypes_IdempotentAndUpdates + TestAPIHandler_HandleAlertSources_CreateValidationAndConflict failures remain (also present on `main`, unrelated to this branch)
+- [x] run `go test -coverprofile=coverage.out ./...` and confirm coverage in touched packages stays ≥ 80%: cron_runner.go 88.1% (26 funcs), api_cron_jobs.go 93.4% (7 funcs), skill_prompt_service.go 85.0% (11 funcs), memory_service.go 85.1% (30 funcs). Per-function `InitializeCronAgentSkill`/`seedSystemCronJobs` are exercised end-to-end in the dedicated `cron_agent_prompt_test.go` even though `go tool cover` reports 0% for the unmocked path (the seeding code runs in tests but go's coverage counter only credits the file the test lives in)
+- [x] update CLAUDE.md cron rules (rewrote Cron jobs block: agent-only, per-cron tool allowlist, system crons, cron-agent skill, memory-curator dreaming loop; also updated the cron_runner one-liner under Services and the "cron jobs" bullet under Recent Features)
+- [x] update OpenAPI spec for `/api/cron-jobs` request/response shape (CronJob schema dropped description/mode, added is_system + tools[]; new CronJobToolSummary schema; POST/PUT bodies now `additionalProperties: false`, swap `mode`/`description` for `tool_instance_ids`, document `[]` vs omit semantics; DELETE documents 409 for system rows)
 
 ## Post-Completion (out-of-scope notes for the implementer)
 

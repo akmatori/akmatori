@@ -143,14 +143,16 @@ Rules:
 
 ### Cron jobs
 
-Cron jobs run on a per-job schedule, target a Channel, and execute either a one-shot LLM call or a full agent investigation.
+Cron jobs run on a per-job schedule, target a Channel, and always execute as a full agent investigation under the `cron-agent` system skill. The legacy `oneshot` mode and `description` field have been removed.
 
 Rules:
-- `oneshot` mode: route through `OneShotLLMCaller` and post the formatted result to `Channel` via the registry
-- `agent` mode: spawn the incident-manager skill mirroring `alert_processor.go`; create an `Incident` with `source_kind="cron"` and `source_uuid=<cron_job.uuid>` so provenance is queryable
+- every cron tick spawns the `cron-agent` skill via `SpawnAgentInvocation`; the path mirrors `alert_processor.go` and creates an `Incident` with `source_kind="cron"` and `source_uuid=<cron_job.uuid>` for provenance
+- each cron carries its own `Tools []ToolInstance` allowlist (m2m via `cron_job_tools`); the runner maps these to `ToolAllowlistEntry` instead of `r.skills.GetToolAllowlist()` — global skill/tool settings are NOT inherited
+- `cron-agent` is registered as a system skill (`IsSystem=true`) alongside `incident-manager`; both are exempt from SKILL.md generation and surface their prompt via `skill_prompt_service`
+- system crons (`IsSystem=true`) are seeded at boot by `seedSystemCronJobs()`; `DeleteJob` on a system row returns `ErrSystemCronImmutable` (HTTP 409). Operators may toggle `Enabled` and edit other fields but cannot delete
+- the seeded `memory-curator` cron drives the "dreaming" maintenance loop; it instructs cron-agent to dedupe `/akmatori/memory/global/` entries via the memory-writer subagent (which now supports `Action: delete <slug>` to emit tombstones)
 - cron expressions are validated at write time; invalid schedules surface as 400
 - `CronRunner` survives tick failures and records `LastRunStatus=error` + `LastRunError`; never let one bad job take the runner down
-- crons inherit global LLM/skill/tool settings — per-cron overrides are intentionally out of scope
 - manual fire is `POST /api/cron-jobs/{uuid}/run`; CRUD reloads the runner so schedule changes apply without restart
 
 ## Important Files by Responsibility
@@ -177,7 +179,7 @@ Rules:
 - `internal/services/title_generator.go` - one-shot title generation
 - `internal/services/slack_summarizer.go` - Slack-safe final output compression
 - `internal/services/channel_service.go` - Integrations/Channels CRUD, `ResolveDefault`, `ResolveForAlertSource`
-- `internal/services/cron_runner.go` - cron scheduler, oneshot + agent tick paths, reload-on-CRUD
+- `internal/services/cron_runner.go` - cron scheduler, per-cron agent tick path, reload-on-CRUD
 - `internal/messaging/` - `Provider`, `ProviderRegistry`, slack provider, telegram stub
 - `akmatori_data/agents/` - `runbook-searcher`, `memory-searcher`, `memory-writer` subagent definitions
 
@@ -278,7 +280,7 @@ Keep this file aligned with these current realities:
 - one-shot LLM calls share the worker transport and current provider settings
 - Slack loading banners use real reasoning lines instead of generic placeholder text
 - messaging is now Integrations + Channels; outbound posting routes through `ProviderRegistry`; the legacy `SlackSettings.AlertsChannel` fallback is gone and `/api/settings/slack` returns 410 Gone
-- cron jobs (`/api/cron-jobs`) schedule oneshot LLM ticks or full agent investigations against a Channel; `CronRunner` boots from `cmd/akmatori/main.go`
+- cron jobs (`/api/cron-jobs`) always run as full agent investigations under the `cron-agent` system skill with a per-cron tool allowlist; system crons (e.g. seeded `memory-curator`) cannot be deleted; `CronRunner` boots from `cmd/akmatori/main.go`
 - alert-source webhooks use adapter-specific secret validation before parsing; explicit notification channels must resolve to `can_post=true` Channels
 
 ## When Editing This File
