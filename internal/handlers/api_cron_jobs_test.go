@@ -362,6 +362,48 @@ func TestHandleCronJobs_Create_InternalErrorSurface(t *testing.T) {
 	}
 }
 
+// TestHandleCronJobs_Create_ToolErrorSurfaceAs500 pins that DB errors wrapped
+// by the new per-cron tool resolution helpers ("attach cron job tools:",
+// "apply enabled=false on create:") surface as 500, not 400. Without these
+// prefixes in isCronClientError the handler would route an infra outage to
+// a 4xx, hiding the failure from monitoring.
+func TestHandleCronJobs_Create_ToolErrorSurfaceAs500(t *testing.T) {
+	cases := map[string]error{
+		"attach":         errors.New("attach cron job tools: db down"),
+		"enabled_update": errors.New("apply enabled=false on create: db down"),
+	}
+	for name, e := range cases {
+		t.Run(name, func(t *testing.T) {
+			mgr := &mockCronJobManager{createErr: e}
+			h := newHandlerWithCronManager(mgr)
+			body, _ := json.Marshal(CreateCronJobRequest{Name: "X", Schedule: "0 9 * * *", Prompt: "p"})
+			req := httptest.NewRequest(http.MethodPost, "/api/cron-jobs", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			h.handleCronJobs(w, req)
+			if w.Code != http.StatusInternalServerError {
+				t.Fatalf("expected 500, got %d", w.Code)
+			}
+		})
+	}
+}
+
+// TestHandleCronJobs_Update_ToolErrorSurfaceAs500 mirrors the create-side
+// regression test for the UPDATE path, where "update cron job tools:" wraps
+// Association.Replace errors.
+func TestHandleCronJobs_Update_ToolErrorSurfaceAs500(t *testing.T) {
+	mgr := &mockCronJobManager{updateErr: errors.New("update cron job tools: db down")}
+	h := newHandlerWithCronManager(mgr)
+	body, _ := json.Marshal(UpdateCronJobRequest{Name: ptr("X")})
+	req := httptest.NewRequest(http.MethodPut, "/api/cron-jobs/u1", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.handleCronJobByUUID(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", w.Code)
+	}
+}
+
 func ptr[T any](v T) *T { return &v }
 
 // TestHandleCronJobs_List_ServiceError surfaces ListJobs failures as 500.

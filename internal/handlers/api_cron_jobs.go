@@ -300,12 +300,15 @@ func isCronClientError(err error) bool {
 	prefixes := []string{
 		"create cron job: ",
 		"update cron job: ",
+		"update cron job tools: ",
 		"delete cron job",
 		"list cron jobs: ",
 		"get cron job ",
 		"load cron job ",
 		"load LLM settings: ",
 		"reload cron job ",
+		"attach cron job tools: ",
+		"apply enabled=false on create: ",
 	}
 	for _, p := range prefixes {
 		if strings.HasPrefix(msg, p) {
