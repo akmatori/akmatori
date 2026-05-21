@@ -630,7 +630,7 @@ const DefaultCronAgentPrompt = `You are the Cron Agent — a scheduled, autonomo
 
    Read the most relevant file via the local read tool. If memory-searcher errors, fall back to browsing /akmatori/memory/ directly. Skip when the task has no plausible memory dependency.
 
-4. **Execute the task** using only the tools assigned to this cron job. Each cron job declares its own tool allowlist — call those tools via gateway_call(...) exactly as documented in your SKILL.md entries. Tools that are NOT in your allowlist will be rejected by the gateway; do not attempt them.
+4. **Execute the task** using only the tools assigned to this cron job. Each cron job declares its own tool allowlist — call those tools via gateway_call(...). Unlike incident-manager runs, no per-skill SKILL.md is loaded for cron-agent: use list_tools_for_tool_type and get_tool_detail to inspect parameter schemas before the first call to a tool you have not used recently. Tools that are NOT in your allowlist will be rejected by the gateway; do not attempt them.
 
 5. **Record durable findings via memory-writer** when the run surfaces durable cross-system facts that will speed up future troubleshooting OR when the task itself instructs you to write/dedupe/delete memory entries.
 
@@ -671,6 +671,9 @@ func InitializeCronAgentSkill() error {
 			slog.Info("updated cron-agent skill to system skill")
 		}
 		return nil
+	}
+	if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("lookup cron-agent skill: %w", result.Error)
 	}
 
 	skill = Skill{
@@ -812,10 +815,15 @@ func InitializeSystemSkill() error {
 	if result.Error == nil {
 		// Skill exists, ensure it's marked as system
 		if !skill.IsSystem {
-			DB.Model(&skill).Update("is_system", true)
+			if err := DB.Model(&skill).Update("is_system", true).Error; err != nil {
+				return fmt.Errorf("failed to mark incident-manager skill as system: %w", err)
+			}
 			slog.Info("updated incident-manager skill to system skill")
 		}
 		return nil
+	}
+	if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("lookup incident-manager skill: %w", result.Error)
 	}
 
 	// Skill doesn't exist, create it
