@@ -130,6 +130,17 @@ Rules:
 - the `slack_channel` AlertSourceInstance type is deprecated and hidden from the UI; do not reintroduce it for new flows
 - Telegram requests must surface `ErrNotImplemented` from the registry — never silently no-op
 
+### Alert sources and webhook adapters
+
+Webhook alert sources are still `AlertSourceInstance` rows, while message destinations are Channels. Keep those responsibilities separate.
+
+Rules:
+- `GET /api/alert-source-types` must hide deprecated types; `slack_channel` exists only for historical rows
+- creating deprecated `slack_channel` sources must fail; inbound Slack listening belongs to Channels with `can_listen=true`
+- `notification_channel_uuid` is optional on alert sources; when set, resolve it to a post-capable Channel before creating/updating the source
+- webhook handlers must fetch the instance, reject disabled rows, find the registered adapter by source type, validate the secret, then parse the body
+- adapter integration tests should use the real `AlertService` plus the real adapter for at least one happy path, bad-secret path, and malformed-payload path
+
 ### Cron jobs
 
 Cron jobs run on a per-job schedule, target a Channel, and execute either a one-shot LLM call or a full agent investigation.
@@ -268,6 +279,7 @@ Keep this file aligned with these current realities:
 - Slack loading banners use real reasoning lines instead of generic placeholder text
 - messaging is now Integrations + Channels; outbound posting routes through `ProviderRegistry`; the legacy `SlackSettings.AlertsChannel` fallback is gone and `/api/settings/slack` returns 410 Gone
 - cron jobs (`/api/cron-jobs`) schedule oneshot LLM ticks or full agent investigations against a Channel; `CronRunner` boots from `cmd/akmatori/main.go`
+- alert-source webhooks use adapter-specific secret validation before parsing; explicit notification channels must resolve to `can_post=true` Channels
 
 ## When Editing This File
 
