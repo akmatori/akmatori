@@ -78,8 +78,16 @@ type AgentMessage struct {
 	// Enabled skill names (sent with new_incident to filter skill discovery)
 	EnabledSkills []string `json:"enabled_skills,omitempty"`
 
-	// Tool allowlist (sent with new_incident to restrict tool access)
-	ToolAllowlist []services.ToolAllowlistEntry `json:"tool_allowlist,omitempty"`
+	// Tool allowlist (sent with new_incident to restrict tool access).
+	//
+	// Intentionally NOT `omitempty`: a non-nil empty slice ([]) MUST round-trip
+	// across the wire as "[]" so the gateway treats it as "reject all tool
+	// calls" rather than "no allowlist active" (the latter is the nil-slice =>
+	// JSON null case). The seeded memory-curator cron and any other tool-less
+	// scheduled run rely on the empty-slice path to confine the agent to
+	// subagent calls. Adding `omitempty` here would drop the empty slice and
+	// silently re-grant all tools.
+	ToolAllowlist []services.ToolAllowlistEntry `json:"tool_allowlist"`
 
 	// One-shot LLM request/response correlation fields
 	RequestID   string  `json:"request_id,omitempty"`

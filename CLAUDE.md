@@ -116,6 +116,7 @@ Rules:
 - `MemoryService.IngestFromDisk` re-materializes those files into Postgres after each incident
 - memory syncing is scope-aware and manifest-driven
 - memory upserts must stay idempotent by `name:` slug + scope
+- memory deletions: `memory-writer` accepts `Action: delete <slug>` and writes a tombstone (`name:` + `deleted: true` frontmatter only); `IngestFromDisk` recognises the tombstone, deletes the matching row, and the post-batch sync purges both the bare tombstone and the prior `<id>-<slug>.md` snapshot. Tombstones for unknown slugs are a no-op but still trigger sync so orphaned files do not accumulate
 
 ### Channels, Integrations, and outbound routing
 
@@ -149,7 +150,9 @@ Rules:
 - every cron tick spawns the `cron-agent` skill via `SpawnAgentInvocation`; the path mirrors `alert_processor.go` and creates an `Incident` with `source_kind="cron"` and `source_uuid=<cron_job.uuid>` for provenance
 - each cron carries its own `Tools []ToolInstance` allowlist (m2m via `cron_job_tools`); the runner maps these to `ToolAllowlistEntry` instead of `r.skills.GetToolAllowlist()` — global skill/tool settings are NOT inherited
 - `cron-agent` is registered as a system skill (`IsSystem=true`) alongside `incident-manager`; both are exempt from SKILL.md generation and surface their prompt via `skill_prompt_service`
-- system crons (`IsSystem=true`) are seeded at boot by `seedSystemCronJobs()`; `DeleteJob` on a system row returns `ErrSystemCronImmutable` (HTTP 409). Operators may toggle `Enabled` and edit other fields but cannot delete
+- system crons (`IsSystem=true`) are seeded at boot by `seedSystemCronJobs()` with `Enabled=false` so a fresh install does not auto-fire them; the seed creates missing rows but leaves existing system rows untouched so operator edits (schedule, prompt, channel, tools, enabled) survive restarts. `DeleteJob` on a system row returns `ErrSystemCronImmutable` (HTTP 409). Operators may toggle `Enabled` and edit other fields but cannot delete
+- crons spawn the agent with ONLY the `cron-agent` root skill prompt — the runner does NOT wrap the task body with `executor.PrependGuidance` (that helper is incident-triage framed and would conflict with `DefaultCronAgentPrompt`'s "you are not triaging an incident" framing); the task is prefixed only with the current UTC time so the model can reason about scheduling
+- tool-less crons (e.g. seeded `memory-curator`) MUST send an explicit empty allowlist on the wire; the `ToolAllowlist` field on `WebSocketMessage` is intentionally NOT `omitempty` so an empty slice serialises as `[]` and the gateway rejects all tool calls rather than treating a missing field as "no allowlist = allow all"
 - the seeded `memory-curator` cron drives the "dreaming" maintenance loop; it instructs cron-agent to dedupe `/akmatori/memory/global/` entries via the memory-writer subagent (which now supports `Action: delete <slug>` to emit tombstones)
 - cron expressions are validated at write time; invalid schedules surface as 400
 - `CronRunner` survives tick failures and records `LastRunStatus=error` + `LastRunError`; never let one bad job take the runner down

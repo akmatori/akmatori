@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -876,6 +877,72 @@ func TestCronRunner_CreateJob_RejectsUnknownToolID(t *testing.T) {
 	_, err := runner.CreateJob("ghost-tool", "*/5 * * * *", "p", chUUID, true, []uint{99999})
 	if err == nil || !strings.Contains(err.Error(), "tool instance 99999 not found") {
 		t.Fatalf("err = %v, want tool-not-found", err)
+	}
+}
+
+// TestCronRunner_UpdateJob_RejectsUnknownToolID mirrors the create-side guard
+// for the update path: an unknown tool ID must fail the whole patch BEFORE
+// the column updates are applied, so a stale Tools association cannot be
+// half-replaced with garbage IDs.
+func TestCronRunner_UpdateJob_RejectsUnknownToolID(t *testing.T) {
+	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	job, err := runner.CreateJob("solid", "*/5 * * * *", "p", chUUID, true, nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	bad := []uint{99999}
+	_, err = runner.UpdateJob(job.UUID, CronJobUpdate{ToolInstanceIDs: &bad})
+	if err == nil || !strings.Contains(err.Error(), "tool instance 99999 not found") {
+		t.Fatalf("err = %v, want tool-not-found", err)
+	}
+}
+
+// TestCronRunner_AgentTick_EmptyAllowlistRejectsAllTools pins the security
+// invariant that a cron with NO assigned tools (e.g. the seeded
+// memory-curator) sends an explicit empty allowlist to the agent worker. A
+// regression that drops the empty slice on the wire would let the gateway
+// fall back to "no allowlist = allow all" and silently re-grant every tool
+// to a maintenance cron that has none.
+func TestCronRunner_AgentTick_EmptyAllowlistRejectsAllTools(t *testing.T) {
+	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	agentRunner := runner.runner.(*fakeIncidentRunner)
+
+	job, err := runner.CreateJob("toolless", "*/5 * * * *", "memory consolidation pass", chUUID, true, nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := runner.RunNow(job.UUID); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	runner.WaitForInflight()
+
+	agentRunner.mu.Lock()
+	defer agentRunner.mu.Unlock()
+	if len(agentRunner.startCalls) != 1 {
+		t.Fatalf("expected one StartIncident call, got %d", len(agentRunner.startCalls))
+	}
+	call := agentRunner.startCalls[0]
+	if call.tools == nil {
+		t.Fatal("StartIncident toolAllowlist must be a non-nil empty slice; a nil slice JSON-marshals as null and the gateway treats null as 'allow all'")
+	}
+	if len(call.tools) != 0 {
+		t.Fatalf("StartIncident toolAllowlist = %d entries, want 0", len(call.tools))
+	}
+
+	// Wire-format defense-in-depth: simulate the JSON marshal the agent_ws
+	// frame goes through and confirm the empty slice rides through as "[]",
+	// not as a missing field. omitempty here would silently re-grant tools.
+	frame := struct {
+		Tools []ToolAllowlistEntry `json:"tool_allowlist"`
+	}{Tools: call.tools}
+	encoded, err := json.Marshal(frame)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if got, want := string(encoded), `{"tool_allowlist":[]}`; got != want {
+		t.Errorf("wire format = %s, want %s", got, want)
 	}
 }
 

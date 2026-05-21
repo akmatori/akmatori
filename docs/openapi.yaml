@@ -203,10 +203,13 @@ components:
         last_run_status: {type: string, enum: [ok, error, ""]}
         last_run_error: {type: string}
         next_run_at: {type: string, format: date-time, nullable: true}
-        channel: {$ref: '#/components/schemas/Channel'}
+        channel:
+          allOf: [{$ref: '#/components/schemas/Channel'}]
+          nullable: true
+          description: Resolved channel for outbound posts. Omitted when the cron has no `channel_id` assigned and no workspace-default channel can be resolved at read time.
         tools:
           type: array
-          description: Per-cron tool allowlist. The cron-agent invocation is restricted to these ToolInstances; the global skill/tool settings are NOT inherited. Settings JSONB is intentionally omitted from this slim projection to keep secrets off the wire.
+          description: Per-cron tool allowlist. Always present (possibly empty). The cron-agent invocation is restricted to these ToolInstances; the global skill/tool settings are NOT inherited. Settings JSONB is intentionally omitted from this slim projection to keep secrets off the wire.
           items:
             $ref: '#/components/schemas/CronJobToolSummary'
         created_at: {type: string, format: date-time}
@@ -1575,6 +1578,8 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Cron service not configured
 
   /cron-jobs/{uuid}:
     parameters:
@@ -1594,6 +1599,8 @@ paths:
               schema: {$ref: '#/components/schemas/CronJob'}
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          description: Cron service not configured
     put:
       summary: Update cron job
       operationId: updateCronJob
@@ -1641,6 +1648,8 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Cron service not configured
     delete:
       summary: Delete cron job
       operationId: deleteCronJob
@@ -1657,6 +1666,8 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Cron service not configured
 
   /cron-jobs/{uuid}/run:
     parameters:
@@ -1679,6 +1690,8 @@ paths:
                   status: {type: string, example: started}
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          description: Cron service not configured
 
   /alert-source-types:
     get:

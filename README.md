@@ -9,7 +9,7 @@ Akmatori is an AI-powered AIOps agent that integrates with monitoring systems an
 - **Multi-LLM Support**: Use OpenAI, Anthropic, Google, OpenRouter, or on-premise models (GLM, Kimi, Minimax, Mistral, LLaMA)
 - **Multi-Source Alert Ingestion**: Receive alerts from Alertmanager, PagerDuty, Grafana, Datadog, Zabbix, and Slack channels
 - **Messaging Integrations & Channels**: Configure one or more messaging providers (Slack today, Telegram on the roadmap) under Settings → Integrations, then attach Channels with capability flags (post / listen / default) that alert sources and cron jobs reference by UUID
-- **Cron Jobs**: Schedule recurring agent investigations that post results to a Channel — pick a 5-field cron expression, write a prompt, and attach a per-cron tool allowlist. Every tick runs as a full investigation under the `cron-agent` system skill; platform-seeded crons (e.g. `memory-curator`) are marked `is_system` and cannot be deleted, only disabled
+- **Cron Jobs**: Schedule recurring agent investigations that post results to a Channel — pick a 5-field cron expression, write a prompt, and attach a per-cron tool allowlist. Every tick runs as a full investigation under the `cron-agent` system skill; platform-seeded crons (e.g. `memory-curator`) are marked `is_system`, ship disabled so you can review them before they fire, and cannot be deleted (only enabled/disabled)
 - **AI-Powered Automation**: Analyze incidents and execute remediation skills using your preferred LLM
 - **[Agent Skills](https://github.com/agentskills/agentskills) Format**: Skills follow the open Agent Skills specification for portability across AI agents
 - **Tools Management**: Configure reusable tools (SSH, Python scripts, API clients) for skills

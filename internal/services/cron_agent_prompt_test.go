@@ -121,9 +121,11 @@ func TestInitializeCronAgentSkill_UpgradesNonSystemRow(t *testing.T) {
 
 // TestSeedSystemCronJobs_IdempotentAndPreservesOperatorState verifies the
 // memory-curator system cron is created disabled on first seed, survives a
-// second InitializeDefaults-equivalent call, and preserves an operator's
-// Enabled=true flip across simulated restarts. The schedule + prompt are
-// re-asserted (canonical), but Enabled and ChannelID are operator-owned.
+// second InitializeDefaults-equivalent call, and preserves ALL operator
+// edits (Enabled, ChannelID, Schedule, Prompt) across simulated restarts.
+// Re-asserting schedule/prompt on boot would silently revert operator edits,
+// contradicting the documented "can be disabled but not deleted; all other
+// fields remain editable" contract.
 func TestSeedSystemCronJobs_IdempotentAndPreservesOperatorState(t *testing.T) {
 	db := newCronAgentTestDB(t)
 
@@ -160,10 +162,17 @@ func TestSeedSystemCronJobs_IdempotentAndPreservesOperatorState(t *testing.T) {
 		t.Fatalf("operator-enable: %v", err)
 	}
 
-	// Operator-only customization that must survive: pick a channel.
+	// Operator-only customization that must survive: pick a channel, retune
+	// the schedule, rewrite the prompt body.
 	channelID := uint(99)
 	if err := db.Model(&database.CronJob{}).Where("id = ?", row.ID).Update("channel_id", channelID).Error; err != nil {
 		t.Fatalf("operator-set channel: %v", err)
+	}
+	const operatorSchedule = "*/30 * * * *"
+	const operatorPrompt = "operator-edited memory consolidation prompt"
+	if err := db.Model(&database.CronJob{}).Where("id = ?", row.ID).
+		Updates(map[string]interface{}{"schedule": operatorSchedule, "prompt": operatorPrompt}).Error; err != nil {
+		t.Fatalf("operator-edit schedule/prompt: %v", err)
 	}
 
 	if err := seedSystemCronJobsViaPackage(); err != nil {
@@ -183,11 +192,11 @@ func TestSeedSystemCronJobs_IdempotentAndPreservesOperatorState(t *testing.T) {
 	if after.UUID != originalUUID {
 		t.Errorf("UUID must not change on re-seed: %s -> %s", originalUUID, after.UUID)
 	}
-	if after.Schedule != "0 2 * * *" {
-		t.Errorf("canonical schedule must be re-asserted: %q", after.Schedule)
+	if after.Schedule != operatorSchedule {
+		t.Errorf("operator-edited schedule must survive re-seed: got %q want %q", after.Schedule, operatorSchedule)
 	}
-	if !strings.Contains(after.Prompt, "memory consolidation") {
-		t.Error("canonical prompt must be re-asserted")
+	if after.Prompt != operatorPrompt {
+		t.Errorf("operator-edited prompt must survive re-seed: got %q", after.Prompt)
 	}
 
 	// Final sanity: still exactly one row after a third seed.

@@ -692,8 +692,11 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 	// inside the loop turned ingest into O(N²) disk churn. A sync after
 	// deletions cleans up both the bare `<name>.md` tombstone the agent
 	// wrote and the prior canonical `<id>-<name>.md` snapshot, since
-	// neither matches an existing row in expectedFiles.
-	if ingested > 0 || deleted > 0 || len(parsed) > 0 {
+	// neither matches an existing row in expectedFiles. len(parsed) > 0
+	// subsumes the ingested/deleted cases (an upsert error or a tombstone
+	// for an unknown slug both leave the file in parsed without bumping
+	// the counters) and ensures the orphaned file gets purged regardless.
+	if len(parsed) > 0 {
 		if err := s.SyncMemoryFiles(); err != nil {
 			slog.Warn("memory ingest: post-batch sync failed", "err", err)
 		}

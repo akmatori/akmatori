@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -664,7 +665,9 @@ func InitializeCronAgentSkill() error {
 
 	if result.Error == nil {
 		if !skill.IsSystem {
-			DB.Model(&skill).Update("is_system", true)
+			if err := DB.Model(&skill).Update("is_system", true).Error; err != nil {
+				return fmt.Errorf("failed to mark cron-agent skill as system: %w", err)
+			}
 			slog.Info("updated cron-agent skill to system skill")
 		}
 		return nil
@@ -719,10 +722,12 @@ const memoryCuratorCronSchedule = "0 2 * * *"
 
 // SeedSystemCronJobs idempotently seeds the non-deletable system cron jobs.
 // Each row is keyed by Name + IsSystem=true. On first seed the row is created
-// disabled (operator opts in). On subsequent runs the IMMUTABLE fields
-// (Schedule, Prompt, IsSystem) are re-asserted so an operator's manual edit
-// of a system row does not drift the canonical content, while the OPERATOR-
-// owned fields (Enabled, ChannelID) are preserved across restarts.
+// disabled (operator opts in). On subsequent runs an existing system row is
+// LEFT ALONE — operators may edit schedule/prompt/channel/tools/enabled
+// directly per the spec ("can be disabled but not deleted; all other fields
+// remain editable"), so re-asserting on boot would silently revert those
+// edits. Restoring the canonical wording is a deliberate operator action
+// (delete-from-DB + re-seed), not a side effect of restart.
 //
 // Exported so callers outside the database package (e.g. service-package
 // tests) can re-run the seed without duplicating the row layout.
@@ -748,19 +753,10 @@ func SeedSystemCronJobs() error {
 		var existing CronJob
 		err := DB.Where("name = ? AND is_system = ?", s.Name, true).First(&existing).Error
 		if err == nil {
-			// Row exists — re-assert the immutable canonical fields without
-			// touching operator-owned Enabled / ChannelID. is_system is left
-			// out of Updates because the lookup already pins it to true.
-			updates := map[string]interface{}{
-				"schedule": s.Schedule,
-				"prompt":   s.Prompt,
-			}
-			if err := DB.Model(&CronJob{}).Where("id = ?", existing.ID).Updates(updates).Error; err != nil {
-				return fmt.Errorf("re-seed system cron %s: %w", s.Name, err)
-			}
+			// Row exists — preserve operator edits to schedule/prompt/etc.
 			continue
 		}
-		if err != gorm.ErrRecordNotFound {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("lookup system cron %s: %w", s.Name, err)
 		}
 

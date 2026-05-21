@@ -106,7 +106,7 @@ export default function CronJobsManager() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          Scheduled jobs that send recurring LLM messages or kick off full agent investigations.
+          Scheduled agent investigations posted to a Channel on a cron cadence.
         </p>
         {!isCreating && !editing && (
           <button className="btn btn-primary" onClick={startCreate}>

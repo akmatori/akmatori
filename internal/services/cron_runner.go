@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
-	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
@@ -428,12 +427,17 @@ func (r *CronRunner) execute(job *database.CronJob) {
 		},
 	}
 
-	// Mirror alert_processor.go / slack_processor.go: prepend the runbook +
-	// cross-incident memory search guidance so the incident-manager agent
-	// follows the same SOP regardless of how it was spawned. Without this the
-	// cron-spawned investigation skips runbook recall entirely.
-	taskWithGuidance := executor.PrependGuidance(job.Prompt)
-	runID, err := r.runner.StartIncident(incidentUUID, taskWithGuidance, llmSettings, skillNames, toolAllowlist, callback)
+	// Do NOT wrap with executor.PrependGuidance: that helper is incident-triage
+	// framed ("Original alert text", "Please help with the following incident
+	// or request"), and it makes runbook + memory search MANDATORY. The
+	// cron-agent system prompt (DefaultCronAgentPrompt) deliberately reframes
+	// the agent as "not triaging an incident" and treats recall as optional —
+	// the seeded memory-curator cron, for example, has no infrastructure tools
+	// and no incident framing to lean on. Prepend only the current UTC time so
+	// the model can reason about scheduling without inheriting the alert SOP.
+	taskWithTime := fmt.Sprintf("Current time: %s\n\n%s",
+		time.Now().UTC().Format("2006-01-02 15:04:05 UTC"), job.Prompt)
+	runID, err := r.runner.StartIncident(incidentUUID, taskWithTime, llmSettings, skillNames, toolAllowlist, callback)
 	if err != nil {
 		errStr := fmt.Sprintf("start incident: %v", err)
 		if updateErr := r.skills.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errStr, 0, 0); updateErr != nil {
