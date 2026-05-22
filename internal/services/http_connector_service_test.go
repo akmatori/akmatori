@@ -5,24 +5,14 @@ import (
 	"testing"
 
 	"github.com/akmatori/akmatori/internal/database"
-	"gorm.io/driver/sqlite"
+	"github.com/akmatori/akmatori/internal/testhelpers"
 	"gorm.io/gorm"
 )
 
 func setupHTTPConnectorTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("failed to open test database: %v", err)
-	}
-
-	if err := db.AutoMigrate(&database.HTTPConnector{}, &database.MCPServerConfig{}); err != nil {
-		t.Fatalf("failed to migrate test database: %v", err)
-	}
-
-	database.DB = db
-	return db
+	return testhelpers.NewGlobalSQLiteDB(t, &database.HTTPConnector{}, &database.MCPServerConfig{})
 }
 
 func validHTTPConnector() *database.HTTPConnector {

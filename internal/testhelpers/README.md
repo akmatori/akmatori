@@ -40,6 +40,12 @@ data := LoadFixture(t, "alerts/alertmanager_firing.json")
 LoadJSONFixture(t, "alerts/alertmanager_firing.json", &payload)
 ```
 
+**SQLite test DBs**
+```go
+db := NewSQLiteDB(t, &database.HTTPConnector{})
+db := NewGlobalSQLiteDB(t, &database.SystemSetting{})
+```
+
 **Mocks**
 ```go
 alertSvc := NewMockAlertService().
