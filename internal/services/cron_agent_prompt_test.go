@@ -222,6 +222,7 @@ func newCronAgentTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&database.Skill{},
 		&database.CronJob{},
+		&database.CronJobTool{},
 		&database.Integration{},
 		&database.Channel{},
 	); err != nil {

@@ -917,7 +917,7 @@ func (r *CronRunner) DeleteJob(uuidStr string) error {
 	// Clear the m2m join rows first; the DB has no ON DELETE CASCADE so a
 	// hard delete would leave cron_job_tools rows pointing at the deleted ID.
 	if err := r.db.Model(&database.CronJob{ID: job.ID}).Association("Tools").Clear(); err != nil {
-		slog.Warn("failed to clear cron job tools before delete", "uuid", job.UUID, "err", err)
+		return fmt.Errorf("delete cron job: clear tools: %w", err)
 	}
 	if err := r.db.Delete(&database.CronJob{}, job.ID).Error; err != nil {
 		return fmt.Errorf("delete cron job: %w", err)
