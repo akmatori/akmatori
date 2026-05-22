@@ -766,21 +766,26 @@ func (r *CronRunner) CreateJob(name, schedule, prompt string, channelUUID string
 		ChannelID: channelID,
 		Enabled:   enabled,
 	}
-	if err := r.db.Create(row).Error; err != nil {
-		return nil, fmt.Errorf("create cron job: %w", err)
-	}
-	// GORM v2 omits zero-value bools from INSERT, so the column-level
-	// `default:true` flips a caller-requested Enabled=false back to true.
-	// Without this guard a "create-disabled" cron job would start firing
-	// immediately — a particularly bad surprise for the create-then-review
-	// workflow.
-	if !enabled {
-		if err := r.db.Model(row).Update("enabled", false).Error; err != nil {
-			return nil, fmt.Errorf("apply enabled=false on create: %w", err)
+	if err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(row).Error; err != nil {
+			return fmt.Errorf("create cron job: %w", err)
 		}
-	}
-	if err := r.db.Model(row).Association("Tools").Replace(tools); err != nil {
-		return nil, fmt.Errorf("attach cron job tools: %w", err)
+		// GORM v2 omits zero-value bools from INSERT, so the column-level
+		// `default:true` flips a caller-requested Enabled=false back to true.
+		// Without this guard a "create-disabled" cron job would start firing
+		// immediately — a particularly bad surprise for the create-then-review
+		// workflow.
+		if !enabled {
+			if err := tx.Model(row).Update("enabled", false).Error; err != nil {
+				return fmt.Errorf("apply enabled=false on create: %w", err)
+			}
+		}
+		if err := tx.Model(row).Association("Tools").Replace(tools); err != nil {
+			return fmt.Errorf("attach cron job tools: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	if err := r.Reload(row.ID); err != nil {
 		slog.Warn("failed to schedule newly created cron job", "uuid", row.UUID, "err", err)
@@ -914,12 +919,17 @@ func (r *CronRunner) DeleteJob(uuidStr string) error {
 	if job.IsSystem {
 		return ErrSystemCronImmutable
 	}
-	// Clear the m2m join rows first; the DB has no ON DELETE CASCADE so a
-	// hard delete would leave cron_job_tools rows pointing at the deleted ID.
-	if err := r.db.Model(&database.CronJob{ID: job.ID}).Association("Tools").Clear(); err != nil {
-		return fmt.Errorf("delete cron job: clear tools: %w", err)
-	}
-	if err := r.db.Delete(&database.CronJob{}, job.ID).Error; err != nil {
+	// Clear the m2m join rows and delete the parent inside a transaction so a
+	// failed parent delete cannot leave the cron alive with an empty allowlist.
+	if err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&database.CronJob{ID: job.ID}).Association("Tools").Clear(); err != nil {
+			return fmt.Errorf("clear tools: %w", err)
+		}
+		if err := tx.Delete(&database.CronJob{}, job.ID).Error; err != nil {
+			return fmt.Errorf("delete: %w", err)
+		}
+		return nil
+	}); err != nil {
 		return fmt.Errorf("delete cron job: %w", err)
 	}
 	if err := r.Reload(job.ID); err != nil {

@@ -233,4 +233,3 @@ func newCronAgentTestDB(t *testing.T) *gorm.DB {
 	t.Cleanup(func() { database.DB = prevDB })
 	return db
 }
-

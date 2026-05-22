@@ -662,6 +662,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 
 	ingested := 0
 	deleted := 0
+	tombstoneFailure := false
 	for _, entry := range parsed {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -670,6 +671,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 			n, err := s.deleteByScopeAndNameNoSync(entry.mem.Scope, entry.mem.Name)
 			if err != nil {
 				slog.Warn("memory ingest: tombstone delete", "scope", entry.mem.Scope, "name", entry.mem.Name, "err", err)
+				tombstoneFailure = true
 				continue
 			}
 			if n > 0 {
@@ -696,7 +698,10 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 	// subsumes the ingested/deleted cases (an upsert error or a tombstone
 	// for an unknown slug both leave the file in parsed without bumping
 	// the counters) and ensures the orphaned file gets purged regardless.
-	if len(parsed) > 0 {
+	// Skip the sync if any tombstone DB delete failed: SyncMemoryFiles
+	// would regenerate the canonical file and purge the tombstone from
+	// disk, making the failed deletion unretryable on the next ingest.
+	if len(parsed) > 0 && !tombstoneFailure {
 		if err := s.SyncMemoryFiles(); err != nil {
 			slog.Warn("memory ingest: post-batch sync failed", "err", err)
 		}
