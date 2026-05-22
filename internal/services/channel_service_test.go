@@ -26,6 +26,7 @@ func setupChannelServiceTest(t *testing.T) (*ChannelService, *gorm.DB) {
 		&database.Integration{},
 		&database.Channel{},
 		&database.CronJob{},
+		&database.CronJobTool{},
 	); err != nil {
 		t.Fatalf("automigrate: %v", err)
 	}
