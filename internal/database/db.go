@@ -784,15 +784,19 @@ func SeedSystemCronJobs() error {
 			IsSystem: true,
 			Enabled:  false, // operator opts in
 		}
-		if err := DB.Create(row).Error; err != nil {
-			return fmt.Errorf("seed system cron %s: %w", s.Name, err)
-		}
-		// GORM v2 omits zero-value bools from INSERT, so the column-level
-		// default:true would flip the seeded Enabled=false back to true. Pin
-		// it explicitly so a fresh install does NOT auto-run the system cron
-		// before the operator reviews it.
-		if err := DB.Model(row).Update("enabled", false).Error; err != nil {
-			return fmt.Errorf("pin seeded system cron %s to disabled: %w", s.Name, err)
+		// Wrap insert + enabled-pin in a transaction so a failed pin cannot
+		// leave the seeded row persisted with enabled=true (GORM v2 omits
+		// zero-value bools from INSERT, so the column default flips it).
+		if err := DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(row).Error; err != nil {
+				return fmt.Errorf("seed system cron %s: %w", s.Name, err)
+			}
+			if err := tx.Model(row).Update("enabled", false).Error; err != nil {
+				return fmt.Errorf("pin seeded system cron %s to disabled: %w", s.Name, err)
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
 		slog.Info("seeded system cron job", "name", s.Name, "enabled", false)
 	}
