@@ -273,6 +273,36 @@ func TestGenerateIncidentAgentsMd_ExcludesIncidentManager(t *testing.T) {
 	}
 }
 
+func TestGenerateIncidentAgentsMd_CronAgentHeader(t *testing.T) {
+	db := setupSkillTestDB(t)
+	svc := newTestSkillService(t, db)
+
+	tmpFile := filepath.Join(t.TempDir(), "AGENTS.md")
+	err := svc.generateAgentsMd(tmpFile, "cron-agent", "test-incident-uuid")
+	if err != nil {
+		t.Fatalf("generateAgentsMd failed: %v", err)
+	}
+
+	content, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	contentStr := string(content)
+	if !strings.Contains(contentStr, "# Cron Agent") {
+		t.Errorf("AGENTS.md should contain '# Cron Agent' header, got:\n%s", contentStr)
+	}
+	if strings.Contains(contentStr, "# Incident Manager") {
+		t.Errorf("AGENTS.md must not contain '# Incident Manager' for cron-agent, got:\n%s", contentStr)
+	}
+	if strings.Contains(contentStr, "Senior Incident Manager") {
+		t.Errorf("AGENTS.md must not contain incident-manager framing for cron-agent, got:\n%s", contentStr)
+	}
+	if !strings.Contains(contentStr, database.DefaultCronAgentPrompt[:50]) {
+		t.Errorf("AGENTS.md should embed DefaultCronAgentPrompt, got:\n%s", contentStr)
+	}
+}
+
 func TestGenerateSkillMd_NoPythonImports(t *testing.T) {
 	db := setupSkillTestDB(t)
 	svc := newTestSkillService(t, db)

@@ -881,15 +881,20 @@ func (r *CronRunner) UpdateJob(uuidStr string, patch CronJobUpdate) (*database.C
 	if len(updates) == 0 && !replaceTools {
 		return job, nil
 	}
-	if len(updates) > 0 {
-		if err := r.db.Model(&database.CronJob{}).Where("id = ?", job.ID).Updates(updates).Error; err != nil {
-			return nil, fmt.Errorf("update cron job: %w", err)
+	if err := r.db.Transaction(func(tx *gorm.DB) error {
+		if len(updates) > 0 {
+			if err := tx.Model(&database.CronJob{}).Where("id = ?", job.ID).Updates(updates).Error; err != nil {
+				return fmt.Errorf("update cron job: %w", err)
+			}
 		}
-	}
-	if replaceTools {
-		if err := r.db.Model(&database.CronJob{ID: job.ID}).Association("Tools").Replace(newTools); err != nil {
-			return nil, fmt.Errorf("update cron job tools: %w", err)
+		if replaceTools {
+			if err := tx.Model(&database.CronJob{ID: job.ID}).Association("Tools").Replace(newTools); err != nil {
+				return fmt.Errorf("update cron job tools: %w", err)
+			}
 		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	if err := r.Reload(job.ID); err != nil {
 		slog.Warn("failed to reload cron job after update", "uuid", job.UUID, "err", err)
@@ -908,6 +913,11 @@ func (r *CronRunner) DeleteJob(uuidStr string) error {
 	}
 	if job.IsSystem {
 		return ErrSystemCronImmutable
+	}
+	// Clear the m2m join rows first; the DB has no ON DELETE CASCADE so a
+	// hard delete would leave cron_job_tools rows pointing at the deleted ID.
+	if err := r.db.Model(&database.CronJob{ID: job.ID}).Association("Tools").Clear(); err != nil {
+		slog.Warn("failed to clear cron job tools before delete", "uuid", job.UUID, "err", err)
 	}
 	if err := r.db.Delete(&database.CronJob{}, job.ID).Error; err != nil {
 		return fmt.Errorf("delete cron job: %w", err)

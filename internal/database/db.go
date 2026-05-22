@@ -777,7 +777,7 @@ func SeedSystemCronJobs() error {
 		}
 
 		row := &CronJob{
-			UUID:     generateCronJobUUID(),
+			UUID:     uuid.New().String(),
 			Name:     s.Name,
 			Schedule: s.Schedule,
 			Prompt:   s.Prompt,
@@ -797,12 +797,6 @@ func SeedSystemCronJobs() error {
 		slog.Info("seeded system cron job", "name", s.Name, "enabled", false)
 	}
 	return nil
-}
-
-// generateCronJobUUID returns a fresh uuid string for a seeded cron row.
-// Kept as a tiny helper so the seed path reads declaratively.
-func generateCronJobUUID() string {
-	return uuid.New().String()
 }
 
 // InitializeSystemSkill creates the incident-manager system skill if it doesn't exist

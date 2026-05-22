@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -30,6 +31,7 @@ type mockCronJobManager struct {
 	lastPatch   *services.CronJobUpdate
 	lastRunUUID string
 	lastToolIDs []uint
+	createTools []database.ToolInstance
 }
 
 func (m *mockCronJobManager) ListJobs() ([]database.CronJob, error) {
@@ -63,6 +65,7 @@ func (m *mockCronJobManager) CreateJob(name, schedule, prompt string, channelUUI
 		Schedule: schedule,
 		Prompt:   prompt,
 		Enabled:  enabled,
+		Tools:    m.createTools,
 	}
 	m.lastCreated = row
 	m.jobs = append(m.jobs, *row)
@@ -519,8 +522,7 @@ func TestHandleCronJobByUUID_ServiceUnavailable(t *testing.T) {
 // CreateJob and verifies the response carries the per-cron Tools summary
 // for the UI.
 func TestHandleCronJobs_Create_WithTools(t *testing.T) {
-	mgr := &mockCronJobManagerWithTools{
-		mockCronJobManager: mockCronJobManager{},
+	mgr := &mockCronJobManager{
 		createTools: []database.ToolInstance{
 			{
 				ID:          11,
@@ -554,8 +556,8 @@ func TestHandleCronJobs_Create_WithTools(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	if diff := uintSliceDiff(mgr.lastToolIDs, []uint{11, 12}); diff != "" {
-		t.Fatalf("tool ids not propagated: %s", diff)
+	if !reflect.DeepEqual(mgr.lastToolIDs, []uint{11, 12}) {
+		t.Fatalf("tool ids not propagated: got %v, want [11 12]", mgr.lastToolIDs)
 	}
 
 	var got cronJobResponse
@@ -577,10 +579,8 @@ func TestHandleCronJobs_Create_WithTools(t *testing.T) {
 // distinguishes "leave tools alone" (field absent) from "replace tools"
 // (explicit slice) by passing a *[]uint through to CronJobUpdate.
 func TestHandleCronJobByUUID_Update_SwapsTools(t *testing.T) {
-	mgr := &mockCronJobManagerWithTools{
-		mockCronJobManager: mockCronJobManager{
-			jobs: []database.CronJob{{UUID: "u1", Name: "Daily"}},
-		},
+	mgr := &mockCronJobManager{
+		jobs: []database.CronJob{{UUID: "u1", Name: "Daily"}},
 	}
 	h := newHandlerWithCronManager(mgr)
 
@@ -598,8 +598,8 @@ func TestHandleCronJobByUUID_Update_SwapsTools(t *testing.T) {
 	if mgr.lastPatch == nil || mgr.lastPatch.ToolInstanceIDs == nil {
 		t.Fatalf("ToolInstanceIDs pointer not threaded through patch: %+v", mgr.lastPatch)
 	}
-	if diff := uintSliceDiff(*mgr.lastPatch.ToolInstanceIDs, []uint{42, 43}); diff != "" {
-		t.Fatalf("tools patch not propagated: %s", diff)
+	if !reflect.DeepEqual(*mgr.lastPatch.ToolInstanceIDs, []uint{42, 43}) {
+		t.Fatalf("tools patch not propagated: got %v, want [42 43]", *mgr.lastPatch.ToolInstanceIDs)
 	}
 }
 
@@ -607,10 +607,8 @@ func TestHandleCronJobByUUID_Update_SwapsTools(t *testing.T) {
 // PUT that omits tool_instance_ids leaves CronJobUpdate.ToolInstanceIDs nil
 // (the runner reads nil as "do not touch the per-cron tool allowlist").
 func TestHandleCronJobByUUID_Update_LeavesToolsAloneByDefault(t *testing.T) {
-	mgr := &mockCronJobManagerWithTools{
-		mockCronJobManager: mockCronJobManager{
-			jobs: []database.CronJob{{UUID: "u1", Name: "Daily"}},
-		},
+	mgr := &mockCronJobManager{
+		jobs: []database.CronJob{{UUID: "u1", Name: "Daily"}},
 	}
 	h := newHandlerWithCronManager(mgr)
 
@@ -746,45 +744,6 @@ func TestCronJobResponse_ExposesIsSystemAndTools(t *testing.T) {
 	}
 }
 
-// mockCronJobManagerWithTools layers tool tracking on top of mockCronJobManager
-// so a subset of tests can inspect what tool IDs were forwarded to the service
-// without complicating the simpler tests that don't care about tools.
-type mockCronJobManagerWithTools struct {
-	mockCronJobManager
-	createTools []database.ToolInstance
-}
-
-func (m *mockCronJobManagerWithTools) CreateJob(name, schedule, prompt string, channelUUID string, enabled bool, toolInstanceIDs []uint) (*database.CronJob, error) {
-	m.lastToolIDs = toolInstanceIDs
-	if m.createErr != nil {
-		return nil, m.createErr
-	}
-	row := &database.CronJob{
-		UUID:     "uuid-" + name,
-		Name:     name,
-		Schedule: schedule,
-		Prompt:   prompt,
-		Enabled:  enabled,
-		Tools:    m.createTools,
-	}
-	m.lastCreated = row
-	m.jobs = append(m.jobs, *row)
-	return row, nil
-}
-
-// uintSliceDiff returns a non-empty diff string when the slices disagree, so
-// table-driven assertions can fail fast with a useful message.
-func uintSliceDiff(got, want []uint) string {
-	if len(got) != len(want) {
-		return "len mismatch"
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			return "value mismatch"
-		}
-	}
-	return ""
-}
 
 // TestHandleCronJobs_ListMasksIntegrationCredentials asserts that
 // /api/cron-jobs does not echo plaintext Slack tokens back to the client.

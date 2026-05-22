@@ -157,6 +157,8 @@ Rules:
 - cron expressions are validated at write time; invalid schedules surface as 400
 - `CronRunner` survives tick failures and records `LastRunStatus=error` + `LastRunError`; never let one bad job take the runner down
 - manual fire is `POST /api/cron-jobs/{uuid}/run`; CRUD reloads the runner so schedule changes apply without restart
+- `CronJobTool` is the explicit join-table model for the `cron_job_tools` m2m; include it alongside `CronJob` in all `AutoMigrate` calls and in-memory test schema setups — GORM does not auto-discover it from the `many2many:` tag alone
+- `SpawnAgentInvocation(rootSkillName, ctx)` in `incident_service.go` is the shared entrypoint for all root-skill agent runs; add a new system root skill by: (1) seeding the skill row in `db.go`, (2) adding its hardcoded prompt constant alongside `DefaultCronAgentPrompt`, (3) adding the `rootSkillName` case to `GetSkillPrompt`, `UpdateSkillPrompt`, `RegenerateSkillMd`, `RegenerateAllSkillMds`, and `rootSkillHeader`
 
 ## Important Files by Responsibility
 
@@ -183,6 +185,7 @@ Rules:
 - `internal/services/slack_summarizer.go` - Slack-safe final output compression
 - `internal/services/channel_service.go` - Integrations/Channels CRUD, `ResolveDefault`, `ResolveForAlertSource`
 - `internal/services/cron_runner.go` - cron scheduler, per-cron agent tick path, reload-on-CRUD
+- `internal/services/incident_service.go` - `SpawnIncidentManager` / `SpawnAgentInvocation`, AGENTS.md generation (`generateAgentsMd`), per-root-skill prompt injection
 - `internal/messaging/` - `Provider`, `ProviderRegistry`, slack provider, telegram stub
 - `akmatori_data/agents/` - `runbook-searcher`, `memory-searcher`, `memory-writer` subagent definitions
 
@@ -211,6 +214,8 @@ Slack has hard byte limits. Any new Slack-facing summary or banner text must tru
 ### Keep tool routing indirect
 
 Do not teach agents to call tool implementations directly. They should go through `gateway_call`, with routing handled by logical instance names or instance hints.
+
+When passing a `ToolAllowlist` in an `AgentMessage` frame, never add `omitempty` to the JSON tag. An empty slice must serialize as `[]` so the gateway treats it as "reject all tool calls"; `null` (produced by `omitempty` on a nil slice) means "no allowlist active = allow all". This is critical for tool-less cron runs.
 
 ### Keep messaging provider-agnostic
 

@@ -218,7 +218,7 @@ type fakeIncidentUpdate struct {
 }
 
 func (f *fakeSkillIncidentManager) SpawnIncidentManager(ctx *IncidentContext) (string, string, error) {
-	return f.SpawnAgentInvocation("incident-manager", ctx)
+	panic("SpawnIncidentManager must not be called by cron runner — use SpawnAgentInvocation")
 }
 
 func (f *fakeSkillIncidentManager) SpawnAgentInvocation(rootSkillName string, ctx *IncidentContext) (string, string, error) {
@@ -845,6 +845,12 @@ func TestCronRunner_AgentTick_UsesCronAgentSkillAndPerCronTools(t *testing.T) {
 		t.Fatalf("expected one StartIncident call, got %d", len(agentRunner.startCalls))
 	}
 	call := agentRunner.startCalls[0]
+	if !strings.HasPrefix(call.task, "Current time:") {
+		t.Errorf("task must start with UTC time prefix, got: %q", call.task)
+	}
+	if !strings.Contains(call.task, "Summarize") {
+		t.Errorf("task must contain the job prompt, got: %q", call.task)
+	}
 	if len(call.skills) != 1 || call.skills[0] != "cron-agent" {
 		t.Errorf("StartIncident skills = %v, want [cron-agent]", call.skills)
 	}

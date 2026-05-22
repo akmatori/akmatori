@@ -130,7 +130,7 @@ func TestSeedSystemCronJobs_IdempotentAndPreservesOperatorState(t *testing.T) {
 	db := newCronAgentTestDB(t)
 
 	// First seed — row must be created disabled.
-	if err := seedSystemCronJobsViaPackage(); err != nil {
+	if err := database.SeedSystemCronJobs(); err != nil {
 		t.Fatalf("first seed: %v", err)
 	}
 	var rows []database.CronJob
@@ -175,7 +175,7 @@ func TestSeedSystemCronJobs_IdempotentAndPreservesOperatorState(t *testing.T) {
 		t.Fatalf("operator-edit schedule/prompt: %v", err)
 	}
 
-	if err := seedSystemCronJobsViaPackage(); err != nil {
+	if err := database.SeedSystemCronJobs(); err != nil {
 		t.Fatalf("second seed: %v", err)
 	}
 
@@ -200,7 +200,7 @@ func TestSeedSystemCronJobs_IdempotentAndPreservesOperatorState(t *testing.T) {
 	}
 
 	// Final sanity: still exactly one row after a third seed.
-	if err := seedSystemCronJobsViaPackage(); err != nil {
+	if err := database.SeedSystemCronJobs(); err != nil {
 		t.Fatalf("third seed: %v", err)
 	}
 	var count int64
@@ -233,9 +233,3 @@ func newCronAgentTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-// seedSystemCronJobsViaPackage delegates to the exported database seed.
-// Kept as a tiny indirection so future test plumbing changes only touch
-// this services package.
-func seedSystemCronJobsViaPackage() error {
-	return database.SeedSystemCronJobs()
-}
