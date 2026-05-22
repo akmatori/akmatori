@@ -124,8 +124,13 @@ func (s *ToolService) UpdateToolInstance(id uint, name string, logicalName strin
 	return nil
 }
 
-// DeleteToolInstance deletes a tool instance
+// DeleteToolInstance deletes a tool instance.
+// The DB has no ON DELETE CASCADE on cron_job_tools, so clear join rows first
+// to avoid a FK violation or orphaned allowlist entries.
 func (s *ToolService) DeleteToolInstance(id uint) error {
+	if err := s.db.Where("tool_instance_id = ?", id).Delete(&database.CronJobTool{}).Error; err != nil {
+		return fmt.Errorf("failed to delete tool instance: clear cron assignments: %w", err)
+	}
 	if err := s.db.Delete(&database.ToolInstance{}, id).Error; err != nil {
 		return fmt.Errorf("failed to delete tool instance: %w", err)
 	}
