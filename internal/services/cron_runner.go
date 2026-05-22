@@ -803,6 +803,18 @@ func (r *CronRunner) resolveToolInstances(ids []uint) ([]database.ToolInstance, 
 	if len(ids) == 0 {
 		return []database.ToolInstance{}, nil
 	}
+	// Deduplicate so a caller that sends [5, 5] doesn't produce a false
+	// "not found" from the len mismatch check below (the DB returns one row
+	// for IN (5, 5) while len(ids) == 2).
+	seen := make(map[uint]struct{}, len(ids))
+	deduped := ids[:0:0]
+	for _, id := range ids {
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			deduped = append(deduped, id)
+		}
+	}
+	ids = deduped
 	var tools []database.ToolInstance
 	if err := r.db.Preload("ToolType").Where("id IN ?", ids).Find(&tools).Error; err != nil {
 		return nil, fmt.Errorf("load cron job tools: %w", err)
