@@ -327,7 +327,7 @@ func (t *ClickHouseTool) executeQueryInternal(ctx context.Context, config *CHCon
 
 // cachedQuery executes a query with response caching
 func (t *ClickHouseTool) cachedQuery(ctx context.Context, incidentID, cacheKey string, ttl time.Duration, queryFn func() (string, error), logicalName ...string) (string, error) {
-	fullCacheKey := cacheKey
+	var fullCacheKey string
 	if len(logicalName) > 0 && logicalName[0] != "" {
 		fullCacheKey = fmt.Sprintf("logical:%s:%s", logicalName[0], cacheKey)
 	} else {

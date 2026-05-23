@@ -1139,12 +1139,6 @@ func TestRateLimiter_Integration(t *testing.T) {
 	limiter := ratelimit.New(10, 20)
 	tool.rateLimiter = limiter
 
-	config := &VMConfig{
-		URL:        "unused", // won't actually connect
-		AuthMethod: "none",
-		Timeout:    5,
-	}
-
 	// Verify the limiter allows requests through
 	initialTokens := limiter.Tokens()
 	if initialTokens <= 0 {
@@ -1157,7 +1151,7 @@ func TestRateLimiter_Integration(t *testing.T) {
 	if !ok {
 		t.Fatal("expected config in cache")
 	}
-	config = cachedConfig.(*VMConfig)
+	config := cachedConfig.(*VMConfig)
 
 	_, err := tool.doRequest(context.Background(), config, http.MethodGet, "/test", nil)
 	if err != nil {

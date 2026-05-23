@@ -25,58 +25,6 @@ func mockLoaderError() MCPServerConfigLoader {
 	}
 }
 
-// newTestHandler creates a ProxyHandler backed by a test pool and mock SSE server
-// that responds to tools/list and tools/call requests.
-func newTestHandler(t *testing.T, tools []mcp.Tool) (*ProxyHandler, *MCPConnectionPool, func()) {
-	t.Helper()
-
-	srv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
-		switch req.Method {
-		case "tools/list":
-			return mcp.NewResponse(req.ID, mcp.ListToolsResult{Tools: tools})
-		case "tools/call":
-			var params mcp.CallToolParams
-			json.Unmarshal(req.Params, &params)
-			return mcp.NewResponse(req.ID, mcp.CallToolResult{
-				Content: []mcp.Content{
-					mcp.NewTextContent(fmt.Sprintf("result from %s", params.Name)),
-				},
-			})
-		default:
-			return mcp.NewResponse(req.ID, nil)
-		}
-	})
-
-	pool := newTestPool(func(ctx context.Context, conn *MCPConnection) error {
-		return nil
-	})
-
-	handler := NewProxyHandler(pool, nil)
-
-	cleanup := func() {
-		handler.Stop()
-		pool.CloseAll()
-		srv.Close()
-	}
-
-	// Store the server URL for use in registrations
-	t.Cleanup(func() {
-		// In case cleanup wasn't called
-	})
-
-	// We need to return the server URL indirectly via a registration helper
-	// Store on the test context - but we can just pass it through
-	// Actually, let the caller build the registration with the URL
-	// So let's return the URL too. We'll modify the approach.
-
-	// Re-think: let's make the helper create registrations and load them
-
-	return handler, pool, func() {
-		cleanup()
-		// Also set the srvURL so tests can use it
-	}
-}
-
 func TestLoadAndRegister_DiscoverTools(t *testing.T) {
 	externalTools := []mcp.Tool{
 		{Name: "create_issue", Description: "Create a GitHub issue"},
@@ -729,13 +677,9 @@ func TestCallTool_GracefulErrorOnServerCrash(t *testing.T) {
 	}
 	handler.LoadAndRegister(context.Background(), mockLoader(regs))
 
-	// Call should return an error but NOT crash the gateway
-	_, err := handler.CallTool(context.Background(), "ext.fragile.fragile_tool", nil)
-	if err == nil {
-		// The error from the external server is a JSON-RPC error, not a transport error,
-		// so it may be returned as a non-nil result with isError.
-		// The important thing is the gateway didn't crash.
-	}
+	// The external server may return either a JSON-RPC error result or a transport
+	// error. The important assertion is that the gateway remains operational.
+	_, _ = handler.CallTool(context.Background(), "ext.fragile.fragile_tool", nil)
 	// Gateway is still operational
 	if handler.ToolCount() != 1 {
 		t.Errorf("expected handler to still have 1 tool registered, got %d", handler.ToolCount())
