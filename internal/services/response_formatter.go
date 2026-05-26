@@ -65,9 +65,13 @@ func validateFormatterResult(raw string) (*formatterResult, []string) {
 		return nil, []string{fmt.Sprintf("invalid JSON: %v", err)}
 	}
 
+	validStatuses := map[string]bool{"resolved": true, "unresolved": true, "escalate": true}
 	var errs []string
-	if strings.TrimSpace(r.Status) == "" {
+	statusVal := strings.ToLower(strings.TrimSpace(r.Status))
+	if statusVal == "" {
 		errs = append(errs, `"status" must be a non-empty string`)
+	} else if !validStatuses[statusVal] {
+		errs = append(errs, `"status" must be one of "resolved", "unresolved", or "escalate"`)
 	}
 	if strings.TrimSpace(r.Summary) == "" {
 		errs = append(errs, `"summary" must be a non-empty string`)

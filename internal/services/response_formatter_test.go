@@ -692,6 +692,22 @@ func TestValidateFormatterResult(t *testing.T) {
 			name: "fenced JSON with trailing text stripped",
 			raw:  "```json\n{\"status\":\"resolved\",\"summary\":\"ok\",\"actions_taken\":[],\"recommendations\":[]}\n```\nSome trailing comment.",
 		},
+		{
+			name:     "invalid status enum value",
+			raw:      `{"status":"escalated","summary":"ok","actions_taken":[],"recommendations":[]}`,
+			wantNil:  true,
+			wantErrs: []string{`"status" must be one of`},
+		},
+		{
+			name:     "status with trailing period fails enum check",
+			raw:      `{"status":"resolved.","summary":"ok","actions_taken":[],"recommendations":[]}`,
+			wantNil:  true,
+			wantErrs: []string{`"status" must be one of`},
+		},
+		{
+			name: "status enum check is case-insensitive",
+			raw:  `{"status":"Resolved","summary":"ok","actions_taken":[],"recommendations":[]}`,
+		},
 	}
 
 	for _, tt := range tests {
