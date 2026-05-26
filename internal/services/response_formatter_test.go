@@ -518,6 +518,9 @@ func TestResponseFormatter_RetryOnValidationFailure(t *testing.T) {
 	if !strings.Contains(caller.lastUser, "raw output") {
 		t.Errorf("expected retry user prompt to contain original raw response, got %q", caller.lastUser)
 	}
+	if !strings.Contains(caller.lastUser, "not valid json at all") {
+		t.Errorf("expected retry user prompt to include the failed first response, got %q", caller.lastUser)
+	}
 	if !strings.Contains(got, "Resolved") {
 		t.Errorf("expected rendered Slack output after successful retry, got %q", got)
 	}

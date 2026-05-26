@@ -73,13 +73,15 @@ func validateFormatterResult(raw string) (*formatterResult, []string) {
 	} else if !validStatuses[statusVal] {
 		errs = append(errs, `"status" must be one of "resolved", "unresolved", or "escalate"`)
 	}
-	if strings.TrimSpace(r.Summary) == "" {
+	summaryVal := strings.TrimSpace(r.Summary)
+	if summaryVal == "" {
 		errs = append(errs, `"summary" must be a non-empty string`)
 	}
 	if len(errs) > 0 {
 		return nil, errs
 	}
 	r.Status = statusVal
+	r.Summary = summaryVal
 	return &r, nil
 }
 
@@ -191,7 +193,8 @@ func (f *ResponseFormatter) Format(ctx context.Context, rawResponse, fullLog str
 
 	result, validationErrs := validateFormatterResult(formatted)
 	if len(validationErrs) > 0 {
-		retryUser := userPrompt + "\n\nThe previous response had validation errors:\n" +
+		retryUser := userPrompt + "\n\nYour previous response was:\n" + formatted +
+			"\n\nIt had validation errors:\n" +
 			strings.Join(validationErrs, "\n") +
 			"\nReturn only corrected JSON."
 		raw2, err2 := f.caller.OneShotLLM(ctx, worker, systemPrompt, retryUser, maxTokens, settings.Temperature)
@@ -201,10 +204,13 @@ func (f *ResponseFormatter) Format(ctx context.Context, rawResponse, fullLog str
 		}
 		formatted2 := strings.TrimSpace(raw2)
 		if formatted2 == "" {
+			slog.Warn("response formatter: retry returned empty response, using raw response")
 			return rawResponse
 		}
-		result, _ = validateFormatterResult(formatted2)
+		var secondErrs []string
+		result, secondErrs = validateFormatterResult(formatted2)
 		if result == nil {
+			slog.Warn("response formatter: retry response failed validation, using raw response", "errors", secondErrs)
 			return rawResponse
 		}
 	}
