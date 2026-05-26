@@ -64,8 +64,8 @@ func TestList_Empty(t *testing.T) {
 	if err := json.Unmarshal([]byte(result.(string)), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if resp.Count != 0 {
-		t.Errorf("expected 0 count, got %d", resp.Count)
+	if resp.Returned != 0 {
+		t.Errorf("expected 0 count, got %d", resp.Returned)
 	}
 	if len(resp.Incidents) != 0 {
 		t.Errorf("expected empty incidents slice")
@@ -92,8 +92,8 @@ func TestList_StatusFilter(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if resp.Count != 2 {
-		t.Errorf("expected 2 resolved, got %d", resp.Count)
+	if resp.Returned != 2 {
+		t.Errorf("expected 2 resolved, got %d", resp.Returned)
 	}
 	for _, inc := range resp.Incidents {
 		if inc.Status != "resolved" {
@@ -118,8 +118,8 @@ func TestList_SourceKindFilter(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if resp.Count != 1 {
-		t.Errorf("expected 1 cron, got %d", resp.Count)
+	if resp.Returned != 1 {
+		t.Errorf("expected 1 cron, got %d", resp.Returned)
 	}
 	if resp.Incidents[0].SourceKind != "cron" {
 		t.Errorf("expected source_kind cron, got %s", resp.Incidents[0].SourceKind)
@@ -150,8 +150,8 @@ func TestList_TimeRangeFilter(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if resp.Count != 1 {
-		t.Errorf("expected 1, got %d", resp.Count)
+	if resp.Returned != 1 {
+		t.Errorf("expected 1, got %d", resp.Returned)
 	}
 	if resp.Incidents[0].UUID != "uuid-2" {
 		t.Errorf("expected uuid-2, got %s", resp.Incidents[0].UUID)
@@ -193,8 +193,8 @@ func TestList_Offset(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if resp.Count != 2 {
-		t.Errorf("expected 2, got %d", resp.Count)
+	if resp.Returned != 2 {
+		t.Errorf("expected 2, got %d", resp.Returned)
 	}
 	if resp.Offset != 1 {
 		t.Errorf("expected offset 1, got %d", resp.Offset)

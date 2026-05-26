@@ -44,7 +44,7 @@ type incidentSummary struct {
 // listResponse is the JSON envelope returned by List.
 type listResponse struct {
 	Incidents []incidentSummary `json:"incidents"`
-	Count     int               `json:"count"`
+	Returned  int               `json:"returned"`
 	Limit     int               `json:"limit"`
 	Offset    int               `json:"offset"`
 }
@@ -121,7 +121,7 @@ func (t *IncidentsTool) List(ctx context.Context, _ string, args map[string]inte
 
 	resp := listResponse{
 		Incidents: summaries,
-		Count:     len(summaries),
+		Returned:  len(summaries),
 		Limit:     limit,
 		Offset:    offset,
 	}
