@@ -205,7 +205,7 @@ func (s *ToolService) EnsureToolTypes() error {
 		Settings:    database.JSONB{},
 		Enabled:     true,
 	}
-	if err := s.db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "logical_name"}}, DoNothing: true}).Create(&incidentsInstance).Error; err != nil {
+	if err := s.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&incidentsInstance).Error; err != nil {
 		return fmt.Errorf("failed to seed incidents tool instance: %w", err)
 	}
 	if err := s.db.Where("logical_name = ?", "incidents").First(&incidentsInstance).Error; err != nil {

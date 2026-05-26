@@ -177,7 +177,7 @@ func (t *IncidentsTool) Get(ctx context.Context, _ string, args map[string]inter
 
 	fullLog := inc.FullLog
 	if len(fullLog) > maxFullLog {
-		fullLog = strings.ToValidUTF8(fullLog[:maxFullLog], "")
+		fullLog = strings.ToValidUTF8(fullLog[:maxFullLog], "�")
 	}
 
 	detail := incidentDetail{

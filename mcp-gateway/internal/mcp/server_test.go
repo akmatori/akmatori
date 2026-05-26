@@ -1283,7 +1283,7 @@ func TestHandleCallTool_TypeOnlyAllowlist_IncidentsAuthorized(t *testing.T) {
 		InputSchema: InputSchema{Type: "object"},
 	}, func(_ context.Context, _ string, _ map[string]interface{}) (interface{}, error) {
 		called = true
-		return `{"incidents":[],"returned":0,"limit":50,"offset":0}`, nil
+		return `{"incidents":[],"count":0,"limit":50,"offset":0}`, nil
 	})
 
 	// Type-only entry: no InstanceID, no LogicalName — valid wildcard for credentialless namespace.
