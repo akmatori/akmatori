@@ -18,6 +18,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/tools/clickhouse"
 	"github.com/akmatori/mcp-gateway/internal/tools/grafana"
 	"github.com/akmatori/mcp-gateway/internal/tools/httpconnector"
+	"github.com/akmatori/mcp-gateway/internal/tools/incidents"
 	"github.com/akmatori/mcp-gateway/internal/tools/jira"
 	"github.com/akmatori/mcp-gateway/internal/tools/k8s"
 	"github.com/akmatori/mcp-gateway/internal/tools/netbox"
@@ -76,6 +77,7 @@ type Registry struct {
 	k8sLimit         *ratelimit.Limiter
 	jiraTool         *jira.JiraTool
 	jiraLimit        *ratelimit.Limiter
+	incidentsTool    *incidents.IncidentsTool
 
 	// HTTP connector state
 	httpExecutor       *httpconnector.HTTPConnectorExecutor
@@ -173,6 +175,9 @@ func (r *Registry) RegisterAllTools() {
 	// Register Jira tools with rate limiter
 	r.registerJiraTools()
 
+	// Register Incidents tools (no rate limiter — local DB queries)
+	r.registerIncidentsTools()
+
 	r.logger.Println("All tools registered")
 }
 
@@ -231,6 +236,7 @@ var builtInToolNamespaces = map[string]bool{
 	"netbox":           true,
 	"kubernetes":       true,
 	"jira":             true,
+	"incidents":        true,
 }
 
 // DefaultMCPProxyLoader loads MCP server configs from the database and converts them
@@ -4746,4 +4752,73 @@ func (r *Registry) registerJiraTools() {
 	)
 
 	r.logger.Println("Jira tools registered (13 methods)")
+}
+
+// registerIncidentsTools registers the incidents.list and incidents.get tools.
+// No rate limiter — these are local DB queries.
+func (r *Registry) registerIncidentsTools() {
+	r.incidentsTool = incidents.NewIncidentsTool(database.DB, r.logger)
+
+	// incidents.list
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "incidents.list",
+			Description: "List Akmatori incidents with optional filters. Returns summary fields only (no full log or response).",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"from": {
+						Type:        "integer",
+						Description: "Start of time range as Unix timestamp (inclusive, filters on started_at)",
+					},
+					"to": {
+						Type:        "integer",
+						Description: "End of time range as Unix timestamp (inclusive, filters on started_at)",
+					},
+					"status": {
+						Type:        "string",
+						Description: "Filter by incident status (e.g. open, resolved)",
+					},
+					"source_kind": {
+						Type:        "string",
+						Description: "Filter by source kind (e.g. alert, cron, slack)",
+					},
+					"limit": {
+						Type:        "integer",
+						Description: "Maximum number of incidents to return (default 50, max 200)",
+					},
+					"offset": {
+						Type:        "integer",
+						Description: "Number of incidents to skip for pagination",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.incidentsTool.List(ctx, incidentID, args)
+		},
+	)
+
+	// incidents.get
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "incidents.get",
+			Description: "Get full details for a single Akmatori incident by UUID. FullLog is truncated to 50,000 bytes if longer.",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"uuid": {
+						Type:        "string",
+						Description: "Incident UUID (required)",
+					},
+				},
+				Required: []string{"uuid"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.incidentsTool.Get(ctx, incidentID, args)
+		},
+	)
+
+	r.logger.Println("Incidents tools registered (2 methods)")
 }

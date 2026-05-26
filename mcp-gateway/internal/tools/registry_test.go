@@ -1073,3 +1073,80 @@ func TestRegisterJiraTools_StopCleanup(t *testing.T) {
 	registry.Stop()
 }
 
+// --- Incidents Tool Registration Tests ---
+
+func TestRegisterIncidentsTools_TwoToolsRegistered(t *testing.T) {
+	stdLogger := log.New(io.Discard, "", 0)
+	server := mcp.NewServer("test", "1.0.0", stdLogger)
+	registry := NewRegistry(server, stdLogger)
+
+	registry.registerIncidentsTools()
+
+	tools := server.Tools()
+	if _, ok := tools["incidents.list"]; !ok {
+		t.Error("expected 'incidents.list' to be registered")
+	}
+	if _, ok := tools["incidents.get"]; !ok {
+		t.Error("expected 'incidents.get' to be registered")
+	}
+}
+
+func TestRegisterIncidentsTools_ToolCount(t *testing.T) {
+	stdLogger := log.New(io.Discard, "", 0)
+	server := mcp.NewServer("test", "1.0.0", stdLogger)
+	registry := NewRegistry(server, stdLogger)
+
+	registry.registerIncidentsTools()
+
+	tools := server.Tools()
+	count := 0
+	for name := range tools {
+		if len(name) > 10 && name[:10] == "incidents." {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Errorf("expected 2 incidents tools, got %d", count)
+	}
+}
+
+func TestRegisterIncidentsTools_ListHasNoRequiredFields(t *testing.T) {
+	stdLogger := log.New(io.Discard, "", 0)
+	server := mcp.NewServer("test", "1.0.0", stdLogger)
+	registry := NewRegistry(server, stdLogger)
+
+	registry.registerIncidentsTools()
+
+	tool := server.Tools()["incidents.list"]
+	if len(tool.InputSchema.Required) != 0 {
+		t.Errorf("incidents.list: expected no required fields, got %v", tool.InputSchema.Required)
+	}
+	for _, param := range []string{"from", "to", "status", "source_kind", "limit", "offset"} {
+		if _, ok := tool.InputSchema.Properties[param]; !ok {
+			t.Errorf("incidents.list: expected property %q", param)
+		}
+	}
+}
+
+func TestRegisterIncidentsTools_GetRequiresUUID(t *testing.T) {
+	stdLogger := log.New(io.Discard, "", 0)
+	server := mcp.NewServer("test", "1.0.0", stdLogger)
+	registry := NewRegistry(server, stdLogger)
+
+	registry.registerIncidentsTools()
+
+	tool := server.Tools()["incidents.get"]
+	if len(tool.InputSchema.Required) != 1 || tool.InputSchema.Required[0] != "uuid" {
+		t.Errorf("incidents.get: expected required [uuid], got %v", tool.InputSchema.Required)
+	}
+	if _, ok := tool.InputSchema.Properties["uuid"]; !ok {
+		t.Error("incidents.get: expected 'uuid' property")
+	}
+}
+
+func TestBuiltInToolNamespaces_IncludesIncidents(t *testing.T) {
+	if !builtInToolNamespaces["incidents"] {
+		t.Error("expected 'incidents' in builtInToolNamespaces")
+	}
+}
+
