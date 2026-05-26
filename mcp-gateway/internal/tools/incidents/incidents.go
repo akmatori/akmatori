@@ -135,7 +135,6 @@ func (t *IncidentsTool) List(_ context.Context, _ string, args map[string]interf
 
 // incidentDetail is the get-view projection (excludes internal fields like WorkingDir, Context, SlackChannelID, etc.).
 type incidentDetail struct {
-	ID              uint       `json:"id"`
 	UUID            string     `json:"uuid"`
 	Source          string     `json:"source"`
 	SourceID        string     `json:"source_id"`
@@ -182,7 +181,6 @@ func (t *IncidentsTool) Get(_ context.Context, _ string, args map[string]interfa
 	}
 
 	detail := incidentDetail{
-		ID:              inc.ID,
 		UUID:            inc.UUID,
 		Source:          inc.Source,
 		SourceID:        inc.SourceID,

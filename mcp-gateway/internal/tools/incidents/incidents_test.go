@@ -200,13 +200,14 @@ func TestList_Offset(t *testing.T) {
 		t.Errorf("expected offset 1, got %d", resp.Offset)
 	}
 	// DESC order + offset=1: skips uuid-3 (newest), returns uuid-2 then uuid-1
-	if len(resp.Incidents) == 2 {
-		if resp.Incidents[0].UUID != "uuid-2" {
-			t.Errorf("expected uuid-2 at index 0, got %s", resp.Incidents[0].UUID)
-		}
-		if resp.Incidents[1].UUID != "uuid-1" {
-			t.Errorf("expected uuid-1 at index 1, got %s", resp.Incidents[1].UUID)
-		}
+	if len(resp.Incidents) != 2 {
+		t.Fatalf("expected 2 incidents, got %d", len(resp.Incidents))
+	}
+	if resp.Incidents[0].UUID != "uuid-2" {
+		t.Errorf("expected uuid-2 at index 0, got %s", resp.Incidents[0].UUID)
+	}
+	if resp.Incidents[1].UUID != "uuid-1" {
+		t.Errorf("expected uuid-1 at index 1, got %s", resp.Incidents[1].UUID)
 	}
 }
 
@@ -337,7 +338,7 @@ func TestGet_ExcludesInternalFields(t *testing.T) {
 	}
 	raw := result.(string)
 
-	for _, field := range []string{"working_dir", "slack_channel_id", "slack_message_ts"} {
+	for _, field := range []string{"working_dir", "slack_channel_id", "slack_message_ts", "context"} {
 		if strings.Contains(raw, `"`+field+`"`) {
 			t.Errorf("get result should not contain field %q", field)
 		}
