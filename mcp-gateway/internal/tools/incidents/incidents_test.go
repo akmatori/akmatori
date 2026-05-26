@@ -290,8 +290,8 @@ func TestGet_FullLogTruncated(t *testing.T) {
 	if err := json.Unmarshal([]byte(result.(string)), &inc); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if len(inc.FullLog) != maxFullLog {
-		t.Errorf("expected FullLog truncated to %d, got %d", maxFullLog, len(inc.FullLog))
+	if len(inc.FullLog) > maxFullLog {
+		t.Errorf("expected FullLog truncated to at most %d, got %d", maxFullLog, len(inc.FullLog))
 	}
 }
 

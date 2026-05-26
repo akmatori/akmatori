@@ -103,6 +103,8 @@ type Incident struct {
 	Context         JSONB      `gorm:"type:jsonb" json:"context"`
 	SessionID       string     `gorm:"index" json:"session_id"`
 	WorkingDir      string     `json:"working_dir"`
+	SlackChannelID  string     `gorm:"column:slack_channel_id" json:"slack_channel_id"`
+	SlackMessageTS  string     `gorm:"column:slack_message_ts" json:"slack_message_ts"`
 	FullLog         string     `gorm:"type:text" json:"full_log"`
 	Response        string     `gorm:"type:text" json:"response"`
 	TokensUsed      int        `json:"tokens_used"`
