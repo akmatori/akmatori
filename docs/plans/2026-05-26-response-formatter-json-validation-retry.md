@@ -28,13 +28,13 @@ Add structured JSON output enforcement to the response formatter: the LLM is ins
 **Files:**
 - Modify: `internal/services/response_formatter.go`
 
-- [ ] Add `formatterResult` struct with json tags: `Status`, `Summary string`; `ActionsTaken`, `Recommendations []string`
-- [ ] Add `formatterJSONInstruction` package-level const: appended to the system prompt, instructs the LLM to return a single JSON object with no fences, all four keys present, empty arrays allowed for list fields
-- [ ] Add `validateFormatterResult(raw string) (*formatterResult, []string)`: strips stray triple-backtick fences, calls `json.Unmarshal`, returns the parsed struct and a slice of validation-error strings; requires non-empty `status` and `summary` (empty `actions_taken`/`recommendations` arrays are valid)
-- [ ] Add `renderFormatterResult(r *formatterResult) string`: maps `formatterResult` to `output.FinalResult`, wraps it in `output.ParsedOutput{FinalResult: &fr}`, calls `output.FormatForSlack`; returns empty string on nil input
-- [ ] Update `Format()` to append `formatterJSONInstruction` to the system prompt before the `OneShotLLM` call; after receiving a non-empty response, call `validateFormatterResult`; on validation failure, issue one retry with the validation errors and "return only corrected JSON" appended to the user prompt; validate again; on second failure or retry-call error, return `rawResponse`; on success call `renderFormatterResult` and return the rendered string (empty render → raw fallback)
-- [ ] Preserve all existing early-return gates (nil caller, disabled, no LLM settings, no API key, no worker, empty output)
-- [ ] Run `make test` — must pass before Task 2
+- [x] Add `formatterResult` struct with json tags: `Status`, `Summary string`; `ActionsTaken`, `Recommendations []string`
+- [x] Add `formatterJSONInstruction` package-level const: appended to the system prompt, instructs the LLM to return a single JSON object with no fences, all four keys present, empty arrays allowed for list fields
+- [x] Add `validateFormatterResult(raw string) (*formatterResult, []string)`: strips stray triple-backtick fences, calls `json.Unmarshal`, returns the parsed struct and a slice of validation-error strings; requires non-empty `status` and `summary` (empty `actions_taken`/`recommendations` arrays are valid)
+- [x] Add `renderFormatterResult(r *formatterResult) string`: maps `formatterResult` to `output.FinalResult`, wraps it in `output.ParsedOutput{FinalResult: &fr}`, calls `output.FormatForSlack`; returns empty string on nil input
+- [x] Update `Format()` to append `formatterJSONInstruction` to the system prompt before the `OneShotLLM` call; after receiving a non-empty response, call `validateFormatterResult`; on validation failure, issue one retry with the validation errors and "return only corrected JSON" appended to the user prompt; validate again; on second failure or retry-call error, return `rawResponse`; on success call `renderFormatterResult` and return the rendered string (empty render → raw fallback)
+- [x] Preserve all existing early-return gates (nil caller, disabled, no LLM settings, no API key, no worker, empty output)
+- [x] Run `make test` — must pass before Task 2
 
 ### Task 2: Update DefaultFormattingPrompt in models_settings.go
 

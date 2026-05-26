@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/output"
 )
 
 // responseFormatterTimeout is the upper bound for a single format call when
@@ -20,6 +22,76 @@ const responseFormatterTimeout = 30 * time.Second
 // trace fed to the LLM. The reasoning trace is truncated from the start so the
 // portion immediately preceding the final answer stays in the prompt.
 const responseFormatterMaxInputBytes = 60_000
+
+// formatterJSONInstruction is appended to the system prompt to enforce a JSON
+// output contract. The formatter validates the returned JSON and retries once
+// on failure.
+const formatterJSONInstruction = `
+
+Return ONLY a single JSON object — no markdown fences, no preamble, no trailing text — with exactly these four keys:
+{
+  "status": "<resolved|unresolved|escalate>",
+  "summary": "<1-3 sentence description>",
+  "actions_taken": ["<action 1>", "..."],
+  "recommendations": ["<recommendation 1>", "..."]
+}
+"status" and "summary" must be non-empty strings. "actions_taken" and "recommendations" may be empty arrays.`
+
+// formatterResult is the JSON envelope the LLM must return when formatting is active.
+type formatterResult struct {
+	Status          string   `json:"status"`
+	Summary         string   `json:"summary"`
+	ActionsTaken    []string `json:"actions_taken"`
+	Recommendations []string `json:"recommendations"`
+}
+
+// validateFormatterResult strips stray code fences, unmarshals the JSON, and
+// validates required fields. Returns the parsed struct and any validation
+// errors; a non-nil struct is guaranteed when the error slice is empty.
+func validateFormatterResult(raw string) (*formatterResult, []string) {
+	s := strings.TrimSpace(raw)
+	if strings.HasPrefix(s, "```") {
+		nl := strings.Index(s, "\n")
+		if nl >= 0 {
+			s = s[nl+1:]
+		}
+		s = strings.TrimSuffix(strings.TrimSpace(s), "```")
+		s = strings.TrimSpace(s)
+	}
+
+	var r formatterResult
+	if err := json.Unmarshal([]byte(s), &r); err != nil {
+		return nil, []string{fmt.Sprintf("invalid JSON: %v", err)}
+	}
+
+	var errs []string
+	if strings.TrimSpace(r.Status) == "" {
+		errs = append(errs, `"status" must be a non-empty string`)
+	}
+	if strings.TrimSpace(r.Summary) == "" {
+		errs = append(errs, `"summary" must be a non-empty string`)
+	}
+	if len(errs) > 0 {
+		return nil, errs
+	}
+	return &r, nil
+}
+
+// renderFormatterResult maps a formatterResult to a Slack-formatted string via
+// output.FormatForSlack. Returns empty string on nil input.
+func renderFormatterResult(r *formatterResult) string {
+	if r == nil {
+		return ""
+	}
+	fr := output.FinalResult{
+		Status:          r.Status,
+		Summary:         r.Summary,
+		ActionsTaken:    r.ActionsTaken,
+		Recommendations: r.Recommendations,
+	}
+	po := &output.ParsedOutput{FinalResult: &fr}
+	return output.FormatForSlack(po)
+}
 
 // ResponseFormatter applies a configurable, global system prompt to the agent's
 // final incident response. It runs an extra one-shot LLM call with the raw
@@ -67,6 +139,7 @@ func (f *ResponseFormatter) Format(ctx context.Context, rawResponse, fullLog str
 			return rawResponse
 		}
 	}
+	systemPrompt += formatterJSONInstruction
 
 	llmSettings, err := database.GetLLMSettings()
 	if err != nil {
@@ -109,7 +182,32 @@ func (f *ResponseFormatter) Format(ctx context.Context, rawResponse, fullLog str
 	if formatted == "" {
 		return rawResponse
 	}
-	return formatted
+
+	result, validationErrs := validateFormatterResult(formatted)
+	if len(validationErrs) > 0 {
+		retryUser := userPrompt + "\n\nThe previous response had validation errors:\n" +
+			strings.Join(validationErrs, "\n") +
+			"\nReturn only corrected JSON."
+		raw2, err2 := f.caller.OneShotLLM(ctx, worker, systemPrompt, retryUser, maxTokens, settings.Temperature)
+		if err2 != nil {
+			slog.Warn("response formatter: retry call failed, using raw response", "err", err2)
+			return rawResponse
+		}
+		formatted2 := strings.TrimSpace(raw2)
+		if formatted2 == "" {
+			return rawResponse
+		}
+		result, _ = validateFormatterResult(formatted2)
+		if result == nil {
+			return rawResponse
+		}
+	}
+
+	rendered := renderFormatterResult(result)
+	if rendered == "" {
+		return rawResponse
+	}
+	return rendered
 }
 
 // buildFormatterUserPrompt assembles the user message with clearly delimited

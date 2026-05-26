@@ -92,19 +92,22 @@ func TestResponseFormatter_EmptyPromptUsesDefaultPrompt(t *testing.T) {
 	seedFormatterLLM(t, defaultLLMForFormatter())
 
 	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
-		return "formatted-default", nil
+		return `{"status":"resolved","summary":"Default prompt output.","actions_taken":[],"recommendations":[]}`, nil
 	}}
 
 	f := NewResponseFormatter(caller)
 	got := f.Format(context.Background(), "raw output", "full log")
-	if got != "formatted-default" {
-		t.Errorf("expected formatted output via default prompt, got %q", got)
+	if !strings.Contains(got, "Resolved") {
+		t.Errorf("expected rendered output via default prompt, got %q", got)
 	}
 	if caller.callCount() != 1 {
 		t.Fatalf("expected 1 LLM call when prompt is blank (default applied), got %d", caller.callCount())
 	}
-	if caller.lastSystem != strings.TrimSpace(database.DefaultFormattingPrompt) {
+	if !strings.Contains(caller.lastSystem, strings.TrimSpace(database.DefaultFormattingPrompt)) {
 		t.Errorf("expected blank stored prompt to fall back to DefaultFormattingPrompt, got %q", caller.lastSystem)
+	}
+	if !strings.Contains(caller.lastSystem, formatterJSONInstruction) {
+		t.Errorf("expected system prompt to contain JSON instruction suffix, got %q", caller.lastSystem)
 	}
 }
 
@@ -161,19 +164,28 @@ func TestResponseFormatter_HappyPathReturnsLLMOutput(t *testing.T) {
 	seedFormatterLLM(t, defaultLLMForFormatter())
 
 	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
-		return `{"status":"resolved","summary":"Failover succeeded."}`, nil
+		return `{"status":"resolved","summary":"Failover succeeded.","actions_taken":["Restarted service"],"recommendations":["Monitor logs"]}`, nil
 	}}
 
 	f := NewResponseFormatter(caller)
 	got := f.Format(context.Background(), "Raw final answer.", "step 1\nstep 2")
-	if got != `{"status":"resolved","summary":"Failover succeeded."}` {
-		t.Errorf("expected formatted output, got %q", got)
+	if !strings.Contains(got, "*Resolved*") {
+		t.Errorf("expected rendered Slack output with status, got %q", got)
+	}
+	if !strings.Contains(got, "*Summary*") {
+		t.Errorf("expected rendered Slack output with summary section, got %q", got)
+	}
+	if !strings.Contains(got, "Failover succeeded.") {
+		t.Errorf("expected summary text in rendered output, got %q", got)
 	}
 	if caller.callCount() != 1 {
 		t.Fatalf("expected 1 LLM call, got %d", caller.callCount())
 	}
-	if caller.lastSystem != "You are a strict JSON formatter." {
+	if !strings.Contains(caller.lastSystem, "You are a strict JSON formatter.") {
 		t.Errorf("system prompt not forwarded: %q", caller.lastSystem)
+	}
+	if !strings.Contains(caller.lastSystem, formatterJSONInstruction) {
+		t.Errorf("system prompt missing JSON instruction suffix: %q", caller.lastSystem)
 	}
 	if !strings.Contains(caller.lastUser, "--- Raw response ---") {
 		t.Errorf("user prompt missing raw response delimiter: %q", caller.lastUser)
@@ -209,12 +221,13 @@ func TestResponseFormatter_DefaultsMaxTokensWhenZero(t *testing.T) {
 	seedFormatterLLM(t, defaultLLMForFormatter())
 
 	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
-		return "formatted", nil
+		return `{"status":"resolved","summary":"formatted","actions_taken":[],"recommendations":[]}`, nil
 	}}
 
 	f := NewResponseFormatter(caller)
-	if got := f.Format(context.Background(), "raw", "log"); got != "formatted" {
-		t.Errorf("expected formatted output, got %q", got)
+	got := f.Format(context.Background(), "raw", "log")
+	if got == "" || got == "raw" {
+		t.Errorf("expected rendered formatted output, got %q", got)
 	}
 	if caller.lastMaxTok != 1500 {
 		t.Errorf("expected default max tokens 1500 when settings has 0, got %d", caller.lastMaxTok)
@@ -278,14 +291,14 @@ func TestResponseFormatter_PropagatesCallerDeadline(t *testing.T) {
 	seedFormatterLLM(t, defaultLLMForFormatter())
 
 	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
-		return "ok", nil
+		return `{"status":"resolved","summary":"ok","actions_taken":[],"recommendations":[]}`, nil
 	}}
 
 	parent, cancel := context.WithDeadline(context.Background(), time.Now().Add(2*time.Second))
 	defer cancel()
 
 	f := NewResponseFormatter(caller)
-	if got := f.Format(parent, "raw", "log"); got != "ok" {
+	if got := f.Format(parent, "raw", "log"); got == "" || got == "raw" {
 		t.Fatalf("unexpected output: %q", got)
 	}
 	if caller.contextSeen == nil {
@@ -310,11 +323,11 @@ func TestResponseFormatter_AppliesDefaultTimeout(t *testing.T) {
 	seedFormatterLLM(t, defaultLLMForFormatter())
 
 	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
-		return "ok", nil
+		return `{"status":"resolved","summary":"ok","actions_taken":[],"recommendations":[]}`, nil
 	}}
 
 	f := NewResponseFormatter(caller)
-	if got := f.Format(context.Background(), "raw", "log"); got != "ok" {
+	if got := f.Format(context.Background(), "raw", "log"); got == "" || got == "raw" {
 		t.Fatalf("unexpected output: %q", got)
 	}
 	if caller.contextSeen == nil {
@@ -336,7 +349,7 @@ func TestResponseFormatter_TruncatesLargeFullLog(t *testing.T) {
 	seedFormatterLLM(t, defaultLLMForFormatter())
 
 	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
-		return "ok", nil
+		return `{"status":"resolved","summary":"truncation test","actions_taken":[],"recommendations":[]}`, nil
 	}}
 
 	rawResp := "FINAL ANSWER"
@@ -349,7 +362,7 @@ func TestResponseFormatter_TruncatesLargeFullLog(t *testing.T) {
 	fullLog := opener + filler + trailer
 
 	f := NewResponseFormatter(caller)
-	if got := f.Format(context.Background(), rawResp, fullLog); got != "ok" {
+	if got := f.Format(context.Background(), rawResp, fullLog); got == "" || got == rawResp {
 		t.Fatalf("unexpected output: %q", got)
 	}
 	prompt := caller.lastUser
@@ -376,7 +389,7 @@ func TestResponseFormatter_TruncatesLargeRawResponse(t *testing.T) {
 	seedFormatterLLM(t, defaultLLMForFormatter())
 
 	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
-		return "ok", nil
+		return `{"status":"resolved","summary":"raw truncation test","actions_taken":[],"recommendations":[]}`, nil
 	}}
 
 	// Build a raw response that alone exceeds the cap. The opener marker must
@@ -388,7 +401,7 @@ func TestResponseFormatter_TruncatesLargeRawResponse(t *testing.T) {
 	rawResp := opener + filler + trailer
 
 	f := NewResponseFormatter(caller)
-	if got := f.Format(context.Background(), rawResp, "step 1"); got != "ok" {
+	if got := f.Format(context.Background(), rawResp, "step 1"); got == "" {
 		t.Fatalf("unexpected output: %q", got)
 	}
 	prompt := caller.lastUser
@@ -460,11 +473,11 @@ func TestResponseFormatter_OmitsReasoningSectionWhenEmpty(t *testing.T) {
 	seedFormatterLLM(t, defaultLLMForFormatter())
 
 	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
-		return "ok", nil
+		return `{"status":"resolved","summary":"ok","actions_taken":[],"recommendations":[]}`, nil
 	}}
 
 	f := NewResponseFormatter(caller)
-	if got := f.Format(context.Background(), "raw only", ""); got != "ok" {
+	if got := f.Format(context.Background(), "raw only", ""); got == "" || got == "raw only" {
 		t.Fatalf("unexpected output: %q", got)
 	}
 	if strings.Contains(caller.lastUser, "--- Full reasoning ---") {
