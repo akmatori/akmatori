@@ -8,6 +8,7 @@ type testValidateStruct struct {
 	Name     string `validate:"required,min=1,max=64"`
 	Category string `validate:"omitempty,oneof=system custom monitoring"`
 	Email    string `validate:"omitempty,email"`
+	URL      string `validate:"omitempty,url"`
 }
 
 func TestValidate_ValidInput(t *testing.T) {
@@ -66,6 +67,55 @@ func TestValidate_InvalidEmail(t *testing.T) {
 	}
 	if errs["email"] != "must be a valid email" {
 		t.Errorf("email error = %q, want %q", errs["email"], "must be a valid email")
+	}
+}
+
+func TestValidate_InvalidURL(t *testing.T) {
+	s := testValidateStruct{Name: "test", URL: "not-a-url"}
+	errs := Validate(s)
+	if errs == nil {
+		t.Fatal("expected validation errors")
+	}
+	if errs["u_r_l"] != "must be a valid URL" {
+		t.Errorf("url error = %q, want %q", errs["u_r_l"], "must be a valid URL")
+	}
+}
+
+func TestValidate_MultipleFieldErrors(t *testing.T) {
+	s := testValidateStruct{
+		Name:     "",
+		Category: "invalid",
+		Email:    "not-an-email",
+		URL:      "not-a-url",
+	}
+	errs := Validate(s)
+	if errs == nil {
+		t.Fatal("expected validation errors")
+	}
+
+	want := map[string]string{
+		"name":     "is required",
+		"category": "must be one of: system custom monitoring",
+		"email":    "must be a valid email",
+		"u_r_l":    "must be a valid URL",
+	}
+	for field, msg := range want {
+		if errs[field] != msg {
+			t.Errorf("%s error = %q, want %q", field, errs[field], msg)
+		}
+	}
+	if len(errs) != len(want) {
+		t.Errorf("error count = %d, want %d: %v", len(errs), len(want), errs)
+	}
+}
+
+func TestValidate_NonStructInputReturnsFallbackError(t *testing.T) {
+	errs := Validate(42)
+	if errs == nil {
+		t.Fatal("expected validation error")
+	}
+	if errs["_"] == "" {
+		t.Errorf("fallback error = %q, want non-empty message", errs["_"])
 	}
 }
 
