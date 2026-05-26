@@ -50,17 +50,17 @@ Add structured JSON output enforcement to the response formatter: the LLM is ins
 - Modify: `internal/services/response_formatter_test.go`
 - Modify: `internal/services/title_generator_test.go` (extend `fakeOneShotLLMCaller`)
 
-- [ ] Add sequenced-response support to `fakeOneShotLLMCaller` in `title_generator_test.go`: add a `responses []func(ctx context.Context) (string, error)` field; in `OneShotLLM` use the call index to pick from `responses` (falling back to `respond` when the slice is exhausted or nil)
-- [ ] Update `TestResponseFormatter_HappyPathReturnsLLMOutput`: LLM now returns valid JSON; assert `callCount()==1` and that the result contains rendered Slack sections (status emoji / `*Resolved*`, `*Summary*`, etc.) instead of raw JSON; assert system prompt contains `formatterJSONInstruction` suffix
-- [ ] Update `TestResponseFormatter_EmptyPromptUsesDefaultPrompt`: same — LLM returns valid JSON, result is rendered output
-- [ ] Add `TestResponseFormatter_RetryOnValidationFailure`: first call returns invalid JSON, second call returns valid JSON; assert `callCount()==2`, retry user prompt contains validation error strings, final result is rendered output
-- [ ] Add `TestResponseFormatter_FallbackAfterTwoValidationFailures`: both calls return invalid JSON; assert `callCount()==2`, result is raw response
-- [ ] Add `TestResponseFormatter_FallbackOnRetryCallError`: first call returns invalid JSON, second call returns `errors.New("boom")`; assert `callCount()==2`, result is raw response
-- [ ] Add `TestResponseFormatter_MissingRequiredFieldTriggersRetry`: first call returns JSON with empty `summary`, second call returns valid JSON; assert `callCount()==2`, final result is rendered
-- [ ] Add unit tests for `validateFormatterResult`: valid JSON, invalid JSON, fenced JSON (backtick-stripped), missing `status`, missing `summary`, empty arrays ok, completely empty string
-- [ ] Add unit tests for `renderFormatterResult`: nil input returns empty string, valid input returns non-empty rendered string containing status and summary content
-- [ ] Verify all existing passthrough tests still pass without modification
-- [ ] Run `make test` — must pass before Task 4
+- [x] Add sequenced-response support to `fakeOneShotLLMCaller` in `title_generator_test.go`: add a `responses []func(ctx context.Context) (string, error)` field; in `OneShotLLM` use the call index to pick from `responses` (falling back to `respond` when the slice is exhausted or nil)
+- [x] Update `TestResponseFormatter_HappyPathReturnsLLMOutput`: LLM now returns valid JSON; assert `callCount()==1` and that the result contains rendered Slack sections (status emoji / `*Resolved*`, `*Summary*`, etc.) instead of raw JSON; assert system prompt contains `formatterJSONInstruction` suffix
+- [x] Update `TestResponseFormatter_EmptyPromptUsesDefaultPrompt`: same — LLM returns valid JSON, result is rendered output
+- [x] Add `TestResponseFormatter_RetryOnValidationFailure`: first call returns invalid JSON, second call returns valid JSON; assert `callCount()==2`, retry user prompt contains validation error strings, final result is rendered output
+- [x] Add `TestResponseFormatter_FallbackAfterTwoValidationFailures`: both calls return invalid JSON; assert `callCount()==2`, result is raw response
+- [x] Add `TestResponseFormatter_FallbackOnRetryCallError`: first call returns invalid JSON, second call returns `errors.New("boom")`; assert `callCount()==2`, result is raw response
+- [x] Add `TestResponseFormatter_MissingRequiredFieldTriggersRetry`: first call returns JSON with empty `summary`, second call returns valid JSON; assert `callCount()==2`, final result is rendered
+- [x] Add unit tests for `validateFormatterResult`: valid JSON, invalid JSON, fenced JSON (backtick-stripped), missing `status`, missing `summary`, empty arrays ok, completely empty string
+- [x] Add unit tests for `renderFormatterResult`: nil input returns empty string, valid input returns non-empty rendered string containing status and summary content
+- [x] Verify all existing passthrough tests still pass without modification
+- [x] Run `make test` — must pass before Task 4
 
 ### Task 4: Verify acceptance criteria
 

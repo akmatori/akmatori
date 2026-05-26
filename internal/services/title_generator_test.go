@@ -21,17 +21,24 @@ type fakeOneShotLLMCaller struct {
 	lastTemp    float64
 	lastLLM     *LLMSettingsForWorker
 	respond     func(ctx context.Context) (string, error)
+	// responses provides per-call responses indexed by call order (0-based).
+	// When the call index is within bounds, responses[idx] is used. When
+	// exhausted or nil, respond is used as the fallback.
+	responses   []func(ctx context.Context) (string, error)
 	contextSeen context.Context
 }
 
 func (f *fakeOneShotLLMCaller) OneShotLLM(ctx context.Context, llm *LLMSettingsForWorker, system, user string, maxTokens int, temperature float64) (string, error) {
-	atomic.AddInt32(&f.calls, 1)
+	idx := int(atomic.AddInt32(&f.calls, 1)) - 1
 	f.lastSystem = system
 	f.lastUser = user
 	f.lastMaxTok = maxTokens
 	f.lastTemp = temperature
 	f.lastLLM = llm
 	f.contextSeen = ctx
+	if len(f.responses) > 0 && idx < len(f.responses) {
+		return f.responses[idx](ctx)
+	}
 	if f.respond == nil {
 		return "", nil
 	}

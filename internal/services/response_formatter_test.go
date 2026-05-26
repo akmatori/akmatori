@@ -488,6 +488,229 @@ func TestResponseFormatter_OmitsReasoningSectionWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestResponseFormatter_RetryOnValidationFailure(t *testing.T) {
+	setupFormatterTestDB(t)
+	seedFormatterSettings(t, database.FormattingSettings{Enabled: true, SystemPrompt: "Reformat.", MaxTokens: 1000, Temperature: 0.2})
+	seedFormatterLLM(t, defaultLLMForFormatter())
+
+	caller := &fakeOneShotLLMCaller{
+		responses: []func(ctx context.Context) (string, error){
+			func(ctx context.Context) (string, error) {
+				return "not valid json at all", nil
+			},
+			func(ctx context.Context) (string, error) {
+				return `{"status":"resolved","summary":"Fixed after retry.","actions_taken":[],"recommendations":[]}`, nil
+			},
+		},
+	}
+
+	f := NewResponseFormatter(caller)
+	got := f.Format(context.Background(), "raw output", "full log")
+	if caller.callCount() != 2 {
+		t.Fatalf("expected 2 LLM calls (initial + retry), got %d", caller.callCount())
+	}
+	if !strings.Contains(caller.lastUser, "validation errors") {
+		t.Errorf("expected retry user prompt to contain 'validation errors', got %q", caller.lastUser)
+	}
+	if !strings.Contains(caller.lastUser, "Return only corrected JSON") {
+		t.Errorf("expected retry user prompt to contain corrective instruction, got %q", caller.lastUser)
+	}
+	if !strings.Contains(got, "Resolved") {
+		t.Errorf("expected rendered Slack output after successful retry, got %q", got)
+	}
+	if !strings.Contains(got, "Fixed after retry.") {
+		t.Errorf("expected summary text in rendered output, got %q", got)
+	}
+}
+
+func TestResponseFormatter_FallbackAfterTwoValidationFailures(t *testing.T) {
+	setupFormatterTestDB(t)
+	seedFormatterSettings(t, database.FormattingSettings{Enabled: true, SystemPrompt: "Reformat.", MaxTokens: 1000, Temperature: 0.2})
+	seedFormatterLLM(t, defaultLLMForFormatter())
+
+	caller := &fakeOneShotLLMCaller{
+		responses: []func(ctx context.Context) (string, error){
+			func(ctx context.Context) (string, error) {
+				return "still not json", nil
+			},
+			func(ctx context.Context) (string, error) {
+				return "also not json", nil
+			},
+		},
+	}
+
+	f := NewResponseFormatter(caller)
+	got := f.Format(context.Background(), "raw output", "full log")
+	if caller.callCount() != 2 {
+		t.Fatalf("expected 2 LLM calls, got %d", caller.callCount())
+	}
+	if got != "raw output" {
+		t.Errorf("expected raw fallback after two validation failures, got %q", got)
+	}
+}
+
+func TestResponseFormatter_FallbackOnRetryCallError(t *testing.T) {
+	setupFormatterTestDB(t)
+	seedFormatterSettings(t, database.FormattingSettings{Enabled: true, SystemPrompt: "Reformat.", MaxTokens: 1000, Temperature: 0.2})
+	seedFormatterLLM(t, defaultLLMForFormatter())
+
+	caller := &fakeOneShotLLMCaller{
+		responses: []func(ctx context.Context) (string, error){
+			func(ctx context.Context) (string, error) {
+				return "not json", nil
+			},
+			func(ctx context.Context) (string, error) {
+				return "", errors.New("boom")
+			},
+		},
+	}
+
+	f := NewResponseFormatter(caller)
+	got := f.Format(context.Background(), "raw output", "full log")
+	if caller.callCount() != 2 {
+		t.Fatalf("expected 2 LLM calls, got %d", caller.callCount())
+	}
+	if got != "raw output" {
+		t.Errorf("expected raw fallback on retry error, got %q", got)
+	}
+}
+
+func TestResponseFormatter_MissingRequiredFieldTriggersRetry(t *testing.T) {
+	setupFormatterTestDB(t)
+	seedFormatterSettings(t, database.FormattingSettings{Enabled: true, SystemPrompt: "Reformat.", MaxTokens: 1000, Temperature: 0.2})
+	seedFormatterLLM(t, defaultLLMForFormatter())
+
+	caller := &fakeOneShotLLMCaller{
+		responses: []func(ctx context.Context) (string, error){
+			func(ctx context.Context) (string, error) {
+				return `{"status":"resolved","summary":"","actions_taken":[],"recommendations":[]}`, nil
+			},
+			func(ctx context.Context) (string, error) {
+				return `{"status":"resolved","summary":"Good summary.","actions_taken":[],"recommendations":[]}`, nil
+			},
+		},
+	}
+
+	f := NewResponseFormatter(caller)
+	got := f.Format(context.Background(), "raw output", "full log")
+	if caller.callCount() != 2 {
+		t.Fatalf("expected 2 LLM calls (missing field triggers retry), got %d", caller.callCount())
+	}
+	if !strings.Contains(got, "Resolved") {
+		t.Errorf("expected rendered output after retry, got %q", got)
+	}
+	if !strings.Contains(got, "Good summary.") {
+		t.Errorf("expected summary in rendered output, got %q", got)
+	}
+}
+
+func TestValidateFormatterResult(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      string
+		wantNil  bool
+		wantErrs []string
+	}{
+		{
+			name: "valid JSON",
+			raw:  `{"status":"resolved","summary":"All good.","actions_taken":["action1"],"recommendations":["rec1"]}`,
+		},
+		{
+			name:     "invalid JSON",
+			raw:      "not json at all",
+			wantNil:  true,
+			wantErrs: []string{"invalid JSON"},
+		},
+		{
+			name: "fenced JSON stripped",
+			raw:  "```json\n{\"status\":\"resolved\",\"summary\":\"ok\",\"actions_taken\":[],\"recommendations\":[]}\n```",
+		},
+		{
+			name:     "missing status",
+			raw:      `{"status":"","summary":"ok","actions_taken":[],"recommendations":[]}`,
+			wantNil:  true,
+			wantErrs: []string{`"status" must be a non-empty string`},
+		},
+		{
+			name:     "missing summary",
+			raw:      `{"status":"resolved","summary":"","actions_taken":[],"recommendations":[]}`,
+			wantNil:  true,
+			wantErrs: []string{`"summary" must be a non-empty string`},
+		},
+		{
+			name: "empty arrays ok",
+			raw:  `{"status":"resolved","summary":"all good","actions_taken":[],"recommendations":[]}`,
+		},
+		{
+			name:     "completely empty string",
+			raw:      "",
+			wantNil:  true,
+			wantErrs: []string{"invalid JSON"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, errs := validateFormatterResult(tt.raw)
+			if tt.wantNil {
+				if r != nil {
+					t.Errorf("expected nil result, got %+v", r)
+				}
+				if len(errs) == 0 {
+					t.Error("expected validation errors, got none")
+				}
+				for _, wantErr := range tt.wantErrs {
+					found := false
+					for _, e := range errs {
+						if strings.Contains(e, wantErr) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("expected error containing %q, got %v", wantErr, errs)
+					}
+				}
+			} else {
+				if r == nil {
+					t.Errorf("expected non-nil result, got nil with errors: %v", errs)
+				}
+				if len(errs) != 0 {
+					t.Errorf("expected no errors, got %v", errs)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderFormatterResult(t *testing.T) {
+	t.Run("nil input returns empty string", func(t *testing.T) {
+		got := renderFormatterResult(nil)
+		if got != "" {
+			t.Errorf("expected empty string for nil input, got %q", got)
+		}
+	})
+
+	t.Run("valid input returns rendered output with status and summary", func(t *testing.T) {
+		r := &formatterResult{
+			Status:          "resolved",
+			Summary:         "The incident was resolved successfully.",
+			ActionsTaken:    []string{"Restarted pod"},
+			Recommendations: []string{"Monitor logs"},
+		}
+		got := renderFormatterResult(r)
+		if got == "" {
+			t.Fatal("expected non-empty rendered output for valid input")
+		}
+		if !strings.Contains(got, "Resolved") {
+			t.Errorf("expected status in rendered output, got %q", got)
+		}
+		if !strings.Contains(got, "The incident was resolved successfully.") {
+			t.Errorf("expected summary in rendered output, got %q", got)
+		}
+	})
+}
+
 func TestNewResponseFormatter(t *testing.T) {
 	if f := NewResponseFormatter(nil); f == nil {
 		t.Fatal("NewResponseFormatter(nil) returned nil")
