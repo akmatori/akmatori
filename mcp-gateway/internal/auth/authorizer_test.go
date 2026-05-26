@@ -356,7 +356,15 @@ func TestAuthorizer_IncidentsTypeOnlyAllowlist_AuthorizesNamespace(t *testing.T)
 
 	// Type-only match should authorize any call to the incidents namespace
 	if !a.IsAuthorized("incident-1", "incidents", 0, "") {
-		t.Error("expected authorized: type-only incidents allowlist entry")
+		t.Error("expected authorized: type-only incidents allowlist entry, no instance")
+	}
+	// Type-only must also authorize when caller specifies the logical name explicitly
+	if !a.IsAuthorized("incident-1", "incidents", 0, "incidents") {
+		t.Error("expected authorized: type-only incidents allowlist entry, with logical name")
+	}
+	// Type-only must also authorize when caller specifies an instance ID
+	if !a.IsAuthorized("incident-1", "incidents", 42, "") {
+		t.Error("expected authorized: type-only incidents allowlist entry, with instance ID")
 	}
 
 	// Other tool types must still be rejected

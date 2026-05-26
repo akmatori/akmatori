@@ -108,7 +108,7 @@ func IsAuthorizedFromEntries(entries []AllowlistEntry, toolType string, instance
 
 	if instanceID > 0 && logicalName != "" {
 		for _, e := range entries {
-			if e.InstanceID == instanceID && e.LogicalName == logicalName && e.ToolType == toolType {
+			if e.ToolType == toolType && ((e.InstanceID == instanceID && e.LogicalName == logicalName) || (e.InstanceID == 0 && e.LogicalName == "")) {
 				return true
 			}
 		}
@@ -117,7 +117,7 @@ func IsAuthorizedFromEntries(entries []AllowlistEntry, toolType string, instance
 
 	if instanceID > 0 {
 		for _, e := range entries {
-			if e.InstanceID == instanceID && e.ToolType == toolType {
+			if e.ToolType == toolType && (e.InstanceID == instanceID || (e.InstanceID == 0 && e.LogicalName == "")) {
 				return true
 			}
 		}
@@ -126,7 +126,7 @@ func IsAuthorizedFromEntries(entries []AllowlistEntry, toolType string, instance
 
 	if logicalName != "" {
 		for _, e := range entries {
-			if e.LogicalName == logicalName && e.ToolType == toolType {
+			if e.ToolType == toolType && (e.LogicalName == logicalName || (e.InstanceID == 0 && e.LogicalName == "")) {
 				return true
 			}
 		}

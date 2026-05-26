@@ -244,7 +244,7 @@ func TestGet_Found(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var inc database.Incident
+	var inc incidentDetail
 	if err := json.Unmarshal([]byte(result.(string)), &inc); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestGet_FullLogTruncated(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var inc database.Incident
+	var inc incidentDetail
 	if err := json.Unmarshal([]byte(result.(string)), &inc); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestGet_IgnoresIncidentID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	var inc database.Incident
+	var inc incidentDetail
 	if err := json.Unmarshal([]byte(result.(string)), &inc); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
