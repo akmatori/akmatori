@@ -1156,6 +1156,120 @@ func TestHandleGetToolDetail_NoAllowlistReturnsAllInstances(t *testing.T) {
 	}
 }
 
+func TestHandleListToolsByType_TypeOnlyAllowlist_AuthorizesAllInstances(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.SetDiscoverer(&mockDiscoverer{
+		tools: []ToolListItem{
+			{Name: "incidents.list", Description: "List incidents", ToolType: "incidents"},
+			{Name: "incidents.get", Description: "Get incident", ToolType: "incidents"},
+			{Name: "ssh.execute_command", Description: "Execute command", ToolType: "ssh"},
+		},
+	})
+	s.SetInstanceLookup(func(toolType string) []ToolDetailInstance {
+		if toolType == "incidents" {
+			return []ToolDetailInstance{
+				{ID: 1, LogicalName: "incidents", Name: "Incidents"},
+			}
+		}
+		if toolType == "ssh" {
+			return []ToolDetailInstance{
+				{ID: 2, LogicalName: "prod-ssh", Name: "Production SSH"},
+			}
+		}
+		return nil
+	})
+
+	// Type-only entry: no InstanceID, no LogicalName — authorizes all instances of that type.
+	allowlist := []auth.AllowlistEntry{
+		{ToolType: "incidents"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/list_by_type",
+		ListToolsByTypeParams{ToolType: "incidents"},
+		map[string]string{
+			"X-Incident-ID":    "incident-typeonly-1",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result ListToolsByTypeResult
+	json.Unmarshal(resultBytes, &result)
+
+	if len(result.Tools) == 0 {
+		t.Fatal("expected incidents tools to be included with type-only allowlist entry")
+	}
+	for _, tool := range result.Tools {
+		if tool.ToolType != "incidents" {
+			t.Errorf("expected only incidents tools, got %q", tool.ToolType)
+		}
+		// Type-only entry must not strip instances.
+		if len(tool.Instances) == 0 {
+			t.Errorf("type-only allowlist entry should preserve all instances, got none for %q", tool.Name)
+		}
+	}
+}
+
+func TestHandleGetToolDetail_TypeOnlyAllowlist_AuthorizesAllInstances(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	s.SetDiscoverer(&mockDiscoverer{
+		detail: &GetToolDetailResult{
+			Name:        "incidents.list",
+			Description: "List incidents",
+			ToolType:    "incidents",
+			InputSchema: InputSchema{Type: "object"},
+		},
+	})
+	s.SetInstanceLookup(func(toolType string) []ToolDetailInstance {
+		if toolType == "incidents" {
+			return []ToolDetailInstance{
+				{ID: 1, LogicalName: "incidents", Name: "Incidents"},
+			}
+		}
+		return nil
+	})
+
+	// Type-only entry: no InstanceID, no LogicalName — authorizes all instances of that type.
+	allowlist := []auth.AllowlistEntry{
+		{ToolType: "incidents"},
+	}
+	allowlistJSON, _ := json.Marshal(allowlist)
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/detail",
+		GetToolDetailParams{ToolName: "incidents.list"},
+		map[string]string{
+			"X-Incident-ID":    "incident-typeonly-2",
+			"X-Tool-Allowlist": string(allowlistJSON),
+		},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result GetToolDetailResult
+	json.Unmarshal(resultBytes, &result)
+
+	if len(result.Instances) != 1 {
+		t.Fatalf("expected 1 instance with type-only allowlist, got %d", len(result.Instances))
+	}
+	if result.Instances[0].LogicalName != "incidents" {
+		t.Errorf("expected instance 'incidents', got %q", result.Instances[0].LogicalName)
+	}
+}
+
 // --- tools/list_types tests ---
 
 func TestHandleListToolTypes_ReturnsTypes(t *testing.T) {

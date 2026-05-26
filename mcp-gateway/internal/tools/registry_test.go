@@ -1091,7 +1091,6 @@ func TestRegisterIncidentsTools_TwoToolsRegistered(t *testing.T) {
 	}
 }
 
-
 func TestRegisterIncidentsTools_ListHasNoRequiredFields(t *testing.T) {
 	stdLogger := log.New(io.Discard, "", 0)
 	server := mcp.NewServer("test", "1.0.0", stdLogger)
