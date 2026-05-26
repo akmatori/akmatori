@@ -177,7 +177,12 @@ func (t *IncidentsTool) Get(ctx context.Context, _ string, args map[string]inter
 
 	fullLog := inc.FullLog
 	if len(fullLog) > maxFullLog {
-		fullLog = strings.ToValidUTF8(fullLog[:maxFullLog], "�")
+		// Drop any incomplete multi-byte sequence at the boundary; empty
+		// replacement keeps the result within maxFullLog bytes.
+		fullLog = strings.ToValidUTF8(fullLog[:maxFullLog], "")
+		if len(fullLog) > maxFullLog {
+			fullLog = fullLog[:maxFullLog]
+		}
 	}
 
 	detail := incidentDetail{
