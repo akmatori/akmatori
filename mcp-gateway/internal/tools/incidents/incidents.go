@@ -133,8 +133,30 @@ func (t *IncidentsTool) List(_ context.Context, _ string, args map[string]interf
 	return string(b), nil
 }
 
+// incidentDetail is the get-view projection (excludes internal fields like WorkingDir, Context, SlackChannelID, etc.).
+type incidentDetail struct {
+	ID              uint       `json:"id"`
+	UUID            string     `json:"uuid"`
+	Source          string     `json:"source"`
+	SourceID        string     `json:"source_id"`
+	SourceKind      string     `json:"source_kind"`
+	SourceUUID      string     `json:"source_uuid"`
+	Title           string     `json:"title"`
+	Status          string     `json:"status"`
+	SessionID       string     `json:"session_id"`
+	FullLog         string     `json:"full_log"`
+	Response        string     `json:"response"`
+	TokensUsed      int        `json:"tokens_used"`
+	ExecutionTimeMs int64      `json:"execution_time_ms"`
+	StartedAt       time.Time  `json:"started_at"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
 // Get returns the full incident record for the given uuid.
 // FullLog is truncated to 50,000 bytes if longer.
+// Internal fields (WorkingDir, Context, SlackChannelID, SlackMessageTS) are omitted.
 // incidentID is ignored — this tool queries by the uuid arg.
 func (t *IncidentsTool) Get(_ context.Context, _ string, args map[string]interface{}) (interface{}, error) {
 	uuidVal, ok := args["uuid"]
@@ -154,11 +176,32 @@ func (t *IncidentsTool) Get(_ context.Context, _ string, args map[string]interfa
 		return nil, err
 	}
 
-	if len(inc.FullLog) > maxFullLog {
-		inc.FullLog = strings.ToValidUTF8(inc.FullLog[:maxFullLog], "")
+	fullLog := inc.FullLog
+	if len(fullLog) > maxFullLog {
+		fullLog = strings.ToValidUTF8(fullLog[:maxFullLog], "")
 	}
 
-	b, err := json.Marshal(inc)
+	detail := incidentDetail{
+		ID:              inc.ID,
+		UUID:            inc.UUID,
+		Source:          inc.Source,
+		SourceID:        inc.SourceID,
+		SourceKind:      inc.SourceKind,
+		SourceUUID:      inc.SourceUUID,
+		Title:           inc.Title,
+		Status:          inc.Status,
+		SessionID:       inc.SessionID,
+		FullLog:         fullLog,
+		Response:        inc.Response,
+		TokensUsed:      inc.TokensUsed,
+		ExecutionTimeMs: inc.ExecutionTimeMs,
+		StartedAt:       inc.StartedAt,
+		CompletedAt:     inc.CompletedAt,
+		CreatedAt:       inc.CreatedAt,
+		UpdatedAt:       inc.UpdatedAt,
+	}
+
+	b, err := json.Marshal(detail)
 	if err != nil {
 		return nil, err
 	}

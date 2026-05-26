@@ -325,6 +325,25 @@ func TestGet_NonStringUUID(t *testing.T) {
 	}
 }
 
+func TestGet_ExcludesInternalFields(t *testing.T) {
+	db := newTestDB(t)
+	tool := newTool(db)
+
+	insertIncident(t, db, "uuid-internal", "Internal Test", "resolved", "alert", "", baseTime, "log")
+
+	result, err := tool.Get(context.Background(), "", map[string]interface{}{"uuid": "uuid-internal"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	raw := result.(string)
+
+	for _, field := range []string{"working_dir", "slack_channel_id", "slack_message_ts"} {
+		if strings.Contains(raw, `"`+field+`"`) {
+			t.Errorf("get result should not contain field %q", field)
+		}
+	}
+}
+
 func TestGet_IgnoresIncidentID(t *testing.T) {
 	db := newTestDB(t)
 	tool := newTool(db)

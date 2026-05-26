@@ -631,16 +631,26 @@ func filterToolsByAllowlist(results []ToolListItem, allowlist []auth.AllowlistEn
 		}
 		// Also filter the instance names to only authorized ones
 		if len(item.Instances) > 0 {
-			authorizedNames := make([]string, 0)
-			for _, name := range item.Instances {
-				for _, e := range allowlist {
-					if e.ToolType == item.ToolType && e.LogicalName == name {
-						authorizedNames = append(authorizedNames, name)
-						break
-					}
+			// Type-only entry (no InstanceID, no LogicalName) authorizes all instances.
+			typeOnly := false
+			for _, e := range allowlist {
+				if e.ToolType == item.ToolType && e.InstanceID == 0 && e.LogicalName == "" {
+					typeOnly = true
+					break
 				}
 			}
-			item.Instances = authorizedNames
+			if !typeOnly {
+				authorizedNames := make([]string, 0)
+				for _, name := range item.Instances {
+					for _, e := range allowlist {
+						if e.ToolType == item.ToolType && e.LogicalName == name {
+							authorizedNames = append(authorizedNames, name)
+							break
+						}
+					}
+				}
+				item.Instances = authorizedNames
+			}
 		}
 		filtered = append(filtered, item)
 	}
@@ -652,7 +662,15 @@ func filterInstancesByAllowlist(instances []ToolDetailInstance, toolType string,
 	filtered := make([]ToolDetailInstance, 0, len(instances))
 	for _, inst := range instances {
 		for _, e := range allowlist {
-			if e.ToolType == toolType && (e.InstanceID == inst.ID || (e.LogicalName != "" && e.LogicalName == inst.LogicalName)) {
+			if e.ToolType != toolType {
+				continue
+			}
+			// Type-only entry (no InstanceID, no LogicalName) authorizes all instances of this type.
+			if e.InstanceID == 0 && e.LogicalName == "" {
+				filtered = append(filtered, inst)
+				break
+			}
+			if e.InstanceID == inst.ID || (e.LogicalName != "" && e.LogicalName == inst.LogicalName) {
 				filtered = append(filtered, inst)
 				break
 			}
