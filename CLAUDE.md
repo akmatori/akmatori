@@ -142,6 +142,18 @@ Rules:
 - webhook handlers must fetch the instance, reject disabled rows, find the registered adapter by source type, validate the secret, then parse the body
 - adapter integration tests should use the real `AlertService` plus the real adapter for at least one happy path, bad-secret path, and malformed-payload path
 
+### Incidents tool (built-in, credential-less)
+
+The `incidents` tool exposes `incidents.list` and `incidents.get` for read-only access to Akmatori's own incident records. It is the only built-in tool that queries the gateway's own DB connection (`database.DB`) directly rather than proxying to an external service.
+
+Rules:
+- `EnsureToolTypes()` seeds both the `ToolType` and a single `ToolInstance` (logical name `"incidents"`, Name `"Incidents"`, empty Settings) so the tool appears in all pickers with zero operator configuration
+- the seeded instance never requires credentials — do not add auth fields to it
+- the tool is registered in `registry.go` via `registerIncidentsTools()` with no rate limiter
+- `incidents` is in `builtInToolNamespaces`; the auth allowlist entry shape is `{ToolType: "incidents"}` (no InstanceID/LogicalName)
+- `List` returns summary fields only (no `full_log`/`response`); `Get` returns the full record with `full_log` truncated to 50,000 bytes
+- when adding another credential-less built-in tool, follow the same seed pattern in `EnsureToolTypes()` and the same `registerXxxTools()` pattern in `registry.go`
+
 ### Cron jobs
 
 Cron jobs run on a per-job schedule, target a Channel, and always execute as a full agent investigation under the `cron-agent` system skill. The legacy `oneshot` mode and `description` field have been removed.
@@ -290,6 +302,7 @@ Keep this file aligned with these current realities:
 - messaging is now Integrations + Channels; outbound posting routes through `ProviderRegistry`; the legacy `SlackSettings.AlertsChannel` fallback is gone and `/api/settings/slack` returns 410 Gone
 - cron jobs (`/api/cron-jobs`) always run as full agent investigations under the `cron-agent` system skill with a per-cron tool allowlist; system crons (e.g. seeded `memory-curator`) cannot be deleted; `CronRunner` boots from `cmd/akmatori/main.go`
 - alert-source webhooks use adapter-specific secret validation before parsing; explicit notification channels must resolve to `can_post=true` Channels
+- the built-in `incidents` tool (`incidents.list`, `incidents.get`) is seeded at boot by `EnsureToolTypes()` with a credential-less instance and queries the gateway DB directly; no operator setup required
 
 ## When Editing This File
 

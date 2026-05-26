@@ -726,6 +726,20 @@ gateway_call("jira.transition_issue", {"key": "OPS-1234", "transition_id": "31"}
 gateway_call("jira.create_issue", {"project_key": "OPS", "issue_type": "Incident", "summary": "Disk usage > 90%%", "labels": ["prod", "urgent"]}, "%s")
 `+"```"+`
 `, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
+	case "incidents":
+		return fmt.Sprintf(`
+**Parameters:**
+- `+"`list`"+`: from (unix timestamp int), to (unix timestamp int), status (string), source_kind (string), limit (int, default 50, max 200), offset (int)
+- `+"`get`"+`: uuid* (string)
+(* = required)
+
+Usage (via gateway_call):
+`+"```"+`
+gateway_call("incidents.list", {"status": "resolved", "source_kind": "alert", "limit": 50}, "%s")
+gateway_call("incidents.list", {"from": 1700000000, "to": 1700086400}, "%s")
+gateway_call("incidents.get", {"uuid": "<incident-uuid>"}, "%s")
+`+"```"+`
+`, logicalName, logicalName, logicalName)
 	default:
 		return fmt.Sprintf("Use `gateway_call(\"%s.<tool_method>\", {<args>}, \"%s\")` to call this tool's methods.\n", typeName, logicalName)
 	}

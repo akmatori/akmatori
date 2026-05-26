@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/akmatori/mcp-gateway/internal/database"
@@ -85,12 +86,12 @@ func (t *IncidentsTool) List(_ context.Context, _ string, args map[string]interf
 		}
 	}
 	if v, ok := args["from"]; ok {
-		if ts := toInt64(v, 0); ts > 0 {
+		if ts := int64(toInt(v, 0)); ts > 0 {
 			q = q.Where("started_at >= ?", time.Unix(ts, 0))
 		}
 	}
 	if v, ok := args["to"]; ok {
-		if ts := toInt64(v, 0); ts > 0 {
+		if ts := int64(toInt(v, 0)); ts > 0 {
 			q = q.Where("started_at <= ?", time.Unix(ts, 0))
 		}
 	}
@@ -154,7 +155,7 @@ func (t *IncidentsTool) Get(_ context.Context, _ string, args map[string]interfa
 	}
 
 	if len(inc.FullLog) > maxFullLog {
-		inc.FullLog = inc.FullLog[:maxFullLog]
+		inc.FullLog = strings.ToValidUTF8(inc.FullLog[:maxFullLog], "")
 	}
 
 	b, err := json.Marshal(inc)
@@ -177,15 +178,3 @@ func toInt(v interface{}, def int) int {
 	return def
 }
 
-// toInt64 safely extracts an int64 from interface{}, returning def on failure.
-func toInt64(v interface{}, def int64) int64 {
-	switch n := v.(type) {
-	case int:
-		return int64(n)
-	case int64:
-		return n
-	case float64:
-		return int64(n)
-	}
-	return def
-}

@@ -359,11 +359,6 @@ func TestAuthorizer_IncidentsTypeOnlyAllowlist_AuthorizesNamespace(t *testing.T)
 		t.Error("expected authorized: type-only incidents allowlist entry")
 	}
 
-	// With just a logical name still authorized (branch 5 falls through to branch 6 when no logicalName match exists — actually branch 5 requires logicalName match, so we use 0/"" to hit branch 6)
-	if !a.IsAuthorized("incident-1", "incidents", 0, "") {
-		t.Error("expected authorized for incidents with no instanceID/logicalName")
-	}
-
 	// Other tool types must still be rejected
 	if a.IsAuthorized("incident-1", "ssh", 0, "") {
 		t.Error("expected unauthorized for ssh when only incidents is in allowlist")

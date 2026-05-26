@@ -1091,24 +1091,6 @@ func TestRegisterIncidentsTools_TwoToolsRegistered(t *testing.T) {
 	}
 }
 
-func TestRegisterIncidentsTools_ToolCount(t *testing.T) {
-	stdLogger := log.New(io.Discard, "", 0)
-	server := mcp.NewServer("test", "1.0.0", stdLogger)
-	registry := NewRegistry(server, stdLogger)
-
-	registry.registerIncidentsTools()
-
-	tools := server.Tools()
-	count := 0
-	for name := range tools {
-		if len(name) > 10 && name[:10] == "incidents." {
-			count++
-		}
-	}
-	if count != 2 {
-		t.Errorf("expected 2 incidents tools, got %d", count)
-	}
-}
 
 func TestRegisterIncidentsTools_ListHasNoRequiredFields(t *testing.T) {
 	stdLogger := log.New(io.Discard, "", 0)

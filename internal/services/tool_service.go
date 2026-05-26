@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -196,6 +197,9 @@ func (s *ToolService) EnsureToolTypes() error {
 	var incidentsInstance database.ToolInstance
 	result := s.db.Where("logical_name = ?", "incidents").First(&incidentsInstance)
 	if result.Error != nil {
+		if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("failed to query incidents tool instance: %w", result.Error)
+		}
 		incidentsInstance = database.ToolInstance{
 			ToolTypeID:  incidentsType.ID,
 			Name:        "Incidents",

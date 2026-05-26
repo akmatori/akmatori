@@ -251,7 +251,9 @@ func TestEnsureToolTypes_CreatesIncidentsTypeAndInstance(t *testing.T) {
 		t.Fatalf("second EnsureToolTypes call failed: %v", err)
 	}
 	var count int64
-	db.Model(&database.ToolInstance{}).Where("logical_name = ?", "incidents").Count(&count)
+	if err := db.Model(&database.ToolInstance{}).Where("logical_name = ?", "incidents").Count(&count).Error; err != nil {
+		t.Fatalf("count query failed: %v", err)
+	}
 	if count != 1 {
 		t.Errorf("expected exactly 1 incidents instance after idempotent call, got %d", count)
 	}
