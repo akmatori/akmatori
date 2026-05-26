@@ -193,7 +193,12 @@ func (f *ResponseFormatter) Format(ctx context.Context, rawResponse, fullLog str
 
 	result, validationErrs := validateFormatterResult(formatted)
 	if len(validationErrs) > 0 {
-		retryUser := userPrompt + "\n\nYour previous response was:\n" + formatted +
+		// Cap the failed response snippet so the retry prompt stays within a
+		// reasonable size. The first call's response should be short JSON, but
+		// truncating here prevents the retry prompt from exceeding the input
+		// budget when the model emits unexpected verbosity.
+		failedSnippet := truncateFromStart(formatted, 2000, "[...truncated...]")
+		retryUser := userPrompt + "\n\nYour previous response was:\n" + failedSnippet +
 			"\n\nIt had validation errors:\n" +
 			strings.Join(validationErrs, "\n") +
 			"\nReturn only corrected JSON."
