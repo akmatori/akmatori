@@ -343,6 +343,33 @@ func TestIsAuthorizedFromEntries_MatchesSameAsAuthorizer(t *testing.T) {
 	}
 }
 
+func TestAuthorizer_IncidentsTypeOnlyAllowlist_AuthorizesNamespace(t *testing.T) {
+	// An allowlist entry with only ToolType set (no InstanceID, no LogicalName)
+	// must authorize any call to that namespace via branch 6 of IsAuthorizedFromEntries.
+	// This is the expected shape for the credential-less "incidents" tool.
+	a := NewAuthorizer(time.Hour)
+	defer a.Stop()
+
+	a.SetAllowlist("incident-1", []AllowlistEntry{
+		{ToolType: "incidents"},
+	})
+
+	// Type-only match should authorize any call to the incidents namespace
+	if !a.IsAuthorized("incident-1", "incidents", 0, "") {
+		t.Error("expected authorized: type-only incidents allowlist entry")
+	}
+
+	// With just a logical name still authorized (branch 5 falls through to branch 6 when no logicalName match exists — actually branch 5 requires logicalName match, so we use 0/"" to hit branch 6)
+	if !a.IsAuthorized("incident-1", "incidents", 0, "") {
+		t.Error("expected authorized for incidents with no instanceID/logicalName")
+	}
+
+	// Other tool types must still be rejected
+	if a.IsAuthorized("incident-1", "ssh", 0, "") {
+		t.Error("expected unauthorized for ssh when only incidents is in allowlist")
+	}
+}
+
 func TestAuthorizer_CleanupRemovesExpired(t *testing.T) {
 	a := NewAuthorizer(50 * time.Millisecond)
 	defer a.Stop()

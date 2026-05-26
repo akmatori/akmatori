@@ -70,11 +70,11 @@ Add a new `incidents` tool type to the MCP gateway that exposes two operations �
 **Files:**
 - Modify: `internal/services/tool_service.go`
 
-- [ ] Add `{Name: "incidents", Description: "Read-only access to Akmatori's own incidents (list and get) for digests and reporting"}` to the `toolTypes` slice in `EnsureToolTypes()`
-- [ ] After the tool type loop, add FirstOrCreate logic for a credential-less ToolInstance: logical name `"incidents"`, Name `"Incidents"`, enabled, empty Settings JSONB — so it appears immediately in both the cron tool-picker and the skill tool-picker with zero operator config
-- [ ] Update or add test in `internal/services/tool_service_test.go` verifying that `EnsureToolTypes()` creates the `incidents` ToolType and that the seeded instance exists with logical name `"incidents"`
-- [ ] Add a test to `mcp-gateway/internal/auth/authorizer_test.go` verifying that an allowlist containing `{ToolType:"incidents"}` with no InstanceID/LogicalName authorizes calls to the `incidents` namespace (branch 6 of `IsAuthorizedFromEntries`)
-- [ ] Run `make test` — must pass before Task 5
+- [x] Add `{Name: "incidents", Description: "Read-only access to Akmatori's own incidents (list and get) for digests and reporting"}` to the `toolTypes` slice in `EnsureToolTypes()`
+- [x] After the tool type loop, add FirstOrCreate logic for a credential-less ToolInstance: logical name `"incidents"`, Name `"Incidents"`, enabled, empty Settings JSONB — so it appears immediately in both the cron tool-picker and the skill tool-picker with zero operator config
+- [x] Update or add test in `internal/services/tool_service_test.go` verifying that `EnsureToolTypes()` creates the `incidents` ToolType and that the seeded instance exists with logical name `"incidents"`
+- [x] Add a test to `mcp-gateway/internal/auth/authorizer_test.go` verifying that an allowlist containing `{ToolType:"incidents"}` with no InstanceID/LogicalName authorizes calls to the `incidents` namespace (branch 6 of `IsAuthorizedFromEntries`)
+- [x] Run `make test` — must pass before Task 5
 
 ### Task 5: Verify acceptance criteria
 

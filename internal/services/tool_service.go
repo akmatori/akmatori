@@ -174,6 +174,7 @@ func (s *ToolService) EnsureToolTypes() error {
 		{Name: "netbox", Description: "NetBox CMDB integration for DCIM, IPAM, circuits, virtualization, and tenancy"},
 		{Name: "kubernetes", Description: "Kubernetes read-only diagnostics for pods, deployments, nodes, services, events, and logs"},
 		{Name: "jira", Description: "Jira issue tracking integration (Cloud and Server/Data Center) for searching, viewing, commenting, and transitioning issues"},
+		{Name: "incidents", Description: "Read-only access to Akmatori's own incidents (list and get) for digests and reporting"},
 	}
 
 	for _, tt := range toolTypes {
@@ -184,6 +185,26 @@ func (s *ToolService) EnsureToolTypes() error {
 			if err := s.db.Create(&tt).Error; err != nil {
 				return fmt.Errorf("failed to create tool type %s: %w", tt.Name, err)
 			}
+		}
+	}
+
+	// Seed a credential-less ToolInstance for "incidents" so it appears in pickers immediately.
+	var incidentsType database.ToolType
+	if err := s.db.Where("name = ?", "incidents").First(&incidentsType).Error; err != nil {
+		return fmt.Errorf("failed to find incidents tool type: %w", err)
+	}
+	var incidentsInstance database.ToolInstance
+	result := s.db.Where("logical_name = ?", "incidents").First(&incidentsInstance)
+	if result.Error != nil {
+		incidentsInstance = database.ToolInstance{
+			ToolTypeID:  incidentsType.ID,
+			Name:        "Incidents",
+			LogicalName: "incidents",
+			Settings:    database.JSONB{},
+			Enabled:     true,
+		}
+		if err := s.db.Create(&incidentsInstance).Error; err != nil {
+			return fmt.Errorf("failed to create incidents tool instance: %w", err)
 		}
 	}
 

@@ -214,6 +214,49 @@ func TestCreateToolInstance_InvalidToolTypeID(t *testing.T) {
 	}
 }
 
+func TestEnsureToolTypes_CreatesIncidentsTypeAndInstance(t *testing.T) {
+	db := setupToolTestDB(t)
+	svc := &ToolService{db: db}
+
+	if err := svc.EnsureToolTypes(); err != nil {
+		t.Fatalf("EnsureToolTypes failed: %v", err)
+	}
+
+	// Verify incidents ToolType was created
+	var tt database.ToolType
+	if err := db.Where("name = ?", "incidents").First(&tt).Error; err != nil {
+		t.Fatalf("incidents ToolType not found: %v", err)
+	}
+	if tt.Description == "" {
+		t.Error("expected non-empty description for incidents ToolType")
+	}
+
+	// Verify seeded ToolInstance exists with logical name "incidents"
+	var instance database.ToolInstance
+	if err := db.Where("logical_name = ?", "incidents").First(&instance).Error; err != nil {
+		t.Fatalf("incidents ToolInstance not found: %v", err)
+	}
+	if instance.Name != "Incidents" {
+		t.Errorf("expected Name 'Incidents', got %q", instance.Name)
+	}
+	if !instance.Enabled {
+		t.Error("expected incidents instance to be enabled")
+	}
+	if instance.ToolTypeID != tt.ID {
+		t.Errorf("expected ToolTypeID %d, got %d", tt.ID, instance.ToolTypeID)
+	}
+
+	// Second call must be idempotent
+	if err := svc.EnsureToolTypes(); err != nil {
+		t.Fatalf("second EnsureToolTypes call failed: %v", err)
+	}
+	var count int64
+	db.Model(&database.ToolInstance{}).Where("logical_name = ?", "incidents").Count(&count)
+	if count != 1 {
+		t.Errorf("expected exactly 1 incidents instance after idempotent call, got %d", count)
+	}
+}
+
 func TestUpdateToolInstance_HonorsProvidedLogicalName(t *testing.T) {
 	db := setupToolTestDB(t)
 
