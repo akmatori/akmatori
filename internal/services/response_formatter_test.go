@@ -711,6 +711,36 @@ func TestValidateFormatterResult(t *testing.T) {
 			name: "status enum check is case-insensitive",
 			raw:  `{"status":"Resolved","summary":"ok","actions_taken":[],"recommendations":[]}`,
 		},
+		{
+			name:     "missing actions_taken",
+			raw:      `{"status":"resolved","summary":"ok","recommendations":[]}`,
+			wantNil:  true,
+			wantErrs: []string{`"actions_taken" must be a JSON array`},
+		},
+		{
+			name:     "null actions_taken",
+			raw:      `{"status":"resolved","summary":"ok","actions_taken":null,"recommendations":[]}`,
+			wantNil:  true,
+			wantErrs: []string{`"actions_taken" must be a JSON array`},
+		},
+		{
+			name:     "missing recommendations",
+			raw:      `{"status":"resolved","summary":"ok","actions_taken":[]}`,
+			wantNil:  true,
+			wantErrs: []string{`"recommendations" must be a JSON array`},
+		},
+		{
+			name:     "null recommendations",
+			raw:      `{"status":"resolved","summary":"ok","actions_taken":[],"recommendations":null}`,
+			wantNil:  true,
+			wantErrs: []string{`"recommendations" must be a JSON array`},
+		},
+		{
+			name:     "missing both list fields",
+			raw:      `{"status":"resolved","summary":"ok"}`,
+			wantNil:  true,
+			wantErrs: []string{`"actions_taken" must be a JSON array`, `"recommendations" must be a JSON array`},
+		},
 	}
 
 	for _, tt := range tests {
@@ -756,11 +786,13 @@ func TestRenderFormatterResult(t *testing.T) {
 	})
 
 	t.Run("valid input returns rendered output with status and summary", func(t *testing.T) {
+		actionsTaken := []string{"Restarted pod"}
+		recommendations := []string{"Monitor logs"}
 		r := &formatterResult{
 			Status:          "resolved",
 			Summary:         "The incident was resolved successfully.",
-			ActionsTaken:    []string{"Restarted pod"},
-			Recommendations: []string{"Monitor logs"},
+			ActionsTaken:    &actionsTaken,
+			Recommendations: &recommendations,
 		}
 		got := renderFormatterResult(r)
 		if got == "" {

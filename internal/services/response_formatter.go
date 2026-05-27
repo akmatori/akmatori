@@ -38,11 +38,13 @@ Return ONLY a single JSON object — no markdown fences, no preamble, no trailin
 "status" and "summary" must be non-empty strings. "actions_taken" and "recommendations" may be empty arrays.`
 
 // formatterResult is the JSON envelope the LLM must return when formatting is active.
+// ActionsTaken and Recommendations use pointer slices so that absent or JSON-null
+// values can be distinguished from present-but-empty arrays during validation.
 type formatterResult struct {
-	Status          string   `json:"status"`
-	Summary         string   `json:"summary"`
-	ActionsTaken    []string `json:"actions_taken"`
-	Recommendations []string `json:"recommendations"`
+	Status          string    `json:"status"`
+	Summary         string    `json:"summary"`
+	ActionsTaken    *[]string `json:"actions_taken"`
+	Recommendations *[]string `json:"recommendations"`
 }
 
 // validateFormatterResult extracts the JSON object from the response, unmarshals
@@ -77,6 +79,12 @@ func validateFormatterResult(raw string) (*formatterResult, []string) {
 	if summaryVal == "" {
 		errs = append(errs, `"summary" must be a non-empty string`)
 	}
+	if r.ActionsTaken == nil {
+		errs = append(errs, `"actions_taken" must be a JSON array (may be empty)`)
+	}
+	if r.Recommendations == nil {
+		errs = append(errs, `"recommendations" must be a JSON array (may be empty)`)
+	}
 	if len(errs) > 0 {
 		return nil, errs
 	}
@@ -91,11 +99,18 @@ func renderFormatterResult(r *formatterResult) string {
 	if r == nil {
 		return ""
 	}
+	var actionsTaken, recommendations []string
+	if r.ActionsTaken != nil {
+		actionsTaken = *r.ActionsTaken
+	}
+	if r.Recommendations != nil {
+		recommendations = *r.Recommendations
+	}
 	fr := output.FinalResult{
 		Status:          r.Status,
 		Summary:         r.Summary,
-		ActionsTaken:    r.ActionsTaken,
-		Recommendations: r.Recommendations,
+		ActionsTaken:    actionsTaken,
+		Recommendations: recommendations,
 	}
 	po := &output.ParsedOutput{FinalResult: &fr}
 	return output.FormatForSlack(po)
