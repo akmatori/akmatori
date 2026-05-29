@@ -316,3 +316,22 @@ func TestRenderForSlack_MissingKey(t *testing.T) {
 		t.Errorf("expected empty string for missing key, got %q", got)
 	}
 }
+
+func TestRenderForSlack_WrongTypeReturnsEmpty(t *testing.T) {
+	// spec says "string" but value is float64 — renderField returns "" silently
+	specs := []FieldSpec{{Name: "summary", Kind: "string"}}
+	parsed := map[string]any{"summary": float64(42)}
+	got := RenderForSlack(parsed, specs)
+	if got != "" {
+		t.Errorf("expected empty string when value type mismatches spec, got %q", got)
+	}
+}
+
+func TestRenderForSlack_ScalarBoolFalse(t *testing.T) {
+	specs := []FieldSpec{{Name: "active", Kind: "bool"}}
+	parsed := map[string]any{"active": false}
+	got := RenderForSlack(parsed, specs)
+	if !strings.Contains(got, "*Active:* false") {
+		t.Errorf("expected bool false to render, got %q", got)
+	}
+}

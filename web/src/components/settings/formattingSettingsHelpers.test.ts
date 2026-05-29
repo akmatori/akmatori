@@ -41,7 +41,7 @@ describe('FormattingSettings helpers', () => {
       expect(payload.enabled).toBe(false);
     });
 
-    it('sends null for output_schema_example when the field is empty (resets to built-in default)', () => {
+    it('sends empty string for output_schema_example when the field is empty (resets to built-in default)', () => {
       const payload = buildFormattingUpdatePayload({
         enabled: true,
         systemPrompt: '',
@@ -49,7 +49,7 @@ describe('FormattingSettings helpers', () => {
         temperature: 0.2,
         outputSchemaExample: '',
       });
-      expect(payload.output_schema_example).toBeNull();
+      expect(payload.output_schema_example).toBe('');
     });
 
     it('sends the value when output_schema_example is non-empty', () => {

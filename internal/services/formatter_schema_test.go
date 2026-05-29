@@ -345,3 +345,46 @@ func TestValidateAgainstSpecs_NotAnArray(t *testing.T) {
 		t.Error("expected error when non-array given for list_string, got none")
 	}
 }
+
+func TestValidateAgainstSpecs_ListNumberWrongElementType(t *testing.T) {
+	specs := []fieldSpec{{Name: "counts", Kind: "list_number"}}
+	parsed := map[string]any{"counts": []any{float64(1), "not-a-number"}}
+	errs := validateAgainstSpecs(parsed, specs)
+	if len(errs) == 0 {
+		t.Error("expected element type error for list_number, got none")
+	}
+	if !strings.Contains(errs[0], "counts") {
+		t.Errorf("expected error to mention 'counts', got %q", errs[0])
+	}
+}
+
+func TestValidateAgainstSpecs_ListNumberNotAnArray(t *testing.T) {
+	specs := []fieldSpec{{Name: "counts", Kind: "list_number"}}
+	parsed := map[string]any{"counts": "not-an-array"}
+	errs := validateAgainstSpecs(parsed, specs)
+	if len(errs) == 0 {
+		t.Error("expected error when non-array given for list_number, got none")
+	}
+}
+
+func TestValidateAgainstSpecs_BoolWrongType(t *testing.T) {
+	specs := []fieldSpec{{Name: "active", Kind: "bool"}}
+	parsed := map[string]any{"active": "true"}
+	errs := validateAgainstSpecs(parsed, specs)
+	if len(errs) == 0 {
+		t.Error("expected type error for bool field given a string, got none")
+	}
+	if !strings.Contains(errs[0], "active") {
+		t.Errorf("expected error to mention 'active', got %q", errs[0])
+	}
+}
+
+func TestInferSchema_BoolFalse(t *testing.T) {
+	specs, err := inferSchema(`{"flag":false}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(specs) != 1 || specs[0].Name != "flag" || specs[0].Kind != "bool" {
+		t.Errorf("expected bool spec for flag, got %+v", specs)
+	}
+}

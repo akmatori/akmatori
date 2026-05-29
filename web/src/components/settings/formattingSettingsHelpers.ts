@@ -45,7 +45,7 @@ export function buildFormattingUpdatePayload(
     system_prompt: state.systemPrompt,
     max_tokens: state.maxTokens,
     temperature: state.temperature,
-    output_schema_example: state.outputSchemaExample || null,
+    output_schema_example: state.outputSchemaExample,
   };
 }
 

@@ -198,6 +198,8 @@ Rules:
 - `internal/services/interfaces.go` - dependency interfaces used by handlers
 - `internal/services/runbook_service.go` - runbook CRUD and DB↔disk sync
 - `internal/services/response_formatter.go` - optional response rewrite stage
+- `internal/services/formatter_schema.go` - schema inference (`inferSchema`, `buildSchemaInstruction`, `validateAgainstSpecs`) and built-in default schema example
+- `internal/output/schema_render.go` - `RenderForSlack(parsed, specs)`: walks `FieldSpec` slice in key order to produce Slack mrkdwn; defines the exported `FieldSpec` type used by both renderer and schema helpers
 - `internal/services/memory_service.go` - cross-incident memory CRUD, DB↔disk sync, and `IngestFromDisk`
 - `internal/services/title_generator.go` - one-shot title generation
 - `internal/services/slack_summarizer.go` - Slack-safe final output compression

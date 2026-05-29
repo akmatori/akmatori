@@ -111,9 +111,10 @@ func inferArray(dec *json.Decoder, name string) (fieldSpec, error) {
 	var spec fieldSpec
 	spec.Name = name
 
-	switch v := tok.(type) {
+	switch tok.(type) {
 	case json.Delim:
-		if v == '{' {
+		d := tok.(json.Delim)
+		if d == '{' {
 			// list-of-objects: use first element's schema for children.
 			children, err := inferObjectFields(dec)
 			if err != nil {
@@ -121,17 +122,16 @@ func inferArray(dec *json.Decoder, name string) (fieldSpec, error) {
 			}
 			spec.Kind = "list_object"
 			spec.Children = children
-		} else if v == '[' {
+		} else if d == '[' {
 			// Array-of-arrays: skip inner array, treat as list_string.
 			if err := skipUntilArrayClose(dec); err != nil {
 				return fieldSpec{}, err
 			}
 			spec.Kind = "list_string"
 		} else {
-			return fieldSpec{}, fmt.Errorf("unexpected delimiter %q in array %q", v, name)
+			return fieldSpec{}, fmt.Errorf("unexpected delimiter %q in array %q", d, name)
 		}
 	case string:
-		_ = v
 		spec.Kind = "list_string"
 	case float64, json.Number:
 		spec.Kind = "list_number"

@@ -433,8 +433,6 @@ func TestResponseFormatter_TruncatesLargeRawResponse(t *testing.T) {
 // The earlier implementation appended the full truncationNote anyway, which
 // pushed the prompt over the cap.
 func TestResponseFormatter_DropsReasoningWhenBudgetSmallerThanTruncationNote(t *testing.T) {
-	caller := &fakeOneShotLLMCaller{}
-
 	// Choose a maxBytes / rawResponse pair so 0 < budgetForLog < len(truncationNote).
 	// truncationNote = "[... earlier reasoning truncated ...]\n" (38 bytes).
 	const maxBytes = 1000
@@ -460,7 +458,6 @@ func TestResponseFormatter_DropsReasoningWhenBudgetSmallerThanTruncationNote(t *
 	if strings.Contains(prompt, truncationNote) {
 		t.Error("expected truncation note to be omitted when reasoning section is dropped")
 	}
-	_ = caller
 }
 
 // lenFormatterOverheadWithReasoning mirrors the fixed prompt scaffolding used

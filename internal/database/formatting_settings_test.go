@@ -72,10 +72,10 @@ func TestDefaultFormattingSettings(t *testing.T) {
 		t.Errorf("Temperature = %f, want 0.2", defaults.Temperature)
 	}
 
-	// The default prompt should be substantive — instruct the LLM to keep
-	// status, actions, and recommendations so the formatted output stays
-	// useful even before an operator authors a custom prompt.
-	for _, keyword := range []string{"Status", "Summary", "Actions", "Recommend"} {
+	// The default prompt should be schema-agnostic and contain general tone/style
+	// guidance. Field-specific hints are intentionally absent so the prompt works
+	// correctly for any operator-configured output shape.
+	for _, keyword := range []string{"incident", "factual", "concise"} {
 		if !strings.Contains(defaults.SystemPrompt, keyword) {
 			t.Errorf("default prompt missing expected keyword %q:\n%s", keyword, defaults.SystemPrompt)
 		}

@@ -459,7 +459,7 @@ export interface FormattingSettingsUpdate {
   system_prompt?: string;
   max_tokens?: number;
   temperature?: number;
-  output_schema_example?: string | null;
+  output_schema_example?: string;
 }
 
 // General Settings

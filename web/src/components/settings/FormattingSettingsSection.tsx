@@ -19,16 +19,6 @@ interface FormattingSettingsSectionProps {
   onStatusChange?: (status: 'configured' | 'disabled' | undefined) => void;
 }
 
-function isValidJson(value: string): boolean {
-  if (!value.trim()) return true;
-  try {
-    JSON.parse(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export default function FormattingSettingsSection({ onStatusChange }: FormattingSettingsSectionProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -106,6 +96,23 @@ export default function FormattingSettingsSection({ onStatusChange }: Formatting
     if (schemaTooLong) {
       setError(`Output shape must be ${OUTPUT_SCHEMA_EXAMPLE_MAX_BYTES} bytes or fewer (current: ${schemaBytes})`);
       return;
+    }
+    // Validate inline in case the textarea was never blurred
+    if (!schemaJsonError && outputSchemaExample.trim()) {
+      try {
+        const parsed = JSON.parse(outputSchemaExample);
+        if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
+          const msg = 'Must be a JSON object (not an array or scalar)';
+          setSchemaJsonError(msg);
+          setError(`Output shape: ${msg}`);
+          return;
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Invalid JSON';
+        setSchemaJsonError(msg);
+        setError(`Output shape: ${msg}`);
+        return;
+      }
     }
     if (schemaJsonError) {
       setError(`Output shape: ${schemaJsonError}`);
