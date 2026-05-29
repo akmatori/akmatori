@@ -117,11 +117,11 @@ describe('FormattingSettings helpers', () => {
   });
 
   describe('DEFAULT_FORMATTING_PROMPT_PLACEHOLDER', () => {
-    it('mentions the four output sections so the placeholder matches the backend default', () => {
-      expect(DEFAULT_FORMATTING_PROMPT_PLACEHOLDER).toContain('Status');
-      expect(DEFAULT_FORMATTING_PROMPT_PLACEHOLDER).toContain('Summary');
-      expect(DEFAULT_FORMATTING_PROMPT_PLACEHOLDER).toContain('Actions taken');
-      expect(DEFAULT_FORMATTING_PROMPT_PLACEHOLDER).toContain('Recommendations');
+    it('describes tone only, not output fields (schema instruction is injected automatically)', () => {
+      expect(DEFAULT_FORMATTING_PROMPT_PLACEHOLDER).toContain('incident-response writer');
+      expect(DEFAULT_FORMATTING_PROMPT_PLACEHOLDER).toContain('output shape is enforced separately');
+      expect(DEFAULT_FORMATTING_PROMPT_PLACEHOLDER).not.toContain('Actions taken');
+      expect(DEFAULT_FORMATTING_PROMPT_PLACEHOLDER).not.toContain('Recommendations');
     });
   });
 

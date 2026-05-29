@@ -65,8 +65,7 @@ func renderField(spec FieldSpec, val any) string {
 		if !ok || len(arr) == 0 {
 			return ""
 		}
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("*%s:*\n", heading))
+		var bullets strings.Builder
 		for _, elem := range arr {
 			obj, ok := elem.(map[string]any)
 			if !ok {
@@ -81,25 +80,30 @@ func renderField(spec FieldSpec, val any) string {
 				parts = append(parts, fmt.Sprintf("%s: %v", titleCase(child.Name), cv))
 			}
 			if len(parts) > 0 {
-				sb.WriteString(fmt.Sprintf(" • %s\n", strings.Join(parts, " | ")))
+				bullets.WriteString(fmt.Sprintf(" • %s\n", strings.Join(parts, " | ")))
 			}
 		}
-		return sb.String()
+		if bullets.Len() == 0 {
+			return ""
+		}
+		return fmt.Sprintf("*%s:*\n", heading) + bullets.String()
 	case "object":
 		obj, ok := val.(map[string]any)
 		if !ok {
 			return ""
 		}
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("*%s:*\n", heading))
+		var children strings.Builder
 		for _, child := range spec.Children {
 			cv, ok := obj[child.Name]
 			if !ok {
 				continue
 			}
-			sb.WriteString(fmt.Sprintf(" • %s: %v\n", titleCase(child.Name), cv))
+			children.WriteString(fmt.Sprintf(" • %s: %v\n", titleCase(child.Name), cv))
 		}
-		return sb.String()
+		if children.Len() == 0 {
+			return ""
+		}
+		return fmt.Sprintf("*%s:*\n", heading) + children.String()
 	}
 	return ""
 }

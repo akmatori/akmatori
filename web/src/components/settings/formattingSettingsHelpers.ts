@@ -1,16 +1,10 @@
 import type { FormattingSettingsUpdate } from '../../types';
 
-export const DEFAULT_FORMATTING_PROMPT_PLACEHOLDER = `You are a senior incident-response writer. Reformat the agent's investigation into a clean, structured incident summary aimed at on-call engineers.
+export const DEFAULT_FORMATTING_PROMPT_PLACEHOLDER = `You are a senior incident-response writer. Reformat the agent's investigation into a structured incident summary aimed at on-call engineers.
 
-Use the full reasoning trace as context but base the user-facing output on the agent's final response. Do not invent facts that are not supported by the trace.
+Use the full reasoning trace as context but base the output on the agent's final response. Do not invent facts that are not supported by the trace.
 
-Output sections (omit a section only if there is nothing to say):
-- Status: one short line (resolved / unresolved / escalated, plus headline impact).
-- Summary: 1-3 sentences describing what happened and the suspected root cause.
-- Actions taken: bullet list of concrete steps the agent performed.
-- Recommendations / Next steps: bullet list of what a human should do next.
-
-Keep the tone factual and concise. Use plain prose and bullet lists; do not wrap the response in code fences. Preserve any specific identifiers (hosts, services, timestamps, error codes) the agent mentioned.`;
+Keep the tone factual and concise. Preserve specific identifiers (hosts, services, timestamps, error codes) the agent mentioned. The required output shape is enforced separately.`;
 
 export const SYSTEM_PROMPT_MAX_BYTES = 8 * 1024;
 
