@@ -102,14 +102,19 @@ func (f *ResponseFormatter) Format(ctx context.Context, rawResponse, fullLog str
 		return rawResponse
 	}
 
-	// Restore the status enum constraint for the built-in default schema so
-	// that invalid values (e.g. "escalated" instead of "escalate") still
-	// trigger a retry, preserving the behaviour of the old fixed validator.
+	// Restore constraints for the built-in default schema to preserve the
+	// behaviour of the old fixed validator: status must be one of the three
+	// allowed values and summary must be non-empty.
 	if usingDefaultSchema {
 		for i, s := range specs {
-			if s.Name == "status" && s.Kind == "string" {
+			if s.Kind != "string" {
+				continue
+			}
+			if s.Name == "status" {
 				specs[i].Enum = []string{"resolved", "unresolved", "escalate"}
-				break
+			}
+			if s.Name == "summary" {
+				specs[i].NonEmpty = true
 			}
 		}
 	}

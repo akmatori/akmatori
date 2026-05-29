@@ -9,11 +9,14 @@ import (
 // Kind is one of: "string", "number", "bool", "list_string", "list_number",
 // "list_object", "object". Children is populated for "object" and "list_object".
 // Enum, when non-nil, restricts "string" fields to the listed values (case-insensitive).
+// NonEmpty, when true, rejects blank strings (after TrimSpace) in addition to the
+// type check — used to restore the old mandatory-summary constraint on the default schema.
 type FieldSpec struct {
 	Name     string
 	Kind     string
 	Children []FieldSpec
 	Enum     []string
+	NonEmpty bool
 }
 
 // RenderForSlack renders a parsed LLM response map as Slack mrkdwn text.

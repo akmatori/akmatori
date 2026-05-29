@@ -206,6 +206,9 @@ func checkKind(spec fieldSpec, val any) []string {
 			errs = append(errs, fmt.Sprintf("key %q: expected string, got %T", spec.Name, val))
 			break
 		}
+		if spec.NonEmpty && strings.TrimSpace(s) == "" {
+			errs = append(errs, fmt.Sprintf("key %q: must be a non-empty string", spec.Name))
+		}
 		if len(spec.Enum) > 0 {
 			found := false
 			for _, e := range spec.Enum {

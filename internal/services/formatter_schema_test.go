@@ -379,6 +379,28 @@ func TestValidateAgainstSpecs_BoolWrongType(t *testing.T) {
 	}
 }
 
+func TestValidateAgainstSpecs_NonEmptyRejectsBlank(t *testing.T) {
+	specs := []fieldSpec{{Name: "summary", Kind: "string", NonEmpty: true}}
+
+	for _, blank := range []string{"", "  ", "\t\n"} {
+		errs := validateAgainstSpecs(map[string]any{"summary": blank}, specs)
+		if len(errs) == 0 {
+			t.Errorf("expected error for blank summary %q, got none", blank)
+		}
+		if len(errs) > 0 && !strings.Contains(errs[0], "summary") {
+			t.Errorf("expected error to mention 'summary', got %q", errs[0])
+		}
+	}
+}
+
+func TestValidateAgainstSpecs_NonEmptyPassesNonBlank(t *testing.T) {
+	specs := []fieldSpec{{Name: "summary", Kind: "string", NonEmpty: true}}
+	errs := validateAgainstSpecs(map[string]any{"summary": "host down"}, specs)
+	if len(errs) != 0 {
+		t.Errorf("expected no errors for non-blank summary, got %v", errs)
+	}
+}
+
 func TestInferSchema_BoolFalse(t *testing.T) {
 	specs, err := inferSchema(`{"flag":false}`)
 	if err != nil {
@@ -386,5 +408,19 @@ func TestInferSchema_BoolFalse(t *testing.T) {
 	}
 	if len(specs) != 1 || specs[0].Name != "flag" || specs[0].Kind != "bool" {
 		t.Errorf("expected bool spec for flag, got %+v", specs)
+	}
+}
+
+func TestInferSchema_ListOfObjectsFollowedByField(t *testing.T) {
+	// Field AFTER a multi-element list_object must not be dropped.
+	specs, err := inferSchema(`{"hosts":[{"name":"s1"},{"name":"s2"}],"status":"ok"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(specs) != 2 {
+		t.Fatalf("expected 2 specs, got %d: %+v", len(specs), specs)
+	}
+	if specs[1].Name != "status" || specs[1].Kind != "string" {
+		t.Errorf("expected {status, string} as second spec, got {%s, %s}", specs[1].Name, specs[1].Kind)
 	}
 }
