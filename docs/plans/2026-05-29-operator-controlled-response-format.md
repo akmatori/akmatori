@@ -64,12 +64,12 @@ Replace the hardcoded four-key JSON contract in the response formatter with an o
 - Create: `internal/output/schema_render.go`
 - Create: `internal/output/schema_render_test.go`
 
-- [ ] Implement `RenderForSlack(parsed map[string]any, specs []fieldSpec) string` that walks specs in order: string/number/bool → `*Title-Cased Key:* value\n`; list of scalars → `*Title-Cased Key:*\n • item\n` (omit section if empty list); list-of-objects → heading then each object as indented sub-block; nested object → heading then indented children
-- [ ] Implement title-case helper: split key on `_`/`-`, capitalize each word
-- [ ] Status emoji treatment: only when key is exactly `"status"` and value is one of `resolved|unresolved|escalate` — prepend ✅/⚠️/🚨 (same as existing `getStatusEmoji`); all other keys render as plain text
-- [ ] Return empty string when nothing renders (e.g. all arrays empty, no string fields)
-- [ ] Write `schema_render_test.go` covering: scalar types, list-of-strings (populated and empty), list-of-objects, nested object, mixed shapes, title-casing, status emoji for known values, non-status key with same values gets no emoji
-- [ ] Run `make test` — must pass
+- [x] Implement `RenderForSlack(parsed map[string]any, specs []fieldSpec) string` that walks specs in order: string/number/bool → `*Title-Cased Key:* value\n`; list of scalars → `*Title-Cased Key:*\n • item\n` (omit section if empty list); list-of-objects → heading then each object as indented sub-block; nested object → heading then indented children
+- [x] Implement title-case helper: split key on `_`/`-`, capitalize each word
+- [x] Status emoji treatment: only when key is exactly `"status"` and value is one of `resolved|unresolved|escalate` — prepend ✅/⚠️/🚨 (same as existing `getStatusEmoji`); all other keys render as plain text
+- [x] Return empty string when nothing renders (e.g. all arrays empty, no string fields)
+- [x] Write `schema_render_test.go` covering: scalar types, list-of-strings (populated and empty), list-of-objects, nested object, mixed shapes, title-casing, status emoji for known values, non-status key with same values gets no emoji
+- [x] Run `make test` — must pass
 
 ### Task 4: Response formatter refactor
 

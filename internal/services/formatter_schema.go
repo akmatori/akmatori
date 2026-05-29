@@ -5,20 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/akmatori/akmatori/internal/output"
 )
 
 // defaultSchemaExample is the built-in four-key output shape used when an
 // operator has not configured a custom OutputSchemaExample.
 const defaultSchemaExample = `{"status":"resolved","summary":"1-3 sentence description of what happened and how it was resolved.","actions_taken":["action 1"],"recommendations":["recommendation 1"]}`
 
-// fieldSpec describes a single field in the expected LLM output schema.
-// Kind is one of: "string", "number", "bool", "list_string", "list_number",
-// "list_object", "object". Children is populated for "object" and "list_object".
-type fieldSpec struct {
-	Name     string
-	Kind     string
-	Children []fieldSpec
-}
+// fieldSpec is a package-local alias for output.FieldSpec so internal helpers
+// can be written concisely without repeating the package qualifier.
+type fieldSpec = output.FieldSpec
 
 // inferSchema parses the example JSON string and returns an ordered slice of
 // fieldSpecs. Key order is preserved via json.Decoder token walk. Returns an

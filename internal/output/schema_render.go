@@ -1,0 +1,121 @@
+package output
+
+import (
+	"fmt"
+	"strings"
+)
+
+// FieldSpec describes a single field in the expected LLM output schema.
+// Kind is one of: "string", "number", "bool", "list_string", "list_number",
+// "list_object", "object". Children is populated for "object" and "list_object".
+type FieldSpec struct {
+	Name     string
+	Kind     string
+	Children []FieldSpec
+}
+
+// RenderForSlack renders a parsed LLM response map as Slack mrkdwn text.
+// It walks specs in order, producing a formatted section per field.
+// Returns empty string when nothing produces visible output.
+func RenderForSlack(parsed map[string]any, specs []FieldSpec) string {
+	var sb strings.Builder
+	for _, spec := range specs {
+		val, ok := parsed[spec.Name]
+		if !ok {
+			continue
+		}
+		sb.WriteString(renderField(spec, val))
+	}
+	return sb.String()
+}
+
+// renderField renders a single field value according to its spec kind.
+func renderField(spec FieldSpec, val any) string {
+	heading := titleCase(spec.Name)
+	switch spec.Kind {
+	case "string":
+		s, ok := val.(string)
+		if !ok {
+			return ""
+		}
+		if spec.Name == "status" {
+			lower := strings.ToLower(s)
+			if lower == "resolved" || lower == "unresolved" || lower == "escalate" {
+				return fmt.Sprintf("*%s:* %s %s\n", heading, getStatusEmoji(lower), s)
+			}
+		}
+		return fmt.Sprintf("*%s:* %s\n", heading, s)
+	case "number":
+		return fmt.Sprintf("*%s:* %v\n", heading, val)
+	case "bool":
+		return fmt.Sprintf("*%s:* %v\n", heading, val)
+	case "list_string", "list_number":
+		arr, ok := val.([]any)
+		if !ok || len(arr) == 0 {
+			return ""
+		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("*%s:*\n", heading))
+		for _, elem := range arr {
+			sb.WriteString(fmt.Sprintf(" • %v\n", elem))
+		}
+		return sb.String()
+	case "list_object":
+		arr, ok := val.([]any)
+		if !ok || len(arr) == 0 {
+			return ""
+		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("*%s:*\n", heading))
+		for _, elem := range arr {
+			obj, ok := elem.(map[string]any)
+			if !ok {
+				continue
+			}
+			var parts []string
+			for _, child := range spec.Children {
+				cv, ok := obj[child.Name]
+				if !ok {
+					continue
+				}
+				parts = append(parts, fmt.Sprintf("%s: %v", titleCase(child.Name), cv))
+			}
+			if len(parts) > 0 {
+				sb.WriteString(fmt.Sprintf(" • %s\n", strings.Join(parts, " | ")))
+			}
+		}
+		return sb.String()
+	case "object":
+		obj, ok := val.(map[string]any)
+		if !ok {
+			return ""
+		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("*%s:*\n", heading))
+		for _, child := range spec.Children {
+			cv, ok := obj[child.Name]
+			if !ok {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf(" • %s: %v\n", titleCase(child.Name), cv))
+		}
+		return sb.String()
+	}
+	return ""
+}
+
+// titleCase converts a snake_case or kebab-case identifier to Title Case.
+func titleCase(key string) string {
+	parts := strings.FieldsFunc(key, func(r rune) bool {
+		return r == '_' || r == '-'
+	})
+	if len(parts) == 0 {
+		return key
+	}
+	for i, p := range parts {
+		if len(p) > 0 {
+			parts[i] = strings.ToUpper(p[:1]) + p[1:]
+		}
+	}
+	return strings.Join(parts, " ")
+}
