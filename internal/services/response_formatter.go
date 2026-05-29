@@ -87,6 +87,7 @@ func (f *ResponseFormatter) Format(ctx context.Context, rawResponse, fullLog str
 		}
 	}
 
+	usingDefaultSchema := strings.TrimSpace(settings.OutputSchemaExample) == ""
 	example := strings.TrimSpace(settings.OutputSchemaExample)
 	if example == "" {
 		example = defaultSchemaExample
@@ -96,6 +97,18 @@ func (f *ResponseFormatter) Format(ctx context.Context, rawResponse, fullLog str
 	if err != nil {
 		slog.Warn("response formatter: failed to infer output schema, using raw response", "err", err)
 		return rawResponse
+	}
+
+	// Restore the status enum constraint for the built-in default schema so
+	// that invalid values (e.g. "escalated" instead of "escalate") still
+	// trigger a retry, preserving the behaviour of the old fixed validator.
+	if usingDefaultSchema {
+		for i, s := range specs {
+			if s.Name == "status" && s.Kind == "string" {
+				specs[i].Enum = []string{"resolved", "unresolved", "escalate"}
+				break
+			}
+		}
 	}
 
 	systemPrompt += buildSchemaInstruction(example)

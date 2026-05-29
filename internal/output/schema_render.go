@@ -8,10 +8,12 @@ import (
 // FieldSpec describes a single field in the expected LLM output schema.
 // Kind is one of: "string", "number", "bool", "list_string", "list_number",
 // "list_object", "object". Children is populated for "object" and "list_object".
+// Enum, when non-nil, restricts "string" fields to the listed values (case-insensitive).
 type FieldSpec struct {
 	Name     string
 	Kind     string
 	Children []FieldSpec
+	Enum     []string
 }
 
 // RenderForSlack renders a parsed LLM response map as Slack mrkdwn text.

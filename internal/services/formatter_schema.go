@@ -81,8 +81,6 @@ func inferValue(dec *json.Decoder, name string) (fieldSpec, error) {
 		return fieldSpec{Name: name, Kind: "string"}, nil
 	case float64:
 		return fieldSpec{Name: name, Kind: "number"}, nil
-	case json.Number:
-		return fieldSpec{Name: name, Kind: "number"}, nil
 	case bool:
 		return fieldSpec{Name: name, Kind: "bool"}, nil
 	case nil:
@@ -133,7 +131,7 @@ func inferArray(dec *json.Decoder, name string) (fieldSpec, error) {
 		}
 	case string:
 		spec.Kind = "list_string"
-	case float64, json.Number:
+	case float64:
 		spec.Kind = "list_number"
 	case bool:
 		spec.Kind = "list_string"
@@ -203,8 +201,22 @@ func checkKind(spec fieldSpec, val any) []string {
 	var errs []string
 	switch spec.Kind {
 	case "string":
-		if _, ok := val.(string); !ok {
+		s, ok := val.(string)
+		if !ok {
 			errs = append(errs, fmt.Sprintf("key %q: expected string, got %T", spec.Name, val))
+			break
+		}
+		if len(spec.Enum) > 0 {
+			found := false
+			for _, e := range spec.Enum {
+				if strings.EqualFold(s, e) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				errs = append(errs, fmt.Sprintf("key %q: expected one of %v, got %q", spec.Name, spec.Enum, s))
+			}
 		}
 	case "number":
 		if _, ok := val.(float64); !ok {
