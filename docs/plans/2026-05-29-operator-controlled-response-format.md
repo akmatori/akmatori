@@ -49,14 +49,14 @@ Replace the hardcoded four-key JSON contract in the response formatter with an o
 **Files:**
 - Create: `internal/services/formatter_schema.go`
 
-- [ ] Define `fieldSpec` struct with `Name`, `Kind` (string enum: "string"|"number"|"bool"|"list_string"|"list_number"|"list_object"|"object"), and `Children []fieldSpec`
-- [ ] Implement `inferSchema(example string) ([]fieldSpec, error)` using `json.Decoder` token walk to preserve key order; detect Kind from Go type after unmarshal; recurse into nested objects and array-of-object elements; empty arrays default to `list_string`
-- [ ] Implement `buildSchemaInstruction(example string) string` that pretty-prints the operator example and wraps it in the "Return ONLY a single JSON object matching exactly this shape" instruction text
-- [ ] Implement `validateAgainstSpecs(parsed map[string]any, specs []fieldSpec) []string` that checks every spec key is present, each value's type matches Kind (recursively), and returns human-readable error strings; extra keys are tolerated (dropped on render)
-- [ ] Define built-in default example constant (four-key shape) used when `OutputSchemaExample` is empty
-- [ ] Unit-test `inferSchema`: scalars, list-of-strings, list-of-objects, nested object, empty array (→ list_string), non-object top-level returns error
-- [ ] Unit-test `validateAgainstSpecs`: all-passing, missing key, wrong type, nested mismatch, extra key tolerated, empty array passes
-- [ ] Run `make test` — must pass
+- [x] Define `fieldSpec` struct with `Name`, `Kind` (string enum: "string"|"number"|"bool"|"list_string"|"list_number"|"list_object"|"object"), and `Children []fieldSpec`
+- [x] Implement `inferSchema(example string) ([]fieldSpec, error)` using `json.Decoder` token walk to preserve key order; detect Kind from Go type after unmarshal; recurse into nested objects and array-of-object elements; empty arrays default to `list_string`
+- [x] Implement `buildSchemaInstruction(example string) string` that pretty-prints the operator example and wraps it in the "Return ONLY a single JSON object matching exactly this shape" instruction text
+- [x] Implement `validateAgainstSpecs(parsed map[string]any, specs []fieldSpec) []string` that checks every spec key is present, each value's type matches Kind (recursively), and returns human-readable error strings; extra keys are tolerated (dropped on render)
+- [x] Define built-in default example constant (four-key shape) used when `OutputSchemaExample` is empty
+- [x] Unit-test `inferSchema`: scalars, list-of-strings, list-of-objects, nested object, empty array (→ list_string), non-object top-level returns error
+- [x] Unit-test `validateAgainstSpecs`: all-passing, missing key, wrong type, nested mismatch, extra key tolerated, empty array passes
+- [x] Run `make test` — must pass
 
 ### Task 3: Auto-renderer
 
