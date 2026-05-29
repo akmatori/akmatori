@@ -14,11 +14,27 @@ Keep the tone factual and concise. Use plain prose and bullet lists; do not wrap
 
 export const SYSTEM_PROMPT_MAX_BYTES = 8 * 1024;
 
+// Matches the Go `defaultSchemaExample` constant in internal/services/formatter_schema.go.
+// Used to pre-fill "Reset to default" and as a placeholder when the field is empty.
+export const DEFAULT_OUTPUT_SCHEMA_EXAMPLE = JSON.stringify(
+  {
+    status: 'resolved',
+    summary: '1-3 sentence description of what happened and how it was resolved.',
+    actions_taken: ['action 1'],
+    recommendations: ['recommendation 1'],
+  },
+  null,
+  2,
+);
+
+export const OUTPUT_SCHEMA_EXAMPLE_MAX_BYTES = 8 * 1024;
+
 export interface FormattingSettingsFormState {
   enabled: boolean;
   systemPrompt: string;
   maxTokens: number;
   temperature: number;
+  outputSchemaExample: string;
 }
 
 export function buildFormattingUpdatePayload(
@@ -29,6 +45,7 @@ export function buildFormattingUpdatePayload(
     system_prompt: state.systemPrompt,
     max_tokens: state.maxTokens,
     temperature: state.temperature,
+    output_schema_example: state.outputSchemaExample || null,
   };
 }
 

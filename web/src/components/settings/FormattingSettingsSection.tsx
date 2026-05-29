@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { Save, Info } from 'lucide-react';
+import { Save, Info, RotateCcw } from 'lucide-react';
 import LoadingSpinner from '../LoadingSpinner';
 import ErrorMessage from '../ErrorMessage';
 import { SuccessMessage } from '../ErrorMessage';
 import { formattingSettingsApi } from '../../api/client';
 import {
   DEFAULT_FORMATTING_PROMPT_PLACEHOLDER,
+  DEFAULT_OUTPUT_SCHEMA_EXAMPLE,
+  OUTPUT_SCHEMA_EXAMPLE_MAX_BYTES,
   SYSTEM_PROMPT_MAX_BYTES,
   buildFormattingUpdatePayload,
   clampMaxTokens,
@@ -17,6 +19,16 @@ interface FormattingSettingsSectionProps {
   onStatusChange?: (status: 'configured' | 'disabled' | undefined) => void;
 }
 
+function isValidJson(value: string): boolean {
+  if (!value.trim()) return true;
+  try {
+    JSON.parse(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export default function FormattingSettingsSection({ onStatusChange }: FormattingSettingsSectionProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -26,6 +38,8 @@ export default function FormattingSettingsSection({ onStatusChange }: Formatting
   const [systemPrompt, setSystemPrompt] = useState('');
   const [maxTokens, setMaxTokens] = useState(1500);
   const [temperature, setTemperature] = useState(0.2);
+  const [outputSchemaExample, setOutputSchemaExample] = useState('');
+  const [schemaJsonError, setSchemaJsonError] = useState<string | null>(null);
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -45,6 +59,7 @@ export default function FormattingSettingsSection({ onStatusChange }: Formatting
       setSystemPrompt(data.system_prompt);
       setMaxTokens(data.max_tokens);
       setTemperature(data.temperature);
+      setOutputSchemaExample(data.output_schema_example ?? '');
       setError(null);
       onStatusChange?.(data.enabled ? 'configured' : 'disabled');
     } catch (err) {
@@ -57,10 +72,43 @@ export default function FormattingSettingsSection({ onStatusChange }: Formatting
 
   const promptBytes = systemPromptByteLength(systemPrompt);
   const promptTooLong = promptBytes > SYSTEM_PROMPT_MAX_BYTES;
+  const schemaBytes = new TextEncoder().encode(outputSchemaExample).length;
+  const schemaTooLong = schemaBytes > OUTPUT_SCHEMA_EXAMPLE_MAX_BYTES;
+  const schemaInvalid = schemaJsonError !== null || schemaTooLong;
+
+  const handleSchemaBlur = () => {
+    if (!outputSchemaExample.trim()) {
+      setSchemaJsonError(null);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(outputSchemaExample);
+      if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
+        setSchemaJsonError('Must be a JSON object (not an array or scalar)');
+      } else {
+        setSchemaJsonError(null);
+      }
+    } catch (e) {
+      setSchemaJsonError(e instanceof Error ? e.message : 'Invalid JSON');
+    }
+  };
+
+  const handleResetSchema = () => {
+    setOutputSchemaExample(DEFAULT_OUTPUT_SCHEMA_EXAMPLE);
+    setSchemaJsonError(null);
+  };
 
   const handleSave = async () => {
     if (promptTooLong) {
       setError(`System prompt must be ${SYSTEM_PROMPT_MAX_BYTES} bytes or fewer (current: ${promptBytes})`);
+      return;
+    }
+    if (schemaTooLong) {
+      setError(`Output shape must be ${OUTPUT_SCHEMA_EXAMPLE_MAX_BYTES} bytes or fewer (current: ${schemaBytes})`);
+      return;
+    }
+    if (schemaJsonError) {
+      setError(`Output shape: ${schemaJsonError}`);
       return;
     }
     try {
@@ -73,12 +121,14 @@ export default function FormattingSettingsSection({ onStatusChange }: Formatting
         systemPrompt,
         maxTokens,
         temperature,
+        outputSchemaExample,
       });
       const updated = await formattingSettingsApi.update(payload);
       setEnabled(updated.enabled);
       setSystemPrompt(updated.system_prompt);
       setMaxTokens(updated.max_tokens);
       setTemperature(updated.temperature);
+      setOutputSchemaExample(updated.output_schema_example ?? '');
       onStatusChange?.(updated.enabled ? 'configured' : 'disabled');
       setSuccess(true);
       if (successTimeoutRef.current !== null) {
@@ -165,6 +215,54 @@ export default function FormattingSettingsSection({ onStatusChange }: Formatting
         </div>
       </div>
 
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            Output shape
+          </label>
+          <button
+            type="button"
+            onClick={handleResetSchema}
+            disabled={!enabled}
+            className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <RotateCcw className="w-3 h-3" />
+            Reset to default
+          </button>
+        </div>
+        <textarea
+          value={outputSchemaExample}
+          onChange={(e) => {
+            setOutputSchemaExample(e.target.value);
+            if (schemaJsonError) setSchemaJsonError(null);
+          }}
+          onBlur={handleSchemaBlur}
+          disabled={!enabled}
+          rows={8}
+          placeholder={DEFAULT_OUTPUT_SCHEMA_EXAMPLE}
+          className={`input-field font-mono text-xs ${schemaJsonError || schemaTooLong ? 'border-red-500 dark:border-red-500' : ''}`}
+        />
+        <div className="mt-1 flex items-start justify-between gap-2">
+          <div className="flex-1">
+            {schemaJsonError ? (
+              <p className="text-xs text-red-600 dark:text-red-400">{schemaJsonError}</p>
+            ) : schemaTooLong ? (
+              <p className="text-xs text-red-600 dark:text-red-400">
+                Output shape must be {OUTPUT_SCHEMA_EXAMPLE_MAX_BYTES} bytes or fewer
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Paste an example of the JSON object you want as the final summary. Leave blank to use
+                the built-in four-key default. The LLM will be instructed to return exactly this shape.
+              </p>
+            )}
+          </div>
+          <p className={`text-xs flex-shrink-0 ${schemaTooLong ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
+            {schemaBytes} / {OUTPUT_SCHEMA_EXAMPLE_MAX_BYTES} bytes
+          </p>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
@@ -211,7 +309,7 @@ export default function FormattingSettingsSection({ onStatusChange }: Formatting
         </p>
         <button
           onClick={handleSave}
-          disabled={saving || promptTooLong}
+          disabled={saving || promptTooLong || schemaInvalid}
           className="btn btn-primary"
         >
           <Save className="w-4 h-4" />

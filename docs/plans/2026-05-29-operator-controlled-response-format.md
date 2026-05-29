@@ -89,13 +89,13 @@ Replace the hardcoded four-key JSON contract in the response formatter with an o
 **Files:**
 - Modify: `web/src/components/settings/FormattingSettingsSection.tsx`
 
-- [ ] Add `outputSchemaExample` state variable and load it from API response in `loadSettings()`
-- [ ] Include `output_schema_example` in `handleSave()` PUT body
-- [ ] Add "Output shape" section below the system prompt textarea: heading, helper text ("Paste an example of the JSON object you want as the final summary…"), monospace textarea bound to `outputSchemaExample`
-- [ ] Add client-side live JSON validation on blur: attempt `JSON.parse`; show a red helper line on parse error; disable Save button when invalid
-- [ ] Add "Reset to default" button that refills the textarea with the built-in four-key example (hardcoded constant in the component matching the Go default)
-- [ ] Disable the new textarea and reset button when the formatter toggle is off (mirrors existing prompt textarea disabled state)
-- [ ] Run `make test-web` — must pass
+- [x] Add `outputSchemaExample` state variable and load it from API response in `loadSettings()`
+- [x] Include `output_schema_example` in `handleSave()` PUT body
+- [x] Add "Output shape" section below the system prompt textarea: heading, helper text ("Paste an example of the JSON object you want as the final summary…"), monospace textarea bound to `outputSchemaExample`
+- [x] Add client-side live JSON validation on blur: attempt `JSON.parse`; show a red helper line on parse error; disable Save button when invalid
+- [x] Add "Reset to default" button that refills the textarea with the built-in four-key example (hardcoded constant in the component matching the Go default)
+- [x] Disable the new textarea and reset button when the formatter toggle is off (mirrors existing prompt textarea disabled state)
+- [x] Run `make test-web` — must pass
 
 ### Task 6: Final verification and CLAUDE.md update
 
