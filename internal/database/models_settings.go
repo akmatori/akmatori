@@ -270,34 +270,35 @@ func DefaultRetentionSettings() *RetentionSettings {
 }
 
 // DefaultFormattingPrompt is the system prompt used by the response formatter
-// when no operator-supplied prompt is configured. It describes content and tone
-// guidance for each JSON field; the JSON schema instruction is appended
-// automatically and does not need to be repeated here.
+// when no operator-supplied prompt is configured. It provides tone and content
+// guidance only; the JSON schema instruction is injected automatically from the
+// operator's output shape example and must not be repeated here.
 const DefaultFormattingPrompt = `You are a senior incident-response writer. Reformat the agent's investigation into a structured incident summary aimed at on-call engineers.
 
 Use the full reasoning trace as context but base the output on the agent's final response. Do not invent facts that are not supported by the trace.
 
-Field guidance:
-- Status ("status"): one of "resolved", "unresolved", or "escalate" — choose the word that best matches the outcome. Use exactly one of the three values with no additional text.
-- Summary ("summary"): 1-3 sentences describing what happened and the suspected root cause. Be factual and concise; preserve specific identifiers (hosts, services, timestamps, error codes).
-- Actions taken ("actions_taken"): each entry is one concrete step the agent performed. Use past tense. Omit steps with no observable effect. Empty array is valid.
-- Recommendations ("recommendations"): each entry is one actionable next step for a human. Omit if none apply. Empty array is valid.
+Content guidance:
+- Status: choose the word that best matches the outcome. Use exactly one value with no additional text.
+- Summary: 1-3 sentences describing what happened and the suspected root cause. Be factual and concise; preserve specific identifiers (hosts, services, timestamps, error codes).
+- Actions taken: each entry is one concrete step the agent performed. Use past tense. Omit steps with no observable effect. Empty list is valid.
+- Recommendations: each entry is one actionable next step for a human. Omit if none apply. Empty list is valid.
 
-Keep the tone factual and concise. The JSON output schema is enforced automatically — focus on accurate, useful content.`
+Keep the tone factual and concise. The JSON output schema is enforced separately — focus on accurate, useful content.`
 
 // FormattingSettings stores the global response-formatter prompt that runs as
 // a one-shot LLM call after each incident finishes investigating. The
 // formatted text replaces incident.response, while incident.full_log keeps the
 // raw reasoning. SingletonKey with a unique index ensures only one row exists.
 type FormattingSettings struct {
-	ID           uint      `gorm:"primaryKey" json:"id"`
-	SingletonKey string    `gorm:"uniqueIndex;default:'default';not null" json:"-"`
-	Enabled      bool      `gorm:"default:false" json:"enabled"`
-	SystemPrompt string    `gorm:"type:text" json:"system_prompt"`
-	MaxTokens    int       `gorm:"default:1500" json:"max_tokens"`
-	Temperature  float64   `gorm:"default:0.2" json:"temperature"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID                  uint      `gorm:"primaryKey" json:"id"`
+	SingletonKey        string    `gorm:"uniqueIndex;default:'default';not null" json:"-"`
+	Enabled             bool      `gorm:"default:false" json:"enabled"`
+	SystemPrompt        string    `gorm:"type:text" json:"system_prompt"`
+	MaxTokens           int       `gorm:"default:1500" json:"max_tokens"`
+	Temperature         float64   `gorm:"default:0.2" json:"temperature"`
+	OutputSchemaExample string    `gorm:"type:text" json:"output_schema_example"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 func (FormattingSettings) TableName() string {

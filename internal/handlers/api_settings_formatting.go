@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/akmatori/akmatori/internal/api"
@@ -13,6 +14,7 @@ const (
 	formattingTemperatureMin  = 0.0
 	formattingTemperatureMax  = 2.0
 	formattingSystemPromptMax = 8 * 1024
+	formattingSchemaExampleMax = 8 * 1024
 )
 
 // handleFormattingSettings handles GET/PUT /api/settings/formatting
@@ -31,6 +33,27 @@ func (h *APIHandler) handleFormattingSettings(w http.ResponseWriter, r *http.Req
 		if err := api.DecodeJSON(r, &req); err != nil {
 			api.RespondError(w, http.StatusBadRequest, err.Error())
 			return
+		}
+
+		// Validate output_schema_example before hitting the DB so invalid input
+		// is rejected early without a round-trip.
+		if req.OutputSchemaExample != nil {
+			val := *req.OutputSchemaExample
+			if len(val) > formattingSchemaExampleMax {
+				api.RespondError(w, http.StatusBadRequest, "output_schema_example must be 8192 bytes or fewer")
+				return
+			}
+			if val != "" {
+				var parsed any
+				if err := json.Unmarshal([]byte(val), &parsed); err != nil {
+					api.RespondError(w, http.StatusBadRequest, "output_schema_example: "+err.Error())
+					return
+				}
+				if _, ok := parsed.(map[string]any); !ok {
+					api.RespondError(w, http.StatusBadRequest, "output_schema_example must be a JSON object")
+					return
+				}
+			}
 		}
 
 		settings, err := database.GetOrCreateFormattingSettings()
@@ -62,6 +85,9 @@ func (h *APIHandler) handleFormattingSettings(w http.ResponseWriter, r *http.Req
 				return
 			}
 			settings.Temperature = *req.Temperature
+		}
+		if req.OutputSchemaExample != nil {
+			settings.OutputSchemaExample = *req.OutputSchemaExample
 		}
 
 		if err := database.UpdateFormattingSettings(settings); err != nil {

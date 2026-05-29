@@ -175,6 +175,8 @@ func TestHandleFormattingSettings_PUT_AcceptsBoundaries(t *testing.T) {
 		{"temperature_max", `{"temperature": 2}`},
 		{"system_prompt_at_limit", `{"system_prompt": "` + strings.Repeat("x", 8*1024) + `"}`},
 		{"system_prompt_empty", `{"system_prompt": ""}`},
+		{"schema_example_empty", `{"output_schema_example": ""}`},
+		{"schema_example_valid_object", `{"output_schema_example": "{\"status\":\"resolved\",\"summary\":\"ok\"}"}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -185,5 +187,48 @@ func TestHandleFormattingSettings_PUT_AcceptsBoundaries(t *testing.T) {
 				t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
 			}
 		})
+	}
+}
+
+func TestHandleFormattingSettings_PUT_OutputSchemaExample_RoundTrip(t *testing.T) {
+	setupFormattingHandlerTestDB(t)
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	example := `{"severity":"high","summary":"Pod crashed","affected_hosts":["host-1","host-2"]}`
+
+	putBody, err := json.Marshal(map[string]string{"output_schema_example": example})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/formatting", strings.NewReader(string(putBody)))
+	putW := httptest.NewRecorder()
+	h.handleFormattingSettings(putW, putReq)
+	if putW.Code != http.StatusOK {
+		t.Fatalf("PUT: expected 200, got %d: %s", putW.Code, putW.Body.String())
+	}
+
+	// Verify PUT response contains the example.
+	var putSettings database.FormattingSettings
+	if err := json.NewDecoder(putW.Body).Decode(&putSettings); err != nil {
+		t.Fatalf("decode PUT response: %v", err)
+	}
+	if putSettings.OutputSchemaExample != example {
+		t.Errorf("PUT response OutputSchemaExample = %q, want %q", putSettings.OutputSchemaExample, example)
+	}
+
+	// GET must return the persisted value.
+	getReq := httptest.NewRequest(http.MethodGet, "/api/settings/formatting", nil)
+	getW := httptest.NewRecorder()
+	h.handleFormattingSettings(getW, getReq)
+	if getW.Code != http.StatusOK {
+		t.Fatalf("GET: expected 200, got %d: %s", getW.Code, getW.Body.String())
+	}
+
+	var getSettings database.FormattingSettings
+	if err := json.NewDecoder(getW.Body).Decode(&getSettings); err != nil {
+		t.Fatalf("decode GET response: %v", err)
+	}
+	if getSettings.OutputSchemaExample != example {
+		t.Errorf("GET OutputSchemaExample = %q, want %q", getSettings.OutputSchemaExample, example)
 	}
 }

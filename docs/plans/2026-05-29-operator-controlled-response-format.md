@@ -35,14 +35,14 @@ Replace the hardcoded four-key JSON contract in the response formatter with an o
 - Modify: `internal/handlers/api_settings_formatting.go`
 - Modify: `internal/handlers/api_settings_formatting_test.go`
 
-- [ ] Add `OutputSchemaExample string` field (GORM `type:text`) to `FormattingSettings` struct
-- [ ] Update `DefaultFormattingSettings()` to leave `OutputSchemaExample` empty (Format() will default to built-in example at runtime)
-- [ ] Rewrite `DefaultFormattingPrompt` constant to be tone/content guidance only — remove all references to specific field names (status, summary, actions_taken, recommendations)
-- [ ] Add `OutputSchemaExample *string` to `UpdateFormattingSettingsRequest` in `internal/api/types.go`
-- [ ] In `handleFormattingSettings` PUT path: when `OutputSchemaExample` is non-nil, validate it parses as JSON (400 with inline parse error), top-level is an object (400), and length <= 8192 bytes (400); on pass, assign to settings
-- [ ] Surface `OutputSchemaExample` in GET response
-- [ ] Add handler tests: PUT with invalid JSON → 400, PUT with non-object top-level (array, scalar) → 400, PUT with oversize example → 400, round-trip GET/PUT preserves value
-- [ ] Run `make test` — must pass
+- [x] Add `OutputSchemaExample string` field (GORM `type:text`) to `FormattingSettings` struct
+- [x] Update `DefaultFormattingSettings()` to leave `OutputSchemaExample` empty (Format() will default to built-in example at runtime)
+- [x] Rewrite `DefaultFormattingPrompt` constant to be tone/content guidance only — remove all references to specific field names (status, summary, actions_taken, recommendations)
+- [x] Add `OutputSchemaExample *string` to `UpdateFormattingSettingsRequest` in `internal/api/types.go`
+- [x] In `handleFormattingSettings` PUT path: when `OutputSchemaExample` is non-nil, validate it parses as JSON (400 with inline parse error), top-level is an object (400), and length <= 8192 bytes (400); on pass, assign to settings
+- [x] Surface `OutputSchemaExample` in GET response
+- [x] Add handler tests: PUT with invalid JSON → 400, PUT with non-object top-level (array, scalar) → 400, PUT with oversize example → 400, round-trip GET/PUT preserves value
+- [x] Run `make test` — must pass
 
 ### Task 2: Schema inference helpers
 

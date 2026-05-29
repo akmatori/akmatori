@@ -157,10 +157,11 @@ type UpdateRetentionSettingsRequest struct {
 
 // UpdateFormattingSettingsRequest is the request body for PUT /api/settings/formatting.
 type UpdateFormattingSettingsRequest struct {
-	Enabled      *bool    `json:"enabled"`
-	SystemPrompt *string  `json:"system_prompt"`
-	MaxTokens    *int     `json:"max_tokens"`
-	Temperature  *float64 `json:"temperature"`
+	Enabled             *bool    `json:"enabled"`
+	SystemPrompt        *string  `json:"system_prompt"`
+	MaxTokens           *int     `json:"max_tokens"`
+	Temperature         *float64 `json:"temperature"`
+	OutputSchemaExample *string  `json:"output_schema_example"`
 }
 
 // ========== Alert Source Types ==========
