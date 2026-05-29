@@ -9,11 +9,11 @@ import (
 )
 
 const (
-	formattingMaxTokensMin    = 1
-	formattingMaxTokensMax    = 8000
-	formattingTemperatureMin  = 0.0
-	formattingTemperatureMax  = 2.0
-	formattingSystemPromptMax = 8 * 1024
+	formattingMaxTokensMin     = 1
+	formattingMaxTokensMax     = 8000
+	formattingTemperatureMin   = 0.0
+	formattingTemperatureMax   = 2.0
+	formattingSystemPromptMax  = 8 * 1024
 	formattingSchemaExampleMax = 8 * 1024
 )
 
