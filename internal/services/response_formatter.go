@@ -37,6 +37,9 @@ func parseAndValidateResponse(raw string, specs []fieldSpec) (map[string]any, []
 	if err := json.Unmarshal([]byte(s), &parsed); err != nil {
 		return nil, []string{fmt.Sprintf("invalid JSON: %v", err)}
 	}
+	if parsed == nil {
+		return nil, []string{"response was JSON null, not an object"}
+	}
 	return parsed, validateAgainstSpecs(parsed, specs)
 }
 
@@ -87,8 +90,8 @@ func (f *ResponseFormatter) Format(ctx context.Context, rawResponse, fullLog str
 		}
 	}
 
-	usingDefaultSchema := strings.TrimSpace(settings.OutputSchemaExample) == ""
 	example := strings.TrimSpace(settings.OutputSchemaExample)
+	usingDefaultSchema := example == ""
 	if example == "" {
 		example = defaultSchemaExample
 	}

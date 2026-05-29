@@ -134,7 +134,7 @@ func inferArray(dec *json.Decoder, name string) (fieldSpec, error) {
 	case float64:
 		spec.Kind = "list_number"
 	case bool:
-		spec.Kind = "list_string"
+		spec.Kind = "list_bool"
 	case nil:
 		spec.Kind = "list_string"
 	}
@@ -246,6 +246,17 @@ func checkKind(spec fieldSpec, val any) []string {
 		for i, elem := range arr {
 			if _, ok := elem.(float64); !ok {
 				errs = append(errs, fmt.Sprintf("key %q: element %d expected number, got %T", spec.Name, i, elem))
+			}
+		}
+	case "list_bool":
+		arr, ok := val.([]any)
+		if !ok {
+			errs = append(errs, fmt.Sprintf("key %q: expected array, got %T", spec.Name, val))
+			break
+		}
+		for i, elem := range arr {
+			if _, ok := elem.(bool); !ok {
+				errs = append(errs, fmt.Sprintf("key %q: element %d expected bool, got %T", spec.Name, i, elem))
 			}
 		}
 	case "list_object":

@@ -51,7 +51,7 @@ func renderField(spec FieldSpec, val any) string {
 		return fmt.Sprintf("*%s:* %v\n", heading, val)
 	case "bool":
 		return fmt.Sprintf("*%s:* %v\n", heading, val)
-	case "list_string", "list_number":
+	case "list_string", "list_number", "list_bool":
 		arr, ok := val.([]any)
 		if !ok || len(arr) == 0 {
 			return ""
