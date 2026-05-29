@@ -165,7 +165,7 @@ func TestApplyResponseFormatter_AppliedHappyPath(t *testing.T) {
 	formatter := services.NewResponseFormatter(caller)
 
 	got := applyResponseFormatter(context.Background(), formatter, false, "Investigation finished. No issues.", "step 1\nstep 2")
-	if !strings.Contains(got, "Resolved") || !strings.Contains(got, "All clear.") {
+	if !strings.Contains(got, "*Status:*") || !strings.Contains(got, "All clear.") {
 		t.Errorf("expected rendered formatted output, got %q", got)
 	}
 	if caller.calls != 1 {

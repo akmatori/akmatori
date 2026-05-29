@@ -97,7 +97,7 @@ func TestResponseFormatter_EmptyPromptUsesDefaultPrompt(t *testing.T) {
 
 	f := NewResponseFormatter(caller)
 	got := f.Format(context.Background(), "raw output", "full log")
-	if !strings.Contains(got, "Resolved") {
+	if !strings.Contains(got, "*Status:*") {
 		t.Errorf("expected rendered output via default prompt, got %q", got)
 	}
 	if caller.callCount() != 1 {
@@ -106,8 +106,8 @@ func TestResponseFormatter_EmptyPromptUsesDefaultPrompt(t *testing.T) {
 	if !strings.Contains(caller.lastSystem, strings.TrimSpace(database.DefaultFormattingPrompt)) {
 		t.Errorf("expected blank stored prompt to fall back to DefaultFormattingPrompt, got %q", caller.lastSystem)
 	}
-	if !strings.Contains(caller.lastSystem, formatterJSONInstruction) {
-		t.Errorf("expected system prompt to contain JSON instruction suffix, got %q", caller.lastSystem)
+	if !strings.Contains(caller.lastSystem, "Return ONLY a single JSON object") {
+		t.Errorf("expected system prompt to contain schema instruction, got %q", caller.lastSystem)
 	}
 }
 
@@ -154,29 +154,37 @@ func TestResponseFormatter_MissingAPIKeyPassthrough(t *testing.T) {
 }
 
 func TestResponseFormatter_HappyPathReturnsLLMOutput(t *testing.T) {
+	customSchema := `{"severity":"high","summary":"1-3 sentences.","affected_hosts":["host1"]}`
 	setupFormatterTestDB(t)
 	seedFormatterSettings(t, database.FormattingSettings{
-		Enabled:      true,
-		SystemPrompt: "You are a strict JSON formatter.",
-		MaxTokens:    1234,
-		Temperature:  0.4,
+		Enabled:             true,
+		SystemPrompt:        "You are a strict JSON formatter.",
+		MaxTokens:           1234,
+		Temperature:         0.4,
+		OutputSchemaExample: customSchema,
 	})
 	seedFormatterLLM(t, defaultLLMForFormatter())
 
 	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
-		return `{"status":"resolved","summary":"Failover succeeded.","actions_taken":["Restarted service"],"recommendations":["Monitor logs"]}`, nil
+		return `{"severity":"high","summary":"Failover succeeded.","affected_hosts":["web-01","web-02"]}`, nil
 	}}
 
 	f := NewResponseFormatter(caller)
 	got := f.Format(context.Background(), "Raw final answer.", "step 1\nstep 2")
-	if !strings.Contains(got, "*Resolved*") {
-		t.Errorf("expected rendered Slack output with status, got %q", got)
+	if !strings.Contains(got, "*Severity:*") {
+		t.Errorf("expected rendered Slack output with custom severity field, got %q", got)
 	}
-	if !strings.Contains(got, "*Summary*") {
+	if !strings.Contains(got, "*Summary:*") {
 		t.Errorf("expected rendered Slack output with summary section, got %q", got)
 	}
 	if !strings.Contains(got, "Failover succeeded.") {
 		t.Errorf("expected summary text in rendered output, got %q", got)
+	}
+	if !strings.Contains(got, "*Affected Hosts:*") {
+		t.Errorf("expected rendered list heading for affected_hosts, got %q", got)
+	}
+	if !strings.Contains(got, "web-01") {
+		t.Errorf("expected host entry in rendered output, got %q", got)
 	}
 	if caller.callCount() != 1 {
 		t.Fatalf("expected 1 LLM call, got %d", caller.callCount())
@@ -184,8 +192,8 @@ func TestResponseFormatter_HappyPathReturnsLLMOutput(t *testing.T) {
 	if !strings.Contains(caller.lastSystem, "You are a strict JSON formatter.") {
 		t.Errorf("system prompt not forwarded: %q", caller.lastSystem)
 	}
-	if !strings.Contains(caller.lastSystem, formatterJSONInstruction) {
-		t.Errorf("system prompt missing JSON instruction suffix: %q", caller.lastSystem)
+	if !strings.Contains(caller.lastSystem, "Return ONLY a single JSON object") {
+		t.Errorf("system prompt missing schema instruction: %q", caller.lastSystem)
 	}
 	if !strings.Contains(caller.lastUser, "--- Raw response ---") {
 		t.Errorf("user prompt missing raw response delimiter: %q", caller.lastUser)
@@ -521,7 +529,7 @@ func TestResponseFormatter_RetryOnValidationFailure(t *testing.T) {
 	if !strings.Contains(caller.lastUser, "not valid json at all") {
 		t.Errorf("expected retry user prompt to include the failed first response, got %q", caller.lastUser)
 	}
-	if !strings.Contains(got, "Resolved") {
+	if !strings.Contains(got, "*Status:*") {
 		t.Errorf("expected rendered Slack output after successful retry, got %q", got)
 	}
 	if !strings.Contains(got, "Fixed after retry.") {
@@ -614,8 +622,9 @@ func TestResponseFormatter_MissingRequiredFieldTriggersRetry(t *testing.T) {
 
 	caller := &fakeOneShotLLMCaller{
 		responses: []func(ctx context.Context) (string, error){
+			// Missing "actions_taken" key → validateAgainstSpecs returns an error.
 			func(ctx context.Context) (string, error) {
-				return `{"status":"resolved","summary":"","actions_taken":[],"recommendations":[]}`, nil
+				return `{"status":"resolved","summary":"Good summary.","recommendations":[]}`, nil
 			},
 			func(ctx context.Context) (string, error) {
 				return `{"status":"resolved","summary":"Good summary.","actions_taken":[],"recommendations":[]}`, nil
@@ -628,7 +637,7 @@ func TestResponseFormatter_MissingRequiredFieldTriggersRetry(t *testing.T) {
 	if caller.callCount() != 2 {
 		t.Fatalf("expected 2 LLM calls (missing field triggers retry), got %d", caller.callCount())
 	}
-	if !strings.Contains(got, "Resolved") {
+	if !strings.Contains(got, "*Status:*") {
 		t.Errorf("expected rendered output after retry, got %q", got)
 	}
 	if !strings.Contains(got, "Good summary.") {
@@ -636,175 +645,169 @@ func TestResponseFormatter_MissingRequiredFieldTriggersRetry(t *testing.T) {
 	}
 }
 
-func TestValidateFormatterResult(t *testing.T) {
-	tests := []struct {
-		name     string
-		raw      string
-		wantNil  bool
-		wantErrs []string
-	}{
-		{
-			name: "valid JSON",
-			raw:  `{"status":"resolved","summary":"All good.","actions_taken":["action1"],"recommendations":["rec1"]}`,
-		},
-		{
-			name:     "invalid JSON",
-			raw:      "not json at all",
-			wantNil:  true,
-			wantErrs: []string{"invalid JSON"},
-		},
-		{
-			name: "fenced JSON stripped",
-			raw:  "```json\n{\"status\":\"resolved\",\"summary\":\"ok\",\"actions_taken\":[],\"recommendations\":[]}\n```",
-		},
-		{
-			name:     "missing status",
-			raw:      `{"status":"","summary":"ok","actions_taken":[],"recommendations":[]}`,
-			wantNil:  true,
-			wantErrs: []string{`"status" must be a non-empty string`},
-		},
-		{
-			name:     "missing summary",
-			raw:      `{"status":"resolved","summary":"","actions_taken":[],"recommendations":[]}`,
-			wantNil:  true,
-			wantErrs: []string{`"summary" must be a non-empty string`},
-		},
-		{
-			name: "empty arrays ok",
-			raw:  `{"status":"resolved","summary":"all good","actions_taken":[],"recommendations":[]}`,
-		},
-		{
-			name:     "completely empty string",
-			raw:      "",
-			wantNil:  true,
-			wantErrs: []string{"invalid JSON"},
-		},
-		{
-			name:     "whitespace-only status",
-			raw:      `{"status":"   ","summary":"ok","actions_taken":[],"recommendations":[]}`,
-			wantNil:  true,
-			wantErrs: []string{`"status" must be a non-empty string`},
-		},
-		{
-			name:     "both required fields empty",
-			raw:      `{"status":"","summary":"","actions_taken":[],"recommendations":[]}`,
-			wantNil:  true,
-			wantErrs: []string{`"status" must be a non-empty string`, `"summary" must be a non-empty string`},
-		},
-		{
-			name: "fenced JSON with trailing text stripped",
-			raw:  "```json\n{\"status\":\"resolved\",\"summary\":\"ok\",\"actions_taken\":[],\"recommendations\":[]}\n```\nSome trailing comment.",
-		},
-		{
-			name:     "invalid status enum value",
-			raw:      `{"status":"escalated","summary":"ok","actions_taken":[],"recommendations":[]}`,
-			wantNil:  true,
-			wantErrs: []string{`"status" must be one of`},
-		},
-		{
-			name:     "status with trailing period fails enum check",
-			raw:      `{"status":"resolved.","summary":"ok","actions_taken":[],"recommendations":[]}`,
-			wantNil:  true,
-			wantErrs: []string{`"status" must be one of`},
-		},
-		{
-			name: "status enum check is case-insensitive",
-			raw:  `{"status":"Resolved","summary":"ok","actions_taken":[],"recommendations":[]}`,
-		},
-		{
-			name:     "missing actions_taken",
-			raw:      `{"status":"resolved","summary":"ok","recommendations":[]}`,
-			wantNil:  true,
-			wantErrs: []string{`"actions_taken" must be a JSON array`},
-		},
-		{
-			name:     "null actions_taken",
-			raw:      `{"status":"resolved","summary":"ok","actions_taken":null,"recommendations":[]}`,
-			wantNil:  true,
-			wantErrs: []string{`"actions_taken" must be a JSON array`},
-		},
-		{
-			name:     "missing recommendations",
-			raw:      `{"status":"resolved","summary":"ok","actions_taken":[]}`,
-			wantNil:  true,
-			wantErrs: []string{`"recommendations" must be a JSON array`},
-		},
-		{
-			name:     "null recommendations",
-			raw:      `{"status":"resolved","summary":"ok","actions_taken":[],"recommendations":null}`,
-			wantNil:  true,
-			wantErrs: []string{`"recommendations" must be a JSON array`},
-		},
-		{
-			name:     "missing both list fields",
-			raw:      `{"status":"resolved","summary":"ok"}`,
-			wantNil:  true,
-			wantErrs: []string{`"actions_taken" must be a JSON array`, `"recommendations" must be a JSON array`},
-		},
+func TestParseAndValidateResponse(t *testing.T) {
+	specs := []fieldSpec{
+		{Name: "status", Kind: "string"},
+		{Name: "summary", Kind: "string"},
+		{Name: "actions_taken", Kind: "list_string"},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r, errs := validateFormatterResult(tt.raw)
-			if tt.wantNil {
-				if r != nil {
-					t.Errorf("expected nil result, got %+v", r)
-				}
-				if len(errs) == 0 {
-					t.Error("expected validation errors, got none")
-				}
-				for _, wantErr := range tt.wantErrs {
-					found := false
-					for _, e := range errs {
-						if strings.Contains(e, wantErr) {
-							found = true
-							break
-						}
-					}
-					if !found {
-						t.Errorf("expected error containing %q, got %v", wantErr, errs)
-					}
-				}
-			} else {
-				if r == nil {
-					t.Errorf("expected non-nil result, got nil with errors: %v", errs)
-				}
-				if len(errs) != 0 {
-					t.Errorf("expected no errors, got %v", errs)
-				}
+	t.Run("valid JSON passes", func(t *testing.T) {
+		parsed, errs := parseAndValidateResponse(`{"status":"resolved","summary":"ok","actions_taken":["a"]}`, specs)
+		if len(errs) != 0 {
+			t.Fatalf("unexpected errors: %v", errs)
+		}
+		if parsed["status"] != "resolved" {
+			t.Errorf("unexpected parsed status: %v", parsed["status"])
+		}
+	})
+
+	t.Run("invalid JSON returns error", func(t *testing.T) {
+		_, errs := parseAndValidateResponse("not json at all", specs)
+		if len(errs) == 0 {
+			t.Fatal("expected error for invalid JSON")
+		}
+		if !strings.Contains(errs[0], "invalid JSON") {
+			t.Errorf("expected 'invalid JSON' error, got %v", errs)
+		}
+	})
+
+	t.Run("fenced JSON is stripped", func(t *testing.T) {
+		raw := "```json\n{\"status\":\"resolved\",\"summary\":\"ok\",\"actions_taken\":[]}\n```"
+		_, errs := parseAndValidateResponse(raw, specs)
+		if len(errs) != 0 {
+			t.Fatalf("expected fenced JSON to be accepted after stripping, got errors: %v", errs)
+		}
+	})
+
+	t.Run("missing required key returns error", func(t *testing.T) {
+		_, errs := parseAndValidateResponse(`{"status":"resolved","summary":"ok"}`, specs)
+		if len(errs) == 0 {
+			t.Fatal("expected error for missing actions_taken")
+		}
+		found := false
+		for _, e := range errs {
+			if strings.Contains(e, "actions_taken") {
+				found = true
 			}
-		})
+		}
+		if !found {
+			t.Errorf("expected error mentioning 'actions_taken', got %v", errs)
+		}
+	})
+
+	t.Run("wrong type returns error", func(t *testing.T) {
+		_, errs := parseAndValidateResponse(`{"status":123,"summary":"ok","actions_taken":[]}`, specs)
+		if len(errs) == 0 {
+			t.Fatal("expected error for wrong type on status")
+		}
+		if !strings.Contains(errs[0], "status") {
+			t.Errorf("expected error mentioning 'status', got %v", errs)
+		}
+	})
+
+	t.Run("extra keys are tolerated", func(t *testing.T) {
+		_, errs := parseAndValidateResponse(`{"status":"ok","summary":"ok","actions_taken":[],"extra_key":"ignored"}`, specs)
+		if len(errs) != 0 {
+			t.Fatalf("expected extra keys to be tolerated, got errors: %v", errs)
+		}
+	})
+}
+
+func TestResponseFormatter_CustomSchemaHappyPath(t *testing.T) {
+	customSchema := `{"severity":"high","summary":"one-liner.","affected_hosts":["host1"]}`
+	setupFormatterTestDB(t)
+	seedFormatterSettings(t, database.FormattingSettings{
+		Enabled:             true,
+		SystemPrompt:        "You are a JSON formatter.",
+		MaxTokens:           1000,
+		Temperature:         0.2,
+		OutputSchemaExample: customSchema,
+	})
+	seedFormatterLLM(t, defaultLLMForFormatter())
+
+	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
+		return `{"severity":"critical","summary":"Disk full on web-01.","affected_hosts":["web-01","db-02"]}`, nil
+	}}
+
+	f := NewResponseFormatter(caller)
+	got := f.Format(context.Background(), "raw output", "")
+	if !strings.Contains(got, "*Severity:*") {
+		t.Errorf("expected custom severity field in output, got %q", got)
+	}
+	if !strings.Contains(got, "Disk full on web-01.") {
+		t.Errorf("expected summary text in output, got %q", got)
+	}
+	if !strings.Contains(got, "web-01") {
+		t.Errorf("expected host list in output, got %q", got)
+	}
+	// buildSchemaInstruction pretty-prints the schema, so check for a field name from the custom schema.
+	if !strings.Contains(caller.lastSystem, `"severity"`) {
+		t.Errorf("expected custom schema field 'severity' in system prompt, got %q", caller.lastSystem)
+	}
+	if strings.Contains(caller.lastSystem, `"status"`) {
+		t.Errorf("expected default schema field 'status' to NOT be in system prompt when custom schema is set, got %q", caller.lastSystem)
 	}
 }
 
-func TestRenderFormatterResult(t *testing.T) {
-	t.Run("nil input returns empty string", func(t *testing.T) {
-		got := renderFormatterResult(nil)
-		if got != "" {
-			t.Errorf("expected empty string for nil input, got %q", got)
-		}
+func TestResponseFormatter_EmptySchemaExampleUsesBuiltinDefault(t *testing.T) {
+	setupFormatterTestDB(t)
+	seedFormatterSettings(t, database.FormattingSettings{
+		Enabled:             true,
+		SystemPrompt:        "You are a formatter.",
+		MaxTokens:           1000,
+		Temperature:         0.2,
+		OutputSchemaExample: "",
 	})
+	seedFormatterLLM(t, defaultLLMForFormatter())
 
-	t.Run("valid input returns rendered output with status and summary", func(t *testing.T) {
-		actionsTaken := []string{"Restarted pod"}
-		recommendations := []string{"Monitor logs"}
-		r := &formatterResult{
-			Status:          "resolved",
-			Summary:         "The incident was resolved successfully.",
-			ActionsTaken:    &actionsTaken,
-			Recommendations: &recommendations,
-		}
-		got := renderFormatterResult(r)
-		if got == "" {
-			t.Fatal("expected non-empty rendered output for valid input")
-		}
-		if !strings.Contains(got, "Resolved") {
-			t.Errorf("expected status in rendered output, got %q", got)
-		}
-		if !strings.Contains(got, "The incident was resolved successfully.") {
-			t.Errorf("expected summary in rendered output, got %q", got)
-		}
+	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
+		return `{"status":"unresolved","summary":"Still investigating.","actions_taken":["Checked logs"],"recommendations":["Page oncall"]}`, nil
+	}}
+
+	f := NewResponseFormatter(caller)
+	got := f.Format(context.Background(), "raw output", "")
+	if !strings.Contains(got, "*Status:*") {
+		t.Errorf("expected status field from built-in schema, got %q", got)
+	}
+	if !strings.Contains(got, "Still investigating.") {
+		t.Errorf("expected summary text in output, got %q", got)
+	}
+	if !strings.Contains(got, "Checked logs") {
+		t.Errorf("expected actions_taken entry in output, got %q", got)
+	}
+	// buildSchemaInstruction pretty-prints the schema; check for field names from the built-in default.
+	if !strings.Contains(caller.lastSystem, `"actions_taken"`) {
+		t.Errorf("expected built-in default schema field 'actions_taken' in system prompt, got %q", caller.lastSystem)
+	}
+	if !strings.Contains(caller.lastSystem, `"recommendations"`) {
+		t.Errorf("expected built-in default schema field 'recommendations' in system prompt, got %q", caller.lastSystem)
+	}
+}
+
+func TestResponseFormatter_EmptyRenderFallback(t *testing.T) {
+	// A schema with only a list field; if the LLM returns an empty array, RenderForSlack
+	// returns an empty string which should fall back to rawResponse.
+	customSchema := `{"tags":["example"]}`
+	setupFormatterTestDB(t)
+	seedFormatterSettings(t, database.FormattingSettings{
+		Enabled:             true,
+		SystemPrompt:        "You are a formatter.",
+		MaxTokens:           1000,
+		Temperature:         0.2,
+		OutputSchemaExample: customSchema,
 	})
+	seedFormatterLLM(t, defaultLLMForFormatter())
+
+	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
+		return `{"tags":[]}`, nil
+	}}
+
+	f := NewResponseFormatter(caller)
+	got := f.Format(context.Background(), "raw output", "")
+	if got != "raw output" {
+		t.Errorf("expected rawResponse fallback when render is empty, got %q", got)
+	}
 }
 
 func TestNewResponseFormatter(t *testing.T) {

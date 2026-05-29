@@ -23,97 +23,21 @@ const responseFormatterTimeout = 30 * time.Second
 // portion immediately preceding the final answer stays in the prompt.
 const responseFormatterMaxInputBytes = 60_000
 
-// formatterJSONInstruction is appended to the system prompt to enforce a JSON
-// output contract. The formatter validates the returned JSON and retries once
-// on failure.
-const formatterJSONInstruction = `
-
-Return ONLY a single JSON object — no markdown fences, no preamble, no trailing text — with exactly these four keys:
-{
-  "status": "<resolved|unresolved|escalate>",
-  "summary": "<1-3 sentence description>",
-  "actions_taken": ["<action 1>", "..."],
-  "recommendations": ["<recommendation 1>", "..."]
-}
-"status" and "summary" must be non-empty strings. "actions_taken" and "recommendations" may be empty arrays.`
-
-// formatterResult is the JSON envelope the LLM must return when formatting is active.
-// ActionsTaken and Recommendations use pointer slices so that absent or JSON-null
-// values can be distinguished from present-but-empty arrays during validation.
-type formatterResult struct {
-	Status          string    `json:"status"`
-	Summary         string    `json:"summary"`
-	ActionsTaken    *[]string `json:"actions_taken"`
-	Recommendations *[]string `json:"recommendations"`
-}
-
-// validateFormatterResult extracts the JSON object from the response, unmarshals
-// it, and validates required fields. Preamble, trailing text, and markdown fences
-// are stripped by scanning for the first '{' and last '}'. Returns the parsed
-// struct and any validation errors; a non-nil struct is guaranteed when the error
-// slice is empty.
-func validateFormatterResult(raw string) (*formatterResult, []string) {
+// parseAndValidateResponse extracts a JSON object from raw (stripping fences and
+// any preamble/trailing text the LLM may have added), unmarshals it to a map, and
+// validates it against specs. Returns the parsed map and any validation errors.
+func parseAndValidateResponse(raw string, specs []fieldSpec) (map[string]any, []string) {
 	s := strings.TrimSpace(raw)
-	// Extract the JSON object by finding the outermost braces so that fences,
-	// preamble, or trailing text the LLM may have added do not cause parse failures.
 	if start := strings.Index(s, "{"); start >= 0 {
 		if end := strings.LastIndex(s, "}"); end > start {
 			s = s[start : end+1]
 		}
 	}
-
-	var r formatterResult
-	if err := json.Unmarshal([]byte(s), &r); err != nil {
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(s), &parsed); err != nil {
 		return nil, []string{fmt.Sprintf("invalid JSON: %v", err)}
 	}
-
-	validStatuses := map[string]bool{"resolved": true, "unresolved": true, "escalate": true}
-	var errs []string
-	statusVal := strings.ToLower(strings.TrimSpace(r.Status))
-	if statusVal == "" {
-		errs = append(errs, `"status" must be a non-empty string`)
-	} else if !validStatuses[statusVal] {
-		errs = append(errs, `"status" must be one of "resolved", "unresolved", or "escalate"`)
-	}
-	summaryVal := strings.TrimSpace(r.Summary)
-	if summaryVal == "" {
-		errs = append(errs, `"summary" must be a non-empty string`)
-	}
-	if r.ActionsTaken == nil {
-		errs = append(errs, `"actions_taken" must be a JSON array (may be empty)`)
-	}
-	if r.Recommendations == nil {
-		errs = append(errs, `"recommendations" must be a JSON array (may be empty)`)
-	}
-	if len(errs) > 0 {
-		return nil, errs
-	}
-	r.Status = statusVal
-	r.Summary = summaryVal
-	return &r, nil
-}
-
-// renderFormatterResult maps a formatterResult to a Slack-formatted string via
-// output.FormatForSlack. Returns empty string on nil input.
-func renderFormatterResult(r *formatterResult) string {
-	if r == nil {
-		return ""
-	}
-	var actionsTaken, recommendations []string
-	if r.ActionsTaken != nil {
-		actionsTaken = *r.ActionsTaken
-	}
-	if r.Recommendations != nil {
-		recommendations = *r.Recommendations
-	}
-	fr := output.FinalResult{
-		Status:          r.Status,
-		Summary:         r.Summary,
-		ActionsTaken:    actionsTaken,
-		Recommendations: recommendations,
-	}
-	po := &output.ParsedOutput{FinalResult: &fr}
-	return output.FormatForSlack(po)
+	return parsed, validateAgainstSpecs(parsed, specs)
 }
 
 // ResponseFormatter applies a configurable, global system prompt to the agent's
@@ -162,7 +86,19 @@ func (f *ResponseFormatter) Format(ctx context.Context, rawResponse, fullLog str
 			return rawResponse
 		}
 	}
-	systemPrompt += formatterJSONInstruction
+
+	example := strings.TrimSpace(settings.OutputSchemaExample)
+	if example == "" {
+		example = defaultSchemaExample
+	}
+
+	specs, err := inferSchema(example)
+	if err != nil {
+		slog.Warn("response formatter: failed to infer output schema, using raw response", "err", err)
+		return rawResponse
+	}
+
+	systemPrompt += buildSchemaInstruction(example)
 
 	llmSettings, err := database.GetLLMSettings()
 	if err != nil {
@@ -206,7 +142,7 @@ func (f *ResponseFormatter) Format(ctx context.Context, rawResponse, fullLog str
 		return rawResponse
 	}
 
-	result, validationErrs := validateFormatterResult(formatted)
+	parsed, validationErrs := parseAndValidateResponse(formatted, specs)
 	if len(validationErrs) > 0 {
 		// Cap the failed response snippet so the retry prompt stays within a
 		// reasonable size. The first call's response should be short JSON, but
@@ -228,14 +164,14 @@ func (f *ResponseFormatter) Format(ctx context.Context, rawResponse, fullLog str
 			return rawResponse
 		}
 		var secondErrs []string
-		result, secondErrs = validateFormatterResult(formatted2)
-		if result == nil {
+		parsed, secondErrs = parseAndValidateResponse(formatted2, specs)
+		if len(secondErrs) > 0 {
 			slog.Warn("response formatter: retry response failed validation, using raw response", "errors", secondErrs)
 			return rawResponse
 		}
 	}
 
-	rendered := renderFormatterResult(result)
+	rendered := output.RenderForSlack(parsed, specs)
 	if rendered == "" {
 		return rawResponse
 	}

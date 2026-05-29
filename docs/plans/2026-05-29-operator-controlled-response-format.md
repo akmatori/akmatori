@@ -77,12 +77,12 @@ Replace the hardcoded four-key JSON contract in the response formatter with an o
 - Modify: `internal/services/response_formatter.go`
 - Modify: `internal/services/response_formatter_test.go`
 
-- [ ] Delete `formatterJSONInstruction` constant, `formatterResult` struct, `validateFormatterResult()`, and `renderFormatterResult()` from `response_formatter.go`
-- [ ] In `Format()`: load `settings.OutputSchemaExample`; if empty use built-in default example; call `inferSchema` to get specs; build `systemPrompt = operatorPrompt + buildSchemaInstruction(example)`; one-shot LLM call, `json.Unmarshal` to `map[string]any`, call `validateAgainstSpecs`; on failure append error list to user prompt and retry once (mirroring existing retry pattern)
-- [ ] Two consecutive failures → return `rawResponse`
-- [ ] On success call `output.RenderForSlack(parsed, specs)`; if render returns empty string → return `rawResponse`
-- [ ] Rewrite `response_formatter_test.go`: replace four-key-specific tests with table-driven cases — happy path with custom schema (severity/summary/hosts list), validation failure → retry → success, two failures → raw fallback, empty-render fallback, empty `OutputSchemaExample` uses built-in default and produces same Slack output as today
-- [ ] Run `make test` — must pass
+- [x] Delete `formatterJSONInstruction` constant, `formatterResult` struct, `validateFormatterResult()`, and `renderFormatterResult()` from `response_formatter.go`
+- [x] In `Format()`: load `settings.OutputSchemaExample`; if empty use built-in default example; call `inferSchema` to get specs; build `systemPrompt = operatorPrompt + buildSchemaInstruction(example)`; one-shot LLM call, `json.Unmarshal` to `map[string]any`, call `validateAgainstSpecs`; on failure append error list to user prompt and retry once (mirroring existing retry pattern)
+- [x] Two consecutive failures → return `rawResponse`
+- [x] On success call `output.RenderForSlack(parsed, specs)`; if render returns empty string → return `rawResponse`
+- [x] Rewrite `response_formatter_test.go`: replace four-key-specific tests with table-driven cases — happy path with custom schema (severity/summary/hosts list), validation failure → retry → success, two failures → raw fallback, empty-render fallback, empty `OutputSchemaExample` uses built-in default and produces same Slack output as today
+- [x] Run `make test` — must pass
 
 ### Task 5: Frontend changes
 
