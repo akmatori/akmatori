@@ -102,6 +102,6 @@ Replace the hardcoded four-key JSON contract in the response formatter with an o
 **Files:**
 - Modify: `CLAUDE.md`
 
-- [ ] Run `make test` (full Go suite)
-- [ ] Run `make test-web`
-- [ ] Update the "Response formatting" rules section in `CLAUDE.md`: remove reference to hardcoded four-key fields; describe `OutputSchemaExample` field, schema inference, operator-driven shape, auto-renderer; update note that empty `OutputSchemaExample` falls back to built-in four-key default
+- [x] Run `make test` (full Go suite)
+- [x] Run `make test-web`
+- [x] Update the "Response formatting" rules section in `CLAUDE.md`: remove reference to hardcoded four-key fields; describe `OutputSchemaExample` field, schema inference, operator-driven shape, auto-renderer; update note that empty `OutputSchemaExample` falls back to built-in four-key default
