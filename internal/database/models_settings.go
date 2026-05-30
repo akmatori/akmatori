@@ -1,6 +1,9 @@
 package database
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // SlackSettings stores Slack integration configuration.
 //
@@ -278,6 +281,29 @@ const DefaultFormattingPrompt = `You are a senior incident-response writer. Refo
 Use the full reasoning trace as context but base the output on the agent's final response. Do not invent facts that are not supported by the trace.
 
 Keep the tone factual and concise. Preserve specific identifiers (hosts, services, timestamps, error codes) the agent mentioned. The required output shape is enforced separately.`
+
+// legacyDefaultFormattingPrompt is the exact system prompt that was seeded by
+// DefaultFormattingSettings() before the operator-controlled output schema
+// feature landed. Existing installs may have this value stored verbatim.
+const legacyDefaultFormattingPrompt = `You are a senior incident-response writer. Reformat the agent's investigation into a structured incident summary aimed at on-call engineers.
+
+Use the full reasoning trace as context but base the output on the agent's final response. Do not invent facts that are not supported by the trace.
+
+Field guidance:
+- Status ("status"): one of "resolved", "unresolved", or "escalate" — choose the word that best matches the outcome. Use exactly one of the three values with no additional text.
+- Summary ("summary"): 1-3 sentences describing what happened and the suspected root cause. Be factual and concise; preserve specific identifiers (hosts, services, timestamps, error codes).
+- Actions taken ("actions_taken"): each entry is one concrete step the agent performed. Use past tense. Omit steps with no observable effect. Empty array is valid.
+- Recommendations ("recommendations"): each entry is one actionable next step for a human. Omit if none apply. Empty array is valid.
+
+Keep the tone factual and concise. The JSON output schema is enforced automatically — focus on accurate, useful content.`
+
+// IsLegacyDefaultFormattingPrompt reports whether s is the exact pre-schema-feature
+// default prompt. The formatter substitutes DefaultFormattingPrompt when it detects
+// this so upgraded installs with a custom OutputSchemaExample do not receive
+// stale field-specific guidance that conflicts with the injected schema instruction.
+func IsLegacyDefaultFormattingPrompt(s string) bool {
+	return strings.TrimSpace(s) == strings.TrimSpace(legacyDefaultFormattingPrompt)
+}
 
 // FormattingSettings stores the global response-formatter prompt that runs as
 // a one-shot LLM call after each incident finishes investigating. The

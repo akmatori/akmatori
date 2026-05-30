@@ -6,6 +6,7 @@ import (
 
 	"github.com/akmatori/akmatori/internal/api"
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/services"
 )
 
 const (
@@ -51,6 +52,10 @@ func (h *APIHandler) handleFormattingSettings(w http.ResponseWriter, r *http.Req
 				}
 				if _, ok := parsed.(map[string]any); !ok {
 					api.RespondError(w, http.StatusBadRequest, "output_schema_example must be a JSON object")
+					return
+				}
+				if err := services.ValidateSchemaExample(val); err != nil {
+					api.RespondError(w, http.StatusBadRequest, "output_schema_example: "+err.Error())
 					return
 				}
 			}

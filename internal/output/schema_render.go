@@ -82,7 +82,14 @@ func renderField(spec FieldSpec, val any) string {
 				if !ok {
 					continue
 				}
-				parts = append(parts, fmt.Sprintf("%s: %v", titleCase(child.Name), cv))
+				switch child.Kind {
+				case "string", "number", "bool":
+					parts = append(parts, fmt.Sprintf("%s: %v", titleCase(child.Name), cv))
+				default:
+					if rendered := renderField(child, cv); rendered != "" {
+						parts = append(parts, strings.TrimRight(rendered, "\n"))
+					}
+				}
 			}
 			if len(parts) > 0 {
 				bullets.WriteString(fmt.Sprintf(" • %s\n", strings.Join(parts, " | ")))
@@ -103,7 +110,14 @@ func renderField(spec FieldSpec, val any) string {
 			if !ok {
 				continue
 			}
-			children.WriteString(fmt.Sprintf(" • %s: %v\n", titleCase(child.Name), cv))
+			switch child.Kind {
+			case "string", "number", "bool":
+				children.WriteString(fmt.Sprintf(" • %s: %v\n", titleCase(child.Name), cv))
+			default:
+				if rendered := renderField(child, cv); rendered != "" {
+					children.WriteString(rendered)
+				}
+			}
 		}
 		if children.Len() == 0 {
 			return ""

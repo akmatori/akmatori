@@ -83,6 +83,36 @@ func TestHandleFormattingSettings_PUT_OutputSchemaExample_NonObject(t *testing.T
 	}
 }
 
+func TestHandleFormattingSettings_PUT_OutputSchemaExample_NullField(t *testing.T) {
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	// A JSON object is valid at the top level, but null field values must be rejected
+	// because inferSchema cannot derive a type from null.
+	cases := []struct {
+		name  string
+		value string
+	}{
+		{"null_field", `{"key": null}`},
+		{"null_in_array", `{"tags": ["ok", null]}`},
+		{"mixed_array", `{"counts": [1, "not-a-number"]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			encoded, err := json.Marshal(tc.value)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			body := `{"output_schema_example": ` + string(encoded) + `}`
+			req := httptest.NewRequest(http.MethodPut, "/api/settings/formatting", strings.NewReader(body))
+			w := httptest.NewRecorder()
+			h.handleFormattingSettings(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("%s: expected 400, got %d: %s", tc.name, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestHandleFormattingSettings_PUT_OutputSchemaExample_Oversize(t *testing.T) {
 	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 

@@ -151,6 +151,26 @@ func TestGetOrCreateFormattingSettings_Idempotent(t *testing.T) {
 	}
 }
 
+func TestIsLegacyDefaultFormattingPrompt(t *testing.T) {
+	legacy := "You are a senior incident-response writer. Reformat the agent's investigation into a structured incident summary aimed at on-call engineers.\n\nUse the full reasoning trace as context but base the output on the agent's final response. Do not invent facts that are not supported by the trace.\n\nField guidance:\n- Status (\"status\"): one of \"resolved\", \"unresolved\", or \"escalate\" — choose the word that best matches the outcome. Use exactly one of the three values with no additional text.\n- Summary (\"summary\"): 1-3 sentences describing what happened and the suspected root cause. Be factual and concise; preserve specific identifiers (hosts, services, timestamps, error codes).\n- Actions taken (\"actions_taken\"): each entry is one concrete step the agent performed. Use past tense. Omit steps with no observable effect. Empty array is valid.\n- Recommendations (\"recommendations\"): each entry is one actionable next step for a human. Omit if none apply. Empty array is valid.\n\nKeep the tone factual and concise. The JSON output schema is enforced automatically — focus on accurate, useful content."
+
+	if !IsLegacyDefaultFormattingPrompt(legacy) {
+		t.Error("exact legacy prompt must be detected")
+	}
+	if !IsLegacyDefaultFormattingPrompt("  " + legacy + "\n") {
+		t.Error("legacy prompt with surrounding whitespace must be detected")
+	}
+	if IsLegacyDefaultFormattingPrompt(DefaultFormattingPrompt) {
+		t.Error("new DefaultFormattingPrompt must not match legacy detector")
+	}
+	if IsLegacyDefaultFormattingPrompt("") {
+		t.Error("empty string must not match legacy detector")
+	}
+	if IsLegacyDefaultFormattingPrompt("Custom operator prompt.") {
+		t.Error("arbitrary custom prompt must not match legacy detector")
+	}
+}
+
 func TestUpdateFormattingSettings_RoundTrip(t *testing.T) {
 	setupFormattingTestDB(t)
 

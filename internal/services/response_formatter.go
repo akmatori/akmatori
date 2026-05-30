@@ -82,8 +82,11 @@ func (f *ResponseFormatter) Format(ctx context.Context, rawResponse, fullLog str
 	// that here by falling back to DefaultFormattingPrompt when the operator
 	// saved an empty/whitespace value. Disabling the formatter entirely is
 	// expressed via Enabled=false, not via a blank prompt.
+	// Also treat the exact legacy default (pre-schema-feature) as blank so
+	// upgraded installs do not mix stale field-specific guidance with a
+	// custom OutputSchemaExample's schema instruction.
 	systemPrompt := strings.TrimSpace(settings.SystemPrompt)
-	if systemPrompt == "" {
+	if systemPrompt == "" || database.IsLegacyDefaultFormattingPrompt(systemPrompt) {
 		systemPrompt = strings.TrimSpace(database.DefaultFormattingPrompt)
 		if systemPrompt == "" {
 			return rawResponse

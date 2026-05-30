@@ -401,6 +401,38 @@ func TestValidateAgainstSpecs_NonEmptyPassesNonBlank(t *testing.T) {
 	}
 }
 
+func TestInferSchema_NullValueReturnsError(t *testing.T) {
+	cases := []string{
+		`{"key": null}`,
+		`{"a": "ok", "b": null}`,
+	}
+	for _, c := range cases {
+		_, err := inferSchema(c)
+		if err == nil {
+			t.Errorf("expected error for null field value in %q, got nil", c)
+		}
+		if err != nil && !strings.Contains(err.Error(), "null") {
+			t.Errorf("expected error to mention 'null', got %q", err.Error())
+		}
+	}
+}
+
+func TestInferSchema_NullInArrayReturnsError(t *testing.T) {
+	cases := []string{
+		`{"tags":[null]}`,
+		`{"items":[null,"a"]}`,
+	}
+	for _, c := range cases {
+		_, err := inferSchema(c)
+		if err == nil {
+			t.Errorf("expected error for null array element in %q, got nil", c)
+		}
+		if err != nil && !strings.Contains(err.Error(), "null") {
+			t.Errorf("expected error to mention 'null', got %q", err.Error())
+		}
+	}
+}
+
 func TestInferSchema_BoolFalse(t *testing.T) {
 	specs, err := inferSchema(`{"flag":false}`)
 	if err != nil {
@@ -408,6 +440,125 @@ func TestInferSchema_BoolFalse(t *testing.T) {
 	}
 	if len(specs) != 1 || specs[0].Name != "flag" || specs[0].Kind != "bool" {
 		t.Errorf("expected bool spec for flag, got %+v", specs)
+	}
+}
+
+func TestInferSchema_MixedArrayTypes(t *testing.T) {
+	cases := []string{
+		`{"tags":["ok",1]}`,
+		`{"tags":["ok",true]}`,
+		`{"counts":[1,"not-a-number"]}`,
+		`{"flags":[true,1]}`,
+	}
+	for _, c := range cases {
+		_, err := inferSchema(c)
+		if err == nil {
+			t.Errorf("expected error for mixed-type array in %q, got nil", c)
+		}
+	}
+}
+
+func TestInferSchema_NullInLaterArrayPosition(t *testing.T) {
+	cases := []string{
+		`{"tags":["ok",null]}`,
+		`{"items":["a","b",null]}`,
+		`{"counts":[1,null]}`,
+	}
+	for _, c := range cases {
+		_, err := inferSchema(c)
+		if err == nil {
+			t.Errorf("expected error for null in later array position in %q, got nil", c)
+		}
+		if err != nil && !strings.Contains(err.Error(), "null") {
+			t.Errorf("expected error to mention 'null', got %q for input %q", err.Error(), c)
+		}
+	}
+}
+
+func TestInferSchema_NullInLaterListObjectElement(t *testing.T) {
+	cases := []string{
+		`{"hosts":[{"name":"s1"},{"name":null}]}`,
+		`{"hosts":[{"name":"s1","port":8080},{"name":null,"port":9090}]}`,
+	}
+	for _, c := range cases {
+		_, err := inferSchema(c)
+		if err == nil {
+			t.Errorf("expected error for null in later list_object element in %q, got nil", c)
+		}
+		if err != nil && !strings.Contains(err.Error(), "null") {
+			t.Errorf("expected error to mention 'null', got %q for input %q", err.Error(), c)
+		}
+	}
+}
+
+func TestInferSchema_TypeInconsistencyInLaterListObjectElement(t *testing.T) {
+	// Field "name" is string in first element but number in second.
+	_, err := inferSchema(`{"hosts":[{"name":"s1"},{"name":42}]}`)
+	if err == nil {
+		t.Error("expected error for type inconsistency in later list_object element, got nil")
+	}
+}
+
+func TestInferSchema_ListObjectMissingKeyInLaterElement(t *testing.T) {
+	// "port" is in the first element but absent in the second; save-time validation
+	// must catch this because runtime validateAgainstSpecs requires all inferred keys.
+	_, err := inferSchema(`{"hosts":[{"name":"s1","port":8080},{"name":"s2"}]}`)
+	if err == nil {
+		t.Error("expected error for missing key in later list_object element, got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "port") {
+		t.Errorf("expected error to mention 'port', got %q", err.Error())
+	}
+}
+
+func TestInferSchema_ListObjectNestedTypeDrift(t *testing.T) {
+	// Nested object field "ip" is string in first element but number in second.
+	_, err := inferSchema(`{"hosts":[{"meta":{"ip":"10.0.0.1"}},{"meta":{"ip":42}}]}`)
+	if err == nil {
+		t.Error("expected error for nested type drift in later list_object element, got nil")
+	}
+}
+
+func TestInferSchema_InnerArrayAsMixedTypeLaterElement(t *testing.T) {
+	// First element is string, later element is an array: mixed type.
+	_, err := inferSchema(`{"tags":["ok",["bad"]]}`)
+	if err == nil {
+		t.Error("expected error for array element in string array, got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "mixed") {
+		t.Errorf("expected error to mention 'mixed', got %q", err.Error())
+	}
+}
+
+func TestInferSchema_ArrayOfArraysRejected(t *testing.T) {
+	// Array-of-arrays has no supported kind; inferSchema must reject it at save time
+	// to prevent a save/runtime mismatch (list_string validation would fail at runtime).
+	cases := []string{
+		`{"matrix":[["a","b"],["c","d"]]}`,
+		`{"matrix":[["a"],["b"]]}`,
+	}
+	for _, c := range cases {
+		_, err := inferSchema(c)
+		if err == nil {
+			t.Errorf("expected error for array-of-arrays in %q, got nil", c)
+		}
+	}
+}
+
+func TestInferSchema_DuplicateKeyReturnsError(t *testing.T) {
+	cases := []string{
+		`{"severity":"low","severity":5}`,
+		`{"a":"x","b":"y","a":"z"}`,
+		`{"status":"ok","status":"ok"}`,
+	}
+	for _, c := range cases {
+		_, err := inferSchema(c)
+		if err == nil {
+			t.Errorf("expected error for duplicate key in %q, got nil", c)
+		}
+		if err != nil && !strings.Contains(err.Error(), "duplicate") {
+			t.Errorf("expected error to mention 'duplicate', got %q for input %q", err.Error(), c)
+		}
 	}
 }
 

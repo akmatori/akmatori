@@ -807,6 +807,47 @@ func TestResponseFormatter_EmptyRenderFallback(t *testing.T) {
 	}
 }
 
+func TestResponseFormatter_LegacyDefaultPromptTreatedAsDefault(t *testing.T) {
+	// Simulate an existing install that has the pre-schema-feature default prompt
+	// stored in the DB. When a custom OutputSchemaExample is set, the formatter
+	// must replace the stale field-specific guidance with DefaultFormattingPrompt
+	// so there is no conflict between the old field names and the new schema.
+	legacyPrompt := "You are a senior incident-response writer. Reformat the agent's investigation into a structured incident summary aimed at on-call engineers.\n\nUse the full reasoning trace as context but base the output on the agent's final response. Do not invent facts that are not supported by the trace.\n\nField guidance:\n- Status (\"status\"): one of \"resolved\", \"unresolved\", or \"escalate\" — choose the word that best matches the outcome. Use exactly one of the three values with no additional text.\n- Summary (\"summary\"): 1-3 sentences describing what happened and the suspected root cause. Be factual and concise; preserve specific identifiers (hosts, services, timestamps, error codes).\n- Actions taken (\"actions_taken\"): each entry is one concrete step the agent performed. Use past tense. Omit steps with no observable effect. Empty array is valid.\n- Recommendations (\"recommendations\"): each entry is one actionable next step for a human. Omit if none apply. Empty array is valid.\n\nKeep the tone factual and concise. The JSON output schema is enforced automatically — focus on accurate, useful content."
+	customSchema := `{"severity":"high","summary":"one-liner."}`
+
+	setupFormatterTestDB(t)
+	seedFormatterSettings(t, database.FormattingSettings{
+		Enabled:             true,
+		SystemPrompt:        legacyPrompt,
+		MaxTokens:           1000,
+		Temperature:         0.2,
+		OutputSchemaExample: customSchema,
+	})
+	seedFormatterLLM(t, defaultLLMForFormatter())
+
+	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
+		return `{"severity":"critical","summary":"Disk full."}`, nil
+	}}
+
+	f := NewResponseFormatter(caller)
+	got := f.Format(context.Background(), "raw output", "")
+	if got == "raw output" {
+		t.Fatalf("expected formatted output, not raw fallback")
+	}
+	// The system prompt sent to the LLM must use the new schema-agnostic prompt,
+	// not the legacy field-specific guidance.
+	if strings.Contains(caller.lastSystem, `"status"`) && strings.Contains(caller.lastSystem, "Actions taken") {
+		t.Errorf("legacy field guidance leaked into system prompt: %q", caller.lastSystem)
+	}
+	if !strings.Contains(caller.lastSystem, strings.TrimSpace(database.DefaultFormattingPrompt)) {
+		t.Errorf("expected new DefaultFormattingPrompt in system prompt, got %q", caller.lastSystem)
+	}
+	// Custom schema instruction must still be present.
+	if !strings.Contains(caller.lastSystem, `"severity"`) {
+		t.Errorf("expected custom schema field 'severity' in system prompt, got %q", caller.lastSystem)
+	}
+}
+
 func TestNewResponseFormatter(t *testing.T) {
 	if f := NewResponseFormatter(nil); f == nil {
 		t.Fatal("NewResponseFormatter(nil) returned nil")

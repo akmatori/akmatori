@@ -327,6 +327,79 @@ func TestRenderForSlack_WrongTypeReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestRenderForSlack_DeeplyNestedObject(t *testing.T) {
+	specs := []FieldSpec{
+		{
+			Name: "meta",
+			Kind: "object",
+			Children: []FieldSpec{
+				{
+					Name: "db",
+					Kind: "object",
+					Children: []FieldSpec{
+						{Name: "host", Kind: "string"},
+						{Name: "port", Kind: "number"},
+					},
+				},
+				{Name: "env", Kind: "string"},
+			},
+		},
+	}
+	parsed := map[string]any{
+		"meta": map[string]any{
+			"db":  map[string]any{"host": "localhost", "port": float64(5432)},
+			"env": "production",
+		},
+	}
+	got := RenderForSlack(parsed, specs)
+	if !strings.Contains(got, "*Meta:*") {
+		t.Errorf("expected top-level heading *Meta:*, got %q", got)
+	}
+	if !strings.Contains(got, "*Db:*") {
+		t.Errorf("expected nested heading *Db:* from recursive render, got %q", got)
+	}
+	if strings.Contains(got, "map[") {
+		t.Errorf("expected no raw map output, got %q", got)
+	}
+	if !strings.Contains(got, "localhost") {
+		t.Errorf("expected nested host value, got %q", got)
+	}
+	if !strings.Contains(got, " • Env: production") {
+		t.Errorf("expected scalar child to use bullet format, got %q", got)
+	}
+}
+
+func TestRenderForSlack_ListObjectWithNestedObject(t *testing.T) {
+	specs := []FieldSpec{
+		{
+			Name: "hosts",
+			Kind: "list_object",
+			Children: []FieldSpec{
+				{Name: "name", Kind: "string"},
+				{Name: "meta", Kind: "object", Children: []FieldSpec{
+					{Name: "zone", Kind: "string"},
+				}},
+			},
+		},
+	}
+	// extra_key is not in the spec and must not appear in the rendered output.
+	parsed := map[string]any{
+		"hosts": []any{
+			map[string]any{"name": "s1", "meta": map[string]any{"zone": "a", "extra_key": "should_not_appear"}},
+		},
+	}
+	got := RenderForSlack(parsed, specs)
+	if strings.Contains(got, "map[") {
+		t.Errorf("expected no raw map output in list_object rendering, got %q", got)
+	}
+	if !strings.Contains(got, "Zone") {
+		t.Errorf("expected nested object field 'Zone' to appear in output, got %q", got)
+	}
+	if strings.Contains(got, "extra_key") || strings.Contains(got, "should_not_appear") {
+		t.Errorf("extra nested keys must not leak through list_object rendering, got %q", got)
+	}
+}
+
 func TestRenderForSlack_ScalarBoolFalse(t *testing.T) {
 	specs := []FieldSpec{{Name: "active", Kind: "bool"}}
 	parsed := map[string]any{"active": false}
