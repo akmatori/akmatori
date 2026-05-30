@@ -345,7 +345,7 @@ func checkKind(spec fieldSpec, val any) []string {
 			break
 		}
 		for _, ce := range validateAgainstSpecs(obj, spec.Children) {
-			errs = append(errs, fmt.Sprintf("key %q.%s", spec.Name, ce))
+			errs = append(errs, fmt.Sprintf("key %q: %s", spec.Name, ce))
 		}
 	}
 	return errs
