@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/akmatori/akmatori/internal/output"
@@ -42,7 +43,14 @@ func inferSchema(example string) ([]fieldSpec, error) {
 	if !ok || delim != '{' {
 		return nil, fmt.Errorf("top-level JSON value must be an object")
 	}
-	return inferObjectFields(dec)
+	specs, err := inferObjectFields(dec)
+	if err != nil {
+		return nil, err
+	}
+	if len(specs) == 0 {
+		return nil, fmt.Errorf("schema example must contain at least one field")
+	}
+	return specs, nil
 }
 
 // inferObjectFields reads key-value pairs from dec until the matching '}'.
@@ -87,6 +95,9 @@ func inferValue(dec *json.Decoder, name string) (fieldSpec, error) {
 			children, err := inferObjectFields(dec)
 			if err != nil {
 				return fieldSpec{}, err
+			}
+			if len(children) == 0 {
+				return fieldSpec{}, fmt.Errorf("empty object for key %q: include at least one field", name)
 			}
 			return fieldSpec{Name: name, Kind: "object", Children: children}, nil
 		}
@@ -133,6 +144,9 @@ func inferArray(dec *json.Decoder, name string) (fieldSpec, error) {
 			children, err := inferObjectFields(dec)
 			if err != nil {
 				return fieldSpec{}, err
+			}
+			if len(children) == 0 {
+				return fieldSpec{}, fmt.Errorf("empty object in array %q: include at least one field in each element", name)
 			}
 			spec.Kind = "list_object"
 			spec.Children = children
@@ -226,6 +240,21 @@ func checkLaterObjectCompatibility(firstChildren, laterChildren []fieldSpec, arr
 			return fmt.Errorf("inconsistent shapes in array %q: field %q present in first element but missing in a later element", arrayField, fc.Name)
 		}
 	}
+	// Also reject extra keys in later elements: the schema is derived from the
+	// first element only, so a field absent from the first would be silently
+	// dropped and never rendered. Surface the mismatch at save time instead.
+	for _, lc := range laterChildren {
+		found := false
+		for _, fc := range firstChildren {
+			if fc.Name == lc.Name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("inconsistent shapes in array %q: field %q appears in a later element but not in the first; move it to the first element or remove it", arrayField, lc.Name)
+		}
+	}
 	return nil
 }
 
@@ -235,6 +264,7 @@ func checkLaterObjectCompatibility(firstChildren, laterChildren []fieldSpec, arr
 func buildSchemaInstruction(example string) string {
 	var buf bytes.Buffer
 	if err := json.Indent(&buf, []byte(example), "", "  "); err != nil {
+		slog.Warn("response formatter: buildSchemaInstruction failed to indent schema", "err", err)
 		return "\n\nReturn ONLY a single JSON object — no markdown fences, no preamble, no trailing text — matching exactly this shape:\n" + example
 	}
 	return "\n\nReturn ONLY a single JSON object — no markdown fences, no preamble, no trailing text — matching exactly this shape:\n" + buf.String()

@@ -234,7 +234,7 @@ export default function FormattingSettingsSection({ onStatusChange }: Formatting
             className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <RotateCcw className="w-3 h-3" />
-            Reset to default
+            Clear
           </button>
         </div>
         <textarea

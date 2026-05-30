@@ -562,6 +562,46 @@ func TestInferSchema_DuplicateKeyReturnsError(t *testing.T) {
 	}
 }
 
+func TestInferSchema_EmptyTopLevelReturnsError(t *testing.T) {
+	_, err := inferSchema(`{}`)
+	if err == nil {
+		t.Error("expected error for empty top-level object, got nil")
+	}
+}
+
+func TestInferSchema_EmptyNestedObjectReturnsError(t *testing.T) {
+	_, err := inferSchema(`{"meta":{}}`)
+	if err == nil {
+		t.Error("expected error for empty nested object, got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "meta") {
+		t.Errorf("expected error to mention 'meta', got %q", err.Error())
+	}
+}
+
+func TestInferSchema_EmptyListObjectReturnsError(t *testing.T) {
+	_, err := inferSchema(`{"events":[{}]}`)
+	if err == nil {
+		t.Error("expected error for empty object in list_object array, got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "events") {
+		t.Errorf("expected error to mention 'events', got %q", err.Error())
+	}
+}
+
+func TestInferSchema_ExtraKeyInLaterListObjectElementReturnsError(t *testing.T) {
+	// "severity" appears in the second element but not the first: the schema is
+	// derived from the first element only, so silently dropping it would confuse
+	// operators. Save-time validation must catch this.
+	_, err := inferSchema(`{"hosts":[{"name":"s1"},{"name":"s2","severity":"high"}]}`)
+	if err == nil {
+		t.Error("expected error for extra key in later list_object element, got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "severity") {
+		t.Errorf("expected error to mention 'severity', got %q", err.Error())
+	}
+}
+
 func TestInferSchema_ListOfObjectsFollowedByField(t *testing.T) {
 	// Field AFTER a multi-element list_object must not be dropped.
 	specs, err := inferSchema(`{"hosts":[{"name":"s1"},{"name":"s2"}],"status":"ok"}`)

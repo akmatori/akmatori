@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/akmatori/akmatori/internal/api"
@@ -44,20 +43,9 @@ func (h *APIHandler) handleFormattingSettings(w http.ResponseWriter, r *http.Req
 				api.RespondError(w, http.StatusBadRequest, "output_schema_example must be 8192 bytes or fewer")
 				return
 			}
-			if val != "" {
-				var parsed any
-				if err := json.Unmarshal([]byte(val), &parsed); err != nil {
-					api.RespondError(w, http.StatusBadRequest, "output_schema_example: "+err.Error())
-					return
-				}
-				if _, ok := parsed.(map[string]any); !ok {
-					api.RespondError(w, http.StatusBadRequest, "output_schema_example must be a JSON object")
-					return
-				}
-				if err := services.ValidateSchemaExample(val); err != nil {
-					api.RespondError(w, http.StatusBadRequest, "output_schema_example: "+err.Error())
-					return
-				}
+			if err := services.ValidateSchemaExample(val); err != nil {
+				api.RespondError(w, http.StatusBadRequest, "output_schema_example: "+err.Error())
+				return
 			}
 		}
 
