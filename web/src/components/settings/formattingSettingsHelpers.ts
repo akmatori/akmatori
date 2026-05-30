@@ -9,7 +9,8 @@ Keep the tone factual and concise. Preserve specific identifiers (hosts, service
 export const SYSTEM_PROMPT_MAX_BYTES = 8 * 1024;
 
 // Matches the Go `defaultSchemaExample` constant in internal/services/formatter_schema.go.
-// Used to pre-fill "Reset to default" and as a placeholder when the field is empty.
+// Used only as a textarea placeholder when the field is empty; "Reset to default" clears to ''
+// so the backend treats it as usingDefaultSchema=true and applies the full built-in constraints.
 export const DEFAULT_OUTPUT_SCHEMA_EXAMPLE = JSON.stringify(
   {
     status: 'resolved',
