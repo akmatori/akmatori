@@ -1044,3 +1044,115 @@ func TestGetToolAllowlist_ExcludesDisabledToolInstances(t *testing.T) {
 		t.Errorf("expected empty allowlist (disabled tools excluded), got %v", allowlist)
 	}
 }
+
+func TestSkillScriptFileLifecycle(t *testing.T) {
+	db := setupSkillTestDB(t)
+	svc := newTestSkillService(t, db)
+
+	if err := svc.UpdateSkillScript("test-skill", "diagnose.sh", "echo ok\n"); err != nil {
+		t.Fatalf("UpdateSkillScript() error = %v", err)
+	}
+
+	info, err := svc.GetSkillScript("test-skill", "diagnose.sh")
+	if err != nil {
+		t.Fatalf("GetSkillScript() error = %v", err)
+	}
+	if info.Filename != "diagnose.sh" {
+		t.Errorf("Filename = %q, want diagnose.sh", info.Filename)
+	}
+	if info.Content != "echo ok\n" {
+		t.Errorf("Content = %q, want script body", info.Content)
+	}
+	if info.Size != int64(len("echo ok\n")) {
+		t.Errorf("Size = %d, want %d", info.Size, len("echo ok\n"))
+	}
+	if info.ModifiedAt.IsZero() {
+		t.Error("ModifiedAt should be populated")
+	}
+
+	scripts, err := svc.ListSkillScripts("test-skill")
+	if err != nil {
+		t.Fatalf("ListSkillScripts() error = %v", err)
+	}
+	if len(scripts) != 1 || scripts[0] != "diagnose.sh" {
+		t.Fatalf("ListSkillScripts() = %#v, want [diagnose.sh]", scripts)
+	}
+
+	if err := svc.DeleteSkillScript("test-skill", "diagnose.sh"); err != nil {
+		t.Fatalf("DeleteSkillScript() error = %v", err)
+	}
+	if _, err := svc.GetSkillScript("test-skill", "diagnose.sh"); err == nil {
+		t.Fatal("GetSkillScript() after delete error = nil, want not found")
+	}
+}
+
+func TestSkillScriptListFiltersCacheAndHiddenEntries(t *testing.T) {
+	db := setupSkillTestDB(t)
+	svc := newTestSkillService(t, db)
+
+	scriptsDir := svc.GetSkillScriptsDir("test-skill")
+	if err := os.MkdirAll(filepath.Join(scriptsDir, "__pycache__"), 0755); err != nil {
+		t.Fatalf("create __pycache__: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptsDir, ".env"), []byte("secret"), 0644); err != nil {
+		t.Fatalf("write hidden entry: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptsDir, "run.py"), []byte("print('ok')\n"), 0644); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	scripts, err := svc.ListSkillScripts("test-skill")
+	if err != nil {
+		t.Fatalf("ListSkillScripts() error = %v", err)
+	}
+	if len(scripts) != 1 || scripts[0] != "run.py" {
+		t.Fatalf("ListSkillScripts() = %#v, want [run.py]", scripts)
+	}
+}
+
+func TestClearSkillScriptsRemovesRegularFilesOnly(t *testing.T) {
+	db := setupSkillTestDB(t)
+	svc := newTestSkillService(t, db)
+
+	scriptsDir := svc.GetSkillScriptsDir("test-skill")
+	if err := os.MkdirAll(scriptsDir, 0755); err != nil {
+		t.Fatalf("create scripts dir: %v", err)
+	}
+	regularPath := filepath.Join(scriptsDir, "cleanup.sh")
+	if err := os.WriteFile(regularPath, []byte("echo cleanup\n"), 0644); err != nil {
+		t.Fatalf("write regular script: %v", err)
+	}
+	targetPath := filepath.Join(t.TempDir(), "tool")
+	if err := os.WriteFile(targetPath, []byte("tool"), 0644); err != nil {
+		t.Fatalf("write symlink target: %v", err)
+	}
+	symlinkPath := filepath.Join(scriptsDir, "tool-link")
+	if err := os.Symlink(targetPath, symlinkPath); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	if err := svc.ClearSkillScripts("test-skill"); err != nil {
+		t.Fatalf("ClearSkillScripts() error = %v", err)
+	}
+	if _, err := os.Stat(regularPath); !os.IsNotExist(err) {
+		t.Fatalf("regular script still exists or stat failed: %v", err)
+	}
+	if _, err := os.Lstat(symlinkPath); err != nil {
+		t.Fatalf("tool symlink should be preserved: %v", err)
+	}
+}
+
+func TestSkillScriptRejectsUnsafeFilename(t *testing.T) {
+	db := setupSkillTestDB(t)
+	svc := newTestSkillService(t, db)
+
+	if err := svc.UpdateSkillScript("test-skill", "../escape.sh", "echo bad\n"); err == nil {
+		t.Fatal("UpdateSkillScript() error = nil, want path traversal rejection")
+	}
+	if _, err := svc.GetSkillScript("test-skill", "nested/escape.sh"); err == nil {
+		t.Fatal("GetSkillScript() error = nil, want path traversal rejection")
+	}
+	if err := svc.DeleteSkillScript("test-skill", "no-extension"); err == nil {
+		t.Fatal("DeleteSkillScript() error = nil, want extension validation error")
+	}
+}
