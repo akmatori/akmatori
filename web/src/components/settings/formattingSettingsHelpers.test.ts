@@ -3,6 +3,8 @@ import {
   buildFormattingUpdatePayload,
   clampMaxTokens,
   clampTemperature,
+  dehydrateField,
+  hydrateField,
   systemPromptByteLength,
   DEFAULT_FORMATTING_PROMPT_PLACEHOLDER,
   DEFAULT_OUTPUT_SCHEMA_EXAMPLE,
@@ -62,6 +64,48 @@ describe('FormattingSettings helpers', () => {
         outputSchemaExample: example,
       });
       expect(payload.output_schema_example).toBe(example);
+    });
+
+    it('normalizes the verbatim defaults back to empty so the backend keeps its built-in defaults', () => {
+      const payload = buildFormattingUpdatePayload({
+        enabled: true,
+        systemPrompt: DEFAULT_FORMATTING_PROMPT_PLACEHOLDER,
+        maxTokens: 1500,
+        temperature: 0.2,
+        outputSchemaExample: DEFAULT_OUTPUT_SCHEMA_EXAMPLE,
+      });
+      // Persisting '' keeps usingDefaultSchema=true (status enum + non-empty summary).
+      expect(payload.output_schema_example).toBe('');
+      expect(payload.system_prompt).toBe('');
+    });
+  });
+
+  describe('hydrateField', () => {
+    it('returns the default when the stored value is empty or whitespace', () => {
+      expect(hydrateField('', 'DEFAULT')).toBe('DEFAULT');
+      expect(hydrateField('   \n  ', 'DEFAULT')).toBe('DEFAULT');
+    });
+
+    it('passes through a non-empty stored value unchanged', () => {
+      expect(hydrateField('{"custom":true}', 'DEFAULT')).toBe('{"custom":true}');
+    });
+  });
+
+  describe('dehydrateField', () => {
+    it('collapses the verbatim default (ignoring surrounding whitespace) to empty', () => {
+      expect(dehydrateField('DEFAULT', 'DEFAULT')).toBe('');
+      expect(dehydrateField('  DEFAULT  ', 'DEFAULT')).toBe('');
+      expect(dehydrateField('', 'DEFAULT')).toBe('');
+    });
+
+    it('passes through a custom edit unchanged', () => {
+      expect(dehydrateField('{"custom":true}', 'DEFAULT')).toBe('{"custom":true}');
+    });
+
+    it('round-trips with hydrateField for an empty stored value', () => {
+      const hydrated = hydrateField('', DEFAULT_OUTPUT_SCHEMA_EXAMPLE);
+      expect(hydrated).toBe(DEFAULT_OUTPUT_SCHEMA_EXAMPLE);
+      expect(dehydrateField(hydrated, DEFAULT_OUTPUT_SCHEMA_EXAMPLE)).toBe('');
     });
   });
 

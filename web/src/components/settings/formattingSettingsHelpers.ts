@@ -24,6 +24,21 @@ export const DEFAULT_OUTPUT_SCHEMA_EXAMPLE = JSON.stringify(
 
 export const OUTPUT_SCHEMA_EXAMPLE_MAX_BYTES = 8 * 1024;
 
+// hydrateField turns an empty stored value into the editable default text so the
+// textarea opens pre-filled with the real default the operator can tweak. A
+// non-empty stored value (a custom edit) is passed through unchanged.
+export function hydrateField(stored: string, defaultText: string): string {
+  return stored.trim() ? stored : defaultText;
+}
+
+// dehydrateField is the inverse of hydrateField for the save path: if the box
+// still holds the verbatim default, persist '' so the backend keeps treating it
+// as the built-in default (e.g. usingDefaultSchema=true, which applies the
+// status enum + non-empty summary constraints). Any real edit is sent as-is.
+export function dehydrateField(current: string, defaultText: string): string {
+  return current.trim() === defaultText.trim() ? '' : current;
+}
+
 export interface FormattingSettingsFormState {
   enabled: boolean;
   systemPrompt: string;
@@ -37,10 +52,10 @@ export function buildFormattingUpdatePayload(
 ): FormattingSettingsUpdate {
   return {
     enabled: state.enabled,
-    system_prompt: state.systemPrompt,
+    system_prompt: dehydrateField(state.systemPrompt, DEFAULT_FORMATTING_PROMPT_PLACEHOLDER),
     max_tokens: state.maxTokens,
     temperature: state.temperature,
-    output_schema_example: state.outputSchemaExample,
+    output_schema_example: dehydrateField(state.outputSchemaExample, DEFAULT_OUTPUT_SCHEMA_EXAMPLE),
   };
 }
 

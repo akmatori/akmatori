@@ -12,6 +12,7 @@ import {
   buildFormattingUpdatePayload,
   clampMaxTokens,
   clampTemperature,
+  hydrateField,
   systemPromptByteLength,
 } from './formattingSettingsHelpers';
 
@@ -46,10 +47,10 @@ export default function FormattingSettingsSection({ onStatusChange }: Formatting
       setLoading(true);
       const data = await formattingSettingsApi.get();
       setEnabled(data.enabled);
-      setSystemPrompt(data.system_prompt);
+      setSystemPrompt(hydrateField(data.system_prompt, DEFAULT_FORMATTING_PROMPT_PLACEHOLDER));
       setMaxTokens(data.max_tokens);
       setTemperature(data.temperature);
-      setOutputSchemaExample(data.output_schema_example ?? '');
+      setOutputSchemaExample(hydrateField(data.output_schema_example ?? '', DEFAULT_OUTPUT_SCHEMA_EXAMPLE));
       setError(null);
       onStatusChange?.(data.enabled ? 'configured' : 'disabled');
     } catch (err) {
@@ -132,10 +133,10 @@ export default function FormattingSettingsSection({ onStatusChange }: Formatting
       });
       const updated = await formattingSettingsApi.update(payload);
       setEnabled(updated.enabled);
-      setSystemPrompt(updated.system_prompt);
+      setSystemPrompt(hydrateField(updated.system_prompt, DEFAULT_FORMATTING_PROMPT_PLACEHOLDER));
       setMaxTokens(updated.max_tokens);
       setTemperature(updated.temperature);
-      setOutputSchemaExample(updated.output_schema_example ?? '');
+      setOutputSchemaExample(hydrateField(updated.output_schema_example ?? '', DEFAULT_OUTPUT_SCHEMA_EXAMPLE));
       onStatusChange?.(updated.enabled ? 'configured' : 'disabled');
       setSuccess(true);
       if (successTimeoutRef.current !== null) {
@@ -200,9 +201,20 @@ export default function FormattingSettingsSection({ onStatusChange }: Formatting
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-          System prompt
-        </label>
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            System prompt
+          </label>
+          <button
+            type="button"
+            onClick={() => setSystemPrompt('')}
+            disabled={!enabled}
+            className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <RotateCcw className="w-3 h-3" />
+            Clear
+          </button>
+        </div>
         <textarea
           value={systemPrompt}
           onChange={(e) => setSystemPrompt(e.target.value)}
@@ -213,8 +225,8 @@ export default function FormattingSettingsSection({ onStatusChange }: Formatting
         />
         <div className="mt-1 flex items-center justify-between">
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            Instructs the LLM how to structure the incident summary. Leave blank to use the default
-            prompt shown as placeholder.
+            Instructs the LLM how to structure the incident summary. Pre-filled with the default —
+            edit it, or clear the box to fall back to the built-in default.
           </p>
           <p className={`text-xs ${promptTooLong ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
             {promptBytes} / {SYSTEM_PROMPT_MAX_BYTES} bytes
@@ -259,8 +271,9 @@ export default function FormattingSettingsSection({ onStatusChange }: Formatting
               </p>
             ) : (
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Paste an example of the JSON object you want as the final summary. Leave blank to use
-                the built-in four-key default. The LLM will be instructed to return exactly this shape.
+                An example of the JSON object you want as the final summary. Pre-filled with the
+                built-in four-key default — edit it, or clear the box to fall back to that default.
+                The LLM will be instructed to return exactly this shape.
               </p>
             )}
           </div>
