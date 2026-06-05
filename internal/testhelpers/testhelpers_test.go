@@ -157,6 +157,41 @@ func TestHTTPTestContext_AssertJSONContentType(t *testing.T) {
 	ctx.ExecuteFunc(handler).AssertJSONContentType()
 }
 
+func TestHTTPTestContext_AssertJSONField(t *testing.T) {
+	ctx := NewHTTPTestContext(t, http.MethodGet, "/test", nil)
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"result": "ok",
+			"count":  float64(2),
+			"details": map[string]string{
+				"name": "is required",
+			},
+		})
+	}
+
+	ctx.ExecuteFunc(handler).
+		AssertJSONField("result", "ok").
+		AssertJSONField("count", 2).
+		AssertJSONField("details.name", "is required")
+}
+
+func TestHTTPTestContext_AssertJSONError(t *testing.T) {
+	ctx := NewHTTPTestContext(t, http.MethodGet, "/test", nil)
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "name already exists",
+			"code":  "duplicate_name",
+		})
+	}
+
+	ctx.ExecuteFunc(handler).AssertJSONError(http.StatusConflict, "name already exists", "duplicate_name")
+}
+
 func TestMockAlertAdapter_Basic(t *testing.T) {
 	mock := NewMockAlertAdapter("prometheus")
 

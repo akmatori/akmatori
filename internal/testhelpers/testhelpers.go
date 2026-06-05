@@ -140,6 +140,45 @@ func (ctx *HTTPTestContext) AssertJSONBody(expected string) *HTTPTestContext {
 	return ctx
 }
 
+// AssertJSONField compares a top-level or dotted JSON response field with the expected value.
+func (ctx *HTTPTestContext) AssertJSONField(path string, expected interface{}) *HTTPTestContext {
+	ctx.T.Helper()
+
+	var body interface{}
+	if err := json.NewDecoder(bytes.NewReader(ctx.Recorder.Body.Bytes())).Decode(&body); err != nil {
+		ctx.T.Fatalf("failed to decode JSON response: %v", err)
+	}
+
+	actual, ok := jsonField(body, path)
+	if !ok {
+		ctx.T.Errorf("expected JSON field %q to exist. Body: %s", path, ctx.Recorder.Body.String())
+		return ctx
+	}
+
+	expectedJSON, _ := json.Marshal(expected)
+	var normalizedExpected interface{}
+	if err := json.Unmarshal(expectedJSON, &normalizedExpected); err != nil {
+		ctx.T.Fatalf("failed to normalize expected JSON field %q: %v", path, err)
+	}
+	expectedJSON, _ = json.Marshal(normalizedExpected)
+	actualJSON, _ := json.Marshal(actual)
+	if string(actualJSON) != string(expectedJSON) {
+		ctx.T.Errorf("expected JSON field %q=%v, got %v. Body: %s", path, expected, actual, ctx.Recorder.Body.String())
+	}
+
+	return ctx
+}
+
+// AssertJSONError checks the standard API error envelope.
+func (ctx *HTTPTestContext) AssertJSONError(status int, message, code string) *HTTPTestContext {
+	ctx.T.Helper()
+	ctx.AssertStatus(status).AssertJSONContentType().AssertJSONField("error", message)
+	if code != "" {
+		ctx.AssertJSONField("code", code)
+	}
+	return ctx
+}
+
 // AssertJSONContentType checks that the response is JSON.
 func (ctx *HTTPTestContext) AssertJSONContentType() *HTTPTestContext {
 	ctx.T.Helper()
@@ -152,6 +191,21 @@ func (ctx *HTTPTestContext) AssertJSONContentType() *HTTPTestContext {
 		ctx.T.Errorf("expected JSON Content-Type header, got %q", contentType)
 	}
 	return ctx
+}
+
+func jsonField(body interface{}, path string) (interface{}, bool) {
+	current := body
+	for _, segment := range strings.Split(path, ".") {
+		obj, ok := current.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		current, ok = obj[segment]
+		if !ok {
+			return nil, false
+		}
+	}
+	return current, true
 }
 
 // ========================================
