@@ -386,6 +386,18 @@ func (f *fakeFeedbackAcker) postCount() int {
 	return f.posts
 }
 
+func (f *fakeFeedbackAcker) lastReactionSnap() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastReaction
+}
+
+func (f *fakeFeedbackAcker) lastPostTextSnap() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastPostText
+}
+
 // TestNewSlackHandler_NilClientLeavesAckerNil verifies the graceful-degradation
 // contract: a client-less handler does not wire a feedbackAcker (persist-only,
 // no nil-pointer panic on ack).
@@ -483,6 +495,9 @@ func TestMaybeCaptureSlackFeedback_NonMentionEmojiOnly(t *testing.T) {
 	if got := fx.acker.postCount(); got != 0 {
 		t.Errorf("text posts = %d, want 0 (non-mention must be emoji-only)", got)
 	}
+	if got := fx.acker.lastReactionSnap(); got != feedbackReaction {
+		t.Errorf("reaction = %q, want %q", got, feedbackReaction)
+	}
 }
 
 // TestRouteBotMentionThreadReply_FeedbackEmojiAndText verifies the mention path
@@ -502,6 +517,10 @@ func TestRouteBotMentionThreadReply_FeedbackEmojiAndText(t *testing.T) {
 
 	if got := fx.acker.reactionCount(); got != 1 {
 		t.Errorf("reactions = %d, want 1", got)
+	}
+	// The text ack must reference the persisted memory's name verbatim.
+	if got, want := fx.acker.lastPostTextSnap(), fx.mockMem.lastUpsertedSnap().Name; !strings.Contains(got, want) {
+		t.Errorf("post text %q should contain memory name %q", got, want)
 	}
 }
 
@@ -544,6 +563,87 @@ func TestMaybeCaptureSlackFeedback_NonFeedbackNoAck(t *testing.T) {
 	}
 	if got := fx.acker.postCount(); got != 0 {
 		t.Errorf("posts = %d, want 0", got)
+	}
+}
+
+// TestMaybeCaptureSlackFeedback_ReactionErrorDoesNotRollBack verifies the
+// best-effort contract on the non-mention path: a failing reaction is swallowed
+// and never rolls back the persisted memory.
+func TestMaybeCaptureSlackFeedback_ReactionErrorDoesNotRollBack(t *testing.T) {
+	fx := newFeedbackAckFixture(t, "TX", true)
+	fx.acker.reactErr = errors.New("slack rate limited")
+
+	fx.handler.maybeCaptureSlackFeedback("C", "TX", "M-1", "the data dir is /mnt/data", "U")
+
+	if fx.mockMem.lastUpserted == nil {
+		t.Fatal("memory must persist even when the reaction call fails")
+	}
+	if got := fx.acker.reactionCount(); got != 1 {
+		t.Errorf("reactions = %d, want 1 (attempted despite error)", got)
+	}
+	if got := fx.acker.postCount(); got != 0 {
+		t.Errorf("posts = %d, want 0", got)
+	}
+}
+
+// TestRouteBotMentionThreadReply_PostErrorDoesNotRollBack verifies the mention
+// path is best-effort and the two acks are independent: a failing text post
+// neither rolls back the memory nor suppresses the reaction.
+func TestRouteBotMentionThreadReply_PostErrorDoesNotRollBack(t *testing.T) {
+	fx := newFeedbackAckFixture(t, "TX", true)
+	fx.acker.postErr = errors.New("slack post failed")
+
+	fx.handler.routeBotMentionThreadReply("C", "TX", "M-1", "<@BOT> the data dir is /mnt/data", "U")
+
+	testhelpers.AssertEventually(t, 2*time.Second, 10*time.Millisecond, func() bool {
+		return fx.acker.postCount() == 1
+	}, "text post should be attempted")
+
+	if fx.mockMem.lastUpsertedSnap() == nil {
+		t.Fatal("memory must persist even when the text post fails")
+	}
+	if got := fx.acker.reactionCount(); got != 1 {
+		t.Errorf("reactions = %d, want 1 (reaction must still fire when post fails)", got)
+	}
+}
+
+// TestMaybeCaptureSlackFeedback_PersistFailureSkipsAck verifies that when the
+// memory upsert fails, neither ack helper fires (ack is gated on a non-nil
+// persisted memory).
+func TestMaybeCaptureSlackFeedback_PersistFailureSkipsAck(t *testing.T) {
+	fx := newFeedbackAckFixture(t, "TX", true)
+	fx.mockMem.upsertErr = errors.New("db down")
+
+	fx.handler.maybeCaptureSlackFeedback("C", "TX", "M-1", "the data dir is /mnt/data", "U")
+
+	if got := fx.acker.reactionCount(); got != 0 {
+		t.Errorf("reactions = %d, want 0 when persist fails", got)
+	}
+	if got := fx.acker.postCount(); got != 0 {
+		t.Errorf("posts = %d, want 0 when persist fails", got)
+	}
+}
+
+// TestRouteBotMentionThreadReply_NilAckerPersistsWithoutAck verifies the
+// mention path also degrades gracefully with a nil acker: the memory persists,
+// nothing is posted/reacted, and postFeedbackTextAck does not panic.
+func TestRouteBotMentionThreadReply_NilAckerPersistsWithoutAck(t *testing.T) {
+	fx := newFeedbackAckFixture(t, "TX", false) // acker NOT wired
+	if fx.handler.feedbackAcker != nil {
+		t.Fatal("precondition: feedbackAcker should be nil")
+	}
+
+	fx.handler.routeBotMentionThreadReply("C", "TX", "M-1", "<@BOT> the data dir is /mnt/data", "U")
+
+	testhelpers.AssertEventually(t, 2*time.Second, 10*time.Millisecond, func() bool {
+		return fx.mockMem.lastUpsertedSnap() != nil
+	}, "memory should persist even with a nil acker")
+
+	if got := fx.acker.reactionCount(); got != 0 {
+		t.Errorf("reactions = %d, want 0 with nil acker", got)
+	}
+	if got := fx.acker.postCount(); got != 0 {
+		t.Errorf("posts = %d, want 0 with nil acker", got)
 	}
 }
 
