@@ -77,10 +77,10 @@ Dependencies: none new.
 
 ### Task 3: Verify acceptance criteria
 
-- [ ] Trace both branches in the final code to confirm: non-mention = emoji only; mention feedback = emoji + text; mention non-feedback = agent continuation; non-mention non-feedback = silent.
-- [ ] Run full suite: `make test`.
-- [ ] Re-run `go test -coverprofile=coverage.out ./...` and confirm `internal/handlers` coverage holds (target 80%+ on the changed file).
-- [ ] Run linter: `golangci-lint run` (or `make verify`).
+- [x] Trace both branches in the final code to confirm: non-mention = emoji only; mention feedback = emoji + text; mention non-feedback = agent continuation; non-mention non-feedback = silent.
+- [x] Run full suite: `make test`.
+- [x] Re-run `go test -coverprofile=coverage.out ./...` and confirm `internal/handlers` coverage holds (target 80%+ on the changed file). — slack_feedback.go at 84.9%.
+- [x] Run linter: `golangci-lint run` (or `make verify`). — golangci-lint not installed in env; `go vet ./internal/handlers/...` clean (matches the `make verify` gate).
 
 ### Task 4: Update documentation
 
