@@ -60,20 +60,20 @@ Dependencies: none new.
 - Modify: `internal/handlers/slack_feedback.go`
 - Modify: `internal/handlers/slack.go` (mention call site at line 356)
 
-- [ ] Split `persistFeedbackAndAck` into three helpers:
+- [x] Split `persistFeedbackAndAck` into three helpers:
       - `persistFeedback(...)` — `UpsertByName` + log, returns the saved `*database.Memory` (or nil on failure).
       - `reactFeedback(channel, messageTS)` — emoji only, best-effort, guards on `feedbackAcker != nil`.
       - `postFeedbackTextAck(channel, threadTS, memName)` — text post, best-effort, guards on `feedbackAcker != nil`.
-- [ ] Non-mention path (`maybeCaptureSlackFeedback`): call `persistFeedback` + `reactFeedback` only — NO text post.
-- [ ] Mention path (`routeBotMentionThreadReply` at slack.go:356): call `persistFeedback` + `reactFeedback` + `postFeedbackTextAck` (unchanged net behavior).
-- [ ] Remove the now-dead combined `persistFeedbackAndAck` helper so there is one clear path per branch.
-- [ ] Route both ack helpers through the `feedbackAcker` seam (not `h.client` directly) so tests can assert call counts.
-- [ ] Tests with `fakeFeedbackAcker`:
+- [x] Non-mention path (`maybeCaptureSlackFeedback`): call `persistFeedback` + `reactFeedback` only — NO text post.
+- [x] Mention path (`routeBotMentionThreadReply` at slack.go:356): call `persistFeedback` + `reactFeedback` + `postFeedbackTextAck` (unchanged net behavior).
+- [x] Remove the now-dead combined `persistFeedbackAndAck` helper so there is one clear path per branch.
+- [x] Route both ack helpers through the `feedbackAcker` seam (not `h.client` directly) so tests can assert call counts.
+- [x] Tests with `fakeFeedbackAcker`:
       - non-mention confident feedback → 1 reaction, 0 text posts, 1 memory upsert.
       - mention confident feedback → 1 reaction, 1 text post, 1 memory upsert.
       - nil acker → memory upserted, 0 reactions, 0 posts, no panic.
       - non-feedback verdict → 0 of everything.
-- [ ] Run `go test ./internal/handlers/...` — must pass before Task 3.
+- [x] Run `go test ./internal/handlers/...` — must pass before Task 3.
 
 ### Task 3: Verify acceptance criteria
 

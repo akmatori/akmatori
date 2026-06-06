@@ -364,7 +364,12 @@ func (h *SlackHandler) routeBotMentionThreadReply(channel, threadTS, messageTS, 
 	go func() {
 		verdict, incident, err := h.classifyThreadReplyForFeedback(threadTS, text)
 		if err == nil && incident != nil && verdict.IsConfidentFeedback() {
-			h.persistFeedbackAndAck(channel, threadTS, messageTS, text, verdict, incident)
+			// Mention path keeps today's behaviour: persist + emoji + short text
+			// ack (Akmatori posts text in a thread only when @mentioned).
+			if mem := h.persistFeedback(threadTS, text, verdict, incident); mem != nil {
+				h.reactFeedback(channel, messageTS)
+				h.postFeedbackTextAck(channel, threadTS, mem.Name)
+			}
 			return
 		}
 		if h.runMentionContinuation != nil {

@@ -409,6 +409,144 @@ func TestNewSlackHandler_NonNilClientWiresAdapter(t *testing.T) {
 	}
 }
 
+// feedbackAckFixture seeds an sqlite-backed incident + LLM settings and returns
+// a SlackHandler wired with a fakeFeedbackAcker so the ack split can be asserted
+// without a live *slack.Client. The classifier returns a confident verdict by
+// default.
+type feedbackAckFixture struct {
+	handler *SlackHandler
+	mockMem *mockMemoryService
+	caller  *fakeOneShotLLMCallerH
+	acker   *fakeFeedbackAcker
+}
+
+func newFeedbackAckFixture(t *testing.T, threadTS string, wireAcker bool) *feedbackAckFixture {
+	t.Helper()
+
+	mock := newMockMemoryService()
+	caller := &fakeOneShotLLMCallerH{
+		response: `{"is_feedback": true, "summary": "data dir is /mnt/data", "confidence": 0.92}`,
+	}
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&database.Incident{}, &database.LLMSettings{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	database.DB = db
+	if err := db.Create(&database.LLMSettings{
+		Name: "t", Provider: database.LLMProviderAnthropic, APIKey: "k",
+		Model: "claude-sonnet-4-6", Active: true, Enabled: true,
+	}).Error; err != nil {
+		t.Fatalf("seed llm: %v", err)
+	}
+	if threadTS != "" {
+		if err := db.Create(&database.Incident{
+			UUID: "inc-99", Source: "slack", SourceID: threadTS, Title: "outage",
+			Response: "agent investigated",
+		}).Error; err != nil {
+			t.Fatalf("seed incident: %v", err)
+		}
+	}
+
+	acker := &fakeFeedbackAcker{}
+	h := &SlackHandler{
+		memoryManager:      mock,
+		feedbackClassifier: services.NewFeedbackClassifier(caller),
+		botUserID:          "BOT",
+		runMentionContinuation: func(_, _, _, _, _ string) {
+		},
+	}
+	if wireAcker {
+		h.feedbackAcker = acker
+	}
+
+	return &feedbackAckFixture{handler: h, mockMem: mock, caller: caller, acker: acker}
+}
+
+// TestMaybeCaptureSlackFeedback_NonMentionEmojiOnly verifies the core Task-2
+// contract: a confident non-mention feedback reply gets the emoji reaction and
+// a persisted memory, but NO threaded text post.
+func TestMaybeCaptureSlackFeedback_NonMentionEmojiOnly(t *testing.T) {
+	fx := newFeedbackAckFixture(t, "TX", true)
+
+	fx.handler.maybeCaptureSlackFeedback("C", "TX", "M-1", "the data dir is /mnt/data, not /var/lib", "U")
+
+	if fx.mockMem.lastUpserted == nil {
+		t.Fatal("expected memory upserted")
+	}
+	if got := fx.acker.reactionCount(); got != 1 {
+		t.Errorf("reactions = %d, want 1", got)
+	}
+	if got := fx.acker.postCount(); got != 0 {
+		t.Errorf("text posts = %d, want 0 (non-mention must be emoji-only)", got)
+	}
+}
+
+// TestRouteBotMentionThreadReply_FeedbackEmojiAndText verifies the mention path
+// keeps emoji + text ack on a confident feedback verdict.
+func TestRouteBotMentionThreadReply_FeedbackEmojiAndText(t *testing.T) {
+	fx := newFeedbackAckFixture(t, "TX", true)
+
+	fx.handler.routeBotMentionThreadReply("C", "TX", "M-1", "<@BOT> the data dir is /mnt/data, not /var/lib", "U")
+
+	testhelpers.AssertEventually(t, 2*time.Second, 10*time.Millisecond, func() bool {
+		return fx.mockMem.lastUpsertedSnap() != nil
+	}, "memory should be upserted on confident feedback")
+
+	testhelpers.AssertEventually(t, 2*time.Second, 10*time.Millisecond, func() bool {
+		return fx.acker.postCount() == 1
+	}, "mention feedback should post a text ack")
+
+	if got := fx.acker.reactionCount(); got != 1 {
+		t.Errorf("reactions = %d, want 1", got)
+	}
+}
+
+// TestMaybeCaptureSlackFeedback_NilAckerPersistsWithoutAck verifies graceful
+// degradation: a nil feedbackAcker still persists the memory and never panics,
+// posting/reacting nothing.
+func TestMaybeCaptureSlackFeedback_NilAckerPersistsWithoutAck(t *testing.T) {
+	fx := newFeedbackAckFixture(t, "TX", false) // acker NOT wired
+	if fx.handler.feedbackAcker != nil {
+		t.Fatal("precondition: feedbackAcker should be nil")
+	}
+
+	fx.handler.maybeCaptureSlackFeedback("C", "TX", "M-1", "the data dir is /mnt/data", "U")
+
+	if fx.mockMem.lastUpserted == nil {
+		t.Fatal("expected memory upserted even with nil acker")
+	}
+	// fx.acker exists but was never wired into the handler — counts must stay 0.
+	if got := fx.acker.reactionCount(); got != 0 {
+		t.Errorf("reactions = %d, want 0 with nil acker", got)
+	}
+	if got := fx.acker.postCount(); got != 0 {
+		t.Errorf("posts = %d, want 0 with nil acker", got)
+	}
+}
+
+// TestMaybeCaptureSlackFeedback_NonFeedbackNoAck verifies a non-feedback verdict
+// touches nothing: no memory, no reaction, no post.
+func TestMaybeCaptureSlackFeedback_NonFeedbackNoAck(t *testing.T) {
+	fx := newFeedbackAckFixture(t, "TX", true)
+	fx.caller.setResponse(`{"is_feedback": false, "summary": "chat", "confidence": 0.95}`)
+
+	fx.handler.maybeCaptureSlackFeedback("C", "TX", "M-1", "any update?", "U")
+
+	if fx.mockMem.lastUpserted != nil {
+		t.Errorf("expected NO memory for non-feedback, got %+v", fx.mockMem.lastUpserted)
+	}
+	if got := fx.acker.reactionCount(); got != 0 {
+		t.Errorf("reactions = %d, want 0", got)
+	}
+	if got := fx.acker.postCount(); got != 0 {
+		t.Errorf("posts = %d, want 0", got)
+	}
+}
+
 // routeFixture wires a SlackHandler with stub deps + a seeded sqlite-backed
 // incident at the given thread TS. Tests use it to exercise
 // routeBotMentionThreadReply and the surrounding wiring without spinning up
