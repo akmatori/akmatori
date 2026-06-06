@@ -115,6 +115,7 @@ Rules:
 - progress banner content comes from the latest reasoning line via `SlackProgressStreamer`
 - final thread output is summarized to fit Slack byte limits
 - mention handling is classify-first: confident operator feedback is stored as memory; other mentions continue the investigation
+- feedback ack is split by trigger: non-mention confident feedback gets the 👍 reaction only (no thread reply); @mention confident feedback keeps the emoji + short text ack. Akmatori only posts text into a thread when explicitly @mentioned. Both acks route through the injectable `feedbackAcker` seam and are best-effort (failures never roll back the persisted memory)
 
 ### Memory system
 

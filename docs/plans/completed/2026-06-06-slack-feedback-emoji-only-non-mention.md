@@ -84,6 +84,6 @@ Dependencies: none new.
 
 ### Task 4: Update documentation
 
-- [ ] Update the "Slack investigation UX" rule in `CLAUDE.md`: non-mention confident feedback is emoji-only (no thread reply); @mention feedback keeps emoji + short text ack; Akmatori only posts text in a thread when @mentioned.
-- [ ] Verify `wc -c CLAUDE.md` stays under 30000 bytes.
-- [ ] Move this plan to `docs/plans/completed/`.
+- [x] Update the "Slack investigation UX" rule in `CLAUDE.md`: non-mention confident feedback is emoji-only (no thread reply); @mention feedback keeps emoji + short text ack; Akmatori only posts text in a thread when @mentioned.
+- [x] Verify `wc -c CLAUDE.md` stays under 30000 bytes. — 25085 bytes.
+- [x] Move this plan to `docs/plans/completed/`.
