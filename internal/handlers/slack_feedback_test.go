@@ -12,6 +12,7 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/services"
 	"github.com/akmatori/akmatori/internal/testhelpers"
+	"github.com/slack-go/slack"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -341,6 +342,71 @@ func (f *fakeOneShotLLMCallerH) setResponse(resp string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.response = resp
+}
+
+// fakeFeedbackAcker is a feedbackAcker test double recording reaction and
+// text-post calls so ack behaviour can be asserted without a live
+// *slack.Client. The mutex guards the counters because acks may run on a
+// worker goroutine.
+type fakeFeedbackAcker struct {
+	mu           sync.Mutex
+	reactions    int
+	posts        int
+	lastReaction string
+	lastPostText string
+	reactErr     error
+	postErr      error
+}
+
+func (f *fakeFeedbackAcker) AddReaction(name string, _ slack.ItemRef) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reactions++
+	f.lastReaction = name
+	return f.reactErr
+}
+
+func (f *fakeFeedbackAcker) PostThreadText(_, _, text string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.posts++
+	f.lastPostText = text
+	return f.postErr
+}
+
+func (f *fakeFeedbackAcker) reactionCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.reactions
+}
+
+func (f *fakeFeedbackAcker) postCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.posts
+}
+
+// TestNewSlackHandler_NilClientLeavesAckerNil verifies the graceful-degradation
+// contract: a client-less handler does not wire a feedbackAcker (persist-only,
+// no nil-pointer panic on ack).
+func TestNewSlackHandler_NilClientLeavesAckerNil(t *testing.T) {
+	h := NewSlackHandler(nil, nil, nil, nil, nil)
+	if h.feedbackAcker != nil {
+		t.Errorf("expected nil feedbackAcker for nil client, got %#v", h.feedbackAcker)
+	}
+}
+
+// TestNewSlackHandler_NonNilClientWiresAdapter verifies the default adapter is
+// wired when a real client is present.
+func TestNewSlackHandler_NonNilClientWiresAdapter(t *testing.T) {
+	client := slack.New("xoxb-test-token")
+	h := NewSlackHandler(client, nil, nil, nil, nil)
+	if h.feedbackAcker == nil {
+		t.Fatal("expected feedbackAcker to be wired for non-nil client")
+	}
+	if _, ok := h.feedbackAcker.(slackFeedbackAcker); !ok {
+		t.Errorf("expected slackFeedbackAcker adapter, got %T", h.feedbackAcker)
+	}
 }
 
 // routeFixture wires a SlackHandler with stub deps + a seeded sqlite-backed

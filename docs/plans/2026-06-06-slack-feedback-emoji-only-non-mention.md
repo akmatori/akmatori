@@ -45,14 +45,14 @@ Dependencies: none new.
 - Modify: `internal/handlers/slack.go` (struct field + `NewSlackHandler` wiring)
 - Modify: `internal/handlers/slack_feedback.go` (interface + default adapter)
 
-- [ ] Define `feedbackAcker` interface in `slack_feedback.go`:
+- [x] Define `feedbackAcker` interface in `slack_feedback.go`:
       `AddReaction(name string, item slack.ItemRef) error` and
       `PostThreadText(channel, threadTS, text string) error`.
-- [ ] Add a default adapter backed by `*slack.Client`: `AddReaction` forwards to `client.AddReaction`; `PostThreadText` wraps `client.PostMessage(channel, slack.MsgOptionText(text, false), slack.MsgOptionTS(threadTS))` and discards the returned channel/ts.
-- [ ] Add a `feedbackAcker` field to the `SlackHandler` struct near `runMentionContinuation`.
-- [ ] In `NewSlackHandler`, set the field to the default adapter only when `client != nil` (leave nil otherwise, mirroring graceful degradation).
-- [ ] Tests: add a `fakeFeedbackAcker` recording reaction/post calls; assert `NewSlackHandler(nil, ...)` leaves the field nil and `NewSlackHandler(non-nil, ...)` wires the adapter.
-- [ ] Run `go test ./internal/handlers/...` — must pass before Task 2.
+- [x] Add a default adapter backed by `*slack.Client`: `AddReaction` forwards to `client.AddReaction`; `PostThreadText` wraps `client.PostMessage(channel, slack.MsgOptionText(text, false), slack.MsgOptionTS(threadTS))` and discards the returned channel/ts.
+- [x] Add a `feedbackAcker` field to the `SlackHandler` struct near `runMentionContinuation`.
+- [x] In `NewSlackHandler`, set the field to the default adapter only when `client != nil` (leave nil otherwise, mirroring graceful degradation).
+- [x] Tests: add a `fakeFeedbackAcker` recording reaction/post calls; assert `NewSlackHandler(nil, ...)` leaves the field nil and `NewSlackHandler(non-nil, ...)` wires the adapter.
+- [x] Run `go test ./internal/handlers/...` — must pass before Task 2.
 
 ### Task 2: Split the ack so non-mention feedback is emoji-only
 

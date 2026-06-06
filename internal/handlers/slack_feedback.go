@@ -16,6 +16,31 @@ import (
 // classifier accepted as feedback. "+1" renders as 👍 in Slack.
 const feedbackReaction = "+1"
 
+// feedbackAcker abstracts the Slack-side acknowledgment calls used after a
+// confident feedback verdict. It mirrors the runMentionContinuation seam: a
+// default adapter is wired only when a real *slack.Client is present, and
+// tests substitute a fake so ack behaviour can be asserted without a live
+// client.
+type feedbackAcker interface {
+	AddReaction(name string, item slack.ItemRef) error
+	PostThreadText(channel, threadTS, text string) error
+}
+
+// slackFeedbackAcker is the production feedbackAcker backed by a real
+// *slack.Client.
+type slackFeedbackAcker struct {
+	client *slack.Client
+}
+
+func (a slackFeedbackAcker) AddReaction(name string, item slack.ItemRef) error {
+	return a.client.AddReaction(name, item)
+}
+
+func (a slackFeedbackAcker) PostThreadText(channel, threadTS, text string) error {
+	_, _, err := a.client.PostMessage(channel, slack.MsgOptionText(text, false), slack.MsgOptionTS(threadTS))
+	return err
+}
+
 // maybeCaptureSlackFeedback runs the LLM-backed classifier against a single
 // non-mention thread reply on an incident thread. When the classifier is
 // confident the reply is operator feedback, it persists a Memory and
