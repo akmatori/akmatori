@@ -312,7 +312,8 @@ func TestHandleMessage_ThreadReplyHumanMention(t *testing.T) {
 // TestHandleMessage_ThreadReplyHumanMention_FeedbackShortCircuits is the
 // end-to-end wiring check: a thread-reply MessageEvent containing a bot
 // mention flows through handleMessage → routeBotMentionThreadReply →
-// persistFeedbackAndAck when the classifier returns confident feedback.
+// persistFeedback (+ emoji + text ack) when the classifier returns confident
+// feedback.
 // This catches regressions of the slack.go:403 routing decision.
 func TestHandleMessage_ThreadReplyHumanMention_FeedbackShortCircuits(t *testing.T) {
 	fx := newRouteFixture(t, "1707000001.000100")

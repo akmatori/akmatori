@@ -16,11 +16,37 @@ import (
 // classifier accepted as feedback. "+1" renders as 👍 in Slack.
 const feedbackReaction = "+1"
 
+// feedbackAcker abstracts the Slack-side acknowledgment calls used after a
+// confident feedback verdict. It mirrors the runMentionContinuation seam: a
+// default adapter is wired only when a real *slack.Client is present, and
+// tests substitute a fake so ack behaviour can be asserted without a live
+// client.
+type feedbackAcker interface {
+	AddReaction(name string, item slack.ItemRef) error
+	PostThreadText(channel, threadTS, text string) error
+}
+
+// slackFeedbackAcker is the production feedbackAcker backed by a real
+// *slack.Client.
+type slackFeedbackAcker struct {
+	client *slack.Client
+}
+
+func (a slackFeedbackAcker) AddReaction(name string, item slack.ItemRef) error {
+	return a.client.AddReaction(name, item)
+}
+
+func (a slackFeedbackAcker) PostThreadText(channel, threadTS, text string) error {
+	_, _, err := a.client.PostMessage(channel, slack.MsgOptionText(text, false), slack.MsgOptionTS(threadTS))
+	return err
+}
+
 // maybeCaptureSlackFeedback runs the LLM-backed classifier against a single
 // non-mention thread reply on an incident thread. When the classifier is
 // confident the reply is operator feedback, it persists a Memory and
-// acknowledges with a reaction + brief threaded confirmation. Stays silent
-// on negatives so we don't spam non-feedback chatter.
+// acknowledges with the 👍 reaction only — Akmatori must not post text into a
+// thread unless explicitly @mentioned. Stays silent on negatives so we don't
+// spam non-feedback chatter.
 //
 // All branches are intentionally fire-and-forget — Slack's Socket Mode
 // handler thread cannot afford to block on an LLM round-trip.
@@ -37,7 +63,12 @@ func (h *SlackHandler) maybeCaptureSlackFeedback(channel, threadTS, messageTS, t
 		// noisy logging is not.
 		return
 	}
-	h.persistFeedbackAndAck(channel, threadTS, messageTS, text, verdict, incident)
+	// Non-mention path: persist + emoji reaction only. Akmatori must not post
+	// text into a thread unless it was explicitly @mentioned, so there is no
+	// text ack here.
+	if mem := h.persistFeedback(threadTS, text, verdict, incident); mem != nil {
+		h.reactFeedback(channel, messageTS)
+	}
 }
 
 // classifyThreadReplyForFeedback resolves a thread reply to an incident and
@@ -81,30 +112,43 @@ func (h *SlackHandler) classifyThreadReplyForFeedback(threadTS, text string) (se
 	return verdict, incident, nil
 }
 
-// persistFeedbackAndAck writes the feedback memory and posts the operator-
-// facing ack (reaction + threaded confirmation). Best-effort: a failed
-// reaction or post must not roll back the persisted memory. The
-// `originalText` argument carries the message body verbatim (un-mention-
-// stripped) so the persisted memory reflects what the operator typed.
-func (h *SlackHandler) persistFeedbackAndAck(channel, threadTS, messageTS, originalText string, verdict services.FeedbackVerdict, incident *database.Incident) {
+// persistFeedback writes the feedback memory and returns the saved record
+// (nil on failure). The `originalText` argument carries the message body
+// verbatim (un-mention-stripped) so the persisted memory reflects what the
+// operator typed. Persisting never depends on Slack ack succeeding.
+func (h *SlackHandler) persistFeedback(threadTS, originalText string, verdict services.FeedbackVerdict, incident *database.Incident) *database.Memory {
 	mem := buildFeedbackMemory(originalText, verdict, incident.UUID)
 	if _, err := h.memoryManager.UpsertByName(mem); err != nil {
 		slog.Warn("feedback persist failed", "thread", threadTS, "incident", incident.UUID, "err", err)
-		return
+		return nil
 	}
 	slog.Info("captured slack feedback as memory", "incident", incident.UUID, "name", mem.Name, "confidence", verdict.Confidence)
+	return mem
+}
 
-	// Acknowledge: reaction on the user's message + a short threaded reply.
-	// Both calls are best-effort — failure to ack must not roll back the
-	// memory we just saved.
-	if h.client != nil {
-		if err := h.client.AddReaction(feedbackReaction, slack.ItemRef{Channel: channel, Timestamp: messageTS}); err != nil {
-			slog.Debug("feedback reaction failed", "err", err)
-		}
-		ack := fmt.Sprintf("Thanks — saved to memory as `%s`. Future incidents will recall it.", mem.Name)
-		if _, _, err := h.client.PostMessage(channel, slack.MsgOptionText(ack, false), slack.MsgOptionTS(threadTS)); err != nil {
-			slog.Debug("feedback ack post failed", "err", err)
-		}
+// reactFeedback attaches the 👍 reaction to the operator's message. Best-effort
+// and routed through the feedbackAcker seam: a nil acker (no live client) skips
+// silently, and a failed reaction must never roll back the persisted memory.
+func (h *SlackHandler) reactFeedback(channel, messageTS string) {
+	if h.feedbackAcker == nil {
+		return
+	}
+	if err := h.feedbackAcker.AddReaction(feedbackReaction, slack.ItemRef{Channel: channel, Timestamp: messageTS}); err != nil {
+		slog.Debug("feedback reaction failed", "err", err)
+	}
+}
+
+// postFeedbackTextAck posts the short threaded confirmation. Only the @mention
+// path uses this — Akmatori must not post text into a thread unless explicitly
+// mentioned. Best-effort and routed through the feedbackAcker seam; a nil acker
+// skips silently.
+func (h *SlackHandler) postFeedbackTextAck(channel, threadTS, memName string) {
+	if h.feedbackAcker == nil {
+		return
+	}
+	ack := fmt.Sprintf("Thanks — saved to memory as `%s`. Future incidents will recall it.", memName)
+	if err := h.feedbackAcker.PostThreadText(channel, threadTS, ack); err != nil {
+		slog.Debug("feedback ack post failed", "err", err)
 	}
 }
 

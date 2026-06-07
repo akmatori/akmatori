@@ -53,6 +53,12 @@ type SlackHandler struct {
 	// handleBotMentionInThread; tests override it to assert routing without
 	// spinning up the real agent path.
 	runMentionContinuation func(channel, threadTS, messageTS, text, user string)
+
+	// feedbackAcker performs the Slack-side acknowledgment (reaction + text)
+	// after a confident feedback verdict. Wired to a default adapter only when
+	// client != nil (mirrors graceful degradation); tests override it to assert
+	// ack call counts without a live client.
+	feedbackAcker feedbackAcker
 }
 
 // NewSlackHandler creates a new Slack handler. The supplied caller is forwarded
@@ -74,6 +80,11 @@ func NewSlackHandler(
 		alertExtractor: extraction.NewAlertExtractor(oneShotCaller),
 	}
 	h.runMentionContinuation = h.handleBotMentionInThread
+	// Wire the default ack adapter only when a real client is present, so a
+	// client-less handler degrades to persist-only (no panic on nil client).
+	if client != nil {
+		h.feedbackAcker = slackFeedbackAcker{client: client}
+	}
 	return h
 }
 
@@ -353,7 +364,12 @@ func (h *SlackHandler) routeBotMentionThreadReply(channel, threadTS, messageTS, 
 	go func() {
 		verdict, incident, err := h.classifyThreadReplyForFeedback(threadTS, text)
 		if err == nil && incident != nil && verdict.IsConfidentFeedback() {
-			h.persistFeedbackAndAck(channel, threadTS, messageTS, text, verdict, incident)
+			// Mention path keeps today's behaviour: persist + emoji + short text
+			// ack (Akmatori posts text in a thread only when @mentioned).
+			if mem := h.persistFeedback(threadTS, text, verdict, incident); mem != nil {
+				h.reactFeedback(channel, messageTS)
+				h.postFeedbackTextAck(channel, threadTS, mem.Name)
+			}
 			return
 		}
 		if h.runMentionContinuation != nil {
