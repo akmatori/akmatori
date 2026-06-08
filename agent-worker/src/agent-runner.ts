@@ -176,17 +176,28 @@ export function resolveModel(
     "ant-ling": "openai-completions",
   };
 
-  // For unknown "custom" endpoints (OpenAI-compatible gateways like Envoy AI Gateway),
-  // disable OpenAI-specific extended cache fields. pi-ai's openai-completions provider
-  // adds prompt_cache_key / prompt_cache_retention="24h" when cacheRetention is "long"
-  // (PI_CACHE_RETENTION=long), and many OpenAI-compatible gateways reject those as
-  // unsupported parameters with a 400.
-  const compat = provider === "custom" ? { supportsLongCacheRetention: false } : undefined;
+  const apiType = apiMap[provider] ?? "openai-completions";
+
+  // Build compat flags for the synthesized model spec:
+  // - Disable OpenAI-specific cache fields for custom (OpenAI-compatible) endpoints;
+  //   many gateways reject prompt_cache_key / prompt_cache_retention with 400.
+  // - Enable adaptive thinking format for any provider using the Anthropic Messages API
+  //   (e.g. minimax, on-prem Anthropic-compatible endpoints). The flag tells pi-ai to
+  //   use the adaptive thinking wire format even when the model is not in the built-in
+  //   registry.
+  const compatFlags: Record<string, unknown> = {};
+  if (provider === "custom") {
+    compatFlags.supportsLongCacheRetention = false;
+  }
+  if (apiType === "anthropic-messages") {
+    compatFlags.forceAdaptiveThinking = true;
+  }
+  const compat = Object.keys(compatFlags).length > 0 ? compatFlags : undefined;
 
   return {
     id: modelId,
     name: modelId,
-    api: apiMap[provider] ?? "openai-completions",
+    api: apiType,
     provider,
     baseUrl: baseUrl ?? "",
     reasoning: true,
