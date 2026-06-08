@@ -215,7 +215,8 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
     }
   };
 
-  const showBaseUrl = form.provider === 'custom' || form.provider === 'openrouter';
+  const showBaseUrl = form.provider === 'custom' || form.provider === 'openrouter'
+    || form.provider === 'nvidia' || form.provider === 'minimax' || form.provider === 'ant-ling';
 
   if (loading) {
     return <LoadingSpinner />;
