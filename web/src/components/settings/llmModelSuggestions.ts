@@ -36,5 +36,21 @@ export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: stri
     { value: 'openai/gpt-5.4-mini', label: 'openai/gpt-5.4-mini' },
     { value: 'google/gemini-2.5-pro', label: 'google/gemini-2.5-pro' },
   ],
+  nvidia: [
+    { value: 'meta/llama-3.3-70b-instruct', label: 'meta/llama-3.3-70b-instruct (Recommended)' },
+    { value: 'meta/llama-3.1-70b-instruct', label: 'meta/llama-3.1-70b-instruct' },
+    { value: 'nvidia.nemotron-super-3-120b', label: 'nvidia.nemotron-super-3-120b (Most capable)' },
+    { value: 'nvidia.nemotron-nano-3-30b', label: 'nvidia.nemotron-nano-3-30b (Fast)' },
+  ],
+  minimax: [
+    { value: 'MiniMax-M3', label: 'MiniMax-M3 (Recommended)' },
+    { value: 'MiniMax-M2.7', label: 'MiniMax-M2.7' },
+    { value: 'MiniMax-M2.7-highspeed', label: 'MiniMax-M2.7-highspeed (Fast)' },
+  ],
+  'ant-ling': [
+    { value: 'Ling-2.6-1T', label: 'Ling-2.6-1T (Recommended)' },
+    { value: 'Ling-2.6-flash', label: 'Ling-2.6-flash (Fast)' },
+    { value: 'Ring-2.6-1T', label: 'Ring-2.6-1T' },
+  ],
   custom: [],
 };

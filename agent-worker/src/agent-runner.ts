@@ -171,6 +171,9 @@ export function resolveModel(
     google: "google-generative-ai",
     openrouter: "openai-completions",
     custom: "openai-completions",
+    nvidia: "openai-completions",
+    minimax: "anthropic-messages",
+    "ant-ling": "openai-completions",
   };
 
   // For unknown "custom" endpoints (OpenAI-compatible gateways like Envoy AI Gateway),
@@ -211,6 +214,9 @@ const PROVIDER_ENV_KEY: Record<string, string> = {
   openai: "OPENAI_API_KEY",
   google: "GEMINI_API_KEY",
   openrouter: "OPENROUTER_API_KEY",
+  nvidia: "NVIDIA_API_KEY",
+  minimax: "MINIMAX_API_KEY",
+  "ant-ling": "ANT_LING_API_KEY",
 };
 
 /**

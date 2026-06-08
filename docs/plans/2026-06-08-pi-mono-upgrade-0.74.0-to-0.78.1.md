@@ -85,14 +85,14 @@ Upgrade `@earendil-works/pi-coding-agent`, `pi-ai`, and `pi-agent-core` from `^0
 - Modify: `web/src/components/settings/llmModelSuggestions.ts`
 - Modify: `agent-worker/src/agent-runner.ts`
 
-- [ ] Extend `LLMProvider` union in `web/src/types/index.ts` with the three new provider string values
-- [ ] Check `agent-worker/src/types.ts` for a separate LLMProvider definition and extend it if present
-- [ ] Add the three providers to `PROVIDER_OPTIONS` in `LLMSettingsSection.tsx`
-- [ ] Add model suggestion arrays for each new provider in `llmModelSuggestions.ts` (at minimum one suggested model each, confirmed from pi-ai catalogue)
-- [ ] In `agent-runner.ts`: add the three providers to `apiMap` in `resolveModel` with their correct `apiType` strings (confirmed from pi-ai's registered provider config); add env var mappings to `PROVIDER_ENV_KEY` for any providers that have a canonical key env var
-- [ ] Run `cd /opt/akmatori/agent-worker && npm run build` — no type errors
-- [ ] Run `make test-agent` — must pass
-- [ ] Run `make test-web` — must pass
+- [x] Extend `LLMProvider` union in `web/src/types/index.ts` with the three new provider string values
+- [x] Check `agent-worker/src/types.ts` for a separate LLMProvider definition and extend it if present
+- [x] Add the three providers to `PROVIDER_OPTIONS` in `LLMSettingsSection.tsx`
+- [x] Add model suggestion arrays for each new provider in `llmModelSuggestions.ts` (at minimum one suggested model each, confirmed from pi-ai catalogue)
+- [x] In `agent-runner.ts`: add the three providers to `apiMap` in `resolveModel` with their correct `apiType` strings (confirmed from pi-ai's registered provider config); add env var mappings to `PROVIDER_ENV_KEY` for any providers that have a canonical key env var
+- [x] Run `cd /opt/akmatori/agent-worker && npm run build` — no type errors
+- [x] Run `make test-agent` — must pass
+- [x] Run `make test-web` — must pass
 
 ### Task 6: compat.forceAdaptiveThinking for on-prem Anthropic-compatible models (C3)
 
