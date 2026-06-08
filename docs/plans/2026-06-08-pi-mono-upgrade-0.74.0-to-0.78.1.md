@@ -37,10 +37,10 @@ Upgrade `@earendil-works/pi-coding-agent`, `pi-ai`, and `pi-agent-core` from `^0
 - Modify: `agent-worker/package.json`
 - Regenerate: `agent-worker/package-lock.json`
 
-- [ ] In `agent-worker/package.json` bump `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent` to `^0.78.1` and `pi-subagents` to `^0.28.0`
-- [ ] Run `cd /opt/akmatori/agent-worker && npm install` to regenerate `package-lock.json`
-- [ ] Run `npm ls @earendil-works/pi-coding-agent @earendil-works/pi-ai @earendil-works/pi-agent-core pi-subagents` — confirm all resolved versions match targets
-- [ ] Run `npm ls undici @earendil-works/pi-tui typebox` — record any version conflicts for follow-up in Task 2; if pi now requires undici 8, note it
+- [x] In `agent-worker/package.json` bump `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent` to `^0.78.1` and `pi-subagents` to `^0.28.0`
+- [x] Run `cd /opt/akmatori/agent-worker && npm install` to regenerate `package-lock.json`
+- [x] Run `npm ls @earendil-works/pi-coding-agent @earendil-works/pi-ai @earendil-works/pi-agent-core pi-subagents` — confirm all resolved versions match targets
+- [x] Run `npm ls undici @earendil-works/pi-tui typebox` — record any version conflicts for follow-up in Task 2; if pi now requires undici 8, note it
 
 ### Task 2: Build verification and no-break area inspection
 
