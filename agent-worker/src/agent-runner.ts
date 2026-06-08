@@ -229,7 +229,7 @@ export function resolveModel(
   if (provider === "custom") {
     compatFlags.supportsLongCacheRetention = false;
   }
-  if (apiType === "anthropic-messages") {
+  if (apiType === "anthropic-messages" && ADAPTIVE_THINKING_REQUIRED_PROVIDERS.has(provider)) {
     compatFlags.forceAdaptiveThinking = true;
   }
   const compat = Object.keys(compatFlags).length > 0 ? compatFlags : undefined;
