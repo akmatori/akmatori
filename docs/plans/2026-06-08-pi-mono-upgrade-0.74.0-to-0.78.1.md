@@ -71,10 +71,10 @@ Upgrade `@earendil-works/pi-coding-agent`, `pi-ai`, and `pi-agent-core` from `^0
 - Modify: `internal/database/models_settings.go`
 - Modify: `internal/database/db.go`
 
-- [ ] Add three `LLMProvider` constants to `models_settings.go`: `LLMProviderNvidiaNIM`, `LLMProviderMiniMax`, `LLMProviderAntLing` (use exact string values matching pi-ai's provider identifiers confirmed from installed node_modules)
-- [ ] Add the three new providers to `ValidLLMProviders()` and `ProviderDisplayName()` in `models_settings.go`
-- [ ] Add entries in `defaultModelsPerProvider` in `db.go` for the three new providers (use a sensible default model ID confirmed from pi-ai's built-in catalogue)
-- [ ] Run `make test` — all Go tests must pass
+- [x] Add three `LLMProvider` constants to `models_settings.go`: `LLMProviderNvidiaNIM`, `LLMProviderMiniMax`, `LLMProviderAntLing` (use exact string values matching pi-ai's provider identifiers confirmed from installed node_modules)
+- [x] Add the three new providers to `ValidLLMProviders()` and `ProviderDisplayName()` in `models_settings.go`
+- [x] Add entries in `defaultModelsPerProvider` in `db.go` for the three new providers (use a sensible default model ID confirmed from pi-ai's built-in catalogue)
+- [x] Run `make test` — all Go tests must pass
 
 ### Task 5: New providers — TypeScript (C2)
 

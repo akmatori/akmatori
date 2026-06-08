@@ -398,8 +398,8 @@ func TestIsValidThinkingLevel(t *testing.T) {
 
 func TestValidLLMProviders(t *testing.T) {
 	providers := ValidLLMProviders()
-	if len(providers) != 5 {
-		t.Errorf("expected 5 providers, got %d", len(providers))
+	if len(providers) != 8 {
+		t.Errorf("expected 8 providers, got %d", len(providers))
 	}
 }
 

@@ -439,8 +439,8 @@ func TestSeedLLMProviders_SetsNames(t *testing.T) {
 	var rows []LLMSettings
 	db.Order("provider asc").Find(&rows)
 
-	if len(rows) != 5 {
-		t.Fatalf("expected 5 rows, got %d", len(rows))
+	if len(rows) != 8 {
+		t.Fatalf("expected 8 rows, got %d", len(rows))
 	}
 
 	// Verify each row has a non-empty name matching its provider display name
@@ -462,6 +462,9 @@ func TestSeedLLMProviders_ModelsMatchUIRecommended(t *testing.T) {
 		LLMProviderGoogle:     "gemini-3-pro-preview",
 		LLMProviderOpenRouter: "openai/gpt-5.5",
 		LLMProviderCustom:     "",
+		LLMProviderNvidiaNIM:  "meta/llama-3.3-70b-instruct",
+		LLMProviderMiniMax:    "MiniMax-M3",
+		LLMProviderAntLing:    "Ling-2.6-flash",
 	}
 	for p, want := range expected {
 		if got := defaultModelsPerProvider[p]; got != want {

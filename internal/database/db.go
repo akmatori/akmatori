@@ -473,6 +473,9 @@ var defaultModelsPerProvider = map[LLMProvider]string{
 	LLMProviderGoogle:     "gemini-3-pro-preview",
 	LLMProviderOpenRouter: "openai/gpt-5.5",
 	LLMProviderCustom:     "",
+	LLMProviderNvidiaNIM:  "meta/llama-3.3-70b-instruct",
+	LLMProviderMiniMax:    "MiniMax-M3",
+	LLMProviderAntLing:    "Ling-2.6-flash",
 }
 
 // seedLLMProviders ensures one row per provider exists in the llm_settings table.
