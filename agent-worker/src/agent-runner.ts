@@ -158,19 +158,6 @@ export function resolveModel(
     // In that case, we must fall back to a custom model spec.
     if (builtInModel) {
       // Some anthropic-messages built-ins (e.g. MiniMax-M3) lack
-      // forceAdaptiveThinking in the SDK registry. Merge the flag so they use
-      // effort-based adaptive thinking instead of budget-based thinking with
-      // the older interleaved-thinking beta header, which MiniMax's endpoint
-      // does not support. Scope to ADAPTIVE_THINKING_REQUIRED_PROVIDERS only:
-      // native Anthropic models that the SDK does not mark with the flag
-      // (e.g. claude-sonnet-4-5, claude-haiku-4-5) must NOT receive it, as
-      // they use the older budget-based thinking path intentionally.
-      //
-      // The compat access is nested inside the api check so TypeScript
-      // resolves builtInModel.compat as AnthropicMessagesCompat (not the
-      // union). TypeScript 5.5+ Set.has() narrowing can otherwise cause
-      // the combined narrowing to evaluate incorrectly when used inline.
-      // Some anthropic-messages built-ins (e.g. MiniMax-M3) lack
       // forceAdaptiveThinking in the SDK registry. For providers in
       // ADAPTIVE_THINKING_REQUIRED_PROVIDERS, merge the flag so they use
       // effort-based adaptive thinking instead of the older budget-based
@@ -225,9 +212,20 @@ export function resolveModel(
   //   (e.g. minimax, on-prem Anthropic-compatible endpoints). The flag tells pi-ai to
   //   use the adaptive thinking wire format even when the model is not in the built-in
   //   registry.
+  // - Mirror ant-ling's built-in compat for unknown models: the endpoint uses
+  //   reasoning: { effort } (not flat reasoning_effort) and rejects OpenAI-specific
+  //   fields like store, developer role, and prompt_cache_retention.
   const compatFlags: Record<string, unknown> = {};
   if (provider === "custom") {
     compatFlags.supportsLongCacheRetention = false;
+  }
+  if (provider === "ant-ling") {
+    compatFlags.supportsStore = false;
+    compatFlags.supportsDeveloperRole = false;
+    compatFlags.supportsReasoningEffort = false;
+    compatFlags.maxTokensField = "max_tokens";
+    compatFlags.supportsLongCacheRetention = false;
+    compatFlags.thinkingFormat = "ant-ling";
   }
   if (apiType === "anthropic-messages" && ADAPTIVE_THINKING_REQUIRED_PROVIDERS.has(provider)) {
     compatFlags.forceAdaptiveThinking = true;
