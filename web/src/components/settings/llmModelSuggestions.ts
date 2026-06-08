@@ -11,7 +11,8 @@ export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: stri
     { value: 'o4-mini', label: 'o4-mini (Reasoning)' },
   ],
   anthropic: [
-    { value: 'claude-opus-4-7', label: 'claude-opus-4-7 (Most capable)' },
+    { value: 'claude-opus-4-8', label: 'claude-opus-4-8 (Most capable)' },
+    { value: 'claude-opus-4-7', label: 'claude-opus-4-7' },
     { value: 'claude-opus-4-6', label: 'claude-opus-4-6' },
     { value: 'claude-sonnet-4-6', label: 'claude-sonnet-4-6 (Recommended)' },
     { value: 'claude-sonnet-4-5', label: 'claude-sonnet-4-5' },
@@ -26,7 +27,8 @@ export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: stri
     { value: 'gemini-2.0-flash', label: 'gemini-2.0-flash (Stable)' },
   ],
   openrouter: [
-    { value: 'anthropic/claude-opus-4.7', label: 'anthropic/claude-opus-4.7 (Most capable)' },
+    { value: 'anthropic/claude-opus-4.8', label: 'anthropic/claude-opus-4.8 (Most capable)' },
+    { value: 'anthropic/claude-opus-4.7', label: 'anthropic/claude-opus-4.7' },
     { value: 'openai/gpt-5.5', label: 'openai/gpt-5.5 (Recommended)' },
     { value: 'google/gemini-3.1-pro-preview', label: 'google/gemini-3.1-pro-preview' },
     { value: 'anthropic/claude-sonnet-4.6', label: 'anthropic/claude-sonnet-4.6' },

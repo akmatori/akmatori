@@ -60,10 +60,10 @@ Upgrade `@earendil-works/pi-coding-agent`, `pi-ai`, and `pi-agent-core` from `^0
 **Files:**
 - Modify: `web/src/components/settings/llmModelSuggestions.ts`
 
-- [ ] In the `anthropic` list, insert `claude-opus-4-8` as the top entry labeled `claude-opus-4-8 (Most capable)` and demote `claude-opus-4-7` to second position without the `(Most capable)` suffix
-- [ ] In the `openrouter` list, insert `anthropic/claude-opus-4.8` as the top entry labeled `anthropic/claude-opus-4.8 (Most capable)` and demote `anthropic/claude-opus-4.7`
-- [ ] Leave `db.go` `defaultModelsPerProvider` Anthropic default at `claude-sonnet-4-6` — do not auto-upgrade existing installs
-- [ ] Run `make test-web` — must pass
+- [x] In the `anthropic` list, insert `claude-opus-4-8` as the top entry labeled `claude-opus-4-8 (Most capable)` and demote `claude-opus-4-7` to second position without the `(Most capable)` suffix
+- [x] In the `openrouter` list, insert `anthropic/claude-opus-4.8` as the top entry labeled `anthropic/claude-opus-4.8 (Most capable)` and demote `anthropic/claude-opus-4.7`
+- [x] Leave `db.go` `defaultModelsPerProvider` Anthropic default at `claude-sonnet-4-6` — do not auto-upgrade existing installs
+- [x] Run `make test-web` — must pass
 
 ### Task 4: New providers — Go backend (C2)
 
