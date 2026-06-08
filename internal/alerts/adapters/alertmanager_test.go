@@ -439,7 +439,13 @@ func TestAlertmanagerAdapter_ParsePayload_CustomFieldMappings(t *testing.T) {
 	adapter := NewAlertmanagerAdapter()
 	instance := &database.AlertSourceInstance{
 		FieldMappings: database.JSONB{
-			"alert_name": "labels.custom_name",
+			"alert_name":     "labels.custom_name",
+			"severity":       "labels.custom_severity",
+			"summary":        "annotations.custom_summary",
+			"description":    "annotations.custom_description",
+			"target_host":    "labels.custom_host",
+			"target_service": "labels.custom_service",
+			"runbook_url":    "annotations.custom_runbook",
 		},
 	}
 
@@ -448,9 +454,22 @@ func TestAlertmanagerAdapter_ParsePayload_CustomFieldMappings(t *testing.T) {
 			"status": "firing",
 			"labels": {
 				"alertname": "DefaultName",
-				"custom_name": "CustomAlertName"
+				"severity": "warning",
+				"instance": "default-host",
+				"job": "default-service",
+				"custom_name": "CustomAlertName",
+				"custom_severity": "critical",
+				"custom_host": "custom-host",
+				"custom_service": "custom-service"
 			},
-			"annotations": {},
+			"annotations": {
+				"summary": "default summary",
+				"description": "default description",
+				"runbook_url": "https://runbooks.example.com/default",
+				"custom_summary": "custom summary",
+				"custom_description": "custom description",
+				"custom_runbook": "https://runbooks.example.com/custom"
+			},
 			"fingerprint": "custom"
 		}]
 	}`)
@@ -464,11 +483,61 @@ func TestAlertmanagerAdapter_ParsePayload_CustomFieldMappings(t *testing.T) {
 		t.Fatalf("Expected 1 alert, got %d", len(alerts))
 	}
 
-	// Custom mapping should take precedence, but the code falls back to alertname
-	// This tests the custom mapping merge functionality
 	alert := alerts[0]
+	if alert.AlertName != "CustomAlertName" {
+		t.Errorf("Expected AlertName from custom mapping, got '%s'", alert.AlertName)
+	}
+	if alert.Severity != database.AlertSeverityCritical {
+		t.Errorf("Expected Severity from custom mapping, got '%s'", alert.Severity)
+	}
+	if alert.Summary != "custom summary" {
+		t.Errorf("Expected Summary from custom mapping, got '%s'", alert.Summary)
+	}
+	if alert.Description != "custom description" {
+		t.Errorf("Expected Description from custom mapping, got '%s'", alert.Description)
+	}
+	if alert.TargetHost != "custom-host" {
+		t.Errorf("Expected TargetHost from custom mapping, got '%s'", alert.TargetHost)
+	}
+	if alert.TargetService != "custom-service" {
+		t.Errorf("Expected TargetService from custom mapping, got '%s'", alert.TargetService)
+	}
+	if alert.RunbookURL != "https://runbooks.example.com/custom" {
+		t.Errorf("Expected RunbookURL from custom mapping, got '%s'", alert.RunbookURL)
+	}
 	if alert.SourceFingerprint != "custom" {
 		t.Errorf("Expected SourceFingerprint 'custom', got '%s'", alert.SourceFingerprint)
+	}
+}
+
+func TestAlertmanagerAdapter_ParsePayload_InvalidCustomMappingFallsBack(t *testing.T) {
+	adapter := NewAlertmanagerAdapter()
+	instance := &database.AlertSourceInstance{
+		FieldMappings: database.JSONB{
+			"alert_name": 42,
+		},
+	}
+
+	payload := []byte(`{
+		"alerts": [{
+			"status": "firing",
+			"labels": {"alertname": "DefaultName"},
+			"annotations": {},
+			"fingerprint": "fallback"
+		}]
+	}`)
+
+	alerts, err := adapter.ParsePayload(payload, instance)
+	if err != nil {
+		t.Fatalf("ParsePayload returned error: %v", err)
+	}
+
+	if len(alerts) != 1 {
+		t.Fatalf("Expected 1 alert, got %d", len(alerts))
+	}
+
+	if alerts[0].AlertName != "DefaultName" {
+		t.Errorf("Expected AlertName to fall back to default label, got '%s'", alerts[0].AlertName)
 	}
 }
 

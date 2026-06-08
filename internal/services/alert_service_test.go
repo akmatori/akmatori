@@ -82,6 +82,53 @@ func TestAlertService_InitializeDefaultSourceTypes_IdempotentAndUpdates(t *testi
 	}
 }
 
+func TestAlertService_ListSourceTypesFiltersDeprecatedAndGetByID(t *testing.T) {
+	service := setupAlertServiceDB(t)
+
+	active, err := service.CreateAlertSourceType(
+		"active_webhook",
+		"Active Webhook",
+		"Visible in the source picker",
+		database.JSONB{"alert_name": "title"},
+		"X-Active-Secret",
+	)
+	if err != nil {
+		t.Fatalf("CreateAlertSourceType(active): %v", err)
+	}
+	deprecated, err := service.CreateAlertSourceType(
+		"legacy_slack_channel",
+		"Legacy Slack Channel",
+		"Retained for historical incidents only",
+		nil,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("CreateAlertSourceType(deprecated): %v", err)
+	}
+	if err := database.DB.Model(deprecated).Update("deprecated", true).Error; err != nil {
+		t.Fatalf("mark source type deprecated: %v", err)
+	}
+
+	types, err := service.ListAlertSourceTypes()
+	if err != nil {
+		t.Fatalf("ListAlertSourceTypes(): %v", err)
+	}
+	if len(types) != 1 {
+		t.Fatalf("ListAlertSourceTypes() length = %d, want 1", len(types))
+	}
+	if types[0].Name != active.Name {
+		t.Fatalf("ListAlertSourceTypes()[0].Name = %q, want %q", types[0].Name, active.Name)
+	}
+
+	fetched, err := service.GetAlertSourceType(active.ID)
+	if err != nil {
+		t.Fatalf("GetAlertSourceType(active.ID): %v", err)
+	}
+	if fetched.DisplayName != "Active Webhook" {
+		t.Errorf("GetAlertSourceType() display name = %q", fetched.DisplayName)
+	}
+}
+
 func TestAlertService_InstanceCRUD(t *testing.T) {
 	service := setupAlertServiceDB(t)
 	sourceType, err := service.CreateAlertSourceType(
