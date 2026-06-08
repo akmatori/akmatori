@@ -99,10 +99,10 @@ Upgrade `@earendil-works/pi-coding-agent`, `pi-ai`, and `pi-agent-core` from `^0
 **Files:**
 - Modify: `agent-worker/src/agent-runner.ts`
 
-- [ ] In `resolveModel`, when the provider resolves to `anthropic-messages` apiType AND the provider is `custom` (or a new on-prem Anthropic-compatible provider), add `compat: { forceAdaptiveThinking: true }` to the synthesized Model spec
-- [ ] Gate behind `apiType === "anthropic-messages"` heuristic (already set for custom providers) rather than forcing it on all custom providers — this covers custom Anthropic-compatible endpoints without affecting OpenAI-compatible ones
-- [ ] Run `cd /opt/akmatori/agent-worker && npm run build` — no type errors
-- [ ] Run `make test-agent` — must pass
+- [x] In `resolveModel`, when the provider resolves to `anthropic-messages` apiType AND the provider is `custom` (or a new on-prem Anthropic-compatible provider), add `compat: { forceAdaptiveThinking: true }` to the synthesized Model spec
+- [x] Gate behind `apiType === "anthropic-messages"` heuristic (already set for custom providers) rather than forcing it on all custom providers — this covers custom Anthropic-compatible endpoints without affecting OpenAI-compatible ones
+- [x] Run `cd /opt/akmatori/agent-worker && npm run build` — no type errors
+- [x] Run `make test-agent` — must pass
 
 ### Task 7: Full test and verification gate
 

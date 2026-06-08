@@ -307,6 +307,30 @@ describe("resolveModel", () => {
     expect(model.api).toBe("google-generative-ai");
     expect(model.provider).toBe("google");
   });
+
+  it("should set forceAdaptiveThinking for minimax (anthropic-messages apiType)", () => {
+    const model = resolveModel("minimax", "minimax-unknown-model");
+    expect(model.api).toBe("anthropic-messages");
+    expect((model as { compat?: { forceAdaptiveThinking?: boolean } }).compat?.forceAdaptiveThinking).toBe(true);
+  });
+
+  it("should set forceAdaptiveThinking for unknown anthropic model (falls through to synthesized spec)", () => {
+    const model = resolveModel("anthropic", "claude-hypothetical-future-model");
+    expect(model.api).toBe("anthropic-messages");
+    expect((model as { compat?: { forceAdaptiveThinking?: boolean } }).compat?.forceAdaptiveThinking).toBe(true);
+  });
+
+  it("should not set forceAdaptiveThinking for custom (openai-completions apiType)", () => {
+    const model = resolveModel("custom", "my-model", "https://my-api.example.com");
+    expect(model.api).toBe("openai-completions");
+    expect((model as { compat?: { forceAdaptiveThinking?: boolean } }).compat?.forceAdaptiveThinking).toBeUndefined();
+  });
+
+  it("should not set forceAdaptiveThinking for openrouter (openai-completions apiType)", () => {
+    const model = resolveModel("openrouter", "some/model");
+    expect(model.api).toBe("openai-completions");
+    expect((model as { compat?: { forceAdaptiveThinking?: boolean } }).compat?.forceAdaptiveThinking).toBeUndefined();
+  });
 });
 
 describe("AgentRunner", () => {
