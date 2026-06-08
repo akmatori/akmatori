@@ -11,7 +11,7 @@ Akmatori is an AI-powered AIOps platform for SRE teams. It ingests alerts from m
 - Agent Worker: Node.js 22+ / TypeScript with `@earendil-works/pi-coding-agent` (`v0.78.1`)
 - Frontend: React 19 + TypeScript + Vite + Tailwind
 - Database: PostgreSQL 16 + GORM
-- LLM providers: Anthropic, OpenAI, Google, OpenRouter, custom/on-prem
+- LLM providers: Anthropic, OpenAI, Google, OpenRouter, NVIDIA NIM, MiniMax, Ant Ling, custom/on-prem
 
 ## Repository Layout
 

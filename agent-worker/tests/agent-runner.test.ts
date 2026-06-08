@@ -331,6 +331,18 @@ describe("resolveModel", () => {
     expect(model.api).toBe("openai-completions");
     expect((model as { compat?: { forceAdaptiveThinking?: boolean } }).compat?.forceAdaptiveThinking).toBeUndefined();
   });
+
+  it("should use openai-completions api for nvidia provider", () => {
+    const model = resolveModel("nvidia", "meta/llama-3.3-70b-instruct");
+    expect(model.api).toBe("openai-completions");
+    expect((model as { compat?: { forceAdaptiveThinking?: boolean } }).compat?.forceAdaptiveThinking).toBeUndefined();
+  });
+
+  it("should use openai-completions api for ant-ling provider", () => {
+    const model = resolveModel("ant-ling", "Ling-2.6-1T");
+    expect(model.api).toBe("openai-completions");
+    expect((model as { compat?: { forceAdaptiveThinking?: boolean } }).compat?.forceAdaptiveThinking).toBeUndefined();
+  });
 });
 
 describe("AgentRunner", () => {
@@ -646,6 +658,9 @@ describe("AgentRunner", () => {
           GEMINI_API_KEY: "sk-leak-3",
           OPENROUTER_API_KEY: "sk-leak-4",
           AKMATORI_CUSTOM_PROVIDER_API_KEY: "sk-leak-5",
+          NVIDIA_API_KEY: "sk-leak-6",
+          MINIMAX_API_KEY: "sk-leak-7",
+          ANT_LING_API_KEY: "sk-leak-8",
           UNRELATED_VAR: "keep-me",
         },
       });
@@ -654,6 +669,9 @@ describe("AgentRunner", () => {
       expect(hookResult.env.GEMINI_API_KEY).toBeUndefined();
       expect(hookResult.env.OPENROUTER_API_KEY).toBeUndefined();
       expect(hookResult.env.AKMATORI_CUSTOM_PROVIDER_API_KEY).toBeUndefined();
+      expect(hookResult.env.NVIDIA_API_KEY).toBeUndefined();
+      expect(hookResult.env.MINIMAX_API_KEY).toBeUndefined();
+      expect(hookResult.env.ANT_LING_API_KEY).toBeUndefined();
       // Non-secret env vars must still pass through (PATH is required for
       // commands to resolve; arbitrary operator env should not be lost).
       expect(hookResult.env.PATH).toBe("/usr/bin");

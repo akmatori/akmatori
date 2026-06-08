@@ -464,7 +464,7 @@ func InitializeDefaults() error {
 
 // Default models per provider, used when seeding new provider rows.
 // Values must align with the "Recommended" entries in
-// web/src/components/settings/LLMSettingsSection.tsx MODEL_SUGGESTIONS, and
+// web/src/components/settings/llmModelSuggestions.ts, and
 // must use IDs registered by the active pi-mono SDK (note OpenRouter aliases
 // use dot-form, e.g. anthropic/claude-sonnet-4.6).
 var defaultModelsPerProvider = map[LLMProvider]string{
@@ -475,7 +475,7 @@ var defaultModelsPerProvider = map[LLMProvider]string{
 	LLMProviderCustom:     "",
 	LLMProviderNvidiaNIM:  "meta/llama-3.3-70b-instruct",
 	LLMProviderMiniMax:    "MiniMax-M3",
-	LLMProviderAntLing:    "Ling-2.6-flash",
+	LLMProviderAntLing:    "Ling-2.6-1T",
 }
 
 // seedLLMProviders ensures one row per provider exists in the llm_settings table.
