@@ -117,7 +117,7 @@ Upgrade `@earendil-works/pi-coding-agent`, `pi-ai`, and `pi-agent-core` from `^0
 - Modify: `CLAUDE.md`
 - Create: `docs/plans/completed/2026-06-08-pi-mono-upgrade-0.74.0-to-0.78.1.md`
 
-- [ ] In `CLAUDE.md` update the Agent Worker line: `pi-coding-agent` (`v0.74.0`) → (`v0.78.1`) and pi-subagents version reference
-- [ ] In the SDK Notes section of `CLAUDE.md`, add: note about `httpIdleTimeoutMs` if added to `DEFAULT_PROVIDER_RETRY`; note that pi-ai 0.77.0+ treats `setRuntimeApiKey` plain strings as literals (operator keys with literal `$` are safe); note `compat.forceAdaptiveThinking` usage for custom Anthropic-compatible endpoints; note pi-subagents 0.28.0 bump
-- [ ] Run `wc -c CLAUDE.md` — must stay under 30000 bytes
-- [ ] Create `docs/plans/completed/2026-06-08-pi-mono-upgrade-0.74.0-to-0.78.1.md` mirroring the 0.73.0→0.74.0 plan structure (version table of changelog items + verification checklist)
+- [x] In `CLAUDE.md` update the Agent Worker line: `pi-coding-agent` (`v0.74.0`) → (`v0.78.1`) and pi-subagents version reference
+- [x] In the SDK Notes section of `CLAUDE.md`, add: note about `httpIdleTimeoutMs` if added to `DEFAULT_PROVIDER_RETRY`; note that pi-ai 0.77.0+ treats `setRuntimeApiKey` plain strings as literals (operator keys with literal `$` are safe); note `compat.forceAdaptiveThinking` usage for custom Anthropic-compatible endpoints; note pi-subagents 0.28.0 bump
+- [x] Run `wc -c CLAUDE.md` — must stay under 30000 bytes
+- [x] Create `docs/plans/completed/2026-06-08-pi-mono-upgrade-0.74.0-to-0.78.1.md` mirroring the 0.73.0→0.74.0 plan structure (version table of changelog items + verification checklist)
