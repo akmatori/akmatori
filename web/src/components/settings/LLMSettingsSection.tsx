@@ -115,7 +115,8 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
     });
     setFormMode('edit');
     setEditingId(config.id);
-    setShowAdvanced(!!config.base_url || (config.thinking_level && config.thinking_level !== 'medium'));
+    setShowAdvanced(!!config.base_url || (config.thinking_level && config.thinking_level !== 'medium')
+      || config.provider === 'nvidia' || config.provider === 'minimax' || config.provider === 'ant-ling');
     setError(null);
   };
 
