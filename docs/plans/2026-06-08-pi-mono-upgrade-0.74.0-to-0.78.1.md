@@ -106,10 +106,10 @@ Upgrade `@earendil-works/pi-coding-agent`, `pi-ai`, and `pi-agent-core` from `^0
 
 ### Task 7: Full test and verification gate
 
-- [ ] Run `make test-agent` — worker tests including extension-loader and tool-output-formatter
-- [ ] Run `make test` — Go backend tests (provider enum, settings handlers)
-- [ ] Run `make test-web` — frontend tests
-- [ ] Run `make verify` — full pre-commit gate; fix any failures before Task 8
+- [x] Run `make test-agent` — worker tests including extension-loader and tool-output-formatter
+- [x] Run `make test` — Go backend tests (provider enum, settings handlers)
+- [x] Run `make test-web` — frontend tests
+- [x] Run `make verify` — full pre-commit gate; fix any failures before Task 8
 
 ### Task 8: Documentation (Part E)
 
