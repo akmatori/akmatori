@@ -72,15 +72,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {
-    const response = await fetch(`${API_BASE_URL}/auth/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ username, password }),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username, password }),
+      });
+    } catch {
+      // fetch only rejects on network-level failures (server unreachable, DNS, CORS)
+      throw new Error('Cannot reach the Akmatori server. Check your connection and try again.');
+    }
 
     if (!response.ok) {
+      // 502/503/504 come from the reverse proxy when the API is down or restarting,
+      // and carry an HTML body — distinguish them from genuine auth failures.
+      if (response.status === 502 || response.status === 503 || response.status === 504) {
+        throw new Error('The Akmatori API is currently unavailable. Please try again in a moment.');
+      }
       const data = await response.json().catch(() => ({}));
       throw new Error(data.error || 'Login failed');
     }
@@ -95,15 +106,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const completeSetup = useCallback(async (password: string, confirmPassword: string) => {
-    const response = await fetch(`${API_BASE_URL}/auth/setup`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ password, confirm_password: confirmPassword }),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE_URL}/auth/setup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ password, confirm_password: confirmPassword }),
+      });
+    } catch {
+      throw new Error('Cannot reach the Akmatori server. Check your connection and try again.');
+    }
 
     if (!response.ok) {
+      if (response.status === 502 || response.status === 503 || response.status === 504) {
+        throw new Error('The Akmatori API is currently unavailable. Please try again in a moment.');
+      }
       const data = await response.json().catch(() => ({}));
       // Handle validation errors
       if (data.details) {
