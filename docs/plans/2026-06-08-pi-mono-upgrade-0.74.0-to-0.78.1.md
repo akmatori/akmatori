@@ -47,13 +47,13 @@ Upgrade `@earendil-works/pi-coding-agent`, `pi-ai`, and `pi-agent-core` from `^0
 **Files:**
 - Modify: `agent-worker/src/agent-runner.ts` (if httpIdleTimeoutMs or session disposal API changed)
 
-- [ ] Run `cd /opt/akmatori/agent-worker && npm run build` — must succeed; fix any TypeScript errors from changed SDK signatures (B4/B5)
-- [ ] Inspect `node_modules/@earendil-works/pi-ai/dist/*.d.ts` (or equivalent) for the `retry.provider` settings shape — determine if `httpIdleTimeoutMs` is a new distinct field separate from `timeoutMs` (B1)
-- [ ] If `httpIdleTimeoutMs` is a new field in the SettingsManager retry type, add it to `DEFAULT_PROVIDER_RETRY` in `agent-runner.ts` alongside `timeoutMs` (both at 600_000 ms)
-- [ ] Inspect pi-ai 0.77.0 API key resolution: check if `setRuntimeApiKey` treats plain strings as literals or $ENV_VAR patterns; if plain strings can be misinterpreted, add a comment documenting the edge case for operator keys containing `$` (B2)
-- [ ] Inspect session disposal API (B3): confirm `session.abort()` still exists and double-dispose does not throw; check if `activeSessions` compare-and-delete pattern needs adjustment
-- [ ] If undici peer conflict was flagged in Task 1: run `npm ls undici`; if SDK requires undici 8, bump `undici` in `package.json` to `^8` and re-run `npm install`
-- [ ] Run `make test-agent` — all existing tests must pass before Task 3
+- [x] Run `cd /opt/akmatori/agent-worker && npm run build` — must succeed; fix any TypeScript errors from changed SDK signatures (B4/B5)
+- [x] Inspect `node_modules/@earendil-works/pi-ai/dist/*.d.ts` (or equivalent) for the `retry.provider` settings shape — determine if `httpIdleTimeoutMs` is a new distinct field separate from `timeoutMs` (B1)
+- [x] If `httpIdleTimeoutMs` is a new field in the SettingsManager retry type, add it to `DEFAULT_PROVIDER_RETRY` in `agent-runner.ts` alongside `timeoutMs` (both at 600_000 ms)
+- [x] Inspect pi-ai 0.77.0 API key resolution: check if `setRuntimeApiKey` treats plain strings as literals or $ENV_VAR patterns; if plain strings can be misinterpreted, add a comment documenting the edge case for operator keys containing `$` (B2)
+- [x] Inspect session disposal API (B3): confirm `session.abort()` still exists and double-dispose does not throw; check if `activeSessions` compare-and-delete pattern needs adjustment
+- [x] If undici peer conflict was flagged in Task 1: run `npm ls undici`; if SDK requires undici 8, bump `undici` in `package.json` to `^8` and re-run `npm install`
+- [x] Run `make test-agent` — all existing tests must pass before Task 3
 
 ### Task 3: Claude Opus 4.8 in model picker (C1)
 
