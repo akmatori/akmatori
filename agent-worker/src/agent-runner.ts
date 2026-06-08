@@ -157,7 +157,47 @@ export function resolveModel(
     // pi-ai may return undefined for unknown/custom models instead of throwing.
     // In that case, we must fall back to a custom model spec.
     if (builtInModel) {
-      return builtInModel;
+      // Some anthropic-messages built-ins (e.g. MiniMax-M3) lack
+      // forceAdaptiveThinking in the SDK registry. Merge the flag so they use
+      // effort-based adaptive thinking instead of budget-based thinking with
+      // the older interleaved-thinking beta header, which MiniMax's endpoint
+      // does not support. Scope to ADAPTIVE_THINKING_REQUIRED_PROVIDERS only:
+      // native Anthropic models that the SDK does not mark with the flag
+      // (e.g. claude-sonnet-4-5, claude-haiku-4-5) must NOT receive it, as
+      // they use the older budget-based thinking path intentionally.
+      //
+      // The compat access is nested inside the api check so TypeScript
+      // resolves builtInModel.compat as AnthropicMessagesCompat (not the
+      // union). TypeScript 5.5+ Set.has() narrowing can otherwise cause
+      // the combined narrowing to evaluate incorrectly when used inline.
+      // Some anthropic-messages built-ins (e.g. MiniMax-M3) lack
+      // forceAdaptiveThinking in the SDK registry. For providers in
+      // ADAPTIVE_THINKING_REQUIRED_PROVIDERS, merge the flag so they use
+      // effort-based adaptive thinking instead of the older budget-based
+      // interleaved-thinking path, which MiniMax's endpoint does not support.
+      // Native Anthropic models must NOT receive the flag: the SDK intentionally
+      // leaves it off for models that use budget-based thinking (e.g.
+      // claude-sonnet-4-5, claude-haiku-4-5).
+      //
+      // The compat check uses (model as any) because TypeScript 5.9's
+      // Set.has() narrowing interacts with Model<any>'s generic conditional
+      // compat type, causing the narrowed compat to evaluate incorrectly
+      // when builtInModel.api === "anthropic-messages" is inside a complex
+      // && chain. The cast is safe: we only read forceAdaptiveThinking,
+      // which is defined on AnthropicMessagesCompat when api is anthropic-messages.
+      let resolved: typeof builtInModel = builtInModel;
+      if (
+        ADAPTIVE_THINKING_REQUIRED_PROVIDERS.has(provider) &&
+        builtInModel.api === "anthropic-messages" &&
+        !(builtInModel as any).compat?.forceAdaptiveThinking
+      ) {
+        const existingCompat = (builtInModel as any).compat ?? {};
+        resolved = { ...builtInModel, compat: { ...existingCompat, forceAdaptiveThinking: true } } as typeof builtInModel;
+      }
+      // When the operator configured a custom base URL, apply it even for
+      // built-in models so on-prem/private endpoints are used instead of the
+      // SDK's public default.
+      return baseUrl ? { ...resolved, baseUrl } : resolved;
     }
   } catch {
     // Continue to fallback model spec below.
@@ -262,6 +302,18 @@ function propagateApiKeyToEnv(provider: string, apiKey: string): void {
  * marker doesn't break pi's models.json validation.
  */
 const AKMATORI_MANAGED_MARKER = "_akmatoriManaged" as const;
+const AKMATORI_MANAGED_BASE_URL_MARKER = "_akmatoriManagedBaseUrl" as const;
+const AKMATORI_MANAGED_COMPAT_MARKER = "_akmatoriManagedCompat" as const;
+
+/**
+ * Providers that use the Anthropic Messages API wire format but are NOT
+ * native Anthropic — their endpoints require effort-based adaptive thinking
+ * (forceAdaptiveThinking: true) rather than the older budget-based interleaved
+ * thinking with the `interleaved-thinking` beta header, which they do not
+ * support. Native Anthropic models only carry this flag when the SDK
+ * explicitly marks them; we must not add it to unmarked built-ins.
+ */
+const ADAPTIVE_THINKING_REQUIRED_PROVIDERS = new Set(["minimax"]);
 
 /**
  * Provider key in models.json that akmatori owns for "custom" UI selections.
@@ -485,21 +537,60 @@ function writeCustomProviderModelsJson(
   for (const [providerName, providerCfg] of Object.entries(providers)) {
     if (providerName === AKMATORI_CUSTOM_PROVIDER_KEY) continue;
     if (typeof providerCfg !== "object" || providerCfg === null) continue;
-    const cfg = providerCfg as { models?: unknown };
-    if (!Array.isArray(cfg.models)) continue;
-    const filtered = (cfg.models as Array<Record<string, unknown>>).filter(
-      (m) => m?.[AKMATORI_MANAGED_MARKER] !== true,
-    );
-    if (filtered.length === (cfg.models as unknown[]).length) continue;
+    const cfg = providerCfg as { models?: unknown; [key: string]: unknown };
+    let changed = false;
+    const updated: Record<string, unknown> = { ...(providerCfg as Record<string, unknown>) };
+    // Strip managed model entries so a model-id or provider change doesn't
+    // leave a stale model in the registry.
+    if (Array.isArray(cfg.models)) {
+      const filtered = (cfg.models as Array<Record<string, unknown>>).filter(
+        (m) => m?.[AKMATORI_MANAGED_MARKER] !== true,
+      );
+      if (filtered.length !== (cfg.models as unknown[]).length) {
+        changed = true;
+        if (filtered.length === 0) {
+          delete updated.models;
+        } else {
+          updated.models = filtered;
+        }
+      }
+    }
+    // Strip managed baseUrl entries so clearing base_url in the UI removes
+    // the stale endpoint from the subagent's inherited models.json.
+    if (cfg[AKMATORI_MANAGED_BASE_URL_MARKER] === true) {
+      changed = true;
+      delete updated.baseUrl;
+      delete updated[AKMATORI_MANAGED_BASE_URL_MARKER];
+    }
+    // Strip managed compat entries so switching away from a provider that
+    // needed a compat override (e.g. minimax) does not leave stale compat
+    // flags that could affect future subagent runs on a different provider.
+    // Only remove the managed forceAdaptiveThinking key rather than the
+    // entire compat object so operator-owned compat fields survive across runs.
+    if (cfg[AKMATORI_MANAGED_COMPAT_MARKER] === true) {
+      changed = true;
+      if (typeof updated.compat === "object" && updated.compat !== null) {
+        const compat = updated.compat as Record<string, unknown>;
+        delete compat.forceAdaptiveThinking;
+        if (Object.keys(compat).length === 0) {
+          delete updated.compat;
+        }
+      } else {
+        delete updated.compat;
+      }
+      delete updated[AKMATORI_MANAGED_COMPAT_MARKER];
+    }
     // Only mutate the provider config when we actually removed something —
     // keeps the no-op short-circuit (before === after) honest.
-    const updated: Record<string, unknown> = { ...(providerCfg as Record<string, unknown>) };
-    if (filtered.length === 0) {
-      delete updated.models;
-    } else {
-      updated.models = filtered;
+    if (changed) {
+      // If cleanup emptied the entire provider entry, remove it so the registry
+      // doesn't reject an override-only provider with no baseUrl/models/etc.
+      if (Object.keys(updated).length === 0) {
+        delete providers[providerName];
+      } else {
+        providers[providerName] = updated;
+      }
     }
-    providers[providerName] = updated;
   }
 
   if (provider === "custom") {
@@ -545,7 +636,19 @@ function writeCustomProviderModelsJson(
     // it via `modelRegistry.find(provider, model)`. Without this the child
     // would fall through to step 4 (first available model) and run the
     // subagent on a hardcoded default, not the UI-selected model.
-    if (!isBuiltInModelKnown(provider, model)) {
+    // Additionally, when the operator supplied a custom base URL for a
+    // built-in provider (e.g. on-prem NVIDIA NIM), write a provider-level
+    // baseUrl override so child processes use the same endpoint.
+    // For providers in ADAPTIVE_THINKING_REQUIRED_PROVIDERS (e.g. minimax),
+    // always write a provider-level compat override so child processes apply
+    // forceAdaptiveThinking even when the model is a known built-in that
+    // lacks the flag in the SDK registry (e.g. MiniMax-M3). Without this,
+    // the child reads the built-in entry directly and uses budget-based
+    // thinking with the interleaved-thinking beta header, which the provider
+    // endpoint rejects.
+    const modelUnknown = !isBuiltInModelKnown(provider, model);
+    const needsCompatOverride = ADAPTIVE_THINKING_REQUIRED_PROVIDERS.has(provider);
+    if (modelUnknown || baseUrl || needsCompatOverride) {
       const existing = (providers[provider] as Record<string, unknown> | undefined) ?? {};
       const existingModels = Array.isArray(existing.models)
         ? (existing.models as Array<Record<string, unknown>>)
@@ -553,20 +656,37 @@ function writeCustomProviderModelsJson(
       // Stale-cleanup above already stripped any prior akmatori-managed
       // model entry, so existingModels here contains only operator models.
       // Append our managed entry so an operator-supplied list stays first.
+      // Merge forceAdaptiveThinking into any existing operator compat flags
+      // so we do not clobber other compat fields the operator may have set.
+      const existingCompat =
+        typeof existing.compat === "object" && existing.compat !== null
+          ? (existing.compat as Record<string, unknown>)
+          : {};
       providers[provider] = {
         ...existing,
-        models: [
-          ...existingModels,
-          {
-            id: model,
-            name: model,
-            reasoning: true,
-            input: ["text"],
-            contextWindow: 128000,
-            maxTokens: 16384,
-            [AKMATORI_MANAGED_MARKER]: true,
-          },
-        ],
+        ...(baseUrl ? { baseUrl, [AKMATORI_MANAGED_BASE_URL_MARKER]: true } : {}),
+        ...(modelUnknown
+          ? {
+              models: [
+                ...existingModels,
+                {
+                  id: model,
+                  name: model,
+                  reasoning: true,
+                  input: ["text"],
+                  contextWindow: 128000,
+                  maxTokens: 16384,
+                  [AKMATORI_MANAGED_MARKER]: true,
+                },
+              ],
+            }
+          : {}),
+        ...(needsCompatOverride
+          ? {
+              compat: { ...existingCompat, forceAdaptiveThinking: true },
+              [AKMATORI_MANAGED_COMPAT_MARKER]: true,
+            }
+          : {}),
       };
     }
   }

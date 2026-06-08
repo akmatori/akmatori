@@ -131,7 +131,7 @@ func (h *APIHandler) createLLMConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !database.IsValidLLMProvider(req.Provider) {
-		api.RespondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid provider: %s. Valid options: openai, anthropic, google, openrouter, custom", req.Provider))
+		api.RespondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid provider: %s. Valid options: openai, anthropic, google, openrouter, nvidia, minimax, ant-ling, custom", req.Provider))
 		return
 	}
 	if req.BaseURL != "" && !isValidURL(req.BaseURL) {

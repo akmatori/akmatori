@@ -479,28 +479,39 @@ var defaultModelsPerProvider = map[LLMProvider]string{
 }
 
 // seedLLMProviders ensures one row per provider exists in the llm_settings table.
-// Creates all provider rows with openai as active if no rows exist yet.
+// Idempotent: seeds missing providers without touching existing rows so upgrades
+// that add new providers (e.g. nvidia, minimax, ant-ling) work correctly.
 func seedLLMProviders() error {
-	var count int64
-	DB.Model(&LLMSettings{}).Count(&count)
-	if count > 0 {
-		return nil
-	}
+	// Determine whether the table has any rows at all so we know whether to set
+	// the first-install default (openai active). On an upgrade the active
+	// provider is already set and new rows must default to inactive.
+	var total int64
+	DB.Model(&LLMSettings{}).Count(&total)
+	firstInstall := total == 0
 
+	created := 0
 	for _, p := range ValidLLMProviders() {
+		var count int64
+		DB.Model(&LLMSettings{}).Where("provider = ?", p).Count(&count)
+		if count > 0 {
+			continue
+		}
 		row := &LLMSettings{
 			Name:          ProviderDisplayName(p),
 			Provider:      p,
 			Model:         defaultModelsPerProvider[p],
 			ThinkingLevel: ThinkingLevelMedium,
 			Enabled:       false,
-			Active:        p == LLMProviderOpenAI,
+			Active:        firstInstall && p == LLMProviderOpenAI,
 		}
 		if err := DB.Create(row).Error; err != nil {
 			return fmt.Errorf("failed to create LLM settings for %s: %w", p, err)
 		}
+		created++
 	}
-	slog.Info("created default LLM settings for all providers")
+	if created > 0 {
+		slog.Info("created default LLM settings for missing providers", "count", created)
+	}
 	return nil
 }
 

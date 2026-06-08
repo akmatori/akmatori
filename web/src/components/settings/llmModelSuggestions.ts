@@ -39,8 +39,8 @@ export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: stri
   nvidia: [
     { value: 'meta/llama-3.3-70b-instruct', label: 'meta/llama-3.3-70b-instruct (Recommended)' },
     { value: 'meta/llama-3.1-70b-instruct', label: 'meta/llama-3.1-70b-instruct' },
-    { value: 'nvidia.nemotron-super-3-120b', label: 'nvidia.nemotron-super-3-120b (Most capable)' },
-    { value: 'nvidia.nemotron-nano-3-30b', label: 'nvidia.nemotron-nano-3-30b (Fast)' },
+    { value: 'nvidia/nemotron-3-super-120b-a12b', label: 'nvidia/nemotron-3-super-120b-a12b (Most capable)' },
+    { value: 'nvidia/nemotron-3-nano-30b-a3b', label: 'nvidia/nemotron-3-nano-30b-a3b (Fast)' },
   ],
   minimax: [
     { value: 'MiniMax-M3', label: 'MiniMax-M3 (Recommended)' },

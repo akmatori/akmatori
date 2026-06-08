@@ -161,6 +161,25 @@ vi.mock("@earendil-works/pi-ai", () => {
           maxTokens: 16384,
         };
       }
+      // MiniMax-M3 is a built-in in pi-ai 0.78.1 using api:anthropic-messages
+      // but WITHOUT forceAdaptiveThinking in the SDK registry. We deliberately
+      // do not include the flag here to match the real SDK state and let tests
+      // verify that resolveModel merges it in for the minimax provider.
+      if (provider === "minimax" && modelId === "MiniMax-M3-builtin-mock") {
+        return {
+          id: "MiniMax-M3-builtin-mock",
+          name: "MiniMax-M3",
+          api: "anthropic-messages",
+          provider: "minimax",
+          baseUrl: "https://api.minimax.io/anthropic",
+          reasoning: true,
+          input: ["text", "image"],
+          cost: { input: 0.6, output: 2.4, cacheRead: 0.12, cacheWrite: 0 },
+          contextWindow: 512000,
+          maxTokens: 128000,
+          // compat intentionally omitted — no forceAdaptiveThinking in registry
+        };
+      }
       // Simulate pi-ai behavior where unknown models may return undefined
       // instead of throwing (observed for custom providers).
       if (provider === "custom" && modelId === "my-model-undefined-return") {
@@ -342,6 +361,41 @@ describe("resolveModel", () => {
     const model = resolveModel("ant-ling", "Ling-2.6-1T");
     expect(model.api).toBe("openai-completions");
     expect((model as { compat?: { forceAdaptiveThinking?: boolean } }).compat?.forceAdaptiveThinking).toBeUndefined();
+  });
+
+  it("should set forceAdaptiveThinking for MiniMax-M3 built-in (anthropic-messages, no compat in SDK registry)", () => {
+    // MiniMax-M3 is a built-in in pi-ai 0.78.1 using api:anthropic-messages but
+    // without forceAdaptiveThinking in the registry. resolveModel must merge the
+    // flag before returning so the effort-based adaptive thinking path is used
+    // instead of budget-based thinking with the interleaved-thinking beta header.
+    const model = resolveModel("minimax", "MiniMax-M3");
+    expect(model.api).toBe("anthropic-messages");
+    expect(model.provider).toBe("minimax");
+    expect((model as { compat?: { forceAdaptiveThinking?: boolean } }).compat?.forceAdaptiveThinking).toBe(true);
+  });
+
+  it("should NOT set forceAdaptiveThinking on a native Anthropic built-in that the SDK left unmarked", () => {
+    // claude-sonnet-4-5-20250929 is in the SDK built-in registry without
+    // forceAdaptiveThinking. The fix at line 165 must NOT add it for native
+    // Anthropic models — only for providers in ADAPTIVE_THINKING_REQUIRED_PROVIDERS
+    // (currently minimax). Forcing the flag on unmarked Anthropic models would
+    // send the wrong thinking wire format to Anthropic's endpoint.
+    const model = resolveModel("anthropic", "claude-sonnet-4-5-20250929");
+    expect(model.api).toBe("anthropic-messages");
+    expect(model.provider).toBe("anthropic");
+    expect((model as { compat?: { forceAdaptiveThinking?: boolean } }).compat?.forceAdaptiveThinking).toBeUndefined();
+  });
+
+  it("should set forceAdaptiveThinking when getModel returns a MiniMax built-in without the flag", () => {
+    // Uses the mock for "MiniMax-M3-builtin-mock" which returns a genuine
+    // built-in-style model for the minimax provider WITHOUT forceAdaptiveThinking.
+    // resolveModel must merge the flag via the built-in path (not the synthesized
+    // fallback) so that in production — where MiniMax-M3 IS in the registry —
+    // the parent session uses the correct adaptive thinking wire format.
+    const model = resolveModel("minimax", "MiniMax-M3-builtin-mock");
+    expect(model.api).toBe("anthropic-messages");
+    expect(model.provider).toBe("minimax");
+    expect((model as { compat?: { forceAdaptiveThinking?: boolean } }).compat?.forceAdaptiveThinking).toBe(true);
   });
 });
 
@@ -1297,6 +1351,156 @@ describe("AgentRunner", () => {
         } finally {
           warnSpy.mockRestore();
         }
+      });
+
+      it("removes provider entry (not empty object) when set-then-clear of managed baseUrl leaves nothing", async () => {
+        // Regression: setting a custom baseUrl for a built-in provider (e.g. an
+        // on-prem OpenAI proxy) writes { openai: { baseUrl, _akmatoriManagedBaseUrl: true } }.
+        // Clearing it must remove the entry entirely — an empty {} would cause
+        // pi's registry to throw "must specify baseUrl, headers, compat, or models".
+        // We use openai/gpt-4o because the test mock treats it as a known built-in
+        // (isBuiltInModelKnown returns true), so no model entry is re-added after cleanup.
+        fs.mkdirSync(tmpAgentDir, { recursive: true });
+        const modelsPath = path.join(tmpAgentDir, "models.json");
+
+        // Seed the models.json as a prior run with baseUrl set would have written it.
+        fs.writeFileSync(
+          modelsPath,
+          JSON.stringify({
+            providers: {
+              openai: {
+                baseUrl: "https://my-openai-proxy.example.com/v1",
+                _akmatoriManagedBaseUrl: true,
+              },
+            },
+          }),
+        );
+
+        // Now run with the same provider/model but no base_url (user cleared it).
+        await runner.execute(
+          makeExecuteParams({
+            llmSettings: makeLLMSettings({
+              provider: "openai",
+              api_key: "sk-openai-key",
+              model: "gpt-4o",
+              base_url: undefined,
+            }),
+          }),
+        );
+
+        const config = JSON.parse(fs.readFileSync(modelsPath, "utf-8")) as {
+          providers: Record<string, unknown>;
+        };
+        // The openai entry must be gone — an empty {} would cause registry failure.
+        expect("openai" in config.providers).toBe(false);
+      });
+
+      // ---- models.json: provider-level compat override for minimax ----
+
+      it("writes provider-level compat.forceAdaptiveThinking for minimax so subagents use effort-based thinking", async () => {
+        // MiniMax-M3 is in pi-ai's built-in registry with api:anthropic-messages
+        // but WITHOUT forceAdaptiveThinking. The child's pi process would use the
+        // built-in entry directly and fall back to budget-based interleaved thinking,
+        // which MiniMax's endpoint rejects. We must persist a provider-level compat
+        // override in models.json so the SDK's mergeCompat applies the flag to
+        // the built-in model in the child process. In tests the mock throws for
+        // MiniMax-M3 (simulating unknown model), so a model entry is also written,
+        // but the key assertion is the provider-level compat block.
+        await runner.execute(
+          makeExecuteParams({
+            llmSettings: makeLLMSettings({
+              provider: "minimax",
+              api_key: "sk-minimax-key",
+              model: "MiniMax-M3",
+            }),
+          }),
+        );
+
+        const modelsPath = path.join(tmpAgentDir, "models.json");
+        expect(fs.existsSync(modelsPath)).toBe(true);
+
+        const config = JSON.parse(fs.readFileSync(modelsPath, "utf-8")) as {
+          providers: Record<string, {
+            compat?: { forceAdaptiveThinking?: boolean };
+            _akmatoriManagedCompat?: boolean;
+          }>;
+        };
+        const minimaxEntry = config.providers.minimax;
+        expect(minimaxEntry).toBeDefined();
+        expect(minimaxEntry?.compat?.forceAdaptiveThinking).toBe(true);
+        expect(minimaxEntry?._akmatoriManagedCompat).toBe(true);
+      });
+
+      it("removes minimax compat override from models.json when provider switches away", async () => {
+        // Seed a models.json that a prior minimax run would have written.
+        fs.mkdirSync(tmpAgentDir, { recursive: true });
+        const modelsPath = path.join(tmpAgentDir, "models.json");
+        fs.writeFileSync(
+          modelsPath,
+          JSON.stringify({
+            providers: {
+              minimax: {
+                compat: { forceAdaptiveThinking: true },
+                _akmatoriManagedCompat: true,
+              },
+            },
+          }),
+        );
+
+        // Switch to anthropic with a known built-in model.
+        await runner.execute(
+          makeExecuteParams({
+            llmSettings: makeLLMSettings({
+              provider: "anthropic",
+              api_key: "sk-ant",
+              model: "claude-sonnet-4-5-20250929",
+            }),
+          }),
+        );
+
+        const config = JSON.parse(fs.readFileSync(modelsPath, "utf-8")) as {
+          providers: Record<string, unknown>;
+        };
+        // minimax entry must be gone — cleanup strips managed compat and removes
+        // the empty provider slot so pi's registry doesn't reject it.
+        expect("minimax" in config.providers).toBe(false);
+      });
+
+      it("preserves operator compat flags in minimax entry when adding managed forceAdaptiveThinking", async () => {
+        // If an operator already has custom compat flags in a minimax entry,
+        // our managed forceAdaptiveThinking must be merged in without clobbering them.
+        fs.mkdirSync(tmpAgentDir, { recursive: true });
+        const modelsPath = path.join(tmpAgentDir, "models.json");
+        fs.writeFileSync(
+          modelsPath,
+          JSON.stringify({
+            providers: {
+              minimax: {
+                compat: { supportsLongCacheRetention: false },
+              },
+            },
+          }),
+        );
+
+        await runner.execute(
+          makeExecuteParams({
+            llmSettings: makeLLMSettings({
+              provider: "minimax",
+              api_key: "sk-minimax-key",
+              model: "MiniMax-M3",
+            }),
+          }),
+        );
+
+        const config = JSON.parse(fs.readFileSync(modelsPath, "utf-8")) as {
+          providers: Record<string, {
+            compat?: Record<string, unknown>;
+            _akmatoriManagedCompat?: boolean;
+          }>;
+        };
+        // Both flags present: operator's supportsLongCacheRetention preserved.
+        expect(config.providers.minimax?.compat?.forceAdaptiveThinking).toBe(true);
+        expect(config.providers.minimax?.compat?.supportsLongCacheRetention).toBe(false);
       });
 
       // ---- settings.json (subagent default provider+model) ----
