@@ -333,10 +333,14 @@ describe("resolveModel", () => {
     expect((model as { compat?: { forceAdaptiveThinking?: boolean } }).compat?.forceAdaptiveThinking).toBe(true);
   });
 
-  it("should set forceAdaptiveThinking for unknown anthropic model (falls through to synthesized spec)", () => {
+  it("should NOT set forceAdaptiveThinking for unknown native Anthropic model (falls through to synthesized spec)", () => {
+    // Native Anthropic models must not receive forceAdaptiveThinking even when the
+    // model is not in the SDK registry. Only ADAPTIVE_THINKING_REQUIRED_PROVIDERS
+    // (e.g. minimax) need it. Setting it on Anthropic models sends the wrong
+    // thinking wire format to Anthropic's endpoint.
     const model = resolveModel("anthropic", "claude-hypothetical-future-model");
     expect(model.api).toBe("anthropic-messages");
-    expect((model as { compat?: { forceAdaptiveThinking?: boolean } }).compat?.forceAdaptiveThinking).toBe(true);
+    expect((model as { compat?: { forceAdaptiveThinking?: boolean } }).compat?.forceAdaptiveThinking).toBeUndefined();
   });
 
   it("should not set forceAdaptiveThinking for custom (openai-completions apiType)", () => {
