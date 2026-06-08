@@ -76,7 +76,7 @@ export interface CreateIncidentResponse {
   message: string;
 }
 
-export type LLMProvider = 'openai' | 'anthropic' | 'google' | 'openrouter' | 'custom';
+export type LLMProvider = 'openai' | 'anthropic' | 'google' | 'openrouter' | 'custom' | 'nvidia' | 'minimax' | 'ant-ling';
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 export interface LLMConfig {

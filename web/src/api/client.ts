@@ -55,6 +55,36 @@ class ApiError extends Error {
   }
 }
 
+// --- API availability tracking ---------------------------------------------
+// A request that fails at the network level (status 0) or returns a gateway
+// error (502/503/504) means the API itself is unreachable rather than the
+// individual call being invalid. We surface that globally so the UI can show a
+// single "API unavailable" banner instead of N scattered error toasts.
+type AvailabilityListener = (available: boolean) => void;
+
+let apiAvailable = true;
+const availabilityListeners = new Set<AvailabilityListener>();
+
+function setApiAvailable(available: boolean): void {
+  if (available === apiAvailable) return;
+  apiAvailable = available;
+  for (const listener of availabilityListeners) listener(available);
+}
+
+function isUnavailableStatus(status: number): boolean {
+  // 0 = network/fetch failure; 502/503/504 = reverse proxy can't reach the API.
+  return status === 0 || status === 502 || status === 503 || status === 504;
+}
+
+export function subscribeApiAvailability(listener: AvailabilityListener): () => void {
+  availabilityListeners.add(listener);
+  // Emit current state immediately so late subscribers are in sync.
+  listener(apiAvailable);
+  return () => {
+    availabilityListeners.delete(listener);
+  };
+}
+
 function getAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem(TOKEN_KEY);
   if (token) {
@@ -77,6 +107,7 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
     });
   } catch (error) {
     // Network errors (DNS, timeout, CORS, offline)
+    setApiAvailable(false);
     const message = error instanceof Error ? error.message : 'Network error';
     throw new ApiError(0, `Connection failed: ${message}`);
   }
@@ -88,6 +119,14 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
     window.location.href = '/login';
     throw new ApiError(401, 'Session expired. Please log in again.');
   }
+
+  if (isUnavailableStatus(response.status)) {
+    setApiAvailable(false);
+    throw new ApiError(response.status, 'The Akmatori API is currently unavailable. Please try again in a moment.');
+  }
+
+  // The API answered (even with a 4xx) — it's reachable.
+  setApiAvailable(true);
 
   if (!response.ok) {
     // Try JSON first (new standard format), fall back to text

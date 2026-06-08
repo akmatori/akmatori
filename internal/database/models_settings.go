@@ -46,6 +46,9 @@ const (
 	LLMProviderGoogle     LLMProvider = "google"
 	LLMProviderOpenRouter LLMProvider = "openrouter"
 	LLMProviderCustom     LLMProvider = "custom"
+	LLMProviderNvidiaNIM  LLMProvider = "nvidia"
+	LLMProviderMiniMax    LLMProvider = "minimax"
+	LLMProviderAntLing    LLMProvider = "ant-ling"
 )
 
 // ValidLLMProviders returns all valid LLM provider values
@@ -56,6 +59,9 @@ func ValidLLMProviders() []LLMProvider {
 		LLMProviderGoogle,
 		LLMProviderOpenRouter,
 		LLMProviderCustom,
+		LLMProviderNvidiaNIM,
+		LLMProviderMiniMax,
+		LLMProviderAntLing,
 	}
 }
 
@@ -72,6 +78,12 @@ func ProviderDisplayName(p LLMProvider) string {
 		return "OpenRouter"
 	case LLMProviderCustom:
 		return "Custom"
+	case LLMProviderNvidiaNIM:
+		return "NVIDIA NIM"
+	case LLMProviderMiniMax:
+		return "MiniMax"
+	case LLMProviderAntLing:
+		return "Ant Ling"
 	default:
 		return string(p)
 	}

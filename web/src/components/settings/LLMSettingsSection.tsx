@@ -21,6 +21,9 @@ const PROVIDER_OPTIONS: { value: LLMProvider; label: string }[] = [
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'google', label: 'Google' },
   { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'nvidia', label: 'NVIDIA NIM' },
+  { value: 'minimax', label: 'MiniMax' },
+  { value: 'ant-ling', label: 'Ant Ling' },
   { value: 'custom', label: 'Custom' },
 ];
 
@@ -112,7 +115,8 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
     });
     setFormMode('edit');
     setEditingId(config.id);
-    setShowAdvanced(!!config.base_url || (config.thinking_level && config.thinking_level !== 'medium'));
+    setShowAdvanced(!!config.base_url || (config.thinking_level && config.thinking_level !== 'medium')
+      || config.provider === 'nvidia' || config.provider === 'minimax' || config.provider === 'ant-ling');
     setError(null);
   };
 
@@ -205,11 +209,15 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
       case 'anthropic': return 'sk-ant-...';
       case 'google': return 'AIza...';
       case 'openrouter': return 'sk-or-...';
+      case 'nvidia': return 'nvapi-...';
+      case 'minimax': return 'Enter MiniMax API key';
+      case 'ant-ling': return 'Enter Ant Ling API key';
       default: return 'Enter API key';
     }
   };
 
-  const showBaseUrl = form.provider === 'custom' || form.provider === 'openrouter';
+  const showBaseUrl = form.provider === 'custom' || form.provider === 'openrouter'
+    || form.provider === 'nvidia' || form.provider === 'minimax' || form.provider === 'ant-ling';
 
   if (loading) {
     return <LoadingSpinner />;

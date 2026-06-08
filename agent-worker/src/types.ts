@@ -51,7 +51,10 @@ export type LLMProvider =
   | "anthropic"
   | "google"
   | "openrouter"
-  | "custom";
+  | "custom"
+  | "nvidia"
+  | "minimax"
+  | "ant-ling";
 
 export type ThinkingLevel =
   | "off"

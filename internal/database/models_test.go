@@ -312,6 +312,9 @@ func TestLLMProvider_Constants(t *testing.T) {
 		{LLMProviderGoogle, "google"},
 		{LLMProviderOpenRouter, "openrouter"},
 		{LLMProviderCustom, "custom"},
+		{LLMProviderNvidiaNIM, "nvidia"},
+		{LLMProviderMiniMax, "minimax"},
+		{LLMProviderAntLing, "ant-ling"},
 	}
 
 	for _, tt := range tests {
@@ -333,6 +336,9 @@ func TestIsValidLLMProvider(t *testing.T) {
 		{"google", true},
 		{"openrouter", true},
 		{"custom", true},
+		{"nvidia", true},
+		{"minimax", true},
+		{"ant-ling", true},
 		{"invalid", false},
 		{"", false},
 		{"OpenAI", false},
@@ -398,8 +404,8 @@ func TestIsValidThinkingLevel(t *testing.T) {
 
 func TestValidLLMProviders(t *testing.T) {
 	providers := ValidLLMProviders()
-	if len(providers) != 5 {
-		t.Errorf("expected 5 providers, got %d", len(providers))
+	if len(providers) != 8 {
+		t.Errorf("expected 8 providers, got %d", len(providers))
 	}
 }
 
