@@ -312,6 +312,9 @@ func TestLLMProvider_Constants(t *testing.T) {
 		{LLMProviderGoogle, "google"},
 		{LLMProviderOpenRouter, "openrouter"},
 		{LLMProviderCustom, "custom"},
+		{LLMProviderNvidiaNIM, "nvidia"},
+		{LLMProviderMiniMax, "minimax"},
+		{LLMProviderAntLing, "ant-ling"},
 	}
 
 	for _, tt := range tests {
@@ -333,6 +336,9 @@ func TestIsValidLLMProvider(t *testing.T) {
 		{"google", true},
 		{"openrouter", true},
 		{"custom", true},
+		{"nvidia", true},
+		{"minimax", true},
+		{"ant-ling", true},
 		{"invalid", false},
 		{"", false},
 		{"OpenAI", false},

@@ -464,7 +464,7 @@ func TestSeedLLMProviders_ModelsMatchUIRecommended(t *testing.T) {
 		LLMProviderCustom:     "",
 		LLMProviderNvidiaNIM:  "meta/llama-3.3-70b-instruct",
 		LLMProviderMiniMax:    "MiniMax-M3",
-		LLMProviderAntLing:    "Ling-2.6-flash",
+		LLMProviderAntLing:    "Ling-2.6-1T",
 	}
 	for p, want := range expected {
 		if got := defaultModelsPerProvider[p]; got != want {
@@ -538,6 +538,9 @@ func TestProviderDisplayName(t *testing.T) {
 		{LLMProviderGoogle, "Google"},
 		{LLMProviderOpenRouter, "OpenRouter"},
 		{LLMProviderCustom, "Custom"},
+		{LLMProviderNvidiaNIM, "NVIDIA NIM"},
+		{LLMProviderMiniMax, "MiniMax"},
+		{LLMProviderAntLing, "Ant Ling"},
 		{LLMProvider("unknown"), "unknown"},
 	}
 	for _, tt := range tests {
