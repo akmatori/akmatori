@@ -8,7 +8,7 @@ Akmatori is an AI-powered AIOps platform for SRE teams. It ingests alerts from m
 
 - Docker deployment: API, Agent Worker, MCP Gateway, PostgreSQL
 - Backend: Go 1.24+
-- Agent Worker: Node.js 22+ / TypeScript with `@earendil-works/pi-coding-agent` (`v0.74.0`)
+- Agent Worker: Node.js 22+ / TypeScript with `@earendil-works/pi-coding-agent` (`v0.78.1`)
 - Frontend: React 19 + TypeScript + Vite + Tailwind
 - Database: PostgreSQL 16 + GORM
 - LLM providers: Anthropic, OpenAI, Google, OpenRouter, custom/on-prem
@@ -260,6 +260,7 @@ Do not create page-local API-down banners or duplicate reachability checks. `fet
 
 ## SDK Notes (`@earendil-works/pi-coding-agent`)
 
+- Current versions: pi-coding-agent, pi-ai, pi-agent-core `0.78.1`; pi-subagents `0.28.0`; undici `^8` (required by pi-coding-agent 0.78.1)
 - As of v0.74.0, pi-mono packages moved from the `@mariozechner/*` scope to `@earendil-works/*` (pi-coding-agent, pi-ai, pi-agent-core)
 - Use `ModelRegistry.inMemory(authStorage)`; there is no public `ModelRegistry` constructor
 - Tool factories in `gateway-tools.ts` should return `defineTool({...})`
@@ -267,6 +268,8 @@ Do not create page-local API-down banners or duplicate reachability checks. `fet
 - `typebox` is imported from `typebox`, not `@sinclair/typebox`
 - `DefaultResourceLoader` requires `agentDir`; pass `getAgentDir()` in production and mocks
 - Provider SDKs are lazy-loaded; Akmatori forwards retry and timeout settings and uses long provider timeouts for slow models
+- `setRuntimeApiKey` in pi-ai stores values in `runtimeOverrides` and bypasses `resolveConfigValue` entirely — operator API keys containing literal `$` characters are safe and will not be interpreted as env var names
+- `compat.forceAdaptiveThinking: true` is set in synthesized model specs for any provider that resolves to `apiType: "anthropic-messages"` (currently `minimax` and fallback custom Anthropic-compatible endpoints); this enables extended thinking wire format on models not in the built-in registry
 - Subagent support: `agent-runner.ts` keeps `noExtensions: false` and passes `additionalExtensionPaths: ["/opt/pi-extensions/pi-subagents"]`. The pi-subagents extension is baked into the image at that path; `~/.pi/agent/extensions` is a thin operator-supplied mount. The agent image must have `pi` on `PATH` and `ripgrep`/`fzf` installed for subagent recon to function
 - Subagent subprocess auth: pi-subagents spawns each subagent in a child `pi` process whose AuthStorage is independent — `agent-runner.ts` mirrors the active API key into `process.env[<provider env var>]` so the child inherits it. Subagent `.md` files intentionally omit `model:` so the child inherits the parent provider/model (hard-coding a model name would break non-Anthropic deployments)
 
