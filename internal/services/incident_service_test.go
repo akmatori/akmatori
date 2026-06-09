@@ -1,11 +1,14 @@
 package services
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -26,6 +29,7 @@ func setupIncidentTestDB(t *testing.T) *gorm.DB {
 		&database.SkillTool{},
 		&database.Incident{},
 		&database.LLMSettings{},
+		&database.AlertCorrelationLog{},
 	)
 	if err != nil {
 		t.Fatalf("failed to migrate test database: %v", err)
@@ -514,5 +518,161 @@ func TestSpawnIncidentManager_NilContext(t *testing.T) {
 	// Should handle nil context gracefully
 	if incident.UUID != uuid {
 		t.Errorf("UUID mismatch: got %s, want %s", incident.UUID, uuid)
+	}
+}
+
+// --- AppendCorrelatedAlert Tests ---
+
+func spawnTestIncident(t *testing.T, svc *SkillService) string {
+	t.Helper()
+	ctx := &IncidentContext{
+		Source:     "zabbix",
+		SourceID:   "evt-corr",
+		SourceKind: database.IncidentSourceKindAlert,
+		SourceUUID: "src-uuid-111",
+		Message:    "test correlation incident",
+	}
+	uuid, _, err := svc.SpawnIncidentManager(ctx)
+	if err != nil {
+		t.Fatalf("SpawnIncidentManager failed: %v", err)
+	}
+	return uuid
+}
+
+func TestAppendCorrelatedAlert_AppendsContextEntry(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnTestIncident(t, svc)
+
+	alert := alerts.NormalizedAlert{
+		AlertName:  "HighCPU",
+		TargetHost: "host-01",
+	}
+	at := time.Now().UTC().Truncate(time.Second)
+
+	if err := svc.AppendCorrelatedAlert(context.Background(), incidentUUID, alert, 0.85, "same host and alert", at); err != nil {
+		t.Fatalf("AppendCorrelatedAlert failed: %v", err)
+	}
+
+	var incident database.Incident
+	if err := db.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
+		t.Fatalf("load incident: %v", err)
+	}
+
+	raw, ok := incident.Context["correlated_alerts"]
+	if !ok {
+		t.Fatal("Context missing correlated_alerts key")
+	}
+	slice, ok := raw.([]interface{})
+	if !ok {
+		t.Fatalf("correlated_alerts is not a slice: %T", raw)
+	}
+	if len(slice) != 1 {
+		t.Fatalf("correlated_alerts len = %d, want 1", len(slice))
+	}
+	entry, ok := slice[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("entry is not a map: %T", slice[0])
+	}
+	if entry["alert_name"] != "HighCPU" {
+		t.Errorf("alert_name = %v, want HighCPU", entry["alert_name"])
+	}
+	if entry["target_host"] != "host-01" {
+		t.Errorf("target_host = %v, want host-01", entry["target_host"])
+	}
+}
+
+func TestAppendCorrelatedAlert_IncrementsCorrelatedCount(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnTestIncident(t, svc)
+
+	alert := alerts.NormalizedAlert{AlertName: "DiskFull", TargetHost: "host-02"}
+	at := time.Now().UTC()
+
+	for i := 0; i < 3; i++ {
+		if err := svc.AppendCorrelatedAlert(context.Background(), incidentUUID, alert, 0.9, "same", at); err != nil {
+			t.Fatalf("call %d failed: %v", i+1, err)
+		}
+	}
+
+	var incident database.Incident
+	if err := db.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
+		t.Fatalf("load incident: %v", err)
+	}
+	if incident.CorrelatedCount != 3 {
+		t.Errorf("CorrelatedCount = %d, want 3", incident.CorrelatedCount)
+	}
+}
+
+func TestAppendCorrelatedAlert_WritesAuditLogRow(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnTestIncident(t, svc)
+
+	alert := alerts.NormalizedAlert{AlertName: "MemLeak", TargetHost: "host-03"}
+	at := time.Now().UTC().Truncate(time.Second)
+
+	if err := svc.AppendCorrelatedAlert(context.Background(), incidentUUID, alert, 0.75, "memory leak match", at); err != nil {
+		t.Fatalf("AppendCorrelatedAlert failed: %v", err)
+	}
+
+	var logRow database.AlertCorrelationLog
+	if err := db.Where("matched_incident_uuid = ?", incidentUUID).First(&logRow).Error; err != nil {
+		t.Fatalf("AlertCorrelationLog row not found: %v", err)
+	}
+	if logRow.AlertName != "MemLeak" {
+		t.Errorf("AlertName = %q, want MemLeak", logRow.AlertName)
+	}
+	if logRow.TargetHost != "host-03" {
+		t.Errorf("TargetHost = %q, want host-03", logRow.TargetHost)
+	}
+	if logRow.Confidence != 0.75 {
+		t.Errorf("Confidence = %f, want 0.75", logRow.Confidence)
+	}
+	if logRow.Reasoning != "memory leak match" {
+		t.Errorf("Reasoning = %q, want 'memory leak match'", logRow.Reasoning)
+	}
+}
+
+func TestAppendCorrelatedAlert_AccumulatesMultipleEntries(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnTestIncident(t, svc)
+
+	at := time.Now().UTC()
+	for i, name := range []string{"AlertA", "AlertB", "AlertC"} {
+		a := alerts.NormalizedAlert{AlertName: name, TargetHost: "multi-host"}
+		if err := svc.AppendCorrelatedAlert(context.Background(), incidentUUID, a, 0.8, "reason", at.Add(time.Duration(i)*time.Second)); err != nil {
+			t.Fatalf("call %d failed: %v", i+1, err)
+		}
+	}
+
+	var incident database.Incident
+	if err := db.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
+		t.Fatalf("load incident: %v", err)
+	}
+	slice, ok := incident.Context["correlated_alerts"].([]interface{})
+	if !ok {
+		t.Fatalf("correlated_alerts is not a slice: %T", incident.Context["correlated_alerts"])
+	}
+	if len(slice) != 3 {
+		t.Errorf("correlated_alerts len = %d, want 3", len(slice))
+	}
+
+	var count int64
+	db.Model(&database.AlertCorrelationLog{}).Where("matched_incident_uuid = ?", incidentUUID).Count(&count)
+	if count != 3 {
+		t.Errorf("AlertCorrelationLog rows = %d, want 3", count)
+	}
+}
+
+func TestAppendCorrelatedAlert_UnknownIncidentReturnsError(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+
+	err := svc.AppendCorrelatedAlert(context.Background(), "nonexistent-uuid", alerts.NormalizedAlert{}, 0.9, "", time.Now())
+	if err == nil {
+		t.Fatal("expected error for unknown incident, got nil")
 	}
 }

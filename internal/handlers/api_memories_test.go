@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +11,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/services"
 )
@@ -544,6 +547,9 @@ func (r *recordingSkillService) UpdateIncidentComplete(string, database.Incident
 func (r *recordingSkillService) UpdateIncidentLog(string, string) error         { return nil }
 func (r *recordingSkillService) GetIncident(string) (*database.Incident, error) { return nil, nil }
 func (r *recordingSkillService) AppendSubagentLog(string, string, string) error { return nil }
+func (r *recordingSkillService) AppendCorrelatedAlert(context.Context, string, alerts.NormalizedAlert, float64, string, time.Time) error {
+	return nil
+}
 
 // newMemoryAPIHandlerWithSkill wires both a memory mock and a skill
 // regeneration recorder. Used by tests that need to verify skill-scoped

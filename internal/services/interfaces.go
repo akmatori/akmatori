@@ -1,8 +1,11 @@
 package services
 
 import (
+	"context"
 	"io"
+	"time"
 
+	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/messaging"
 )
@@ -40,6 +43,7 @@ type IncidentManager interface {
 	UpdateIncidentLog(incidentUUID string, fullLog string) error
 	GetIncident(incidentUUID string) (*database.Incident, error)
 	AppendSubagentLog(incidentUUID string, skillName string, subagentLog string) error
+	AppendCorrelatedAlert(ctx context.Context, incidentUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string, at time.Time) error
 }
 
 // SkillIncidentManager combines SkillManager and IncidentManager for handlers

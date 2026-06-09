@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -310,4 +311,82 @@ func (s *SkillService) AppendSubagentLog(incidentUUID string, skillName string, 
 	}
 
 	return nil
+}
+
+// correlatedAlertEntry is a single entry in the correlated_alerts JSONB slice.
+type correlatedAlertEntry struct {
+	AlertName  string    `json:"alert_name"`
+	TargetHost string    `json:"target_host"`
+	At         time.Time `json:"at"`
+	Confidence float64   `json:"confidence"`
+	Reasoning  string    `json:"reasoning"`
+}
+
+// AppendCorrelatedAlert records that an incoming alert was collapsed into this
+// incident rather than spawning a new investigation. It atomically:
+//  1. Appends an entry to incident.Context["correlated_alerts"]
+//  2. Increments correlated_count
+//  3. Writes one AlertCorrelationLog audit row
+//
+// All three writes happen inside a single transaction.
+func (s *SkillService) AppendCorrelatedAlert(ctx context.Context, incidentUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string, at time.Time) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var incident database.Incident
+		if err := tx.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
+			return fmt.Errorf("AppendCorrelatedAlert: load incident: %w", err)
+		}
+
+		if incident.Context == nil {
+			incident.Context = database.JSONB{}
+		}
+
+		entry := correlatedAlertEntry{
+			AlertName:  alert.AlertName,
+			TargetHost: alert.TargetHost,
+			At:         at,
+			Confidence: confidence,
+			Reasoning:  reasoning,
+		}
+
+		// Retrieve or initialise the slice from the JSONB map.
+		var existing []interface{}
+		if raw, ok := incident.Context["correlated_alerts"]; ok {
+			if slice, ok := raw.([]interface{}); ok {
+				existing = slice
+			}
+		}
+		// Build a plain map so it round-trips through JSONB cleanly.
+		entryMap := map[string]interface{}{
+			"alert_name":  entry.AlertName,
+			"target_host": entry.TargetHost,
+			"at":          entry.At.Format(time.RFC3339),
+			"confidence":  entry.Confidence,
+			"reasoning":   entry.Reasoning,
+		}
+		incident.Context["correlated_alerts"] = append(existing, entryMap)
+
+		if err := tx.Model(&database.Incident{}).
+			Where("uuid = ?", incidentUUID).
+			Updates(map[string]interface{}{
+				"context":          incident.Context,
+				"correlated_count": gorm.Expr("correlated_count + 1"),
+			}).Error; err != nil {
+			return fmt.Errorf("AppendCorrelatedAlert: update incident: %w", err)
+		}
+
+		logRow := database.AlertCorrelationLog{
+			SourceUUID:          incident.SourceUUID,
+			AlertName:           alert.AlertName,
+			TargetHost:          alert.TargetHost,
+			MatchedIncidentUUID: incidentUUID,
+			Confidence:          confidence,
+			Reasoning:           reasoning,
+			CreatedAt:           at,
+		}
+		if err := tx.Create(&logRow).Error; err != nil {
+			return fmt.Errorf("AppendCorrelatedAlert: write log: %w", err)
+		}
+
+		return nil
+	})
 }

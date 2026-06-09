@@ -49,6 +49,9 @@ type Incident struct {
 	// Slack context fields (for thread replies to source messages)
 	SlackChannelID string `gorm:"column:slack_channel_id" json:"slack_channel_id"` // Slack channel ID where alert originated
 	SlackMessageTS string `gorm:"column:slack_message_ts" json:"slack_message_ts"` // Slack message timestamp for thread replies
+
+	// Correlation fields — populated when incoming alerts are deduped into this incident
+	CorrelatedCount int `gorm:"default:0" json:"correlated_count"` // number of subsequent alerts collapsed into this incident
 }
 
 // BeforeCreate hook to set StartedAt

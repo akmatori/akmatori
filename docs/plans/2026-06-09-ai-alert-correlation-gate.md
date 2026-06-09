@@ -65,11 +65,11 @@ Add an AI-powered one-shot LLM gate that runs before each alert spawns a new inc
 - Modify: `internal/services/interfaces.go`
 - Modify: `internal/services/incident_service.go`
 
-- [ ] Add `AppendCorrelatedAlert(ctx context.Context, incidentUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string, at time.Time) error` to the `IncidentManager` interface in `interfaces.go`
-- [ ] Implement `AppendCorrelatedAlert` in `incident_service.go`: append entry to `incident.Context` JSONB under key `correlated_alerts` (slice of `{alert_name, target_host, at, confidence, reasoning}`), increment `correlated_count` field, write one `AlertCorrelationLog` row to DB
-- [ ] Update any mock implementations of `IncidentManager` in `internal/testhelpers/` to add the stub method
-- [ ] Write unit tests for `AppendCorrelatedAlert`: verifies JSONB append, count increment, and audit row creation
-- [ ] Run `make test` — must pass before Task 4
+- [x] Add `AppendCorrelatedAlert(ctx context.Context, incidentUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string, at time.Time) error` to the `IncidentManager` interface in `interfaces.go`
+- [x] Implement `AppendCorrelatedAlert` in `incident_service.go`: append entry to `incident.Context` JSONB under key `correlated_alerts` (slice of `{alert_name, target_host, at, confidence, reasoning}`), increment `correlated_count` field, write one `AlertCorrelationLog` row to DB
+- [x] Update any mock implementations of `IncidentManager` in `internal/testhelpers/` to add the stub method
+- [x] Write unit tests for `AppendCorrelatedAlert`: verifies JSONB append, count increment, and audit row creation
+- [x] Run `make test` — must pass before Task 4
 
 ### Task 4: AlertHandler wiring
 
