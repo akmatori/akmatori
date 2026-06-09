@@ -199,6 +199,12 @@ type GeneralSettings struct {
 	BaseURL   string    `gorm:"type:text" json:"base_url"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// Alert correlation gate settings (all nullable; nil means use service defaults)
+	AlertCorrelationEnabled        *bool    `gorm:"default:null" json:"alert_correlation_enabled"`
+	AlertCorrelationWindowMinutes  *int     `gorm:"default:null" json:"alert_correlation_window_minutes"`
+	AlertCorrelationThreshold      *float64 `gorm:"default:null" json:"alert_correlation_threshold"`
+	AlertCorrelationMaxCandidates  *int     `gorm:"default:null" json:"alert_correlation_max_candidates"`
 }
 
 func (GeneralSettings) TableName() string {

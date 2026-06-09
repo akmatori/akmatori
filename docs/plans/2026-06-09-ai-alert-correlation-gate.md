@@ -33,11 +33,11 @@ Add an AI-powered one-shot LLM gate that runs before each alert spawns a new inc
 - Create: `internal/database/models_alert_correlation.go`
 - Modify: `internal/database/db.go`
 
-- [ ] Create `AlertCorrelationLog` model with fields: ID, SourceUUID, AlertName, TargetHost, MatchedIncidentUUID, Confidence, Reasoning, CreatedAt (indexed on SourceUUID and MatchedIncidentUUID)
-- [ ] Add 4 nullable columns to `GeneralSettings`: `AlertCorrelationEnabled bool`, `AlertCorrelationWindowMinutes int`, `AlertCorrelationThreshold float64`, `AlertCorrelationMaxCandidates int`
-- [ ] Add `AlertCorrelationLog` and updated `GeneralSettings` to the `AutoMigrate` call in `db.go`
-- [ ] Write migration smoke test confirming AutoMigrate succeeds with the new model and columns
-- [ ] Run `make test` — must pass before Task 2
+- [x] Create `AlertCorrelationLog` model with fields: ID, SourceUUID, AlertName, TargetHost, MatchedIncidentUUID, Confidence, Reasoning, CreatedAt (indexed on SourceUUID and MatchedIncidentUUID)
+- [x] Add 4 nullable columns to `GeneralSettings`: `AlertCorrelationEnabled bool`, `AlertCorrelationWindowMinutes int`, `AlertCorrelationThreshold float64`, `AlertCorrelationMaxCandidates int`
+- [x] Add `AlertCorrelationLog` and updated `GeneralSettings` to the `AutoMigrate` call in `db.go`
+- [x] Write migration smoke test confirming AutoMigrate succeeds with the new model and columns
+- [x] Run `make test` — must pass before Task 2
 
 ### Task 2: AlertCorrelator service
 

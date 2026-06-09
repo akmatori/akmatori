@@ -153,6 +153,8 @@ func runMigrations(db *gorm.DB) error {
 		&Channel{},
 		&CronJob{},
 		&CronJobTool{},
+		// Alert correlation gate
+		&AlertCorrelationLog{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
