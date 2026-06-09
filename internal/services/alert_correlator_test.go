@@ -27,7 +27,9 @@ func setupCorrelatorDB(t *testing.T) *gorm.DB {
 	); err != nil {
 		t.Fatalf("automigrate: %v", err)
 	}
+	origDB := database.DB
 	database.DB = db
+	t.Cleanup(func() { database.DB = origDB })
 
 	// Seed active LLM settings so GetLLMSettings returns a valid row.
 	if err := db.Create(&database.LLMSettings{

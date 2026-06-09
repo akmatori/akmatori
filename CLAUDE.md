@@ -72,6 +72,7 @@ Use the one-shot path for short non-agent calls such as:
 - Slack final-message summarization
 - response formatting
 - feedback classification
+- alert correlation (deciding whether an incoming alert is a recurrence of a recent incident)
 
 Rules:
 - API frame type is `oneshot_llm_request`
@@ -139,6 +140,21 @@ Rules:
 - the `slack_channel` AlertSourceInstance type is deprecated and hidden from the UI; do not reintroduce it for new flows
 - Telegram requests must surface `ErrNotImplemented` from the registry — never silently no-op
 
+### Alert correlation gate
+
+Before spawning a new incident, `AlertHandler` runs `AlertCorrelator.Correlate` to ask the LLM whether the incoming alert is a recurrence of a recent incident. When confidence meets the threshold, `AppendCorrelatedAlert` is called instead of `SpawnIncidentManager`.
+
+Rules:
+- gate is flag-gated (`AlertCorrelationEnabled` in `GeneralSettings`, default false); when disabled, no LLM call is made and all alerts spawn normally (fail-open)
+- `AlertCorrelator` is constructed in `main.go` from `GeneralSettings` (window 30m, threshold 0.7, maxCandidates 20 as defaults); wired via `alertHandler.SetAlertCorrelator(c)`
+- both `processAlert` and `ProcessAlertFromListenerChannel` wrap the evaluate-and-spawn block in `h.spawnGroup.Do(key, ...)` where `key = sha256hex(sourceUUID + "|" + alertName + "|" + targetHost)`; singleflight followers skip the LLM call and call `recordRecurrence` using the `isLeader` flag pattern (not the `shared` bool, which is true for the leader when followers exist)
+- `AppendCorrelatedAlert` in `SkillService` atomically: appends an entry to `incident.Context["correlated_alerts"]`, increments `correlated_count`, and writes an `AlertCorrelationLog` audit row — all inside a single transaction
+- `ErrWorkerNotConnected` from the correlator is treated as no-match → alert spawns normally (fail-open)
+- candidate query filters: `source_kind='alert'`, `started_at >= now()-window`, `status IN (pending,running,diagnosed,completed)` — failed incidents are never correlation targets
+- hallucination guard: any UUID returned by the LLM that was not in the fetched candidate set forces `Correlated=false`
+- correlation config fields live in `GeneralSettings`; they are read once at startup and wired into the correlator — changes require a restart (no live reload path)
+- one-shot LLM path is used for the correlation call; defined in `internal/services/alert_correlator.go`
+
 ### Alert sources and webhook adapters
 
 Webhook alert sources are still `AlertSourceInstance` rows, while message destinations are Channels. Keep those responsibilities separate.
@@ -205,6 +221,7 @@ Rules:
 - `internal/services/memory_service.go` - cross-incident memory CRUD, DB↔disk sync, and `IngestFromDisk`
 - `internal/services/title_generator.go` - one-shot title generation
 - `internal/services/slack_summarizer.go` - Slack-safe final output compression
+- `internal/services/alert_correlator.go` - LLM-powered gate that decides whether an incoming alert is a recurrence of a recent incident; defines `CorrelationConfig`, `CorrelationVerdict`, and `AlertCorrelator`
 - `internal/services/channel_service.go` - Integrations/Channels CRUD, `ResolveDefault`, `ResolveForAlertSource`
 - `internal/services/cron_runner.go` - cron scheduler, per-cron agent tick path, reload-on-CRUD
 - `internal/services/incident_service.go` - `SpawnIncidentManager` / `SpawnAgentInvocation`, AGENTS.md generation (`generateAgentsMd`), per-root-skill prompt injection
@@ -322,6 +339,7 @@ Keep this file aligned with these current realities:
 - cron jobs (`/api/cron-jobs`) always run as full agent investigations under the `cron-agent` system skill with a per-cron tool allowlist; system crons (e.g. seeded `memory-curator`) cannot be deleted; `CronRunner` boots from `cmd/akmatori/main.go`
 - alert-source webhooks use adapter-specific secret validation before parsing; explicit notification channels must resolve to `can_post=true` Channels
 - the built-in `incidents` tool (`incidents.list`, `incidents.get`) is seeded at boot by `EnsureToolTypes()` with a credential-less instance and queries the gateway DB directly; no operator setup required
+- alert correlation gate (`services.AlertCorrelator`) runs before each incident spawn in both `processAlert` and `ProcessAlertFromListenerChannel`; flag-gated via `GeneralSettings.AlertCorrelationEnabled` (default false); uses `isLeader` outer-variable pattern (not singleflight `shared` bool) to distinguish leader from follower; `AppendCorrelatedAlert` records collapsed alerts in `incident.Context["correlated_alerts"]` and the `alert_correlation_logs` table; config is read once at startup
 
 ## When Editing This File
 

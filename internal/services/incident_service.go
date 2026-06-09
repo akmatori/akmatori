@@ -313,15 +313,6 @@ func (s *SkillService) AppendSubagentLog(incidentUUID string, skillName string, 
 	return nil
 }
 
-// correlatedAlertEntry is a single entry in the correlated_alerts JSONB slice.
-type correlatedAlertEntry struct {
-	AlertName  string    `json:"alert_name"`
-	TargetHost string    `json:"target_host"`
-	At         time.Time `json:"at"`
-	Confidence float64   `json:"confidence"`
-	Reasoning  string    `json:"reasoning"`
-}
-
 // AppendCorrelatedAlert records that an incoming alert was collapsed into this
 // incident rather than spawning a new investigation. It atomically:
 //  1. Appends an entry to incident.Context["correlated_alerts"]
@@ -340,14 +331,6 @@ func (s *SkillService) AppendCorrelatedAlert(ctx context.Context, incidentUUID s
 			incident.Context = database.JSONB{}
 		}
 
-		entry := correlatedAlertEntry{
-			AlertName:  alert.AlertName,
-			TargetHost: alert.TargetHost,
-			At:         at,
-			Confidence: confidence,
-			Reasoning:  reasoning,
-		}
-
 		// Retrieve or initialise the slice from the JSONB map.
 		var existing []interface{}
 		if raw, ok := incident.Context["correlated_alerts"]; ok {
@@ -355,13 +338,12 @@ func (s *SkillService) AppendCorrelatedAlert(ctx context.Context, incidentUUID s
 				existing = slice
 			}
 		}
-		// Build a plain map so it round-trips through JSONB cleanly.
 		entryMap := map[string]interface{}{
-			"alert_name":  entry.AlertName,
-			"target_host": entry.TargetHost,
-			"at":          entry.At.Format(time.RFC3339),
-			"confidence":  entry.Confidence,
-			"reasoning":   entry.Reasoning,
+			"alert_name":  alert.AlertName,
+			"target_host": alert.TargetHost,
+			"at":          at.Format(time.RFC3339),
+			"confidence":  confidence,
+			"reasoning":   reasoning,
 		}
 		incident.Context["correlated_alerts"] = append(existing, entryMap)
 

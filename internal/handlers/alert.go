@@ -135,6 +135,15 @@ func (h *AlertHandler) correlate(ctx context.Context, sourceUUID string, alert a
 	return h.alertCorrelator.Correlate(ctx, sourceUUID, alert)
 }
 
+// correlationThreshold returns the configured correlation confidence threshold,
+// or the CorrelationConfigWithDefaults default (0.7) when no correlator is wired.
+func (h *AlertHandler) correlationThreshold() float64 {
+	if h.alertCorrelator != nil {
+		return h.alertCorrelator.Threshold()
+	}
+	return 0.7
+}
+
 // recordRecurrence calls AppendCorrelatedAlert and logs but does not propagate
 // errors — a failed recurrence write must never block alert processing.
 func (h *AlertHandler) recordRecurrence(ctx context.Context, incidentUUID string, alert alerts.NormalizedAlert, verdict services.CorrelationVerdict) {

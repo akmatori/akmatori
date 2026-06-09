@@ -25,6 +25,7 @@ type corrGateSkillService struct {
 	appendCount int
 	spawnErr    error
 	spawnUUID   string
+	spawnHook   func() // called at entry of SpawnIncidentManager (before the mutex)
 
 	appendCalls []corrAppendCall
 }
@@ -36,6 +37,9 @@ type corrAppendCall struct {
 }
 
 func (s *corrGateSkillService) SpawnIncidentManager(*services.IncidentContext) (string, string, error) {
+	if s.spawnHook != nil {
+		s.spawnHook()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.spawnErr != nil {
@@ -187,19 +191,35 @@ func newCorrTestAlert() alerts.NormalizedAlert {
 
 // ---- tests ----
 
-// TestAlertHandler_Singleflight_15ConcurrentAlerts verifies that 15 goroutines
-// sending the same alert key result in exactly 1 spawn and 14 recurrences.
+// TestAlertHandler_Singleflight_15ConcurrentAlerts verifies that concurrent
+// alerts with the same key result in exactly 1 spawn and N-1 recurrences.
+//
+// Approach: the leader's SpawnIncidentManager blocks until all followers have
+// queued inside singleflight.Do, then releases. This guarantees deterministic
+// overlap rather than relying on goroutine scheduling timing.
 func TestAlertHandler_Singleflight_15ConcurrentAlerts(t *testing.T) {
-	// Provide a minimal global DB so isSlackEnabled() can query SlackSettings.
 	testhelpers.NewGlobalSQLiteDB(t,
 		&database.SlackSettings{},
 		&database.AlertCorrelationLog{},
 		&database.Incident{},
 	)
 
-	svc := &corrGateSkillService{spawnUUID: "shared-incident"}
+	const n = 15
+
+	// spawnEntered is closed when SpawnIncidentManager first starts.
+	// spawnRelease is closed to let SpawnIncidentManager complete.
+	spawnEntered := make(chan struct{})
+	spawnRelease := make(chan struct{})
+	var enterOnce sync.Once
+
+	svc := &corrGateSkillService{
+		spawnUUID: "shared-incident",
+		spawnHook: func() {
+			enterOnce.Do(func() { close(spawnEntered) })
+			<-spawnRelease
+		},
+	}
 	h := NewAlertHandler(nil, nil, nil, nil, svc, nil, nil)
-	// No correlator — leader spawns, followers attach.
 
 	instance := &database.AlertSourceInstance{
 		UUID:    "src-uuid",
@@ -212,7 +232,6 @@ func TestAlertHandler_Singleflight_15ConcurrentAlerts(t *testing.T) {
 	}
 	alert := newCorrTestAlert()
 
-	const n = 15
 	var wg sync.WaitGroup
 	wg.Add(n)
 	start := make(chan struct{})
@@ -224,15 +243,24 @@ func TestAlertHandler_Singleflight_15ConcurrentAlerts(t *testing.T) {
 		}()
 	}
 	close(start)
+
+	// Wait until the leader goroutine is inside SpawnIncidentManager (blocking).
+	// All other goroutines that call Do with the same key while the leader is
+	// blocked will queue as followers rather than becoming new leaders.
+	<-spawnEntered
+
+	// Give the remaining goroutines time to reach singleflight.Do and queue up.
+	// The leader is blocking so they will wait rather than spawn independently.
+	time.Sleep(50 * time.Millisecond)
+
+	// Release the leader; queued followers receive the same incident UUID.
+	close(spawnRelease)
 	wg.Wait()
 
-	spawns := svc.getSpawnCount()
-	appends := svc.getAppendCount()
-
-	if spawns != 1 {
+	if spawns := svc.getSpawnCount(); spawns != 1 {
 		t.Errorf("expected 1 spawn, got %d", spawns)
 	}
-	if appends != n-1 {
+	if appends := svc.getAppendCount(); appends != n-1 {
 		t.Errorf("expected %d recurrences, got %d", n-1, appends)
 	}
 }
@@ -278,7 +306,7 @@ func TestAlertHandler_ConfidentVerdict_NoSpawn(t *testing.T) {
 	if svc.getAppendCount() != 1 {
 		t.Errorf("expected 1 AppendCorrelatedAlert call, got %d", svc.getAppendCount())
 	}
-	if len(svc.appendCalls) > 0 && svc.appendCalls[0].incidentUUID != "existing-inc" {
+	if svc.appendCalls[0].incidentUUID != "existing-inc" {
 		t.Errorf("expected recurrence attached to 'existing-inc', got %q", svc.appendCalls[0].incidentUUID)
 	}
 }

@@ -46,10 +46,10 @@ func CorrelationConfigWithDefaults(c CorrelationConfig) CorrelationConfig {
 
 // CorrelationVerdict is the structured output from the correlation gate.
 type CorrelationVerdict struct {
-	Correlated   bool
-	IncidentUUID string
-	Confidence   float64
-	Reasoning    string
+	Correlated   bool    `json:"correlated"`
+	IncidentUUID string  `json:"incident_uuid"`
+	Confidence   float64 `json:"confidence"`
+	Reasoning    string  `json:"reasoning"`
 }
 
 // IsConfident returns true when the verdict indicates a match with confidence
@@ -93,14 +93,6 @@ type candidateRow struct {
 	StartedAt time.Time
 }
 
-// correlationVerdictJSON is the expected JSON shape from the LLM.
-type correlationVerdictJSON struct {
-	Correlated   bool    `json:"correlated"`
-	IncidentUUID string  `json:"incident_uuid"`
-	Confidence   float64 `json:"confidence"`
-	Reasoning    string  `json:"reasoning"`
-}
-
 // Correlate asks the LLM whether the incoming alert matches a recent incident.
 // It is safe to call concurrently. Returns {Correlated: false} on:
 //   - flag disabled
@@ -116,7 +108,7 @@ func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, aler
 		return noMatch, nil
 	}
 
-	candidates, err := c.fetchCandidates(ctx, sourceUUID)
+	candidates, err := c.fetchCandidates(ctx)
 	if err != nil {
 		return noMatch, fmt.Errorf("correlate: fetch candidates: %w", err)
 	}
@@ -177,7 +169,7 @@ func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, aler
 // fetchCandidates queries recent alert-sourced incidents that are still active
 // within the correlation window. Failed incidents are excluded because they are
 // not viable targets for recurrence attachment.
-func (c *AlertCorrelator) fetchCandidates(ctx context.Context, sourceUUID string) ([]candidateRow, error) {
+func (c *AlertCorrelator) fetchCandidates(ctx context.Context) ([]candidateRow, error) {
 	windowStart := time.Now().Add(-c.cfg.Window)
 	activeStatuses := []string{
 		string(database.IncidentStatusPending),
@@ -257,24 +249,21 @@ func parseCorrelationVerdict(raw string) (CorrelationVerdict, error) {
 		return CorrelationVerdict{}, fmt.Errorf("empty response")
 	}
 
-	var j correlationVerdictJSON
-	if err := json.Unmarshal([]byte(cleaned), &j); err != nil {
+	var v CorrelationVerdict
+	if err := json.Unmarshal([]byte(cleaned), &v); err != nil {
 		return CorrelationVerdict{}, fmt.Errorf("decode: %w", err)
 	}
 
-	if j.Confidence < 0 {
-		j.Confidence = 0
+	if v.Confidence < 0 {
+		v.Confidence = 0
 	}
-	if j.Confidence > 1 {
-		j.Confidence = 1
+	if v.Confidence > 1 {
+		v.Confidence = 1
 	}
+	v.IncidentUUID = strings.TrimSpace(v.IncidentUUID)
+	v.Reasoning = strings.TrimSpace(v.Reasoning)
 
-	return CorrelationVerdict{
-		Correlated:   j.Correlated,
-		IncidentUUID: strings.TrimSpace(j.IncidentUUID),
-		Confidence:   j.Confidence,
-		Reasoning:    strings.TrimSpace(j.Reasoning),
-	}, nil
+	return v, nil
 }
 
 const correlationSystemPrompt = `You decide whether an incoming alert is a RECURRENCE of a recent incident rather than a new event that needs its own investigation.

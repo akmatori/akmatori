@@ -94,11 +94,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		if corrErr != nil {
 			slog.Debug("alert correlator error, spawning new incident", "err", corrErr)
 		}
-		threshold := float64(0.7)
-		if h.alertCorrelator != nil {
-			threshold = h.alertCorrelator.Threshold()
-		}
-		if verdict.IsConfident(threshold) {
+		if verdict.IsConfident(h.correlationThreshold()) {
 			slog.Info("alert correlated to existing incident", "incident_uuid", verdict.IncidentUUID, "confidence", verdict.Confidence)
 			h.recordRecurrence(context.Background(), verdict.IncidentUUID, normalized, verdict)
 			return verdict.IncidentUUID, nil
@@ -141,13 +137,12 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		// Follower: the leader decided which incident owns this alert burst;
 		// attach this copy as a recurrence.
 		incidentUUID, _ := v.(string)
-		followerVerdict := services.CorrelationVerdict{
+		h.recordRecurrence(context.Background(), incidentUUID, normalized, services.CorrelationVerdict{
 			Correlated:   true,
 			IncidentUUID: incidentUUID,
 			Confidence:   1.0,
 			Reasoning:    "collapsed via concurrent dedup",
-		}
-		h.recordRecurrence(context.Background(), incidentUUID, normalized, followerVerdict)
+		})
 	}
 }
 
@@ -233,11 +228,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 		if corrErr != nil {
 			slog.Debug("alert correlator error, spawning new incident", "err", corrErr)
 		}
-		threshold := float64(0.7)
-		if h.alertCorrelator != nil {
-			threshold = h.alertCorrelator.Threshold()
-		}
-		if verdict.IsConfident(threshold) {
+		if verdict.IsConfident(h.correlationThreshold()) {
 			slog.Info("listener channel alert correlated to existing incident", "incident_uuid", verdict.IncidentUUID, "confidence", verdict.Confidence)
 			h.recordRecurrence(context.Background(), verdict.IncidentUUID, normalized, verdict)
 			return verdict.IncidentUUID, nil
@@ -278,13 +269,12 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 	if !isLeader {
 		// Follower: attach this alert to the incident the leader decided on.
 		incidentUUID, _ := v.(string)
-		followerVerdict := services.CorrelationVerdict{
+		h.recordRecurrence(context.Background(), incidentUUID, normalized, services.CorrelationVerdict{
 			Correlated:   true,
 			IncidentUUID: incidentUUID,
 			Confidence:   1.0,
 			Reasoning:    "collapsed via concurrent dedup",
-		}
-		h.recordRecurrence(context.Background(), incidentUUID, normalized, followerVerdict)
+		})
 	}
 }
 
