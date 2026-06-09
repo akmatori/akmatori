@@ -92,10 +92,10 @@ Add an AI-powered one-shot LLM gate that runs before each alert spawns a new inc
 **Files:**
 - Modify: `cmd/akmatori/main.go`
 
-- [ ] After the `agentWSHandler` is constructed, read `CorrelationConfig` from `database.GetOrCreateGeneralSettings()` (with nil-safe defaults: window 30m, threshold 0.7, maxCandidates 20, enabled false)
-- [ ] Construct `services.NewAlertCorrelator(agentWSHandler, database.DB, cfg)`
-- [ ] Wire via `alertHandler.SetAlertCorrelator(correlator)` alongside the other `Set*` calls
-- [ ] Run `make test` — must pass before Task 6
+- [x] After the `agentWSHandler` is constructed, read `CorrelationConfig` from `database.GetOrCreateGeneralSettings()` (with nil-safe defaults: window 30m, threshold 0.7, maxCandidates 20, enabled false)
+- [x] Construct `services.NewAlertCorrelator(agentWSHandler, database.DB, cfg)`
+- [x] Wire via `alertHandler.SetAlertCorrelator(correlator)` alongside the other `Set*` calls
+- [x] Run `make test` — must pass before Task 6
 
 ### Task 6: Verify acceptance criteria
 

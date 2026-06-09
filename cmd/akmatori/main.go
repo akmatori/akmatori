@@ -233,6 +233,29 @@ func main() {
 	alertHandler.SetChannelService(channelService)
 	alertHandler.SetProviderRegistry(providerRegistry)
 
+	// Build correlation config from GeneralSettings. Nil fields fall back to
+	// service-layer defaults (window 30m, threshold 0.7, maxCandidates 20, enabled false).
+	var correlationCfg services.CorrelationConfig
+	if gs, err := database.GetOrCreateGeneralSettings(); err != nil {
+		slog.Warn("could not load general settings for alert correlator, using defaults", "err", err)
+	} else {
+		if gs.AlertCorrelationEnabled != nil {
+			correlationCfg.Enabled = *gs.AlertCorrelationEnabled
+		}
+		if gs.AlertCorrelationWindowMinutes != nil && *gs.AlertCorrelationWindowMinutes > 0 {
+			correlationCfg.Window = time.Duration(*gs.AlertCorrelationWindowMinutes) * time.Minute
+		}
+		if gs.AlertCorrelationThreshold != nil {
+			correlationCfg.Threshold = *gs.AlertCorrelationThreshold
+		}
+		if gs.AlertCorrelationMaxCandidates != nil {
+			correlationCfg.MaxCandidates = *gs.AlertCorrelationMaxCandidates
+		}
+	}
+	alertCorrelator := services.NewAlertCorrelator(agentWSHandler, database.GetDB(), correlationCfg)
+	alertHandler.SetAlertCorrelator(alertCorrelator)
+	slog.Info("alert correlator wired", "enabled", correlationCfg.Enabled)
+
 	// Set up event handler for when Slack connects
 	// Note: We receive the client directly to avoid deadlock (can't call GetClient while holding lock)
 	slackManager.SetEventHandler(func(socketClient *socketmode.Client, client *slack.Client) {
