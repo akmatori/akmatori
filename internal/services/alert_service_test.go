@@ -218,6 +218,93 @@ func TestAlertService_InstanceCRUD(t *testing.T) {
 	}
 }
 
+func TestAlertService_InstanceUUIDOperations(t *testing.T) {
+	service := setupAlertServiceDB(t)
+	sourceType, err := service.CreateAlertSourceType(
+		"pagerduty",
+		"PagerDuty",
+		"Receives PagerDuty incidents",
+		database.JSONB{"alert_name": "event.data.title"},
+		"Authorization",
+	)
+	if err != nil {
+		t.Fatalf("CreateAlertSourceType(): %v", err)
+	}
+
+	instance, err := service.CreateInstanceByTypeID(
+		sourceType.ID,
+		"PagerDuty production",
+		"Primary PagerDuty source",
+		"secret-1",
+		database.JSONB{"severity": "event.data.priority.summary"},
+		database.JSONB{"dedupe": "incident_key"},
+	)
+	if err != nil {
+		t.Fatalf("CreateInstanceByTypeID(): %v", err)
+	}
+	if instance.UUID == "" {
+		t.Fatal("CreateInstanceByTypeID() returned empty UUID")
+	}
+	if instance.AlertSourceType.ID != sourceType.ID {
+		t.Fatalf("preloaded source type ID = %d, want %d", instance.AlertSourceType.ID, sourceType.ID)
+	}
+	if !instance.Enabled {
+		t.Fatal("instance should be enabled by default")
+	}
+
+	tests := []struct {
+		name string
+		fn   func(t *testing.T)
+	}{
+		{
+			name: "update by uuid changes selected fields",
+			fn: func(t *testing.T) {
+				updates := map[string]interface{}{
+					"name":           "PagerDuty staging",
+					"description":    "Staging PagerDuty source",
+					"webhook_secret": "secret-2",
+					"enabled":        false,
+				}
+				if err := service.UpdateInstance(instance.UUID, updates); err != nil {
+					t.Fatalf("UpdateInstance(): %v", err)
+				}
+
+				updated, err := service.GetInstanceByUUID(instance.UUID)
+				if err != nil {
+					t.Fatalf("GetInstanceByUUID() after update: %v", err)
+				}
+				if updated.Name != "PagerDuty staging" {
+					t.Errorf("updated name = %q, want PagerDuty staging", updated.Name)
+				}
+				if updated.Description != "Staging PagerDuty source" {
+					t.Errorf("updated description = %q, want Staging PagerDuty source", updated.Description)
+				}
+				if updated.WebhookSecret != "secret-2" {
+					t.Errorf("updated webhook secret = %q, want secret-2", updated.WebhookSecret)
+				}
+				if updated.Enabled {
+					t.Error("updated instance should be disabled")
+				}
+			},
+		},
+		{
+			name: "delete by uuid removes the row",
+			fn: func(t *testing.T) {
+				if err := service.DeleteInstance(instance.UUID); err != nil {
+					t.Fatalf("DeleteInstance(): %v", err)
+				}
+				if _, err := service.GetInstanceByUUID(instance.UUID); err == nil {
+					t.Fatal("GetInstanceByUUID() after delete returned nil error, want not found")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, tt.fn)
+	}
+}
+
 func TestAlertService_CreateInstance_MissingSourceType(t *testing.T) {
 	service := setupAlertServiceDB(t)
 
