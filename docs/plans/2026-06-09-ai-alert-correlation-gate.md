@@ -99,7 +99,7 @@ Add an AI-powered one-shot LLM gate that runs before each alert spawns a new inc
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] Run `make test` (Go backend full suite)
-- [ ] Run `make test-adapters`
-- [ ] Confirm flag-off behavior: with `AlertCorrelationEnabled=false`, no LLM calls made in any alert path
-- [ ] Confirm fail-open: when `SetAlertCorrelator` is never called (nil), both `processAlert` paths behave identically to today
+- [x] Run `make test` (Go backend full suite)
+- [x] Run `make test-adapters`
+- [x] Confirm flag-off behavior: with `AlertCorrelationEnabled=false`, no LLM calls made in any alert path
+- [x] Confirm fail-open: when `SetAlertCorrelator` is never called (nil), both `processAlert` paths behave identically to today
