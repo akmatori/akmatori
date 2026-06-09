@@ -201,9 +201,9 @@ func buildCorrelationUserPrompt(alert alerts.NormalizedAlert, candidates []candi
 
 	var sb strings.Builder
 	sb.WriteString("Incoming alert:\n")
-	sb.WriteString(fmt.Sprintf("  Name: %s\n", alert.AlertName))
+	sb.WriteString(fmt.Sprintf("  Name: %s\n", truncateForPrompt(sanitizeForPrompt(alert.AlertName), snippetCap)))
 	if alert.TargetHost != "" {
-		sb.WriteString(fmt.Sprintf("  Host: %s\n", alert.TargetHost))
+		sb.WriteString(fmt.Sprintf("  Host: %s\n", truncateForPrompt(sanitizeForPrompt(alert.TargetHost), snippetCap)))
 	}
 	if alert.Summary != "" {
 		sb.WriteString(fmt.Sprintf("  Summary: %s\n", truncateForPrompt(alert.Summary, snippetCap)))
@@ -236,6 +236,12 @@ func buildCorrelationUserPrompt(alert alerts.NormalizedAlert, candidates []candi
 	}
 
 	return sb.String()
+}
+
+// sanitizeForPrompt strips newlines from a field sourced from external input so
+// it cannot be used to inject additional prompt lines.
+func sanitizeForPrompt(s string) string {
+	return strings.NewReplacer("\n", " ", "\r", " ").Replace(s)
 }
 
 // parseCorrelationVerdict cleans LLM output and decodes it into a CorrelationVerdict.

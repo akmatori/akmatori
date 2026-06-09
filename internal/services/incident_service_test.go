@@ -550,7 +550,7 @@ func TestAppendCorrelatedAlert_AppendsContextEntry(t *testing.T) {
 	}
 	at := time.Now().UTC().Truncate(time.Second)
 
-	if err := svc.AppendCorrelatedAlert(context.Background(), incidentUUID, alert, 0.85, "same host and alert", at); err != nil {
+	if err := svc.AppendCorrelatedAlert(context.Background(), "src-uuid-111", incidentUUID, alert, 0.85, "same host and alert", at); err != nil {
 		t.Fatalf("AppendCorrelatedAlert failed: %v", err)
 	}
 
@@ -591,7 +591,7 @@ func TestAppendCorrelatedAlert_IncrementsCorrelatedCount(t *testing.T) {
 	at := time.Now().UTC()
 
 	for i := 0; i < 3; i++ {
-		if err := svc.AppendCorrelatedAlert(context.Background(), incidentUUID, alert, 0.9, "same", at); err != nil {
+		if err := svc.AppendCorrelatedAlert(context.Background(), "src-uuid-111", incidentUUID, alert, 0.9, "same", at); err != nil {
 			t.Fatalf("call %d failed: %v", i+1, err)
 		}
 	}
@@ -613,7 +613,7 @@ func TestAppendCorrelatedAlert_WritesAuditLogRow(t *testing.T) {
 	alert := alerts.NormalizedAlert{AlertName: "MemLeak", TargetHost: "host-03"}
 	at := time.Now().UTC().Truncate(time.Second)
 
-	if err := svc.AppendCorrelatedAlert(context.Background(), incidentUUID, alert, 0.75, "memory leak match", at); err != nil {
+	if err := svc.AppendCorrelatedAlert(context.Background(), "src-uuid-incoming", incidentUUID, alert, 0.75, "memory leak match", at); err != nil {
 		t.Fatalf("AppendCorrelatedAlert failed: %v", err)
 	}
 
@@ -633,6 +633,9 @@ func TestAppendCorrelatedAlert_WritesAuditLogRow(t *testing.T) {
 	if logRow.Reasoning != "memory leak match" {
 		t.Errorf("Reasoning = %q, want 'memory leak match'", logRow.Reasoning)
 	}
+	if logRow.SourceUUID != "src-uuid-incoming" {
+		t.Errorf("SourceUUID = %q, want src-uuid-incoming", logRow.SourceUUID)
+	}
 }
 
 func TestAppendCorrelatedAlert_AccumulatesMultipleEntries(t *testing.T) {
@@ -643,7 +646,7 @@ func TestAppendCorrelatedAlert_AccumulatesMultipleEntries(t *testing.T) {
 	at := time.Now().UTC()
 	for i, name := range []string{"AlertA", "AlertB", "AlertC"} {
 		a := alerts.NormalizedAlert{AlertName: name, TargetHost: "multi-host"}
-		if err := svc.AppendCorrelatedAlert(context.Background(), incidentUUID, a, 0.8, "reason", at.Add(time.Duration(i)*time.Second)); err != nil {
+		if err := svc.AppendCorrelatedAlert(context.Background(), "src-uuid-111", incidentUUID, a, 0.8, "reason", at.Add(time.Duration(i)*time.Second)); err != nil {
 			t.Fatalf("call %d failed: %v", i+1, err)
 		}
 	}
@@ -671,7 +674,7 @@ func TestAppendCorrelatedAlert_UnknownIncidentReturnsError(t *testing.T) {
 	db := setupIncidentTestDB(t)
 	svc := newIncidentTestService(t, db)
 
-	err := svc.AppendCorrelatedAlert(context.Background(), "nonexistent-uuid", alerts.NormalizedAlert{}, 0.9, "", time.Now())
+	err := svc.AppendCorrelatedAlert(context.Background(), "src-uuid-111", "nonexistent-uuid", alerts.NormalizedAlert{}, 0.9, "", time.Now())
 	if err == nil {
 		t.Fatal("expected error for unknown incident, got nil")
 	}

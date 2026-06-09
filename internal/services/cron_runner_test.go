@@ -252,7 +252,7 @@ func (f *fakeSkillIncidentManager) UpdateIncidentComplete(uuid string, status da
 func (f *fakeSkillIncidentManager) UpdateIncidentLog(string, string) error         { return nil }
 func (f *fakeSkillIncidentManager) GetIncident(string) (*database.Incident, error) { return nil, nil }
 func (f *fakeSkillIncidentManager) AppendSubagentLog(string, string, string) error { return nil }
-func (f *fakeSkillIncidentManager) AppendCorrelatedAlert(context.Context, string, alerts.NormalizedAlert, float64, string, time.Time) error {
+func (f *fakeSkillIncidentManager) AppendCorrelatedAlert(context.Context, string, string, alerts.NormalizedAlert, float64, string, time.Time) error {
 	return nil
 }
 

@@ -53,7 +53,7 @@ func (s *corrGateSkillService) SpawnIncidentManager(*services.IncidentContext) (
 	return uuid, "", nil
 }
 
-func (s *corrGateSkillService) AppendCorrelatedAlert(_ context.Context, incidentUUID string, alert alerts.NormalizedAlert, confidence float64, _ string, _ time.Time) error {
+func (s *corrGateSkillService) AppendCorrelatedAlert(_ context.Context, _ string, incidentUUID string, alert alerts.NormalizedAlert, confidence float64, _ string, _ time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.appendCount++

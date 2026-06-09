@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -92,11 +93,15 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		// Correlation gate: attach to a recent incident when confident.
 		verdict, corrErr := h.correlate(context.Background(), instance.UUID, normalized)
 		if corrErr != nil {
-			slog.Debug("alert correlator error, spawning new incident", "err", corrErr)
+			if errors.Is(corrErr, services.ErrWorkerNotConnected) {
+				slog.Debug("alert correlator worker not connected, spawning new incident")
+			} else {
+				slog.Warn("alert correlator error, spawning new incident", "err", corrErr)
+			}
 		}
 		if verdict.IsConfident(h.correlationThreshold()) {
 			slog.Info("alert correlated to existing incident", "incident_uuid", verdict.IncidentUUID, "confidence", verdict.Confidence)
-			h.recordRecurrence(context.Background(), verdict.IncidentUUID, normalized, verdict)
+			h.recordRecurrence(context.Background(), instance.UUID, verdict.IncidentUUID, normalized, verdict)
 			return verdict.IncidentUUID, nil
 		}
 
@@ -137,7 +142,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		// Follower: the leader decided which incident owns this alert burst;
 		// attach this copy as a recurrence.
 		incidentUUID, _ := v.(string)
-		h.recordRecurrence(context.Background(), incidentUUID, normalized, services.CorrelationVerdict{
+		h.recordRecurrence(context.Background(), instance.UUID, incidentUUID, normalized, services.CorrelationVerdict{
 			Correlated:   true,
 			IncidentUUID: incidentUUID,
 			Confidence:   1.0,
@@ -226,11 +231,15 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 		// Correlation gate: attach to a recent incident when confident.
 		verdict, corrErr := h.correlate(context.Background(), channel.UUID, normalized)
 		if corrErr != nil {
-			slog.Debug("alert correlator error, spawning new incident", "err", corrErr)
+			if errors.Is(corrErr, services.ErrWorkerNotConnected) {
+				slog.Debug("alert correlator worker not connected, spawning new incident")
+			} else {
+				slog.Warn("alert correlator error, spawning new incident", "err", corrErr)
+			}
 		}
 		if verdict.IsConfident(h.correlationThreshold()) {
 			slog.Info("listener channel alert correlated to existing incident", "incident_uuid", verdict.IncidentUUID, "confidence", verdict.Confidence)
-			h.recordRecurrence(context.Background(), verdict.IncidentUUID, normalized, verdict)
+			h.recordRecurrence(context.Background(), channel.UUID, verdict.IncidentUUID, normalized, verdict)
 			return verdict.IncidentUUID, nil
 		}
 
@@ -269,7 +278,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 	if !isLeader {
 		// Follower: attach this alert to the incident the leader decided on.
 		incidentUUID, _ := v.(string)
-		h.recordRecurrence(context.Background(), incidentUUID, normalized, services.CorrelationVerdict{
+		h.recordRecurrence(context.Background(), channel.UUID, incidentUUID, normalized, services.CorrelationVerdict{
 			Correlated:   true,
 			IncidentUUID: incidentUUID,
 			Confidence:   1.0,

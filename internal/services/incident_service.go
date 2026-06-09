@@ -320,7 +320,7 @@ func (s *SkillService) AppendSubagentLog(incidentUUID string, skillName string, 
 //  3. Writes one AlertCorrelationLog audit row
 //
 // All three writes happen inside a single transaction.
-func (s *SkillService) AppendCorrelatedAlert(ctx context.Context, incidentUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string, at time.Time) error {
+func (s *SkillService) AppendCorrelatedAlert(ctx context.Context, sourceUUID string, incidentUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string, at time.Time) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var incident database.Incident
 		if err := tx.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
@@ -357,7 +357,7 @@ func (s *SkillService) AppendCorrelatedAlert(ctx context.Context, incidentUUID s
 		}
 
 		logRow := database.AlertCorrelationLog{
-			SourceUUID:          incident.SourceUUID,
+			SourceUUID:          sourceUUID,
 			AlertName:           alert.AlertName,
 			TargetHost:          alert.TargetHost,
 			MatchedIncidentUUID: incidentUUID,

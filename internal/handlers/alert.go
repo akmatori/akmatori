@@ -146,8 +146,11 @@ func (h *AlertHandler) correlationThreshold() float64 {
 
 // recordRecurrence calls AppendCorrelatedAlert and logs but does not propagate
 // errors — a failed recurrence write must never block alert processing.
-func (h *AlertHandler) recordRecurrence(ctx context.Context, incidentUUID string, alert alerts.NormalizedAlert, verdict services.CorrelationVerdict) {
-	if err := h.skillService.AppendCorrelatedAlert(ctx, incidentUUID, alert, verdict.Confidence, verdict.Reasoning, time.Now()); err != nil {
+func (h *AlertHandler) recordRecurrence(ctx context.Context, sourceUUID string, incidentUUID string, alert alerts.NormalizedAlert, verdict services.CorrelationVerdict) {
+	if h.skillService == nil {
+		return
+	}
+	if err := h.skillService.AppendCorrelatedAlert(ctx, sourceUUID, incidentUUID, alert, verdict.Confidence, verdict.Reasoning, time.Now()); err != nil {
 		slog.Warn("failed to record alert recurrence", "incident_uuid", incidentUUID, "err", err)
 	}
 }
