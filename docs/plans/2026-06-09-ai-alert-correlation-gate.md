@@ -44,11 +44,11 @@ Add an AI-powered one-shot LLM gate that runs before each alert spawns a new inc
 **Files:**
 - Create: `internal/services/alert_correlator.go`
 
-- [ ] Define `CorrelationConfig` struct (Enabled, Window, MaxCandidates, Threshold with documented defaults: 30m, 20, 0.7)
-- [ ] Define `CorrelationVerdict` struct (Correlated bool, IncidentUUID string, Confidence float64, Reasoning string) with `IsConfident(threshold float64) bool` helper
-- [ ] Define `AlertCorrelator` struct with fields: caller OneShotLLMCaller, db *gorm.DB, cfg CorrelationConfig
-- [ ] Implement `NewAlertCorrelator(caller, db, cfg)` constructor
-- [ ] Implement `Correlate(ctx, sourceUUID string, alert alerts.NormalizedAlert) (CorrelationVerdict, error)`:
+- [x] Define `CorrelationConfig` struct (Enabled, Window, MaxCandidates, Threshold with documented defaults: 30m, 20, 0.7)
+- [x] Define `CorrelationVerdict` struct (Correlated bool, IncidentUUID string, Confidence float64, Reasoning string) with `IsConfident(threshold float64) bool` helper
+- [x] Define `AlertCorrelator` struct with fields: caller OneShotLLMCaller, db *gorm.DB, cfg CorrelationConfig
+- [x] Implement `NewAlertCorrelator(caller, db, cfg)` constructor
+- [x] Implement `Correlate(ctx, sourceUUID string, alert alerts.NormalizedAlert) (CorrelationVerdict, error)`:
   - Short-circuit when cfg.Enabled == false or caller == nil → return `{Correlated: false}`
   - Fetch candidates: SELECT uuid,title,status,response,context,started_at FROM incidents WHERE source_kind='alert' AND started_at >= now()-window AND status IN ('pending','running','diagnosed','completed') ORDER BY started_at DESC LIMIT max; return `{Correlated: false}` when zero candidates (no LLM call)
   - Build system prompt (hardcoded constant) and user prompt (numbered candidate list with uuid, status, age, title, 200-char summary snippet from Response or context)
@@ -56,8 +56,8 @@ Add an AI-powered one-shot LLM gate that runs before each alert spawns a new inc
   - Parse via `parseCorrelationVerdict` (strip code fences, unmarshal, clamp confidence to [0..1])
   - Hallucination guard: if IncidentUUID not in fetched candidate set → force `Correlated: false`
   - Return `ErrWorkerNotConnected` as-is; parse failures → `{Correlated: false}` + debug log; all other errors wrapped
-- [ ] Write unit tests covering the full matrix: empty window (no LLM call), confident match ≥0.7, confident match <0.7, not correlated, hallucinated UUID, candidate query excludes failed incidents, worker not connected (ErrWorkerNotConnected), malformed JSON, flag off
-- [ ] Run `make test` — must pass before Task 3
+- [x] Write unit tests covering the full matrix: empty window (no LLM call), confident match ≥0.7, confident match <0.7, not correlated, hallucinated UUID, candidate query excludes failed incidents, worker not connected (ErrWorkerNotConnected), malformed JSON, flag off
+- [x] Run `make test` — must pass before Task 3
 
 ### Task 3: Interface additions and AppendCorrelatedAlert implementation
 
