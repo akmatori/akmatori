@@ -76,6 +76,12 @@ func NewAlertCorrelator(caller OneShotLLMCaller, db *gorm.DB, cfg CorrelationCon
 	}
 }
 
+// Threshold returns the minimum confidence required to consider a verdict
+// a confident match.
+func (c *AlertCorrelator) Threshold() float64 {
+	return c.cfg.Threshold
+}
+
 // candidateRow is a minimal projection of the Incident table used for
 // candidate ranking so we don't load full_log into memory.
 type candidateRow struct {

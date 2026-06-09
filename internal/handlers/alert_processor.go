@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -24,6 +26,14 @@ import (
 // runbook-searcher subagent, so a generous cap leaves room for distinctive
 // phrasing on retries without re-fetching the source message.
 const originalAlertTextMaxBytes = 1500
+
+// alertSpawnKey returns a stable singleflight key for deduplicating concurrent
+// alerts with the same origin tuple. SHA-256 is used to produce a fixed-length
+// key that can contain any character without escaping issues.
+func alertSpawnKey(sourceUUID, alertName, targetHost string) string {
+	h := sha256.Sum256([]byte(sourceUUID + "|" + alertName + "|" + targetHost))
+	return hex.EncodeToString(h[:])
+}
 
 func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, normalized alerts.NormalizedAlert) {
 	if normalized.Status == database.AlertStatusResolved {
@@ -73,30 +83,72 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		Message: fmt.Sprintf("%s - %s: %s", normalized.AlertName, normalized.TargetHost, normalized.Summary),
 	}
 
-	// Spawn incident manager
-	incidentUUID, _, err := h.skillService.SpawnIncidentManager(incidentCtx)
-	if err != nil {
-		slog.Error("failed to spawn incident manager", "err", err)
+	key := alertSpawnKey(instance.UUID, normalized.AlertName, normalized.TargetHost)
+	isLeader := false
+
+	v, sfErr, _ := h.spawnGroup.Do(key, func() (interface{}, error) {
+		isLeader = true
+
+		// Correlation gate: attach to a recent incident when confident.
+		verdict, corrErr := h.correlate(context.Background(), instance.UUID, normalized)
+		if corrErr != nil {
+			slog.Debug("alert correlator error, spawning new incident", "err", corrErr)
+		}
+		threshold := float64(0.7)
+		if h.alertCorrelator != nil {
+			threshold = h.alertCorrelator.Threshold()
+		}
+		if verdict.IsConfident(threshold) {
+			slog.Info("alert correlated to existing incident", "incident_uuid", verdict.IncidentUUID, "confidence", verdict.Confidence)
+			h.recordRecurrence(context.Background(), verdict.IncidentUUID, normalized, verdict)
+			return verdict.IncidentUUID, nil
+		}
+
+		// Spawn incident manager
+		incidentUUID, _, err := h.skillService.SpawnIncidentManager(incidentCtx)
+		if err != nil {
+			slog.Error("failed to spawn incident manager", "err", err)
+			return "", err
+		}
+
+		slog.Info("created incident for alert", "incident_id", incidentUUID)
+
+		// Post to Slack
+		var channelID, threadTS string
+		if h.isSlackEnabled() {
+			var err error
+			channelID, threadTS, err = h.postAlertToSlack(normalized, instance)
+			if err != nil {
+				slog.Warn("failed to post alert to Slack", "err", err)
+			}
+		}
+
+		// Update incident status and run investigation
+		if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
+			slog.Warn("failed to update incident status", "err", err)
+		}
+		go h.runInvestigation(incidentUUID, normalized, instance, channelID, threadTS)
+
+		return incidentUUID, nil
+	})
+
+	if sfErr != nil {
+		slog.Error("failed to process alert", "err", sfErr)
 		return
 	}
 
-	slog.Info("created incident for alert", "incident_id", incidentUUID)
-
-	// Post to Slack
-	var channelID, threadTS string
-	if h.isSlackEnabled() {
-		var err error
-		channelID, threadTS, err = h.postAlertToSlack(normalized, instance)
-		if err != nil {
-			slog.Warn("failed to post alert to Slack", "err", err)
+	if !isLeader {
+		// Follower: the leader decided which incident owns this alert burst;
+		// attach this copy as a recurrence.
+		incidentUUID, _ := v.(string)
+		followerVerdict := services.CorrelationVerdict{
+			Correlated:   true,
+			IncidentUUID: incidentUUID,
+			Confidence:   1.0,
+			Reasoning:    "collapsed via concurrent dedup",
 		}
+		h.recordRecurrence(context.Background(), incidentUUID, normalized, followerVerdict)
 	}
-
-	// Update incident status and run investigation
-	if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
-		slog.Warn("failed to update incident status", "err", err)
-	}
-	go h.runInvestigation(incidentUUID, normalized, instance, channelID, threadTS)
 }
 
 // ProcessAlertFromListenerChannel processes an alert that originated from a
@@ -170,29 +222,70 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 		Message: fmt.Sprintf("%s - %s: %s", normalized.AlertName, normalized.TargetHost, normalized.Summary),
 	}
 
-	// Spawn incident manager
-	incidentUUID, _, err := h.skillService.SpawnIncidentManager(incidentCtx)
-	if err != nil {
-		slog.Error("failed to spawn incident manager for listener channel alert", "err", err)
-		h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
-		h.postSlackThreadReply(slackChannelID, slackMessageTS,
-			fmt.Sprintf("Failed to create incident: %v", err))
+	key := alertSpawnKey(channel.UUID, normalized.AlertName, normalized.TargetHost)
+	isLeader := false
+
+	v, sfErr, _ := h.spawnGroup.Do(key, func() (interface{}, error) {
+		isLeader = true
+
+		// Correlation gate: attach to a recent incident when confident.
+		verdict, corrErr := h.correlate(context.Background(), channel.UUID, normalized)
+		if corrErr != nil {
+			slog.Debug("alert correlator error, spawning new incident", "err", corrErr)
+		}
+		threshold := float64(0.7)
+		if h.alertCorrelator != nil {
+			threshold = h.alertCorrelator.Threshold()
+		}
+		if verdict.IsConfident(threshold) {
+			slog.Info("listener channel alert correlated to existing incident", "incident_uuid", verdict.IncidentUUID, "confidence", verdict.Confidence)
+			h.recordRecurrence(context.Background(), verdict.IncidentUUID, normalized, verdict)
+			return verdict.IncidentUUID, nil
+		}
+
+		// Spawn incident manager
+		incidentUUID, _, err := h.skillService.SpawnIncidentManager(incidentCtx)
+		if err != nil {
+			slog.Error("failed to spawn incident manager for listener channel alert", "err", err)
+			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
+			h.postSlackThreadReply(slackChannelID, slackMessageTS,
+				fmt.Sprintf("Failed to create incident: %v", err))
+			return "", err
+		}
+
+		slog.Info("created incident for listener channel alert", "incident_id", incidentUUID)
+
+		// Update incident with Slack context for thread replies
+		if err := h.updateIncidentSlackContext(incidentUUID, slackChannelID, slackMessageTS); err != nil {
+			slog.Warn("failed to update incident Slack context", "err", err)
+		}
+
+		// Update incident status and run investigation
+		if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
+			slog.Warn("failed to update incident status", "err", err)
+		}
+
+		go h.runListenerChannelInvestigation(incidentUUID, normalized, channel, slackChannelID, slackMessageTS)
+
+		return incidentUUID, nil
+	})
+
+	if sfErr != nil {
+		slog.Error("failed to process listener channel alert", "err", sfErr)
 		return
 	}
 
-	slog.Info("created incident for listener channel alert", "incident_id", incidentUUID)
-
-	// Update incident with Slack context for thread replies
-	if err := h.updateIncidentSlackContext(incidentUUID, slackChannelID, slackMessageTS); err != nil {
-		slog.Warn("failed to update incident Slack context", "err", err)
+	if !isLeader {
+		// Follower: attach this alert to the incident the leader decided on.
+		incidentUUID, _ := v.(string)
+		followerVerdict := services.CorrelationVerdict{
+			Correlated:   true,
+			IncidentUUID: incidentUUID,
+			Confidence:   1.0,
+			Reasoning:    "collapsed via concurrent dedup",
+		}
+		h.recordRecurrence(context.Background(), incidentUUID, normalized, followerVerdict)
 	}
-
-	// Update incident status and run investigation
-	if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
-		slog.Warn("failed to update incident status", "err", err)
-	}
-
-	go h.runListenerChannelInvestigation(incidentUUID, normalized, channel, slackChannelID, slackMessageTS)
 }
 
 // extractOriginalMessage returns the verbatim original alert message stored in

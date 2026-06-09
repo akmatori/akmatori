@@ -77,15 +77,15 @@ Add an AI-powered one-shot LLM gate that runs before each alert spawns a new inc
 - Modify: `internal/handlers/alert.go`
 - Modify: `internal/handlers/alert_processor.go`
 
-- [ ] Add `alertCorrelator *services.AlertCorrelator` field and `spawnGroup singleflight.Group` field to `AlertHandler` struct in `alert.go`
-- [ ] Add `SetAlertCorrelator(c *services.AlertCorrelator)` setter (nil-safe)
-- [ ] Add private `correlate(ctx, sourceUUID string, alert alerts.NormalizedAlert) (services.CorrelationVerdict, error)` helper that delegates to `h.alertCorrelator` when non-nil, else returns `{Correlated: false}`
-- [ ] Add private `recordRecurrence(ctx, incidentUUID string, alert alerts.NormalizedAlert, verdict services.CorrelationVerdict)` helper that calls `h.skillService.AppendCorrelatedAlert`; logs on error but does not propagate
-- [ ] In `alert_processor.go`, wrap the evaluate-and-spawn block in both `processAlert` and `ProcessAlertFromListenerChannel` with `h.spawnGroup.Do(key, ...)` where `key = sha256hex(sourceUUID + "|" + alert.AlertName + "|" + alert.TargetHost)`
-- [ ] Inside the singleflight func, add the correlate-before-spawn gate: call `h.correlate`; if `verdict.IsConfident(threshold)`, call `h.recordRecurrence` and return (no spawn); otherwise fall through to the existing `SpawnIncidentManager` + `runInvestigation` path
-- [ ] Singleflight followers (non-leaders): extract the returned incidentUUID from the leader result and call `h.recordRecurrence` on the same incident
-- [ ] Write handler tests: 15 concurrent same-key alerts → 1 spawn + 14 recurrences; confident verdict → no spawn + AppendCorrelatedAlert called; below-threshold verdict → spawn; worker disconnected → spawn (fail-open)
-- [ ] Run `make test` — must pass before Task 5
+- [x] Add `alertCorrelator *services.AlertCorrelator` field and `spawnGroup singleflight.Group` field to `AlertHandler` struct in `alert.go`
+- [x] Add `SetAlertCorrelator(c *services.AlertCorrelator)` setter (nil-safe)
+- [x] Add private `correlate(ctx, sourceUUID string, alert alerts.NormalizedAlert) (services.CorrelationVerdict, error)` helper that delegates to `h.alertCorrelator` when non-nil, else returns `{Correlated: false}`
+- [x] Add private `recordRecurrence(ctx, incidentUUID string, alert alerts.NormalizedAlert, verdict services.CorrelationVerdict)` helper that calls `h.skillService.AppendCorrelatedAlert`; logs on error but does not propagate
+- [x] In `alert_processor.go`, wrap the evaluate-and-spawn block in both `processAlert` and `ProcessAlertFromListenerChannel` with `h.spawnGroup.Do(key, ...)` where `key = sha256hex(sourceUUID + "|" + alert.AlertName + "|" + alert.TargetHost)`
+- [x] Inside the singleflight func, add the correlate-before-spawn gate: call `h.correlate`; if `verdict.IsConfident(threshold)`, call `h.recordRecurrence` and return (no spawn); otherwise fall through to the existing `SpawnIncidentManager` + `runInvestigation` path
+- [x] Singleflight followers (non-leaders): extract the returned incidentUUID from the leader result and call `h.recordRecurrence` on the same incident
+- [x] Write handler tests: 15 concurrent same-key alerts → 1 spawn + 14 recurrences; confident verdict → no spawn + AppendCorrelatedAlert called; below-threshold verdict → spawn; worker disconnected → spawn (fail-open)
+- [x] Run `make test` — must pass before Task 5
 
 ### Task 5: main.go construction and injection
 

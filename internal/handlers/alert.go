@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/services"
 	slackutil "github.com/akmatori/akmatori/internal/slack"
+	"golang.org/x/sync/singleflight"
 )
 
 // slackAppendInterval is the minimum time between chat.update calls on the
@@ -46,6 +48,11 @@ type AlertHandler struct {
 	responseFormatter *services.ResponseFormatter
 	channelService    services.ChannelManager
 	providerRegistry  services.ProviderRegistry
+	alertCorrelator   *services.AlertCorrelator
+
+	// spawnGroup deduplicates concurrent alerts with the same
+	// (sourceUUID, alertName, targetHost) key so only one incident is created.
+	spawnGroup singleflight.Group
 
 	// Workspace team ID (required for Streaming API)
 	teamID string
@@ -110,6 +117,30 @@ func (h *AlertHandler) SetChannelService(c services.ChannelManager) {
 // channel's provider), the handler falls back to the existing slack client.
 func (h *AlertHandler) SetProviderRegistry(r services.ProviderRegistry) {
 	h.providerRegistry = r
+}
+
+// SetAlertCorrelator wires the AlertCorrelator used to decide whether an
+// incoming alert should be attached to a recent incident instead of spawning
+// a new investigation. Optional — when nil the handler spawns unconditionally.
+func (h *AlertHandler) SetAlertCorrelator(c *services.AlertCorrelator) {
+	h.alertCorrelator = c
+}
+
+// correlate delegates to the wired AlertCorrelator when present; otherwise
+// returns a no-match verdict (fail-open).
+func (h *AlertHandler) correlate(ctx context.Context, sourceUUID string, alert alerts.NormalizedAlert) (services.CorrelationVerdict, error) {
+	if h.alertCorrelator == nil {
+		return services.CorrelationVerdict{}, nil
+	}
+	return h.alertCorrelator.Correlate(ctx, sourceUUID, alert)
+}
+
+// recordRecurrence calls AppendCorrelatedAlert and logs but does not propagate
+// errors — a failed recurrence write must never block alert processing.
+func (h *AlertHandler) recordRecurrence(ctx context.Context, incidentUUID string, alert alerts.NormalizedAlert, verdict services.CorrelationVerdict) {
+	if err := h.skillService.AppendCorrelatedAlert(ctx, incidentUUID, alert, verdict.Confidence, verdict.Reasoning, time.Now()); err != nil {
+		slog.Warn("failed to record alert recurrence", "incident_uuid", incidentUUID, "err", err)
+	}
 }
 
 // RegisterAdapter registers an alert adapter for a source type
