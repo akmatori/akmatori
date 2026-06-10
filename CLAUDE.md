@@ -147,7 +147,7 @@ Before spawning a new incident, `AlertHandler` runs `AlertCorrelator.Correlate` 
 Rules:
 - gate is flag-gated (`AlertCorrelationEnabled` in `GeneralSettings`, default false); when disabled, no LLM call is made and all alerts spawn normally (fail-open)
 - `AlertCorrelator` is constructed in `main.go` from `GeneralSettings` (window 30m, threshold 0.7, maxCandidates 20 as defaults); wired via `alertHandler.SetAlertCorrelator(c)`
-- both `processAlert` and `ProcessAlertFromListenerChannel` wrap the evaluate-and-spawn block in `h.spawnGroup.Do(key, ...)` where `key = sha256hex(sourceUUID + "|" + alertName + "|" + targetHost)`; singleflight followers skip the LLM call and call `recordRecurrence` using the `isLeader` flag pattern (not the `shared` bool, which is true for the leader when followers exist)
+- both `processAlert` and `ProcessAlertFromListenerChannel` wrap the evaluate-and-spawn block in `h.spawnGroup.Do(key, ...)` where `key = sha256hex(json([sourceUUID, alertName, targetHost, fingerprint]))`; singleflight followers skip the LLM call and call `recordRecurrence` using the `isLeader` flag pattern (not the `shared` bool, which is true for the leader when followers exist)
 - `AppendCorrelatedAlert` in `SkillService` atomically: appends an entry to `incident.Context["correlated_alerts"]`, increments `correlated_count`, and writes an `AlertCorrelationLog` audit row — all inside a single transaction
 - `ErrWorkerNotConnected` from the correlator is treated as no-match → alert spawns normally (fail-open)
 - candidate query filters: `source_kind='alert'`, `started_at >= now()-window`, `status IN (pending,running,diagnosed,completed)` — failed incidents are never correlation targets

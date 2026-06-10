@@ -42,8 +42,8 @@ func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Reques
 			settings.AlertCorrelationEnabled = req.AlertCorrelationEnabled
 		}
 		if req.AlertCorrelationWindowMinutes != nil {
-			if *req.AlertCorrelationWindowMinutes < 1 {
-				api.RespondError(w, http.StatusBadRequest, "alert_correlation_window_minutes must be >= 1")
+			if *req.AlertCorrelationWindowMinutes < 1 || *req.AlertCorrelationWindowMinutes > 1440 {
+				api.RespondError(w, http.StatusBadRequest, "alert_correlation_window_minutes must be between 1 and 1440")
 				return
 			}
 			settings.AlertCorrelationWindowMinutes = req.AlertCorrelationWindowMinutes
@@ -56,8 +56,8 @@ func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Reques
 			settings.AlertCorrelationThreshold = req.AlertCorrelationThreshold
 		}
 		if req.AlertCorrelationMaxCandidates != nil {
-			if *req.AlertCorrelationMaxCandidates < 1 {
-				api.RespondError(w, http.StatusBadRequest, "alert_correlation_max_candidates must be >= 1")
+			if *req.AlertCorrelationMaxCandidates < 1 || *req.AlertCorrelationMaxCandidates > 100 {
+				api.RespondError(w, http.StatusBadRequest, "alert_correlation_max_candidates must be between 1 and 100")
 				return
 			}
 			settings.AlertCorrelationMaxCandidates = req.AlertCorrelationMaxCandidates

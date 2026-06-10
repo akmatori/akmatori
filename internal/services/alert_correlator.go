@@ -121,11 +121,11 @@ func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, aler
 		return noMatch, fmt.Errorf("correlate: load llm settings: %w", err)
 	}
 	if settings == nil || settings.APIKey == "" {
-		return noMatch, ErrWorkerNotConnected
+		return noMatch, fmt.Errorf("correlate: LLM settings not configured")
 	}
 	worker := BuildLLMSettingsForWorker(settings)
 	if worker == nil {
-		return noMatch, ErrWorkerNotConnected
+		return noMatch, fmt.Errorf("correlate: could not build LLM worker settings")
 	}
 
 	userPrompt := buildCorrelationUserPrompt(alert, candidates)
