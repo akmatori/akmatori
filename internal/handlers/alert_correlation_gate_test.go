@@ -121,7 +121,6 @@ func (s *corrGateSkillService) DeleteSkillScript(string, string) error         {
 
 // corrOneShotLLMCaller is a configurable stub for services.OneShotLLMCaller.
 type corrOneShotLLMCaller struct {
-	mu      sync.Mutex
 	calls   int32
 	respond func(ctx context.Context) (string, error)
 }

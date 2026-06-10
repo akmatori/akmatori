@@ -244,6 +244,9 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 		if verdict.IsConfident(h.correlationThreshold()) {
 			slog.Info("listener channel alert correlated to existing incident", "incident_uuid", verdict.IncidentUUID, "confidence", verdict.Confidence)
 			h.recordRecurrence(context.Background(), channel.UUID, verdict.IncidentUUID, normalized, verdict)
+			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, false)
+			h.postSlackThreadReply(slackChannelID, slackMessageTS,
+				fmt.Sprintf("Alert merged into existing incident (ID: %s)", verdict.IncidentUUID))
 			return verdict.IncidentUUID, nil
 		}
 
