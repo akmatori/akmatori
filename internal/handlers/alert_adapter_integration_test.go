@@ -292,7 +292,7 @@ func setupWebhookHandlerIntegrationDB(t *testing.T) (*services.AlertService, fun
 	if err != nil {
 		t.Fatalf("open sqlite db: %v", err)
 	}
-	if err := db.AutoMigrate(&database.AlertSourceType{}, &database.AlertSourceInstance{}); err != nil {
+	if err := db.AutoMigrate(&database.AlertSourceType{}, &database.AlertSourceInstance{}, &database.SlackSettings{}); err != nil {
 		t.Fatalf("migrate alert source tables: %v", err)
 	}
 	database.DB = db
@@ -370,6 +370,99 @@ func TestWebhookHandler_AlertmanagerEndpointUsesRealServiceAndAdapter(t *testing
 			}
 		})
 	}
+}
+
+func TestWebhookHandler_DatadogEndpointCreatesIncidentContext(t *testing.T) {
+	service, cleanup := setupWebhookHandlerIntegrationDB(t)
+	defer cleanup()
+
+	instance, err := service.CreateInstance(
+		"datadog",
+		"Production Datadog",
+		"Datadog monitor webhooks",
+		"dd-api-key",
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("create datadog instance: %v", err)
+	}
+
+	skills := newRecordingSkillIncidentManager()
+	h := NewAlertHandler(nil, nil, nil, nil, skills, service, nil)
+	h.RegisterAdapter(adapters.NewDatadogAdapter())
+
+	body := `{
+		"id": "event-123",
+		"alert_id": "monitor-456",
+		"alert_title": "API latency high",
+		"body": "p95 latency crossed 900ms",
+		"alert_type": "error",
+		"alert_status": "Triggered",
+		"hostname": "api-01",
+		"alert_metric": "trace.http.request.duration",
+		"alert_cycle_key": "cycle-789",
+		"tags": ["service:checkout", "env:prod", "team:sre"],
+		"event_links": [
+			{"name": "Runbook", "url": "https://runbooks.example.com/checkout-latency"}
+		]
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/webhook/alert/"+instance.UUID, strings.NewReader(body))
+	req.Header.Set("DD-API-KEY", "dd-api-key")
+	w := httptest.NewRecorder()
+
+	h.HandleWebhook(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%q", w.Code, http.StatusOK, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "Received 1 alerts") {
+		t.Fatalf("body = %q, want received-alert count", w.Body.String())
+	}
+
+	ctx := skills.waitForSpawn(t)
+	if ctx.Source != "datadog" {
+		t.Fatalf("incident source = %q, want datadog", ctx.Source)
+	}
+	if ctx.SourceID != "cycle-789" {
+		t.Fatalf("incident source id = %q, want cycle-789", ctx.SourceID)
+	}
+	if ctx.SourceUUID != instance.UUID {
+		t.Fatalf("incident source uuid = %q, want %q", ctx.SourceUUID, instance.UUID)
+	}
+	if ctx.SourceKind != database.IncidentSourceKindAlert {
+		t.Fatalf("incident source kind = %q, want %q", ctx.SourceKind, database.IncidentSourceKindAlert)
+	}
+
+	assertJSONBString(t, ctx.Context, "alert_name", "API latency high")
+	assertJSONBString(t, ctx.Context, "severity", string(database.AlertSeverityCritical))
+	assertJSONBString(t, ctx.Context, "status", string(database.AlertStatusFiring))
+	assertJSONBString(t, ctx.Context, "summary", "p95 latency crossed 900ms")
+	assertJSONBString(t, ctx.Context, "target_host", "api-01")
+	assertJSONBString(t, ctx.Context, "target_service", "checkout")
+	assertJSONBString(t, ctx.Context, "metric_name", "trace.http.request.duration")
+	assertJSONBString(t, ctx.Context, "runbook_url", "https://runbooks.example.com/checkout-latency")
+	assertJSONBString(t, ctx.Context, "source_alert_id", "monitor-456")
+	assertJSONBString(t, ctx.Context, "source_fingerprint", "cycle-789")
+	assertJSONBString(t, ctx.Context, "source_instance", "Production Datadog")
+
+	targetLabels, ok := ctx.Context["target_labels"].(database.JSONB)
+	if !ok {
+		t.Fatalf("target_labels type = %T, want database.JSONB", ctx.Context["target_labels"])
+	}
+	assertJSONBString(t, targetLabels, "service", "checkout")
+	assertJSONBString(t, targetLabels, "env", "prod")
+	assertJSONBString(t, targetLabels, "team", "sre")
+
+	rawPayload, ok := ctx.Context["raw_payload"].(database.JSONB)
+	if !ok {
+		t.Fatalf("raw_payload type = %T, want database.JSONB", ctx.Context["raw_payload"])
+	}
+	assertJSONBString(t, rawPayload, "alert_cycle_key", "cycle-789")
+	assertJSONBString(t, rawPayload, "hostname", "api-01")
+	assertJSONBString(t, rawPayload, "alert_metric", "trace.http.request.duration")
+
+	skills.waitForCompletion(t)
 }
 
 // TestAlertHandler_AdapterRegistration tests dynamic adapter registration
@@ -636,6 +729,136 @@ func BenchmarkAlertHandler_ConcurrentRequests(b *testing.B) {
 			h.HandleWebhook(w, req)
 		}
 	})
+}
+
+type recordingSkillIncidentManager struct {
+	spawned   chan services.IncidentContext
+	completed chan struct{}
+}
+
+func newRecordingSkillIncidentManager() *recordingSkillIncidentManager {
+	return &recordingSkillIncidentManager{
+		spawned:   make(chan services.IncidentContext, 1),
+		completed: make(chan struct{}, 1),
+	}
+}
+
+func (r *recordingSkillIncidentManager) waitForSpawn(t *testing.T) services.IncidentContext {
+	t.Helper()
+	select {
+	case ctx := <-r.spawned:
+		return ctx
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for incident spawn")
+		return services.IncidentContext{}
+	}
+}
+
+func (r *recordingSkillIncidentManager) waitForCompletion(t *testing.T) {
+	t.Helper()
+	select {
+	case <-r.completed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for background investigation completion")
+	}
+}
+
+func (r *recordingSkillIncidentManager) SpawnIncidentManager(ctx *services.IncidentContext) (string, string, error) {
+	if ctx != nil {
+		r.spawned <- *ctx
+	}
+	return "incident-datadog-1", "/tmp/akmatori-test-incident", nil
+}
+
+func (r *recordingSkillIncidentManager) SpawnAgentInvocation(string, *services.IncidentContext) (string, string, error) {
+	panic("SpawnAgentInvocation must not be called by alert webhooks")
+}
+
+func (r *recordingSkillIncidentManager) UpdateIncidentStatus(string, database.IncidentStatus, string, string) error {
+	return nil
+}
+
+func (r *recordingSkillIncidentManager) UpdateIncidentComplete(string, database.IncidentStatus, string, string, string, int, int64) error {
+	r.completed <- struct{}{}
+	return nil
+}
+
+func (r *recordingSkillIncidentManager) UpdateIncidentLog(string, string) error { return nil }
+func (r *recordingSkillIncidentManager) GetIncident(string) (*database.Incident, error) {
+	return nil, nil
+}
+func (r *recordingSkillIncidentManager) AppendSubagentLog(string, string, string) error {
+	return nil
+}
+
+func (r *recordingSkillIncidentManager) CreateSkill(string, string, string, string) (*database.Skill, error) {
+	panic("CreateSkill must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) UpdateSkill(string, string, string, bool) (*database.Skill, error) {
+	panic("UpdateSkill must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) DeleteSkill(string) error {
+	panic("DeleteSkill must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) ListSkills() ([]database.Skill, error) {
+	panic("ListSkills must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) ListEnabledSkills() ([]database.Skill, error) {
+	panic("ListEnabledSkills must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) GetEnabledSkillNames() []string { return nil }
+func (r *recordingSkillIncidentManager) GetToolAllowlist() []services.ToolAllowlistEntry {
+	return nil
+}
+func (r *recordingSkillIncidentManager) GetSkill(string) (*database.Skill, error) {
+	panic("GetSkill must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) AssignTools(string, []uint) error {
+	panic("AssignTools must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) GetSkillDir(string) string {
+	panic("GetSkillDir must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) GetSkillScriptsDir(string) string {
+	panic("GetSkillScriptsDir must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) GetSkillPrompt(string) (string, error) {
+	panic("GetSkillPrompt must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) UpdateSkillPrompt(string, string) error {
+	panic("UpdateSkillPrompt must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) RegenerateSkillMd(string) error {
+	panic("RegenerateSkillMd must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) SyncSkillsFromFilesystem() error {
+	panic("SyncSkillsFromFilesystem must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) ListSkillScripts(string) ([]string, error) {
+	panic("ListSkillScripts must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) ClearSkillScripts(string) error {
+	panic("ClearSkillScripts must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) GetSkillScript(string, string) (*services.ScriptInfo, error) {
+	panic("GetSkillScript must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) UpdateSkillScript(string, string, string) error {
+	panic("UpdateSkillScript must not be called by alert webhooks")
+}
+func (r *recordingSkillIncidentManager) DeleteSkillScript(string, string) error {
+	panic("DeleteSkillScript must not be called by alert webhooks")
+}
+
+func assertJSONBString(t *testing.T, values database.JSONB, key, want string) {
+	t.Helper()
+	got, ok := values[key].(string)
+	if !ok {
+		t.Fatalf("%s type = %T, want string", key, values[key])
+	}
+	if got != want {
+		t.Fatalf("%s = %q, want %q", key, got, want)
+	}
 }
 
 // ========================================
