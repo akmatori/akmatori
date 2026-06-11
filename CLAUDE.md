@@ -221,6 +221,8 @@ Rules:
 
 ### Frontend
 
+- `web/src/api/client.ts` - API wrapper, auth headers, shared API availability state
+- `web/src/components/ApiStatusBanner.tsx` - global API-unavailable banner driven by client availability events
 - `web/src/components/settings/FormattingSettingsSection.tsx` - response formatter settings form and validation
 - `web/src/components/settings/formattingSettingsHelpers.ts` - formatter default hydrate/dehydrate helpers; keep constants aligned with Go defaults
 
@@ -251,6 +253,10 @@ Do not call Slack APIs directly from handlers or services. Resolve a `Channel`, 
 ### Preserve graceful degradation
 
 Akmatori intentionally keeps working when optional AI pieces fail. When adding AI-dependent behavior, define the fallback path at the same time.
+
+### Keep frontend API availability centralized
+
+Do not create page-local API-down banners or duplicate reachability checks. `fetchApi` marks the API unavailable only for network failures and 502/503/504 gateway responses, and marks it available again after any answered request, including 4xx. UI surfaces should subscribe through `subscribeApiAvailability`; auth/setup flows may translate unavailable errors into clearer copy.
 
 ## SDK Notes (`@earendil-works/pi-coding-agent`)
 
@@ -314,6 +320,7 @@ Keep this file aligned with these current realities:
 - response formatting is live (`/api/settings/formatting`); operators paste an example JSON object into `OutputSchemaExample` to control the output shape; schema inference derives field types and order; the formatter validates with one retry then renders via `output.RenderForSlack`; empty `OutputSchemaExample` falls back to the built-in four-key default (`status`/`summary`/`actions_taken`/`recommendations`) so existing installs are unaffected
 - the formatting settings UI now shows editable default prompt/schema text even when the stored values are empty; saving unchanged defaults must continue to send empty strings so upgrades keep using backend defaults
 - one-shot LLM calls share the worker transport and current provider settings
+- the frontend has a global API-unavailable banner; `web/src/api/client.ts` owns availability state and `ApiStatusBanner` is mounted once in `App.tsx`
 - Slack loading banners use real reasoning lines instead of generic placeholder text
 - messaging is now Integrations + Channels; outbound posting routes through `ProviderRegistry`; the legacy `SlackSettings.AlertsChannel` fallback is gone and `/api/settings/slack` returns 410 Gone
 - cron jobs (`/api/cron-jobs`) always run as full agent investigations under the `cron-agent` system skill with a per-cron tool allowlist; system crons (e.g. seeded `memory-curator`) cannot be deleted; `CronRunner` boots from `cmd/akmatori/main.go`
