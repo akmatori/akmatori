@@ -64,6 +64,13 @@ func (b *WebhookRequestBuilder) WithBody(body []byte) *WebhookRequestBuilder {
 	return b
 }
 
+// WithFixtureBody loads a fixture from tests/fixtures and uses it as the request body.
+func (b *WebhookRequestBuilder) WithFixtureBody(path string) *WebhookRequestBuilder {
+	b.t.Helper()
+	b.body = LoadFixture(b.t, path)
+	return b
+}
+
 // WithJSONBody marshals and sets the request body as JSON
 func (b *WebhookRequestBuilder) WithJSONBody(v interface{}) *WebhookRequestBuilder {
 	body, err := json.Marshal(v)

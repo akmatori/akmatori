@@ -41,6 +41,7 @@ ctx.AssertJSONError(http.StatusConflict, "name already exists", "duplicate_name"
 ```go
 data := LoadFixture(t, "alerts/alertmanager_firing.json")
 LoadJSONFixture(t, "alerts/alertmanager_firing.json", &payload)
+req := NewWebhookRequest(t).WithFixtureBody("alerts/alertmanager_firing.json").Build()
 ```
 
 **SQLite test DBs**

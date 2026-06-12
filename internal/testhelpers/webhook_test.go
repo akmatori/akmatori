@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -36,6 +37,31 @@ func TestWebhookRequestBuilder_WithJSONBody(t *testing.T) {
 	contentType := req.Header.Get("Content-Type")
 	if contentType != "application/json" {
 		t.Errorf("expected Content-Type 'application/json', got %s", contentType)
+	}
+}
+
+func TestWebhookRequestBuilder_WithFixtureBody(t *testing.T) {
+	req := NewWebhookRequest(t).
+		WithInstanceUUID("fixture-alert").
+		WithFixtureBody("alerts/alertmanager_firing.json").
+		WithContentType("application/json").
+		Build()
+
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("failed to read request body: %v", err)
+	}
+
+	if req.Header.Get("Content-Type") != "application/json" {
+		t.Fatalf("expected Content-Type 'application/json', got %q", req.Header.Get("Content-Type"))
+	}
+
+	var payload AlertmanagerPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("fixture body should be valid Alertmanager JSON: %v", err)
+	}
+	if payload.Version != "4" {
+		t.Fatalf("expected Alertmanager fixture version 4, got %q", payload.Version)
 	}
 }
 
@@ -268,6 +294,39 @@ func TestWebhookRequestBuilder_CompleteFlow(t *testing.T) {
 	// Recorder is ready for use
 	if rec == nil {
 		t.Error("recorder should not be nil")
+	}
+}
+
+func TestWebhookRequestBuilder_FixtureFlowWithSignature(t *testing.T) {
+	secret := "webhook-secret"
+	timestamp := time.Unix(1705315800, 0)
+
+	req, rec := NewWebhookRequest(t).
+		WithInstanceUUID("prod-alertmanager").
+		WithFixtureBody("alerts/alertmanager_firing.json").
+		WithContentType("application/json").
+		WithTimestamp(timestamp).
+		WithSlackSignature(secret).
+		BuildWithRecorder()
+
+	if rec == nil {
+		t.Fatal("recorder should not be nil")
+	}
+	if req.URL.Path != "/webhook/alert/prod-alertmanager" {
+		t.Fatalf("unexpected path: %s", req.URL.Path)
+	}
+
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("failed to read request body: %v", err)
+	}
+
+	baseString := "v0:" + req.Header.Get("X-Slack-Request-Timestamp") + ":" + string(body)
+	h := hmac.New(sha256.New, []byte(secret))
+	h.Write([]byte(baseString))
+	expectedSig := "v0=" + hex.EncodeToString(h.Sum(nil))
+	if req.Header.Get("X-Slack-Signature") != expectedSig {
+		t.Fatalf("signature mismatch\nexpected: %s\ngot: %s", expectedSig, req.Header.Get("X-Slack-Signature"))
 	}
 }
 
