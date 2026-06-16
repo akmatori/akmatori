@@ -328,6 +328,7 @@ func (s *SkillService) RecordSuppressedIncident(incidentCtx *IncidentContext, si
 
 	alertName, _ := incidentCtx.Context["alert_name"].(string)
 	targetHost, _ := incidentCtx.Context["target_host"].(string)
+	alertFingerprint, _ := incidentCtx.Context["alert_fingerprint"].(string)
 
 	title := "Suppressed"
 	if alertName != "" {
@@ -340,19 +341,20 @@ func (s *SkillService) RecordSuppressedIncident(incidentCtx *IncidentContext, si
 	)
 
 	incident := &database.Incident{
-		UUID:            incidentUUID,
-		Source:          incidentCtx.Source,
-		SourceID:        incidentCtx.SourceID,
-		SourceKind:      incidentCtx.SourceKind,
-		SourceUUID:      incidentCtx.SourceUUID,
-		Title:           title,
-		Status:          database.IncidentStatusCompleted,
-		Context:         incidentCtx.Context,
-		Response:        response,
-		TokensUsed:      0,
-		ExecutionTimeMs: 0,
-		StartedAt:       now,
-		CompletedAt:     &now,
+		UUID:             incidentUUID,
+		Source:           incidentCtx.Source,
+		SourceID:         incidentCtx.SourceID,
+		SourceKind:       incidentCtx.SourceKind,
+		SourceUUID:       incidentCtx.SourceUUID,
+		Title:            title,
+		Status:           database.IncidentStatusCompleted,
+		Context:          incidentCtx.Context,
+		Response:         response,
+		TokensUsed:       0,
+		ExecutionTimeMs:  0,
+		StartedAt:        now,
+		CompletedAt:      &now,
+		AlertFingerprint: alertFingerprint,
 	}
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {

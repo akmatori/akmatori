@@ -146,14 +146,27 @@ Before spawning a new incident, `AlertHandler` runs `AlertCorrelator.Correlate` 
 
 Rules:
 - gate is flag-gated (`AlertCorrelationEnabled` in `GeneralSettings`, default false); when disabled, no LLM call is made and all alerts spawn normally (fail-open)
-- `AlertCorrelator` is constructed in `main.go` from `GeneralSettings` (window 30m, threshold 0.7, maxCandidates 20 as defaults); wired via `alertHandler.SetAlertCorrelator(c)`
-- both `processAlert` and `ProcessAlertFromListenerChannel` wrap the evaluate-and-spawn block in `h.spawnGroup.Do(key, ...)` where `key = sha256hex(json([sourceUUID, alertName, targetHost, fingerprint]))`; singleflight followers skip the LLM call and call `recordRecurrence` using the `isLeader` flag pattern (not the `shared` bool, which is true for the leader when followers exist)
-- `AppendCorrelatedAlert` in `SkillService` atomically: appends an entry to `incident.Context["correlated_alerts"]`, increments `correlated_count`, and writes an `AlertCorrelationLog` audit row — all inside a single transaction
-- `ErrWorkerNotConnected` from the correlator is treated as no-match → alert spawns normally (fail-open)
-- candidate query filters: `source_kind='alert'`, `started_at >= now()-window`, `status IN (pending,running,diagnosed,completed)` — failed incidents are never correlation targets
-- hallucination guard: any UUID returned by the LLM that was not in the fetched candidate set forces `Correlated=false`
-- correlation config fields live in `GeneralSettings`; they are read once at startup and wired into the correlator — changes require a restart (no live reload path)
-- one-shot LLM path is used for the correlation call; defined in `internal/services/alert_correlator.go`
+- `AlertCorrelator` is constructed with `NewAlertCorrelator(caller, db)`; wired via `alertHandler.SetAlertCorrelator(c)`; reads config live from `GeneralSettings` on every call — changes take effect without a restart
+- both `processAlert` and `ProcessAlertFromListenerChannel` wrap the evaluate-and-spawn block in `h.spawnGroup.Do(key, ...)`; singleflight followers use the `isLeader` flag pattern; followers skip `recordRecurrence` when the leader chose suppression (via `alertSpawnResult.suppressed`)
+- `AppendCorrelatedAlert` atomically appends to `incident.Context["correlated_alerts"]`, increments `correlated_count`, and writes an `AlertCorrelationLog` row — all in one transaction
+- `ErrWorkerNotConnected` is fail-open (alert spawns normally)
+- candidate query filters: `source_kind='alert'`, `started_at >= now()-window`, `status IN (pending,running,diagnosed,completed)` — failed incidents are never targets
+- hallucination guard: any UUID not in the fetched candidate set forces `Correlated=false`
+- alert fingerprint: `ComputeAlertFingerprint(sourceUUID, lower(alertName), lower(targetHost))` stored as `alert_fingerprint` (32-char sha256) on each `Incident`; pre-filters candidates; defined in `internal/services/alert_fingerprint.go`
+- one-shot LLM path; defined in `internal/services/alert_correlator.go`
+
+### Alert suppression gate
+
+After the correlation check passes, `AlertHandler` runs `AlertSuppressor.Evaluate` against known false-positive signatures. On a confident match, `RecordSuppressedIncident` is called instead of `SpawnIncidentManager`.
+
+Rules:
+- flag-gated (`AlertSuppressionEnabled` in `GeneralSettings`, default false); when disabled, no LLM call is made (fail-open)
+- `AlertSuppressor` is constructed with `NewAlertSuppressor(caller, db)`; wired via `alertHandler.SetAlertSuppressor(s)`; reads config live — changes take effect without a restart
+- signatures are `Memory` rows with `Suppress=true`; zero signatures → no LLM call
+- one-shot LLM call; hallucination guard: any name the LLM returns not in the fetched set forces `Suppressed=false`
+- `ErrWorkerNotConnected` is fail-open (alert spawns normally)
+- `RecordSuppressedIncident` atomically creates a completed `Incident` (TokensUsed=0, `AlertFingerprint` set) + `AlertSuppressionLog` audit row
+- manifest capped at `manifestMaxEntriesPerScope` (150) non-suppress entries per scope; suppress entries always appear; a `<!-- truncated: N more entries not shown -->` comment is added when the cap fires
 
 ### Alert sources and webhook adapters
 
@@ -222,6 +235,9 @@ Rules:
 - `internal/services/title_generator.go` - one-shot title generation
 - `internal/services/slack_summarizer.go` - Slack-safe final output compression
 - `internal/services/alert_correlator.go` - LLM-powered gate that decides whether an incoming alert is a recurrence of a recent incident; defines `CorrelationConfig`, `CorrelationVerdict`, and `AlertCorrelator`
+- `internal/services/alert_suppressor.go` - LLM-powered gate for known false-positive suppression; defines `SuppressionConfig`, `SuppressionVerdict`, and `AlertSuppressor`
+- `internal/services/alert_fingerprint.go` - `ComputeAlertFingerprint(sourceUUID, alertName, targetHost)` — stable 32-char hex digest for correlation candidate pre-filtering
+- `internal/database/models_alert_suppression.go` - `AlertSuppressionLog` audit model
 - `internal/services/channel_service.go` - Integrations/Channels CRUD, `ResolveDefault`, `ResolveForAlertSource`
 - `internal/services/cron_runner.go` - cron scheduler, per-cron agent tick path, reload-on-CRUD
 - `internal/services/incident_service.go` - `SpawnIncidentManager` / `SpawnAgentInvocation`, AGENTS.md generation (`generateAgentsMd`), per-root-skill prompt injection
@@ -339,7 +355,7 @@ Keep this file aligned with these current realities:
 - cron jobs (`/api/cron-jobs`) always run as full agent investigations under the `cron-agent` system skill with a per-cron tool allowlist; system crons (e.g. seeded `memory-curator`) cannot be deleted; `CronRunner` boots from `cmd/akmatori/main.go`
 - alert-source webhooks use adapter-specific secret validation before parsing; explicit notification channels must resolve to `can_post=true` Channels
 - the built-in `incidents` tool (`incidents.list`, `incidents.get`) is seeded at boot by `EnsureToolTypes()` with a credential-less instance and queries the gateway DB directly; no operator setup required
-- alert correlation gate (`services.AlertCorrelator`) runs before each incident spawn in both `processAlert` and `ProcessAlertFromListenerChannel`; flag-gated via `GeneralSettings.AlertCorrelationEnabled` (default false); uses `isLeader` outer-variable pattern (not singleflight `shared` bool) to distinguish leader from follower; `AppendCorrelatedAlert` records collapsed alerts in `incident.Context["correlated_alerts"]` and the `alert_correlation_logs` table; config is read once at startup
+- alert correlation gate (`services.AlertCorrelator`) and suppression gate (`services.AlertSuppressor`) run before each incident spawn in both `processAlert` and `ProcessAlertFromListenerChannel`; both are flag-gated via `GeneralSettings` (default false); both read config live on every call — no restart needed; singleflight followers skip `recordRecurrence` when the leader chose suppression (via `alertSpawnResult.suppressed`)
 
 ## When Editing This File
 

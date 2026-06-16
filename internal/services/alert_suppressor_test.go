@@ -192,7 +192,7 @@ func TestAlertSuppressor_ConfidentSuppress_AboveThreshold(t *testing.T) {
 	}
 }
 
-func TestAlertSuppressor_LowConfidence_NotSuppressed(t *testing.T) {
+func TestAlertSuppressor_LowConfidence_RawVerdictPassthrough(t *testing.T) {
 	db := setupSuppressorDB(t)
 	seedSignature(t, db, "maybe-similar", "DiskSpaceLow pattern")
 	seedSuppressionSettings(t, db, true, 0.7)

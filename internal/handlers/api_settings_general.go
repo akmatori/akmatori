@@ -112,6 +112,7 @@ func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
+		applyGeneralSettingsDefaults(settings)
 		api.RespondJSON(w, http.StatusOK, settings)
 
 	default:

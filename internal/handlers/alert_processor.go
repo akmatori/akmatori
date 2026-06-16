@@ -40,6 +40,15 @@ func alertSpawnKey(sourceUUID, alertName, targetHost, fingerprint string) string
 	return hex.EncodeToString(h[:])
 }
 
+// alertSpawnResult is the typed singleflight return value for processAlert and
+// ProcessAlertFromListenerChannel. The suppressed flag tells followers whether
+// the leader took the suppression path so they can skip recordRecurrence (which
+// would otherwise attach bogus audit rows to a closed suppressed incident).
+type alertSpawnResult struct {
+	incidentUUID string
+	suppressed   bool
+}
+
 func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, normalized alerts.NormalizedAlert) {
 	if normalized.Status == database.AlertStatusResolved {
 		slog.Info("processing resolved alert", "alert_name", normalized.AlertName)
@@ -110,7 +119,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		if verdict.IsConfident(h.correlationThreshold()) {
 			slog.Info("alert correlated to existing incident", "incident_uuid", verdict.IncidentUUID, "confidence", verdict.Confidence)
 			h.recordRecurrence(context.Background(), instance.UUID, verdict.IncidentUUID, normalized, verdict)
-			return verdict.IncidentUUID, nil
+			return alertSpawnResult{incidentUUID: verdict.IncidentUUID}, nil
 		}
 
 		// Suppression gate: check if this is a known false positive before spawning.
@@ -128,7 +137,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 			if suppRecordErr != nil {
 				slog.Error("failed to record suppressed incident, spawning normally", "err", suppRecordErr)
 			} else {
-				return incidentUUID, nil
+				return alertSpawnResult{incidentUUID: incidentUUID, suppressed: true}, nil
 			}
 		}
 
@@ -136,7 +145,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		incidentUUID, _, err := h.skillService.SpawnIncidentManager(incidentCtx)
 		if err != nil {
 			slog.Error("failed to spawn incident manager", "err", err)
-			return "", err
+			return alertSpawnResult{}, err
 		}
 
 		slog.Info("created incident for alert", "incident_id", incidentUUID)
@@ -157,7 +166,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		}
 		go h.runInvestigation(incidentUUID, normalized, instance, channelID, threadTS)
 
-		return incidentUUID, nil
+		return alertSpawnResult{incidentUUID: incidentUUID}, nil
 	})
 
 	if sfErr != nil {
@@ -166,15 +175,18 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 	}
 
 	if !isLeader {
-		// Follower: the leader decided which incident owns this alert burst;
-		// attach this copy as a recurrence.
-		incidentUUID, _ := v.(string)
-		h.recordRecurrence(context.Background(), instance.UUID, incidentUUID, normalized, services.CorrelationVerdict{
-			Correlated:   true,
-			IncidentUUID: incidentUUID,
-			Confidence:   1.0,
-			Reasoning:    "collapsed via concurrent dedup",
-		})
+		// Follower: the leader decided which incident owns this alert burst.
+		// Skip recordRecurrence when the leader suppressed the alert — there
+		// is no active investigation to attach burst duplicates to.
+		result, _ := v.(alertSpawnResult)
+		if !result.suppressed {
+			h.recordRecurrence(context.Background(), instance.UUID, result.incidentUUID, normalized, services.CorrelationVerdict{
+				Correlated:   true,
+				IncidentUUID: result.incidentUUID,
+				Confidence:   1.0,
+				Reasoning:    "collapsed via concurrent dedup",
+			})
+		}
 	}
 }
 
@@ -274,7 +286,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, false)
 			h.postSlackThreadReply(slackChannelID, slackMessageTS,
 				fmt.Sprintf("Alert merged into existing incident (ID: %s)", verdict.IncidentUUID))
-			return verdict.IncidentUUID, nil
+			return alertSpawnResult{incidentUUID: verdict.IncidentUUID}, nil
 		}
 
 		// Suppression gate: check if this is a known false positive before spawning.
@@ -295,7 +307,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 				h.updateSlackChannelReactions(slackChannelID, slackMessageTS, false)
 				h.postSlackThreadReply(slackChannelID, slackMessageTS,
 					fmt.Sprintf("Alert suppressed (matched signature: %s). No investigation needed.", suppVerdict.SignatureName))
-				return incidentUUID, nil
+				return alertSpawnResult{incidentUUID: incidentUUID, suppressed: true}, nil
 			}
 		}
 
@@ -306,7 +318,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
 			h.postSlackThreadReply(slackChannelID, slackMessageTS,
 				fmt.Sprintf("Failed to create incident: %v", err))
-			return "", err
+			return alertSpawnResult{}, err
 		}
 
 		slog.Info("created incident for listener channel alert", "incident_id", incidentUUID)
@@ -323,7 +335,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 
 		go h.runListenerChannelInvestigation(incidentUUID, normalized, channel, slackChannelID, slackMessageTS)
 
-		return incidentUUID, nil
+		return alertSpawnResult{incidentUUID: incidentUUID}, nil
 	})
 
 	if sfErr != nil {
@@ -332,14 +344,18 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 	}
 
 	if !isLeader {
-		// Follower: attach this alert to the incident the leader decided on.
-		incidentUUID, _ := v.(string)
-		h.recordRecurrence(context.Background(), channel.UUID, incidentUUID, normalized, services.CorrelationVerdict{
-			Correlated:   true,
-			IncidentUUID: incidentUUID,
-			Confidence:   1.0,
-			Reasoning:    "collapsed via concurrent dedup",
-		})
+		// Follower: the leader decided which incident owns this alert burst.
+		// Skip recordRecurrence when the leader suppressed the alert — there
+		// is no active investigation to attach burst duplicates to.
+		result, _ := v.(alertSpawnResult)
+		if !result.suppressed {
+			h.recordRecurrence(context.Background(), channel.UUID, result.incidentUUID, normalized, services.CorrelationVerdict{
+				Correlated:   true,
+				IncidentUUID: result.incidentUUID,
+				Confidence:   1.0,
+				Reasoning:    "collapsed via concurrent dedup",
+			})
+		}
 	}
 }
 
