@@ -149,6 +149,7 @@ func setupCorrelatorHandlerDB(t *testing.T) *gorm.DB {
 		&database.LLMSettings{},
 		&database.AlertCorrelationLog{},
 		&database.SlackSettings{},
+		&database.GeneralSettings{},
 	)
 	if err := db.Create(&database.LLMSettings{
 		Name:     "test",
@@ -161,6 +162,23 @@ func setupCorrelatorHandlerDB(t *testing.T) *gorm.DB {
 		t.Fatalf("seed LLMSettings: %v", err)
 	}
 	return db
+}
+
+// seedCorrHandlerSettings seeds a GeneralSettings row enabling the correlator.
+func seedCorrHandlerSettings(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	enabled := true
+	win := 30
+	mc := 20
+	th := 0.7
+	if err := db.Create(&database.GeneralSettings{
+		AlertCorrelationEnabled:       &enabled,
+		AlertCorrelationWindowMinutes: &win,
+		AlertCorrelationMaxCandidates: &mc,
+		AlertCorrelationThreshold:     &th,
+	}).Error; err != nil {
+		t.Fatalf("seed GeneralSettings: %v", err)
+	}
 }
 
 // seedHandlerIncident inserts a candidate incident for correlation tests.
@@ -272,19 +290,14 @@ func TestAlertHandler_Singleflight_15ConcurrentAlerts(t *testing.T) {
 func TestAlertHandler_ConfidentVerdict_NoSpawn(t *testing.T) {
 	db := setupCorrelatorHandlerDB(t)
 	seedHandlerIncident(t, db, "existing-inc", "CPU high on web01", "running", 5*time.Minute)
+	seedCorrHandlerSettings(t, db)
 
 	caller := &corrOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		return `{"correlated":true,"incident_uuid":"existing-inc","confidence":0.92,"reasoning":"same host and alert"}`, nil
 	}
 
-	cfg := services.CorrelationConfig{
-		Enabled:       true,
-		Window:        30 * time.Minute,
-		MaxCandidates: 20,
-		Threshold:     0.7,
-	}
-	correlator := services.NewAlertCorrelator(caller, db, cfg)
+	correlator := services.NewAlertCorrelator(caller, db)
 
 	svc := &corrGateSkillService{spawnUUID: "would-be-new-incident"}
 	h := NewAlertHandler(nil, nil, nil, nil, svc, nil, nil)
@@ -318,19 +331,14 @@ func TestAlertHandler_ConfidentVerdict_NoSpawn(t *testing.T) {
 func TestAlertHandler_BelowThresholdVerdict_Spawns(t *testing.T) {
 	db := setupCorrelatorHandlerDB(t)
 	seedHandlerIncident(t, db, "maybe-related", "CPU high on web01", "running", 5*time.Minute)
+	seedCorrHandlerSettings(t, db)
 
 	caller := &corrOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		return `{"correlated":true,"incident_uuid":"maybe-related","confidence":0.55,"reasoning":"possibly related"}`, nil
 	}
 
-	cfg := services.CorrelationConfig{
-		Enabled:       true,
-		Window:        30 * time.Minute,
-		MaxCandidates: 20,
-		Threshold:     0.7,
-	}
-	correlator := services.NewAlertCorrelator(caller, db, cfg)
+	correlator := services.NewAlertCorrelator(caller, db)
 
 	svc := &corrGateSkillService{spawnUUID: "new-incident-uuid"}
 	h := NewAlertHandler(nil, nil, nil, nil, svc, nil, nil)
@@ -362,19 +370,14 @@ func TestAlertHandler_BelowThresholdVerdict_Spawns(t *testing.T) {
 func TestAlertHandler_WorkerNotConnected_Spawns(t *testing.T) {
 	db := setupCorrelatorHandlerDB(t)
 	seedHandlerIncident(t, db, "active-inc", "CPU high on web01", "running", 5*time.Minute)
+	seedCorrHandlerSettings(t, db)
 
 	caller := &corrOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		return "", services.ErrWorkerNotConnected
 	}
 
-	cfg := services.CorrelationConfig{
-		Enabled:       true,
-		Window:        30 * time.Minute,
-		MaxCandidates: 20,
-		Threshold:     0.7,
-	}
-	correlator := services.NewAlertCorrelator(caller, db, cfg)
+	correlator := services.NewAlertCorrelator(caller, db)
 
 	svc := &corrGateSkillService{spawnUUID: "fail-open-incident"}
 	h := NewAlertHandler(nil, nil, nil, nil, svc, nil, nil)

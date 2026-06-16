@@ -122,15 +122,9 @@ func TestFetchCandidates_FingerprintFilter(t *testing.T) {
 		t.Fatalf("seed legacy: %v", err)
 	}
 
-	cfg := CorrelationConfig{
-		Enabled:       true,
-		Window:        30 * time.Minute,
-		MaxCandidates: 20,
-		Threshold:     0.7,
-	}
-	c := NewAlertCorrelator(nil, db, cfg)
+	c := NewAlertCorrelator(nil, db)
 
-	candidates, err := c.fetchCandidates(context.Background(), fp)
+	candidates, err := c.fetchCandidates(context.Background(), fp, 30*time.Minute, 20)
 	if err != nil {
 		t.Fatalf("fetchCandidates: %v", err)
 	}
@@ -173,16 +167,10 @@ func TestFetchCandidates_EmptyFingerprintPassthrough(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	cfg := CorrelationConfig{
-		Enabled:       true,
-		Window:        30 * time.Minute,
-		MaxCandidates: 20,
-		Threshold:     0.7,
-	}
-	c := NewAlertCorrelator(nil, db, cfg)
+	c := NewAlertCorrelator(nil, db)
 
 	// Pass empty fingerprint — all qualifying candidates should be returned.
-	candidates, err := c.fetchCandidates(context.Background(), "")
+	candidates, err := c.fetchCandidates(context.Background(), "", 30*time.Minute, 20)
 	if err != nil {
 		t.Fatalf("fetchCandidates: %v", err)
 	}
@@ -229,18 +217,14 @@ func TestCorrelate_UsesFingerprint(t *testing.T) {
 		t.Fatalf("seed irrelevant: %v", err)
 	}
 
+	seedCorrelationSettings(t, db, true, 30, 20, 0.7)
+
 	caller := &fakeOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		return `{"correlated":false,"incident_uuid":"","confidence":0.1,"reasoning":"captured"}`, nil
 	}
 
-	cfg := CorrelationConfig{
-		Enabled:       true,
-		Window:        30 * time.Minute,
-		MaxCandidates: 20,
-		Threshold:     0.7,
-	}
-	c := NewAlertCorrelator(caller, db, cfg)
+	c := NewAlertCorrelator(caller, db)
 
 	_, err := c.Correlate(context.Background(), "src-1", alerts.NormalizedAlert{
 		AlertName:  "CPUHigh",

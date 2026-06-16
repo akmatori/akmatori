@@ -101,13 +101,13 @@ Four product changes to cut wasted investigation tokens, harden the correlation 
 - Modify: `web/src/types.ts` — extend `GeneralSettings` type with correlation + suppression fields
 - Modify: `web/src/components/settings/GeneralSettingsSection.tsx` — add correlation + suppression controls
 
-- [ ] Change `AlertCorrelator` and `AlertSuppressor` constructors to drop the static config parameter; read `GeneralSettings` from DB at the start of each `Correlate` / `Evaluate` call (consistent with how both already call `database.GetLLMSettings()` on every call); `CorrelationConfigWithDefaults` / `SuppressionConfigWithDefaults` remain for applying code defaults to nil DB values
-- [ ] Update `cmd/akmatori/main.go` to use new constructors; remove the `correlationCfg` block; startup log now says "alert correlator ready (live config)" instead of logging the static config values
-- [ ] In `handleGeneralSettings` GET: before JSON encoding, apply defaults to all `Alert*` nullable fields so nil → effective default; do NOT persist the defaults (only hydrate for response); `AlertCorrelationEnabled` defaults false, `AlertCorrelationWindowMinutes` defaults 30, `AlertCorrelationThreshold` defaults 0.7, `AlertCorrelationMaxCandidates` defaults 20, `AlertSuppressionEnabled` defaults false, `AlertSuppressionThreshold` defaults 0.7
-- [ ] Add correlation + suppression fields to `web/src/types.ts` GeneralSettings interface; all fields non-nullable after GET hydration
-- [ ] Add controls in `GeneralSettingsSection.tsx`: correlation enabled toggle, window (minutes, 1–1440), threshold (0–1, step 0.01), max candidates (1–100); suppression enabled toggle, threshold (0–1, step 0.01); save sends all fields; update `generalSettingsApi.update` call to include them
-- [ ] Write tests: `alert_correlator_test.go` — constructor accepts no config; `Correlate` respects DB-stored enabled=false (no LLM call); `Correlate` respects DB-stored threshold; `handleGeneralSettings` GET returns non-nil defaults even when DB row has all nulls
-- [ ] `make test`
+- [x] Change `AlertCorrelator` and `AlertSuppressor` constructors to drop the static config parameter; read `GeneralSettings` from DB at the start of each `Correlate` / `Evaluate` call (consistent with how both already call `database.GetLLMSettings()` on every call); `CorrelationConfigWithDefaults` / `SuppressionConfigWithDefaults` remain for applying code defaults to nil DB values
+- [x] Update `cmd/akmatori/main.go` to use new constructors; remove the `correlationCfg` block; startup log now says "alert correlator ready (live config)" instead of logging the static config values
+- [x] In `handleGeneralSettings` GET: before JSON encoding, apply defaults to all `Alert*` nullable fields so nil → effective default; do NOT persist the defaults (only hydrate for response); `AlertCorrelationEnabled` defaults false, `AlertCorrelationWindowMinutes` defaults 30, `AlertCorrelationThreshold` defaults 0.7, `AlertCorrelationMaxCandidates` defaults 20, `AlertSuppressionEnabled` defaults false, `AlertSuppressionThreshold` defaults 0.7
+- [x] Add correlation + suppression fields to `web/src/types.ts` GeneralSettings interface; all fields non-nullable after GET hydration
+- [x] Add controls in `GeneralSettingsSection.tsx`: correlation enabled toggle, window (minutes, 1–1440), threshold (0–1, step 0.01), max candidates (1–100); suppression enabled toggle, threshold (0–1, step 0.01); save sends all fields; update `generalSettingsApi.update` call to include them
+- [x] Write tests: `alert_correlator_test.go` — constructor accepts no config; `Correlate` respects DB-stored enabled=false (no LLM call); `Correlate` respects DB-stored threshold; `handleGeneralSettings` GET returns non-nil defaults even when DB row has all nulls
+- [x] `make test`
 
 ### Task 4: Memory scaling for recall and curation
 

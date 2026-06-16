@@ -59,22 +59,39 @@ func (v SuppressionVerdict) IsConfident(threshold float64) bool {
 type AlertSuppressor struct {
 	caller OneShotLLMCaller
 	db     *gorm.DB
-	cfg    SuppressionConfig
 }
 
 // NewAlertSuppressor constructs an AlertSuppressor. Pass nil for caller to
 // produce an instance that always returns {Suppressed: false} (fail-open).
-func NewAlertSuppressor(caller OneShotLLMCaller, db *gorm.DB, cfg SuppressionConfig) *AlertSuppressor {
-	return &AlertSuppressor{
-		caller: caller,
-		db:     db,
-		cfg:    SuppressionConfigWithDefaults(cfg),
-	}
+// Config is read live from GeneralSettings on each Evaluate call.
+func NewAlertSuppressor(caller OneShotLLMCaller, db *gorm.DB) *AlertSuppressor {
+	return &AlertSuppressor{caller: caller, db: db}
 }
 
-// Threshold returns the minimum confidence required for suppression.
+// loadConfig reads GeneralSettings from the DB and applies code defaults to nil
+// fields, returning a fully-populated SuppressionConfig for this call.
+func (s *AlertSuppressor) loadConfig() (SuppressionConfig, error) {
+	gs, err := database.GetOrCreateGeneralSettings()
+	if err != nil {
+		return SuppressionConfigWithDefaults(SuppressionConfig{}), fmt.Errorf("load general settings: %w", err)
+	}
+	var cfg SuppressionConfig
+	if gs.AlertSuppressionEnabled != nil {
+		cfg.Enabled = *gs.AlertSuppressionEnabled
+	}
+	if gs.AlertSuppressionThreshold != nil {
+		cfg.Threshold = *gs.AlertSuppressionThreshold
+	}
+	return SuppressionConfigWithDefaults(cfg), nil
+}
+
+// Threshold returns the effective suppression confidence threshold from DB settings.
 func (s *AlertSuppressor) Threshold() float64 {
-	return s.cfg.Threshold
+	cfg, err := s.loadConfig()
+	if err != nil {
+		return SuppressionConfigWithDefaults(SuppressionConfig{}).Threshold
+	}
+	return cfg.Threshold
 }
 
 // signatureRow is a minimal projection of suppression-signature memory rows.
@@ -85,7 +102,7 @@ type signatureRow struct {
 
 // Evaluate asks the LLM whether the incoming alert matches a known false-positive
 // signature. It is safe to call concurrently. Returns {Suppressed: false} on:
-//   - flag disabled
+//   - flag disabled (reads live from DB)
 //   - nil caller
 //   - zero signatures in DB (no LLM call made)
 //
@@ -94,11 +111,19 @@ type signatureRow struct {
 func (s *AlertSuppressor) Evaluate(ctx context.Context, alert alerts.NormalizedAlert) (SuppressionVerdict, error) {
 	noMatch := SuppressionVerdict{}
 
-	if !s.cfg.Enabled || s.caller == nil {
+	if s.caller == nil {
 		return noMatch, nil
 	}
 
-	signatures, err := s.fetchSignatures(ctx)
+	cfg, err := s.loadConfig()
+	if err != nil {
+		return noMatch, fmt.Errorf("suppressor: %w", err)
+	}
+	if !cfg.Enabled {
+		return noMatch, nil
+	}
+
+	signatures, err := s.fetchSignatures(ctx, cfg.MaxSignatures)
 	if err != nil {
 		return noMatch, fmt.Errorf("suppressor: fetch signatures: %w", err)
 	}
@@ -158,13 +183,13 @@ func (s *AlertSuppressor) Evaluate(ctx context.Context, alert alerts.NormalizedA
 
 // fetchSignatures queries memories flagged with suppress=true for use as
 // false-positive pattern signatures.
-func (s *AlertSuppressor) fetchSignatures(ctx context.Context) ([]signatureRow, error) {
+func (s *AlertSuppressor) fetchSignatures(ctx context.Context, maxSignatures int) ([]signatureRow, error) {
 	var rows []signatureRow
 	err := s.db.WithContext(ctx).
 		Model(&database.Memory{}).
 		Select("name, body").
 		Where("suppress = ?", true).
-		Limit(s.cfg.MaxSignatures).
+		Limit(maxSignatures).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err

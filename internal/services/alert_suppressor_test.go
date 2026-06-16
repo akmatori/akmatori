@@ -12,8 +12,9 @@ import (
 	"gorm.io/gorm"
 )
 
-// setupSuppressorDB prepares an in-memory SQLite DB with the memories table
-// and seeds LLM settings so the suppressor can call GetLLMSettings.
+// setupSuppressorDB prepares an in-memory SQLite DB with the memories and
+// GeneralSettings tables and seeds LLM settings so the suppressor can call
+// GetLLMSettings and GetOrCreateGeneralSettings.
 func setupSuppressorDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -23,6 +24,7 @@ func setupSuppressorDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&database.Memory{},
 		&database.LLMSettings{},
+		&database.GeneralSettings{},
 	); err != nil {
 		t.Fatalf("automigrate: %v", err)
 	}
@@ -43,6 +45,18 @@ func setupSuppressorDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+// seedSuppressionSettings inserts a GeneralSettings row that enables the
+// suppressor with the given parameters.
+func seedSuppressionSettings(t *testing.T, db *gorm.DB, enabled bool, threshold float64) {
+	t.Helper()
+	if err := db.Create(&database.GeneralSettings{
+		AlertSuppressionEnabled:   &enabled,
+		AlertSuppressionThreshold: &threshold,
+	}).Error; err != nil {
+		t.Fatalf("seed suppression settings: %v", err)
+	}
+}
+
 // seedSignature inserts a suppression-signature memory into db.
 func seedSignature(t *testing.T, db *gorm.DB, name, body string) {
 	t.Helper()
@@ -59,24 +73,15 @@ func seedSignature(t *testing.T, db *gorm.DB, name, body string) {
 	}
 }
 
-func enabledSuppressionCfg() SuppressionConfig {
-	return SuppressionConfig{
-		Enabled:       true,
-		Threshold:     0.7,
-		MaxSignatures: 50,
-	}
-}
-
 // ---- tests ----
 
 func TestAlertSuppressor_FlagOff_NoLLMCall(t *testing.T) {
 	db := setupSuppressorDB(t)
 	seedSignature(t, db, "disk-false-positive", "DiskSpaceLow on cron-*.prod fires nightly")
+	// No GeneralSettings row → suppression enabled defaults to false.
 
 	caller := &fakeOneShotLLMCaller{}
-	cfg := enabledSuppressionCfg()
-	cfg.Enabled = false
-	s := NewAlertSuppressor(caller, db, cfg)
+	s := NewAlertSuppressor(caller, db)
 
 	verdict, err := s.Evaluate(context.Background(), alerts.NormalizedAlert{AlertName: "DiskSpaceLow"})
 	if err != nil {
@@ -94,7 +99,7 @@ func TestAlertSuppressor_NilCaller_NoLLMCall(t *testing.T) {
 	db := setupSuppressorDB(t)
 	seedSignature(t, db, "disk-false-positive", "DiskSpaceLow fires nightly")
 
-	s := NewAlertSuppressor(nil, db, enabledSuppressionCfg())
+	s := NewAlertSuppressor(nil, db)
 	verdict, err := s.Evaluate(context.Background(), alerts.NormalizedAlert{AlertName: "DiskSpaceLow"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -107,9 +112,10 @@ func TestAlertSuppressor_NilCaller_NoLLMCall(t *testing.T) {
 func TestAlertSuppressor_ZeroSignatures_NoLLMCall(t *testing.T) {
 	db := setupSuppressorDB(t)
 	// No signatures in DB (no suppress=true rows).
+	seedSuppressionSettings(t, db, true, 0.7)
 
 	caller := &fakeOneShotLLMCaller{}
-	s := NewAlertSuppressor(caller, db, enabledSuppressionCfg())
+	s := NewAlertSuppressor(caller, db)
 
 	verdict, err := s.Evaluate(context.Background(), alerts.NormalizedAlert{AlertName: "DiskSpaceLow"})
 	if err != nil {
@@ -137,9 +143,10 @@ func TestAlertSuppressor_NonSuppressMemoriesIgnored(t *testing.T) {
 	if err := db.Create(&m).Error; err != nil {
 		t.Fatalf("seed memory: %v", err)
 	}
+	seedSuppressionSettings(t, db, true, 0.7)
 
 	caller := &fakeOneShotLLMCaller{}
-	s := NewAlertSuppressor(caller, db, enabledSuppressionCfg())
+	s := NewAlertSuppressor(caller, db)
 
 	verdict, err := s.Evaluate(context.Background(), alerts.NormalizedAlert{AlertName: "DiskSpaceLow"})
 	if err != nil {
@@ -156,12 +163,13 @@ func TestAlertSuppressor_NonSuppressMemoriesIgnored(t *testing.T) {
 func TestAlertSuppressor_ConfidentSuppress_AboveThreshold(t *testing.T) {
 	db := setupSuppressorDB(t)
 	seedSignature(t, db, "cron-disk-false-positive", "DiskSpaceLow on cron-01 nightly rotation")
+	seedSuppressionSettings(t, db, true, 0.7)
 
 	caller := &fakeOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		return `{"suppressed":true,"signature_name":"cron-disk-false-positive","confidence":0.95,"reasoning":"identical rule on same host"}`, nil
 	}
-	s := NewAlertSuppressor(caller, db, enabledSuppressionCfg())
+	s := NewAlertSuppressor(caller, db)
 
 	verdict, err := s.Evaluate(context.Background(), alerts.NormalizedAlert{
 		AlertName:  "DiskSpaceLow",
@@ -187,12 +195,13 @@ func TestAlertSuppressor_ConfidentSuppress_AboveThreshold(t *testing.T) {
 func TestAlertSuppressor_LowConfidence_NotSuppressed(t *testing.T) {
 	db := setupSuppressorDB(t)
 	seedSignature(t, db, "maybe-similar", "DiskSpaceLow pattern")
+	seedSuppressionSettings(t, db, true, 0.7)
 
 	caller := &fakeOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		return `{"suppressed":true,"signature_name":"maybe-similar","confidence":0.55,"reasoning":"possibly related but uncertain"}`, nil
 	}
-	s := NewAlertSuppressor(caller, db, enabledSuppressionCfg())
+	s := NewAlertSuppressor(caller, db)
 
 	verdict, err := s.Evaluate(context.Background(), alerts.NormalizedAlert{AlertName: "DiskSpaceLow"})
 	if err != nil {
@@ -210,12 +219,13 @@ func TestAlertSuppressor_LowConfidence_NotSuppressed(t *testing.T) {
 func TestAlertSuppressor_WorkerNotConnected_PropagatedFailOpen(t *testing.T) {
 	db := setupSuppressorDB(t)
 	seedSignature(t, db, "some-sig", "Some pattern")
+	seedSuppressionSettings(t, db, true, 0.7)
 
 	caller := &fakeOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		return "", ErrWorkerNotConnected
 	}
-	s := NewAlertSuppressor(caller, db, enabledSuppressionCfg())
+	s := NewAlertSuppressor(caller, db)
 
 	_, err := s.Evaluate(context.Background(), alerts.NormalizedAlert{AlertName: "DiskSpaceLow"})
 	if !errors.Is(err, ErrWorkerNotConnected) {
@@ -226,13 +236,14 @@ func TestAlertSuppressor_WorkerNotConnected_PropagatedFailOpen(t *testing.T) {
 func TestAlertSuppressor_HallucinatedName_ForcedFalse(t *testing.T) {
 	db := setupSuppressorDB(t)
 	seedSignature(t, db, "real-sig", "Real pattern")
+	seedSuppressionSettings(t, db, true, 0.7)
 
 	caller := &fakeOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		// LLM returns a signature name NOT in the set.
 		return `{"suppressed":true,"signature_name":"invented-sig-llm","confidence":0.95,"reasoning":"hallucinated"}`, nil
 	}
-	s := NewAlertSuppressor(caller, db, enabledSuppressionCfg())
+	s := NewAlertSuppressor(caller, db)
 
 	verdict, err := s.Evaluate(context.Background(), alerts.NormalizedAlert{AlertName: "DiskSpaceLow"})
 	if err != nil {
@@ -246,12 +257,13 @@ func TestAlertSuppressor_HallucinatedName_ForcedFalse(t *testing.T) {
 func TestAlertSuppressor_NotSuppressed_LLMSaysNo(t *testing.T) {
 	db := setupSuppressorDB(t)
 	seedSignature(t, db, "unrelated-pattern", "Memory leak on cache servers")
+	seedSuppressionSettings(t, db, true, 0.7)
 
 	caller := &fakeOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		return `{"suppressed":false,"signature_name":"","confidence":0.1,"reasoning":"different alert"}`, nil
 	}
-	s := NewAlertSuppressor(caller, db, enabledSuppressionCfg())
+	s := NewAlertSuppressor(caller, db)
 
 	verdict, err := s.Evaluate(context.Background(), alerts.NormalizedAlert{AlertName: "CPUHigh"})
 	if err != nil {

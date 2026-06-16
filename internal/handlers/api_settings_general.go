@@ -7,6 +7,36 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 )
 
+// applyGeneralSettingsDefaults fills nil alert config pointers with effective
+// code defaults so the GET response never contains null. It modifies the struct
+// in-place; callers must not persist the result back to the DB.
+func applyGeneralSettingsDefaults(s *database.GeneralSettings) {
+	if s.AlertCorrelationEnabled == nil {
+		v := false
+		s.AlertCorrelationEnabled = &v
+	}
+	if s.AlertCorrelationWindowMinutes == nil {
+		v := 30
+		s.AlertCorrelationWindowMinutes = &v
+	}
+	if s.AlertCorrelationThreshold == nil {
+		v := 0.7
+		s.AlertCorrelationThreshold = &v
+	}
+	if s.AlertCorrelationMaxCandidates == nil {
+		v := 20
+		s.AlertCorrelationMaxCandidates = &v
+	}
+	if s.AlertSuppressionEnabled == nil {
+		v := false
+		s.AlertSuppressionEnabled = &v
+	}
+	if s.AlertSuppressionThreshold == nil {
+		v := 0.7
+		s.AlertSuppressionThreshold = &v
+	}
+}
+
 // handleGeneralSettings handles GET/PUT /api/settings/general
 func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -16,6 +46,10 @@ func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Reques
 			api.RespondError(w, http.StatusInternalServerError, "Failed to get general settings")
 			return
 		}
+		// Hydrate nil alert config fields with effective defaults so the
+		// frontend always receives non-null values and can display them
+		// without null guards. The defaults are NOT persisted to the DB.
+		applyGeneralSettingsDefaults(settings)
 		api.RespondJSON(w, http.StatusOK, settings)
 
 	case http.MethodPut:

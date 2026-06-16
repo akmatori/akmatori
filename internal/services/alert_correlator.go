@@ -63,23 +63,45 @@ func (v CorrelationVerdict) IsConfident(threshold float64) bool {
 type AlertCorrelator struct {
 	caller OneShotLLMCaller
 	db     *gorm.DB
-	cfg    CorrelationConfig
 }
 
 // NewAlertCorrelator constructs an AlertCorrelator. Pass nil for caller to
 // produce an instance that always returns {Correlated: false} (fail-open).
-func NewAlertCorrelator(caller OneShotLLMCaller, db *gorm.DB, cfg CorrelationConfig) *AlertCorrelator {
-	return &AlertCorrelator{
-		caller: caller,
-		db:     db,
-		cfg:    CorrelationConfigWithDefaults(cfg),
-	}
+// Config is read live from GeneralSettings on each Correlate call.
+func NewAlertCorrelator(caller OneShotLLMCaller, db *gorm.DB) *AlertCorrelator {
+	return &AlertCorrelator{caller: caller, db: db}
 }
 
-// Threshold returns the minimum confidence required to consider a verdict
-// a confident match.
+// loadConfig reads GeneralSettings from the DB and applies code defaults to nil
+// fields, returning a fully-populated CorrelationConfig for this call.
+func (c *AlertCorrelator) loadConfig() (CorrelationConfig, error) {
+	gs, err := database.GetOrCreateGeneralSettings()
+	if err != nil {
+		return CorrelationConfigWithDefaults(CorrelationConfig{}), fmt.Errorf("load general settings: %w", err)
+	}
+	var cfg CorrelationConfig
+	if gs.AlertCorrelationEnabled != nil {
+		cfg.Enabled = *gs.AlertCorrelationEnabled
+	}
+	if gs.AlertCorrelationWindowMinutes != nil && *gs.AlertCorrelationWindowMinutes > 0 {
+		cfg.Window = time.Duration(*gs.AlertCorrelationWindowMinutes) * time.Minute
+	}
+	if gs.AlertCorrelationThreshold != nil {
+		cfg.Threshold = *gs.AlertCorrelationThreshold
+	}
+	if gs.AlertCorrelationMaxCandidates != nil {
+		cfg.MaxCandidates = *gs.AlertCorrelationMaxCandidates
+	}
+	return CorrelationConfigWithDefaults(cfg), nil
+}
+
+// Threshold returns the effective correlation confidence threshold from DB settings.
 func (c *AlertCorrelator) Threshold() float64 {
-	return c.cfg.Threshold
+	cfg, err := c.loadConfig()
+	if err != nil {
+		return CorrelationConfigWithDefaults(CorrelationConfig{}).Threshold
+	}
+	return cfg.Threshold
 }
 
 // candidateRow is a minimal projection of the Incident table used for
@@ -96,7 +118,7 @@ type candidateRow struct {
 
 // Correlate asks the LLM whether the incoming alert matches a recent incident.
 // It is safe to call concurrently. Returns {Correlated: false} on:
-//   - flag disabled
+//   - flag disabled (reads live from DB)
 //   - nil caller
 //   - zero candidates in the window (no LLM call made)
 //
@@ -105,13 +127,21 @@ type candidateRow struct {
 func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, alert alerts.NormalizedAlert) (CorrelationVerdict, error) {
 	noMatch := CorrelationVerdict{}
 
-	if !c.cfg.Enabled || c.caller == nil {
+	if c.caller == nil {
+		return noMatch, nil
+	}
+
+	cfg, err := c.loadConfig()
+	if err != nil {
+		return noMatch, fmt.Errorf("correlate: %w", err)
+	}
+	if !cfg.Enabled {
 		return noMatch, nil
 	}
 
 	fingerprint := ComputeAlertFingerprint(sourceUUID, alert.AlertName, alert.TargetHost)
 
-	candidates, err := c.fetchCandidates(ctx, fingerprint)
+	candidates, err := c.fetchCandidates(ctx, fingerprint, cfg.Window, cfg.MaxCandidates)
 	if err != nil {
 		return noMatch, fmt.Errorf("correlate: fetch candidates: %w", err)
 	}
@@ -178,8 +208,8 @@ func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, aler
 // OR incidents whose fingerprint column is empty (legacy rows created before
 // this field was added). This shrinks the LLM candidate set for exact-match
 // recurrences while staying inclusive for older incidents.
-func (c *AlertCorrelator) fetchCandidates(ctx context.Context, fingerprint string) ([]candidateRow, error) {
-	windowStart := time.Now().Add(-c.cfg.Window)
+func (c *AlertCorrelator) fetchCandidates(ctx context.Context, fingerprint string, window time.Duration, maxCandidates int) ([]candidateRow, error) {
+	windowStart := time.Now().Add(-window)
 	activeStatuses := []string{
 		string(database.IncidentStatusPending),
 		string(database.IncidentStatusRunning),
@@ -199,7 +229,7 @@ func (c *AlertCorrelator) fetchCandidates(ctx context.Context, fingerprint strin
 	}
 
 	err := q.Order("started_at DESC").
-		Limit(c.cfg.MaxCandidates).
+		Limit(maxCandidates).
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err

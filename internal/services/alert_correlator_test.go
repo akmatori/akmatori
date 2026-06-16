@@ -13,8 +13,9 @@ import (
 	"gorm.io/gorm"
 )
 
-// setupCorrelatorDB prepares an in-memory SQLite DB with the incidents table
-// and seeds LLM settings so the correlator can call GetLLMSettings.
+// setupCorrelatorDB prepares an in-memory SQLite DB with the incidents and
+// GeneralSettings tables and seeds LLM settings so the correlator can call
+// GetLLMSettings. It also assigns database.DB so GetOrCreateGeneralSettings works.
 func setupCorrelatorDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -24,6 +25,7 @@ func setupCorrelatorDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&database.Incident{},
 		&database.LLMSettings{},
+		&database.GeneralSettings{},
 	); err != nil {
 		t.Fatalf("automigrate: %v", err)
 	}
@@ -45,6 +47,20 @@ func setupCorrelatorDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+// seedCorrelationSettings inserts a GeneralSettings row that enables the
+// correlator with the given parameters.
+func seedCorrelationSettings(t *testing.T, db *gorm.DB, enabled bool, windowMin, maxCandidates int, threshold float64) {
+	t.Helper()
+	if err := db.Create(&database.GeneralSettings{
+		AlertCorrelationEnabled:       &enabled,
+		AlertCorrelationWindowMinutes: &windowMin,
+		AlertCorrelationMaxCandidates: &maxCandidates,
+		AlertCorrelationThreshold:     &threshold,
+	}).Error; err != nil {
+		t.Fatalf("seed general settings: %v", err)
+	}
+}
+
 // seedIncident inserts a minimal incident into db and returns its UUID.
 func seedIncident(t *testing.T, db *gorm.DB, uuid, title, status string, startedAt time.Time) {
 	t.Helper()
@@ -63,18 +79,9 @@ func seedIncident(t *testing.T, db *gorm.DB, uuid, title, status string, started
 	}
 }
 
-func newCorrelator(t *testing.T, caller OneShotLLMCaller, db *gorm.DB, cfg CorrelationConfig) *AlertCorrelator {
+func newCorrelator(t *testing.T, caller OneShotLLMCaller, db *gorm.DB) *AlertCorrelator {
 	t.Helper()
-	return NewAlertCorrelator(caller, db, cfg)
-}
-
-func enabledCfg() CorrelationConfig {
-	return CorrelationConfig{
-		Enabled:       true,
-		Window:        30 * time.Minute,
-		MaxCandidates: 20,
-		Threshold:     0.7,
-	}
+	return NewAlertCorrelator(caller, db)
 }
 
 // ---- tests ----
@@ -82,11 +89,10 @@ func enabledCfg() CorrelationConfig {
 func TestAlertCorrelator_FlagOff_NoLLMCall(t *testing.T) {
 	db := setupCorrelatorDB(t)
 	seedIncident(t, db, "inc-1", "CPU high on web01", "running", time.Now().Add(-5*time.Minute))
+	// No GeneralSettings row → enabled defaults to false.
 
 	caller := &fakeOneShotLLMCaller{}
-	cfg := enabledCfg()
-	cfg.Enabled = false
-	c := newCorrelator(t, caller, db, cfg)
+	c := newCorrelator(t, caller, db)
 
 	verdict, err := c.Correlate(context.Background(), "src-1", alerts.NormalizedAlert{AlertName: "CPUHigh"})
 	if err != nil {
@@ -104,7 +110,7 @@ func TestAlertCorrelator_NilCaller_NoLLMCall(t *testing.T) {
 	db := setupCorrelatorDB(t)
 	seedIncident(t, db, "inc-2", "CPU high on web01", "running", time.Now().Add(-5*time.Minute))
 
-	c := newCorrelator(t, nil, db, enabledCfg())
+	c := newCorrelator(t, nil, db)
 	verdict, err := c.Correlate(context.Background(), "src-1", alerts.NormalizedAlert{AlertName: "CPUHigh"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -118,9 +124,10 @@ func TestAlertCorrelator_EmptyWindow_NoLLMCall(t *testing.T) {
 	db := setupCorrelatorDB(t)
 	// Seed an incident that is outside the window (2 hours ago, window is 30m).
 	seedIncident(t, db, "inc-old", "CPU high on web01", "running", time.Now().Add(-2*time.Hour))
+	seedCorrelationSettings(t, db, true, 30, 20, 0.7)
 
 	caller := &fakeOneShotLLMCaller{}
-	c := newCorrelator(t, caller, db, enabledCfg())
+	c := newCorrelator(t, caller, db)
 
 	verdict, err := c.Correlate(context.Background(), "src-1", alerts.NormalizedAlert{AlertName: "CPUHigh"})
 	if err != nil {
@@ -137,12 +144,13 @@ func TestAlertCorrelator_EmptyWindow_NoLLMCall(t *testing.T) {
 func TestAlertCorrelator_ConfidentMatch_AboveThreshold(t *testing.T) {
 	db := setupCorrelatorDB(t)
 	seedIncident(t, db, "inc-match", "CPU high on web01", "running", time.Now().Add(-5*time.Minute))
+	seedCorrelationSettings(t, db, true, 30, 20, 0.7)
 
 	caller := &fakeOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		return `{"correlated":true,"incident_uuid":"inc-match","confidence":0.92,"reasoning":"same alert same host"}`, nil
 	}
-	c := newCorrelator(t, caller, db, enabledCfg())
+	c := newCorrelator(t, caller, db)
 
 	verdict, err := c.Correlate(context.Background(), "src-1", alerts.NormalizedAlert{AlertName: "CPUHigh", TargetHost: "web01"})
 	if err != nil {
@@ -165,12 +173,13 @@ func TestAlertCorrelator_ConfidentMatch_AboveThreshold(t *testing.T) {
 func TestAlertCorrelator_ConfidentMatch_BelowThreshold(t *testing.T) {
 	db := setupCorrelatorDB(t)
 	seedIncident(t, db, "inc-low", "CPU high on web01", "running", time.Now().Add(-5*time.Minute))
+	seedCorrelationSettings(t, db, true, 30, 20, 0.7)
 
 	caller := &fakeOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		return `{"correlated":true,"incident_uuid":"inc-low","confidence":0.55,"reasoning":"possibly related"}`, nil
 	}
-	c := newCorrelator(t, caller, db, enabledCfg())
+	c := newCorrelator(t, caller, db)
 
 	verdict, err := c.Correlate(context.Background(), "src-1", alerts.NormalizedAlert{AlertName: "CPUHigh"})
 	if err != nil {
@@ -188,12 +197,13 @@ func TestAlertCorrelator_ConfidentMatch_BelowThreshold(t *testing.T) {
 func TestAlertCorrelator_NotCorrelated(t *testing.T) {
 	db := setupCorrelatorDB(t)
 	seedIncident(t, db, "inc-unrelated", "Disk full on db01", "running", time.Now().Add(-5*time.Minute))
+	seedCorrelationSettings(t, db, true, 30, 20, 0.7)
 
 	caller := &fakeOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		return `{"correlated":false,"incident_uuid":"","confidence":0.1,"reasoning":"different alert"}`, nil
 	}
-	c := newCorrelator(t, caller, db, enabledCfg())
+	c := newCorrelator(t, caller, db)
 
 	verdict, err := c.Correlate(context.Background(), "src-1", alerts.NormalizedAlert{AlertName: "CPUHigh"})
 	if err != nil {
@@ -210,13 +220,14 @@ func TestAlertCorrelator_NotCorrelated(t *testing.T) {
 func TestAlertCorrelator_HallucinatedUUID_ForcedFalse(t *testing.T) {
 	db := setupCorrelatorDB(t)
 	seedIncident(t, db, "inc-real", "CPU high on web01", "running", time.Now().Add(-5*time.Minute))
+	seedCorrelationSettings(t, db, true, 30, 20, 0.7)
 
 	caller := &fakeOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		// LLM returns a UUID that was NOT in the candidate set.
 		return `{"correlated":true,"incident_uuid":"inc-invented-by-llm","confidence":0.95,"reasoning":"hallucinated"}`, nil
 	}
-	c := newCorrelator(t, caller, db, enabledCfg())
+	c := newCorrelator(t, caller, db)
 
 	verdict, err := c.Correlate(context.Background(), "src-1", alerts.NormalizedAlert{AlertName: "CPUHigh"})
 	if err != nil {
@@ -231,9 +242,10 @@ func TestAlertCorrelator_FailedIncidentExcluded(t *testing.T) {
 	db := setupCorrelatorDB(t)
 	// Only a failed incident in the window — should not be a candidate.
 	seedIncident(t, db, "inc-failed", "CPU high on web01", "failed", time.Now().Add(-5*time.Minute))
+	seedCorrelationSettings(t, db, true, 30, 20, 0.7)
 
 	caller := &fakeOneShotLLMCaller{}
-	c := newCorrelator(t, caller, db, enabledCfg())
+	c := newCorrelator(t, caller, db)
 
 	verdict, err := c.Correlate(context.Background(), "src-1", alerts.NormalizedAlert{AlertName: "CPUHigh"})
 	if err != nil {
@@ -250,12 +262,13 @@ func TestAlertCorrelator_FailedIncidentExcluded(t *testing.T) {
 func TestAlertCorrelator_WorkerNotConnected_ReturnedAsIs(t *testing.T) {
 	db := setupCorrelatorDB(t)
 	seedIncident(t, db, "inc-3", "CPU high on web01", "running", time.Now().Add(-5*time.Minute))
+	seedCorrelationSettings(t, db, true, 30, 20, 0.7)
 
 	caller := &fakeOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		return "", ErrWorkerNotConnected
 	}
-	c := newCorrelator(t, caller, db, enabledCfg())
+	c := newCorrelator(t, caller, db)
 
 	_, err := c.Correlate(context.Background(), "src-1", alerts.NormalizedAlert{AlertName: "CPUHigh"})
 	if !errors.Is(err, ErrWorkerNotConnected) {
@@ -266,12 +279,13 @@ func TestAlertCorrelator_WorkerNotConnected_ReturnedAsIs(t *testing.T) {
 func TestAlertCorrelator_MalformedJSON_Silent(t *testing.T) {
 	db := setupCorrelatorDB(t)
 	seedIncident(t, db, "inc-4", "CPU high on web01", "running", time.Now().Add(-5*time.Minute))
+	seedCorrelationSettings(t, db, true, 30, 20, 0.7)
 
 	caller := &fakeOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		return "not valid json", nil
 	}
-	c := newCorrelator(t, caller, db, enabledCfg())
+	c := newCorrelator(t, caller, db)
 
 	verdict, err := c.Correlate(context.Background(), "src-1", alerts.NormalizedAlert{AlertName: "CPUHigh"})
 	if err != nil {
@@ -361,6 +375,72 @@ func TestCorrelationConfigWithDefaults_PreservesNonZero(t *testing.T) {
 	}
 	if !cfg.Enabled {
 		t.Error("Enabled should be preserved")
+	}
+}
+
+// TestAlertCorrelator_DBStoredFlagOff_NoLLMCall verifies that a GeneralSettings
+// row with enabled=false prevents any LLM call even when candidates exist.
+func TestAlertCorrelator_DBStoredFlagOff_NoLLMCall(t *testing.T) {
+	db := setupCorrelatorDB(t)
+	seedIncident(t, db, "inc-db-off", "CPU high on web01", "running", time.Now().Add(-5*time.Minute))
+	// Explicitly seed enabled=false.
+	disabled := false
+	win := 30
+	mc := 20
+	th := 0.7
+	if err := db.Create(&database.GeneralSettings{
+		AlertCorrelationEnabled:       &disabled,
+		AlertCorrelationWindowMinutes: &win,
+		AlertCorrelationMaxCandidates: &mc,
+		AlertCorrelationThreshold:     &th,
+	}).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	caller := &fakeOneShotLLMCaller{}
+	c := newCorrelator(t, caller, db)
+
+	verdict, err := c.Correlate(context.Background(), "src-1", alerts.NormalizedAlert{AlertName: "CPUHigh"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if verdict.Correlated {
+		t.Error("expected Correlated=false when DB-stored enabled=false")
+	}
+	if caller.callCount() != 0 {
+		t.Errorf("expected 0 LLM calls with DB-stored flag off, got %d", caller.callCount())
+	}
+}
+
+// TestAlertCorrelator_DBStoredThreshold_Applied verifies that the threshold read
+// from DB is used for IsConfident checks — a high threshold rejects a moderate
+// confidence verdict.
+func TestAlertCorrelator_DBStoredThreshold_Applied(t *testing.T) {
+	db := setupCorrelatorDB(t)
+	seedIncident(t, db, "inc-thresh", "CPU high on web01", "running", time.Now().Add(-5*time.Minute))
+	// Set threshold=0.9 so 0.85 confidence is below threshold.
+	seedCorrelationSettings(t, db, true, 30, 20, 0.9)
+
+	caller := &fakeOneShotLLMCaller{}
+	caller.respond = func(_ context.Context) (string, error) {
+		return `{"correlated":true,"incident_uuid":"inc-thresh","confidence":0.85,"reasoning":"fairly sure"}`, nil
+	}
+	c := newCorrelator(t, caller, db)
+
+	verdict, err := c.Correlate(context.Background(), "src-1", alerts.NormalizedAlert{AlertName: "CPUHigh", TargetHost: "web01"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !verdict.Correlated {
+		t.Error("expected Correlated=true from LLM response")
+	}
+	// DB threshold is 0.9; Threshold() must also return 0.9.
+	thresh := c.Threshold()
+	if thresh != 0.9 {
+		t.Errorf("expected Threshold()=0.9, got %f", thresh)
+	}
+	if verdict.IsConfident(thresh) {
+		t.Error("expected IsConfident(0.9)=false for confidence 0.85")
 	}
 }
 

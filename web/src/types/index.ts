@@ -468,10 +468,24 @@ export interface GeneralSettings {
   base_url: string;
   created_at: string;
   updated_at: string;
+  // Alert correlation gate (non-nullable after GET hydration with effective defaults)
+  alert_correlation_enabled: boolean;
+  alert_correlation_window_minutes: number;
+  alert_correlation_threshold: number;
+  alert_correlation_max_candidates: number;
+  // Alert suppression gate (non-nullable after GET hydration with effective defaults)
+  alert_suppression_enabled: boolean;
+  alert_suppression_threshold: number;
 }
 
 export interface GeneralSettingsUpdate {
   base_url?: string;
+  alert_correlation_enabled?: boolean;
+  alert_correlation_window_minutes?: number;
+  alert_correlation_threshold?: number;
+  alert_correlation_max_candidates?: number;
+  alert_suppression_enabled?: boolean;
+  alert_suppression_threshold?: number;
 }
 
 // Pagination

@@ -151,7 +151,21 @@ func setupSuppressorHandlerDB(t *testing.T) *gorm.DB {
 		&database.AlertSuppressionLog{},
 		&database.Incident{},
 		&database.SlackSettings{},
+		&database.GeneralSettings{},
 	)
+}
+
+// seedSuppHandlerSettings seeds a GeneralSettings row enabling the suppressor.
+func seedSuppHandlerSettings(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	enabled := true
+	th := 0.7
+	if err := db.Create(&database.GeneralSettings{
+		AlertSuppressionEnabled:   &enabled,
+		AlertSuppressionThreshold: &th,
+	}).Error; err != nil {
+		t.Fatalf("seed GeneralSettings: %v", err)
+	}
 }
 
 // seedHandlerSignature inserts a suppression signature memory for handler tests.
@@ -199,18 +213,14 @@ func newSuppTestAlert() alerts.NormalizedAlert {
 func TestAlertHandler_ConfidentSuppression_NoSpawn(t *testing.T) {
 	db := setupSuppressorHandlerDB(t)
 	seedHandlerSignature(t, db, "cron-disk-nightly", "DiskSpaceLow on cron-01 nightly tmpfs rotation")
+	seedSuppHandlerSettings(t, db)
 
 	caller := &suppOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		return `{"suppressed":true,"signature_name":"cron-disk-nightly","confidence":0.93,"reasoning":"identical rule on same host"}`, nil
 	}
 
-	cfg := services.SuppressionConfig{
-		Enabled:       true,
-		Threshold:     0.7,
-		MaxSignatures: 50,
-	}
-	suppressor := services.NewAlertSuppressor(caller, db, cfg)
+	suppressor := services.NewAlertSuppressor(caller, db)
 
 	svc := &suppGateSkillService{}
 	h := NewAlertHandler(nil, nil, nil, nil, svc, nil, nil)
@@ -244,18 +254,14 @@ func TestAlertHandler_ConfidentSuppression_NoSpawn(t *testing.T) {
 func TestAlertHandler_BelowThresholdSuppression_Spawns(t *testing.T) {
 	db := setupSuppressorHandlerDB(t)
 	seedHandlerSignature(t, db, "maybe-pattern", "Possibly related pattern")
+	seedSuppHandlerSettings(t, db)
 
 	caller := &suppOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
 		return `{"suppressed":true,"signature_name":"maybe-pattern","confidence":0.55,"reasoning":"not certain"}`, nil
 	}
 
-	cfg := services.SuppressionConfig{
-		Enabled:       true,
-		Threshold:     0.7,
-		MaxSignatures: 50,
-	}
-	suppressor := services.NewAlertSuppressor(caller, db, cfg)
+	suppressor := services.NewAlertSuppressor(caller, db)
 
 	svc := &suppGateSkillService{spawnUUID: "new-incident-uuid"}
 	h := NewAlertHandler(nil, nil, nil, nil, svc, nil, nil)
