@@ -74,17 +74,21 @@ func (s *SkillService) SpawnAgentInvocation(rootSkillName string, ctx *IncidentC
 	titleGen := NewTitleGenerator(s.oneShotLLMCaller)
 	title := titleGen.GenerateFallbackTitle(ctx.Message, ctx.Source)
 
+	// Read alert fingerprint from context if set (alert-sourced incidents only).
+	alertFingerprint, _ := ctx.Context["alert_fingerprint"].(string)
+
 	// Create incident record in database with fallback title
 	incident := &database.Incident{
-		UUID:       incidentUUID,
-		Source:     ctx.Source,
-		SourceID:   ctx.SourceID,
-		SourceKind: ctx.SourceKind,
-		SourceUUID: ctx.SourceUUID,
-		Title:      title,
-		Status:     database.IncidentStatusPending,
-		Context:    ctx.Context,
-		WorkingDir: incidentDir, // Working dir is incident root
+		UUID:             incidentUUID,
+		Source:           ctx.Source,
+		SourceID:         ctx.SourceID,
+		SourceKind:       ctx.SourceKind,
+		SourceUUID:       ctx.SourceUUID,
+		Title:            title,
+		Status:           database.IncidentStatusPending,
+		Context:          ctx.Context,
+		WorkingDir:       incidentDir, // Working dir is incident root
+		AlertFingerprint: alertFingerprint,
 	}
 
 	if err := s.db.Create(incident).Error; err != nil {

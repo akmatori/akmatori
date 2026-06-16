@@ -85,12 +85,13 @@ func (c *AlertCorrelator) Threshold() float64 {
 // candidateRow is a minimal projection of the Incident table used for
 // candidate ranking so we don't load full_log into memory.
 type candidateRow struct {
-	UUID      string
-	Title     string
-	Status    string
-	Response  string
-	Context   database.JSONB
-	StartedAt time.Time
+	UUID             string
+	Title            string
+	Status           string
+	Response         string
+	Context          database.JSONB
+	StartedAt        time.Time
+	AlertFingerprint string
 }
 
 // Correlate asks the LLM whether the incoming alert matches a recent incident.
@@ -108,7 +109,9 @@ func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, aler
 		return noMatch, nil
 	}
 
-	candidates, err := c.fetchCandidates(ctx)
+	fingerprint := ComputeAlertFingerprint(sourceUUID, alert.AlertName, alert.TargetHost)
+
+	candidates, err := c.fetchCandidates(ctx, fingerprint)
 	if err != nil {
 		return noMatch, fmt.Errorf("correlate: fetch candidates: %w", err)
 	}
@@ -169,7 +172,13 @@ func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, aler
 // fetchCandidates queries recent alert-sourced incidents that are still active
 // within the correlation window. Failed incidents are excluded because they are
 // not viable targets for recurrence attachment.
-func (c *AlertCorrelator) fetchCandidates(ctx context.Context) ([]candidateRow, error) {
+//
+// When fingerprint is non-empty, the query adds a pre-filter that restricts
+// candidates to incidents with the same alert fingerprint (same rule + host)
+// OR incidents whose fingerprint column is empty (legacy rows created before
+// this field was added). This shrinks the LLM candidate set for exact-match
+// recurrences while staying inclusive for older incidents.
+func (c *AlertCorrelator) fetchCandidates(ctx context.Context, fingerprint string) ([]candidateRow, error) {
 	windowStart := time.Now().Add(-c.cfg.Window)
 	activeStatuses := []string{
 		string(database.IncidentStatusPending),
@@ -179,12 +188,17 @@ func (c *AlertCorrelator) fetchCandidates(ctx context.Context) ([]candidateRow, 
 	}
 
 	var rows []candidateRow
-	err := c.db.WithContext(ctx).
+	q := c.db.WithContext(ctx).
 		Model(&database.Incident{}).
-		Select("uuid, title, status, response, context, started_at").
+		Select("uuid, title, status, response, context, started_at, alert_fingerprint").
 		Where("source_kind = ? AND started_at >= ? AND status IN ?",
-			database.IncidentSourceKindAlert, windowStart, activeStatuses).
-		Order("started_at DESC").
+			database.IncidentSourceKindAlert, windowStart, activeStatuses)
+
+	if fingerprint != "" {
+		q = q.Where("alert_fingerprint = ? OR alert_fingerprint = ''", fingerprint)
+	}
+
+	err := q.Order("started_at DESC").
 		Limit(c.cfg.MaxCandidates).
 		Scan(&rows).Error
 	if err != nil {

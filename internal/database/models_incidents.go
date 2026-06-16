@@ -52,6 +52,14 @@ type Incident struct {
 
 	// Correlation fields — populated when incoming alerts are deduped into this incident
 	CorrelatedCount int `gorm:"default:0" json:"correlated_count"` // number of subsequent alerts collapsed into this incident
+
+	// AlertFingerprint is a stable 32-char hex digest derived from
+	// sha256(json([sourceUUID, lower(alertName), lower(targetHost)])). It is
+	// used to pre-filter the LLM correlation candidate set to same-identity
+	// incidents, reducing the number of rows the LLM must evaluate.
+	// Distinct from SourceFingerprint (adapter-supplied external ID) and
+	// alertSpawnKey (includes SourceFingerprint for exact-burst dedup).
+	AlertFingerprint string `gorm:"size:32;index" json:"alert_fingerprint"`
 }
 
 // BeforeCreate hook to set StartedAt

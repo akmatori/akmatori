@@ -60,6 +60,9 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		rawPayload[k] = v
 	}
 
+	// Compute stable alert fingerprint for correlation candidate pre-filtering.
+	alertFingerprint := services.ComputeAlertFingerprint(instance.UUID, normalized.AlertName, normalized.TargetHost)
+
 	// Create incident context from alert data
 	incidentCtx := &services.IncidentContext{
 		Source:     instance.AlertSourceType.Name,
@@ -84,6 +87,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 			"source_type":        instance.AlertSourceType.Name,
 			"source_instance":    instance.Name,
 			"raw_payload":        rawPayload,
+			"alert_fingerprint":  alertFingerprint,
 		},
 		Message: fmt.Sprintf("%s - %s: %s", normalized.AlertName, normalized.TargetHost, normalized.Summary),
 	}
@@ -214,6 +218,9 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 		sourceInstance = channel.ExternalID
 	}
 
+	// Compute stable alert fingerprint for correlation candidate pre-filtering.
+	alertFingerprint := services.ComputeAlertFingerprint(channel.UUID, normalized.AlertName, normalized.TargetHost)
+
 	// Create incident context from alert data
 	incidentCtx := &services.IncidentContext{
 		Source:     sourceLabel,
@@ -241,6 +248,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 			"raw_payload":        rawPayload,
 			"slack_channel_id":   slackChannelID,
 			"slack_message_ts":   slackMessageTS,
+			"alert_fingerprint":  alertFingerprint,
 		},
 		Message: fmt.Sprintf("%s - %s: %s", normalized.AlertName, normalized.TargetHost, normalized.Summary),
 	}
