@@ -177,6 +177,11 @@ func runMigrations(db *gorm.DB) error {
 		return fmt.Errorf("failed to ensure memories suppress/scope index: %w", err)
 	}
 
+	// Composite index on (scope, type) for scope-scoped type-filtered queries.
+	if err := ensureMemoriesScopeTypeIndex(db); err != nil {
+		return fmt.Errorf("failed to ensure memories scope/type index: %w", err)
+	}
+
 	// Backfill legacy SlackSettings + slack_channel AlertSourceInstance rows
 	// into the new Integration/Channel rows. Read-old → write-new →
 	// don't-delete-old-until-verified, one transaction per step, idempotent
@@ -728,12 +733,12 @@ const memoryCuratorCronName = "memory-curator"
 // summary in the channel can audit what changed without tailing logs.
 const memoryCuratorCronPrompt = `You are running the nightly memory consolidation pass over the global cross-incident memory scope (/akmatori/memory/global/).
 
-Goal: keep the global memory scope tight and high-signal. Concretely:
+Goal: keep the global memory scope tight and high-signal. Focus only on the global scope. Process entries updated in the last 14 days — use the memory-searcher subagent to surface candidates from that window. Concretely:
 
-1. Use the memory-searcher subagent to list current entries — search broadly enough to surface duplicates, near-duplicates, and stale rows.
+1. Use the memory-searcher subagent to list current entries — search broadly enough to surface duplicates, near-duplicates, and stale rows among entries updated in the last 14 days.
 2. For each duplicate or near-duplicate cluster, decide which entry to keep (prefer the most specific, most recent, most operator-validated wording) and which to remove.
 3. For each kept entry that should incorporate facts from a soon-to-be-deleted duplicate, prepare a merged body.
-4. Apply mutations one at a time via the memory-writer subagent:
+4. Apply mutations one at a time via the memory-writer subagent. For each duplicate or superseded entry, emit Action: delete <slug> via memory-writer rather than rewriting both:
    - Action: upsert <slug> — write the merged or refreshed body (memory-writer is idempotent and overwrites by name).
    - Action: delete <slug> — remove a duplicate or obsolete entry.
 5. End with a concise summary of the pass: how many entries scanned, how many merged, how many deleted. List the affected slugs.
@@ -1240,6 +1245,18 @@ func ensureMemoriesSuppressScopeIndex(db *gorm.DB) error {
 	stmt := "CREATE INDEX IF NOT EXISTS idx_memories_suppress_scope ON memories (suppress, scope)"
 	if err := db.Exec(stmt).Error; err != nil {
 		return fmt.Errorf("create idx_memories_suppress_scope: %w", err)
+	}
+	return nil
+}
+
+// ensureMemoriesScopeTypeIndex creates a composite index on (scope, type) to
+// speed up scope-scoped, type-filtered memory queries (e.g. memory-searcher
+// range queries that filter by scope and type). Idempotent (uses IF NOT EXISTS);
+// works on both PostgreSQL and SQLite.
+func ensureMemoriesScopeTypeIndex(db *gorm.DB) error {
+	stmt := "CREATE INDEX IF NOT EXISTS idx_memories_scope_type ON memories (scope, type)"
+	if err := db.Exec(stmt).Error; err != nil {
+		return fmt.Errorf("create idx_memories_scope_type: %w", err)
 	}
 	return nil
 }

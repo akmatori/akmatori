@@ -320,6 +320,13 @@ const (
 	manifestMaxBytes = 25 * 1024
 	manifestFile     = "MEMORY.md"
 
+	// manifestMaxEntriesPerScope caps the number of non-suppress entries written
+	// to a scope's MEMORY.md manifest. Suppress-flagged entries (suppression
+	// signatures) are always included regardless of this limit. Among non-suppress
+	// entries, the most-recently-updated ones fill the available slots; older
+	// entries are excluded from the manifest but their files remain on disk.
+	manifestMaxEntriesPerScope = 150
+
 	// maxMemoryFileBytes caps the per-file size IngestFromDisk will read.
 	// The agent worker has rw access to the shared memory mount, so a
 	// prompt-injected or buggy memory-writer could plant a huge .md and
@@ -429,7 +436,11 @@ func (s *MemoryService) SyncMemoryFiles() error {
 			return writeErr
 		}
 
-		manifest := renderManifest(scope, entries)
+		manifestEntries, truncatedCount := limitManifestEntries(entries, manifestMaxEntriesPerScope)
+		manifest := renderManifest(scope, manifestEntries)
+		if truncatedCount > 0 {
+			manifest += fmt.Sprintf("<!-- truncated: %d more entries not shown -->\n", truncatedCount)
+		}
 		if err := writeMemoryFileInRoot(scopeRoot, manifestFile, []byte(manifest)); err != nil {
 			scopeRoot.Close()
 			return fmt.Errorf("failed to write manifest %s/%s: %w", scope, manifestFile, err)
@@ -1024,6 +1035,46 @@ func renderMemoryFile(m database.Memory) string {
 		}
 	}
 	return b.String()
+}
+
+// limitManifestEntries caps the entry list for a scope's manifest. Suppress-
+// flagged entries always appear regardless of age (they are suppression
+// signatures that the searcher must always see). Among non-suppress entries,
+// the most-recently-updated ones fill up to max slots; any beyond that are
+// excluded and counted in the returned truncatedCount. Files for excluded
+// entries remain on disk — only the manifest is trimmed.
+func limitManifestEntries(entries []database.Memory, max int) (limited []database.Memory, truncated int) {
+	if len(entries) <= max {
+		return entries, 0
+	}
+	var suppress, rest []database.Memory
+	for _, m := range entries {
+		if m.Suppress {
+			suppress = append(suppress, m)
+		} else {
+			rest = append(rest, m)
+		}
+	}
+	// Sort non-suppress entries by most-recently-updated so the cap retains the
+	// freshest facts. The caller (SyncMemoryFiles) fetches by created_at desc;
+	// updated_at is more accurate for "recently changed" here.
+	sort.Slice(rest, func(i, j int) bool {
+		return rest[i].UpdatedAt.After(rest[j].UpdatedAt)
+	})
+	available := max - len(suppress)
+	if available < 0 {
+		available = 0
+	}
+	if len(rest) > available {
+		truncated = len(rest) - available
+		rest = rest[:available]
+	}
+	limited = append(suppress, rest...)
+	// Sort the combined result by updated_at desc for consistent manifest display.
+	sort.Slice(limited, func(i, j int) bool {
+		return limited[i].UpdatedAt.After(limited[j].UpdatedAt)
+	})
+	return limited, truncated
 }
 
 // renderManifest builds the per-scope MEMORY.md table. Hard-capped at

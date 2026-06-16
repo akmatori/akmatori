@@ -1,10 +1,12 @@
 package services
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
 	"gopkg.in/yaml.v3"
@@ -273,4 +275,161 @@ func readFile(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(b)
+}
+
+// TestSyncMemoryFiles_ManifestTruncatesToPerScopeCap verifies that when a scope
+// has more than manifestMaxEntriesPerScope entries, the MEMORY.md manifest is
+// capped to that many entries with a truncation comment, while all files remain
+// on disk.
+func TestSyncMemoryFiles_ManifestTruncatesToPerScopeCap(t *testing.T) {
+	svc := setupMemoryServiceTest(t)
+
+	total := manifestMaxEntriesPerScope + 1
+	for i := 0; i < total; i++ {
+		m := validMemory(fmt.Sprintf("entry-%04d", i))
+		if _, err := svc.CreateMemory(m); err != nil {
+			t.Fatalf("create memory %d: %v", i, err)
+		}
+	}
+
+	if err := svc.SyncMemoryFiles(); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	scopeDir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
+
+	// All files must still be on disk (manifest cap does not delete files).
+	files, err := os.ReadDir(scopeDir)
+	if err != nil {
+		t.Fatalf("read scope dir: %v", err)
+	}
+	mdCount := 0
+	for _, f := range files {
+		if f.Name() != manifestFile && strings.HasSuffix(f.Name(), ".md") {
+			mdCount++
+		}
+	}
+	if mdCount != total {
+		t.Errorf("expected %d .md files on disk, got %d", total, mdCount)
+	}
+
+	// Manifest must be truncated and carry the HTML comment.
+	manifest := readFile(t, filepath.Join(scopeDir, manifestFile))
+	if !strings.Contains(manifest, "<!-- truncated:") {
+		t.Errorf("expected truncation comment in manifest; got:\n%s", manifest)
+	}
+
+	// Count table rows (lines starting with "| `").
+	rows := 0
+	for _, line := range strings.Split(manifest, "\n") {
+		if strings.HasPrefix(line, "| `") {
+			rows++
+		}
+	}
+	if rows != manifestMaxEntriesPerScope {
+		t.Errorf("expected %d manifest rows, got %d", manifestMaxEntriesPerScope, rows)
+	}
+}
+
+// TestSyncMemoryFiles_SuppressEntryAlwaysInManifest verifies that a suppress-
+// flagged memory appears in the manifest even when non-suppress entries fill
+// the manifestMaxEntriesPerScope quota.
+func TestSyncMemoryFiles_SuppressEntryAlwaysInManifest(t *testing.T) {
+	svc := setupMemoryServiceTest(t)
+
+	// Fill the non-suppress quota exactly.
+	for i := 0; i < manifestMaxEntriesPerScope; i++ {
+		m := validMemory(fmt.Sprintf("regular-%04d", i))
+		if _, err := svc.CreateMemory(m); err != nil {
+			t.Fatalf("create regular memory %d: %v", i, err)
+		}
+	}
+
+	// Create a suppress-flagged memory and force an old updated_at so it ranks
+	// below all regular entries by recency.
+	sup := validMemory("suppress-sig")
+	sup.Suppress = true
+	sup.Description = "known false-positive suppression signature"
+	created, err := svc.CreateMemory(sup)
+	if err != nil {
+		t.Fatalf("create suppress memory: %v", err)
+	}
+	oldTime := time.Now().Add(-365 * 24 * time.Hour)
+	if err := svc.db.Model(created).Update("updated_at", oldTime).Error; err != nil {
+		t.Fatalf("force old updated_at: %v", err)
+	}
+
+	if err := svc.SyncMemoryFiles(); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	manifest := readFile(t, filepath.Join(svc.MemoryDir(), MemoryScopeGlobal, manifestFile))
+	if !strings.Contains(manifest, "suppress-sig") {
+		t.Errorf("suppress-flagged entry missing from manifest:\n%s", manifest)
+	}
+}
+
+// TestLimitManifestEntries verifies the helper's core semantics directly.
+func TestLimitManifestEntries(t *testing.T) {
+	now := time.Now()
+	makeEntry := func(name string, suppress bool, age time.Duration) database.Memory {
+		return database.Memory{
+			Name:      name,
+			Suppress:  suppress,
+			UpdatedAt: now.Add(-age),
+		}
+	}
+
+	t.Run("under cap returns unchanged", func(t *testing.T) {
+		entries := []database.Memory{
+			makeEntry("a", false, time.Hour),
+			makeEntry("b", false, 2*time.Hour),
+		}
+		limited, truncated := limitManifestEntries(entries, 5)
+		if len(limited) != 2 || truncated != 0 {
+			t.Errorf("got len=%d truncated=%d, want len=2 truncated=0", len(limited), truncated)
+		}
+	})
+
+	t.Run("non-suppress capped, suppress always included", func(t *testing.T) {
+		var entries []database.Memory
+		entries = append(entries, makeEntry("suppress-old", true, 100*24*time.Hour))
+		for i := 0; i < 5; i++ {
+			entries = append(entries, makeEntry(fmt.Sprintf("reg-%d", i), false, time.Duration(i)*time.Hour))
+		}
+		// cap=4: 1 suppress always + 3 non-suppress slots (4-1=3), 2 non-suppress truncated
+		limited, truncated := limitManifestEntries(entries, 4)
+		if truncated != 2 {
+			t.Errorf("expected 2 truncated, got %d", truncated)
+		}
+		hasSup := false
+		for _, m := range limited {
+			if m.Name == "suppress-old" {
+				hasSup = true
+			}
+		}
+		if !hasSup {
+			t.Errorf("suppress entry missing from limited set: %+v", limited)
+		}
+		if len(limited) != 4 {
+			t.Errorf("expected 4 entries, got %d", len(limited))
+		}
+	})
+
+	t.Run("most-recently-updated non-suppress are retained", func(t *testing.T) {
+		entries := []database.Memory{
+			makeEntry("old", false, 10*time.Hour),
+			makeEntry("newest", false, time.Minute),
+			makeEntry("mid", false, 5*time.Hour),
+		}
+		limited, truncated := limitManifestEntries(entries, 2)
+		if truncated != 1 {
+			t.Errorf("expected 1 truncated, got %d", truncated)
+		}
+		for _, m := range limited {
+			if m.Name == "old" {
+				t.Errorf("oldest entry should have been excluded: %+v", limited)
+			}
+		}
+	})
 }
