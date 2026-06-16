@@ -94,6 +94,57 @@ func TestDecodeJSON_UnknownField(t *testing.T) {
 	}
 }
 
+func TestDecodeJSON_TrailingData(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "second object",
+			body: "{\"name\":\"test\"}{\"name\":\"other\"}",
+		},
+		{
+			name: "second scalar",
+			body: "{\"name\":\"test\"} true",
+		},
+		{
+			name: "non-json suffix",
+			body: "{\"name\":\"test\"} trailing",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := newRequest(tt.body)
+
+			var dst struct {
+				Name string `json:"name"`
+			}
+			err := DecodeJSON(r, &dst)
+			if err == nil {
+				t.Fatal("expected error for trailing data")
+			}
+			if err.Error() != "request body must contain a single JSON value" {
+				t.Errorf("error = %q, want %q", err.Error(), "request body must contain a single JSON value")
+			}
+		})
+	}
+}
+
+func TestDecodeJSON_TrailingWhitespace(t *testing.T) {
+	r := newRequest("{\"name\":\"test\"}\n\t ")
+
+	var dst struct {
+		Name string `json:"name"`
+	}
+	if err := DecodeJSON(r, &dst); err != nil {
+		t.Fatalf("DecodeJSON returned error for trailing whitespace: %v", err)
+	}
+	if dst.Name != "test" {
+		t.Errorf("name = %q, want %q", dst.Name, "test")
+	}
+}
+
 func TestDecodeJSON_OversizedBody(t *testing.T) {
 	// Create a body that exceeds MaxBodySize (1MB)
 	huge := `{"data":"` + strings.Repeat("x", MaxBodySize+1) + `"}`

@@ -27,7 +27,10 @@ func DecodeJSON(r *http.Request, dst interface{}) error {
 
 	err := dec.Decode(dst)
 	if err == nil {
-		return nil
+		if dec.Decode(&struct{}{}) == io.EOF {
+			return nil
+		}
+		return errors.New("request body must contain a single JSON value")
 	}
 
 	// Translate common JSON errors into friendly messages.
