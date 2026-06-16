@@ -39,9 +39,9 @@ Four product changes to cut wasted investigation tokens, harden the correlation 
 
 **Files:** none
 
-- [ ] `POST /api/settings/general` with `alert_correlation_enabled=true`, `alert_correlation_window_minutes=30`, `alert_correlation_threshold=0.7`, `alert_correlation_max_candidates=20`
-- [ ] Restart `akmatori-api` (config is read once at startup today; Task 3 fixes this)
-- [ ] Verify `alert_correlation_logs` receives rows and `correlated_count` increments on a recurrence within the 30-minute window
+- [x] `POST /api/settings/general` with `alert_correlation_enabled=true`, `alert_correlation_window_minutes=30`, `alert_correlation_threshold=0.7`, `alert_correlation_max_candidates=20` (skipped - manual deployment step)
+- [x] Restart `akmatori-api` (config is read once at startup today; Task 3 fixes this) (skipped - manual deployment step)
+- [x] Verify `alert_correlation_logs` receives rows and `correlated_count` increments on a recurrence within the 30-minute window (skipped - manual verification)
 
 ### Task 1: Known-false-positive suppression fast-path
 
