@@ -669,7 +669,9 @@ func TestFetchCandidates_FingerprintWindowMatchAt2h(t *testing.T) {
 	twoHoursAgo := time.Now().Add(-2 * time.Hour)
 	// running status so it also qualifies for long-window, but 2h is within
 	// the fingerprint window (24h) — should appear via query 2, NOT longWindowUUIDs.
-	seedIncidentWithFingerprint(t, db, "fp-2h-inc", "Service down", "completed", fp, twoHoursAgo)
+	// Must NOT be completed: query 2 excludes completed incidents so that
+	// AppendCorrelatedAlert is never called against a closed investigation.
+	seedIncidentWithFingerprint(t, db, "fp-2h-inc", "Service down", "running", fp, twoHoursAgo)
 
 	c := NewAlertCorrelator(nil, db)
 	candidates, longWindowUUIDs, err := c.fetchCandidates(context.Background(), fp, 30*time.Minute, 24*time.Hour, 7, 20)

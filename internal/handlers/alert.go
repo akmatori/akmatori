@@ -262,6 +262,8 @@ func (h *AlertHandler) runRecurrenceUpdate(ctx context.Context, sourceUUID, inci
 	// concurrent recurrences post correct sequence numbers in their Slack messages.
 	if updated, err := h.skillService.GetIncident(incidentUUID); err == nil {
 		recurrenceN = updated.CorrelatedCount
+	} else {
+		slog.Warn("recurrence update: re-read incident failed, using estimated count", "incident_uuid", incidentUUID, "err", err)
 	}
 
 	// Post a short Slack thread reply to the incident's source thread, if known.

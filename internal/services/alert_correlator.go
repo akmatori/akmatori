@@ -274,21 +274,29 @@ func (c *AlertCorrelator) fetchCandidates(ctx context.Context, fingerprint strin
 	longWindowUUIDs := make(map[string]struct{})
 
 	if fingerprint != "" {
-		// Query 2: fingerprint-gated wider window (all active statuses).
+		// Query 2: fingerprint-gated wider window. Exclude completed incidents so a
+		// closed investigation cannot be correlated-into via AppendCorrelatedAlert,
+		// which has no status guard. The LLM system prompt also says not to
+		// correlate resolved incidents, but code-level filtering is the safer boundary.
 		fpWindowStart := time.Now().Add(-fingerprintWindow)
+		nonCompletedStatuses := []string{
+			string(database.IncidentStatusPending),
+			string(database.IncidentStatusRunning),
+			string(database.IncidentStatusDiagnosed),
+		}
 		var fpRows []candidateRow
 		fpErr := c.db.WithContext(ctx).
 			Model(&database.Incident{}).
 			Select("uuid, title, status, response, context, started_at, alert_fingerprint").
 			Where("source_kind = ? AND started_at >= ? AND status IN ?",
-				database.IncidentSourceKindAlert, fpWindowStart, activeStatuses).
+				database.IncidentSourceKindAlert, fpWindowStart, nonCompletedStatuses).
 			Where("alert_fingerprint = ?", fingerprint).
 			Where("NOT EXISTS (SELECT 1 FROM alert_suppression_logs WHERE incident_uuid = incidents.uuid)").
 			Order("started_at DESC").
 			Limit(maxCandidates).
 			Scan(&fpRows).Error
 		if fpErr != nil {
-			slog.Debug("alert correlator: fingerprint-window query failed", "err", fpErr)
+			slog.Warn("alert correlator: fingerprint-window query failed", "err", fpErr)
 		} else {
 			for _, r := range fpRows {
 				if _, already := seenUUIDs[r.UUID]; !already {
@@ -318,7 +326,7 @@ func (c *AlertCorrelator) fetchCandidates(ctx context.Context, fingerprint strin
 				Limit(maxCandidates).
 				Scan(&longRows).Error
 			if longErr != nil {
-				slog.Debug("alert correlator: long-window query failed", "err", longErr)
+				slog.Warn("alert correlator: long-window query failed", "err", longErr)
 			} else {
 				for _, r := range longRows {
 					if _, already := seenUUIDs[r.UUID]; !already {
