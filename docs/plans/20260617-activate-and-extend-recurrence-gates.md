@@ -75,15 +75,15 @@ Recurring real-but-blocked incidents recur over days (not 30m), so each currentl
 - Modify: `internal/database/models_settings.go`
 - Modify: `internal/services/incident_service.go`
 
-- [ ] Add `AlertCorrelationLongWindowDays *int` (default 7) to GeneralSettings; add to AutoMigrate
-- [ ] Add `LongWindowDays int` to CorrelationConfig; populate from AlertCorrelationLongWindowDays (default 7 when nil)
-- [ ] Add `IsLongWindowMatch bool` to CorrelationVerdict
-- [ ] In fetchCandidates: second query for fingerprint-matching incidents with status IN ('running','diagnosed') started within LongWindowDays; dedup by UUID against standard 30m candidates; tag matched rows so the LLM prompt labels them as "known open issue" candidates; set IsLongWindowMatch=true in the verdict when the chosen match came only from this long-window set
-- [ ] In alert_processor.go: when verdict.IsLongWindowMatch is true, call a new runRecurrenceUpdate(ctx, incidentUUID, incoming, verdict) instead of recordRecurrence
-- [ ] runRecurrenceUpdate: calls OneShotLLMCaller with a ~3k-token prompt ("still blocked — generate a 2-sentence delta for the Nth recurrence of this incident"); appends result via AppendCorrelatedAlert (existing atomic method, reuse reasoning field for the delta note); posts a short Slack thread reply to the incident's source channel via ProviderRegistry (reuse incident source channel resolution from alert_processor)
-- [ ] Guard: if incoming fingerprint is empty OR confidence < threshold, fall through to full spawn (fail-open); on OneShotLLMCaller error, fall through to full spawn
-- [ ] Tests: fingerprint + unresolved match at 4 days → IsLongWindowMatch=true, runRecurrenceUpdate called, no full spawn, correlated_count increments; confidence below threshold → full spawn; non-fingerprint at >30m → not long-window matched; resolved incident excluded from long-window candidates; LLM error in runRecurrenceUpdate → falls through to full spawn
-- [ ] `make test`
+- [x] Add `AlertCorrelationLongWindowDays *int` (default 7) to GeneralSettings; add to AutoMigrate
+- [x] Add `LongWindowDays int` to CorrelationConfig; populate from AlertCorrelationLongWindowDays (default 7 when nil)
+- [x] Add `IsLongWindowMatch bool` to CorrelationVerdict
+- [x] In fetchCandidates: second query for fingerprint-matching incidents with status IN ('running','diagnosed') started within LongWindowDays; dedup by UUID against standard 30m candidates; tag matched rows so the LLM prompt labels them as "known open issue" candidates; set IsLongWindowMatch=true in the verdict when the chosen match came only from this long-window set
+- [x] In alert_processor.go: when verdict.IsLongWindowMatch is true, call a new runRecurrenceUpdate(ctx, incidentUUID, incoming, verdict) instead of recordRecurrence
+- [x] runRecurrenceUpdate: calls OneShotLLMCaller with a ~3k-token prompt ("still blocked — generate a 2-sentence delta for the Nth recurrence of this incident"); appends result via AppendCorrelatedAlert (existing atomic method, reuse reasoning field for the delta note); posts a short Slack thread reply to the incident's source channel via ProviderRegistry (reuse incident source channel resolution from alert_processor)
+- [x] Guard: if incoming fingerprint is empty OR confidence < threshold, fall through to full spawn (fail-open); on OneShotLLMCaller error, fall through to full spawn
+- [x] Tests: fingerprint + unresolved match at 4 days → IsLongWindowMatch=true, runRecurrenceUpdate called, no full spawn, correlated_count increments; confidence below threshold → full spawn; non-fingerprint at >30m → not long-window matched; resolved incident excluded from long-window candidates; LLM error in runRecurrenceUpdate → falls through to full spawn
+- [x] `make test`
 
 ### Task 4: Fingerprint-gated adaptive correlation window
 

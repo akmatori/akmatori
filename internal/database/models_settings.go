@@ -201,10 +201,11 @@ type GeneralSettings struct {
 	UpdatedAt time.Time `json:"updated_at"`
 
 	// Alert correlation gate settings (all nullable; nil means use service defaults)
-	AlertCorrelationEnabled       *bool    `gorm:"default:null" json:"alert_correlation_enabled"`
-	AlertCorrelationWindowMinutes *int     `gorm:"default:null" json:"alert_correlation_window_minutes"`
-	AlertCorrelationThreshold     *float64 `gorm:"default:null" json:"alert_correlation_threshold"`
-	AlertCorrelationMaxCandidates *int     `gorm:"default:null" json:"alert_correlation_max_candidates"`
+	AlertCorrelationEnabled         *bool    `gorm:"default:null" json:"alert_correlation_enabled"`
+	AlertCorrelationWindowMinutes   *int     `gorm:"default:null" json:"alert_correlation_window_minutes"`
+	AlertCorrelationThreshold       *float64 `gorm:"default:null" json:"alert_correlation_threshold"`
+	AlertCorrelationMaxCandidates   *int     `gorm:"default:null" json:"alert_correlation_max_candidates"`
+	AlertCorrelationLongWindowDays  *int     `gorm:"default:null" json:"alert_correlation_long_window_days"`
 
 	// Alert suppression gate settings (all nullable; nil means use service defaults)
 	AlertSuppressionEnabled   *bool    `gorm:"default:null" json:"alert_suppression_enabled"`

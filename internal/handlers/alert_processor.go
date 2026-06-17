@@ -118,8 +118,18 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		}
 		if verdict.IsConfident(h.correlationThreshold()) {
 			slog.Info("alert correlated to existing incident", "incident_uuid", verdict.IncidentUUID, "confidence", verdict.Confidence)
-			h.recordRecurrence(context.Background(), instance.UUID, verdict.IncidentUUID, normalized, verdict)
-			return alertSpawnResult{incidentUUID: verdict.IncidentUUID}, nil
+			if verdict.IsLongWindowMatch {
+				// Long-window match: try cheap delta update instead of full spawn.
+				if err := h.runRecurrenceUpdate(context.Background(), instance.UUID, verdict.IncidentUUID, alertFingerprint, normalized, verdict); err != nil {
+					slog.Warn("long-window recurrence update failed, spawning new incident", "err", err, "incident_uuid", verdict.IncidentUUID)
+					// Fall through to suppression gate and full spawn.
+				} else {
+					return alertSpawnResult{incidentUUID: verdict.IncidentUUID}, nil
+				}
+			} else {
+				h.recordRecurrence(context.Background(), instance.UUID, verdict.IncidentUUID, normalized, verdict)
+				return alertSpawnResult{incidentUUID: verdict.IncidentUUID}, nil
+			}
 		}
 
 		// Suppression gate: check if this is a known false positive before spawning.
@@ -282,11 +292,24 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 		}
 		if verdict.IsConfident(h.correlationThreshold()) {
 			slog.Info("listener channel alert correlated to existing incident", "incident_uuid", verdict.IncidentUUID, "confidence", verdict.Confidence)
-			h.recordRecurrence(context.Background(), channel.UUID, verdict.IncidentUUID, normalized, verdict)
-			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, false)
-			h.postSlackThreadReply(slackChannelID, slackMessageTS,
-				fmt.Sprintf("Alert merged into existing incident (ID: %s)", verdict.IncidentUUID))
-			return alertSpawnResult{incidentUUID: verdict.IncidentUUID}, nil
+			if verdict.IsLongWindowMatch {
+				// Long-window match: try cheap delta update instead of full spawn.
+				if err := h.runRecurrenceUpdate(context.Background(), channel.UUID, verdict.IncidentUUID, alertFingerprint, normalized, verdict); err != nil {
+					slog.Warn("long-window recurrence update failed, spawning new incident", "err", err, "incident_uuid", verdict.IncidentUUID)
+					// Fall through to suppression gate and full spawn.
+				} else {
+					h.updateSlackChannelReactions(slackChannelID, slackMessageTS, false)
+					h.postSlackThreadReply(slackChannelID, slackMessageTS,
+						fmt.Sprintf("Alert merged into existing blocked incident (ID: %s)", verdict.IncidentUUID))
+					return alertSpawnResult{incidentUUID: verdict.IncidentUUID}, nil
+				}
+			} else {
+				h.recordRecurrence(context.Background(), channel.UUID, verdict.IncidentUUID, normalized, verdict)
+				h.updateSlackChannelReactions(slackChannelID, slackMessageTS, false)
+				h.postSlackThreadReply(slackChannelID, slackMessageTS,
+					fmt.Sprintf("Alert merged into existing incident (ID: %s)", verdict.IncidentUUID))
+				return alertSpawnResult{incidentUUID: verdict.IncidentUUID}, nil
+			}
 		}
 
 		// Suppression gate: check if this is a known false positive before spawning.

@@ -27,6 +27,10 @@ func applyGeneralSettingsDefaults(s *database.GeneralSettings) {
 		v := 20
 		s.AlertCorrelationMaxCandidates = &v
 	}
+	if s.AlertCorrelationLongWindowDays == nil {
+		v := 7
+		s.AlertCorrelationLongWindowDays = &v
+	}
 	if s.AlertSuppressionEnabled == nil {
 		v := false
 		s.AlertSuppressionEnabled = &v
@@ -95,6 +99,13 @@ func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Reques
 				return
 			}
 			settings.AlertCorrelationMaxCandidates = req.AlertCorrelationMaxCandidates
+		}
+		if req.AlertCorrelationLongWindowDays != nil {
+			if *req.AlertCorrelationLongWindowDays < 1 || *req.AlertCorrelationLongWindowDays > 90 {
+				api.RespondError(w, http.StatusBadRequest, "alert_correlation_long_window_days must be between 1 and 90")
+				return
+			}
+			settings.AlertCorrelationLongWindowDays = req.AlertCorrelationLongWindowDays
 		}
 		if req.AlertSuppressionEnabled != nil {
 			settings.AlertSuppressionEnabled = req.AlertSuppressionEnabled

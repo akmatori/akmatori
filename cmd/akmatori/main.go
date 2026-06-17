@@ -244,6 +244,9 @@ func main() {
 	alertHandler.SetAlertSuppressor(alertSuppressor)
 	slog.Info("alert suppressor ready (live config)")
 
+	// Wire the one-shot LLM caller for long-window recurrence delta updates.
+	alertHandler.SetOneShotCaller(agentWSHandler)
+
 	// Set up event handler for when Slack connects
 	// Note: We receive the client directly to avoid deadlock (can't call GetClient while holding lock)
 	slackManager.SetEventHandler(func(socketClient *socketmode.Client, client *slack.Client) {

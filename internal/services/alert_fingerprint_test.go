@@ -124,7 +124,7 @@ func TestFetchCandidates_FingerprintFilter(t *testing.T) {
 
 	c := NewAlertCorrelator(nil, db)
 
-	candidates, err := c.fetchCandidates(context.Background(), fp, 30*time.Minute, 20)
+	candidates, _, err := c.fetchCandidates(context.Background(), fp, 30*time.Minute, 7, 20)
 	if err != nil {
 		t.Fatalf("fetchCandidates: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestFetchCandidates_EmptyFingerprintPassthrough(t *testing.T) {
 	c := NewAlertCorrelator(nil, db)
 
 	// Pass empty fingerprint — all qualifying candidates should be returned.
-	candidates, err := c.fetchCandidates(context.Background(), "", 30*time.Minute, 20)
+	candidates, _, err := c.fetchCandidates(context.Background(), "", 30*time.Minute, 7, 20)
 	if err != nil {
 		t.Fatalf("fetchCandidates: %v", err)
 	}

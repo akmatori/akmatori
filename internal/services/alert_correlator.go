@@ -20,12 +20,13 @@ const correlationTimeout = 15 * time.Second
 // All fields have documented defaults; zero values fall back to those defaults
 // when the config is constructed via CorrelationConfigWithDefaults.
 //
-// Defaults: Window=30m, MaxCandidates=20, Threshold=0.7, Enabled=false.
+// Defaults: Window=30m, MaxCandidates=20, Threshold=0.7, LongWindowDays=7, Enabled=false.
 type CorrelationConfig struct {
-	Enabled       bool
-	Window        time.Duration // how far back to search for candidate incidents
-	MaxCandidates int           // LIMIT on the candidate query
-	Threshold     float64       // minimum confidence to collapse the alert
+	Enabled        bool
+	Window         time.Duration // how far back to search for candidate incidents
+	MaxCandidates  int           // LIMIT on the candidate query
+	Threshold      float64       // minimum confidence to collapse the alert
+	LongWindowDays int           // lookback in days for fingerprint-matching unresolved incidents
 }
 
 // CorrelationConfigWithDefaults returns a config with documented defaults
@@ -41,15 +42,19 @@ func CorrelationConfigWithDefaults(c CorrelationConfig) CorrelationConfig {
 	if c.Threshold <= 0 {
 		c.Threshold = 0.7
 	}
+	if c.LongWindowDays <= 0 {
+		c.LongWindowDays = 7
+	}
 	return c
 }
 
 // CorrelationVerdict is the structured output from the correlation gate.
 type CorrelationVerdict struct {
-	Correlated   bool    `json:"correlated"`
-	IncidentUUID string  `json:"incident_uuid"`
-	Confidence   float64 `json:"confidence"`
-	Reasoning    string  `json:"reasoning"`
+	Correlated      bool    `json:"correlated"`
+	IncidentUUID    string  `json:"incident_uuid"`
+	Confidence      float64 `json:"confidence"`
+	Reasoning       string  `json:"reasoning"`
+	IsLongWindowMatch bool  `json:"-"` // true when match came exclusively from the long-window query
 }
 
 // IsConfident returns true when the verdict indicates a match with confidence
@@ -91,6 +96,9 @@ func (c *AlertCorrelator) loadConfig() (CorrelationConfig, error) {
 	}
 	if gs.AlertCorrelationMaxCandidates != nil {
 		cfg.MaxCandidates = *gs.AlertCorrelationMaxCandidates
+	}
+	if gs.AlertCorrelationLongWindowDays != nil && *gs.AlertCorrelationLongWindowDays > 0 {
+		cfg.LongWindowDays = *gs.AlertCorrelationLongWindowDays
 	}
 	return CorrelationConfigWithDefaults(cfg), nil
 }
@@ -141,7 +149,7 @@ func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, aler
 
 	fingerprint := ComputeAlertFingerprint(sourceUUID, alert.AlertName, alert.TargetHost)
 
-	candidates, err := c.fetchCandidates(ctx, fingerprint, cfg.Window, cfg.MaxCandidates)
+	candidates, longWindowUUIDs, err := c.fetchCandidates(ctx, fingerprint, cfg.Window, cfg.LongWindowDays, cfg.MaxCandidates)
 	if err != nil {
 		return noMatch, fmt.Errorf("correlate: fetch candidates: %w", err)
 	}
@@ -161,7 +169,7 @@ func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, aler
 		return noMatch, fmt.Errorf("correlate: could not build LLM worker settings")
 	}
 
-	userPrompt := buildCorrelationUserPrompt(alert, candidates)
+	userPrompt := buildCorrelationUserPrompt(alert, candidates, longWindowUUIDs)
 
 	callCtx, cancel := context.WithTimeout(ctx, correlationTimeout)
 	defer cancel()
@@ -194,6 +202,11 @@ func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, aler
 			slog.Debug("alert correlator: hallucinated UUID rejected", "uuid", verdict.IncidentUUID)
 			return noMatch, nil
 		}
+		// Mark as long-window when the matched incident was sourced exclusively
+		// from the long-window query (not present in the standard-window candidates).
+		if _, ok := longWindowUUIDs[verdict.IncidentUUID]; ok {
+			verdict.IsLongWindowMatch = true
+		}
 	}
 
 	return verdict, nil
@@ -208,7 +221,13 @@ func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, aler
 // OR incidents whose fingerprint column is empty (legacy rows created before
 // this field was added). This shrinks the LLM candidate set for exact-match
 // recurrences while staying inclusive for older incidents.
-func (c *AlertCorrelator) fetchCandidates(ctx context.Context, fingerprint string, window time.Duration, maxCandidates int) ([]candidateRow, error) {
+//
+// A second query looks for fingerprint-matching incidents with status IN
+// ('running','diagnosed') that started within the long-window (default 7d).
+// These represent known-open blocked incidents. Returned UUIDs that appear
+// exclusively in the long-window set are tracked in longWindowUUIDs so the
+// caller can set IsLongWindowMatch on the verdict.
+func (c *AlertCorrelator) fetchCandidates(ctx context.Context, fingerprint string, window time.Duration, longWindowDays int, maxCandidates int) ([]candidateRow, map[string]struct{}, error) {
 	windowStart := time.Now().Add(-window)
 	activeStatuses := []string{
 		string(database.IncidentStatusPending),
@@ -233,15 +252,59 @@ func (c *AlertCorrelator) fetchCandidates(ctx context.Context, fingerprint strin
 		Limit(maxCandidates).
 		Scan(&rows).Error
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return rows, nil
+
+	// Build a set of UUIDs already returned by the standard window query.
+	standardUUIDs := make(map[string]struct{}, len(rows))
+	for _, r := range rows {
+		standardUUIDs[r.UUID] = struct{}{}
+	}
+
+	// Second query: fingerprint-matching unresolved incidents from the long window.
+	// Only run when fingerprint is non-empty (no fingerprint → no long-window match).
+	longWindowUUIDs := make(map[string]struct{})
+	if fingerprint != "" && longWindowDays > 0 {
+		longWindowStart := time.Now().Add(-time.Duration(longWindowDays) * 24 * time.Hour)
+		openStatuses := []string{
+			string(database.IncidentStatusRunning),
+			string(database.IncidentStatusDiagnosed),
+		}
+
+		var longRows []candidateRow
+		longErr := c.db.WithContext(ctx).
+			Model(&database.Incident{}).
+			Select("uuid, title, status, response, context, started_at, alert_fingerprint").
+			Where("source_kind = ? AND started_at >= ? AND status IN ?",
+				database.IncidentSourceKindAlert, longWindowStart, openStatuses).
+			Where("alert_fingerprint = ?", fingerprint).
+			Where("NOT EXISTS (SELECT 1 FROM alert_suppression_logs WHERE incident_uuid = incidents.uuid)").
+			Order("started_at DESC").
+			Limit(maxCandidates).
+			Scan(&longRows).Error
+		if longErr != nil {
+			// Non-fatal: proceed with standard candidates only.
+			slog.Debug("alert correlator: long-window query failed", "err", longErr)
+		} else {
+			for _, r := range longRows {
+				if _, alreadyIn := standardUUIDs[r.UUID]; !alreadyIn {
+					rows = append(rows, r)
+					longWindowUUIDs[r.UUID] = struct{}{}
+				}
+			}
+		}
+	}
+
+	return rows, longWindowUUIDs, nil
 }
 
 // buildCorrelationUserPrompt produces the numbered candidate list shown to the
 // LLM. Each candidate includes its UUID, status, age, title, and a capped
-// summary snippet so the prompt stays manageable.
-func buildCorrelationUserPrompt(alert alerts.NormalizedAlert, candidates []candidateRow) string {
+// summary snippet so the prompt stays manageable. Long-window candidates
+// (incidents that are known-open beyond the standard correlation window) are
+// labeled as "[KNOWN OPEN ISSUE]" so the LLM can distinguish them from
+// recently-started candidates.
+func buildCorrelationUserPrompt(alert alerts.NormalizedAlert, candidates []candidateRow, longWindowUUIDs map[string]struct{}) string {
 	const snippetCap = 200
 
 	var sb strings.Builder
@@ -273,8 +336,13 @@ func buildCorrelationUserPrompt(alert alerts.NormalizedAlert, candidates []candi
 			}
 		}
 
+		statusLabel := cand.Status
+		if _, isLong := longWindowUUIDs[cand.UUID]; isLong {
+			statusLabel = cand.Status + " [KNOWN OPEN ISSUE — still active after extended period]"
+		}
+
 		sb.WriteString(fmt.Sprintf("\n%d. UUID: %s\n   Status: %s | Age: %s\n   Title: %s\n",
-			i+1, cand.UUID, cand.Status, age, sanitizeForPrompt(title)))
+			i+1, cand.UUID, statusLabel, age, sanitizeForPrompt(title)))
 		if snippet != "" {
 			sb.WriteString(fmt.Sprintf("   Snippet: %s\n", snippet))
 		}
