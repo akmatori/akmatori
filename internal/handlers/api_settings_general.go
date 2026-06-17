@@ -141,9 +141,9 @@ func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Reques
 			if settings.AlertCorrelationLongWindowDays != nil {
 				lwDays = *settings.AlertCorrelationLongWindowDays
 			}
-			if fpMins > lwDays*1440 {
+			if fpMins >= lwDays*1440 {
 				api.RespondError(w, http.StatusBadRequest,
-					"alert_correlation_fingerprint_window_minutes must not exceed alert_correlation_long_window_days × 1440")
+					"alert_correlation_fingerprint_window_minutes must be strictly less than alert_correlation_long_window_days × 1440")
 				return
 			}
 		}

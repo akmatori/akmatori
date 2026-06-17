@@ -201,8 +201,7 @@ func TestHandleGeneralSettings_FingerprintWindowMinutes_InvalidValue(t *testing.
 }
 
 // TestHandleGeneralSettings_CrossFieldValidation verifies that the cross-field
-// check (fpMins <= lwDays*1440) accepts boundary values and rejects only values
-// that strictly exceed the long window.
+// check (fpMins < lwDays*1440) rejects values equal to or exceeding the long window.
 func TestHandleGeneralSettings_CrossFieldValidation(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -210,13 +209,21 @@ func TestHandleGeneralSettings_CrossFieldValidation(t *testing.T) {
 		wantOK bool
 	}{
 		{
-			"max fingerprint window with default long window (boundary, must accept)",
+			"max fingerprint window equals default long window (boundary, must reject)",
 			map[string]interface{}{"alert_correlation_fingerprint_window_minutes": 10080},
-			true,
+			false,
 		},
 		{
-			"min long window with default fingerprint window (boundary, must accept)",
+			"min long window equals default fingerprint window (boundary, must reject)",
 			map[string]interface{}{"alert_correlation_long_window_days": 1},
+			false,
+		},
+		{
+			"fingerprint window strictly less than long window (valid, must accept)",
+			map[string]interface{}{
+				"alert_correlation_fingerprint_window_minutes": 720,
+				"alert_correlation_long_window_days":           2,
+			},
 			true,
 		},
 		{
