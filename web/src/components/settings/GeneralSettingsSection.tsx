@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Save, Info } from 'lucide-react';
+import { Save, Info, AlertTriangle } from 'lucide-react';
 import LoadingSpinner from '../LoadingSpinner';
 import ErrorMessage from '../ErrorMessage';
 import { SuccessMessage } from '../ErrorMessage';
-import { generalSettingsApi } from '../../api/client';
-import type { GeneralSettings as GeneralSettingsType } from '../../types';
+import { generalSettingsApi, recurrenceStatsApi } from '../../api/client';
+import type { GeneralSettings as GeneralSettingsType, RecurrenceStats } from '../../types';
 
 interface GeneralSettingsSectionProps {
   onStatusChange?: (status: 'configured' | undefined) => void;
@@ -29,9 +29,22 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
   const [suppressionEnabled, setSuppressionEnabled] = useState(false);
   const [suppressionThreshold, setSuppressionThreshold] = useState(0.7);
 
+  // Recurrence stats for warning badges
+  const [recurrenceStats, setRecurrenceStats] = useState<RecurrenceStats | null>(null);
+
   useEffect(() => {
     loadGeneralSettings();
+    loadRecurrenceStats();
   }, []);
+
+  const loadRecurrenceStats = async () => {
+    try {
+      const stats = await recurrenceStatsApi.get();
+      setRecurrenceStats(stats);
+    } catch {
+      // Stats are best-effort; don't block the settings form on failure.
+    }
+  };
 
   const loadGeneralSettings = async () => {
     try {
@@ -128,6 +141,12 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
           <label htmlFor="correlation-enabled" className="text-sm text-gray-700 dark:text-gray-300">
             Enable alert correlation gate
           </label>
+          {!correlationEnabled && recurrenceStats && recurrenceStats.redundancy_rate_24h > 0.2 && (
+            <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 font-medium">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              {Math.round(recurrenceStats.redundancy_rate_24h * 100)}% redundancy in last 24h
+            </span>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -210,6 +229,12 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
           <label htmlFor="suppression-enabled" className="text-sm text-gray-700 dark:text-gray-300">
             Enable alert suppression gate
           </label>
+          {!suppressionEnabled && recurrenceStats && recurrenceStats.redundancy_rate_24h > 0.2 && (
+            <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 font-medium">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              {Math.round(recurrenceStats.redundancy_rate_24h * 100)}% redundancy in last 24h
+            </span>
+          )}
         </div>
 
         <div className="w-1/3">

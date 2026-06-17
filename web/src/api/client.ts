@@ -41,6 +41,7 @@ import type {
   CronJob,
   CreateCronJobRequest,
   UpdateCronJobRequest,
+  RecurrenceStats,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
@@ -579,6 +580,11 @@ export const cronJobsApi = {
     fetchApi<{ status: string }>(`/api/cron-jobs/${uuid}/run`, {
       method: 'POST',
     }),
+};
+
+// Recurrence stats API
+export const recurrenceStatsApi = {
+  get: () => fetchApi<RecurrenceStats>('/api/stats/recurrence'),
 };
 
 // Memories API

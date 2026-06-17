@@ -114,11 +114,11 @@ Close the loop so operators can see the 40% fingerprint redundancy and whether t
 - Create: `web/src/components/settings/RecurrenceStatsPanel.tsx`
 - Modify: `web/src/components/settings/GeneralSettingsSection.tsx`
 
-- [ ] Add `GET /api/stats/recurrence` returning: top-10 fingerprints by correlated_count (last 7d with alert_name + target_host), estimated tokens saved (correlated_count × 412000 per entry), gate hit-rates from alert_correlation_logs and alert_suppression_logs (last 24h and last 7d), candidate suppression signatures (incident_pattern/feedback memories from benign-verdict incidents without suppress=true, last 7d)
-- [ ] In GeneralSettingsSection.tsx: fetch /api/stats/recurrence on load; show a yellow warning badge next to each gate toggle when that gate is disabled AND fingerprint redundancy rate (sum(correlated_count) / total incident count, last 24h) exceeds 20%
-- [ ] RecurrenceStatsPanel.tsx: fingerprint groups table (rule + host + count + est. saved tokens), gate hit-rate numbers (correlation gate: N correlated / M total; suppression gate: N suppressed / M total), candidate signature list with "Mark as signature" quick-action that calls PATCH /api/memories/{id}/suppress; embed panel in settings page alongside SuppressionSignaturesSection
-- [ ] Tests: /api/stats/recurrence aggregate counts match direct DB queries with seeded data; warning condition fires when gate is false and redundancy >20%; candidate list excludes suppress=true memories
-- [ ] `make test` + `make test-web`
+- [x] Add `GET /api/stats/recurrence` returning: top-10 fingerprints by correlated_count (last 7d with alert_name + target_host), estimated tokens saved (correlated_count × 412000 per entry), gate hit-rates from alert_correlation_logs and alert_suppression_logs (last 24h and last 7d), candidate suppression signatures (incident_pattern/feedback memories from benign-verdict incidents without suppress=true, last 7d)
+- [x] In GeneralSettingsSection.tsx: fetch /api/stats/recurrence on load; show a yellow warning badge next to each gate toggle when that gate is disabled AND fingerprint redundancy rate (sum(correlated_count) / total incident count, last 24h) exceeds 20%
+- [x] RecurrenceStatsPanel.tsx: fingerprint groups table (rule + host + count + est. saved tokens), gate hit-rate numbers (correlation gate: N correlated / M total; suppression gate: N suppressed / M total), candidate signature list with "Mark as signature" quick-action that calls PATCH /api/memories/{id}/suppress; embed panel in settings page alongside SuppressionSignaturesSection
+- [x] Tests: /api/stats/recurrence aggregate counts match direct DB queries with seeded data; warning condition fires when gate is false and redundancy >20%; candidate list excludes suppress=true memories
+- [x] `make test` + `make test-web`
 
 ### Task 6: Verify acceptance criteria
 

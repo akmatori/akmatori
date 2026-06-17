@@ -531,3 +531,31 @@ export interface SSHHostConfig {
   jumphost_port?: number;
   allow_write_commands?: boolean;
 }
+
+// Recurrence stats
+export interface FingerprintGroup {
+  alert_name: string;
+  target_host: string;
+  fingerprint: string;
+  recurrence_count: number;
+  est_tokens_saved: number;
+}
+
+export interface GateRate {
+  hits: number;
+  total: number;
+}
+
+export interface GateHitRates {
+  correlation_24h: GateRate;
+  correlation_7d: GateRate;
+  suppression_24h: GateRate;
+  suppression_7d: GateRate;
+}
+
+export interface RecurrenceStats {
+  fingerprint_groups: FingerprintGroup[];
+  gate_hit_rates: GateHitRates;
+  candidate_signatures: Memory[];
+  redundancy_rate_24h: number;
+}

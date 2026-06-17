@@ -178,6 +178,9 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/alert-sources", h.handleAlertSources)
 	mux.HandleFunc("/api/alert-sources/", h.handleAlertSourceByUUID)
 
+	// Recurrence and gate-effectiveness observability
+	mux.HandleFunc("GET /api/stats/recurrence", h.handleRecurrenceStats)
+
 	// API documentation (public, no auth required)
 	mux.HandleFunc("GET /api/docs", h.handleDocs)
 	mux.HandleFunc("GET /api/openapi.yaml", h.handleOpenAPISpec)
