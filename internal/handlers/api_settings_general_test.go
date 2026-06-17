@@ -199,3 +199,53 @@ func TestHandleGeneralSettings_FingerprintWindowMinutes_InvalidValue(t *testing.
 		})
 	}
 }
+
+// TestHandleGeneralSettings_CrossFieldValidation verifies that the cross-field
+// check (fpMins <= lwDays*1440) accepts boundary values and rejects only values
+// that strictly exceed the long window.
+func TestHandleGeneralSettings_CrossFieldValidation(t *testing.T) {
+	cases := []struct {
+		name   string
+		body   map[string]interface{}
+		wantOK bool
+	}{
+		{
+			"max fingerprint window with default long window (boundary, must accept)",
+			map[string]interface{}{"alert_correlation_fingerprint_window_minutes": 10080},
+			true,
+		},
+		{
+			"min long window with default fingerprint window (boundary, must accept)",
+			map[string]interface{}{"alert_correlation_long_window_days": 1},
+			true,
+		},
+		{
+			"fingerprint window exceeds long window (must reject)",
+			map[string]interface{}{
+				"alert_correlation_fingerprint_window_minutes": 10081,
+				"alert_correlation_long_window_days":           7,
+			},
+			false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			testhelpers.NewGlobalSQLiteDB(t, &database.GeneralSettings{})
+			h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+			b, _ := json.Marshal(tc.body)
+			req := httptest.NewRequest(http.MethodPut, "/api/settings/general", bytes.NewBuffer(b))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			h.handleGeneralSettings(rec, req)
+
+			if tc.wantOK && rec.Code != http.StatusOK {
+				t.Errorf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if !tc.wantOK && rec.Code != http.StatusBadRequest {
+				t.Errorf("expected 400 Bad Request, got %d: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}

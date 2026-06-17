@@ -62,13 +62,13 @@ func (h *APIHandler) handleRecurrenceStats(w http.ResponseWriter, r *http.Reques
 	}
 	var fpRows []fpRow
 	if err := database.DB.Raw(`
-		SELECT acl.alert_name, acl.target_host, i.alert_fingerprint AS fingerprint,
-		       COUNT(acl.id) AS recurrence_count
+		SELECT MIN(acl.alert_name) AS alert_name, MIN(acl.target_host) AS target_host,
+		       i.alert_fingerprint AS fingerprint, COUNT(acl.id) AS recurrence_count
 		FROM alert_correlation_logs acl
 		JOIN incidents i ON i.uuid = acl.matched_incident_uuid
 		WHERE acl.created_at >= ?
 		  AND i.alert_fingerprint != ''
-		GROUP BY acl.alert_name, acl.target_host, i.alert_fingerprint
+		GROUP BY i.alert_fingerprint
 		ORDER BY recurrence_count DESC
 		LIMIT 10
 	`, ago7d).Scan(&fpRows).Error; err != nil {

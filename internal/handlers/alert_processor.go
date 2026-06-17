@@ -174,6 +174,13 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 			}
 		}
 
+		// Persist Slack context so long-window recurrence updates can post thread replies.
+		if channelID != "" && threadTS != "" {
+			if err := h.updateIncidentSlackContext(incidentUUID, channelID, threadTS); err != nil {
+				slog.Warn("failed to update incident Slack context", "err", err)
+			}
+		}
+
 		// Update incident status and run investigation
 		if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
 			slog.Warn("failed to update incident status", "err", err)
