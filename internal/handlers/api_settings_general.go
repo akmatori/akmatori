@@ -129,6 +129,25 @@ func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Reques
 			settings.AlertSuppressionThreshold = req.AlertSuppressionThreshold
 		}
 
+		// Cross-field: fingerprint window must be shorter than the long window, otherwise
+		// the dedup logic in fetchCandidates absorbs all long-window candidates into query 2
+		// and IsLongWindowMatch is never set, silently killing the cheap recurrence path.
+		{
+			fpMins := 1440
+			if settings.AlertCorrelationFingerprintWindowMinutes != nil {
+				fpMins = *settings.AlertCorrelationFingerprintWindowMinutes
+			}
+			lwDays := 7
+			if settings.AlertCorrelationLongWindowDays != nil {
+				lwDays = *settings.AlertCorrelationLongWindowDays
+			}
+			if fpMins >= lwDays*1440 {
+				api.RespondError(w, http.StatusBadRequest,
+					"alert_correlation_fingerprint_window_minutes must be less than alert_correlation_long_window_days × 1440")
+				return
+			}
+		}
+
 		if err := database.UpdateGeneralSettings(settings); err != nil {
 			api.RespondError(w, http.StatusInternalServerError, "Failed to update general settings")
 			return

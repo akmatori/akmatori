@@ -23,7 +23,7 @@ export default function SuppressionSignaturesSection() {
       const all = await memoriesApi.list();
       setSignatures(all.filter((m) => m.suppress));
       // Candidate signatures: incident_pattern memories without suppress=true
-      setCandidates(all.filter((m) => m.type === 'incident_pattern' && !m.suppress));
+      setCandidates(all.filter((m) => (m.type === 'incident_pattern' || m.type === 'feedback') && !m.suppress));
     } catch (err) {
       setError('Failed to load memories');
       console.error(err);

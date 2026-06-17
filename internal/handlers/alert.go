@@ -260,7 +260,7 @@ func (h *AlertHandler) runRecurrenceUpdate(ctx context.Context, sourceUUID, inci
 
 	// Post a short Slack thread reply to the incident's source thread, if known.
 	if incident.SlackChannelID != "" && incident.SlackMessageTS != "" {
-		msg := fmt.Sprintf("Recurring alert #%d: %s", recurrenceN, truncateForSlack(deltaNote, 300))
+		msg := fmt.Sprintf("Recurring alert #%d: %s", recurrenceN, truncateForSlack(reasoning, 300))
 		h.postSlackThreadReply(incident.SlackChannelID, incident.SlackMessageTS, msg)
 	}
 
