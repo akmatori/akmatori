@@ -339,6 +339,31 @@ func TestWebhookHandler_AlertmanagerEndpointUsesRealServiceAndAdapter(t *testing
 			expectedBody:   "Received 0 alerts",
 		},
 		{
+			name: "valid resolved multi-alert batch",
+			body: `{
+				"status": "resolved",
+				"alerts": [
+					{
+						"status": "resolved",
+						"labels": {"alertname": "HighCPU", "severity": "critical", "instance": "api-01"},
+						"annotations": {"summary": "CPU recovered"},
+						"fingerprint": "fp-high-cpu",
+						"endsAt": "2026-06-17T16:00:00Z"
+					},
+					{
+						"status": "resolved",
+						"labels": {"alertname": "DiskFull", "severity": "warning", "instance": "db-01"},
+						"annotations": {"summary": "Disk usage recovered"},
+						"fingerprint": "fp-disk-full",
+						"endsAt": "2026-06-17T16:01:00Z"
+					}
+				]
+			}`,
+			secret:         "webhook-secret",
+			expectedStatus: http.StatusOK,
+			expectedBody:   "Received 2 alerts",
+		},
+		{
 			name:           "invalid secret rejected before parsing",
 			body:           `{"alerts":[]}`,
 			secret:         "wrong-secret",
