@@ -167,7 +167,9 @@ func (s *MemoryService) SetSuppress(id uint, suppress bool) error {
 		return errMemoryNotFound
 	}
 	if err := s.SyncMemoryFiles(); err != nil {
-		return fmt.Errorf("suppress updated but file sync failed: %w", err)
+		// Sync is best-effort: the DB update already succeeded and the sync
+		// will be retried on the next memory write operation.
+		slog.Warn("suppress flag updated but file sync failed", "id", id, "err", err)
 	}
 	return nil
 }

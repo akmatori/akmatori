@@ -7,6 +7,7 @@ import type { RecurrenceStats, Memory } from '../../types';
 
 interface RecurrenceStatsPanelProps {
   onStatsLoaded?: (stats: RecurrenceStats) => void;
+  onSignatureMarked?: () => void;
 }
 
 function rateLabel(hits: number, total: number): string {
@@ -14,7 +15,7 @@ function rateLabel(hits: number, total: number): string {
   return `${hits} / ${total}`;
 }
 
-export default function RecurrenceStatsPanel({ onStatsLoaded }: RecurrenceStatsPanelProps) {
+export default function RecurrenceStatsPanel({ onStatsLoaded, onSignatureMarked }: RecurrenceStatsPanelProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<RecurrenceStats | null>(null);
@@ -44,6 +45,7 @@ export default function RecurrenceStatsPanel({ onStatsLoaded }: RecurrenceStatsP
     try {
       await memoriesApi.setSuppress(mem.id, true);
       await loadStats();
+      onSignatureMarked?.();
     } catch (err) {
       setError('Failed to flag signature');
       console.error(err);

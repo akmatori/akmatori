@@ -123,6 +123,7 @@ export default function Settings() {
   const [generalStatus, setGeneralStatus] = useState<'configured' | undefined>();
   const [retentionStatus, setRetentionStatus] = useState<'configured' | 'disabled' | undefined>();
   const [formattingStatus, setFormattingStatus] = useState<'configured' | 'disabled' | undefined>();
+  const [suppressionRefreshKey, setSuppressionRefreshKey] = useState(0);
 
   return (
     <div className="animate-fade-in max-w-3xl mx-auto">
@@ -149,12 +150,12 @@ export default function Settings() {
           icon={BarChart2}
         >
           <div className="space-y-6">
-            <RecurrenceStatsPanel />
+            <RecurrenceStatsPanel onSignatureMarked={() => setSuppressionRefreshKey((k) => k + 1)} />
             <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
               <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
                 Suppression Signatures
               </h3>
-              <SuppressionSignaturesSection />
+              <SuppressionSignaturesSection key={suppressionRefreshKey} />
             </div>
           </div>
         </SettingsSection>

@@ -233,7 +233,7 @@ func (h *AlertHandler) runRecurrenceUpdate(ctx context.Context, sourceUUID, inci
 	userPrompt := fmt.Sprintf(
 		"Incident: %s\nStatus: %s\nAlert: %s (host: %s)\nThis is recurrence #%d of this alert. Previous correlation reasoning: %s\n\nWrite 2 sentences as a delta update for the incident timeline.",
 		sanitizeRecurrenceField(incident.Title),
-		incident.Status,
+		sanitizeRecurrenceField(string(incident.Status)),
 		sanitizeRecurrenceField(alert.AlertName),
 		sanitizeRecurrenceField(alert.TargetHost),
 		recurrenceN,
@@ -256,6 +256,12 @@ func (h *AlertHandler) runRecurrenceUpdate(ctx context.Context, sourceUUID, inci
 
 	if err := h.skillService.AppendCorrelatedAlert(ctx, sourceUUID, incidentUUID, alert, verdict.Confidence, reasoning, time.Now()); err != nil {
 		return fmt.Errorf("append correlated alert: %w", err)
+	}
+
+	// Re-read the incident to get the atomically-incremented CorrelatedCount so
+	// concurrent recurrences post correct sequence numbers in their Slack messages.
+	if updated, err := h.skillService.GetIncident(incidentUUID); err == nil {
+		recurrenceN = updated.CorrelatedCount
 	}
 
 	// Post a short Slack thread reply to the incident's source thread, if known.
