@@ -184,6 +184,7 @@ Rules:
 
 ### Handlers
 
+- `internal/api/request.go` - shared strict JSON request decoding
 - `internal/handlers/agent_ws.go` - worker transport and message types
 - `internal/handlers/api.go` - REST route wiring
 - `internal/handlers/api_settings_formatting*.go` - formatting settings API
@@ -231,6 +232,10 @@ Rules:
 ### Prefer interfaces at handler boundaries
 
 Handlers should depend on interfaces from `internal/services/interfaces.go`. If you add a new service dependency, wire it behind an interface first so handlers stay testable.
+
+### Use strict request decoding
+
+For JSON request bodies, use `api.DecodeJSON` instead of a raw `json.Decoder` in handlers. It enforces the shared 1 MB body limit, rejects unknown fields, rejects trailing JSON values, and returns operator-friendly 400 errors.
 
 ### Keep one-shot features provider-agnostic
 
