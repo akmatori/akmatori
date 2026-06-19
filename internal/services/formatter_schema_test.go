@@ -1,9 +1,33 @@
 package services
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
+
+const benchmarkIncidentSchemaExample = `{
+	"status": "investigating",
+	"summary": "API latency is elevated after the checkout deploy.",
+	"root_cause": {
+		"service": "checkout-api",
+		"signal": "p95 latency",
+		"confidence": 0.82
+	},
+	"actions_taken": [
+		{
+			"step": "Checked deploy timeline",
+			"owner": "sre",
+			"completed": true
+		},
+		{
+			"step": "Compared error rate with baseline",
+			"owner": "sre",
+			"completed": true
+		}
+	],
+	"recommendations": ["roll back checkout-api", "watch p95 latency for 15 minutes"]
+}`
 
 // --- inferSchema tests ---
 
@@ -516,6 +540,40 @@ func TestInferSchema_ListObjectNestedTypeDrift(t *testing.T) {
 	_, err := inferSchema(`{"hosts":[{"meta":{"ip":"10.0.0.1"}},{"meta":{"ip":42}}]}`)
 	if err == nil {
 		t.Error("expected error for nested type drift in later list_object element, got nil")
+	}
+}
+
+func BenchmarkInferSchema_IncidentSchema(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		specs, err := inferSchema(benchmarkIncidentSchemaExample)
+		if err != nil {
+			b.Fatalf("inferSchema() error = %v", err)
+		}
+		if len(specs) != 5 {
+			b.Fatalf("inferSchema() returned %d specs, want 5", len(specs))
+		}
+	}
+}
+
+func BenchmarkValidateAgainstSpecs_IncidentResult(b *testing.B) {
+	specs, err := inferSchema(benchmarkIncidentSchemaExample)
+	if err != nil {
+		b.Fatalf("inferSchema() error = %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(benchmarkIncidentSchemaExample), &parsed); err != nil {
+		b.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		errs := validateAgainstSpecs(parsed, specs)
+		if len(errs) != 0 {
+			b.Fatalf("validateAgainstSpecs() returned errors: %v", errs)
+		}
 	}
 }
 
