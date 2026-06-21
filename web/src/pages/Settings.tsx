@@ -13,7 +13,6 @@ import {
   Trash2,
   Sparkles,
   Hash,
-  BarChart2,
 } from 'lucide-react';
 import AlertSourcesManager from '../components/AlertSourcesManager';
 import ProxySettings from '../components/ProxySettings';
@@ -21,8 +20,6 @@ import LLMSettingsSection from '../components/settings/LLMSettingsSection';
 import GeneralSettingsSection from '../components/settings/GeneralSettingsSection';
 import RetentionSettingsSection from '../components/settings/RetentionSettingsSection';
 import FormattingSettingsSection from '../components/settings/FormattingSettingsSection';
-import SuppressionSignaturesSection from '../components/settings/SuppressionSignaturesSection';
-import RecurrenceStatsPanel from '../components/settings/RecurrenceStatsPanel';
 
 function SettingsSection({
   title,
@@ -123,7 +120,6 @@ export default function Settings() {
   const [generalStatus, setGeneralStatus] = useState<'configured' | undefined>();
   const [retentionStatus, setRetentionStatus] = useState<'configured' | 'disabled' | undefined>();
   const [formattingStatus, setFormattingStatus] = useState<'configured' | 'disabled' | undefined>();
-  const [suppressionRefreshKey, setSuppressionRefreshKey] = useState(0);
 
   return (
     <div className="animate-fade-in max-w-3xl mx-auto">
@@ -142,22 +138,6 @@ export default function Settings() {
           status={generalStatus}
         >
           <GeneralSettingsSection onStatusChange={setGeneralStatus} />
-        </SettingsSection>
-
-        <SettingsSection
-          title="Recurrence & Gate Effectiveness"
-          description="Alert correlation and suppression gate stats, fingerprint recurrences, and suppression signatures"
-          icon={BarChart2}
-        >
-          <div className="space-y-6">
-            <RecurrenceStatsPanel onSignatureMarked={() => setSuppressionRefreshKey((k) => k + 1)} />
-            <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                Suppression Signatures
-              </h3>
-              <SuppressionSignaturesSection key={suppressionRefreshKey} />
-            </div>
-          </div>
         </SettingsSection>
 
         <SettingsSection

@@ -228,19 +228,19 @@ removed.
 - Modify: `web/src/components/settings/GeneralSettingsSection.tsx`
 - Modify: `web/src/api/client.ts`
 
-- [ ] Delete `SuppressionSignaturesSection.tsx` and `RecurrenceStatsPanel.tsx`
-- [ ] In `Settings.tsx`: remove imports of both deleted components; remove the
+- [x] Delete `SuppressionSignaturesSection.tsx` and `RecurrenceStatsPanel.tsx`
+- [x] In `Settings.tsx`: remove imports of both deleted components; remove the
       `suppressionRefreshKey` state and `setSuppressionRefreshKey`; remove the
       "Recurrence & Gate Effectiveness" section render block
-- [ ] In `GeneralSettingsSection.tsx`: remove `recurrenceStatsApi` import; remove all
+- [x] In `GeneralSettingsSection.tsx`: remove `recurrenceStatsApi` import; remove all
       `suppressionEnabled`/`suppressionThreshold` state + the recurrence stats fetch call; remove
       all suppression form fields; remove all correlation knob fields (window, threshold, max
       candidates, long window days, fingerprint window minutes); keep the correlation enable toggle;
       add a number input for `alert_monitor_window_minutes` (label: "Monitor window (minutes)",
       min=1)
-- [ ] In `web/src/api/client.ts`: remove `recurrenceStatsApi` export; remove
+- [x] In `web/src/api/client.ts`: remove `recurrenceStatsApi` export; remove
       `memoriesApi.setSuppress` method
-- [ ] Run `make test-web` — must pass before task 8
+- [x] Run `make test-web` — must pass before task 8
 
 ### Task 8: New tests for the redesigned behavior
 
