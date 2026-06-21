@@ -104,7 +104,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		verdict, corrErr := h.correlate(context.Background(), instance.UUID, normalized)
 		if corrErr != nil {
 			if errors.Is(corrErr, services.ErrWorkerNotConnected) {
-				slog.Debug("alert correlator worker not connected, spawning new incident")
+				slog.Info("alert correlator worker not connected, spawning new incident")
 			} else {
 				slog.Warn("alert correlator error, spawning new incident", "err", corrErr)
 			}
@@ -254,7 +254,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 		verdict, corrErr := h.correlate(context.Background(), channel.UUID, normalized)
 		if corrErr != nil {
 			if errors.Is(corrErr, services.ErrWorkerNotConnected) {
-				slog.Debug("alert correlator worker not connected, spawning new incident")
+				slog.Info("alert correlator worker not connected, spawning new incident")
 			} else {
 				slog.Warn("alert correlator error, spawning new incident", "err", corrErr)
 			}

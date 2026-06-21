@@ -36,7 +36,7 @@ func (s *SkillService) InsertFiringAlert(ctx context.Context, incidentUUID strin
 		FiredAt:           firedAt,
 		RawPayload:        alert.RawPayload,
 	}
-	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
+	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
 		return fmt.Errorf("InsertFiringAlert: %w", err)
 	}
 	return nil
