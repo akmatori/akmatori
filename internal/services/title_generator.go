@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/utils"
@@ -131,10 +132,15 @@ func (t *TitleGenerator) GenerateFallbackTitle(message string, source string) st
 	return message
 }
 
-// truncateForPrompt truncates a string to fit in the prompt
+// truncateForPrompt truncates a string to fit in the prompt without splitting
+// UTF-8 multi-byte sequences, which would panic at slice boundaries.
 func truncateForPrompt(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	cut := maxLen - 3
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }
