@@ -98,11 +98,8 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 	}
 
 	key := alertSpawnKey(instance.UUID, normalized.AlertName, normalized.TargetHost, normalized.SourceFingerprint)
-	isLeader := false
 
 	_, sfErr, _ := h.spawnGroup.Do(key, func() (interface{}, error) {
-		isLeader = true
-
 		// Correlation gate: attach to a recent open or monitor incident when confident.
 		verdict, corrErr := h.correlate(context.Background(), instance.UUID, normalized)
 		if corrErr != nil {
@@ -169,12 +166,9 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		slog.Error("failed to process alert", "err", sfErr)
 		return
 	}
-
-	if !isLeader {
-		// Follower: singleflight collapsed this burst — the leader owned all work.
-		// The partial-unique index on alerts prevents duplicate rows if the same
-		// alert arrives again before the leader's insert commits.
-	}
+	// Followers (isLeader==false): singleflight collapsed the burst; the leader
+	// owned all work. The partial-unique index on alerts prevents duplicate rows
+	// if the same alert arrives again before the leader's insert commits.
 }
 
 // ProcessAlertFromListenerChannel processes an alert that originated from a
@@ -254,11 +248,8 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 	}
 
 	key := alertSpawnKey(channel.UUID, normalized.AlertName, normalized.TargetHost, normalized.SourceFingerprint)
-	isLeader := false
 
 	_, sfErr, _ := h.spawnGroup.Do(key, func() (interface{}, error) {
-		isLeader = true
-
 		// Correlation gate: attach to a recent open or monitor incident when confident.
 		verdict, corrErr := h.correlate(context.Background(), channel.UUID, normalized)
 		if corrErr != nil {
@@ -315,10 +306,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 		slog.Error("failed to process listener channel alert", "err", sfErr)
 		return
 	}
-
-	if !isLeader {
-		// Follower: singleflight collapsed this burst — the leader owned all work.
-	}
+	// Followers (isLeader==false): singleflight collapsed the burst; the leader owned all work.
 }
 
 // processResolvedAlert finds the matching firing alert row in the alerts table

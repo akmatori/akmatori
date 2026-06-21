@@ -36,7 +36,9 @@ func setupIncidentTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("failed to migrate test database: %v", err)
 	}
 
+	origDB := database.DB
 	database.DB = db
+	t.Cleanup(func() { database.DB = origDB })
 	return db
 }
 

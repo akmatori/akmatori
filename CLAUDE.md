@@ -142,33 +142,33 @@ Rules:
 
 ### Alert correlation gate
 
-Before spawning a new incident, `AlertHandler` runs `AlertCorrelator.Correlate` to ask the LLM whether the incoming alert is a recurrence of a recent incident. When confidence meets the threshold, `AppendCorrelatedAlert` is called instead of `SpawnIncidentManager`.
+Before spawning a new incident, `AlertHandler` runs `AlertCorrelator.Correlate` to ask the LLM whether the incoming alert belongs to a recent open or monitor-mode incident. On a confident match, `LinkAlertToIncident` is called instead of `SpawnIncidentManager`.
 
 Rules:
 - gate is flag-gated (`AlertCorrelationEnabled` in `GeneralSettings`, default false); when disabled, no LLM call is made and all alerts spawn normally (fail-open)
-- `AlertCorrelator` is constructed with `NewAlertCorrelator(caller, db)`; wired via `alertHandler.SetAlertCorrelator(c)`; reads config live from `GeneralSettings` on every call — changes take effect without a restart
-- both `processAlert` and `ProcessAlertFromListenerChannel` wrap the evaluate-and-spawn block in `h.spawnGroup.Do(key, ...)`; singleflight followers use the `isLeader` flag pattern; followers skip `recordRecurrence` when the leader chose suppression (via `alertSpawnResult.suppressed`)
-- `AppendCorrelatedAlert` atomically appends to `incident.Context["correlated_alerts"]`, increments `correlated_count`, and writes an `AlertCorrelationLog` row — all in one transaction
+- `AlertCorrelator` is constructed with `NewAlertCorrelator(caller, db)`; wired via `alertHandler.SetAlertCorrelator(c)`; reads config live — changes take effect without a restart
+- both `processAlert` and `ProcessAlertFromListenerChannel` wrap the evaluate-and-spawn block in `h.spawnGroup.Do(key, ...)`; singleflight followers are no-ops — the partial-unique index on `alerts` handles burst dedup
+- on a confident match: `skillService.LinkAlertToIncident` attaches the alert row to the existing incident; if the incident is in `monitor` status, `monitor_until` is extended by the window; no new investigation is spawned
+- on no-match or error (fail-open): `SpawnIncidentManager` then `InsertFiringAlert`; resolved alerts go to `processResolvedAlert`
+- `fetchCandidates` runs a single query: `source_kind='alert' AND (status IN ('pending','running','diagnosed') OR (status='monitor' AND monitor_until >= NOW()))`, `ORDER BY started_at DESC LIMIT 25`
 - `ErrWorkerNotConnected` is fail-open (alert spawns normally)
-- `fetchCandidates` runs three sub-queries: (1) standard window; (2) fingerprint window (`AlertCorrelationFingerprintWindowMinutes`, default 1440, valid 1–10080); (3) long-window (`AlertCorrelationLongWindowDays`, default 7, valid 1–90) — running/diagnosed only; UUIDs exclusive to query 3 set `IsLongWindowMatch=true`
-- `IsLongWindowMatch=true` → `runRecurrenceUpdate` (2-sentence delta via one-shot LLM) instead of spawning; falls through to spawn on error; `alertHandler.SetOneShotCaller(agentWSHandler)` wired in `main.go`
 - hallucination guard: any UUID not in the fetched candidate set forces `Correlated=false`
-- alert fingerprint: `ComputeAlertFingerprint(sourceUUID, lower(alertName), lower(targetHost))` stored as `alert_fingerprint` (32-char sha256) on each `Incident`; pre-filters candidates; defined in `internal/services/alert_fingerprint.go`
+- `CorrelationConfig` holds only `Enabled bool`; `correlationMaxCandidates=25` and `correlationThreshold=0.7` are package-level constants
+- alert fingerprint: `ComputeAlertFingerprint(sourceUUID, lower(alertName), lower(targetHost))` stored as `alert_fingerprint` (32-char sha256) on each `Incident`; defined in `internal/services/alert_fingerprint.go`
 - one-shot LLM path; defined in `internal/services/alert_correlator.go`
 
-### Alert suppression gate
+### Alert monitor mode
 
-After the correlation check passes, `AlertHandler` runs `AlertSuppressor.Evaluate` against known false-positive signatures. On a confident match, `RecordSuppressedIncident` is called instead of `SpawnIncidentManager`.
+After an alert-sourced incident completes, it enters `monitor` status for a configurable window so that recurrences are correlated rather than spawning duplicate investigations.
 
 Rules:
-- flag-gated (`AlertSuppressionEnabled` in `GeneralSettings`, default false); when disabled, no LLM call is made (fail-open)
-- `AlertSuppressor` is constructed with `NewAlertSuppressor(caller, db)`; wired via `alertHandler.SetAlertSuppressor(s)`; reads config live — changes take effect without a restart
-- signatures are `Memory` rows with `Suppress=true`; zero signatures → no LLM call
-- one-shot LLM call; hallucination guard: any name the LLM returns not in the fetched set forces `Suppressed=false`
-- `ErrWorkerNotConnected` is fail-open (alert spawns normally)
-- `RecordSuppressedIncident` atomically creates a completed `Incident` (TokensUsed=0, `AlertFingerprint` set) + `AlertSuppressionLog` audit row
-- manifest capped at `manifestMaxEntriesPerScope` (150) non-suppress entries per scope; suppress entries always appear; a `<!-- truncated: N more entries not shown -->` comment is added when the cap fires
-- operators can manually flag/unflag signatures via `PATCH /api/memories/{id}/suppress` (`{"suppress": bool}`); handler calls `SetSuppress` then regenerates SKILL.md for the affected scope
+- `UpdateIncidentComplete` sets `status=monitor` and `monitor_until = completedAt + GetAlertMonitorWindow()` for all `source_kind='alert'` incidents; non-alert incidents (cron, etc.) are unaffected
+- `AlertMonitorWindowMinutes` is configured in `GeneralSettings` (default 60, valid 1–10080); read via `gs.GetAlertMonitorWindow()`; exposed in `PUT /api/settings/general`
+- `processResolvedAlert` runs in a transaction with row-level lock on the incident: finds the matching `alerts` row by `source_fingerprint` (then `fingerprint` fallback), marks it `resolved_at=now`; if no firing alerts remain and the incident is completed/monitor, sets `monitor_until = min(monitor_until, resolved_at + window)` to end the watch period promptly; no-match is logged and silently dropped
+- `InsertFiringAlert` inserts the initial `alerts` row (status=firing) for a newly spawned incident
+- `LinkAlertToIncident` attaches an alert to an existing incident; extends `monitor_until` if the incident is in monitor status
+- `IncidentStatusMonitor` is defined in `internal/database/models_incidents.go`; `Alert` model is in `internal/database/models_alerts.go`
+- manifest capped at `manifestMaxEntriesPerScope` (150) entries per scope by `UpdatedAt` descending
 
 ### Alert sources and webhook adapters
 
@@ -236,10 +236,9 @@ Rules:
 - `internal/services/memory_service.go` - cross-incident memory CRUD, DB↔disk sync, and `IngestFromDisk`
 - `internal/services/title_generator.go` - one-shot title generation
 - `internal/services/slack_summarizer.go` - Slack-safe final output compression
-- `internal/services/alert_correlator.go` - LLM-powered gate that decides whether an incoming alert is a recurrence of a recent incident; defines `CorrelationConfig`, `CorrelationVerdict`, and `AlertCorrelator`
-- `internal/services/alert_suppressor.go` - LLM-powered gate for known false-positive suppression; defines `SuppressionConfig`, `SuppressionVerdict`, and `AlertSuppressor`
+- `internal/services/alert_correlator.go` - LLM-powered correlation gate; defines `CorrelationConfig`, `CorrelationVerdict`, and `AlertCorrelator`
 - `internal/services/alert_fingerprint.go` - `ComputeAlertFingerprint(sourceUUID, alertName, targetHost)` — stable 32-char hex digest for correlation candidate pre-filtering
-- `internal/database/models_alert_suppression.go` - `AlertSuppressionLog` audit model
+- `internal/database/models_alerts.go` - `Alert` model: one row per firing/resolved alert linked to an incident; `AlertStatus` constants; unique index prevents duplicate concurrent fires
 - `internal/services/channel_service.go` - Integrations/Channels CRUD, `ResolveDefault`, `ResolveForAlertSource`
 - `internal/services/cron_runner.go` - cron scheduler, per-cron agent tick path, reload-on-CRUD
 - `internal/services/incident_service.go` - `SpawnIncidentManager` / `SpawnAgentInvocation`, AGENTS.md generation (`generateAgentsMd`), per-root-skill prompt injection
@@ -258,8 +257,6 @@ Rules:
 
 - `web/src/components/settings/FormattingSettingsSection.tsx` - response formatter settings form and validation
 - `web/src/components/settings/formattingSettingsHelpers.ts` - formatter default hydrate/dehydrate helpers; keep constants aligned with Go defaults
-- `web/src/components/settings/SuppressionSignaturesSection.tsx` - active suppress signatures + unflagged candidates; flag/unflag via `PATCH /api/memories/{id}/suppress`
-- `web/src/components/settings/RecurrenceStatsPanel.tsx` - fingerprint groups, gate hit-rates (24h/7d), candidate signatures with "Mark as signature" action
 
 ## Code Patterns
 
@@ -356,9 +353,8 @@ Keep this file aligned with these current realities:
 - cron jobs always run as full agent investigations under `cron-agent`; system crons cannot be deleted; `CronRunner` boots from `cmd/akmatori/main.go`
 - alert-source webhooks use adapter-specific secret validation; explicit notification channels must resolve to `can_post=true` Channels
 - the built-in `incidents` tool is seeded at boot with a credential-less instance; no operator setup required
-- alert correlation and suppression gates are flag-gated via `GeneralSettings` (default false); read config live; see Alert correlation gate section for `fetchCandidates` three-query logic and `runRecurrenceUpdate` long-window path
-- `GET /api/stats/recurrence` returns fingerprint groups, gate hit-rates, candidate signatures, `redundancy_rate_24h`; shown in `RecurrenceStatsPanel` and gate-enable badges
-- when verdict is false-positive/self-healing, memory-writer sets `suppress: true`; operators can also flag via `PATCH /api/memories/{id}/suppress`
+- alert correlation gate is flag-gated (`AlertCorrelationEnabled` in `GeneralSettings`, default false); `fetchCandidates` uses a single query covering active + non-expired monitor incidents; suppression gate and recurrence stats endpoint are removed
+- alert monitor mode: completed alert-sourced incidents transition to `status=monitor` with `monitor_until` set; resolved alerts trigger `processResolvedAlert` which shortens the window; `AlertMonitorWindowMinutes` (default 60, valid 1–10080) controls the watch duration
 
 ## When Editing This File
 

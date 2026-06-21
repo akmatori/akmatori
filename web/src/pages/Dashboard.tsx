@@ -63,6 +63,8 @@ export default function Dashboard() {
     switch (status) {
       case 'completed':
         return { class: 'text-green-600 dark:text-green-400', icon: CheckCircle, label: 'Completed' };
+      case 'monitor':
+        return { class: 'text-green-600 dark:text-green-400', icon: CheckCircle, label: 'Monitor' };
       case 'running':
         return { class: 'text-primary-600 dark:text-primary-400', icon: Activity, label: 'Running' };
       case 'failed':

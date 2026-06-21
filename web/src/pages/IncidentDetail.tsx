@@ -11,6 +11,8 @@ const getStatusConfig = (status: string) => {
   switch (status) {
     case 'completed':
       return { class: 'badge-success', icon: CheckCircle, label: 'Completed' };
+    case 'monitor':
+      return { class: 'badge-success', icon: CheckCircle, label: 'Monitor' };
     case 'running':
       return { class: 'badge-primary', icon: Activity, label: 'Running' };
     case 'diagnosed':
@@ -153,7 +155,7 @@ export default function IncidentDetail() {
                 <span>Auto-refresh (2s)</span>
               </label>
             )}
-            {(incident.status === 'completed' || incident.status === 'failed') && (
+            {(incident.status === 'completed' || incident.status === 'monitor' || incident.status === 'failed') && (
               <>
                 {incident.execution_time_ms > 0 && (
                   <span className="flex items-center gap-1.5">

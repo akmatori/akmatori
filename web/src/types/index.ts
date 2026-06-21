@@ -32,7 +32,7 @@ export interface ToolInstance {
   tool_type?: ToolType;
 }
 
-export type IncidentStatus = 'pending' | 'running' | 'diagnosed' | 'completed' | 'failed';
+export type IncidentStatus = 'pending' | 'running' | 'diagnosed' | 'completed' | 'failed' | 'monitor';
 
 export interface Incident {
   id: number;
@@ -50,6 +50,8 @@ export interface Incident {
   execution_time_ms: number;  // Execution time in milliseconds
   started_at: string;
   completed_at?: string;
+  monitor_until?: string;
+  alert_count?: number;
   created_at: string;
   updated_at: string;
 }

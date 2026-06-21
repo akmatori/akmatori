@@ -1351,7 +1351,11 @@ func migrateBackfillAlerts(db *gorm.DB) error {
 		}
 
 		if (inc.Status == IncidentStatusCompleted || inc.Status == IncidentStatusFailed) && inc.CompletedAt != nil {
-			monitorUntil := inc.CompletedAt.Add(60 * time.Minute)
+			window := 60 * time.Minute
+			if gs, err := GetOrCreateGeneralSettings(); err == nil && gs != nil {
+				window = gs.GetAlertMonitorWindow()
+			}
+			monitorUntil := inc.CompletedAt.Add(window)
 			if err := db.Exec(
 				"UPDATE incidents SET monitor_until = ?, status = ? WHERE uuid = ? AND status IN ('completed','failed')",
 				monitorUntil, string(IncidentStatusMonitor), inc.UUID,

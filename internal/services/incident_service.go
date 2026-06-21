@@ -301,7 +301,11 @@ func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status databa
 		var incident database.Incident
 		if err := s.db.Where("uuid = ?", incidentUUID).Select("source_kind").First(&incident).Error; err == nil {
 			if incident.SourceKind == database.IncidentSourceKindAlert {
-				settings, _ := database.GetOrCreateGeneralSettings()
+				settings, settingsErr := database.GetOrCreateGeneralSettings()
+				if settingsErr != nil || settings == nil {
+					slog.Warn("UpdateIncidentComplete: could not load settings, using default window", "err", settingsErr)
+					settings = &database.GeneralSettings{}
+				}
 				window := settings.GetAlertMonitorWindow()
 				monitorUntil := now.Add(window)
 				updates["status"] = database.IncidentStatusMonitor

@@ -148,6 +148,8 @@ export default function Incidents() {
     switch (status) {
       case 'completed':
         return { class: 'badge-success', icon: CheckCircle, label: 'Completed' };
+      case 'monitor':
+        return { class: 'badge-success', icon: CheckCircle, label: 'Monitor' };
       case 'running':
         return { class: 'badge-primary', icon: Activity, label: 'Running' };
       case 'diagnosed':
@@ -321,7 +323,7 @@ export default function Incidents() {
                             >
                               <Terminal className="w-4 h-4" />
                             </button>
-                            {(incident.status === 'completed' || incident.status === 'failed') && (
+                            {(incident.status === 'completed' || incident.status === 'monitor' || incident.status === 'failed') && (
                               <button
                                 onClick={() => openModal(incident)}
                                 className="btn btn-ghost p-1.5"
@@ -428,7 +430,7 @@ export default function Incidents() {
                     <span className="text-sm text-gray-600 dark:text-gray-400">Auto-refresh (2s)</span>
                   </label>
                 )}
-                {(selectedIncident.status === 'completed' || selectedIncident.status === 'failed') && (
+                {(selectedIncident.status === 'completed' || selectedIncident.status === 'monitor' || selectedIncident.status === 'failed') && (
                   <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
                     {selectedIncident.execution_time_ms > 0 && (
                       <span className="flex items-center gap-1.5">

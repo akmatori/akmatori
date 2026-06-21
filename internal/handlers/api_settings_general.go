@@ -62,8 +62,8 @@ func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Reques
 			settings.AlertCorrelationEnabled = req.AlertCorrelationEnabled
 		}
 		if req.AlertMonitorWindowMinutes != nil {
-			if *req.AlertMonitorWindowMinutes < 1 {
-				api.RespondError(w, http.StatusBadRequest, "alert_monitor_window_minutes must be at least 1")
+			if *req.AlertMonitorWindowMinutes < 1 || *req.AlertMonitorWindowMinutes > 10080 {
+				api.RespondError(w, http.StatusBadRequest, "alert_monitor_window_minutes must be between 1 and 10080")
 				return
 			}
 			settings.AlertMonitorWindowMinutes = req.AlertMonitorWindowMinutes
