@@ -75,7 +75,7 @@ export default function Dashboard() {
   };
 
   const runningCount = incidents.filter(i => i.status === 'running').length;
-  const completedCount = incidents.filter(i => i.status === 'completed').length;
+  const completedCount = incidents.filter(i => i.status === 'completed' || i.status === 'monitor').length;
   const failedCount = incidents.filter(i => i.status === 'failed').length;
 
   if (loading) return <LoadingSpinner />;

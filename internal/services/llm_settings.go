@@ -12,6 +12,11 @@ import (
 // deterministic behavior without surfacing the failure to end users.
 var ErrWorkerNotConnected = errors.New("agent worker not connected")
 
+// ErrAlertAlreadyClaimed is returned by InsertFiringAlert when another process
+// already inserted a firing alert for the same (source_uuid, source_fingerprint)
+// pair, indicating a cross-process duplicate spawn that must be cancelled.
+var ErrAlertAlreadyClaimed = errors.New("alert already claimed by concurrent process")
+
 // ErrIncidentSuperseded is delivered via OnError to a previously registered
 // incident callback when a newer StartIncident/ContinueIncident call replaces
 // it for the same incident_id (e.g. a second Slack message lands in the same

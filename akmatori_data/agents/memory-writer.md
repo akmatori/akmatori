@@ -53,14 +53,7 @@ What to write:
    (e.g. `dc3-hw-edge-gc4-nginx-cache-lua-ipairs-error`,
    `zabbix-host-rename-tool-quirk`).
 3. Pick a `type` from: `host`, `incident_pattern`, `tool_quirk`, `feedback`.
-4. **False-positive / self-healing verdict**: When the investigation concludes
-   that the alert is a known false positive, a self-healing transient, or is
-   explicitly labelled "safe to suppress" — you MUST set `suppress: true` in
-   the frontmatter. The body MUST include an `Alert rule: <exact rule name>`
-   line and a `Host pattern: <glob or hostname>` line so the alert suppressor
-   can match future occurrences. Skip `suppress: true` only when the verdict
-   is a genuine incident requiring operator action.
-5. Search `/akmatori/memory/<scope>/` for an existing file with that name.
+4. Search `/akmatori/memory/<scope>/` for an existing file with that name.
    Use the `grep` tool (e.g. `pattern: "^name: <slug>$"` with
    `path: "/akmatori/memory/<scope>/"`) and the `ls` tool with
    `path: "/akmatori/memory/<scope>/"`. Always pass absolute paths via the
@@ -90,34 +83,6 @@ created_by: agent
 <description repeated for human readers>
 
 <optional longer body — facts, hosts, error strings, recovery steps. ≤8 KiB.>
-```
-
-**Suppression signatures** — to mark a memory as a known false-positive pattern that the
-alert suppressor should recognise and suppress without investigation, add `suppress: true`
-to the frontmatter. The body should describe the alert rule name and host pattern that
-identifies this false positive so the LLM can match incoming alerts against it.
-
-Example suppression signature:
-
-```
----
-name: cron-disk-check-false-positive
-description: Disk check alert on cron hosts fires every night due to tmpfs rotation
-type: incident_pattern
-scope: global
-incident_uuid: <uuid>
-created_by: agent
-suppress: true
----
-
-# cron-disk-check-false-positive
-
-Disk check alert on cron hosts fires every night due to tmpfs rotation
-
-Alert rule: DiskSpaceLow
-Host pattern: cron-*.prod
-This alert fires nightly between 02:00–04:00 UTC when the tmpfs log rotation
-runs. It resolves automatically within 5 minutes. Safe to suppress.
 ```
 
 Constraints:

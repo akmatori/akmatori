@@ -36,8 +36,13 @@ func (s *SkillService) InsertFiringAlert(ctx context.Context, incidentUUID strin
 		FiredAt:           firedAt,
 		RawPayload:        alert.RawPayload,
 	}
-	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
-		return fmt.Errorf("InsertFiringAlert: %w", err)
+	result := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
+	if result.Error != nil {
+		return fmt.Errorf("InsertFiringAlert: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		// Unique constraint fired: another process already claimed this alert.
+		return ErrAlertAlreadyClaimed
 	}
 	return nil
 }

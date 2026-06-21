@@ -112,15 +112,17 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		if verdict.IsConfident(h.correlationThreshold()) {
 			slog.Info("alert correlated to existing incident", "incident_uuid", verdict.IncidentUUID, "confidence", verdict.Confidence)
 			if err := h.skillService.LinkAlertToIncident(context.Background(), verdict.IncidentUUID, instance.UUID, normalized); err != nil {
-				slog.Warn("failed to link alert to incident", "incident_uuid", verdict.IncidentUUID, "err", err)
+				// Fail-open: link failed (incident deleted, DB error, etc.) — spawn new investigation.
+				slog.Warn("failed to link alert to incident, spawning new incident", "incident_uuid", verdict.IncidentUUID, "err", err)
+			} else {
+				// Best-effort Slack thread note on the matched incident's thread.
+				if incident, err := h.skillService.GetIncident(verdict.IncidentUUID); err == nil && incident != nil &&
+					incident.SlackChannelID != "" && incident.SlackMessageTS != "" {
+					h.postSlackThreadReply(incident.SlackChannelID, incident.SlackMessageTS,
+						fmt.Sprintf("Recurring alert: %s", normalized.AlertName))
+				}
+				return nil, nil
 			}
-			// Best-effort Slack thread note on the matched incident's thread.
-			if incident, err := h.skillService.GetIncident(verdict.IncidentUUID); err == nil && incident != nil &&
-				incident.SlackChannelID != "" && incident.SlackMessageTS != "" {
-				h.postSlackThreadReply(incident.SlackChannelID, incident.SlackMessageTS,
-					fmt.Sprintf("Recurring alert: %s", normalized.AlertName))
-			}
-			return nil, nil
 		}
 
 		// Spawn incident manager
@@ -132,6 +134,13 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 
 		// Insert the initial firing alert row for this new incident.
 		if err := h.skillService.InsertFiringAlert(context.Background(), incidentUUID, instance.UUID, normalized); err != nil {
+			if errors.Is(err, services.ErrAlertAlreadyClaimed) {
+				// Cross-process duplicate: another instance already claimed this alert.
+				// Cancel the orphaned incident rather than running a duplicate investigation.
+				slog.Info("alert already claimed by concurrent process, cancelling duplicate incident", "incident_uuid", incidentUUID)
+				_ = h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusFailed, "", "")
+				return nil, nil
+			}
 			slog.Warn("failed to insert firing alert", "incident_uuid", incidentUUID, "err", err)
 		}
 
@@ -262,12 +271,14 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 		if verdict.IsConfident(h.correlationThreshold()) {
 			slog.Info("listener channel alert correlated to existing incident", "incident_uuid", verdict.IncidentUUID, "confidence", verdict.Confidence)
 			if err := h.skillService.LinkAlertToIncident(context.Background(), verdict.IncidentUUID, channel.UUID, normalized); err != nil {
-				slog.Warn("failed to link alert to incident", "incident_uuid", verdict.IncidentUUID, "err", err)
+				// Fail-open: link failed — spawn new investigation instead.
+				slog.Warn("failed to link alert to incident, spawning new incident", "incident_uuid", verdict.IncidentUUID, "err", err)
+			} else {
+				h.updateSlackChannelReactions(slackChannelID, slackMessageTS, false)
+				h.postSlackThreadReply(slackChannelID, slackMessageTS,
+					fmt.Sprintf("Alert merged into existing incident (ID: %s)", verdict.IncidentUUID))
+				return nil, nil
 			}
-			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, false)
-			h.postSlackThreadReply(slackChannelID, slackMessageTS,
-				fmt.Sprintf("Alert merged into existing incident (ID: %s)", verdict.IncidentUUID))
-			return nil, nil
 		}
 
 		// Spawn incident manager
@@ -282,6 +293,11 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 
 		// Insert the initial firing alert row for this new incident.
 		if err := h.skillService.InsertFiringAlert(context.Background(), incidentUUID, channel.UUID, normalized); err != nil {
+			if errors.Is(err, services.ErrAlertAlreadyClaimed) {
+				slog.Info("alert already claimed by concurrent process, cancelling duplicate incident", "incident_uuid", incidentUUID)
+				_ = h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusFailed, "", "")
+				return nil, nil
+			}
 			slog.Warn("failed to insert firing alert", "incident_uuid", incidentUUID, "err", err)
 		}
 
@@ -369,20 +385,10 @@ func (h *AlertHandler) processResolvedAlert(sourceUUID string, normalized alerts
 			return fmt.Errorf("mark alert resolved: %w", err)
 		}
 
-		// Check whether any firing alerts still remain for this incident.
-		var firingCount int64
-		if err := tx.Model(&database.Alert{}).
-			Where("incident_uuid = ? AND status = ? AND resolved_at IS NULL",
-				a.IncidentUUID, string(database.AlertStatusFiring)).
-			Count(&firingCount).Error; err != nil {
-			return fmt.Errorf("count firing alerts: %w", err)
-		}
-		if firingCount > 0 {
-			return nil // active alerts remain; leave monitor_until unchanged
-		}
-
-		// All alerts resolved. Lock the incident row and potentially pull in the
-		// monitor window so the watch period ends promptly.
+		// Lock the incident row BEFORE counting remaining firing alerts. This
+		// prevents a concurrent LinkAlertToIncident from inserting a new firing
+		// alert between the count and the monitor_until update, which would cause
+		// the watch window to be shortened while a fresh alert is still in-flight.
 		var incident database.Incident
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("uuid = ?", a.IncidentUUID).First(&incident).Error; err != nil {
@@ -392,6 +398,19 @@ func (h *AlertHandler) processResolvedAlert(sourceUUID string, normalized alerts
 		if incident.Status != database.IncidentStatusCompleted &&
 			incident.Status != database.IncidentStatusMonitor {
 			return nil
+		}
+
+		// Count remaining firing alerts while holding the incident lock so no
+		// concurrent inserts can race the count.
+		var firingCount int64
+		if err := tx.Model(&database.Alert{}).
+			Where("incident_uuid = ? AND status = ? AND resolved_at IS NULL",
+				a.IncidentUUID, string(database.AlertStatusFiring)).
+			Count(&firingCount).Error; err != nil {
+			return fmt.Errorf("count firing alerts: %w", err)
+		}
+		if firingCount > 0 {
+			return nil // active alerts remain; leave monitor_until unchanged
 		}
 
 		settings, err := database.GetOrCreateGeneralSettings()
