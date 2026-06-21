@@ -138,7 +138,9 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 				// Cross-process duplicate: another instance already claimed this alert.
 				// Cancel the orphaned incident rather than running a duplicate investigation.
 				slog.Info("alert already claimed by concurrent process, cancelling duplicate incident", "incident_uuid", incidentUUID)
-				_ = h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusFailed, "", "")
+				if uerr := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusFailed, "", ""); uerr != nil {
+					slog.Warn("failed to cancel duplicate incident", "incident_uuid", incidentUUID, "err", uerr)
+				}
 				return nil, nil
 			}
 			slog.Warn("failed to insert firing alert", "incident_uuid", incidentUUID, "err", err)
@@ -295,7 +297,9 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 		if err := h.skillService.InsertFiringAlert(context.Background(), incidentUUID, channel.UUID, normalized); err != nil {
 			if errors.Is(err, services.ErrAlertAlreadyClaimed) {
 				slog.Info("alert already claimed by concurrent process, cancelling duplicate incident", "incident_uuid", incidentUUID)
-				_ = h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusFailed, "", "")
+				if uerr := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusFailed, "", ""); uerr != nil {
+					slog.Warn("failed to cancel duplicate incident", "incident_uuid", incidentUUID, "err", uerr)
+				}
 				return nil, nil
 			}
 			slog.Warn("failed to insert firing alert", "incident_uuid", incidentUUID, "err", err)

@@ -1312,6 +1312,11 @@ func migrateBackfillAlerts(db *gorm.DB) error {
 		return nil
 	}
 
+	window := 60 * time.Minute
+	if gs, err := GetOrCreateGeneralSettings(); err == nil && gs != nil {
+		window = gs.GetAlertMonitorWindow()
+	}
+
 	for _, inc := range incidents {
 		fingerprint, _ := inc.Context["alert_fingerprint"].(string)
 		sourceFingerprint, _ := inc.Context["source_fingerprint"].(string)
@@ -1342,13 +1347,9 @@ func migrateBackfillAlerts(db *gorm.DB) error {
 		}
 
 		if inc.Status == IncidentStatusCompleted && inc.CompletedAt != nil {
-			window := 60 * time.Minute
-			if gs, err := GetOrCreateGeneralSettings(); err == nil && gs != nil {
-				window = gs.GetAlertMonitorWindow()
-			}
 			monitorUntil := inc.CompletedAt.Add(window)
 			if err := db.Exec(
-				"UPDATE incidents SET monitor_until = ?, status = ? WHERE uuid = ? AND status IN ('completed','failed')",
+				"UPDATE incidents SET monitor_until = ?, status = ? WHERE uuid = ? AND status = 'completed'",
 				monitorUntil, string(IncidentStatusMonitor), inc.UUID,
 			).Error; err != nil {
 				slog.Warn("migrateBackfillAlerts: set monitor_until", "incident_uuid", inc.UUID, "err", err)
