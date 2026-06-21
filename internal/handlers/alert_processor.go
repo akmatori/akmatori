@@ -428,7 +428,7 @@ func (h *AlertHandler) processResolvedAlert(sourceUUID string, normalized alerts
 
 	// Best-effort Slack thread reply on the incident's source thread.
 	if h.skillService != nil {
-		if incident, err := h.skillService.GetIncident(linkedIncidentUUID); err == nil &&
+		if incident, err := h.skillService.GetIncident(linkedIncidentUUID); err == nil && incident != nil &&
 			incident.SlackChannelID != "" && incident.SlackMessageTS != "" {
 			h.postSlackThreadReply(incident.SlackChannelID, incident.SlackMessageTS,
 				fmt.Sprintf("Alert resolved: %s", normalized.AlertName))

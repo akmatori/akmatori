@@ -247,24 +247,24 @@ removed.
 **Files:**
 - Modify or create test files in `internal/handlers/` and `internal/services/`
 
-- [ ] Test: `processAlert` spawns a new incident and inserts one `alerts` row with correct
+- [x] Test: `processAlert` spawns a new incident and inserts one `alerts` row with correct
       `IncidentUUID`, `SourceUUID`, `Fingerprint`, and `status=firing`
-- [ ] Test: `UpdateIncidentComplete` for a `source_kind='alert'` incident sets
+- [x] Test: `UpdateIncidentComplete` for a `source_kind='alert'` incident sets
       `MonitorUntil = CompletedAt + window` and `status = monitor`
-- [ ] Test: `UpdateIncidentComplete` for a `source_kind='cron'` incident does NOT set
+- [x] Test: `UpdateIncidentComplete` for a `source_kind='cron'` incident does NOT set
       `MonitorUntil`
-- [ ] Test: `fetchCandidates` returns a `monitor` incident whose `monitor_until >= now`; does NOT
+- [x] Test: `fetchCandidates` returns a `monitor` incident whose `monitor_until >= now`; does NOT
       return a monitor incident whose `monitor_until < now`
-- [ ] Test: correlation match on a `monitor` incident → `LinkAlertToIncident` called; no new
+- [x] Test: correlation match on a `monitor` incident → `LinkAlertToIncident` called; no new
       incident spawned; monitor window extended
-- [ ] Test: correlation match on a `running` incident → `LinkAlertToIncident` called; no new
+- [x] Test: correlation match on a `running` incident → `LinkAlertToIncident` called; no new
       incident spawned
-- [ ] Test: `processResolvedAlert` matches by `source_fingerprint`, marks `alerts.resolved_at`
-- [ ] Test: `processResolvedAlert` — last firing alert resolved + incident already completed →
+- [x] Test: `processResolvedAlert` matches by `source_fingerprint`, marks `alerts.resolved_at`
+- [x] Test: `processResolvedAlert` — last firing alert resolved + incident already completed →
       `monitor_until` pulled in to `min(monitor_until, resolved_at + window)`
-- [ ] Test: `processResolvedAlert` — no matching firing alert → log + drop, no error
-- [ ] Test: `ErrWorkerNotConnected` during correlation → fail-open, new incident spawned
-- [ ] Run `make test` — must pass before task 9
+- [x] Test: `processResolvedAlert` — no matching firing alert → log + drop, no error
+- [x] Test: `ErrWorkerNotConnected` during correlation → fail-open, new incident spawned
+- [x] Run `make test` — must pass before task 9
 
 ### Task 9: Verify acceptance criteria
 
