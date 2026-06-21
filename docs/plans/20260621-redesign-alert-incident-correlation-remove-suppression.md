@@ -75,24 +75,24 @@ removed.
 - Modify: `internal/handlers/api_settings_general.go`
 - Modify: `web/src/types/index.ts`
 
-- [ ] Add `AlertMonitorWindowMinutes *int` field (`gorm:"default:null"`) to `GeneralSettings`
+- [x] Add `AlertMonitorWindowMinutes *int` field (`gorm:"default:null"`) to `GeneralSettings`
       struct; add helper `GetAlertMonitorWindow() time.Duration` that returns 60 min when nil
-- [ ] Remove the five correlation knob fields from `GeneralSettings` struct:
+- [x] Remove the five correlation knob fields from `GeneralSettings` struct:
       `AlertCorrelationWindowMinutes`, `AlertCorrelationThreshold`,
       `AlertCorrelationMaxCandidates`, `AlertCorrelationLongWindowDays`,
       `AlertCorrelationFingerprintWindowMinutes` (do NOT add DDL to drop the columns —
       non-destructive)
-- [ ] Remove both suppression fields from `GeneralSettings` struct: `AlertSuppressionEnabled`,
+- [x] Remove both suppression fields from `GeneralSettings` struct: `AlertSuppressionEnabled`,
       `AlertSuppressionThreshold`
-- [ ] Trim `UpdateGeneralSettingsRequest` in `api/types.go` to three fields: `BaseURL`,
+- [x] Trim `UpdateGeneralSettingsRequest` in `api/types.go` to three fields: `BaseURL`,
       `AlertCorrelationEnabled`, `AlertMonitorWindowMinutes`
-- [ ] Update `applyGeneralSettingsDefaults` and GET/PUT handler in `api_settings_general.go`:
+- [x] Update `applyGeneralSettingsDefaults` and GET/PUT handler in `api_settings_general.go`:
       hydrate `AlertMonitorWindowMinutes` with effective default 60 in GET; apply it on PUT
-- [ ] In `web/src/types/index.ts`: remove the five correlation knob fields + two suppression fields
+- [x] In `web/src/types/index.ts`: remove the five correlation knob fields + two suppression fields
       from `GeneralSettings` and `GeneralSettingsUpdate`; add `alert_monitor_window_minutes: number`
       to both; remove `RecurrenceStats`, `FingerprintGroup`, `GateHitRates`, `GateRate` types
-- [ ] Write tests: GET /api/settings/general returns `alert_monitor_window_minutes`, PUT updates it
-- [ ] Run `make test` + `make test-web` — must pass before task 3
+- [x] Write tests: GET /api/settings/general returns `alert_monitor_window_minutes`, PUT updates it
+- [x] Run `make test` + `make test-web` — must pass before task 3
 
 ### Task 3: Alert correlator simplification
 

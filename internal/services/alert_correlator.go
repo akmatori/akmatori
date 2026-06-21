@@ -92,21 +92,6 @@ func (c *AlertCorrelator) loadConfig() (CorrelationConfig, error) {
 	if gs.AlertCorrelationEnabled != nil {
 		cfg.Enabled = *gs.AlertCorrelationEnabled
 	}
-	if gs.AlertCorrelationWindowMinutes != nil && *gs.AlertCorrelationWindowMinutes > 0 {
-		cfg.Window = time.Duration(*gs.AlertCorrelationWindowMinutes) * time.Minute
-	}
-	if gs.AlertCorrelationThreshold != nil {
-		cfg.Threshold = *gs.AlertCorrelationThreshold
-	}
-	if gs.AlertCorrelationMaxCandidates != nil {
-		cfg.MaxCandidates = *gs.AlertCorrelationMaxCandidates
-	}
-	if gs.AlertCorrelationLongWindowDays != nil && *gs.AlertCorrelationLongWindowDays > 0 {
-		cfg.LongWindowDays = *gs.AlertCorrelationLongWindowDays
-	}
-	if gs.AlertCorrelationFingerprintWindowMinutes != nil && *gs.AlertCorrelationFingerprintWindowMinutes > 0 {
-		cfg.FingerprintWindow = time.Duration(*gs.AlertCorrelationFingerprintWindowMinutes) * time.Minute
-	}
 	return CorrelationConfigWithDefaults(cfg), nil
 }
 

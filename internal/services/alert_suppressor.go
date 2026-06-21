@@ -71,18 +71,10 @@ func NewAlertSuppressor(caller OneShotLLMCaller, db *gorm.DB) *AlertSuppressor {
 // loadConfig reads GeneralSettings from the DB and applies code defaults to nil
 // fields, returning a fully-populated SuppressionConfig for this call.
 func (s *AlertSuppressor) loadConfig() (SuppressionConfig, error) {
-	gs, err := database.GetOrCreateGeneralSettings()
-	if err != nil {
+	if _, err := database.GetOrCreateGeneralSettings(); err != nil {
 		return SuppressionConfigWithDefaults(SuppressionConfig{}), fmt.Errorf("load general settings: %w", err)
 	}
-	var cfg SuppressionConfig
-	if gs.AlertSuppressionEnabled != nil {
-		cfg.Enabled = *gs.AlertSuppressionEnabled
-	}
-	if gs.AlertSuppressionThreshold != nil {
-		cfg.Threshold = *gs.AlertSuppressionThreshold
-	}
-	return SuppressionConfigWithDefaults(cfg), nil
+	return SuppressionConfigWithDefaults(SuppressionConfig{}), nil
 }
 
 // Threshold returns the effective suppression confidence threshold from DB settings.

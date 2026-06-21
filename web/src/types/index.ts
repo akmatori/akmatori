@@ -485,26 +485,13 @@ export interface GeneralSettings {
   updated_at: string;
   // Alert correlation gate (non-nullable after GET hydration with effective defaults)
   alert_correlation_enabled: boolean;
-  alert_correlation_window_minutes: number;
-  alert_correlation_threshold: number;
-  alert_correlation_max_candidates: number;
-  alert_correlation_long_window_days: number;
-  alert_correlation_fingerprint_window_minutes: number;
-  // Alert suppression gate (non-nullable after GET hydration with effective defaults)
-  alert_suppression_enabled: boolean;
-  alert_suppression_threshold: number;
+  alert_monitor_window_minutes: number;
 }
 
 export interface GeneralSettingsUpdate {
   base_url?: string;
   alert_correlation_enabled?: boolean;
-  alert_correlation_window_minutes?: number;
-  alert_correlation_threshold?: number;
-  alert_correlation_max_candidates?: number;
-  alert_correlation_long_window_days?: number;
-  alert_correlation_fingerprint_window_minutes?: number;
-  alert_suppression_enabled?: boolean;
-  alert_suppression_threshold?: number;
+  alert_monitor_window_minutes?: number;
 }
 
 // Pagination
@@ -532,30 +519,3 @@ export interface SSHHostConfig {
   allow_write_commands?: boolean;
 }
 
-// Recurrence stats
-export interface FingerprintGroup {
-  alert_name: string;
-  target_host: string;
-  fingerprint: string;
-  recurrence_count: number;
-  est_tokens_saved: number;
-}
-
-export interface GateRate {
-  hits: number;
-  total: number;
-}
-
-export interface GateHitRates {
-  correlation_24h: GateRate;
-  correlation_7d: GateRate;
-  suppression_24h: GateRate;
-  suppression_7d: GateRate;
-}
-
-export interface RecurrenceStats {
-  fingerprint_groups: FingerprintGroup[];
-  gate_hit_rates: GateHitRates;
-  candidate_signatures: Memory[];
-  redundancy_rate_24h: number;
-}

@@ -306,17 +306,9 @@ func TestAlertHandler_LongWindowMatch_FallsThrough_WhenNoShotCaller(t *testing.T
 		t.Fatalf("seed incident: %v", err)
 	}
 
-	longWindow := 7
 	enabled := true
-	win := 30
-	mc := 20
-	th := 0.7
 	if err := db.Create(&database.GeneralSettings{
-		AlertCorrelationEnabled:        &enabled,
-		AlertCorrelationWindowMinutes:  &win,
-		AlertCorrelationMaxCandidates:  &mc,
-		AlertCorrelationThreshold:      &th,
-		AlertCorrelationLongWindowDays: &longWindow,
+		AlertCorrelationEnabled: &enabled,
 	}).Error; err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}

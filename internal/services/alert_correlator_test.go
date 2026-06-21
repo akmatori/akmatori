@@ -48,15 +48,11 @@ func setupCorrelatorDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-// seedCorrelationSettings inserts a GeneralSettings row that enables the
-// correlator with the given parameters.
-func seedCorrelationSettings(t *testing.T, db *gorm.DB, enabled bool, windowMin, maxCandidates int, threshold float64) {
+// seedCorrelationSettings inserts a GeneralSettings row that enables the correlator.
+func seedCorrelationSettings(t *testing.T, db *gorm.DB, enabled bool, _, _ int, _ float64) {
 	t.Helper()
 	if err := db.Create(&database.GeneralSettings{
-		AlertCorrelationEnabled:       &enabled,
-		AlertCorrelationWindowMinutes: &windowMin,
-		AlertCorrelationMaxCandidates: &maxCandidates,
-		AlertCorrelationThreshold:     &threshold,
+		AlertCorrelationEnabled: &enabled,
 	}).Error; err != nil {
 		t.Fatalf("seed general settings: %v", err)
 	}
@@ -386,14 +382,8 @@ func TestAlertCorrelator_DBStoredFlagOff_NoLLMCall(t *testing.T) {
 	seedIncident(t, db, "inc-db-off", "CPU high on web01", "running", time.Now().Add(-5*time.Minute))
 	// Explicitly seed enabled=false.
 	disabled := false
-	win := 30
-	mc := 20
-	th := 0.7
 	if err := db.Create(&database.GeneralSettings{
-		AlertCorrelationEnabled:       &disabled,
-		AlertCorrelationWindowMinutes: &win,
-		AlertCorrelationMaxCandidates: &mc,
-		AlertCorrelationThreshold:     &th,
+		AlertCorrelationEnabled: &disabled,
 	}).Error; err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -413,14 +403,13 @@ func TestAlertCorrelator_DBStoredFlagOff_NoLLMCall(t *testing.T) {
 	}
 }
 
-// TestAlertCorrelator_DBStoredThreshold_Applied verifies that the threshold read
-// from DB is used for IsConfident checks — a high threshold rejects a moderate
-// confidence verdict.
-func TestAlertCorrelator_DBStoredThreshold_Applied(t *testing.T) {
+// TestAlertCorrelator_Threshold_DefaultApplied verifies that Threshold() returns
+// the hardcoded default (0.7) and that IsConfident correctly classifies verdicts
+// relative to that threshold.
+func TestAlertCorrelator_Threshold_DefaultApplied(t *testing.T) {
 	db := setupCorrelatorDB(t)
 	seedIncident(t, db, "inc-thresh", "CPU high on web01", "running", time.Now().Add(-5*time.Minute))
-	// Set threshold=0.9 so 0.85 confidence is below threshold.
-	seedCorrelationSettings(t, db, true, 30, 20, 0.9)
+	seedCorrelationSettings(t, db, true, 30, 20, 0.7)
 
 	caller := &fakeOneShotLLMCaller{}
 	caller.respond = func(_ context.Context) (string, error) {
@@ -435,13 +424,13 @@ func TestAlertCorrelator_DBStoredThreshold_Applied(t *testing.T) {
 	if !verdict.Correlated {
 		t.Error("expected Correlated=true from LLM response")
 	}
-	// DB threshold is 0.9; Threshold() must also return 0.9.
+	// Threshold is hardcoded at 0.7; confidence 0.85 must be confident.
 	thresh := c.Threshold()
-	if thresh != 0.9 {
-		t.Errorf("expected Threshold()=0.9, got %f", thresh)
+	if thresh != 0.7 {
+		t.Errorf("expected Threshold()=0.7, got %f", thresh)
 	}
-	if verdict.IsConfident(thresh) {
-		t.Error("expected IsConfident(0.9)=false for confidence 0.85")
+	if !verdict.IsConfident(thresh) {
+		t.Error("expected IsConfident(0.7)=true for confidence 0.85")
 	}
 }
 
@@ -579,17 +568,9 @@ func TestCorrelate_LongWindowMatch_SetsIsLongWindowMatch(t *testing.T) {
 	fourDaysAgo := time.Now().Add(-4 * 24 * time.Hour)
 	seedIncidentWithFingerprint(t, db, "blocked-inc", "CPU blocked 4d", "running", fp, fourDaysAgo)
 
-	longWindow := 7
 	enabled := true
-	win := 30
-	mc := 20
-	th := 0.7
 	if err := db.Create(&database.GeneralSettings{
-		AlertCorrelationEnabled:        &enabled,
-		AlertCorrelationWindowMinutes:  &win,
-		AlertCorrelationMaxCandidates:  &mc,
-		AlertCorrelationThreshold:      &th,
-		AlertCorrelationLongWindowDays: &longWindow,
+		AlertCorrelationEnabled: &enabled,
 	}).Error; err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}

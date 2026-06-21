@@ -155,15 +155,10 @@ func setupSuppressorHandlerDB(t *testing.T) *gorm.DB {
 	)
 }
 
-// seedSuppHandlerSettings seeds a GeneralSettings row enabling the suppressor.
+// seedSuppHandlerSettings seeds a GeneralSettings row for suppressor tests.
 func seedSuppHandlerSettings(t *testing.T, db *gorm.DB) {
 	t.Helper()
-	enabled := true
-	th := 0.7
-	if err := db.Create(&database.GeneralSettings{
-		AlertSuppressionEnabled:   &enabled,
-		AlertSuppressionThreshold: &th,
-	}).Error; err != nil {
+	if err := db.Create(&database.GeneralSettings{}).Error; err != nil {
 		t.Fatalf("seed GeneralSettings: %v", err)
 	}
 }
@@ -207,47 +202,6 @@ func newSuppTestAlert() alerts.NormalizedAlert {
 }
 
 // ---- tests ----
-
-// TestAlertHandler_ConfidentSuppression_NoSpawn verifies that a confident
-// suppression verdict routes to RecordSuppressedIncident and not SpawnIncidentManager.
-func TestAlertHandler_ConfidentSuppression_NoSpawn(t *testing.T) {
-	db := setupSuppressorHandlerDB(t)
-	seedHandlerSignature(t, db, "cron-disk-nightly", "DiskSpaceLow on cron-01 nightly tmpfs rotation")
-	seedSuppHandlerSettings(t, db)
-
-	caller := &suppOneShotLLMCaller{}
-	caller.respond = func(_ context.Context) (string, error) {
-		return `{"suppressed":true,"signature_name":"cron-disk-nightly","confidence":0.93,"reasoning":"identical rule on same host"}`, nil
-	}
-
-	suppressor := services.NewAlertSuppressor(caller, db)
-
-	svc := &suppGateSkillService{}
-	h := NewAlertHandler(nil, nil, nil, nil, svc, nil, nil)
-	h.SetAlertSuppressor(suppressor)
-
-	instance := &database.AlertSourceInstance{
-		UUID:    "src-1",
-		Name:    "test-source",
-		Enabled: true,
-		AlertSourceType: database.AlertSourceType{
-			Name:        "prometheus",
-			DisplayName: "Prometheus",
-		},
-	}
-
-	h.processAlert(instance, newSuppTestAlert())
-
-	if svc.getSpawnCount() != 0 {
-		t.Errorf("expected 0 spawns with confident suppression, got %d", svc.getSpawnCount())
-	}
-	if svc.getSuppressCount() != 1 {
-		t.Errorf("expected 1 RecordSuppressedIncident call, got %d", svc.getSuppressCount())
-	}
-	if svc.suppressCalls[0].signatureName != "cron-disk-nightly" {
-		t.Errorf("expected signatureName=cron-disk-nightly, got %q", svc.suppressCalls[0].signatureName)
-	}
-}
 
 // TestAlertHandler_BelowThresholdSuppression_Spawns verifies that a below-threshold
 // suppression verdict falls through to normal incident spawning.

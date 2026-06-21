@@ -200,17 +200,18 @@ type GeneralSettings struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
-	// Alert correlation gate settings (all nullable; nil means use service defaults)
-	AlertCorrelationEnabled                  *bool    `gorm:"default:null" json:"alert_correlation_enabled"`
-	AlertCorrelationWindowMinutes            *int     `gorm:"default:null" json:"alert_correlation_window_minutes"`
-	AlertCorrelationThreshold                *float64 `gorm:"default:null" json:"alert_correlation_threshold"`
-	AlertCorrelationMaxCandidates            *int     `gorm:"default:null" json:"alert_correlation_max_candidates"`
-	AlertCorrelationLongWindowDays           *int     `gorm:"default:null" json:"alert_correlation_long_window_days"`
-	AlertCorrelationFingerprintWindowMinutes *int     `gorm:"default:null" json:"alert_correlation_fingerprint_window_minutes"`
+	// Alert correlation gate settings
+	AlertCorrelationEnabled  *bool `gorm:"default:null" json:"alert_correlation_enabled"`
+	AlertMonitorWindowMinutes *int  `gorm:"default:null" json:"alert_monitor_window_minutes"`
+}
 
-	// Alert suppression gate settings (all nullable; nil means use service defaults)
-	AlertSuppressionEnabled   *bool    `gorm:"default:null" json:"alert_suppression_enabled"`
-	AlertSuppressionThreshold *float64 `gorm:"default:null" json:"alert_suppression_threshold"`
+// GetAlertMonitorWindow returns the configured monitor window duration,
+// defaulting to 60 minutes when nil.
+func (s *GeneralSettings) GetAlertMonitorWindow() time.Duration {
+	if s.AlertMonitorWindowMinutes == nil {
+		return 60 * time.Minute
+	}
+	return time.Duration(*s.AlertMonitorWindowMinutes) * time.Minute
 }
 
 func (GeneralSettings) TableName() string {

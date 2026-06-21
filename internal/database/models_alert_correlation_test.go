@@ -58,7 +58,7 @@ func TestAlertCorrelationLog_TableName(t *testing.T) {
 }
 
 // TestGeneralSettings_AlertCorrelationColumns confirms AutoMigrate succeeds with
-// the new correlation columns on GeneralSettings and that nil (pointer) defaults
+// the correlation columns on GeneralSettings and that nil (pointer) defaults
 // are preserved on a freshly-created row.
 func TestGeneralSettings_AlertCorrelationColumns(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -81,26 +81,14 @@ func TestGeneralSettings_AlertCorrelationColumns(t *testing.T) {
 	if reloaded.AlertCorrelationEnabled != nil {
 		t.Errorf("AlertCorrelationEnabled = %v, want nil", reloaded.AlertCorrelationEnabled)
 	}
-	if reloaded.AlertCorrelationWindowMinutes != nil {
-		t.Errorf("AlertCorrelationWindowMinutes = %v, want nil", reloaded.AlertCorrelationWindowMinutes)
-	}
-	if reloaded.AlertCorrelationThreshold != nil {
-		t.Errorf("AlertCorrelationThreshold = %v, want nil", reloaded.AlertCorrelationThreshold)
-	}
-	if reloaded.AlertCorrelationMaxCandidates != nil {
-		t.Errorf("AlertCorrelationMaxCandidates = %v, want nil", reloaded.AlertCorrelationMaxCandidates)
+	if reloaded.AlertMonitorWindowMinutes != nil {
+		t.Errorf("AlertMonitorWindowMinutes = %v, want nil", reloaded.AlertMonitorWindowMinutes)
 	}
 
 	// Verify that explicit values round-trip correctly.
 	enabled := true
-	window := 45
-	threshold := 0.8
-	maxCandidates := 15
 	if err := db.Model(&reloaded).Updates(map[string]interface{}{
-		"alert_correlation_enabled":         enabled,
-		"alert_correlation_window_minutes":  window,
-		"alert_correlation_threshold":       threshold,
-		"alert_correlation_max_candidates":  maxCandidates,
+		"alert_correlation_enabled": enabled,
 	}).Error; err != nil {
 		t.Fatalf("update correlation columns: %v", err)
 	}
@@ -111,14 +99,5 @@ func TestGeneralSettings_AlertCorrelationColumns(t *testing.T) {
 	}
 	if updated.AlertCorrelationEnabled == nil || *updated.AlertCorrelationEnabled != true {
 		t.Errorf("AlertCorrelationEnabled = %v, want *true", updated.AlertCorrelationEnabled)
-	}
-	if updated.AlertCorrelationWindowMinutes == nil || *updated.AlertCorrelationWindowMinutes != 45 {
-		t.Errorf("AlertCorrelationWindowMinutes = %v, want *45", updated.AlertCorrelationWindowMinutes)
-	}
-	if updated.AlertCorrelationThreshold == nil || *updated.AlertCorrelationThreshold != 0.8 {
-		t.Errorf("AlertCorrelationThreshold = %v, want *0.8", updated.AlertCorrelationThreshold)
-	}
-	if updated.AlertCorrelationMaxCandidates == nil || *updated.AlertCorrelationMaxCandidates != 15 {
-		t.Errorf("AlertCorrelationMaxCandidates = %v, want *15", updated.AlertCorrelationMaxCandidates)
 	}
 }
