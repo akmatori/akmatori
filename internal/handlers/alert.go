@@ -12,7 +12,6 @@ import (
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/config"
-	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/services"
 	slackutil "github.com/akmatori/akmatori/internal/slack"
@@ -50,8 +49,6 @@ type AlertHandler struct {
 	channelService    services.ChannelManager
 	providerRegistry  services.ProviderRegistry
 	alertCorrelator   *services.AlertCorrelator
-	alertSuppressor   *services.AlertSuppressor
-	oneShotCaller     services.OneShotLLMCaller
 
 	// spawnGroup deduplicates concurrent alerts with the same
 	// (sourceUUID, alertName, targetHost) key so only one incident is created.
@@ -129,21 +126,6 @@ func (h *AlertHandler) SetAlertCorrelator(c *services.AlertCorrelator) {
 	h.alertCorrelator = c
 }
 
-// SetAlertSuppressor wires the AlertSuppressor used to decide whether an
-// incoming alert matches a known false-positive signature and should be
-// suppressed without spawning a full investigation. Optional — when nil the
-// handler never suppresses (fail-open).
-func (h *AlertHandler) SetAlertSuppressor(s *services.AlertSuppressor) {
-	h.alertSuppressor = s
-}
-
-// SetOneShotCaller wires the OneShotLLMCaller used by runRecurrenceUpdate to
-// generate a 2-sentence delta note for long-window recurrences. Optional —
-// when nil, runRecurrenceUpdate falls through to a full spawn.
-func (h *AlertHandler) SetOneShotCaller(c services.OneShotLLMCaller) {
-	h.oneShotCaller = c
-}
-
 // correlate delegates to the wired AlertCorrelator when present; otherwise
 // returns a no-match verdict (fail-open).
 func (h *AlertHandler) correlate(ctx context.Context, sourceUUID string, alert alerts.NormalizedAlert) (services.CorrelationVerdict, error) {
@@ -160,115 +142,6 @@ func (h *AlertHandler) correlationThreshold() float64 {
 		return h.alertCorrelator.Threshold()
 	}
 	return 0.7
-}
-
-// suppress delegates to the wired AlertSuppressor when present; otherwise
-// returns a no-match verdict (fail-open).
-func (h *AlertHandler) suppress(ctx context.Context, alert alerts.NormalizedAlert) (services.SuppressionVerdict, error) {
-	if h.alertSuppressor == nil {
-		return services.SuppressionVerdict{}, nil
-	}
-	return h.alertSuppressor.Evaluate(ctx, alert)
-}
-
-// suppressionThreshold returns the configured suppression confidence threshold,
-// or the SuppressionConfigWithDefaults default (0.7) when no suppressor is wired.
-func (h *AlertHandler) suppressionThreshold() float64 {
-	if h.alertSuppressor != nil {
-		return h.alertSuppressor.Threshold()
-	}
-	return 0.7
-}
-
-// recordRecurrence calls LinkAlertToIncident and logs but does not propagate
-// errors — a failed recurrence write must never block alert processing.
-func (h *AlertHandler) recordRecurrence(ctx context.Context, sourceUUID string, incidentUUID string, alert alerts.NormalizedAlert, verdict services.CorrelationVerdict) {
-	if h.skillService == nil {
-		return
-	}
-	if err := h.skillService.LinkAlertToIncident(ctx, incidentUUID, sourceUUID, alert); err != nil {
-		slog.Warn("failed to link alert to incident", "incident_uuid", incidentUUID, "err", err)
-	}
-}
-
-// runRecurrenceUpdate handles a long-window correlation match: instead of
-// spawning a full re-investigation, it generates a short delta note via one-shot
-// LLM, appends it to the incident via AppendCorrelatedAlert, and posts a brief
-// Slack thread reply.
-//
-// Returns nil when the recurrence was handled successfully (caller should NOT
-// spawn a new incident). Returns an error when the cheap path fails — the
-// caller should then fall through to a full spawn.
-//
-// Guards: no caller → error; empty fingerprint → error; LLM error → error.
-func (h *AlertHandler) runRecurrenceUpdate(ctx context.Context, sourceUUID, incidentUUID, alertFingerprint string, alert alerts.NormalizedAlert, verdict services.CorrelationVerdict) error {
-	if h.oneShotCaller == nil {
-		return fmt.Errorf("no one-shot caller configured for recurrence update")
-	}
-	if alertFingerprint == "" {
-		return fmt.Errorf("empty alert fingerprint: cannot use long-window recurrence path")
-	}
-	if h.skillService == nil {
-		return fmt.Errorf("no skill service for recurrence update")
-	}
-
-	incident, err := h.skillService.GetIncident(incidentUUID)
-	if err != nil {
-		return fmt.Errorf("load incident: %w", err)
-	}
-
-	settings, err := database.GetLLMSettings()
-	if err != nil || settings == nil || settings.APIKey == "" {
-		return fmt.Errorf("LLM settings not configured for recurrence update")
-	}
-	worker := services.BuildLLMSettingsForWorker(settings)
-	if worker == nil {
-		return fmt.Errorf("could not build LLM worker settings")
-	}
-
-	const recurrenceSystemPrompt = `You are an incident timeline writer. Given a recurring alert for a known open incident, write exactly 2 sentences describing what this recurrence means. Be factual and concise. Output plain text only, no JSON.`
-
-	userPrompt := fmt.Sprintf(
-		"Incident: %s\nStatus: %s\nAlert: %s (host: %s)\nPrevious correlation reasoning: %s\n\nWrite 2 sentences as a delta update for the incident timeline.",
-		sanitizeRecurrenceField(incident.Title),
-		sanitizeRecurrenceField(string(incident.Status)),
-		sanitizeRecurrenceField(alert.AlertName),
-		sanitizeRecurrenceField(alert.TargetHost),
-		sanitizeRecurrenceField(verdict.Reasoning),
-	)
-
-	callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-
-	deltaNote, llmErr := h.oneShotCaller.OneShotLLM(callCtx, worker, recurrenceSystemPrompt, userPrompt, 150, 0.3)
-	if llmErr != nil {
-		return fmt.Errorf("llm delta call failed: %w", llmErr)
-	}
-	deltaNote = strings.TrimSpace(deltaNote)
-
-	reasoning := verdict.Reasoning
-	if deltaNote != "" {
-		reasoning = deltaNote
-	}
-
-	if err := h.skillService.LinkAlertToIncident(ctx, incidentUUID, sourceUUID, alert); err != nil {
-		return fmt.Errorf("link alert to incident: %w", err)
-	}
-
-	// Post a short Slack thread reply to the incident's source thread, if known.
-	if incident.SlackChannelID != "" && incident.SlackMessageTS != "" {
-		msg := fmt.Sprintf("Recurring alert: %s", truncateForSlack(reasoning, 300))
-		h.postSlackThreadReply(incident.SlackChannelID, incident.SlackMessageTS, msg)
-	}
-
-	slog.Info("long-window recurrence update applied", "incident_uuid", incidentUUID)
-	return nil
-}
-
-// sanitizeRecurrenceField strips newlines from a field so it cannot inject
-// additional prompt lines into the recurrence delta prompt.
-func sanitizeRecurrenceField(s string) string {
-	return strings.NewReplacer("\n", " ", "\r", " ").Replace(strings.TrimSpace(s))
 }
 
 // RegisterAdapter registers an alert adapter for a source type

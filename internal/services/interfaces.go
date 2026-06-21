@@ -44,9 +44,6 @@ type IncidentManager interface {
 	AppendSubagentLog(incidentUUID string, skillName string, subagentLog string) error
 	InsertFiringAlert(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert) error
 	LinkAlertToIncident(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert) error
-	// RecordSuppressedIncident is kept for Task 5 cleanup; called by alert_processor.go
-	// until the suppressor gate is removed.
-	RecordSuppressedIncident(incidentCtx *IncidentContext, signatureName, reasoning string, confidence float64) (string, error)
 }
 
 // SkillIncidentManager combines SkillManager and IncidentManager for handlers

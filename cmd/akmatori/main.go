@@ -233,19 +233,11 @@ func main() {
 	alertHandler.SetChannelService(channelService)
 	alertHandler.SetProviderRegistry(providerRegistry)
 
-	// Alert correlator and suppressor read their config live from GeneralSettings on
-	// each call, so no startup config block is needed. Changes to correlation/suppression
-	// settings take effect immediately without a restart.
+	// Alert correlator reads its config live from GeneralSettings on each call,
+	// so no startup config block is needed. Changes take effect immediately without a restart.
 	alertCorrelator := services.NewAlertCorrelator(agentWSHandler, database.GetDB())
 	alertHandler.SetAlertCorrelator(alertCorrelator)
 	slog.Info("alert correlator ready (live config)")
-
-	alertSuppressor := services.NewAlertSuppressor(agentWSHandler, database.GetDB())
-	alertHandler.SetAlertSuppressor(alertSuppressor)
-	slog.Info("alert suppressor ready (live config)")
-
-	// Wire the one-shot LLM caller for long-window recurrence delta updates.
-	alertHandler.SetOneShotCaller(agentWSHandler)
 
 	// Set up event handler for when Slack connects
 	// Note: We receive the client directly to avoid deadlock (can't call GetClient while holding lock)

@@ -565,9 +565,6 @@ func (r *recordingSkillService) InsertFiringAlert(context.Context, string, strin
 func (r *recordingSkillService) LinkAlertToIncident(context.Context, string, string, alerts.NormalizedAlert) error {
 	return nil
 }
-func (r *recordingSkillService) RecordSuppressedIncident(*services.IncidentContext, string, string, float64) (string, error) {
-	return "", nil
-}
 
 // newMemoryAPIHandlerWithSkill wires both a memory mock and a skill
 // regeneration recorder. Used by tests that need to verify skill-scoped

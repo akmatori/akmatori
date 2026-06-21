@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unicode/utf8"
 
 	"github.com/akmatori/akmatori/internal/alerts"
@@ -19,6 +20,8 @@ import (
 	"github.com/akmatori/akmatori/internal/services"
 	slackutil "github.com/akmatori/akmatori/internal/slack"
 	"github.com/slack-go/slack"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // originalAlertTextMaxBytes caps how much of the verbatim alert text
@@ -40,22 +43,11 @@ func alertSpawnKey(sourceUUID, alertName, targetHost, fingerprint string) string
 	return hex.EncodeToString(h[:])
 }
 
-// alertSpawnResult is the typed singleflight return value for processAlert and
-// ProcessAlertFromListenerChannel. The suppressed flag tells followers whether
-// the leader took the suppression path so they can skip recordRecurrence (which
-// would otherwise attach bogus audit rows to a closed suppressed incident).
-// The longWindow flag tells followers whether the leader already handled the
-// alert via the long-window recurrence path (runRecurrenceUpdate), so they skip
-// a redundant recordRecurrence call that would create duplicate audit log rows.
-type alertSpawnResult struct {
-	incidentUUID string
-	suppressed   bool
-	longWindow   bool
-}
 
 func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, normalized alerts.NormalizedAlert) {
 	if normalized.Status == database.AlertStatusResolved {
 		slog.Info("processing resolved alert", "alert_name", normalized.AlertName)
+		go h.processResolvedAlert(instance.UUID, normalized)
 		return
 	}
 
@@ -108,10 +100,10 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 	key := alertSpawnKey(instance.UUID, normalized.AlertName, normalized.TargetHost, normalized.SourceFingerprint)
 	isLeader := false
 
-	v, sfErr, _ := h.spawnGroup.Do(key, func() (interface{}, error) {
+	_, sfErr, _ := h.spawnGroup.Do(key, func() (interface{}, error) {
 		isLeader = true
 
-		// Correlation gate: attach to a recent incident when confident.
+		// Correlation gate: attach to a recent open or monitor incident when confident.
 		verdict, corrErr := h.correlate(context.Background(), instance.UUID, normalized)
 		if corrErr != nil {
 			if errors.Is(corrErr, services.ErrWorkerNotConnected) {
@@ -122,34 +114,28 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		}
 		if verdict.IsConfident(h.correlationThreshold()) {
 			slog.Info("alert correlated to existing incident", "incident_uuid", verdict.IncidentUUID, "confidence", verdict.Confidence)
-			h.recordRecurrence(context.Background(), instance.UUID, verdict.IncidentUUID, normalized, verdict)
-			return alertSpawnResult{incidentUUID: verdict.IncidentUUID}, nil
-		}
-
-		// Suppression gate: check if this is a known false positive before spawning.
-		suppVerdict, suppErr := h.suppress(context.Background(), normalized)
-		if suppErr != nil {
-			if errors.Is(suppErr, services.ErrWorkerNotConnected) {
-				slog.Debug("alert suppressor worker not connected, spawning new incident")
-			} else {
-				slog.Warn("alert suppressor error, spawning new incident", "err", suppErr)
+			if err := h.skillService.LinkAlertToIncident(context.Background(), verdict.IncidentUUID, instance.UUID, normalized); err != nil {
+				slog.Warn("failed to link alert to incident", "incident_uuid", verdict.IncidentUUID, "err", err)
 			}
-		}
-		if suppVerdict.IsConfident(h.suppressionThreshold()) {
-			slog.Info("alert suppressed as known false positive", "signature", suppVerdict.SignatureName, "confidence", suppVerdict.Confidence)
-			incidentUUID, suppRecordErr := h.skillService.RecordSuppressedIncident(incidentCtx, suppVerdict.SignatureName, suppVerdict.Reasoning, suppVerdict.Confidence)
-			if suppRecordErr != nil {
-				slog.Error("failed to record suppressed incident, spawning normally", "err", suppRecordErr)
-			} else {
-				return alertSpawnResult{incidentUUID: incidentUUID, suppressed: true}, nil
+			// Best-effort Slack thread note on the matched incident's thread.
+			if incident, err := h.skillService.GetIncident(verdict.IncidentUUID); err == nil && incident != nil &&
+				incident.SlackChannelID != "" && incident.SlackMessageTS != "" {
+				h.postSlackThreadReply(incident.SlackChannelID, incident.SlackMessageTS,
+					fmt.Sprintf("Recurring alert: %s", normalized.AlertName))
 			}
+			return nil, nil
 		}
 
 		// Spawn incident manager
 		incidentUUID, _, err := h.skillService.SpawnIncidentManager(incidentCtx)
 		if err != nil {
 			slog.Error("failed to spawn incident manager", "err", err)
-			return alertSpawnResult{}, err
+			return nil, err
+		}
+
+		// Insert the initial firing alert row for this new incident.
+		if err := h.skillService.InsertFiringAlert(context.Background(), incidentUUID, instance.UUID, normalized); err != nil {
+			slog.Warn("failed to insert firing alert", "incident_uuid", incidentUUID, "err", err)
 		}
 
 		slog.Info("created incident for alert", "incident_id", incidentUUID)
@@ -164,7 +150,6 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 			}
 		}
 
-		// Persist Slack context so long-window recurrence updates can post thread replies.
 		if channelID != "" && threadTS != "" {
 			if err := h.updateIncidentSlackContext(incidentUUID, channelID, threadTS); err != nil {
 				slog.Warn("failed to update incident Slack context", "err", err)
@@ -177,7 +162,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		}
 		go h.runInvestigation(incidentUUID, normalized, instance, channelID, threadTS)
 
-		return alertSpawnResult{incidentUUID: incidentUUID}, nil
+		return nil, nil
 	})
 
 	if sfErr != nil {
@@ -186,20 +171,9 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 	}
 
 	if !isLeader {
-		// Follower: the leader decided which incident owns this alert burst.
-		// Skip recordRecurrence when the leader suppressed the alert (no active
-		// investigation to attach burst duplicates to) or when the leader already
-		// handled the alert via the long-window recurrence path (runRecurrenceUpdate
-		// already wrote the AppendCorrelatedAlert row).
-		result, _ := v.(alertSpawnResult)
-		if !result.suppressed && !result.longWindow {
-			h.recordRecurrence(context.Background(), instance.UUID, result.incidentUUID, normalized, services.CorrelationVerdict{
-				Correlated:   true,
-				IncidentUUID: result.incidentUUID,
-				Confidence:   1.0,
-				Reasoning:    "collapsed via concurrent dedup",
-			})
-		}
+		// Follower: singleflight collapsed this burst — the leader owned all work.
+		// The partial-unique index on alerts prevents duplicate rows if the same
+		// alert arrives again before the leader's insert commits.
 	}
 }
 
@@ -216,6 +190,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 ) {
 	if normalized.Status == database.AlertStatusResolved {
 		slog.Info("processing resolved alert from listener channel", "alert_name", normalized.AlertName)
+		go h.processResolvedAlert(channel.UUID, normalized)
 		return
 	}
 
@@ -281,10 +256,10 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 	key := alertSpawnKey(channel.UUID, normalized.AlertName, normalized.TargetHost, normalized.SourceFingerprint)
 	isLeader := false
 
-	v, sfErr, _ := h.spawnGroup.Do(key, func() (interface{}, error) {
+	_, sfErr, _ := h.spawnGroup.Do(key, func() (interface{}, error) {
 		isLeader = true
 
-		// Correlation gate: attach to a recent incident when confident.
+		// Correlation gate: attach to a recent open or monitor incident when confident.
 		verdict, corrErr := h.correlate(context.Background(), channel.UUID, normalized)
 		if corrErr != nil {
 			if errors.Is(corrErr, services.ErrWorkerNotConnected) {
@@ -295,36 +270,13 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 		}
 		if verdict.IsConfident(h.correlationThreshold()) {
 			slog.Info("listener channel alert correlated to existing incident", "incident_uuid", verdict.IncidentUUID, "confidence", verdict.Confidence)
-			h.recordRecurrence(context.Background(), channel.UUID, verdict.IncidentUUID, normalized, verdict)
+			if err := h.skillService.LinkAlertToIncident(context.Background(), verdict.IncidentUUID, channel.UUID, normalized); err != nil {
+				slog.Warn("failed to link alert to incident", "incident_uuid", verdict.IncidentUUID, "err", err)
+			}
 			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, false)
 			h.postSlackThreadReply(slackChannelID, slackMessageTS,
 				fmt.Sprintf("Alert merged into existing incident (ID: %s)", verdict.IncidentUUID))
-			return alertSpawnResult{incidentUUID: verdict.IncidentUUID}, nil
-		}
-
-		// Suppression gate: check if this is a known false positive before spawning.
-		suppVerdict, suppErr := h.suppress(context.Background(), normalized)
-		if suppErr != nil {
-			if errors.Is(suppErr, services.ErrWorkerNotConnected) {
-				slog.Debug("alert suppressor worker not connected, spawning new incident")
-			} else {
-				slog.Warn("alert suppressor error, spawning new incident", "err", suppErr)
-			}
-		}
-		if suppVerdict.IsConfident(h.suppressionThreshold()) {
-			slog.Info("listener channel alert suppressed as known false positive", "signature", suppVerdict.SignatureName, "confidence", suppVerdict.Confidence)
-			incidentUUID, suppRecordErr := h.skillService.RecordSuppressedIncident(incidentCtx, suppVerdict.SignatureName, suppVerdict.Reasoning, suppVerdict.Confidence)
-			if suppRecordErr != nil {
-				slog.Error("failed to record suppressed incident, spawning normally", "err", suppRecordErr)
-			} else {
-				if err := h.updateIncidentSlackContext(incidentUUID, slackChannelID, slackMessageTS); err != nil {
-					slog.Warn("failed to update suppressed incident Slack context", "err", err)
-				}
-				h.updateSlackChannelReactions(slackChannelID, slackMessageTS, false)
-				h.postSlackThreadReply(slackChannelID, slackMessageTS,
-					fmt.Sprintf("Alert suppressed (matched signature: %s). No investigation needed.", suppVerdict.SignatureName))
-				return alertSpawnResult{incidentUUID: incidentUUID, suppressed: true}, nil
-			}
+			return nil, nil
 		}
 
 		// Spawn incident manager
@@ -334,7 +286,12 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 			h.updateSlackChannelReactions(slackChannelID, slackMessageTS, true)
 			h.postSlackThreadReply(slackChannelID, slackMessageTS,
 				fmt.Sprintf("Failed to create incident: %v", err))
-			return alertSpawnResult{}, err
+			return nil, err
+		}
+
+		// Insert the initial firing alert row for this new incident.
+		if err := h.skillService.InsertFiringAlert(context.Background(), incidentUUID, channel.UUID, normalized); err != nil {
+			slog.Warn("failed to insert firing alert", "incident_uuid", incidentUUID, "err", err)
 		}
 
 		slog.Info("created incident for listener channel alert", "incident_id", incidentUUID)
@@ -351,7 +308,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 
 		go h.runListenerChannelInvestigation(incidentUUID, normalized, channel, slackChannelID, slackMessageTS)
 
-		return alertSpawnResult{incidentUUID: incidentUUID}, nil
+		return nil, nil
 	})
 
 	if sfErr != nil {
@@ -360,19 +317,121 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 	}
 
 	if !isLeader {
-		// Follower: the leader decided which incident owns this alert burst.
-		// Skip recordRecurrence when the leader suppressed the alert (no active
-		// investigation to attach burst duplicates to) or when the leader already
-		// handled the alert via the long-window recurrence path (runRecurrenceUpdate
-		// already wrote the AppendCorrelatedAlert row).
-		result, _ := v.(alertSpawnResult)
-		if !result.suppressed && !result.longWindow {
-			h.recordRecurrence(context.Background(), channel.UUID, result.incidentUUID, normalized, services.CorrelationVerdict{
-				Correlated:   true,
-				IncidentUUID: result.incidentUUID,
-				Confidence:   1.0,
-				Reasoning:    "collapsed via concurrent dedup",
-			})
+		// Follower: singleflight collapsed this burst — the leader owned all work.
+	}
+}
+
+// processResolvedAlert finds the matching firing alert row in the alerts table
+// and marks it resolved. When no firing alerts remain for the incident and the
+// incident is in completed or monitor status, the monitor window is shortened to
+// min(monitor_until, resolved_at + window) so the watch period ends promptly.
+// A no-match is logged and silently dropped — it is not an error (the alert
+// may have fired before Akmatori was deployed, or the source sent a duplicate
+// resolved notification). A best-effort Slack thread reply is posted to the
+// incident's source thread after the transaction commits.
+func (h *AlertHandler) processResolvedAlert(sourceUUID string, normalized alerts.NormalizedAlert) {
+	db := database.GetDB()
+	if db == nil {
+		slog.Warn("processResolvedAlert: database not available")
+		return
+	}
+
+	fingerprint := services.ComputeAlertFingerprint(sourceUUID, normalized.AlertName, normalized.TargetHost)
+	now := time.Now()
+	var linkedIncidentUUID string
+
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		// Prefer source_fingerprint (external adapter ID); fall back to the
+		// computed fingerprint derived from alertName + targetHost.
+		var a database.Alert
+		found := false
+		if normalized.SourceFingerprint != "" {
+			if err := tx.Where(
+				"source_uuid = ? AND source_fingerprint = ? AND status = ? AND resolved_at IS NULL",
+				sourceUUID, normalized.SourceFingerprint, string(database.AlertStatusFiring),
+			).Order("fired_at DESC").Limit(1).First(&a).Error; err == nil {
+				found = true
+			}
+		}
+		if !found {
+			if err := tx.Where(
+				"source_uuid = ? AND fingerprint = ? AND status = ? AND resolved_at IS NULL",
+				sourceUUID, fingerprint, string(database.AlertStatusFiring),
+			).Order("fired_at DESC").Limit(1).First(&a).Error; err != nil {
+				slog.Info("processResolvedAlert: no matching firing alert, dropping",
+					"alert_name", normalized.AlertName, "source_uuid", sourceUUID)
+				return nil
+			}
+		}
+
+		linkedIncidentUUID = a.IncidentUUID
+
+		// Mark the alert resolved.
+		resolvedAt := now
+		if err := tx.Model(&a).Updates(map[string]interface{}{
+			"status":      string(database.AlertStatusResolved),
+			"resolved_at": resolvedAt,
+		}).Error; err != nil {
+			return fmt.Errorf("mark alert resolved: %w", err)
+		}
+
+		// Check whether any firing alerts still remain for this incident.
+		var firingCount int64
+		if err := tx.Model(&database.Alert{}).
+			Where("incident_uuid = ? AND status = ? AND resolved_at IS NULL",
+				a.IncidentUUID, string(database.AlertStatusFiring)).
+			Count(&firingCount).Error; err != nil {
+			return fmt.Errorf("count firing alerts: %w", err)
+		}
+		if firingCount > 0 {
+			return nil // active alerts remain; leave monitor_until unchanged
+		}
+
+		// All alerts resolved. Lock the incident row and potentially pull in the
+		// monitor window so the watch period ends promptly.
+		var incident database.Incident
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("uuid = ?", a.IncidentUUID).First(&incident).Error; err != nil {
+			return fmt.Errorf("load incident: %w", err)
+		}
+
+		if incident.Status != database.IncidentStatusCompleted &&
+			incident.Status != database.IncidentStatusMonitor {
+			return nil
+		}
+
+		settings, err := database.GetOrCreateGeneralSettings()
+		if err != nil {
+			slog.Warn("processResolvedAlert: could not load settings, skipping monitor_until update", "err", err)
+			return nil
+		}
+		window := settings.GetAlertMonitorWindow()
+		newUntil := resolvedAt.Add(window)
+		if incident.MonitorUntil == nil || newUntil.Before(*incident.MonitorUntil) {
+			if err := tx.Model(&incident).Update("monitor_until", newUntil).Error; err != nil {
+				return fmt.Errorf("update monitor_until: %w", err)
+			}
+		}
+		return nil
+	}); err != nil {
+		slog.Warn("processResolvedAlert: error", "err", err,
+			"alert_name", normalized.AlertName, "source_uuid", sourceUUID)
+		return
+	}
+
+	if linkedIncidentUUID == "" {
+		return // no matching alert found; already logged above
+	}
+
+	slog.Info("processResolvedAlert: alert resolved",
+		"alert_name", normalized.AlertName, "incident_uuid", linkedIncidentUUID)
+
+	// Best-effort Slack thread reply on the incident's source thread.
+	if h.skillService != nil {
+		if incident, err := h.skillService.GetIncident(linkedIncidentUUID); err == nil &&
+			incident.SlackChannelID != "" && incident.SlackMessageTS != "" {
+			h.postSlackThreadReply(incident.SlackChannelID, incident.SlackMessageTS,
+				fmt.Sprintf("Alert resolved: %s", normalized.AlertName))
 		}
 	}
 }

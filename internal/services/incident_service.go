@@ -339,69 +339,6 @@ func (s *SkillService) UpdateIncidentLog(incidentUUID string, fullLog string) er
 	return nil
 }
 
-// RecordSuppressedIncident creates a completed incident record for an alert that
-// matched a known false-positive suppression signature. Kept until the suppressor
-// gate is removed in Task 5. No agent is spawned; TokensUsed and ExecutionTimeMs are 0.
-func (s *SkillService) RecordSuppressedIncident(incidentCtx *IncidentContext, signatureName, reasoning string, confidence float64) (string, error) {
-	incidentUUID := uuid.New().String()
-	now := time.Now()
-
-	alertName, _ := incidentCtx.Context["alert_name"].(string)
-	targetHost, _ := incidentCtx.Context["target_host"].(string)
-	alertFingerprint, _ := incidentCtx.Context["alert_fingerprint"].(string)
-
-	title := "Suppressed"
-	if alertName != "" {
-		title = "Suppressed: " + alertName
-	}
-
-	response := fmt.Sprintf(
-		"Alert suppressed: matched known false-positive signature %q with %.0f%% confidence.\n\nReasoning: %s",
-		signatureName, confidence*100, reasoning,
-	)
-
-	incident := &database.Incident{
-		UUID:             incidentUUID,
-		Source:           incidentCtx.Source,
-		SourceID:         incidentCtx.SourceID,
-		SourceKind:       incidentCtx.SourceKind,
-		SourceUUID:       incidentCtx.SourceUUID,
-		Title:            title,
-		Status:           database.IncidentStatusCompleted,
-		Context:          incidentCtx.Context,
-		Response:         response,
-		TokensUsed:       0,
-		ExecutionTimeMs:  0,
-		StartedAt:        now,
-		CompletedAt:      &now,
-		AlertFingerprint: alertFingerprint,
-	}
-
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(incident).Error; err != nil {
-			return fmt.Errorf("RecordSuppressedIncident: create incident: %w", err)
-		}
-		logRow := database.AlertSuppressionLog{
-			SourceUUID:    incidentCtx.SourceUUID,
-			AlertName:     alertName,
-			TargetHost:    targetHost,
-			IncidentUUID:  incidentUUID,
-			SignatureName: signatureName,
-			Confidence:    confidence,
-			Reasoning:     reasoning,
-			CreatedAt:     now,
-		}
-		if err := tx.Create(&logRow).Error; err != nil {
-			return fmt.Errorf("RecordSuppressedIncident: write log: %w", err)
-		}
-		return nil
-	})
-	if err != nil {
-		return "", err
-	}
-	return incidentUUID, nil
-}
-
 // GetIncident retrieves an incident by UUID
 func (s *SkillService) GetIncident(incidentUUID string) (*database.Incident, error) {
 	var incident database.Incident

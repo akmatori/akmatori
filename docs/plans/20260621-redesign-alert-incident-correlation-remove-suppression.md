@@ -152,31 +152,31 @@ removed.
 - Modify: `internal/handlers/alert.go`
 - Modify: `cmd/akmatori/main.go`
 
-- [ ] Replace two-gate body in `processAlert`: single `h.correlate()` call → confident match:
+- [x] Replace two-gate body in `processAlert`: single `h.correlate()` call → confident match:
       call `skillService.LinkAlertToIncident` + send brief Slack thread note (no new investigation
       spawned); no-match or error (fail-open): `SpawnIncidentManager` + `InsertFiringAlert` +
       `go runInvestigation`; singleflight followers: no-op (the partial-unique index handles
       cross-process burst dedup)
-- [ ] Apply the same replacement to `ProcessAlertFromListenerChannel`
-- [ ] Remove suppression gate block (`h.suppress()`, `h.skillService.RecordSuppressedIncident`,
+- [x] Apply the same replacement to `ProcessAlertFromListenerChannel`
+- [x] Remove suppression gate block (`h.suppress()`, `h.skillService.RecordSuppressedIncident`,
       `alertSpawnResult.suppressed`), `IsLongWindowMatch`/`runRecurrenceUpdate` branch,
       `recordRecurrence` follower blocks, and `alertSpawnResult.longWindow` field
-- [ ] Replace both resolved-alert early returns with a new
+- [x] Replace both resolved-alert early returns with a new
       `processResolvedAlert(sourceUUID string, normalized NormalizedAlert)` function: in a
       transaction with `clause.Locking{Strength:"UPDATE"}` on the incident row — find matching
       firing `alerts` row (by `source_fingerprint` match first, then `fingerprint` fallback,
       newest-first, `LIMIT 1`); mark it `resolved_at = now`; if no firing alerts remain AND
       incident is completed/monitor, update `monitor_until = min(monitor_until, resolved_at +
       window)`; no match → `slog.Info` + drop; best-effort Slack resolved thread reply
-- [ ] Remove `SetAlertSuppressor`, `SetOneShotCaller` wiring methods from `alert.go`; remove
+- [x] Remove `SetAlertSuppressor`, `SetOneShotCaller` wiring methods from `alert.go`; remove
       `alertSuppressor *services.AlertSuppressor` and `oneShotCaller` fields from `AlertHandler`
-- [ ] In `main.go`: remove `NewAlertSuppressor`/`SetAlertSuppressor` block; remove
+- [x] In `main.go`: remove `NewAlertSuppressor`/`SetAlertSuppressor` block; remove
       `alertHandler.SetOneShotCaller` line; keep `NewAlertCorrelator`/`SetAlertCorrelator`
-- [ ] Update `alert_correlation_gate_test.go`: remove long-window path tests; update mock stubs
+- [x] Update `alert_correlation_gate_test.go`: remove long-window path tests; update mock stubs
       for new interface (add `LinkAlertToIncident`/`InsertFiringAlert`); add test that on
       correlation match with a monitor incident, `LinkAlertToIncident` is called (not
       SpawnIncidentManager)
-- [ ] Run `make test` — must pass before task 6
+- [x] Run `make test` — must pass before task 6
 
 ### Task 6: Remove suppression backend and recurrence stats
 

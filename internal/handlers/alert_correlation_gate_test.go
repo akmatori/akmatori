@@ -92,9 +92,6 @@ func (s *corrGateSkillService) UpdateIncidentComplete(string, database.IncidentS
 func (s *corrGateSkillService) UpdateIncidentLog(string, string) error        { return nil }
 func (s *corrGateSkillService) GetIncident(string) (*database.Incident, error) { return nil, nil }
 func (s *corrGateSkillService) AppendSubagentLog(string, string, string) error { return nil }
-func (s *corrGateSkillService) RecordSuppressedIncident(*services.IncidentContext, string, string, float64) (string, error) {
-	return "", nil
-}
 func (s *corrGateSkillService) CreateSkill(string, string, string, string) (*database.Skill, error) {
 	return nil, nil
 }
@@ -148,9 +145,8 @@ func setupCorrelatorHandlerDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db := testhelpers.NewGlobalSQLiteDB(t,
 		&database.Incident{},
+		&database.Alert{},
 		&database.LLMSettings{},
-		&database.AlertCorrelationLog{},
-		&database.AlertSuppressionLog{},
 		&database.SlackSettings{},
 		&database.GeneralSettings{},
 	)
@@ -209,7 +205,9 @@ func newCorrTestAlert() alerts.NormalizedAlert {
 // ---- tests ----
 
 // TestAlertHandler_Singleflight_15ConcurrentAlerts verifies that concurrent
-// alerts with the same key result in exactly 1 spawn and N-1 recurrences.
+// alerts with the same key result in exactly 1 spawn and 0 link calls.
+// The new design makes followers a no-op; the partial-unique index on the alerts
+// table prevents duplicate rows without follower recurrence logic.
 //
 // Approach: the leader's SpawnIncidentManager blocks until all followers have
 // queued inside singleflight.Do, then releases. This guarantees deterministic
@@ -217,8 +215,8 @@ func newCorrTestAlert() alerts.NormalizedAlert {
 func TestAlertHandler_Singleflight_15ConcurrentAlerts(t *testing.T) {
 	testhelpers.NewGlobalSQLiteDB(t,
 		&database.SlackSettings{},
-		&database.AlertCorrelationLog{},
 		&database.Incident{},
+		&database.Alert{},
 	)
 
 	const n = 15
@@ -277,8 +275,9 @@ func TestAlertHandler_Singleflight_15ConcurrentAlerts(t *testing.T) {
 	if spawns := svc.getSpawnCount(); spawns != 1 {
 		t.Errorf("expected 1 spawn, got %d", spawns)
 	}
-	if links := svc.getLinkCount(); links != n-1 {
-		t.Errorf("expected %d link calls, got %d", n-1, links)
+	// Followers are now no-ops; the partial-unique index handles burst dedup.
+	if links := svc.getLinkCount(); links != 0 {
+		t.Errorf("expected 0 link calls from followers (no-op path), got %d", links)
 	}
 }
 
@@ -405,8 +404,8 @@ func TestAlertHandler_WorkerNotConnected_Spawns(t *testing.T) {
 func TestAlertHandler_NilCorrelator_AlwaysSpawns(t *testing.T) {
 	testhelpers.NewGlobalSQLiteDB(t,
 		&database.SlackSettings{},
-		&database.AlertCorrelationLog{},
 		&database.Incident{},
+		&database.Alert{},
 	)
 
 	svc := &corrGateSkillService{spawnUUID: "no-correlator-incident"}
@@ -440,6 +439,61 @@ func TestAlertHandler_SetAlertCorrelator_NilSafe(t *testing.T) {
 	h.SetAlertCorrelator(nil)
 	if h.alertCorrelator != nil {
 		t.Error("expected nil alertCorrelator after SetAlertCorrelator(nil)")
+	}
+}
+
+// TestAlertHandler_ConfidentVerdict_MonitorIncident verifies that a confident
+// correlation to a monitor-status incident calls LinkAlertToIncident and does
+// NOT spawn a new incident.
+func TestAlertHandler_ConfidentVerdict_MonitorIncident(t *testing.T) {
+	db := setupCorrelatorHandlerDB(t)
+	monitorUntil := time.Now().Add(30 * time.Minute)
+	if err := db.Create(&database.Incident{
+		UUID:         "monitor-inc",
+		Source:       "test",
+		SourceKind:   database.IncidentSourceKindAlert,
+		SourceUUID:   "src-1",
+		Title:        "CPU high on web01",
+		Status:       database.IncidentStatusMonitor,
+		StartedAt:    time.Now().Add(-2 * time.Hour),
+		Response:     "prior investigation",
+		MonitorUntil: &monitorUntil,
+	}).Error; err != nil {
+		t.Fatalf("seed monitor incident: %v", err)
+	}
+	seedCorrHandlerSettings(t, db)
+
+	caller := &corrOneShotLLMCaller{}
+	caller.respond = func(_ context.Context) (string, error) {
+		return `{"correlated":true,"incident_uuid":"monitor-inc","confidence":0.95,"reasoning":"same alert recurring in monitor window"}`, nil
+	}
+
+	correlator := services.NewAlertCorrelator(caller, db)
+
+	svc := &corrGateSkillService{spawnUUID: "should-not-be-spawned"}
+	h := NewAlertHandler(nil, nil, nil, nil, svc, nil, nil)
+	h.SetAlertCorrelator(correlator)
+
+	instance := &database.AlertSourceInstance{
+		UUID:    "src-1",
+		Name:    "test-source",
+		Enabled: true,
+		AlertSourceType: database.AlertSourceType{
+			Name:        "prometheus",
+			DisplayName: "Prometheus",
+		},
+	}
+
+	h.processAlert(instance, newCorrTestAlert())
+
+	if svc.getSpawnCount() != 0 {
+		t.Errorf("expected 0 spawns for monitor incident correlation, got %d", svc.getSpawnCount())
+	}
+	if svc.getLinkCount() != 1 {
+		t.Errorf("expected 1 LinkAlertToIncident call for monitor incident, got %d", svc.getLinkCount())
+	}
+	if len(svc.linkCalls) > 0 && svc.linkCalls[0].incidentUUID != "monitor-inc" {
+		t.Errorf("expected link to 'monitor-inc', got %q", svc.linkCalls[0].incidentUUID)
 	}
 }
 
