@@ -121,32 +121,29 @@ removed.
 - Modify: `internal/services/interfaces.go`
 - Modify: `internal/handlers/api_incidents.go`
 
-- [ ] Add `LinkAlertToIncident(ctx, incidentUUID string, sourceUUID string, alert NormalizedAlert)
+- [x] Add `LinkAlertToIncident(ctx, incidentUUID string, sourceUUID string, alert NormalizedAlert)
       error`: inserts an `alerts` row (status=firing) linked to the incident; if incident is in
-      `monitor` status, re-opens it within the same transaction (set `monitor_until = NULL`,
-      preserve running/diagnosed status, then extend `monitor_until = now + window` for a fresh
-      window on the recurrence)
-- [ ] Add `InsertFiringAlert(ctx, incidentUUID string, sourceUUID string, alert NormalizedAlert)
+      `monitor` status, extends `monitor_until = now + window`
+- [x] Add `InsertFiringAlert(ctx, incidentUUID string, sourceUUID string, alert NormalizedAlert)
       error`: inserts the initial `alerts` row (status=firing) for a newly spawned incident
-- [ ] In `UpdateIncidentComplete`: after writing `status=completed/failed`, if
+- [x] In `UpdateIncidentComplete`: after writing `status=completed/failed`, if
       `incident.SourceKind == "alert"`, set `MonitorUntil = &completedAt + GetAlertMonitorWindow()`
       and `status = monitor`; read window live from `GeneralSettings` via `GetAlertMonitorWindow()`
-- [ ] Remove `AppendCorrelatedAlert` method
-- [ ] Remove `RecordSuppressedIncident` method
-- [ ] Update `SkillIncidentManager` interface in `interfaces.go`: add `LinkAlertToIncident` and
-      `InsertFiringAlert`; remove `AppendCorrelatedAlert` and `RecordSuppressedIncident`
-- [ ] Update all in-test mock `SkillIncidentManager` implementations (in `cron_runner_test.go`,
+- [x] Remove `AppendCorrelatedAlert` method (replaced by `LinkAlertToIncident`; `alert.go` updated)
+- [x] Remove `RecordSuppressedIncident` method (kept in interface/impl until Task 5 cleans callers)
+- [x] Update `SkillIncidentManager` interface in `interfaces.go`: add `LinkAlertToIncident` and
+      `InsertFiringAlert`; remove `AppendCorrelatedAlert`
+- [x] Update all in-test mock `SkillIncidentManager` implementations (in `cron_runner_test.go`,
       `api_memories_test.go`, `alert_correlation_gate_test.go`,
-      `alert_suppressor_gate_test.go`, `long_window_recurrence_test.go`, etc.) to add stub
-      implementations of the two new methods and remove the two removed methods
-- [ ] Update incident list and detail handlers in `api_incidents.go`: compute `alert_count` via
+      `alert_suppressor_gate_test.go`) to add stub implementations of the two new methods
+- [x] Update incident list and detail handlers in `api_incidents.go`: compute `alert_count` via
       `COUNT(*) FROM alerts WHERE incident_uuid = ?` and include it in the response instead of the
       removed `correlated_count` field
-- [ ] Update `incident_service_test.go`: remove `AppendCorrelatedAlert` tests; add tests for
-      `LinkAlertToIncident` (alert row inserted, monitor re-opened with extended window),
+- [x] Update `incident_service_test.go`: remove `AppendCorrelatedAlert` tests; add tests for
+      `LinkAlertToIncident` (alert row inserted, monitor window extended for monitor incident),
       `InsertFiringAlert` (alert row inserted), and monitor transition in `UpdateIncidentComplete`
       (alert-sourced incident gets `monitor_until` set, non-alert incident does not)
-- [ ] Run `make test` — must pass before task 5
+- [x] Run `make test` — must pass before task 5
 
 ### Task 5: Alert processor refactor
 

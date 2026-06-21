@@ -28,7 +28,9 @@ func setupIncidentTestDB(t *testing.T) *gorm.DB {
 		&database.ToolInstance{},
 		&database.SkillTool{},
 		&database.Incident{},
+		&database.Alert{},
 		&database.LLMSettings{},
+		&database.GeneralSettings{},
 		&database.AlertCorrelationLog{},
 	)
 	if err != nil {
@@ -521,16 +523,16 @@ func TestSpawnIncidentManager_NilContext(t *testing.T) {
 	}
 }
 
-// --- AppendCorrelatedAlert Tests ---
+// --- InsertFiringAlert Tests ---
 
-func spawnTestIncident(t *testing.T, svc *SkillService) string {
+func spawnAlertIncident(t *testing.T, svc *SkillService) string {
 	t.Helper()
 	ctx := &IncidentContext{
 		Source:     "zabbix",
-		SourceID:   "evt-corr",
+		SourceID:   "evt-alert",
 		SourceKind: database.IncidentSourceKindAlert,
 		SourceUUID: "src-uuid-111",
-		Message:    "test correlation incident",
+		Message:    "test alert incident",
 	}
 	uuid, _, err := svc.SpawnIncidentManager(ctx)
 	if err != nil {
@@ -539,144 +541,199 @@ func spawnTestIncident(t *testing.T, svc *SkillService) string {
 	return uuid
 }
 
-func TestAppendCorrelatedAlert_AppendsContextEntry(t *testing.T) {
+func TestInsertFiringAlert_CreatesAlertRow(t *testing.T) {
 	db := setupIncidentTestDB(t)
 	svc := newIncidentTestService(t, db)
-	incidentUUID := spawnTestIncident(t, svc)
+	incidentUUID := spawnAlertIncident(t, svc)
 
-	alert := alerts.NormalizedAlert{
-		AlertName:  "HighCPU",
-		TargetHost: "host-01",
+	a := alerts.NormalizedAlert{
+		AlertName:         "HighCPU",
+		TargetHost:        "host-01",
+		SourceFingerprint: "fp-abc",
 	}
-	at := time.Now().UTC().Truncate(time.Second)
-
-	if err := svc.AppendCorrelatedAlert(context.Background(), "src-uuid-111", incidentUUID, alert, 0.85, "same host and alert", at); err != nil {
-		t.Fatalf("AppendCorrelatedAlert failed: %v", err)
-	}
-
-	var incident database.Incident
-	if err := db.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
-		t.Fatalf("load incident: %v", err)
-	}
-
-	raw, ok := incident.Context["correlated_alerts"]
-	if !ok {
-		t.Fatal("Context missing correlated_alerts key")
-	}
-	slice, ok := raw.([]interface{})
-	if !ok {
-		t.Fatalf("correlated_alerts is not a slice: %T", raw)
-	}
-	if len(slice) != 1 {
-		t.Fatalf("correlated_alerts len = %d, want 1", len(slice))
-	}
-	entry, ok := slice[0].(map[string]interface{})
-	if !ok {
-		t.Fatalf("entry is not a map: %T", slice[0])
-	}
-	if entry["alert_name"] != "HighCPU" {
-		t.Errorf("alert_name = %v, want HighCPU", entry["alert_name"])
-	}
-	if entry["target_host"] != "host-01" {
-		t.Errorf("target_host = %v, want host-01", entry["target_host"])
-	}
-}
-
-func TestAppendCorrelatedAlert_IncrementsCorrelatedCount(t *testing.T) {
-	db := setupIncidentTestDB(t)
-	svc := newIncidentTestService(t, db)
-	incidentUUID := spawnTestIncident(t, svc)
-
-	alert := alerts.NormalizedAlert{AlertName: "DiskFull", TargetHost: "host-02"}
-	at := time.Now().UTC()
-
-	for i := 0; i < 3; i++ {
-		if err := svc.AppendCorrelatedAlert(context.Background(), "src-uuid-111", incidentUUID, alert, 0.9, "same", at); err != nil {
-			t.Fatalf("call %d failed: %v", i+1, err)
-		}
-	}
-
-	var incident database.Incident
-	if err := db.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
-		t.Fatalf("load incident: %v", err)
-	}
-	// CorrelatedCount field removed; verify correlated_alerts context key instead
-	if incident.Context["correlated_alerts"] == nil {
-		t.Error("correlated_alerts context key not set after 3 AppendCorrelatedAlert calls")
-	}
-}
-
-func TestAppendCorrelatedAlert_WritesAuditLogRow(t *testing.T) {
-	db := setupIncidentTestDB(t)
-	svc := newIncidentTestService(t, db)
-	incidentUUID := spawnTestIncident(t, svc)
-
-	alert := alerts.NormalizedAlert{AlertName: "MemLeak", TargetHost: "host-03"}
-	at := time.Now().UTC().Truncate(time.Second)
-
-	if err := svc.AppendCorrelatedAlert(context.Background(), "src-uuid-incoming", incidentUUID, alert, 0.75, "memory leak match", at); err != nil {
-		t.Fatalf("AppendCorrelatedAlert failed: %v", err)
-	}
-
-	var logRow database.AlertCorrelationLog
-	if err := db.Where("matched_incident_uuid = ?", incidentUUID).First(&logRow).Error; err != nil {
-		t.Fatalf("AlertCorrelationLog row not found: %v", err)
-	}
-	if logRow.AlertName != "MemLeak" {
-		t.Errorf("AlertName = %q, want MemLeak", logRow.AlertName)
-	}
-	if logRow.TargetHost != "host-03" {
-		t.Errorf("TargetHost = %q, want host-03", logRow.TargetHost)
-	}
-	if logRow.Confidence != 0.75 {
-		t.Errorf("Confidence = %f, want 0.75", logRow.Confidence)
-	}
-	if logRow.Reasoning != "memory leak match" {
-		t.Errorf("Reasoning = %q, want 'memory leak match'", logRow.Reasoning)
-	}
-	if logRow.SourceUUID != "src-uuid-incoming" {
-		t.Errorf("SourceUUID = %q, want src-uuid-incoming", logRow.SourceUUID)
-	}
-}
-
-func TestAppendCorrelatedAlert_AccumulatesMultipleEntries(t *testing.T) {
-	db := setupIncidentTestDB(t)
-	svc := newIncidentTestService(t, db)
-	incidentUUID := spawnTestIncident(t, svc)
-
-	at := time.Now().UTC()
-	for i, name := range []string{"AlertA", "AlertB", "AlertC"} {
-		a := alerts.NormalizedAlert{AlertName: name, TargetHost: "multi-host"}
-		if err := svc.AppendCorrelatedAlert(context.Background(), "src-uuid-111", incidentUUID, a, 0.8, "reason", at.Add(time.Duration(i)*time.Second)); err != nil {
-			t.Fatalf("call %d failed: %v", i+1, err)
-		}
-	}
-
-	var incident database.Incident
-	if err := db.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
-		t.Fatalf("load incident: %v", err)
-	}
-	slice, ok := incident.Context["correlated_alerts"].([]interface{})
-	if !ok {
-		t.Fatalf("correlated_alerts is not a slice: %T", incident.Context["correlated_alerts"])
-	}
-	if len(slice) != 3 {
-		t.Errorf("correlated_alerts len = %d, want 3", len(slice))
+	if err := svc.InsertFiringAlert(context.Background(), incidentUUID, "src-uuid-111", a); err != nil {
+		t.Fatalf("InsertFiringAlert failed: %v", err)
 	}
 
 	var count int64
-	db.Model(&database.AlertCorrelationLog{}).Where("matched_incident_uuid = ?", incidentUUID).Count(&count)
-	if count != 3 {
-		t.Errorf("AlertCorrelationLog rows = %d, want 3", count)
+	db.Model(&database.Alert{}).Where("incident_uuid = ?", incidentUUID).Count(&count)
+	if count != 1 {
+		t.Errorf("alerts count = %d, want 1", count)
+	}
+
+	var row database.Alert
+	if err := db.Where("incident_uuid = ?", incidentUUID).First(&row).Error; err != nil {
+		t.Fatalf("load alert row: %v", err)
+	}
+	if row.AlertName != "HighCPU" {
+		t.Errorf("AlertName = %q, want HighCPU", row.AlertName)
+	}
+	if row.TargetHost != "host-01" {
+		t.Errorf("TargetHost = %q, want host-01", row.TargetHost)
+	}
+	if row.Status != database.AlertStatusFiring {
+		t.Errorf("Status = %q, want firing", row.Status)
+	}
+	if row.SourceFingerprint != "fp-abc" {
+		t.Errorf("SourceFingerprint = %q, want fp-abc", row.SourceFingerprint)
+	}
+	if row.Fingerprint == "" {
+		t.Error("Fingerprint should not be empty")
 	}
 }
 
-func TestAppendCorrelatedAlert_UnknownIncidentReturnsError(t *testing.T) {
+// --- LinkAlertToIncident Tests ---
+
+func TestLinkAlertToIncident_RunningIncident_InsertsAlertRow(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnAlertIncident(t, svc)
+
+	// Set to running
+	if err := db.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).
+		Update("status", database.IncidentStatusRunning).Error; err != nil {
+		t.Fatalf("set status running: %v", err)
+	}
+
+	a := alerts.NormalizedAlert{AlertName: "DiskFull", TargetHost: "host-02"}
+	if err := svc.LinkAlertToIncident(context.Background(), incidentUUID, "src-uuid-111", a); err != nil {
+		t.Fatalf("LinkAlertToIncident failed: %v", err)
+	}
+
+	var count int64
+	db.Model(&database.Alert{}).Where("incident_uuid = ?", incidentUUID).Count(&count)
+	if count != 1 {
+		t.Errorf("alerts count = %d, want 1", count)
+	}
+
+	var incident database.Incident
+	if err := db.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
+		t.Fatalf("load incident: %v", err)
+	}
+	if incident.Status != database.IncidentStatusRunning {
+		t.Errorf("status = %q, want running (no change for running incident)", incident.Status)
+	}
+	if incident.MonitorUntil != nil {
+		t.Error("MonitorUntil should remain nil for running incident")
+	}
+}
+
+func TestLinkAlertToIncident_MonitorIncident_ExtendsWindow(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnAlertIncident(t, svc)
+
+	// Set to monitor with a soon-to-expire window
+	oldWindow := time.Now().Add(5 * time.Minute)
+	if err := db.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).
+		Updates(map[string]interface{}{
+			"status":        database.IncidentStatusMonitor,
+			"monitor_until": &oldWindow,
+		}).Error; err != nil {
+		t.Fatalf("set status monitor: %v", err)
+	}
+
+	a := alerts.NormalizedAlert{AlertName: "CPUHigh", TargetHost: "host-monitor"}
+	if err := svc.LinkAlertToIncident(context.Background(), incidentUUID, "src-uuid-111", a); err != nil {
+		t.Fatalf("LinkAlertToIncident failed: %v", err)
+	}
+
+	var incident database.Incident
+	if err := db.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
+		t.Fatalf("load incident: %v", err)
+	}
+	if incident.MonitorUntil == nil {
+		t.Fatal("MonitorUntil should be set after LinkAlertToIncident for monitor incident")
+	}
+	if !incident.MonitorUntil.After(oldWindow) {
+		t.Errorf("MonitorUntil %v should be extended beyond old window %v", incident.MonitorUntil, oldWindow)
+	}
+
+	// Alert row should be inserted
+	var count int64
+	db.Model(&database.Alert{}).Where("incident_uuid = ?", incidentUUID).Count(&count)
+	if count != 1 {
+		t.Errorf("alerts count = %d, want 1", count)
+	}
+}
+
+func TestLinkAlertToIncident_UnknownIncidentReturnsError(t *testing.T) {
 	db := setupIncidentTestDB(t)
 	svc := newIncidentTestService(t, db)
 
-	err := svc.AppendCorrelatedAlert(context.Background(), "src-uuid-111", "nonexistent-uuid", alerts.NormalizedAlert{}, 0.9, "", time.Now())
+	err := svc.LinkAlertToIncident(context.Background(), "nonexistent-uuid", "src-uuid-111", alerts.NormalizedAlert{})
 	if err == nil {
 		t.Fatal("expected error for unknown incident, got nil")
+	}
+}
+
+// --- UpdateIncidentComplete Monitor Transition Tests ---
+
+func TestUpdateIncidentComplete_AlertSourced_SetsMonitorStatus(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+
+	ctx := &IncidentContext{
+		Source:     "prometheus",
+		SourceID:   "evt-mon",
+		SourceKind: database.IncidentSourceKindAlert,
+		SourceUUID: "src-uuid-222",
+		Message:    "test monitor transition",
+	}
+	incidentUUID, _, err := svc.SpawnIncidentManager(ctx)
+	if err != nil {
+		t.Fatalf("SpawnIncidentManager failed: %v", err)
+	}
+
+	if err := svc.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, "sid-1", "log", "response", 100, 500); err != nil {
+		t.Fatalf("UpdateIncidentComplete failed: %v", err)
+	}
+
+	var incident database.Incident
+	if err := db.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
+		t.Fatalf("load incident: %v", err)
+	}
+
+	if incident.Status != database.IncidentStatusMonitor {
+		t.Errorf("Status = %q, want monitor for alert-sourced completed incident", incident.Status)
+	}
+	if incident.MonitorUntil == nil {
+		t.Fatal("MonitorUntil should be set for alert-sourced incident on completion")
+	}
+	if !incident.MonitorUntil.After(time.Now()) {
+		t.Error("MonitorUntil should be in the future")
+	}
+}
+
+func TestUpdateIncidentComplete_CronSourced_DoesNotSetMonitor(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+
+	ctx := &IncidentContext{
+		Source:     "cron",
+		SourceID:   "cron-job-1",
+		SourceKind: database.IncidentSourceKindCron,
+		SourceUUID: "cron-uuid-333",
+		Message:    "cron incident",
+	}
+	incidentUUID, _, err := svc.SpawnIncidentManager(ctx)
+	if err != nil {
+		t.Fatalf("SpawnIncidentManager failed: %v", err)
+	}
+
+	if err := svc.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, "sid-2", "log", "response", 100, 500); err != nil {
+		t.Fatalf("UpdateIncidentComplete failed: %v", err)
+	}
+
+	var incident database.Incident
+	if err := db.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
+		t.Fatalf("load incident: %v", err)
+	}
+
+	if incident.Status != database.IncidentStatusCompleted {
+		t.Errorf("Status = %q, want completed for non-alert incident", incident.Status)
+	}
+	if incident.MonitorUntil != nil {
+		t.Errorf("MonitorUntil should be nil for cron-sourced incident, got %v", incident.MonitorUntil)
 	}
 }

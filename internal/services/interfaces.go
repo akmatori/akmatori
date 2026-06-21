@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"io"
-	"time"
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
@@ -43,7 +42,10 @@ type IncidentManager interface {
 	UpdateIncidentLog(incidentUUID string, fullLog string) error
 	GetIncident(incidentUUID string) (*database.Incident, error)
 	AppendSubagentLog(incidentUUID string, skillName string, subagentLog string) error
-	AppendCorrelatedAlert(ctx context.Context, sourceUUID string, incidentUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string, at time.Time) error
+	InsertFiringAlert(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert) error
+	LinkAlertToIncident(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert) error
+	// RecordSuppressedIncident is kept for Task 5 cleanup; called by alert_processor.go
+	// until the suppressor gate is removed.
 	RecordSuppressedIncident(incidentCtx *IncidentContext, signatureName, reasoning string, confidence float64) (string, error)
 }
 

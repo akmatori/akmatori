@@ -63,6 +63,13 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Populate alert_count for each incident from the alerts table.
+		for i := range incidents {
+			var cnt int64
+			db.Model(&database.Alert{}).Where("incident_uuid = ?", incidents[i].UUID).Count(&cnt)
+			incidents[i].AlertCount = cnt
+		}
+
 		api.RespondJSON(w, http.StatusOK, api.PaginatedResponse{
 			Data: incidents,
 			Pagination: api.PaginationMeta{
@@ -256,6 +263,11 @@ func (h *APIHandler) handleIncidentByID(w http.ResponseWriter, r *http.Request) 
 		api.RespondError(w, http.StatusNotFound, "Incident not found")
 		return
 	}
+
+	db := database.GetDB()
+	var cnt int64
+	db.Model(&database.Alert{}).Where("incident_uuid = ?", incident.UUID).Count(&cnt)
+	incident.AlertCount = cnt
 
 	api.RespondJSON(w, http.StatusOK, incident)
 }

@@ -5,7 +5,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
@@ -65,7 +64,11 @@ func (s *suppGateSkillService) RecordSuppressedIncident(_ *services.IncidentCont
 	return u, nil
 }
 
-func (s *suppGateSkillService) AppendCorrelatedAlert(_ context.Context, _ string, _ string, _ alerts.NormalizedAlert, _ float64, _ string, _ time.Time) error {
+func (s *suppGateSkillService) InsertFiringAlert(_ context.Context, _ string, _ string, _ alerts.NormalizedAlert) error {
+	return nil
+}
+
+func (s *suppGateSkillService) LinkAlertToIncident(_ context.Context, _ string, _ string, _ alerts.NormalizedAlert) error {
 	return nil
 }
 

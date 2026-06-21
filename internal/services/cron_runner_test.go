@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
@@ -252,7 +251,10 @@ func (f *fakeSkillIncidentManager) UpdateIncidentComplete(uuid string, status da
 func (f *fakeSkillIncidentManager) UpdateIncidentLog(string, string) error         { return nil }
 func (f *fakeSkillIncidentManager) GetIncident(string) (*database.Incident, error) { return nil, nil }
 func (f *fakeSkillIncidentManager) AppendSubagentLog(string, string, string) error { return nil }
-func (f *fakeSkillIncidentManager) AppendCorrelatedAlert(context.Context, string, string, alerts.NormalizedAlert, float64, string, time.Time) error {
+func (f *fakeSkillIncidentManager) InsertFiringAlert(context.Context, string, string, alerts.NormalizedAlert) error {
+	return nil
+}
+func (f *fakeSkillIncidentManager) LinkAlertToIncident(context.Context, string, string, alerts.NormalizedAlert) error {
 	return nil
 }
 func (f *fakeSkillIncidentManager) RecordSuppressedIncident(*IncidentContext, string, string, float64) (string, error) {

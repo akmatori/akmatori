@@ -16,6 +16,83 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// InsertFiringAlert inserts the initial alerts row (status=firing) for a newly
+// spawned incident. Called immediately after SpawnIncidentManager succeeds.
+func (s *SkillService) InsertFiringAlert(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert) error {
+	firedAt := time.Now()
+	if alert.StartedAt != nil {
+		firedAt = *alert.StartedAt
+	}
+	fingerprint := ComputeAlertFingerprint(sourceUUID, alert.AlertName, alert.TargetHost)
+	row := database.Alert{
+		UUID:              uuid.New().String(),
+		IncidentUUID:      incidentUUID,
+		Status:            database.AlertStatusFiring,
+		Fingerprint:       fingerprint,
+		SourceUUID:        sourceUUID,
+		SourceFingerprint: alert.SourceFingerprint,
+		AlertName:         alert.AlertName,
+		TargetHost:        alert.TargetHost,
+		FiredAt:           firedAt,
+		RawPayload:        alert.RawPayload,
+	}
+	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
+		return fmt.Errorf("InsertFiringAlert: %w", err)
+	}
+	return nil
+}
+
+// LinkAlertToIncident records an incoming alert against an existing incident
+// instead of spawning a new investigation. For monitor-status incidents the
+// monitor window is extended so recurrences are visible in the watch period.
+func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var incident database.Incident
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
+			return fmt.Errorf("LinkAlertToIncident: load incident: %w", err)
+		}
+
+		now := time.Now()
+		firedAt := now
+		if alert.StartedAt != nil {
+			firedAt = *alert.StartedAt
+		}
+		fingerprint := ComputeAlertFingerprint(sourceUUID, alert.AlertName, alert.TargetHost)
+		row := database.Alert{
+			UUID:              uuid.New().String(),
+			IncidentUUID:      incidentUUID,
+			Status:            database.AlertStatusFiring,
+			Fingerprint:       fingerprint,
+			SourceUUID:        sourceUUID,
+			SourceFingerprint: alert.SourceFingerprint,
+			AlertName:         alert.AlertName,
+			TargetHost:        alert.TargetHost,
+			FiredAt:           firedAt,
+			RawPayload:        alert.RawPayload,
+		}
+		if err := tx.Create(&row).Error; err != nil {
+			return fmt.Errorf("LinkAlertToIncident: insert alert: %w", err)
+		}
+
+		if incident.Status == database.IncidentStatusMonitor {
+			var settings database.GeneralSettings
+			tx.First(&settings) // ignore error: zero value gives 60-min default
+			window := settings.GetAlertMonitorWindow()
+			newUntil := now.Add(window)
+			if err := tx.Model(&database.Incident{}).
+				Where("uuid = ?", incidentUUID).
+				Updates(map[string]interface{}{
+					"monitor_until": &newUntil,
+				}).Error; err != nil {
+				return fmt.Errorf("LinkAlertToIncident: extend monitor window: %w", err)
+			}
+		}
+
+		return nil
+	})
+}
+
 // IncidentContext contains context for spawning an incident manager
 type IncidentContext struct {
 	Source     string         // e.g., "slack", "zabbix"
@@ -217,6 +294,22 @@ func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status databa
 		"completed_at":      &now,
 	}
 
+	// Alert-sourced incidents transition to monitor status on completion so
+	// subsequent matching alerts are correlated rather than spawning a new
+	// investigation within the monitoring window.
+	if status == database.IncidentStatusCompleted || status == database.IncidentStatusFailed {
+		var incident database.Incident
+		if err := s.db.Where("uuid = ?", incidentUUID).Select("source_kind").First(&incident).Error; err == nil {
+			if incident.SourceKind == database.IncidentSourceKindAlert {
+				settings, _ := database.GetOrCreateGeneralSettings()
+				window := settings.GetAlertMonitorWindow()
+				monitorUntil := now.Add(window)
+				updates["status"] = database.IncidentStatusMonitor
+				updates["monitor_until"] = &monitorUntil
+			}
+		}
+	}
+
 	if err := s.db.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).Updates(updates).Error; err != nil {
 		return fmt.Errorf("failed to update incident: %w", err)
 	}
@@ -244,6 +337,69 @@ func (s *SkillService) UpdateIncidentLog(incidentUUID string, fullLog string) er
 		return fmt.Errorf("failed to update incident log: %w", err)
 	}
 	return nil
+}
+
+// RecordSuppressedIncident creates a completed incident record for an alert that
+// matched a known false-positive suppression signature. Kept until the suppressor
+// gate is removed in Task 5. No agent is spawned; TokensUsed and ExecutionTimeMs are 0.
+func (s *SkillService) RecordSuppressedIncident(incidentCtx *IncidentContext, signatureName, reasoning string, confidence float64) (string, error) {
+	incidentUUID := uuid.New().String()
+	now := time.Now()
+
+	alertName, _ := incidentCtx.Context["alert_name"].(string)
+	targetHost, _ := incidentCtx.Context["target_host"].(string)
+	alertFingerprint, _ := incidentCtx.Context["alert_fingerprint"].(string)
+
+	title := "Suppressed"
+	if alertName != "" {
+		title = "Suppressed: " + alertName
+	}
+
+	response := fmt.Sprintf(
+		"Alert suppressed: matched known false-positive signature %q with %.0f%% confidence.\n\nReasoning: %s",
+		signatureName, confidence*100, reasoning,
+	)
+
+	incident := &database.Incident{
+		UUID:             incidentUUID,
+		Source:           incidentCtx.Source,
+		SourceID:         incidentCtx.SourceID,
+		SourceKind:       incidentCtx.SourceKind,
+		SourceUUID:       incidentCtx.SourceUUID,
+		Title:            title,
+		Status:           database.IncidentStatusCompleted,
+		Context:          incidentCtx.Context,
+		Response:         response,
+		TokensUsed:       0,
+		ExecutionTimeMs:  0,
+		StartedAt:        now,
+		CompletedAt:      &now,
+		AlertFingerprint: alertFingerprint,
+	}
+
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(incident).Error; err != nil {
+			return fmt.Errorf("RecordSuppressedIncident: create incident: %w", err)
+		}
+		logRow := database.AlertSuppressionLog{
+			SourceUUID:    incidentCtx.SourceUUID,
+			AlertName:     alertName,
+			TargetHost:    targetHost,
+			IncidentUUID:  incidentUUID,
+			SignatureName: signatureName,
+			Confidence:    confidence,
+			Reasoning:     reasoning,
+			CreatedAt:     now,
+		}
+		if err := tx.Create(&logRow).Error; err != nil {
+			return fmt.Errorf("RecordSuppressedIncident: write log: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return incidentUUID, nil
 }
 
 // GetIncident retrieves an incident by UUID
@@ -318,127 +474,3 @@ func (s *SkillService) AppendSubagentLog(incidentUUID string, skillName string, 
 	return nil
 }
 
-// RecordSuppressedIncident creates a completed incident record for an alert that
-// matched a known false-positive suppression signature, alongside an
-// AlertSuppressionLog audit row. No agent is spawned; TokensUsed and
-// ExecutionTimeMs are both 0. Returns the new incident UUID.
-func (s *SkillService) RecordSuppressedIncident(incidentCtx *IncidentContext, signatureName, reasoning string, confidence float64) (string, error) {
-	incidentUUID := uuid.New().String()
-	now := time.Now()
-
-	alertName, _ := incidentCtx.Context["alert_name"].(string)
-	targetHost, _ := incidentCtx.Context["target_host"].(string)
-	alertFingerprint, _ := incidentCtx.Context["alert_fingerprint"].(string)
-
-	title := "Suppressed"
-	if alertName != "" {
-		title = "Suppressed: " + alertName
-	}
-
-	response := fmt.Sprintf(
-		"Alert suppressed: matched known false-positive signature %q with %.0f%% confidence.\n\nReasoning: %s\n\nThis alert matched a suppression signature and was closed without investigation.",
-		signatureName, confidence*100, reasoning,
-	)
-
-	incident := &database.Incident{
-		UUID:             incidentUUID,
-		Source:           incidentCtx.Source,
-		SourceID:         incidentCtx.SourceID,
-		SourceKind:       incidentCtx.SourceKind,
-		SourceUUID:       incidentCtx.SourceUUID,
-		Title:            title,
-		Status:           database.IncidentStatusCompleted,
-		Context:          incidentCtx.Context,
-		Response:         response,
-		TokensUsed:       0,
-		ExecutionTimeMs:  0,
-		StartedAt:        now,
-		CompletedAt:      &now,
-		AlertFingerprint: alertFingerprint,
-	}
-
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(incident).Error; err != nil {
-			return fmt.Errorf("RecordSuppressedIncident: create incident: %w", err)
-		}
-
-		logRow := database.AlertSuppressionLog{
-			SourceUUID:    incidentCtx.SourceUUID,
-			AlertName:     alertName,
-			TargetHost:    targetHost,
-			IncidentUUID:  incidentUUID,
-			SignatureName: signatureName,
-			Confidence:    confidence,
-			Reasoning:     reasoning,
-			CreatedAt:     now,
-		}
-		if err := tx.Create(&logRow).Error; err != nil {
-			return fmt.Errorf("RecordSuppressedIncident: write log: %w", err)
-		}
-
-		return nil
-	})
-	if err != nil {
-		return "", err
-	}
-	return incidentUUID, nil
-}
-
-// AppendCorrelatedAlert records that an incoming alert was collapsed into this
-// incident rather than spawning a new investigation. It atomically:
-//  1. Appends an entry to incident.Context["correlated_alerts"]
-//  2. Increments correlated_count
-//  3. Writes one AlertCorrelationLog audit row
-//
-// All three writes happen inside a single transaction.
-func (s *SkillService) AppendCorrelatedAlert(ctx context.Context, sourceUUID string, incidentUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string, at time.Time) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var incident database.Incident
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
-			return fmt.Errorf("AppendCorrelatedAlert: load incident: %w", err)
-		}
-
-		if incident.Context == nil {
-			incident.Context = database.JSONB{}
-		}
-
-		// Retrieve or initialise the slice from the JSONB map.
-		var existing []interface{}
-		if raw, ok := incident.Context["correlated_alerts"]; ok {
-			if slice, ok := raw.([]interface{}); ok {
-				existing = slice
-			}
-		}
-		entryMap := map[string]interface{}{
-			"alert_name":  alert.AlertName,
-			"target_host": alert.TargetHost,
-			"at":          at.Format(time.RFC3339),
-			"confidence":  confidence,
-			"reasoning":   reasoning,
-		}
-		incident.Context["correlated_alerts"] = append(existing, entryMap)
-
-		if err := tx.Model(&database.Incident{}).
-			Where("uuid = ?", incidentUUID).
-			Updates(map[string]interface{}{
-				"context":          incident.Context,
-			}).Error; err != nil {
-			return fmt.Errorf("AppendCorrelatedAlert: update incident: %w", err)
-		}
-
-		logRow := database.AlertCorrelationLog{
-			SourceUUID:          sourceUUID,
-			AlertName:           alert.AlertName,
-			TargetHost:          alert.TargetHost,
-			MatchedIncidentUUID: incidentUUID,
-			Confidence:          confidence,
-			Reasoning:           reasoning,
-			CreatedAt:           at,
-		}
-		if err := tx.Create(&logRow).Error; err != nil {
-			return fmt.Errorf("AppendCorrelatedAlert: write log: %w", err)
-		}
-
-		return nil
-	})
-}

@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
@@ -560,7 +559,10 @@ func (r *recordingSkillService) UpdateIncidentComplete(string, database.Incident
 func (r *recordingSkillService) UpdateIncidentLog(string, string) error         { return nil }
 func (r *recordingSkillService) GetIncident(string) (*database.Incident, error) { return nil, nil }
 func (r *recordingSkillService) AppendSubagentLog(string, string, string) error { return nil }
-func (r *recordingSkillService) AppendCorrelatedAlert(context.Context, string, string, alerts.NormalizedAlert, float64, string, time.Time) error {
+func (r *recordingSkillService) InsertFiringAlert(context.Context, string, string, alerts.NormalizedAlert) error {
+	return nil
+}
+func (r *recordingSkillService) LinkAlertToIncident(context.Context, string, string, alerts.NormalizedAlert) error {
 	return nil
 }
 func (r *recordingSkillService) RecordSuppressedIncident(*services.IncidentContext, string, string, float64) (string, error) {

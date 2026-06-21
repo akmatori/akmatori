@@ -17,23 +17,22 @@ import (
 // ---- test doubles ----
 
 // corrGateSkillService is a minimal SkillIncidentManager stub that records
-// SpawnIncidentManager and AppendCorrelatedAlert calls.
+// SpawnIncidentManager and LinkAlertToIncident calls.
 type corrGateSkillService struct {
 	mu sync.Mutex
 
-	spawnCount  int
-	appendCount int
-	spawnErr    error
-	spawnUUID   string
-	spawnHook   func() // called at entry of SpawnIncidentManager (before the mutex)
+	spawnCount int
+	linkCount  int
+	spawnErr   error
+	spawnUUID  string
+	spawnHook  func() // called at entry of SpawnIncidentManager (before the mutex)
 
-	appendCalls []corrAppendCall
+	linkCalls []corrLinkCall
 }
 
-type corrAppendCall struct {
+type corrLinkCall struct {
 	incidentUUID string
 	alertName    string
-	confidence   float64
 }
 
 func (s *corrGateSkillService) SpawnIncidentManager(*services.IncidentContext) (string, string, error) {
@@ -53,15 +52,18 @@ func (s *corrGateSkillService) SpawnIncidentManager(*services.IncidentContext) (
 	return uuid, "", nil
 }
 
-func (s *corrGateSkillService) AppendCorrelatedAlert(_ context.Context, _ string, incidentUUID string, alert alerts.NormalizedAlert, confidence float64, _ string, _ time.Time) error {
+func (s *corrGateSkillService) LinkAlertToIncident(_ context.Context, incidentUUID string, _ string, alert alerts.NormalizedAlert) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.appendCount++
-	s.appendCalls = append(s.appendCalls, corrAppendCall{
+	s.linkCount++
+	s.linkCalls = append(s.linkCalls, corrLinkCall{
 		incidentUUID: incidentUUID,
 		alertName:    alert.AlertName,
-		confidence:   confidence,
 	})
+	return nil
+}
+
+func (s *corrGateSkillService) InsertFiringAlert(_ context.Context, _ string, _ string, _ alerts.NormalizedAlert) error {
 	return nil
 }
 
@@ -71,10 +73,10 @@ func (s *corrGateSkillService) getSpawnCount() int {
 	return s.spawnCount
 }
 
-func (s *corrGateSkillService) getAppendCount() int {
+func (s *corrGateSkillService) getLinkCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.appendCount
+	return s.linkCount
 }
 
 // SkillManager stubs (not used in these tests).
@@ -275,8 +277,8 @@ func TestAlertHandler_Singleflight_15ConcurrentAlerts(t *testing.T) {
 	if spawns := svc.getSpawnCount(); spawns != 1 {
 		t.Errorf("expected 1 spawn, got %d", spawns)
 	}
-	if appends := svc.getAppendCount(); appends != n-1 {
-		t.Errorf("expected %d recurrences, got %d", n-1, appends)
+	if links := svc.getLinkCount(); links != n-1 {
+		t.Errorf("expected %d link calls, got %d", n-1, links)
 	}
 }
 
@@ -313,11 +315,11 @@ func TestAlertHandler_ConfidentVerdict_NoSpawn(t *testing.T) {
 	if svc.getSpawnCount() != 0 {
 		t.Errorf("expected 0 spawns with confident correlation, got %d", svc.getSpawnCount())
 	}
-	if svc.getAppendCount() != 1 {
-		t.Errorf("expected 1 AppendCorrelatedAlert call, got %d", svc.getAppendCount())
+	if svc.getLinkCount() != 1 {
+		t.Errorf("expected 1 LinkAlertToIncident call, got %d", svc.getLinkCount())
 	}
-	if svc.appendCalls[0].incidentUUID != "existing-inc" {
-		t.Errorf("expected recurrence attached to 'existing-inc', got %q", svc.appendCalls[0].incidentUUID)
+	if svc.linkCalls[0].incidentUUID != "existing-inc" {
+		t.Errorf("expected link to 'existing-inc', got %q", svc.linkCalls[0].incidentUUID)
 	}
 }
 
@@ -354,8 +356,8 @@ func TestAlertHandler_BelowThresholdVerdict_Spawns(t *testing.T) {
 	if svc.getSpawnCount() != 1 {
 		t.Errorf("expected 1 spawn for below-threshold verdict, got %d", svc.getSpawnCount())
 	}
-	if svc.getAppendCount() != 0 {
-		t.Errorf("expected 0 recurrences for below-threshold verdict, got %d", svc.getAppendCount())
+	if svc.getLinkCount() != 0 {
+		t.Errorf("expected 0 link calls for below-threshold verdict, got %d", svc.getLinkCount())
 	}
 }
 
@@ -393,8 +395,8 @@ func TestAlertHandler_WorkerNotConnected_Spawns(t *testing.T) {
 	if svc.getSpawnCount() != 1 {
 		t.Errorf("expected 1 spawn when worker not connected (fail-open), got %d", svc.getSpawnCount())
 	}
-	if svc.getAppendCount() != 0 {
-		t.Errorf("expected 0 recurrences in fail-open path, got %d", svc.getAppendCount())
+	if svc.getLinkCount() != 0 {
+		t.Errorf("expected 0 link calls in fail-open path, got %d", svc.getLinkCount())
 	}
 }
 
@@ -426,8 +428,8 @@ func TestAlertHandler_NilCorrelator_AlwaysSpawns(t *testing.T) {
 	if svc.getSpawnCount() != 1 {
 		t.Errorf("expected 1 spawn with nil correlator, got %d", svc.getSpawnCount())
 	}
-	if svc.getAppendCount() != 0 {
-		t.Errorf("expected 0 recurrences with nil correlator, got %d", svc.getAppendCount())
+	if svc.getLinkCount() != 0 {
+		t.Errorf("expected 0 link calls with nil correlator, got %d", svc.getLinkCount())
 	}
 }
 

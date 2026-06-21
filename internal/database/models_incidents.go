@@ -60,6 +60,9 @@ type Incident struct {
 	// Distinct from SourceFingerprint (adapter-supplied external ID) and
 	// alertSpawnKey (includes SourceFingerprint for exact-burst dedup).
 	AlertFingerprint string `gorm:"size:32;index" json:"alert_fingerprint"`
+
+	// AlertCount is not stored; populated by API handlers via COUNT query.
+	AlertCount int64 `gorm:"-" json:"alert_count"`
 }
 
 // BeforeCreate hook to set StartedAt

@@ -180,14 +180,14 @@ func (h *AlertHandler) suppressionThreshold() float64 {
 	return 0.7
 }
 
-// recordRecurrence calls AppendCorrelatedAlert and logs but does not propagate
+// recordRecurrence calls LinkAlertToIncident and logs but does not propagate
 // errors — a failed recurrence write must never block alert processing.
 func (h *AlertHandler) recordRecurrence(ctx context.Context, sourceUUID string, incidentUUID string, alert alerts.NormalizedAlert, verdict services.CorrelationVerdict) {
 	if h.skillService == nil {
 		return
 	}
-	if err := h.skillService.AppendCorrelatedAlert(ctx, sourceUUID, incidentUUID, alert, verdict.Confidence, verdict.Reasoning, time.Now()); err != nil {
-		slog.Warn("failed to record alert recurrence", "incident_uuid", incidentUUID, "err", err)
+	if err := h.skillService.LinkAlertToIncident(ctx, incidentUUID, sourceUUID, alert); err != nil {
+		slog.Warn("failed to link alert to incident", "incident_uuid", incidentUUID, "err", err)
 	}
 }
 
@@ -251,8 +251,8 @@ func (h *AlertHandler) runRecurrenceUpdate(ctx context.Context, sourceUUID, inci
 		reasoning = deltaNote
 	}
 
-	if err := h.skillService.AppendCorrelatedAlert(ctx, sourceUUID, incidentUUID, alert, verdict.Confidence, reasoning, time.Now()); err != nil {
-		return fmt.Errorf("append correlated alert: %w", err)
+	if err := h.skillService.LinkAlertToIncident(ctx, incidentUUID, sourceUUID, alert); err != nil {
+		return fmt.Errorf("link alert to incident: %w", err)
 	}
 
 	// Post a short Slack thread reply to the incident's source thread, if known.
