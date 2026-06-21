@@ -299,12 +299,13 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 		if err := h.skillService.InsertFiringAlert(context.Background(), incidentUUID, channel.UUID, normalized); err != nil {
 			if errors.Is(err, services.ErrAlertAlreadyClaimed) {
 				slog.Info("alert already claimed by concurrent process, cancelling duplicate incident", "incident_uuid", incidentUUID)
-				if uerr := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusFailed, "", ""); uerr != nil {
-					slog.Warn("failed to cancel duplicate incident", "incident_uuid", incidentUUID, "err", uerr)
-				}
-				return nil, nil
+			} else {
+				slog.Error("failed to insert firing alert, cancelling incident", "incident_uuid", incidentUUID, "err", err)
 			}
-			slog.Warn("failed to insert firing alert", "incident_uuid", incidentUUID, "err", err)
+			if uerr := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusFailed, "", ""); uerr != nil {
+				slog.Warn("failed to cancel incident after alert insert failure", "incident_uuid", incidentUUID, "err", uerr)
+			}
+			return nil, nil
 		}
 
 		slog.Info("created incident for listener channel alert", "incident_id", incidentUUID)

@@ -76,8 +76,13 @@ func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID str
 			FiredAt:           firedAt,
 			RawPayload:        alert.RawPayload,
 		}
-		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
-			return fmt.Errorf("LinkAlertToIncident: insert alert: %w", err)
+		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
+		if result.Error != nil {
+			return fmt.Errorf("LinkAlertToIncident: insert alert: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			// Duplicate alert already linked; do not extend the monitor window.
+			return nil
 		}
 
 		if incident.Status == database.IncidentStatusMonitor {

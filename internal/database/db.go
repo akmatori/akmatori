@@ -1,6 +1,9 @@
 package database
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -1288,6 +1291,19 @@ func ensureAlertsIndexes(db *gorm.DB) error {
 // and flips status to "monitor". Failed incidents have their backfilled alert
 // row resolved immediately to free the partial unique index slot, but are not
 // promoted to monitor (failed investigations should not attract new alerts). Idempotent.
+// computeAlertFingerprintDB mirrors services.ComputeAlertFingerprint without
+// importing that package (which would create a cycle: database → services →
+// database). The algorithm must stay in sync with the services implementation.
+func computeAlertFingerprintDB(sourceUUID, alertName, targetHost string) string {
+	tuple, _ := json.Marshal([]string{
+		sourceUUID,
+		strings.ToLower(alertName),
+		strings.ToLower(targetHost),
+	})
+	h := sha256.Sum256(tuple)
+	return hex.EncodeToString(h[:])[:32]
+}
+
 func migrateBackfillAlerts(db *gorm.DB) error {
 	if !db.Migrator().HasTable("alerts") {
 		return nil
@@ -1320,10 +1336,12 @@ func migrateBackfillAlerts(db *gorm.DB) error {
 	}
 
 	for _, inc := range incidents {
-		fingerprint, _ := inc.Context["alert_fingerprint"].(string)
 		sourceFingerprint, _ := inc.Context["source_fingerprint"].(string)
 		alertName, _ := inc.Context["alert_name"].(string)
 		targetHost, _ := inc.Context["target_host"].(string)
+		// Compute fingerprint from canonical fields rather than reading the
+		// context key, which is absent on pre-migration incidents.
+		fingerprint := computeAlertFingerprintDB(inc.SourceUUID, alertName, targetHost)
 		var rawPayload JSONB
 		if rp, ok := inc.Context["raw_payload"].(map[string]interface{}); ok {
 			rawPayload = JSONB(rp)
