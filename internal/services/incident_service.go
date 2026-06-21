@@ -296,8 +296,9 @@ func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status databa
 
 	// Alert-sourced incidents transition to monitor status on completion so
 	// subsequent matching alerts are correlated rather than spawning a new
-	// investigation within the monitoring window.
-	if status == database.IncidentStatusCompleted || status == database.IncidentStatusFailed {
+	// investigation within the monitoring window. Failed investigations are
+	// not promoted — they should not enter the correlation candidate pool.
+	if status == database.IncidentStatusCompleted {
 		var incident database.Incident
 		if err := s.db.Where("uuid = ?", incidentUUID).Select("source_kind").First(&incident).Error; err == nil {
 			if incident.SourceKind == database.IncidentSourceKindAlert {

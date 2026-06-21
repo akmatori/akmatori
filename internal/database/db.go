@@ -1341,7 +1341,7 @@ func migrateBackfillAlerts(db *gorm.DB) error {
 			continue
 		}
 
-		if (inc.Status == IncidentStatusCompleted || inc.Status == IncidentStatusFailed) && inc.CompletedAt != nil {
+		if inc.Status == IncidentStatusCompleted && inc.CompletedAt != nil {
 			window := 60 * time.Minute
 			if gs, err := GetOrCreateGeneralSettings(); err == nil && gs != nil {
 				window = gs.GetAlertMonitorWindow()

@@ -334,11 +334,14 @@ func (h *AlertHandler) processResolvedAlert(sourceUUID string, normalized alerts
 		var a database.Alert
 		found := false
 		if normalized.SourceFingerprint != "" {
-			if err := tx.Where(
+			err := tx.Where(
 				"source_uuid = ? AND source_fingerprint = ? AND status = ? AND resolved_at IS NULL",
 				sourceUUID, normalized.SourceFingerprint, string(database.AlertStatusFiring),
-			).Order("fired_at DESC").Limit(1).First(&a).Error; err == nil {
+			).Order("fired_at DESC").Limit(1).First(&a).Error
+			if err == nil {
 				found = true
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("processResolvedAlert: lookup by source_fingerprint: %w", err)
 			}
 		}
 		if !found {
@@ -346,9 +349,12 @@ func (h *AlertHandler) processResolvedAlert(sourceUUID string, normalized alerts
 				"source_uuid = ? AND fingerprint = ? AND status = ? AND resolved_at IS NULL",
 				sourceUUID, fingerprint, string(database.AlertStatusFiring),
 			).Order("fired_at DESC").Limit(1).First(&a).Error; err != nil {
-				slog.Info("processResolvedAlert: no matching firing alert, dropping",
-					"alert_name", normalized.AlertName, "source_uuid", sourceUUID)
-				return nil
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					slog.Info("processResolvedAlert: no matching firing alert, dropping",
+						"alert_name", normalized.AlertName, "source_uuid", sourceUUID)
+					return nil
+				}
+				return fmt.Errorf("processResolvedAlert: lookup by fingerprint: %w", err)
 			}
 		}
 
