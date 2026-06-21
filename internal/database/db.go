@@ -1284,8 +1284,10 @@ func ensureAlertsIndexes(db *gorm.DB) error {
 // migrateBackfillAlerts inserts one alerts row for each pre-existing
 // alert-sourced incident that does not yet have a matching alerts row.
 // Incidents recorded in alert_suppression_logs (if the table still exists) are
-// skipped. For already-completed or failed incidents the function also sets
-// monitor_until and flips status to "monitor". Idempotent.
+// skipped. For already-completed incidents the function also sets monitor_until
+// and flips status to "monitor". Failed incidents have their backfilled alert
+// row resolved immediately to free the partial unique index slot, but are not
+// promoted to monitor (failed investigations should not attract new alerts). Idempotent.
 func migrateBackfillAlerts(db *gorm.DB) error {
 	if !db.Migrator().HasTable("alerts") {
 		return nil
@@ -1346,21 +1348,39 @@ func migrateBackfillAlerts(db *gorm.DB) error {
 			continue
 		}
 
-		if inc.Status == IncidentStatusCompleted && inc.CompletedAt != nil {
-			monitorUntil := inc.CompletedAt.Add(window)
-			if err := db.Exec(
-				"UPDATE incidents SET monitor_until = ?, status = ? WHERE uuid = ? AND status = 'completed'",
-				monitorUntil, string(IncidentStatusMonitor), inc.UUID,
-			).Error; err != nil {
-				slog.Warn("migrateBackfillAlerts: set monitor_until", "incident_uuid", inc.UUID, "err", err)
+		switch inc.Status {
+		case IncidentStatusCompleted:
+			if inc.CompletedAt != nil {
+				monitorUntil := inc.CompletedAt.Add(window)
+				if err := db.Exec(
+					"UPDATE incidents SET monitor_until = ?, status = ? WHERE uuid = ? AND status = 'completed'",
+					monitorUntil, string(IncidentStatusMonitor), inc.UUID,
+				).Error; err != nil {
+					slog.Warn("migrateBackfillAlerts: set monitor_until", "incident_uuid", inc.UUID, "err", err)
+				}
+				// The investigation is done — mark the backfilled alert resolved so it
+				// does not appear as a live firing alert and does not occupy the partial
+				// unique index slot.
+				if err := db.Exec(
+					"UPDATE alerts SET status = 'resolved', resolved_at = ? WHERE incident_uuid = ? AND status = 'firing'",
+					inc.CompletedAt, inc.UUID,
+				).Error; err != nil {
+					slog.Warn("migrateBackfillAlerts: resolve alert row", "incident_uuid", inc.UUID, "err", err)
+				}
 			}
-			// The investigation is already done — mark the backfilled alert as
-			// resolved so it does not appear as a live firing alert in the UI.
+		case IncidentStatusFailed:
+			// Failed incidents must not enter the correlation candidate pool, so we
+			// do not promote them to monitor. We do resolve the backfilled firing
+			// alert so it does not block future alerts with the same source fingerprint.
+			resolvedAt := inc.StartedAt
+			if inc.CompletedAt != nil {
+				resolvedAt = *inc.CompletedAt
+			}
 			if err := db.Exec(
 				"UPDATE alerts SET status = 'resolved', resolved_at = ? WHERE incident_uuid = ? AND status = 'firing'",
-				inc.CompletedAt, inc.UUID,
+				resolvedAt, inc.UUID,
 			).Error; err != nil {
-				slog.Warn("migrateBackfillAlerts: resolve alert row", "incident_uuid", inc.UUID, "err", err)
+				slog.Warn("migrateBackfillAlerts: resolve failed-incident alert row", "incident_uuid", inc.UUID, "err", err)
 			}
 		}
 	}

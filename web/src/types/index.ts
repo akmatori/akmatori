@@ -182,7 +182,6 @@ export interface Memory {
   body: string;
   incident_uuid?: string;
   created_by?: string;
-  suppress?: boolean;
   created_at: string;
   updated_at: string;
 }
