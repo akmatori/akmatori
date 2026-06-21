@@ -226,7 +226,7 @@ func buildCorrelationUserPrompt(alert alerts.NormalizedAlert, candidates []candi
 		}
 
 		sb.WriteString(fmt.Sprintf("\n%d. UUID: %s\n   Status: %s | Age: %s\n   Title: %s\n",
-			i+1, cand.UUID, cand.Status, age, sanitizeForPrompt(title)))
+			i+1, cand.UUID, sanitizeForPrompt(string(cand.Status)), age, sanitizeForPrompt(title)))
 		if snippet != "" {
 			sb.WriteString(fmt.Sprintf("   Snippet: %s\n", snippet))
 		}

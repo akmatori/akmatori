@@ -124,6 +124,13 @@ func runMigrations(db *gorm.DB) error {
 		return err
 	}
 
+	// Pre-migration: drop the legacy `correlated_count` column from incidents.
+	// The alert correlation redesign replaces the counter with first-class Alert
+	// rows; GORM AutoMigrate never drops columns, so we must remove it explicitly.
+	if err := preMigrateIncidentsDropCorrelatedCount(db); err != nil {
+		return err
+	}
+
 	// Reset GORM session state before AutoMigrate. The preMigrate step
 	// operates on specific tables, leaving internal GORM state (table name,
 	// clauses) that can leak into AutoMigrate's processing of other models
@@ -260,6 +267,24 @@ func preMigrateCronJobsDropLegacyColumns(db *gorm.DB) error {
 		}
 		return nil
 	})
+}
+
+// preMigrateIncidentsDropCorrelatedCount removes the legacy `correlated_count`
+// column that was removed from the Incident model as part of the alert
+// correlation redesign. GORM AutoMigrate never drops columns, so upgrade
+// installs would otherwise retain the stale column indefinitely. Idempotent.
+func preMigrateIncidentsDropCorrelatedCount(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&Incident{}) {
+		return nil
+	}
+	if !db.Migrator().HasColumn(&Incident{}, "correlated_count") {
+		return nil
+	}
+	if err := db.Exec("ALTER TABLE incidents DROP COLUMN correlated_count").Error; err != nil {
+		return fmt.Errorf("drop incidents.correlated_count column: %w", err)
+	}
+	slog.Info("dropped incidents.correlated_count column (alert correlation redesign)")
+	return nil
 }
 
 // preMigrateLLMSettings prepares the llm_settings table for the multi-config
