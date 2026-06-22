@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -42,6 +43,7 @@ func TestFormatNumber(t *testing.T) {
 	}{
 		{"zero", 0, "0"},
 		{"single digit", 5, "5"},
+		{"negative number", -1234, "-1,234"},
 		{"double digit", 42, "42"},
 		{"triple digit", 123, "123"},
 		{"thousands", 1234, "1,234"},
@@ -75,6 +77,8 @@ func TestTruncateText(t *testing.T) {
 		{"very short max", "hello", 3, "..."},
 		{"with newlines", "hello\nworld", 20, "hello world"},
 		{"multiline truncate", "hello\nworld\nfoo", 10, "hello w..."},
+		{"zero max length", "hello", 0, "..."},
+		{"trims before truncating", "  hello world  ", 8, "hello..."},
 	}
 
 	for _, tt := range tests {
@@ -100,6 +104,7 @@ func TestGetLastNLines(t *testing.T) {
 		{"exact n lines", "line1\nline2\nline3", 3, "line1\nline2\nline3"},
 		{"more lines than n", "line1\nline2\nline3\nline4\nline5", 3, "line3\nline4\nline5"},
 		{"get last 1", "a\nb\nc\nd", 1, "d"},
+		{"get last zero", "a\nb\nc", 0, ""},
 	}
 
 	for _, tt := range tests {
@@ -154,6 +159,7 @@ func TestTruncateLogForSlack(t *testing.T) {
 		{"short log", "short log", 100, "short log"},
 		{"exact length", "exactly", 7, "exactly"},
 		{"truncated", "line1\nline2\nline3\nline4\nline5", 20, "truncated"},
+		{"starts at nearby newline", "prefix\nline2\nline3\nline4", 18, "line3"},
 	}
 
 	for _, tt := range tests {
@@ -161,6 +167,42 @@ func TestTruncateLogForSlack(t *testing.T) {
 			result := TruncateLogForSlack(tt.log, tt.maxLen)
 			if len(result) > tt.maxLen+20 { // Allow for "...(truncated)\n" prefix
 				t.Errorf("Result too long: got %d, max was %d", len(result), tt.maxLen)
+			}
+			if !strings.Contains(result, tt.contains) {
+				t.Errorf("TruncateLogForSlack() = %q; want it to contain %q", result, tt.contains)
+			}
+		})
+	}
+}
+
+func TestCleanLLMResponse(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		expected string
+	}{
+		{
+			name:     "no heading unchanged",
+			response: "I checked the logs and found the issue.",
+			expected: "I checked the logs and found the issue.",
+		},
+		{
+			name:     "strips planning before h2",
+			response: "Thinking through the problem...\n\n## Summary\nCPU is high.",
+			expected: "## Summary\nCPU is high.",
+		},
+		{
+			name:     "strips planning before h3 with spaces",
+			response: "Plan first\n\n   ### Details\nRestarted service.",
+			expected: "### Details\nRestarted service.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := CleanLLMResponse(tt.response)
+			if result != tt.expected {
+				t.Errorf("CleanLLMResponse() = %q; want %q", result, tt.expected)
 			}
 		})
 	}
