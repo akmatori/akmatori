@@ -50,7 +50,7 @@ func (p PaginationParams) Offset() int {
 
 // TotalPages calculates the total number of pages for a given total count.
 func (p PaginationParams) TotalPages(total int64) int {
-	if p.PerPage <= 0 {
+	if p.PerPage <= 0 || total <= 0 {
 		return 0
 	}
 	pages := int(total) / p.PerPage

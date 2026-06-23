@@ -51,6 +51,9 @@ func TestParsePagination_InvalidValues(t *testing.T) {
 		{"non-numeric page", "page=abc", 1, 50},
 		{"negative per_page", "per_page=-5", 1, 50},
 		{"zero per_page", "per_page=0", 1, 50},
+		{"non-numeric per_page", "per_page=abc", 1, 50},
+		{"invalid page valid per_page", "page=abc&per_page=25", 1, 25},
+		{"valid page invalid per_page", "page=3&per_page=abc", 3, 50},
 	}
 
 	for _, tt := range tests {
@@ -102,6 +105,7 @@ func TestPaginationParams_TotalPages(t *testing.T) {
 		{"with remainder", 10, 101, 11},
 		{"single page", 50, 30, 1},
 		{"zero total", 50, 0, 0},
+		{"negative total", 50, -51, 0},
 		{"one item", 50, 1, 1},
 		{"zero per page", 0, 100, 0},
 	}
