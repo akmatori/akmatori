@@ -490,6 +490,83 @@ func TestWebhookHandler_DatadogEndpointCreatesIncidentContext(t *testing.T) {
 	skills.waitForCompletion(t)
 }
 
+func TestWebhookHandler_RejectsDisabledInstanceWithRealService(t *testing.T) {
+	service, cleanup := setupWebhookHandlerIntegrationDB(t)
+	defer cleanup()
+
+	instance, err := service.CreateInstance(
+		"alertmanager",
+		"Disabled Alertmanager",
+		"Alertmanager webhook paused by an operator",
+		"webhook-secret",
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("create alertmanager instance: %v", err)
+	}
+	if err := service.UpdateInstanceByID(
+		instance.ID,
+		instance.Name,
+		instance.Description,
+		instance.WebhookSecret,
+		instance.FieldMappings,
+		instance.Settings,
+		false,
+	); err != nil {
+		t.Fatalf("disable alertmanager instance: %v", err)
+	}
+
+	h := NewAlertHandler(nil, nil, nil, nil, nil, service, nil)
+	h.RegisterAdapter(adapters.NewAlertmanagerAdapter())
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/alert/"+instance.UUID, strings.NewReader(`{"alerts":[]}`))
+	req.Header.Set("X-Alertmanager-Secret", "webhook-secret")
+	w := httptest.NewRecorder()
+
+	h.HandleWebhook(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d; body=%q", w.Code, http.StatusForbidden, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "Instance disabled") {
+		t.Fatalf("body = %q, want disabled-instance error", w.Body.String())
+	}
+}
+
+func TestWebhookHandler_RejectsRealInstanceWithoutRegisteredAdapter(t *testing.T) {
+	service, cleanup := setupWebhookHandlerIntegrationDB(t)
+	defer cleanup()
+
+	instance, err := service.CreateInstance(
+		"pagerduty",
+		"PagerDuty without adapter",
+		"Registered source instance whose adapter was not wired",
+		"pagerduty-secret",
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("create pagerduty instance: %v", err)
+	}
+
+	h := NewAlertHandler(nil, nil, nil, nil, nil, service, nil)
+	h.RegisterAdapter(adapters.NewAlertmanagerAdapter())
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/alert/"+instance.UUID, strings.NewReader(`{"event":{}}`))
+	req.Header.Set("X-PagerDuty-Signature", "v1=anything")
+	w := httptest.NewRecorder()
+
+	h.HandleWebhook(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%q", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "Unsupported source type") {
+		t.Fatalf("body = %q, want unsupported-source error", w.Body.String())
+	}
+}
+
 // TestAlertHandler_AdapterRegistration tests dynamic adapter registration
 func TestAlertHandler_AdapterRegistration(t *testing.T) {
 	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
