@@ -22,9 +22,9 @@ Replace the flat incidents table with a Sentry-style issues list showing alert a
 - Modify: `internal/database/models_incidents.go`
 - Modify: `internal/database/models_alerts.go`
 
-- [ ] Add three transient fields to `Incident` after `AlertCount` (line 65): `FirstSeen *time.Time \`gorm:"-" json:"first_seen,omitempty"\``, `LastSeen *time.Time \`gorm:"-" json:"last_seen,omitempty"\``, `Trend []int \`gorm:"-" json:"trend,omitempty"\``
-- [ ] Add correlation fields to `Alert` after `RawPayload`: `Correlated bool \`gorm:"default:false" json:"correlated"\``, `CorrelationConfidence *float64 \`json:"correlation_confidence,omitempty"\``, `CorrelationReasoning string \`gorm:"type:text" json:"correlation_reasoning,omitempty"\``
-- [ ] Run `make test` to confirm compilation
+- [x] Add three transient fields to `Incident` after `AlertCount` (line 65): `FirstSeen *time.Time \`gorm:"-" json:"first_seen,omitempty"\``, `LastSeen *time.Time \`gorm:"-" json:"last_seen,omitempty"\``, `Trend []int \`gorm:"-" json:"trend,omitempty"\``
+- [x] Add correlation fields to `Alert` after `RawPayload`: `Correlated bool \`gorm:"default:false" json:"correlated"\``, `CorrelationConfidence *float64 \`json:"correlation_confidence,omitempty"\``, `CorrelationReasoning string \`gorm:"type:text" json:"correlation_reasoning,omitempty"\``
+- [x] Run `make test` to confirm compilation
 
 ### Task 2: Backend — bucketTimestamps helper + enriched incidents list endpoint
 

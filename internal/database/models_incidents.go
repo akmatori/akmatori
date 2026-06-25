@@ -63,6 +63,11 @@ type Incident struct {
 
 	// AlertCount is not stored; populated by API handlers via COUNT query.
 	AlertCount int64 `gorm:"-" json:"alert_count"`
+
+	// FirstSeen, LastSeen, and Trend are transient; populated by the list endpoint.
+	FirstSeen *time.Time `gorm:"-" json:"first_seen,omitempty"`
+	LastSeen  *time.Time `gorm:"-" json:"last_seen,omitempty"`
+	Trend     []int      `gorm:"-" json:"trend,omitempty"`
 }
 
 // BeforeCreate hook to set StartedAt

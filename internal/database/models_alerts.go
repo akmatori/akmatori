@@ -16,8 +16,14 @@ type Alert struct {
 	FiredAt           time.Time   `json:"fired_at"`
 	ResolvedAt        *time.Time  `json:"resolved_at,omitempty"`
 	RawPayload        JSONB       `gorm:"type:jsonb" json:"raw_payload"`
-	CreatedAt         time.Time   `json:"created_at"`
-	UpdatedAt         time.Time   `json:"updated_at"`
+
+	// Correlation fields: set when this alert is linked to an existing incident.
+	Correlated              bool     `gorm:"default:false" json:"correlated"`
+	CorrelationConfidence   *float64 `json:"correlation_confidence,omitempty"`
+	CorrelationReasoning    string   `gorm:"type:text" json:"correlation_reasoning,omitempty"`
+
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 func (Alert) TableName() string {
