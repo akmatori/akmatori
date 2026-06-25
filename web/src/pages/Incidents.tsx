@@ -191,6 +191,7 @@ export default function Incidents() {
           label: 'Monitoring',
           subLabel: monitorUntil ? formatCountdown(monitorUntil) : undefined,
         };
+      case 'pending':
       case 'running':
         return { class: 'badge-primary', icon: Activity, label: 'Ongoing', subLabel: undefined };
       case 'diagnosed':
