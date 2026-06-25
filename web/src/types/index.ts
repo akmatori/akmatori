@@ -52,6 +52,28 @@ export interface Incident {
   completed_at?: string;
   monitor_until?: string;
   alert_count?: number;
+  source_kind?: string;
+  first_seen?: string;
+  last_seen?: string;
+  trend?: number[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Alert {
+  uuid: string;
+  incident_uuid: string;
+  status: 'firing' | 'resolved';
+  fingerprint?: string;
+  source_uuid?: string;
+  alert_name: string;
+  target_host: string;
+  fired_at: string;
+  resolved_at?: string;
+  correlated: boolean;
+  correlation_confidence?: number;
+  correlation_reasoning: string;
+  raw_payload: any;
   created_at: string;
   updated_at: string;
 }

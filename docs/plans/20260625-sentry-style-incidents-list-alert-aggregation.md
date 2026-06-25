@@ -75,11 +75,11 @@ Replace the flat incidents table with a Sentry-style issues list showing alert a
 - Modify: `web/src/types/index.ts`
 - Modify: `web/src/api/client.ts`
 
-- [ ] In `types/index.ts` add to `Incident`: `source_kind?: string; first_seen?: string; last_seen?: string; trend?: number[];`
-- [ ] In `types/index.ts` add new `Alert` interface: `uuid, incident_uuid, status: 'firing'|'resolved', fingerprint?, source_uuid?, alert_name, target_host, fired_at, resolved_at?, correlated, correlation_confidence?, correlation_reasoning, raw_payload: any, created_at, updated_at`
-- [ ] In `api/client.ts` extend `incidentsApi.list` to accept optional `trendWindow?: '1h' | '3h'` arg and append it as `trend_window` query param when provided
-- [ ] In `api/client.ts` add `incidentsApi.getAlerts(uuid: string): Promise<Alert[]>` → `fetchApi<Alert[]>(\`/api/incidents/\${uuid}/alerts\`)`
-- [ ] Run `make test-web` (type-check passes with new fields)
+- [x] In `types/index.ts` add to `Incident`: `source_kind?: string; first_seen?: string; last_seen?: string; trend?: number[];`
+- [x] In `types/index.ts` add new `Alert` interface: `uuid, incident_uuid, status: 'firing'|'resolved', fingerprint?, source_uuid?, alert_name, target_host, fired_at, resolved_at?, correlated, correlation_confidence?, correlation_reasoning, raw_payload: any, created_at, updated_at`
+- [x] In `api/client.ts` extend `incidentsApi.list` to accept optional `trendWindow?: '1h' | '3h'` arg and append it as `trend_window` query param when provided
+- [x] In `api/client.ts` add `incidentsApi.getAlerts(uuid: string): Promise<Alert[]>` → `fetchApi<Alert[]>(\`/api/incidents/\${uuid}/alerts\`)`
+- [x] Run `make test-web` (type-check passes with new fields)
 
 ### Task 6: Frontend — TrendSparkline component
 

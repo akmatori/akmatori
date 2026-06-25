@@ -3,6 +3,7 @@ import type {
   ToolType,
   ToolInstance,
   Incident,
+  Alert,
   Integration,
   CreateIntegrationRequest,
   UpdateIntegrationRequest,
@@ -254,16 +255,19 @@ export const sshKeysApi = {
 
 // Incidents API
 export const incidentsApi = {
-  list: (from?: number, to?: number, page = 1, perPage = 50) => {
+  list: (from?: number, to?: number, page = 1, perPage = 50, trendWindow?: '1h' | '3h') => {
     const params = new URLSearchParams();
     if (from !== undefined) params.set('from', String(from));
     if (to !== undefined) params.set('to', String(to));
     params.set('page', String(page));
     params.set('per_page', String(perPage));
+    if (trendWindow) params.set('trend_window', trendWindow);
     return fetchApi<PaginatedResponse<Incident>>(`/api/incidents?${params.toString()}`);
   },
 
   get: (uuid: string) => fetchApi<Incident>(`/api/incidents/${uuid}`),
+
+  getAlerts: (uuid: string) => fetchApi<Alert[]>(`/api/incidents/${uuid}/alerts`),
 
   create: (request: CreateIncidentRequest) =>
     fetchApi<CreateIncidentResponse>('/api/incidents', {
