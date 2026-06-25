@@ -107,11 +107,11 @@ Replace the flat incidents table with a Sentry-style issues list showing alert a
 **Files:**
 - Modify: `web/src/components/IncidentDetailView.tsx`
 
-- [ ] Add `'alerts'` to the `TabType` union
-- [ ] Add the Alerts tab button (after Raw Alert): show only when `incident.source_kind === 'alert'`; icon: Bell or List
-- [ ] Add `alerts` state (`Alert[] | null`), `alertsLoading` bool, `alertsError` string; fetch via `incidentsApi.getAlerts(incident.uuid)` on first tab open (lazy); show spinner while loading; degrade cleanly on error with an error message
-- [ ] Render the Alerts tab content: table of alert name / target host / status pill (firing/resolved) / fired (relative) / resolved (relative or —); rows with `correlated === true` show a "Correlated" badge with confidence percentage; clicking the badge (or a `>` expand) reveals `correlation_reasoning` text inline; the first/spawning row (correlated=false) is visually marked as "Origin"
-- [ ] Run `make test-web`
+- [x] Add `'alerts'` to the `TabType` union
+- [x] Add the Alerts tab button (after Raw Alert): show only when `incident.source_kind === 'alert'`; icon: Bell or List
+- [x] Add `alerts` state (`Alert[] | null`), `alertsLoading` bool, `alertsError` string; fetch via `incidentsApi.getAlerts(incident.uuid)` on first tab open (lazy); show spinner while loading; degrade cleanly on error with an error message
+- [x] Render the Alerts tab content: table of alert name / target host / status pill (firing/resolved) / fired (relative) / resolved (relative or —); rows with `correlated === true` show a "Correlated" badge with confidence percentage; clicking the badge (or a `>` expand) reveals `correlation_reasoning` text inline; the first/spawning row (correlated=false) is visually marked as "Origin"
+- [x] Run `make test-web`
 
 ### Task 9: Verify acceptance criteria
 

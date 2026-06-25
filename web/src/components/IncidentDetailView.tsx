@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Terminal, MessageSquare, FileCode, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
+import { Terminal, MessageSquare, FileCode, ChevronDown, ChevronRight, RefreshCw, Bell } from 'lucide-react';
 import { JsonView, darkStyles } from 'react-json-view-lite';
 import 'react-json-view-lite/dist/index.css';
-import type { Incident } from '../types';
+import type { Incident, Alert } from '../types';
+import { incidentsApi } from '../api/client';
 
-type TabType = 'reasoning' | 'response' | 'raw';
+type TabType = 'reasoning' | 'response' | 'raw' | 'alerts';
 
 const jsonViewerStyles = {
   ...darkStyles,
@@ -54,6 +55,11 @@ interface IncidentDetailViewProps {
 export default function IncidentDetailView({ incident, autoRefresh = false }: IncidentDetailViewProps) {
   const [activeTab, setActiveTab] = useState<TabType>('reasoning');
   const [showToolCalls, setShowToolCalls] = useState(false);
+  const [alerts, setAlerts] = useState<Alert[] | null>(null);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [alertsError, setAlertsError] = useState('');
+  const [expandedReasoning, setExpandedReasoning] = useState<Set<string>>(new Set());
+  const alertsFetchedRef = useRef(false);
   const logContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-scroll to bottom when log updates
@@ -62,6 +68,16 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
   }, [incident.full_log, activeTab]);
+
+  // Lazy-fetch alerts on first tab open
+  useEffect(() => {
+    if (activeTab !== 'alerts' || alertsFetchedRef.current) return;
+    alertsFetchedRef.current = true;
+    setAlertsLoading(true);
+    incidentsApi.getAlerts(incident.uuid)
+      .then(data => { setAlerts(data); setAlertsLoading(false); })
+      .catch(err => { setAlertsError(String(err)); setAlertsLoading(false); });
+  }, [activeTab, incident.uuid]);
 
   const parsedLog = useMemo(() => {
     if (!incident.full_log) return null;
@@ -226,6 +242,21 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
             Raw Alert
           </span>
         </button>
+        {incident.source_kind === 'alert' && (
+          <button
+            onClick={() => setActiveTab('alerts')}
+            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'alerts'
+                ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <Bell className="w-4 h-4" />
+              Alerts
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Tab Content */}
@@ -299,13 +330,97 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
               </p>
             )}
           </div>
-        ) : (
+        ) : activeTab === 'raw' ? (
           <div className="bg-gray-900 rounded-lg p-6 min-h-[200px] overflow-x-auto">
             <div className="flex items-center gap-2 text-gray-500 mb-4 pb-4 border-b border-gray-700">
               <FileCode className="w-4 h-4" />
               <span className="text-xs font-medium uppercase tracking-wide">Original Webhook Payload</span>
             </div>
             <RawPayloadViewer payload={incident.context?.raw_payload} />
+          </div>
+        ) : (
+          <div className="min-h-[200px]">
+            {alertsLoading ? (
+              <div className="flex items-center justify-center py-12 text-gray-400">
+                <RefreshCw className="w-5 h-5 animate-spin mr-2" />
+                Loading alerts...
+              </div>
+            ) : alertsError ? (
+              <p className="text-red-400 text-center py-8">{alertsError}</p>
+            ) : !alerts || alerts.length === 0 ? (
+              <p className="text-gray-500 text-center py-8">No alerts linked to this incident</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 dark:border-gray-700 text-left text-xs text-gray-500 uppercase tracking-wide">
+                      <th className="pb-2 pr-4 font-medium">Alert</th>
+                      <th className="pb-2 pr-4 font-medium">Host</th>
+                      <th className="pb-2 pr-4 font-medium">Status</th>
+                      <th className="pb-2 pr-4 font-medium">Fired</th>
+                      <th className="pb-2 font-medium">Resolved</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {alerts.map((alert) => {
+                      const isOrigin = !alert.correlated;
+                      const isExpanded = expandedReasoning.has(alert.uuid);
+                      return (
+                        <tr key={alert.uuid} className="align-top">
+                          <td className="py-3 pr-4">
+                            <div className="flex items-start gap-2">
+                              <span className="font-medium text-gray-900 dark:text-gray-100">{alert.alert_name}</span>
+                              {isOrigin && (
+                                <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                                  Origin
+                                </span>
+                              )}
+                              {alert.correlated && (
+                                <button
+                                  onClick={() => setExpandedReasoning(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(alert.uuid)) next.delete(alert.uuid);
+                                    else next.add(alert.uuid);
+                                    return next;
+                                  })}
+                                  className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/60 transition-colors"
+                                  title="Show correlation reasoning"
+                                >
+                                  Correlated
+                                  {alert.correlation_confidence != null && (
+                                    <span>{Math.round(alert.correlation_confidence * 100)}%</span>
+                                  )}
+                                  {isExpanded ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />}
+                                </button>
+                              )}
+                            </div>
+                            {isExpanded && alert.correlation_reasoning && (
+                              <div className="mt-2 text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 rounded p-2 max-w-sm">
+                                {alert.correlation_reasoning}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3 pr-4 text-gray-600 dark:text-gray-400 font-mono text-xs">{alert.target_host}</td>
+                          <td className="py-3 pr-4">
+                            {alert.status === 'firing' ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">Firing</span>
+                            ) : (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">Resolved</span>
+                            )}
+                          </td>
+                          <td className="py-3 pr-4 text-gray-500 dark:text-gray-400 text-xs whitespace-nowrap">
+                            {new Date(alert.fired_at).toLocaleString()}
+                          </td>
+                          <td className="py-3 text-gray-500 dark:text-gray-400 text-xs whitespace-nowrap">
+                            {alert.resolved_at ? new Date(alert.resolved_at).toLocaleString() : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
       </div>
