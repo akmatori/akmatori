@@ -86,8 +86,8 @@ Replace the flat incidents table with a Sentry-style issues list showing alert a
 **Files:**
 - Create: `web/src/components/TrendSparkline.tsx`
 
-- [ ] Create `TrendSparkline.tsx`: props `buckets: number[]`; render an inline SVG (width ~88px, height ~24px); each bar width = `width/buckets.length`, height proportional to `bucket / max(buckets, 1)` scaled to SVG height; muted color (e.g. `currentColor` with opacity); include `<title>` element listing total alerts for accessibility; return a single `<span>` with `aria-label` when buckets is empty or all-zero to show a flat line placeholder
-- [ ] Run `make test-web`
+- [x] Create `TrendSparkline.tsx`: props `buckets: number[]`; render an inline SVG (width ~88px, height ~24px); each bar width = `width/buckets.length`, height proportional to `bucket / max(buckets, 1)` scaled to SVG height; muted color (e.g. `currentColor` with opacity); include `<title>` element listing total alerts for accessibility; return a single `<span>` with `aria-label` when buckets is empty or all-zero to show a flat line placeholder
+- [x] Run `make test-web`
 
 ### Task 7: Frontend — redesign Incidents table
 
