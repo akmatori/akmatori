@@ -7,8 +7,8 @@ Akmatori is an AI-powered AIOps platform for SRE teams. It ingests alerts from m
 ## Stack and Runtime
 
 - Docker deployment: API, Agent Worker, MCP Gateway, PostgreSQL
-- Backend: Go 1.24+
-- Agent Worker: Node.js 22+ / TypeScript with `@earendil-works/pi-coding-agent` (`v0.78.1`)
+- Backend: Go 1.25 (match `go.mod`)
+- Agent Worker: Node.js >=22.19.0 / TypeScript with `@earendil-works/pi-coding-agent` (`v0.78.1`)
 - Frontend: React 19 + TypeScript + Vite + Tailwind
 - Database: PostgreSQL 16 + GORM
 - LLM providers: Anthropic, OpenAI, Google, OpenRouter, NVIDIA NIM, MiniMax, Ant Ling, custom/on-prem
@@ -295,6 +295,7 @@ After changing code, run the smallest relevant test target and then the broad su
 
 Extra rule:
 - before quoting coverage, re-run `go test -coverprofile=coverage.out ./...`
+- backend verification must run on Go 1.25; use a Go 1.25 container if the host toolchain is older
 
 ### Current testing focus
 
