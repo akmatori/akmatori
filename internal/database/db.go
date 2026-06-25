@@ -131,6 +131,13 @@ func runMigrations(db *gorm.DB) error {
 		return err
 	}
 
+	// Pre-migration: drop the orphaned legacy `incident_alerts` table left behind
+	// by the alert correlation redesign. Its no-cascade FK to incidents otherwise
+	// blocks retention cleanup. Superseded by the new alerts table.
+	if err := preMigrateDropLegacyIncidentAlerts(db); err != nil {
+		return err
+	}
+
 	// Reset GORM session state before AutoMigrate. The preMigrate step
 	// operates on specific tables, leaving internal GORM state (table name,
 	// clauses) that can leak into AutoMigrate's processing of other models
@@ -284,6 +291,24 @@ func preMigrateIncidentsDropCorrelatedCount(db *gorm.DB) error {
 		return fmt.Errorf("drop incidents.correlated_count column: %w", err)
 	}
 	slog.Info("dropped incidents.correlated_count column (alert correlation redesign)")
+	return nil
+}
+
+// preMigrateDropLegacyIncidentAlerts drops the orphaned incident_alerts table.
+// The alert correlation redesign removed the IncidentAlert Go model in favour of
+// the new first-class Alert model (alerts table). GORM AutoMigrate never drops
+// tables, so the legacy table lingers with a no-cascade FK to incidents. That FK
+// blocks retention cleanup (DELETE FROM incidents) for every incident that has a
+// legacy alert row. The data is superseded by the alerts table, so we drop the
+// table (CASCADE also removes the dependent FK constraint). Idempotent.
+func preMigrateDropLegacyIncidentAlerts(db *gorm.DB) error {
+	if !db.Migrator().HasTable("incident_alerts") {
+		return nil
+	}
+	if err := db.Exec("DROP TABLE IF EXISTS incident_alerts CASCADE").Error; err != nil {
+		return fmt.Errorf("drop legacy incident_alerts table: %w", err)
+	}
+	slog.Info("dropped legacy incident_alerts table (alert correlation redesign)")
 	return nil
 }
 
@@ -1330,6 +1355,16 @@ func computeAlertFingerprintDB(sourceUUID, alertName, targetHost string) string 
 }
 
 func migrateBackfillAlerts(db *gorm.DB) error {
+	// AutoMigrate pins postgres migrations to a single connection via
+	// DB.Connection(...), which hands us a non-cloning session (clone==0):
+	// every chained call reuses one Statement, so a Schema set by an earlier
+	// operation (e.g. the Raw().Scan() below, or a prior migration step) leaks
+	// into the subsequent Create(&alert) and GORM applies the wrong model's
+	// field setters to the Alert value (panic: time.Time vs *time.Time). Reset
+	// to a fresh-statement session so each Scan/Create/Exec parses its own
+	// schema. ConnPool is preserved, keeping the migration on the pinned conn.
+	db = db.Session(&gorm.Session{NewDB: true})
+
 	if !db.Migrator().HasTable("alerts") {
 		return nil
 	}
