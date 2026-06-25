@@ -94,13 +94,13 @@ Replace the flat incidents table with a Sentry-style issues list showing alert a
 **Files:**
 - Modify: `web/src/pages/Incidents.tsx`
 
-- [ ] Add `formatRelative(iso: string): string` helper near `formatExecutionTime`: returns "Xm" / "Xh" / "Xd" / "Xw" from ISO string to now; used for Age and Last seen
-- [ ] Update `getStatusConfig` status remap: `pending|running|diagnosed → { label: 'Ongoing', ... }`, `monitor → { label: 'Monitoring', ... }`, `completed → { label: 'Resolved', ... }`, `failed → { label: 'Failed', ... }`; for `monitor` status, compute a countdown string from `monitor_until` and attach it as a sub-label/title tooltip
-- [ ] Add `trendWindow` state (`'1h' | '3h'`, default `'1h'`); pass it to `loadIncidents` → `incidentsApi.list`; add a small segmented toggle (two buttons) in the `PageHeader` action area alongside existing controls; on toggle, refetch
-- [ ] Replace the 7-column table header with the new columns: Issue / Trend / Age / Last seen / Status / Alerts / Actions
-- [ ] Replace table row cells: Issue cell = title (bold) + source_kind chip (alert/cron/slack) + truncated uuid + source stacked; Trend cell = `<TrendSparkline buckets={incident.trend ?? []} />`; Age cell = `formatRelative(incident.first_seen ?? incident.started_at)`; Last seen = `formatRelative(incident.last_seen ?? incident.started_at)`; Status = existing badge using remapped `getStatusConfig`; Alerts = `alert_count` badge (de-emphasize / dim when 0 or 1, show count with bell icon when > 1); Actions = keep existing reasoning/response buttons
-- [ ] Preserve: time-range picker, pagination, auto-refresh, detail modal, create-incident modal
-- [ ] Run `make test-web`
+- [x] Add `formatRelative(iso: string): string` helper near `formatExecutionTime`: returns "Xm" / "Xh" / "Xd" / "Xw" from ISO string to now; used for Age and Last seen
+- [x] Update `getStatusConfig` status remap: `pending|running|diagnosed → { label: 'Ongoing', ... }`, `monitor → { label: 'Monitoring', ... }`, `completed → { label: 'Resolved', ... }`, `failed → { label: 'Failed', ... }`; for `monitor` status, compute a countdown string from `monitor_until` and attach it as a sub-label/title tooltip
+- [x] Add `trendWindow` state (`'1h' | '3h'`, default `'1h'`); pass it to `loadIncidents` → `incidentsApi.list`; add a small segmented toggle (two buttons) in the `PageHeader` action area alongside existing controls; on toggle, refetch
+- [x] Replace the 7-column table header with the new columns: Issue / Trend / Age / Last seen / Status / Alerts / Actions
+- [x] Replace table row cells: Issue cell = title (bold) + source_kind chip (alert/cron/slack) + truncated uuid + source stacked; Trend cell = `<TrendSparkline buckets={incident.trend ?? []} />`; Age cell = `formatRelative(incident.first_seen ?? incident.started_at)`; Last seen = `formatRelative(incident.last_seen ?? incident.started_at)`; Status = existing badge using remapped `getStatusConfig`; Alerts = `alert_count` badge (de-emphasize / dim when 0 or 1, show count with bell icon when > 1); Actions = keep existing reasoning/response buttons
+- [x] Preserve: time-range picker, pagination, auto-refresh, detail modal, create-incident modal
+- [x] Run `make test-web`
 
 ### Task 8: Frontend — Incident detail Alerts tab
 

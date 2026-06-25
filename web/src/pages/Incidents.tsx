@@ -1,11 +1,12 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { RefreshCw, X, Plus, MessageSquare, Activity, Clock, CheckCircle, AlertCircle, Terminal, Zap, Timer } from 'lucide-react';
+import { RefreshCw, X, Plus, MessageSquare, Activity, Clock, CheckCircle, AlertCircle, Terminal, Zap, Timer, Bell } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { SuccessMessage } from '../components/ErrorMessage';
 import TimeRangePicker from '../components/TimeRangePicker';
 import IncidentDetailView from '../components/IncidentDetailView';
+import TrendSparkline from '../components/TrendSparkline';
 import { incidentsApi } from '../api/client';
 import type { Incident } from '../types';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
@@ -14,6 +15,32 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 const DEFAULT_TIME_RANGE = 30 * 60;
 // Default: refresh every 1 minute
 const DEFAULT_REFRESH_INTERVAL = 60000;
+
+const formatRelative = (iso: string): string => {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return `${diffSec}s`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 7) return `${diffDay}d`;
+  const diffWeek = Math.floor(diffDay / 7);
+  return `${diffWeek}w`;
+};
+
+const formatCountdown = (iso: string): string => {
+  const remainingMs = new Date(iso).getTime() - Date.now();
+  if (remainingMs <= 0) return 'expired';
+  const remainingMin = Math.floor(remainingMs / 60000);
+  if (remainingMin < 60) return `${remainingMin}m left`;
+  const remainingHr = Math.floor(remainingMin / 60);
+  const remMin = remainingMin % 60;
+  if (remainingHr < 24) return `${remainingHr}h ${remMin}m left`;
+  const remainingDay = Math.floor(remainingHr / 24);
+  return `${remainingDay}d left`;
+};
 
 export default function Incidents() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -27,6 +54,9 @@ export default function Incidents() {
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const refreshIntervalRef = useRef<number | null>(null);
+
+  // Trend window
+  const [trendWindow, setTrendWindow] = useState<'1h' | '3h'>('1h');
 
   // Pagination state
   const [page, setPage] = useState(1);
@@ -44,7 +74,7 @@ export default function Incidents() {
   const listRefreshRef = useRef<number | null>(null);
 
   // Load incidents with current time range
-  const loadIncidents = useCallback(async (from?: number, to?: number, isRefresh?: boolean, pageOverride?: number, perPageOverride?: number) => {
+  const loadIncidents = useCallback(async (from?: number, to?: number, isRefresh?: boolean, pageOverride?: number, perPageOverride?: number, trendWindowOverride?: '1h' | '3h') => {
     try {
       setLoading(true);
       setError('');
@@ -64,7 +94,8 @@ export default function Incidents() {
 
       const currentPage = pageOverride ?? page;
       const currentPerPage = perPageOverride ?? perPage;
-      const result = await incidentsApi.list(effectiveFrom, effectiveTo, currentPage, currentPerPage);
+      const effectiveTrendWindow = trendWindowOverride ?? trendWindow;
+      const result = await incidentsApi.list(effectiveFrom, effectiveTo, currentPage, currentPerPage, effectiveTrendWindow);
       setIncidents(result.data);
       setTotalPages(result.pagination.total_pages);
       setTotalIncidents(result.pagination.total);
@@ -79,7 +110,7 @@ export default function Incidents() {
     } finally {
       setLoading(false);
     }
-  }, [timeFrom, relativeRange, page, perPage]);
+  }, [timeFrom, relativeRange, page, perPage, trendWindow]);
 
   // Initial load
   useEffect(() => {
@@ -123,6 +154,11 @@ export default function Incidents() {
     setListRefreshInterval(interval);
   }, []);
 
+  const handleTrendWindowChange = useCallback((newWindow: '1h' | '3h') => {
+    setTrendWindow(newWindow);
+    loadIncidents(undefined, undefined, false, undefined, undefined, newWindow);
+  }, [loadIncidents]);
+
   useEffect(() => {
     if (showModal && selectedIncident && selectedIncident.status === 'running' && autoRefresh) {
       refreshIntervalRef.current = window.setInterval(async () => {
@@ -144,20 +180,54 @@ export default function Incidents() {
     };
   }, [showModal, selectedIncident?.uuid, selectedIncident?.status, autoRefresh]);
 
-  const getStatusConfig = (status: string) => {
+  const getStatusConfig = (status: string, monitorUntil?: string) => {
     switch (status) {
       case 'completed':
-        return { class: 'badge-success', icon: CheckCircle, label: 'Completed' };
+        return { class: 'badge-success', icon: CheckCircle, label: 'Resolved', subLabel: undefined };
       case 'monitor':
-        return { class: 'badge-success', icon: CheckCircle, label: 'Monitor' };
+        return {
+          class: 'badge-success',
+          icon: CheckCircle,
+          label: 'Monitoring',
+          subLabel: monitorUntil ? formatCountdown(monitorUntil) : undefined,
+        };
       case 'running':
-        return { class: 'badge-primary', icon: Activity, label: 'Running' };
+        return { class: 'badge-primary', icon: Activity, label: 'Ongoing', subLabel: undefined };
       case 'diagnosed':
-        return { class: 'badge-purple', icon: CheckCircle, label: 'Diagnosed' };
+        return { class: 'badge-purple', icon: Activity, label: 'Ongoing', subLabel: undefined };
       case 'failed':
-        return { class: 'badge-error', icon: AlertCircle, label: 'Failed' };
+        return { class: 'badge-error', icon: AlertCircle, label: 'Failed', subLabel: undefined };
       default:
-        return { class: 'badge-default', icon: Clock, label: 'Pending' };
+        return { class: 'badge-default', icon: Clock, label: 'Ongoing', subLabel: undefined };
+    }
+  };
+
+  const getSourceKindChip = (kind?: string) => {
+    switch (kind) {
+      case 'alert':
+        return (
+          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+            Alert
+          </span>
+        );
+      case 'cron':
+        return (
+          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+            Cron
+          </span>
+        );
+      case 'slack':
+        return (
+          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
+            Slack
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+            Manual
+          </span>
+        );
     }
   };
 
@@ -226,6 +296,31 @@ export default function Incidents() {
         description="Monitor all incident manager sessions and execution logs"
         action={
           <div className="flex items-center gap-3">
+            {/* Trend window segmented toggle */}
+            <div className="flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
+              <button
+                onClick={() => handleTrendWindowChange('1h')}
+                className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                  trendWindow === '1h'
+                    ? 'bg-primary-500 text-white'
+                    : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+                title="Show 1-hour trend"
+              >
+                1h
+              </button>
+              <button
+                onClick={() => handleTrendWindowChange('3h')}
+                className={`px-2.5 py-1 text-xs font-medium border-l border-gray-300 dark:border-gray-600 transition-colors ${
+                  trendWindow === '3h'
+                    ? 'bg-primary-500 text-white'
+                    : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+                title="Show 3-hour trend"
+              >
+                3h
+              </button>
+            </div>
             <TimeRangePicker
               from={timeFrom}
               to={timeTo}
@@ -264,55 +359,77 @@ export default function Incidents() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>UUID</th>
-                    <th>Source</th>
-                    <th>Title</th>
+                    <th>Issue</th>
+                    <th>Trend</th>
+                    <th>Age</th>
+                    <th>Last seen</th>
                     <th>Status</th>
-                    <th>Started</th>
-                    <th>Duration</th>
+                    <th>Alerts</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {incidents.map((incident) => {
-                    const statusConfig = getStatusConfig(incident.status);
+                    const statusConfig = getStatusConfig(incident.status, incident.monitor_until);
                     const StatusIcon = statusConfig.icon;
-                    const duration = incident.completed_at
-                      ? Math.round((new Date(incident.completed_at).getTime() - new Date(incident.started_at).getTime()) / 1000)
-                      : null;
+                    const alertCount = incident.alert_count ?? 0;
 
                     return (
                       <tr key={incident.id}>
-                        <td>
-                          <code className="text-xs bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
-                            {incident.uuid.slice(0, 8)}
-                          </code>
-                        </td>
-                        <td className="text-gray-600 dark:text-gray-300 capitalize">
-                          {incident.source}
-                        </td>
                         <td className="max-w-xs">
-                          <span className="text-gray-700 dark:text-gray-200 text-sm truncate block" title={incident.title || '-'}>
-                            {incident.title || <span className="text-gray-400 italic">No title</span>}
-                          </span>
+                          <div className="flex flex-col gap-0.5">
+                            <span
+                              className="text-gray-800 dark:text-gray-100 font-semibold text-sm truncate"
+                              title={incident.title || undefined}
+                            >
+                              {incident.title || <span className="text-gray-400 italic font-normal">No title</span>}
+                            </span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {getSourceKindChip(incident.source_kind)}
+                              <code className="text-xs text-gray-400 dark:text-gray-500">
+                                {incident.uuid.slice(0, 8)}
+                              </code>
+                              {incident.source && (
+                                <span className="text-xs text-gray-400 dark:text-gray-500 truncate max-w-[120px]" title={incident.source}>
+                                  {incident.source}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="text-gray-500 dark:text-gray-400">
+                          <TrendSparkline buckets={incident.trend ?? []} />
+                        </td>
+                        <td className="text-gray-500 dark:text-gray-400 text-sm whitespace-nowrap">
+                          {formatRelative(incident.first_seen ?? incident.started_at)}
+                        </td>
+                        <td className="text-gray-500 dark:text-gray-400 text-sm whitespace-nowrap">
+                          {formatRelative(incident.last_seen ?? incident.started_at)}
                         </td>
                         <td>
-                          <span className={`badge ${statusConfig.class} inline-flex items-center gap-1`}>
-                            <StatusIcon className="w-3 h-3" />
-                            {statusConfig.label}
-                          </span>
+                          <div className="flex flex-col gap-0.5">
+                            <span className={`badge ${statusConfig.class} inline-flex items-center gap-1`}>
+                              <StatusIcon className="w-3 h-3" />
+                              {statusConfig.label}
+                            </span>
+                            {statusConfig.subLabel && (
+                              <span className="text-xs text-gray-400 dark:text-gray-500">
+                                {statusConfig.subLabel}
+                              </span>
+                            )}
+                          </div>
                         </td>
-                        <td className="text-gray-500 dark:text-gray-400 text-sm">
-                          {new Date(incident.started_at).toLocaleString('en-US', {
-                            month: 'short',
-                            day: '2-digit',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            hour12: false
-                          })}
-                        </td>
-                        <td className="text-gray-500 dark:text-gray-400 text-sm font-mono">
-                          {duration !== null ? `${duration}s` : '-'}
+                        <td>
+                          {alertCount > 1 ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                              <Bell className="w-3 h-3" />
+                              {alertCount}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-400 dark:text-gray-500">
+                              {alertCount}
+                            </span>
+                          )}
                         </td>
                         <td>
                           <div className="flex items-center gap-2">
@@ -397,8 +514,8 @@ export default function Incidents() {
                   <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
                     {selectedIncident.title || 'Incident Details'}
                   </h2>
-                  <span className={`badge ${getStatusConfig(selectedIncident.status).class}`}>
-                    {selectedIncident.status}
+                  <span className={`badge ${getStatusConfig(selectedIncident.status, selectedIncident.monitor_until).class}`}>
+                    {getStatusConfig(selectedIncident.status, selectedIncident.monitor_until).label}
                   </span>
                 </div>
                 <div className="mt-1 flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
