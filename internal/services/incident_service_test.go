@@ -597,7 +597,7 @@ func TestLinkAlertToIncident_RunningIncident_InsertsAlertRow(t *testing.T) {
 	}
 
 	a := alerts.NormalizedAlert{AlertName: "DiskFull", TargetHost: "host-02"}
-	if err := svc.LinkAlertToIncident(context.Background(), incidentUUID, "src-uuid-111", a); err != nil {
+	if err := svc.LinkAlertToIncident(context.Background(), incidentUUID, "src-uuid-111", a, 0.95, "same host"); err != nil {
 		t.Fatalf("LinkAlertToIncident failed: %v", err)
 	}
 
@@ -635,7 +635,7 @@ func TestLinkAlertToIncident_MonitorIncident_ExtendsWindow(t *testing.T) {
 	}
 
 	a := alerts.NormalizedAlert{AlertName: "CPUHigh", TargetHost: "host-monitor"}
-	if err := svc.LinkAlertToIncident(context.Background(), incidentUUID, "src-uuid-111", a); err != nil {
+	if err := svc.LinkAlertToIncident(context.Background(), incidentUUID, "src-uuid-111", a, 0.92, "recurring in monitor window"); err != nil {
 		t.Fatalf("LinkAlertToIncident failed: %v", err)
 	}
 
@@ -662,9 +662,45 @@ func TestLinkAlertToIncident_UnknownIncidentReturnsError(t *testing.T) {
 	db := setupIncidentTestDB(t)
 	svc := newIncidentTestService(t, db)
 
-	err := svc.LinkAlertToIncident(context.Background(), "nonexistent-uuid", "src-uuid-111", alerts.NormalizedAlert{})
+	err := svc.LinkAlertToIncident(context.Background(), "nonexistent-uuid", "src-uuid-111", alerts.NormalizedAlert{}, 0.9, "test")
 	if err == nil {
 		t.Fatal("expected error for unknown incident, got nil")
+	}
+}
+
+func TestLinkAlertToIncident_PersistsCorrelationFields(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnAlertIncident(t, svc)
+
+	if err := db.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).
+		Update("status", database.IncidentStatusRunning).Error; err != nil {
+		t.Fatalf("set status running: %v", err)
+	}
+
+	const wantConfidence = 0.93
+	const wantReasoning = "same alert name and host, recurring within window"
+
+	a := alerts.NormalizedAlert{AlertName: "CPUHigh", TargetHost: "web01"}
+	if err := svc.LinkAlertToIncident(context.Background(), incidentUUID, "src-uuid-999", a, wantConfidence, wantReasoning); err != nil {
+		t.Fatalf("LinkAlertToIncident failed: %v", err)
+	}
+
+	var row database.Alert
+	if err := db.Where("incident_uuid = ?", incidentUUID).First(&row).Error; err != nil {
+		t.Fatalf("load alert row: %v", err)
+	}
+	if !row.Correlated {
+		t.Error("Correlated should be true for a linked alert")
+	}
+	if row.CorrelationConfidence == nil {
+		t.Fatal("CorrelationConfidence should not be nil")
+	}
+	if *row.CorrelationConfidence != wantConfidence {
+		t.Errorf("CorrelationConfidence = %v, want %v", *row.CorrelationConfidence, wantConfidence)
+	}
+	if row.CorrelationReasoning != wantReasoning {
+		t.Errorf("CorrelationReasoning = %q, want %q", row.CorrelationReasoning, wantReasoning)
 	}
 }
 

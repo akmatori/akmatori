@@ -111,7 +111,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		}
 		if verdict.IsConfident(h.correlationThreshold()) {
 			slog.Info("alert correlated to existing incident", "incident_uuid", verdict.IncidentUUID, "confidence", verdict.Confidence)
-			if err := h.skillService.LinkAlertToIncident(context.Background(), verdict.IncidentUUID, instance.UUID, normalized); err != nil {
+			if err := h.skillService.LinkAlertToIncident(context.Background(), verdict.IncidentUUID, instance.UUID, normalized, verdict.Confidence, verdict.Reasoning); err != nil {
 				// Fail-open: link failed (incident deleted, DB error, etc.) — spawn new investigation.
 				slog.Warn("failed to link alert to incident, spawning new incident", "incident_uuid", verdict.IncidentUUID, "err", err)
 			} else {
@@ -274,7 +274,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 		}
 		if verdict.IsConfident(h.correlationThreshold()) {
 			slog.Info("listener channel alert correlated to existing incident", "incident_uuid", verdict.IncidentUUID, "confidence", verdict.Confidence)
-			if err := h.skillService.LinkAlertToIncident(context.Background(), verdict.IncidentUUID, channel.UUID, normalized); err != nil {
+			if err := h.skillService.LinkAlertToIncident(context.Background(), verdict.IncidentUUID, channel.UUID, normalized, verdict.Confidence, verdict.Reasoning); err != nil {
 				// Fail-open: link failed — spawn new investigation instead.
 				slog.Warn("failed to link alert to incident, spawning new incident", "incident_uuid", verdict.IncidentUUID, "err", err)
 			} else {

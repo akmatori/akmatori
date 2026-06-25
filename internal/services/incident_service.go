@@ -50,7 +50,7 @@ func (s *SkillService) InsertFiringAlert(ctx context.Context, incidentUUID strin
 // LinkAlertToIncident records an incoming alert against an existing incident
 // instead of spawning a new investigation. For monitor-status incidents the
 // monitor window is extended so recurrences are visible in the watch period.
-func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert) error {
+func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var incident database.Incident
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -65,16 +65,19 @@ func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID str
 		}
 		fingerprint := ComputeAlertFingerprint(sourceUUID, alert.AlertName, alert.TargetHost)
 		row := database.Alert{
-			UUID:              uuid.New().String(),
-			IncidentUUID:      incidentUUID,
-			Status:            database.AlertStatusFiring,
-			Fingerprint:       fingerprint,
-			SourceUUID:        sourceUUID,
-			SourceFingerprint: alert.SourceFingerprint,
-			AlertName:         alert.AlertName,
-			TargetHost:        alert.TargetHost,
-			FiredAt:           firedAt,
-			RawPayload:        alert.RawPayload,
+			UUID:                    uuid.New().String(),
+			IncidentUUID:            incidentUUID,
+			Status:                  database.AlertStatusFiring,
+			Fingerprint:             fingerprint,
+			SourceUUID:              sourceUUID,
+			SourceFingerprint:       alert.SourceFingerprint,
+			AlertName:               alert.AlertName,
+			TargetHost:              alert.TargetHost,
+			FiredAt:                 firedAt,
+			RawPayload:              alert.RawPayload,
+			Correlated:              true,
+			CorrelationConfidence:   &confidence,
+			CorrelationReasoning:    reasoning,
 		}
 		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
 		if result.Error != nil {

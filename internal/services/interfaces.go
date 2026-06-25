@@ -43,7 +43,7 @@ type IncidentManager interface {
 	GetIncident(incidentUUID string) (*database.Incident, error)
 	AppendSubagentLog(incidentUUID string, skillName string, subagentLog string) error
 	InsertFiringAlert(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert) error
-	LinkAlertToIncident(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert) error
+	LinkAlertToIncident(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string) error
 }
 
 // SkillIncidentManager combines SkillManager and IncidentManager for handlers

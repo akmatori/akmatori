@@ -52,7 +52,7 @@ func (s *corrGateSkillService) SpawnIncidentManager(*services.IncidentContext) (
 	return uuid, "", nil
 }
 
-func (s *corrGateSkillService) LinkAlertToIncident(_ context.Context, incidentUUID string, _ string, alert alerts.NormalizedAlert) error {
+func (s *corrGateSkillService) LinkAlertToIncident(_ context.Context, incidentUUID string, _ string, alert alerts.NormalizedAlert, _ float64, _ string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.linkCount++

@@ -49,14 +49,14 @@ Replace the flat incidents table with a Sentry-style issues list showing alert a
 - Modify: `internal/handlers/alert_correlation_gate_test.go`
 - Modify: `internal/handlers/api_memories_test.go` (and grep for any other `LinkAlertToIncident` mocks)
 
-- [ ] In `interfaces.go` change `LinkAlertToIncident` signature to `LinkAlertToIncident(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string) error`
-- [ ] In `incident_service.go` `LinkAlertToIncident` implementation set `Correlated: true`, `CorrelationConfidence: &confidence`, `CorrelationReasoning: reasoning` on the alert row before save; `InsertFiringAlert` (spawning alert) stays `Correlated: false`
-- [ ] In `alert_processor.go` line 114: pass `verdict.Confidence, verdict.Reasoning` as the two new trailing args
-- [ ] In `alert_processor.go` line 277: same — pass `verdict.Confidence, verdict.Reasoning`
-- [ ] Update the `corrGateSkillService.LinkAlertToIncident` mock in `alert_correlation_gate_test.go` to accept the new signature (just add `confidence float64, reasoning string` params; mock body unchanged)
-- [ ] Grep for all other `LinkAlertToIncident` mocks (e.g. `api_memories_test.go:552`) and update each
-- [ ] Write or extend a test asserting that after a confident correlation, the linked `Alert` row has `Correlated=true`, the expected confidence, and the expected reasoning
-- [ ] Run `make test`
+- [x] In `interfaces.go` change `LinkAlertToIncident` signature to `LinkAlertToIncident(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string) error`
+- [x] In `incident_service.go` `LinkAlertToIncident` implementation set `Correlated: true`, `CorrelationConfidence: &confidence`, `CorrelationReasoning: reasoning` on the alert row before save; `InsertFiringAlert` (spawning alert) stays `Correlated: false`
+- [x] In `alert_processor.go` line 114: pass `verdict.Confidence, verdict.Reasoning` as the two new trailing args
+- [x] In `alert_processor.go` line 277: same — pass `verdict.Confidence, verdict.Reasoning`
+- [x] Update the `corrGateSkillService.LinkAlertToIncident` mock in `alert_correlation_gate_test.go` to accept the new signature (just add `confidence float64, reasoning string` params; mock body unchanged)
+- [x] Grep for all other `LinkAlertToIncident` mocks (e.g. `api_memories_test.go:552`) and update each
+- [x] Write or extend a test asserting that after a confident correlation, the linked `Alert` row has `Correlated=true`, the expected confidence, and the expected reasoning
+- [x] Run `make test`
 
 ### Task 4: New GET /api/incidents/{uuid}/alerts endpoint
 

@@ -254,7 +254,7 @@ func (f *fakeSkillIncidentManager) AppendSubagentLog(string, string, string) err
 func (f *fakeSkillIncidentManager) InsertFiringAlert(context.Context, string, string, alerts.NormalizedAlert) error {
 	return nil
 }
-func (f *fakeSkillIncidentManager) LinkAlertToIncident(context.Context, string, string, alerts.NormalizedAlert) error {
+func (f *fakeSkillIncidentManager) LinkAlertToIncident(context.Context, string, string, alerts.NormalizedAlert, float64, string) error {
 	return nil
 }
 

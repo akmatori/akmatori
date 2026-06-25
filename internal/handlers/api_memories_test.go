@@ -549,7 +549,7 @@ func (r *recordingSkillService) AppendSubagentLog(string, string, string) error 
 func (r *recordingSkillService) InsertFiringAlert(context.Context, string, string, alerts.NormalizedAlert) error {
 	return nil
 }
-func (r *recordingSkillService) LinkAlertToIncident(context.Context, string, string, alerts.NormalizedAlert) error {
+func (r *recordingSkillService) LinkAlertToIncident(context.Context, string, string, alerts.NormalizedAlert, float64, string) error {
 	return nil
 }
 
