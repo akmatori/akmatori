@@ -45,6 +45,23 @@ func NewSQLiteDB(t testing.TB, models ...interface{}) *gorm.DB {
 	return db
 }
 
+// NewCronSQLiteDB opens a test database with the channel/cron schema applied.
+// Keep this helper in sync with production migrations when cron associations
+// change; tests that preload or replace CronJob.Tools need CronJobTool too.
+func NewCronSQLiteDB(t testing.TB, extraModels ...interface{}) *gorm.DB {
+	t.Helper()
+
+	models := []interface{}{
+		&database.Integration{},
+		&database.Channel{},
+		&database.CronJob{},
+		&database.CronJobTool{},
+	}
+	models = append(models, extraModels...)
+
+	return NewSQLiteDB(t, models...)
+}
+
 // NewGlobalSQLiteDB opens a test database, assigns it to database.DB, and
 // restores the previous global handle at cleanup.
 func NewGlobalSQLiteDB(t testing.TB, models ...interface{}) *gorm.DB {
@@ -52,6 +69,21 @@ func NewGlobalSQLiteDB(t testing.TB, models ...interface{}) *gorm.DB {
 
 	previous := database.DB
 	db := NewSQLiteDB(t, models...)
+	database.DB = db
+	t.Cleanup(func() {
+		database.DB = previous
+	})
+
+	return db
+}
+
+// NewGlobalCronSQLiteDB opens a cron-schema test database, assigns it to
+// database.DB, and restores the previous global handle at cleanup.
+func NewGlobalCronSQLiteDB(t testing.TB, extraModels ...interface{}) *gorm.DB {
+	t.Helper()
+
+	previous := database.DB
+	db := NewCronSQLiteDB(t, extraModels...)
 	database.DB = db
 	t.Cleanup(func() {
 		database.DB = previous

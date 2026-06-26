@@ -11,9 +11,9 @@ import (
 
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/messaging"
+	"github.com/akmatori/akmatori/internal/testhelpers"
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -366,26 +366,12 @@ func (f *fakeIncidentRunner) ReleaseRun(string, string) bool {
 
 func setupCronRunnerTest(t *testing.T) (*CronRunner, *gorm.DB, *fakeScheduler, *recordingChannelManager, *recordingProvider) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(
-		&database.Integration{},
-		&database.Channel{},
-		&database.CronJob{},
-		&database.CronJobTool{},
+	db := testhelpers.NewGlobalCronSQLiteDB(
+		t,
 		&database.ToolType{},
 		&database.ToolInstance{},
 		&database.LLMSettings{},
-	); err != nil {
-		t.Fatalf("automigrate: %v", err)
-	}
-	// Stash and restore the package-level DB so other tests in this package
-	// (which share the global) see the prior handle once we're done.
-	prevDB := database.DB
-	database.DB = db
-	t.Cleanup(func() { database.DB = prevDB })
+	)
 
 	integration := database.Integration{
 		UUID:     uuid.New().String(),
@@ -1639,13 +1625,7 @@ func TestCronRunner_FormatMessages_RespectsByteCap(t *testing.T) {
 // TestCronRunner_NewCronRunner_ConstructorReturnsRunner is a smoke check that
 // the production constructor wires every dependency through.
 func TestCronRunner_NewCronRunner_ConstructorReturnsRunner(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("sqlite: %v", err)
-	}
-	prevDB := database.DB
-	database.DB = db
-	t.Cleanup(func() { database.DB = prevDB })
+	testhelpers.NewGlobalSQLiteDB(t)
 
 	runner := NewCronRunner(
 		&recordingChannelManager{},

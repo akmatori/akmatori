@@ -63,3 +63,41 @@ func TestNewGlobalSQLiteDB_RestoresDatabaseHandle(t *testing.T) {
 		t.Fatal("expected helper cleanup to restore database.DB")
 	}
 }
+
+func TestNewCronSQLiteDB_MigratesCronToolJoinTable(t *testing.T) {
+	db := NewCronSQLiteDB(t, &database.ToolType{}, &database.ToolInstance{})
+
+	toolType := database.ToolType{Name: "kubectl", Description: "kubectl wrapper"}
+	if err := db.Create(&toolType).Error; err != nil {
+		t.Fatalf("failed to seed tool type: %v", err)
+	}
+
+	tool := database.ToolInstance{
+		ToolTypeID:  toolType.ID,
+		Name:        "prod-k8s",
+		LogicalName: "prod-k8s",
+		Enabled:     true,
+	}
+	if err := db.Create(&tool).Error; err != nil {
+		t.Fatalf("failed to seed tool: %v", err)
+	}
+
+	job := database.CronJob{
+		UUID:     "cron-1",
+		Name:     "daily-check",
+		Schedule: "0 2 * * *",
+		Prompt:   "Check production",
+		Tools:    []database.ToolInstance{tool},
+	}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatalf("failed to create cron job: %v", err)
+	}
+
+	var reloaded database.CronJob
+	if err := db.Preload("Tools").First(&reloaded, job.ID).Error; err != nil {
+		t.Fatalf("failed to reload cron job: %v", err)
+	}
+	if len(reloaded.Tools) != 1 || reloaded.Tools[0].LogicalName != "prod-k8s" {
+		t.Fatalf("expected cron tool association to round-trip, got %#v", reloaded.Tools)
+	}
+}

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/akmatori/akmatori/internal/database"
-	"gorm.io/driver/sqlite"
+	"github.com/akmatori/akmatori/internal/testhelpers"
 	"gorm.io/gorm"
 )
 
@@ -215,21 +215,5 @@ func TestSeedSystemCronJobs_IdempotentAndPreservesOperatorState(t *testing.T) {
 // the testing.T's cleanup so other tests in this package keep their handle.
 func newCronAgentTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(
-		&database.Skill{},
-		&database.CronJob{},
-		&database.CronJobTool{},
-		&database.Integration{},
-		&database.Channel{},
-	); err != nil {
-		t.Fatalf("automigrate: %v", err)
-	}
-	prevDB := database.DB
-	database.DB = db
-	t.Cleanup(func() { database.DB = prevDB })
-	return db
+	return testhelpers.NewGlobalCronSQLiteDB(t, &database.Skill{})
 }

@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/testhelpers"
 	"github.com/google/uuid"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -16,20 +16,11 @@ import (
 // invariant is exercised end-to-end.
 func setupChannelServiceTest(t *testing.T) (*ChannelService, *gorm.DB) {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(
+	db := testhelpers.NewCronSQLiteDB(
+		t,
 		&database.AlertSourceType{},
 		&database.AlertSourceInstance{},
-		&database.Integration{},
-		&database.Channel{},
-		&database.CronJob{},
-		&database.CronJobTool{},
-	); err != nil {
-		t.Fatalf("automigrate: %v", err)
-	}
+	)
 	// Mirror the production partial-unique index so default-post conflicts
 	// surface here just like they would in postgres.
 	if err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_default_post_per_integration ON channels (integration_id) WHERE is_default_post = true").Error; err != nil {
