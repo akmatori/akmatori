@@ -175,6 +175,7 @@ export default function Feed() {
   const [relativeRange, setRelativeRange] = useState<number | null>(DEFAULT_TIME_RANGE);
   const [refreshInterval, setRefreshInterval] = useState(DEFAULT_REFRESH_INTERVAL);
   const refreshRef = useRef<number | null>(null);
+  const loadFeedRef = useRef(loadFeed);
 
   const loadFeed = useCallback(async (
     from?: number,
@@ -227,9 +228,13 @@ export default function Feed() {
   }, []);
 
   useEffect(() => {
+    loadFeedRef.current = loadFeed;
+  }, [loadFeed]);
+
+  useEffect(() => {
     if (refreshInterval > 0) {
       refreshRef.current = window.setInterval(() => {
-        loadFeed(undefined, undefined, true);
+        loadFeedRef.current(undefined, undefined, true);
       }, refreshInterval);
     }
     return () => {
@@ -238,7 +243,7 @@ export default function Feed() {
         refreshRef.current = null;
       }
     };
-  }, [refreshInterval, loadFeed]);
+  }, [refreshInterval]);
 
   const handleTimeRangeChange = useCallback((from: number, to: number, relativeDuration?: number | null) => {
     setTimeFrom(from);
@@ -277,7 +282,8 @@ export default function Feed() {
       const result = await alertsApi.unlink(item.event_uuid);
       setSuccessMsg(`Alert unlinked. New incident: ${result.incident_uuid.slice(0, 8)}...`);
       setTimeout(() => setSuccessMsg(null), 6000);
-      loadFeed(undefined, undefined, false, page);
+      setPage(1);
+      loadFeed(undefined, undefined, false, 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to unlink alert');
     } finally {
@@ -287,7 +293,7 @@ export default function Feed() {
         return next;
       });
     }
-  }, [loadFeed, page]);
+  }, [loadFeed]);
 
   const typeFilterOptions: { label: string; value: TypeFilter }[] = [
     { label: 'All', value: 'all' },

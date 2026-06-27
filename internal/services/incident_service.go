@@ -167,6 +167,9 @@ func (s *SkillService) UnlinkAlertFromIncident(ctx context.Context, alertUUID st
 			Updates(map[string]interface{}{"status": database.IncidentStatusFailed}).Error; markErr != nil {
 			slog.Error("UnlinkAlertFromIncident: failed to mark orphaned incident as failed", "incident", newIncidentUUID, "err", markErr)
 		}
+		if removeErr := os.RemoveAll(filepath.Join(s.incidentsDir, newIncidentUUID)); removeErr != nil {
+			slog.Error("UnlinkAlertFromIncident: failed to remove orphaned incident dir", "incident", newIncidentUUID, "err", removeErr)
+		}
 	}
 
 	reasoning := "manually unlinked from " + oldIncidentUUID
