@@ -4,6 +4,7 @@ import type {
   ToolInstance,
   Incident,
   Alert,
+  EventFeedItem,
   Integration,
   CreateIntegrationRequest,
   UpdateIntegrationRequest,
@@ -255,13 +256,14 @@ export const sshKeysApi = {
 
 // Incidents API
 export const incidentsApi = {
-  list: (from?: number, to?: number, page = 1, perPage = 50, trendWindow?: '1h' | '3h') => {
+  list: (from?: number, to?: number, page = 1, perPage = 50, trendWindow?: '1h' | '3h', status?: string) => {
     const params = new URLSearchParams();
     if (from !== undefined) params.set('from', String(from));
     if (to !== undefined) params.set('to', String(to));
     params.set('page', String(page));
     params.set('per_page', String(perPage));
     if (trendWindow) params.set('trend_window', trendWindow);
+    if (status !== undefined) params.set('status', status);
     return fetchApi<PaginatedResponse<Incident>>(`/api/incidents?${params.toString()}`);
   },
 
@@ -596,6 +598,27 @@ export const memoriesApi = {
   },
 
   get: (id: number) => fetchApi<Memory>(`/api/memories/${id}`),
+};
+
+// Events feed API
+export const eventsApi = {
+  list: (params: { from?: number; to?: number; page?: number; perPage?: number; type?: string }) => {
+    const qs = new URLSearchParams();
+    if (params.from !== undefined) qs.set('from', String(params.from));
+    if (params.to !== undefined) qs.set('to', String(params.to));
+    qs.set('page', String(params.page ?? 1));
+    qs.set('per_page', String(params.perPage ?? 50));
+    if (params.type) qs.set('type', params.type);
+    return fetchApi<PaginatedResponse<EventFeedItem>>(`/api/events?${qs.toString()}`);
+  },
+};
+
+// Alerts API
+export const alertsApi = {
+  unlink: (uuid: string) =>
+    fetchApi<{ incident_uuid: string }>(`/api/alerts/${encodeURIComponent(uuid)}/unlink`, {
+      method: 'POST',
+    }),
 };
 
 export { ApiError };

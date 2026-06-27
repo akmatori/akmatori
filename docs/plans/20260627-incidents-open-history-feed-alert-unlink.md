@@ -81,11 +81,11 @@ Three related features: (1) Incidents tab defaults to an Open view with no time 
 - Modify: `web/src/types/index.ts`
 - Modify: `web/src/api/client.ts`
 
-- [ ] Add `EventFeedItem` interface to `types/index.ts` mirroring the Go struct fields
-- [ ] Update `incidentsApi.list` to accept optional `status?: string` param and omit `from`/`to` when undefined (don't pass them in the query string when not set)
-- [ ] Add `eventsApi.list(params: {from?, to?, page, perPage, type?})` to `client.ts`
-- [ ] Add `alertsApi = { unlink: (uuid: string) => fetchApi<{incident_uuid: string}>(..., {method: 'POST'}) }` to `client.ts`
-- [ ] run `make test-web` — must pass before Task 6
+- [x] Add `EventFeedItem` interface to `types/index.ts` mirroring the Go struct fields
+- [x] Update `incidentsApi.list` to accept optional `status?: string` param and omit `from`/`to` when undefined (don't pass them in the query string when not set)
+- [x] Add `eventsApi.list(params: {from?, to?, page, perPage, type?})` to `client.ts`
+- [x] Add `alertsApi = { unlink: (uuid: string) => fetchApi<{incident_uuid: string}>(..., {method: 'POST'}) }` to `client.ts`
+- [x] run `make test-web` — must pass before Task 6
 
 ### Task 6: Incidents tab Open/History toggle
 

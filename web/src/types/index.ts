@@ -543,3 +543,21 @@ export interface SSHHostConfig {
   allow_write_commands?: boolean;
 }
 
+// Events feed
+export interface EventFeedItem {
+  event_type: string;
+  event_uuid: string;
+  title: string;
+  occurred_at: string;
+  status: string;
+  incident_uuid: string;
+  correlated: boolean;
+  correlation_confidence?: number;
+  correlation_reasoning?: string;
+  correlation_decision?: string;
+  target_host?: string;
+  source_uuid?: string;
+  incident_title?: string;
+  incident_status?: string;
+}
+
