@@ -63,9 +63,30 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	//
 	// Use separate COUNT queries for the total, and limit each data query to
 	// (offset + perPage) rows — sufficient to serve any page without loading the
-	// entire table.
+	// entire table. Hard-cap the fetch to eventsMaxRowFetch to prevent large
+	// page numbers from pulling unbounded rows into memory.
+	const eventsMaxRowFetch = 10_000
+	// Reject page numbers that exceed the fetch cap before multiplying. Any
+	// page > eventsMaxRowFetch would produce offset >= eventsMaxRowFetch even
+	// at per_page=1, but very large page values can also overflow int and wrap
+	// to a small positive offset, bypassing the guard below.
+	if params.Page > eventsMaxRowFetch {
+		api.RespondError(w, http.StatusBadRequest, "page exceeds the searchable range; use date filters to narrow the result set")
+		return
+	}
 	offset := params.Offset()
+	// Reject pages whose offset exceeds the row-fetch cap. The in-memory merge
+	// can only cover rows 0…eventsMaxRowFetch-1; beyond that the result would
+	// be silently empty while the client's total_pages would still show the full
+	// uncapped count. Instruct the caller to use date filters instead.
+	if offset < 0 || offset >= eventsMaxRowFetch {
+		api.RespondError(w, http.StatusBadRequest, "page exceeds the searchable range; use date filters to narrow the result set")
+		return
+	}
 	rowLimit := offset + params.PerPage
+	if rowLimit > eventsMaxRowFetch {
+		rowLimit = eventsMaxRowFetch
+	}
 
 	var alertCount int64
 	var alertItems []EventFeedItem
@@ -173,8 +194,20 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	merged = append(merged, alertItems...)
 	merged = append(merged, incidentItems...)
 	sortEventFeedItems(merged)
+	// Trim to the fetch-window cap so that pagination slices stay consistent
+	// with the capped total. Without this, the last page could return more
+	// rows than (total - offset) when both streams each contributed up to
+	// eventsMaxRowFetch rows.
+	if len(merged) > eventsMaxRowFetch {
+		merged = merged[:eventsMaxRowFetch]
+	}
 
 	total := alertCount + incidentCount
+	// Cap the reported total to the fetch-window maximum so pagination
+	// metadata never advertises page counts beyond what can actually be served.
+	if total > int64(eventsMaxRowFetch) {
+		total = int64(eventsMaxRowFetch)
+	}
 
 	// Apply pagination.
 	var page []EventFeedItem
@@ -243,4 +276,3 @@ func sortEventFeedItems(items []EventFeedItem) {
 		return items[i].OccurredAt.After(items[j].OccurredAt)
 	})
 }
-

@@ -420,6 +420,11 @@ func (h *APIHandler) handleAlertUnlink(w http.ResponseWriter, r *http.Request) {
 	if task == "" {
 		task = "Alert investigation"
 	}
+	// Include the original raw alert text when available so the agent has the
+	// same rich context it would receive from the normal alert-processing path.
+	if original := extractOriginalMessage(alert.RawPayload, originalAlertTextMaxBytes); original != "" {
+		task += "\n\nOriginal alert text:\n" + original
+	}
 	taskHeader := fmt.Sprintf("🔗 Unlinked Alert Investigation:\n%s\n\n--- Execution Log ---\n\n", task)
 	go h.runAgentInvestigation(newIncidentUUID, taskHeader, task)
 

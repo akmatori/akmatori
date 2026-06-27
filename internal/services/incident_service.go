@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -115,7 +116,14 @@ func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID str
 // and spawns a fresh investigation for it. Returns the new incident UUID.
 // Returns ErrAlertNotCorrelated if the alert was not correlated (linked) from
 // another incident.
+//
+// Concurrent unlink calls for the same alert are serialised by a per-row DB
+// lock: after spawning the new incident the alert row is re-locked and
+// re-checked so only one caller wins; the loser's spawned incident is marked
+// failed and ErrAlertNotCorrelated is returned.
 func (s *SkillService) UnlinkAlertFromIncident(ctx context.Context, alertUUID string) (string, error) {
+	// Fast pre-check (no lock); the definitive check happens inside the
+	// transaction below after the incident has been spawned.
 	var alert database.Alert
 	if err := s.db.WithContext(ctx).Where("uuid = ?", alertUUID).First(&alert).Error; err != nil {
 		return "", fmt.Errorf("UnlinkAlertFromIncident: load alert: %w", err)
@@ -141,34 +149,61 @@ func (s *SkillService) UnlinkAlertFromIncident(ctx context.Context, alertUUID st
 			"alert_name":        alert.AlertName,
 			"target_host":       alert.TargetHost,
 			"alert_fingerprint": alertFingerprint,
+			"raw_payload":       alert.RawPayload,
 		},
 		Message: msg,
 	}
 
+	// Spawn the new incident (creates dir + DB record) outside the transaction
+	// so the OS work is not held under a row lock.
 	newIncidentUUID, _, err := s.SpawnIncidentManager(incidentCtx)
 	if err != nil {
 		return "", fmt.Errorf("UnlinkAlertFromIncident: spawn incident: %w", err)
 	}
 
-	reasoning := "manually unlinked from " + oldIncidentUUID
-	// Use Select to explicitly include correlation_confidence so GORM sets it to
-	// NULL (the zero value for *float64) rather than skipping the zero-value field.
-	if err := s.db.WithContext(ctx).Model(&database.Alert{}).
-		Select("incident_uuid", "correlated", "correlation_decision", "correlation_reasoning", "correlation_confidence").
-		Where("uuid = ?", alertUUID).
-		Updates(database.Alert{
-			IncidentUUID:         newIncidentUUID,
-			Correlated:           false,
-			CorrelationDecision:  "new_incident",
-			CorrelationReasoning: reasoning,
-		}).Error; err != nil {
-		// Mark the new incident failed so it does not remain orphaned in pending status.
+	markOrphanFailed := func() {
 		if markErr := s.db.Model(&database.Incident{}).
 			Where("uuid = ?", newIncidentUUID).
 			Updates(map[string]interface{}{"status": database.IncidentStatusFailed}).Error; markErr != nil {
 			slog.Error("UnlinkAlertFromIncident: failed to mark orphaned incident as failed", "incident", newIncidentUUID, "err", markErr)
 		}
-		return "", fmt.Errorf("UnlinkAlertFromIncident: repoint alert: %w", err)
+	}
+
+	reasoning := "manually unlinked from " + oldIncidentUUID
+
+	// Transactionally lock the alert row and confirm it is still correlated.
+	// A concurrent unlink that committed first will have set correlated=false,
+	// causing the locked re-read to return zero rows — we detect that and bail.
+	txErr := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var locked database.Alert
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("uuid = ? AND correlated = ?", alertUUID, true).
+			First(&locked).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrAlertNotCorrelated
+			}
+			return fmt.Errorf("UnlinkAlertFromIncident: lock alert: %w", err)
+		}
+
+		// Use Select to explicitly include correlation_confidence so GORM sets
+		// it to NULL (the zero value for *float64) rather than skipping it.
+		return tx.Model(&database.Alert{}).
+			Select("incident_uuid", "correlated", "correlation_decision", "correlation_reasoning", "correlation_confidence").
+			Where("uuid = ?", alertUUID).
+			Updates(database.Alert{
+				IncidentUUID:         newIncidentUUID,
+				Correlated:           false,
+				CorrelationDecision:  "new_incident",
+				CorrelationReasoning: reasoning,
+			}).Error
+	})
+
+	if txErr != nil {
+		markOrphanFailed()
+		if errors.Is(txErr, ErrAlertNotCorrelated) {
+			return "", ErrAlertNotCorrelated
+		}
+		return "", fmt.Errorf("UnlinkAlertFromIncident: repoint alert: %w", txErr)
 	}
 
 	return newIncidentUUID, nil

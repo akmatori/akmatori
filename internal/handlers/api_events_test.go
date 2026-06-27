@@ -160,6 +160,25 @@ func TestHandleEvents_TypeFilterCron(t *testing.T) {
 	}
 }
 
+// TestHandleEvents_DeepPageReturns400 verifies that requesting a page whose offset
+// exceeds eventsMaxRowFetch (10 000) returns 400 rather than silent empty data.
+func TestHandleEvents_DeepPageReturns400(t *testing.T) {
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+
+	mux := http.NewServeMux()
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h.SetupRoutes(mux)
+
+	// per_page=1, page=10001 → offset=10000 which equals eventsMaxRowFetch.
+	req := httptest.NewRequest(http.MethodGet, "/api/events?per_page=1&page=10001", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestHandleEvents_Pagination verifies that page/per_page work correctly.
 func TestHandleEvents_Pagination(t *testing.T) {
 	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})

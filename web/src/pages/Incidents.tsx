@@ -308,9 +308,13 @@ export default function Incidents() {
       setError('');
       const response = await incidentsApi.create({ task: newTask.trim() });
 
-      // Fetch the full incident and add to list immediately
+      // Fetch the full incident and add to list immediately, but only when in
+      // open view — a new incident starts as pending and would be out of place
+      // in the history view which filters for completed/failed.
       const newIncident = await incidentsApi.get(response.uuid);
-      setIncidents(prev => [newIncident, ...prev]);
+      if (view === 'open') {
+        setIncidents(prev => [newIncident, ...prev]);
+      }
 
       setCreateSuccess(`Incident created: ${response.uuid.slice(0, 8)}...`);
       setNewTask('');
