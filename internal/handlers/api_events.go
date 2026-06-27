@@ -192,8 +192,12 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("events: failed to scan incident rows", "err", err)
 		}
 		for _, inc := range iRows {
+			eventType := inc.SourceKind
+			if eventType == "" {
+				eventType = database.IncidentSourceKindManual
+			}
 			incidentItems = append(incidentItems, EventFeedItem{
-				EventType:    inc.SourceKind,
+				EventType:    eventType,
 				EventUUID:    inc.UUID,
 				Title:        inc.Title,
 				OccurredAt:   inc.StartedAt,
