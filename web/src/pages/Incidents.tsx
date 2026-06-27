@@ -55,6 +55,9 @@ export default function Incidents() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const refreshIntervalRef = useRef<number | null>(null);
 
+  // Open/History view toggle
+  const [view, setView] = useState<'open' | 'history'>('open');
+
   // Trend window
   const [trendWindow, setTrendWindow] = useState<'1h' | '3h'>('1h');
 
@@ -64,7 +67,7 @@ export default function Incidents() {
   const [totalPages, setTotalPages] = useState(0);
   const [totalIncidents, setTotalIncidents] = useState(0);
 
-  // Time range picker state
+  // Time range picker state (used only in history view)
   const now = Math.floor(Date.now() / 1000);
   const [timeFrom, setTimeFrom] = useState(now - DEFAULT_TIME_RANGE);
   const [timeTo, setTimeTo] = useState(now);
@@ -73,44 +76,60 @@ export default function Incidents() {
   const [listRefreshInterval, setListRefreshInterval] = useState(DEFAULT_REFRESH_INTERVAL);
   const listRefreshRef = useRef<number | null>(null);
 
-  // Load incidents with current time range
-  const loadIncidents = useCallback(async (from?: number, to?: number, isRefresh?: boolean, pageOverride?: number, perPageOverride?: number, trendWindowOverride?: '1h' | '3h') => {
+  // Load incidents — view-aware: open view omits from/to and applies status filter
+  const loadIncidents = useCallback(async (
+    from?: number,
+    to?: number,
+    isRefresh?: boolean,
+    pageOverride?: number,
+    perPageOverride?: number,
+    trendWindowOverride?: '1h' | '3h',
+    viewOverride?: 'open' | 'history',
+  ) => {
     try {
       setLoading(true);
       setError('');
       const currentNow = Math.floor(Date.now() / 1000);
+      const effectiveView = viewOverride ?? view;
 
-      let effectiveFrom: number;
-      let effectiveTo: number;
+      let effectiveFrom: number | undefined;
+      let effectiveTo: number | undefined;
+      let statusFilter: string;
 
-      if (isRefresh && relativeRange !== null) {
-        // For relative ranges on refresh, recalculate both from and to
-        effectiveFrom = currentNow - relativeRange;
-        effectiveTo = currentNow;
+      if (effectiveView === 'open') {
+        effectiveFrom = undefined;
+        effectiveTo = undefined;
+        statusFilter = 'pending,running,diagnosed,monitor';
       } else {
-        effectiveFrom = from ?? timeFrom;
-        effectiveTo = to ?? currentNow;
+        statusFilter = 'completed,failed';
+        if (isRefresh && relativeRange !== null) {
+          effectiveFrom = currentNow - relativeRange;
+          effectiveTo = currentNow;
+        } else {
+          effectiveFrom = from ?? timeFrom;
+          effectiveTo = to ?? currentNow;
+        }
       }
 
       const currentPage = pageOverride ?? page;
       const currentPerPage = perPageOverride ?? perPage;
       const effectiveTrendWindow = trendWindowOverride ?? trendWindow;
-      const result = await incidentsApi.list(effectiveFrom, effectiveTo, currentPage, currentPerPage, effectiveTrendWindow);
+      const result = await incidentsApi.list(effectiveFrom, effectiveTo, currentPage, currentPerPage, effectiveTrendWindow, statusFilter);
       setIncidents(result.data);
       setTotalPages(result.pagination.total_pages);
       setTotalIncidents(result.pagination.total);
 
-      // Update time state for display
-      if (isRefresh && relativeRange !== null) {
-        setTimeFrom(effectiveFrom);
-        setTimeTo(effectiveTo);
+      // Update time display state for relative ranges in history view
+      if (effectiveView === 'history' && isRefresh && relativeRange !== null) {
+        setTimeFrom(effectiveFrom!);
+        setTimeTo(effectiveTo!);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load incidents');
     } finally {
       setLoading(false);
     }
-  }, [timeFrom, relativeRange, page, perPage, trendWindow]);
+  }, [timeFrom, relativeRange, page, perPage, trendWindow, view]);
 
   // Initial load
   useEffect(() => {
@@ -157,6 +176,12 @@ export default function Incidents() {
   const handleTrendWindowChange = useCallback((newWindow: '1h' | '3h') => {
     setTrendWindow(newWindow);
     loadIncidents(undefined, undefined, false, undefined, undefined, newWindow);
+  }, [loadIncidents]);
+
+  const handleViewChange = useCallback((newView: 'open' | 'history') => {
+    setView(newView);
+    setPage(1);
+    loadIncidents(undefined, undefined, false, 1, undefined, undefined, newView);
   }, [loadIncidents]);
 
   useEffect(() => {
@@ -309,6 +334,29 @@ export default function Incidents() {
         description="Monitor all incident manager sessions and execution logs"
         action={
           <div className="flex items-center gap-3">
+            {/* Open/History view toggle */}
+            <div className="flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
+              <button
+                onClick={() => handleViewChange('open')}
+                className={`px-3 py-1 text-xs font-medium transition-colors ${
+                  view === 'open'
+                    ? 'bg-primary-500 text-white'
+                    : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+              >
+                Open
+              </button>
+              <button
+                onClick={() => handleViewChange('history')}
+                className={`px-3 py-1 text-xs font-medium border-l border-gray-300 dark:border-gray-600 transition-colors ${
+                  view === 'history'
+                    ? 'bg-primary-500 text-white'
+                    : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+                }`}
+              >
+                History
+              </button>
+            </div>
             {/* Trend window segmented toggle */}
             <div className="flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
               <button
@@ -334,13 +382,15 @@ export default function Incidents() {
                 3h
               </button>
             </div>
-            <TimeRangePicker
-              from={timeFrom}
-              to={timeTo}
-              refreshInterval={listRefreshInterval}
-              onChange={handleTimeRangeChange}
-              onRefreshIntervalChange={handleRefreshIntervalChange}
-            />
+            {view === 'history' && (
+              <TimeRangePicker
+                from={timeFrom}
+                to={timeTo}
+                refreshInterval={listRefreshInterval}
+                onChange={handleTimeRangeChange}
+                onRefreshIntervalChange={handleRefreshIntervalChange}
+              />
+            )}
             <button onClick={() => setShowCreateModal(true)} className="btn btn-primary">
               <Plus className="w-4 h-4" />
               New Incident
@@ -363,8 +413,12 @@ export default function Incidents() {
           {incidents.length === 0 ? (
             <div className="py-16 text-center border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
               <Activity className="w-12 h-12 mx-auto text-gray-400 mb-3" />
-              <p className="text-gray-500 dark:text-gray-400">No incidents found</p>
-              <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Create a new incident to get started</p>
+              <p className="text-gray-500 dark:text-gray-400">
+                {view === 'open' ? 'No open incidents' : 'No incidents found'}
+              </p>
+              <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
+                {view === 'open' ? 'All clear — no active or monitoring incidents' : 'Create a new incident to get started'}
+              </p>
             </div>
           ) : (
             <>

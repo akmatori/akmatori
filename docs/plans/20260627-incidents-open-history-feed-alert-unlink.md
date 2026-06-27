@@ -92,11 +92,11 @@ Three related features: (1) Incidents tab defaults to an Open view with no time 
 **Files:**
 - Modify: `web/src/pages/Incidents.tsx`
 
-- [ ] Add `view` state (`'open' | 'history'`, default `'open'`) and a segmented toggle control in the page header
-- [ ] Open view: call `incidentsApi.list` with `status="pending,running,diagnosed,monitor"`, no `from`/`to`; hide the `TimeRangePicker`
-- [ ] History view: call with `status="completed,failed"`, show `TimeRangePicker` with its existing default range
-- [ ] Reset page to 1 and reload when view changes
-- [ ] run `make test-web` — must pass before Task 7
+- [x] Add `view` state (`'open' | 'history'`, default `'open'`) and a segmented toggle control in the page header
+- [x] Open view: call `incidentsApi.list` with `status="pending,running,diagnosed,monitor"`, no `from`/`to`; hide the `TimeRangePicker`
+- [x] History view: call with `status="completed,failed"`, show `TimeRangePicker` with its existing default range
+- [x] Reset page to 1 and reload when view changes
+- [x] run `make test-web` — must pass before Task 7
 
 ### Task 7: Feed page and navigation
 
