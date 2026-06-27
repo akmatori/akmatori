@@ -153,7 +153,13 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 		incBaseQ := db.Model(&database.Incident{}).
 			Where("source_kind != ?", database.IncidentSourceKindAlert)
 		if typeParam != "" && typeParam != "alert" {
-			incBaseQ = incBaseQ.Where("source_kind = ?", typeParam)
+			if typeParam == database.IncidentSourceKindManual {
+				// Legacy API-created incidents may have source_kind="" — include them
+				// under the "manual" filter so they don't silently disappear.
+				incBaseQ = incBaseQ.Where("source_kind IN ?", []string{database.IncidentSourceKindManual, ""})
+			} else {
+				incBaseQ = incBaseQ.Where("source_kind = ?", typeParam)
+			}
 		}
 		if fromTime != nil {
 			incBaseQ = incBaseQ.Where("started_at >= ?", *fromTime)
