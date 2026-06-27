@@ -125,6 +125,20 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 			}
 		}
 
+		// Derive correlation decision for the alert row.
+		alertDecision := "not_evaluated"
+		alertReasoning := ""
+		if corrErr != nil {
+			if errors.Is(corrErr, services.ErrWorkerNotConnected) {
+				alertReasoning = "worker not connected"
+			} else {
+				alertReasoning = "correlator error"
+			}
+		} else if h.alertCorrelator != nil {
+			alertDecision = "new_incident"
+			alertReasoning = verdict.Reasoning
+		}
+
 		// Spawn incident manager
 		incidentUUID, _, err := h.skillService.SpawnIncidentManager(incidentCtx)
 		if err != nil {
@@ -133,7 +147,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		}
 
 		// Insert the initial firing alert row for this new incident.
-		if err := h.skillService.InsertFiringAlert(context.Background(), incidentUUID, instance.UUID, normalized); err != nil {
+		if err := h.skillService.InsertFiringAlert(context.Background(), incidentUUID, instance.UUID, normalized, alertDecision, alertReasoning); err != nil {
 			// Any InsertFiringAlert failure — duplicate claim or DB error — means we
 			// cannot track this alert correctly. Cancel the orphaned incident rather
 			// than running an investigation with no alert row.
@@ -285,6 +299,20 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 			}
 		}
 
+		// Derive correlation decision for the alert row.
+		alertDecision := "not_evaluated"
+		alertReasoning := ""
+		if corrErr != nil {
+			if errors.Is(corrErr, services.ErrWorkerNotConnected) {
+				alertReasoning = "worker not connected"
+			} else {
+				alertReasoning = "correlator error"
+			}
+		} else if h.alertCorrelator != nil {
+			alertDecision = "new_incident"
+			alertReasoning = verdict.Reasoning
+		}
+
 		// Spawn incident manager
 		incidentUUID, _, err := h.skillService.SpawnIncidentManager(incidentCtx)
 		if err != nil {
@@ -296,7 +324,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 		}
 
 		// Insert the initial firing alert row for this new incident.
-		if err := h.skillService.InsertFiringAlert(context.Background(), incidentUUID, channel.UUID, normalized); err != nil {
+		if err := h.skillService.InsertFiringAlert(context.Background(), incidentUUID, channel.UUID, normalized, alertDecision, alertReasoning); err != nil {
 			if errors.Is(err, services.ErrAlertAlreadyClaimed) {
 				slog.Info("alert already claimed by concurrent process, cancelling duplicate incident", "incident_uuid", incidentUUID)
 			} else {

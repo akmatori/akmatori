@@ -546,7 +546,7 @@ func (r *recordingSkillService) UpdateIncidentComplete(string, database.Incident
 func (r *recordingSkillService) UpdateIncidentLog(string, string) error         { return nil }
 func (r *recordingSkillService) GetIncident(string) (*database.Incident, error) { return nil, nil }
 func (r *recordingSkillService) AppendSubagentLog(string, string, string) error { return nil }
-func (r *recordingSkillService) InsertFiringAlert(context.Context, string, string, alerts.NormalizedAlert) error {
+func (r *recordingSkillService) InsertFiringAlert(context.Context, string, string, alerts.NormalizedAlert, string, string) error {
 	return nil
 }
 func (r *recordingSkillService) LinkAlertToIncident(context.Context, string, string, alerts.NormalizedAlert, float64, string) error {

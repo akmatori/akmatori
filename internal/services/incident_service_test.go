@@ -552,7 +552,7 @@ func TestInsertFiringAlert_CreatesAlertRow(t *testing.T) {
 		TargetHost:        "host-01",
 		SourceFingerprint: "fp-abc",
 	}
-	if err := svc.InsertFiringAlert(context.Background(), incidentUUID, "src-uuid-111", a); err != nil {
+	if err := svc.InsertFiringAlert(context.Background(), incidentUUID, "src-uuid-111", a, "new_incident", ""); err != nil {
 		t.Fatalf("InsertFiringAlert failed: %v", err)
 	}
 

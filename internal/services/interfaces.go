@@ -42,7 +42,7 @@ type IncidentManager interface {
 	UpdateIncidentLog(incidentUUID string, fullLog string) error
 	GetIncident(incidentUUID string) (*database.Incident, error)
 	AppendSubagentLog(incidentUUID string, skillName string, subagentLog string) error
-	InsertFiringAlert(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert) error
+	InsertFiringAlert(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert, decision, reasoning string) error
 	LinkAlertToIncident(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string) error
 }
 

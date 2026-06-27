@@ -63,7 +63,7 @@ func (s *corrGateSkillService) LinkAlertToIncident(_ context.Context, incidentUU
 	return nil
 }
 
-func (s *corrGateSkillService) InsertFiringAlert(_ context.Context, _ string, _ string, _ alerts.NormalizedAlert) error {
+func (s *corrGateSkillService) InsertFiringAlert(_ context.Context, _ string, _ string, _ alerts.NormalizedAlert, _, _ string) error {
 	return nil
 }
 

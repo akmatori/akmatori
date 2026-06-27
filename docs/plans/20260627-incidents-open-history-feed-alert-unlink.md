@@ -27,14 +27,14 @@ Three related features: (1) Incidents tab defaults to an Open view with no time 
 - Modify: `internal/services/interfaces.go`
 - Modify: `internal/handlers/alert_processor.go`
 
-- [ ] Add `CorrelationDecision string` field (`gorm:"size:16;index"`) to `database.Alert` struct with values `"linked"`, `"new_incident"`, `"not_evaluated"`
-- [ ] Update `InsertFiringAlert` signature to `InsertFiringAlert(ctx, incidentUUID, sourceUUID string, alert NormalizedAlert, decision, reasoning string) error`; set the two new fields on the `database.Alert` row before `Create`
-- [ ] Update `LinkAlertToIncident` to set `CorrelationDecision: "linked"` on the inserted row
-- [ ] Update `IncidentManager` interface in `interfaces.go` to match the new `InsertFiringAlert` signature
-- [ ] In `alert_processor.go` `processAlert`: derive `decision`/`reasoning` from `corrErr` and `verdict` then pass to `InsertFiringAlert` — `"linked"` if confident match (unreachable here, already returned), `"new_incident"` + `verdict.Reasoning` if correlator ran but no match, `"not_evaluated"` + short literal if correlator nil / `ErrWorkerNotConnected` / other error
-- [ ] Apply the same derivation in `ProcessAlertFromListenerChannel` (~line 299)
-- [ ] Update `Alert` type in `web/src/types/index.ts` to include `correlation_decision?: string`
-- [ ] run `make test` — must pass before Task 2
+- [x] Add `CorrelationDecision string` field (`gorm:"size:16;index"`) to `database.Alert` struct with values `"linked"`, `"new_incident"`, `"not_evaluated"`
+- [x] Update `InsertFiringAlert` signature to `InsertFiringAlert(ctx, incidentUUID, sourceUUID string, alert NormalizedAlert, decision, reasoning string) error`; set the two new fields on the `database.Alert` row before `Create`
+- [x] Update `LinkAlertToIncident` to set `CorrelationDecision: "linked"` on the inserted row
+- [x] Update `IncidentManager` interface in `interfaces.go` to match the new `InsertFiringAlert` signature
+- [x] In `alert_processor.go` `processAlert`: derive `decision`/`reasoning` from `corrErr` and `verdict` then pass to `InsertFiringAlert` — `"linked"` if confident match (unreachable here, already returned), `"new_incident"` + `verdict.Reasoning` if correlator ran but no match, `"not_evaluated"` + short literal if correlator nil / `ErrWorkerNotConnected` / other error
+- [x] Apply the same derivation in `ProcessAlertFromListenerChannel` (~line 299)
+- [x] Update `Alert` type in `web/src/types/index.ts` to include `correlation_decision?: string`
+- [x] run `make test` — must pass before Task 2
 
 ### Task 2: Incidents list status filter
 

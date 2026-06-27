@@ -21,6 +21,7 @@ type Alert struct {
 	Correlated              bool     `gorm:"default:false" json:"correlated"`
 	CorrelationConfidence   *float64 `json:"correlation_confidence,omitempty"`
 	CorrelationReasoning    string   `gorm:"type:text" json:"correlation_reasoning,omitempty"`
+	CorrelationDecision     string   `gorm:"size:16;index" json:"correlation_decision,omitempty"`
 
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`

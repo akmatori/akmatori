@@ -29,7 +29,7 @@ type insertAlertRecord struct {
 	targetHost   string
 }
 
-func (s *insertTrackingService) InsertFiringAlert(_ context.Context, incidentUUID, sourceUUID string, a alerts.NormalizedAlert) error {
+func (s *insertTrackingService) InsertFiringAlert(_ context.Context, incidentUUID, sourceUUID string, a alerts.NormalizedAlert, _, _ string) error {
 	s.insertMu.Lock()
 	defer s.insertMu.Unlock()
 	s.insertAlertCalls = append(s.insertAlertCalls, insertAlertRecord{

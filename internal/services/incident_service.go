@@ -18,23 +18,27 @@ import (
 
 // InsertFiringAlert inserts the initial alerts row (status=firing) for a newly
 // spawned incident. Called immediately after SpawnIncidentManager succeeds.
-func (s *SkillService) InsertFiringAlert(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert) error {
+// decision is one of "new_incident", "not_evaluated"; reasoning is the
+// correlator's explanation (empty when not evaluated).
+func (s *SkillService) InsertFiringAlert(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert, decision, reasoning string) error {
 	firedAt := time.Now()
 	if alert.StartedAt != nil {
 		firedAt = *alert.StartedAt
 	}
 	fingerprint := ComputeAlertFingerprint(sourceUUID, alert.AlertName, alert.TargetHost)
 	row := database.Alert{
-		UUID:              uuid.New().String(),
-		IncidentUUID:      incidentUUID,
-		Status:            database.AlertStatusFiring,
-		Fingerprint:       fingerprint,
-		SourceUUID:        sourceUUID,
-		SourceFingerprint: alert.SourceFingerprint,
-		AlertName:         alert.AlertName,
-		TargetHost:        alert.TargetHost,
-		FiredAt:           firedAt,
-		RawPayload:        alert.RawPayload,
+		UUID:                uuid.New().String(),
+		IncidentUUID:        incidentUUID,
+		Status:              database.AlertStatusFiring,
+		Fingerprint:         fingerprint,
+		SourceUUID:          sourceUUID,
+		SourceFingerprint:   alert.SourceFingerprint,
+		AlertName:           alert.AlertName,
+		TargetHost:          alert.TargetHost,
+		FiredAt:             firedAt,
+		RawPayload:          alert.RawPayload,
+		CorrelationDecision: decision,
+		CorrelationReasoning: reasoning,
 	}
 	result := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
 	if result.Error != nil {
@@ -78,6 +82,7 @@ func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID str
 			Correlated:              true,
 			CorrelationConfidence:   &confidence,
 			CorrelationReasoning:    reasoning,
+			CorrelationDecision:     "linked",
 		}
 		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
 		if result.Error != nil {

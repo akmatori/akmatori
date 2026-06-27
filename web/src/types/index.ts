@@ -73,6 +73,7 @@ export interface Alert {
   correlated: boolean;
   correlation_confidence?: number;
   correlation_reasoning?: string;
+  correlation_decision?: string;
   raw_payload: any;
   created_at: string;
   updated_at: string;
