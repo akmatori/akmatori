@@ -162,6 +162,12 @@ func (s *SkillService) UnlinkAlertFromIncident(ctx context.Context, alertUUID st
 			CorrelationDecision:  "new_incident",
 			CorrelationReasoning: reasoning,
 		}).Error; err != nil {
+		// Mark the new incident failed so it does not remain orphaned in pending status.
+		if markErr := s.db.Model(&database.Incident{}).
+			Where("uuid = ?", newIncidentUUID).
+			Updates(map[string]interface{}{"status": database.IncidentStatusFailed}).Error; markErr != nil {
+			slog.Error("UnlinkAlertFromIncident: failed to mark orphaned incident as failed", "incident", newIncidentUUID, "err", markErr)
+		}
 		return "", fmt.Errorf("UnlinkAlertFromIncident: repoint alert: %w", err)
 	}
 

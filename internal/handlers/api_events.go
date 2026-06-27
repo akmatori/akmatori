@@ -3,6 +3,7 @@ package handlers
 import (
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -223,18 +224,9 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // sortEventFeedItems sorts items by OccurredAt DESC (most recent first).
-// Simple insertion sort is fine here since the two halves are already unsorted
-// but total count is bounded by DB limits.
 func sortEventFeedItems(items []EventFeedItem) {
-	n := len(items)
-	for i := 1; i < n; i++ {
-		key := items[i]
-		j := i - 1
-		for j >= 0 && items[j].OccurredAt.Before(key.OccurredAt) {
-			items[j+1] = items[j]
-			j--
-		}
-		items[j+1] = key
-	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].OccurredAt.After(items[j].OccurredAt)
+	})
 }
 

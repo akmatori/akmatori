@@ -27,9 +27,10 @@ type insertAlertRecord struct {
 	sourceUUID   string
 	alertName    string
 	targetHost   string
+	decision     string
 }
 
-func (s *insertTrackingService) InsertFiringAlert(_ context.Context, incidentUUID, sourceUUID string, a alerts.NormalizedAlert, _, _ string) error {
+func (s *insertTrackingService) InsertFiringAlert(_ context.Context, incidentUUID, sourceUUID string, a alerts.NormalizedAlert, decision, _ string) error {
 	s.insertMu.Lock()
 	defer s.insertMu.Unlock()
 	s.insertAlertCalls = append(s.insertAlertCalls, insertAlertRecord{
@@ -37,6 +38,7 @@ func (s *insertTrackingService) InsertFiringAlert(_ context.Context, incidentUUI
 		sourceUUID:   sourceUUID,
 		alertName:    a.AlertName,
 		targetHost:   a.TargetHost,
+		decision:     decision,
 	})
 	return nil
 }
@@ -165,6 +167,10 @@ func TestProcessAlert_SpawnsIncidentAndInsertsAlertRow(t *testing.T) {
 	}
 	if got := svc.insertAlertCalls[0].targetHost; got != alert.TargetHost {
 		t.Errorf("InsertFiringAlert targetHost = %q, want %q", got, alert.TargetHost)
+	}
+	// With no correlator wired, decision must be "not_evaluated".
+	if got := svc.insertAlertCalls[0].decision; got != "not_evaluated" {
+		t.Errorf("InsertFiringAlert decision = %q, want %q", got, "not_evaluated")
 	}
 }
 

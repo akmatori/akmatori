@@ -37,7 +37,6 @@ func seedEventIncident(t *testing.T, sourceKind string, startedAt time.Time, sta
 func seedEventAlert(t *testing.T, incidentUUID string, firedAt time.Time, correlated bool) string {
 	t.Helper()
 	db := database.GetDB()
-	id := uuid.New().String()
 	decision := "new_incident"
 	if correlated {
 		decision = "linked"
@@ -52,7 +51,6 @@ func seedEventAlert(t *testing.T, incidentUUID string, firedAt time.Time, correl
 		Correlated:          correlated,
 		CorrelationDecision: decision,
 	}
-	_ = id
 	if err := db.Create(&a).Error; err != nil {
 		t.Fatalf("seed alert: %v", err)
 	}

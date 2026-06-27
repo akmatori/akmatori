@@ -174,8 +174,9 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 		}
 
 		incidentContext := &services.IncidentContext{
-			Source:   "api",
-			SourceID: fmt.Sprintf("api-%d", time.Now().UnixNano()),
+			Source:     "api",
+			SourceKind: database.IncidentSourceKindManual,
+			SourceID:   fmt.Sprintf("api-%d", time.Now().UnixNano()),
 			Context: database.JSONB{
 				"task":       req.Task,
 				"created_by": "api",

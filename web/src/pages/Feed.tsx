@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, Fragment } from 'react';
 import { RefreshCw, Activity, Rss, Link as LinkIcon, Unlink } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import PageHeader from '../components/PageHeader';
@@ -358,8 +358,8 @@ export default function Feed() {
                       const showUnlink = item.event_type === 'alert' && item.correlated;
 
                       return (
-                        <>
-                          <tr key={item.event_uuid}>
+                        <Fragment key={item.event_uuid}>
+                          <tr>
                             <td className="text-gray-500 dark:text-gray-400 text-sm whitespace-nowrap" title={formatAbsolute(item.occurred_at)}>
                               {formatRelative(item.occurred_at)}
                             </td>
@@ -439,7 +439,7 @@ export default function Feed() {
                               </td>
                             </tr>
                           )}
-                        </>
+                        </Fragment>
                       );
                     })}
                   </tbody>
