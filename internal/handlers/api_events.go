@@ -34,11 +34,6 @@ type EventFeedItem struct {
 // handleEvents handles GET /api/events — unified paginated feed of alerts and
 // non-alert incidents, merged and ordered by occurred_at DESC.
 func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
 	db := database.GetDB()
 	params := api.ParsePagination(r)
 
@@ -61,21 +56,34 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	wantAlerts := typeParam == "" || typeParam == "alert"
-	wantNonAlert := typeParam == "" || (typeParam != "alert")
+	wantNonAlert := typeParam != "alert"
 
 	// Build the merged result using two queries then merge+sort in Go.
 	// This avoids UNION ALL compatibility issues across SQLite (tests) and PostgreSQL (prod).
+	//
+	// Use separate COUNT queries for the total, and limit each data query to
+	// (offset + perPage) rows — sufficient to serve any page without loading the
+	// entire table.
+	offset := params.Offset()
+	rowLimit := offset + params.PerPage
 
+	var alertCount int64
 	var alertItems []EventFeedItem
 	if wantAlerts {
-		alertQ := db.Model(&database.Alert{}).
-			Select("uuid, incident_uuid, alert_name, fired_at, status, correlated, correlation_confidence, correlation_reasoning, correlation_decision, target_host, source_uuid")
+		alertBaseQ := db.Model(&database.Alert{})
 		if fromTime != nil {
-			alertQ = alertQ.Where("fired_at >= ?", *fromTime)
+			alertBaseQ = alertBaseQ.Where("fired_at >= ?", *fromTime)
 		}
 		if toTime != nil {
-			alertQ = alertQ.Where("fired_at <= ?", *toTime)
+			alertBaseQ = alertBaseQ.Where("fired_at <= ?", *toTime)
 		}
+
+		alertBaseQ.Count(&alertCount)
+
+		alertQ := alertBaseQ.
+			Select("uuid, incident_uuid, alert_name, fired_at, status, correlated, correlation_confidence, correlation_reasoning, correlation_decision, target_host, source_uuid").
+			Order("fired_at DESC").
+			Limit(rowLimit)
 
 		type alertRow struct {
 			UUID                  string
@@ -112,21 +120,28 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var incidentCount int64
 	var incidentItems []EventFeedItem
 	if wantNonAlert {
 		// Non-alert incidents (cron, slack_mention, api, etc.)
-		incQ := db.Model(&database.Incident{}).
-			Select("uuid, title, started_at, status, source_kind, source_uuid").
+		incBaseQ := db.Model(&database.Incident{}).
 			Where("source_kind != ?", database.IncidentSourceKindAlert)
 		if typeParam != "" && typeParam != "alert" {
-			incQ = incQ.Where("source_kind = ?", typeParam)
+			incBaseQ = incBaseQ.Where("source_kind = ?", typeParam)
 		}
 		if fromTime != nil {
-			incQ = incQ.Where("started_at >= ?", *fromTime)
+			incBaseQ = incBaseQ.Where("started_at >= ?", *fromTime)
 		}
 		if toTime != nil {
-			incQ = incQ.Where("started_at <= ?", *toTime)
+			incBaseQ = incBaseQ.Where("started_at <= ?", *toTime)
 		}
+
+		incBaseQ.Count(&incidentCount)
+
+		incQ := incBaseQ.
+			Select("uuid, title, started_at, status, source_kind, source_uuid").
+			Order("started_at DESC").
+			Limit(rowLimit)
 
 		type incRow struct {
 			UUID       string
@@ -159,10 +174,9 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	merged = append(merged, incidentItems...)
 	sortEventFeedItems(merged)
 
-	total := int64(len(merged))
+	total := alertCount + incidentCount
 
 	// Apply pagination.
-	offset := params.Offset()
 	var page []EventFeedItem
 	if offset < len(merged) {
 		end := offset + params.PerPage
