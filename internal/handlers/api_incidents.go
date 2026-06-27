@@ -16,6 +16,7 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/services"
+	"gorm.io/gorm"
 )
 
 // handleIncidents handles GET /api/incidents and POST /api/incidents
@@ -398,7 +399,12 @@ func (h *APIHandler) handleAlertUnlink(w http.ResponseWriter, r *http.Request) {
 	db := database.GetDB()
 	var alert database.Alert
 	if err := db.Where("uuid = ?", alertUUID).First(&alert).Error; err != nil {
-		api.RespondError(w, http.StatusNotFound, "Alert not found")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			api.RespondError(w, http.StatusNotFound, "Alert not found")
+		} else {
+			slog.Error("handleAlertUnlink: db error loading alert", "alert", alertUUID, "err", err)
+			api.RespondError(w, http.StatusInternalServerError, "Failed to load alert")
+		}
 		return
 	}
 

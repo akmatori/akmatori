@@ -79,12 +79,15 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
     try {
       const result = await alertsApi.unlink(alertUUID);
       setUnlinkResult({ alertUUID, newIncidentUUID: result.incident_uuid });
-      // Refresh the alerts list
+      // Refresh the alerts list — reset the guard first so the lazy-fetch effect
+      // can retry if this inline refresh also fails.
       alertsFetchedForRef.current = null;
       setAlerts(null);
-      alertsFetchedForRef.current = incident.uuid;
       incidentsApi.getAlerts(incident.uuid)
-        .then(data => { setAlerts(data); })
+        .then(data => {
+          alertsFetchedForRef.current = incident.uuid;
+          setAlerts(data);
+        })
         .catch(err => { setAlertsError(String(err)); });
     } catch (err) {
       setAlertsError(`Unlink failed: ${String(err)}`);

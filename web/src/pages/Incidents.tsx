@@ -107,7 +107,7 @@ export default function Incidents() {
           effectiveTo = currentNow;
         } else {
           effectiveFrom = from ?? timeFrom;
-          effectiveTo = to ?? currentNow;
+          effectiveTo = to ?? timeTo;
         }
       }
 
@@ -129,7 +129,7 @@ export default function Incidents() {
     } finally {
       setLoading(false);
     }
-  }, [timeFrom, relativeRange, page, perPage, trendWindow, view]);
+  }, [timeFrom, timeTo, relativeRange, page, perPage, trendWindow, view]);
 
   // Initial load
   useEffect(() => {

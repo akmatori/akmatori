@@ -9,6 +9,7 @@ import (
 
 	"github.com/akmatori/akmatori/internal/api"
 	"github.com/akmatori/akmatori/internal/database"
+	"gorm.io/gorm"
 )
 
 // EventFeedItem is one entry in the unified events feed.
@@ -99,7 +100,11 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 			alertBaseQ = alertBaseQ.Where("fired_at <= ?", *toTime)
 		}
 
-		alertBaseQ.Count(&alertCount)
+		if err := alertBaseQ.Session(&gorm.Session{}).Count(&alertCount).Error; err != nil {
+			slog.Error("events: failed to count alert rows", "err", err)
+			api.RespondError(w, http.StatusInternalServerError, "Failed to fetch events")
+			return
+		}
 
 		alertQ := alertBaseQ.
 			Select("uuid, incident_uuid, alert_name, fired_at, status, correlated, correlation_confidence, correlation_reasoning, correlation_decision, target_host, source_uuid").
@@ -157,7 +162,11 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 			incBaseQ = incBaseQ.Where("started_at <= ?", *toTime)
 		}
 
-		incBaseQ.Count(&incidentCount)
+		if err := incBaseQ.Session(&gorm.Session{}).Count(&incidentCount).Error; err != nil {
+			slog.Error("events: failed to count incident rows", "err", err)
+			api.RespondError(w, http.StatusInternalServerError, "Failed to fetch events")
+			return
+		}
 
 		incQ := incBaseQ.
 			Select("uuid, title, started_at, status, source_kind, source_uuid").
