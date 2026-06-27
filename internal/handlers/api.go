@@ -120,6 +120,9 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/incidents/{uuid}/alerts", h.handleIncidentAlerts)
 	mux.HandleFunc("/api/incidents/", h.handleIncidentByID)
 
+	// Unified events feed (alerts + non-alert incidents merged by occurred_at).
+	mux.HandleFunc("GET /api/events", h.handleEvents)
+
 	// Slack settings (removed; returns 410 Gone — use /api/integrations and
 	// /api/channels). Route kept so clients on the old endpoint see a clear
 	// error instead of a generic 404.

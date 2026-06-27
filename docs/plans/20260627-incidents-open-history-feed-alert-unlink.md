@@ -51,11 +51,11 @@ Three related features: (1) Incidents tab defaults to an Open view with no time 
 - Create: `internal/handlers/api_events.go`
 - Modify: `internal/handlers/api.go`
 
-- [ ] Define `EventFeedItem` struct with fields: `EventType`, `EventUUID`, `Title`, `OccurredAt`, `Status`, `IncidentUUID`, `Correlated`, `CorrelationConfidence`, `CorrelationReasoning`, `CorrelationDecision`, `TargetHost`, `SourceUUID`, and enriched `IncidentTitle`/`IncidentStatus`
-- [ ] Implement `handleEvents` for `GET /api/events`; params: `page`/`per_page` via `api.ParsePagination`, optional `from`/`to` on `occurred_at`, optional `type` filter; execute two separate COUNT queries summed for total, then a `UNION ALL` via raw SQL (or two queries merged and re-sorted) with `LIMIT/OFFSET`: alerts projection (`event_type='alert'`, `occurred_at=fired_at`) and non-alert incidents projection (`event_type=source_kind`, `occurred_at=started_at`, correlation fields empty); batch-enrich with incident title+status for distinct `incident_uuid`s; return `api.PaginatedResponse[EventFeedItem]`
-- [ ] Wire `GET /api/events` in `api.go` alongside incidents routes
-- [ ] Add handler test covering: returns merged rows ordered by `occurred_at DESC`, type filter works, pagination works
-- [ ] run `make test` — must pass before Task 4
+- [x] Define `EventFeedItem` struct with fields: `EventType`, `EventUUID`, `Title`, `OccurredAt`, `Status`, `IncidentUUID`, `Correlated`, `CorrelationConfidence`, `CorrelationReasoning`, `CorrelationDecision`, `TargetHost`, `SourceUUID`, and enriched `IncidentTitle`/`IncidentStatus`
+- [x] Implement `handleEvents` for `GET /api/events`; params: `page`/`per_page` via `api.ParsePagination`, optional `from`/`to` on `occurred_at`, optional `type` filter; execute two separate COUNT queries summed for total, then a `UNION ALL` via raw SQL (or two queries merged and re-sorted) with `LIMIT/OFFSET`: alerts projection (`event_type='alert'`, `occurred_at=fired_at`) and non-alert incidents projection (`event_type=source_kind`, `occurred_at=started_at`, correlation fields empty); batch-enrich with incident title+status for distinct `incident_uuid`s; return `api.PaginatedResponse[EventFeedItem]`
+- [x] Wire `GET /api/events` in `api.go` alongside incidents routes
+- [x] Add handler test covering: returns merged rows ordered by `occurred_at DESC`, type filter works, pagination works
+- [x] run `make test` — must pass before Task 4
 
 ### Task 4: UnlinkAlertFromIncident service + runAgentInvestigation extraction + unlink handler
 
