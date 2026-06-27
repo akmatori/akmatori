@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,6 +28,7 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 
 		fromParam := r.URL.Query().Get("from")
 		toParam := r.URL.Query().Get("to")
+		statusParam := r.URL.Query().Get("status")
 
 		if fromParam != "" {
 			from, err := strconv.ParseInt(fromParam, 10, 64)
@@ -38,6 +40,12 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 			to, err := strconv.ParseInt(toParam, 10, 64)
 			if err == nil {
 				query = query.Where("created_at <= ?", time.Unix(to, 0))
+			}
+		}
+		if statusParam != "" {
+			statuses := splitCSV(statusParam)
+			if len(statuses) > 0 {
+				query = query.Where("status IN ?", statuses)
 			}
 		}
 
@@ -54,6 +62,12 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 		if toParam != "" {
 			if to, err := strconv.ParseInt(toParam, 10, 64); err == nil {
 				countQuery = countQuery.Where("created_at <= ?", time.Unix(to, 0))
+			}
+		}
+		if statusParam != "" {
+			statuses := splitCSV(statusParam)
+			if len(statuses) > 0 {
+				countQuery = countQuery.Where("status IN ?", statuses)
 			}
 		}
 		countQuery.Count(&total)
@@ -363,4 +377,16 @@ func (h *APIHandler) handleIncidentByID(w http.ResponseWriter, r *http.Request) 
 	incident.AlertCount = cnt
 
 	api.RespondJSON(w, http.StatusOK, incident)
+}
+
+// splitCSV splits a comma-separated string into a trimmed, non-empty slice.
+func splitCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }

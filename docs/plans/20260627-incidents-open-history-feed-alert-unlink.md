@@ -41,9 +41,9 @@ Three related features: (1) Incidents tab defaults to an Open view with no time 
 **Files:**
 - Modify: `internal/handlers/api_incidents.go`
 
-- [ ] In `handleIncidents` GET handler, parse a `status` query param (comma-separated); when present add `WHERE status IN (?)` to both the data query and `countQuery` before pagination
-- [ ] Add test in a new `internal/handlers/api_incidents_test.go` (or extend existing) covering: no filter returns all, `status=monitor` returns only monitor rows, multiple statuses work; reuse `setupCorrelatorHandlerDB` / `seedHandlerIncident` helpers from `alert_correlation_gate_test.go`
-- [ ] run `make test` — must pass before Task 3
+- [x] In `handleIncidents` GET handler, parse a `status` query param (comma-separated); when present add `WHERE status IN (?)` to both the data query and `countQuery` before pagination
+- [x] Add test in a new `internal/handlers/api_incidents_test.go` (or extend existing) covering: no filter returns all, `status=monitor` returns only monitor rows, multiple statuses work; reuse `setupCorrelatorHandlerDB` / `seedHandlerIncident` helpers from `alert_correlation_gate_test.go`
+- [x] run `make test` — must pass before Task 3
 
 ### Task 3: Unified events feed endpoint
 
