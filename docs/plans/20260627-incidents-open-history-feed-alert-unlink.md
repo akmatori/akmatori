@@ -115,9 +115,9 @@ Three related features: (1) Incidents tab defaults to an Open view with no time 
 **Files:**
 - Modify: `web/src/components/IncidentDetailView.tsx`
 
-- [ ] In the Alerts tab, next to the "Correlated" badge on each alert row, add an "Unlink" button visible only when `alert.correlated === true`
-- [ ] On click: call `alertsApi.unlink(alert.uuid)`; on success refresh the alerts list and show a success message with a link to the new incident UUID
-- [ ] run `make test-web` — must pass before Task 9
+- [x] In the Alerts tab, next to the "Correlated" badge on each alert row, add an "Unlink" button visible only when `alert.correlated === true`
+- [x] On click: call `alertsApi.unlink(alert.uuid)`; on success refresh the alerts list and show a success message with a link to the new incident UUID
+- [x] run `make test-web` — must pass before Task 9
 
 ### Task 9: Verify acceptance criteria
 

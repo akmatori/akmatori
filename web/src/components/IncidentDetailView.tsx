@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Terminal, MessageSquare, FileCode, ChevronDown, ChevronRight, RefreshCw, Bell } from 'lucide-react';
+import { Terminal, MessageSquare, FileCode, ChevronDown, ChevronRight, RefreshCw, Bell, Unlink } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { JsonView, darkStyles } from 'react-json-view-lite';
 import 'react-json-view-lite/dist/index.css';
 import type { Incident, Alert } from '../types';
-import { incidentsApi } from '../api/client';
+import { incidentsApi, alertsApi } from '../api/client';
 
 type TabType = 'reasoning' | 'response' | 'raw' | 'alerts';
 
@@ -59,6 +60,8 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
   const [alertsLoading, setAlertsLoading] = useState(false);
   const [alertsError, setAlertsError] = useState('');
   const [expandedReasoning, setExpandedReasoning] = useState<Set<string>>(new Set());
+  const [unlinkingUUID, setUnlinkingUUID] = useState<string | null>(null);
+  const [unlinkResult, setUnlinkResult] = useState<{ alertUUID: string; newIncidentUUID: string } | null>(null);
   const alertsFetchedForRef = useRef<string | null>(null);
   const logContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -67,8 +70,28 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
     alertsFetchedForRef.current = null;
     setAlerts(null);
     setAlertsError('');
+    setUnlinkResult(null);
     setActiveTab('reasoning');
   }, [incident.uuid]);
+
+  const handleUnlink = async (alertUUID: string) => {
+    setUnlinkingUUID(alertUUID);
+    try {
+      const result = await alertsApi.unlink(alertUUID);
+      setUnlinkResult({ alertUUID, newIncidentUUID: result.incident_uuid });
+      // Refresh the alerts list
+      alertsFetchedForRef.current = null;
+      setAlerts(null);
+      alertsFetchedForRef.current = incident.uuid;
+      incidentsApi.getAlerts(incident.uuid)
+        .then(data => { setAlerts(data); })
+        .catch(err => { setAlertsError(String(err)); });
+    } catch (err) {
+      setAlertsError(`Unlink failed: ${String(err)}`);
+    } finally {
+      setUnlinkingUUID(null);
+    }
+  };
 
   // Auto-scroll to bottom when log updates
   useEffect(() => {
@@ -363,6 +386,17 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
           </div>
         ) : (
           <div className="min-h-[200px]">
+            {unlinkResult && (
+              <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 text-sm">
+                <span>Alert unlinked. New investigation started:</span>
+                <Link
+                  to={`/incidents/${unlinkResult.newIncidentUUID}`}
+                  className="font-mono underline hover:no-underline"
+                >
+                  {unlinkResult.newIncidentUUID}
+                </Link>
+              </div>
+            )}
             {alertsLoading ? (
               <div className="flex items-center justify-center py-12 text-gray-400">
                 <RefreshCw className="w-5 h-5 animate-spin mr-2" />
@@ -381,7 +415,8 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
                       <th className="pb-2 pr-4 font-medium">Host</th>
                       <th className="pb-2 pr-4 font-medium">Status</th>
                       <th className="pb-2 pr-4 font-medium">Fired</th>
-                      <th className="pb-2 font-medium">Resolved</th>
+                      <th className="pb-2 pr-4 font-medium">Resolved</th>
+                      <th className="pb-2 font-medium"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -434,8 +469,25 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
                           <td className="py-3 pr-4 text-gray-500 dark:text-gray-400 text-xs whitespace-nowrap">
                             {new Date(alert.fired_at).toLocaleString()}
                           </td>
-                          <td className="py-3 text-gray-500 dark:text-gray-400 text-xs whitespace-nowrap">
+                          <td className="py-3 pr-4 text-gray-500 dark:text-gray-400 text-xs whitespace-nowrap">
                             {alert.resolved_at ? new Date(alert.resolved_at).toLocaleString() : '—'}
+                          </td>
+                          <td className="py-3">
+                            {alert.correlated && (
+                              <button
+                                onClick={() => handleUnlink(alert.uuid)}
+                                disabled={unlinkingUUID === alert.uuid}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                title="Unlink this alert and start a new investigation"
+                              >
+                                {unlinkingUUID === alert.uuid ? (
+                                  <RefreshCw className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <Unlink className="w-3 h-3" />
+                                )}
+                                Unlink
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );
