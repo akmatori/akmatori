@@ -351,6 +351,37 @@ func (h *AlertHandler) updateIncidentSlackContext(incidentUUID, channelID, messa
 		}).Error
 }
 
+// buildAlertMergedMessage builds the Slack thread note posted when an incoming
+// alert is correlated into an existing incident. It enriches the bare incident
+// UUID with a clickable link, the incident subject, and the current count of
+// alerts linked to that incident. All enrichment is best-effort: if the incident
+// cannot be loaded, it degrades to a link with the UUID.
+func (h *AlertHandler) buildAlertMergedMessage(incidentUUID string) string {
+	baseURL := resolveBaseURL()
+	link := fmt.Sprintf("<%s/incidents/%s|incident>", baseURL, incidentUUID)
+
+	incident, err := h.skillService.GetIncident(incidentUUID)
+	if err != nil || incident == nil {
+		return fmt.Sprintf("Alert merged into existing %s (ID: %s)", link, incidentUUID)
+	}
+
+	subject := strings.TrimSpace(incident.Title)
+	if subject == "" {
+		subject = "untitled incident"
+	}
+
+	var alertCount int64
+	database.GetDB().Model(&database.Alert{}).
+		Where("incident_uuid = ?", incident.UUID).Count(&alertCount)
+
+	plural := "alerts"
+	if alertCount == 1 {
+		plural = "alert"
+	}
+	return fmt.Sprintf("Alert merged into existing %s: *%s* — %d %s linked",
+		link, subject, alertCount, plural)
+}
+
 // resolveBaseURL returns the base URL for incident links (package-level helper).
 // Priority: DB GeneralSettings > AKMATORI_BASE_URL env var > fallback.
 func resolveBaseURL() string {

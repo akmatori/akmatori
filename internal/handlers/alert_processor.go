@@ -280,7 +280,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 			} else {
 				h.updateSlackChannelReactions(slackChannelID, slackMessageTS, false)
 				h.postSlackThreadReply(slackChannelID, slackMessageTS,
-					fmt.Sprintf("Alert merged into existing incident (ID: %s)", verdict.IncidentUUID))
+					h.buildAlertMergedMessage(verdict.IncidentUUID))
 				return nil, nil
 			}
 		}
