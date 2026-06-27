@@ -72,7 +72,10 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				countQuery = countQuery.Where("status IN ?", statuses)
 			}
 		}
-		countQuery.Count(&total)
+		if err := countQuery.Count(&total).Error; err != nil {
+			api.RespondError(w, http.StatusInternalServerError, "Failed to count incidents")
+			return
+		}
 
 		if err := query.Offset(params.Offset()).Limit(params.PerPage).Find(&incidents).Error; err != nil {
 			api.RespondError(w, http.StatusInternalServerError, "Failed to get incidents")
@@ -241,14 +244,9 @@ func (h *APIHandler) handleIncidentAlerts(w http.ResponseWriter, r *http.Request
 	api.RespondJSON(w, http.StatusOK, alerts)
 }
 
-// handleIncidentByID handles GET /api/incidents/:uuid
+// handleIncidentByID handles GET /api/incidents/{uuid}
 func (h *APIHandler) handleIncidentByID(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	uuid := r.URL.Path[len("/api/incidents/"):]
+	uuid := r.PathValue("uuid")
 
 	incident, err := h.skillService.GetIncident(uuid)
 	if err != nil {

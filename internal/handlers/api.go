@@ -118,7 +118,7 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	// Incidents — exact-method prefix routes resolve before the wildcard catch-all.
 	mux.HandleFunc("/api/incidents", h.handleIncidents)
 	mux.HandleFunc("GET /api/incidents/{uuid}/alerts", h.handleIncidentAlerts)
-	mux.HandleFunc("/api/incidents/", h.handleIncidentByID)
+	mux.HandleFunc("GET /api/incidents/{uuid}", h.handleIncidentByID)
 
 	// Alert management (unlink a correlated alert from its incident).
 	mux.HandleFunc("POST /api/alerts/{uuid}/unlink", h.handleAlertUnlink)

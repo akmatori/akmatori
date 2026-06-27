@@ -99,6 +99,14 @@ function CorrelationChip({
 
   if (correlation_decision === 'linked') {
     const pct = correlation_confidence !== undefined ? Math.round(correlation_confidence * 100) : null;
+    const label = `Correlated${pct !== null ? ` ${pct}%` : ''}`;
+    if (!item.correlation_reasoning) {
+      return (
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+          {label}
+        </span>
+      );
+    }
     return (
       <button
         onClick={onToggle}
@@ -109,12 +117,19 @@ function CorrelationChip({
         }`}
         title="Click to see correlation reasoning"
       >
-        Correlated{pct !== null ? ` ${pct}%` : ''}
+        {label}
       </button>
     );
   }
 
   if (correlation_decision === 'new_incident') {
+    if (!item.correlation_reasoning) {
+      return (
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
+          New incident
+        </span>
+      );
+    }
     return (
       <button
         onClick={onToggle}
