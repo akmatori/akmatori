@@ -105,10 +105,10 @@ Three related features: (1) Incidents tab defaults to an Open view with no time 
 - Modify: `web/src/components/Layout.tsx`
 - Modify: `web/src/App.tsx`
 
-- [ ] Create `Feed.tsx` modeled on `Incidents.tsx`: `PageHeader`, optional `TimeRangePicker` for `from`/`to` filter, type-filter chips (All / Alert / Cron / Slack / Manual), paginated table with columns: Time, Type chip, Title, Status badge, Linked incident link; alert rows show `correlation_decision` chip (`"Correlated NN%"` / `"New incident"` / `"Not evaluated"`); click chip expands `correlation_reasoning` inline; Unlink button on alert rows where `correlated === true`
-- [ ] Add `{ name: 'Feed', href: '/feed', icon: Rss }` to the `navigation` array in `Layout.tsx` (import `Rss` from lucide-react)
-- [ ] Add `<Route path="/feed" element={<Feed />} />` in `App.tsx` and import `Feed`
-- [ ] run `make test-web` — must pass before Task 8
+- [x] Create `Feed.tsx` modeled on `Incidents.tsx`: `PageHeader`, optional `TimeRangePicker` for `from`/`to` filter, type-filter chips (All / Alert / Cron / Slack / Manual), paginated table with columns: Time, Type chip, Title, Status badge, Linked incident link; alert rows show `correlation_decision` chip (`"Correlated NN%"` / `"New incident"` / `"Not evaluated"`); click chip expands `correlation_reasoning` inline; Unlink button on alert rows where `correlated === true`
+- [x] Add `{ name: 'Feed', href: '/feed', icon: Rss }` to the `navigation` array in `Layout.tsx` (import `Rss` from lucide-react)
+- [x] Add `<Route path="/feed" element={<Feed />} />` in `App.tsx` and import `Feed`
+- [x] run `make test-web` — must pass before Task 8
 
 ### Task 8: Unlink action in IncidentDetailView
 

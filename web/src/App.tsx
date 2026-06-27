@@ -17,6 +17,7 @@ import Settings from './pages/Settings';
 import IntegrationsPage from './pages/IntegrationsPage';
 import ChannelsPage from './pages/ChannelsPage';
 import CronJobsPage from './pages/CronJobsPage';
+import Feed from './pages/Feed';
 
 function App() {
   return (
@@ -36,6 +37,7 @@ function App() {
                       <Route path="/" element={<Dashboard />} />
                       <Route path="/incidents/:uuid" element={<IncidentDetail />} />
                       <Route path="/incidents" element={<Incidents />} />
+                      <Route path="/feed" element={<Feed />} />
                       <Route path="/skills" element={<Skills />} />
                       <Route path="/tools" element={<Tools />} />
                       <Route path="/context" element={<ContextFiles />} />

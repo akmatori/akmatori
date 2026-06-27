@@ -14,6 +14,7 @@ import {
   Sun,
   Moon,
   LogOut,
+  Rss,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -31,6 +32,7 @@ export const useSidebar = () => useContext(SidebarContext);
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Incidents', href: '/incidents', icon: Activity },
+  { name: 'Feed', href: '/feed', icon: Rss },
   { name: 'Skills', href: '/skills', icon: Bot },
   { name: 'Tools', href: '/tools', icon: Wrench },
   { name: 'Context Files', href: '/context', icon: FileText },
