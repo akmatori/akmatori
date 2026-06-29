@@ -145,6 +145,102 @@ func TestUpdateHTTPConnector_RejectsReservedNamespaceOnRename(t *testing.T) {
 	}
 }
 
+func TestUpdateHTTPConnector_RejectsMCPNamespaceCollisionOnRename(t *testing.T) {
+	db := setupHTTPConnectorTestDB(t)
+	if err := db.Create(&database.MCPServerConfig{
+		Name:            "GitHub MCP",
+		Transport:       database.MCPServerTransportSSE,
+		URL:             "https://example.com/sse",
+		NamespacePrefix: "github-ext",
+		Enabled:         true,
+	}).Error; err != nil {
+		t.Fatalf("failed to seed MCP server: %v", err)
+	}
+	svc := &HTTPConnectorService{db: db}
+
+	created, err := svc.CreateHTTPConnector(validHTTPConnector())
+	if err != nil {
+		t.Fatalf("CreateHTTPConnector failed: %v", err)
+	}
+
+	_, err = svc.UpdateHTTPConnector(created.ID, map[string]interface{}{"tool_type_name": "github-ext"})
+	if err == nil {
+		t.Fatal("expected MCP namespace collision error, got nil")
+	}
+	if !strings.Contains(err.Error(), "existing MCP server namespace") {
+		t.Fatalf("expected MCP collision error, got %v", err)
+	}
+}
+
+func TestUpdateHTTPConnector_UpdatesFieldsAndListReflectsChanges(t *testing.T) {
+	db := setupHTTPConnectorTestDB(t)
+	svc := &HTTPConnectorService{db: db}
+
+	created, err := svc.CreateHTTPConnector(validHTTPConnector())
+	if err != nil {
+		t.Fatalf("CreateHTTPConnector failed: %v", err)
+	}
+
+	updatedTools := database.JSONB{
+		"tools": []interface{}{
+			map[string]interface{}{
+				"name":        "create_invoice",
+				"http_method": "POST",
+				"path":        "/invoices",
+			},
+		},
+	}
+	updatedAuth := database.JSONB{
+		"method":       "api_key",
+		"key_name":     "X-API-Key",
+		"key_location": "header",
+	}
+	updated, err := svc.UpdateHTTPConnector(created.ID, map[string]interface{}{
+		"tool_type_name": "billing-v2",
+		"description":    "Updated billing API",
+		"base_url_field": "endpoint",
+		"auth_config":    updatedAuth,
+		"tools":          updatedTools,
+		"enabled":        false,
+	})
+	if err != nil {
+		t.Fatalf("UpdateHTTPConnector failed: %v", err)
+	}
+	if updated.ToolTypeName != "billing-v2" {
+		t.Fatalf("expected renamed connector, got %q", updated.ToolTypeName)
+	}
+	if updated.Description != "Updated billing API" {
+		t.Fatalf("expected updated description, got %q", updated.Description)
+	}
+	if updated.BaseURLField != "endpoint" {
+		t.Fatalf("expected updated base_url_field, got %q", updated.BaseURLField)
+	}
+	if updated.Enabled {
+		t.Fatal("expected connector to be disabled")
+	}
+	if updated.AuthConfig["method"] != "api_key" {
+		t.Fatalf("expected updated auth_config, got %#v", updated.AuthConfig)
+	}
+	defs, err := updated.GetToolDefs()
+	if err != nil {
+		t.Fatalf("GetToolDefs failed: %v", err)
+	}
+	if len(defs) != 1 || defs[0].Name != "create_invoice" {
+		t.Fatalf("expected updated tool definition, got %#v", defs)
+	}
+
+	connectors, err := svc.ListHTTPConnectors()
+	if err != nil {
+		t.Fatalf("ListHTTPConnectors failed: %v", err)
+	}
+	if len(connectors) != 1 {
+		t.Fatalf("expected one connector, got %d", len(connectors))
+	}
+	if connectors[0].ToolTypeName != "billing-v2" {
+		t.Fatalf("expected listed connector to reflect rename, got %q", connectors[0].ToolTypeName)
+	}
+}
+
 func TestDeleteHTTPConnector_ReturnsNotFoundForMissingRow(t *testing.T) {
 	db := setupHTTPConnectorTestDB(t)
 	svc := &HTTPConnectorService{db: db}
