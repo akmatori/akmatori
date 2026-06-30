@@ -153,6 +153,48 @@ func TestInferSchema_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestInferSchema_RejectsTrailingContent(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "second object",
+			input: `{"status":"ok"}{"extra":"ignored"}`,
+		},
+		{
+			name:  "trailing scalar",
+			input: `{"status":"ok"} 42`,
+		},
+		{
+			name:  "trailing junk",
+			input: `{"status":"ok"} definitely-not-json`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := inferSchema(tc.input)
+			if err == nil {
+				t.Fatalf("inferSchema(%q) error = nil, want trailing content error", tc.input)
+			}
+			if !strings.Contains(err.Error(), "trailing") && !strings.Contains(err.Error(), "invalid JSON") {
+				t.Fatalf("inferSchema(%q) error = %q, want trailing-content context", tc.input, err.Error())
+			}
+		})
+	}
+}
+
+func TestInferSchema_AllowsTrailingWhitespace(t *testing.T) {
+	specs, err := inferSchema("{\"status\":\"ok\"}\n\t  ")
+	if err != nil {
+		t.Fatalf("inferSchema with trailing whitespace error = %v", err)
+	}
+	if len(specs) != 1 || specs[0].Name != "status" || specs[0].Kind != "string" {
+		t.Fatalf("inferSchema with trailing whitespace returned specs %+v, want status string", specs)
+	}
+}
+
 func TestInferSchema_DefaultExampleIsValid(t *testing.T) {
 	specs, err := inferSchema(defaultSchemaExample)
 	if err != nil {
