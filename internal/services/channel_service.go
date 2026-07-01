@@ -432,20 +432,20 @@ func (s *ChannelService) ResolveDefault(provider database.MessagingProvider) (*d
 
 // ResolveForAlertSource picks the Channel that should receive outbound posts
 // for the given alert source instance. The explicit NotificationChannelID
-// wins (provided the channel and its integration are both enabled and the
-// channel can post); otherwise the per-provider default channel is used. The
-// provider argument selects which default to consult — most callers pass
-// MessagingProviderSlack until the multi-provider UI lands.
+// wins (provided the channel and its integration are both enabled, the channel
+// can post, and the integration matches provider); otherwise the per-provider
+// default channel is used. The provider argument selects both the accepted
+// explicit-channel provider and the fallback default provider.
 func (s *ChannelService) ResolveForAlertSource(asi *database.AlertSourceInstance, provider database.MessagingProvider) (*database.Channel, error) {
 	if asi != nil && asi.NotificationChannelID != nil {
 		var row database.Channel
 		err := s.db.Preload("Integration").First(&row, *asi.NotificationChannelID).Error
 		if err == nil {
-			if row.Enabled && row.CanPost && row.Integration.Enabled {
+			if row.Enabled && row.CanPost && row.Integration.Enabled && row.Integration.Provider == provider {
 				return &row, nil
 			}
-			// Explicit channel exists but is unusable for posting; fall back
-			// to the default so the alert still surfaces somewhere.
+			// Explicit channel exists but is unusable for this provider; fall
+			// back to the default so the alert still surfaces somewhere.
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("resolve alert source channel: %w", err)
 		}

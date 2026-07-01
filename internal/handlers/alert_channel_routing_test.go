@@ -133,6 +133,61 @@ func TestAlertHandler_ResolveOutboundSlackChannel_FallsBackToDefault(t *testing.
 	}
 }
 
+// TestAlertHandler_ResolveOutboundSlackChannel_DisabledIntegrationFallsBack
+// covers a real outbound-routing integration edge: an alert source can retain
+// a stale NotificationChannelID after the owning Slack integration is disabled.
+// The webhook path should use the provider default instead of dropping the
+// alert or returning an unusable channel.
+func TestAlertHandler_ResolveOutboundSlackChannel_DisabledIntegrationFallsBack(t *testing.T) {
+	db, cleanup := setupChannelRoutingDB(t)
+	defer cleanup()
+
+	_, defaultCh, _ := seedIntegrationWithChannels(t, db)
+	disabled := &database.Integration{
+		UUID:     uuid.New().String(),
+		Provider: database.MessagingProviderSlack,
+		Name:     "disabled slack",
+		Enabled:  false,
+	}
+	if err := db.Create(disabled).Error; err != nil {
+		t.Fatalf("create disabled integration: %v", err)
+	}
+	if err := db.Model(&database.Integration{}).Where("id = ?", disabled.ID).Update("enabled", false).Error; err != nil {
+		t.Fatalf("disable integration: %v", err)
+	}
+	explicit := &database.Channel{
+		UUID:          uuid.New().String(),
+		IntegrationID: disabled.ID,
+		ExternalID:    "C_DISABLED",
+		DisplayName:   "#disabled-alerts",
+		CanPost:       true,
+		Enabled:       true,
+	}
+	if err := db.Create(explicit).Error; err != nil {
+		t.Fatalf("create explicit channel: %v", err)
+	}
+
+	asi := &database.AlertSourceInstance{
+		UUID:                  uuid.New().String(),
+		Name:                  "disabled-integration-asi",
+		NotificationChannelID: &explicit.ID,
+	}
+
+	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
+	h.SetChannelService(services.NewChannelService())
+
+	channel, channelID := h.resolveOutboundSlackChannel(asi)
+	if channel == nil {
+		t.Fatal("expected default channel, got nil")
+	}
+	if channel.ID != defaultCh.ID {
+		t.Errorf("channel.ID = %d, want %d (default)", channel.ID, defaultCh.ID)
+	}
+	if channelID != "C_DEFAULT" {
+		t.Errorf("channelID = %q, want %q", channelID, "C_DEFAULT")
+	}
+}
+
 // TestAlertHandler_ResolveOutboundSlackChannel_NoLegacyFallback asserts that
 // the Task-3 legacy fallback (synthesising a Channel from
 // SlackSettings.AlertsChannel) has been removed. Even with a configured

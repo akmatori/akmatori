@@ -575,6 +575,53 @@ func TestChannelService_ResolveForAlertSource_DisabledExplicitFallsBack(t *testi
 	}
 }
 
+// TestChannelService_ResolveForAlertSource_CrossProviderExplicitFallsBack
+// covers the alert-source integration path where an operator accidentally
+// points a Slack alert source at a channel owned by another provider. The
+// explicit row must not escape the provider boundary; fall back to Slack's
+// default post channel instead.
+func TestChannelService_ResolveForAlertSource_CrossProviderExplicitFallsBack(t *testing.T) {
+	svc, db := setupChannelServiceTest(t)
+	slackIntegration := seedSlackIntegration(t, db)
+	defaultChan, err := svc.CreateChannel(&database.Channel{
+		IntegrationID: slackIntegration.ID,
+		ExternalID:    "C-default",
+		CanPost:       true,
+		IsDefaultPost: true,
+		Enabled:       true,
+	})
+	if err != nil {
+		t.Fatalf("seed slack default: %v", err)
+	}
+	telegramIntegration := &database.Integration{
+		UUID:     uuid.New().String(),
+		Provider: database.MessagingProviderTelegram,
+		Name:     "Telegram",
+		Enabled:  true,
+	}
+	if err := db.Create(telegramIntegration).Error; err != nil {
+		t.Fatalf("seed telegram integration: %v", err)
+	}
+	telegramChannel, err := svc.CreateChannel(&database.Channel{
+		IntegrationID: telegramIntegration.ID,
+		ExternalID:    "tg-ops",
+		CanPost:       true,
+		Enabled:       true,
+	})
+	if err != nil {
+		t.Fatalf("seed telegram channel: %v", err)
+	}
+
+	asi := &database.AlertSourceInstance{NotificationChannelID: &telegramChannel.ID}
+	got, err := svc.ResolveForAlertSource(asi, database.MessagingProviderSlack)
+	if err != nil {
+		t.Fatalf("ResolveForAlertSource(cross-provider explicit) error = %v", err)
+	}
+	if got.ID != defaultChan.ID {
+		t.Errorf("cross-provider explicit fell to id %d, want slack default id %d", got.ID, defaultChan.ID)
+	}
+}
+
 // TestChannelService_ListIntegrations_Sorted asserts the surface returns rows
 // in (provider, name) order so the UI listing is deterministic.
 func TestChannelService_ListIntegrations_Sorted(t *testing.T) {
