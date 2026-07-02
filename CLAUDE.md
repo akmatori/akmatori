@@ -132,7 +132,7 @@ Operators configure a messaging `Integration` (provider credentials) and one or 
 
 Rules:
 - outbound posting goes through `ProviderRegistry.Get(channel.Integration.Provider).PostMessage(ctx, channel, ...)`, never the legacy `SlackSettings.AlertsChannel`
-- alert routing uses `ChannelService.ResolveForAlertSource(asi)`: explicit `notification_channel_id` wins, otherwise fall back to the provider's `is_default_post=true` Channel
+- alert routing uses `ChannelService.ResolveForAlertSource(asi, provider)`: explicit `notification_channel_id` wins only when the Channel and Integration are enabled, post-capable, and on the requested provider; otherwise fall back to that provider's `is_default_post=true` Channel
 - at most one `is_default_post=true` per provider (enforced by a partial-unique index and a service-layer check)
 - inbound listening reads `Channel.ExtractionPrompt` and `Channel.ProcessHumanMessages`, not alert-source `Settings` JSONB; `slack_processor.go` must honour this
 - `Channel.CanPost` / `Channel.CanListen` capability flags gate which triggers may reference a channel
