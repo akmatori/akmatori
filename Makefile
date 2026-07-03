@@ -102,6 +102,12 @@ docker-run: ## Run Docker container
 
 dev: ## Build and run the stack from local source (maintainer flow)
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+	@# The standalone nginx proxy caches upstream container IPs at startup. Recreated
+	@# api/frontend containers get new IPs, so restart the proxy to force DNS re-resolution.
+	@if docker inspect akmatori-proxy >/dev/null 2>&1; then \
+		echo "Restarting akmatori-proxy to refresh upstream IPs..."; \
+		docker restart akmatori-proxy; \
+	fi
 
 docker-up: ## Start all containers with docker-compose (includes directory init)
 	docker-compose up -d
