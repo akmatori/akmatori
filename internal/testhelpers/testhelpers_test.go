@@ -177,6 +177,41 @@ func TestHTTPTestContext_AssertJSONField(t *testing.T) {
 		AssertJSONField("details.name", "is required")
 }
 
+func TestHTTPTestContext_AssertJSONField_ArraySegments(t *testing.T) {
+	ctx := NewHTTPTestContext(t, http.MethodGet, "/test", nil)
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"configs": []map[string]interface{}{
+				{"name": "prod", "models": []string{"gpt-5.5", "gpt-5.3-codex"}},
+				{"name": "dev", "models": []string{"gpt-5.4-mini"}},
+			},
+		})
+	}
+
+	ctx.ExecuteFunc(handler).
+		AssertJSONField("configs.0.name", "prod").
+		AssertJSONField("configs.0.models.1", "gpt-5.3-codex").
+		AssertJSONField("configs.1.name", "dev")
+}
+
+func TestHTTPTestContext_AssertJSONField_TopLevelArray(t *testing.T) {
+	ctx := NewHTTPTestContext(t, http.MethodGet, "/test", nil)
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]string{
+			{"uuid": "c1", "name": "ops"},
+			{"uuid": "c2", "name": "alerts"},
+		})
+	}
+
+	ctx.ExecuteFunc(handler).
+		AssertJSONField("0.uuid", "c1").
+		AssertJSONField("1.name", "alerts")
+}
+
 func TestHTTPTestContext_AssertJSONError(t *testing.T) {
 	ctx := NewHTTPTestContext(t, http.MethodGet, "/test", nil)
 

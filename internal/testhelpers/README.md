@@ -32,7 +32,8 @@ ctx := NewHTTPTestContext(t, http.MethodPost, "/api/alerts", nil).
     AssertStatus(http.StatusCreated).
     AssertJSONContentType().
     AssertJSONBody(`{"ok":true}`).
-    AssertJSONField("result.uuid", "alert-uuid")
+    AssertJSONField("result.uuid", "alert-uuid").
+    AssertJSONField("items.0.name", "first item")
 
 ctx.AssertJSONError(http.StatusConflict, "name already exists", "duplicate_name")
 ```
