@@ -10,6 +10,7 @@ import (
 
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/services"
+	"github.com/akmatori/akmatori/internal/testhelpers"
 )
 
 // TestHandleChannels_MasksIntegrationCredentials asserts the eagerly-preloaded
@@ -20,11 +21,11 @@ func TestHandleChannels_MasksIntegrationCredentials(t *testing.T) {
 	creds := database.JSONB{"bot_token": "xoxb-SECRET-1234"}
 	mgr := &mockChannelManager{
 		channels: []database.Channel{{
-			ID:           1,
-			UUID:         "c1",
-			ExternalID:   "#ops",
-			CanPost:      true,
-			Integration:  database.Integration{ID: 9, UUID: "u1", Provider: database.MessagingProviderSlack, Name: "Slack", Credentials: creds, Enabled: true},
+			ID:          1,
+			UUID:        "c1",
+			ExternalID:  "#ops",
+			CanPost:     true,
+			Integration: database.Integration{ID: 9, UUID: "u1", Provider: database.MessagingProviderSlack, Name: "Slack", Credentials: creds, Enabled: true},
 		}},
 	}
 	h := newHandlerWithChannelManager(mgr)
@@ -53,19 +54,12 @@ func TestHandleChannels_List(t *testing.T) {
 	}
 	h := newHandlerWithChannelManager(mgr)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/channels", nil)
-	w := httptest.NewRecorder()
-	h.handleChannels(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	var got []database.Channel
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("expected 2 channels, got %d", len(got))
-	}
+	testhelpers.NewHTTPTestContext(t, http.MethodGet, "/api/channels", nil).
+		ExecuteFunc(h.handleChannels).
+		AssertStatus(http.StatusOK).
+		AssertJSONContentType().
+		AssertJSONField("0.uuid", "c1").
+		AssertJSONField("1.uuid", "c2")
 }
 
 // TestHandleChannels_List_FilterByCanPost confirms the boolean query param

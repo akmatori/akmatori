@@ -34,11 +34,17 @@ func FormatDuration(d time.Duration) string {
 // FormatNumber formats a number with comma separators
 // Examples: 123 -> "123", 1234 -> "1,234", 1234567 -> "1,234,567"
 func FormatNumber(n int) string {
-	if n < 1000 {
+	if n > -1000 && n < 1000 {
 		return fmt.Sprintf("%d", n)
 	}
 
+	sign := ""
 	str := fmt.Sprintf("%d", n)
+	if strings.HasPrefix(str, "-") {
+		sign = "-"
+		str = strings.TrimPrefix(str, "-")
+	}
+
 	var result []rune
 	for i, c := range str {
 		if i > 0 && (len(str)-i)%3 == 0 {
@@ -46,7 +52,7 @@ func FormatNumber(n int) string {
 		}
 		result = append(result, c)
 	}
-	return string(result)
+	return sign + string(result)
 }
 
 // TruncateText truncates text to maxLen characters, adding "..." if truncated

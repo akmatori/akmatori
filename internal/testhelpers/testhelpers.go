@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -140,7 +141,8 @@ func (ctx *HTTPTestContext) AssertJSONBody(expected string) *HTTPTestContext {
 	return ctx
 }
 
-// AssertJSONField compares a top-level or dotted JSON response field with the expected value.
+// AssertJSONField compares a dotted JSON response field with the expected value.
+// Numeric path segments traverse arrays, for example "configs.0.name".
 func (ctx *HTTPTestContext) AssertJSONField(path string, expected interface{}) *HTTPTestContext {
 	ctx.T.Helper()
 
@@ -196,12 +198,20 @@ func (ctx *HTTPTestContext) AssertJSONContentType() *HTTPTestContext {
 func jsonField(body interface{}, path string) (interface{}, bool) {
 	current := body
 	for _, segment := range strings.Split(path, ".") {
-		obj, ok := current.(map[string]interface{})
-		if !ok {
-			return nil, false
-		}
-		current, ok = obj[segment]
-		if !ok {
+		switch typed := current.(type) {
+		case map[string]interface{}:
+			var ok bool
+			current, ok = typed[segment]
+			if !ok {
+				return nil, false
+			}
+		case []interface{}:
+			index, err := strconv.Atoi(segment)
+			if err != nil || index < 0 || index >= len(typed) {
+				return nil, false
+			}
+			current = typed[index]
+		default:
 			return nil, false
 		}
 	}
