@@ -847,7 +847,9 @@ func TestUnlinkAlertFromIncident_HappyPath(t *testing.T) {
 	}
 }
 
-func TestUnlinkAlertFromIncident_RejectsNonCorrelated(t *testing.T) {
+// Origin (non-correlated) alerts can now be unlinked too — the alert is
+// repointed to a fresh incident just like a correlated one.
+func TestUnlinkAlertFromIncident_OriginAlertSucceeds(t *testing.T) {
 	db := setupIncidentTestDB(t)
 	svc := newIncidentTestService(t, db)
 
@@ -868,11 +870,79 @@ func TestUnlinkAlertFromIncident_RejectsNonCorrelated(t *testing.T) {
 		t.Fatalf("seed alert: %v", err)
 	}
 
-	_, err := svc.UnlinkAlertFromIncident(context.Background(), alertUUID)
-	if err == nil {
-		t.Fatal("expected ErrAlertNotCorrelated, got nil")
+	newIncidentUUID, err := svc.UnlinkAlertFromIncident(context.Background(), alertUUID)
+	if err != nil {
+		t.Fatalf("UnlinkAlertFromIncident failed: %v", err)
 	}
-	if !errors.Is(err, ErrAlertNotCorrelated) {
-		t.Errorf("expected ErrAlertNotCorrelated, got %v", err)
+	if newIncidentUUID == "" || newIncidentUUID == origIncidentUUID {
+		t.Fatalf("expected a distinct new incident, got %q", newIncidentUUID)
+	}
+
+	var row database.Alert
+	if err := db.Where("uuid = ?", alertUUID).First(&row).Error; err != nil {
+		t.Fatalf("load alert row: %v", err)
+	}
+	if row.IncidentUUID != newIncidentUUID {
+		t.Errorf("IncidentUUID = %q, want %q", row.IncidentUUID, newIncidentUUID)
+	}
+	if row.Correlated {
+		t.Error("Correlated should be false after unlink")
+	}
+}
+
+// Moving an alert to an existing incident links it there without spawning a
+// new investigation.
+func TestMoveAlertToIncident_LinkToExisting(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+
+	incidentA := spawnAlertIncident(t, svc)
+	incidentB := spawnAlertIncident(t, svc)
+	alertUUID := seedCorrelatedAlert(t, db, incidentA)
+
+	result, err := svc.MoveAlertToIncident(context.Background(), alertUUID, incidentB)
+	if err != nil {
+		t.Fatalf("MoveAlertToIncident failed: %v", err)
+	}
+	if result != incidentB {
+		t.Errorf("result = %q, want %q", result, incidentB)
+	}
+
+	var row database.Alert
+	if err := db.Where("uuid = ?", alertUUID).First(&row).Error; err != nil {
+		t.Fatalf("load alert row: %v", err)
+	}
+	if row.IncidentUUID != incidentB {
+		t.Errorf("IncidentUUID = %q, want %q", row.IncidentUUID, incidentB)
+	}
+	if !row.Correlated {
+		t.Error("Correlated should be true after linking to an existing incident")
+	}
+	if row.CorrelationDecision != "linked" {
+		t.Errorf("CorrelationDecision = %q, want linked", row.CorrelationDecision)
+	}
+	if row.CorrelationConfidence != nil {
+		t.Errorf("CorrelationConfidence should be nil after a manual link, got %v", row.CorrelationConfidence)
+	}
+	if !strings.Contains(row.CorrelationReasoning, incidentB) {
+		t.Errorf("CorrelationReasoning %q should mention target incident %q", row.CorrelationReasoning, incidentB)
+	}
+}
+
+func TestMoveAlertToIncident_InvalidTarget(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+
+	incidentA := spawnAlertIncident(t, svc)
+	alertUUID := seedCorrelatedAlert(t, db, incidentA)
+
+	// Non-existent target.
+	if _, err := svc.MoveAlertToIncident(context.Background(), alertUUID, "no-such-incident"); !errors.Is(err, ErrInvalidMoveTarget) {
+		t.Errorf("expected ErrInvalidMoveTarget for missing target, got %v", err)
+	}
+
+	// Target equal to the alert's current incident.
+	if _, err := svc.MoveAlertToIncident(context.Background(), alertUUID, incidentA); !errors.Is(err, ErrInvalidMoveTarget) {
+		t.Errorf("expected ErrInvalidMoveTarget for same-incident target, got %v", err)
 	}
 }

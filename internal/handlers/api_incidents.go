@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -386,53 +387,83 @@ func (h *APIHandler) runAgentInvestigation(incidentUUID, taskHeader, task string
 	}
 }
 
-// handleAlertUnlink handles POST /api/alerts/{uuid}/unlink. It detaches a
-// correlated alert from its incident and spawns a fresh investigation for it.
-// Returns 409 if the alert was not correlated, 404 if the alert does not exist.
+// handleAlertUnlink handles POST /api/alerts/{uuid}/unlink. It detaches an
+// alert from its incident and spawns a fresh investigation for it.
+// Returns 404 if the alert does not exist, 409 on a concurrent move.
 func (h *APIHandler) handleAlertUnlink(w http.ResponseWriter, r *http.Request) {
-	alertUUID := r.PathValue("uuid")
+	h.moveAlert(w, r, r.PathValue("uuid"), "")
+}
 
+// alertMoveRequest is the body for POST /api/alerts/{uuid}/move.
+type alertMoveRequest struct {
+	// TargetIncidentUUID is the incident to attach the alert to. Empty means
+	// "spawn a fresh investigation" (equivalent to unlink).
+	TargetIncidentUUID string `json:"target_incident_uuid"`
+}
+
+// handleAlertMove handles POST /api/alerts/{uuid}/move. It reassigns an alert to
+// a different incident: an empty target spawns a fresh investigation (unlink),
+// a non-empty target links the alert to that existing incident.
+func (h *APIHandler) handleAlertMove(w http.ResponseWriter, r *http.Request) {
+	var req alertMoveRequest
+	if r.Body != nil {
+		// A missing/empty body is valid and means "new incident".
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	h.moveAlert(w, r, r.PathValue("uuid"), strings.TrimSpace(req.TargetIncidentUUID))
+}
+
+// moveAlert is the shared implementation behind unlink and move. When target is
+// empty it spawns and runs a fresh investigation for the alert; otherwise it
+// links the alert to the existing target incident without spawning anything.
+func (h *APIHandler) moveAlert(w http.ResponseWriter, r *http.Request, alertUUID, target string) {
 	// Load the alert to build the task text and verify existence before the
-	// unlink operation modifies the row.
+	// move operation modifies the row.
 	db := database.GetDB()
 	var alert database.Alert
 	if err := db.Where("uuid = ?", alertUUID).First(&alert).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			api.RespondError(w, http.StatusNotFound, "Alert not found")
 		} else {
-			slog.Error("handleAlertUnlink: db error loading alert", "alert", alertUUID, "err", err)
+			slog.Error("moveAlert: db error loading alert", "alert", alertUUID, "err", err)
 			api.RespondError(w, http.StatusInternalServerError, "Failed to load alert")
 		}
 		return
 	}
 
-	newIncidentUUID, err := h.skillService.UnlinkAlertFromIncident(r.Context(), alertUUID)
+	resultIncidentUUID, err := h.skillService.MoveAlertToIncident(r.Context(), alertUUID, target)
 	if err != nil {
-		if errors.Is(err, services.ErrAlertNotCorrelated) {
-			api.RespondError(w, http.StatusConflict, "alert is not correlated")
-			return
+		switch {
+		case errors.Is(err, services.ErrInvalidMoveTarget):
+			api.RespondError(w, http.StatusBadRequest, "target incident does not exist or is the alert's current incident")
+		case errors.Is(err, services.ErrAlertAlreadyMoved):
+			api.RespondError(w, http.StatusConflict, "alert was moved by a concurrent request")
+		default:
+			slog.Error("MoveAlertToIncident failed", "alert", alertUUID, "target", target, "err", err)
+			api.RespondError(w, http.StatusInternalServerError, "Failed to move alert")
 		}
-		slog.Error("UnlinkAlertFromIncident failed", "alert", alertUUID, "err", err)
-		api.RespondError(w, http.StatusInternalServerError, "Failed to unlink alert")
 		return
 	}
 
-	task := alert.AlertName
-	if alert.TargetHost != "" {
-		task += " on " + alert.TargetHost
+	// Linking to an existing incident does not start a new investigation.
+	if target == "" {
+		task := alert.AlertName
+		if alert.TargetHost != "" {
+			task += " on " + alert.TargetHost
+		}
+		if task == "" {
+			task = "Alert investigation"
+		}
+		// Include the original raw alert text when available so the agent has the
+		// same rich context it would receive from the normal alert-processing path.
+		if original := extractOriginalMessage(alert.RawPayload, originalAlertTextMaxBytes); original != "" {
+			task += "\n\nOriginal alert text:\n" + original
+		}
+		taskHeader := fmt.Sprintf("🔗 Unlinked Alert Investigation:\n%s\n\n--- Execution Log ---\n\n", task)
+		go h.runAgentInvestigation(resultIncidentUUID, taskHeader, task)
 	}
-	if task == "" {
-		task = "Alert investigation"
-	}
-	// Include the original raw alert text when available so the agent has the
-	// same rich context it would receive from the normal alert-processing path.
-	if original := extractOriginalMessage(alert.RawPayload, originalAlertTextMaxBytes); original != "" {
-		task += "\n\nOriginal alert text:\n" + original
-	}
-	taskHeader := fmt.Sprintf("🔗 Unlinked Alert Investigation:\n%s\n\n--- Execution Log ---\n\n", task)
-	go h.runAgentInvestigation(newIncidentUUID, taskHeader, task)
 
-	api.RespondJSON(w, http.StatusOK, map[string]string{"incident_uuid": newIncidentUUID})
+	api.RespondJSON(w, http.StatusOK, map[string]string{"incident_uuid": resultIncidentUUID})
 }
 
 // splitCSV splits a comma-separated string into a trimmed, non-empty slice.

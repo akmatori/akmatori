@@ -729,14 +729,14 @@ gateway_call("jira.create_issue", {"project_key": "OPS", "issue_type": "Incident
 	case "incidents":
 		return fmt.Sprintf(`
 **Parameters:**
-- `+"`list`"+`: from (unix timestamp int), to (unix timestamp int), status (string), source_kind (string), limit (int, default 50, max 200), offset (int)
+- `+"`list`"+`: from, to (filter by started_at; each accepts either a Unix timestamp OR an ISO-8601 date/datetime string like "2026-07-01T00:00:00Z" — prefer the ISO string, or subtract from the "Unix timestamp" given in the current-time header, rather than hand-computing epoch seconds), status (string), source_kind (string), limit (int, default 50, max 200), offset (int). Omit from/to to return the most recent incidents regardless of time.
 - `+"`get`"+`: uuid* (string)
 (* = required)
 
 Usage (via gateway_call):
 `+"```"+`
 gateway_call("incidents.list", {"status": "resolved", "source_kind": "alert", "limit": 50}, "%s")
-gateway_call("incidents.list", {"from": 1700000000, "to": 1700086400}, "%s")
+gateway_call("incidents.list", {"from": "2026-07-01T00:00:00Z", "to": "2026-07-02T00:00:00Z"}, "%s")
 gateway_call("incidents.get", {"uuid": "<incident-uuid>"}, "%s")
 `+"```"+`
 `, logicalName, logicalName, logicalName)

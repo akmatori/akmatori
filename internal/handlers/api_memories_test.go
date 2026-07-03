@@ -555,6 +555,9 @@ func (r *recordingSkillService) LinkAlertToIncident(context.Context, string, str
 func (r *recordingSkillService) UnlinkAlertFromIncident(context.Context, string) (string, error) {
 	return "", nil
 }
+func (r *recordingSkillService) MoveAlertToIncident(context.Context, string, string) (string, error) {
+	return "", nil
+}
 
 // newMemoryAPIHandlerWithSkill wires both a memory mock and a skill
 // regeneration recorder. Used by tests that need to verify skill-scoped

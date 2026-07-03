@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -16,20 +17,20 @@ import (
 // Alert rows use event_type="alert" and occurred_at=fired_at.
 // Non-alert incident rows use event_type=source_kind and occurred_at=started_at.
 type EventFeedItem struct {
-	EventType             string     `json:"event_type"`
-	EventUUID             string     `json:"event_uuid"`
-	Title                 string     `json:"title"`
-	OccurredAt            time.Time  `json:"occurred_at"`
-	Status                string     `json:"status"`
-	IncidentUUID          string     `json:"incident_uuid"`
-	Correlated            bool       `json:"correlated"`
-	CorrelationConfidence *float64   `json:"correlation_confidence,omitempty"`
-	CorrelationReasoning  string     `json:"correlation_reasoning,omitempty"`
-	CorrelationDecision   string     `json:"correlation_decision,omitempty"`
-	TargetHost            string     `json:"target_host,omitempty"`
-	SourceUUID            string     `json:"source_uuid,omitempty"`
-	IncidentTitle         string     `json:"incident_title,omitempty"`
-	IncidentStatus        string     `json:"incident_status,omitempty"`
+	EventType             string    `json:"event_type"`
+	EventUUID             string    `json:"event_uuid"`
+	Title                 string    `json:"title"`
+	OccurredAt            time.Time `json:"occurred_at"`
+	Status                string    `json:"status"`
+	IncidentUUID          string    `json:"incident_uuid"`
+	Correlated            bool      `json:"correlated"`
+	CorrelationConfidence *float64  `json:"correlation_confidence,omitempty"`
+	CorrelationReasoning  string    `json:"correlation_reasoning,omitempty"`
+	CorrelationDecision   string    `json:"correlation_decision,omitempty"`
+	TargetHost            string    `json:"target_host,omitempty"`
+	SourceUUID            string    `json:"source_uuid,omitempty"`
+	IncidentTitle         string    `json:"incident_title,omitempty"`
+	IncidentStatus        string    `json:"incident_status,omitempty"`
 }
 
 // handleEvents handles GET /api/events — unified paginated feed of alerts and
@@ -287,6 +288,65 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 			TotalPages: params.TotalPages(total),
 		},
 	})
+}
+
+// handleEventRaw handles GET /api/events/raw?type=<event_type>&uuid=<event_uuid>.
+// It returns the raw payload / original message for a single feed event on
+// demand, so the events list endpoint can stay lightweight. For alert events
+// the payload comes from the alert row; for non-alert events it comes from the
+// incident's context.
+func (h *APIHandler) handleEventRaw(w http.ResponseWriter, r *http.Request) {
+	db := database.GetDB()
+	eventType := r.URL.Query().Get("type")
+	eventUUID := r.URL.Query().Get("uuid")
+	if eventUUID == "" {
+		api.RespondError(w, http.StatusBadRequest, "uuid is required")
+		return
+	}
+
+	resp := map[string]interface{}{}
+
+	if eventType == "alert" {
+		var alert database.Alert
+		if err := db.Select("raw_payload").Where("uuid = ?", eventUUID).First(&alert).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				api.RespondError(w, http.StatusNotFound, "Event not found")
+			} else {
+				slog.Error("events raw: failed to load alert", "uuid", eventUUID, "err", err)
+				api.RespondError(w, http.StatusInternalServerError, "Failed to load event")
+			}
+			return
+		}
+		if alert.RawPayload != nil {
+			resp["raw"] = alert.RawPayload
+			if om, ok := alert.RawPayload["original_message"]; ok {
+				resp["original_message"] = om
+			}
+		}
+	} else {
+		var inc database.Incident
+		if err := db.Select("context").Where("uuid = ?", eventUUID).First(&inc).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				api.RespondError(w, http.StatusNotFound, "Event not found")
+			} else {
+				slog.Error("events raw: failed to load incident", "uuid", eventUUID, "err", err)
+				api.RespondError(w, http.StatusInternalServerError, "Failed to load event")
+			}
+			return
+		}
+		if inc.Context != nil {
+			if rp, ok := inc.Context["raw_payload"]; ok {
+				resp["raw"] = rp
+			}
+			if om, ok := inc.Context["original_message"]; ok {
+				resp["original_message"] = om
+			} else if m, ok := inc.Context["message"]; ok {
+				resp["original_message"] = m
+			}
+		}
+	}
+
+	api.RespondJSON(w, http.StatusOK, resp)
 }
 
 // sortEventFeedItems sorts items by OccurredAt DESC (most recent first).

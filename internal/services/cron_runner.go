@@ -437,8 +437,13 @@ func (r *CronRunner) execute(job *database.CronJob) {
 	// the seeded memory-curator cron, for example, has no infrastructure tools
 	// and no incident framing to lean on. Prepend only the current UTC time so
 	// the model can reason about scheduling without inheriting the alert SOP.
-	taskWithTime := fmt.Sprintf("Current time: %s\n\n%s",
-		time.Now().UTC().Format("2006-01-02 15:04:05 UTC"), job.Prompt)
+	// Include the Unix timestamp as well: models reliably subtract from an
+	// epoch (now - 86400 for "last 24h") but frequently miscompute an absolute
+	// calendar date into epoch seconds by hand, which silently produces the
+	// wrong query window for time-scoped tools like incidents.list.
+	now := time.Now().UTC()
+	taskWithTime := fmt.Sprintf("Current time: %s (Unix timestamp: %d)\n\n%s",
+		now.Format("2006-01-02 15:04:05 UTC"), now.Unix(), job.Prompt)
 	runID, err := r.runner.StartIncident(incidentUUID, taskWithTime, llmSettings, skillNames, toolAllowlist, callback)
 	if err != nil {
 		errStr := fmt.Sprintf("start incident: %v", err)

@@ -22,6 +22,16 @@ var ErrAlertAlreadyClaimed = errors.New("alert already claimed by concurrent pro
 // surface this as HTTP 409.
 var ErrAlertNotCorrelated = errors.New("alert is not correlated from another incident")
 
+// ErrAlertAlreadyMoved is returned by MoveAlertToIncident when the alert's
+// incident assignment changed between the initial read and the locked update
+// (a concurrent move won). The caller should surface this as HTTP 409.
+var ErrAlertAlreadyMoved = errors.New("alert was moved by a concurrent request")
+
+// ErrInvalidMoveTarget is returned by MoveAlertToIncident when the requested
+// target incident does not exist or equals the alert's current incident. The
+// caller should surface this as HTTP 400.
+var ErrInvalidMoveTarget = errors.New("invalid move target incident")
+
 // ErrIncidentSuperseded is delivered via OnError to a previously registered
 // incident callback when a newer StartIncident/ContinueIncident call replaces
 // it for the same incident_id (e.g. a second Slack message lands in the same

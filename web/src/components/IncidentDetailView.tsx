@@ -1,52 +1,11 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Terminal, MessageSquare, FileCode, ChevronDown, ChevronRight, RefreshCw, Bell, Unlink } from 'lucide-react';
+import { Terminal, MessageSquare, ChevronDown, ChevronRight, RefreshCw, Bell, Shuffle } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { JsonView, darkStyles } from 'react-json-view-lite';
-import 'react-json-view-lite/dist/index.css';
 import type { Incident, Alert } from '../types';
-import { incidentsApi, alertsApi } from '../api/client';
+import { incidentsApi } from '../api/client';
+import MoveIncidentModal from './MoveIncidentModal';
 
-type TabType = 'reasoning' | 'response' | 'raw' | 'alerts';
-
-const jsonViewerStyles = {
-  ...darkStyles,
-  container: 'bg-transparent font-mono text-sm',
-  basicChildStyle: 'pl-4',
-  label: 'text-purple-400 mr-1',
-  nullValue: 'text-gray-500',
-  undefinedValue: 'text-gray-500',
-  stringValue: 'text-green-400',
-  booleanValue: 'text-red-400',
-  numberValue: 'text-orange-400',
-  otherValue: 'text-gray-300',
-  punctuation: 'text-gray-500',
-  expandIcon: 'text-gray-400 cursor-pointer select-none',
-  collapseIcon: 'text-gray-400 cursor-pointer select-none',
-};
-
-function RawPayloadViewer({ payload }: { payload: unknown }) {
-  if (payload === null || payload === undefined) {
-    return (
-      <p className="text-gray-500 text-center py-8">
-        No raw payload available for this incident
-      </p>
-    );
-  }
-  if (typeof payload === 'object') {
-    return (
-      <JsonView
-        data={payload}
-        style={jsonViewerStyles}
-        shouldExpandNode={() => true}
-      />
-    );
-  }
-  return (
-    <pre className="whitespace-pre-wrap text-gray-300 font-mono text-sm">
-      {String(payload)}
-    </pre>
-  );
-}
+type TabType = 'reasoning' | 'response' | 'alerts';
 
 interface IncidentDetailViewProps {
   incident: Incident;
@@ -60,8 +19,8 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
   const [alertsLoading, setAlertsLoading] = useState(false);
   const [alertsError, setAlertsError] = useState('');
   const [expandedReasoning, setExpandedReasoning] = useState<Set<string>>(new Set());
-  const [unlinkingUUID, setUnlinkingUUID] = useState<string | null>(null);
-  const [unlinkResult, setUnlinkResult] = useState<{ alertUUID: string; newIncidentUUID: string } | null>(null);
+  const [moveTargetAlert, setMoveTargetAlert] = useState<Alert | null>(null);
+  const [moveResult, setMoveResult] = useState<{ incidentUUID: string; isNew: boolean } | null>(null);
   const alertsFetchedForRef = useRef<string | null>(null);
   const logContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -70,30 +29,23 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
     alertsFetchedForRef.current = null;
     setAlerts(null);
     setAlertsError('');
-    setUnlinkResult(null);
+    setMoveResult(null);
     setActiveTab('reasoning');
   }, [incident.uuid]);
 
-  const handleUnlink = async (alertUUID: string) => {
-    setUnlinkingUUID(alertUUID);
-    try {
-      const result = await alertsApi.unlink(alertUUID);
-      setUnlinkResult({ alertUUID, newIncidentUUID: result.incident_uuid });
-      // Refresh the alerts list — reset the guard first so the lazy-fetch effect
-      // can retry if this inline refresh also fails.
-      alertsFetchedForRef.current = null;
-      setAlerts(null);
-      incidentsApi.getAlerts(incident.uuid)
-        .then(data => {
-          alertsFetchedForRef.current = incident.uuid;
-          setAlerts(data);
-        })
-        .catch(err => { setAlertsError(String(err)); });
-    } catch (err) {
-      setAlertsError(`Unlink failed: ${String(err)}`);
-    } finally {
-      setUnlinkingUUID(null);
-    }
+  const handleMoved = (result: { incidentUUID: string; isNew: boolean }) => {
+    setMoveTargetAlert(null);
+    setMoveResult(result);
+    // Refresh the alerts list — reset the guard first so the lazy-fetch effect
+    // can retry if this inline refresh also fails.
+    alertsFetchedForRef.current = null;
+    setAlerts(null);
+    incidentsApi.getAlerts(incident.uuid)
+      .then(data => {
+        alertsFetchedForRef.current = incident.uuid;
+        setAlerts(data);
+      })
+      .catch(err => { setAlertsError(String(err)); });
   };
 
   // Auto-scroll to bottom when log updates
@@ -278,19 +230,6 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
             Response
           </span>
         </button>
-        <button
-          onClick={() => setActiveTab('raw')}
-          className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === 'raw'
-              ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-              : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-          }`}
-        >
-          <span className="flex items-center gap-2">
-            <FileCode className="w-4 h-4" />
-            Raw Alert
-          </span>
-        </button>
         {incident.source_kind === 'alert' && (
           <button
             onClick={() => setActiveTab('alerts')}
@@ -379,24 +318,16 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
               </p>
             )}
           </div>
-        ) : activeTab === 'raw' ? (
-          <div className="bg-gray-900 rounded-lg p-6 min-h-[200px] overflow-x-auto">
-            <div className="flex items-center gap-2 text-gray-500 mb-4 pb-4 border-b border-gray-700">
-              <FileCode className="w-4 h-4" />
-              <span className="text-xs font-medium uppercase tracking-wide">Original Webhook Payload</span>
-            </div>
-            <RawPayloadViewer payload={incident.context?.raw_payload} />
-          </div>
         ) : (
           <div className="min-h-[200px]">
-            {unlinkResult && (
+            {moveResult && (
               <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 text-sm">
-                <span>Alert unlinked. New investigation started:</span>
+                <span>{moveResult.isNew ? 'Alert unlinked. New investigation started:' : 'Alert linked to incident:'}</span>
                 <Link
-                  to={`/incidents/${unlinkResult.newIncidentUUID}`}
+                  to={`/incidents/${moveResult.incidentUUID}`}
                   className="font-mono underline hover:no-underline"
                 >
-                  {unlinkResult.newIncidentUUID}
+                  {moveResult.incidentUUID}
                 </Link>
               </div>
             )}
@@ -476,21 +407,14 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
                             {alert.resolved_at ? new Date(alert.resolved_at).toLocaleString() : '—'}
                           </td>
                           <td className="py-3">
-                            {alert.correlated && (
-                              <button
-                                onClick={() => handleUnlink(alert.uuid)}
-                                disabled={unlinkingUUID === alert.uuid}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                title="Unlink this alert and start a new investigation"
-                              >
-                                {unlinkingUUID === alert.uuid ? (
-                                  <RefreshCw className="w-3 h-3 animate-spin" />
-                                ) : (
-                                  <Unlink className="w-3 h-3" />
-                                )}
-                                Unlink
-                              </button>
-                            )}
+                            <button
+                              onClick={() => setMoveTargetAlert(alert)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors"
+                              title="Move this alert to another incident (or unlink into a new one)"
+                            >
+                              <Shuffle className="w-3 h-3" />
+                              Move
+                            </button>
                           </td>
                         </tr>
                       );
@@ -502,6 +426,16 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
           </div>
         )}
       </div>
+
+      {moveTargetAlert && (
+        <MoveIncidentModal
+          alertUUID={moveTargetAlert.uuid}
+          alertTitle={moveTargetAlert.alert_name}
+          currentIncidentUUID={incident.uuid}
+          onClose={() => setMoveTargetAlert(null)}
+          onMoved={handleMoved}
+        />
+      )}
     </div>
   );
 }

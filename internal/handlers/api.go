@@ -120,11 +120,14 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/incidents/{uuid}/alerts", h.handleIncidentAlerts)
 	mux.HandleFunc("GET /api/incidents/{uuid}", h.handleIncidentByID)
 
-	// Alert management (unlink a correlated alert from its incident).
+	// Alert management: unlink spawns a fresh investigation; move reassigns the
+	// alert to a chosen incident (empty target == unlink).
 	mux.HandleFunc("POST /api/alerts/{uuid}/unlink", h.handleAlertUnlink)
+	mux.HandleFunc("POST /api/alerts/{uuid}/move", h.handleAlertMove)
 
 	// Unified events feed (alerts + non-alert incidents merged by occurred_at).
 	mux.HandleFunc("GET /api/events", h.handleEvents)
+	mux.HandleFunc("GET /api/events/raw", h.handleEventRaw)
 
 	// Slack settings (removed; returns 410 Gone — use /api/integrations and
 	// /api/channels). Route kept so clients on the old endpoint see a clear

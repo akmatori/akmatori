@@ -28,17 +28,17 @@ func (s *SkillService) InsertFiringAlert(ctx context.Context, incidentUUID strin
 	}
 	fingerprint := ComputeAlertFingerprint(sourceUUID, alert.AlertName, alert.TargetHost)
 	row := database.Alert{
-		UUID:                uuid.New().String(),
-		IncidentUUID:        incidentUUID,
-		Status:              database.AlertStatusFiring,
-		Fingerprint:         fingerprint,
-		SourceUUID:          sourceUUID,
-		SourceFingerprint:   alert.SourceFingerprint,
-		AlertName:           alert.AlertName,
-		TargetHost:          alert.TargetHost,
-		FiredAt:             firedAt,
-		RawPayload:          alert.RawPayload,
-		CorrelationDecision: decision,
+		UUID:                 uuid.New().String(),
+		IncidentUUID:         incidentUUID,
+		Status:               database.AlertStatusFiring,
+		Fingerprint:          fingerprint,
+		SourceUUID:           sourceUUID,
+		SourceFingerprint:    alert.SourceFingerprint,
+		AlertName:            alert.AlertName,
+		TargetHost:           alert.TargetHost,
+		FiredAt:              firedAt,
+		RawPayload:           alert.RawPayload,
+		CorrelationDecision:  decision,
 		CorrelationReasoning: reasoning,
 	}
 	result := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
@@ -70,20 +70,20 @@ func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID str
 		}
 		fingerprint := ComputeAlertFingerprint(sourceUUID, alert.AlertName, alert.TargetHost)
 		row := database.Alert{
-			UUID:                    uuid.New().String(),
-			IncidentUUID:            incidentUUID,
-			Status:                  database.AlertStatusFiring,
-			Fingerprint:             fingerprint,
-			SourceUUID:              sourceUUID,
-			SourceFingerprint:       alert.SourceFingerprint,
-			AlertName:               alert.AlertName,
-			TargetHost:              alert.TargetHost,
-			FiredAt:                 firedAt,
-			RawPayload:              alert.RawPayload,
-			Correlated:              true,
-			CorrelationConfidence:   &confidence,
-			CorrelationReasoning:    reasoning,
-			CorrelationDecision:     "linked",
+			UUID:                  uuid.New().String(),
+			IncidentUUID:          incidentUUID,
+			Status:                database.AlertStatusFiring,
+			Fingerprint:           fingerprint,
+			SourceUUID:            sourceUUID,
+			SourceFingerprint:     alert.SourceFingerprint,
+			AlertName:             alert.AlertName,
+			TargetHost:            alert.TargetHost,
+			FiredAt:               firedAt,
+			RawPayload:            alert.RawPayload,
+			Correlated:            true,
+			CorrelationConfidence: &confidence,
+			CorrelationReasoning:  reasoning,
+			CorrelationDecision:   "linked",
 		}
 		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
 		if result.Error != nil {
@@ -112,34 +112,102 @@ func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID str
 	})
 }
 
-// UnlinkAlertFromIncident detaches a correlated alert from its current incident
-// and spawns a fresh investigation for it. Returns the new incident UUID.
-// Returns ErrAlertNotCorrelated if the alert was not correlated (linked) from
-// another incident.
-//
-// Concurrent unlink calls for the same alert are serialised by a per-row DB
-// lock: after spawning the new incident the alert row is re-locked and
-// re-checked so only one caller wins; the loser's spawned incident is marked
-// failed and ErrAlertNotCorrelated is returned.
+// UnlinkAlertFromIncident detaches an alert from its current incident and
+// spawns a fresh investigation for it. Returns the new incident UUID. It is a
+// thin wrapper around MoveAlertToIncident with an empty target.
 func (s *SkillService) UnlinkAlertFromIncident(ctx context.Context, alertUUID string) (string, error) {
+	return s.MoveAlertToIncident(ctx, alertUUID, "")
+}
+
+// MoveAlertToIncident reassigns an alert to a different incident.
+//
+//   - targetIncidentUUID == "" — spawn a fresh investigation and repoint the
+//     alert to it (the "unlink" behaviour). Returns the new incident UUID. The
+//     caller is responsible for running the investigation.
+//   - targetIncidentUUID != "" — attach the alert to the existing target
+//     incident (manual link). No investigation is spawned. Returns the target
+//     UUID.
+//
+// Works for any alert regardless of its correlation state, so origin alerts can
+// be reassigned too. Concurrent moves of the same alert are serialised by a
+// per-row DB lock: after the initial read the alert row is re-locked and its
+// incident assignment re-checked, so only one caller wins; a loser gets
+// ErrAlertAlreadyMoved (and, for the spawn path, its orphaned incident cleaned
+// up). Returns ErrInvalidMoveTarget when the target does not exist or equals
+// the alert's current incident.
+func (s *SkillService) MoveAlertToIncident(ctx context.Context, alertUUID, targetIncidentUUID string) (string, error) {
 	// Fast pre-check (no lock); the definitive check happens inside the
-	// transaction below after the incident has been spawned.
+	// transaction below.
 	var alert database.Alert
 	if err := s.db.WithContext(ctx).Where("uuid = ?", alertUUID).First(&alert).Error; err != nil {
-		return "", fmt.Errorf("UnlinkAlertFromIncident: load alert: %w", err)
+		return "", fmt.Errorf("MoveAlertToIncident: load alert: %w", err)
 	}
-	if !alert.Correlated {
-		return "", ErrAlertNotCorrelated
-	}
-
 	oldIncidentUUID := alert.IncidentUUID
-	alertFingerprint := ComputeAlertFingerprint(alert.SourceUUID, alert.AlertName, alert.TargetHost)
 
+	// --- Link to an existing incident ---------------------------------------
+	if targetIncidentUUID != "" {
+		if targetIncidentUUID == oldIncidentUUID {
+			return "", ErrInvalidMoveTarget
+		}
+		var target database.Incident
+		if err := s.db.WithContext(ctx).Select("uuid", "status").
+			Where("uuid = ?", targetIncidentUUID).First(&target).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return "", ErrInvalidMoveTarget
+			}
+			return "", fmt.Errorf("MoveAlertToIncident: load target incident: %w", err)
+		}
+
+		reasoning := "manually linked to " + targetIncidentUUID + " from " + oldIncidentUUID
+		txErr := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var locked database.Alert
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("uuid = ?", alertUUID).First(&locked).Error; err != nil {
+				return fmt.Errorf("MoveAlertToIncident: lock alert: %w", err)
+			}
+			if locked.IncidentUUID != oldIncidentUUID {
+				return ErrAlertAlreadyMoved
+			}
+			if err := tx.Model(&database.Alert{}).
+				Where("uuid = ?", alertUUID).
+				Updates(map[string]interface{}{
+					"incident_uuid":          targetIncidentUUID,
+					"correlated":             true,
+					"correlation_decision":   "linked",
+					"correlation_reasoning":  reasoning,
+					"correlation_confidence": nil,
+				}).Error; err != nil {
+				return err
+			}
+			// Extend the watch window if the target is under monitoring so the
+			// freshly-attached alert keeps the incident visible.
+			if target.Status == database.IncidentStatusMonitor {
+				var settings database.GeneralSettings
+				tx.First(&settings) // ignore error: zero value gives default window
+				newUntil := time.Now().Add(settings.GetAlertMonitorWindow())
+				if err := tx.Model(&database.Incident{}).
+					Where("uuid = ?", targetIncidentUUID).
+					Update("monitor_until", &newUntil).Error; err != nil {
+					return fmt.Errorf("MoveAlertToIncident: extend monitor window: %w", err)
+				}
+			}
+			return nil
+		})
+		if txErr != nil {
+			if errors.Is(txErr, ErrAlertAlreadyMoved) {
+				return "", ErrAlertAlreadyMoved
+			}
+			return "", fmt.Errorf("MoveAlertToIncident: relink alert: %w", txErr)
+		}
+		return targetIncidentUUID, nil
+	}
+
+	// --- Unlink into a fresh incident ---------------------------------------
+	alertFingerprint := ComputeAlertFingerprint(alert.SourceUUID, alert.AlertName, alert.TargetHost)
 	msg := alert.AlertName
 	if alert.TargetHost != "" {
 		msg = alert.AlertName + " on " + alert.TargetHost
 	}
-
 	incidentCtx := &IncidentContext{
 		Source:     "alert",
 		SourceID:   alert.UUID,
@@ -158,55 +226,51 @@ func (s *SkillService) UnlinkAlertFromIncident(ctx context.Context, alertUUID st
 	// so the OS work is not held under a row lock.
 	newIncidentUUID, _, err := s.SpawnIncidentManager(incidentCtx)
 	if err != nil {
-		return "", fmt.Errorf("UnlinkAlertFromIncident: spawn incident: %w", err)
+		return "", fmt.Errorf("MoveAlertToIncident: spawn incident: %w", err)
 	}
 
 	markOrphanFailed := func() {
 		if markErr := s.db.Model(&database.Incident{}).
 			Where("uuid = ?", newIncidentUUID).
 			Updates(map[string]interface{}{"status": database.IncidentStatusFailed}).Error; markErr != nil {
-			slog.Error("UnlinkAlertFromIncident: failed to mark orphaned incident as failed", "incident", newIncidentUUID, "err", markErr)
+			slog.Error("MoveAlertToIncident: failed to mark orphaned incident as failed", "incident", newIncidentUUID, "err", markErr)
 		}
 		if removeErr := os.RemoveAll(filepath.Join(s.incidentsDir, newIncidentUUID)); removeErr != nil {
-			slog.Error("UnlinkAlertFromIncident: failed to remove orphaned incident dir", "incident", newIncidentUUID, "err", removeErr)
+			slog.Error("MoveAlertToIncident: failed to remove orphaned incident dir", "incident", newIncidentUUID, "err", removeErr)
 		}
 	}
 
 	reasoning := "manually unlinked from " + oldIncidentUUID
 
-	// Transactionally lock the alert row and confirm it is still correlated.
-	// A concurrent unlink that committed first will have set correlated=false,
-	// causing the locked re-read to return zero rows — we detect that and bail.
+	// Transactionally lock the alert row and confirm its incident assignment is
+	// unchanged. A concurrent move that committed first repoints the row, so the
+	// locked re-read shows a different incident_uuid — we detect that and bail.
 	txErr := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var locked database.Alert
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("uuid = ? AND correlated = ?", alertUUID, true).
-			First(&locked).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrAlertNotCorrelated
-			}
-			return fmt.Errorf("UnlinkAlertFromIncident: lock alert: %w", err)
+			Where("uuid = ?", alertUUID).First(&locked).Error; err != nil {
+			return fmt.Errorf("MoveAlertToIncident: lock alert: %w", err)
 		}
-
-		// Use Select to explicitly include correlation_confidence so GORM sets
-		// it to NULL (the zero value for *float64) rather than skipping it.
+		if locked.IncidentUUID != oldIncidentUUID {
+			return ErrAlertAlreadyMoved
+		}
 		return tx.Model(&database.Alert{}).
-			Select("incident_uuid", "correlated", "correlation_decision", "correlation_reasoning", "correlation_confidence").
 			Where("uuid = ?", alertUUID).
-			Updates(database.Alert{
-				IncidentUUID:         newIncidentUUID,
-				Correlated:           false,
-				CorrelationDecision:  "new_incident",
-				CorrelationReasoning: reasoning,
+			Updates(map[string]interface{}{
+				"incident_uuid":          newIncidentUUID,
+				"correlated":             false,
+				"correlation_decision":   "new_incident",
+				"correlation_reasoning":  reasoning,
+				"correlation_confidence": nil,
 			}).Error
 	})
 
 	if txErr != nil {
 		markOrphanFailed()
-		if errors.Is(txErr, ErrAlertNotCorrelated) {
-			return "", ErrAlertNotCorrelated
+		if errors.Is(txErr, ErrAlertAlreadyMoved) {
+			return "", ErrAlertAlreadyMoved
 		}
-		return "", fmt.Errorf("UnlinkAlertFromIncident: repoint alert: %w", txErr)
+		return "", fmt.Errorf("MoveAlertToIncident: repoint alert: %w", txErr)
 	}
 
 	return newIncidentUUID, nil
@@ -543,4 +607,3 @@ func (s *SkillService) AppendSubagentLog(incidentUUID string, skillName string, 
 
 	return nil
 }
-

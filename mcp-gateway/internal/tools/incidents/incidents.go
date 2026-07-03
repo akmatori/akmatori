@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -86,12 +87,12 @@ func (t *IncidentsTool) List(ctx context.Context, _ string, args map[string]inte
 		}
 	}
 	if v, ok := args["from"]; ok {
-		if ts := int64(toInt(v, 0)); ts > 0 {
+		if ts := toUnix(v); ts > 0 {
 			q = q.Where("started_at >= ?", time.Unix(ts, 0))
 		}
 	}
 	if v, ok := args["to"]; ok {
-		if ts := int64(toInt(v, 0)); ts > 0 {
+		if ts := toUnix(v); ts > 0 {
 			q = q.Where("started_at <= ?", time.Unix(ts, 0))
 		}
 	}
@@ -224,3 +225,37 @@ func toInt(v interface{}, def int) int {
 	return def
 }
 
+// toUnix converts an arg into a Unix timestamp (seconds). Numeric values (and
+// numeric strings) are treated as Unix seconds; string values are also parsed
+// as RFC3339 or common date/datetime layouts. This lets callers pass ISO dates
+// (e.g. "2026-07-01T00:00:00Z") instead of hand-computing epoch seconds, which
+// LLMs frequently get wrong. Returns 0 when the value cannot be interpreted.
+func toUnix(v interface{}) int64 {
+	switch n := v.(type) {
+	case int:
+		return int64(n)
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	case string:
+		s := strings.TrimSpace(n)
+		if s == "" {
+			return 0
+		}
+		if iv, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return iv
+		}
+		for _, layout := range []string{
+			time.RFC3339,
+			"2006-01-02T15:04:05",
+			"2006-01-02 15:04:05",
+			"2006-01-02",
+		} {
+			if t, err := time.Parse(layout, s); err == nil {
+				return t.Unix()
+			}
+		}
+	}
+	return 0
+}

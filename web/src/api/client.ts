@@ -611,6 +611,12 @@ export const eventsApi = {
     if (params.type) qs.set('type', params.type);
     return fetchApi<PaginatedResponse<EventFeedItem>>(`/api/events?${qs.toString()}`);
   },
+
+  // Fetch the raw payload / original message for a single feed event on demand.
+  raw: (type: string, uuid: string) =>
+    fetchApi<{ raw?: unknown; original_message?: string }>(
+      `/api/events/raw?type=${encodeURIComponent(type)}&uuid=${encodeURIComponent(uuid)}`,
+    ),
 };
 
 // Alerts API
@@ -618,6 +624,15 @@ export const alertsApi = {
   unlink: (uuid: string) =>
     fetchApi<{ incident_uuid: string }>(`/api/alerts/${encodeURIComponent(uuid)}/unlink`, {
       method: 'POST',
+    }),
+
+  // Reassign an alert to a different incident. An empty/omitted target spawns a
+  // fresh investigation (equivalent to unlink); a target UUID links the alert to
+  // that existing incident.
+  move: (uuid: string, targetIncidentUUID?: string) =>
+    fetchApi<{ incident_uuid: string }>(`/api/alerts/${encodeURIComponent(uuid)}/move`, {
+      method: 'POST',
+      body: JSON.stringify({ target_incident_uuid: targetIncidentUUID ?? '' }),
     }),
 };
 

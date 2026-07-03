@@ -34,16 +34,16 @@ var baseTime = time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
 func insertIncident(t *testing.T, db *gorm.DB, uuid, title, status, sourceKind, sourceUUID string, startedAt time.Time, fullLog string) {
 	t.Helper()
 	inc := database.Incident{
-		UUID:        uuid,
-		Source:      "test",
-		Title:       title,
-		Status:      status,
-		SourceKind:  sourceKind,
-		SourceUUID:  sourceUUID,
-		StartedAt:   startedAt,
-		FullLog:     fullLog,
-		Response:    "some response",
-		TokensUsed:  100,
+		UUID:       uuid,
+		Source:     "test",
+		Title:      title,
+		Status:     status,
+		SourceKind: sourceKind,
+		SourceUUID: sourceUUID,
+		StartedAt:  startedAt,
+		FullLog:    fullLog,
+		Response:   "some response",
+		TokensUsed: 100,
 	}
 	if err := db.Create(&inc).Error; err != nil {
 		t.Fatalf("insert: %v", err)
@@ -155,6 +155,58 @@ func TestList_TimeRangeFilter(t *testing.T) {
 	}
 	if resp.Incidents[0].UUID != "uuid-2" {
 		t.Errorf("expected uuid-2, got %s", resp.Incidents[0].UUID)
+	}
+}
+
+// ISO-8601 date/datetime strings are accepted for from/to so callers (and
+// LLMs) need not hand-compute epoch seconds.
+func TestList_TimeRangeFilter_ISOStrings(t *testing.T) {
+	db := newTestDB(t)
+	tool := newTool(db)
+
+	t1 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	t2 := time.Date(2025, 1, 5, 0, 0, 0, 0, time.UTC)
+	t3 := time.Date(2025, 1, 10, 0, 0, 0, 0, time.UTC)
+
+	insertIncident(t, db, "uuid-1", "Early", "resolved", "alert", "", t1, "")
+	insertIncident(t, db, "uuid-2", "Mid", "resolved", "alert", "", t2, "")
+	insertIncident(t, db, "uuid-3", "Late", "resolved", "alert", "", t3, "")
+
+	result, err := tool.List(context.Background(), "", map[string]interface{}{
+		"from": "2025-01-04T00:00:00Z",
+		"to":   "2025-01-06",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var resp listResponse
+	if err := json.Unmarshal([]byte(result.(string)), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Count != 1 || resp.Incidents[0].UUID != "uuid-2" {
+		t.Errorf("expected only uuid-2, got count=%d %+v", resp.Count, resp.Incidents)
+	}
+}
+
+func TestToUnix(t *testing.T) {
+	want := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC).Unix()
+	cases := map[string]interface{}{
+		"rfc3339":     "2026-07-01T00:00:00Z",
+		"date only":   "2026-07-01",
+		"unix float":  float64(want),
+		"unix int":    int(want),
+		"unix string": "1782864000",
+	}
+	for name, in := range cases {
+		if got := toUnix(in); got != want {
+			t.Errorf("%s: toUnix(%v) = %d, want %d", name, in, got, want)
+		}
+	}
+	if got := toUnix("not-a-date"); got != 0 {
+		t.Errorf("garbage string should yield 0, got %d", got)
+	}
+	if got := toUnix(""); got != 0 {
+		t.Errorf("empty string should yield 0, got %d", got)
 	}
 }
 

@@ -1,14 +1,72 @@
 import { useEffect, useState, useRef, useCallback, Fragment } from 'react';
-import { RefreshCw, Activity, Rss, Link as LinkIcon, Unlink } from 'lucide-react';
+import { RefreshCw, Activity, Rss, Link as LinkIcon, Shuffle, FileCode, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { JsonView, darkStyles } from 'react-json-view-lite';
+import 'react-json-view-lite/dist/index.css';
 import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { SuccessMessage } from '../components/ErrorMessage';
 import TimeRangePicker from '../components/TimeRangePicker';
-import { eventsApi, alertsApi } from '../api/client';
+import MoveIncidentModal from '../components/MoveIncidentModal';
+import { eventsApi } from '../api/client';
 import type { EventFeedItem } from '../types';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+
+const jsonViewerStyles = {
+  ...darkStyles,
+  container: 'bg-transparent font-mono text-xs',
+  basicChildStyle: 'pl-4',
+  label: 'text-purple-400 mr-1',
+  nullValue: 'text-gray-500',
+  undefinedValue: 'text-gray-500',
+  stringValue: 'text-green-400',
+  booleanValue: 'text-red-400',
+  numberValue: 'text-orange-400',
+  otherValue: 'text-gray-300',
+  punctuation: 'text-gray-500',
+  expandIcon: 'text-gray-400 cursor-pointer select-none',
+  collapseIcon: 'text-gray-400 cursor-pointer select-none',
+};
+
+// RawEventContent renders an event's raw payload / original message on demand.
+function RawEventContent({ state }: { state?: RawState }) {
+  if (!state || state.loading) {
+    return (
+      <div className="flex items-center gap-2 text-gray-400 text-xs">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading raw message…
+      </div>
+    );
+  }
+  if (state.error) {
+    return <p className="text-red-400 text-xs">{state.error}</p>;
+  }
+  if (state.original_message) {
+    return (
+      <pre className="whitespace-pre-wrap text-gray-300 font-mono text-xs max-h-80 overflow-y-auto">
+        {state.original_message}
+      </pre>
+    );
+  }
+  if (state.raw !== undefined && state.raw !== null) {
+    if (typeof state.raw === 'object') {
+      return (
+        <div className="max-h-80 overflow-y-auto">
+          <JsonView data={state.raw as object} style={jsonViewerStyles} shouldExpandNode={() => true} />
+        </div>
+      );
+    }
+    return <pre className="whitespace-pre-wrap text-gray-300 font-mono text-xs">{String(state.raw)}</pre>;
+  }
+  return <p className="text-gray-500 text-xs">No raw message available for this event</p>;
+}
+
+interface RawState {
+  loading: boolean;
+  raw?: unknown;
+  original_message?: string;
+  error?: string;
+}
 
 const DEFAULT_TIME_RANGE = 3 * 60 * 60; // 3 hours
 const DEFAULT_REFRESH_INTERVAL = 60000;
@@ -94,7 +152,11 @@ function CorrelationChip({
   onToggle: () => void;
   expanded: boolean;
 }) {
-  const { correlation_decision, correlation_confidence } = item;
+  const { correlation_confidence } = item;
+  // Historical/seeded alerts can carry correlated=true (with confidence and
+  // reasoning) but a NULL correlation_decision. Derive the display state from
+  // `correlated` in that case so the reasoning is not silently hidden.
+  const correlation_decision = item.correlation_decision || (item.correlated ? 'linked' : '');
   if (!correlation_decision) return null;
 
   if (correlation_decision === 'linked') {
@@ -160,7 +222,11 @@ export default function Feed() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [expandedUUIDs, setExpandedUUIDs] = useState<Set<string>>(new Set());
-  const [unlinkingUUIDs, setUnlinkingUUIDs] = useState<Set<string>>(new Set());
+  // Raw-message expansion + per-event fetch cache.
+  const [rawExpanded, setRawExpanded] = useState<Set<string>>(new Set());
+  const [rawData, setRawData] = useState<Record<string, RawState>>({});
+  // The alert currently being reassigned via the Move modal.
+  const [moveTarget, setMoveTarget] = useState<EventFeedItem | null>(null);
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -175,7 +241,6 @@ export default function Feed() {
   const [relativeRange, setRelativeRange] = useState<number | null>(DEFAULT_TIME_RANGE);
   const [refreshInterval, setRefreshInterval] = useState(DEFAULT_REFRESH_INTERVAL);
   const refreshRef = useRef<number | null>(null);
-  const loadFeedRef = useRef(loadFeed);
 
   const loadFeed = useCallback(async (
     from?: number,
@@ -222,6 +287,8 @@ export default function Feed() {
       setLoading(false);
     }
   }, [timeFrom, timeTo, relativeRange, page, perPage, typeFilter]);
+
+  const loadFeedRef = useRef(loadFeed);
 
   useEffect(() => {
     loadFeed();
@@ -276,23 +343,35 @@ export default function Feed() {
     });
   }, []);
 
-  const handleUnlink = useCallback(async (item: EventFeedItem) => {
-    setUnlinkingUUIDs(prev => new Set(prev).add(item.event_uuid));
-    try {
-      const result = await alertsApi.unlink(item.event_uuid);
-      setSuccessMsg(`Alert unlinked. New incident: ${result.incident_uuid.slice(0, 8)}...`);
-      setTimeout(() => setSuccessMsg(null), 6000);
-      setPage(1);
-      loadFeed(undefined, undefined, false, 1);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to unlink alert');
-    } finally {
-      setUnlinkingUUIDs(prev => {
-        const next = new Set(prev);
-        next.delete(item.event_uuid);
+  const toggleRaw = useCallback((item: EventFeedItem) => {
+    const uuid = item.event_uuid;
+    setRawExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(uuid)) {
+        next.delete(uuid);
         return next;
+      }
+      next.add(uuid);
+      // Fetch the raw payload the first time this row is expanded.
+      setRawData(prevData => {
+        if (prevData[uuid] && !prevData[uuid].error) return prevData;
+        eventsApi.raw(item.event_type, uuid)
+          .then(res => setRawData(d => ({ ...d, [uuid]: { loading: false, raw: res.raw, original_message: res.original_message } })))
+          .catch(err => setRawData(d => ({ ...d, [uuid]: { loading: false, error: err instanceof Error ? err.message : 'Failed to load raw message' } })));
+        return { ...prevData, [uuid]: { loading: true } };
       });
-    }
+      return next;
+    });
+  }, []);
+
+  const handleMoved = useCallback((result: { incidentUUID: string; isNew: boolean }) => {
+    setMoveTarget(null);
+    setSuccessMsg(result.isNew
+      ? `Alert unlinked. New incident: ${result.incidentUUID.slice(0, 8)}…`
+      : `Alert linked to incident ${result.incidentUUID.slice(0, 8)}…`);
+    setTimeout(() => setSuccessMsg(null), 6000);
+    setPage(1);
+    loadFeed(undefined, undefined, false, 1);
   }, [loadFeed]);
 
   const typeFilterOptions: { label: string; value: TypeFilter }[] = [
@@ -375,8 +454,9 @@ export default function Feed() {
                   <tbody>
                     {items.map((item) => {
                       const isExpanded = expandedUUIDs.has(item.event_uuid);
-                      const isUnlinking = unlinkingUUIDs.has(item.event_uuid);
-                      const showUnlink = item.event_type === 'alert' && item.correlated;
+                      const isRawExpanded = rawExpanded.has(item.event_uuid);
+                      // Any alert can be reassigned (origin or correlated).
+                      const showMove = item.event_type === 'alert';
 
                       return (
                         <Fragment key={item.event_uuid}>
@@ -423,7 +503,7 @@ export default function Feed() {
                               )}
                             </td>
                             <td>
-                              {item.event_type === 'alert' && item.correlation_decision && (
+                              {item.event_type === 'alert' && (
                                 <CorrelationChip
                                   item={item}
                                   expanded={isExpanded}
@@ -432,20 +512,28 @@ export default function Feed() {
                               )}
                             </td>
                             <td>
-                              {showUnlink && (
+                              <div className="flex items-center gap-1 justify-end">
                                 <button
-                                  onClick={() => handleUnlink(item)}
-                                  disabled={isUnlinking}
-                                  className="btn btn-ghost p-1.5 text-orange-500 hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300"
-                                  title="Unlink alert from incident and spawn new investigation"
+                                  onClick={() => toggleRaw(item)}
+                                  className={`btn btn-ghost p-1.5 ${
+                                    isRawExpanded
+                                      ? 'text-primary-600 dark:text-primary-400'
+                                      : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+                                  }`}
+                                  title="View raw alert/event message"
                                 >
-                                  {isUnlinking ? (
-                                    <RefreshCw className="w-4 h-4 animate-spin" />
-                                  ) : (
-                                    <Unlink className="w-4 h-4" />
-                                  )}
+                                  <FileCode className="w-4 h-4" />
                                 </button>
-                              )}
+                                {showMove && (
+                                  <button
+                                    onClick={() => setMoveTarget(item)}
+                                    className="btn btn-ghost p-1.5 text-orange-500 hover:text-orange-700 dark:text-orange-400 dark:hover:text-orange-300"
+                                    title="Move alert to another incident (or unlink into a new one)"
+                                  >
+                                    <Shuffle className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                           {isExpanded && item.correlation_reasoning && (
@@ -457,6 +545,17 @@ export default function Feed() {
                                     {item.correlation_reasoning}
                                   </p>
                                 </div>
+                              </td>
+                            </tr>
+                          )}
+                          {isRawExpanded && (
+                            <tr key={`${item.event_uuid}-raw`} className="bg-gray-900">
+                              <td colSpan={7} className="px-4 py-3">
+                                <div className="flex items-center gap-2 text-gray-500 mb-2">
+                                  <FileCode className="w-3.5 h-3.5" />
+                                  <span className="text-[10px] font-medium uppercase tracking-wide">Raw message</span>
+                                </div>
+                                <RawEventContent state={rawData[item.event_uuid]} />
                               </td>
                             </tr>
                           )}
@@ -494,6 +593,16 @@ export default function Feed() {
             </>
           )}
         </div>
+      )}
+
+      {moveTarget && (
+        <MoveIncidentModal
+          alertUUID={moveTarget.event_uuid}
+          alertTitle={moveTarget.title}
+          currentIncidentUUID={moveTarget.incident_uuid}
+          onClose={() => setMoveTarget(null)}
+          onMoved={handleMoved}
+        />
       )}
     </div>
   );

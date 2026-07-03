@@ -45,6 +45,7 @@ type IncidentManager interface {
 	InsertFiringAlert(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert, decision, reasoning string) error
 	LinkAlertToIncident(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string) error
 	UnlinkAlertFromIncident(ctx context.Context, alertUUID string) (string, error)
+	MoveAlertToIncident(ctx context.Context, alertUUID, targetIncidentUUID string) (string, error)
 }
 
 // SkillIncidentManager combines SkillManager and IncidentManager for handlers
