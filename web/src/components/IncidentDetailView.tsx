@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import type { Incident, Alert } from '../types';
 import { incidentsApi } from '../api/client';
 import MoveIncidentModal from './MoveIncidentModal';
+import IncidentFeedbackStrip from './IncidentFeedbackStrip';
 
 type TabType = 'reasoning' | 'response' | 'alerts';
 
@@ -302,20 +303,25 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
             )}
           </div>
         ) : activeTab === 'response' ? (
-          <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-6 min-h-[200px]">
-            {incident.response ? (
-              <div className="whitespace-pre-wrap text-gray-700 dark:text-gray-300 font-mono text-sm">
-                {incident.response
-                  .replace(/\[FINAL_RESULT\]\n?/g, '')
-                  .replace(/\[\/FINAL_RESULT\]\n?/g, '')
-                  .trim()}
-              </div>
-            ) : (
-              <p className="text-gray-500 text-center py-8">
-                {incident.status === 'pending' || incident.status === 'running'
-                  ? 'Response will be available when the incident completes...'
-                  : 'No response available'}
-              </p>
+          <div>
+            <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-6 min-h-[200px]">
+              {incident.response ? (
+                <div className="whitespace-pre-wrap text-gray-700 dark:text-gray-300 font-mono text-sm">
+                  {incident.response
+                    .replace(/\[FINAL_RESULT\]\n?/g, '')
+                    .replace(/\[\/FINAL_RESULT\]\n?/g, '')
+                    .trim()}
+                </div>
+              ) : (
+                <p className="text-gray-500 text-center py-8">
+                  {incident.status === 'pending' || incident.status === 'running'
+                    ? 'Response will be available when the incident completes...'
+                    : 'No response available'}
+                </p>
+              )}
+            </div>
+            {(incident.status === 'completed' || incident.status === 'monitor' || incident.status === 'failed') && (
+              <IncidentFeedbackStrip incidentUUID={incident.uuid} />
             )}
           </div>
         ) : (

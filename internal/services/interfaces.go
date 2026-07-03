@@ -190,6 +190,22 @@ type CronJobManager interface {
 	RunNow(uuid string) error
 }
 
+// ProposalManager is the handler-facing surface for self-improvement
+// proposals: list/read, approve (apply through the existing managers),
+// reject, and the refinement-chat transcript store. Satisfied by
+// *ProposalService; handlers depend on this interface so tests can stub it.
+type ProposalManager interface {
+	ListProposals(status, kind string, limit, offset int) ([]database.Proposal, int64, error)
+	GetProposal(uuid string) (*database.Proposal, error)
+	CountPending() (int64, error)
+	Approve(ctx context.Context, uuid string) (*database.Proposal, error)
+	Reject(uuid string) (*database.Proposal, error)
+	SetChatIncident(uuid, incidentUUID string) error
+	AppendChatMessage(proposalUUID, role, content string) error
+	ListChatMessages(proposalUUID string) ([]database.ProposalChatMessage, error)
+	ChatToolAllowlist() []ToolAllowlistEntry
+}
+
 // MCPServerManager defines the interface for MCP server configuration CRUD operations.
 type MCPServerManager interface {
 	CreateMCPServer(config *database.MCPServerConfig) (*database.MCPServerConfig, error)

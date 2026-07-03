@@ -1,4 +1,4 @@
-import { useState, createContext, useContext } from 'react';
+import { useState, useEffect, createContext, useContext } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -15,11 +15,13 @@ import {
   Moon,
   LogOut,
   Rss,
+  Lightbulb,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useSetupStatus } from '../hooks/useSetupStatus';
 import OnboardingWizard from './OnboardingWizard';
+import { proposalsApi } from '../api/client';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -33,6 +35,7 @@ const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Incidents', href: '/incidents', icon: Activity },
   { name: 'Feed', href: '/feed', icon: Rss },
+  { name: 'Proposals', href: '/proposals', icon: Lightbulb },
   { name: 'Skills', href: '/skills', icon: Bot },
   { name: 'Tools', href: '/tools', icon: Wrench },
   { name: 'Context Files', href: '/context', icon: FileText },
@@ -41,12 +44,38 @@ const navigation = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
+// usePendingProposalsCount polls the pending-proposals count for the nav
+// badge. Failures render nothing (count 0) — the badge is decorative and
+// must never break navigation.
+function usePendingProposalsCount(): number {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await proposalsApi.pendingCount();
+        if (!cancelled) setCount(res.pending);
+      } catch {
+        if (!cancelled) setCount(0);
+      }
+    };
+    load();
+    const interval = window.setInterval(load, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+  return count;
+}
+
 export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const { user, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
   const { showOnboarding, dismissOnboarding, markComplete } = useSetupStatus();
+  const pendingProposals = usePendingProposalsCount();
 
   return (
     <SidebarContext.Provider value={{ collapsed }}>
@@ -105,7 +134,12 @@ export default function Layout({ children }: LayoutProps) {
                   >
                     <Icon size={20} className={isActive ? 'text-primary-500' : ''} />
                     {!collapsed && (
-                      <span className="text-sm font-medium">{item.name}</span>
+                      <span className="text-sm font-medium flex-1">{item.name}</span>
+                    )}
+                    {!collapsed && item.href === '/proposals' && pendingProposals > 0 && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                        {pendingProposals}
+                      </span>
                     )}
                   </Link>
                 );

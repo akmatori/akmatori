@@ -176,6 +176,7 @@ func (s *ToolService) EnsureToolTypes() error {
 		{Name: "kubernetes", Description: "Kubernetes read-only diagnostics for pods, deployments, nodes, services, events, and logs"},
 		{Name: "jira", Description: "Jira issue tracking integration (Cloud and Server/Data Center) for searching, viewing, commenting, and transitioning issues"},
 		{Name: "incidents", Description: "Read-only access to Akmatori's own incidents (list and get) for digests and reporting"},
+		{Name: "proposals", Description: "Create, inspect, and revise self-improvement proposals reviewed by operators in the Proposals tab"},
 	}
 
 	for _, tt := range toolTypes {
@@ -210,6 +211,25 @@ func (s *ToolService) EnsureToolTypes() error {
 	}
 	if err := s.db.Where("logical_name = ?", "incidents").First(&incidentsInstance).Error; err != nil {
 		return fmt.Errorf("failed to read incidents tool instance: %w", err)
+	}
+
+	// Seed a credential-less ToolInstance for "proposals" the same way.
+	var proposalsType database.ToolType
+	if err := s.db.Where("name = ?", "proposals").First(&proposalsType).Error; err != nil {
+		return fmt.Errorf("failed to find proposals tool type: %w", err)
+	}
+	proposalsInstance := database.ToolInstance{
+		ToolTypeID:  proposalsType.ID,
+		LogicalName: "proposals",
+		Name:        "Proposals",
+		Settings:    database.JSONB{},
+		Enabled:     true,
+	}
+	if err := s.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&proposalsInstance).Error; err != nil {
+		return fmt.Errorf("failed to seed proposals tool instance: %w", err)
+	}
+	if err := s.db.Where("logical_name = ?", "proposals").First(&proposalsInstance).Error; err != nil {
+		return fmt.Errorf("failed to read proposals tool instance: %w", err)
 	}
 
 	return nil

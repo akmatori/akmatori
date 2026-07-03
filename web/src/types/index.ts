@@ -218,6 +218,57 @@ export interface Runbook {
   updated_at: string;
 }
 
+// Self-improvement proposals
+export type ProposalKind =
+  | 'runbook_new'
+  | 'runbook_update'
+  | 'memory_new'
+  | 'memory_update'
+  | 'cron_new'
+  | 'cron_update'
+  | 'skill_prompt_update';
+
+export type ProposalStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'apply_failed'
+  | 'superseded';
+
+export interface Proposal {
+  id: number;
+  uuid: string;
+  kind: ProposalKind;
+  status: ProposalStatus;
+  title: string;
+  reasoning: string;
+  target_ref: string;
+  current_snapshot: string; // JSON string, per-kind shape
+  proposed_content: string; // JSON string, per-kind shape
+  source_incident_uuids?: { uuids?: string[] };
+  evaluation_run_uuid: string;
+  chat_incident_uuid: string;
+  created_by: string;
+  apply_error: string;
+  applied_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProposalChatMessage {
+  id: number;
+  proposal_uuid: string;
+  role: 'operator' | 'assistant';
+  content: string;
+  created_at: string;
+}
+
+export interface ProposalChatResponse {
+  messages: ProposalChatMessage[];
+  chat_incident_uuid: string;
+  chat_status: string;
+}
+
 export interface ValidateReferencesRequest {
   text: string;
 }

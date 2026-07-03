@@ -24,6 +24,7 @@ const (
 	IncidentSourceKindCron         = "cron"
 	IncidentSourceKindSlackMention = "slack_mention"
 	IncidentSourceKindManual       = "manual"
+	IncidentSourceKindProposal     = "proposal"
 )
 
 // Incident represents a spawned incident manager session

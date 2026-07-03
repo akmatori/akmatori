@@ -18,6 +18,8 @@ import IntegrationsPage from './pages/IntegrationsPage';
 import ChannelsPage from './pages/ChannelsPage';
 import CronJobsPage from './pages/CronJobsPage';
 import Feed from './pages/Feed';
+import Proposals from './pages/Proposals';
+import ProposalDetail from './pages/ProposalDetail';
 
 function App() {
   return (
@@ -38,6 +40,8 @@ function App() {
                       <Route path="/incidents/:uuid" element={<IncidentDetail />} />
                       <Route path="/incidents" element={<Incidents />} />
                       <Route path="/feed" element={<Feed />} />
+                      <Route path="/proposals/:uuid" element={<ProposalDetail />} />
+                      <Route path="/proposals" element={<Proposals />} />
                       <Route path="/skills" element={<Skills />} />
                       <Route path="/tools" element={<Tools />} />
                       <Route path="/context" element={<ContextFiles />} />

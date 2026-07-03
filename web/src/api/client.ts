@@ -43,6 +43,8 @@ import type {
   CronJob,
   CreateCronJobRequest,
   UpdateCronJobRequest,
+  Proposal,
+  ProposalChatResponse,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
@@ -275,6 +277,42 @@ export const incidentsApi = {
     fetchApi<CreateIncidentResponse>('/api/incidents', {
       method: 'POST',
       body: JSON.stringify(request),
+    }),
+
+  sendFeedback: (uuid: string, text: string) =>
+    fetchApi<Memory>(`/api/incidents/${uuid}/feedback`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    }),
+};
+
+// Self-improvement proposals API
+export const proposalsApi = {
+  list: (status?: string, kind?: string, page = 1, perPage = 50) => {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (kind) params.set('kind', kind);
+    params.set('page', String(page));
+    params.set('per_page', String(perPage));
+    return fetchApi<PaginatedResponse<Proposal>>(`/api/proposals?${params.toString()}`);
+  },
+
+  get: (uuid: string) => fetchApi<Proposal>(`/api/proposals/${uuid}`),
+
+  pendingCount: () => fetchApi<{ pending: number }>('/api/proposals/count'),
+
+  approve: (uuid: string) =>
+    fetchApi<Proposal>(`/api/proposals/${uuid}/approve`, { method: 'POST' }),
+
+  reject: (uuid: string) =>
+    fetchApi<Proposal>(`/api/proposals/${uuid}/reject`, { method: 'POST' }),
+
+  getChat: (uuid: string) => fetchApi<ProposalChatResponse>(`/api/proposals/${uuid}/chat`),
+
+  sendChat: (uuid: string, message: string) =>
+    fetchApi<{ chat_incident_uuid: string; status: string }>(`/api/proposals/${uuid}/chat`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
     }),
 };
 

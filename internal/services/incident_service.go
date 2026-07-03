@@ -303,6 +303,7 @@ func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, strin
 // rootSkillName is one of:
 //   - "incident-manager" — alert/Slack/manual investigations (default path)
 //   - "cron-agent"       — scheduled cron-driven runs (post-redesign)
+//   - "proposal-editor"  — proposal refinement chat turns
 //
 // Returns the new incident UUID + working directory so the caller can stream
 // updates back through it.
@@ -401,6 +402,8 @@ func (s *SkillService) generateAgentsMd(path string, rootSkillName string, incid
 		switch rootSkillName {
 		case "cron-agent":
 			prompt = database.DefaultCronAgentPrompt
+		case "proposal-editor":
+			prompt = database.DefaultProposalEditorPrompt
 		default:
 			prompt = database.DefaultIncidentManagerPrompt
 		}
@@ -428,6 +431,8 @@ func rootSkillHeader(rootSkillName string) string {
 	switch rootSkillName {
 	case "cron-agent":
 		return "Cron Agent"
+	case "proposal-editor":
+		return "Proposal Editor"
 	default:
 		return "Incident Manager"
 	}

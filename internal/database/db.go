@@ -172,6 +172,9 @@ func runMigrations(db *gorm.DB) error {
 		&CronJobTool{},
 		// Alerts (first-class alert rows attached to incidents)
 		&Alert{},
+		// Self-improvement proposals + refinement chat transcripts
+		&Proposal{},
+		&ProposalChatMessage{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
@@ -523,6 +526,12 @@ func InitializeDefaults() error {
 		return fmt.Errorf("failed to initialize cron-agent skill: %w", err)
 	}
 
+	// Initialize the proposal-editor system skill — the root prompt for
+	// operator↔agent refinement chats on self-improvement proposals.
+	if err := InitializeProposalEditorSkill(); err != nil {
+		return fmt.Errorf("failed to initialize proposal-editor skill: %w", err)
+	}
+
 	// Seed non-deletable system cron jobs (e.g. memory-curator). Operator can
 	// re-enable; the row itself is idempotently re-seeded on every boot.
 	if err := SeedSystemCronJobs(); err != nil {
@@ -784,6 +793,75 @@ func InitializeCronAgentSkill() error {
 	return nil
 }
 
+// DefaultProposalEditorPrompt is the root prompt for the proposal-editor
+// system skill. Each chat turn on a proposal runs a fresh agent session under
+// this prompt; the task body carries the live proposal JSON, the full chat
+// transcript so far, and the operator's new message. The agent persists
+// agreed revisions via the proposals gateway tool — it never applies them.
+const DefaultProposalEditorPrompt = `You are the Proposal Editor — you refine a single self-improvement proposal in conversation with a human operator. Your task message contains the proposal (kind, title, reasoning, current content snapshot, proposed content as JSON), the conversation so far, and the operator's latest message. Reply to the latest message.
+
+## Workflow
+
+1. **Understand**: Read the proposal and the operator's request carefully. The proposal was generated from evidence in past incidents; the operator wants to polish it before approving.
+
+2. **Verify before editing**: Ground every substantive change in evidence.
+   - Re-check the cited incidents: gateway_call("incidents.get", {"uuid": "<uuid>"}) / gateway_call("incidents.list", {...})
+   - Related SOPs and memories: delegate to the runbook-searcher / memory-searcher subagents, or read /akmatori/runbooks/, /akmatori/memory/, and /akmatori/skills/<name>/SKILL.md directly.
+   - Current cron definitions: gateway_call("proposals.list_cron_jobs", {})
+   - The proposal's own latest state: gateway_call("proposals.get", {"uuid": "<proposal uuid>"})
+
+3. **Persist agreed changes**: When you and the operator converge on a revision, save it with
+   gateway_call("proposals.update_draft", {"uuid": "<proposal uuid>", "proposed_content": <object>, "title": "...", "reasoning": "..."})
+   proposed_content must keep the exact JSON shape it arrived in. Only include the fields you are changing.
+
+4. **Confirm**: End your reply with one short paragraph summarizing what you changed in the draft (or a clarifying question when you need operator input before editing).
+
+## Rules
+
+- You never apply proposals — only the operator approves them via the UI.
+- You never call the memory-writer subagent and never edit files; the only mutation you make is proposals.update_draft.
+- Keep replies short and conversational; the operator reads them in a chat panel.
+- If the operator asks for something outside this proposal's scope, say so and suggest they reject the proposal or wait for the next evaluator run.`
+
+// InitializeProposalEditorSkill creates the proposal-editor system skill if
+// it doesn't exist, mirroring InitializeCronAgentSkill's pattern. The prompt
+// is hardcoded (DefaultProposalEditorPrompt) and the row is IsSystem=true so
+// operators cannot delete it.
+func InitializeProposalEditorSkill() error {
+	slog.Info("checking for proposal-editor system skill")
+
+	var skill Skill
+	result := DB.Where("name = ?", "proposal-editor").First(&skill)
+
+	if result.Error == nil {
+		if !skill.IsSystem {
+			if err := DB.Model(&skill).Update("is_system", true).Error; err != nil {
+				return fmt.Errorf("failed to mark proposal-editor skill as system: %w", err)
+			}
+			slog.Info("updated proposal-editor skill to system skill")
+		}
+		return nil
+	}
+	if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("lookup proposal-editor skill: %w", result.Error)
+	}
+
+	skill = Skill{
+		Name:        "proposal-editor",
+		Description: "Core system skill for refining self-improvement proposals in chat",
+		Category:    "system",
+		IsSystem:    true,
+		Enabled:     true,
+	}
+
+	if err := DB.Create(&skill).Error; err != nil {
+		return fmt.Errorf("failed to create proposal-editor skill: %w", err)
+	}
+
+	slog.Info("created proposal-editor system skill", "id", skill.ID)
+	return nil
+}
+
 // memoryCuratorCronName is the canonical name of the seeded memory-curator
 // system cron. Lifted into a constant so tests can pin idempotency without
 // duplicating the literal.
@@ -892,6 +970,98 @@ func SeedSystemCronJobs() error {
 		}
 		slog.Info("seeded system cron job", "name", s.Name, "enabled", false)
 	}
+	return nil
+}
+
+// improvementEvaluatorCronName is the canonical name of the seeded
+// improvement-evaluator system cron. Hoisted so tests can pin idempotency.
+const improvementEvaluatorCronName = "improvement-evaluator"
+
+// improvementEvaluatorCronSchedule runs the self-improvement review daily at
+// 05:00 UTC, after the 02:00 memory-curator pass has consolidated memory.
+const improvementEvaluatorCronSchedule = "0 5 * * *"
+
+// improvementEvaluatorCronPrompt is the task body for the improvement-evaluator
+// system cron. It runs under the cron-agent root skill with the incidents and
+// proposals tools allowlisted, reviews recent incident history plus operator
+// feedback, and emits improvement proposals for operator review in the UI.
+const improvementEvaluatorCronPrompt = `You are running the periodic self-improvement review. Goal: propose concrete changes that improve root-cause correctness and reduce analysis time for future investigations.
+
+1. Gather recent history. List incidents started in the last 24 hours via gateway_call("incidents.list", {...}) — query status "monitor", "completed", and "failed" separately (source_kind "alert" and "cron"), using the "from" filter derived from the current-time header. Pick up to 10 incidents for deep review, prioritizing: failed runs, the slowest execution_time_ms, and repeated titles. Fetch each with gateway_call("incidents.get", {"uuid": ...}) and study the full_log for wasted investigation steps, missing runbook coverage, wrong initial hypotheses, and tool errors.
+
+2. Gather operator feedback. Ask the memory-searcher subagent for recent operator feedback (type: feedback) and recurring incident patterns relevant to what you saw in step 1.
+
+3. Inspect current assets before proposing changes: read /akmatori/runbooks/ and /akmatori/memory/global/ directly, read /akmatori/skills/<name>/SKILL.md for any non-system skill you want to change, and call gateway_call("proposals.list_cron_jobs", {}) for current cron definitions. Never propose an update to something you have not read in its current form.
+
+4. Dedup. Call gateway_call("proposals.list", {"status": "pending"}) and never re-propose a change that is already pending.
+
+5. Emit at most 5 proposals via gateway_call("proposals.create", {...}). Choose the kind per proposal: runbook_new, runbook_update, memory_new, memory_update, cron_new, cron_update, or skill_prompt_update (non-system skills only). Each proposal needs: a title (imperative, under 80 chars), reasoning that cites the concrete incident UUIDs driving it, source_incident_uuids listing those UUIDs, target_ref for *_update kinds, and proposed_content in the documented JSON shape for the kind. Quality bar: only propose changes backed by at least 2 incidents or explicit operator feedback; prefer one high-confidence proposal over five speculative ones.
+
+6. Final summary: one line per proposal created (title + kind), or "no-op: nothing actionable" when the review surfaced nothing worth proposing.`
+
+// SeedImprovementEvaluatorCron idempotently seeds the improvement-evaluator
+// system cron with the incidents + proposals tools attached. Same semantics
+// as SeedSystemCronJobs (created disabled, operator edits preserved, shadow
+// rows refuse the seed) — but split out because it must run AFTER
+// EnsureToolTypes has seeded the credential-less incidents/proposals tool
+// instances, which happens later in the boot sequence than InitializeDefaults.
+func SeedImprovementEvaluatorCron() error {
+	var existing CronJob
+	err := DB.Where("name = ? AND is_system = ?", improvementEvaluatorCronName, true).First(&existing).Error
+	if err == nil {
+		// Row exists — preserve operator edits to schedule/prompt/tools/enabled.
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("lookup system cron %s: %w", improvementEvaluatorCronName, err)
+	}
+
+	// Refuse to create when a non-system row shadows the slot (same recovery
+	// semantics as SeedSystemCronJobs).
+	var shadow int64
+	if err := DB.Model(&CronJob{}).Where("name = ?", improvementEvaluatorCronName).Count(&shadow).Error; err != nil {
+		return fmt.Errorf("shadow check for system cron %s: %w", improvementEvaluatorCronName, err)
+	}
+	if shadow > 0 {
+		slog.Warn("system cron seed skipped: non-system row shadows the name",
+			"name", improvementEvaluatorCronName)
+		return nil
+	}
+
+	// The allowlist tools must exist before seeding; missing instances mean
+	// the boot sequence called this too early (before EnsureToolTypes).
+	var tools []ToolInstance
+	if err := DB.Where("logical_name IN ?", []string{"incidents", "proposals"}).Find(&tools).Error; err != nil {
+		return fmt.Errorf("lookup evaluator cron tools: %w", err)
+	}
+	if len(tools) < 2 {
+		return fmt.Errorf("seed system cron %s: incidents/proposals tool instances not seeded yet (found %d of 2) — call after EnsureToolTypes", improvementEvaluatorCronName, len(tools))
+	}
+
+	row := &CronJob{
+		UUID:     uuid.New().String(),
+		Name:     improvementEvaluatorCronName,
+		Schedule: improvementEvaluatorCronSchedule,
+		Prompt:   improvementEvaluatorCronPrompt,
+		IsSystem: true,
+		Enabled:  false, // operator opts in
+		Tools:    tools,
+	}
+	// Same insert + enabled-pin transaction as SeedSystemCronJobs: GORM v2
+	// omits zero-value bools from INSERT, so the column default would flip
+	// enabled to true without the explicit pin.
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(row).Error; err != nil {
+			return fmt.Errorf("seed system cron %s: %w", improvementEvaluatorCronName, err)
+		}
+		if err := tx.Model(row).Update("enabled", false).Error; err != nil {
+			return fmt.Errorf("pin seeded system cron %s to disabled: %w", improvementEvaluatorCronName, err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	slog.Info("seeded system cron job", "name", improvementEvaluatorCronName, "enabled", false)
 	return nil
 }
 

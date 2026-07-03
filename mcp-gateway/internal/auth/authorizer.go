@@ -18,6 +18,7 @@ type AllowlistEntry struct {
 // namespace, callers must authorize a specific instance by ID or logical name.
 var credentiallessNamespaces = map[string]bool{
 	"incidents": true,
+	"proposals": true,
 }
 
 // incidentAllowlist stores an allowlist with its expiry time.

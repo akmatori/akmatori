@@ -314,10 +314,10 @@ func (s *SkillService) SyncSkillsFromFilesystem() error {
 // manifest. Used by the memory CRUD handlers so a skill-scoped memory write
 // is reflected in that skill's prompt without waiting for a restart or a
 // manual prompt edit. Returns nil silently for the hardcoded-prompt system
-// skills "incident-manager" and "cron-agent" (no SKILL.md is generated for
-// them — the agent worker injects their prompts directly into AGENTS.md).
+// skills "incident-manager", "cron-agent", and "proposal-editor" (no SKILL.md
+// is generated for them — their prompts are injected directly into AGENTS.md).
 func (s *SkillService) RegenerateSkillMd(name string) error {
-	if name == "" || name == "incident-manager" || name == "cron-agent" {
+	if name == "" || name == "incident-manager" || name == "cron-agent" || name == "proposal-editor" {
 		return nil
 	}
 	skill, err := s.GetSkill(name)
@@ -367,9 +367,9 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 
 	for _, skill := range skills {
 		// Skip hardcoded-prompt system skills (handled directly by AGENTS.md
-		// for incident-manager and by the cron path for cron-agent — no
-		// SKILL.md is generated for them).
-		if skill.Name == "incident-manager" || skill.Name == "cron-agent" {
+		// for incident-manager and by the respective spawn paths for
+		// cron-agent and proposal-editor — no SKILL.md is generated for them).
+		if skill.Name == "incident-manager" || skill.Name == "cron-agent" || skill.Name == "proposal-editor" {
 			continue
 		}
 

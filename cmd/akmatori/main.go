@@ -109,6 +109,13 @@ func main() {
 		slog.Info("tool types ready")
 	}
 
+	// Seed the improvement-evaluator system cron. Runs here (not in
+	// InitializeDefaults) because it attaches the credential-less
+	// incidents/proposals tool instances that EnsureToolTypes just seeded.
+	if err := database.SeedImprovementEvaluatorCron(); err != nil {
+		slog.Warn("failed to seed improvement-evaluator cron", "err", err)
+	}
+
 	// Data directory for skills and incidents (hardcoded)
 	const dataDir = "/akmatori"
 
@@ -325,6 +332,12 @@ func main() {
 	// WebSocket as alert/Slack flows.
 	cronRunner := services.NewCronRunner(channelService, providerRegistry, skillService, agentWSHandler)
 	apiHandler.SetCronJobManager(cronRunner)
+
+	// Self-improvement proposals: apply-on-approve goes through the same
+	// services operators use (runbooks, memories, crons, skill prompts), so
+	// disk sync / runner reload / SKILL.md regen all behave like manual edits.
+	proposalService := services.NewProposalService(database.GetDB(), runbookService, memoryService, cronRunner, skillService)
+	apiHandler.SetProposalService(proposalService)
 
 	// Wire listener channel reload: when channels (or, transitionally, alert
 	// sources) are created/updated/deleted via API, reload the Slack handler's

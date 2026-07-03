@@ -24,6 +24,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/tools/netbox"
 	"github.com/akmatori/mcp-gateway/internal/tools/pagerduty"
 	"github.com/akmatori/mcp-gateway/internal/tools/postgresql"
+	"github.com/akmatori/mcp-gateway/internal/tools/proposals"
 	"github.com/akmatori/mcp-gateway/internal/tools/ssh"
 	"github.com/akmatori/mcp-gateway/internal/tools/victoriametrics"
 	"github.com/akmatori/mcp-gateway/internal/tools/zabbix"
@@ -78,6 +79,7 @@ type Registry struct {
 	jiraTool         *jira.JiraTool
 	jiraLimit        *ratelimit.Limiter
 	incidentsTool    *incidents.IncidentsTool
+	proposalsTool    *proposals.ProposalsTool
 
 	// HTTP connector state
 	httpExecutor       *httpconnector.HTTPConnectorExecutor
@@ -178,6 +180,9 @@ func (r *Registry) RegisterAllTools() {
 	// Register Incidents tools (no rate limiter — local DB queries)
 	r.registerIncidentsTools()
 
+	// Register Proposals tools (no rate limiter — local DB queries)
+	r.registerProposalsTools()
+
 	r.logger.Println("All tools registered")
 }
 
@@ -237,6 +242,7 @@ var builtInToolNamespaces = map[string]bool{
 	"kubernetes":       true,
 	"jira":             true,
 	"incidents":        true,
+	"proposals":        true,
 }
 
 // DefaultMCPProxyLoader loads MCP server configs from the database and converts them
@@ -4821,4 +4827,159 @@ func (r *Registry) registerIncidentsTools() {
 	)
 
 	r.logger.Println("Incidents tools registered (2 methods)")
+}
+
+// registerProposalsTools registers the proposals.* tools used by the
+// improvement-evaluator cron and the proposal-editor chat agent.
+// No rate limiter — these are local DB queries.
+func (r *Registry) registerProposalsTools() {
+	r.proposalsTool = proposals.NewProposalsTool(database.DB, r.logger)
+
+	// proposals.create
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "proposals.create",
+			Description: "Create a self-improvement proposal for operator review. Deduplicates against pending proposals for the same target; returns {deduplicated: true, uuid} when one already exists.",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"kind": {
+						Type:        "string",
+						Description: "Proposal kind: runbook_new, runbook_update, memory_new, memory_update, cron_new, cron_update, or skill_prompt_update (non-system skills only)",
+					},
+					"title": {
+						Type:        "string",
+						Description: "Imperative title under 80 chars (e.g. \"Add runbook for nginx 502 storms\")",
+					},
+					"reasoning": {
+						Type:        "string",
+						Description: "Why this change helps, citing the concrete incident UUIDs that motivated it",
+					},
+					"target_ref": {
+						Type:        "string",
+						Description: "Required for *_update kinds: runbook ID for runbook_update, \"<scope>/<name>\" for memory_update, cron job UUID for cron_update, skill name for skill_prompt_update",
+					},
+					"proposed_content": {
+						Type:        "object",
+						Description: "Per-kind JSON object. runbook: {title, content}. memory: {scope, type, name, description, body}. cron: {name, schedule, prompt, tool_logical_names?}. skill_prompt: {skill_name, prompt}.",
+					},
+					"source_incident_uuids": {
+						Type:        "array",
+						Description: "Incident UUIDs that are evidence for this proposal (validated; unknown UUIDs are dropped)",
+					},
+				},
+				Required: []string{"kind", "title", "proposed_content"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.proposalsTool.Create(ctx, incidentID, args)
+		},
+	)
+
+	// proposals.list
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "proposals.list",
+			Description: "List self-improvement proposals filtered by status (default pending) and kind. Returns summary fields; set include_content=true for full bodies.",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"status": {
+						Type:        "string",
+						Description: "Filter by status: pending (default), approved, rejected, apply_failed, superseded",
+					},
+					"kind": {
+						Type:        "string",
+						Description: "Filter by proposal kind",
+					},
+					"include_content": {
+						Type:        "boolean",
+						Description: "Include reasoning, current_snapshot, and proposed_content in each row (default false)",
+					},
+					"limit": {
+						Type:        "integer",
+						Description: "Maximum number of proposals to return (default 50, max 200)",
+					},
+					"offset": {
+						Type:        "integer",
+						Description: "Number of proposals to skip for pagination",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.proposalsTool.List(ctx, incidentID, args)
+		},
+	)
+
+	// proposals.get
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "proposals.get",
+			Description: "Get the full record of a single self-improvement proposal by UUID, including proposed content and current snapshot.",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"uuid": {
+						Type:        "string",
+						Description: "Proposal UUID (required)",
+					},
+				},
+				Required: []string{"uuid"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.proposalsTool.Get(ctx, incidentID, args)
+		},
+	)
+
+	// proposals.update_draft
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "proposals.update_draft",
+			Description: "Revise a pending proposal's title, reasoning, and/or proposed_content. Only pending proposals can be revised; proposed_content must keep the per-kind JSON shape.",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"uuid": {
+						Type:        "string",
+						Description: "Proposal UUID (required)",
+					},
+					"title": {
+						Type:        "string",
+						Description: "New title (optional)",
+					},
+					"reasoning": {
+						Type:        "string",
+						Description: "New reasoning (optional)",
+					},
+					"proposed_content": {
+						Type:        "object",
+						Description: "Full replacement proposed_content object in the same per-kind shape (optional)",
+					},
+				},
+				Required: []string{"uuid"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.proposalsTool.UpdateDraft(ctx, incidentID, args)
+		},
+	)
+
+	// proposals.list_cron_jobs
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "proposals.list_cron_jobs",
+			Description: "List current cron job definitions (name, schedule, prompt, tools) so cron_new/cron_update proposals can be grounded in the current state.",
+			InputSchema: mcp.InputSchema{
+				Type:       "object",
+				Properties: map[string]mcp.Property{},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.proposalsTool.ListCronJobs(ctx, incidentID, args)
+		},
+	)
+
+	r.logger.Println("Proposals tools registered (5 methods)")
 }
