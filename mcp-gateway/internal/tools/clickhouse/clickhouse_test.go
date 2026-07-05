@@ -363,7 +363,7 @@ func TestGetConfig_CacheHit(t *testing.T) {
 	}
 	tool.configCache.Set(configCacheKey("test-incident"), config)
 
-	got, err := tool.resolveConfigFromDB(nil, "test-incident")
+	got, err := tool.resolveConfigFromDB(context.TODO(), "test-incident")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestGetConfig_LogicalNameCacheHit(t *testing.T) {
 	}
 	tool.configCache.Set("creds:logical:clickhouse:prod-ch", config)
 
-	got, err := tool.resolveConfigFromDB(nil, "test-incident", "prod-ch")
+	got, err := tool.resolveConfigFromDB(context.TODO(), "test-incident", "prod-ch")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -592,7 +592,7 @@ func TestExecuteQuery_RequiresQuery(t *testing.T) {
 	tool := NewClickHouseTool(testLogger(), nil)
 	defer tool.Stop()
 
-	_, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{})
+	_, err := tool.ExecuteQuery(context.TODO(), "test-incident", map[string]interface{}{})
 	if err == nil {
 		t.Error("expected error for missing query")
 	}
@@ -605,7 +605,7 @@ func TestExecuteQuery_EmptyQuery(t *testing.T) {
 	tool := NewClickHouseTool(testLogger(), nil)
 	defer tool.Stop()
 
-	_, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{"query": ""})
+	_, err := tool.ExecuteQuery(context.TODO(), "test-incident", map[string]interface{}{"query": ""})
 	if err == nil {
 		t.Error("expected error for empty query")
 	}
@@ -631,7 +631,7 @@ func TestExecuteQuery_RejectsNonSelect(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{"query": tt.query})
+			_, err := tool.ExecuteQuery(context.TODO(), "test-incident", map[string]interface{}{"query": tt.query})
 			if err == nil {
 				t.Error("expected error for non-SELECT query")
 			}
@@ -711,7 +711,7 @@ func TestExecuteQuery_CacheHit(t *testing.T) {
 	expectedResult := `[{"id":1,"name":"alice"}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
 
-	result, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{
+	result, err := tool.ExecuteQuery(context.TODO(), "test-incident", map[string]interface{}{
 		"query": "SELECT * FROM users",
 	})
 	if err != nil {
@@ -781,7 +781,7 @@ func TestDescribeTable_RequiresTableName(t *testing.T) {
 	tool := NewClickHouseTool(testLogger(), nil)
 	defer tool.Stop()
 
-	_, err := tool.DescribeTable(nil, "test-incident", map[string]interface{}{})
+	_, err := tool.DescribeTable(context.TODO(), "test-incident", map[string]interface{}{})
 	if err == nil {
 		t.Error("expected error for missing table_name")
 	}
@@ -906,7 +906,7 @@ func TestGetPartsInfo_RequiresTableName(t *testing.T) {
 	tool := NewClickHouseTool(testLogger(), nil)
 	defer tool.Stop()
 
-	_, err := tool.GetPartsInfo(nil, "test-incident", map[string]interface{}{})
+	_, err := tool.GetPartsInfo(context.TODO(), "test-incident", map[string]interface{}{})
 	if err == nil {
 		t.Error("expected error for missing table_name")
 	}
@@ -1355,7 +1355,7 @@ func TestExecuteQuery_WithLogicalName(t *testing.T) {
 	expectedResult := `[{"1":1}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
 
-	result, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{
+	result, err := tool.ExecuteQuery(context.TODO(), "test-incident", map[string]interface{}{
 		"query":        "SELECT 1",
 		"logical_name": "prod-ch",
 	})
