@@ -74,8 +74,13 @@ export default function Layout({ children }: LayoutProps) {
   const { user, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const { showOnboarding, dismissOnboarding, markComplete } = useSetupStatus();
   const pendingProposals = usePendingProposalsCount();
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
 
   return (
     <SidebarContext.Provider value={{ collapsed }}>
@@ -87,12 +92,22 @@ export default function Layout({ children }: LayoutProps) {
         />
       )}
 
-      <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
+      <div className="flex h-dvh bg-gray-50 dark:bg-gray-900">
+          {/* Mobile backdrop */}
+          {mobileOpen && (
+            <div
+              className="fixed inset-0 z-30 bg-black/40 md:hidden"
+              onClick={() => setMobileOpen(false)}
+            />
+          )}
+
           {/* Sidebar */}
           <aside
             className={`
               flex flex-col border-r border-gray-200 dark:border-gray-700
               bg-white dark:bg-gray-800 transition-all duration-200 ease-in-out
+              fixed inset-y-0 left-0 z-40 md:static md:inset-auto
+              ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0
               ${collapsed ? 'w-16' : 'w-64'}
             `}
           >
@@ -122,6 +137,7 @@ export default function Layout({ children }: LayoutProps) {
                   <Link
                     key={item.name}
                     to={item.href}
+                    onClick={() => setMobileOpen(false)}
                     className={`
                       flex items-center gap-3 px-3 py-2.5 rounded-lg
                       transition-colors duration-150
@@ -167,7 +183,7 @@ export default function Layout({ children }: LayoutProps) {
               )}
 
               {/* Theme Toggle & Collapse */}
-              <div className={`flex ${collapsed ? 'justify-center' : 'justify-between'} items-center px-3 py-2`}>
+              <div className={`hidden md:flex ${collapsed ? 'justify-center' : 'justify-between'} items-center px-3 py-2`}>
                 {/* Dark/Light Mode Toggle */}
                 <button
                   onClick={() => setTheme(theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'light' : 'dark')}
@@ -194,9 +210,16 @@ export default function Layout({ children }: LayoutProps) {
           </aside>
 
           {/* Main content */}
-          <main className="flex-1 flex flex-col overflow-hidden">
+          <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
             {/* Top bar */}
             <header className="h-16 flex items-center justify-between px-6 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+              <button
+                className="block md:hidden p-2 rounded-md text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+                onClick={() => setMobileOpen(true)}
+                aria-label="Open menu"
+              >
+                <Menu size={20} />
+              </button>
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
                   {navigation.find(n => n.href === location.pathname)?.name || 'Page'}

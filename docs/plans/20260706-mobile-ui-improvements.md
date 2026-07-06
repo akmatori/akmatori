@@ -30,16 +30,16 @@ Make the Akmatori frontend usable on mobile by adding a slide-in sidebar drawer 
 
 The sidebar is currently always in the flex flow and never hides. On mobile, we need it to be a `position:fixed` overlay that slides in/out.
 
-- [ ] Add `mobileOpen` boolean state (default `false`)
-- [ ] Add useEffect to close sidebar on location.pathname change: `setMobileOpen(false)`
-- [ ] Change root container: `h-screen` → `h-dvh` (avoids iOS address-bar clipping)
-- [ ] Add semi-transparent backdrop: `<div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setMobileOpen(false)}>` rendered when `mobileOpen` is true
-- [ ] On the `<aside>`: add `fixed inset-y-0 left-0 z-40 md:static md:inset-auto` and drive translation with `${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`; keep existing `transition-all duration-200` and width classes unchanged
-- [ ] Add `min-w-0` to `<main>` so flex content does not overflow on narrow screens
-- [ ] Add hamburger button to the top `<header>` bar: `<button className="block md:hidden p-2 ..." onClick={() => setMobileOpen(true)}><Menu size={20} /></button>` — placed as the first child of the header
-- [ ] Hide the desktop collapse toggle button on mobile: add `hidden md:flex` to the collapse toggle row in the sidebar footer
-- [ ] Add `onClick={() => setMobileOpen(false)}` to every `<Link>` in the nav (no-op on desktop, closes drawer on mobile)
-- [ ] Run `make test-web`
+- [x] Add `mobileOpen` boolean state (default `false`)
+- [x] Add useEffect to close sidebar on location.pathname change: `setMobileOpen(false)`
+- [x] Change root container: `h-screen` → `h-dvh` (avoids iOS address-bar clipping)
+- [x] Add semi-transparent backdrop: `<div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setMobileOpen(false)}>` rendered when `mobileOpen` is true
+- [x] On the `<aside>`: add `fixed inset-y-0 left-0 z-40 md:static md:inset-auto` and drive translation with `${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`; keep existing `transition-all duration-200` and width classes unchanged
+- [x] Add `min-w-0` to `<main>` so flex content does not overflow on narrow screens
+- [x] Add hamburger button to the top `<header>` bar: `<button className="block md:hidden p-2 ..." onClick={() => setMobileOpen(true)}><Menu size={20} /></button>` — placed as the first child of the header
+- [x] Hide the desktop collapse toggle button on mobile: add `hidden md:flex` to the collapse toggle row in the sidebar footer
+- [x] Add `onClick={() => setMobileOpen(false)}` to every `<Link>` in the nav (no-op on desktop, closes drawer on mobile)
+- [x] Run `make test-web`
 
 ### Task 2: Content spacing and PageHeader responsiveness
 
