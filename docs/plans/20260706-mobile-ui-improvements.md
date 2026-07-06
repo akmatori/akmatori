@@ -59,8 +59,8 @@ The sidebar is currently always in the flex flow and never hides. On mobile, we 
 **Files:**
 - Modify: `web/src/pages/Proposals.tsx`
 
-- [ ] Find the `<table>` element and wrap it in `<div className="overflow-x-auto">` (matching the pattern used in Incidents.tsx, Feed.tsx, and all other list pages)
-- [ ] Run `make test-web`
+- [x] Find the `<table>` element and wrap it in `<div className="overflow-x-auto">` (matching the pattern used in Incidents.tsx, Feed.tsx, and all other list pages)
+- [x] Run `make test-web`
 
 ### Task 4: Sidebar footer touch targets
 
