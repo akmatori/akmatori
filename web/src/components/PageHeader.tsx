@@ -20,11 +20,7 @@ export default function PageHeader({ title, description, action }: PageHeaderPro
             </p>
           )}
         </div>
-        {action && (
-          <div>
-            {action}
-          </div>
-        )}
+        {action}
       </div>
     </div>
   );

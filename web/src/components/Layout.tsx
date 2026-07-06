@@ -82,6 +82,18 @@ export default function Layout({ children }: LayoutProps) {
     setMobileOpen(false);
   }, [location.pathname]);
 
+  useEffect(() => {
+    document.body.classList.toggle('overflow-hidden', mobileOpen);
+    return () => { document.body.classList.remove('overflow-hidden'); };
+  }, [mobileOpen]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobileOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [mobileOpen]);
+
   return (
     <SidebarContext.Provider value={{ collapsed }}>
       {/* Onboarding Wizard */}
@@ -108,7 +120,7 @@ export default function Layout({ children }: LayoutProps) {
               bg-white dark:bg-gray-800 transition-all duration-200 ease-in-out
               fixed inset-y-0 left-0 z-40 md:static md:inset-auto
               ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0
-              ${collapsed ? 'w-16' : 'w-64'}
+              ${collapsed ? 'w-64 md:w-16' : 'w-64'}
             `}
           >
             {/* Logo */}
@@ -183,7 +195,7 @@ export default function Layout({ children }: LayoutProps) {
               )}
 
               {/* Theme Toggle & Collapse */}
-              <div className={`hidden md:flex ${collapsed ? 'justify-center' : 'justify-between'} items-center px-3 py-2`}>
+              <div className={`flex ${collapsed ? 'justify-center' : 'justify-between'} items-center px-3 py-2`}>
                 {/* Dark/Light Mode Toggle */}
                 <button
                   onClick={() => setTheme(theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'light' : 'dark')}
@@ -200,7 +212,7 @@ export default function Layout({ children }: LayoutProps) {
                 {/* Collapse Toggle */}
                 <button
                   onClick={() => setCollapsed(!collapsed)}
-                  className="p-2.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+                  className="hidden md:block p-2.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
                   title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
                 >
                   {collapsed ? <Menu size={16} /> : <ChevronLeft size={16} />}
@@ -214,6 +226,7 @@ export default function Layout({ children }: LayoutProps) {
             {/* Top bar */}
             <header className="h-16 flex items-center justify-between px-4 md:px-6 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
               <button
+                type="button"
                 className="block md:hidden p-2 rounded-md text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
                 onClick={() => setMobileOpen(true)}
                 aria-label="Open menu"
