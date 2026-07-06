@@ -174,7 +174,7 @@ export default function Layout({ children }: LayoutProps) {
                   )}
                   <button
                     onClick={logout}
-                    className="p-1.5 rounded-md text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+                    className="p-2.5 rounded-md text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
                     title="Sign out"
                   >
                     <LogOut size={14} />
@@ -187,7 +187,7 @@ export default function Layout({ children }: LayoutProps) {
                 {/* Dark/Light Mode Toggle */}
                 <button
                   onClick={() => setTheme(theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'light' : 'dark')}
-                  className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+                  className="p-2.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
                   title={theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'Switch to light mode' : 'Switch to dark mode'}
                 >
                   {theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? (
@@ -200,7 +200,7 @@ export default function Layout({ children }: LayoutProps) {
                 {/* Collapse Toggle */}
                 <button
                   onClick={() => setCollapsed(!collapsed)}
-                  className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+                  className="p-2.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
                   title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
                 >
                   {collapsed ? <Menu size={16} /> : <ChevronLeft size={16} />}

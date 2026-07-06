@@ -69,8 +69,8 @@ The sidebar is currently always in the flex flow and never hides. On mobile, we 
 
 The sidebar footer buttons (logout, theme toggle, collapse) use `p-1.5` (~28px tap target). Mobile needs ~44px minimum.
 
-- [ ] Change all `p-1.5` icon buttons in the sidebar footer section to `p-2.5` (applies to logout, theme toggle, and collapse buttons — 3 buttons total)
-- [ ] Run `make test-web`
+- [x] Change all `p-1.5` icon buttons in the sidebar footer section to `p-2.5` (applies to logout, theme toggle, and collapse buttons — 3 buttons total)
+- [x] Run `make test-web`
 
 ### Task 5: Verify acceptance criteria
 
