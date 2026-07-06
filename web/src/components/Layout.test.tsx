@@ -1,7 +1,19 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import Layout from './Layout';
+
+beforeAll(() => {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }),
+  });
+});
 
 vi.mock('../context/AuthContext', () => ({
   useAuth: () => ({ user: { username: 'tester' }, logout: vi.fn() }),
@@ -74,6 +86,19 @@ describe('Layout mobile sidebar', () => {
     const aside = document.querySelector('aside');
     expect(aside?.className).toContain('w-64');
     expect(aside?.className).not.toContain('w-16');
+  });
+
+  it('nav labels visible in mobile drawer even when sidebar was collapsed on desktop', () => {
+    renderLayout();
+    // Collapse the sidebar (button is always in DOM in jsdom regardless of CSS hidden class)
+    const collapseBtn = screen.getByTitle('Collapse sidebar');
+    fireEvent.click(collapseBtn);
+    // Open the mobile drawer
+    fireEvent.click(screen.getByLabelText('Open menu'));
+    // Nav item labels must be visible in the drawer — query within <nav> to avoid matching the <h2> header
+    const nav = document.querySelector('nav');
+    expect(nav?.textContent).toContain('Dashboard');
+    expect(nav?.textContent).toContain('Incidents');
   });
 
   it('theme toggle is present in the sidebar (accessible on mobile)', () => {

@@ -75,6 +75,7 @@ export default function Layout({ children }: LayoutProps) {
   const { theme, setTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
   const { showOnboarding, dismissOnboarding, markComplete } = useSetupStatus();
   const pendingProposals = usePendingProposalsCount();
 
@@ -93,6 +94,13 @@ export default function Layout({ children }: LayoutProps) {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [mobileOpen]);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   return (
     <SidebarContext.Provider value={{ collapsed }}>
@@ -115,6 +123,8 @@ export default function Layout({ children }: LayoutProps) {
 
           {/* Sidebar */}
           <aside
+            id="mobile-sidebar"
+            aria-hidden={isMobile && !mobileOpen ? true : undefined}
             className={`
               flex flex-col border-r border-gray-200 dark:border-gray-700
               bg-white dark:bg-gray-800 transition-all duration-200 ease-in-out
@@ -131,7 +141,7 @@ export default function Layout({ children }: LayoutProps) {
                   alt="Akmatori"
                   className="w-8 h-8 flex-shrink-0"
                 />
-                {!collapsed && (
+                {(!collapsed || mobileOpen) && (
                   <h1 className="font-semibold text-gray-900 dark:text-white animate-fade-in">
                     Akmatori
                   </h1>
@@ -161,10 +171,10 @@ export default function Layout({ children }: LayoutProps) {
                     title={collapsed ? item.name : undefined}
                   >
                     <Icon size={20} className={isActive ? 'text-primary-500' : ''} />
-                    {!collapsed && (
+                    {(!collapsed || mobileOpen) && (
                       <span className="text-sm font-medium flex-1">{item.name}</span>
                     )}
-                    {!collapsed && item.href === '/proposals' && pendingProposals > 0 && (
+                    {(!collapsed || mobileOpen) && item.href === '/proposals' && pendingProposals > 0 && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
                         {pendingProposals}
                       </span>
@@ -179,7 +189,7 @@ export default function Layout({ children }: LayoutProps) {
               {/* User Info & Logout */}
               {user && (
                 <div className={`flex ${collapsed ? 'justify-center' : 'justify-between'} items-center px-3 py-2`}>
-                  {!collapsed && (
+                  {(!collapsed || mobileOpen) && (
                     <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
                       {user.username}
                     </span>
@@ -230,6 +240,8 @@ export default function Layout({ children }: LayoutProps) {
                 className="block md:hidden p-2 rounded-md text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
                 onClick={() => setMobileOpen(true)}
                 aria-label="Open menu"
+                aria-expanded={mobileOpen}
+                aria-controls="mobile-sidebar"
               >
                 <Menu size={20} />
               </button>
