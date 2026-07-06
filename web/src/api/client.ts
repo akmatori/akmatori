@@ -52,10 +52,15 @@ const TOKEN_KEY = 'aiops_auth_token';
 
 class ApiError extends Error {
   status: number;
+  // Parsed JSON error body, when the response was JSON (e.g. the
+  // requires_confirmation/firing_alert_count shape returned by
+  // POST /api/incidents/{uuid}/close).
+  body?: unknown;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, body?: unknown) {
     super(message);
     this.status = status;
+    this.body = body;
     this.name = 'ApiError';
   }
 }
@@ -136,14 +141,16 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
   if (!response.ok) {
     // Try JSON first (new standard format), fall back to text
     let message: string;
+    let body: unknown;
     const text = await response.text();
     try {
       const json = JSON.parse(text);
+      body = json;
       message = json.error || text || response.statusText;
     } catch {
       message = text || response.statusText;
     }
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, message, body);
   }
 
   // Handle 204 No Content
@@ -283,6 +290,16 @@ export const incidentsApi = {
     fetchApi<Memory>(`/api/incidents/${uuid}/feedback`, {
       method: 'POST',
       body: JSON.stringify({ text }),
+    }),
+
+  // Manually close an incident. If it still has firing alerts and confirm is
+  // false, the request rejects with an ApiError(409) whose `body` is
+  // `{ requires_confirmation: true, firing_alert_count: number }` — callers
+  // should surface that to the operator and retry with confirm=true.
+  close: (uuid: string, confirm = false) =>
+    fetchApi<{ status: string }>(`/api/incidents/${uuid}/close`, {
+      method: 'POST',
+      body: JSON.stringify({ confirm }),
     }),
 };
 
@@ -671,6 +688,12 @@ export const alertsApi = {
     fetchApi<{ incident_uuid: string }>(`/api/alerts/${encodeURIComponent(uuid)}/move`, {
       method: 'POST',
       body: JSON.stringify({ target_incident_uuid: targetIncidentUUID ?? '' }),
+    }),
+
+  // Manually mark a firing alert resolved.
+  resolve: (uuid: string) =>
+    fetchApi<{ status: string }>(`/api/alerts/${encodeURIComponent(uuid)}/resolve`, {
+      method: 'POST',
     }),
 };
 

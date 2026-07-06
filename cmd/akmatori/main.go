@@ -420,6 +420,12 @@ func main() {
 	go retentionService.StartBackgroundCleanup(ctx)
 	slog.Info("retention cleanup service started")
 
+	// Start monitor sweep service: auto-closes incidents whose monitor window
+	// has expired so "monitor" doesn't accumulate indefinitely.
+	monitorSweepService := services.NewMonitorSweepService(database.GetDB())
+	go monitorSweepService.StartBackgroundSweep(ctx)
+	slog.Info("monitor sweep service started")
+
 	// Start watching for Slack settings reload requests
 	go slackManager.WatchForReloads(ctx)
 

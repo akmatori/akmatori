@@ -127,11 +127,14 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/incidents", h.handleIncidents)
 	mux.HandleFunc("GET /api/incidents/{uuid}/alerts", h.handleIncidentAlerts)
 	mux.HandleFunc("GET /api/incidents/{uuid}", h.handleIncidentByID)
+	mux.HandleFunc("POST /api/incidents/{uuid}/close", h.handleIncidentClose)
 
 	// Alert management: unlink spawns a fresh investigation; move reassigns the
-	// alert to a chosen incident (empty target == unlink).
+	// alert to a chosen incident (empty target == unlink); resolve manually
+	// marks a firing alert resolved.
 	mux.HandleFunc("POST /api/alerts/{uuid}/unlink", h.handleAlertUnlink)
 	mux.HandleFunc("POST /api/alerts/{uuid}/move", h.handleAlertMove)
+	mux.HandleFunc("POST /api/alerts/{uuid}/resolve", h.handleAlertResolve)
 
 	// Unified events feed (alerts + non-alert incidents merged by occurred_at).
 	mux.HandleFunc("GET /api/events", h.handleEvents)

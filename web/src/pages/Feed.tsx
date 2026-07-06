@@ -127,6 +127,8 @@ function StatusBadge({ status }: { status: string }) {
       return <span className="badge badge-success">Resolved</span>;
     case 'monitor':
       return <span className="badge badge-success">Monitoring</span>;
+    case 'closed':
+      return <span className="badge badge-default">Closed</span>;
     case 'pending':
     case 'running':
       return <span className="badge badge-primary">Ongoing</span>;

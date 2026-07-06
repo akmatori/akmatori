@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/akmatori/akmatori/internal/database"
 )
@@ -31,6 +32,31 @@ var ErrAlertAlreadyMoved = errors.New("alert was moved by a concurrent request")
 // target incident does not exist or equals the alert's current incident. The
 // caller should surface this as HTTP 400.
 var ErrInvalidMoveTarget = errors.New("invalid move target incident")
+
+// ErrAlertAlreadyResolved is returned by ResolveAlert when the target alert
+// is not currently firing. The caller should surface this as HTTP 409.
+var ErrAlertAlreadyResolved = errors.New("alert is already resolved")
+
+// ErrIncidentAlreadyClosed is returned by CloseIncident when the incident is
+// already closed. The caller should surface this as HTTP 409.
+var ErrIncidentAlreadyClosed = errors.New("incident is already closed")
+
+// ErrConfirmationRequired is returned by CloseIncident when closing would
+// have a side effect the caller did not explicitly confirm: the incident
+// still has firing alerts linked (they get resolved as part of the close),
+// and/or the investigation itself is still pending/running (some
+// investigations get orphaned there indefinitely — e.g. a worker disconnect
+// right at spawn — and an operator needs a way to force-close them). Carries
+// enough detail for handlers to surface a specific prompt to the operator
+// before retrying with confirm=true.
+type ErrConfirmationRequired struct {
+	FiringAlertCount int64
+	InProgress       bool
+}
+
+func (e *ErrConfirmationRequired) Error() string {
+	return fmt.Sprintf("confirmation required to close: in_progress=%v firing_alert_count=%d", e.InProgress, e.FiringAlertCount)
+}
 
 // ErrIncidentSuperseded is delivered via OnError to a previously registered
 // incident callback when a newer StartIncident/ContinueIncident call replaces

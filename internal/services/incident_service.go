@@ -112,6 +112,157 @@ func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID str
 	})
 }
 
+// countFiringAlerts returns the number of still-firing alerts linked to the
+// given incident. Callers that need a consistent count should run this
+// inside the same transaction as a row lock on the incident (see
+// ResolveAlertTx, CloseIncident, UpdateIncidentComplete) to avoid racing a
+// concurrent LinkAlertToIncident/resolve.
+func countFiringAlerts(tx *gorm.DB, incidentUUID string) (int64, error) {
+	var firingCount int64
+	err := tx.Model(&database.Alert{}).
+		Where("incident_uuid = ? AND status = ? AND resolved_at IS NULL",
+			incidentUUID, string(database.AlertStatusFiring)).
+		Count(&firingCount).Error
+	return firingCount, err
+}
+
+// ResolveAlertTx marks alert resolved and, if it was the incident's last
+// firing alert, advances the incident's monitor-mode state: an already-
+// monitor incident gets its monitor_until shortened to resolvedAt+window (if
+// that is sooner than the existing deadline); a completed incident that was
+// held out of monitor mode by UpdateIncidentComplete (because alerts were
+// still firing at investigation-completion time) is promoted to monitor now,
+// with a fresh monitor_until. Runs entirely within the caller's transaction.
+func ResolveAlertTx(tx *gorm.DB, alert *database.Alert, resolvedAt time.Time) error {
+	if err := tx.Model(alert).Updates(map[string]interface{}{
+		"status":      string(database.AlertStatusResolved),
+		"resolved_at": resolvedAt,
+	}).Error; err != nil {
+		return fmt.Errorf("ResolveAlertTx: mark alert resolved: %w", err)
+	}
+
+	// Lock the incident row BEFORE counting remaining firing alerts, so a
+	// concurrent LinkAlertToIncident cannot insert a new firing alert between
+	// the count and the status/monitor_until update below.
+	var incident database.Incident
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("uuid = ?", alert.IncidentUUID).First(&incident).Error; err != nil {
+		return fmt.Errorf("ResolveAlertTx: load incident: %w", err)
+	}
+
+	if incident.Status != database.IncidentStatusCompleted &&
+		incident.Status != database.IncidentStatusMonitor {
+		return nil
+	}
+
+	firingCount, err := countFiringAlerts(tx, alert.IncidentUUID)
+	if err != nil {
+		return fmt.Errorf("ResolveAlertTx: count firing alerts: %w", err)
+	}
+	if firingCount > 0 {
+		return nil // active alerts remain; leave incident status/monitor_until unchanged
+	}
+
+	settings, err := database.GetOrCreateGeneralSettings()
+	if err != nil {
+		slog.Warn("ResolveAlertTx: could not load settings, skipping monitor transition", "err", err)
+		return nil
+	}
+	window := settings.GetAlertMonitorWindow()
+	newUntil := resolvedAt.Add(window)
+
+	if incident.Status == database.IncidentStatusMonitor {
+		if incident.MonitorUntil == nil || newUntil.Before(*incident.MonitorUntil) {
+			if err := tx.Model(&incident).Update("monitor_until", newUntil).Error; err != nil {
+				return fmt.Errorf("ResolveAlertTx: shorten monitor_until: %w", err)
+			}
+		}
+		return nil
+	}
+
+	// incident.Status == Completed and this was the last firing alert: promote
+	// to monitor now.
+	if err := tx.Model(&incident).Updates(map[string]interface{}{
+		"status":        database.IncidentStatusMonitor,
+		"monitor_until": &newUntil,
+	}).Error; err != nil {
+		return fmt.Errorf("ResolveAlertTx: promote to monitor: %w", err)
+	}
+	return nil
+}
+
+// ResolveAlert manually marks a firing alert resolved, e.g. from an operator
+// action in the UI. Returns ErrAlertAlreadyResolved if the alert is not
+// currently firing.
+func (s *SkillService) ResolveAlert(ctx context.Context, alertUUID string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var alert database.Alert
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("uuid = ?", alertUUID).First(&alert).Error; err != nil {
+			return fmt.Errorf("ResolveAlert: load alert: %w", err)
+		}
+		if alert.Status != database.AlertStatusFiring {
+			return ErrAlertAlreadyResolved
+		}
+		return ResolveAlertTx(tx, &alert, time.Now())
+	})
+}
+
+// CloseIncident manually closes an incident, e.g. from an operator action in
+// the UI. Returns ErrIncidentAlreadyClosed if already closed. If the
+// incident is still pending/running (some investigations get orphaned there
+// indefinitely — e.g. a worker disconnect right at spawn, which also leaves
+// them absorbing new correlated alerts forever) and/or has firing alerts
+// still linked, and confirm is false, returns *ErrConfirmationRequired
+// without mutating anything so the caller can prompt the operator with the
+// specific reason(s) and retry with confirm=true; confirming resolves all
+// linked firing alerts as part of the close regardless of investigation
+// status.
+func (s *SkillService) CloseIncident(ctx context.Context, incidentUUID string, confirm bool) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var incident database.Incident
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
+			return fmt.Errorf("CloseIncident: load incident: %w", err)
+		}
+
+		if incident.Status == database.IncidentStatusClosed {
+			return ErrIncidentAlreadyClosed
+		}
+		inProgress := incident.Status == database.IncidentStatusPending || incident.Status == database.IncidentStatusRunning
+
+		firingCount, err := countFiringAlerts(tx, incidentUUID)
+		if err != nil {
+			return fmt.Errorf("CloseIncident: count firing alerts: %w", err)
+		}
+		if (inProgress || firingCount > 0) && !confirm {
+			return &ErrConfirmationRequired{FiringAlertCount: firingCount, InProgress: inProgress}
+		}
+
+		now := time.Now()
+		if firingCount > 0 {
+			if err := tx.Model(&database.Alert{}).
+				Where("incident_uuid = ? AND status = ? AND resolved_at IS NULL",
+					incidentUUID, string(database.AlertStatusFiring)).
+				Updates(map[string]interface{}{
+					"status":      string(database.AlertStatusResolved),
+					"resolved_at": now,
+				}).Error; err != nil {
+				return fmt.Errorf("CloseIncident: resolve linked alerts: %w", err)
+			}
+		}
+
+		if err := tx.Model(&incident).Updates(map[string]interface{}{
+			"status":        database.IncidentStatusClosed,
+			"resolved_at":   &now,
+			"monitor_until": nil,
+		}).Error; err != nil {
+			return fmt.Errorf("CloseIncident: update incident: %w", err)
+		}
+		return nil
+	})
+}
+
 // UnlinkAlertFromIncident detaches an alert from its current incident and
 // spawns a fresh investigation for it. Returns the new incident UUID. It is a
 // thin wrapper around MoveAlertToIncident with an empty target.
@@ -482,14 +633,31 @@ func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status databa
 		"completed_at":      &now,
 	}
 
-	// Alert-sourced incidents transition to monitor status on completion so
-	// subsequent matching alerts are correlated rather than spawning a new
-	// investigation within the monitoring window. Failed investigations are
-	// not promoted — they should not enter the correlation candidate pool.
-	if status == database.IncidentStatusCompleted {
+	// effectiveStatus tracks what actually gets written to "status" (which
+	// may differ from the requested status below) so the memory-ingest check
+	// after the transaction reflects the real outcome.
+	effectiveStatus := status
+
+	txErr := s.db.Transaction(func(tx *gorm.DB) error {
 		var incident database.Incident
-		if err := s.db.Where("uuid = ?", incidentUUID).Select("source_kind").First(&incident).Error; err == nil {
-			if incident.SourceKind == database.IncidentSourceKindAlert {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
+			return err
+		}
+
+		// Alert-sourced incidents transition to monitor status on completion,
+		// but only once every linked alert has resolved — otherwise the
+		// incident would falsely read as "being monitored" while an alert is
+		// still firing. Incidents held back here get promoted to monitor
+		// later by ResolveAlertTx when their last firing alert resolves.
+		// Failed investigations are never promoted — they should not enter
+		// the correlation candidate pool.
+		if status == database.IncidentStatusCompleted && incident.SourceKind == database.IncidentSourceKindAlert {
+			firingCount, err := countFiringAlerts(tx, incidentUUID)
+			if err != nil {
+				return err
+			}
+			if firingCount == 0 {
 				settings, settingsErr := database.GetOrCreateGeneralSettings()
 				if settingsErr != nil || settings == nil {
 					slog.Warn("UpdateIncidentComplete: could not load settings, using default window", "err", settingsErr)
@@ -499,21 +667,19 @@ func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status databa
 				monitorUntil := now.Add(window)
 				updates["status"] = database.IncidentStatusMonitor
 				updates["monitor_until"] = &monitorUntil
+				effectiveStatus = database.IncidentStatusMonitor
 			}
 		}
-	}
 
-	if err := s.db.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).Updates(updates).Error; err != nil {
-		return fmt.Errorf("failed to update incident: %w", err)
+		return tx.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).Updates(updates).Error
+	})
+	if txErr != nil {
+		return fmt.Errorf("failed to update incident: %w", txErr)
 	}
 
 	// Fire memory ingest for all terminal states: completed (including alert
 	// incidents that are promoted to monitor below), failed, and monitor if a
 	// caller ever passes that status directly.
-	effectiveStatus := status
-	if v, ok := updates["status"].(database.IncidentStatus); ok {
-		effectiveStatus = v
-	}
 	if (effectiveStatus == database.IncidentStatusCompleted ||
 		effectiveStatus == database.IncidentStatusMonitor ||
 		effectiveStatus == database.IncidentStatusFailed) && s.memoryIngester != nil {

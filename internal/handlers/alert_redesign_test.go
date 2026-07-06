@@ -246,6 +246,39 @@ func TestProcessResolvedAlert_LastFiringResolved_PullsInMonitorUntil(t *testing.
 	}
 }
 
+// TestProcessResolvedAlert_LastFiringResolved_CompletedIncident_PromotesToMonitor
+// verifies that resolving the last firing alert on a "completed" incident (one
+// that UpdateIncidentComplete held out of monitor mode because this alert was
+// still firing) now promotes it to monitor with a fresh monitor_until.
+func TestProcessResolvedAlert_LastFiringResolved_CompletedIncident_PromotesToMonitor(t *testing.T) {
+	setupResolvedAlertTestDB(t)
+
+	incUUID, _ := seedResolvedAlertTestData(t, database.IncidentStatusCompleted, nil, "fp-completed-promote")
+
+	svc := &corrGateSkillService{}
+	h := NewAlertHandler(nil, nil, nil, nil, svc, nil, nil)
+
+	before := time.Now()
+	normalized := alerts.NormalizedAlert{
+		AlertName:         "TestAlert",
+		TargetHost:        "host-resolved",
+		Status:            database.AlertStatusResolved,
+		SourceFingerprint: "fp-completed-promote",
+	}
+	h.processResolvedAlert("src-resolved-test", normalized)
+
+	var incident database.Incident
+	if err := database.GetDB().Where("uuid = ?", incUUID).First(&incident).Error; err != nil {
+		t.Fatalf("load incident: %v", err)
+	}
+	if incident.Status != database.IncidentStatusMonitor {
+		t.Errorf("Status = %q, want monitor once the last firing alert resolves on a completed incident", incident.Status)
+	}
+	if incident.MonitorUntil == nil || incident.MonitorUntil.Before(before) {
+		t.Errorf("MonitorUntil should be freshly set in the future, got %v", incident.MonitorUntil)
+	}
+}
+
 // TestProcessResolvedAlert_NoMatchingAlert_DropsSilently verifies that when no
 // firing alert matches the incoming resolved notification, the function logs and
 // silently drops the event without returning an error or panicking.

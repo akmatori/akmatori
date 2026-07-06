@@ -1,13 +1,14 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { RefreshCw, X, Plus, MessageSquare, Activity, Clock, CheckCircle, AlertCircle, Terminal, Zap, Timer, Bell } from 'lucide-react';
+import { RefreshCw, X, Plus, MessageSquare, Activity, Clock, CheckCircle, AlertCircle, XCircle, Terminal, Zap, Timer, Bell } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { SuccessMessage } from '../components/ErrorMessage';
 import TimeRangePicker from '../components/TimeRangePicker';
 import IncidentDetailView from '../components/IncidentDetailView';
+import CloseIncidentModal from '../components/CloseIncidentModal';
 import TrendSparkline from '../components/TrendSparkline';
-import { incidentsApi } from '../api/client';
+import { incidentsApi, ApiError } from '../api/client';
 import type { Incident } from '../types';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -99,9 +100,11 @@ export default function Incidents() {
       if (effectiveView === 'open') {
         effectiveFrom = undefined;
         effectiveTo = undefined;
-        statusFilter = 'pending,running,diagnosed,monitor';
+        // alert_active = "completed" alert-sourced incidents whose linked
+        // alert is still firing — still-open work, not history.
+        statusFilter = 'pending,running,diagnosed,monitor,alert_active';
       } else {
-        statusFilter = 'completed,failed';
+        statusFilter = 'completed,failed,closed';
         if (isRefresh && relativeRange !== null) {
           effectiveFrom = currentNow - relativeRange;
           effectiveTo = currentNow;
@@ -213,10 +216,18 @@ export default function Incidents() {
     };
   }, [showModal, selectedIncident?.uuid, selectedIncident?.status, autoRefresh]);
 
-  const getStatusConfig = (status: string, monitorUntil?: string) => {
+  const getStatusConfig = (status: string, monitorUntil?: string, sourceKind?: string) => {
     switch (status) {
       case 'completed':
-        return { class: 'badge-success', icon: CheckCircle, label: 'Resolved', subLabel: undefined };
+        if (sourceKind === 'alert') {
+          // An alert-sourced incident only stays "completed" while at least
+          // one linked alert is still firing (see UpdateIncidentComplete /
+          // ResolveAlertTx) — it gets promoted to "monitor" the moment every
+          // alert clears. Treat it as ongoing, still-open work (also shown
+          // in the Open view via the alert_active status filter token).
+          return { class: 'badge-primary', icon: Activity, label: 'Ongoing', subLabel: undefined };
+        }
+        return { class: 'badge-success', icon: CheckCircle, label: 'Completed', subLabel: undefined };
       case 'monitor':
         return {
           class: 'badge-success',
@@ -224,6 +235,8 @@ export default function Incidents() {
           label: 'Monitoring',
           subLabel: monitorUntil ? formatCountdown(monitorUntil) : undefined,
         };
+      case 'closed':
+        return { class: 'badge-default', icon: XCircle, label: 'Closed', subLabel: undefined };
       case 'pending':
       case 'running':
         return { class: 'badge-primary', icon: Activity, label: 'Ongoing', subLabel: undefined };
@@ -286,6 +299,8 @@ export default function Incidents() {
   };
 
   const openModal = useCallback(async (incident: Incident) => {
+    setCloseIncidentError('');
+    setConfirmCloseIncident(null);
     try {
       const latest = await incidentsApi.get(incident.uuid);
       setSelectedIncident(latest);
@@ -298,6 +313,42 @@ export default function Incidents() {
   const closeModal = () => {
     setShowModal(false);
     setSelectedIncident(null);
+    setCloseIncidentError('');
+    setConfirmCloseIncident(null);
+  };
+
+  const [closingIncident, setClosingIncident] = useState(false);
+  const [closeIncidentError, setCloseIncidentError] = useState('');
+  const [confirmCloseIncident, setConfirmCloseIncident] = useState<{ firingAlertCount: number; inProgress: boolean } | null>(null);
+
+  const refreshSelectedIncident = async () => {
+    if (!selectedIncident) return;
+    try {
+      setSelectedIncident(await incidentsApi.get(selectedIncident.uuid));
+    } catch (err) {
+      console.error('Failed to refresh incident:', err);
+    }
+  };
+
+  const handleCloseIncidentClick = async () => {
+    if (!selectedIncident) return;
+    setCloseIncidentError('');
+    setClosingIncident(true);
+    try {
+      await incidentsApi.close(selectedIncident.uuid, false);
+      await refreshSelectedIncident();
+    } catch (err) {
+      const body = err instanceof ApiError && err.status === 409
+        ? err.body as { requires_confirmation?: boolean; firing_alert_count?: number; in_progress?: boolean } | undefined
+        : undefined;
+      if (body?.requires_confirmation) {
+        setConfirmCloseIncident({ firingAlertCount: body.firing_alert_count ?? 0, inProgress: body.in_progress ?? false });
+      } else {
+        setCloseIncidentError(err instanceof Error ? err.message : 'Failed to close incident');
+      }
+    } finally {
+      setClosingIncident(false);
+    }
   };
 
   const handleCreateIncident = async () => {
@@ -328,7 +379,7 @@ export default function Incidents() {
   };
 
   const selectedStatusConfig = selectedIncident
-    ? getStatusConfig(selectedIncident.status, selectedIncident.monitor_until)
+    ? getStatusConfig(selectedIncident.status, selectedIncident.monitor_until, selectedIncident.source_kind)
     : null;
 
   return (
@@ -441,7 +492,7 @@ export default function Incidents() {
                 </thead>
                 <tbody>
                   {incidents.map((incident) => {
-                    const statusConfig = getStatusConfig(incident.status, incident.monitor_until);
+                    const statusConfig = getStatusConfig(incident.status, incident.monitor_until, incident.source_kind);
                     const StatusIcon = statusConfig.icon;
                     const alertCount = incident.alert_count ?? 0;
 
@@ -586,6 +637,16 @@ export default function Incidents() {
                     {selectedIncident.title || 'Incident Details'}
                   </h2>
                   {selectedStatusConfig && <span className={`badge ${selectedStatusConfig.class}`}>{selectedStatusConfig.label}</span>}
+                  {selectedIncident.status !== 'closed' && (
+                    <button
+                      onClick={handleCloseIncidentClick}
+                      disabled={closingIncident}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      {closingIncident ? 'Closing…' : 'Close Incident'}
+                    </button>
+                  )}
                 </div>
                 <div className="mt-1 flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
                   <span>
@@ -594,6 +655,11 @@ export default function Incidents() {
                   <span className="text-gray-300 dark:text-gray-600">|</span>
                   <span>Source: {selectedIncident.source}</span>
                 </div>
+                {closeIncidentError && (
+                  <div className="mt-2 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-sm">
+                    {closeIncidentError}
+                  </div>
+                )}
               </div>
               <button onClick={closeModal} className="btn btn-ghost p-2" title="Close">
                 <X className="w-5 h-5" />
@@ -700,6 +766,19 @@ export default function Incidents() {
             </div>
           </div>
         </div>
+      )}
+
+      {confirmCloseIncident && selectedIncident && (
+        <CloseIncidentModal
+          incidentUUID={selectedIncident.uuid}
+          firingAlertCount={confirmCloseIncident.firingAlertCount}
+          inProgress={confirmCloseIncident.inProgress}
+          onClose={() => setConfirmCloseIncident(null)}
+          onClosed={() => {
+            setConfirmCloseIncident(null);
+            refreshSelectedIncident();
+          }}
+        />
       )}
     </div>
   );

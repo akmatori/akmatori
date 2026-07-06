@@ -776,6 +776,206 @@ func TestUpdateIncidentComplete_CronSourced_DoesNotSetMonitor(t *testing.T) {
 	}
 }
 
+func TestUpdateIncidentComplete_AlertSourced_FiringAlert_StaysCompleted(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnAlertIncident(t, svc)
+	seedCorrelatedAlert(t, db, incidentUUID) // firing alert still linked
+
+	if err := svc.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, "sid-3", "log", "response", 100, 500); err != nil {
+		t.Fatalf("UpdateIncidentComplete failed: %v", err)
+	}
+
+	var incident database.Incident
+	if err := db.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
+		t.Fatalf("load incident: %v", err)
+	}
+	if incident.Status != database.IncidentStatusCompleted {
+		t.Errorf("Status = %q, want completed while an alert is still firing", incident.Status)
+	}
+	if incident.MonitorUntil != nil {
+		t.Errorf("MonitorUntil should stay nil while an alert is still firing, got %v", incident.MonitorUntil)
+	}
+}
+
+func TestResolveAlert_LastFiringAlert_PromotesCompletedIncidentToMonitor(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnAlertIncident(t, svc)
+	alertUUID := seedCorrelatedAlert(t, db, incidentUUID)
+
+	if err := svc.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, "sid-4", "log", "response", 100, 500); err != nil {
+		t.Fatalf("UpdateIncidentComplete failed: %v", err)
+	}
+
+	if err := svc.ResolveAlert(context.Background(), alertUUID); err != nil {
+		t.Fatalf("ResolveAlert failed: %v", err)
+	}
+
+	var incident database.Incident
+	if err := db.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
+		t.Fatalf("load incident: %v", err)
+	}
+	if incident.Status != database.IncidentStatusMonitor {
+		t.Errorf("Status = %q, want monitor once the last firing alert resolves", incident.Status)
+	}
+	if incident.MonitorUntil == nil || !incident.MonitorUntil.After(time.Now()) {
+		t.Errorf("MonitorUntil should be set in the future, got %v", incident.MonitorUntil)
+	}
+
+	var alert database.Alert
+	if err := db.Where("uuid = ?", alertUUID).First(&alert).Error; err != nil {
+		t.Fatalf("load alert: %v", err)
+	}
+	if alert.Status != database.AlertStatusResolved || alert.ResolvedAt == nil {
+		t.Errorf("alert should be resolved, got status=%q resolved_at=%v", alert.Status, alert.ResolvedAt)
+	}
+}
+
+func TestResolveAlert_AlreadyResolved_ReturnsError(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnAlertIncident(t, svc)
+	alertUUID := seedCorrelatedAlert(t, db, incidentUUID)
+
+	if err := svc.ResolveAlert(context.Background(), alertUUID); err != nil {
+		t.Fatalf("first ResolveAlert failed: %v", err)
+	}
+	err := svc.ResolveAlert(context.Background(), alertUUID)
+	if !errors.Is(err, ErrAlertAlreadyResolved) {
+		t.Errorf("second ResolveAlert error = %v, want ErrAlertAlreadyResolved", err)
+	}
+}
+
+// --- CloseIncident Tests ---
+
+func TestCloseIncident_InProgress_RequiresConfirmation(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnAlertIncident(t, svc) // starts pending
+
+	err := svc.CloseIncident(context.Background(), incidentUUID, false)
+	var confirmErr *ErrConfirmationRequired
+	if !errors.As(err, &confirmErr) {
+		t.Fatalf("CloseIncident error = %v, want *ErrConfirmationRequired", err)
+	}
+	if !confirmErr.InProgress {
+		t.Error("InProgress should be true for a pending incident")
+	}
+
+	var incident database.Incident
+	db.Where("uuid = ?", incidentUUID).First(&incident)
+	if incident.Status != database.IncidentStatusPending {
+		t.Errorf("Status = %q, want unchanged (pending) before confirmation", incident.Status)
+	}
+}
+
+func TestCloseIncident_InProgress_ConfirmForceCloses(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnAlertIncident(t, svc) // starts pending
+	if err := db.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).
+		Update("status", database.IncidentStatusRunning).Error; err != nil {
+		t.Fatalf("set status running: %v", err)
+	}
+	alertUUID := seedCorrelatedAlert(t, db, incidentUUID)
+
+	if err := svc.CloseIncident(context.Background(), incidentUUID, true); err != nil {
+		t.Fatalf("CloseIncident with confirm=true failed: %v", err)
+	}
+
+	var incident database.Incident
+	db.Where("uuid = ?", incidentUUID).First(&incident)
+	if incident.Status != database.IncidentStatusClosed {
+		t.Errorf("Status = %q, want closed", incident.Status)
+	}
+
+	var alert database.Alert
+	db.Where("uuid = ?", alertUUID).First(&alert)
+	if alert.Status != database.AlertStatusResolved {
+		t.Errorf("alert status = %q, want resolved after confirmed force-close", alert.Status)
+	}
+}
+
+func TestCloseIncident_NoFiringAlerts_ClosesImmediately(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnAlertIncident(t, svc)
+	if err := svc.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, "sid-5", "log", "response", 100, 500); err != nil {
+		t.Fatalf("UpdateIncidentComplete failed: %v", err)
+	}
+
+	if err := svc.CloseIncident(context.Background(), incidentUUID, false); err != nil {
+		t.Fatalf("CloseIncident failed: %v", err)
+	}
+
+	var incident database.Incident
+	if err := db.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
+		t.Fatalf("load incident: %v", err)
+	}
+	if incident.Status != database.IncidentStatusClosed {
+		t.Errorf("Status = %q, want closed", incident.Status)
+	}
+}
+
+func TestCloseIncident_FiringAlerts_RequiresConfirmation(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnAlertIncident(t, svc)
+	alertUUID := seedCorrelatedAlert(t, db, incidentUUID)
+	if err := svc.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, "sid-6", "log", "response", 100, 500); err != nil {
+		t.Fatalf("UpdateIncidentComplete failed: %v", err)
+	}
+
+	err := svc.CloseIncident(context.Background(), incidentUUID, false)
+	var confirmErr *ErrConfirmationRequired
+	if !errors.As(err, &confirmErr) {
+		t.Fatalf("CloseIncident error = %v, want *ErrConfirmationRequired", err)
+	}
+	if confirmErr.FiringAlertCount != 1 {
+		t.Errorf("FiringAlertCount = %d, want 1", confirmErr.FiringAlertCount)
+	}
+
+	// Nothing should have been mutated yet.
+	var incident database.Incident
+	db.Where("uuid = ?", incidentUUID).First(&incident)
+	if incident.Status != database.IncidentStatusCompleted {
+		t.Errorf("Status = %q, want unchanged (completed) before confirmation", incident.Status)
+	}
+
+	// Confirming resolves the alert and closes the incident.
+	if err := svc.CloseIncident(context.Background(), incidentUUID, true); err != nil {
+		t.Fatalf("CloseIncident with confirm=true failed: %v", err)
+	}
+	db.Where("uuid = ?", incidentUUID).First(&incident)
+	if incident.Status != database.IncidentStatusClosed {
+		t.Errorf("Status = %q, want closed", incident.Status)
+	}
+
+	var alert database.Alert
+	db.Where("uuid = ?", alertUUID).First(&alert)
+	if alert.Status != database.AlertStatusResolved {
+		t.Errorf("alert status = %q, want resolved after confirmed close", alert.Status)
+	}
+}
+
+func TestCloseIncident_AlreadyClosed_ReturnsError(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnAlertIncident(t, svc)
+	if err := svc.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, "sid-7", "log", "response", 100, 500); err != nil {
+		t.Fatalf("UpdateIncidentComplete failed: %v", err)
+	}
+	if err := svc.CloseIncident(context.Background(), incidentUUID, false); err != nil {
+		t.Fatalf("first CloseIncident failed: %v", err)
+	}
+
+	err := svc.CloseIncident(context.Background(), incidentUUID, false)
+	if !errors.Is(err, ErrIncidentAlreadyClosed) {
+		t.Errorf("CloseIncident error = %v, want ErrIncidentAlreadyClosed", err)
+	}
+}
+
 // --- UnlinkAlertFromIncident Tests ---
 
 func seedCorrelatedAlert(t *testing.T, db *gorm.DB, incidentUUID string) string {

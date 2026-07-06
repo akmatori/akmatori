@@ -32,6 +32,7 @@ func NewRetentionService(dataDir string, db *gorm.DB) *RetentionService {
 // CleanupResult holds statistics from a cleanup run.
 type CleanupResult struct {
 	ExpiredIncidentsDeleted int
+	ExpiredAlertsDeleted    int
 	ExpiredDirsDeleted      int
 	ExpiredBytesFreed       int64
 	OrphanedDirsDeleted     int
@@ -61,6 +62,7 @@ func (s *RetentionService) RunCleanup() (*CleanupResult, error) {
 
 	logAttrs := []any{
 		"expired_incidents_deleted", result.ExpiredIncidentsDeleted,
+		"expired_alerts_deleted", result.ExpiredAlertsDeleted,
 		"expired_dirs_deleted", result.ExpiredDirsDeleted,
 		"expired_bytes_freed", result.ExpiredBytesFreed,
 		"orphaned_dirs_deleted", result.OrphanedDirsDeleted,
@@ -111,11 +113,24 @@ func (s *RetentionService) cleanupExpiredIncidents(retentionDays int, result *Cl
 		if !dirRemoved {
 			continue
 		}
-		if err := s.db.Delete(&incident).Error; err != nil {
+
+		// Delete linked alerts in the same transaction as the incident so a
+		// deleted incident never leaves orphaned Alert rows behind (they'd be
+		// unreachable by any resolve path — no incident left to close).
+		var alertsDeleted int64
+		if err := s.db.Transaction(func(tx *gorm.DB) error {
+			del := tx.Where("incident_uuid = ?", incident.UUID).Delete(&database.Alert{})
+			if del.Error != nil {
+				return fmt.Errorf("delete linked alerts: %w", del.Error)
+			}
+			alertsDeleted = del.RowsAffected
+			return tx.Delete(&incident).Error
+		}); err != nil {
 			slog.Error("failed to delete incident record", "uuid", incident.UUID, "error", err)
 			result.Errors = append(result.Errors, fmt.Errorf("delete record %s: %w", incident.UUID, err))
 		} else {
 			result.ExpiredIncidentsDeleted++
+			result.ExpiredAlertsDeleted += int(alertsDeleted)
 		}
 	}
 }

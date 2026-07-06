@@ -21,7 +21,6 @@ import (
 	slackutil "github.com/akmatori/akmatori/internal/slack"
 	"github.com/slack-go/slack"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // originalAlertTextMaxBytes caps how much of the verbatim alert text
@@ -42,7 +41,6 @@ func alertSpawnKey(sourceUUID, alertName, targetHost, fingerprint string) string
 	h := sha256.Sum256(tuple)
 	return hex.EncodeToString(h[:])
 }
-
 
 func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, normalized alerts.NormalizedAlert) {
 	if normalized.Status == database.AlertStatusResolved {
@@ -411,54 +409,12 @@ func (h *AlertHandler) processResolvedAlert(sourceUUID string, normalized alerts
 
 		linkedIncidentUUID = a.IncidentUUID
 
-		// Mark the alert resolved.
-		resolvedAt := now
-		if err := tx.Model(&a).Updates(map[string]interface{}{
-			"status":      string(database.AlertStatusResolved),
-			"resolved_at": resolvedAt,
-		}).Error; err != nil {
-			return fmt.Errorf("mark alert resolved: %w", err)
-		}
-
-		// Lock the incident row BEFORE counting remaining firing alerts. This
-		// prevents a concurrent LinkAlertToIncident from inserting a new firing
-		// alert between the count and the monitor_until update, which would cause
-		// the watch window to be shortened while a fresh alert is still in-flight.
-		var incident database.Incident
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("uuid = ?", a.IncidentUUID).First(&incident).Error; err != nil {
-			return fmt.Errorf("load incident: %w", err)
-		}
-
-		if incident.Status != database.IncidentStatusCompleted &&
-			incident.Status != database.IncidentStatusMonitor {
-			return nil
-		}
-
-		// Count remaining firing alerts while holding the incident lock so no
-		// concurrent inserts can race the count.
-		var firingCount int64
-		if err := tx.Model(&database.Alert{}).
-			Where("incident_uuid = ? AND status = ? AND resolved_at IS NULL",
-				a.IncidentUUID, string(database.AlertStatusFiring)).
-			Count(&firingCount).Error; err != nil {
-			return fmt.Errorf("count firing alerts: %w", err)
-		}
-		if firingCount > 0 {
-			return nil // active alerts remain; leave monitor_until unchanged
-		}
-
-		settings, err := database.GetOrCreateGeneralSettings()
-		if err != nil {
-			slog.Warn("processResolvedAlert: could not load settings, skipping monitor_until update", "err", err)
-			return nil
-		}
-		window := settings.GetAlertMonitorWindow()
-		newUntil := resolvedAt.Add(window)
-		if incident.MonitorUntil == nil || newUntil.Before(*incident.MonitorUntil) {
-			if err := tx.Model(&incident).Update("monitor_until", newUntil).Error; err != nil {
-				return fmt.Errorf("update monitor_until: %w", err)
-			}
+		// Mark the alert resolved and advance the incident's monitor-mode
+		// state (shorten an existing monitor window, or promote a completed
+		// incident that was held out of monitor mode because this alert was
+		// still firing at investigation-completion time).
+		if err := services.ResolveAlertTx(tx, &a, now); err != nil {
+			return fmt.Errorf("resolve alert: %w", err)
 		}
 		return nil
 	}); err != nil {

@@ -1,10 +1,11 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Activity, Clock, CheckCircle, AlertCircle, Timer, Zap } from 'lucide-react';
+import { ArrowLeft, Activity, Clock, CheckCircle, AlertCircle, Timer, Zap, XCircle } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import IncidentDetailView from '../components/IncidentDetailView';
-import { incidentsApi } from '../api/client';
+import CloseIncidentModal from '../components/CloseIncidentModal';
+import { incidentsApi, ApiError } from '../api/client';
 import type { Incident } from '../types';
 
 const getStatusConfig = (status: string) => {
@@ -19,6 +20,8 @@ const getStatusConfig = (status: string) => {
       return { class: 'badge-purple', icon: CheckCircle, label: 'Diagnosed' };
     case 'failed':
       return { class: 'badge-error', icon: AlertCircle, label: 'Failed' };
+    case 'closed':
+      return { class: 'badge-default', icon: XCircle, label: 'Closed' };
     default:
       return { class: 'badge-default', icon: Clock, label: 'Pending' };
   }
@@ -49,6 +52,9 @@ export default function IncidentDetail() {
   const [error, setError] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const refreshIntervalRef = useRef<number | null>(null);
+  const [closing, setClosing] = useState(false);
+  const [closeError, setCloseError] = useState('');
+  const [confirmClose, setConfirmClose] = useState<{ firingAlertCount: number; inProgress: boolean } | null>(null);
 
   useEffect(() => {
     if (!uuid) return;
@@ -87,6 +93,36 @@ export default function IncidentDetail() {
       }
     };
   }, [incident?.status, autoRefresh, uuid]);
+
+  const refreshIncident = async () => {
+    if (!uuid) return;
+    try {
+      setIncident(await incidentsApi.get(uuid));
+    } catch (err) {
+      console.error('Failed to refresh incident:', err);
+    }
+  };
+
+  const handleCloseClick = async () => {
+    if (!uuid) return;
+    setCloseError('');
+    setClosing(true);
+    try {
+      await incidentsApi.close(uuid, false);
+      await refreshIncident();
+    } catch (err) {
+      const body = err instanceof ApiError && err.status === 409
+        ? err.body as { requires_confirmation?: boolean; firing_alert_count?: number; in_progress?: boolean } | undefined
+        : undefined;
+      if (body?.requires_confirmation) {
+        setConfirmClose({ firingAlertCount: body.firing_alert_count ?? 0, inProgress: body.in_progress ?? false });
+      } else {
+        setCloseError(err instanceof Error ? err.message : 'Failed to close incident');
+      }
+    } finally {
+      setClosing(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -137,11 +173,29 @@ export default function IncidentDetail() {
                 <span>{new Date(incident.started_at).toLocaleString()}</span>
               </div>
             </div>
-            <span className={`badge ${statusConfig.class} inline-flex items-center gap-1`}>
-              <StatusIcon className="w-3 h-3" />
-              {statusConfig.label}
-            </span>
+            <div className="flex items-center gap-3">
+              <span className={`badge ${statusConfig.class} inline-flex items-center gap-1`}>
+                <StatusIcon className="w-3 h-3" />
+                {statusConfig.label}
+              </span>
+              {incident.status !== 'closed' && (
+                <button
+                  onClick={handleCloseClick}
+                  disabled={closing}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                  {closing ? 'Closing…' : 'Close Incident'}
+                </button>
+              )}
+            </div>
           </div>
+
+          {closeError && (
+            <div className="mt-3 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-sm">
+              {closeError}
+            </div>
+          )}
 
           {/* Metrics bar */}
           <div className="mt-4 flex items-center gap-6 text-sm text-gray-500 dark:text-gray-400">
@@ -177,6 +231,19 @@ export default function IncidentDetail() {
         {/* Detail view */}
         <IncidentDetailView incident={incident} autoRefresh={autoRefresh} />
       </div>
+
+      {confirmClose && (
+        <CloseIncidentModal
+          incidentUUID={incident.uuid}
+          firingAlertCount={confirmClose.firingAlertCount}
+          inProgress={confirmClose.inProgress}
+          onClose={() => setConfirmClose(null)}
+          onClosed={() => {
+            setConfirmClose(null);
+            refreshIncident();
+          }}
+        />
+      )}
     </div>
   );
 }

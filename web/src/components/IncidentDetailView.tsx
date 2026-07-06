@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { Terminal, MessageSquare, ChevronDown, ChevronRight, RefreshCw, Bell, Shuffle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { Incident, Alert } from '../types';
-import { incidentsApi } from '../api/client';
+import { incidentsApi, alertsApi } from '../api/client';
 import MoveIncidentModal from './MoveIncidentModal';
 import IncidentFeedbackStrip from './IncidentFeedbackStrip';
 
@@ -22,6 +22,8 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
   const [expandedReasoning, setExpandedReasoning] = useState<Set<string>>(new Set());
   const [moveTargetAlert, setMoveTargetAlert] = useState<Alert | null>(null);
   const [moveResult, setMoveResult] = useState<{ incidentUUID: string; isNew: boolean } | null>(null);
+  const [resolvingAlertUUID, setResolvingAlertUUID] = useState<string | null>(null);
+  const [resolveError, setResolveError] = useState('');
   const alertsFetchedForRef = useRef<string | null>(null);
   const logContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -31,6 +33,7 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
     setAlerts(null);
     setAlertsError('');
     setMoveResult(null);
+    setResolveError('');
     setActiveTab('reasoning');
   }, [incident.uuid]);
 
@@ -47,6 +50,16 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
         setAlerts(data);
       })
       .catch(err => { setAlertsError(String(err)); });
+  };
+
+  const handleResolve = (alert: Alert) => {
+    setResolveError('');
+    setResolvingAlertUUID(alert.uuid);
+    alertsApi.resolve(alert.uuid)
+      .then(() => incidentsApi.getAlerts(incident.uuid))
+      .then(data => { setAlerts(data); })
+      .catch(err => { setResolveError(String(err)); })
+      .finally(() => { setResolvingAlertUUID(null); });
   };
 
   // Auto-scroll to bottom when log updates
@@ -326,6 +339,11 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
           </div>
         ) : (
           <div className="min-h-[200px]">
+            {resolveError && (
+              <div className="mb-4 px-4 py-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-sm">
+                {resolveError}
+              </div>
+            )}
             {moveResult && (
               <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 text-sm">
                 <span>{moveResult.isNew ? 'Alert unlinked. New investigation started:' : 'Alert linked to incident:'}</span>
@@ -413,14 +431,26 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
                             {alert.resolved_at ? new Date(alert.resolved_at).toLocaleString() : '—'}
                           </td>
                           <td className="py-3">
-                            <button
-                              onClick={() => setMoveTargetAlert(alert)}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors"
-                              title="Move this alert to another incident (or unlink into a new one)"
-                            >
-                              <Shuffle className="w-3 h-3" />
-                              Move
-                            </button>
+                            <div className="flex items-center gap-2">
+                              {alert.status === 'firing' && (
+                                <button
+                                  onClick={() => handleResolve(alert)}
+                                  disabled={resolvingAlertUUID === alert.uuid}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-green-700 dark:text-green-300 bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/40 transition-colors disabled:opacity-50"
+                                  title="Manually mark this alert resolved"
+                                >
+                                  {resolvingAlertUUID === alert.uuid ? 'Resolving…' : 'Resolve'}
+                                </button>
+                              )}
+                              <button
+                                onClick={() => setMoveTargetAlert(alert)}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors"
+                                title="Move this alert to another incident (or unlink into a new one)"
+                              >
+                                <Shuffle className="w-3 h-3" />
+                                Move
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );

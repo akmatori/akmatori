@@ -89,7 +89,7 @@ func (s *corrGateSkillService) UpdateIncidentStatus(string, database.IncidentSta
 func (s *corrGateSkillService) UpdateIncidentComplete(string, database.IncidentStatus, string, string, string, int, int64) error {
 	return nil
 }
-func (s *corrGateSkillService) UpdateIncidentLog(string, string) error        { return nil }
+func (s *corrGateSkillService) UpdateIncidentLog(string, string) error         { return nil }
 func (s *corrGateSkillService) GetIncident(string) (*database.Incident, error) { return nil, nil }
 func (s *corrGateSkillService) AppendSubagentLog(string, string, string) error { return nil }
 func (s *corrGateSkillService) CreateSkill(string, string, string, string) (*database.Skill, error) {
@@ -103,18 +103,18 @@ func (s *corrGateSkillService) ListSkills() ([]database.Skill, error) { return n
 func (s *corrGateSkillService) ListEnabledSkills() ([]database.Skill, error) {
 	return nil, nil
 }
-func (s *corrGateSkillService) GetEnabledSkillNames() []string                     { return nil }
-func (s *corrGateSkillService) GetToolAllowlist() []services.ToolAllowlistEntry    { return nil }
-func (s *corrGateSkillService) GetSkill(string) (*database.Skill, error)           { return nil, nil }
-func (s *corrGateSkillService) AssignTools(string, []uint) error                   { return nil }
-func (s *corrGateSkillService) GetSkillDir(string) string                          { return "" }
-func (s *corrGateSkillService) GetSkillScriptsDir(string) string                   { return "" }
-func (s *corrGateSkillService) GetSkillPrompt(string) (string, error)              { return "", nil }
-func (s *corrGateSkillService) UpdateSkillPrompt(string, string) error             { return nil }
-func (s *corrGateSkillService) RegenerateSkillMd(string) error                     { return nil }
-func (s *corrGateSkillService) SyncSkillsFromFilesystem() error                    { return nil }
-func (s *corrGateSkillService) ListSkillScripts(string) ([]string, error)          { return nil, nil }
-func (s *corrGateSkillService) ClearSkillScripts(string) error                     { return nil }
+func (s *corrGateSkillService) GetEnabledSkillNames() []string                  { return nil }
+func (s *corrGateSkillService) GetToolAllowlist() []services.ToolAllowlistEntry { return nil }
+func (s *corrGateSkillService) GetSkill(string) (*database.Skill, error)        { return nil, nil }
+func (s *corrGateSkillService) AssignTools(string, []uint) error                { return nil }
+func (s *corrGateSkillService) GetSkillDir(string) string                       { return "" }
+func (s *corrGateSkillService) GetSkillScriptsDir(string) string                { return "" }
+func (s *corrGateSkillService) GetSkillPrompt(string) (string, error)           { return "", nil }
+func (s *corrGateSkillService) UpdateSkillPrompt(string, string) error          { return nil }
+func (s *corrGateSkillService) RegenerateSkillMd(string) error                  { return nil }
+func (s *corrGateSkillService) SyncSkillsFromFilesystem() error                 { return nil }
+func (s *corrGateSkillService) ListSkillScripts(string) ([]string, error)       { return nil, nil }
+func (s *corrGateSkillService) ClearSkillScripts(string) error                  { return nil }
 func (s *corrGateSkillService) GetSkillScript(string, string) (*services.ScriptInfo, error) {
 	return nil, nil
 }
@@ -126,6 +126,8 @@ func (s *corrGateSkillService) UnlinkAlertFromIncident(context.Context, string) 
 func (s *corrGateSkillService) MoveAlertToIncident(context.Context, string, string) (string, error) {
 	return "", nil
 }
+func (s *corrGateSkillService) ResolveAlert(context.Context, string) error        { return nil }
+func (s *corrGateSkillService) CloseIncident(context.Context, string, bool) error { return nil }
 
 // corrOneShotLLMCaller is a configurable stub for services.OneShotLLMCaller.
 type corrOneShotLLMCaller struct {

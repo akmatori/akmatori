@@ -16,6 +16,7 @@ const (
 	IncidentStatusCompleted IncidentStatus = "completed"
 	IncidentStatusFailed    IncidentStatus = "failed"
 	IncidentStatusMonitor   IncidentStatus = "monitor"
+	IncidentStatusClosed    IncidentStatus = "closed"
 )
 
 // IncidentSourceKind enumerates the trigger kinds that can spawn an incident.

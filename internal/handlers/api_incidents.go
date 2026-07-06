@@ -46,10 +46,7 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if statusParam != "" {
-			statuses := splitCSV(statusParam)
-			if len(statuses) > 0 {
-				query = query.Where("status IN ?", statuses)
-			}
+			query = applyIncidentStatusFilter(query, statusParam)
 		}
 
 		// Always use pagination (defaults: page=1, per_page=50)
@@ -68,10 +65,7 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if statusParam != "" {
-			statuses := splitCSV(statusParam)
-			if len(statuses) > 0 {
-				countQuery = countQuery.Where("status IN ?", statuses)
-			}
+			countQuery = applyIncidentStatusFilter(countQuery, statusParam)
 		}
 		if err := countQuery.Count(&total).Error; err != nil {
 			api.RespondError(w, http.StatusInternalServerError, "Failed to count incidents")
@@ -263,6 +257,54 @@ func (h *APIHandler) handleIncidentByID(w http.ResponseWriter, r *http.Request) 
 	api.RespondJSON(w, http.StatusOK, incident)
 }
 
+// incidentCloseRequest is the body for POST /api/incidents/{uuid}/close.
+type incidentCloseRequest struct {
+	// Confirm must be true to close an incident that still has firing alerts
+	// linked; those alerts are resolved as part of the close. Without it, a
+	// close attempt against a firing incident returns 409 with the firing
+	// count so the caller can prompt the operator first.
+	Confirm bool `json:"confirm"`
+}
+
+// handleIncidentClose handles POST /api/incidents/{uuid}/close. It manually
+// closes an incident. Returns 404 if missing, 409 if already closed, and 409
+// with a requires_confirmation body (firing_alert_count, in_progress) if the
+// incident has firing alerts and/or is still pending/running and confirm was
+// not set — confirming force-closes it regardless, resolving any linked
+// firing alerts.
+func (h *APIHandler) handleIncidentClose(w http.ResponseWriter, r *http.Request) {
+	incidentUUID := r.PathValue("uuid")
+
+	var req incidentCloseRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	err := h.skillService.CloseIncident(r.Context(), incidentUUID, req.Confirm)
+	if err == nil {
+		api.RespondJSON(w, http.StatusOK, map[string]string{"status": "closed"})
+		return
+	}
+
+	var confirmErr *services.ErrConfirmationRequired
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		api.RespondError(w, http.StatusNotFound, "Incident not found")
+	case errors.Is(err, services.ErrIncidentAlreadyClosed):
+		api.RespondError(w, http.StatusConflict, "incident is already closed")
+	case errors.As(err, &confirmErr):
+		api.RespondJSON(w, http.StatusConflict, map[string]interface{}{
+			"error":                 confirmErr.Error(),
+			"requires_confirmation": true,
+			"firing_alert_count":    confirmErr.FiringAlertCount,
+			"in_progress":           confirmErr.InProgress,
+		})
+	default:
+		slog.Error("CloseIncident failed", "incident", incidentUUID, "err", err)
+		api.RespondError(w, http.StatusInternalServerError, "Failed to close incident")
+	}
+}
+
 // runAgentInvestigation runs a full agent investigation for the given incident.
 // It must be launched as a goroutine by the caller. taskHeader is prepended to
 // all log updates; task is the raw user-facing task text (guidance is added
@@ -413,6 +455,27 @@ func (h *APIHandler) handleAlertMove(w http.ResponseWriter, r *http.Request) {
 	h.moveAlert(w, r, r.PathValue("uuid"), strings.TrimSpace(req.TargetIncidentUUID))
 }
 
+// handleAlertResolve handles POST /api/alerts/{uuid}/resolve. It manually
+// marks a firing alert resolved (e.g. an operator confirming the underlying
+// issue cleared). Returns 404 if the alert does not exist, 409 if it is
+// already resolved.
+func (h *APIHandler) handleAlertResolve(w http.ResponseWriter, r *http.Request) {
+	alertUUID := r.PathValue("uuid")
+	if err := h.skillService.ResolveAlert(r.Context(), alertUUID); err != nil {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			api.RespondError(w, http.StatusNotFound, "Alert not found")
+		case errors.Is(err, services.ErrAlertAlreadyResolved):
+			api.RespondError(w, http.StatusConflict, "alert is already resolved")
+		default:
+			slog.Error("ResolveAlert failed", "alert", alertUUID, "err", err)
+			api.RespondError(w, http.StatusInternalServerError, "Failed to resolve alert")
+		}
+		return
+	}
+	api.RespondJSON(w, http.StatusOK, map[string]string{"status": "resolved"})
+}
+
 // moveAlert is the shared implementation behind unlink and move. When target is
 // empty it spawns and runs a fresh investigation for the alert; otherwise it
 // links the alert to the existing target incident without spawning anything.
@@ -464,6 +527,37 @@ func (h *APIHandler) moveAlert(w http.ResponseWriter, r *http.Request, alertUUID
 	}
 
 	api.RespondJSON(w, http.StatusOK, map[string]string{"incident_uuid": resultIncidentUUID})
+}
+
+// applyIncidentStatusFilter applies a comma-separated ?status= filter to an
+// incidents query. Besides the real IncidentStatus values, it recognizes the
+// pseudo-token "alert_active" — an alert-sourced incident only stays
+// "completed" while at least one linked alert is still firing (see
+// UpdateIncidentComplete / ResolveAlertTx), so it represents unresolved,
+// still-open work rather than history. The plain "completed" token is
+// narrowed to exclude that case so the two buckets partition cleanly (used by
+// the Incidents page's Open/History toggle).
+func applyIncidentStatusFilter(query *gorm.DB, statusParam string) *gorm.DB {
+	statuses := splitCSV(statusParam)
+	if len(statuses) == 0 {
+		return query
+	}
+	conds := make([]string, 0, len(statuses))
+	args := make([]interface{}, 0, len(statuses))
+	for _, s := range statuses {
+		switch s {
+		case "alert_active":
+			conds = append(conds, "(status = ? AND source_kind = ?)")
+			args = append(args, string(database.IncidentStatusCompleted), database.IncidentSourceKindAlert)
+		case "completed":
+			conds = append(conds, "(status = ? AND source_kind != ?)")
+			args = append(args, string(database.IncidentStatusCompleted), database.IncidentSourceKindAlert)
+		default:
+			conds = append(conds, "status = ?")
+			args = append(args, s)
+		}
+	}
+	return query.Where(strings.Join(conds, " OR "), args...)
 }
 
 // splitCSV splits a comma-separated string into a trimmed, non-empty slice.

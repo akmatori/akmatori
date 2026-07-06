@@ -21,6 +21,7 @@ func setupRetentionTestDB(t *testing.T) *gorm.DB {
 
 	err = db.AutoMigrate(
 		&database.Incident{},
+		&database.Alert{},
 		&database.RetentionSettings{},
 	)
 	if err != nil {
@@ -29,6 +30,7 @@ func setupRetentionTestDB(t *testing.T) *gorm.DB {
 
 	// Clean tables to prevent data leaking between tests
 	db.Exec("DELETE FROM incidents")
+	db.Exec("DELETE FROM alerts")
 	db.Exec("DELETE FROM retention_settings")
 
 	origDB := database.DB
@@ -107,6 +109,54 @@ func TestRunCleanup_ExpiredIncidents(t *testing.T) {
 	db.Model(&database.Incident{}).Where("uuid = ?", "recent-uuid-1").Count(&count)
 	if count != 1 {
 		t.Error("expected recent incident DB record to still exist")
+	}
+}
+
+func TestRunCleanup_ExpiredIncident_CascadesLinkedAlerts(t *testing.T) {
+	db := setupRetentionTestDB(t)
+	dataDir := t.TempDir()
+
+	db.Create(&database.RetentionSettings{Enabled: true, RetentionDays: 30, CleanupIntervalHours: 6})
+	createExpiredIncident(t, db, "expired-uuid-1", dataDir, 60)
+	createExpiredIncident(t, db, "recent-uuid-1", dataDir, 10)
+
+	if err := db.Create(&database.Alert{
+		UUID:         "alert-on-expired",
+		IncidentUUID: "expired-uuid-1",
+		Status:       database.AlertStatusFiring,
+		AlertName:    "still firing when incident aged out",
+		FiredAt:      time.Now(),
+	}).Error; err != nil {
+		t.Fatalf("seed alert on expired incident: %v", err)
+	}
+	if err := db.Create(&database.Alert{
+		UUID:         "alert-on-recent",
+		IncidentUUID: "recent-uuid-1",
+		Status:       database.AlertStatusFiring,
+		AlertName:    "linked to an incident not yet eligible for retention",
+		FiredAt:      time.Now(),
+	}).Error; err != nil {
+		t.Fatalf("seed alert on recent incident: %v", err)
+	}
+
+	svc := NewRetentionService(dataDir, db)
+	result, err := svc.RunCleanup()
+	if err != nil {
+		t.Fatalf("RunCleanup failed: %v", err)
+	}
+
+	if result.ExpiredAlertsDeleted != 1 {
+		t.Errorf("ExpiredAlertsDeleted = %d, want 1", result.ExpiredAlertsDeleted)
+	}
+
+	var count int64
+	db.Model(&database.Alert{}).Where("uuid = ?", "alert-on-expired").Count(&count)
+	if count != 0 {
+		t.Error("expected alert linked to the deleted incident to be deleted too (no orphan left behind)")
+	}
+	db.Model(&database.Alert{}).Where("uuid = ?", "alert-on-recent").Count(&count)
+	if count != 1 {
+		t.Error("expected alert linked to the still-retained incident to be untouched")
 	}
 }
 
