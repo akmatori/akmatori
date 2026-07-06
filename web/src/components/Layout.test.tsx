@@ -61,7 +61,17 @@ describe('Layout mobile sidebar', () => {
 
   it('backdrop is absent by default', () => {
     renderLayout();
-    expect(document.querySelector('[class*="bg-black"]')).toBeNull();
+    expect(document.querySelector('.fixed.inset-0.z-30')).toBeNull();
+  });
+
+  it('main content is inert when drawer is open and interactive when closed', () => {
+    renderLayout();
+    const main = document.querySelector('main')!;
+    expect(main.hasAttribute('inert')).toBe(false);
+    fireEvent.click(screen.getByLabelText('Open menu'));
+    expect(main.hasAttribute('inert')).toBe(true);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(main.hasAttribute('inert')).toBe(false);
   });
 
   it('Escape key closes drawer and removes body scroll lock', () => {

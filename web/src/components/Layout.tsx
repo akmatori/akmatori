@@ -225,7 +225,7 @@ export default function Layout({ children }: LayoutProps) {
                 {/* Collapse Toggle */}
                 <button
                   onClick={() => setCollapsed(!collapsed)}
-                  className="hidden md:block p-2.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+                  className="hidden md:inline-flex items-center justify-center p-2.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
                   title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
                 >
                   {collapsed ? <Menu size={16} /> : <ChevronLeft size={16} />}
@@ -235,7 +235,7 @@ export default function Layout({ children }: LayoutProps) {
           </aside>
 
           {/* Main content */}
-          <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
+          <main inert={mobileOpen || undefined} className="flex-1 min-w-0 flex flex-col overflow-hidden">
             {/* Top bar */}
             <header className="h-16 flex items-center justify-between px-4 md:px-6 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
               <button
