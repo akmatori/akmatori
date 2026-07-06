@@ -191,7 +191,7 @@ export default function Layout({ children }: LayoutProps) {
             <div className="p-3 border-t border-gray-200 dark:border-gray-700 space-y-2">
               {/* User Info & Logout */}
               {user && (
-                <div className={`flex ${collapsed ? 'justify-center' : 'justify-between'} items-center px-3 py-2`}>
+                <div className={`flex ${(collapsed && !mobileOpen) ? 'justify-center' : 'justify-between'} items-center px-3 py-2`}>
                   {(!collapsed || mobileOpen) && (
                     <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
                       {user.username}
@@ -208,7 +208,7 @@ export default function Layout({ children }: LayoutProps) {
               )}
 
               {/* Theme Toggle & Collapse */}
-              <div className={`flex ${collapsed ? 'justify-center' : 'justify-between'} items-center px-3 py-2`}>
+              <div className={`flex ${(collapsed && !mobileOpen) ? 'justify-center' : 'justify-between'} items-center px-3 py-2`}>
                 {/* Dark/Light Mode Toggle */}
                 <button
                   onClick={() => setTheme(theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'light' : 'dark')}

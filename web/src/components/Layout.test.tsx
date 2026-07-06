@@ -83,9 +83,13 @@ describe('Layout mobile sidebar', () => {
 
   it('sidebar always renders full width on mobile (collapsed state does not shrink)', () => {
     renderLayout();
+    // Collapse the sidebar first to verify mobile ignores that state
+    const collapseBtn = screen.getByTitle('Collapse sidebar');
+    fireEvent.click(collapseBtn);
     const aside = document.querySelector('aside');
     expect(aside?.className).toContain('w-64');
-    expect(aside?.className).not.toContain('w-16');
+    // md:w-16 is present in the class string but only applies at ≥768px — on mobile the sidebar stays w-64
+    expect(aside?.className).not.toMatch(/(?<![:\w])w-16(?!\w)/);
   });
 
   it('nav labels visible in mobile drawer even when sidebar was collapsed on desktop', () => {
