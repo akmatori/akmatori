@@ -52,6 +52,12 @@ describe('Layout mobile sidebar', () => {
     expect(hamburger.getAttribute('type')).toBe('button');
   });
 
+  it('does not focus hamburger button on initial mount', () => {
+    renderLayout();
+    const hamburger = screen.getByLabelText('Open menu');
+    expect(document.activeElement).not.toBe(hamburger);
+  });
+
   it('opening drawer adds overflow-hidden to body', () => {
     renderLayout();
     expect(document.body.classList.contains('overflow-hidden')).toBe(false);

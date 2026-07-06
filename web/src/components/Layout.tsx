@@ -78,6 +78,7 @@ export default function Layout({ children }: LayoutProps) {
   const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
   const sidebarRef = useRef<HTMLElement>(null);
   const hamburgerRef = useRef<HTMLButtonElement>(null);
+  const drawerWasOpen = useRef(false);
   const { showOnboarding, dismissOnboarding, markComplete } = useSetupStatus();
   const pendingProposals = usePendingProposalsCount();
 
@@ -100,14 +101,17 @@ export default function Layout({ children }: LayoutProps) {
   // Move focus into the sidebar when the mobile drawer opens so keyboard/AT
   // users are not stranded after <main inert> disables the hamburger button.
   // When the drawer closes, return focus to the hamburger button.
+  // Guard with drawerWasOpen so we don't steal focus on initial mount.
   useEffect(() => {
     if (mobileOpen) {
+      drawerWasOpen.current = true;
       const id = requestAnimationFrame(() => {
         const first = sidebarRef.current?.querySelector<HTMLElement>('a[href],button:not([disabled])');
         first?.focus();
       });
       return () => cancelAnimationFrame(id);
-    } else {
+    } else if (drawerWasOpen.current) {
+      drawerWasOpen.current = false;
       hamburgerRef.current?.focus();
     }
   }, [mobileOpen]);
