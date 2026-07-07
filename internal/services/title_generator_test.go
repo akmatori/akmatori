@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/akmatori/akmatori/internal/database"
 	"gorm.io/driver/sqlite"
@@ -14,13 +15,13 @@ import (
 
 // fakeOneShotLLMCaller is a configurable test double for OneShotLLMCaller.
 type fakeOneShotLLMCaller struct {
-	calls       int32
-	lastSystem  string
-	lastUser    string
-	lastMaxTok  int
-	lastTemp    float64
-	lastLLM     *LLMSettingsForWorker
-	respond     func(ctx context.Context) (string, error)
+	calls      int32
+	lastSystem string
+	lastUser   string
+	lastMaxTok int
+	lastTemp   float64
+	lastLLM    *LLMSettingsForWorker
+	respond    func(ctx context.Context) (string, error)
 	// responses provides per-call responses indexed by call order (0-based).
 	// When the call index is within bounds, responses[idx] is used. When
 	// exhausted or nil, respond is used as the fallback.
@@ -75,6 +76,7 @@ func TestTitleGenerator_GenerateFallbackTitle(t *testing.T) {
 		{name: "double prefix only first removed", message: "Alert: Incident: Double prefix", source: "Test", expected: "Incident: Double prefix"},
 		{name: "Unicode characters", message: "服务器警报: CPU过高", source: "Monitoring", expected: "服务器警报: CPU过高"},
 		{name: "emoji in message", message: "🚨 Critical: Production down", source: "Slack", expected: "🚨 Critical: Production down"},
+		{name: "long unicode truncates on rune boundary", message: strings.Repeat("日", 90), source: "Webhook", expected: strings.Repeat("日", 77) + "..."},
 	}
 
 	for _, tt := range tests {
@@ -84,6 +86,21 @@ func TestTitleGenerator_GenerateFallbackTitle(t *testing.T) {
 				t.Errorf("GenerateFallbackTitle(%q, %q) = %q, want %q", tt.message, tt.source, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestTitleGenerator_GenerateFallbackTitle_LongUnicodeIsValidUTF8(t *testing.T) {
+	gen := NewTitleGenerator(nil)
+
+	got := gen.GenerateFallbackTitle(strings.Repeat("日", 90), "Webhook")
+	if !utf8.ValidString(got) {
+		t.Fatalf("GenerateFallbackTitle returned invalid UTF-8: %q", got)
+	}
+	if utf8.RuneCountInString(got) > 80 {
+		t.Fatalf("GenerateFallbackTitle returned %d runes, want <= 80", utf8.RuneCountInString(got))
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("GenerateFallbackTitle() = %q, want ellipsis suffix", got)
 	}
 }
 
@@ -101,6 +118,7 @@ func TestTruncateForPrompt(t *testing.T) {
 		{name: "maxLen 3 edge case", input: "hello", maxLen: 3, expected: "..."},
 		{name: "maxLen 4", input: "hello world", maxLen: 4, expected: "h..."},
 		{name: "unicode truncation", input: "你好世界", maxLen: 3, expected: "..."},
+		{name: "long unicode remains valid", input: strings.Repeat("日", 12), maxLen: 10, expected: strings.Repeat("日", 7) + "..."},
 		{name: "very long string", input: strings.Repeat("a", 5000), maxLen: 100, expected: strings.Repeat("a", 97) + "..."},
 	}
 
@@ -109,6 +127,9 @@ func TestTruncateForPrompt(t *testing.T) {
 			result := truncateForPrompt(tt.input, tt.maxLen)
 			if result != tt.expected {
 				t.Errorf("truncateForPrompt(%q, %d) = %q, want %q", tt.input, tt.maxLen, result, tt.expected)
+			}
+			if !utf8.ValidString(result) {
+				t.Errorf("truncateForPrompt(%q, %d) returned invalid UTF-8: %q", tt.input, tt.maxLen, result)
 			}
 		})
 	}
@@ -300,6 +321,23 @@ func TestTitleGenerator_GenerateTitle(t *testing.T) {
 			want:             strings.Repeat("x", 252) + "...",
 			wantCallerCalled: true,
 		},
+		{
+			name:    "successful unicode response truncates on rune boundary",
+			message: "The LLM returned a long unicode title that still needs to be safe for storage and UI rendering.",
+			source:  "Slack",
+			settings: database.LLMSettings{
+				Name:     "openai",
+				Provider: database.LLMProviderOpenAI,
+				APIKey:   "test-key",
+				Enabled:  true,
+				Active:   true,
+			},
+			caller: &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
+				return strings.Repeat("日", 260), nil
+			}},
+			want:             strings.Repeat("日", 252) + "...",
+			wantCallerCalled: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -324,6 +362,9 @@ func TestTitleGenerator_GenerateTitle(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Fatalf("GenerateTitle() = %q, want %q", got, tt.want)
+			}
+			if !utf8.ValidString(got) {
+				t.Fatalf("GenerateTitle() returned invalid UTF-8: %q", got)
 			}
 			if tt.caller != nil {
 				called := tt.caller.callCount() > 0
