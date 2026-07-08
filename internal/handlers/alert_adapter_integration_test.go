@@ -292,8 +292,13 @@ func setupWebhookHandlerIntegrationDB(t *testing.T) (*services.AlertService, fun
 	if err != nil {
 		t.Fatalf("open sqlite db: %v", err)
 	}
-	if err := db.AutoMigrate(&database.AlertSourceType{}, &database.AlertSourceInstance{}); err != nil {
-		t.Fatalf("migrate alert source tables: %v", err)
+	if err := db.AutoMigrate(
+		&database.AlertSourceType{},
+		&database.AlertSourceInstance{},
+		&database.Incident{},
+		&database.SlackSettings{},
+	); err != nil {
+		t.Fatalf("migrate webhook handler tables: %v", err)
 	}
 	database.DB = db
 
@@ -369,6 +374,138 @@ func TestWebhookHandler_AlertmanagerEndpointUsesRealServiceAndAdapter(t *testing
 				t.Fatalf("body = %q, want substring %q", w.Body.String(), tt.expectedBody)
 			}
 		})
+	}
+}
+
+func TestWebhookHandler_AlertmanagerBatchCreatesIncidentsForFiringAlerts(t *testing.T) {
+	service, cleanup := setupWebhookHandlerIntegrationDB(t)
+	defer cleanup()
+
+	instance, err := service.CreateInstance(
+		"alertmanager",
+		"Production Alertmanager Batch",
+		"Primary Prometheus Alertmanager batch webhook",
+		"webhook-secret",
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("create alertmanager instance: %v", err)
+	}
+
+	skillService := services.NewSkillService(t.TempDir(), nil, nil, nil)
+	h := NewAlertHandler(nil, nil, nil, nil, skillService, service, nil)
+	h.RegisterAdapter(adapters.NewAlertmanagerAdapter())
+
+	body := `{
+		"alerts": [
+			{
+				"status": "firing",
+				"labels": {
+					"alertname": "HighCPUUsage",
+					"severity": "critical",
+					"instance": "prod-web-01:9100",
+					"job": "node"
+				},
+				"annotations": {
+					"summary": "CPU usage exceeds 95%",
+					"description": "Production web server CPU is critically high"
+				},
+				"fingerprint": "fp-high-cpu"
+			},
+			{
+				"status": "resolved",
+				"labels": {
+					"alertname": "OldDiskFull",
+					"severity": "warning",
+					"instance": "prod-web-02:9100"
+				},
+				"annotations": {"summary": "Disk recovered"},
+				"fingerprint": "fp-old-disk"
+			},
+			{
+				"status": "firing",
+				"labels": {
+					"alertname": "APIErrorRate",
+					"severity": "warning",
+					"instance": "api-01:8080",
+					"job": "api"
+				},
+				"annotations": {"summary": "5xx rate above threshold"},
+				"fingerprint": "fp-api-errors"
+			}
+		]
+	}`
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/alert/"+instance.UUID, strings.NewReader(body))
+	req.Header.Set("X-Alertmanager-Secret", "webhook-secret")
+	w := httptest.NewRecorder()
+
+	h.HandleWebhook(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%q", w.Code, http.StatusOK, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "Received 3 alerts") {
+		t.Fatalf("body = %q, want Received 3 alerts", w.Body.String())
+	}
+
+	var incidents []database.Incident
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		incidents = nil
+		if err := database.DB.Where("source_uuid = ?", instance.UUID).Order("source_id ASC").Find(&incidents).Error; err != nil {
+			t.Fatalf("query incidents: %v", err)
+		}
+		if len(incidents) == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("created %d incidents, want 2", len(incidents))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	byFingerprint := make(map[string]database.Incident, len(incidents))
+	for _, incident := range incidents {
+		byFingerprint[incident.SourceID] = incident
+		if incident.Source != "alertmanager" {
+			t.Errorf("incident source = %q, want alertmanager", incident.Source)
+		}
+		if incident.SourceKind != database.IncidentSourceKindAlert {
+			t.Errorf("incident source kind = %q, want %q", incident.SourceKind, database.IncidentSourceKindAlert)
+		}
+		if incident.SourceUUID != instance.UUID {
+			t.Errorf("incident source uuid = %q, want %q", incident.SourceUUID, instance.UUID)
+		}
+	}
+
+	cpu, ok := byFingerprint["fp-high-cpu"]
+	if !ok {
+		t.Fatalf("missing incident for fp-high-cpu: %#v", byFingerprint)
+	}
+	if cpu.Context["alert_name"] != "HighCPUUsage" {
+		t.Errorf("cpu alert_name = %v, want HighCPUUsage", cpu.Context["alert_name"])
+	}
+	if cpu.Context["target_host"] != "prod-web-01:9100" {
+		t.Errorf("cpu target_host = %v, want prod-web-01:9100", cpu.Context["target_host"])
+	}
+	if cpu.Context["severity"] != string(database.AlertSeverityCritical) {
+		t.Errorf("cpu severity = %v, want %q", cpu.Context["severity"], database.AlertSeverityCritical)
+	}
+
+	api, ok := byFingerprint["fp-api-errors"]
+	if !ok {
+		t.Fatalf("missing incident for fp-api-errors: %#v", byFingerprint)
+	}
+	if api.Context["alert_name"] != "APIErrorRate" {
+		t.Errorf("api alert_name = %v, want APIErrorRate", api.Context["alert_name"])
+	}
+	if api.Context["target_service"] != "api" {
+		t.Errorf("api target_service = %v, want api", api.Context["target_service"])
+	}
+	if _, ok := byFingerprint["fp-old-disk"]; ok {
+		t.Fatal("resolved alert fp-old-disk should not create an incident")
 	}
 }
 
