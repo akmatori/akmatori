@@ -32,7 +32,7 @@ export interface ToolInstance {
   tool_type?: ToolType;
 }
 
-export type IncidentStatus = 'pending' | 'running' | 'diagnosed' | 'completed' | 'failed' | 'monitor' | 'closed';
+export type IncidentStatus = 'pending' | 'running' | 'diagnosed' | 'completed' | 'failed' | 'monitor' | 'closed' | 'merged';
 
 export interface Incident {
   id: number;
@@ -469,6 +469,7 @@ export interface CronJob {
   is_system: boolean;
   channel_id?: number | null;
   enabled: boolean;
+  post_results: boolean;
   last_run_at?: string | null;
   last_run_status: CronRunStatus;
   last_run_error: string;
@@ -485,6 +486,7 @@ export interface CreateCronJobRequest {
   prompt: string;
   channel_uuid?: string;
   enabled?: boolean;
+  post_results?: boolean;
   tool_instance_ids?: number[];
 }
 
@@ -494,6 +496,7 @@ export interface UpdateCronJobRequest {
   prompt?: string;
   channel_uuid?: string;
   enabled?: boolean;
+  post_results?: boolean;
   tool_instance_ids?: number[];
 }
 
@@ -561,12 +564,14 @@ export interface GeneralSettings {
   // Alert correlation gate (non-nullable after GET hydration with effective defaults)
   alert_correlation_enabled: boolean;
   alert_monitor_window_minutes: number;
+  incident_merge_enabled: boolean;
 }
 
 export interface GeneralSettingsUpdate {
   base_url?: string;
   alert_correlation_enabled?: boolean;
   alert_monitor_window_minutes?: number;
+  incident_merge_enabled?: boolean;
 }
 
 // Pagination

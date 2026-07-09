@@ -21,6 +21,7 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
   // Alert correlation fields
   const [correlationEnabled, setCorrelationEnabled] = useState(false);
   const [monitorWindowMinutes, setMonitorWindowMinutes] = useState(60);
+  const [incidentMergeEnabled, setIncidentMergeEnabled] = useState(false);
 
   useEffect(() => {
     loadGeneralSettings();
@@ -34,6 +35,7 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
       setInstanceBaseUrl(data.base_url || '');
       setCorrelationEnabled(data.alert_correlation_enabled);
       setMonitorWindowMinutes(data.alert_monitor_window_minutes ?? 60);
+      setIncidentMergeEnabled(data.incident_merge_enabled ?? false);
       setGeneralError(null);
       onStatusChange?.(data.base_url ? 'configured' : undefined);
     } catch (err) {
@@ -54,6 +56,7 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
         base_url: instanceBaseUrl,
         alert_correlation_enabled: correlationEnabled,
         alert_monitor_window_minutes: monitorWindowMinutes,
+        incident_merge_enabled: incidentMergeEnabled,
       });
       setGeneralSettings(updated);
       onStatusChange?.(updated.base_url ? 'configured' : undefined);
@@ -110,6 +113,19 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
           />
           <label htmlFor="correlation-enabled" className="text-sm text-gray-700 dark:text-gray-300">
             Enable alert correlation gate
+          </label>
+        </div>
+
+        <div className="flex items-center gap-2 mb-4">
+          <input
+            id="incident-merge-enabled"
+            type="checkbox"
+            checked={incidentMergeEnabled}
+            onChange={(e) => setIncidentMergeEnabled(e.target.checked)}
+            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <label htmlFor="incident-merge-enabled" className="text-sm text-gray-700 dark:text-gray-300">
+            Merge incidents with the same root cause after investigation
           </label>
         </div>
 

@@ -637,6 +637,7 @@ func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status databa
 	// may differ from the requested status below) so the memory-ingest check
 	// after the transaction reflects the real outcome.
 	effectiveStatus := status
+	sourceKind := ""
 
 	txErr := s.db.Transaction(func(tx *gorm.DB) error {
 		var incident database.Incident
@@ -644,6 +645,7 @@ func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status databa
 			Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
 			return err
 		}
+		sourceKind = incident.SourceKind
 
 		// Alert-sourced incidents transition to monitor status on completion,
 		// but only once every linked alert has resolved — otherwise the
@@ -692,6 +694,22 @@ func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status databa
 			ctx := context.Background()
 			if err := ingester.IngestFromDisk(ctx); err != nil {
 				slog.Warn("memory ingest from disk failed", "incident", uuid, "err", err)
+			}
+		}()
+	}
+
+	// Post-investigation merge pass: for alert-sourced incidents that
+	// finished successfully, ask the merger whether this investigation's
+	// root cause matches an earlier investigated incident. Detached and
+	// best-effort — the merger itself is flag-gated and fail-open.
+	if sourceKind == database.IncidentSourceKindAlert &&
+		(effectiveStatus == database.IncidentStatusCompleted ||
+			effectiveStatus == database.IncidentStatusMonitor) && s.incidentMerger != nil {
+		merger := s.incidentMerger
+		uuid := incidentUUID
+		go func() {
+			if err := merger.EvaluateAndMerge(context.Background(), uuid); err != nil {
+				slog.Warn("post-investigation merge pass failed", "incident", uuid, "err", err)
 			}
 		}()
 	}

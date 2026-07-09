@@ -22,8 +22,9 @@ type SkillService struct {
 	memoryDir        string // /akmatori/memory - cross-incident memory mirror
 	toolService      *ToolService
 	contextService   *ContextService
-	oneShotLLMCaller OneShotLLMCaller // optional; nil = title generation falls back deterministically
-	memoryIngester   MemoryIngester   // optional; nil = post-investigation file ingest is a no-op
+	oneShotLLMCaller OneShotLLMCaller      // optional; nil = title generation falls back deterministically
+	memoryIngester   MemoryIngester        // optional; nil = post-investigation file ingest is a no-op
+	incidentMerger   IncidentMergeEvaluator // optional; nil = post-investigation merge pass is a no-op
 }
 
 // SetMemoryIngester wires the post-investigation memory file ingester that
@@ -53,6 +54,20 @@ func NewSkillService(dataDir string, toolService *ToolService, contextService *C
 // in the full MemoryService.
 type MemoryIngester interface {
 	IngestFromDisk(ctx context.Context) error
+}
+
+// SetIncidentMerger wires the post-investigation root-cause merge pass that
+// runs in a detached goroutine when an alert-sourced incident completes.
+// Optional — when unset, the merge pass is skipped silently.
+func (s *SkillService) SetIncidentMerger(m IncidentMergeEvaluator) {
+	s.incidentMerger = m
+}
+
+// IncidentMergeEvaluator represents the post-investigation merge check.
+// Narrow interface so SkillService can be tested without the full
+// IncidentMerger (and its LLM dependency).
+type IncidentMergeEvaluator interface {
+	EvaluateAndMerge(ctx context.Context, incidentUUID string) error
 }
 
 // ValidateSkillName validates that skill name follows kebab-case format

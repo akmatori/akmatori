@@ -203,6 +203,18 @@ type GeneralSettings struct {
 	// Alert correlation gate settings
 	AlertCorrelationEnabled  *bool `gorm:"default:null" json:"alert_correlation_enabled"`
 	AlertMonitorWindowMinutes *int  `gorm:"default:null" json:"alert_monitor_window_minutes"`
+
+	// IncidentMergeEnabled gates the post-investigation merge pass: after an
+	// alert-sourced incident completes, an LLM compares its diagnosed root
+	// cause against recent investigated incidents and merges on a confident
+	// match. Nil/false = disabled (default).
+	IncidentMergeEnabled *bool `gorm:"default:null" json:"incident_merge_enabled"`
+}
+
+// GetIncidentMergeEnabled returns the effective merge-gate flag, defaulting
+// to false when unset.
+func (s *GeneralSettings) GetIncidentMergeEnabled() bool {
+	return s.IncidentMergeEnabled != nil && *s.IncidentMergeEnabled
 }
 
 // GetAlertMonitorWindow returns the configured monitor window duration,
