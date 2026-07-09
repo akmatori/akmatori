@@ -1146,3 +1146,77 @@ func TestMoveAlertToIncident_InvalidTarget(t *testing.T) {
 		t.Errorf("expected ErrInvalidMoveTarget for same-incident target, got %v", err)
 	}
 }
+
+// TestLinkAlertToIncident_MergedIncident_RedirectsToSurvivor covers the race
+// where the correlator picked a candidate that got merged into a survivor
+// before LinkAlertToIncident ran: the alert must attach to the survivor (and
+// extend its monitor window), never to the hidden merged row.
+func TestLinkAlertToIncident_MergedIncident_RedirectsToSurvivor(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	survivorUUID := spawnAlertIncident(t, svc)
+	mergedUUID := spawnAlertIncident(t, svc)
+
+	oldWindow := time.Now().Add(5 * time.Minute)
+	if err := db.Model(&database.Incident{}).Where("uuid = ?", survivorUUID).
+		Updates(map[string]interface{}{
+			"status":        database.IncidentStatusMonitor,
+			"monitor_until": &oldWindow,
+		}).Error; err != nil {
+		t.Fatalf("set survivor monitor: %v", err)
+	}
+	if err := db.Model(&database.Incident{}).Where("uuid = ?", mergedUUID).
+		Updates(map[string]interface{}{
+			"status":           database.IncidentStatusMerged,
+			"merged_into_uuid": survivorUUID,
+		}).Error; err != nil {
+		t.Fatalf("set merged: %v", err)
+	}
+
+	a := alerts.NormalizedAlert{AlertName: "CPUHigh", TargetHost: "host-r"}
+	if err := svc.LinkAlertToIncident(context.Background(), mergedUUID, "src-uuid-111", a, 0.9, "recurrence"); err != nil {
+		t.Fatalf("LinkAlertToIncident failed: %v", err)
+	}
+
+	var onMerged, onSurvivor int64
+	db.Model(&database.Alert{}).Where("incident_uuid = ?", mergedUUID).Count(&onMerged)
+	db.Model(&database.Alert{}).Where("incident_uuid = ?", survivorUUID).Count(&onSurvivor)
+	if onMerged != 0 {
+		t.Errorf("alert attached to merged row (%d rows); must redirect to survivor", onMerged)
+	}
+	if onSurvivor != 1 {
+		t.Errorf("expected 1 alert on survivor, got %d", onSurvivor)
+	}
+
+	var survivor database.Incident
+	if err := db.Where("uuid = ?", survivorUUID).First(&survivor).Error; err != nil {
+		t.Fatalf("load survivor: %v", err)
+	}
+	if survivor.MonitorUntil == nil || !survivor.MonitorUntil.After(oldWindow) {
+		t.Error("survivor monitor window must be extended by the redirected link")
+	}
+}
+
+// TestLinkAlertToIncident_MergedWithoutPointer_AttachesInPlace verifies the
+// degraded path: a merged row with no merged_into_uuid still accepts the
+// alert rather than erroring (attaching beats dropping).
+func TestLinkAlertToIncident_MergedWithoutPointer_AttachesInPlace(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnAlertIncident(t, svc)
+
+	if err := db.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).
+		Update("status", database.IncidentStatusMerged).Error; err != nil {
+		t.Fatalf("set merged: %v", err)
+	}
+
+	a := alerts.NormalizedAlert{AlertName: "CPUHigh", TargetHost: "host-x"}
+	if err := svc.LinkAlertToIncident(context.Background(), incidentUUID, "src-uuid-111", a, 0.9, "r"); err != nil {
+		t.Fatalf("LinkAlertToIncident failed: %v", err)
+	}
+	var count int64
+	db.Model(&database.Alert{}).Where("incident_uuid = ?", incidentUUID).Count(&count)
+	if count != 1 {
+		t.Errorf("expected alert attached in place, got %d rows", count)
+	}
+}

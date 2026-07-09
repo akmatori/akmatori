@@ -90,7 +90,7 @@ Rules:
 - preserve raw fallback behavior when worker or LLM formatting fails
 - handler wiring happens via `SetResponseFormatter(...)`
 - operators configure the output shape via `OutputSchemaExample` (pasted example JSON in `FormattingSettings`); when empty, the built-in four-key default (`status`, `summary`, `actions_taken`, `recommendations`) applies
-- schema inference (`inferSchema` in `internal/services/formatter_schema.go`) derives field types/order from the example; `buildSchemaInstruction` wraps it into `systemPrompt = operatorPrompt + instruction`; response is validated with `validateAgainstSpecs`, retried once with the error list appended, then falls back to `rawResponse`
+- schema inference (`inferSchema` in `internal/services/formatter_schema.go`) derives field types/order from the example; `buildSchemaInstruction` yields `systemPrompt = operatorPrompt + instruction`; responses are validated by `validateAgainstSpecs`, retried once with the errors appended, then fall back to `rawResponse`
 - success renders to Slack mrkdwn via `output.RenderForSlack(parsed, specs)` (`internal/output/schema_render.go`); empty render also falls back to `rawResponse`
 - `DefaultFormattingPrompt` describes field content/tone only — the schema instruction is injected automatically; do not repeat it in the prompt
 - the web form pre-fills editable defaults with `hydrateField` and `dehydrateField` persists unchanged defaults as empty strings, keeping backend fallback constraints authoritative
@@ -104,7 +104,7 @@ Rules:
 - keep DB state and on-disk runbook files in sync (the runbook service writes both directions)
 - the incident-manager prompt invokes `subagent({agent: "runbook-searcher", task: ...})` for SOP lookup — do not introduce direct grep loops in the main agent
 - memory recall goes through `memory-searcher`; durable findings get written by `memory-writer` near end-of-investigation
-- the memory-writer subagent is invoked with `{agent: "memory-writer", task}` only — pi-subagents drops extra top-level keys, so scope and incident UUID are embedded as the first two header lines of `task` (`Scope: <slug>\nIncident UUID: <uuid>\n\n<reasoning>`); the subagent parses them out so `IngestFromDisk` upserts route correctly
+- memory-writer is invoked with `{agent: "memory-writer", task}` only — pi-subagents drops extra top-level keys, so scope and incident UUID are the first two header lines of `task` (`Scope: <slug>\nIncident UUID: <uuid>\n\n<reasoning>`); the subagent parses them so `IngestFromDisk` upserts route correctly
 - on incident completion the API runs `MemoryService.IngestFromDisk` to materialize new memory files into Postgres (idempotent by scope + `name:` slug); operator-authored rows carry `created_by: operator` in their frontmatter and ingest preserves that
 
 ### Slack investigation UX
@@ -163,7 +163,7 @@ After an alert-sourced incident completes, it enters `monitor` status for a conf
 Rules:
 - `UpdateIncidentComplete` sets `status=monitor` and `monitor_until = completedAt + GetAlertMonitorWindow()` for all `source_kind='alert'` incidents; non-alert incidents (cron, etc.) are unaffected
 - `AlertMonitorWindowMinutes` is configured in `GeneralSettings` (default 60, valid 1–10080); read via `gs.GetAlertMonitorWindow()`; exposed in `PUT /api/settings/general`
-- `processResolvedAlert` runs in a tx with a row lock on the incident: finds the matching `alerts` row by `source_fingerprint` (then `fingerprint` fallback), marks it `resolved_at=now`; if no firing alerts remain and the incident is completed/monitor, sets `monitor_until = min(monitor_until, resolved_at + window)` to end the watch period promptly; no-match is logged and dropped
+- `processResolvedAlert` (tx + row lock): finds the `alerts` row by `source_fingerprint` (then `fingerprint` fallback), marks it `resolved_at=now`; when no firing alerts remain on a completed/monitor incident, sets `monitor_until = min(monitor_until, resolved_at + window)`; no-match is logged and dropped
 - `InsertFiringAlert` inserts the initial `alerts` row (status=firing) for a newly spawned incident
 - `LinkAlertToIncident` attaches an alert to an existing incident; extends `monitor_until` if the incident is in monitor status
 - `IncidentStatusMonitor` is defined in `internal/database/models_incidents.go`; `Alert` model is in `internal/database/models_alerts.go`
@@ -178,6 +178,7 @@ Rules:
 - candidates: alert-sourced `completed`/`monitor`, non-empty `response`, `completed_at` within 24h, `started_at` earlier than the completing incident (newer→older only), LIMIT 25; `mergeThreshold=0.8` + hallucination guard
 - merge tx: lock both rows in UUID order, revalidate statuses, re-point `alerts` rows (safe: `uniq_firing_alert` is global), extend survivor `monitor_until`, set merged row `status=merged` + `merged_into_uuid`; merged incidents drop out of all candidate pools
 - Slack: best-effort note only in the merged incident's thread; failure never rolls back the merge
+- `LinkAlertToIncident` follows `merged_into_uuid` (bounded hops, each row locked) so a correlator verdict targeting a just-merged incident attaches to the survivor
 
 ### Alert sources and webhook adapters
 
@@ -218,7 +219,7 @@ Rules:
 - cron expressions are validated at write time (invalid → 400); `CronRunner` survives tick failures, recording `LastRunStatus=error` + `LastRunError`
 - manual fire is `POST /api/cron-jobs/{uuid}/run`; CRUD reloads the runner without restart
 - `CronJobTool` is the explicit join-table model; include it alongside `CronJob` in all `AutoMigrate` calls and test schemas — GORM does not auto-discover it from the `many2many:` tag
-- `SpawnAgentInvocation(rootSkillName, ctx)` in `incident_service.go` is the shared entrypoint for all root-skill agent runs; add a new system root skill by: (1) seeding the skill row in `db.go`, (2) adding its hardcoded prompt constant alongside `DefaultCronAgentPrompt`, (3) adding the `rootSkillName` case to `GetSkillPrompt`, `UpdateSkillPrompt`, `RegenerateSkillMd`, `RegenerateAllSkillMds`, and `rootSkillHeader`. Current system root skills: `incident-manager`, `cron-agent`, `proposal-editor`
+- `SpawnAgentInvocation(rootSkillName, ctx)` in `incident_service.go` is the shared entrypoint for root-skill agent runs; new system root skill = seed the skill row in `db.go`, add its prompt constant alongside `DefaultCronAgentPrompt`, add the `rootSkillName` case to `GetSkillPrompt`/`UpdateSkillPrompt`/`RegenerateSkillMd`/`RegenerateAllSkillMds`/`rootSkillHeader`. Current: `incident-manager`, `cron-agent`, `proposal-editor`
 
 ### Self-improving proposals
 
