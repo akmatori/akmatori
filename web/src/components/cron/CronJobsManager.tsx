@@ -60,6 +60,7 @@ export default function CronJobsManager() {
         prompt: form.prompt,
         channel_uuid: form.channel_uuid ?? '',
         enabled: form.enabled,
+        post_results: form.post_results,
         tool_instance_ids: form.tool_instance_ids,
       });
     } else if (editing) {
@@ -69,6 +70,7 @@ export default function CronJobsManager() {
         prompt: form.prompt,
         channel_uuid: form.channel_uuid ?? '',
         enabled: form.enabled,
+        post_results: form.post_results,
         tool_instance_ids: form.tool_instance_ids,
       });
     }

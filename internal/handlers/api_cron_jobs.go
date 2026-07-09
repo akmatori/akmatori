@@ -30,6 +30,7 @@ type cronJobResponse struct {
 	IsSystem      bool                  `json:"is_system"`
 	ChannelID     *uint                 `json:"channel_id"`
 	Enabled       bool                  `json:"enabled"`
+	PostResults   bool                  `json:"post_results"`
 	LastRunAt     *time.Time            `json:"last_run_at,omitempty"`
 	LastRunStatus string                `json:"last_run_status"`
 	LastRunError  string                `json:"last_run_error"`
@@ -62,6 +63,7 @@ func toCronJobResponse(row *database.CronJob) cronJobResponse {
 		IsSystem:      row.IsSystem,
 		ChannelID:     row.ChannelID,
 		Enabled:       row.Enabled,
+		PostResults:   row.PostResults,
 		LastRunAt:     row.LastRunAt,
 		LastRunStatus: row.LastRunStatus,
 		LastRunError:  row.LastRunError,
@@ -113,6 +115,7 @@ type CreateCronJobRequest struct {
 	Prompt          string `json:"prompt"`
 	ChannelUUID     string `json:"channel_uuid,omitempty"`
 	Enabled         *bool  `json:"enabled,omitempty"`
+	PostResults     *bool  `json:"post_results,omitempty"`
 	ToolInstanceIDs []uint `json:"tool_instance_ids,omitempty"`
 }
 
@@ -130,6 +133,7 @@ type UpdateCronJobRequest struct {
 	Prompt          *string `json:"prompt,omitempty"`
 	ChannelUUID     *string `json:"channel_uuid,omitempty"`
 	Enabled         *bool   `json:"enabled,omitempty"`
+	PostResults     *bool   `json:"post_results,omitempty"`
 	ToolInstanceIDs *[]uint `json:"tool_instance_ids,omitempty"`
 }
 
@@ -159,12 +163,17 @@ func (h *APIHandler) handleCronJobs(w http.ResponseWriter, r *http.Request) {
 		if req.Enabled != nil {
 			enabled = *req.Enabled
 		}
+		postResults := true
+		if req.PostResults != nil {
+			postResults = *req.PostResults
+		}
 		row, err := h.cronService.CreateJob(
 			req.Name,
 			req.Schedule,
 			req.Prompt,
 			req.ChannelUUID,
 			enabled,
+			postResults,
 			req.ToolInstanceIDs,
 		)
 		if err != nil {
@@ -236,6 +245,7 @@ func (h *APIHandler) handleCronJobByUUID(w http.ResponseWriter, r *http.Request)
 			Prompt:          req.Prompt,
 			ChannelUUID:     req.ChannelUUID,
 			Enabled:         req.Enabled,
+			PostResults:     req.PostResults,
 			ToolInstanceIDs: req.ToolInstanceIDs,
 		}
 		row, err := h.cronService.UpdateJob(uuid, patch)

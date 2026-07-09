@@ -237,11 +237,32 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
           </p>
         </div>
 
-        <ChannelPicker
-          label="Post results to channel"
-          value={form.channel_uuid}
-          onChange={(uuid) => setForm({ ...form, channel_uuid: uuid })}
-        />
+        <div className="flex items-center gap-3 p-4 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+          <input
+            type="checkbox"
+            id="cron-post-results"
+            checked={form.post_results}
+            onChange={(e) => setForm({ ...form, post_results: e.target.checked })}
+          />
+          <label htmlFor="cron-post-results" className="cursor-pointer">
+            <span className="text-sm text-gray-700 dark:text-gray-300">
+              {form.post_results ? 'Post results to a channel' : "Don't post results anywhere"}
+            </span>
+            <span className="block text-xs text-gray-500 dark:text-gray-400">
+              {form.post_results
+                ? 'The final summary is posted to the selected channel (or the workspace default).'
+                : 'The run still executes and its outcome is recorded on the incident — nothing is sent to Slack.'}
+            </span>
+          </label>
+        </div>
+
+        {form.post_results && (
+          <ChannelPicker
+            label="Post results to channel"
+            value={form.channel_uuid}
+            onChange={(uuid) => setForm({ ...form, channel_uuid: uuid })}
+          />
+        )}
 
         <div className="flex items-center gap-3 p-4 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
           <input

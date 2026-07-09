@@ -24,6 +24,7 @@ const makeJob = (overrides: Partial<CronJob>): CronJob => ({
   is_system: overrides.is_system ?? false,
   channel_id: overrides.channel_id ?? null,
   enabled: overrides.enabled ?? true,
+  post_results: overrides.post_results ?? true,
   last_run_at: overrides.last_run_at ?? null,
   last_run_status: overrides.last_run_status ?? '',
   last_run_error: overrides.last_run_error ?? '',
