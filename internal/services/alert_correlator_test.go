@@ -24,6 +24,7 @@ func setupCorrelatorDB(t *testing.T) *gorm.DB {
 	}
 	if err := db.AutoMigrate(
 		&database.Incident{},
+		&database.Alert{},
 		&database.LLMSettings{},
 		&database.GeneralSettings{},
 	); err != nil {
@@ -72,6 +73,21 @@ func seedIncident(t *testing.T, db *gorm.DB, uuid, title, status string, started
 	}
 	if err := db.Create(&inc).Error; err != nil {
 		t.Fatalf("seed incident %s: %v", uuid, err)
+	}
+}
+
+// seedAlert inserts a minimal alert row linked to an incident.
+func seedAlert(t *testing.T, db *gorm.DB, uuid, incidentUUID string, status database.AlertStatus, resolvedAt *time.Time) {
+	t.Helper()
+	alert := database.Alert{
+		UUID:         uuid,
+		IncidentUUID: incidentUUID,
+		Status:       status,
+		FiredAt:      time.Now().Add(-10 * time.Minute),
+		ResolvedAt:   resolvedAt,
+	}
+	if err := db.Create(&alert).Error; err != nil {
+		t.Fatalf("seed alert %s: %v", uuid, err)
 	}
 }
 
@@ -478,6 +494,75 @@ func TestFetchCandidates_MonitorExpired_NotCandidate(t *testing.T) {
 	for _, row := range candidates {
 		if row.UUID == "monitor-expired" {
 			t.Error("expected monitor incident with expired monitor_until to be excluded from candidates")
+		}
+	}
+}
+
+// TestFetchCandidates_CompletedWithFiringAlert_IsCandidate verifies that a
+// completed incident held out of monitor mode (because its alert never
+// resolved) is still a correlation candidate.
+func TestFetchCandidates_CompletedWithFiringAlert_IsCandidate(t *testing.T) {
+	db := setupCorrelatorDB(t)
+	seedIncident(t, db, "completed-still-firing", "edge-guard down on or0001", "completed", time.Now().Add(-20*time.Minute))
+	seedAlert(t, db, "alert-1", "completed-still-firing", database.AlertStatusFiring, nil)
+
+	c := NewAlertCorrelator(nil, db)
+	candidates, err := c.fetchCandidates(context.Background())
+	if err != nil {
+		t.Fatalf("fetchCandidates: %v", err)
+	}
+
+	found := false
+	for _, row := range candidates {
+		if row.UUID == "completed-still-firing" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected completed incident with a still-firing alert to be a candidate")
+	}
+}
+
+// TestFetchCandidates_CompletedFullyResolved_NotCandidate verifies that a
+// completed incident whose alert already resolved is excluded — that
+// incident should have already been promoted to monitor status by
+// ResolveAlertTx, and once its monitor window lapses it must not resurface.
+func TestFetchCandidates_CompletedFullyResolved_NotCandidate(t *testing.T) {
+	db := setupCorrelatorDB(t)
+	seedIncident(t, db, "completed-resolved", "edge-guard down on or0002", "completed", time.Now().Add(-3*time.Hour))
+	resolvedAt := time.Now().Add(-2 * time.Hour)
+	seedAlert(t, db, "alert-2", "completed-resolved", database.AlertStatusResolved, &resolvedAt)
+
+	c := NewAlertCorrelator(nil, db)
+	candidates, err := c.fetchCandidates(context.Background())
+	if err != nil {
+		t.Fatalf("fetchCandidates: %v", err)
+	}
+
+	for _, row := range candidates {
+		if row.UUID == "completed-resolved" {
+			t.Error("expected fully-resolved completed incident to be excluded from candidates")
+		}
+	}
+}
+
+// TestFetchCandidates_CompletedNoAlerts_NotCandidate verifies that a completed
+// incident with no linked alert rows at all is excluded (no unresolved alert
+// exists to justify eligibility).
+func TestFetchCandidates_CompletedNoAlerts_NotCandidate(t *testing.T) {
+	db := setupCorrelatorDB(t)
+	seedIncident(t, db, "completed-no-alerts", "CPU high on web01", "completed", time.Now().Add(-20*time.Minute))
+
+	c := NewAlertCorrelator(nil, db)
+	candidates, err := c.fetchCandidates(context.Background())
+	if err != nil {
+		t.Fatalf("fetchCandidates: %v", err)
+	}
+
+	for _, row := range candidates {
+		if row.UUID == "completed-no-alerts" {
+			t.Error("expected completed incident with no alert rows to be excluded from candidates")
 		}
 	}
 }

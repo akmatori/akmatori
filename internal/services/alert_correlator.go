@@ -165,8 +165,13 @@ func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, aler
 }
 
 // fetchCandidates queries recent alert-sourced incidents that are viable targets
-// for recurrence attachment. Returns active incidents (pending/running/diagnosed)
-// and monitor incidents whose monitor window has not yet expired.
+// for recurrence attachment: active incidents (pending/running/diagnosed),
+// monitor incidents whose monitor window has not yet expired, and completed
+// incidents that UpdateIncidentComplete held out of monitor mode because an
+// alert was still firing when the investigation finished (see
+// countFiringAlerts) — those are still open from the alerting system's
+// perspective even though status reads "completed", so they must stay
+// eligible until ResolveAlertTx promotes them to monitor.
 func (c *AlertCorrelator) fetchCandidates(ctx context.Context) ([]candidateRow, error) {
 	now := time.Now()
 	activeStatuses := []string{
@@ -179,8 +184,10 @@ func (c *AlertCorrelator) fetchCandidates(ctx context.Context) ([]candidateRow, 
 	err := c.db.WithContext(ctx).
 		Model(&database.Incident{}).
 		Select("uuid, title, status, response, context, started_at, alert_fingerprint").
-		Where("source_kind = ? AND (status IN ? OR (status = ? AND monitor_until >= ?))",
-			database.IncidentSourceKindAlert, activeStatuses, string(database.IncidentStatusMonitor), now).
+		Where("source_kind = ? AND (status IN ? OR (status = ? AND monitor_until >= ?) OR (status = ? AND EXISTS (SELECT 1 FROM alerts WHERE alerts.incident_uuid = incidents.uuid AND alerts.status = ? AND alerts.resolved_at IS NULL)))",
+			database.IncidentSourceKindAlert, activeStatuses,
+			string(database.IncidentStatusMonitor), now,
+			string(database.IncidentStatusCompleted), string(database.AlertStatusFiring)).
 		Order("started_at DESC").
 		Limit(correlationMaxCandidates).
 		Scan(&rows).Error
