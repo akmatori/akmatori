@@ -13,8 +13,12 @@ interface IncidentDetailViewProps {
   autoRefresh?: boolean;
 }
 
+// defaultTab opens the incident on its final response when one exists;
+// in-flight incidents (no response yet) still open on the reasoning stream.
+const defaultTab = (incident: Incident): TabType => (incident.response ? 'response' : 'reasoning');
+
 export default function IncidentDetailView({ incident, autoRefresh = false }: IncidentDetailViewProps) {
-  const [activeTab, setActiveTab] = useState<TabType>('reasoning');
+  const [activeTab, setActiveTab] = useState<TabType>(defaultTab(incident));
   const [showToolCalls, setShowToolCalls] = useState(false);
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [alertsLoading, setAlertsLoading] = useState(false);
@@ -34,7 +38,8 @@ export default function IncidentDetailView({ incident, autoRefresh = false }: In
     setAlertsError('');
     setMoveResult(null);
     setResolveError('');
-    setActiveTab('reasoning');
+    setActiveTab(defaultTab(incident));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incident.uuid]);
 
   const handleMoved = (result: { incidentUUID: string; isNew: boolean }) => {

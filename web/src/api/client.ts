@@ -657,15 +657,22 @@ export const memoriesApi = {
 
 // Events feed API
 export const eventsApi = {
-  list: (params: { from?: number; to?: number; page?: number; perPage?: number; type?: string }) => {
+  list: (params: { from?: number; to?: number; page?: number; perPage?: number; type?: string; search?: string }) => {
     const qs = new URLSearchParams();
     if (params.from !== undefined) qs.set('from', String(params.from));
     if (params.to !== undefined) qs.set('to', String(params.to));
     qs.set('page', String(params.page ?? 1));
     qs.set('per_page', String(params.perPage ?? 50));
     if (params.type) qs.set('type', params.type);
+    if (params.search) qs.set('search', params.search);
     return fetchApi<PaginatedResponse<EventFeedItem>>(`/api/events?${qs.toString()}`);
   },
+
+  // Lightweight incident response projection for the Feed's inline expansion.
+  incidentResponse: (uuid: string) =>
+    fetchApi<{ uuid: string; title: string; status: string; response: string }>(
+      `/api/incidents/${encodeURIComponent(uuid)}/response`,
+    ),
 
   // Fetch the raw payload / original message for a single feed event on demand.
   raw: (type: string, uuid: string) =>

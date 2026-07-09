@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/api"
@@ -42,6 +43,7 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	fromParam := r.URL.Query().Get("from")
 	toParam := r.URL.Query().Get("to")
 	typeParam := r.URL.Query().Get("type")
+	searchParam := strings.TrimSpace(r.URL.Query().Get("search"))
 
 	var fromTime, toTime *time.Time
 	if fromParam != "" {
@@ -99,6 +101,16 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		if toTime != nil {
 			alertBaseQ = alertBaseQ.Where("fired_at <= ?", *toTime)
+		}
+		if searchParam != "" {
+			// UUIDs match by prefix (so a copied short ID finds its event);
+			// title and host match by substring. LOWER(...) LIKE keeps the
+			// query portable across PostgreSQL (prod) and SQLite (tests).
+			prefix := strings.ToLower(searchParam) + "%"
+			like := "%" + strings.ToLower(searchParam) + "%"
+			alertBaseQ = alertBaseQ.Where(
+				"LOWER(uuid) LIKE ? OR LOWER(incident_uuid) LIKE ? OR LOWER(alert_name) LIKE ? OR LOWER(target_host) LIKE ?",
+				prefix, prefix, like, like)
 		}
 
 		if err := alertBaseQ.Session(&gorm.Session{}).Count(&alertCount).Error; err != nil {
@@ -167,6 +179,11 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		if toTime != nil {
 			incBaseQ = incBaseQ.Where("started_at <= ?", *toTime)
+		}
+		if searchParam != "" {
+			prefix := strings.ToLower(searchParam) + "%"
+			like := "%" + strings.ToLower(searchParam) + "%"
+			incBaseQ = incBaseQ.Where("LOWER(uuid) LIKE ? OR LOWER(title) LIKE ?", prefix, like)
 		}
 
 		if err := incBaseQ.Session(&gorm.Session{}).Count(&incidentCount).Error; err != nil {

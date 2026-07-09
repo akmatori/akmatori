@@ -208,3 +208,90 @@ func TestHandleEvents_Pagination(t *testing.T) {
 		t.Errorf("expected 1 row on page 2, got %d", len(rows2))
 	}
 }
+
+// TestHandleEvents_SearchByUUIDPrefixAndTitle verifies the search param:
+// UUID prefixes match alert and incident events; title substrings match too;
+// non-matching terms return an empty page.
+func TestHandleEvents_SearchByUUIDPrefixAndTitle(t *testing.T) {
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+
+	now := time.Now().UTC()
+	alertIncUUID := seedEventIncident(t, database.IncidentSourceKindAlert, now, database.IncidentStatusRunning)
+	alertUUID := seedEventAlert(t, alertIncUUID, now, false)
+	cronUUID := seedEventIncident(t, database.IncidentSourceKindCron, now, database.IncidentStatusCompleted)
+
+	// Search by the alert event's UUID prefix — only that event comes back.
+	rows, meta := doEventsRequest(t, "search="+alertUUID[:8])
+	if meta.Total != 1 || len(rows) != 1 {
+		t.Fatalf("uuid-prefix search: expected 1 row, got total=%d rows=%d", meta.Total, len(rows))
+	}
+	if rows[0]["event_uuid"] != alertUUID {
+		t.Errorf("expected event %s, got %v", alertUUID, rows[0]["event_uuid"])
+	}
+
+	// Search by the cron incident's UUID prefix.
+	rows, _ = doEventsRequest(t, "search="+cronUUID[:8])
+	if len(rows) != 1 || rows[0]["event_uuid"] != cronUUID {
+		t.Fatalf("cron uuid search: expected %s, got %v", cronUUID, rows)
+	}
+
+	// Title substring matches the alert (name "TestAlert"), case-insensitive.
+	rows, _ = doEventsRequest(t, "search=testalert")
+	if len(rows) != 1 || rows[0]["event_uuid"] != alertUUID {
+		t.Fatalf("title search: expected alert event, got %v", rows)
+	}
+
+	// Host substring matches the alert row (host-01).
+	rows, _ = doEventsRequest(t, "search=host-01")
+	if len(rows) != 1 || rows[0]["event_uuid"] != alertUUID {
+		t.Fatalf("host search: expected alert event, got %v", rows)
+	}
+
+	// Non-matching term returns nothing.
+	rows, meta = doEventsRequest(t, "search=zzz-no-such-event")
+	if meta.Total != 0 || len(rows) != 0 {
+		t.Errorf("expected empty result, got total=%d rows=%d", meta.Total, len(rows))
+	}
+}
+
+// TestHandleIncidentResponse_LightweightProjection verifies the /response
+// endpoint returns title/status/response without the heavy fields, and 404s
+// for unknown incidents.
+func TestHandleIncidentResponse_LightweightProjection(t *testing.T) {
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+
+	db := database.GetDB()
+	incUUID := seedEventIncident(t, database.IncidentSourceKindAlert, time.Now().UTC(), database.IncidentStatusCompleted)
+	if err := db.Model(&database.Incident{}).Where("uuid = ?", incUUID).
+		Updates(map[string]interface{}{"response": "root cause: bad deploy", "full_log": "huge log"}).Error; err != nil {
+		t.Fatalf("set response: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h.SetupRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/incidents/"+incUUID+"/response", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["response"] != "root cause: bad deploy" {
+		t.Errorf("expected response text, got %v", resp["response"])
+	}
+	if _, hasLog := resp["full_log"]; hasLog {
+		t.Error("full_log must not be included in the lightweight projection")
+	}
+
+	req404 := httptest.NewRequest(http.MethodGet, "/api/incidents/does-not-exist/response", nil)
+	rec404 := httptest.NewRecorder()
+	mux.ServeHTTP(rec404, req404)
+	if rec404.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for unknown incident, got %d", rec404.Code)
+	}
+}
