@@ -92,8 +92,8 @@ Respond with ONLY the title, nothing else.`
 		return t.GenerateFallbackTitle(messageOrAlert, source), nil
 	}
 
-	if len(title) > 255 {
-		title = title[:252] + "..."
+	if utf8.RuneCountInString(title) > 255 {
+		title = truncateRunesWithEllipsis(title, 255)
 	}
 	return title, nil
 }
@@ -116,12 +116,14 @@ func (t *TitleGenerator) GenerateFallbackTitle(message string, source string) st
 	}
 
 	// Truncate to reasonable length
-	if len(message) > 80 {
+	if utf8.RuneCountInString(message) > 80 {
 		// Try to cut at word boundary
-		if idx := strings.LastIndex(message[:80], " "); idx > 40 {
+		prefix := firstRunes(message, 80)
+		idx := strings.LastIndex(prefix, " ")
+		if idx > 0 && utf8.RuneCountInString(prefix[:idx]) > 40 {
 			message = message[:idx] + "..."
 		} else {
-			message = message[:77] + "..."
+			message = truncateRunesWithEllipsis(message, 80)
 		}
 	}
 
@@ -135,12 +137,28 @@ func (t *TitleGenerator) GenerateFallbackTitle(message string, source string) st
 // truncateForPrompt truncates a string to fit in the prompt without splitting
 // UTF-8 multi-byte sequences, which would panic at slice boundaries.
 func truncateForPrompt(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if utf8.RuneCountInString(s) <= maxLen {
 		return s
 	}
-	cut := maxLen - 3
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
+	return truncateRunesWithEllipsis(s, maxLen)
+}
+
+func truncateRunesWithEllipsis(s string, maxRunes int) string {
+	if maxRunes <= 3 {
+		return "..."
 	}
-	return s[:cut] + "..."
+	return firstRunes(s, maxRunes-3) + "..."
+}
+
+func firstRunes(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	for idx := range s {
+		if maxRunes == 0 {
+			return s[:idx]
+		}
+		maxRunes--
+	}
+	return s
 }

@@ -23,11 +23,11 @@ import (
 
 // Cache TTL constants
 const (
-	ConfigCacheTTL   = 5 * time.Minute  // Credentials cache TTL
-	ResponseCacheTTL = 30 * time.Second // Default API response cache TTL
-	CacheCleanupTick = time.Minute      // Background cleanup interval
-	AlertsCacheTTL   = 15 * time.Second // Alerts and error data cache TTL
-	PerfCacheTTL     = 30 * time.Second // Performance data cache TTL
+	ConfigCacheTTL    = 5 * time.Minute  // Credentials cache TTL
+	ResponseCacheTTL  = 30 * time.Second // Default API response cache TTL
+	CacheCleanupTick  = time.Minute      // Background cleanup interval
+	AlertsCacheTTL    = 15 * time.Second // Alerts and error data cache TTL
+	PerfCacheTTL      = 30 * time.Second // Performance data cache TTL
 	InventoryCacheTTL = 60 * time.Second // Tests, nodes, and inventory cache TTL
 )
 
@@ -201,7 +201,7 @@ func (t *CatchpointTool) getCachedProxySettings(ctx context.Context) *database.P
 func (t *CatchpointTool) doRequest(ctx context.Context, config *CatchpointConfig, method, path string, queryParams url.Values, body io.Reader) ([]byte, error) {
 	// Validate token before consuming rate limit budget
 	if config.APIToken == "" {
-		return nil, fmt.Errorf("Catchpoint API token is required but not configured")
+		return nil, fmt.Errorf("catchpoint API token is required but not configured")
 	}
 
 	// Apply rate limiting
@@ -311,7 +311,7 @@ func (t *CatchpointTool) cachedGet(ctx context.Context, incidentID, path string,
 	}
 
 	if config.URL == "" {
-		return nil, fmt.Errorf("Catchpoint URL not configured")
+		return nil, fmt.Errorf("catchpoint URL not configured")
 	}
 
 	respBody, err := t.doRequest(ctx, config, http.MethodGet, path, queryParams, nil)

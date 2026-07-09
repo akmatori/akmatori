@@ -416,7 +416,7 @@ func (t *ZabbixTool) request(ctx context.Context, incidentID string, method stri
 	}
 
 	if config.URL == "" {
-		return nil, fmt.Errorf("Zabbix URL not configured")
+		return nil, fmt.Errorf("zabbix URL not configured")
 	}
 
 	auth, err := t.getAuth(ctx, config)

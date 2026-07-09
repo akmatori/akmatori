@@ -1835,11 +1835,11 @@ func TestAddComment_MissingBody(t *testing.T) {
 		t.Error("should not reach server")
 	})
 	cases := []map[string]interface{}{
-		{"key": "FOO-1"},                                       // missing body
-		{"key": "FOO-1", "body": ""},                           // empty string
-		{"key": "FOO-1", "body": "   "},                        // whitespace
-		{"key": "FOO-1", "body": map[string]interface{}{}},     // empty object
-		{"key": "FOO-1", "body": 42},                           // wrong type
+		{"key": "FOO-1"},                                   // missing body
+		{"key": "FOO-1", "body": ""},                       // empty string
+		{"key": "FOO-1", "body": "   "},                    // whitespace
+		{"key": "FOO-1", "body": map[string]interface{}{}}, // empty object
+		{"key": "FOO-1", "body": 42},                       // wrong type
 	}
 	for i, args := range cases {
 		_, err := tool.AddComment(context.Background(), "test-incident", args)

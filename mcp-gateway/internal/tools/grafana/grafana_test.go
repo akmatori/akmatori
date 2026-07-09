@@ -605,7 +605,7 @@ func TestDoPost_EmptyURL(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty URL")
 	}
-	if !strings.Contains(err.Error(), "Grafana URL not configured") {
+	if !strings.Contains(err.Error(), "grafana URL not configured") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

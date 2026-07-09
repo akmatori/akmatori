@@ -23,9 +23,9 @@ import (
 
 // Cache TTL constants
 const (
-	ConfigCacheTTL    = 5 * time.Minute  // Credentials cache TTL
-	ResponseCacheTTL  = 30 * time.Second // Default API response cache TTL
-	CacheCleanupTick  = time.Minute      // Background cleanup interval
+	ConfigCacheTTL      = 5 * time.Minute  // Credentials cache TTL
+	ResponseCacheTTL    = 30 * time.Second // Default API response cache TTL
+	CacheCleanupTick    = time.Minute      // Background cleanup interval
 	AlertsCacheTTL      = 15 * time.Second // Alerts and firing instances cache TTL
 	DashboardCacheTTL   = 30 * time.Second // Dashboard data cache TTL
 	InventoryCacheTTL   = 60 * time.Second // Data sources and static config cache TTL
@@ -191,7 +191,7 @@ func (t *GrafanaTool) getCachedProxySettings(ctx context.Context) *database.Prox
 func (t *GrafanaTool) doRequest(ctx context.Context, config *GrafanaConfig, method, path string, queryParams url.Values, body io.Reader) ([]byte, error) {
 	// Validate token before consuming rate limit budget
 	if config.APIToken == "" {
-		return nil, fmt.Errorf("Grafana API token is required but not configured")
+		return nil, fmt.Errorf("grafana API token is required but not configured")
 	}
 
 	// Apply rate limiting
@@ -301,7 +301,7 @@ func (t *GrafanaTool) cachedGet(ctx context.Context, incidentID, path string, qu
 	}
 
 	if config.URL == "" {
-		return nil, fmt.Errorf("Grafana URL not configured")
+		return nil, fmt.Errorf("grafana URL not configured")
 	}
 
 	respBody, err := t.doRequest(ctx, config, http.MethodGet, path, queryParams, nil)
@@ -324,7 +324,7 @@ func (t *GrafanaTool) doPost(ctx context.Context, incidentID, path string, reqBo
 	}
 
 	if config.URL == "" {
-		return nil, fmt.Errorf("Grafana URL not configured")
+		return nil, fmt.Errorf("grafana URL not configured")
 	}
 
 	bodyJSON, err := json.Marshal(reqBody)

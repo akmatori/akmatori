@@ -121,7 +121,7 @@ func TestCommandValidator_ErrorContainsAllowedCommands(t *testing.T) {
 
 	// Check that the error message contains the allowed commands list
 	expectedPhrases := []string{
-		"Command blocked:",
+		"command blocked:",
 		"Allowed commands in read-only mode:",
 		"File viewing: cat, head, tail",
 		"Directory: ls, pwd, tree",

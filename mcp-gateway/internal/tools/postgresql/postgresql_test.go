@@ -70,7 +70,7 @@ func TestGetConfig_CacheHit(t *testing.T) {
 	}
 	tool.configCache.Set(configCacheKey("test-incident"), config)
 
-	got, err := tool.getConfig(nil, "test-incident")
+	got, err := tool.getConfig(context.TODO(), "test-incident")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestGetConfig_LogicalNameCacheHit(t *testing.T) {
 	}
 	tool.configCache.Set("creds:logical:postgresql:prod-pg", config)
 
-	got, err := tool.getConfig(nil, "test-incident", "prod-pg")
+	got, err := tool.getConfig(context.TODO(), "test-incident", "prod-pg")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -221,9 +221,9 @@ func TestIsSelectOnly(t *testing.T) {
 
 func TestClampTimeout(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   int
-		want    int
+		name  string
+		input int
+		want  int
 	}{
 		{"zero defaults to min", 0, MinTimeout},
 		{"negative defaults to min", -1, MinTimeout},
@@ -500,24 +500,24 @@ func TestBuildConnConfig_IgnoresEnvVars(t *testing.T) {
 		t.Errorf("expected Password 'mypass', got %q (env leak)", connConfig.Password)
 	}
 	// Verify protocol/SSL negotiation env vars are cleared
-	if connConfig.Config.SSLNegotiation != "" {
-		t.Errorf("expected SSLNegotiation to be empty, got %q (PGSSLNEGOTIATION env leak)", connConfig.Config.SSLNegotiation)
+	if connConfig.SSLNegotiation != "" {
+		t.Errorf("expected SSLNegotiation to be empty, got %q (PGSSLNEGOTIATION env leak)", connConfig.SSLNegotiation)
 	}
-	if connConfig.Config.MinProtocolVersion != "" {
-		t.Errorf("expected MinProtocolVersion to be empty, got %q (PGMINPROTOCOLVERSION env leak)", connConfig.Config.MinProtocolVersion)
+	if connConfig.MinProtocolVersion != "" {
+		t.Errorf("expected MinProtocolVersion to be empty, got %q (PGMINPROTOCOLVERSION env leak)", connConfig.MinProtocolVersion)
 	}
-	if connConfig.Config.MaxProtocolVersion != "" {
-		t.Errorf("expected MaxProtocolVersion to be empty, got %q (PGMAXPROTOCOLVERSION env leak)", connConfig.Config.MaxProtocolVersion)
+	if connConfig.MaxProtocolVersion != "" {
+		t.Errorf("expected MaxProtocolVersion to be empty, got %q (PGMAXPROTOCOLVERSION env leak)", connConfig.MaxProtocolVersion)
 	}
 	// Verify channel_binding and kerberos fields are cleared (could leak via PGSERVICE service-file)
-	if connConfig.Config.ChannelBinding != "" {
-		t.Errorf("expected ChannelBinding to be empty, got %q (env/service-file leak)", connConfig.Config.ChannelBinding)
+	if connConfig.ChannelBinding != "" {
+		t.Errorf("expected ChannelBinding to be empty, got %q (env/service-file leak)", connConfig.ChannelBinding)
 	}
-	if connConfig.Config.KerberosSrvName != "" {
-		t.Errorf("expected KerberosSrvName to be empty, got %q (env/service-file leak)", connConfig.Config.KerberosSrvName)
+	if connConfig.KerberosSrvName != "" {
+		t.Errorf("expected KerberosSrvName to be empty, got %q (env/service-file leak)", connConfig.KerberosSrvName)
 	}
-	if connConfig.Config.KerberosSpn != "" {
-		t.Errorf("expected KerberosSpn to be empty, got %q (env/service-file leak)", connConfig.Config.KerberosSpn)
+	if connConfig.KerberosSpn != "" {
+		t.Errorf("expected KerberosSpn to be empty, got %q (env/service-file leak)", connConfig.KerberosSpn)
 	}
 }
 
@@ -781,7 +781,7 @@ func TestExecuteQuery_RejectsNonSelect(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{
+			_, err := tool.ExecuteQuery(context.TODO(), "test-incident", map[string]interface{}{
 				"query": tt.query,
 			})
 			if err == nil {
@@ -798,7 +798,7 @@ func TestExecuteQuery_RequiresQuery(t *testing.T) {
 	tool := NewPostgreSQLTool(testLogger(), nil)
 	defer tool.Stop()
 
-	_, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{})
+	_, err := tool.ExecuteQuery(context.TODO(), "test-incident", map[string]interface{}{})
 	if err == nil {
 		t.Error("expected error for missing query")
 	}
@@ -811,7 +811,7 @@ func TestDescribeTable_RequiresTableName(t *testing.T) {
 	tool := NewPostgreSQLTool(testLogger(), nil)
 	defer tool.Stop()
 
-	_, err := tool.DescribeTable(nil, "test-incident", map[string]interface{}{})
+	_, err := tool.DescribeTable(context.TODO(), "test-incident", map[string]interface{}{})
 	if err == nil {
 		t.Error("expected error for missing table_name")
 	}
@@ -824,7 +824,7 @@ func TestGetIndexes_RequiresTableName(t *testing.T) {
 	tool := NewPostgreSQLTool(testLogger(), nil)
 	defer tool.Stop()
 
-	_, err := tool.GetIndexes(nil, "test-incident", map[string]interface{}{})
+	_, err := tool.GetIndexes(context.TODO(), "test-incident", map[string]interface{}{})
 	if err == nil {
 		t.Error("expected error for missing table_name")
 	}
@@ -837,7 +837,7 @@ func TestExplainQuery_RejectsNonSelect(t *testing.T) {
 	tool := NewPostgreSQLTool(testLogger(), nil)
 	defer tool.Stop()
 
-	_, err := tool.ExplainQuery(nil, "test-incident", map[string]interface{}{
+	_, err := tool.ExplainQuery(context.TODO(), "test-incident", map[string]interface{}{
 		"query": "DELETE FROM users",
 	})
 	if err == nil {
@@ -849,7 +849,7 @@ func TestExplainQuery_RequiresQuery(t *testing.T) {
 	tool := NewPostgreSQLTool(testLogger(), nil)
 	defer tool.Stop()
 
-	_, err := tool.ExplainQuery(nil, "test-incident", map[string]interface{}{})
+	_, err := tool.ExplainQuery(context.TODO(), "test-incident", map[string]interface{}{})
 	if err == nil {
 		t.Error("expected error for missing query")
 	}
@@ -859,7 +859,7 @@ func TestExplainQuery_RejectsQueryWithExplain(t *testing.T) {
 	tool := NewPostgreSQLTool(testLogger(), nil)
 	defer tool.Stop()
 
-	_, err := tool.ExplainQuery(nil, "test-incident", map[string]interface{}{
+	_, err := tool.ExplainQuery(context.TODO(), "test-incident", map[string]interface{}{
 		"query": "EXPLAIN SELECT * FROM users",
 	})
 	if err == nil {
@@ -933,7 +933,7 @@ func TestExecuteQuery_CacheHit(t *testing.T) {
 	expectedResult := `[{"id":1,"name":"alice"}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
 
-	result, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{
+	result, err := tool.ExecuteQuery(context.TODO(), "test-incident", map[string]interface{}{
 		"query": "SELECT * FROM users",
 	})
 	if err != nil {
@@ -959,7 +959,7 @@ func TestExecuteQuery_AppendLimitWhenMissing(t *testing.T) {
 	expectedResult := `[{"id":1}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
 
-	result, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{
+	result, err := tool.ExecuteQuery(context.TODO(), "test-incident", map[string]interface{}{
 		"query": "SELECT * FROM users",
 		"limit": float64(50),
 	})
@@ -985,7 +985,7 @@ func TestExecuteQuery_PreservesExistingLimit(t *testing.T) {
 	expectedResult := `[{"id":1}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
 
-	result, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{
+	result, err := tool.ExecuteQuery(context.TODO(), "test-incident", map[string]interface{}{
 		"query": queryWithLimit,
 	})
 	if err != nil {
@@ -1000,7 +1000,7 @@ func TestExecuteQuery_EmptyQuery(t *testing.T) {
 	tool := NewPostgreSQLTool(testLogger(), nil)
 	defer tool.Stop()
 
-	_, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{
+	_, err := tool.ExecuteQuery(context.TODO(), "test-incident", map[string]interface{}{
 		"query": "",
 	})
 	if err == nil {
@@ -1021,7 +1021,7 @@ func TestExecuteQuery_WithLogicalName(t *testing.T) {
 	expectedResult := `[{"?column?":1}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
 
-	result, err := tool.ExecuteQuery(nil, "test-incident", map[string]interface{}{
+	result, err := tool.ExecuteQuery(context.TODO(), "test-incident", map[string]interface{}{
 		"query":        "SELECT 1",
 		"logical_name": "prod-pg",
 	})
@@ -1045,7 +1045,7 @@ func TestListTables_CacheHit(t *testing.T) {
 	expectedResult := `[{"table_name":"users","table_type":"BASE TABLE","row_estimate":1000}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, SchemaCacheTTL)
 
-	result, err := tool.ListTables(nil, "test-incident", map[string]interface{}{})
+	result, err := tool.ListTables(context.TODO(), "test-incident", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1066,7 +1066,7 @@ func TestListTables_CustomSchema(t *testing.T) {
 	expectedResult := `[{"table_name":"orders","table_type":"BASE TABLE","row_estimate":500}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, SchemaCacheTTL)
 
-	result, err := tool.ListTables(nil, "test-incident", map[string]interface{}{
+	result, err := tool.ListTables(context.TODO(), "test-incident", map[string]interface{}{
 		"schema": "myschema",
 	})
 	if err != nil {
@@ -1089,7 +1089,7 @@ func TestDescribeTable_CacheHit(t *testing.T) {
 	expectedResult := `[{"column_name":"id","data_type":"integer","is_nullable":"NO"}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, SchemaCacheTTL)
 
-	result, err := tool.DescribeTable(nil, "test-incident", map[string]interface{}{
+	result, err := tool.DescribeTable(context.TODO(), "test-incident", map[string]interface{}{
 		"table_name": "users",
 	})
 	if err != nil {
@@ -1104,7 +1104,7 @@ func TestDescribeTable_EmptyTableName(t *testing.T) {
 	tool := NewPostgreSQLTool(testLogger(), nil)
 	defer tool.Stop()
 
-	_, err := tool.DescribeTable(nil, "test-incident", map[string]interface{}{
+	_, err := tool.DescribeTable(context.TODO(), "test-incident", map[string]interface{}{
 		"table_name": "",
 	})
 	if err == nil {
@@ -1124,7 +1124,7 @@ func TestGetIndexes_CacheHit(t *testing.T) {
 	expectedResult := `[{"indexname":"users_pkey","indexdef":"CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id)","is_unique":true}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, SchemaCacheTTL)
 
-	result, err := tool.GetIndexes(nil, "test-incident", map[string]interface{}{
+	result, err := tool.GetIndexes(context.TODO(), "test-incident", map[string]interface{}{
 		"table_name": "users",
 	})
 	if err != nil {
@@ -1139,7 +1139,7 @@ func TestGetIndexes_EmptyTableName(t *testing.T) {
 	tool := NewPostgreSQLTool(testLogger(), nil)
 	defer tool.Stop()
 
-	_, err := tool.GetIndexes(nil, "test-incident", map[string]interface{}{
+	_, err := tool.GetIndexes(context.TODO(), "test-incident", map[string]interface{}{
 		"table_name": "",
 	})
 	if err == nil {
@@ -1159,7 +1159,7 @@ func TestGetTableStats_AllTables_CacheHit(t *testing.T) {
 	expectedResult := `[{"table_name":"users","n_live_tup":1000,"n_dead_tup":50}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, StatsCacheTTL)
 
-	result, err := tool.GetTableStats(nil, "test-incident", map[string]interface{}{})
+	result, err := tool.GetTableStats(context.TODO(), "test-incident", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1180,7 +1180,7 @@ func TestGetTableStats_SpecificTable_CacheHit(t *testing.T) {
 	expectedResult := `[{"table_name":"orders","n_live_tup":5000,"n_dead_tup":200}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, StatsCacheTTL)
 
-	result, err := tool.GetTableStats(nil, "test-incident", map[string]interface{}{
+	result, err := tool.GetTableStats(context.TODO(), "test-incident", map[string]interface{}{
 		"table_name": "orders",
 	})
 	if err != nil {
@@ -1203,7 +1203,7 @@ func TestExplainQuery_CacheHit(t *testing.T) {
 	expectedResult := `[{"QUERY PLAN":[{"Plan":{"Node Type":"Seq Scan","Relation Name":"users"}}]}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
 
-	result, err := tool.ExplainQuery(nil, "test-incident", map[string]interface{}{
+	result, err := tool.ExplainQuery(context.TODO(), "test-incident", map[string]interface{}{
 		"query": "SELECT * FROM users",
 	})
 	if err != nil {
@@ -1218,7 +1218,7 @@ func TestExplainQuery_EmptyQuery(t *testing.T) {
 	tool := NewPostgreSQLTool(testLogger(), nil)
 	defer tool.Stop()
 
-	_, err := tool.ExplainQuery(nil, "test-incident", map[string]interface{}{
+	_, err := tool.ExplainQuery(context.TODO(), "test-incident", map[string]interface{}{
 		"query": "",
 	})
 	if err == nil {
@@ -1238,7 +1238,7 @@ func TestCachedQuery_CacheHitAndMiss(t *testing.T) {
 	}
 
 	// First call - should execute queryFn (cache miss)
-	result1, err := tool.cachedQuery(nil, "incident-1", "test-key", QueryCacheTTL, queryFn)
+	result1, err := tool.cachedQuery(context.TODO(), "incident-1", "test-key", QueryCacheTTL, queryFn)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1247,7 +1247,7 @@ func TestCachedQuery_CacheHitAndMiss(t *testing.T) {
 	}
 
 	// Second call - should hit cache
-	result2, err := tool.cachedQuery(nil, "incident-1", "test-key", QueryCacheTTL, queryFn)
+	result2, err := tool.cachedQuery(context.TODO(), "incident-1", "test-key", QueryCacheTTL, queryFn)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1269,7 +1269,7 @@ func TestCachedQuery_DifferentIncidentsHaveDifferentCaches(t *testing.T) {
 		return `{"result":"data"}`, nil
 	}
 
-	_, err := tool.cachedQuery(nil, "incident-1", "key", QueryCacheTTL, queryFn)
+	_, err := tool.cachedQuery(context.TODO(), "incident-1", "key", QueryCacheTTL, queryFn)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1278,7 +1278,7 @@ func TestCachedQuery_DifferentIncidentsHaveDifferentCaches(t *testing.T) {
 	}
 
 	// Different incident should not hit the cache
-	_, err = tool.cachedQuery(nil, "incident-2", "key", QueryCacheTTL, queryFn)
+	_, err = tool.cachedQuery(context.TODO(), "incident-2", "key", QueryCacheTTL, queryFn)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1298,7 +1298,7 @@ func TestCachedQuery_LogicalNameCacheKey(t *testing.T) {
 	}
 
 	// With logical name
-	_, err := tool.cachedQuery(nil, "incident-1", "key", QueryCacheTTL, queryFn, "prod-pg")
+	_, err := tool.cachedQuery(context.TODO(), "incident-1", "key", QueryCacheTTL, queryFn, "prod-pg")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1307,7 +1307,7 @@ func TestCachedQuery_LogicalNameCacheKey(t *testing.T) {
 	}
 
 	// Same logical name from different incident should hit cache
-	_, err = tool.cachedQuery(nil, "incident-2", "key", QueryCacheTTL, queryFn, "prod-pg")
+	_, err = tool.cachedQuery(context.TODO(), "incident-2", "key", QueryCacheTTL, queryFn, "prod-pg")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1326,13 +1326,13 @@ func TestCachedQuery_ErrorNotCached(t *testing.T) {
 		return "", fmt.Errorf("connection failed")
 	}
 
-	_, err := tool.cachedQuery(nil, "incident-1", "key", QueryCacheTTL, queryFn)
+	_, err := tool.cachedQuery(context.TODO(), "incident-1", "key", QueryCacheTTL, queryFn)
 	if err == nil {
 		t.Error("expected error")
 	}
 
 	// Second call should also execute queryFn (errors are not cached)
-	_, err = tool.cachedQuery(nil, "incident-1", "key", QueryCacheTTL, queryFn)
+	_, err = tool.cachedQuery(context.TODO(), "incident-1", "key", QueryCacheTTL, queryFn)
 	if err == nil {
 		t.Error("expected error")
 	}
@@ -1355,7 +1355,7 @@ func TestGetActiveQueries_CacheHit(t *testing.T) {
 	expectedResult := `[{"pid":123,"state":"active","query":"SELECT 1","duration_seconds":5.2}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
 
-	result, err := tool.GetActiveQueries(nil, "test-incident", map[string]interface{}{})
+	result, err := tool.GetActiveQueries(context.TODO(), "test-incident", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1378,7 +1378,7 @@ func TestGetActiveQueries_IncludeIdle(t *testing.T) {
 	expectedResult := `[{"pid":123,"state":"idle","query":"SELECT 1"}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
 
-	result, err := tool.GetActiveQueries(nil, "test-incident", args)
+	result, err := tool.GetActiveQueries(context.TODO(), "test-incident", args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1400,7 +1400,7 @@ func TestGetActiveQueries_MinDuration(t *testing.T) {
 	expectedResult := `[{"pid":456,"state":"active","query":"SELECT pg_sleep(30)","duration_seconds":25.1}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
 
-	result, err := tool.GetActiveQueries(nil, "test-incident", args)
+	result, err := tool.GetActiveQueries(context.TODO(), "test-incident", args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1422,7 +1422,7 @@ func TestGetActiveQueries_WithLogicalName(t *testing.T) {
 	expectedResult := `[{"pid":789,"state":"active","query":"SELECT count(*) FROM orders"}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
 
-	result, err := tool.GetActiveQueries(nil, "test-incident", args)
+	result, err := tool.GetActiveQueries(context.TODO(), "test-incident", args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1444,7 +1444,7 @@ func TestGetLocks_CacheHit(t *testing.T) {
 	expectedResult := `[{"locktype":"relation","relation":"users","mode":"AccessShareLock","granted":true,"pid":123}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
 
-	result, err := tool.GetLocks(nil, "test-incident", args)
+	result, err := tool.GetLocks(context.TODO(), "test-incident", args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1466,7 +1466,7 @@ func TestGetLocks_BlockedOnly(t *testing.T) {
 	expectedResult := `[{"locktype":"relation","relation":"orders","mode":"ExclusiveLock","granted":false,"pid":456}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, QueryCacheTTL)
 
-	result, err := tool.GetLocks(nil, "test-incident", args)
+	result, err := tool.GetLocks(context.TODO(), "test-incident", args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1502,7 +1502,7 @@ func TestGetReplicationStatus_CacheHit(t *testing.T) {
 	expectedResult := `[{"client_addr":"10.0.0.2","state":"streaming","sent_lsn":"0/3000060","write_lsn":"0/3000060","flush_lsn":"0/3000060","replay_lsn":"0/3000060","sync_state":"async"}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, StatsCacheTTL)
 
-	result, err := tool.GetReplicationStatus(nil, "test-incident", map[string]interface{}{})
+	result, err := tool.GetReplicationStatus(context.TODO(), "test-incident", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1523,7 +1523,7 @@ func TestGetReplicationStatus_WithLogicalName(t *testing.T) {
 	expectedResult := `[{"client_addr":"10.0.1.5","state":"streaming"}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, StatsCacheTTL)
 
-	result, err := tool.GetReplicationStatus(nil, "test-incident", map[string]interface{}{
+	result, err := tool.GetReplicationStatus(context.TODO(), "test-incident", map[string]interface{}{
 		"logical_name": "prod-pg",
 	})
 	if err != nil {
@@ -1546,7 +1546,7 @@ func TestGetDatabaseStats_CacheHit(t *testing.T) {
 	expectedResult := `[{"numbackends":15,"xact_commit":50000,"xact_rollback":100,"blks_read":1000,"blks_hit":99000,"cache_hit_ratio":99.0,"deadlocks":0,"db_size":104857600}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, StatsCacheTTL)
 
-	result, err := tool.GetDatabaseStats(nil, "test-incident", map[string]interface{}{})
+	result, err := tool.GetDatabaseStats(context.TODO(), "test-incident", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1567,7 +1567,7 @@ func TestGetDatabaseStats_WithLogicalName(t *testing.T) {
 	expectedResult := `[{"numbackends":50,"xact_commit":500000,"deadlocks":2,"db_size":1073741824}]`
 	tool.responseCache.SetWithTTL(fullCacheKey, expectedResult, StatsCacheTTL)
 
-	result, err := tool.GetDatabaseStats(nil, "test-incident", map[string]interface{}{
+	result, err := tool.GetDatabaseStats(context.TODO(), "test-incident", map[string]interface{}{
 		"logical_name": "prod-pg",
 	})
 	if err != nil {
@@ -1589,12 +1589,12 @@ func TestGetDatabaseStats_CacheSeparation(t *testing.T) {
 	}
 
 	// Two different incidents should get separate caches for database stats
-	_, err := tool.cachedQuery(nil, "incident-1", "dbstats", StatsCacheTTL, queryFn)
+	_, err := tool.cachedQuery(context.TODO(), "incident-1", "dbstats", StatsCacheTTL, queryFn)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	_, err = tool.cachedQuery(nil, "incident-2", "dbstats", StatsCacheTTL, queryFn)
+	_, err = tool.cachedQuery(context.TODO(), "incident-2", "dbstats", StatsCacheTTL, queryFn)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1604,7 +1604,7 @@ func TestGetDatabaseStats_CacheSeparation(t *testing.T) {
 	}
 
 	// Same incident should hit cache
-	_, err = tool.cachedQuery(nil, "incident-1", "dbstats", StatsCacheTTL, queryFn)
+	_, err = tool.cachedQuery(context.TODO(), "incident-1", "dbstats", StatsCacheTTL, queryFn)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1612,7 +1612,6 @@ func TestGetDatabaseStats_CacheSeparation(t *testing.T) {
 		t.Errorf("expected still 2 calls (cache hit), got %d", callCount)
 	}
 }
-
 
 // --- Task 9: Tests with mock execution for full coverage ---
 
@@ -1645,7 +1644,7 @@ func TestExecuteQuery_FullPath(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.ExecuteQuery(nil, "inc-1", map[string]interface{}{"query": "SELECT * FROM users"})
+	result, err := tool.ExecuteQuery(context.TODO(), "inc-1", map[string]interface{}{"query": "SELECT * FROM users"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1659,7 +1658,7 @@ func TestExecuteQuery_FullPath_WithLimit(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.ExecuteQuery(nil, "inc-1", map[string]interface{}{
+	result, err := tool.ExecuteQuery(context.TODO(), "inc-1", map[string]interface{}{
 		"query": "SELECT * FROM users",
 		"limit": float64(50),
 	})
@@ -1676,7 +1675,7 @@ func TestExecuteQuery_FullPath_ExistingLimit(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.ExecuteQuery(nil, "inc-1", map[string]interface{}{
+	result, err := tool.ExecuteQuery(context.TODO(), "inc-1", map[string]interface{}{
 		"query": "SELECT * FROM users LIMIT 5",
 	})
 	if err != nil {
@@ -1691,7 +1690,7 @@ func TestExecuteQuery_FullPath_Error(t *testing.T) {
 	tool := newTestToolWithMock(nil, fmt.Errorf("connection refused"))
 	defer tool.Stop()
 
-	_, err := tool.ExecuteQuery(nil, "inc-1", map[string]interface{}{"query": "SELECT 1"})
+	_, err := tool.ExecuteQuery(context.TODO(), "inc-1", map[string]interface{}{"query": "SELECT 1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1705,7 +1704,7 @@ func TestListTables_FullPath(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.ListTables(nil, "inc-1", map[string]interface{}{})
+	result, err := tool.ListTables(context.TODO(), "inc-1", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1719,7 +1718,7 @@ func TestListTables_FullPath_CustomSchema(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.ListTables(nil, "inc-1", map[string]interface{}{"schema": "custom"})
+	result, err := tool.ListTables(context.TODO(), "inc-1", map[string]interface{}{"schema": "custom"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1732,7 +1731,7 @@ func TestListTables_FullPath_Error(t *testing.T) {
 	tool := newTestToolWithMock(nil, fmt.Errorf("query failed"))
 	defer tool.Stop()
 
-	_, err := tool.ListTables(nil, "inc-1", map[string]interface{}{})
+	_, err := tool.ListTables(context.TODO(), "inc-1", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1743,7 +1742,7 @@ func TestDescribeTable_FullPath(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.DescribeTable(nil, "inc-1", map[string]interface{}{"table_name": "users"})
+	result, err := tool.DescribeTable(context.TODO(), "inc-1", map[string]interface{}{"table_name": "users"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1757,7 +1756,7 @@ func TestDescribeTable_FullPath_CustomSchema(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.DescribeTable(nil, "inc-1", map[string]interface{}{"table_name": "orders", "schema": "sales"})
+	result, err := tool.DescribeTable(context.TODO(), "inc-1", map[string]interface{}{"table_name": "orders", "schema": "sales"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1770,7 +1769,7 @@ func TestDescribeTable_FullPath_Error(t *testing.T) {
 	tool := newTestToolWithMock(nil, fmt.Errorf("table not found"))
 	defer tool.Stop()
 
-	_, err := tool.DescribeTable(nil, "inc-1", map[string]interface{}{"table_name": "nonexistent"})
+	_, err := tool.DescribeTable(context.TODO(), "inc-1", map[string]interface{}{"table_name": "nonexistent"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1781,7 +1780,7 @@ func TestGetIndexes_FullPath(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.GetIndexes(nil, "inc-1", map[string]interface{}{"table_name": "users"})
+	result, err := tool.GetIndexes(context.TODO(), "inc-1", map[string]interface{}{"table_name": "users"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1794,7 +1793,7 @@ func TestGetIndexes_FullPath_Error(t *testing.T) {
 	tool := newTestToolWithMock(nil, fmt.Errorf("query failed"))
 	defer tool.Stop()
 
-	_, err := tool.GetIndexes(nil, "inc-1", map[string]interface{}{"table_name": "users"})
+	_, err := tool.GetIndexes(context.TODO(), "inc-1", map[string]interface{}{"table_name": "users"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1805,7 +1804,7 @@ func TestGetTableStats_FullPath_AllTables(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.GetTableStats(nil, "inc-1", map[string]interface{}{})
+	result, err := tool.GetTableStats(context.TODO(), "inc-1", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1819,7 +1818,7 @@ func TestGetTableStats_FullPath_SpecificTable(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.GetTableStats(nil, "inc-1", map[string]interface{}{"table_name": "orders"})
+	result, err := tool.GetTableStats(context.TODO(), "inc-1", map[string]interface{}{"table_name": "orders"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1832,7 +1831,7 @@ func TestGetTableStats_FullPath_Error(t *testing.T) {
 	tool := newTestToolWithMock(nil, fmt.Errorf("connection lost"))
 	defer tool.Stop()
 
-	_, err := tool.GetTableStats(nil, "inc-1", map[string]interface{}{})
+	_, err := tool.GetTableStats(context.TODO(), "inc-1", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1842,7 +1841,7 @@ func TestGetTableStats_FullPath_SpecificTable_Error(t *testing.T) {
 	tool := newTestToolWithMock(nil, fmt.Errorf("connection lost"))
 	defer tool.Stop()
 
-	_, err := tool.GetTableStats(nil, "inc-1", map[string]interface{}{"table_name": "users"})
+	_, err := tool.GetTableStats(context.TODO(), "inc-1", map[string]interface{}{"table_name": "users"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1853,7 +1852,7 @@ func TestExplainQuery_FullPath(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.ExplainQuery(nil, "inc-1", map[string]interface{}{"query": "SELECT * FROM users"})
+	result, err := tool.ExplainQuery(context.TODO(), "inc-1", map[string]interface{}{"query": "SELECT * FROM users"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1866,7 +1865,7 @@ func TestExplainQuery_FullPath_Error(t *testing.T) {
 	tool := newTestToolWithMock(nil, fmt.Errorf("query failed"))
 	defer tool.Stop()
 
-	_, err := tool.ExplainQuery(nil, "inc-1", map[string]interface{}{"query": "SELECT 1"})
+	_, err := tool.ExplainQuery(context.TODO(), "inc-1", map[string]interface{}{"query": "SELECT 1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1877,7 +1876,7 @@ func TestGetActiveQueries_FullPath(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.GetActiveQueries(nil, "inc-1", map[string]interface{}{})
+	result, err := tool.GetActiveQueries(context.TODO(), "inc-1", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1891,7 +1890,7 @@ func TestGetActiveQueries_FullPath_IncludeIdle(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.GetActiveQueries(nil, "inc-1", map[string]interface{}{"include_idle": true})
+	result, err := tool.GetActiveQueries(context.TODO(), "inc-1", map[string]interface{}{"include_idle": true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1905,7 +1904,7 @@ func TestGetActiveQueries_FullPath_MinDuration(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.GetActiveQueries(nil, "inc-1", map[string]interface{}{"min_duration_seconds": float64(10)})
+	result, err := tool.GetActiveQueries(context.TODO(), "inc-1", map[string]interface{}{"min_duration_seconds": float64(10)})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1918,7 +1917,7 @@ func TestGetActiveQueries_FullPath_Error(t *testing.T) {
 	tool := newTestToolWithMock(nil, fmt.Errorf("db error"))
 	defer tool.Stop()
 
-	_, err := tool.GetActiveQueries(nil, "inc-1", map[string]interface{}{})
+	_, err := tool.GetActiveQueries(context.TODO(), "inc-1", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1929,7 +1928,7 @@ func TestGetLocks_FullPath(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.GetLocks(nil, "inc-1", map[string]interface{}{})
+	result, err := tool.GetLocks(context.TODO(), "inc-1", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1943,7 +1942,7 @@ func TestGetLocks_FullPath_BlockedOnly(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.GetLocks(nil, "inc-1", map[string]interface{}{"blocked_only": true})
+	result, err := tool.GetLocks(context.TODO(), "inc-1", map[string]interface{}{"blocked_only": true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1956,7 +1955,7 @@ func TestGetLocks_FullPath_Error(t *testing.T) {
 	tool := newTestToolWithMock(nil, fmt.Errorf("lock query failed"))
 	defer tool.Stop()
 
-	_, err := tool.GetLocks(nil, "inc-1", map[string]interface{}{})
+	_, err := tool.GetLocks(context.TODO(), "inc-1", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1967,7 +1966,7 @@ func TestGetReplicationStatus_FullPath(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.GetReplicationStatus(nil, "inc-1", map[string]interface{}{})
+	result, err := tool.GetReplicationStatus(context.TODO(), "inc-1", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1980,7 +1979,7 @@ func TestGetReplicationStatus_FullPath_Error(t *testing.T) {
 	tool := newTestToolWithMock(nil, fmt.Errorf("replication query failed"))
 	defer tool.Stop()
 
-	_, err := tool.GetReplicationStatus(nil, "inc-1", map[string]interface{}{})
+	_, err := tool.GetReplicationStatus(context.TODO(), "inc-1", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1991,7 +1990,7 @@ func TestGetDatabaseStats_FullPath(t *testing.T) {
 	tool := newTestToolWithMock(rows, nil)
 	defer tool.Stop()
 
-	result, err := tool.GetDatabaseStats(nil, "inc-1", map[string]interface{}{})
+	result, err := tool.GetDatabaseStats(context.TODO(), "inc-1", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2004,7 +2003,7 @@ func TestGetDatabaseStats_FullPath_Error(t *testing.T) {
 	tool := newTestToolWithMock(nil, fmt.Errorf("stats query failed"))
 	defer tool.Stop()
 
-	_, err := tool.GetDatabaseStats(nil, "inc-1", map[string]interface{}{})
+	_, err := tool.GetDatabaseStats(context.TODO(), "inc-1", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -2127,7 +2126,7 @@ func TestExecuteQuery_ConfigError(t *testing.T) {
 	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
 	defer tool.Stop()
 
-	_, err := tool.ExecuteQuery(nil, "inc-1", map[string]interface{}{"query": "SELECT 1"})
+	_, err := tool.ExecuteQuery(context.TODO(), "inc-1", map[string]interface{}{"query": "SELECT 1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -2140,7 +2139,7 @@ func TestListTables_ConfigError(t *testing.T) {
 	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
 	defer tool.Stop()
 
-	_, err := tool.ListTables(nil, "inc-1", map[string]interface{}{})
+	_, err := tool.ListTables(context.TODO(), "inc-1", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -2150,7 +2149,7 @@ func TestDescribeTable_ConfigError(t *testing.T) {
 	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
 	defer tool.Stop()
 
-	_, err := tool.DescribeTable(nil, "inc-1", map[string]interface{}{"table_name": "users"})
+	_, err := tool.DescribeTable(context.TODO(), "inc-1", map[string]interface{}{"table_name": "users"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -2160,7 +2159,7 @@ func TestGetIndexes_ConfigError(t *testing.T) {
 	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
 	defer tool.Stop()
 
-	_, err := tool.GetIndexes(nil, "inc-1", map[string]interface{}{"table_name": "users"})
+	_, err := tool.GetIndexes(context.TODO(), "inc-1", map[string]interface{}{"table_name": "users"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -2170,7 +2169,7 @@ func TestGetTableStats_ConfigError(t *testing.T) {
 	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
 	defer tool.Stop()
 
-	_, err := tool.GetTableStats(nil, "inc-1", map[string]interface{}{})
+	_, err := tool.GetTableStats(context.TODO(), "inc-1", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -2180,7 +2179,7 @@ func TestGetTableStats_SpecificTable_ConfigError(t *testing.T) {
 	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
 	defer tool.Stop()
 
-	_, err := tool.GetTableStats(nil, "inc-1", map[string]interface{}{"table_name": "users"})
+	_, err := tool.GetTableStats(context.TODO(), "inc-1", map[string]interface{}{"table_name": "users"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -2190,7 +2189,7 @@ func TestExplainQuery_ConfigError(t *testing.T) {
 	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
 	defer tool.Stop()
 
-	_, err := tool.ExplainQuery(nil, "inc-1", map[string]interface{}{"query": "SELECT 1"})
+	_, err := tool.ExplainQuery(context.TODO(), "inc-1", map[string]interface{}{"query": "SELECT 1"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -2200,7 +2199,7 @@ func TestGetActiveQueries_ConfigError(t *testing.T) {
 	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
 	defer tool.Stop()
 
-	_, err := tool.GetActiveQueries(nil, "inc-1", map[string]interface{}{})
+	_, err := tool.GetActiveQueries(context.TODO(), "inc-1", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -2210,7 +2209,7 @@ func TestGetLocks_ConfigError(t *testing.T) {
 	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
 	defer tool.Stop()
 
-	_, err := tool.GetLocks(nil, "inc-1", map[string]interface{}{})
+	_, err := tool.GetLocks(context.TODO(), "inc-1", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -2220,7 +2219,7 @@ func TestGetReplicationStatus_ConfigError(t *testing.T) {
 	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
 	defer tool.Stop()
 
-	_, err := tool.GetReplicationStatus(nil, "inc-1", map[string]interface{}{})
+	_, err := tool.GetReplicationStatus(context.TODO(), "inc-1", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -2230,7 +2229,7 @@ func TestGetDatabaseStats_ConfigError(t *testing.T) {
 	tool := newTestToolWithConfigError(fmt.Errorf("no credentials found"))
 	defer tool.Stop()
 
-	_, err := tool.GetDatabaseStats(nil, "inc-1", map[string]interface{}{})
+	_, err := tool.GetDatabaseStats(context.TODO(), "inc-1", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -2244,7 +2243,7 @@ func TestExecuteQuery_WithLogicalName_FullPath(t *testing.T) {
 	})
 	defer tool.Stop()
 
-	result, err := tool.ExecuteQuery(nil, "inc-1", map[string]interface{}{
+	result, err := tool.ExecuteQuery(context.TODO(), "inc-1", map[string]interface{}{
 		"query":        "SELECT count(*) FROM users",
 		"logical_name": "prod-pg",
 	})

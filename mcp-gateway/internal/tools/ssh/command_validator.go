@@ -194,7 +194,7 @@ func (v *CommandValidator) isSubcommandAllowed(fullCmd, baseCmd string, allowedS
 
 // blockedError creates a detailed error message with allowed commands
 func (v *CommandValidator) blockedError(reason string) error {
-	return fmt.Errorf(`Command blocked: %s (read-only mode is enabled).
+	return fmt.Errorf(`command blocked: %s (read-only mode is enabled)
 
 Allowed commands in read-only mode:
   File viewing: cat, head, tail, less, more
@@ -210,7 +210,7 @@ Allowed commands in read-only mode:
   Logs: journalctl, dmesg
   Containers: docker ps/images/logs/inspect/stats, kubectl get/describe/logs
 
-To allow write commands, enable 'Allow Write Commands' for this host.`, reason)
+To allow write commands, enable 'Allow Write Commands' for this host`, reason)
 }
 
 // extractBaseCommand extracts the base command from a command string

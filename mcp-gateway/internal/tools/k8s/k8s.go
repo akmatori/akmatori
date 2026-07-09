@@ -24,7 +24,7 @@ import (
 
 // Cache TTL constants
 const (
-	ConfigCacheTTL   = 5 * time.Minute  // Credentials cache TTL
+	ConfigCacheTTL   = 5 * time.Minute   // Credentials cache TTL
 	ResponseCacheTTL = 60 * time.Second  // Default API response cache TTL
 	CacheCleanupTick = time.Minute       // Background cleanup interval
 	PodCacheTTL      = 30 * time.Second  // Pod data (changes frequently)
@@ -204,7 +204,7 @@ func (t *K8sTool) getCachedProxySettings(ctx context.Context) *database.ProxySet
 func (t *K8sTool) doRequest(ctx context.Context, config *K8sConfig, method, path string, queryParams url.Values, maxBytes ...int) ([]byte, error) {
 	// Validate token before consuming rate limit budget
 	if config.Token == "" {
-		return nil, fmt.Errorf("Kubernetes API token is required but not configured")
+		return nil, fmt.Errorf("kubernetes API token is required but not configured")
 	}
 
 	// Apply rate limiting
@@ -362,7 +362,7 @@ func (t *K8sTool) cachedGet(ctx context.Context, incidentID, path string, queryP
 	}
 
 	if config.URL == "" {
-		return nil, fmt.Errorf("Kubernetes API URL not configured")
+		return nil, fmt.Errorf("kubernetes API URL not configured")
 	}
 
 	respBody, err := t.doRequest(ctx, config, http.MethodGet, path, queryParams)
@@ -402,7 +402,7 @@ func (t *K8sTool) cachedGetGeneric(ctx context.Context, incidentID, path string,
 	}
 
 	if config.URL == "" {
-		return nil, fmt.Errorf("Kubernetes API URL not configured")
+		return nil, fmt.Errorf("kubernetes API URL not configured")
 	}
 
 	respBody, err := t.doRequest(ctx, config, http.MethodGet, path, queryParams)
@@ -440,7 +440,7 @@ func (t *K8sTool) cachedGetConfigMaps(ctx context.Context, incidentID, path stri
 	}
 
 	if config.URL == "" {
-		return nil, fmt.Errorf("Kubernetes API URL not configured")
+		return nil, fmt.Errorf("kubernetes API URL not configured")
 	}
 
 	// Use a raised limit (50 MB) for the raw response since ConfigMap data/binaryData
@@ -459,7 +459,7 @@ func (t *K8sTool) cachedGetConfigMaps(ctx context.Context, incidentID, path stri
 	// Enforce size limit on the stripped (metadata-only) result, not the raw wire payload
 	const maxStrippedBytes = 5 * 1024 * 1024 // 5 MB
 	if len(stripped) > maxStrippedBytes {
-		return nil, fmt.Errorf("ConfigMap metadata response exceeds %d MB limit after stripping data fields", maxStrippedBytes/(1024*1024))
+		return nil, fmt.Errorf("configmap metadata response exceeds %d MB limit after stripping data fields", maxStrippedBytes/(1024*1024))
 	}
 
 	t.responseCache.SetWithTTL(cacheKey, stripped, ttl)
@@ -492,7 +492,7 @@ func (t *K8sTool) cachedGetConfigMapsGeneric(ctx context.Context, incidentID, pa
 	}
 
 	if config.URL == "" {
-		return nil, fmt.Errorf("Kubernetes API URL not configured")
+		return nil, fmt.Errorf("kubernetes API URL not configured")
 	}
 
 	const maxRawConfigMapBytes = 50 * 1024 * 1024 // 50 MB
@@ -505,7 +505,7 @@ func (t *K8sTool) cachedGetConfigMapsGeneric(ctx context.Context, incidentID, pa
 
 	const maxStrippedBytes = 5 * 1024 * 1024 // 5 MB
 	if len(stripped) > maxStrippedBytes {
-		return nil, fmt.Errorf("ConfigMap metadata response exceeds %d MB limit after stripping data fields", maxStrippedBytes/(1024*1024))
+		return nil, fmt.Errorf("configmap metadata response exceeds %d MB limit after stripping data fields", maxStrippedBytes/(1024*1024))
 	}
 
 	t.responseCache.SetWithTTL(cacheKey, stripped, ttl)

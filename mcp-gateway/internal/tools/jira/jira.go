@@ -26,13 +26,13 @@ import (
 
 // Cache TTL constants
 const (
-	ConfigCacheTTL    = 5 * time.Minute  // Credentials cache TTL
-	ResponseCacheTTL  = 30 * time.Second // Default API response cache TTL
-	CacheCleanupTick  = time.Minute      // Background cleanup interval
-	SearchCacheTTL    = 15 * time.Second // Issue search results
-	IssueCacheTTL     = 30 * time.Second // Issue detail / comments / transitions
-	ChangelogCacheTTL = 60 * time.Second // Changelog
-	UserCacheTTL      = 60 * time.Second // User search
+	ConfigCacheTTL    = 5 * time.Minute   // Credentials cache TTL
+	ResponseCacheTTL  = 30 * time.Second  // Default API response cache TTL
+	CacheCleanupTick  = time.Minute       // Background cleanup interval
+	SearchCacheTTL    = 15 * time.Second  // Issue search results
+	IssueCacheTTL     = 30 * time.Second  // Issue detail / comments / transitions
+	ChangelogCacheTTL = 60 * time.Second  // Changelog
+	UserCacheTTL      = 60 * time.Second  // User search
 	ProjectCacheTTL   = 120 * time.Second // Project list/detail
 )
 
@@ -318,7 +318,7 @@ func authHeader(config *JiraConfig) (string, error) {
 // doRequest performs an HTTP request against the Jira REST API.
 func (t *JiraTool) doRequest(ctx context.Context, config *JiraConfig, method, path string, queryParams url.Values, body io.Reader) ([]byte, error) {
 	if config.URL == "" {
-		return nil, fmt.Errorf("Jira URL not configured")
+		return nil, fmt.Errorf("jira URL not configured")
 	}
 
 	// Build auth header before consuming rate limit budget.
