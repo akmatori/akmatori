@@ -257,6 +257,35 @@ func (h *APIHandler) handleIncidentByID(w http.ResponseWriter, r *http.Request) 
 	api.RespondJSON(w, http.StatusOK, incident)
 }
 
+// handleIncidentResponse handles GET /api/incidents/{uuid}/response — a
+// lightweight projection (no full_log) used by the Feed's inline response
+// expansion so it doesn't pull megabytes of agent log per click.
+func (h *APIHandler) handleIncidentResponse(w http.ResponseWriter, r *http.Request) {
+	incidentUUID := r.PathValue("uuid")
+	db := database.GetDB()
+
+	var row struct {
+		UUID     string `json:"uuid"`
+		Title    string `json:"title"`
+		Status   string `json:"status"`
+		Response string `json:"response"`
+	}
+	err := db.Model(&database.Incident{}).
+		Select("uuid, title, status, response").
+		Where("uuid = ?", incidentUUID).
+		First(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			api.RespondError(w, http.StatusNotFound, "Incident not found")
+		} else {
+			slog.Error("incident response: failed to load", "uuid", incidentUUID, "err", err)
+			api.RespondError(w, http.StatusInternalServerError, "Failed to load incident")
+		}
+		return
+	}
+	api.RespondJSON(w, http.StatusOK, row)
+}
+
 // incidentCloseRequest is the body for POST /api/incidents/{uuid}/close.
 type incidentCloseRequest struct {
 	// Confirm must be true to close an incident that still has firing alerts

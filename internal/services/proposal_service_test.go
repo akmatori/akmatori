@@ -87,7 +87,7 @@ type fakeCrons struct {
 	live            map[string]*database.CronJob
 }
 
-func (f *fakeCrons) CreateJob(name, schedule, prompt string, channelUUID string, enabled bool, toolInstanceIDs []uint) (*database.CronJob, error) {
+func (f *fakeCrons) CreateJob(name, schedule, prompt string, channelUUID string, enabled, postResults bool, toolInstanceIDs []uint) (*database.CronJob, error) {
 	f.createdName = name
 	f.createdSchedule = schedule
 	f.createdEnabled = enabled

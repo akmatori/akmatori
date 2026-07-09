@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext } from 'react';
+import { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -74,8 +74,57 @@ export default function Layout({ children }: LayoutProps) {
   const { user, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const hamburgerRef = useRef<HTMLButtonElement>(null);
+  const drawerWasOpen = useRef(false);
   const { showOnboarding, dismissOnboarding, markComplete } = useSetupStatus();
   const pendingProposals = usePendingProposalsCount();
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    document.body.classList.toggle('overflow-hidden', mobileOpen);
+    return () => { document.body.classList.remove('overflow-hidden'); };
+  }, [mobileOpen]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobileOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [mobileOpen]);
+
+  // Move focus into the sidebar when the mobile drawer opens so keyboard/AT
+  // users are not stranded after <main inert> disables the hamburger button.
+  // When the drawer closes, return focus to the hamburger button.
+  // Guard with drawerWasOpen so we don't steal focus on initial mount.
+  useEffect(() => {
+    if (mobileOpen) {
+      drawerWasOpen.current = true;
+      const id = requestAnimationFrame(() => {
+        const first = sidebarRef.current?.querySelector<HTMLElement>('a[href],button:not([disabled])');
+        first?.focus();
+      });
+      return () => cancelAnimationFrame(id);
+    } else if (drawerWasOpen.current) {
+      drawerWasOpen.current = false;
+      hamburgerRef.current?.focus();
+    }
+  }, [mobileOpen]);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const onChange = (e: MediaQueryListEvent) => {
+      setIsMobile(e.matches);
+      if (!e.matches) setMobileOpen(false);
+    };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   return (
     <SidebarContext.Provider value={{ collapsed }}>
@@ -87,13 +136,26 @@ export default function Layout({ children }: LayoutProps) {
         />
       )}
 
-      <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
+      <div className="flex h-dvh bg-gray-50 dark:bg-gray-900">
+          {/* Mobile backdrop */}
+          {mobileOpen && (
+            <div
+              className="fixed inset-0 z-30 bg-black/40 md:hidden"
+              onClick={() => setMobileOpen(false)}
+            />
+          )}
+
           {/* Sidebar */}
           <aside
+            ref={sidebarRef}
+            id="mobile-sidebar"
+            inert={isMobile && !mobileOpen ? true : undefined}
             className={`
               flex flex-col border-r border-gray-200 dark:border-gray-700
               bg-white dark:bg-gray-800 transition-all duration-200 ease-in-out
-              ${collapsed ? 'w-16' : 'w-64'}
+              fixed inset-y-0 left-0 z-40 md:static md:inset-auto
+              ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0
+              ${collapsed ? 'w-64 md:w-16' : 'w-64'}
             `}
           >
             {/* Logo */}
@@ -104,7 +166,7 @@ export default function Layout({ children }: LayoutProps) {
                   alt="Akmatori"
                   className="w-8 h-8 flex-shrink-0"
                 />
-                {!collapsed && (
+                {(!collapsed || mobileOpen) && (
                   <h1 className="font-semibold text-gray-900 dark:text-white animate-fade-in">
                     Akmatori
                   </h1>
@@ -122,6 +184,7 @@ export default function Layout({ children }: LayoutProps) {
                   <Link
                     key={item.name}
                     to={item.href}
+                    onClick={() => setMobileOpen(false)}
                     className={`
                       flex items-center gap-3 px-3 py-2.5 rounded-lg
                       transition-colors duration-150
@@ -133,10 +196,10 @@ export default function Layout({ children }: LayoutProps) {
                     title={collapsed ? item.name : undefined}
                   >
                     <Icon size={20} className={isActive ? 'text-primary-500' : ''} />
-                    {!collapsed && (
+                    {(!collapsed || mobileOpen) && (
                       <span className="text-sm font-medium flex-1">{item.name}</span>
                     )}
-                    {!collapsed && item.href === '/proposals' && pendingProposals > 0 && (
+                    {(!collapsed || mobileOpen) && item.href === '/proposals' && pendingProposals > 0 && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
                         {pendingProposals}
                       </span>
@@ -150,15 +213,15 @@ export default function Layout({ children }: LayoutProps) {
             <div className="p-3 border-t border-gray-200 dark:border-gray-700 space-y-2">
               {/* User Info & Logout */}
               {user && (
-                <div className={`flex ${collapsed ? 'justify-center' : 'justify-between'} items-center px-3 py-2`}>
-                  {!collapsed && (
+                <div className={`flex ${(collapsed && !mobileOpen) ? 'justify-center' : 'justify-between'} items-center px-3 py-2`}>
+                  {(!collapsed || mobileOpen) && (
                     <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
                       {user.username}
                     </span>
                   )}
                   <button
                     onClick={logout}
-                    className="p-1.5 rounded-md text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+                    className="p-2.5 rounded-md text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
                     title="Sign out"
                   >
                     <LogOut size={14} />
@@ -167,11 +230,11 @@ export default function Layout({ children }: LayoutProps) {
               )}
 
               {/* Theme Toggle & Collapse */}
-              <div className={`flex ${collapsed ? 'justify-center' : 'justify-between'} items-center px-3 py-2`}>
+              <div className={`flex ${(collapsed && !mobileOpen) ? 'justify-center' : 'justify-between'} items-center px-3 py-2`}>
                 {/* Dark/Light Mode Toggle */}
                 <button
                   onClick={() => setTheme(theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'light' : 'dark')}
-                  className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+                  className="p-2.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
                   title={theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'Switch to light mode' : 'Switch to dark mode'}
                 >
                   {theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? (
@@ -184,7 +247,7 @@ export default function Layout({ children }: LayoutProps) {
                 {/* Collapse Toggle */}
                 <button
                   onClick={() => setCollapsed(!collapsed)}
-                  className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+                  className="hidden md:inline-flex items-center justify-center p-2.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
                   title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
                 >
                   {collapsed ? <Menu size={16} /> : <ChevronLeft size={16} />}
@@ -194,9 +257,20 @@ export default function Layout({ children }: LayoutProps) {
           </aside>
 
           {/* Main content */}
-          <main className="flex-1 flex flex-col overflow-hidden">
+          <main inert={mobileOpen || undefined} className="flex-1 min-w-0 flex flex-col overflow-hidden">
             {/* Top bar */}
-            <header className="h-16 flex items-center justify-between px-6 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+            <header className="h-16 flex items-center justify-between px-4 md:px-6 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+              <button
+                ref={hamburgerRef}
+                type="button"
+                className="block md:hidden p-2 rounded-md text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+                onClick={() => setMobileOpen(true)}
+                aria-label="Open menu"
+                aria-expanded={mobileOpen}
+                aria-controls="mobile-sidebar"
+              >
+                <Menu size={20} />
+              </button>
               <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
                   {navigation.find(n => n.href === location.pathname)?.name || 'Page'}
@@ -212,7 +286,7 @@ export default function Layout({ children }: LayoutProps) {
 
             {/* Content */}
             <div className="flex-1 overflow-auto">
-              <div className="p-6 max-w-7xl mx-auto">
+              <div className="p-3 sm:p-6 max-w-7xl mx-auto">
                 {children}
               </div>
             </div>

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback, Fragment } from 'react';
-import { RefreshCw, Activity, Rss, Link as LinkIcon, Shuffle, FileCode, Loader2 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { RefreshCw, Activity, Rss, Link as LinkIcon, Shuffle, FileCode, Loader2, Search, X, MessageSquareText } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { JsonView, darkStyles } from 'react-json-view-lite';
 import 'react-json-view-lite/dist/index.css';
 import PageHeader from '../components/PageHeader';
@@ -66,6 +66,42 @@ interface RawState {
   raw?: unknown;
   original_message?: string;
   error?: string;
+}
+
+interface ResponseState {
+  loading: boolean;
+  title?: string;
+  status?: string;
+  response?: string;
+  error?: string;
+}
+
+// IncidentResponseContent renders the linked incident's final response on demand.
+function IncidentResponseContent({ state }: { state?: ResponseState }) {
+  if (!state || state.loading) {
+    return (
+      <div className="flex items-center gap-2 text-gray-400 text-xs">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading incident response…
+      </div>
+    );
+  }
+  if (state.error) {
+    return <p className="text-red-400 text-xs">{state.error}</p>;
+  }
+  if (state.response) {
+    return (
+      <pre className="whitespace-pre-wrap text-gray-700 dark:text-gray-300 font-sans text-xs max-h-80 overflow-y-auto">
+        {state.response}
+      </pre>
+    );
+  }
+  return (
+    <p className="text-gray-500 text-xs">
+      {state.status === 'running' || state.status === 'pending'
+        ? 'Response will be available when the investigation completes…'
+        : 'No response available for this incident'}
+    </p>
+  );
 }
 
 const DEFAULT_TIME_RANGE = 3 * 60 * 60; // 3 hours
@@ -218,6 +254,7 @@ function CorrelationChip({
 }
 
 export default function Feed() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<EventFeedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -227,6 +264,15 @@ export default function Feed() {
   // Raw-message expansion + per-event fetch cache.
   const [rawExpanded, setRawExpanded] = useState<Set<string>>(new Set());
   const [rawData, setRawData] = useState<Record<string, RawState>>({});
+  // Incident-response expansion + per-incident fetch cache.
+  const [responseExpanded, setResponseExpanded] = useState<Set<string>>(new Set());
+  const [responseData, setResponseData] = useState<Record<string, ResponseState>>({});
+  // Search: `search` mirrors the input; `activeSearch` is what the API sees.
+  // Seeded from ?search= (or ?event=) so event links are shareable.
+  const initialSearch = searchParams.get('search') || searchParams.get('event') || '';
+  const [search, setSearch] = useState(initialSearch);
+  const [activeSearch, setActiveSearch] = useState(initialSearch);
+  const searchDebounceRef = useRef<number | null>(null);
   // The alert currently being reassigned via the Move modal.
   const [moveTarget, setMoveTarget] = useState<EventFeedItem | null>(null);
 
@@ -250,6 +296,7 @@ export default function Feed() {
     isRefresh?: boolean,
     pageOverride?: number,
     typeOverride?: TypeFilter,
+    searchOverride?: string,
   ) => {
     try {
       setLoading(true);
@@ -267,6 +314,7 @@ export default function Feed() {
       }
 
       const effectiveType = typeOverride ?? typeFilter;
+      const effectiveSearch = (searchOverride ?? activeSearch).trim();
       const currentPage = pageOverride ?? page;
       const result = await eventsApi.list({
         from: effectiveFrom,
@@ -274,6 +322,7 @@ export default function Feed() {
         page: currentPage,
         perPage,
         type: effectiveType === 'all' ? undefined : effectiveType,
+        search: effectiveSearch || undefined,
       });
       setItems(result.data);
       setTotalPages(result.pagination.total_pages);
@@ -288,7 +337,7 @@ export default function Feed() {
     } finally {
       setLoading(false);
     }
-  }, [timeFrom, timeTo, relativeRange, page, perPage, typeFilter]);
+  }, [timeFrom, timeTo, relativeRange, page, perPage, typeFilter, activeSearch]);
 
   const loadFeedRef = useRef(loadFeed);
 
@@ -345,6 +394,18 @@ export default function Feed() {
     });
   }, []);
 
+  // fetchRaw lazily loads (and caches) an event's raw payload.
+  const fetchRaw = useCallback((item: EventFeedItem) => {
+    const uuid = item.event_uuid;
+    setRawData(prevData => {
+      if (prevData[uuid] && !prevData[uuid].error) return prevData;
+      eventsApi.raw(item.event_type, uuid)
+        .then(res => setRawData(d => ({ ...d, [uuid]: { loading: false, raw: res.raw, original_message: res.original_message } })))
+        .catch(err => setRawData(d => ({ ...d, [uuid]: { loading: false, error: err instanceof Error ? err.message : 'Failed to load raw message' } })));
+      return { ...prevData, [uuid]: { loading: true } };
+    });
+  }, []);
+
   const toggleRaw = useCallback((item: EventFeedItem) => {
     const uuid = item.event_uuid;
     setRawExpanded(prev => {
@@ -354,17 +415,79 @@ export default function Feed() {
         return next;
       }
       next.add(uuid);
-      // Fetch the raw payload the first time this row is expanded.
-      setRawData(prevData => {
-        if (prevData[uuid] && !prevData[uuid].error) return prevData;
-        eventsApi.raw(item.event_type, uuid)
-          .then(res => setRawData(d => ({ ...d, [uuid]: { loading: false, raw: res.raw, original_message: res.original_message } })))
-          .catch(err => setRawData(d => ({ ...d, [uuid]: { loading: false, error: err instanceof Error ? err.message : 'Failed to load raw message' } })));
-        return { ...prevData, [uuid]: { loading: true } };
+      fetchRaw(item);
+      return next;
+    });
+  }, [fetchRaw]);
+
+  // toggleRowDetails is the whole-row click target: it opens (or closes) the
+  // raw message and the correlation reasoning together.
+  const toggleRowDetails = useCallback((item: EventFeedItem) => {
+    const uuid = item.event_uuid;
+    const isOpen = rawExpanded.has(uuid) || expandedUUIDs.has(uuid);
+    if (isOpen) {
+      setRawExpanded(prev => { const n = new Set(prev); n.delete(uuid); return n; });
+      setExpandedUUIDs(prev => { const n = new Set(prev); n.delete(uuid); return n; });
+      return;
+    }
+    setRawExpanded(prev => new Set(prev).add(uuid));
+    fetchRaw(item);
+    if (item.correlation_reasoning) {
+      setExpandedUUIDs(prev => new Set(prev).add(uuid));
+    }
+  }, [rawExpanded, expandedUUIDs, fetchRaw]);
+
+  // toggleResponse expands an inline panel with the linked incident's final
+  // response, fetched on demand through the lightweight /response endpoint.
+  const toggleResponse = useCallback((item: EventFeedItem) => {
+    const incidentUUID = item.incident_uuid;
+    if (!incidentUUID) return;
+    const uuid = item.event_uuid;
+    setResponseExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(uuid)) {
+        next.delete(uuid);
+        return next;
+      }
+      next.add(uuid);
+      setResponseData(prevData => {
+        if (prevData[incidentUUID] && !prevData[incidentUUID].error) return prevData;
+        eventsApi.incidentResponse(incidentUUID)
+          .then(res => setResponseData(d => ({ ...d, [incidentUUID]: { loading: false, title: res.title, status: res.status, response: res.response } })))
+          .catch(err => setResponseData(d => ({ ...d, [incidentUUID]: { loading: false, error: err instanceof Error ? err.message : 'Failed to load incident response' } })));
+        return { ...prevData, [incidentUUID]: { loading: true } };
       });
       return next;
     });
   }, []);
+
+  // applySearch commits a search term: syncs the URL (?search=) so the view is
+  // shareable, resets to page 1, and reloads.
+  const applySearch = useCallback((term: string) => {
+    const trimmed = term.trim();
+    setActiveSearch(trimmed);
+    setPage(1);
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (trimmed) next.set('search', trimmed); else next.delete('search');
+      next.delete('event');
+      return next;
+    }, { replace: true });
+    loadFeed(undefined, undefined, false, 1, undefined, trimmed);
+  }, [loadFeed, setSearchParams]);
+
+  const handleSearchInput = useCallback((value: string) => {
+    setSearch(value);
+    if (searchDebounceRef.current) window.clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = window.setTimeout(() => applySearch(value), 400);
+  }, [applySearch]);
+
+  // Clicking an event's ID chip filters the feed down to that event.
+  const filterByEventId = useCallback((uuid: string) => {
+    setSearch(uuid);
+    if (searchDebounceRef.current) window.clearTimeout(searchDebounceRef.current);
+    applySearch(uuid);
+  }, [applySearch]);
 
   const handleMoved = useCallback((result: { incidentUUID: string; isNew: boolean }) => {
     setMoveTarget(null);
@@ -409,8 +532,8 @@ export default function Feed() {
       {error && <ErrorMessage message={error} />}
       {successMsg && <SuccessMessage message={successMsg} />}
 
-      {/* Type filter chips */}
-      <div className="flex items-center gap-2 mb-4">
+      {/* Type filter chips + search */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
         {typeFilterOptions.map(opt => (
           <button
             key={opt.value}
@@ -424,6 +547,25 @@ export default function Feed() {
             {opt.label}
           </button>
         ))}
+        <div className="relative ml-auto min-w-[280px]">
+          <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => handleSearchInput(e.target.value)}
+            placeholder="Search by event ID, title, or host…"
+            className="input-field pl-8 pr-8 py-1.5 text-sm w-full"
+          />
+          {search && (
+            <button
+              onClick={() => { setSearch(''); applySearch(''); }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              title="Clear search"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {loading ? (
@@ -445,6 +587,7 @@ export default function Feed() {
                   <thead>
                     <tr>
                       <th>Time</th>
+                      <th>ID</th>
                       <th>Type</th>
                       <th>Title</th>
                       <th>Status</th>
@@ -457,14 +600,28 @@ export default function Feed() {
                     {items.map((item) => {
                       const isExpanded = expandedUUIDs.has(item.event_uuid);
                       const isRawExpanded = rawExpanded.has(item.event_uuid);
+                      const isResponseExpanded = responseExpanded.has(item.event_uuid);
                       // Any alert can be reassigned (origin or correlated).
                       const showMove = item.event_type === 'alert';
 
                       return (
                         <Fragment key={item.event_uuid}>
-                          <tr>
+                          <tr
+                            onClick={() => toggleRowDetails(item)}
+                            className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                            title="Click to see raw message and correlation details"
+                          >
                             <td className="text-gray-500 dark:text-gray-400 text-sm whitespace-nowrap" title={formatAbsolute(item.occurred_at)}>
                               {formatRelative(item.occurred_at)}
+                            </td>
+                            <td>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); filterByEventId(item.event_uuid); }}
+                                className="font-mono text-xs text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 hover:underline"
+                                title={`${item.event_uuid} — click to filter the feed to this event`}
+                              >
+                                {item.event_uuid.slice(0, 8)}
+                              </button>
                             </td>
                             <td>
                               <TypeChip type={item.event_type} />
@@ -487,13 +644,28 @@ export default function Feed() {
                             <td>
                               {item.incident_uuid ? (
                                 <div className="flex flex-col gap-0.5">
-                                  <Link
-                                    to={`/incidents/${item.incident_uuid}`}
-                                    className="inline-flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:underline"
-                                  >
-                                    <LinkIcon className="w-3 h-3" />
-                                    <code>{item.incident_uuid.slice(0, 8)}</code>
-                                  </Link>
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); toggleResponse(item); }}
+                                      className={`inline-flex items-center gap-1 text-xs hover:underline ${
+                                        isResponseExpanded
+                                          ? 'text-primary-700 dark:text-primary-300'
+                                          : 'text-primary-600 dark:text-primary-400'
+                                      }`}
+                                      title="Click to see the incident's response"
+                                    >
+                                      <MessageSquareText className="w-3 h-3" />
+                                      <code>{item.incident_uuid.slice(0, 8)}</code>
+                                    </button>
+                                    <Link
+                                      to={`/incidents/${item.incident_uuid}`}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
+                                      title="Open incident page"
+                                    >
+                                      <LinkIcon className="w-3 h-3" />
+                                    </Link>
+                                  </div>
                                   {item.incident_title && (
                                     <span className="text-xs text-gray-400 dark:text-gray-500 truncate max-w-[140px]" title={item.incident_title}>
                                       {item.incident_title}
@@ -504,7 +676,7 @@ export default function Feed() {
                                 <span className="text-xs text-gray-400">—</span>
                               )}
                             </td>
-                            <td>
+                            <td onClick={(e) => e.stopPropagation()}>
                               {item.event_type === 'alert' && (
                                 <CorrelationChip
                                   item={item}
@@ -513,7 +685,7 @@ export default function Feed() {
                                 />
                               )}
                             </td>
-                            <td>
+                            <td onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center gap-1 justify-end">
                                 <button
                                   onClick={() => toggleRaw(item)}
@@ -540,24 +712,40 @@ export default function Feed() {
                           </tr>
                           {isExpanded && item.correlation_reasoning && (
                             <tr key={`${item.event_uuid}-reasoning`} className="bg-gray-50 dark:bg-gray-900/30">
-                              <td colSpan={7} className="px-4 py-3">
+                              <td colSpan={8} className="px-4 py-3">
                                 <div className="flex items-start gap-2">
                                   <Activity className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
-                                  <p className="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-wrap">
-                                    {item.correlation_reasoning}
-                                  </p>
+                                  <div>
+                                    <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400 block mb-1">Correlation reasoning</span>
+                                    <p className="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-wrap">
+                                      {item.correlation_reasoning}
+                                    </p>
+                                  </div>
                                 </div>
                               </td>
                             </tr>
                           )}
                           {isRawExpanded && (
                             <tr key={`${item.event_uuid}-raw`} className="bg-gray-900">
-                              <td colSpan={7} className="px-4 py-3">
+                              <td colSpan={8} className="px-4 py-3">
                                 <div className="flex items-center gap-2 text-gray-500 mb-2">
                                   <FileCode className="w-3.5 h-3.5" />
                                   <span className="text-[10px] font-medium uppercase tracking-wide">Raw message</span>
                                 </div>
                                 <RawEventContent state={rawData[item.event_uuid]} />
+                              </td>
+                            </tr>
+                          )}
+                          {isResponseExpanded && item.incident_uuid && (
+                            <tr key={`${item.event_uuid}-response`} className="bg-gray-50 dark:bg-gray-900/30">
+                              <td colSpan={8} className="px-4 py-3">
+                                <div className="flex items-center gap-2 text-gray-500 mb-2">
+                                  <MessageSquareText className="w-3.5 h-3.5" />
+                                  <span className="text-[10px] font-medium uppercase tracking-wide">
+                                    Incident response{responseData[item.incident_uuid]?.title ? ` — ${responseData[item.incident_uuid].title}` : ''}
+                                  </span>
+                                </div>
+                                <IncidentResponseContent state={responseData[item.incident_uuid]} />
                               </td>
                             </tr>
                           )}

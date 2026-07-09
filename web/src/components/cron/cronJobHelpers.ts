@@ -9,6 +9,7 @@ export interface CronJobFormState {
   prompt: string;
   channel_uuid: string | null;
   enabled: boolean;
+  post_results: boolean;
   tool_instance_ids: number[];
 }
 
@@ -18,6 +19,7 @@ export const EMPTY_CRON_FORM: CronJobFormState = {
   prompt: '',
   channel_uuid: null,
   enabled: true,
+  post_results: true,
   tool_instance_ids: [],
 };
 
@@ -31,6 +33,7 @@ export function formStateFromJob(job: CronJob): CronJobFormState {
     prompt: job.prompt,
     channel_uuid: job.channel?.uuid ?? null,
     enabled: job.enabled,
+    post_results: job.post_results ?? true,
     tool_instance_ids: (job.tools ?? []).map((t) => t.id),
   };
 }

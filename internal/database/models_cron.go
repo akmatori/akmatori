@@ -27,6 +27,10 @@ type CronJob struct {
 	IsSystem      bool       `gorm:"default:false" json:"is_system"`
 	ChannelID     *uint      `gorm:"index" json:"channel_id"`
 	Enabled       bool       `gorm:"default:true" json:"enabled"`
+	// PostResults controls whether the tick's final summary is posted to a
+	// messaging channel. When false the run still executes and records its
+	// result on the Incident row — it just stays out of Slack/Telegram.
+	PostResults bool `gorm:"default:true" json:"post_results"`
 	LastRunAt     *time.Time `json:"last_run_at,omitempty"`
 	LastRunStatus string     `gorm:"size:16" json:"last_run_status"`
 	LastRunError  string     `gorm:"type:text" json:"last_run_error"`

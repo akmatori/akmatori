@@ -246,6 +246,14 @@ func main() {
 	alertHandler.SetAlertCorrelator(alertCorrelator)
 	slog.Info("alert correlator ready (live config)")
 
+	// Post-investigation merger: after an alert incident completes, compares
+	// its diagnosed root cause against recent investigated incidents and
+	// merges on a confident match. Flag-gated (IncidentMergeEnabled), config
+	// read live per call.
+	incidentMerger := services.NewIncidentMerger(agentWSHandler, database.GetDB(), providerRegistry)
+	skillService.SetIncidentMerger(incidentMerger)
+	slog.Info("incident merger ready (live config)")
+
 	// Set up event handler for when Slack connects
 	// Note: We receive the client directly to avoid deadlock (can't call GetClient while holding lock)
 	slackManager.SetEventHandler(func(socketClient *socketmode.Client, client *slack.Client) {

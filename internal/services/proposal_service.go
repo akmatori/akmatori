@@ -388,7 +388,7 @@ func (s *ProposalService) apply(ctx context.Context, p *database.Proposal) error
 			// explicit operator enable, and channel selection stays an
 			// operator decision (the runner falls back to the provider
 			// default at fire time).
-			_, err := s.crons.CreateJob(content.Name, content.Schedule, content.Prompt, "", false, toolIDs)
+			_, err := s.crons.CreateJob(content.Name, content.Schedule, content.Prompt, "", false, true, toolIDs)
 			return err
 		}
 		patch := CronJobUpdate{

@@ -862,18 +862,22 @@ func InitializeProposalEditorSkill() error {
 	return nil
 }
 
-// memoryCuratorCronName is the canonical name of the seeded memory-curator
-// system cron. Lifted into a constant so tests can pin idempotency without
-// duplicating the literal.
-const memoryCuratorCronName = "memory-curator"
+// dreamingCronName is the canonical name of the seeded Dreaming system cron
+// (formerly "memory-curator"). Lifted into a constant so tests can pin
+// idempotency without duplicating the literal.
+const dreamingCronName = "Dreaming"
 
-// memoryCuratorCronPrompt is the task body for the nightly memory-curator
+// legacyMemoryCuratorCronName is the pre-rename name of the Dreaming cron;
+// SeedSystemCronJobs renames existing rows in place on upgrade.
+const legacyMemoryCuratorCronName = "memory-curator"
+
+// dreamingCronPrompt is the task body for the nightly Dreaming
 // system cron. It instructs the cron-agent to dedupe and consolidate the
 // global-scope memory entries via the memory-writer subagent. The prompt
 // asks the agent to keep its mutations explicit (each Action: upsert/delete
 // is a separate memory-writer call) so an operator reading the post-run
 // summary in the channel can audit what changed without tailing logs.
-const memoryCuratorCronPrompt = `You are running the nightly memory consolidation pass over the global cross-incident memory scope (/akmatori/memory/global/).
+const dreamingCronPrompt = `You are running the nightly memory consolidation pass over the global cross-incident memory scope (/akmatori/memory/global/).
 
 Goal: keep the global memory scope tight and high-signal. Focus only on the global scope. Process entries updated in the last 14 days — use the memory-searcher subagent to surface candidates from that window. Concretely:
 
@@ -889,18 +893,19 @@ Use Scope: global and the cron run's incident UUID for every memory-writer call.
 
 If memory-searcher returns no entries or no clear duplicates, exit with a one-line "no-op: nothing to consolidate" summary.`
 
-// memoryCuratorCronSchedule is the canonical schedule for the memory-curator
+// dreamingCronSchedule is the canonical schedule for the Dreaming
 // system cron (daily at 02:00). Hoisted to a constant so tests can pin it.
-const memoryCuratorCronSchedule = "0 2 * * *"
+const dreamingCronSchedule = "0 2 * * *"
 
 // SeedSystemCronJobs idempotently seeds the non-deletable system cron jobs.
 // Each row is keyed by Name + IsSystem=true. On first seed the row is created
-// disabled (operator opts in). On subsequent runs an existing system row is
-// LEFT ALONE — operators may edit schedule/prompt/channel/tools/enabled
-// directly per the spec ("can be disabled but not deleted; all other fields
-// remain editable"), so re-asserting on boot would silently revert those
-// edits. Restoring the canonical wording is a deliberate operator action
-// (delete-from-DB + re-seed), not a side effect of restart.
+// with the seed's default Enabled state. On subsequent runs an existing
+// system row is LEFT ALONE — operators may edit
+// schedule/prompt/channel/tools/enabled directly per the spec ("can be
+// disabled but not deleted; all other fields remain editable"), so
+// re-asserting on boot would silently revert those edits. Restoring the
+// canonical wording is a deliberate operator action (delete-from-DB +
+// re-seed), not a side effect of restart.
 //
 // Exported so callers outside the database package (e.g. service-package
 // tests) can re-run the seed without duplicating the row layout.
@@ -909,13 +914,25 @@ func SeedSystemCronJobs() error {
 		Name     string
 		Schedule string
 		Prompt   string
+		Enabled  bool
 	}
 	seeds := []seedRow{
 		{
-			Name:     memoryCuratorCronName,
-			Schedule: memoryCuratorCronSchedule,
-			Prompt:   memoryCuratorCronPrompt,
+			Name:     dreamingCronName,
+			Schedule: dreamingCronSchedule,
+			Prompt:   dreamingCronPrompt,
+			Enabled:  true,
 		},
+	}
+
+	// Upgrade path: the Dreaming cron was originally seeded as
+	// "memory-curator". Rename any existing system row in place (all operator
+	// edits, including Enabled, are preserved) so upgrades don't grow a second
+	// system row for the same job.
+	if err := DB.Model(&CronJob{}).
+		Where("name = ? AND is_system = ?", legacyMemoryCuratorCronName, true).
+		Update("name", dreamingCronName).Error; err != nil {
+		return fmt.Errorf("rename %s to %s: %w", legacyMemoryCuratorCronName, dreamingCronName, err)
 	}
 
 	for _, s := range seeds {
@@ -952,23 +969,24 @@ func SeedSystemCronJobs() error {
 			Schedule: s.Schedule,
 			Prompt:   s.Prompt,
 			IsSystem: true,
-			Enabled:  false, // operator opts in
+			Enabled:  s.Enabled,
 		}
 		// Wrap insert + enabled-pin in a transaction so a failed pin cannot
-		// leave the seeded row persisted with enabled=true (GORM v2 omits
-		// zero-value bools from INSERT, so the column default flips it).
+		// leave the seeded row persisted with the wrong enabled state (GORM v2
+		// omits zero-value bools from INSERT, so the column default would flip
+		// a seeded false).
 		if err := DB.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Create(row).Error; err != nil {
 				return fmt.Errorf("seed system cron %s: %w", s.Name, err)
 			}
-			if err := tx.Model(row).Update("enabled", false).Error; err != nil {
-				return fmt.Errorf("pin seeded system cron %s to disabled: %w", s.Name, err)
+			if err := tx.Model(row).Update("enabled", s.Enabled).Error; err != nil {
+				return fmt.Errorf("pin seeded system cron %s enabled state: %w", s.Name, err)
 			}
 			return nil
 		}); err != nil {
 			return err
 		}
-		slog.Info("seeded system cron job", "name", s.Name, "enabled", false)
+		slog.Info("seeded system cron job", "name", s.Name, "enabled", s.Enabled)
 	}
 	return nil
 }
@@ -978,7 +996,7 @@ func SeedSystemCronJobs() error {
 const improvementEvaluatorCronName = "improvement-evaluator"
 
 // improvementEvaluatorCronSchedule runs the self-improvement review daily at
-// 05:00 UTC, after the 02:00 memory-curator pass has consolidated memory.
+// 05:00 UTC, after the 02:00 Dreaming pass has consolidated memory.
 const improvementEvaluatorCronSchedule = "0 5 * * *"
 
 // improvementEvaluatorCronPrompt is the task body for the improvement-evaluator

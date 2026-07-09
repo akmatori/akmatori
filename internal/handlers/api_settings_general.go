@@ -21,6 +21,10 @@ func applyGeneralSettingsDefaults(s *database.GeneralSettings) {
 		v := defaultAlertMonitorWindowMinutes
 		s.AlertMonitorWindowMinutes = &v
 	}
+	if s.IncidentMergeEnabled == nil {
+		v := false
+		s.IncidentMergeEnabled = &v
+	}
 }
 
 // handleGeneralSettings handles GET/PUT /api/settings/general
@@ -67,6 +71,9 @@ func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Reques
 				return
 			}
 			settings.AlertMonitorWindowMinutes = req.AlertMonitorWindowMinutes
+		}
+		if req.IncidentMergeEnabled != nil {
+			settings.IncidentMergeEnabled = req.IncidentMergeEnabled
 		}
 
 		if err := database.UpdateGeneralSettings(settings); err != nil {

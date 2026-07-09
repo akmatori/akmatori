@@ -452,7 +452,7 @@ func TestCronRunner_CreateJob_ValidatesSchedule(t *testing.T) {
 	runner, _, _, _, _ := setupCronRunnerTest(t)
 	chUUID := runner.channels.(*recordingChannelManager).channels[0].UUID
 
-	_, err := runner.CreateJob("daily report", "not a cron", "report status", chUUID, true, nil)
+	_, err := runner.CreateJob("daily report", "not a cron", "report status", chUUID, true, true, nil)
 	if err == nil || !errors.Is(err, ErrInvalidCronSchedule) {
 		t.Fatalf("expected ErrInvalidCronSchedule, got %v", err)
 	}
@@ -462,7 +462,7 @@ func TestCronRunner_CreateJob_RejectsEmptyName(t *testing.T) {
 	runner, _, _, _, _ := setupCronRunnerTest(t)
 	chUUID := runner.channels.(*recordingChannelManager).channels[0].UUID
 
-	_, err := runner.CreateJob("   ", "*/2 * * * *", "report status", chUUID, true, nil)
+	_, err := runner.CreateJob("   ", "*/2 * * * *", "report status", chUUID, true, true, nil)
 	if err == nil {
 		t.Fatal("expected name validation error, got nil")
 	}
@@ -472,7 +472,7 @@ func TestCronRunner_UpdateJob_ScheduleAndChannelTakeEffect(t *testing.T) {
 	runner, _, sched, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
 
-	job, err := runner.CreateJob("nightly", "*/5 * * * *", "x", chUUID, true, nil)
+	job, err := runner.CreateJob("nightly", "*/5 * * * *", "x", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -499,7 +499,7 @@ func TestCronRunner_UpdateJob_RejectsBadSchedule(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
 
-	job, err := runner.CreateJob("nightly", "*/5 * * * *", "x", chUUID, true, nil)
+	job, err := runner.CreateJob("nightly", "*/5 * * * *", "x", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -513,7 +513,7 @@ func TestCronRunner_DeleteJob_RemovesScheduledEntry(t *testing.T) {
 	runner, _, sched, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
 
-	job, err := runner.CreateJob("nightly", "*/5 * * * *", "x", chUUID, true, nil)
+	job, err := runner.CreateJob("nightly", "*/5 * * * *", "x", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -541,7 +541,7 @@ func TestCronRunner_RunNow_FiresImmediately(t *testing.T) {
 	runner, _, _, chMgr, prov := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
 
-	job, err := runner.CreateJob("status", "*/10 * * * *", "Summarize", chUUID, true, nil)
+	job, err := runner.CreateJob("status", "*/10 * * * *", "Summarize", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -572,7 +572,7 @@ func TestCronRunner_Tick_RecordsProviderError(t *testing.T) {
 	chUUID := chMgr.channels[0].UUID
 	prov.postErr = errors.New("network unreachable")
 
-	if _, err := runner.CreateJob("status", "*/2 * * * *", "Summarize", chUUID, true, nil); err != nil {
+	if _, err := runner.CreateJob("status", "*/2 * * * *", "Summarize", chUUID, true, true, nil); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	for id := range sched.jobs {
@@ -602,7 +602,7 @@ func TestCronRunner_AgentTick_SpawnsIncidentWithCronProvenance(t *testing.T) {
 	chUUID := chMgr.channels[0].UUID
 	skills := runner.skills.(*fakeSkillIncidentManager)
 
-	job, err := runner.CreateJob("daily report", "*/2 * * * *", "Investigate disks", chUUID, true, nil)
+	job, err := runner.CreateJob("daily report", "*/2 * * * *", "Investigate disks", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -636,7 +636,7 @@ func TestCronRunner_AgentTick_PostsFinalSummaryToChannel(t *testing.T) {
 	runner, db, _, chMgr, prov := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
 
-	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Summarize incidents", chUUID, true, nil)
+	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Summarize incidents", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -679,7 +679,7 @@ func TestCronRunner_AgentTick_RecordsWorkerNotConnected(t *testing.T) {
 	chUUID := chMgr.channels[0].UUID
 	runner.runner.(*fakeIncidentRunner).connected = false
 
-	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Summarize incidents", chUUID, true, nil)
+	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Summarize incidents", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -717,7 +717,7 @@ func TestCronRunner_AgentTick_RecordsAgentError(t *testing.T) {
 		}
 	}
 
-	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Investigate", chUUID, true, nil)
+	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Investigate", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -755,7 +755,7 @@ func TestCronRunner_AgentTick_RecordsStartIncidentError(t *testing.T) {
 	chUUID := chMgr.channels[0].UUID
 	runner.runner.(*fakeIncidentRunner).startErr = errors.New("transport closed")
 
-	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Investigate", chUUID, true, nil)
+	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Investigate", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -785,7 +785,7 @@ func TestCronRunner_AgentTick_MissingWiringMarksError(t *testing.T) {
 	runner.runner = nil
 	chUUID := chMgr.channels[0].UUID
 
-	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Investigate", chUUID, true, nil)
+	job, err := runner.CreateJob("morning report", "*/2 * * * *", "Investigate", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -845,7 +845,7 @@ func TestCronRunner_AgentTick_UsesCronAgentSkillAndPerCronTools(t *testing.T) {
 		t.Fatalf("disable tool: %v", err)
 	}
 
-	job, err := runner.CreateJob("status report", "*/5 * * * *", "Summarize", chUUID, true, []uint{enabledTool.ID, disabledTool.ID})
+	job, err := runner.CreateJob("status report", "*/5 * * * *", "Summarize", chUUID, true, true, []uint{enabledTool.ID, disabledTool.ID})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -895,7 +895,7 @@ func TestCronRunner_AgentTick_UsesCronAgentSkillAndPerCronTools(t *testing.T) {
 func TestCronRunner_CreateJob_RejectsUnknownToolID(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	_, err := runner.CreateJob("ghost-tool", "*/5 * * * *", "p", chUUID, true, []uint{99999})
+	_, err := runner.CreateJob("ghost-tool", "*/5 * * * *", "p", chUUID, true, true, []uint{99999})
 	if err == nil || !strings.Contains(err.Error(), "tool instance 99999 not found") {
 		t.Fatalf("err = %v, want tool-not-found", err)
 	}
@@ -908,7 +908,7 @@ func TestCronRunner_CreateJob_RejectsUnknownToolID(t *testing.T) {
 func TestCronRunner_UpdateJob_RejectsUnknownToolID(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("solid", "*/5 * * * *", "p", chUUID, true, nil)
+	job, err := runner.CreateJob("solid", "*/5 * * * *", "p", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -930,7 +930,7 @@ func TestCronRunner_AgentTick_EmptyAllowlistRejectsAllTools(t *testing.T) {
 	chUUID := chMgr.channels[0].UUID
 	agentRunner := runner.runner.(*fakeIncidentRunner)
 
-	job, err := runner.CreateJob("toolless", "*/5 * * * *", "memory consolidation pass", chUUID, true, nil)
+	job, err := runner.CreateJob("toolless", "*/5 * * * *", "memory consolidation pass", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -988,7 +988,7 @@ func TestCronRunner_UpdateJob_ReplacesToolAllowlist(t *testing.T) {
 		t.Fatalf("seed beta: %v", err)
 	}
 
-	job, err := runner.CreateJob("swap-tools", "*/5 * * * *", "p", chUUID, true, []uint{first.ID})
+	job, err := runner.CreateJob("swap-tools", "*/5 * * * *", "p", chUUID, true, true, []uint{first.ID})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -1186,7 +1186,7 @@ func TestCronRunner_ResolveChannel_FallsBackWhenExplicitDisabled(t *testing.T) {
 	disabled.Enabled = false
 	chMgr.channels = append(chMgr.channels, disabled)
 
-	if _, err := runner.CreateJob("status", "*/2 * * * *", "Summarize", disabled.UUID, true, nil); err != nil {
+	if _, err := runner.CreateJob("status", "*/2 * * * *", "Summarize", disabled.UUID, true, true, nil); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	for id := range sched.jobs {
@@ -1261,10 +1261,10 @@ func TestCronRunner_ListJobs_ReturnsRowsSorted(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
 
-	if _, err := runner.CreateJob("B job", "*/5 * * * *", "p", chUUID, true, nil); err != nil {
+	if _, err := runner.CreateJob("B job", "*/5 * * * *", "p", chUUID, true, true, nil); err != nil {
 		t.Fatalf("seed B: %v", err)
 	}
-	if _, err := runner.CreateJob("A job", "*/5 * * * *", "p", chUUID, true, nil); err != nil {
+	if _, err := runner.CreateJob("A job", "*/5 * * * *", "p", chUUID, true, true, nil); err != nil {
 		t.Fatalf("seed A: %v", err)
 	}
 
@@ -1285,7 +1285,7 @@ func TestCronRunner_ListJobs_ReturnsRowsSorted(t *testing.T) {
 // per-provider default at tick time.
 func TestCronRunner_CreateJob_AcceptsEmptyChannelUUID(t *testing.T) {
 	runner, _, _, _, _ := setupCronRunnerTest(t)
-	job, err := runner.CreateJob("nightly", "0 9 * * *", "Summarize", "", true, nil)
+	job, err := runner.CreateJob("nightly", "0 9 * * *", "Summarize", "", true, true, nil)
 	if err != nil {
 		t.Fatalf("CreateJob: %v", err)
 	}
@@ -1298,7 +1298,7 @@ func TestCronRunner_CreateJob_AcceptsEmptyChannelUUID(t *testing.T) {
 // the channel manager.
 func TestCronRunner_CreateJob_UnknownChannelUUID(t *testing.T) {
 	runner, _, _, _, _ := setupCronRunnerTest(t)
-	_, err := runner.CreateJob("nightly", "0 9 * * *", "Summarize", "ghost", true, nil)
+	_, err := runner.CreateJob("nightly", "0 9 * * *", "Summarize", "ghost", true, true, nil)
 	if !errors.Is(err, ErrChannelNotFound) {
 		t.Errorf("err = %v, want ErrChannelNotFound", err)
 	}
@@ -1313,7 +1313,7 @@ func TestCronRunner_CreateJob_RejectsNonPostableChannel(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chMgr.channels[0].CanPost = false
 	chUUID := chMgr.channels[0].UUID
-	_, err := runner.CreateJob("nightly", "0 9 * * *", "Summarize", chUUID, true, nil)
+	_, err := runner.CreateJob("nightly", "0 9 * * *", "Summarize", chUUID, true, true, nil)
 	if !errors.Is(err, ErrChannelNotPostable) {
 		t.Errorf("err = %v, want ErrChannelNotPostable", err)
 	}
@@ -1325,7 +1325,7 @@ func TestCronRunner_CreateJob_RejectsNonPostableChannel(t *testing.T) {
 func TestCronRunner_UpdateJob_RejectsNonPostableChannel(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	postable := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "0 9 * * *", "Summarize", postable, true, nil)
+	job, err := runner.CreateJob("nightly", "0 9 * * *", "Summarize", postable, true, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1340,7 +1340,7 @@ func TestCronRunner_UpdateJob_RejectsNonPostableChannel(t *testing.T) {
 func TestCronRunner_CreateJob_RejectsEmptyPrompt(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	if _, err := runner.CreateJob("nightly", "0 9 * * *", "   ", chUUID, true, nil); err == nil {
+	if _, err := runner.CreateJob("nightly", "0 9 * * *", "   ", chUUID, true, true, nil); err == nil {
 		t.Error("CreateJob blank prompt error = nil, want validation error")
 	}
 }
@@ -1352,7 +1352,7 @@ func TestCronRunner_CreateJob_RejectsEmptyPrompt(t *testing.T) {
 func TestCronRunner_CreateJob_HonorsEnabledFalse(t *testing.T) {
 	runner, db, sched, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("disabled-on-create", "0 9 * * *", "Summarize", chUUID, false, nil)
+	job, err := runner.CreateJob("disabled-on-create", "0 9 * * *", "Summarize", chUUID, false, true, nil)
 	if err != nil {
 		t.Fatalf("CreateJob: %v", err)
 	}
@@ -1379,7 +1379,7 @@ func TestCronRunner_CreateJob_HonorsEnabledFalse(t *testing.T) {
 func TestCronRunner_UpdateJob_RejectsBlankNameAndPrompt(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true, nil)
+	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1399,7 +1399,7 @@ func TestCronRunner_UpdateJob_RejectsBlankNameAndPrompt(t *testing.T) {
 func TestCronRunner_UpdateJob_ChannelUUIDClearAndReassign(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true, nil)
+	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1430,7 +1430,7 @@ func TestCronRunner_UpdateJob_ChannelUUIDClearAndReassign(t *testing.T) {
 func TestCronRunner_UpdateJob_RejectsUnknownChannel(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true, nil)
+	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1453,7 +1453,7 @@ func TestCronRunner_UpdateJob_NotFound(t *testing.T) {
 func TestCronRunner_UpdateJob_NoFieldsReturnsRow(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true, nil)
+	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1481,7 +1481,7 @@ func TestCronRunner_DeleteJob_NotFound(t *testing.T) {
 func TestCronRunner_Reload_RemovesEntryWhenRowDeleted(t *testing.T) {
 	runner, db, sched, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true, nil)
+	job, err := runner.CreateJob("nightly", "0 9 * * *", "p", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1506,7 +1506,7 @@ func TestCronRunner_Reload_RemovesEntryWhenRowDeleted(t *testing.T) {
 func TestCronRunner_Fire_SkipsDisabledJob(t *testing.T) {
 	runner, db, sched, chMgr, prov := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "*/5 * * * *", "p", chUUID, true, nil)
+	job, err := runner.CreateJob("nightly", "*/5 * * * *", "p", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1531,7 +1531,7 @@ func TestCronRunner_Fire_SkipsDisabledJob(t *testing.T) {
 func TestCronRunner_Fire_VanishedJob(t *testing.T) {
 	runner, db, sched, chMgr, prov := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "*/5 * * * *", "p", chUUID, true, nil)
+	job, err := runner.CreateJob("nightly", "*/5 * * * *", "p", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1554,7 +1554,7 @@ func TestCronRunner_Fire_VanishedJob(t *testing.T) {
 func TestCronRunner_AgentTick_FallsBackToDefaultChannel(t *testing.T) {
 	runner, _, sched, chMgr, prov := setupCronRunnerTest(t)
 	// CreateJob without a channel — runner should resolve via channels.ResolveDefault.
-	if _, err := runner.CreateJob("nightly", "*/5 * * * *", "Summarize", "", true, nil); err != nil {
+	if _, err := runner.CreateJob("nightly", "*/5 * * * *", "Summarize", "", true, true, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	for id := range sched.jobs {
@@ -1578,7 +1578,7 @@ func TestCronRunner_AgentTick_MissingDefaultRecordsError(t *testing.T) {
 	chMgr.resolveDefault = nil
 	chMgr.resolveErr = nil
 
-	if _, err := runner.CreateJob("nightly", "*/5 * * * *", "Summarize", "", true, nil); err != nil {
+	if _, err := runner.CreateJob("nightly", "*/5 * * * *", "Summarize", "", true, true, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	for id := range sched.jobs {
@@ -1603,7 +1603,7 @@ func TestCronRunner_AgentTick_MissingDefaultRecordsError(t *testing.T) {
 func TestCronRunner_AgentTick_LoadChannelByIDStale(t *testing.T) {
 	runner, db, sched, chMgr, prov := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
-	job, err := runner.CreateJob("nightly", "*/5 * * * *", "Summarize", chUUID, true, nil)
+	job, err := runner.CreateJob("nightly", "*/5 * * * *", "Summarize", chUUID, true, true, nil)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -1673,5 +1673,80 @@ func TestCronRunner_NewCronRunner_ConstructorReturnsRunner(t *testing.T) {
 	}
 	if runner.scheduler == nil {
 		t.Error("scheduler not wired")
+	}
+}
+
+// TestCronRunner_AgentTick_PostResultsOff_SkipsChannelPost verifies a cron
+// with PostResults=false runs the investigation, records LastRunStatus=ok,
+// and never calls the messaging provider — even with a channel configured.
+func TestCronRunner_AgentTick_PostResultsOff_SkipsChannelPost(t *testing.T) {
+	runner, db, _, chMgr, prov := setupCronRunnerTest(t)
+	chUUID := chMgr.channels[0].UUID
+	skills := runner.skills.(*fakeSkillIncidentManager)
+
+	job, err := runner.CreateJob("silent report", "*/2 * * * *", "Summarize incidents", chUUID, true, false, nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if job.PostResults {
+		t.Fatalf("expected PostResults=false persisted, got %v", job.PostResults)
+	}
+	if err := runner.RunNow(job.UUID); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	runner.WaitForInflight()
+
+	prov.mu.Lock()
+	postCount := len(prov.posts)
+	prov.mu.Unlock()
+	if postCount != 0 {
+		t.Errorf("expected zero PostMessage calls for post-less cron, got %d", postCount)
+	}
+	if len(skills.spawnCalls) != 1 {
+		t.Errorf("investigation must still run: expected 1 spawn, got %d", len(skills.spawnCalls))
+	}
+
+	var got database.CronJob
+	if err := db.First(&got, "uuid = ?", job.UUID).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.PostResults {
+		t.Error("PostResults=false must survive the create round-trip (zero-bool INSERT pin)")
+	}
+	if got.LastRunStatus != database.CronJobRunStatusOK {
+		t.Errorf("LastRunStatus = %q, want ok", got.LastRunStatus)
+	}
+}
+
+// TestCronRunner_AgentTick_PostResultsOff_NoChannelNeeded verifies a post-less
+// cron with NO channel configured still runs fine — channel resolution must
+// not block it.
+func TestCronRunner_AgentTick_PostResultsOff_NoChannelNeeded(t *testing.T) {
+	runner, db, _, chMgr, prov := setupCronRunnerTest(t)
+	// Remove every channel so resolution would fail if attempted.
+	chMgr.channels = nil
+
+	job, err := runner.CreateJob("channel-less", "*/2 * * * *", "Summarize", "", true, false, nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := runner.RunNow(job.UUID); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	runner.WaitForInflight()
+
+	prov.mu.Lock()
+	postCount := len(prov.posts)
+	prov.mu.Unlock()
+	if postCount != 0 {
+		t.Errorf("expected zero posts, got %d", postCount)
+	}
+
+	var got database.CronJob
+	if err := db.First(&got, "uuid = ?", job.UUID).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.LastRunStatus != database.CronJobRunStatusOK {
+		t.Errorf("LastRunStatus = %q, want ok (channel resolution must be skipped), got error: %s", got.LastRunStatus, got.LastRunError)
 	}
 }

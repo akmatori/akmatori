@@ -17,6 +17,11 @@ const (
 	IncidentStatusFailed    IncidentStatus = "failed"
 	IncidentStatusMonitor   IncidentStatus = "monitor"
 	IncidentStatusClosed    IncidentStatus = "closed"
+	// IncidentStatusMerged marks an incident whose investigation concluded it
+	// shares a root cause with an earlier incident; its alerts were re-pointed
+	// to the survivor referenced by MergedIntoUUID. Merged incidents are
+	// excluded from all correlation candidate pools.
+	IncidentStatusMerged IncidentStatus = "merged"
 )
 
 // IncidentSourceKind enumerates the trigger kinds that can spawn an incident.
@@ -63,6 +68,10 @@ type Incident struct {
 	// Distinct from SourceFingerprint (adapter-supplied external ID) and
 	// alertSpawnKey (includes SourceFingerprint for exact-burst dedup).
 	AlertFingerprint string `gorm:"size:32;index" json:"alert_fingerprint"`
+
+	// MergedIntoUUID points at the surviving incident when Status is
+	// "merged" (post-investigation root-cause merge). Empty otherwise.
+	MergedIntoUUID string `gorm:"size:36;index" json:"merged_into_uuid,omitempty"`
 
 	// AlertCount is not stored; populated by API handlers via COUNT query.
 	AlertCount int64 `gorm:"-" json:"alert_count"`

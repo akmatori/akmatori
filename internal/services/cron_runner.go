@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/messaging"
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
@@ -65,6 +66,7 @@ type CronJobUpdate struct {
 	Prompt          *string
 	ChannelUUID     *string
 	Enabled         *bool
+	PostResults     *bool
 	ToolInstanceIDs *[]uint
 }
 
@@ -334,15 +336,24 @@ func (r *CronRunner) execute(job *database.CronJob) {
 		return
 	}
 
-	channel, err := r.resolveChannel(job)
-	if err != nil {
-		r.recordResult(job, database.CronJobRunStatusError, err.Error())
-		return
-	}
-	provider, err := r.registry.Get(channel.Integration.Provider)
-	if err != nil {
-		r.recordResult(job, database.CronJobRunStatusError, fmt.Sprintf("provider unavailable: %v", err))
-		return
+	// Channel/provider resolution is only required when the cron posts its
+	// results. Post-less crons (PostResults=false) run the investigation and
+	// record the outcome on the Incident row only, so a missing channel or
+	// provider must not block them.
+	var channel *database.Channel
+	var provider messaging.Provider
+	if job.PostResults {
+		var err error
+		channel, err = r.resolveChannel(job)
+		if err != nil {
+			r.recordResult(job, database.CronJobRunStatusError, err.Error())
+			return
+		}
+		provider, err = r.registry.Get(channel.Integration.Provider)
+		if err != nil {
+			r.recordResult(job, database.CronJobRunStatusError, fmt.Sprintf("provider unavailable: %v", err))
+			return
+		}
 	}
 	if !r.runner.IsWorkerConnected() {
 		r.recordResult(job, database.CronJobRunStatusError, "agent worker not connected")
@@ -486,13 +497,16 @@ func (r *CronRunner) execute(job *database.CronJob) {
 
 	// Post the final summary to the cron's channel as a fresh message. On
 	// error, surface the failure into the channel so operators see the cron
-	// tick failed without having to open the incident.
-	body := formatCronAgentMessage(job, response, hasError, errorMsg)
-	postCtx, cancel := context.WithTimeout(context.Background(), cronChannelPostTimeout)
-	defer cancel()
-	if _, err := provider.PostMessage(postCtx, channel, body); err != nil {
-		r.recordResult(job, database.CronJobRunStatusError, fmt.Sprintf("post message: %v", err))
-		return
+	// tick failed without having to open the incident. Post-less crons skip
+	// this entirely — the incident row is their only output surface.
+	if job.PostResults {
+		body := formatCronAgentMessage(job, response, hasError, errorMsg)
+		postCtx, cancel := context.WithTimeout(context.Background(), cronChannelPostTimeout)
+		defer cancel()
+		if _, err := provider.PostMessage(postCtx, channel, body); err != nil {
+			r.recordResult(job, database.CronJobRunStatusError, fmt.Sprintf("post message: %v", err))
+			return
+		}
 	}
 	if hasError {
 		r.recordResult(job, database.CronJobRunStatusError, errorMsg)
@@ -734,7 +748,7 @@ func (r *CronRunner) GetJobByUUID(uuidStr string) (*database.CronJob, error) {
 // with no infrastructure tools (memory + runbooks only). Operator-created
 // jobs are always IsSystem=false; system rows are seeded exclusively via
 // database.SeedSystemCronJobs.
-func (r *CronRunner) CreateJob(name, schedule, prompt string, channelUUID string, enabled bool, toolInstanceIDs []uint) (*database.CronJob, error) {
+func (r *CronRunner) CreateJob(name, schedule, prompt string, channelUUID string, enabled, postResults bool, toolInstanceIDs []uint) (*database.CronJob, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("cron job name cannot be empty")
@@ -766,12 +780,13 @@ func (r *CronRunner) CreateJob(name, schedule, prompt string, channelUUID string
 	}
 
 	row := &database.CronJob{
-		UUID:      uuid.New().String(),
-		Name:      name,
-		Schedule:  schedule,
-		Prompt:    prompt,
-		ChannelID: channelID,
-		Enabled:   enabled,
+		UUID:        uuid.New().String(),
+		Name:        name,
+		Schedule:    schedule,
+		Prompt:      prompt,
+		ChannelID:   channelID,
+		Enabled:     enabled,
+		PostResults: postResults,
 	}
 	if err := r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(row).Error; err != nil {
@@ -785,6 +800,13 @@ func (r *CronRunner) CreateJob(name, schedule, prompt string, channelUUID string
 		if !enabled {
 			if err := tx.Model(row).Update("enabled", false).Error; err != nil {
 				return fmt.Errorf("apply enabled=false on create: %w", err)
+			}
+		}
+		// Same zero-bool INSERT caveat as Enabled above: pin an explicit
+		// PostResults=false so the column default doesn't flip it to true.
+		if !postResults {
+			if err := tx.Model(row).Update("post_results", false).Error; err != nil {
+				return fmt.Errorf("apply post_results=false on create: %w", err)
 			}
 		}
 		if err := tx.Model(row).Association("Tools").Replace(tools); err != nil {
@@ -888,6 +910,9 @@ func (r *CronRunner) UpdateJob(uuidStr string, patch CronJobUpdate) (*database.C
 	}
 	if patch.Enabled != nil {
 		updates["enabled"] = *patch.Enabled
+	}
+	if patch.PostResults != nil {
+		updates["post_results"] = *patch.PostResults
 	}
 	// Pre-resolve the new tools BEFORE issuing the column update so an unknown
 	// tool ID fails the whole patch cleanly rather than leaving column fields

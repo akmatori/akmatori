@@ -90,7 +90,7 @@ Rules:
 - preserve raw fallback behavior when worker or LLM formatting fails
 - handler wiring happens via `SetResponseFormatter(...)`
 - operators configure the output shape via `OutputSchemaExample` (pasted example JSON in `FormattingSettings`); when empty, the built-in four-key default (`status`, `summary`, `actions_taken`, `recommendations`) applies
-- schema inference (`inferSchema` in `internal/services/formatter_schema.go`) derives field types/order from the example; `buildSchemaInstruction` wraps it into `systemPrompt = operatorPrompt + instruction`; response is validated with `validateAgainstSpecs`, retried once with the error list appended, then falls back to `rawResponse`
+- schema inference (`inferSchema` in `internal/services/formatter_schema.go`) derives field types/order from the example; `buildSchemaInstruction` yields `systemPrompt = operatorPrompt + instruction`; responses are validated by `validateAgainstSpecs`, retried once with the errors appended, then fall back to `rawResponse`
 - success renders to Slack mrkdwn via `output.RenderForSlack(parsed, specs)` (`internal/output/schema_render.go`); empty render also falls back to `rawResponse`
 - `DefaultFormattingPrompt` describes field content/tone only — the schema instruction is injected automatically; do not repeat it in the prompt
 - the web form pre-fills editable defaults with `hydrateField` and `dehydrateField` persists unchanged defaults as empty strings, keeping backend fallback constraints authoritative
@@ -98,13 +98,13 @@ Rules:
 
 ### Runbooks and memory search/write
 
-Runbooks live in Postgres and sync to markdown under `akmatori_data/runbooks/` (mounted read-only into the agent). Cross-incident memory lives in markdown under `akmatori_data/memory/` (mounted read-write so the memory-writer subagent can edit in place). The agent reaches both via pi-mono subagents (`runbook-searcher`, `memory-searcher`, `memory-writer`).
+Runbooks live in Postgres and sync to markdown under `akmatori_data/runbooks/` (mounted read-only). Cross-incident memory lives in markdown under `akmatori_data/memory/` (read-write so memory-writer can edit in place). The agent reaches both via pi-mono subagents (`runbook-searcher`, `memory-searcher`, `memory-writer`).
 
 Rules:
 - keep DB state and on-disk runbook files in sync (the runbook service writes both directions)
 - the incident-manager prompt invokes `subagent({agent: "runbook-searcher", task: ...})` for SOP lookup — do not introduce direct grep loops in the main agent
 - memory recall goes through `memory-searcher`; durable findings get written by `memory-writer` near end-of-investigation
-- the memory-writer subagent is invoked with `{agent: "memory-writer", task}` only — pi-subagents silently drops any extra top-level keys, so scope and incident UUID are embedded as the first two header lines of `task` (`Scope: <slug>\nIncident UUID: <uuid>\n\n<reasoning>`); the subagent parses them out before writing so `IngestFromDisk` upserts route to the correct row
+- memory-writer is invoked with `{agent: "memory-writer", task}` only — pi-subagents drops extra top-level keys, so scope and incident UUID are the first two header lines of `task` (`Scope: <slug>\nIncident UUID: <uuid>\n\n<reasoning>`); the subagent parses them so `IngestFromDisk` upserts route correctly
 - on incident completion the API runs `MemoryService.IngestFromDisk` to materialize new memory files into Postgres (idempotent by scope + `name:` slug); operator-authored rows carry `created_by: operator` in their frontmatter and ingest preserves that
 
 ### Slack investigation UX
@@ -115,7 +115,7 @@ Rules:
 - progress banner content comes from the latest reasoning line via `SlackProgressStreamer`
 - final thread output is summarized to fit Slack byte limits
 - mention handling is classify-first: confident operator feedback is stored as memory; other mentions continue the investigation
-- feedback ack is split by trigger: non-mention confident feedback gets the 👍 reaction only (no thread reply); @mention confident feedback keeps the emoji + short text ack. Akmatori only posts text into a thread when explicitly @mentioned. Both acks route through the injectable `feedbackAcker` seam and are best-effort (failures never roll back the persisted memory)
+- feedback ack is split by trigger: non-mention confident feedback → 👍 reaction only; @mention confident feedback → emoji + short text ack (Akmatori only posts thread text when explicitly @mentioned); both route through the injectable `feedbackAcker` seam, best-effort (failures never roll back the persisted memory)
 
 ### Memory system
 
@@ -124,7 +124,7 @@ Rules:
 - `MemoryService.IngestFromDisk` re-materializes those files into Postgres after each incident
 - memory syncing is scope-aware and manifest-driven
 - memory upserts must stay idempotent by `name:` slug + scope
-- memory deletions: `memory-writer` accepts `Action: delete <slug>` and writes a tombstone (`name:` + `deleted: true` frontmatter only); `IngestFromDisk` recognises the tombstone, deletes the matching row, and the post-batch sync purges both the bare tombstone and the prior `<id>-<slug>.md` snapshot. Tombstones for unknown slugs are a no-op but still trigger sync so orphaned files do not accumulate
+- memory deletions: `memory-writer` accepts `Action: delete <slug>` and writes a tombstone (`name:` + `deleted: true` frontmatter only); `IngestFromDisk` deletes the matching row and the post-batch sync purges the tombstone and prior `<id>-<slug>.md` snapshot; unknown-slug tombstones are a no-op but still trigger sync
 
 ### Channels, Integrations, and outbound routing
 
@@ -149,7 +149,7 @@ Rules:
 - both `processAlert` and `ProcessAlertFromListenerChannel` wrap evaluate-and-spawn in `h.spawnGroup.Do(key, ...)`; singleflight followers are no-ops — the partial-unique index on `alerts` handles burst dedup
 - confident match → `LinkAlertToIncident(ctx, incidentUUID, sourceUUID, alert, confidence, reasoning)` attaches the alert row (persisting `Correlated`, `CorrelationConfidence`, `CorrelationReasoning`), extends `monitor_until` for monitor incidents, spawns nothing
 - no-match or error (fail-open) → `SpawnIncidentManager` then `InsertFiringAlert`; resolved alerts go to `processResolvedAlert`
-- `fetchCandidates` runs a single query: `source_kind='alert' AND (status IN ('pending','running','diagnosed') OR (status='monitor' AND monitor_until >= NOW()))`, `ORDER BY started_at DESC LIMIT 25`
+- `fetchCandidates` single query: `source_kind='alert' AND (status IN ('pending','running','diagnosed') OR (status='monitor' AND monitor_until >= NOW()) OR (status='completed' AND EXISTS unresolved firing alert))`, `ORDER BY started_at DESC LIMIT 25`; the completed clause covers incidents held out of monitor mode by a still-firing alert
 - `ErrWorkerNotConnected` is fail-open (alert spawns normally)
 - hallucination guard: any UUID not in the fetched candidate set forces `Correlated=false`
 - `CorrelationConfig` holds only `Enabled bool`; `correlationMaxCandidates=25` and `correlationThreshold=0.7` are package-level constants
@@ -163,11 +163,22 @@ After an alert-sourced incident completes, it enters `monitor` status for a conf
 Rules:
 - `UpdateIncidentComplete` sets `status=monitor` and `monitor_until = completedAt + GetAlertMonitorWindow()` for all `source_kind='alert'` incidents; non-alert incidents (cron, etc.) are unaffected
 - `AlertMonitorWindowMinutes` is configured in `GeneralSettings` (default 60, valid 1–10080); read via `gs.GetAlertMonitorWindow()`; exposed in `PUT /api/settings/general`
-- `processResolvedAlert` runs in a transaction with row-level lock on the incident: finds the matching `alerts` row by `source_fingerprint` (then `fingerprint` fallback), marks it `resolved_at=now`; if no firing alerts remain and the incident is completed/monitor, sets `monitor_until = min(monitor_until, resolved_at + window)` to end the watch period promptly; no-match is logged and silently dropped
+- `processResolvedAlert` (tx + row lock): finds the `alerts` row by `source_fingerprint` (then `fingerprint` fallback), marks it `resolved_at=now`; when no firing alerts remain on a completed/monitor incident, sets `monitor_until = min(monitor_until, resolved_at + window)`; no-match is logged and dropped
 - `InsertFiringAlert` inserts the initial `alerts` row (status=firing) for a newly spawned incident
 - `LinkAlertToIncident` attaches an alert to an existing incident; extends `monitor_until` if the incident is in monitor status
 - `IncidentStatusMonitor` is defined in `internal/database/models_incidents.go`; `Alert` model is in `internal/database/models_alerts.go`
 - manifest capped at `manifestMaxEntriesPerScope` (150) entries per scope by `UpdatedAt` descending
+
+### Post-investigation incident merge
+
+`IncidentMerger` (`internal/services/incident_merger.go`): when an alert-sourced investigation completes, a one-shot LLM compares its diagnosed root cause against earlier investigated incidents and merges the newer incident into the earlier survivor on a confident match.
+
+Rules:
+- flag-gated (`IncidentMergeEnabled` in `GeneralSettings`, default false, read live); fail-open everywhere; fired as a detached goroutine from `UpdateIncidentComplete` via `SkillService.SetIncidentMerger`
+- candidates: alert-sourced `completed`/`monitor`, non-empty `response`, `completed_at` within 24h, `started_at` earlier than the completing incident (newer→older only), LIMIT 25; `mergeThreshold=0.8` + hallucination guard
+- merge tx: lock both rows in UUID order, revalidate statuses, re-point `alerts` rows (safe: `uniq_firing_alert` is global), extend survivor `monitor_until`, set merged row `status=merged` + `merged_into_uuid`; merged incidents drop out of all candidate pools
+- Slack: best-effort note only in the merged incident's thread; failure never rolls back the merge
+- `LinkAlertToIncident` follows `merged_into_uuid` (bounded hops, each row locked) so a correlator verdict targeting a just-merged incident attaches to the survivor
 
 ### Alert sources and webhook adapters
 
@@ -194,20 +205,21 @@ Rules:
 
 ### Cron jobs
 
-Cron jobs run on a per-job schedule, target a Channel, and always execute as a full agent investigation under the `cron-agent` system skill. The legacy `oneshot` mode and `description` field have been removed.
+Cron jobs run on a per-job schedule and always execute as a full agent investigation under the `cron-agent` system skill. The legacy `oneshot` mode and `description` field are gone.
 
 Rules:
 - every cron tick spawns the `cron-agent` skill via `SpawnAgentInvocation`, creating an `Incident` with `source_kind="cron"` and `source_uuid=<cron_job.uuid>`
 - each cron carries its own `Tools []ToolInstance` allowlist (m2m via `cron_job_tools`) mapped to `ToolAllowlistEntry` — global skill/tool settings are NOT inherited
 - `cron-agent` is a system skill (`IsSystem=true`), exempt from SKILL.md generation; prompt surfaces via `skill_prompt_service`
-- system crons are seeded by `seedSystemCronJobs()` with `Enabled=false`; the seed leaves existing system rows untouched (operator edits survive restarts); `DeleteJob` on a system row returns `ErrSystemCronImmutable` (409) — editable but not deletable
+- system crons seed via `seedSystemCronJobs()` with per-seed `Enabled` defaults (`Dreaming` enabled, `improvement-evaluator` disabled); existing system rows are left untouched (operator edits survive restarts); legacy `memory-curator` rows rename to `Dreaming` in place; `DeleteJob` on a system row returns `ErrSystemCronImmutable` (409) — editable, not deletable
+- `post_results` (default true) gates channel posting; when false the tick skips channel/provider resolution entirely and records its outcome only on the Incident row
 - crons spawn with ONLY the `cron-agent` root prompt — do NOT wrap the task with `executor.PrependGuidance` (incident-triage framed); the task is prefixed only with the current UTC time
-- tool-less crons (e.g. `memory-curator`) MUST send an explicit empty allowlist; `ToolAllowlist` on `WebSocketMessage` is intentionally NOT `omitempty` — `[]` means reject-all, `null` means allow-all
-- the seeded `memory-curator` cron dedupes `/akmatori/memory/global/` via memory-writer (`Action: delete <slug>` emits tombstones)
+- tool-less crons (e.g. `Dreaming`) MUST send an explicit empty allowlist; `ToolAllowlist` on `WebSocketMessage` is intentionally NOT `omitempty` — `[]` means reject-all, `null` means allow-all
+- the seeded `Dreaming` cron dedupes `/akmatori/memory/global/` via memory-writer (`Action: delete <slug>` emits tombstones)
 - cron expressions are validated at write time (invalid → 400); `CronRunner` survives tick failures, recording `LastRunStatus=error` + `LastRunError`
 - manual fire is `POST /api/cron-jobs/{uuid}/run`; CRUD reloads the runner without restart
 - `CronJobTool` is the explicit join-table model; include it alongside `CronJob` in all `AutoMigrate` calls and test schemas — GORM does not auto-discover it from the `many2many:` tag
-- `SpawnAgentInvocation(rootSkillName, ctx)` in `incident_service.go` is the shared entrypoint for all root-skill agent runs; add a new system root skill by: (1) seeding the skill row in `db.go`, (2) adding its hardcoded prompt constant alongside `DefaultCronAgentPrompt`, (3) adding the `rootSkillName` case to `GetSkillPrompt`, `UpdateSkillPrompt`, `RegenerateSkillMd`, `RegenerateAllSkillMds`, and `rootSkillHeader`. Current system root skills: `incident-manager`, `cron-agent`, `proposal-editor`
+- `SpawnAgentInvocation(rootSkillName, ctx)` in `incident_service.go` is the shared entrypoint for root-skill agent runs; new system root skill = seed the skill row in `db.go`, add its prompt constant alongside `DefaultCronAgentPrompt`, add the `rootSkillName` case to `GetSkillPrompt`/`UpdateSkillPrompt`/`RegenerateSkillMd`/`RegenerateAllSkillMds`/`rootSkillHeader`. Current: `incident-manager`, `cron-agent`, `proposal-editor`
 
 ### Self-improving proposals
 
@@ -219,7 +231,7 @@ Rules:
 - staleness: gateway captures `current_snapshot` at create (runbook/memory/cron); skill prompts backfilled lazily by the API on first list/get (disk-only in the API container); approve compares live vs snapshot, mismatch → `superseded` + `ErrProposalStale` (409)
 - `skill_prompt_update` targets non-system skills ONLY (enforced at gateway create AND apply — `UpdateSkillPrompt` silently no-ops for system skills); `cron_new` applies `Enabled=false`, no channel
 - proposal chat = fresh `StartIncident` per turn on the same chat incident (`source_kind="proposal"`, root skill `proposal-editor`), NEVER `ContinueIncident`; proposal state + transcript rebuilt into each task; transcript in `proposal_chat_messages` written by the handler; allowlist = `ChatToolAllowlist()` (incidents+proposals; non-nil empty on failure); no `executor.PrependGuidance`
-- `SeedImprovementEvaluatorCron()` runs from `main.go` AFTER `EnsureToolTypes()` (attaches the seeded tool instances); same disabled-seed/preserve-edits/shadow-check semantics as `SeedSystemCronJobs`
+- `SeedImprovementEvaluatorCron()` runs from `main.go` AFTER `EnsureToolTypes()` (attaches the seeded tool instances); seeds disabled, same preserve-edits/shadow-check semantics as `SeedSystemCronJobs`
 - gateway `proposals.create` dedups against pending rows (kind+target_ref, or kind+title for `*_new`) and drops hallucinated `source_incident_uuids`; `proposals` is in `builtInToolNamespaces` and `credentiallessNamespaces`
 - key files: `internal/database/models_proposals.go`, `internal/services/proposal_service.go`, `internal/handlers/api_proposals.go`, `mcp-gateway/internal/tools/proposals/`, `web/src/pages/Proposals.tsx` + `ProposalDetail.tsx`
 - incident feedback UI (`IncidentFeedbackStrip`, Response tab) posts to `POST /api/incidents/{uuid}/feedback`; feedback memories feed the next evaluator run
@@ -289,13 +301,11 @@ Slack has hard byte limits. Any new Slack-facing summary or banner text must tru
 
 ### Keep tool routing indirect
 
-Do not teach agents to call tool implementations directly. They should go through `gateway_call`, with routing handled by logical instance names or instance hints.
-
-When passing a `ToolAllowlist` in an `AgentMessage` frame, never add `omitempty` to the JSON tag. An empty slice must serialize as `[]` so the gateway treats it as "reject all tool calls"; `null` (produced by `omitempty` on a nil slice) means "no allowlist active = allow all". This is critical for tool-less cron runs.
+Do not teach agents to call tool implementations directly. They should go through `gateway_call`, with routing handled by logical instance names or instance hints. (`ToolAllowlist` JSON-tag rule: see the cron section — never `omitempty`.)
 
 ### Keep messaging provider-agnostic
 
-Do not call Slack APIs directly from handlers or services. Resolve a `Channel`, fetch the provider through `ProviderRegistry.Get(...)`, and call `PostMessage` / `PostThreadReply` / `UpdateMessage`. When you add a new messaging provider, register it in `internal/messaging/` and the rest of the system should pick it up by provider name without further changes.
+Do not call Slack APIs directly from handlers or services — resolve a `Channel` and go through `ProviderRegistry.Get(...)` (`PostMessage` / `PostThreadReply` / `UpdateMessage`). New providers register in `internal/messaging/` and are picked up by provider name.
 
 ### Preserve graceful degradation
 
@@ -348,23 +358,23 @@ Historically weak or regression-prone areas:
 
 Rebuild the affected container after runtime changes.
 
-Maintainers running from source use the dev override (`docker-compose.dev.yml`) so the local `build:` blocks take effect. End users pulling published GHCR images use only the base `docker-compose.yml` (`docker compose pull && docker compose up -d`) — never run these `build` commands against a release install.
+Source maintainers use the dev override (`docker-compose.dev.yml`) so local `build:` blocks take effect. GHCR-image installs use only the base file (`docker compose pull && docker compose up -d`) — never run `build` against a release install.
 
-| Area changed | Rebuild |
+Command: `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build <svc> && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d <svc>` with `<svc>`:
+
+| Area changed | `<svc>` |
 |---|---|
-| API (`cmd/`, `internal/`) | `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build akmatori-api && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d akmatori-api` |
-| MCP Gateway | `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build mcp-gateway && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d mcp-gateway` |
-| Agent worker | `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build akmatori-agent && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d akmatori-agent` |
-| Frontend | `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build frontend && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d frontend` |
+| API (`cmd/`, `internal/`) | `akmatori-api` |
+| MCP Gateway | `mcp-gateway` |
+| Agent worker | `akmatori-agent` |
+| Frontend | `frontend` |
 
 ## Recent Features and Docs-Sensitive Areas
 
-Details for each live in the rules sections above:
-- QMD is gone; recall runs through pi-mono subagents; memory re-ingests at incident completion
-- Slack launches start fresh agent sessions — session resume is NOT used anywhere (stale-session resumes fail once the agent process exits); proposal chat follows the same fresh-session-per-turn pattern
-- messaging is Integrations + Channels; `/api/settings/slack` returns 410 Gone
-- alert-source webhooks use adapter-specific secret validation; explicit notification channels must resolve to `can_post=true` Channels
-- self-improving proposals are live (evaluator cron + `/api/proposals` + Proposals tab)
+Details live in rules sections above:
+- QMD is gone; recall runs through pi-mono subagents
+- session resume is NOT used anywhere — Slack launches and proposal chat start fresh agent sessions per turn (stale resumes fail once the agent process exits)
+- `/api/settings/slack` returns 410 Gone
 
 ## When Editing This File
 

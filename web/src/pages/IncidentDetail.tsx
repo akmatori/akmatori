@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Activity, Clock, CheckCircle, AlertCircle, Timer, Zap, XCircle } from 'lucide-react';
+import { ArrowLeft, Activity, Clock, CheckCircle, AlertCircle, Timer, Zap, XCircle, GitMerge } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import IncidentDetailView from '../components/IncidentDetailView';
@@ -22,6 +22,8 @@ const getStatusConfig = (status: string) => {
       return { class: 'badge-error', icon: AlertCircle, label: 'Failed' };
     case 'closed':
       return { class: 'badge-default', icon: XCircle, label: 'Closed' };
+    case 'merged':
+      return { class: 'badge-default', icon: GitMerge, label: 'Merged' };
     default:
       return { class: 'badge-default', icon: Clock, label: 'Pending' };
   }

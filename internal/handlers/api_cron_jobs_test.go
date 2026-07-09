@@ -54,18 +54,19 @@ func (m *mockCronJobManager) GetJobByUUID(uuid string) (*database.CronJob, error
 	return nil, services.ErrCronJobNotFound
 }
 
-func (m *mockCronJobManager) CreateJob(name, schedule, prompt string, channelUUID string, enabled bool, toolInstanceIDs []uint) (*database.CronJob, error) {
+func (m *mockCronJobManager) CreateJob(name, schedule, prompt string, channelUUID string, enabled, postResults bool, toolInstanceIDs []uint) (*database.CronJob, error) {
 	m.lastToolIDs = toolInstanceIDs
 	if m.createErr != nil {
 		return nil, m.createErr
 	}
 	row := &database.CronJob{
-		UUID:     "uuid-" + name,
-		Name:     name,
-		Schedule: schedule,
-		Prompt:   prompt,
-		Enabled:  enabled,
-		Tools:    m.createTools,
+		UUID:        "uuid-" + name,
+		Name:        name,
+		Schedule:    schedule,
+		Prompt:      prompt,
+		Enabled:     enabled,
+		PostResults: postResults,
+		Tools:       m.createTools,
 	}
 	m.lastCreated = row
 	m.jobs = append(m.jobs, *row)

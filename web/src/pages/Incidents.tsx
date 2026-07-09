@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { RefreshCw, X, Plus, MessageSquare, Activity, Clock, CheckCircle, AlertCircle, XCircle, Terminal, Zap, Timer, Bell } from 'lucide-react';
+import { RefreshCw, X, Plus, MessageSquare, Activity, Clock, CheckCircle, AlertCircle, XCircle, Terminal, Zap, Timer, Bell, GitMerge } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
@@ -237,6 +237,8 @@ export default function Incidents() {
         };
       case 'closed':
         return { class: 'badge-default', icon: XCircle, label: 'Closed', subLabel: undefined };
+      case 'merged':
+        return { class: 'badge-default', icon: GitMerge, label: 'Merged', subLabel: undefined };
       case 'pending':
       case 'running':
         return { class: 'badge-primary', icon: Activity, label: 'Ongoing', subLabel: undefined };

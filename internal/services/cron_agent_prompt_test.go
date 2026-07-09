@@ -120,7 +120,7 @@ func TestInitializeCronAgentSkill_UpgradesNonSystemRow(t *testing.T) {
 }
 
 // TestSeedSystemCronJobs_IdempotentAndPreservesOperatorState verifies the
-// memory-curator system cron is created disabled on first seed, survives a
+// Dreaming system cron is created enabled on first seed, survives a
 // second InitializeDefaults-equivalent call, and preserves ALL operator
 // edits (Enabled, ChannelID, Schedule, Prompt) across simulated restarts.
 // Re-asserting schedule/prompt on boot would silently revert operator edits,
@@ -129,37 +129,37 @@ func TestInitializeCronAgentSkill_UpgradesNonSystemRow(t *testing.T) {
 func TestSeedSystemCronJobs_IdempotentAndPreservesOperatorState(t *testing.T) {
 	db := newCronAgentTestDB(t)
 
-	// First seed — row must be created disabled.
+	// First seed — row must be created enabled (Dreaming runs by default).
 	if err := database.SeedSystemCronJobs(); err != nil {
 		t.Fatalf("first seed: %v", err)
 	}
 	var rows []database.CronJob
-	if err := db.Where("name = ?", "memory-curator").Find(&rows).Error; err != nil {
-		t.Fatalf("query memory-curator: %v", err)
+	if err := db.Where("name = ?", "Dreaming").Find(&rows).Error; err != nil {
+		t.Fatalf("query Dreaming: %v", err)
 	}
 	if len(rows) != 1 {
-		t.Fatalf("expected one memory-curator row, got %d", len(rows))
+		t.Fatalf("expected one Dreaming row, got %d", len(rows))
 	}
 	row := rows[0]
 	if !row.IsSystem {
-		t.Error("memory-curator must be IsSystem=true")
+		t.Error("Dreaming must be IsSystem=true")
 	}
-	if row.Enabled {
-		t.Error("memory-curator must default to Enabled=false (operator opts in)")
+	if !row.Enabled {
+		t.Error("Dreaming must default to Enabled=true")
 	}
 	if row.Schedule != "0 2 * * *" {
-		t.Errorf("memory-curator schedule wrong, got %q", row.Schedule)
+		t.Errorf("Dreaming schedule wrong, got %q", row.Schedule)
 	}
 	if !strings.Contains(row.Prompt, "memory consolidation") {
-		t.Errorf("memory-curator prompt is missing the consolidation directive: %q", row.Prompt)
+		t.Errorf("Dreaming prompt is missing the consolidation directive: %q", row.Prompt)
 	}
 	originalUUID := row.UUID
 
-	// Operator enables the cron. A subsequent seed must NOT flip it back to
-	// disabled — the seed is "ensure the row exists with the canonical
+	// Operator disables the cron. A subsequent seed must NOT flip it back to
+	// enabled — the seed is "ensure the row exists with the canonical
 	// schedule + prompt", not "reset operator preferences on every boot".
-	if err := db.Model(&database.CronJob{}).Where("id = ?", row.ID).Update("enabled", true).Error; err != nil {
-		t.Fatalf("operator-enable: %v", err)
+	if err := db.Model(&database.CronJob{}).Where("id = ?", row.ID).Update("enabled", false).Error; err != nil {
+		t.Fatalf("operator-disable: %v", err)
 	}
 
 	// Operator-only customization that must survive: pick a channel, retune
@@ -180,11 +180,11 @@ func TestSeedSystemCronJobs_IdempotentAndPreservesOperatorState(t *testing.T) {
 	}
 
 	var after database.CronJob
-	if err := db.Where("name = ?", "memory-curator").First(&after).Error; err != nil {
+	if err := db.Where("name = ?", "Dreaming").First(&after).Error; err != nil {
 		t.Fatalf("re-read: %v", err)
 	}
-	if !after.Enabled {
-		t.Error("operator's Enabled=true flip must survive re-seed across restarts")
+	if after.Enabled {
+		t.Error("operator's Enabled=false flip must survive re-seed across restarts")
 	}
 	if after.ChannelID == nil || *after.ChannelID != channelID {
 		t.Errorf("operator's ChannelID must survive re-seed: got %v", after.ChannelID)
@@ -204,9 +204,55 @@ func TestSeedSystemCronJobs_IdempotentAndPreservesOperatorState(t *testing.T) {
 		t.Fatalf("third seed: %v", err)
 	}
 	var count int64
-	db.Model(&database.CronJob{}).Where("name = ?", "memory-curator").Count(&count)
+	db.Model(&database.CronJob{}).Where("name = ?", "Dreaming").Count(&count)
 	if count != 1 {
-		t.Errorf("expected exactly one memory-curator row after 3 seeds, got %d", count)
+		t.Errorf("expected exactly one Dreaming row after 3 seeds, got %d", count)
+	}
+}
+
+// TestSeedSystemCronJobs_RenamesLegacyMemoryCurator verifies the upgrade
+// path: an existing "memory-curator" system row is renamed to "Dreaming" in
+// place (UUID and operator state preserved) instead of growing a second row.
+func TestSeedSystemCronJobs_RenamesLegacyMemoryCurator(t *testing.T) {
+	db := newCronAgentTestDB(t)
+
+	legacy := database.CronJob{
+		UUID:     "legacy-uuid",
+		Name:     "memory-curator",
+		Schedule: "*/15 * * * *", // operator-edited
+		Prompt:   "operator prompt",
+		IsSystem: true,
+		Enabled:  false, // operator had it disabled
+	}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+	// Pin enabled=false explicitly (GORM omits zero-value bools on INSERT).
+	if err := db.Model(&legacy).Update("enabled", false).Error; err != nil {
+		t.Fatalf("pin legacy enabled: %v", err)
+	}
+
+	if err := database.SeedSystemCronJobs(); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	var count int64
+	db.Model(&database.CronJob{}).Where("is_system = ?", true).Count(&count)
+	if count != 1 {
+		t.Fatalf("expected exactly one system row after rename, got %d", count)
+	}
+	var row database.CronJob
+	if err := db.Where("name = ?", "Dreaming").First(&row).Error; err != nil {
+		t.Fatalf("renamed row missing: %v", err)
+	}
+	if row.UUID != "legacy-uuid" {
+		t.Errorf("rename must keep the UUID, got %s", row.UUID)
+	}
+	if row.Enabled {
+		t.Error("rename must preserve operator's Enabled=false")
+	}
+	if row.Schedule != "*/15 * * * *" || row.Prompt != "operator prompt" {
+		t.Errorf("rename must preserve operator edits: %q %q", row.Schedule, row.Prompt)
 	}
 }
 

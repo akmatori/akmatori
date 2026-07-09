@@ -148,6 +148,7 @@ type UpdateGeneralSettingsRequest struct {
 	BaseURL                  *string `json:"base_url"`
 	AlertCorrelationEnabled  *bool   `json:"alert_correlation_enabled"`
 	AlertMonitorWindowMinutes *int   `json:"alert_monitor_window_minutes"`
+	IncidentMergeEnabled     *bool   `json:"incident_merge_enabled"`
 }
 
 // UpdateRetentionSettingsRequest is the request body for PUT /api/settings/retention.

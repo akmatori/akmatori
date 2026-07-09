@@ -13,7 +13,7 @@ Akmatori is an AI-powered AIOps agent that integrates with monitoring systems an
 - **AI-Powered Automation**: Analyze incidents and execute remediation skills using your preferred LLM
 - **[Agent Skills](https://github.com/agentskills/agentskills) Format**: Skills follow the open Agent Skills specification for portability across AI agents
 - **Tools Management**: Configure reusable tools (SSH, Python scripts, API clients) for skills
-- **Web Dashboard**: Manage incidents, skills, tools, and settings through a modern UI
+- **Web Dashboard**: Manage incidents, skills, tools, and settings through a modern, mobile-responsive UI
 - **Context Files**: Upload reference documents for the AI to use during incident analysis
 - **Self-Hosted**: Your data never leaves your infrastructure
 

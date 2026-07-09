@@ -55,13 +55,19 @@ func (s *SkillService) InsertFiringAlert(ctx context.Context, incidentUUID strin
 // LinkAlertToIncident records an incoming alert against an existing incident
 // instead of spawning a new investigation. For monitor-status incidents the
 // monitor window is extended so recurrences are visible in the watch period.
+//
+// The target may have been merged into a survivor between the correlator's
+// candidate fetch and this call (the LLM verdict takes seconds; the merge
+// goroutine fires at investigation completion). Attaching to the merged row
+// would strand the alert on a hidden incident with no monitor extension, so
+// the link follows merged_into_uuid to the live survivor first.
 func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var incident database.Incident
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
-			return fmt.Errorf("LinkAlertToIncident: load incident: %w", err)
+		incident, err := loadLinkTargetTx(tx, incidentUUID)
+		if err != nil {
+			return err
 		}
+		incidentUUID = incident.UUID
 
 		now := time.Now()
 		firedAt := now
@@ -110,6 +116,38 @@ func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID str
 
 		return nil
 	})
+}
+
+// linkRedirectMaxHops bounds how far loadLinkTargetTx follows the
+// merged_into_uuid chain. Merges only flow newer→older so real chains are
+// short; the cap is a corrupted-data backstop, not an expected depth.
+const linkRedirectMaxHops = 5
+
+// loadLinkTargetTx loads and row-locks the incident an alert should attach
+// to, following merged_into_uuid redirects to the surviving incident. Each
+// hop is locked in turn so the final target cannot be merged away underneath
+// the caller. A merged row with no forward pointer (or a chain exceeding the
+// hop cap) is returned as-is — attaching to it beats dropping the alert.
+func loadLinkTargetTx(tx *gorm.DB, incidentUUID string) (*database.Incident, error) {
+	uuid := incidentUUID
+	for hop := 0; ; hop++ {
+		var incident database.Incident
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("uuid = ?", uuid).First(&incident).Error; err != nil {
+			return nil, fmt.Errorf("LinkAlertToIncident: load incident %s: %w", uuid, err)
+		}
+		if incident.Status != database.IncidentStatusMerged || incident.MergedIntoUUID == "" {
+			return &incident, nil
+		}
+		if hop >= linkRedirectMaxHops {
+			slog.Warn("LinkAlertToIncident: merged_into_uuid chain exceeds hop cap; attaching to merged row",
+				"incident", incidentUUID, "stopped_at", uuid)
+			return &incident, nil
+		}
+		slog.Info("LinkAlertToIncident: redirecting link from merged incident to survivor",
+			"merged", uuid, "survivor", incident.MergedIntoUUID)
+		uuid = incident.MergedIntoUUID
+	}
 }
 
 // countFiringAlerts returns the number of still-firing alerts linked to the
@@ -637,6 +675,7 @@ func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status databa
 	// may differ from the requested status below) so the memory-ingest check
 	// after the transaction reflects the real outcome.
 	effectiveStatus := status
+	sourceKind := ""
 
 	txErr := s.db.Transaction(func(tx *gorm.DB) error {
 		var incident database.Incident
@@ -644,6 +683,7 @@ func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status databa
 			Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
 			return err
 		}
+		sourceKind = incident.SourceKind
 
 		// Alert-sourced incidents transition to monitor status on completion,
 		// but only once every linked alert has resolved — otherwise the
@@ -692,6 +732,22 @@ func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status databa
 			ctx := context.Background()
 			if err := ingester.IngestFromDisk(ctx); err != nil {
 				slog.Warn("memory ingest from disk failed", "incident", uuid, "err", err)
+			}
+		}()
+	}
+
+	// Post-investigation merge pass: for alert-sourced incidents that
+	// finished successfully, ask the merger whether this investigation's
+	// root cause matches an earlier investigated incident. Detached and
+	// best-effort — the merger itself is flag-gated and fail-open.
+	if sourceKind == database.IncidentSourceKindAlert &&
+		(effectiveStatus == database.IncidentStatusCompleted ||
+			effectiveStatus == database.IncidentStatusMonitor) && s.incidentMerger != nil {
+		merger := s.incidentMerger
+		uuid := incidentUUID
+		go func() {
+			if err := merger.EvaluateAndMerge(context.Background(), uuid); err != nil {
+				slog.Warn("post-investigation merge pass failed", "incident", uuid, "err", err)
 			}
 		}()
 	}
