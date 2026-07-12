@@ -1,16 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ---------------------------------------------------------------------------
-// Mock pi-ai's `complete()` and `getModel()`. agent-runner.resolveModel()
-// calls into getModel(); we leave it to fall through to the custom model
-// spec path so we don't need to mock the whole registry.
+// Mock pi-ai's `complete()` (compat entrypoint since 0.80.0) and
+// `getBuiltinModel()` (providers/all). agent-runner.resolveModel() calls into
+// getBuiltinModel(); we leave it to fall through to the custom model spec
+// path so we don't need to mock the whole registry.
 // ---------------------------------------------------------------------------
 
 const completeMock = vi.fn();
 
-vi.mock("@earendil-works/pi-ai", () => ({
+vi.mock("@earendil-works/pi-ai/compat", () => ({
   complete: (...args: unknown[]) => completeMock(...args),
-  getModel: vi.fn(() => undefined),
+}));
+
+vi.mock("@earendil-works/pi-ai/providers/all", () => ({
+  getBuiltinModel: vi.fn(() => undefined),
 }));
 
 // Mock proxy.ts to avoid touching undici's real global dispatcher in tests.

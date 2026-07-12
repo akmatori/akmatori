@@ -14,6 +14,7 @@ const THINKING_LEVELS: { value: ThinkingLevel; label: string }[] = [
   { value: 'medium', label: 'Medium (Default)' },
   { value: 'high', label: 'High' },
   { value: 'xhigh', label: 'Extra High' },
+  { value: 'max', label: 'Max' },
 ];
 
 const PROVIDER_OPTIONS: { value: LLMProvider; label: string }[] = [

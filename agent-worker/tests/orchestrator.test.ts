@@ -106,13 +106,16 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 
 const completeMock = vi.fn();
 
-vi.mock("@earendil-works/pi-ai", () => ({
-  getModel: vi.fn(() => ({
+vi.mock("@earendil-works/pi-ai/providers/all", () => ({
+  getBuiltinModel: vi.fn(() => ({
     id: "o4-mini",
     name: "o4-mini",
     api: "openai-responses",
     provider: "openai",
   })),
+}));
+
+vi.mock("@earendil-works/pi-ai/compat", () => ({
   complete: (...args: unknown[]) => completeMock(...args),
 }));
 
@@ -988,7 +991,7 @@ describe("Orchestrator", () => {
 
     it("should default model to gpt-5.5 when not specified", async () => {
       const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
-      const { getModel } = await import("@earendil-works/pi-ai");
+      const { getBuiltinModel } = await import("@earendil-works/pi-ai/providers/all");
 
       await orchestrator.start();
       await waitForMessage((m) => m.type === "status");
@@ -1005,8 +1008,8 @@ describe("Orchestrator", () => {
         (m) => m.type === "agent_completed" && m.incident_id === "incident-settings-002",
       );
 
-      // getModel should have been called with "gpt-5.5" (matches database default)
-      expect(getModel).toHaveBeenCalledWith("openai", "gpt-5.5");
+      // getBuiltinModel should have been called with "gpt-5.5" (matches database default)
+      expect(getBuiltinModel).toHaveBeenCalledWith("openai", "gpt-5.5");
     });
   });
 

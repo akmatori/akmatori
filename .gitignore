@@ -9,6 +9,14 @@ akmatori_data/agents/*
 !akmatori_data/agents/runbook-searcher.md
 !akmatori_data/agents/memory-searcher.md
 !akmatori_data/agents/memory-writer.md
+# System-supplied pi-subagents extension config ships with the repo (compact
+# tool descriptions). Other operator files under extensions/ stay untracked.
+!akmatori_data/extensions/
+akmatori_data/extensions/*
+!akmatori_data/extensions/subagent/
+akmatori_data/extensions/subagent/*
+!akmatori_data/extensions/subagent/config.json
+!akmatori_data/extensions/subagent/README.md
 # Binaries for programs and plugins
 *.exe
 *.exe~

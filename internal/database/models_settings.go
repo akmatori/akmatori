@@ -109,6 +109,7 @@ const (
 	ThinkingLevelMedium  ThinkingLevel = "medium"
 	ThinkingLevelHigh    ThinkingLevel = "high"
 	ThinkingLevelXHigh   ThinkingLevel = "xhigh"
+	ThinkingLevelMax     ThinkingLevel = "max"
 )
 
 // ValidThinkingLevels returns all valid thinking level values
@@ -120,6 +121,7 @@ func ValidThinkingLevels() []ThinkingLevel {
 		ThinkingLevelMedium,
 		ThinkingLevelHigh,
 		ThinkingLevelXHigh,
+		ThinkingLevelMax,
 	}
 }
 

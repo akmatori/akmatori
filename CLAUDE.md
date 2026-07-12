@@ -305,18 +305,22 @@ Akmatori intentionally keeps working when optional AI pieces fail. When adding A
 
 ## SDK Notes (`@earendil-works/pi-coding-agent`)
 
-- Current versions: pi-coding-agent, pi-ai, pi-agent-core `0.78.1`; pi-subagents `0.28.0`; undici `^8` (required by pi-coding-agent 0.78.1)
-- As of v0.74.0, pi-mono packages moved from the `@mariozechner/*` scope to `@earendil-works/*` (pi-coding-agent, pi-ai, pi-agent-core)
-- Use `ModelRegistry.inMemory(authStorage)`; there is no public `ModelRegistry` constructor
-- Tool factories in `gateway-tools.ts` should return `defineTool({...})`
-- The bash tool remains the local exception because of TypeScript variance friction
-- `typebox` is imported from `typebox`, not `@sinclair/typebox`
-- `DefaultResourceLoader` requires `agentDir`; pass `getAgentDir()` in production and mocks
-- Provider SDKs are lazy-loaded; Akmatori forwards retry and timeout settings and uses long provider timeouts for slow models
-- `setRuntimeApiKey` in pi-ai stores values in `runtimeOverrides` and bypasses `resolveConfigValue` entirely — operator API keys containing literal `$` characters are safe and will not be interpreted as env var names
-- `compat.forceAdaptiveThinking: true` is set in synthesized model specs for any provider that resolves to `apiType: "anthropic-messages"` (currently `minimax` and fallback custom Anthropic-compatible endpoints); this enables extended thinking wire format on models not in the built-in registry
-- Subagent support: `agent-runner.ts` keeps `noExtensions: false` and passes `additionalExtensionPaths: ["/opt/pi-extensions/pi-subagents"]`. The pi-subagents extension is baked into the image at that path; `~/.pi/agent/extensions` is a thin operator-supplied mount. The agent image must have `pi` on `PATH` and `ripgrep`/`fzf` installed for subagent recon to function
-- Subagent subprocess auth: pi-subagents spawns each subagent in a child `pi` process whose AuthStorage is independent — `agent-runner.ts` mirrors the active API key into `process.env[<provider env var>]` so the child inherits it. Subagent `.md` files intentionally omit `model:` so the child inherits the parent provider/model (hard-coding a model name would break non-Anthropic deployments)
+- Current versions: pi-coding-agent, pi-ai, pi-agent-core `0.80.6`; pi-subagents `0.34.0`; undici `^8`
+- pi-ai 0.80.0 root is core-only (types stay at root): `complete` from `/compat`, `getBuiltinModel` from `/providers/all`; the new Models API rejects akmatori's synthesized custom-provider specs (compat dispatches on `model.api`)
+- models.json `apiKey` needs `$ENV_VAR` syntax — bare names are literals since pi 0.79.4
+- Project trust (0.79.0+): headless child `pi` treats workspaces as untrusted (we write `<workDir>/.pi/settings.json`) — children use the global `<agentDir>/settings.json` pin and never run workspace `.pi/extensions`; never set `defaultProjectTrust: "always"`
+- Thinking level `max` (above `xhigh`); list mirrored in worker (agent-runner/types/orchestrator), Go (`models_settings.go`, `api_settings_llm.go`), web (types, `LLMSettingsSection.tsx`)
+- pi-subagents reads `<agentDir>/extensions/subagent/config.json` (strict JSON); repo ships it with `toolDescriptionMode: "compact"`
+- Use `ModelRegistry.inMemory(authStorage)` (no public constructor)
+- `gateway-tools.ts` tool factories return `defineTool({...})`
+- The bash tool stays local (TypeScript variance friction)
+- import `typebox` from `typebox`, not `@sinclair/typebox`
+- `DefaultResourceLoader` requires `agentDir` (`getAgentDir()` in production and mocks)
+- Provider SDKs are lazy-loaded; Akmatori forwards retry/timeout settings (long provider timeouts for slow models)
+- `setRuntimeApiKey` bypasses `resolveConfigValue` — operator API keys with literal `$` characters are safe
+- `compat.forceAdaptiveThinking: true` is set in synthesized model specs for providers resolving to `anthropic-messages` (`minimax`, fallback Anthropic-compatible endpoints) to enable extended-thinking wire format
+- Subagent support: `agent-runner.ts` keeps `noExtensions: false` + `additionalExtensionPaths: ["/opt/pi-extensions/pi-subagents"]` (baked into the image; `~/.pi/agent/extensions` is an operator mount); the image needs `pi` on `PATH` plus `ripgrep`/`fzf`
+- Subagent subprocess auth: the child `pi` has independent AuthStorage — `agent-runner.ts` mirrors the active API key into `process.env[<provider env var>]`; subagent `.md` files omit `model:` so children inherit the parent provider/model
 
 ## Testing Rules
 
@@ -363,8 +367,6 @@ Command: `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build <
 
 ## Recent Features and Docs-Sensitive Areas
 
-Details live in rules sections above:
-- QMD is gone; recall runs through pi-mono subagents
 - session resume is NOT used anywhere — Slack launches and proposal chat start fresh agent sessions per turn
 - `/api/settings/slack` returns 410 Gone
 

@@ -62,7 +62,8 @@ export type ThinkingLevel =
   | "low"
   | "medium"
   | "high"
-  | "xhigh";
+  | "xhigh"
+  | "max";
 
 export interface LLMSettings {
   provider: LLMProvider;

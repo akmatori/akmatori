@@ -130,9 +130,9 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
   };
 });
 
-vi.mock("@earendil-works/pi-ai", () => {
+vi.mock("@earendil-works/pi-ai/providers/all", () => {
   return {
-    getModel: vi.fn((provider: string, modelId: string) => {
+    getBuiltinModel: vi.fn((provider: string, modelId: string) => {
       // Return a mock model for known combinations
       if (provider === "anthropic" && modelId === "claude-sonnet-4-5-20250929") {
         return {
@@ -840,10 +840,11 @@ describe("AgentRunner", () => {
         // who places their own `providers.custom` entry cannot collide with us.
         expect(config.providers["akmatori-custom"].baseUrl).toBe("https://gateway.internal.example/v1");
         expect(config.providers["akmatori-custom"].api).toBe("openai-completions");
-        // apiKey is the env var NAME, not the literal secret — pi-mono's
-        // resolveConfigValueOrThrow reads process.env[name] when resolving
-        // so we don't persist the raw key under /home/agent/.pi.
-        expect(config.providers["akmatori-custom"].apiKey).toBe("AKMATORI_CUSTOM_PROVIDER_API_KEY");
+        // apiKey is a `$NAME` env reference, not the literal secret —
+        // pi-mono's resolveConfigValueOrThrow expands `$NAME` from the
+        // environment (bare names are literals since pi 0.79.4), so we don't
+        // persist the raw key under /home/agent/.pi.
+        expect(config.providers["akmatori-custom"].apiKey).toBe("$AKMATORI_CUSTOM_PROVIDER_API_KEY");
         expect(process.env.AKMATORI_CUSTOM_PROVIDER_API_KEY).toBe("sk-custom-key-123");
         expect(config.providers["akmatori-custom"].models[0].id).toBe("custom-model-id");
         // Marker lets future runs distinguish akmatori-managed entries from
@@ -895,9 +896,10 @@ describe("AgentRunner", () => {
         expect(config.providers.custom.baseUrl).toBe("https://operator.example/v1");
         expect(config.providers.custom.apiKey).toBe("operator-key");
         // Akmatori writes its own slot side-by-side with the operator's; the
-        // apiKey field references our env var, not the literal secret.
+        // apiKey field is a `$NAME` reference to our env var, not the literal
+        // secret.
         expect(config.providers["akmatori-custom"].baseUrl).toBe("https://akmatori.example/v1");
-        expect(config.providers["akmatori-custom"].apiKey).toBe("AKMATORI_CUSTOM_PROVIDER_API_KEY");
+        expect(config.providers["akmatori-custom"].apiKey).toBe("$AKMATORI_CUSTOM_PROVIDER_API_KEY");
         expect(process.env.AKMATORI_CUSTOM_PROVIDER_API_KEY).toBe("akmatori-key");
         expect(config.providers["akmatori-custom"].models[0].id).toBe("akmatori-model");
       });
@@ -1151,10 +1153,11 @@ describe("AgentRunner", () => {
         };
         // Legacy marker-bearing custom entry is gone.
         expect("custom" in config.providers).toBe(false);
-        // New akmatori-custom entry carries the current config; apiKey is the
-        // env var name and the live secret is propagated via process.env.
+        // New akmatori-custom entry carries the current config; apiKey is a
+        // `$NAME` env reference and the live secret is propagated via
+        // process.env.
         expect(config.providers["akmatori-custom"]?.baseUrl).toBe("https://akmatori.example/v1");
-        expect(config.providers["akmatori-custom"]?.apiKey).toBe("AKMATORI_CUSTOM_PROVIDER_API_KEY");
+        expect(config.providers["akmatori-custom"]?.apiKey).toBe("$AKMATORI_CUSTOM_PROVIDER_API_KEY");
         expect(process.env.AKMATORI_CUSTOM_PROVIDER_API_KEY).toBe("akmatori-key");
       });
 
@@ -1817,7 +1820,7 @@ describe("AgentRunner", () => {
         const config = JSON.parse(raw) as {
           providers: { "akmatori-custom": { apiKey: string } };
         };
-        expect(config.providers["akmatori-custom"].apiKey).toBe("AKMATORI_CUSTOM_PROVIDER_API_KEY");
+        expect(config.providers["akmatori-custom"].apiKey).toBe("$AKMATORI_CUSTOM_PROVIDER_API_KEY");
         // The env var carries the live secret so the child resolves it.
         expect(process.env.AKMATORI_CUSTOM_PROVIDER_API_KEY).toBe("sk-secret-custom-key");
       });
