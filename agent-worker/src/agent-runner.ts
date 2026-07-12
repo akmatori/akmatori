@@ -20,7 +20,8 @@ import {
   getAgentDir,
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
-import { getModel, type Model, type ThinkingLevel as PiThinkingLevel } from "@earendil-works/pi-ai";
+import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
+import type { Model, ThinkingLevel as PiThinkingLevel } from "@earendil-works/pi-ai";
 import type { LLMSettings, ExecuteResult, ProxyConfig, ThinkingLevel, ToolAllowlistEntry } from "./types.js";
 import { applyProxyConfig } from "./proxy.js";
 import {
@@ -160,7 +161,7 @@ export function extractSkillNameFromReadPath(
 
 export function mapThinkingLevel(level: ThinkingLevel): PiThinkingLevel | "off" {
   if (level === "off") return "off";
-  const valid: PiThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh"];
+  const valid: PiThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
   return valid.includes(level as PiThinkingLevel) ? (level as PiThinkingLevel) : "medium";
 }
 
@@ -179,7 +180,7 @@ export function resolveModel(
   baseUrl?: string,
 ): Model<any> {
   try {
-    const builtInModel = getModel(provider as any, modelId as any);
+    const builtInModel = getBuiltinModel(provider as any, modelId as any);
     // pi-ai may return undefined for unknown/custom models instead of throwing.
     // In that case, we must fall back to a custom model spec.
     if (builtInModel) {
@@ -351,12 +352,14 @@ const ADAPTIVE_THINKING_REQUIRED_PROVIDERS = new Set(["minimax"]);
 const AKMATORI_CUSTOM_PROVIDER_KEY = "akmatori-custom" as const;
 
 /**
- * Env var name written into models.json's apiKey field for the akmatori-custom
- * provider. Pi-mono's config resolver (resolveConfigValueOrThrow in
- * resolve-config-value.ts) treats an apiKey string as an env var name first
- * and falls back to literal only if process.env[name] is unset. We set this
- * env var in process.env so the child `pi` process inherits it through the
- * normal env propagation, keeping the raw API key out of the persistent
+ * Env var name referenced from models.json's apiKey field for the
+ * akmatori-custom provider (written as `$AKMATORI_CUSTOM_PROVIDER_API_KEY`).
+ * Pi-mono's config resolver (resolveConfigValueOrThrow in
+ * resolve-config-value.ts) requires explicit `$NAME`/`${NAME}` syntax for env
+ * references — a bare uppercase name is treated as a LITERAL value (the
+ * legacy env-name-first shim was removed in pi 0.79.4). We set this env var
+ * in process.env so the child `pi` process inherits it through the normal
+ * env propagation, keeping the raw API key out of the persistent
  * `<agentDir>/models.json` (which lives on the agent's home volume and is
  * readable by future agent/tool executions).
  */
@@ -436,10 +439,10 @@ function writeFileAtomic(filePath: string, contents: string): void {
  */
 function isBuiltInModelKnown(provider: string, model: string): boolean {
   try {
-    // getModel returns undefined for unknown models in production but throws
-    // for unknown providers under some pi-ai versions and in our test mocks.
-    // Treat both as "not in the registry."
-    return !!getModel(provider as any, model as any);
+    // getBuiltinModel returns undefined for unknown models in production but
+    // throws for unknown providers under some pi-ai versions and in our test
+    // mocks. Treat both as "not in the registry."
+    return !!getBuiltinModel(provider as any, model as any);
   } catch {
     return false;
   }
@@ -626,14 +629,16 @@ function writeCustomProviderModelsJson(
         `[agent-runner] operator-managed providers.${AKMATORI_CUSTOM_PROVIDER_KEY} found in ${modelsPath}; not overwriting`,
       );
     } else {
-      // Write the env var NAME, not the literal apiKey, so the secret stays
-      // out of persistent on-disk state. The caller is responsible for
+      // Write a `$NAME` env reference, not the literal apiKey, so the secret
+      // stays out of persistent on-disk state. The caller is responsible for
       // setting process.env[AKMATORI_CUSTOM_API_KEY_ENV] to the live key —
-      // pi-mono's resolveConfigValueOrThrow reads the env var when resolving.
+      // pi-mono's resolveConfigValueOrThrow expands `$NAME` from the
+      // environment (bare names without `$` would be sent as the literal
+      // Bearer token since pi 0.79.4 removed the legacy env-name shim).
       providers[AKMATORI_CUSTOM_PROVIDER_KEY] = {
         baseUrl,
         api: "openai-completions",
-        apiKey: AKMATORI_CUSTOM_API_KEY_ENV,
+        apiKey: `$${AKMATORI_CUSTOM_API_KEY_ENV}`,
         compat: { supportsLongCacheRetention: false },
         models: [
           {
@@ -750,6 +755,19 @@ function writeCustomProviderModelsJson(
  * scope so neither pre-existing state nor anything written into workDir during
  * the session can shadow the parent's UI selection. The parent itself uses
  * `SettingsManager.inMemory(...)` and does not read either file.
+ *
+ * Project trust (pi 0.79.0+): because we write `<workDir>/.pi/settings.json`,
+ * every akmatori workspace counts as trust-requiring, and the headless child
+ * `pi` spawned by pi-subagents (no UI, no --approve, defaultProjectTrust
+ * "ask") resolves it as UNTRUSTED — so the project-scope file is ignored by
+ * children. That is fine: the global `<agentDir>/settings.json` pin below is
+ * user scope (never trust-gated) and still controls the child, and the same
+ * trust gate guarantees nothing written into workDir (settings, extensions)
+ * can shadow it either — a security improvement over pre-0.79 pi, where a
+ * prompt-injected `workDir/.pi/extensions` write would execute in the child.
+ * The project pin is kept for defense in depth: it reasserts the selection
+ * when an operator explicitly trusts workspaces (trust.json or
+ * `defaultProjectTrust: "always"`, which we deliberately do NOT set).
  *
  * For UI-selected "custom" providers we point the child at the dedicated
  * `akmatori-custom` slot we materialize in models.json (see

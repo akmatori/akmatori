@@ -411,8 +411,8 @@ func TestValidLLMProviders(t *testing.T) {
 
 func TestValidThinkingLevels(t *testing.T) {
 	levels := ValidThinkingLevels()
-	if len(levels) != 6 {
-		t.Errorf("expected 6 thinking levels, got %d", len(levels))
+	if len(levels) != 7 {
+		t.Errorf("expected 7 thinking levels, got %d", len(levels))
 	}
 }
 

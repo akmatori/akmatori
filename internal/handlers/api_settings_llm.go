@@ -139,7 +139,7 @@ func (h *APIHandler) createLLMConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.ThinkingLevel != "" && !database.IsValidThinkingLevel(req.ThinkingLevel) {
-		api.RespondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid thinking_level: %s. Valid options: off, minimal, low, medium, high, xhigh", req.ThinkingLevel))
+		api.RespondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid thinking_level: %s. Valid options: off, minimal, low, medium, high, xhigh, max", req.ThinkingLevel))
 		return
 	}
 
@@ -210,7 +210,7 @@ func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	if req.ThinkingLevel != nil && !database.IsValidThinkingLevel(*req.ThinkingLevel) {
-		api.RespondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid thinking_level: %s. Valid options: off, minimal, low, medium, high, xhigh", *req.ThinkingLevel))
+		api.RespondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid thinking_level: %s. Valid options: off, minimal, low, medium, high, xhigh, max", *req.ThinkingLevel))
 		return
 	}
 

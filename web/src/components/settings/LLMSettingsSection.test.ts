@@ -9,8 +9,10 @@ describe('MODEL_SUGGESTIONS', () => {
     expect(ids('openai')).toEqual(expect.arrayContaining(['gpt-5.5', 'gpt-5.5-pro']));
   });
 
-  it('includes Anthropic claude-opus-4-7', () => {
-    expect(ids('anthropic')).toEqual(expect.arrayContaining(['claude-opus-4-7']));
+  it('includes the Anthropic Claude 5 models', () => {
+    expect(ids('anthropic')).toEqual(
+      expect.arrayContaining(['claude-fable-5', 'claude-sonnet-5']),
+    );
   });
 
   it('includes Google gemini-3 preview models', () => {
@@ -26,7 +28,8 @@ describe('MODEL_SUGGESTIONS', () => {
   it('includes the new OpenRouter aliases', () => {
     expect(ids('openrouter')).toEqual(
       expect.arrayContaining([
-        'anthropic/claude-opus-4.7',
+        'anthropic/claude-fable-5',
+        'anthropic/claude-sonnet-5',
         'openai/gpt-5.5',
         'google/gemini-3.1-pro-preview',
       ]),
@@ -35,7 +38,7 @@ describe('MODEL_SUGGESTIONS', () => {
 
   it('keeps existing models for backward compatibility', () => {
     expect(ids('openai')).toEqual(expect.arrayContaining(['gpt-5.4', 'gpt-5.4-mini']));
-    expect(ids('anthropic')).toEqual(expect.arrayContaining(['claude-opus-4-6', 'claude-sonnet-4-6']));
+    expect(ids('anthropic')).toEqual(expect.arrayContaining(['claude-opus-4-8', 'claude-sonnet-4-6']));
     expect(ids('google')).toEqual(expect.arrayContaining(['gemini-2.5-pro']));
     expect(ids('openrouter')).toEqual(expect.arrayContaining(['anthropic/claude-sonnet-4.6']));
   });
@@ -50,7 +53,7 @@ describe('MODEL_SUGGESTIONS', () => {
   it('marks exactly one Recommended entry per non-custom provider', () => {
     const expected: Record<string, string> = {
       openai: 'gpt-5.5',
-      anthropic: 'claude-sonnet-4-6',
+      anthropic: 'claude-sonnet-5',
       google: 'gemini-3-pro-preview',
       openrouter: 'openai/gpt-5.5',
     };

@@ -8,7 +8,13 @@
  * HTTP clients.
  */
 
-import { complete, type AssistantMessage, type Context, type Message } from "@earendil-works/pi-ai";
+// pi-ai 0.80.0 made the root entrypoint core-only: `complete` now lives on the
+// temporary /compat entrypoint (types stay at root). Follow-up: when upstream
+// removes /compat (after coding-agent's own ModelManager migration), port this
+// to per-api `streamSimple` dispatch or a Models collection with a registered
+// provider factory.
+import { complete } from "@earendil-works/pi-ai/compat";
+import type { AssistantMessage, Context, Message } from "@earendil-works/pi-ai";
 import type { LLMSettings, ProxyConfig } from "./types.js";
 import { applyProxyConfig } from "./proxy.js";
 import { resolveModel } from "./agent-runner.js";
