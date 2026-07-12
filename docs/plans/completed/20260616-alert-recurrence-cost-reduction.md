@@ -88,7 +88,7 @@ Four product changes to cut wasted investigation tokens, harden the correlation 
 - [x] Add `computeAlertFingerprint(sourceUUID, alertName, targetHost string) string`: `sha256(json([sourceUUID, lower(alertName), lower(targetHost)]))[:32]` — note this is distinct from `SourceFingerprint` (adapter-supplied external ID) and from `alertSpawnKey` (which includes the adapter fingerprint for exact dedup; this new field is derived only from normalized identity fields for candidate grouping)
 - [x] Call `computeAlertFingerprint` in both `processAlert` and `ProcessAlertFromListenerChannel`; store in `incidentCtx.Context["alert_fingerprint"]`; `SpawnAgentInvocation` reads it and sets `incident.AlertFingerprint` at create time
 - [x] In `fetchCandidates`: add `AND (alert_fingerprint = ? OR alert_fingerprint = '')` with the incoming alert's computed fingerprint; this reduces LLM candidate set for exact-match recurrences
-- [x] Write tests: `alert_fingerprint_test.go` — fingerprint is stable across title-case variants (`TikTok` vs `tiktok`), different source fingerprints on same rule+host produce identical alert fingerprint; `fetchCandidates` with fingerprint filter returns only same-fingerprint rows when fingerprint column is populated
+- [x] Write tests: `alert_fingerprint_test.go` — fingerprint is stable across title-case variants (`HighCPU` vs `highcpu`), different source fingerprints on same rule+host produce identical alert fingerprint; `fetchCandidates` with fingerprint filter returns only same-fingerprint rows when fingerprint column is populated
 - [x] `make test`
 
 ### Task 3: Correlation/suppression config UX — live reload + sane defaults

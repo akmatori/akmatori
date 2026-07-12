@@ -11,8 +11,8 @@ import (
 )
 
 // TestComputeAlertFingerprint_StableAcrossCaseVariants verifies that alertName
-// and targetHost are normalised to lower-case before hashing, so "TikTok" and
-// "tiktok" produce the same fingerprint.
+// and targetHost are normalised to lower-case before hashing, so "HighCPU" and
+// "highcpu" produce the same fingerprint.
 func TestComputeAlertFingerprint_StableAcrossCaseVariants(t *testing.T) {
 	fp1 := ComputeAlertFingerprint("src-1", "HighCPU", "web01")
 	fp2 := ComputeAlertFingerprint("src-1", "highcpu", "WEB01")
