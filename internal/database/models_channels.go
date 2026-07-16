@@ -69,6 +69,7 @@ type Channel struct {
 	CanListen            bool      `json:"can_listen"`
 	IsDefaultPost        bool      `json:"is_default_post"`
 	ExtractionPrompt     string    `gorm:"type:text" json:"extraction_prompt"`
+	ProcessBotMessages   bool      `json:"process_bot_messages"`
 	ProcessHumanMessages bool      `json:"process_human_messages"`
 	Enabled              bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt            time.Time `json:"created_at"`

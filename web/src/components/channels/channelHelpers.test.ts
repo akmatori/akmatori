@@ -43,6 +43,7 @@ const makeChannel = (overrides: Partial<Channel>): Channel => ({
   can_listen: overrides.can_listen ?? false,
   is_default_post: overrides.is_default_post ?? false,
   extraction_prompt: overrides.extraction_prompt ?? '',
+  process_bot_messages: true,
   process_human_messages: overrides.process_human_messages ?? false,
   enabled: overrides.enabled ?? true,
   integration: overrides.integration ?? slackIntegration,

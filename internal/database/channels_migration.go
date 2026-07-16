@@ -318,6 +318,7 @@ func migrateSlackChannelAlertSourcesToChannels(db *gorm.DB) error {
 					CanListen:            true,
 					IsDefaultPost:        false,
 					ExtractionPrompt:     extractionPrompt,
+					ProcessBotMessages:   true,
 					ProcessHumanMessages: processHumanMessages,
 					Enabled:              inst.Enabled,
 				}

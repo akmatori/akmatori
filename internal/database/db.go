@@ -138,6 +138,14 @@ func runMigrations(db *gorm.DB) error {
 		return err
 	}
 
+	// Pre-migration: add channels.process_bot_messages with true for existing
+	// rows. Pre-existing listener channels processed bot messages
+	// unconditionally, so a plain AutoMigrate add (zero value false) would
+	// silently stop alert processing on upgrade installs.
+	if err := preMigrateChannelsProcessBotMessages(db); err != nil {
+		return err
+	}
+
 	// Reset GORM session state before AutoMigrate. The preMigrate step
 	// operates on specific tables, leaving internal GORM state (table name,
 	// clauses) that can leak into AutoMigrate's processing of other models
@@ -301,6 +309,27 @@ func preMigrateIncidentsDropCorrelatedCount(db *gorm.DB) error {
 		return fmt.Errorf("drop incidents.correlated_count column: %w", err)
 	}
 	slog.Info("dropped incidents.correlated_count column (alert correlation redesign)")
+	return nil
+}
+
+// preMigrateChannelsProcessBotMessages adds the process_bot_messages column
+// with true for pre-existing channel rows. Before the column existed, listener
+// channels processed top-level bot messages as alerts unconditionally; letting
+// AutoMigrate add the column (zero value false) would disable that on every
+// upgrade install. Fresh installs skip this (no channels table yet) and get the
+// column from AutoMigrate; the API sets the value explicitly on create.
+// Idempotent.
+func preMigrateChannelsProcessBotMessages(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&Channel{}) {
+		return nil
+	}
+	if db.Migrator().HasColumn(&Channel{}, "process_bot_messages") {
+		return nil
+	}
+	if err := db.Exec("ALTER TABLE channels ADD COLUMN process_bot_messages boolean NOT NULL DEFAULT true").Error; err != nil {
+		return fmt.Errorf("add channels.process_bot_messages column: %w", err)
+	}
+	slog.Info("added channels.process_bot_messages column (backfilled true for existing rows)")
 	return nil
 }
 

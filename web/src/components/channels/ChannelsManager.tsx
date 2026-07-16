@@ -20,6 +20,7 @@ type FormState = {
   can_listen: boolean;
   is_default_post: boolean;
   extraction_prompt: string;
+  process_bot_messages: boolean;
   process_human_messages: boolean;
   enabled: boolean;
 };
@@ -32,6 +33,7 @@ const EMPTY_FORM: FormState = {
   can_listen: false,
   is_default_post: false,
   extraction_prompt: '',
+  process_bot_messages: true,
   process_human_messages: false,
   enabled: true,
 };
@@ -87,6 +89,7 @@ export default function ChannelsManager() {
       can_listen: row.can_listen,
       is_default_post: row.is_default_post,
       extraction_prompt: row.extraction_prompt,
+      process_bot_messages: row.process_bot_messages,
       process_human_messages: row.process_human_messages,
       enabled: row.enabled,
     });
@@ -118,6 +121,7 @@ export default function ChannelsManager() {
           can_listen: form.can_listen,
           is_default_post: form.is_default_post,
           extraction_prompt: form.extraction_prompt || undefined,
+          process_bot_messages: form.process_bot_messages,
           process_human_messages: form.process_human_messages,
           enabled: form.enabled,
         });
@@ -129,6 +133,7 @@ export default function ChannelsManager() {
           can_listen: form.can_listen,
           is_default_post: form.is_default_post,
           extraction_prompt: form.extraction_prompt,
+          process_bot_messages: form.process_bot_messages,
           process_human_messages: form.process_human_messages,
           enabled: form.enabled,
         });
@@ -289,13 +294,29 @@ export default function ChannelsManager() {
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
+                    checked={form.process_bot_messages}
+                    onChange={(e) => setForm({ ...form, process_bot_messages: e.target.checked })}
+                  />
+                  <span className="text-sm text-gray-700 dark:text-gray-300">
+                    Process bot messages as alerts
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
                     checked={form.process_human_messages}
                     onChange={(e) => setForm({ ...form, process_human_messages: e.target.checked })}
                   />
                   <span className="text-sm text-gray-700 dark:text-gray-300">
-                    Process human messages as alerts (default: bots only)
+                    Process human messages as alerts
                   </span>
                 </label>
+                {!form.process_bot_messages && !form.process_human_messages && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    Neither source is selected: this channel will not create alerts. Only explicit
+                    @mentions of the bot will be handled.
+                  </p>
+                )}
               </>
             )}
 

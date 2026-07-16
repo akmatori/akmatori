@@ -87,7 +87,7 @@ Ordered `FormattingRule` rows (`/api/formatting-rules`, CRUD + `PUT /reorder`) a
 Rules:
 - match fields (empty = wildcard, ANDed): `match_source_kind`, `match_source_uuid` (trigger), `match_channel_uuid` (destination), `match_last_skill` — OR a `match_expression` (`==/!=/&&/||/!`, parens, `and/or/not`; either/or with simple fields, API-enforced; invalid stored expr → rule skipped; Go parser + TS mirror `matchExpression.ts` must stay in sync)
 - `FormatForFlow(ctx, raw, fullLog, FormatFlow)` never errors — failures collapse to passthrough; skips error responses; cron formats only on match (`full_log` keeps raw); proposal chat never formats
-- flow identity via `BuildFormatFlow(incidentUUID, channelUUID)`; Slack chat channel via `ChannelService.FindByExternalID`
+- flow identity via `BuildFormatFlow(incidentUUID, channelUUID)`; Slack chat channel via `FindByExternalID`
 - `Incident.LastSkillUsed`: worker latches the last `<skillsDir>/<name>/SKILL.md` read, sends `last_skill` on `agent_completed`; `agent_ws.go` persists it BEFORE `dispatchOnCompleted` (guard: `isCurrentRun`)
 - blank rule fields fall back: prompt → `DefaultFormattingPrompt`, schema → four-key default (`status`/`summary`/`actions_taken`/`recommendations`), `MaxTokens<=0` → 1500; NO gorm default tags (explicit false/0 must persist)
 - `inferSchema` derives specs from the example; schema instruction appended automatically (never repeat it in the prompt); `validateAgainstSpecs` + one retry, then raw; renders via `output.RenderForSlack` (empty → raw)
@@ -100,15 +100,15 @@ Runbooks live in Postgres and sync to markdown under `akmatori_data/runbooks/` (
 Rules:
 - keep DB state and on-disk runbook files in sync (the runbook service writes both directions)
 - the incident-manager prompt invokes `subagent({agent: "runbook-searcher", task: ...})` for SOP lookup — do not introduce direct grep loops in the main agent
-- memory recall goes through `memory-searcher`; durable findings get written by `memory-writer` near end-of-investigation
+- memory recall goes through `memory-searcher`; `memory-writer` persists durable findings near end-of-investigation
 - memory-writer is invoked with `{agent: "memory-writer", task}` only — pi-subagents drops extra top-level keys, so scope and incident UUID are the first two header lines of `task` (`Scope: <slug>\nIncident UUID: <uuid>\n\n<reasoning>`); the subagent parses them so `IngestFromDisk` upserts route correctly
 - on incident completion the API runs `MemoryService.IngestFromDisk` to materialize new memory files into Postgres (idempotent by scope + `name:` slug); operator-authored rows carry `created_by: operator` in their frontmatter and ingest preserves that
 
 ### Slack investigation UX
 
 Rules:
-- long investigations use the Slack typing/banner flow, not a placeholder reply
-- typing state is driven by `assistant.threads.setStatus` plus the hourglass reaction
+- long investigations use the Slack typing/banner flow, no placeholder reply
+- typing state = `assistant.threads.setStatus` plus the hourglass reaction
 - progress banner content comes from the latest reasoning line via `SlackProgressStreamer`
 - final thread output is summarized to fit Slack byte limits
 - mention handling is classify-first: confident operator feedback is stored as memory; other mentions continue the investigation
@@ -128,7 +128,7 @@ Rules:
 - outbound posting goes through `ProviderRegistry.Get(channel.Integration.Provider).PostMessage(...)`, never legacy `SlackSettings.AlertsChannel`
 - alert routing: `ChannelService.ResolveForAlertSource(asi)` — explicit `notification_channel_id` wins, else the provider's `is_default_post=true` Channel
 - at most one `is_default_post=true` per provider (partial-unique index + service-layer check)
-- inbound listening reads `Channel.ExtractionPrompt` / `Channel.ProcessHumanMessages`, not alert-source `Settings` JSONB (`slack_processor.go`)
+- inbound listening reads `Channel.ExtractionPrompt` + the `ProcessBotMessages`/`ProcessHumanMessages` source gates (`slack.go` dispatch); `process_bot_messages` backfills true on upgrade (preMigrate in db.go)
 - `Channel.CanPost`/`CanListen` gate which triggers may reference a channel; `can_listen=true, can_post=false` = silent listener: alerts investigated, results UI-only, no replies/reactions/banner (listener flow + `incidentThreadPostable`)
 - the `slack_channel` AlertSourceInstance type is deprecated and UI-hidden; do not reintroduce it
 - Telegram requests surface `ErrNotImplemented` from the registry — never silently no-op
@@ -177,8 +177,8 @@ Rules:
 Webhook alert sources are still `AlertSourceInstance` rows, while message destinations are Channels. Keep those responsibilities separate.
 
 Rules:
-- `GET /api/alert-source-types` must hide deprecated types; `slack_channel` exists only for historical rows
-- creating deprecated `slack_channel` sources must fail; inbound Slack listening belongs to Channels with `can_listen=true`
+- `GET /api/alert-source-types` hides deprecated types; `slack_channel` exists only for historical rows
+- creating deprecated `slack_channel` sources must fail; inbound listening belongs to `can_listen=true` Channels
 - `notification_channel_uuid` is optional on alert sources; when set, resolve to a post-capable Channel before create/update
 - webhook handlers: fetch instance, reject disabled rows, find adapter by source type, validate secret, then parse body
 - adapter integration tests: real `AlertService` + real adapter for at least one happy, bad-secret, and malformed-payload path

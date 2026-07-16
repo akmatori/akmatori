@@ -44,6 +44,7 @@ type channelResponse struct {
 	CanListen            bool                 `json:"can_listen"`
 	IsDefaultPost        bool                 `json:"is_default_post"`
 	ExtractionPrompt     string               `json:"extraction_prompt"`
+	ProcessBotMessages   bool                 `json:"process_bot_messages"`
 	ProcessHumanMessages bool                 `json:"process_human_messages"`
 	Enabled              bool                 `json:"enabled"`
 	CreatedAt            interface{}          `json:"created_at"`
@@ -62,6 +63,7 @@ func toChannelResponse(row *database.Channel) channelResponse {
 		CanListen:            row.CanListen,
 		IsDefaultPost:        row.IsDefaultPost,
 		ExtractionPrompt:     row.ExtractionPrompt,
+		ProcessBotMessages:   row.ProcessBotMessages,
 		ProcessHumanMessages: row.ProcessHumanMessages,
 		Enabled:              row.Enabled,
 		CreatedAt:            row.CreatedAt,
@@ -93,6 +95,7 @@ type CreateChannelRequest struct {
 	CanListen            bool   `json:"can_listen"`
 	IsDefaultPost        bool   `json:"is_default_post,omitempty"`
 	ExtractionPrompt     string `json:"extraction_prompt,omitempty"`
+	ProcessBotMessages   *bool  `json:"process_bot_messages,omitempty"`
 	ProcessHumanMessages bool   `json:"process_human_messages,omitempty"`
 	Enabled              *bool  `json:"enabled,omitempty"`
 }
@@ -108,6 +111,7 @@ type UpdateChannelRequest struct {
 	CanListen            *bool   `json:"can_listen,omitempty"`
 	IsDefaultPost        *bool   `json:"is_default_post,omitempty"`
 	ExtractionPrompt     *string `json:"extraction_prompt,omitempty"`
+	ProcessBotMessages   *bool   `json:"process_bot_messages,omitempty"`
 	ProcessHumanMessages *bool   `json:"process_human_messages,omitempty"`
 	Enabled              *bool   `json:"enabled,omitempty"`
 }
@@ -168,6 +172,12 @@ func (h *APIHandler) handleChannels(w http.ResponseWriter, r *http.Request) {
 		if req.Enabled != nil {
 			enabled = *req.Enabled
 		}
+		// Omitted process_bot_messages defaults to true — listener channels
+		// have always processed bot messages; opting out is the new behavior.
+		processBotMessages := true
+		if req.ProcessBotMessages != nil {
+			processBotMessages = *req.ProcessBotMessages
+		}
 
 		ch := &database.Channel{
 			IntegrationID:        integration.ID,
@@ -177,6 +187,7 @@ func (h *APIHandler) handleChannels(w http.ResponseWriter, r *http.Request) {
 			CanListen:            req.CanListen,
 			IsDefaultPost:        req.IsDefaultPost,
 			ExtractionPrompt:     req.ExtractionPrompt,
+			ProcessBotMessages:   processBotMessages,
 			ProcessHumanMessages: req.ProcessHumanMessages,
 			Enabled:              enabled,
 		}
@@ -248,6 +259,7 @@ func (h *APIHandler) handleChannelByUUID(w http.ResponseWriter, r *http.Request)
 			CanListen:            req.CanListen,
 			IsDefaultPost:        req.IsDefaultPost,
 			ExtractionPrompt:     req.ExtractionPrompt,
+			ProcessBotMessages:   req.ProcessBotMessages,
 			ProcessHumanMessages: req.ProcessHumanMessages,
 			Enabled:              req.Enabled,
 		}

@@ -359,6 +359,7 @@ export interface Channel {
   can_listen: boolean;
   is_default_post: boolean;
   extraction_prompt: string;
+  process_bot_messages: boolean;
   process_human_messages: boolean;
   enabled: boolean;
   created_at: string;
@@ -374,6 +375,7 @@ export interface CreateChannelRequest {
   can_listen: boolean;
   is_default_post?: boolean;
   extraction_prompt?: string;
+  process_bot_messages?: boolean;
   process_human_messages?: boolean;
   enabled?: boolean;
 }
@@ -385,6 +387,7 @@ export interface UpdateChannelRequest {
   can_listen?: boolean;
   is_default_post?: boolean;
   extraction_prompt?: string;
+  process_bot_messages?: boolean;
   process_human_messages?: boolean;
   enabled?: boolean;
 }

@@ -253,6 +253,7 @@ describe('formStateFromJob', () => {
           can_listen: false,
           is_default_post: false,
           extraction_prompt: '',
+          process_bot_messages: true,
           process_human_messages: false,
           enabled: true,
           created_at: '',

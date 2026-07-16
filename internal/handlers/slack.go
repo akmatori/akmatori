@@ -487,8 +487,17 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 			return
 		}
 
-		// Top-level bot message — process as alert.
-		go h.handleAlertChannelMessage(event, listenerChannel)
+		// Top-level bot message — process as alert unless the channel opted
+		// out of bot messages (humans-only listeners).
+		if listenerChannel.ProcessBotMessages {
+			go h.handleAlertChannelMessage(event, listenerChannel)
+		} else {
+			slog.Info("ignoring bot message in listener channel (process_bot_messages=false)",
+				"channel", event.Channel,
+				"bot_id", event.BotID,
+				"text_preview", truncateForLog(event.Text, 100),
+			)
+		}
 		return
 	}
 

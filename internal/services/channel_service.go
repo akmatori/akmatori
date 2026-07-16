@@ -302,6 +302,7 @@ type ChannelUpdate struct {
 	CanListen            *bool
 	IsDefaultPost        *bool
 	ExtractionPrompt     *string
+	ProcessBotMessages   *bool
 	ProcessHumanMessages *bool
 	Enabled              *bool
 }
@@ -334,6 +335,9 @@ func (s *ChannelService) UpdateChannel(uuidStr string, patch ChannelUpdate) (*da
 	}
 	if patch.ExtractionPrompt != nil {
 		updates["extraction_prompt"] = *patch.ExtractionPrompt
+	}
+	if patch.ProcessBotMessages != nil {
+		updates["process_bot_messages"] = *patch.ProcessBotMessages
 	}
 	if patch.ProcessHumanMessages != nil {
 		updates["process_human_messages"] = *patch.ProcessHumanMessages
