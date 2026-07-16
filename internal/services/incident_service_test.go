@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
@@ -489,9 +490,10 @@ func TestSpawnIncidentManager_VeryLongMessage_Truncated(t *testing.T) {
 		t.Fatalf("failed to find incident: %v", err)
 	}
 
-	// Title should be truncated to reasonable length
-	if len(incident.Title) > 100 {
-		t.Errorf("Title too long: %d chars (should be truncated)", len(incident.Title))
+	// Title should be truncated to the fallback cap (200 runes + ellipsis;
+	// byte length can exceed that for multi-byte input).
+	if utf8.RuneCountInString(incident.Title) > 203 {
+		t.Errorf("Title too long: %d runes (should be truncated)", utf8.RuneCountInString(incident.Title))
 	}
 	if !strings.HasSuffix(incident.Title, "...") {
 		t.Errorf("Long title should end with '...', got: %q", incident.Title)

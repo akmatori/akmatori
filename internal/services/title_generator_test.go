@@ -67,16 +67,16 @@ func TestTitleGenerator_GenerateFallbackTitle(t *testing.T) {
 		{name: "Incident: prefix", message: "Incident: Database connection failure", source: "Datadog", expected: "Database connection failure"},
 		{name: "incident: lowercase prefix", message: "incident: API gateway timeout", source: "OpsGenie", expected: "API gateway timeout"},
 		{name: "multiline first line only", message: "First line title\nSecond line details\nThird line", source: "Slack", expected: "First line title"},
-		{name: "long message word boundary", message: "This is a very long alert title that needs to be truncated because it exceeds the maximum allowed length for titles", source: "Alertmanager", expected: "This is a very long alert title that needs to be truncated because it exceeds..."},
-		{name: "long message no good boundary", message: "ThisIsAVeryLongAlertTitleWithNoSpacesThatNeedsToBetruncatedBecauseItExceedsTheMaximumAllowedLengthForTitles", source: "Custom", expected: "ThisIsAVeryLongAlertTitleWithNoSpacesThatNeedsToBetruncatedBecauseItExceedsTh..."},
-		{name: "exactly 80 chars", message: strings.Repeat("a", 80), source: "Test", expected: strings.Repeat("a", 80)},
-		{name: "81 chars truncated", message: strings.Repeat("a", 81), source: "Test", expected: strings.Repeat("a", 77) + "..."},
+		{name: "long message under new cap kept whole", message: "This is a very long alert title that needs to be truncated because it exceeds the maximum allowed length for titles", source: "Alertmanager", expected: "This is a very long alert title that needs to be truncated because it exceeds the maximum allowed length for titles"},
+		{name: "long message no good boundary", message: strings.Repeat("x", 210), source: "Custom", expected: strings.Repeat("x", 197) + "..."},
+		{name: "exactly 200 chars", message: strings.Repeat("a", 200), source: "Test", expected: strings.Repeat("a", 200)},
+		{name: "201 chars truncated", message: strings.Repeat("a", 201), source: "Test", expected: strings.Repeat("a", 197) + "..."},
 		{name: "multiline with prefix", message: "Alert: Server outage\nDetails: Production cluster\nTime: 10:30 UTC", source: "Slack", expected: "Server outage"},
 		{name: "leading/trailing whitespace", message: "  Important alert  ", source: "Test", expected: "Important alert"},
 		{name: "double prefix only first removed", message: "Alert: Incident: Double prefix", source: "Test", expected: "Incident: Double prefix"},
 		{name: "Unicode characters", message: "服务器警报: CPU过高", source: "Monitoring", expected: "服务器警报: CPU过高"},
 		{name: "emoji in message", message: "🚨 Critical: Production down", source: "Slack", expected: "🚨 Critical: Production down"},
-		{name: "long unicode truncates on rune boundary", message: strings.Repeat("日", 90), source: "Webhook", expected: strings.Repeat("日", 77) + "..."},
+		{name: "long unicode truncates on rune boundary", message: strings.Repeat("日", 210), source: "Webhook", expected: strings.Repeat("日", 197) + "..."},
 	}
 
 	for _, tt := range tests {
@@ -92,12 +92,12 @@ func TestTitleGenerator_GenerateFallbackTitle(t *testing.T) {
 func TestTitleGenerator_GenerateFallbackTitle_LongUnicodeIsValidUTF8(t *testing.T) {
 	gen := NewTitleGenerator(nil)
 
-	got := gen.GenerateFallbackTitle(strings.Repeat("日", 90), "Webhook")
+	got := gen.GenerateFallbackTitle(strings.Repeat("日", 210), "Webhook")
 	if !utf8.ValidString(got) {
 		t.Fatalf("GenerateFallbackTitle returned invalid UTF-8: %q", got)
 	}
-	if utf8.RuneCountInString(got) > 80 {
-		t.Fatalf("GenerateFallbackTitle returned %d runes, want <= 80", utf8.RuneCountInString(got))
+	if utf8.RuneCountInString(got) > 200 {
+		t.Fatalf("GenerateFallbackTitle returned %d runes, want <= 200", utf8.RuneCountInString(got))
 	}
 	if !strings.HasSuffix(got, "...") {
 		t.Fatalf("GenerateFallbackTitle() = %q, want ellipsis suffix", got)
@@ -200,7 +200,7 @@ func TestTitleGenerator_GenerateTitle(t *testing.T) {
 			source:    "Slack",
 			settings:  database.LLMSettings{Name: "openai", Provider: database.LLMProviderOpenAI, APIKey: "test-key", Enabled: true, Active: true},
 			nilCaller: true,
-			want:      "The database connection pool is saturated and requests are timing out for...",
+			want:      "The database connection pool is saturated and requests are timing out for multiple users.",
 		},
 		{
 			name:    "missing api key falls back",
@@ -216,7 +216,7 @@ func TestTitleGenerator_GenerateTitle(t *testing.T) {
 				t.Fatal("caller must not be invoked when API key is empty")
 				return "", nil
 			}},
-			want: "The database connection pool is saturated and requests are timing out for...",
+			want: "The database connection pool is saturated and requests are timing out for multiple users.",
 		},
 		{
 			name:    "non-openai provider round-trips through caller (no fallback)",
@@ -250,7 +250,7 @@ func TestTitleGenerator_GenerateTitle(t *testing.T) {
 			caller: &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
 				return "", errors.New("boom")
 			}},
-			want:             "HTTP connector deployment failed because the upstream returned repeated 503...",
+			want:             "HTTP connector deployment failed because the upstream returned repeated 503 responses.",
 			wantCallerCalled: true,
 		},
 		{
@@ -267,7 +267,7 @@ func TestTitleGenerator_GenerateTitle(t *testing.T) {
 			caller: &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
 				return "", ErrWorkerNotConnected
 			}},
-			want:             "The agent worker disconnected mid-incident which left the dispatcher unable to...",
+			want:             "The agent worker disconnected mid-incident which left the dispatcher unable to react.",
 			wantCallerCalled: true,
 		},
 		{
@@ -284,7 +284,7 @@ func TestTitleGenerator_GenerateTitle(t *testing.T) {
 			caller: &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
 				return "   ", nil
 			}},
-			want:             "A customer webhook produced malformed JSON and the parser rejected the payload...",
+			want:             "A customer webhook produced malformed JSON and the parser rejected the payload before routing.",
 			wantCallerCalled: true,
 		},
 		{

@@ -115,15 +115,19 @@ func (t *TitleGenerator) GenerateFallbackTitle(message string, source string) st
 		message = message[:idx]
 	}
 
-	// Truncate to reasonable length
-	if utf8.RuneCountInString(message) > 80 {
+	// Truncate to reasonable length. Fallback titles carry the raw alert
+	// text, so keep as much context as fits comfortably in the 255-char
+	// title column — the incidents list truncates visually and exposes the
+	// stored title via hover/detail, so a tight cap here just loses data.
+	const fallbackTitleMaxRunes = 200
+	if utf8.RuneCountInString(message) > fallbackTitleMaxRunes {
 		// Try to cut at word boundary
-		prefix := firstRunes(message, 80)
+		prefix := firstRunes(message, fallbackTitleMaxRunes)
 		idx := strings.LastIndex(prefix, " ")
-		if idx > 0 && utf8.RuneCountInString(prefix[:idx]) > 40 {
+		if idx > 0 && utf8.RuneCountInString(prefix[:idx]) > fallbackTitleMaxRunes/2 {
 			message = message[:idx] + "..."
 		} else {
-			message = truncateRunesWithEllipsis(message, 80)
+			message = truncateRunesWithEllipsis(message, fallbackTitleMaxRunes)
 		}
 	}
 

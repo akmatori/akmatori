@@ -172,6 +172,88 @@ describe("runOneshotLLM", () => {
     ).rejects.toThrow(/rate limited/);
   });
 
+  it("retries once without temperature when the provider rejects it, then remembers the model", async () => {
+    // Anthropic claude-sonnet-5 rejects the parameter outright; pi-ai 0.80.6's
+    // catalog lacks supportsTemperature:false for it, so the 400 reaches us.
+    // NOTE: the rejection cache is module-level, so this test uses a dedicated
+    // model name to avoid leaking state into sibling tests.
+    const sonnetSettings: LLMSettings = {
+      ...validSettings,
+      provider: "anthropic",
+      model: "claude-sonnet-5",
+    };
+    completeMock
+      .mockResolvedValueOnce({
+        ...assistantText(""),
+        stopReason: "error" as const,
+        errorMessage: '400 {"type":"error","error":{"type":"invalid_request_error","message":"`temperature` is deprecated for this model."}}',
+      })
+      .mockResolvedValueOnce(assistantText("Nginx local request connection timeout on sg1-hw-edge1"));
+
+    const out = await runOneshotLLM({
+      requestId: "req-temp-retry",
+      user: "ping",
+      temperature: 0.3,
+      llmSettings: sonnetSettings,
+    });
+
+    expect(out).toBe("Nginx local request connection timeout on sg1-hw-edge1");
+    expect(completeMock).toHaveBeenCalledTimes(2);
+    expect(completeMock.mock.calls[0][2].temperature).toBe(0.3);
+    expect(completeMock.mock.calls[1][2].temperature).toBeUndefined();
+    // Everything else is preserved on the retry.
+    expect(completeMock.mock.calls[1][2].apiKey).toBe("sk-test");
+
+    // Second call for the same model: skip temperature up front — one
+    // request, no doomed probe.
+    completeMock.mockClear();
+    completeMock.mockResolvedValue(assistantText("second title"));
+    const out2 = await runOneshotLLM({
+      requestId: "req-temp-cached",
+      user: "ping again",
+      temperature: 0.3,
+      llmSettings: sonnetSettings,
+    });
+    expect(out2).toBe("second title");
+    expect(completeMock).toHaveBeenCalledTimes(1);
+    expect(completeMock.mock.calls[0][2].temperature).toBeUndefined();
+  });
+
+  it("does not retry temperature-rejection when no temperature was sent", async () => {
+    completeMock.mockResolvedValue({
+      ...assistantText(""),
+      stopReason: "error" as const,
+      errorMessage: "`temperature` is deprecated for this model.",
+    });
+
+    await expect(
+      runOneshotLLM({
+        requestId: "req-temp-no-retry",
+        user: "ping",
+        llmSettings: validSettings,
+      }),
+    ).rejects.toThrow(/temperature/);
+    expect(completeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry on unrelated provider errors", async () => {
+    completeMock.mockResolvedValue({
+      ...assistantText(""),
+      stopReason: "error" as const,
+      errorMessage: "overloaded",
+    });
+
+    await expect(
+      runOneshotLLM({
+        requestId: "req-no-retry",
+        user: "ping",
+        temperature: 0.3,
+        llmSettings: validSettings,
+      }),
+    ).rejects.toThrow(/overloaded/);
+    expect(completeMock).toHaveBeenCalledTimes(1);
+  });
+
   it("throws when assistant message stopReason is aborted", async () => {
     completeMock.mockResolvedValue({
       ...assistantText(""),
