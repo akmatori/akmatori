@@ -7,7 +7,7 @@ Akmatori is an AI-powered AIOps platform for SRE teams. It ingests alerts from m
 ## Stack and Runtime
 
 - Docker deployment: API, Agent Worker, MCP Gateway, PostgreSQL
-- Backend: Go 1.24+
+- Backend: Go 1.25
 - Agent Worker: Node.js 22+ / TypeScript with `@earendil-works/pi-coding-agent` (`v0.78.1`)
 - Frontend: React 19 + TypeScript + Vite + Tailwind
 - Database: PostgreSQL 16 + GORM
@@ -276,6 +276,7 @@ Rules:
 
 - `web/src/components/settings/FormattingRulesSection.tsx` - formatting rules list/editor (shared fields in `FormattingConfigFields.tsx`)
 - `web/src/components/settings/formattingSettingsHelpers.ts` - formatter default hydrate/dehydrate helpers; keep constants aligned with Go defaults
+- `web/src/components/cron/` - cron form/list helpers, including `post_results`
 
 ## Code Patterns
 
@@ -326,7 +327,7 @@ Akmatori intentionally keeps working when optional AI pieces fail. When adding A
 
 ### Minimum verification
 
-After changing code, run the smallest relevant test target and then the broad suite required by the change.
+Run the smallest relevant test target, then the broad suite the change requires.
 
 | Area changed | Primary command |
 |---|---|
@@ -337,12 +338,11 @@ After changing code, run the smallest relevant test target and then the broad su
 | Frontend | `make test-web` |
 | Pre-commit full gate | `make verify` |
 
-Extra rule:
 - before quoting coverage, re-run `go test -coverprofile=coverage.out ./...`
 
 ### Current testing focus
 
-Historically weak or regression-prone areas:
+Weak/regression-prone areas:
 - `internal/handlers`
 - `internal/services`
 - `internal/slack`
@@ -352,9 +352,7 @@ Historically weak or regression-prone areas:
 
 ## Rebuild Rules
 
-Rebuild the affected container after runtime changes.
-
-Source maintainers use the dev override (`docker-compose.dev.yml`) so local `build:` blocks take effect. GHCR-image installs use only the base file (`docker compose pull && docker compose up -d`) — never run `build` against a release install.
+Rebuild the affected container after runtime changes. Source maintainers use the dev override (`docker-compose.dev.yml`) so local `build:` blocks take effect; GHCR-image installs use only the base file (`docker compose pull && docker compose up -d`) — never run `build` against a release install.
 
 Command: `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build <svc> && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d <svc>` with `<svc>`:
 
@@ -367,7 +365,7 @@ Command: `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build <
 
 ## Recent Features and Docs-Sensitive Areas
 
-- session resume is NOT used anywhere — Slack launches and proposal chat start fresh agent sessions per turn
+- session resume is NOT used — Slack and proposal chat start fresh agent sessions per turn
 - `/api/settings/slack` returns 410 Gone
 
 ## When Editing This File
