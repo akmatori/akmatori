@@ -7,7 +7,7 @@ Akmatori is an AI-powered AIOps platform for SRE teams. It ingests alerts from m
 ## Stack and Runtime
 
 - Docker deployment: API, Agent Worker, MCP Gateway, PostgreSQL
-- Backend: Go 1.24+
+- Backend: Go 1.25
 - Agent Worker: Node.js 22+ / TypeScript with `@earendil-works/pi-coding-agent` (`v0.78.1`)
 - Frontend: React 19 + TypeScript + Vite + Tailwind
 - Database: PostgreSQL 16 + GORM
@@ -283,7 +283,8 @@ Rules:
 ### Frontend
 
 - `web/src/components/settings/FormattingSettingsSection.tsx` - response formatter settings form and validation
-- `web/src/components/settings/formattingSettingsHelpers.ts` - formatter default hydrate/dehydrate helpers; keep constants aligned with Go defaults
+- `web/src/components/settings/formattingSettingsHelpers.ts` - formatter hydrate/dehydrate defaults
+- `web/src/components/cron/` - cron form/list helpers, including `post_results`
 
 ## Code Patterns
 
@@ -313,8 +314,7 @@ Akmatori intentionally keeps working when optional AI pieces fail. When adding A
 
 ## SDK Notes (`@earendil-works/pi-coding-agent`)
 
-- Current versions: pi-coding-agent, pi-ai, pi-agent-core `0.78.1`; pi-subagents `0.28.0`; undici `^8` (required by pi-coding-agent 0.78.1)
-- As of v0.74.0, pi-mono packages moved from the `@mariozechner/*` scope to `@earendil-works/*` (pi-coding-agent, pi-ai, pi-agent-core)
+- Versions: pi-coding-agent/pi-ai/pi-agent-core `0.78.1`; pi-subagents `0.28.0`; undici `^8`
 - Use `ModelRegistry.inMemory(authStorage)`; there is no public `ModelRegistry` constructor
 - Tool factories in `gateway-tools.ts` should return `defineTool({...})`
 - The bash tool remains the local exception because of TypeScript variance friction
@@ -373,8 +373,9 @@ Command: `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build <
 
 Details live in rules sections above:
 - QMD is gone; recall runs through pi-mono subagents
-- session resume is NOT used anywhere — Slack launches and proposal chat start fresh agent sessions per turn (stale resumes fail once the agent process exits)
+- session resume is NOT used — Slack and proposal chat start fresh agent sessions per turn
 - `/api/settings/slack` returns 410 Gone
+- alert links to merged incidents are redirected to the survivor by `LinkAlertToIncident`
 
 ## When Editing This File
 
