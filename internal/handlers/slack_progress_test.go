@@ -27,6 +27,12 @@ func (c *captureSink) snapshot() []string {
 	return out
 }
 
+func expireThrottle(s *SlackProgressStreamer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastUpdateAt = s.lastUpdateAt.Add(-s.appendInterval)
+}
+
 // --- condenseStatusLine -----------------------------------------------------
 
 func TestCondenseStatusLine(t *testing.T) {
@@ -85,9 +91,7 @@ func TestSlackProgressStreamer_ToolMarkersDropped(t *testing.T) {
 	s := NewSlackProgressStreamer(cap.sink, 1*time.Millisecond)
 
 	s.AppendStatus("\n🛠️ Running: gateway_call\n")
-	time.Sleep(3 * time.Millisecond)
 	s.AppendStatus("\n✅ Ran: gateway_call\n")
-	time.Sleep(3 * time.Millisecond)
 	s.AppendStatus("\n❌ Failed: gateway_call\n")
 	s.Flush()
 
@@ -101,7 +105,7 @@ func TestSlackProgressStreamer_ThinkingReplacesInPlace(t *testing.T) {
 	s := NewSlackProgressStreamer(cap.sink, 1*time.Millisecond)
 
 	s.AppendStatus("\n🤔 first thought\n")
-	time.Sleep(3 * time.Millisecond)
+	expireThrottle(s)
 	s.AppendStatus("\n🤔 second thought\n")
 
 	got := cap.snapshot()
@@ -149,7 +153,7 @@ func TestSlackProgressStreamer_DedupesConsecutive(t *testing.T) {
 	s := NewSlackProgressStreamer(cap.sink, 1*time.Millisecond)
 
 	s.AppendStatus("\n🤔 same thought\n")
-	time.Sleep(3 * time.Millisecond)
+	expireThrottle(s)
 	s.AppendStatus("\n🤔 same thought\n")
 
 	got := cap.snapshot()
@@ -175,7 +179,7 @@ func TestSlackProgressStreamer_ThrottleWindow_KeepsOnlyLatest(t *testing.T) {
 		t.Errorf("first emit unexpected: %q", got[0])
 	}
 
-	time.Sleep(60 * time.Millisecond)
+	expireThrottle(s)
 	s.AppendStatus("\n🤔 fourth\n")
 	got = cap.snapshot()
 	if len(got) != 2 {
