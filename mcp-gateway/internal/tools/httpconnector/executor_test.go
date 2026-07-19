@@ -531,8 +531,7 @@ func TestExecute_NonJSONResponse(t *testing.T) {
 
 func TestExecute_ContextCancelled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(5 * time.Second)
-		w.WriteHeader(200)
+		<-r.Context().Done()
 	}))
 	defer server.Close()
 
