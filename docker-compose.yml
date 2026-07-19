@@ -103,7 +103,7 @@ services:
     volumes:
       - ./akmatori_data:/akmatori
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
+      test: ["CMD", "wget", "-q", "--proxy=off", "--spider", "http://localhost:3000/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -141,7 +141,7 @@ services:
     volumes:
       - ./akmatori_data/secrets:/akmatori/secrets:ro
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "--proxy=off", "--spider", "http://localhost:8080/health"]
       interval: 30s
       timeout: 5s
       retries: 3
