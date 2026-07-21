@@ -121,6 +121,60 @@ func TestUpdateMCPServer_RejectsConflictingNamespaceRename(t *testing.T) {
 	}
 }
 
+func TestUpdateMCPServer_RejectsConflictingInputs(t *testing.T) {
+	tests := []struct {
+		name        string
+		seed        func(t *testing.T, db *gorm.DB)
+		updates     map[string]interface{}
+		wantMessage string
+	}{
+		{
+			name:        "duplicate name",
+			seed:        func(t *testing.T, db *gorm.DB) { seedMCPServer(t, db, "jira-mcp", "jira_ext") },
+			updates:     map[string]interface{}{"name": "jira-mcp"},
+			wantMessage: "already exists",
+		},
+		{
+			name:        "duplicate namespace",
+			seed:        func(t *testing.T, db *gorm.DB) { seedMCPServer(t, db, "jira-mcp", "jira_ext") },
+			updates:     map[string]interface{}{"namespace_prefix": "jira_ext"},
+			wantMessage: "namespace_prefix",
+		},
+		{
+			name:        "reserved namespace",
+			updates:     map[string]interface{}{"namespace_prefix": "grafana"},
+			wantMessage: "built-in tool namespace",
+		},
+		{
+			name:        "invalid transport after patch",
+			updates:     map[string]interface{}{"transport": "grpc"},
+			wantMessage: "validation failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupMCPServerTestDB(t)
+			svc := &MCPServerService{db: db}
+			created, err := svc.CreateMCPServer(validMCPServerConfig())
+			if err != nil {
+				t.Fatalf("CreateMCPServer failed: %v", err)
+			}
+			if tt.seed != nil {
+				tt.seed(t, db)
+			}
+
+			_, err = svc.UpdateMCPServer(created.ID, tt.updates)
+			if err == nil {
+				t.Fatal("UpdateMCPServer error = nil, want error")
+			}
+			if !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("UpdateMCPServer error = %v, want message containing %q", err, tt.wantMessage)
+			}
+		})
+	}
+}
+
 func TestUpdateMCPServer_PatchesFieldsAndValidates(t *testing.T) {
 	db := setupMCPServerTestDB(t)
 	svc := &MCPServerService{db: db}
