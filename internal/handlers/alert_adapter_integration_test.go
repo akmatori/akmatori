@@ -296,6 +296,7 @@ func setupWebhookHandlerIntegrationDB(t *testing.T) (*services.AlertService, fun
 		&database.AlertSourceType{},
 		&database.AlertSourceInstance{},
 		&database.Incident{},
+		&database.Alert{},
 		&database.SlackSettings{},
 	); err != nil {
 		t.Fatalf("migrate webhook handler tables: %v", err)
@@ -506,6 +507,137 @@ func TestWebhookHandler_AlertmanagerBatchCreatesIncidentsForFiringAlerts(t *test
 	}
 	if _, ok := byFingerprint["fp-old-disk"]; ok {
 		t.Fatal("resolved alert fp-old-disk should not create an incident")
+	}
+}
+
+func TestWebhookHandler_NonAlertmanagerAdaptersCreateIncidents(t *testing.T) {
+	service, cleanup := setupWebhookHandlerIntegrationDB(t)
+	defer cleanup()
+
+	h := NewAlertHandler(nil, nil, nil, nil, services.NewSkillService(t.TempDir(), nil, nil, nil), service, nil)
+	h.RegisterAdapter(adapters.NewGrafanaAdapter())
+	h.RegisterAdapter(adapters.NewDatadogAdapter())
+	h.RegisterAdapter(adapters.NewZabbixAdapter())
+	h.RegisterAdapter(adapters.NewPagerDutyAdapter())
+
+	tests := []struct {
+		name           string
+		sourceType     string
+		secretHeader   string
+		secretValue    string
+		body           string
+		wantSourceID   string
+		wantAlertName  string
+		wantTargetHost string
+		wantSeverity   database.AlertSeverity
+	}{
+		{
+			name:           "grafana firing alert",
+			sourceType:     "grafana",
+			secretHeader:   "X-Grafana-Secret",
+			secretValue:    "grafana-secret",
+			body:           "{\"alerts\":[{\"status\":\"firing\",\"labels\":{\"alertname\":\"GrafanaHighLatency\",\"severity\":\"critical\",\"instance\":\"api-01:9090\",\"job\":\"api\"},\"annotations\":{\"summary\":\"API p95 latency is above threshold\",\"description\":\"Latency burn rate is elevated\"},\"fingerprint\":\"grafana-fp-1\"}]}",
+			wantSourceID:   "grafana-fp-1",
+			wantAlertName:  "GrafanaHighLatency",
+			wantTargetHost: "api-01:9090",
+			wantSeverity:   database.AlertSeverityCritical,
+		},
+		{
+			name:           "datadog triggered monitor",
+			sourceType:     "datadog",
+			secretHeader:   "DD-API-KEY",
+			secretValue:    "datadog-secret",
+			body:           "{\"id\":\"event-123\",\"alert_id\":\"monitor-456\",\"alert_cycle_key\":\"datadog-cycle-1\",\"title\":\"Datadog CPU Monitor\",\"body\":\"CPU is above 90% on checkout host\",\"alert_type\":\"error\",\"alert_status\":\"Triggered\",\"hostname\":\"checkout-01\",\"tags\":[\"service:checkout\",\"env:prod\"]}",
+			wantSourceID:   "datadog-cycle-1",
+			wantAlertName:  "Datadog CPU Monitor",
+			wantTargetHost: "checkout-01",
+			wantSeverity:   database.AlertSeverityCritical,
+		},
+		{
+			name:           "zabbix problem event",
+			sourceType:     "zabbix",
+			secretHeader:   "X-Zabbix-Secret",
+			secretValue:    "zabbix-secret",
+			body:           "{\"event_id\":\"zbx-789\",\"event_status\":\"PROBLEM\",\"alert_name\":\"Zabbix Memory Pressure\",\"priority\":\"4\",\"hardware\":\"db-01\",\"metric_name\":\"vm.memory.size[pavailable]\",\"metric_value\":\"3\",\"trigger_expression\":\"Available memory below 5%\"}",
+			wantSourceID:   "zbx-789",
+			wantAlertName:  "Zabbix Memory Pressure",
+			wantTargetHost: "db-01",
+			wantSeverity:   database.AlertSeverityHigh,
+		},
+		{
+			name:           "pagerduty triggered incident",
+			sourceType:     "pagerduty",
+			secretHeader:   "Authorization",
+			secretValue:    "Bearer pagerduty-secret",
+			body:           "{\"event\":{\"id\":\"pd-event-1\",\"event_type\":\"incident.triggered\",\"data\":{\"id\":\"pd-incident-42\",\"title\":\"PagerDuty Database Timeout\",\"description\":\"Database connection attempts are timing out\",\"urgency\":\"high\",\"priority\":{\"id\":\"P1\",\"summary\":\"P1 Critical\"},\"service\":{\"id\":\"svc-db\",\"name\":\"database\"},\"source\":\"primary-db\"}}}",
+			wantSourceID:   "pd-incident-42",
+			wantAlertName:  "PagerDuty Database Timeout",
+			wantTargetHost: "primary-db",
+			wantSeverity:   database.AlertSeverityCritical,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			instance, err := service.CreateInstance(
+				tt.sourceType,
+				tt.sourceType+" production webhook",
+				"integration test webhook",
+				strings.TrimPrefix(tt.secretValue, "Bearer "),
+				nil,
+				nil,
+			)
+			if err != nil {
+				t.Fatalf("create %s instance: %v", tt.sourceType, err)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/webhook/alert/"+instance.UUID, strings.NewReader(tt.body))
+			req.Header.Set(tt.secretHeader, tt.secretValue)
+			w := httptest.NewRecorder()
+
+			h.HandleWebhook(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d; body=%q", w.Code, http.StatusOK, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), "Received 1 alerts") {
+				t.Fatalf("body = %q, want Received 1 alerts", w.Body.String())
+			}
+
+			incident := waitForIncidentBySourceID(t, instance.UUID, tt.wantSourceID)
+			if incident.Source != tt.sourceType {
+				t.Errorf("incident source = %q, want %q", incident.Source, tt.sourceType)
+			}
+			if incident.SourceKind != database.IncidentSourceKindAlert {
+				t.Errorf("incident source kind = %q, want %q", incident.SourceKind, database.IncidentSourceKindAlert)
+			}
+			if incident.Context["alert_name"] != tt.wantAlertName {
+				t.Errorf("alert_name = %v, want %q", incident.Context["alert_name"], tt.wantAlertName)
+			}
+			if incident.Context["target_host"] != tt.wantTargetHost {
+				t.Errorf("target_host = %v, want %q", incident.Context["target_host"], tt.wantTargetHost)
+			}
+			if incident.Context["severity"] != string(tt.wantSeverity) {
+				t.Errorf("severity = %v, want %q", incident.Context["severity"], tt.wantSeverity)
+			}
+		})
+	}
+}
+
+func waitForIncidentBySourceID(t *testing.T, sourceUUID string, sourceID string) database.Incident {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var incident database.Incident
+		err := database.DB.Where("source_uuid = ? AND source_id = ?", sourceUUID, sourceID).First(&incident).Error
+		if err == nil {
+			return incident
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("incident with source_uuid=%q source_id=%q was not created: %v", sourceUUID, sourceID, err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
