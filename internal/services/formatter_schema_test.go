@@ -5,6 +5,59 @@ import (
 	"testing"
 )
 
+func TestValidateSchemaExample(t *testing.T) {
+	tests := []struct {
+		name       string
+		example    string
+		wantErr    bool
+		errInclude string
+	}{
+		{
+			name:    "empty example uses runtime default",
+			example: "",
+		},
+		{
+			name:    "valid custom schema",
+			example: `{"status":"resolved","actions":["checked logs"]}`,
+		},
+		{
+			name:    "invalid JSON is rejected",
+			example: `{not-json`,
+			wantErr: true,
+		},
+		{
+			name:       "unsupported null is rejected",
+			example:    `{"summary":null}`,
+			wantErr:    true,
+			errInclude: "null",
+		},
+		{
+			name:       "non-object top level is rejected",
+			example:    `["status"]`,
+			wantErr:    true,
+			errInclude: "object",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSchemaExample(tt.example)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.errInclude != "" && !strings.Contains(err.Error(), tt.errInclude) {
+					t.Fatalf("expected error to contain %q, got %q", tt.errInclude, err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+		})
+	}
+}
+
 // --- inferSchema tests ---
 
 func TestInferSchema_Scalars(t *testing.T) {
