@@ -1,22 +1,113 @@
 # SSH Tool Command Validation
 
-The SSH tool implements a multi-layered command validation system to prevent destructive operations while allowing necessary diagnostic and monitoring commands.
+The SSH tool implements a **4-stage command validation pipeline** using Claude Code wildcard syntax for flexible pattern matching.
 
 ## Overview
 
-The `CommandValidator` enforces three security modes:
-
-| Mode | Description | Dangerous Patterns | Write Redirects |
-|------|-------------|-------------------|-----------------|
-| **Read-only** (default) | Only whitelisted read-only commands | ✅ Blocked | ✅ Blocked |
-| **Custom Allowlist** | Operator-defined command list | ✅ Blocked | ✅ Blocked |
-| **Write-enabled** | All commands permitted | ❌ Allowed | ❌ Allowed |
+| Stage | Description | Configurable |
+|-------|-------------|--------------|
+| **1. Global Deny List** | Patterns that ALWAYS block commands | ✅ Tool settings |
+| **2. Default Read-Only** | Whitelisted safe commands | ❌ Static |
+| **3. Global Allow List** | Explicitly permitted commands | ✅ Tool settings |
+| **4. Destructive Gate** | Allows non-read-only commands | ✅ Tool toggle |
 
 ---
 
-## Read-Only Mode (Default)
+## Pattern Syntax (Claude Code Wildcards)
 
-When `allow_write_commands` is `false` (default), only these base commands are permitted:
+Commands use **glob patterns** with `*`:
+
+| Pattern | Matches | Does NOT Match |
+|---------|---------|----------------|
+| `rm` | `rm`, `rm ` | `rm -rf /`, `rmdir` |
+| `rm *` | `rm -rf /`, `rm file.txt` | `rm` (no args), `rmdir` |
+| `rm:*` | Same as `rm *` | `rm` (no args) |
+| `shutdown` | `shutdown`, `shutdown ` | `shutdown -h now` |
+| `shutdown *` | `shutdown -h now` | `shutdown` (no args) |
+| `* --version` | `docker --version`, `git --version` | `docker ps` |
+| `git push *` | `git push origin main` | `git pull` |
+
+**Important:** Space before `*` matters:
+- `ls *` matches `ls -la` but NOT `lsof`
+- `ls*` matches both `ls -la` and `lsof`
+
+---
+
+## Stage 1: Global Deny List
+
+**Configured in:** SSH Tool Settings → Command Policies → Deny List
+
+**Rules:**
+- Applied to ALL hosts in the tool instance
+- **Always active** — cannot be bypassed, even with write commands enabled
+- Commands matching any deny pattern are immediately blocked
+
+**Example patterns:**
+```
+rm *
+rmdir *
+shred *
+mv *
+cp *
+chmod *
+chown *
+kill *
+killall *
+pkill *
+shutdown
+reboot
+halt
+poweroff
+init *
+dd *
+mkfs
+fdisk *
+parted *
+mount *
+umount *
+useradd *
+userdel *
+usermod *
+passwd *
+groupadd *
+apt install *
+apt remove *
+apt purge *
+apt-get install *
+yum install *
+yum remove *
+pip install *
+npm install *
+systemctl start *
+systemctl stop *
+systemctl restart *
+systemctl enable *
+systemctl disable *
+docker rm *
+docker rmi *
+docker stop *
+docker kill *
+docker run *
+docker exec *
+kubectl delete *
+kubectl apply *
+kubectl create *
+kubectl exec *
+kubectl edit *
+iptables
+firewall-cmd
+ufw *
+su *
+:(){ :|:& };:
+mkfifo
+mknod *
+```
+
+---
+
+## Stage 2: Default Read-Only List
+
+**Static list** — cannot be configured. Contains safe diagnostic commands:
 
 ### File Viewing
 ```
@@ -51,11 +142,6 @@ mpstat, sar, iostat, vmstat
 nmon, iotop, pidstat
 ```
 
-### Conditional Tests
-```
-test, [
-```
-
 ### Memory and Disk Information
 ```
 df, du, free, lsblk
@@ -72,7 +158,7 @@ traceroute, dig, nslookup, host
 env, printenv, echo
 ```
 
-### Text Processing (Read-Only Operations)
+### Text Processing (Read-Only)
 ```
 wc, sort, uniq, cut, awk
 sed, tr, diff, comm
@@ -89,174 +175,149 @@ journalctl, dmesg
 ```
 
 ### Commands with Subcommand Restrictions
-These commands are allowed but restricted to specific subcommands (see [Subcommand Restrictions](#subcommand-restrictions)):
-```
-docker, kubectl, systemctl
-dpkg, rpm, apt, yum
-```
+These commands are allowed but restricted to specific subcommands:
+
+| Command | ✅ Allowed Subcommands |
+|---------|----------------------|
+| `docker` | ps, images, logs, inspect, stats, top, info, version, network ls, volume ls |
+| `kubectl` | get, describe, logs, top, version, config view, cluster-info |
+| `systemctl` | status, is-active, is-enabled, list-units, list-unit-files, show |
+| `apt` | list, show, search, policy |
+| `yum` | list, info, search |
+| `dpkg` | -l, -L, -s, --list, --listfiles, --status |
+| `rpm` | -qa, -qi, -ql, --query |
 
 ### Sudo
 ```
 sudo
 ```
-When `sudo` is used, the inner command is recursively validated against the same read-only rules.
+When `sudo` is used, the inner command is recursively validated against the same rules.
 
 ---
 
-## Subcommand Restrictions
+## Stage 3: Global Allow List
 
-Certain commands have restricted subcommands in read-only mode:
+**Configured in:** SSH Tool Settings → Command Policies → Allow List
 
-### Docker
-| ✅ Allowed | ❌ Blocked |
-|-----------|-----------|
-| `docker ps` | `docker rm` |
-| `docker images` | `docker rmi` |
-| `docker logs` | `docker stop` |
-| `docker inspect` | `docker kill` |
-| `docker stats` | `docker exec` |
-| `docker top` | `docker run` |
-| `docker info` | `docker start` |
-| `docker version` | |
-| `docker network ls` | |
-| `docker volume ls` | |
+**Rules:**
+- Applied to ALL hosts in the tool instance
+- Commands matching these patterns are explicitly allowed
+- **Deny list still applies** — denied commands are blocked first
+- Useful for permitting commands not in the default read-only list
 
-### Kubectl
-| ✅ Allowed | ❌ Blocked |
-|-----------|-----------|
-| `kubectl get` | `kubectl delete` |
-| `kubectl describe` | `kubectl apply` |
-| `kubectl logs` | `kubectl create` |
-| `kubectl top` | `kubectl exec` |
-| `kubectl version` | `kubectl edit` |
-| `kubectl config view` | `kubectl patch` |
-| `kubectl cluster-info` | |
-
-### Systemctl
-| ✅ Allowed | ❌ Blocked |
-|-----------|-----------|
-| `systemctl status` | `systemctl start` |
-| `systemctl is-active` | `systemctl stop` |
-| `systemctl is-enabled` | `systemctl restart` |
-| `systemctl list-units` | `systemctl enable` |
-| `systemctl list-unit-files` | `systemctl disable` |
-| `systemctl show` | |
-
-### Package Managers
-| Command | ✅ Allowed Subcommands |
-|---------|----------------------|
-| `apt` | `list`, `show`, `search`, `policy` |
-| `yum` | `list`, `info`, `search` |
-| `dpkg` | `-l`, `-L`, `-s`, `--list`, `--listfiles`, `--status` |
-| `rpm` | `-qa`, `-qi`, `-ql`, `--query` |
+**Example patterns:**
+```
+curl *
+wget *
+scp *
+rsync *
+ssh *
+```
 
 ---
 
-## Dangerous Patterns (Always Blocked in Read-Only and Custom Modes)
+## Stage 4: Destructive Gate
 
-These patterns are **always blocked** when read-only mode or custom allowlist is enabled:
+**Configured in:** SSH Tool Settings → Command Policies → "Allow Write/Destructive Commands" toggle
 
-### Destructive File Operations
-```
-rm, rmdir, shred
-```
-
-### File Modification
-```
-mv, cp, chmod, chown, chgrp
-```
-
-### Process Control
-```
-kill, killall, pkill
-```
-
-### System Control
-```
-shutdown, reboot, halt, poweroff, init
-```
-
-### Disk Operations
-```
-dd, mkfs, fdisk, parted, mount, umount
-```
-
-### User Management
-```
-useradd, userdel, usermod, passwd, groupadd
-```
-
-### Package Modification
-```
-apt install/remove/purge, apt-get install/remove
-yum install/remove/erase
-dnf install/remove
-pip install/uninstall
-npm install/uninstall
-```
-
-### Service Control
-```
-systemctl start/stop/restart/enable/disable
-service start/stop/restart
-```
-
-### Network Modification
-```
-iptables, firewall-cmd, ufw
-```
-
-### Privilege Escalation
-```
-su
-```
-
-### Other Dangerous Commands
-```
-mkfifo, mknod
-:(){ :|:& };:  (fork bomb)
-```
-
-### Output Redirects
-```
->  (file output redirect, detected intelligently)
->> (append redirect)
-```
-Note: `2>` and `>&` (stderr redirects) are permitted.
+**Rules:**
+- When **disabled** (default): commands not in read-only list and not in allow list are blocked
+- When **enabled**: commands not in read-only list are permitted (except those in deny list)
+- **Deny list still applies** — denied commands are always blocked
 
 ---
 
-## Custom Allowlist Mode
+## Validation Pipeline Flow
 
-When `allowed_commands` is configured for a host, it **overrides** the default read-only list:
+```
+Command Received
+       │
+       ▼
+┌──────────────────────────────┐
+│ Stage 1: Global Deny List    │
+│ (Tool Settings)              │
+├──────────────────────────────┤
+│ Match? → BLOCK               │
+│ No Match → continue          │
+└──────────────────────────────┘
+       │
+       ▼
+┌──────────────────────────────┐
+│ Check Write Redirects (>)    │
+├──────────────────────────────┤
+│ Found? → BLOCK               │
+│ None → continue              │
+└──────────────────────────────┘
+       │
+       ▼
+┌──────────────────────────────┐
+│ Stage 2: Default Read-Only   │
+│ (Static List)                │
+├──────────────────────────────┤
+│ In List? → ALLOW             │
+│ Not in List → continue       │
+└──────────────────────────────┘
+       │
+       ▼
+┌──────────────────────────────┐
+│ Stage 3: Global Allow List   │
+│ (Tool Settings)              │
+├──────────────────────────────┤
+│ Match? → ALLOW               │
+│ No Match → continue          │
+└──────────────────────────────┘
+       │
+       ▼
+┌──────────────────────────────┐
+│ Stage 4: Destructive Gate    │
+│ (Tool Toggle)                │
+├──────────────────────────────┤
+│ Write Enabled? → ALLOW       │
+│ Write Disabled? → BLOCK      │
+└──────────────────────────────┘
+```
+
+---
+
+## Configuration
+
+### Tool-Level Settings (apply to ALL hosts)
+
+| Setting | Type | Description |
+|---------|------|-------------|
+| `ssh_deny_list` | array | Global deny patterns (Claude Code wildcard syntax) |
+| `ssh_allow_list` | array | Global allow patterns (Claude Code wildcard syntax) |
+| `ssh_allow_write_commands` | boolean | Allow destructive commands not in read-only list |
+
+### Example Tool Configuration
 
 ```json
 {
-  "hostname": "web-prod-1",
-  "address": "10.0.1.5",
-  "allowed_commands": ["curl", "wget", "cat", "ls", "grep", "journalctl"]
+  "ssh_deny_list": [
+    "rm *",
+    "shutdown",
+    "kill *",
+    "docker stop *",
+    "docker rm *",
+    "kubectl delete *"
+  ],
+  "ssh_allow_list": [
+    "curl *",
+    "wget *",
+    "scp *"
+  ],
+  "ssh_allow_write_commands": false
 }
 ```
 
-**Rules:**
-- Only commands in the list are permitted
-- Dangerous patterns are **still blocked**
-- Write redirects are **still blocked**
-- No subcommand restrictions (only base command is checked)
-- `sudo` recursively validates the inner command against the custom list
-
 ---
 
-## Write-Enabled Mode
+## Error Messages
 
-When `allow_write_commands` is `true` for a host:
-
-- All commands are permitted
-- No validation is performed
-- Dangerous patterns are **not** checked
-- Write redirects are **allowed**
-
-⚠️ **Use with caution** — this disables all command validation.
+When a command is blocked, the error message includes:
+- The reason for blocking (deny list, read-only, etc.)
+- List of allowed commands by category
+- Instructions to enable write commands
 
 ---
 

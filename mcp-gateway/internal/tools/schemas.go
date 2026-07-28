@@ -174,24 +174,33 @@ func getSSHSchema() ToolTypeSchema {
 								Maximum:     intPtr(65535),
 								Advanced:    true,
 							},
-							"allow_write_commands": {
-								Type:        "boolean",
-								Description: "Allow write/destructive commands (WARNING: security risk)",
-								Default:     false,
-								Advanced:    true,
-								Warning:     "Enabling this allows destructive commands like rm, mv, kill, etc.",
-							},
-							"allowed_commands": {
-								Type:        "array",
-								Description: "Custom list of allowed base commands. When set, ONLY these commands are permitted (overrides the default read-only list). Leave empty to use the default read-only command list.",
-								Advanced:    true,
-								Items: &ItemSchema{
-									Type: "string",
-								},
-								Warning: "When set, commands not in this list will be blocked even if they are in the default read-only list.",
-							},
 						},
 					},
+				},
+				"ssh_deny_list": {
+					Type:        "array",
+					Description: "Global deny list of command patterns (Claude Code wildcard syntax). Commands matching these patterns are ALWAYS blocked. Applied to all hosts. Example: ['rm *', 'shutdown', 'kill *', 'docker stop *']",
+					Advanced:    true,
+					Items: &ItemSchema{
+						Type: "string",
+					},
+					Example: []string{"rm *", "shutdown", "kill *", "docker stop *", "kubectl delete *"},
+				},
+				"ssh_allow_list": {
+					Type:        "array",
+					Description: "Global allow list of command patterns (Claude Code wildcard syntax). Commands matching these patterns are explicitly allowed even if not in the default read-only list. Applied to all hosts. Example: ['curl *', 'wget *', 'scp *']",
+					Advanced:    true,
+					Items: &ItemSchema{
+						Type: "string",
+					},
+					Example: []string{"curl *", "wget *", "scp *", "rsync *"},
+				},
+				"ssh_allow_write_commands": {
+					Type:        "boolean",
+					Description: "Allow write/destructive commands that are not in the default read-only list and not explicitly blocked by the deny list. WARNING: This allows commands like rm, mv, kill, systemctl restart, etc.",
+					Default:     false,
+					Advanced:    true,
+					Warning:     "Enabling this allows destructive commands. Commands in the deny list are still blocked.",
 				},
 				"ssh_command_timeout": {
 					Type:        "integer",

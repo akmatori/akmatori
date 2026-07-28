@@ -499,9 +499,6 @@ func TestResolveTargetHosts_UnconfiguredServerAdhocEnabled(t *testing.T) {
 	if h.Port != 2200 {
 		t.Errorf("expected port 2200, got %d", h.Port)
 	}
-	if h.AllowWriteCommands {
-		t.Error("expected ad-hoc host to be read-only")
-	}
 }
 
 func TestResolveTargetHosts_AdhocWriteCommandsEnabled(t *testing.T) {
@@ -513,13 +510,11 @@ func TestResolveTargetHosts_AdhocWriteCommandsEnabled(t *testing.T) {
 		AdhocAllowWriteCommands: true,
 	}
 
-	hosts, err := tool.resolveTargetHosts([]string{"server.example.com"}, config)
+	_, err := tool.resolveTargetHosts([]string{"server.example.com"}, config)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !hosts[0].AllowWriteCommands {
-		t.Error("expected ad-hoc host to allow write commands")
-	}
+	// Adhoc hosts no longer have per-host write settings - controlled at tool level
 }
 
 func TestResolveTargetHosts_MixedConfiguredAndAdhoc(t *testing.T) {
@@ -647,7 +642,7 @@ func TestResolveTargetHosts_IPv6BracketNormalization(t *testing.T) {
 	tool := newTestTool()
 	config := &SSHConfig{
 		Hosts: []SSHHostConfig{
-			{Hostname: "ipv6-server", Address: "[2001:db8::1]", User: "root", Port: 22, AllowWriteCommands: true},
+			{Hostname: "ipv6-server", Address: "[2001:db8::1]", User: "root", Port: 22},
 		},
 		AdhocDefaultUser:      "root",
 		AdhocDefaultPort:      22,
@@ -665,9 +660,7 @@ func TestResolveTargetHosts_IPv6BracketNormalization(t *testing.T) {
 	if hosts[0].Hostname != "ipv6-server" {
 		t.Errorf("expected configured host ipv6-server, got %s", hosts[0].Hostname)
 	}
-	if !hosts[0].AllowWriteCommands {
-		t.Error("expected configured host's AllowWriteCommands=true to be preserved")
-	}
+	// Hosts no longer have per-host write settings - controlled at tool level
 
 	// Target with brackets — should also match
 	hosts, err = tool.resolveTargetHosts([]string{"[2001:db8::1]"}, config)

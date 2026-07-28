@@ -87,11 +87,31 @@ export default function ToolFormSection({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [expandedHosts, setExpandedHosts] = useState<number[]>([]);
 
+  // Command Policies state (tool-level, SSH only)
+  const [denyList, setDenyList] = useState<string[]>([]);
+  const [allowList, setAllowList] = useState<string[]>([]);
+  const [allowWriteCommands, setAllowWriteCommands] = useState(false);
+
   // Reset local UI state when switching between tools
   useEffect(() => {
     setShowAdvanced(false);
     setExpandedHosts([]);
-  }, [editingToolId, isCreating, formData.tool_type_id]);
+    // Sync Command Policies from formData.settings
+    if (formData?.settings) {
+      setDenyList(Array.isArray(formData.settings.ssh_deny_list) ? formData.settings.ssh_deny_list : []);
+      setAllowList(Array.isArray(formData.settings.ssh_allow_list) ? formData.settings.ssh_allow_list : []);
+      setAllowWriteCommands(!!formData.settings.ssh_allow_write_commands);
+    }
+  }, [editingToolId, isCreating, formData.tool_type_id, formData?.settings]);
+
+  // Sync Command Policies back to formData
+  useEffect(() => {
+    if (selectedType?.name === 'ssh') {
+      updateSetting('ssh_deny_list', denyList);
+      updateSetting('ssh_allow_list', allowList);
+      updateSetting('ssh_allow_write_commands', allowWriteCommands);
+    }
+  }, [denyList, allowList, allowWriteCommands, selectedType?.name]);
 
   const addHost = () => {
     const currentHosts = formData.settings.ssh_hosts || [];
@@ -268,6 +288,12 @@ export default function ToolFormSection({
                   onDeleteSSHKey={onDeleteSSHKey}
                   onSetDefaultKey={onSetDefaultKey}
                   getDefaultKey={getDefaultKey}
+                  denyList={denyList}
+                  setDenyList={setDenyList}
+                  allowList={allowList}
+                  setAllowList={setAllowList}
+                  allowWriteCommands={allowWriteCommands}
+                  setAllowWriteCommands={setAllowWriteCommands}
                 />
               )}
 

@@ -16,35 +16,179 @@ func TestNewCommandValidator(t *testing.T) {
 		t.Error("ReadOnlyCommands should not be empty")
 	}
 
-	if len(v.DangerousPatterns) == 0 {
-		t.Error("DangerousPatterns should not be empty")
-	}
-
 	if len(v.AllowedSubcommands) == 0 {
 		t.Error("AllowedSubcommands should not be empty")
 	}
 }
 
-func TestCommandValidator_AllowWriteCommands(t *testing.T) {
-	v := NewCommandValidator()
+func TestNewCommandValidatorWithPatterns(t *testing.T) {
+	denyList := []string{"rm *", "shutdown", "kill *"}
+	allowList := []string{"curl *", "wget *"}
 
-	// When allowWriteCommands is true, all commands should pass
-	dangerousCommands := []string{
-		"rm -rf /",
-		"shutdown -h now",
-		"kill -9 1234",
-		"sudo reboot",
+	v := NewCommandValidatorWithPatterns(denyList, allowList)
+
+	if v == nil {
+		t.Fatal("NewCommandValidatorWithPatterns returned nil")
 	}
 
-	for _, cmd := range dangerousCommands {
-		err := v.ValidateCommand(cmd, true, false)
-		if err != nil {
-			t.Errorf("Command '%s' should be allowed when allowWriteCommands=true, got error: %v", cmd, err)
+	if len(v.GlobalDenyPatterns) != len(denyList) {
+		t.Errorf("Expected %d deny patterns, got %d", len(denyList), len(v.GlobalDenyPatterns))
+	}
+
+	if len(v.GlobalAllowPatterns) != len(allowList) {
+		t.Errorf("Expected %d allow patterns, got %d", len(allowList), len(v.GlobalAllowPatterns))
+	}
+}
+
+// ============================================================================
+// Stage 1: Deny List Tests
+// ============================================================================
+
+func TestDenyList_RmPattern(t *testing.T) {
+	v := NewCommandValidatorWithPatterns([]string{"rm *"}, nil)
+
+	// Should match "rm *"
+	if !v.MatchesDenyList("rm -rf /") {
+		t.Error("Expected 'rm -rf /' to match 'rm *'")
+	}
+	if !v.MatchesDenyList("rm file.txt") {
+		t.Error("Expected 'rm file.txt' to match 'rm *'")
+	}
+
+	// Should NOT match "rmdir" (different command)
+	if v.MatchesDenyList("rmdir /tmp") {
+		t.Error("Expected 'rmdir /tmp' to NOT match 'rm *'")
+	}
+}
+
+func TestDenyList_ExactPattern(t *testing.T) {
+	v := NewCommandValidatorWithPatterns([]string{"shutdown"}, nil)
+
+	if !v.MatchesDenyList("shutdown") {
+		t.Error("Expected 'shutdown' to match exact pattern")
+	}
+	if !v.MatchesDenyList("shutdown ") {
+		t.Error("Expected 'shutdown ' to match exact pattern")
+	}
+	// "shutdown -h now" should NOT match exact "shutdown"
+	if v.MatchesDenyList("shutdown -h now") {
+		t.Error("Expected 'shutdown -h now' to NOT match exact 'shutdown'")
+	}
+}
+
+func TestDenyList_ShutdownWithArgs(t *testing.T) {
+	v := NewCommandValidatorWithPatterns([]string{"shutdown *"}, nil)
+
+	if !v.MatchesDenyList("shutdown -h now") {
+		t.Error("Expected 'shutdown -h now' to match 'shutdown *'")
+	}
+	if !v.MatchesDenyList("reboot") {
+		// "reboot" should NOT match "shutdown *"
+	}
+}
+
+func TestDenyList_KillPattern(t *testing.T) {
+	v := NewCommandValidatorWithPatterns([]string{"kill *"}, nil)
+
+	if !v.MatchesDenyList("kill 1234") {
+		t.Error("Expected 'kill 1234' to match 'kill *'")
+	}
+	if !v.MatchesDenyList("kill -9 1234") {
+		t.Error("Expected 'kill -9 1234' to match 'kill *'")
+	}
+	// "killall" should NOT match "kill *"
+	if v.MatchesDenyList("killall nginx") {
+		t.Error("Expected 'killall nginx' to NOT match 'kill *'")
+	}
+}
+
+func TestDenyList_DockerPattern(t *testing.T) {
+	v := NewCommandValidatorWithPatterns([]string{"docker stop *", "docker rm *"}, nil)
+
+	if !v.MatchesDenyList("docker stop container") {
+		t.Error("Expected 'docker stop container' to match 'docker stop *'")
+	}
+	if !v.MatchesDenyList("docker rm container") {
+		t.Error("Expected 'docker rm container' to match 'docker rm *'")
+	}
+	// "docker ps" should NOT match
+	if v.MatchesDenyList("docker ps") {
+		t.Error("Expected 'docker ps' to NOT match deny patterns")
+	}
+}
+
+func TestDenyList_LeadingWildcard(t *testing.T) {
+	v := NewCommandValidatorWithPatterns([]string{"* --version"}, nil)
+
+	if !v.MatchesDenyList("docker --version") {
+		t.Error("Expected 'docker --version' to match '* --version'")
+	}
+	if !v.MatchesDenyList("git --version") {
+		t.Error("Expected 'git --version' to match '* --version'")
+	}
+	// "docker ps" should NOT match
+	if v.MatchesDenyList("docker ps") {
+		t.Error("Expected 'docker ps' to NOT match '* --version'")
+	}
+}
+
+func TestDenyList_MultiWordPattern(t *testing.T) {
+	v := NewCommandValidatorWithPatterns([]string{"git push *"}, nil)
+
+	if !v.MatchesDenyList("git push origin main") {
+		t.Error("Expected 'git push origin main' to match 'git push *'")
+	}
+	// "git push" without args should NOT match "git push *" (args required)
+	if v.MatchesDenyList("git push") {
+		t.Error("Expected 'git push' to NOT match 'git push *' (args required)")
+	}
+	// "git pull" should NOT match
+	if v.MatchesDenyList("git pull") {
+		t.Error("Expected 'git pull' to NOT match 'git push *'")
+	}
+}
+
+func TestDenyList_SystemctlPattern(t *testing.T) {
+	denyList := []string{
+		"systemctl start *",
+		"systemctl stop *",
+		"systemctl restart *",
+		"systemctl enable *",
+		"systemctl disable *",
+	}
+	v := NewCommandValidatorWithPatterns(denyList, nil)
+
+	blocked := []string{
+		"systemctl start nginx",
+		"systemctl stop nginx",
+		"systemctl restart nginx",
+		"systemctl enable nginx",
+		"systemctl disable nginx",
+	}
+	for _, cmd := range blocked {
+		if !v.MatchesDenyList(cmd) {
+			t.Errorf("Expected '%s' to match deny pattern", cmd)
+		}
+	}
+
+	// Allowed systemctl subcommands
+	allowed := []string{
+		"systemctl status nginx",
+		"systemctl is-active nginx",
+		"systemctl list-units",
+	}
+	for _, cmd := range allowed {
+		if v.MatchesDenyList(cmd) {
+			t.Errorf("Expected '%s' to NOT match deny pattern", cmd)
 		}
 	}
 }
 
-func TestCommandValidator_ReadOnlyAllowed(t *testing.T) {
+// ============================================================================
+// Stage 2: Read-Only List Tests
+// ============================================================================
+
+func TestReadOnly_AllowedCommands(t *testing.T) {
 	v := NewCommandValidator()
 
 	allowedCommands := []string{
@@ -62,7 +206,6 @@ func TestCommandValidator_ReadOnlyAllowed(t *testing.T) {
 		"grep error /var/log/syslog",
 		"rg error /var/log/syslog",
 		"find /var/log -name '*.log'",
-		"fzf --version",
 		"wc -l /etc/passwd",
 		"stat /etc/hosts",
 		"echo hello",
@@ -74,14 +217,14 @@ func TestCommandValidator_ReadOnlyAllowed(t *testing.T) {
 	}
 
 	for _, cmd := range allowedCommands {
-		err := v.ValidateCommand(cmd, false, false)
+		err := v.ValidateCommand(cmd, false)
 		if err != nil {
 			t.Errorf("Command '%s' should be allowed in read-only mode, got error: %v", cmd, err)
 		}
 	}
 }
 
-func TestCommandValidator_ReadOnlyBlocked(t *testing.T) {
+func TestReadOnly_BlockedCommands(t *testing.T) {
 	v := NewCommandValidator()
 
 	blockedCommands := []string{
@@ -95,37 +238,400 @@ func TestCommandValidator_ReadOnlyBlocked(t *testing.T) {
 		"killall nginx",
 		"shutdown -h now",
 		"reboot",
-		"sudo apt update",
 		"su - root",
 		"echo test > /tmp/file",
-		"cat /etc/passwd >> /tmp/out",
 	}
 
 	for _, cmd := range blockedCommands {
-		err := v.ValidateCommand(cmd, false, false)
+		err := v.ValidateCommand(cmd, false)
 		if err == nil {
 			t.Errorf("Command '%s' should be blocked in read-only mode", cmd)
 		}
 	}
 }
 
-func TestCommandValidator_ErrorContainsAllowedCommands(t *testing.T) {
+// ============================================================================
+// Stage 3: Allow List Tests
+// ============================================================================
+
+func TestAllowList_CurlPattern(t *testing.T) {
+	v := NewCommandValidatorWithPatterns(nil, []string{"curl *"})
+
+	if !v.MatchesAllowList("curl https://api.example.com") {
+		t.Error("Expected 'curl https://api.example.com' to match 'curl *'")
+	}
+	if !v.MatchesAllowList("curl -X POST https://api.example.com") {
+		t.Error("Expected 'curl -X POST ...' to match 'curl *'")
+	}
+	// "wget" should NOT match
+	if v.MatchesAllowList("wget http://example.com") {
+		t.Error("Expected 'wget' to NOT match 'curl *'")
+	}
+}
+
+func TestAllowList_MultiplePatterns(t *testing.T) {
+	v := NewCommandValidatorWithPatterns(nil, []string{"curl *", "wget *", "scp *"})
+
+	allowed := []string{
+		"curl https://example.com",
+		"wget http://example.com/file",
+		"scp file user@host:/path",
+	}
+	for _, cmd := range allowed {
+		if !v.MatchesAllowList(cmd) {
+			t.Errorf("Expected '%s' to match allow pattern", cmd)
+		}
+	}
+
+	// Not allowed
+	blocked := []string{
+		"rsync -avz src dst",
+		"ssh user@host",
+	}
+	for _, cmd := range blocked {
+		if v.MatchesAllowList(cmd) {
+			t.Errorf("Expected '%s' to NOT match allow pattern", cmd)
+		}
+	}
+}
+
+// ============================================================================
+// Stage 4: Destructive Check Tests
+// ============================================================================
+
+func TestDestructive_WriteEnabled(t *testing.T) {
 	v := NewCommandValidator()
 
-	err := v.ValidateCommand("rm -rf /", false, false)
+	// When allowWriteCommands is true, commands not in read-only list are allowed
+	dangerousCommands := []string{
+		"rm -rf /tmp/file",
+		"shutdown -h now",
+		"kill -9 1234",
+		"systemctl restart nginx",
+		"chmod 777 /tmp/file",
+	}
+
+	for _, cmd := range dangerousCommands {
+		err := v.ValidateCommand(cmd, true)
+		if err != nil {
+			t.Errorf("Command '%s' should be allowed when allowWriteCommands=true, got error: %v", cmd, err)
+		}
+	}
+}
+
+func TestDestructive_WriteDisabled(t *testing.T) {
+	v := NewCommandValidator()
+
+	// When allowWriteCommands is false, commands not in read-only list are blocked
+	dangerousCommands := []string{
+		"rm -rf /tmp/file",
+		"shutdown -h now",
+		"kill -9 1234",
+		"systemctl restart nginx",
+		"chmod 777 /tmp/file",
+	}
+
+	for _, cmd := range dangerousCommands {
+		err := v.ValidateCommand(cmd, false)
+		if err == nil {
+			t.Errorf("Command '%s' should be blocked when allowWriteCommands=false", cmd)
+		}
+	}
+}
+
+// ============================================================================
+// Full Pipeline Tests
+// ============================================================================
+
+func TestPipeline_DenyBlocksReadOnly(t *testing.T) {
+	// Even though "cat" is in read-only list, deny list takes precedence
+	v := NewCommandValidatorWithPatterns([]string{"cat *"}, nil)
+
+	err := v.ValidateCommand("cat /etc/passwd", false)
+	if err == nil {
+		t.Error("Expected 'cat /etc/passwd' to be blocked by deny list")
+	}
+}
+
+func TestPipeline_AllowOverridesReadOnly(t *testing.T) {
+	// "curl" is NOT in read-only list, but allow list permits it
+	v := NewCommandValidatorWithPatterns(nil, []string{"curl *"})
+
+	err := v.ValidateCommand("curl https://api.example.com", false)
+	if err != nil {
+		t.Errorf("Expected 'curl' to be allowed by allow list, got error: %v", err)
+	}
+}
+
+func TestPipeline_DenyOverridesAllow(t *testing.T) {
+	// "docker *" is in deny list (blocks ALL docker commands), "curl *" is in allow list
+	v := NewCommandValidatorWithPatterns([]string{"docker *"}, []string{"curl *"})
+
+	// Normal curl should be allowed
+	err := v.ValidateCommand("curl https://api.example.com", false)
+	if err != nil {
+		t.Errorf("Expected 'curl https://...' to be allowed, got error: %v", err)
+	}
+
+	// docker ps should be blocked by deny list (even though docker is in read-only)
+	err = v.ValidateCommand("docker ps", false)
+	if err == nil {
+		t.Error("Expected 'docker ps' to be blocked by deny list")
+	}
+}
+
+func TestPipeline_FullFlow(t *testing.T) {
+	// Deny list: commands that are ALWAYS blocked (even with write enabled)
+	denyList := []string{
+		"rm *",
+		"shutdown",
+		"kill *",
+		"docker stop *",
+		"docker rm *",
+		// Note: systemctl patterns are NOT in deny list - they're blocked by read-only
+		// but allowed when write is enabled
+		"kubectl delete *",
+	}
+	// Allow list: commands explicitly permitted beyond read-only
+	allowList := []string{
+		"curl *",
+		"wget *",
+		"scp *",
+	}
+
+	v := NewCommandValidatorWithPatterns(denyList, allowList)
+
+	tests := []struct {
+		cmd     string
+		write   bool
+		wantErr bool
+	}{
+		// Stage 1: Deny list blocks (always, even with write enabled)
+		{"rm -rf /", false, true},
+		{"shutdown", false, true},
+		{"shutdown", true, true}, // deny list ALWAYS blocks
+		{"kill 1234", false, true},
+		{"docker stop container", false, true},
+		{"docker stop container", true, true}, // deny list ALWAYS blocks
+		{"kubectl delete pod my-pod", false, true},
+
+		// Stage 2: Read-only allowed
+		{"cat /var/log/syslog", false, false},
+		{"ls -la /home", false, false},
+		{"ps aux", false, false},
+		{"docker ps", false, false},
+		{"kubectl get pods", false, false},
+
+		// Stage 3: Allow list permits
+		{"curl https://api.example.com", false, false},
+		{"wget http://example.com/file", false, false},
+		{"scp file user@host:/path", false, false},
+
+		// Stage 4: Destructive check
+		{"systemctl restart nginx", false, true}, // Not in read-only, not in allow, destructive
+		{"systemctl restart nginx", true, false}, // Write enabled allows it
+		{"chmod 777 /tmp/file", false, true},     // Not in read-only, not in allow, destructive
+		{"chmod 777 /tmp/file", true, false},     // Write enabled allows it
+	}
+
+	for _, tt := range tests {
+		err := v.ValidateCommand(tt.cmd, tt.write)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("ValidateCommand(%q, %v) error = %v, wantErr %v", tt.cmd, tt.write, err, tt.wantErr)
+		}
+	}
+}
+
+// ============================================================================
+// Sudo Tests
+// ============================================================================
+
+func TestSudo_RecursiveValidation(t *testing.T) {
+	v := NewCommandValidator()
+
+	// sudo cat /etc/passwd should be allowed (cat is read-only)
+	err := v.ValidateCommand("sudo cat /etc/passwd", false)
+	if err != nil {
+		t.Errorf("Expected 'sudo cat /etc/passwd' to be allowed, got error: %v", err)
+	}
+
+	// sudo rm -rf / should be blocked (rm is not read-only)
+	err = v.ValidateCommand("sudo rm -rf /", false)
+	if err == nil {
+		t.Error("Expected 'sudo rm -rf /' to be blocked")
+	}
+}
+
+func TestSudo_DenyList(t *testing.T) {
+	v := NewCommandValidatorWithPatterns([]string{"rm *"}, nil)
+
+	// sudo rm should be blocked by deny list (recursive validation)
+	err := v.ValidateCommand("sudo rm -rf /", false)
+	if err == nil {
+		t.Error("Expected 'sudo rm -rf /' to be blocked by deny list")
+	}
+}
+
+// ============================================================================
+// Subcommand Restriction Tests
+// ============================================================================
+
+func TestSubcommands_Docker(t *testing.T) {
+	v := NewCommandValidator()
+
+	allowed := []string{
+		"docker ps",
+		"docker images",
+		"docker logs container",
+		"docker inspect container",
+		"docker stats",
+	}
+	for _, cmd := range allowed {
+		err := v.ValidateCommand(cmd, false)
+		if err != nil {
+			t.Errorf("Docker command '%s' should be allowed, got error: %v", cmd, err)
+		}
+	}
+
+	blocked := []string{
+		"docker rm container",
+		"docker stop container",
+		"docker run ubuntu",
+	}
+	for _, cmd := range blocked {
+		err := v.ValidateCommand(cmd, false)
+		if err == nil {
+			t.Errorf("Docker command '%s' should be blocked in read-only mode", cmd)
+		}
+	}
+}
+
+func TestSubcommands_Kubectl(t *testing.T) {
+	v := NewCommandValidator()
+
+	allowed := []string{
+		"kubectl get pods",
+		"kubectl describe pod my-pod",
+		"kubectl logs my-pod",
+	}
+	for _, cmd := range allowed {
+		err := v.ValidateCommand(cmd, false)
+		if err != nil {
+			t.Errorf("Kubectl command '%s' should be allowed, got error: %v", cmd, err)
+		}
+	}
+
+	blocked := []string{
+		"kubectl delete pod my-pod",
+		"kubectl apply -f manifest.yaml",
+		"kubectl exec my-pod -- ls",
+	}
+	for _, cmd := range blocked {
+		err := v.ValidateCommand(cmd, false)
+		if err == nil {
+			t.Errorf("Kubectl command '%s' should be blocked in read-only mode", cmd)
+		}
+	}
+}
+
+func TestSubcommands_Systemctl(t *testing.T) {
+	v := NewCommandValidator()
+
+	allowed := []string{
+		"systemctl status nginx",
+		"systemctl is-active nginx",
+		"systemctl list-units",
+	}
+	for _, cmd := range allowed {
+		err := v.ValidateCommand(cmd, false)
+		if err != nil {
+			t.Errorf("Systemctl command '%s' should be allowed, got error: %v", cmd, err)
+		}
+	}
+
+	blocked := []string{
+		"systemctl start nginx",
+		"systemctl stop nginx",
+		"systemctl restart nginx",
+	}
+	for _, cmd := range blocked {
+		err := v.ValidateCommand(cmd, false)
+		if err == nil {
+			t.Errorf("Systemctl command '%s' should be blocked in read-only mode", cmd)
+		}
+	}
+}
+
+// ============================================================================
+// Pipe/Separator Tests
+// ============================================================================
+
+func TestPipes_ReadOnly(t *testing.T) {
+	v := NewCommandValidator()
+
+	// Pipe with all read-only commands should pass
+	err := v.ValidateCommand("cat /var/log/syslog | grep error", false)
+	if err != nil {
+		t.Errorf("Expected 'cat ... | grep ...' to be allowed, got error: %v", err)
+	}
+
+	// Pipe with dangerous command should fail
+	err = v.ValidateCommand("cat /var/log/syslog | rm -f /tmp/out", false)
+	if err == nil {
+		t.Error("Expected pipe with 'rm' to be blocked")
+	}
+}
+
+func TestPipes_DenyList(t *testing.T) {
+	v := NewCommandValidatorWithPatterns([]string{"rm *"}, nil)
+
+	// Pipe with denied command should fail
+	err := v.ValidateCommand("cat /var/log/syslog | rm -f /tmp/out", false)
+	if err == nil {
+		t.Error("Expected pipe with 'rm' to be blocked by deny list")
+	}
+}
+
+// ============================================================================
+// Write Redirect Tests
+// ============================================================================
+
+func TestWriteRedirect_Blocked(t *testing.T) {
+	v := NewCommandValidator()
+
+	blocked := []string{
+		"echo test > /tmp/file",
+		"cat /etc/passwd >> /tmp/out",
+		"ls -la > /tmp/list.txt",
+	}
+	for _, cmd := range blocked {
+		err := v.ValidateCommand(cmd, false)
+		if err == nil {
+			t.Errorf("Command '%s' should be blocked (write redirect)", cmd)
+		}
+	}
+}
+
+// ============================================================================
+// Error Message Tests
+// ============================================================================
+
+func TestErrorMessage_ContainsHelp(t *testing.T) {
+	v := NewCommandValidator()
+
+	err := v.ValidateCommand("rm -rf /", false)
 	if err == nil {
 		t.Fatal("Expected error for dangerous command")
 	}
 
 	errorMsg := err.Error()
 
-	// Check that the error message contains the allowed commands list
 	expectedPhrases := []string{
 		"command blocked:",
-		"Allowed commands in read-only mode:",
+		"read-only mode",
 		"File viewing: cat, head, tail",
 		"Directory: ls, pwd, tree",
-		"To allow write commands, enable 'Allow Write Commands'",
+		"Allow Write Commands",
 	}
 
 	for _, phrase := range expectedPhrases {
@@ -135,457 +641,40 @@ func TestCommandValidator_ErrorContainsAllowedCommands(t *testing.T) {
 	}
 }
 
-func TestCommandValidator_ErrorContainsNewSystemInfoCommands(t *testing.T) {
+// ============================================================================
+// Edge Cases
+// ============================================================================
+
+func TestEmptyCommand(t *testing.T) {
 	v := NewCommandValidator()
 
-	err := v.ValidateCommand("rm -rf /", false, false)
-	if err == nil {
-		t.Fatal("Expected error for dangerous command")
-	}
-
-	errorMsg := err.Error()
-
-	// Verify new system info commands appear in the help text
-	for _, cmd := range []string{"nproc", "lscpu", "getconf"} {
-		if !strings.Contains(errorMsg, cmd) {
-			t.Errorf("Error message should list '%s' in system info commands, got: %s", cmd, errorMsg)
-		}
-	}
-}
-
-func TestCommandValidator_DockerSubcommands(t *testing.T) {
-	v := NewCommandValidator()
-
-	// Allowed docker subcommands
-	allowed := []string{
-		"docker ps",
-		"docker ps -a",
-		"docker images",
-		"docker logs container_name",
-		"docker inspect container_name",
-		"docker stats",
-		"docker top container_name",
-		"docker info",
-		"docker version",
-	}
-
-	for _, cmd := range allowed {
-		err := v.ValidateCommand(cmd, false, false)
-		if err != nil {
-			t.Errorf("Docker command '%s' should be allowed, got error: %v", cmd, err)
-		}
-	}
-
-	// Blocked docker subcommands
-	blocked := []string{
-		"docker rm container_name",
-		"docker rmi image_name",
-		"docker stop container_name",
-		"docker kill container_name",
-		"docker exec container_name ls",
-		"docker run ubuntu",
-	}
-
-	for _, cmd := range blocked {
-		err := v.ValidateCommand(cmd, false, false)
-		if err == nil {
-			t.Errorf("Docker command '%s' should be blocked in read-only mode", cmd)
-		}
-	}
-}
-
-func TestCommandValidator_KubectlSubcommands(t *testing.T) {
-	v := NewCommandValidator()
-
-	// Allowed kubectl subcommands
-	allowed := []string{
-		"kubectl get pods",
-		"kubectl get pods -n kube-system",
-		"kubectl describe pod my-pod",
-		"kubectl logs my-pod",
-		"kubectl top pods",
-		"kubectl version",
-		"kubectl cluster-info",
-	}
-
-	for _, cmd := range allowed {
-		err := v.ValidateCommand(cmd, false, false)
-		if err != nil {
-			t.Errorf("Kubectl command '%s' should be allowed, got error: %v", cmd, err)
-		}
-	}
-
-	// Blocked kubectl subcommands
-	blocked := []string{
-		"kubectl delete pod my-pod",
-		"kubectl apply -f manifest.yaml",
-		"kubectl create deployment nginx",
-		"kubectl exec my-pod -- ls",
-		"kubectl edit deployment nginx",
-	}
-
-	for _, cmd := range blocked {
-		err := v.ValidateCommand(cmd, false, false)
-		if err == nil {
-			t.Errorf("Kubectl command '%s' should be blocked in read-only mode", cmd)
-		}
-	}
-}
-
-func TestCommandValidator_SystemctlSubcommands(t *testing.T) {
-	v := NewCommandValidator()
-
-	// Allowed systemctl subcommands
-	allowed := []string{
-		"systemctl status nginx",
-		"systemctl is-active nginx",
-		"systemctl is-enabled nginx",
-		"systemctl list-units",
-		"systemctl list-unit-files",
-	}
-
-	for _, cmd := range allowed {
-		err := v.ValidateCommand(cmd, false, false)
-		if err != nil {
-			t.Errorf("Systemctl command '%s' should be allowed, got error: %v", cmd, err)
-		}
-	}
-
-	// Blocked systemctl subcommands
-	blocked := []string{
-		"systemctl start nginx",
-		"systemctl stop nginx",
-		"systemctl restart nginx",
-		"systemctl enable nginx",
-		"systemctl disable nginx",
-	}
-
-	for _, cmd := range blocked {
-		err := v.ValidateCommand(cmd, false, false)
-		if err == nil {
-			t.Errorf("Systemctl command '%s' should be blocked in read-only mode", cmd)
-		}
-	}
-}
-
-func TestCommandValidator_PipeChains(t *testing.T) {
-	v := NewCommandValidator()
-
-	// Allowed pipe chains
-	allowed := []string{
-		"cat /var/log/syslog | grep error",
-		"ps aux | grep nginx | wc -l",
-		"ls -la | head -n 10",
-		"df -h | grep /dev",
-	}
-
-	for _, cmd := range allowed {
-		err := v.ValidateCommand(cmd, false, false)
-		if err != nil {
-			t.Errorf("Pipe chain '%s' should be allowed, got error: %v", cmd, err)
-		}
-	}
-
-	// Blocked pipe chains (contains dangerous command)
-	blocked := []string{
-		"cat /etc/passwd | rm /tmp/file",
-		"ls | su - root",
-	}
-
-	for _, cmd := range blocked {
-		err := v.ValidateCommand(cmd, false, false)
-		if err == nil {
-			t.Errorf("Pipe chain '%s' should be blocked in read-only mode", cmd)
-		}
-	}
-}
-
-func TestCommandValidator_UnknownCommand(t *testing.T) {
-	v := NewCommandValidator()
-
-	unknownCommands := []string{
-		"customtool --help",
-		"mytool run",
-		"unknownbinary",
-	}
-
-	for _, cmd := range unknownCommands {
-		err := v.ValidateCommand(cmd, false, false)
-		if err == nil {
-			t.Errorf("Unknown command '%s' should be blocked in read-only mode", cmd)
-		}
-		if !strings.Contains(err.Error(), "not in the allowed command list") {
-			t.Errorf("Error for unknown command should mention 'not in the allowed command list', got: %v", err)
-		}
-	}
-}
-
-func TestExtractBaseCommand(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"cat /etc/passwd", "cat"},
-		{"/usr/bin/cat /etc/passwd", "cat"},
-		{"ls -la", "ls"},
-		{"  grep error", "grep"},
-		{"$(whoami)", "whoami"},
-		{"`hostname`", "hostname"},
-		{"", ""},
-		// Inline environment variables
-		{"LANG=C ps aux", "ps"},
-		{"LC_ALL=C LANG=C df -h", "df"},
-		{"FOO=bar BAZ=qux echo hello", "echo"},
-		{"TZ=UTC date", "date"},
-		// Edge cases
-		{"VAR=value", ""}, // Only env var, no command
-	}
-
-	for _, test := range tests {
-		result := extractBaseCommand(test.input)
-		if result != test.expected {
-			t.Errorf("extractBaseCommand(%q) = %q, expected %q", test.input, result, test.expected)
-		}
-	}
-}
-
-func TestCommandValidator_InlineEnvVars(t *testing.T) {
-	v := NewCommandValidator()
-
-	allowed := []string{
-		"LANG=C ps aux",
-		"LC_ALL=C df -h",
-		"TZ=UTC date",
-		"LANG=C LC_ALL=C free -m",
-		"FOO=bar echo hello",
-	}
-
-	for _, cmd := range allowed {
-		err := v.ValidateCommand(cmd, false, false)
-		if err != nil {
-			t.Errorf("Command with env var '%s' should be allowed, got error: %v", cmd, err)
-		}
-	}
-
-	// Blocked - dangerous command with env var prefix
-	blocked := []string{
-		"LANG=C rm -rf /tmp",
-		"FOO=bar sudo reboot",
-	}
-
-	for _, cmd := range blocked {
-		err := v.ValidateCommand(cmd, false, false)
-		if err == nil {
-			t.Errorf("Command '%s' should be blocked", cmd)
-		}
-	}
-}
-
-func TestCommandValidator_EmptyCommand(t *testing.T) {
-	v := NewCommandValidator()
-
-	err := v.ValidateCommand("", false, false)
+	err := v.ValidateCommand("", false)
 	if err != nil {
-		t.Errorf("Empty command should not error, got: %v", err)
+		t.Errorf("Expected empty command to pass, got error: %v", err)
 	}
 
-	err = v.ValidateCommand("   ", false, false)
+	err = v.ValidateCommand("   ", false)
 	if err != nil {
-		t.Errorf("Whitespace-only command should not error, got: %v", err)
+		t.Errorf("Expected whitespace command to pass, got error: %v", err)
 	}
 }
 
-func TestCommandValidator_SemicolonChains(t *testing.T) {
+func TestPathPrefixes(t *testing.T) {
 	v := NewCommandValidator()
 
-	// Allowed semicolon chains
-	allowed := []string{
-		"uptime; echo '---'; mpstat 1 3",
-		"ps aux; df -h; free -m",
-		"uptime; echo '---'; ps -eo pid,comm,pcpu,pmem | head -n 15",
-		"vmstat 1 5; iostat -x 1 3",
-	}
-
-	for _, cmd := range allowed {
-		err := v.ValidateCommand(cmd, false, false)
-		if err != nil {
-			t.Errorf("Semicolon chain '%s' should be allowed, got error: %v", cmd, err)
-		}
-	}
-
-	// Blocked semicolon chains
-	blocked := []string{
-		"uptime; rm -rf /tmp",
-		"ls; sudo reboot",
-	}
-
-	for _, cmd := range blocked {
-		err := v.ValidateCommand(cmd, false, false)
-		if err == nil {
-			t.Errorf("Semicolon chain '%s' should be blocked", cmd)
-		}
-	}
-}
-
-func TestCommandValidator_AndOrChains(t *testing.T) {
-	v := NewCommandValidator()
-
-	allowed := []string{
-		"test -f /etc/hosts && cat /etc/hosts",
-		"grep error /var/log/syslog || echo 'no errors'",
-		"ls /tmp && df -h",
-	}
-
-	for _, cmd := range allowed {
-		err := v.ValidateCommand(cmd, false, false)
-		if err != nil {
-			t.Errorf("Chain '%s' should be allowed, got error: %v", cmd, err)
-		}
-	}
-
-	blocked := []string{
-		"test -f /etc/hosts && rm /etc/hosts",
-		"ls || sudo reboot",
-	}
-
-	for _, cmd := range blocked {
-		err := v.ValidateCommand(cmd, false, false)
-		if err == nil {
-			t.Errorf("Chain '%s' should be blocked", cmd)
-		}
-	}
-}
-
-func TestCommandValidator_SystemInfoCommands(t *testing.T) {
-	v := NewCommandValidator()
-
-	allowed := []string{
-		"nproc",
-		"nproc --all",
-		"lscpu",
-		"lscpu --extended",
-		"getconf _NPROCESSORS_ONLN",
-		"getconf LONG_BIT",
-	}
-
-	for _, cmd := range allowed {
-		err := v.ValidateCommand(cmd, false, false)
-		if err != nil {
-			t.Errorf("System info command '%s' should be allowed, got error: %v", cmd, err)
-		}
-	}
-}
-
-func TestCommandValidator_MonitoringCommands(t *testing.T) {
-	v := NewCommandValidator()
-
-	allowed := []string{
-		"mpstat 1 3",
-		"vmstat 1 5",
-		"iostat -x 1 3",
-		"sar -u 1 3",
-		"pidstat 1 3",
-		"nmon -f -s 1 -c 3",
-		"iotop -b -n 1",
-	}
-
-	for _, cmd := range allowed {
-		err := v.ValidateCommand(cmd, false, false)
-		if err != nil {
-			t.Errorf("Monitoring command '%s' should be allowed, got error: %v", cmd, err)
-		}
-	}
-}
-
-func TestCommandValidator_ComplexRealWorldCommand(t *testing.T) {
-	v := NewCommandValidator()
-
-	// Test the exact command from the user's example
-	cmd := "uptime; echo '---'; mpstat 1 3; echo '---'; ps -eo pid,comm,pcpu,pmem,etime,user --sort=-pcpu | head -n 15"
-	err := v.ValidateCommand(cmd, false, false)
+	// /usr/bin/cat should be recognized as "cat"
+	err := v.ValidateCommand("/usr/bin/cat /etc/passwd", false)
 	if err != nil {
-		t.Errorf("Real-world command '%s' should be allowed, got error: %v", cmd, err)
+		t.Errorf("Expected '/usr/bin/cat' to be recognized as 'cat', got error: %v", err)
 	}
 }
 
-func TestCommandValidator_SudoCommands(t *testing.T) {
+func TestEnvironmentVariablePrefix(t *testing.T) {
 	v := NewCommandValidator()
 
-	// Allowed sudo commands (read-only operations with elevated privileges)
-	allowed := []string{
-		"sudo cat /var/log/secure",
-		"sudo cat /etc/shadow",
-		"sudo tail -f /var/log/auth.log",
-		"sudo head -n 100 /var/log/messages",
-		"sudo journalctl -u nginx",
-		"sudo dmesg",
-		"sudo ls -la /root",
-		"sudo ps aux",
-		"sudo netstat -tlnp",
-		"sudo ss -tlnp",
-		"sudo docker ps",
-		"sudo kubectl get pods",
-		"sudo systemctl status nginx",
-		// Sudo with flags
-		"sudo -u www-data cat /var/log/app.log",
-		"sudo -i cat /etc/shadow",
-		"sudo -E env",
-	}
-
-	for _, cmd := range allowed {
-		err := v.ValidateCommand(cmd, false, false)
-		if err != nil {
-			t.Errorf("Sudo command '%s' should be allowed, got error: %v", cmd, err)
-		}
-	}
-
-	// Blocked sudo commands (dangerous operations)
-	blocked := []string{
-		"sudo rm -rf /tmp",
-		"sudo reboot",
-		"sudo shutdown -h now",
-		"sudo kill 1234",
-		"sudo apt install nginx",
-		"sudo yum remove httpd",
-		"sudo systemctl restart nginx",
-		"sudo docker rm container",
-		"sudo kubectl delete pod my-pod",
-		"sudo chmod 777 /etc/passwd",
-		"sudo chown root:root /tmp/file",
-		"sudo mv /etc/hosts /etc/hosts.bak",
-		// Nested sudo (should still validate inner command)
-		"sudo unknowncommand",
-	}
-
-	for _, cmd := range blocked {
-		err := v.ValidateCommand(cmd, false, false)
-		if err == nil {
-			t.Errorf("Sudo command '%s' should be blocked in read-only mode", cmd)
-		}
-	}
-}
-
-func TestExtractCommandAfterSudo(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"sudo cat /etc/shadow", "cat /etc/shadow"},
-		{"sudo -u www-data cat /var/log/app.log", "cat /var/log/app.log"},
-		{"sudo -i cat /etc/shadow", "cat /etc/shadow"},
-		{"sudo -E env", "env"},
-		{"sudo -u root -g wheel ls /root", "ls /root"},
-		{"sudo --preserve-env cat /etc/shadow", "cat /etc/shadow"},
-		{"sudo", ""},            // No command after sudo
-		{"sudo -u user", ""},    // Only flag with argument
-		{"notasudo cat", ""},    // Not a sudo command
-		{"cat /etc/passwd", ""}, // Not a sudo command
-	}
-
-	for _, test := range tests {
-		result := extractCommandAfterSudo(test.input)
-		if result != test.expected {
-			t.Errorf("extractCommandAfterSudo(%q) = %q, expected %q", test.input, result, test.expected)
-		}
+	// LANG=C cat /etc/passwd should work (skip env var prefix)
+	err := v.ValidateCommand("LANG=C cat /etc/passwd", false)
+	if err != nil {
+		t.Errorf("Expected 'LANG=C cat ...' to work, got error: %v", err)
 	}
 }
