@@ -100,6 +100,70 @@ func TestHandleLLMSettings_ListWithConfigs(t *testing.T) {
 	}
 }
 
+func TestHandleLLMSettings_ListUsesLowestPKEnabledFallback(t *testing.T) {
+	h := setupLLMHandlerTest(t)
+	first := seedLLMConfig(t, "Z Enabled OpenAI", database.LLMProviderOpenAI, false)
+	seedLLMConfig(t, "A Enabled Anthropic", database.LLMProviderAnthropic, false)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/llm", nil)
+	w := httptest.NewRecorder()
+	h.handleLLMSettings(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if uint(resp["active_id"].(float64)) != first.ID {
+		t.Errorf("expected active_id to use lowest enabled PK %d, got %v", first.ID, resp["active_id"])
+	}
+}
+
+func TestHandleLLMSettings_ListUsesLowestPKWhenNoActiveOrEnabled(t *testing.T) {
+	h := setupLLMHandlerTest(t)
+	first := &database.LLMSettings{
+		Name:          "Z Disabled OpenAI",
+		Provider:      database.LLMProviderOpenAI,
+		Model:         "gpt-4",
+		ThinkingLevel: database.ThinkingLevelMedium,
+		Enabled:       false,
+		Active:        false,
+	}
+	if err := database.CreateLLMSettings(first); err != nil {
+		t.Fatalf("seed first disabled config: %v", err)
+	}
+	second := &database.LLMSettings{
+		Name:          "A Disabled Anthropic",
+		Provider:      database.LLMProviderAnthropic,
+		Model:         "claude-sonnet-4",
+		ThinkingLevel: database.ThinkingLevelMedium,
+		Enabled:       false,
+		Active:        false,
+	}
+	if err := database.CreateLLMSettings(second); err != nil {
+		t.Fatalf("seed second disabled config: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/llm", nil)
+	w := httptest.NewRecorder()
+	h.handleLLMSettings(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if uint(resp["active_id"].(float64)) != first.ID {
+		t.Errorf("expected active_id to use lowest PK %d, got %v", first.ID, resp["active_id"])
+	}
+}
+
 func TestHandleLLMSettings_Create(t *testing.T) {
 	h := setupLLMHandlerTest(t)
 
