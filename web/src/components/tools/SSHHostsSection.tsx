@@ -442,7 +442,7 @@ export default function SSHHostsSection({
                     </div>
                     <div>
                       <p className="font-medium text-gray-700 dark:text-gray-300 mb-1">Fork Bomb</p>
-                      <p className="text-gray-600 dark:text-gray-400 text-xs">:(){ :|:& };:</p>
+                      <p className="text-gray-600 dark:text-gray-400 text-xs">{'():(){ :|:& };:'}</p>
                     </div>
                   </div>
                   <div className="bg-red-50 dark:bg-red-900/20 rounded p-2 text-xs text-red-800 dark:text-red-300 mt-2">
