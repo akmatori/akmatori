@@ -1,4 +1,4 @@
-import { Plus, Save, X, Trash2, Key, Star, Shield, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { Plus, Save, X, Trash2, Key, Star, Shield, ShieldAlert, ShieldCheck, Info, ChevronDown, ChevronUp } from 'lucide-react';
 import type { SSHKey } from '../../types';
 
 interface SSHKeysSectionProps {
