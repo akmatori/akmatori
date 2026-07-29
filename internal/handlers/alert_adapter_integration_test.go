@@ -378,6 +378,75 @@ func TestWebhookHandler_AlertmanagerEndpointUsesRealServiceAndAdapter(t *testing
 	}
 }
 
+func TestWebhookHandler_RejectsDisabledInstanceBeforeParsing(t *testing.T) {
+	service, cleanup := setupWebhookHandlerIntegrationDB(t)
+	defer cleanup()
+
+	instance, err := service.CreateInstance(
+		"alertmanager",
+		"Disabled Alertmanager",
+		"Webhook temporarily paused by an operator",
+		"webhook-secret",
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("create alertmanager instance: %v", err)
+	}
+	if err := service.UpdateInstance(instance.UUID, map[string]interface{}{"enabled": false}); err != nil {
+		t.Fatalf("disable alertmanager instance: %v", err)
+	}
+
+	h := NewAlertHandler(nil, nil, nil, nil, nil, service, nil)
+	h.RegisterAdapter(adapters.NewAlertmanagerAdapter())
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/alert/"+instance.UUID, strings.NewReader(`{"alerts":[`))
+	req.Header.Set("X-Alertmanager-Secret", "webhook-secret")
+	w := httptest.NewRecorder()
+
+	h.HandleWebhook(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d; body=%q", w.Code, http.StatusForbidden, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "Instance disabled") {
+		t.Fatalf("body = %q, want Instance disabled", w.Body.String())
+	}
+}
+
+func TestWebhookHandler_RejectsRegisteredSourceTypeWithoutAdapter(t *testing.T) {
+	service, cleanup := setupWebhookHandlerIntegrationDB(t)
+	defer cleanup()
+
+	instance, err := service.CreateInstance(
+		"grafana",
+		"Grafana without runtime adapter",
+		"Misconfigured webhook boot path",
+		"grafana-secret",
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("create grafana instance: %v", err)
+	}
+
+	h := NewAlertHandler(nil, nil, nil, nil, nil, service, nil)
+	// Intentionally do not register the Grafana adapter. The handler should
+	// reject the request before secret validation or payload parsing.
+	req := httptest.NewRequest(http.MethodPost, "/webhook/alert/"+instance.UUID, strings.NewReader(`{"alerts":[`))
+	req.Header.Set("X-Grafana-Secret", "grafana-secret")
+	w := httptest.NewRecorder()
+
+	h.HandleWebhook(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%q", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "Unsupported source type") {
+		t.Fatalf("body = %q, want Unsupported source type", w.Body.String())
+	}
+}
+
 func TestWebhookHandler_AlertmanagerBatchCreatesIncidentsForFiringAlerts(t *testing.T) {
 	service, cleanup := setupWebhookHandlerIntegrationDB(t)
 	defer cleanup()
