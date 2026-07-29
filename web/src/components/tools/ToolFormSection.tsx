@@ -102,7 +102,7 @@ export default function ToolFormSection({
       setAllowList(Array.isArray(formData.settings.ssh_allow_list) ? formData.settings.ssh_allow_list : []);
       setAllowWriteCommands(!!formData.settings.ssh_allow_write_commands);
     }
-  }, [editingToolId, isCreating, formData.tool_type_id, formData?.settings]);
+  }, [editingToolId, isCreating, formData.tool_type_id]);
 
   // Sync Command Policies back to formData
   useEffect(() => {
