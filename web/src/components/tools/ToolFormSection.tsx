@@ -40,22 +40,34 @@ interface ToolFormSectionProps {
   onCancel: () => void;
 }
 
+const COMMAND_POLICY_KEYS = new Set(['ssh_deny_list', 'ssh_allow_list', 'ssh_allow_write_commands']);
+
 function getSchemaProperties(schema: any) {
   const properties = schema?.properties || {};
   const basicProps: [string, any][] = [];
-  const advancedProps: [string, any][] = [];
+  const adhocProps: [string, any][] = [];
+  const commandPolicyProps: [string, any][] = [];
+  const otherAdvancedProps: [string, any][] = [];
 
   Object.entries(properties).forEach(([key, prop]: [string, any]) => {
     if (key === 'ssh_hosts' || key === 'ssh_keys' || key === 'ssh_private_key') return;
 
     if (prop.advanced) {
-      advancedProps.push([key, prop]);
+      if (key.startsWith('ssh_adhoc_')) {
+        adhocProps.push([key, prop]);
+      } else if (COMMAND_POLICY_KEYS.has(key)) {
+        commandPolicyProps.push([key, prop]);
+      } else {
+        otherAdvancedProps.push([key, prop]);
+      }
     } else {
       basicProps.push([key, prop]);
     }
   });
 
-  return { basicProps, advancedProps };
+  const advancedProps = [...adhocProps, ...commandPolicyProps, ...otherAdvancedProps];
+
+  return { basicProps, advancedProps, adhocProps, commandPolicyProps, otherAdvancedProps };
 }
 
 export default function ToolFormSection({
@@ -308,11 +320,12 @@ export default function ToolFormSection({
 
               {/* Basic (non-advanced) properties */}
               {(() => {
-                const { basicProps, advancedProps } = getSchemaProperties(selectedSchema.settings_schema);
+                const { basicProps, advancedProps, adhocProps, commandPolicyProps, otherAdvancedProps } = getSchemaProperties(selectedSchema.settings_schema);
+                const required = selectedSchema.settings_schema.required || [];
                 return (
                   <>
                     {basicProps.map(([key, prop]) =>
-                      renderPropertyInput(key, prop, selectedSchema.settings_schema.required?.includes(key) || false)
+                      renderPropertyInput(key, prop, required.includes(key))
                     )}
 
                     {/* Advanced toggle */}
@@ -344,9 +357,35 @@ export default function ToolFormSection({
                         </div>
 
                         {showAdvanced && (
-                          <div className="mt-4 space-y-4 pl-4 border-l-2 border-gray-200 dark:border-gray-700">
-                            {advancedProps.map(([key, prop]) =>
-                              renderPropertyInput(key, prop, selectedSchema.settings_schema.required?.includes(key) || false)
+                          <div className="mt-4 space-y-6 pl-4 border-l-2 border-gray-200 dark:border-gray-700">
+                            {/* AD Hoc Settings */}
+                            {adhocProps.length > 0 && (
+                              <div className="space-y-4">
+                                <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">AD Hoc Settings</h4>
+                                {adhocProps.map(([key, prop]) =>
+                                  renderPropertyInput(key, prop, required.includes(key))
+                                )}
+                              </div>
+                            )}
+
+                            {/* Command Policies */}
+                            {commandPolicyProps.length > 0 && (
+                              <div className="space-y-4">
+                                <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Command Policies</h4>
+                                {commandPolicyProps.map(([key, prop]) =>
+                                  renderPropertyInput(key, prop, required.includes(key))
+                                )}
+                              </div>
+                            )}
+
+                            {/* Remaining advanced settings */}
+                            {otherAdvancedProps.length > 0 && (
+                              <div className="space-y-4">
+                                <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Other Settings</h4>
+                                {otherAdvancedProps.map(([key, prop]) =>
+                                  renderPropertyInput(key, prop, required.includes(key))
+                                )}
+                              </div>
                             )}
                           </div>
                         )}
