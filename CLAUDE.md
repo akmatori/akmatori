@@ -8,7 +8,7 @@ Akmatori is an AI-powered AIOps platform for SRE teams. It ingests alerts from m
 
 - Docker deployment: API, Agent Worker, MCP Gateway, PostgreSQL
 - Backend: Go 1.25
-- Agent Worker: Node.js 22+ / TypeScript with `@earendil-works/pi-coding-agent` (`v0.78.1`)
+- Agent Worker: Node.js 22+ / TypeScript with `@earendil-works/pi-coding-agent` (`0.80.6`)
 - Frontend: React 19 + TypeScript + Vite + Tailwind
 - Database: PostgreSQL 16 + GORM
 - LLM providers: Anthropic, OpenAI, Google, OpenRouter, NVIDIA NIM, MiniMax, Ant Ling, custom/on-prem
@@ -370,6 +370,7 @@ Command: `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build <
 
 - session resume is NOT used — Slack and proposal chat start fresh agent sessions per turn
 - `/api/settings/slack` returns 410 Gone
+- `docs/CONTRIBUTING.md` and `docs/TOOL_ARCHITECTURE.md` still describe the retired Python tool/Quick Start path; live tool routing is gateway-first via `gateway_call`
 
 ## When Editing This File
 
