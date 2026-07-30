@@ -1,4 +1,4 @@
-import { Plus, Trash2, ChevronDown, ChevronUp, Server, Key, Info, X, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, Server, Key, Info, X, ShieldCheck, ShieldAlert, Settings } from 'lucide-react';
 import type { SSHKey, SSHHostConfig } from '../../types';
 import { useState } from 'react';
 
@@ -113,115 +113,144 @@ export default function SSHHostsSection({
           {/* Advanced Fields (collapsible) */}
           {expandedHosts.includes(index) && (
             <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Advanced Options</p>
-                <button
-                  type="button"
-                  onClick={() => setShowCommandPolicyHelp(true)}
-                  className="btn btn-ghost btn-sm p-1 text-blue-500 hover:text-blue-700 dark:hover:text-blue-300"
-                  title="Command Policy Documentation"
-                >
-                  <Info className="w-4 h-4" />
-                </button>
-              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Advanced Options</p>
 
-              {/* User and Port */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-                    SSH User <span className="text-gray-400">(default: root)</span>
-                  </label>
-                  <input
-                    type="text"
-                    className="input-field"
-                    placeholder="root"
-                    value={host.user || ''}
-                    onChange={(e) => onUpdateHost(index, 'user', e.target.value)}
-                  />
+              {/* General Command Options */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Settings className="w-3 h-3 text-gray-400" />
+                  <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">General Command Options</p>
                 </div>
-                <div>
-                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-                    SSH Port <span className="text-gray-400">(default: 22)</span>
-                  </label>
-                  <input
-                    type="number"
-                    className="input-field"
-                    placeholder="22"
-                    value={host.port || ''}
-                    onChange={(e) => onUpdateHost(index, 'port', e.target.value ? parseInt(e.target.value) : undefined)}
-                  />
-                </div>
-              </div>
+                <div className="space-y-4">
+                  {/* User and Port */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                        SSH User <span className="text-gray-400">(default: root)</span>
+                      </label>
+                      <input
+                        type="text"
+                        className="input-field"
+                        placeholder="root"
+                        value={host.user || ''}
+                        onChange={(e) => onUpdateHost(index, 'user', e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                        SSH Port <span className="text-gray-400">(default: 22)</span>
+                      </label>
+                      <input
+                        type="number"
+                        className="input-field"
+                        placeholder="22"
+                        value={host.port || ''}
+                        onChange={(e) => onUpdateHost(index, 'port', e.target.value ? parseInt(e.target.value) : undefined)}
+                      />
+                    </div>
+                  </div>
 
-              {/* SSH Key Selection */}
-              {sshKeys.length > 0 && (
-                <div>
-                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
-                    <Key className="w-3 h-3 inline mr-1" />
-                    SSH Key
-                  </label>
-                  <select
-                    className="input-field"
-                    value={host.key_id || ''}
-                    onChange={(e) => onUpdateHost(index, 'key_id', e.target.value || undefined)}
-                  >
-                    <option value="">
-                      Use Default ({getDefaultKey()?.name || 'none'})
-                    </option>
-                    {sshKeys.filter(k => !k.is_default).map((key) => (
-                      <option key={key.id} value={key.id}>
-                        {key.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Jumphost Configuration */}
-              <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-3">
-                <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-3">
-                  <Server className="w-3 h-3 inline mr-1" />
-                  Jumphost / Bastion (optional)
-                </p>
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Address</label>
-                    <input
-                      type="text"
-                      className="input-field"
-                      placeholder="bastion.example.com"
-                      value={host.jumphost_address || ''}
-                      onChange={(e) => onUpdateHost(index, 'jumphost_address', e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">User</label>
-                    <input
-                      type="text"
-                      className="input-field"
-                      placeholder="(same as host)"
-                      value={host.jumphost_user || ''}
-                      onChange={(e) => onUpdateHost(index, 'jumphost_user', e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Port</label>
-                    <input
-                      type="number"
-                      className="input-field"
-                      placeholder="22"
-                      value={host.jumphost_port || ''}
-                      onChange={(e) => onUpdateHost(index, 'jumphost_port', e.target.value ? parseInt(e.target.value) : undefined)}
-                    />
-                  </div>
+                  {/* SSH Key Selection */}
+                  {sshKeys.length > 0 && (
+                    <div>
+                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                        <Key className="w-3 h-3 inline mr-1" />
+                        SSH Key
+                      </label>
+                      <select
+                        className="input-field"
+                        value={host.key_id || ''}
+                        onChange={(e) => onUpdateHost(index, 'key_id', e.target.value || undefined)}
+                      >
+                        <option value="">
+                          Use Default ({getDefaultKey()?.name || 'none'})
+                        </option>
+                        {sshKeys.filter(k => !k.is_default).map((key) => (
+                          <option key={key.id} value={key.id}>
+                            {key.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Info: Command Policies are configured at tool level */}
-              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 border border-blue-200 dark:border-blue-800">
-                <p className="text-xs text-blue-700 dark:text-blue-300">
-                  <strong>Command Policies:</strong> Command validation (deny list, allow list, write commands) is configured at the tool level in the SSH Keys section. These settings apply to ALL hosts in this tool instance.
-                </p>
+              {/* Divider */}
+              <div className="border-t border-gray-200 dark:border-gray-700 my-4"></div>
+
+              {/* Jumphost / Bastion Connection */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Server className="w-3 h-3 text-gray-400" />
+                  <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">Jumphost / Bastion Connection</p>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-3">
+                  <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-3">
+                    <Server className="w-3 h-3 inline mr-1" />
+                    Jumphost / Bastion (optional)
+                  </p>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Address</label>
+                      <input
+                        type="text"
+                        className="input-field"
+                        placeholder="bastion.example.com"
+                        value={host.jumphost_address || ''}
+                        onChange={(e) => onUpdateHost(index, 'jumphost_address', e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">User</label>
+                      <input
+                        type="text"
+                        className="input-field"
+                        placeholder="(same as host)"
+                        value={host.jumphost_user || ''}
+                        onChange={(e) => onUpdateHost(index, 'jumphost_user', e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Port</label>
+                      <input
+                        type="number"
+                        className="input-field"
+                        placeholder="22"
+                        value={host.jumphost_port || ''}
+                        onChange={(e) => onUpdateHost(index, 'jumphost_port', e.target.value ? parseInt(e.target.value) : undefined)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div className="border-t border-gray-200 dark:border-gray-700 my-4"></div>
+
+              {/* Command Policies */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <ShieldCheck className="w-3 h-3 text-gray-400" />
+                  <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide">Command Policies</p>
+                </div>
+
+                {/* Info: Command Policies are configured at tool level */}
+                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 border border-blue-200 dark:border-blue-800">
+                  <div className="flex items-start gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowCommandPolicyHelp(true)}
+                      className="btn btn-ghost btn-sm p-1 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200 flex-shrink-0 mt-0.5"
+                      title="Command Policy Documentation"
+                    >
+                      <Info className="w-4 h-4" />
+                    </button>
+                    <p className="text-xs text-blue-700 dark:text-blue-300">
+                      <strong>Command Policies:</strong> Command validation (deny list, allow list, write commands) is configured at the tool level in the SSH Keys section. These settings apply to ALL hosts in this tool instance.
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           )}
