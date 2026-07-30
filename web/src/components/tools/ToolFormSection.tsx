@@ -289,12 +289,6 @@ export default function ToolFormSection({
                   onDeleteSSHKey={onDeleteSSHKey}
                   onSetDefaultKey={onSetDefaultKey}
                   getDefaultKey={getDefaultKey}
-                  denyList={denyList}
-                  setDenyList={setDenyList}
-                  allowList={allowList}
-                  setAllowList={setAllowList}
-                  allowWriteCommands={allowWriteCommands}
-                  setAllowWriteCommands={setAllowWriteCommands}
                 />
               )}
 
