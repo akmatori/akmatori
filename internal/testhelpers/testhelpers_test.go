@@ -95,6 +95,29 @@ func TestHTTPTestContext_WithJSONBody(t *testing.T) {
 	}
 }
 
+func TestNewJSONHTTPTestContext(t *testing.T) {
+	body := map[string]string{"key": "value"}
+	ctx := NewJSONHTTPTestContext(t, http.MethodPut, "/api/test", body)
+
+	if ctx.Request.Method != http.MethodPut {
+		t.Errorf("expected method PUT, got %s", ctx.Request.Method)
+	}
+	if ctx.Request.URL.Path != "/api/test" {
+		t.Errorf("expected path /api/test, got %s", ctx.Request.URL.Path)
+	}
+	if got := ctx.Request.Header.Get("Content-Type"); got != "application/json" {
+		t.Errorf("expected Content-Type application/json, got %q", got)
+	}
+
+	var decoded map[string]string
+	if err := json.NewDecoder(ctx.Request.Body).Decode(&decoded); err != nil {
+		t.Fatalf("failed to decode request body: %v", err)
+	}
+	if decoded["key"] != "value" {
+		t.Fatalf("expected JSON body to contain key=value, got %#v", decoded)
+	}
+}
+
 func TestHTTPTestContext_WithJSONBody_PreservesHeaders(t *testing.T) {
 	ctx := NewHTTPTestContext(t, http.MethodPost, "/test", nil).
 		WithHeader("X-Test-Header", "kept").

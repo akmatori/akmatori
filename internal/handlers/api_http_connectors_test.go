@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +8,7 @@ import (
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/testhelpers"
 )
 
 // mockHTTPConnectorService implements services.HTTPConnectorManager for testing
@@ -153,16 +153,12 @@ func TestHandleHTTPConnectors_Create(t *testing.T) {
 			},
 		},
 	}
-	bodyBytes, _ := json.Marshal(body)
+	ctx := testhelpers.NewJSONHTTPTestContext(t, http.MethodPost, "/api/http-connectors", body)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/http-connectors", bytes.NewReader(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
+	h.handleHTTPConnectors(ctx.Recorder, ctx.Request)
 
-	h.handleHTTPConnectors(w, req)
-
-	if w.Code != http.StatusCreated {
-		t.Errorf("expected 201, got %d: %s", w.Code, w.Body.String())
+	if ctx.Recorder.Code != http.StatusCreated {
+		t.Errorf("expected 201, got %d: %s", ctx.Recorder.Code, ctx.Recorder.Body.String())
 	}
 
 	if mock.lastCreate == nil {
@@ -197,15 +193,12 @@ func TestHandleHTTPConnectors_Create_MissingFields(t *testing.T) {
 			mock := &mockHTTPConnectorService{}
 			h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, mock, nil)
 
-			bodyBytes, _ := json.Marshal(tt.body)
-			req := httptest.NewRequest(http.MethodPost, "/api/http-connectors", bytes.NewReader(bodyBytes))
-			req.Header.Set("Content-Type", "application/json")
-			w := httptest.NewRecorder()
+			ctx := testhelpers.NewJSONHTTPTestContext(t, http.MethodPost, "/api/http-connectors", tt.body)
 
-			h.handleHTTPConnectors(w, req)
+			h.handleHTTPConnectors(ctx.Recorder, ctx.Request)
 
-			if w.Code != http.StatusBadRequest {
-				t.Errorf("expected 400, got %d", w.Code)
+			if ctx.Recorder.Code != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d", ctx.Recorder.Code)
 			}
 		})
 	}
@@ -223,15 +216,12 @@ func TestHandleHTTPConnectors_Create_Conflict(t *testing.T) {
 		BaseURLField: "url",
 		Tools:        database.JSONB{"tools": []interface{}{}},
 	}
-	bodyBytes, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPost, "/api/http-connectors", bytes.NewReader(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
+	ctx := testhelpers.NewJSONHTTPTestContext(t, http.MethodPost, "/api/http-connectors", body)
 
-	h.handleHTTPConnectors(w, req)
+	h.handleHTTPConnectors(ctx.Recorder, ctx.Request)
 
-	if w.Code != http.StatusConflict {
-		t.Errorf("expected 409, got %d", w.Code)
+	if ctx.Recorder.Code != http.StatusConflict {
+		t.Errorf("expected 409, got %d", ctx.Recorder.Code)
 	}
 }
 
@@ -318,16 +308,12 @@ func TestHandleHTTPConnectorByID_Update(t *testing.T) {
 	body := UpdateHTTPConnectorRequest{
 		Description: &desc,
 	}
-	bodyBytes, _ := json.Marshal(body)
+	ctx := testhelpers.NewJSONHTTPTestContext(t, http.MethodPut, "/api/http-connectors/1", body)
 
-	req := httptest.NewRequest(http.MethodPut, "/api/http-connectors/1", bytes.NewReader(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
+	h.handleHTTPConnectorByID(ctx.Recorder, ctx.Request)
 
-	h.handleHTTPConnectorByID(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	if ctx.Recorder.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", ctx.Recorder.Code, ctx.Recorder.Body.String())
 	}
 }
 
@@ -340,16 +326,12 @@ func TestHandleHTTPConnectorByID_UpdateNotFound(t *testing.T) {
 
 	desc := "Updated"
 	body := UpdateHTTPConnectorRequest{Description: &desc}
-	bodyBytes, _ := json.Marshal(body)
+	ctx := testhelpers.NewJSONHTTPTestContext(t, http.MethodPut, "/api/http-connectors/999", body)
 
-	req := httptest.NewRequest(http.MethodPut, "/api/http-connectors/999", bytes.NewReader(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
+	h.handleHTTPConnectorByID(ctx.Recorder, ctx.Request)
 
-	h.handleHTTPConnectorByID(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("expected 404, got %d", w.Code)
+	if ctx.Recorder.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", ctx.Recorder.Code)
 	}
 }
 
@@ -477,15 +459,12 @@ func TestHandleHTTPConnectors_CreateValidationError(t *testing.T) {
 		BaseURLField: "url",
 		Tools:        database.JSONB{"tools": []interface{}{}},
 	}
-	bodyBytes, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPost, "/api/http-connectors", bytes.NewReader(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
+	ctx := testhelpers.NewJSONHTTPTestContext(t, http.MethodPost, "/api/http-connectors", body)
 
-	h.handleHTTPConnectors(w, req)
+	h.handleHTTPConnectors(ctx.Recorder, ctx.Request)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", w.Code)
+	if ctx.Recorder.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", ctx.Recorder.Code)
 	}
 }
 

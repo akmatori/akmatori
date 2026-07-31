@@ -49,6 +49,12 @@ func NewHTTPTestContext(t *testing.T, method, path string, body io.Reader) *HTTP
 	}
 }
 
+// NewJSONHTTPTestContext creates an HTTP test context with a JSON request body.
+func NewJSONHTTPTestContext(t *testing.T, method, path string, body interface{}) *HTTPTestContext {
+	t.Helper()
+	return NewHTTPTestContext(t, method, path, nil).WithJSONBody(body)
+}
+
 // WithHeader adds a header to the request
 func (ctx *HTTPTestContext) WithHeader(key, value string) *HTTPTestContext {
 	ctx.Request.Header.Set(key, value)
