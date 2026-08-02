@@ -63,7 +63,9 @@ func (s *SkillService) SyncSkillAssets(skillName string, prompt string) error {
 	for _, entry := range entries {
 		if !currentRefSet[entry.Name()] {
 			entryPath := filepath.Join(assetsDir, entry.Name())
-			os.Remove(entryPath)
+			if err := os.Remove(entryPath); err != nil {
+				slog.Warn("failed to remove stale skill asset", "path", entryPath, "err", err)
+			}
 		}
 	}
 
@@ -80,7 +82,10 @@ func (s *SkillService) SyncSkillAssets(skillName string, prompt string) error {
 
 		// Remove existing entry (file or symlink) to ensure fresh symlink
 		if _, err := os.Lstat(dstPath); err == nil {
-			os.Remove(dstPath)
+			if err := os.Remove(dstPath); err != nil {
+				slog.Warn("failed to remove existing skill asset", "path", dstPath, "err", err)
+				continue
+			}
 		}
 
 		// Create symlink pointing to /akmatori/context/{filename}
@@ -152,7 +157,7 @@ func ValidateScriptFilename(filename string) error {
 
 	// Only allow alphanumeric, underscore, dash, and dot characters
 	for _, c := range filename {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.') {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '_' && c != '-' && c != '.' {
 			return fmt.Errorf("invalid filename: only alphanumeric, underscore, dash, and dot characters allowed")
 		}
 	}

@@ -521,7 +521,7 @@ func TestRetryUntil_Timeout(t *testing.T) {
 
 func TestWithEnv(t *testing.T) {
 	key := "TEST_HELPER_ENV_VAR"
-	os.Unsetenv(key) // Ensure it's not set
+	_ = os.Unsetenv(key) // Ensure it's not set
 
 	cleanup := WithEnv(t, key, "test-value")
 
@@ -554,7 +554,9 @@ func TestWithEnv_AutoCleanup(t *testing.T) {
 
 func TestWithEnv_RestoresOriginal(t *testing.T) {
 	key := "TEST_HELPER_ENV_VAR_RESTORE"
-	os.Setenv(key, "original")
+	if err := os.Setenv(key, "original"); err != nil {
+		t.Fatalf("failed to set env var: %v", err)
+	}
 
 	cleanup := WithEnv(t, key, "modified")
 
@@ -568,7 +570,7 @@ func TestWithEnv_RestoresOriginal(t *testing.T) {
 		t.Errorf("expected env var to be 'original' after cleanup, got %q", got)
 	}
 
-	os.Unsetenv(key)
+	_ = os.Unsetenv(key)
 }
 
 func TestWithEnv_AutoCleanup_RestoresOriginal(t *testing.T) {
@@ -576,7 +578,7 @@ func TestWithEnv_AutoCleanup_RestoresOriginal(t *testing.T) {
 	if err := os.Setenv(key, "original"); err != nil {
 		t.Fatalf("failed to set env var: %v", err)
 	}
-	defer os.Unsetenv(key)
+	defer func() { _ = os.Unsetenv(key) }()
 
 	t.Run("overrides env", func(t *testing.T) {
 		WithEnv(t, key, "modified")

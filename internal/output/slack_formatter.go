@@ -60,18 +60,18 @@ func formatFinalResultForSlack(result *FinalResult, additionalContext string) st
 	// Status emoji and header
 	statusEmoji := getStatusEmoji(result.Status)
 	statusText := cases.Title(language.English).String(result.Status)
-	sb.WriteString(fmt.Sprintf("%s *%s*\n\n", statusEmoji, statusText))
+	fmt.Fprintf(&sb, "%s *%s*\n\n", statusEmoji, statusText)
 
 	// Summary
 	if result.Summary != "" {
-		sb.WriteString(fmt.Sprintf("*Summary*\n%s\n", result.Summary))
+		fmt.Fprintf(&sb, "*Summary*\n%s\n", result.Summary)
 	}
 
 	// Actions taken
 	if len(result.ActionsTaken) > 0 {
 		sb.WriteString("\n*Actions Taken*\n")
 		for _, action := range result.ActionsTaken {
-			sb.WriteString(fmt.Sprintf("• %s\n", action))
+			fmt.Fprintf(&sb, "• %s\n", action)
 		}
 	}
 
@@ -79,13 +79,13 @@ func formatFinalResultForSlack(result *FinalResult, additionalContext string) st
 	if len(result.Recommendations) > 0 {
 		sb.WriteString("\n*Recommendations*\n")
 		for _, rec := range result.Recommendations {
-			sb.WriteString(fmt.Sprintf("• %s\n", rec))
+			fmt.Fprintf(&sb, "• %s\n", rec)
 		}
 	}
 
 	// Add any additional context that was outside the structured block
 	if additionalContext != "" {
-		sb.WriteString(fmt.Sprintf("\n---\n%s", additionalContext))
+		fmt.Fprintf(&sb, "\n---\n%s", additionalContext)
 	}
 
 	return sb.String()
@@ -97,29 +97,29 @@ func formatEscalationForSlack(esc *Escalation, additionalContext string) string 
 
 	// Urgency emoji and header
 	urgencyEmoji := getUrgencyEmoji(esc.Urgency)
-	sb.WriteString(fmt.Sprintf("%s *ESCALATION REQUIRED* (%s)\n\n", urgencyEmoji, strings.ToUpper(esc.Urgency)))
+	fmt.Fprintf(&sb, "%s *ESCALATION REQUIRED* (%s)\n\n", urgencyEmoji, strings.ToUpper(esc.Urgency))
 
 	// Reason
 	if esc.Reason != "" {
-		sb.WriteString(fmt.Sprintf("*Reason*\n%s\n", esc.Reason))
+		fmt.Fprintf(&sb, "*Reason*\n%s\n", esc.Reason)
 	}
 
 	// Context
 	if esc.Context != "" {
-		sb.WriteString(fmt.Sprintf("\n*Context*\n%s\n", esc.Context))
+		fmt.Fprintf(&sb, "\n*Context*\n%s\n", esc.Context)
 	}
 
 	// Suggested actions
 	if len(esc.SuggestedActions) > 0 {
 		sb.WriteString("\n*Suggested Actions*\n")
 		for _, action := range esc.SuggestedActions {
-			sb.WriteString(fmt.Sprintf("• %s\n", action))
+			fmt.Fprintf(&sb, "• %s\n", action)
 		}
 	}
 
 	// Add any additional context
 	if additionalContext != "" {
-		sb.WriteString(fmt.Sprintf("\n---\n%s", additionalContext))
+		fmt.Fprintf(&sb, "\n---\n%s", additionalContext)
 	}
 
 	return sb.String()
@@ -132,19 +132,19 @@ func formatProgressForSlack(progress *Progress, additionalContext string) string
 	sb.WriteString("🔄 *Progress Update*\n\n")
 
 	if progress.Step != "" {
-		sb.WriteString(fmt.Sprintf("*Current Step*: %s\n", progress.Step))
+		fmt.Fprintf(&sb, "*Current Step*: %s\n", progress.Step)
 	}
 
 	if progress.Completed != "" {
-		sb.WriteString(fmt.Sprintf("*Progress*: %s\n", progress.Completed))
+		fmt.Fprintf(&sb, "*Progress*: %s\n", progress.Completed)
 	}
 
 	if progress.FindingsSoFar != "" {
-		sb.WriteString(fmt.Sprintf("\n*Findings So Far*\n%s\n", progress.FindingsSoFar))
+		fmt.Fprintf(&sb, "\n*Findings So Far*\n%s\n", progress.FindingsSoFar)
 	}
 
 	if additionalContext != "" {
-		sb.WriteString(fmt.Sprintf("\n---\n%s", additionalContext))
+		fmt.Fprintf(&sb, "\n---\n%s", additionalContext)
 	}
 
 	return sb.String()

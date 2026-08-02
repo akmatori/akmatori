@@ -91,7 +91,8 @@ func inferValue(dec *json.Decoder, name string) (fieldSpec, error) {
 	}
 	switch v := tok.(type) {
 	case json.Delim:
-		if v == '{' {
+		switch v {
+		case '{':
 			children, err := inferObjectFields(dec)
 			if err != nil {
 				return fieldSpec{}, err
@@ -100,8 +101,7 @@ func inferValue(dec *json.Decoder, name string) (fieldSpec, error) {
 				return fieldSpec{}, fmt.Errorf("empty object for key %q: include at least one field", name)
 			}
 			return fieldSpec{Name: name, Kind: "object", Children: children}, nil
-		}
-		if v == '[' {
+		case '[':
 			return inferArray(dec, name)
 		}
 		return fieldSpec{}, fmt.Errorf("unexpected delimiter %q for key %q", v, name)
@@ -139,7 +139,8 @@ func inferArray(dec *json.Decoder, name string) (fieldSpec, error) {
 
 	switch v := tok.(type) {
 	case json.Delim:
-		if v == '{' {
+		switch v {
+		case '{':
 			// list-of-objects: use first element's schema for children.
 			children, err := inferObjectFields(dec)
 			if err != nil {
@@ -150,9 +151,9 @@ func inferArray(dec *json.Decoder, name string) (fieldSpec, error) {
 			}
 			spec.Kind = "list_object"
 			spec.Children = children
-		} else if v == '[' {
+		case '[':
 			return fieldSpec{}, fmt.Errorf("array-of-arrays not supported for key %q: use strings, numbers, bools, or objects as array elements", name)
-		} else {
+		default:
 			return fieldSpec{}, fmt.Errorf("unexpected delimiter %q in array %q", v, name)
 		}
 	case string:
@@ -177,7 +178,8 @@ func inferArray(dec *json.Decoder, name string) (fieldSpec, error) {
 		case nil:
 			return fieldSpec{}, fmt.Errorf("null element in array %q: null is not a supported element type", name)
 		case json.Delim:
-			if v == '{' {
+			switch v {
+			case '{':
 				if spec.Kind != "list_object" {
 					return fieldSpec{}, fmt.Errorf("mixed element types in array %q: expected %s elements, got object", name, spec.Kind)
 				}
@@ -189,9 +191,9 @@ func inferArray(dec *json.Decoder, name string) (fieldSpec, error) {
 				if err := checkLaterObjectCompatibility(spec.Children, laterChildren, name); err != nil {
 					return fieldSpec{}, err
 				}
-			} else if v == '[' {
+			case '[':
 				return fieldSpec{}, fmt.Errorf("mixed element types in array %q: expected %s elements, got array", name, spec.Kind)
-			} else {
+			default:
 				return fieldSpec{}, fmt.Errorf("unexpected delimiter %q in array %q", v, name)
 			}
 		case string:

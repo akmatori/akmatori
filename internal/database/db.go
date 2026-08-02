@@ -85,7 +85,7 @@ func AutoMigrate() error {
 	// connection pool can dispatch each Exec to a different connection,
 	// causing the lock to protect nothing and potentially leak.
 	// SQLite (tests) is single-writer and needs no lock.
-	if DB.Dialector.Name() == "postgres" {
+	if DB.Name() == "postgres" {
 		return DB.Connection(func(conn *gorm.DB) error {
 			if err := conn.Exec("SELECT pg_advisory_lock(742819001)").Error; err != nil {
 				return fmt.Errorf("acquire migration lock: %w", err)

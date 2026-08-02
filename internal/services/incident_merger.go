@@ -314,9 +314,9 @@ func buildMergeUserPrompt(incident *database.Incident, candidates []candidateRow
 
 	var sb strings.Builder
 	sb.WriteString("Just-completed incident:\n")
-	sb.WriteString(fmt.Sprintf("  Title: %s\n", sanitizeForPrompt(incident.Title)))
-	sb.WriteString(fmt.Sprintf("  Diagnosis: %s\n",
-		truncateForPrompt(sanitizeForPrompt(strings.TrimSpace(incident.Response)), diagnosisCap)))
+	fmt.Fprintf(&sb, "  Title: %s\n", sanitizeForPrompt(incident.Title))
+	fmt.Fprintf(&sb, "  Diagnosis: %s\n",
+		truncateForPrompt(sanitizeForPrompt(strings.TrimSpace(incident.Response)), diagnosisCap))
 
 	sb.WriteString("\nEarlier investigated incidents (most recent first):\n")
 	now := time.Now()
@@ -326,9 +326,9 @@ func buildMergeUserPrompt(incident *database.Incident, candidates []candidateRow
 		if title == "" {
 			title = "(no title)"
 		}
-		sb.WriteString(fmt.Sprintf("\n%d. UUID: %s\n   Age: %s\n   Title: %s\n   Diagnosis: %s\n",
+		fmt.Fprintf(&sb, "\n%d. UUID: %s\n   Age: %s\n   Title: %s\n   Diagnosis: %s\n",
 			i+1, cand.UUID, age, sanitizeForPrompt(title),
-			truncateForPrompt(sanitizeForPrompt(strings.TrimSpace(cand.Response)), candidateCap)))
+			truncateForPrompt(sanitizeForPrompt(strings.TrimSpace(cand.Response)), candidateCap))
 	}
 	return sb.String()
 }

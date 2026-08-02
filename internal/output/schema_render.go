@@ -61,12 +61,12 @@ func renderField(spec FieldSpec, val any) string {
 			return ""
 		}
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("*%s:*\n", heading))
+		fmt.Fprintf(&sb, "*%s:*\n", heading)
 		for _, elem := range arr {
 			if spec.Kind == "list_number" {
-				sb.WriteString(fmt.Sprintf(" • %s\n", formatNumber(elem)))
+				fmt.Fprintf(&sb, " • %s\n", formatNumber(elem))
 			} else {
-				sb.WriteString(fmt.Sprintf(" • %v\n", elem))
+				fmt.Fprintf(&sb, " • %v\n", elem)
 			}
 		}
 		return sb.String()
@@ -99,7 +99,7 @@ func renderField(spec FieldSpec, val any) string {
 				}
 			}
 			if len(parts) > 0 {
-				bullets.WriteString(fmt.Sprintf(" • %s\n", strings.Join(parts, " | ")))
+				fmt.Fprintf(&bullets, " • %s\n", strings.Join(parts, " | "))
 			}
 		}
 		if bullets.Len() == 0 {
@@ -119,9 +119,9 @@ func renderField(spec FieldSpec, val any) string {
 			}
 			switch child.Kind {
 			case "string", "bool":
-				children.WriteString(fmt.Sprintf(" • %s: %v\n", titleCase(child.Name), cv))
+				fmt.Fprintf(&children, " • %s: %v\n", titleCase(child.Name), cv)
 			case "number":
-				children.WriteString(fmt.Sprintf(" • %s: %s\n", titleCase(child.Name), formatNumber(cv)))
+				fmt.Fprintf(&children, " • %s: %s\n", titleCase(child.Name), formatNumber(cv))
 			default:
 				if rendered := renderField(child, cv); rendered != "" {
 					children.WriteString(rendered)

@@ -183,7 +183,7 @@ func (s *SkillService) generateSkillMd(name, description, body string, tools []d
 			if logicalName == "" {
 				logicalName = tool.Name
 			}
-			toolsSection.WriteString(fmt.Sprintf("\n### %s (logical_name: \"%s\", type: %s)\n", tool.Name, logicalName, tool.ToolType.Name))
+			fmt.Fprintf(&toolsSection, "\n### %s (logical_name: \"%s\", type: %s)\n", tool.Name, logicalName, tool.ToolType.Name)
 			if details := extractToolDetails(tool); details != "" {
 				toolsSection.WriteString(details)
 			}
@@ -276,7 +276,7 @@ func (s *SkillService) renderMemoryRecallSection(scope string, incidentUUID stri
 		uuidArg = incidentUUIDFromCwdPlaceholder
 	}
 	b.WriteString("\n### Record durable findings\n\n")
-	b.WriteString(fmt.Sprintf(memoryWriteInstructionTemplate, scope, scope, uuidArg))
+	fmt.Fprintf(&b, memoryWriteInstructionTemplate, scope, scope, uuidArg)
 	b.WriteString("\n")
 	return b.String()
 }
@@ -397,7 +397,7 @@ For CPU core count use ` + "`nproc`" + ` or ` + "`lscpu`" + ` (not /proc/cpuinfo
 				"Ad-hoc connections allow write commands.\n"
 		} else if hasConfiguredHosts && configuredHostsWritable && adhocEnabled && !adhocWriteEnabled {
 			readOnlyNote = "\n**Read-only mode is enabled for ad-hoc connections** — only diagnostic commands are allowed on ad-hoc targets.\n" + readOnlyCommands
-		} else if !configuredHostsWritable && !(adhocEnabled && adhocWriteEnabled) {
+		} else if !configuredHostsWritable && (!adhocEnabled || !adhocWriteEnabled) {
 			readOnlyNote = "\n**Read-only mode is enabled** — only diagnostic commands are allowed.\n" + readOnlyCommands
 		}
 
@@ -800,7 +800,7 @@ func extractToolDetails(tool database.ToolInstance) string {
 						}
 					}
 					if len(hostnames) > 0 {
-						details.WriteString(fmt.Sprintf("Configured hosts: %s\n", strings.Join(hostnames, ", ")))
+						fmt.Fprintf(&details, "Configured hosts: %s\n", strings.Join(hostnames, ", "))
 					}
 				}
 			}
@@ -816,7 +816,7 @@ func extractToolDetails(tool database.ToolInstance) string {
 			if p, ok := tool.Settings["adhoc_default_port"].(float64); ok && p > 0 {
 				port = int(p)
 			}
-			details.WriteString(fmt.Sprintf("Ad-hoc connections enabled: can connect to any server (default user: %s, port: %d)\n", user, port))
+			fmt.Fprintf(&details, "Ad-hoc connections enabled: can connect to any server (default user: %s, port: %d)\n", user, port)
 			if allowWrite, ok := tool.Settings["adhoc_allow_write_commands"].(bool); ok && allowWrite {
 				details.WriteString("Ad-hoc write commands: allowed\n")
 			} else {

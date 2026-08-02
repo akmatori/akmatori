@@ -374,7 +374,7 @@ func (s *MemoryService) SyncMemoryFiles() error {
 	if err != nil {
 		return fmt.Errorf("open memory root: %w", err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	var memories []database.Memory
 	if err := s.db.Order("created_at desc").Find(&memories).Error; err != nil {
@@ -431,7 +431,7 @@ func (s *MemoryService) SyncMemoryFiles() error {
 			}
 		}
 		if writeErr != nil {
-			scopeRoot.Close()
+			_ = scopeRoot.Close()
 			return writeErr
 		}
 
@@ -441,14 +441,16 @@ func (s *MemoryService) SyncMemoryFiles() error {
 			manifest += fmt.Sprintf("<!-- truncated: %d more entries not shown -->\n", truncatedCount)
 		}
 		if err := writeMemoryFileInRoot(scopeRoot, manifestFile, []byte(manifest)); err != nil {
-			scopeRoot.Close()
+			_ = scopeRoot.Close()
 			return fmt.Errorf("failed to write manifest %s/%s: %w", scope, manifestFile, err)
 		}
 
 		if err := removeStaleFilesInRoot(scopeRoot, expectedFiles); err != nil {
 			slog.Warn("failed to clean stale memory files", "scope", scope, "err", err)
 		}
-		scopeRoot.Close()
+		if err := scopeRoot.Close(); err != nil {
+			slog.Warn("failed to close memory scope root", "scope", scope, "err", err)
+		}
 	}
 
 	if err := removeStaleScopesInRoot(root, expectedScopes); err != nil {
@@ -561,7 +563,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 		}
 		return fmt.Errorf("open memory root: %w", err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	scopeEntries, err := readDirFromRoot(root, ".")
 	if err != nil {
@@ -752,7 +754,7 @@ func readDirFromRoot(root *os.Root, name string) ([]os.DirEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	entries, err := dir.ReadDir(-1)
 	if err != nil {
 		return nil, err
@@ -784,7 +786,7 @@ func readMemoryFileFromRoot(root *os.Root, rel string) ([]byte, bool) {
 		slog.Warn("memory ingest: open file", "path", rel, "err", err)
 		return nil, false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	info, err := f.Stat()
 	if err != nil {
@@ -1107,7 +1109,9 @@ func removeStaleFilesInRoot(scopeRoot *os.Root, keep map[string]bool) error {
 		return err
 	}
 	entries, err := dir.ReadDir(-1)
-	dir.Close()
+	if closeErr := dir.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
 	if err != nil {
 		return err
 	}
@@ -1138,7 +1142,9 @@ func removeStaleScopesInRoot(root *os.Root, keep map[string]bool) error {
 		return err
 	}
 	entries, err := dir.ReadDir(-1)
-	dir.Close()
+	if closeErr := dir.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
 	if err != nil {
 		return err
 	}

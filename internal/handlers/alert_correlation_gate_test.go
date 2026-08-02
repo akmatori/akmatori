@@ -143,10 +143,6 @@ func (c *corrOneShotLLMCaller) OneShotLLM(ctx context.Context, _ *services.LLMSe
 	return `{"correlated":false,"incident_uuid":"","confidence":0.1,"reasoning":"no match"}`, nil
 }
 
-func (c *corrOneShotLLMCaller) callCount() int {
-	return int(atomic.LoadInt32(&c.calls))
-}
-
 // setupCorrelatorHandlerDB opens an isolated in-memory DB with the tables
 // needed by AlertCorrelator and seeds LLM settings so GetLLMSettings works.
 func setupCorrelatorHandlerDB(t *testing.T) *gorm.DB {

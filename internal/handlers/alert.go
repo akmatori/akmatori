@@ -202,7 +202,11 @@ func (h *AlertHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// Read request body (limit to 10 MB to prevent DoS)
 	const maxWebhookBodySize = 10 * 1024 * 1024
-	defer r.Body.Close()
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			slog.Warn("failed to close webhook body", "err", err)
+		}
+	}()
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxWebhookBodySize))
 	if err != nil {
 		slog.Error("failed to read webhook body", "err", err)
@@ -226,5 +230,7 @@ func (h *AlertHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Received %d alerts", len(normalizedAlerts))
+	if _, err := fmt.Fprintf(w, "Received %d alerts", len(normalizedAlerts)); err != nil {
+		slog.Warn("failed to write webhook response", "err", err)
+	}
 }

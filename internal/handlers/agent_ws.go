@@ -213,7 +213,9 @@ func (h *AgentWSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 	h.mu.Lock()
 	if h.workerConn != nil {
 		// Close existing connection
-		h.workerConn.Close()
+		if err := h.workerConn.Close(); err != nil {
+			slog.Warn("failed to close existing worker connection", "err", err)
+		}
 	}
 	h.workerConn = conn
 	h.workerReady = true
@@ -292,7 +294,9 @@ func (h *AgentWSHandler) cleanupWorkerConn(conn *websocket.Conn) {
 		h.workerReady = false
 	}
 	h.mu.Unlock()
-	conn.Close()
+	if err := conn.Close(); err != nil {
+		slog.Warn("failed to close worker connection", "err", err)
+	}
 
 	h.failPendingOneshotForConn(conn, ErrWorkerNotConnected.Error())
 	h.failCallbacksForConn(conn, ErrWorkerNotConnected.Error())

@@ -252,15 +252,15 @@ func TestAlertHandler_getBaseURL(t *testing.T) {
 	h := NewAlertHandler(nil, nil, nil, nil, nil, nil, nil)
 
 	// Test default value
-	os.Unsetenv("AKMATORI_BASE_URL")
+	t.Setenv("AKMATORI_BASE_URL", "")
+	_ = os.Unsetenv("AKMATORI_BASE_URL")
 	url := h.getBaseURL()
 	if url != "http://localhost:3000" {
 		t.Errorf("getBaseURL() with no env = %q, want %q", url, "http://localhost:3000")
 	}
 
 	// Test with env var set
-	os.Setenv("AKMATORI_BASE_URL", "https://akmatori.example.com")
-	defer os.Unsetenv("AKMATORI_BASE_URL")
+	t.Setenv("AKMATORI_BASE_URL", "https://akmatori.example.com")
 
 	url = h.getBaseURL()
 	if url != "https://akmatori.example.com" {
@@ -826,8 +826,7 @@ func TestBuildSlackFooter_WithoutMetrics(t *testing.T) {
 }
 
 func TestBuildSlackFooter_UILink(t *testing.T) {
-	os.Setenv("AKMATORI_BASE_URL", "https://akmatori.example.com")
-	defer os.Unsetenv("AKMATORI_BASE_URL")
+	t.Setenv("AKMATORI_BASE_URL", "https://akmatori.example.com")
 
 	_, footer := buildSlackFooter("some response", "uuid-123")
 
@@ -837,7 +836,7 @@ func TestBuildSlackFooter_UILink(t *testing.T) {
 }
 
 func TestBuildSlackFooter_UILinkDefaultBaseURL(t *testing.T) {
-	os.Unsetenv("AKMATORI_BASE_URL")
+	_ = os.Unsetenv("AKMATORI_BASE_URL")
 
 	_, footer := buildSlackFooter("some response", "uuid-456")
 
@@ -864,7 +863,7 @@ func TestBuildSlackFooter_MetricsExtractedCorrectly(t *testing.T) {
 }
 
 func TestBuildSlackFooter_FooterFormat(t *testing.T) {
-	os.Unsetenv("AKMATORI_BASE_URL")
+	_ = os.Unsetenv("AKMATORI_BASE_URL")
 
 	response := "Done.\n\n---\n⏱️ Time: 5s | 🎯 Tokens: 100"
 	_, footer := buildSlackFooter(response, "inc-1")

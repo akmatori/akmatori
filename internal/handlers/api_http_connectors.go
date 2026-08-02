@@ -186,7 +186,7 @@ func GatewayReloadFunc(gatewayURL string) func() error {
 		if err != nil {
 			return fmt.Errorf("gateway reload request failed: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("gateway reload returned status %d", resp.StatusCode)
 		}
@@ -201,7 +201,7 @@ func GatewayMCPReloadFunc(gatewayURL string) func() error {
 		if err != nil {
 			return fmt.Errorf("gateway MCP reload request failed: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("gateway MCP reload returned status %d", resp.StatusCode)
 		}

@@ -19,7 +19,7 @@ func TestValidateFilename_ValidNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	s := &ContextService{contextDir: tmpDir}
 
@@ -50,7 +50,7 @@ func TestValidateFilename_InvalidNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	s := &ContextService{contextDir: tmpDir}
 
@@ -84,7 +84,7 @@ func TestValidateFileType_ValidExtensions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	s := &ContextService{contextDir: tmpDir}
 
@@ -103,7 +103,7 @@ func TestValidateFileType_InvalidExtensions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	s := &ContextService{contextDir: tmpDir}
 
@@ -130,7 +130,7 @@ func TestValidateFileType_CaseInsensitive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	s := &ContextService{contextDir: tmpDir}
 
@@ -157,7 +157,7 @@ func TestValidateFileType_NoExtension(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	s := &ContextService{contextDir: tmpDir}
 
@@ -305,7 +305,7 @@ func TestNewContextService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	s, err := NewContextService(tmpDir)
 	if err != nil {
@@ -336,7 +336,7 @@ func TestNewContextService_CreatesDirRecursively(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Use nested path that doesn't exist
 	nestedPath := filepath.Join(tmpDir, "data", "nested", "path")
@@ -364,7 +364,7 @@ func TestValidateFilename_BoundaryLength(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	s := &ContextService{contextDir: tmpDir}
 

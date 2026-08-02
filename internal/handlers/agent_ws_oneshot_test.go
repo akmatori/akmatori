@@ -56,14 +56,14 @@ func setupOneshotTest(t *testing.T) (*AgentWSHandler, *websocket.Conn, func()) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if !handler.IsWorkerConnected() {
-		conn.Close()
+		_ = conn.Close()
 		server.Close()
 		database.DB = prevDB
 		t.Fatal("worker did not register as connected")
 	}
 
 	cleanup := func() {
-		conn.Close()
+		_ = conn.Close()
 		server.Close()
 		database.DB = prevDB
 	}
@@ -321,7 +321,7 @@ func TestOneShotLLM_WorkerDisconnectWakesPending(t *testing.T) {
 	_ = readOneshotRequest(t, conn)
 
 	// Simulate the worker dropping by closing the WebSocket on the worker side.
-	conn.Close()
+	_ = conn.Close()
 
 	select {
 	case err := <-resCh:
@@ -370,7 +370,7 @@ func TestCleanupWorkerConn_PerConnRouting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial A: %v", err)
 	}
-	defer connA.Close()
+	defer func() { _ = connA.Close() }()
 	deadline := time.Now().Add(2 * time.Second)
 	for !handler.IsWorkerConnected() && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
@@ -387,7 +387,7 @@ func TestCleanupWorkerConn_PerConnRouting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial B: %v", err)
 	}
-	defer connB.Close()
+	defer func() { _ = connB.Close() }()
 	deadline = time.Now().Add(2 * time.Second)
 	var connBServer *websocket.Conn
 	for time.Now().Before(deadline) {
@@ -518,7 +518,7 @@ func TestStartIncident_WorkerDisconnectFiresOnError(t *testing.T) {
 	_ = readNewIncidentRequest(t, conn)
 
 	// Force the worker drop. cleanupWorkerConn must wake the registered callback.
-	conn.Close()
+	_ = conn.Close()
 
 	select {
 	case <-done:
@@ -1189,7 +1189,7 @@ func TestFailCallbacksForConn_SkipsFinalizedEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer wsConn.Close()
+	defer func() { _ = wsConn.Close() }()
 	deadline := time.Now().Add(2 * time.Second)
 	for !handler.IsWorkerConnected() && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
@@ -1251,7 +1251,7 @@ func TestCleanupWorkerConn_PerConnCallbackRouting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial A: %v", err)
 	}
-	defer connA.Close()
+	defer func() { _ = connA.Close() }()
 	deadline := time.Now().Add(2 * time.Second)
 	for !handler.IsWorkerConnected() && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
@@ -1268,7 +1268,7 @@ func TestCleanupWorkerConn_PerConnCallbackRouting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial B: %v", err)
 	}
-	defer connB.Close()
+	defer func() { _ = connB.Close() }()
 	deadline = time.Now().Add(2 * time.Second)
 	var connBServer *websocket.Conn
 	for time.Now().Before(deadline) {

@@ -506,11 +506,11 @@ func TestCanonicalIngestName(t *testing.T) {
 		{"5-foo.md", "foo", true},
 		{"123-foo-bar.md", "foo-bar", true},
 		{"foo.md", "foo", false},
-		{"-foo.md", "foo", false},          // empty numeric prefix
-		{"abc-foo.md", "foo", false},       // non-numeric prefix
-		{"5-foo.md", "different", false},   // name mismatch
-		{"5-foo-extra.md", "foo", false},   // trailing extra not part of name
-		{"5foo.md", "foo", false},          // no hyphen separator
+		{"-foo.md", "foo", false},        // empty numeric prefix
+		{"abc-foo.md", "foo", false},     // non-numeric prefix
+		{"5-foo.md", "different", false}, // name mismatch
+		{"5-foo-extra.md", "foo", false}, // trailing extra not part of name
+		{"5foo.md", "foo", false},        // no hyphen separator
 	}
 	for _, c := range cases {
 		if got := canonicalIngestName(c.filename, c.name); got != c.want {
@@ -570,7 +570,7 @@ func TestReadMemoryFileFromRoot_RejectsSymlinkAtPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open root: %v", err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	if _, ok := readMemoryFileFromRoot(root, "link.md"); ok {
 		t.Fatalf("readMemoryFileFromRoot should refuse to open a symlink path")
@@ -604,7 +604,7 @@ func TestReadMemoryFileFromRoot_RejectsSymlinkAtParentComponent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open root: %v", err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	// os.Root.Open must refuse to traverse the escape symlink because its
 	// target lives outside the pinned root.
@@ -627,7 +627,7 @@ func TestReadMemoryFileFromRoot_RejectsFifoAtPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open root: %v", err)
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 
 	done := make(chan struct {
 		ok bool

@@ -295,7 +295,7 @@ func buildSlackFooter(response, incidentUUID string) (responseWithoutMetrics, fo
 		sb.WriteString(metricsLine)
 		sb.WriteString("\n")
 	}
-	sb.WriteString(fmt.Sprintf("<%s/incidents/%s|View reasoning log>", baseURL, incidentUUID))
+	fmt.Fprintf(&sb, "<%s/incidents/%s|View reasoning log>", baseURL, incidentUUID)
 	footer = sb.String()
 	return
 }

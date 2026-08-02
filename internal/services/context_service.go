@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -127,11 +128,17 @@ func (s *ContextService) SaveFile(filename, originalName, mimeType, description 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			slog.Warn("failed to close context file", "path", filePath, "err", err)
+		}
+	}()
 
 	written, err := io.Copy(file, content)
 	if err != nil {
-		os.Remove(filePath) // Clean up on error
+		if removeErr := os.Remove(filePath); removeErr != nil {
+			slog.Warn("failed to remove context file after write error", "path", filePath, "err", removeErr)
+		}
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
@@ -145,7 +152,9 @@ func (s *ContextService) SaveFile(filename, originalName, mimeType, description 
 	}
 
 	if err := s.db.Create(contextFile).Error; err != nil {
-		os.Remove(filePath) // Clean up on error
+		if removeErr := os.Remove(filePath); removeErr != nil {
+			slog.Warn("failed to remove context file after database error", "path", filePath, "err", removeErr)
+		}
 		return nil, fmt.Errorf("failed to create database record: %w", err)
 	}
 

@@ -127,7 +127,7 @@ func isChannelID(s string) bool {
 	}
 	// Check if rest is alphanumeric
 	for _, c := range s[1:] {
-		if !((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+		if (c < 'A' || c > 'Z') && (c < '0' || c > '9') {
 			return false
 		}
 	}

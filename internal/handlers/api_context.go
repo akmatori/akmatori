@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -32,7 +33,11 @@ func (h *APIHandler) handleContext(w http.ResponseWriter, r *http.Request) {
 			api.RespondError(w, http.StatusBadRequest, "Failed to get file")
 			return
 		}
-		defer file.Close()
+		defer func() {
+			if err := file.Close(); err != nil {
+				slog.Warn("failed to close uploaded context file", "err", err)
+			}
+		}()
 
 		filename := r.FormValue("filename")
 		if filename == "" {

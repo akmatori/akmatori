@@ -227,16 +227,22 @@ func (h *SlackHandler) HandleSocketMode(socketClient *socketmode.Client) {
 				slog.Info("received Events API event", "outer_type", eventsAPIEvent.Type, "inner_type", eventsAPIEvent.InnerEvent.Type)
 
 				// Ack immediately to avoid Slack retries
-				socketClient.Ack(*evt.Request)
+				if err := socketClient.Ack(*evt.Request); err != nil {
+					slog.Warn("failed to ack Slack Events API event", "err", err)
+				}
 
 				// Process event in a goroutine to handle multiple messages concurrently
 				go h.handleEventsAPI(eventsAPIEvent)
 
 			case socketmode.EventTypeInteractive:
-				socketClient.Ack(*evt.Request)
+				if err := socketClient.Ack(*evt.Request); err != nil {
+					slog.Warn("failed to ack Slack interactive event", "err", err)
+				}
 
 			case socketmode.EventTypeSlashCommand:
-				socketClient.Ack(*evt.Request)
+				if err := socketClient.Ack(*evt.Request); err != nil {
+					slog.Warn("failed to ack Slack slash command", "err", err)
+				}
 
 			case socketmode.EventTypeConnecting,
 				socketmode.EventTypeConnected,

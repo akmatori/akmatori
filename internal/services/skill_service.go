@@ -22,8 +22,8 @@ type SkillService struct {
 	memoryDir        string // /akmatori/memory - cross-incident memory mirror
 	toolService      *ToolService
 	contextService   *ContextService
-	oneShotLLMCaller OneShotLLMCaller      // optional; nil = title generation falls back deterministically
-	memoryIngester   MemoryIngester        // optional; nil = post-investigation file ingest is a no-op
+	oneShotLLMCaller OneShotLLMCaller       // optional; nil = title generation falls back deterministically
+	memoryIngester   MemoryIngester         // optional; nil = post-investigation file ingest is a no-op
 	incidentMerger   IncidentMergeEvaluator // optional; nil = post-investigation merge pass is a no-op
 }
 
@@ -142,7 +142,9 @@ func (s *SkillService) CreateSkill(name, description, category, prompt string) (
 
 	if err := s.db.Create(skill).Error; err != nil {
 		// Clean up filesystem on DB error
-		os.RemoveAll(skillDir)
+		if removeErr := os.RemoveAll(skillDir); removeErr != nil {
+			slog.Warn("failed to clean skill directory after database error", "dir", skillDir, "err", removeErr)
+		}
 		return nil, fmt.Errorf("failed to create skill record: %w", err)
 	}
 

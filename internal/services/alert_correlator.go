@@ -205,12 +205,12 @@ func buildCorrelationUserPrompt(alert alerts.NormalizedAlert, candidates []candi
 
 	var sb strings.Builder
 	sb.WriteString("Incoming alert:\n")
-	sb.WriteString(fmt.Sprintf("  Name: %s\n", truncateForPrompt(sanitizeForPrompt(alert.AlertName), snippetCap)))
+	fmt.Fprintf(&sb, "  Name: %s\n", truncateForPrompt(sanitizeForPrompt(alert.AlertName), snippetCap))
 	if alert.TargetHost != "" {
-		sb.WriteString(fmt.Sprintf("  Host: %s\n", truncateForPrompt(sanitizeForPrompt(alert.TargetHost), snippetCap)))
+		fmt.Fprintf(&sb, "  Host: %s\n", truncateForPrompt(sanitizeForPrompt(alert.TargetHost), snippetCap))
 	}
 	if alert.Summary != "" {
-		sb.WriteString(fmt.Sprintf("  Summary: %s\n", truncateForPrompt(sanitizeForPrompt(alert.Summary), snippetCap)))
+		fmt.Fprintf(&sb, "  Summary: %s\n", truncateForPrompt(sanitizeForPrompt(alert.Summary), snippetCap))
 	}
 
 	sb.WriteString("\nCandidate incidents (most recent first):\n")
@@ -232,10 +232,10 @@ func buildCorrelationUserPrompt(alert alerts.NormalizedAlert, candidates []candi
 			}
 		}
 
-		sb.WriteString(fmt.Sprintf("\n%d. UUID: %s\n   Status: %s | Age: %s\n   Title: %s\n",
-			i+1, cand.UUID, sanitizeForPrompt(string(cand.Status)), age, sanitizeForPrompt(title)))
+		fmt.Fprintf(&sb, "\n%d. UUID: %s\n   Status: %s | Age: %s\n   Title: %s\n",
+			i+1, cand.UUID, sanitizeForPrompt(string(cand.Status)), age, sanitizeForPrompt(title))
 		if snippet != "" {
-			sb.WriteString(fmt.Sprintf("   Snippet: %s\n", snippet))
+			fmt.Fprintf(&sb, "   Snippet: %s\n", snippet)
 		}
 	}
 
