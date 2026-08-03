@@ -192,6 +192,50 @@ func TestRunbookService_ListRunbooks_ReturnsAlphabeticalTitles(t *testing.T) {
 	}
 }
 
+func TestRunbookService_SyncRunbookFiles_PrunesStaleFilesButKeepsDirectories(t *testing.T) {
+	svc, runbooksDir := setupRunbookServiceTest(t)
+
+	runbook, err := svc.CreateRunbook("Database failover", "Promote replica")
+	if err != nil {
+		t.Fatalf("CreateRunbook() error = %v", err)
+	}
+
+	stalePath := filepath.Join(runbooksDir, "999-old-runbook.md")
+	if err := os.WriteFile(stalePath, []byte("stale"), 0644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", stalePath, err)
+	}
+
+	nestedDir := filepath.Join(runbooksDir, "attachments")
+	if err := os.Mkdir(nestedDir, 0755); err != nil {
+		t.Fatalf("Mkdir(%q) error = %v", nestedDir, err)
+	}
+	nestedFile := filepath.Join(nestedDir, "diagram.txt")
+	if err := os.WriteFile(nestedFile, []byte("keep"), 0644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", nestedFile, err)
+	}
+
+	if err := svc.SyncRunbookFiles(); err != nil {
+		t.Fatalf("SyncRunbookFiles() error = %v", err)
+	}
+
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Fatalf("stale file %q still exists, stat err = %v", stalePath, err)
+	}
+	if _, err := os.Stat(nestedFile); err != nil {
+		t.Fatalf("nested runbook asset %q should remain, stat err = %v", nestedFile, err)
+	}
+
+	expectedRunbookPath := filepath.Join(runbooksDir, "1-database-failover.md")
+	content, err := os.ReadFile(expectedRunbookPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", expectedRunbookPath, err)
+	}
+	wantContent := "# " + runbook.Title + "\n\nPromote replica\n"
+	if string(content) != wantContent {
+		t.Fatalf("runbook file content = %q, want %q", string(content), wantContent)
+	}
+}
+
 func TestSlugify(t *testing.T) {
 	tests := []struct {
 		name  string
