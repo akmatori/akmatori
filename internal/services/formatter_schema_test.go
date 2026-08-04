@@ -655,6 +655,42 @@ func TestInferSchema_ExtraKeyInLaterListObjectElementReturnsError(t *testing.T) 
 	}
 }
 
+func TestInferSchema_TrailingContentReturnsError(t *testing.T) {
+	cases := []struct {
+		name       string
+		example    string
+		errInclude string
+	}{
+		{
+			name:       "second object",
+			example:    `{"status":"ok"}{"extra":"bad"}`,
+			errInclude: "trailing",
+		},
+		{
+			name:       "array after object",
+			example:    `{"status":"ok"} ["extra"]`,
+			errInclude: "trailing",
+		},
+		{
+			name:       "plain text after object",
+			example:    `{"status":"ok"} trailing text`,
+			errInclude: "invalid JSON after top-level object",
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := inferSchema(tt.example)
+			if err == nil {
+				t.Fatal("expected error for trailing content, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.errInclude) {
+				t.Fatalf("expected error to contain %q, got %q", tt.errInclude, err.Error())
+			}
+		})
+	}
+}
+
 func TestInferSchema_ListOfObjectsFollowedByField(t *testing.T) {
 	// Field AFTER a multi-element list_object must not be dropped.
 	specs, err := inferSchema(`{"hosts":[{"name":"s1"},{"name":"s2"}],"status":"ok"}`)

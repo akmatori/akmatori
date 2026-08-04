@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 
@@ -49,6 +50,12 @@ func inferSchema(example string) ([]fieldSpec, error) {
 	}
 	if len(specs) == 0 {
 		return nil, fmt.Errorf("schema example must contain at least one field")
+	}
+	if tok, err := dec.Token(); err != io.EOF {
+		if err != nil {
+			return nil, fmt.Errorf("invalid JSON after top-level object: %w", err)
+		}
+		return nil, fmt.Errorf("unexpected trailing JSON value %v after top-level object", tok)
 	}
 	return specs, nil
 }
