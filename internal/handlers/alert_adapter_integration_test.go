@@ -689,6 +689,26 @@ func TestWebhookHandler_NonAlertmanagerAdaptersCreateIncidents(t *testing.T) {
 			if incident.Context["severity"] != string(tt.wantSeverity) {
 				t.Errorf("severity = %v, want %q", incident.Context["severity"], tt.wantSeverity)
 			}
+
+			alert := waitForAlertByIncidentUUID(t, incident.UUID)
+			if alert.SourceUUID != instance.UUID {
+				t.Errorf("alert source uuid = %q, want %q", alert.SourceUUID, instance.UUID)
+			}
+			if alert.SourceFingerprint != tt.wantSourceID {
+				t.Errorf("alert source fingerprint = %q, want %q", alert.SourceFingerprint, tt.wantSourceID)
+			}
+			if alert.AlertName != tt.wantAlertName {
+				t.Errorf("alert name = %q, want %q", alert.AlertName, tt.wantAlertName)
+			}
+			if alert.TargetHost != tt.wantTargetHost {
+				t.Errorf("alert target host = %q, want %q", alert.TargetHost, tt.wantTargetHost)
+			}
+			if alert.Status != database.AlertStatusFiring {
+				t.Errorf("alert status = %q, want %q", alert.Status, database.AlertStatusFiring)
+			}
+			if alert.CorrelationDecision != "not_evaluated" {
+				t.Errorf("alert correlation decision = %q, want not_evaluated", alert.CorrelationDecision)
+			}
 		})
 	}
 }
@@ -705,6 +725,23 @@ func waitForIncidentBySourceID(t *testing.T, sourceUUID string, sourceID string)
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("incident with source_uuid=%q source_id=%q was not created: %v", sourceUUID, sourceID, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitForAlertByIncidentUUID(t *testing.T, incidentUUID string) database.Alert {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var alert database.Alert
+		err := database.DB.Where("incident_uuid = ?", incidentUUID).First(&alert).Error
+		if err == nil {
+			return alert
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("alert for incident_uuid=%q was not created: %v", incidentUUID, err)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
