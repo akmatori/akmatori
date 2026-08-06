@@ -183,7 +183,7 @@ Rules:
 - creating deprecated `slack_channel` sources must fail; inbound listening belongs to `can_listen=true` Channels
 - `notification_channel_uuid` is optional on alert sources; when set, resolve to a post-capable Channel before create/update
 - webhook handlers: fetch instance, reject disabled rows, find adapter by source type, validate secret, then parse body
-- adapter integration tests: real `AlertService` + real adapter for at least one happy, bad-secret, and malformed-payload path
+- adapter integration tests: real `AlertService` + real adapter for happy, bad-secret, malformed-payload, and persisted firing-alert-row paths
 
 ### Incidents tool (built-in, credential-less)
 
@@ -226,9 +226,9 @@ Rules:
 - `skill_prompt_update` targets non-system skills ONLY (enforced at gateway create AND apply — `UpdateSkillPrompt` silently no-ops for system skills); `cron_new` applies `Enabled=false`, no channel
 - proposal chat = fresh `StartIncident` per turn on the same chat incident (`source_kind="proposal"`, root skill `proposal-editor`), NEVER `ContinueIncident`; proposal state + transcript rebuilt into each task; transcript in `proposal_chat_messages` written by the handler; allowlist = `ChatToolAllowlist()` (incidents+proposals; non-nil empty on failure); no `executor.PrependGuidance`
 - `SeedImprovementEvaluatorCron()` runs from `main.go` AFTER `EnsureToolTypes()` (attaches the seeded tool instances); seeds disabled, same preserve-edits/shadow-check semantics as `SeedSystemCronJobs`
-- gateway `proposals.create` dedups against pending rows (kind+target_ref, or kind+title for `*_new`) and drops hallucinated `source_incident_uuids`; `proposals` is in `builtInToolNamespaces` and `credentiallessNamespaces`
+- gateway `proposals.create` dedups pending rows (kind+target_ref, or kind+title for `*_new`) and drops hallucinated `source_incident_uuids`; `proposals` is built-in + credentialless
 - key files: `internal/database/models_proposals.go`, `internal/services/proposal_service.go`, `internal/handlers/api_proposals.go`, `mcp-gateway/internal/tools/proposals/`, `web/src/pages/Proposals.tsx` + `ProposalDetail.tsx`
-- incident feedback UI (`IncidentFeedbackStrip`, Response tab) posts to `POST /api/incidents/{uuid}/feedback`; feedback memories feed the next evaluator run
+- incident feedback UI posts to `POST /api/incidents/{uuid}/feedback`; feedback memories feed the next evaluator run
 
 ## Important Files by Responsibility
 
