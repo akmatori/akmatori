@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/testhelpers"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -30,8 +31,9 @@ func setupRunbookServiceTest(t *testing.T) (*RunbookService, string) {
 
 func TestRunbookService_CreateRunbook_SyncsTrimmedTitleToDisk(t *testing.T) {
 	svc, runbooksDir := setupRunbookServiceTest(t)
+	runbookBody := testhelpers.LoadTextFixture(t, "runbooks/database_failover.md")
 
-	runbook, err := svc.CreateRunbook("  API outage playbook  ", "Step 1\nStep 2")
+	runbook, err := svc.CreateRunbook("  API outage playbook  ", runbookBody)
 	if err != nil {
 		t.Fatalf("CreateRunbook() error = %v", err)
 	}
@@ -44,7 +46,7 @@ func TestRunbookService_CreateRunbook_SyncsTrimmedTitleToDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRunbook() error = %v", err)
 	}
-	if stored.Content != "Step 1\nStep 2" {
+	if stored.Content != runbookBody {
 		t.Fatalf("GetRunbook() content = %q, want original content", stored.Content)
 	}
 
@@ -63,7 +65,7 @@ func TestRunbookService_CreateRunbook_SyncsTrimmedTitleToDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	wantContent := "# API outage playbook\n\nStep 1\nStep 2\n"
+	wantContent := "# API outage playbook\n\n" + runbookBody + "\n"
 	if string(content) != wantContent {
 		t.Fatalf("runbook file content = %q, want %q", string(content), wantContent)
 	}

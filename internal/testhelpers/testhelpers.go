@@ -348,6 +348,12 @@ func LoadFixture(t testing.TB, path string) []byte {
 	return bytes.Clone(data)
 }
 
+// LoadTextFixture loads a UTF-8 text fixture from tests/fixtures/.
+func LoadTextFixture(t testing.TB, path string) string {
+	t.Helper()
+	return string(LoadFixture(t, path))
+}
+
 // LoadJSONFixture loads and unmarshals a JSON fixture
 func LoadJSONFixture(t testing.TB, path string, v interface{}) {
 	t.Helper()

@@ -501,6 +501,16 @@ func TestLoadFixture_ReturnsIndependentCopy(t *testing.T) {
 	}
 }
 
+func TestLoadTextFixture(t *testing.T) {
+	content := LoadTextFixture(t, "runbooks/database_failover.md")
+	if !strings.Contains(content, "# Database Failover Runbook") {
+		t.Fatalf("expected markdown fixture title, got %q", content)
+	}
+	if !strings.Contains(content, "pg_ctl promote") {
+		t.Fatalf("expected markdown fixture command, got %q", content)
+	}
+}
+
 func TestFixturePath_RejectsTraversal(t *testing.T) {
 	_, err := fixturePath("../README.md")
 	if err == nil {
