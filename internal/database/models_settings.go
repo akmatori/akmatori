@@ -1,6 +1,7 @@
 package database
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -148,8 +149,52 @@ type LLMSettings struct {
 	BaseURL       string        `gorm:"type:text" json:"base_url"`
 	Enabled       bool          `gorm:"default:false" json:"enabled"`
 	Active        bool          `gorm:"default:false" json:"active"`
-	CreatedAt     time.Time     `json:"created_at"`
-	UpdatedAt     time.Time     `json:"updated_at"`
+
+	// Sampling overrides. NULL means "send nothing and let the provider pick",
+	// which is the historical behaviour — neither Akmatori nor pi-mono sets any
+	// of these unless an operator opts in, so an unconfigured model still runs
+	// at the provider default. Pointers (not zero values) because 0 is a
+	// meaningful setting for Temperature/TopP.
+	Temperature *float64 `gorm:"default:null" json:"temperature"`
+	TopP        *float64 `gorm:"default:null" json:"top_p"`
+	TopK        *int     `gorm:"default:null" json:"top_k"`
+	MaxTokens   *int     `gorm:"default:null" json:"max_tokens"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Sampling parameter bounds. Deliberately permissive supersets of what any one
+// provider accepts — a provider that rejects a value in range surfaces its own
+// error rather than Akmatori guessing per-provider limits.
+const (
+	SamplingTemperatureMin = 0.0
+	SamplingTemperatureMax = 2.0
+	SamplingTopPMin        = 0.0
+	SamplingTopPMax        = 1.0
+	SamplingTopKMin        = 1
+	SamplingTopKMax        = 1000
+	SamplingMaxTokensMin   = 1
+	SamplingMaxTokensMax   = 1000000
+)
+
+// ValidateSamplingParams checks any supplied sampling override against its
+// allowed range. nil values are "unset" and always valid. Returns a
+// human-readable message describing the first violation, or "" when valid.
+func ValidateSamplingParams(temperature, topP *float64, topK, maxTokens *int) string {
+	if temperature != nil && (*temperature < SamplingTemperatureMin || *temperature > SamplingTemperatureMax) {
+		return fmt.Sprintf("temperature must be between %g and %g", SamplingTemperatureMin, SamplingTemperatureMax)
+	}
+	if topP != nil && (*topP < SamplingTopPMin || *topP > SamplingTopPMax) {
+		return fmt.Sprintf("top_p must be between %g and %g", SamplingTopPMin, SamplingTopPMax)
+	}
+	if topK != nil && (*topK < SamplingTopKMin || *topK > SamplingTopKMax) {
+		return fmt.Sprintf("top_k must be between %d and %d", SamplingTopKMin, SamplingTopKMax)
+	}
+	if maxTokens != nil && (*maxTokens < SamplingMaxTokensMin || *maxTokens > SamplingMaxTokensMax) {
+		return fmt.Sprintf("max_tokens must be between %d and %d", SamplingMaxTokensMin, SamplingMaxTokensMax)
+	}
+	return ""
 }
 
 // IsConfigured returns true if the LLM provider has an API key set

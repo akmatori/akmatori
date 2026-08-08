@@ -115,6 +115,12 @@ export interface LLMConfig {
   is_configured: boolean;
   enabled: boolean;
   active: boolean;
+  // Sampling overrides. null means unset — the request omits the parameter and
+  // the provider's own default applies.
+  temperature: number | null;
+  top_p: number | null;
+  top_k: number | null;
+  max_tokens: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -131,14 +137,24 @@ export interface CreateLLMConfigRequest {
   model?: string;
   thinking_level?: string;
   base_url?: string;
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  max_tokens?: number;
 }
 
+// On update, an omitted sampling key leaves the stored value alone while an
+// explicit null clears the override back to the provider default.
 export interface UpdateLLMConfigRequest {
   name?: string;
   api_key?: string;
   model?: string;
   thinking_level?: string;
   base_url?: string;
+  temperature?: number | null;
+  top_p?: number | null;
+  top_k?: number | null;
+  max_tokens?: number | null;
 }
 
 // Proxy Settings types

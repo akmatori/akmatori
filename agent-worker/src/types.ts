@@ -71,6 +71,14 @@ export interface LLMSettings {
   model: string;
   thinking_level: ThinkingLevel;
   base_url?: string;
+
+  // Operator-configured sampling overrides. Absent means the API sent nothing
+  // for that parameter, so the request must omit it and let the provider
+  // decide — the historical behaviour for every field here.
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  max_tokens?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,9 +140,17 @@ export interface WebSocketMessage {
   request_id?: string;
   system?: string;
   user?: string;
+  summary?: string;
+
+  // Sampling parameters. Sent with new_incident/continue_incident from the
+  // active LLM config, and with oneshot_llm_request as the call-site value
+  // (already overridden by the config on the Go side when one is set). The Go
+  // struct uses pointers so an explicit 0 survives `omitempty` — treat a
+  // missing field, and only a missing field, as "provider default".
   max_tokens?: number;
   temperature?: number;
-  summary?: string;
+  top_p?: number;
+  top_k?: number;
 
   // Per-call run identifier. The API stamps a fresh run_id on every
   // new_incident / continue_incident; the worker must echo it back on every

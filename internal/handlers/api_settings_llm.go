@@ -143,6 +143,11 @@ func (h *APIHandler) createLLMConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if msg := database.ValidateSamplingParams(req.Temperature, req.TopP, req.TopK, req.MaxTokens); msg != "" {
+		api.RespondError(w, http.StatusBadRequest, msg)
+		return
+	}
+
 	thinkingLevel := database.ThinkingLevelMedium
 	if req.ThinkingLevel != "" {
 		thinkingLevel = database.ThinkingLevel(req.ThinkingLevel)
@@ -156,6 +161,10 @@ func (h *APIHandler) createLLMConfig(w http.ResponseWriter, r *http.Request) {
 		ThinkingLevel: thinkingLevel,
 		BaseURL:       req.BaseURL,
 		Enabled:       req.APIKey != "",
+		Temperature:   req.Temperature,
+		TopP:          req.TopP,
+		TopK:          req.TopK,
+		MaxTokens:     req.MaxTokens,
 	}
 
 	if err := database.CreateLLMSettings(settings); err != nil {
@@ -213,6 +222,10 @@ func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id 
 		api.RespondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid thinking_level: %s. Valid options: off, minimal, low, medium, high, xhigh, max", *req.ThinkingLevel))
 		return
 	}
+	if msg := database.ValidateSamplingParams(req.Temperature.Value, req.TopP.Value, req.TopK.Value, req.MaxTokens.Value); msg != "" {
+		api.RespondError(w, http.StatusBadRequest, msg)
+		return
+	}
 
 	updates := make(map[string]interface{})
 	if req.Name != nil {
@@ -230,6 +243,20 @@ func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id 
 	}
 	if req.BaseURL != nil {
 		updates["base_url"] = *req.BaseURL
+	}
+	// Typed nil pointers so GORM writes SQL NULL (clearing the override back to
+	// "provider default") rather than skipping the column.
+	if req.Temperature.Set {
+		updates["temperature"] = req.Temperature.Value
+	}
+	if req.TopP.Set {
+		updates["top_p"] = req.TopP.Value
+	}
+	if req.TopK.Set {
+		updates["top_k"] = req.TopK.Value
+	}
+	if req.MaxTokens.Set {
+		updates["max_tokens"] = req.MaxTokens.Value
 	}
 
 	if len(updates) == 0 {
@@ -317,7 +344,12 @@ func llmConfigResponse(s *database.LLMSettings) map[string]interface{} {
 		"is_configured":  s.APIKey != "",
 		"enabled":        s.Enabled,
 		"active":         s.Active,
-		"created_at":     s.CreatedAt,
-		"updated_at":     s.UpdatedAt,
+		// null = unset = provider default; the UI renders these as blank fields.
+		"temperature": s.Temperature,
+		"top_p":       s.TopP,
+		"top_k":       s.TopK,
+		"max_tokens":  s.MaxTokens,
+		"created_at":  s.CreatedAt,
+		"updated_at":  s.UpdatedAt,
 	}
 }

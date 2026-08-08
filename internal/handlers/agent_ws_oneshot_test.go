@@ -132,10 +132,10 @@ func TestOneShotLLM_SuccessRoundTrip(t *testing.T) {
 	if req.User != "summarize this" {
 		t.Errorf("user: got %q", req.User)
 	}
-	if req.MaxTokens != 100 {
-		t.Errorf("max_tokens: got %d", req.MaxTokens)
+	if req.MaxTokens == nil || *req.MaxTokens != 100 {
+		t.Errorf("max_tokens: got %v", req.MaxTokens)
 	}
-	if req.Temperature != 0.2 {
+	if req.Temperature == nil || *req.Temperature != 0.2 {
 		t.Errorf("temperature: got %v", req.Temperature)
 	}
 	if req.Provider != "anthropic" {
@@ -269,7 +269,10 @@ func TestOneShotLLM_ConcurrentRequestsRouted(t *testing.T) {
 	for i := n - 1; i >= 0; i-- {
 		// MaxTokens is the per-call sentinel — echo it back so we can verify
 		// each goroutine receives its own response.
-		writeOneshotResponse(t, conn, reqs[i].RequestID, formatSummary(reqs[i].MaxTokens), "")
+		if reqs[i].MaxTokens == nil {
+			t.Fatalf("request %d: max_tokens missing", i)
+		}
+		writeOneshotResponse(t, conn, reqs[i].RequestID, formatSummary(*reqs[i].MaxTokens), "")
 	}
 
 	wg.Wait()

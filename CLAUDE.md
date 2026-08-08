@@ -8,7 +8,7 @@ Akmatori is an AI-powered AIOps platform for SRE teams. It ingests alerts from m
 
 - Docker deployment: API, Agent Worker, MCP Gateway, PostgreSQL
 - Backend: Go 1.25
-- Agent Worker: Node.js 22+ / TypeScript with `@earendil-works/pi-coding-agent` (`0.80.6`)
+- Agent Worker: Node.js 22+ / TypeScript with `@earendil-works/pi-coding-agent` (`v0.82.1`)
 - Frontend: React 19 + TypeScript + Vite + Tailwind
 - Database: PostgreSQL 16 + GORM
 - LLM providers: Anthropic, OpenAI, Google, OpenRouter, NVIDIA NIM, MiniMax, Ant Ling, custom/on-prem
@@ -309,22 +309,23 @@ Akmatori intentionally keeps working when optional AI pieces fail. When adding A
 
 ## SDK Notes (`@earendil-works/pi-coding-agent`)
 
-- Current versions: pi-coding-agent, pi-ai, pi-agent-core `0.80.6`; pi-subagents `0.34.0`
-- pi-ai 0.80.0 root is core-only (types stay at root): `complete` from `/compat`, `getBuiltinModel` from `/providers/all`; the new Models API rejects akmatori's synthesized custom-provider specs (compat dispatches on `model.api`)
-- models.json `apiKey` needs `$ENV_VAR` syntax — bare names are literals since pi 0.79.4
-- Project trust (0.79.0+): headless child `pi` treats workspaces as untrusted (we write `<workDir>/.pi/settings.json`) — children use the global `<agentDir>/settings.json` pin and never run workspace `.pi/extensions`; never set `defaultProjectTrust: "always"`
+- Versions: pi-coding-agent/pi-ai/pi-agent-core `0.82.1`, pi-subagents `0.36.0`; child `pi` CLI = `node_modules/.bin/pi`
+- pi-subagents peers are `optional`; loader aliases `@earendil-works/*` to pi's bundled copies — don't add `pi-tui`
+- `tokens_used` = `turn_end` usage + `compaction_end` `result.usage` (compaction's LLM call is invisible to `turn_end`)
+- `PROVIDER_API_KEY_ENV_VARS` (bash scrub) must cover every credential env var pi reads — incl. `ANTHROPIC_AUTH_TOKEN` (0.82.1 bearer)
+- pi-ai root is core-only: `complete` from `/compat`, `getBuiltinModel` from `/providers/all`; the Models API rejects our synthesized custom-provider specs (compat dispatches on `model.api`)
+- models.json `apiKey` needs `$ENV_VAR` syntax — bare names are literals (pi 0.79.4+)
+- Project trust: headless child `pi` treats workspaces as untrusted (we write `<workDir>/.pi/settings.json`) — children use the global `<agentDir>/settings.json` pin, never workspace `.pi/extensions`; never set `defaultProjectTrust: "always"`
 - Thinking level `max` (above `xhigh`); list mirrored in worker (agent-runner/types/orchestrator), Go (`models_settings.go`, `api_settings_llm.go`), web (types, `LLMSettingsSection.tsx`)
 - pi-subagents reads `<agentDir>/extensions/subagent/config.json` (strict JSON); repo ships it with `toolDescriptionMode: "compact"`
-- Use `ModelRegistry.inMemory(authStorage)` (no public constructor)
-- `gateway-tools.ts` tool factories return `defineTool({...})`
-- The bash tool stays local (TypeScript variance friction)
+- Auth/model runtime: `ModelRuntime.create({modelsPath: null, allowModelNetwork: false})` + `setRuntimeApiKey(provider, key, {allowNetwork: false})` → pass `modelRuntime` to `createAgentSession`; key in-memory only (`RuntimeCredentials`, `$`-safe), `modelsPath: null` = parent uses explicit `model`
+- Bash tool stays local (TypeScript variance friction)
 - import `typebox` from `typebox`, not `@sinclair/typebox`
-- `DefaultResourceLoader` requires `agentDir` (`getAgentDir()` in production and mocks)
-- Provider SDKs are lazy-loaded; Akmatori forwards retry/timeout settings
-- `setRuntimeApiKey` bypasses `resolveConfigValue` — operator API keys with literal `$` characters are safe
-- `compat.forceAdaptiveThinking: true` is set in synthesized model specs for providers resolving to `anthropic-messages` (`minimax`, fallback Anthropic-compatible endpoints) to enable extended-thinking wire format
-- Subagent support: `agent-runner.ts` keeps `noExtensions: false` + `additionalExtensionPaths: ["/opt/pi-extensions/pi-subagents"]` (baked into the image; `~/.pi/agent/extensions` is an operator mount); the image needs `pi` on `PATH` plus `ripgrep`/`fzf`
-- Subagent subprocess auth: the child `pi` has independent AuthStorage — `agent-runner.ts` mirrors the active API key into `process.env[<provider env var>]`; subagent `.md` files omit `model:` so children inherit the parent provider/model
+- `DefaultResourceLoader` requires `agentDir` (`getAgentDir()` in prod and mocks)
+- Provider SDKs are lazy-loaded; akmatori forwards retry/timeout settings
+- `compat.forceAdaptiveThinking: true` in synthesized specs for `anthropic-messages` providers (`minimax`, Anthropic-compatible endpoints) — extended-thinking wire format
+- Subagents: `noExtensions: false` + `additionalExtensionPaths: ["/opt/pi-extensions/pi-subagents"]` (baked in image; `~/.pi/agent/extensions` is an operator mount); image needs `ripgrep`/`fzf`
+- Subagent auth: child `pi` has its own model runtime — `agent-runner.ts` mirrors the API key into `process.env[<provider env var>]`; subagent `.md` omits `model:` so children inherit parent provider/model
 
 ## Testing Rules
 
@@ -345,26 +346,15 @@ Run the smallest relevant test target, then the broad suite the change requires.
 
 ### Current testing focus
 
-Weak/regression-prone areas:
-- `internal/handlers`
-- `internal/services`
-- `internal/slack`
-- main-module database logic
-- `mcp-gateway/internal/tools`
-- `mcp-gateway/internal/tools/zabbix`
+Weak/regression-prone: `internal/handlers`, `internal/services`, `internal/slack`, main-module database logic, `mcp-gateway/internal/tools` (esp. `/zabbix`)
 
 ## Rebuild Rules
 
 Rebuild the affected container after runtime changes. Source maintainers use the dev override (`docker-compose.dev.yml`) so local `build:` blocks take effect; GHCR-image installs use only the base file (`docker compose pull && docker compose up -d`) — never run `build` against a release install.
 
-Command: `docker-compose -f docker-compose.yml -f docker-compose.dev.yml build <svc> && docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d <svc>` with `<svc>`:
+Command (with `-f docker-compose.yml -f docker-compose.dev.yml` on both): `docker-compose … build <svc> && docker-compose … up -d <svc>`, `<svc>`:
 
-| Area changed | `<svc>` |
-|---|---|
-| API (`cmd/`, `internal/`) | `akmatori-api` |
-| MCP Gateway | `mcp-gateway` |
-| Agent worker | `akmatori-agent` |
-| Frontend | `frontend` |
+API (`cmd/`, `internal/`) → `akmatori-api`; MCP Gateway → `mcp-gateway`; Agent worker → `akmatori-agent`; Frontend → `frontend`
 
 ## Recent Features and Docs-Sensitive Areas
 

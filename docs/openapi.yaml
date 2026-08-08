@@ -1106,9 +1106,39 @@ paths:
                 base_url:
                   type: string
                   format: uri
+                temperature:
+                  type: number
+                  nullable: true
+                  minimum: 0
+                  maximum: 2
+                  description: >-
+                    Sampling override. Omit to leave unchanged, null to clear.
+                    When unset, no temperature is sent and the provider default applies.
+                top_p:
+                  type: number
+                  nullable: true
+                  minimum: 0
+                  maximum: 1
+                  description: Nucleus sampling override; null clears it back to the provider default.
+                top_k:
+                  type: integer
+                  nullable: true
+                  minimum: 1
+                  maximum: 1000
+                  description: >-
+                    Top-k sampling override; null clears it. Dropped for providers whose
+                    API has no top_k (OpenAI, Mistral).
+                max_tokens:
+                  type: integer
+                  nullable: true
+                  minimum: 1
+                  maximum: 1000000
+                  description: Output token cap override; null clears it back to the model default.
       responses:
         '200':
           description: Updated settings
+        '400':
+          description: Validation error (sampling parameter out of range, invalid provider/thinking_level/base_url)
 
   /settings/proxy:
     get:

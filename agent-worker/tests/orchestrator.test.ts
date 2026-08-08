@@ -53,14 +53,11 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   createAgentSession: vi.fn(async () => ({
     session: mockSession,
   })),
-  AuthStorage: {
-    inMemory: vi.fn(() => ({
-      setRuntimeApiKey: vi.fn(),
+  ModelRuntime: {
+    create: vi.fn(async () => ({
+      setRuntimeApiKey: vi.fn(async () => {}),
     })),
   },
-  ModelRegistry: Object.assign(vi.fn(() => ({})), {
-    inMemory: vi.fn(() => ({})),
-  }),
   SessionManager: {
     inMemory: vi.fn(() => ({
       newSession: vi.fn(),
@@ -1053,6 +1050,52 @@ describe("Orchestrator", () => {
       expect(opts.maxTokens).toBe(64);
       expect(opts.temperature).toBe(0.2);
       expect(opts.apiKey).toBe("sk-key");
+    });
+
+    it("forwards top_p/top_k through the payload hook and leaves it off when unset", async () => {
+      completeMock.mockResolvedValueOnce(makeAssistantText("tuned"));
+
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "oneshot_llm_request",
+        request_id: "req-sampling",
+        api_key: "sk-key",
+        model: "o4-mini",
+        provider: "openai",
+        user: "summarize",
+        temperature: 0.2,
+        top_p: 0.9,
+        top_k: 40,
+      });
+
+      await waitForMessage(
+        (m) => m.type === "oneshot_llm_response" && m.request_id === "req-sampling",
+      );
+
+      // top_p has no StreamOptions equivalent, so it can only arrive via onPayload.
+      const opts = completeMock.mock.calls[0][2];
+      expect(typeof opts.onPayload).toBe("function");
+      const patched = opts.onPayload({ model: "o4-mini" }, { api: "openai-responses", provider: "openai" });
+      expect(patched).toMatchObject({ top_p: 0.9 });
+
+      // Nothing configured => no hook at all, so requests stay byte-identical
+      // to the pre-feature behaviour.
+      completeMock.mockResolvedValueOnce(makeAssistantText("plain"));
+      sendFromServer({
+        type: "oneshot_llm_request",
+        request_id: "req-plain",
+        api_key: "sk-key",
+        model: "o4-mini",
+        provider: "openai",
+        user: "summarize",
+        temperature: 0.2,
+      });
+      await waitForMessage(
+        (m) => m.type === "oneshot_llm_response" && m.request_id === "req-plain",
+      );
+      expect(completeMock.mock.calls[1][2].onPayload).toBeUndefined();
     });
 
     it("sends an error response when LLM settings are missing", async () => {

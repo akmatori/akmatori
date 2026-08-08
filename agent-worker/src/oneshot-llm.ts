@@ -18,6 +18,7 @@ import type { AssistantMessage, Context, Message } from "@earendil-works/pi-ai";
 import type { LLMSettings, ProxyConfig } from "./types.js";
 import { applyProxyConfig } from "./proxy.js";
 import { resolveModel } from "./agent-runner.js";
+import { createSamplingPayloadHook } from "./sampling.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -36,6 +37,10 @@ export interface OneshotLLMParams {
   user: string;
   maxTokens?: number;
   temperature?: number;
+  /** Operator-configured nucleus sampling; omitted unless explicitly set. */
+  topP?: number;
+  /** Operator-configured top-k sampling; omitted unless explicitly set. */
+  topK?: number;
   llmSettings: LLMSettings;
   proxyConfig?: ProxyConfig;
   signal?: AbortSignal;
@@ -79,11 +84,21 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
     messages,
   };
 
+  // temperature and maxTokens ride pi-ai's native StreamOptions so the
+  // temperature-rejection retry below still has a parameter to strip. top_p and
+  // top_k have no StreamOptions equivalent at all, so they go in through the
+  // payload hook, which is a no-op when neither is configured.
+  const samplingHook = createSamplingPayloadHook(
+    { top_p: params.topP, top_k: params.topK },
+    (message) => console.warn(`oneshot_llm ${params.requestId}: ${message}`),
+  );
+
   const baseOptions = {
     apiKey: params.llmSettings.api_key,
     maxTokens: params.maxTokens,
     timeoutMs: params.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     signal: params.signal,
+    ...(samplingHook ? { onPayload: samplingHook } : {}),
   };
 
   const modelKey = `${params.llmSettings.provider}/${params.llmSettings.model}`;

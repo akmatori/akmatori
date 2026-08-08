@@ -75,6 +75,14 @@ type LLMSettingsForWorker struct {
 	Model         string
 	ThinkingLevel string
 	BaseURL       string
+
+	// Sampling overrides, nil when the operator left them unset. A nil field is
+	// never put on the wire, so the worker omits the parameter entirely and the
+	// provider default applies.
+	Temperature *float64
+	TopP        *float64
+	TopK        *int
+	MaxTokens   *int
 }
 
 // BuildLLMSettingsForWorker creates LLMSettingsForWorker from database LLMSettings.
@@ -89,6 +97,10 @@ func BuildLLMSettingsForWorker(dbSettings *database.LLMSettings) *LLMSettingsFor
 		Model:         dbSettings.Model,
 		ThinkingLevel: string(dbSettings.ThinkingLevel),
 		BaseURL:       dbSettings.BaseURL,
+		Temperature:   dbSettings.Temperature,
+		TopP:          dbSettings.TopP,
+		TopK:          dbSettings.TopK,
+		MaxTokens:     dbSettings.MaxTokens,
 	}
 }
 

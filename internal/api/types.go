@@ -87,22 +87,34 @@ type CreateIncidentResponse struct {
 // ========== Settings Types ==========
 
 // CreateLLMSettingsRequest is the request body for POST /api/settings/llm.
+// The sampling fields are optional; omitting one leaves it unset, meaning the
+// request carries no such parameter and the provider default applies.
 type CreateLLMSettingsRequest struct {
-	Provider      string `json:"provider" validate:"required"`
-	Name          string `json:"name" validate:"required,min=1,max=100"`
-	APIKey        string `json:"api_key"`
-	Model         string `json:"model"`
-	ThinkingLevel string `json:"thinking_level"`
-	BaseURL       string `json:"base_url"`
+	Provider      string   `json:"provider" validate:"required"`
+	Name          string   `json:"name" validate:"required,min=1,max=100"`
+	APIKey        string   `json:"api_key"`
+	Model         string   `json:"model"`
+	ThinkingLevel string   `json:"thinking_level"`
+	BaseURL       string   `json:"base_url"`
+	Temperature   *float64 `json:"temperature"`
+	TopP          *float64 `json:"top_p"`
+	TopK          *int     `json:"top_k"`
+	MaxTokens     *int     `json:"max_tokens"`
 }
 
 // UpdateLLMSettingsRequest is the request body for PUT /api/settings/llm/{id}.
+// Sampling fields use Nullable so an explicit null clears an override back to
+// the provider default, while omitting the key leaves the stored value alone.
 type UpdateLLMSettingsRequest struct {
-	Name          *string `json:"name"`
-	APIKey        *string `json:"api_key"`
-	Model         *string `json:"model"`
-	ThinkingLevel *string `json:"thinking_level"`
-	BaseURL       *string `json:"base_url"`
+	Name          *string           `json:"name"`
+	APIKey        *string           `json:"api_key"`
+	Model         *string           `json:"model"`
+	ThinkingLevel *string           `json:"thinking_level"`
+	BaseURL       *string           `json:"base_url"`
+	Temperature   Nullable[float64] `json:"temperature"`
+	TopP          Nullable[float64] `json:"top_p"`
+	TopK          Nullable[int]     `json:"top_k"`
+	MaxTokens     Nullable[int]     `json:"max_tokens"`
 }
 
 // UpdateProxySettingsRequest is the request body for PUT /api/settings/proxy.

@@ -6,6 +6,18 @@ import { SuccessMessage } from '../ErrorMessage';
 import { llmSettingsApi } from '../../api/client';
 import type { LLMConfig, LLMProvider, ThinkingLevel } from '../../types';
 import { MODEL_SUGGESTIONS } from './llmModelSuggestions';
+import {
+  EMPTY_SAMPLING_FORM,
+  SAMPLING_BOUNDS,
+  dehydrateSamplingForCreate,
+  dehydrateSamplingForUpdate,
+  describeSampling,
+  hasSamplingOverrides,
+  hydrateSampling,
+  validateSampling,
+  type SamplingFormState,
+  type SamplingParamKey,
+} from './samplingParamsHelpers';
 
 const THINKING_LEVELS: { value: ThinkingLevel; label: string }[] = [
   { value: 'off', label: 'Off' },
@@ -45,6 +57,7 @@ interface FormState {
   model: string;
   thinkingLevel: ThinkingLevel;
   baseUrl: string;
+  sampling: SamplingFormState;
 }
 
 const emptyForm: FormState = {
@@ -54,7 +67,16 @@ const emptyForm: FormState = {
   model: 'gpt-5.5',
   thinkingLevel: 'medium',
   baseUrl: '',
+  sampling: EMPTY_SAMPLING_FORM,
 };
+
+// Order the sampling inputs are rendered in.
+const SAMPLING_FIELDS: { key: SamplingParamKey; hint: string }[] = [
+  { key: 'temperature', hint: 'Higher is more random. Blank = provider default.' },
+  { key: 'top_p', hint: 'Nucleus sampling cutoff. Blank = provider default.' },
+  { key: 'top_k', hint: 'Anthropic and Google only; ignored by OpenAI.' },
+  { key: 'max_tokens', hint: 'Output cap per request. Blank = model default.' },
+];
 
 export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectionProps) {
   const [configs, setConfigs] = useState<LLMConfig[]>([]);
@@ -106,6 +128,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
   };
 
   const openEditForm = (config: LLMConfig) => {
+    const sampling = hydrateSampling(config);
     setForm({
       name: config.name,
       provider: config.provider,
@@ -113,10 +136,12 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
       model: config.model,
       thinkingLevel: config.thinking_level || 'medium',
       baseUrl: config.base_url || '',
+      sampling,
     });
     setFormMode('edit');
     setEditingId(config.id);
     setShowAdvanced(!!config.base_url || (config.thinking_level && config.thinking_level !== 'medium')
+      || hasSamplingOverrides(sampling)
       || config.provider === 'nvidia' || config.provider === 'minimax' || config.provider === 'ant-ling');
     setError(null);
   };
@@ -139,6 +164,11 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
   };
 
   const handleSave = async () => {
+    const samplingError = validateSampling(form.sampling);
+    if (samplingError) {
+      setError(samplingError);
+      return;
+    }
     try {
       setSaving(true);
       setError(null);
@@ -151,10 +181,14 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
           model: form.model || undefined,
           thinking_level: form.thinkingLevel || undefined,
           base_url: form.baseUrl || undefined,
+          ...dehydrateSamplingForCreate(form.sampling),
         });
         showSuccess('Configuration created');
       } else if (formMode === 'edit' && editingId) {
-        const updates: Record<string, string | undefined> = {};
+        const updates: Record<string, string | number | null | undefined> = {
+          // Blank boxes send explicit nulls so clearing an override sticks.
+          ...dehydrateSamplingForUpdate(form.sampling),
+        };
         updates.name = form.name;
         updates.model = form.model;
         updates.thinking_level = form.thinkingLevel;
@@ -361,7 +395,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
         >
           {showAdvanced ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
           Advanced settings
-          {(form.thinkingLevel !== 'medium' || form.baseUrl) && (
+          {(form.thinkingLevel !== 'medium' || form.baseUrl || hasSamplingOverrides(form.sampling)) && (
             <span className="text-xs text-primary-600 dark:text-primary-400">(customized)</span>
           )}
         </button>
@@ -405,6 +439,57 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                 </p>
               </div>
             )}
+
+            {/* Sampling parameters — every box is optional. */}
+            <div>
+              <div className="flex items-baseline justify-between mb-1.5">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Sampling parameters
+                </span>
+                {hasSamplingOverrides(form.sampling) && (
+                  <button
+                    type="button"
+                    onClick={() => setForm(prev => ({ ...prev, sampling: EMPTY_SAMPLING_FORM }))}
+                    className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {SAMPLING_FIELDS.map(({ key, hint }) => {
+                  const bounds = SAMPLING_BOUNDS[key];
+                  return (
+                    <div key={key}>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        {bounds.label}
+                      </label>
+                      <input
+                        type="number"
+                        inputMode={bounds.integer ? 'numeric' : 'decimal'}
+                        step={bounds.integer ? 1 : 0.05}
+                        min={bounds.min}
+                        max={bounds.max}
+                        value={form.sampling[key]}
+                        onChange={(e) => setForm(prev => ({
+                          ...prev,
+                          sampling: { ...prev.sampling, [key]: e.target.value },
+                        }))}
+                        placeholder="Provider default"
+                        className="input-field"
+                      />
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{hint}</p>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Leave blank to send no value and let the provider decide — this is the default.
+                Applies to investigations and to internal one-shot calls (titles, alert
+                extraction, correlation). Anthropic ignores temperature, Top P, and Top K while
+                extended thinking is enabled.
+              </p>
+            </div>
           </div>
         )}
 
@@ -454,6 +539,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                 {activeConfig.model || 'No model set'}
                 {activeConfig.thinking_level && activeConfig.thinking_level !== 'medium' && ` \u00B7 Thinking: ${activeConfig.thinking_level}`}
                 {activeConfig.base_url && ` \u00B7 Custom URL`}
+                {describeSampling(activeConfig) && ` \u00B7 ${describeSampling(activeConfig)}`}
               </p>
             </div>
             <button
@@ -506,6 +592,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                     {config.model || 'No model set'}
                     {config.thinking_level && config.thinking_level !== 'medium' && ` \u00B7 Thinking: ${config.thinking_level}`}
                     {config.base_url && ` \u00B7 Custom URL`}
+                    {describeSampling(config) && ` \u00B7 ${describeSampling(config)}`}
                   </p>
                 </div>
                 <div className="flex items-center gap-1 ml-3">

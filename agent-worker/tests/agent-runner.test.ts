@@ -18,6 +18,9 @@ function createMockSession() {
   const subscribers: Array<(event: any) => void> = [];
   return {
     sessionId: "mock-session-123",
+    // Mirrors AgentSession.agent, on which createAgentSession installs its own
+    // onPayload (the `before_provider_request` extension dispatch).
+    agent: { onPayload: undefined as undefined | ((p: unknown, m: unknown) => unknown) },
     subscribe: vi.fn((listener: (event: any) => void) => {
       subscribers.push(listener);
       return () => {
@@ -71,14 +74,11 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
       return { session: mockSession, extensionsResult: {} };
     }),
     AgentSession: vi.fn(),
-    AuthStorage: {
-      inMemory: vi.fn(() => ({
-        setRuntimeApiKey: vi.fn(),
+    ModelRuntime: {
+      create: vi.fn(async () => ({
+        setRuntimeApiKey: vi.fn(async () => {}),
       })),
     },
-    ModelRegistry: Object.assign(vi.fn().mockImplementation(() => ({})), {
-      inMemory: vi.fn(() => ({})),
-    }),
     SessionManager: {
       inMemory: vi.fn(() => ({
         newSession: vi.fn(),
@@ -443,6 +443,46 @@ describe("AgentRunner", () => {
       expect(opts.thinkingLevel).toBe("medium");
     });
 
+    it("should not install a payload hook when no sampling params are configured", async () => {
+      await runner.execute(makeExecuteParams());
+      expect(mockSession.agent.onPayload).toBeUndefined();
+    });
+
+    it("should inject configured sampling params into the provider payload", async () => {
+      await runner.execute(
+        makeExecuteParams({
+          llmSettings: { ...makeLLMSettings(), temperature: 0.2, top_p: 0.9, max_tokens: 8192 },
+        }),
+      );
+
+      const hook = mockSession.agent.onPayload;
+      expect(hook).toBeDefined();
+      const patched = await hook!(
+        { model: "claude-sonnet-4-5", max_tokens: 4096 },
+        { api: "anthropic-messages", provider: "anthropic" },
+      );
+      expect(patched).toMatchObject({ temperature: 0.2, top_p: 0.9, max_tokens: 8192 });
+    });
+
+    it("should chain, not replace, the SDK's own payload hook", async () => {
+      // createAgentSession installs an onPayload that dispatches the
+      // before_provider_request extension event; clobbering it would silently
+      // disable extension payload rewriting for the whole session.
+      const upstream = vi.fn((payload: any) => ({ ...payload, taggedByExtension: true }));
+      mockSession.agent.onPayload = upstream as any;
+
+      await runner.execute(
+        makeExecuteParams({ llmSettings: { ...makeLLMSettings(), temperature: 0.2 } }),
+      );
+
+      const patched = await mockSession.agent.onPayload!(
+        { model: "claude-sonnet-4-5" },
+        { api: "anthropic-messages", provider: "anthropic" },
+      );
+      expect(upstream).toHaveBeenCalledTimes(1);
+      expect(patched).toMatchObject({ taggedByExtension: true, temperature: 0.2 });
+    });
+
     it("should use incident ID as deterministic session ID for new sessions", async () => {
       const { SessionManager } = await import("@earendil-works/pi-coding-agent");
       const params = makeExecuteParams({ incidentId: "inc-uuid-abc-123" });
@@ -575,8 +615,8 @@ describe("AgentRunner", () => {
       expect(opts.thinkingLevel).toBe("high");
     });
 
-    it("should set runtime API key on AuthStorage", async () => {
-      const { AuthStorage } = await import("@earendil-works/pi-coding-agent");
+    it("should set the runtime API key on the ModelRuntime (in-memory, literal)", async () => {
+      const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
       const params = makeExecuteParams({
         llmSettings: makeLLMSettings({
           provider: "anthropic",
@@ -585,16 +625,18 @@ describe("AgentRunner", () => {
       });
       await runner.execute(params);
 
-      // AuthStorage.inMemory() was called and setRuntimeApiKey was called on the result
-      const authInstance = (AuthStorage as any).inMemory.mock.results[0].value;
-      expect(authInstance.setRuntimeApiKey).toHaveBeenCalledWith(
+      // ModelRuntime.create() was called and setRuntimeApiKey was called on the
+      // resulting runtime with allowNetwork:false (offline, memory-only overlay).
+      const runtimeInstance = await (ModelRuntime as any).create.mock.results[0].value;
+      expect(runtimeInstance.setRuntimeApiKey).toHaveBeenCalledWith(
         "anthropic",
         "sk-ant-my-key",
+        { allowNetwork: false },
       );
     });
 
-    it("should create ModelRegistry via inMemory() with AuthStorage and pass to session (getApiKeyAndHeaders not called directly)", async () => {
-      const { AuthStorage, ModelRegistry } = await import("@earendil-works/pi-coding-agent");
+    it("should create a ModelRuntime and pass it to the session (no direct key resolution)", async () => {
+      const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
       const params = makeExecuteParams({
         llmSettings: makeLLMSettings({
           provider: "openai",
@@ -603,16 +645,13 @@ describe("AgentRunner", () => {
       });
       await runner.execute(params);
 
-      // ModelRegistry.inMemory() should be called with the AuthStorage instance (0.64.0+)
-      const authInstance = (AuthStorage as any).inMemory.mock.results[0].value;
-      expect((ModelRegistry as any).inMemory).toHaveBeenCalledWith(authInstance);
-
-      // The resulting modelRegistry should be passed to createAgentSession
+      // ModelRuntime.create() should be called, and the runtime passed to createAgentSession.
+      expect((ModelRuntime as any).create).toHaveBeenCalled();
       const opts = createAgentSessionCalls[0];
-      expect(opts.modelRegistry).toBeDefined();
+      expect(opts.modelRuntime).toBeDefined();
 
-      // We never call getApiKey or getApiKeyAndHeaders directly —
-      // the SDK handles key resolution internally via the modelRegistry.
+      // We never resolve API keys directly — the SDK handles key resolution
+      // internally via the ModelRuntime.
     });
 
     it("should pass bash tool definition and gateway tools as customTools", async () => {
@@ -720,6 +759,10 @@ describe("AgentRunner", () => {
           NVIDIA_API_KEY: "sk-leak-6",
           MINIMAX_API_KEY: "sk-leak-7",
           ANT_LING_API_KEY: "sk-leak-8",
+          // pi 0.82.1 bearer auth for Anthropic-compatible gateways. Akmatori
+          // never sets it, but an operator running an on-prem gateway may, so
+          // it must not survive the bash boundary either.
+          ANTHROPIC_AUTH_TOKEN: "sk-leak-9",
           UNRELATED_VAR: "keep-me",
         },
       });
@@ -731,6 +774,7 @@ describe("AgentRunner", () => {
       expect(hookResult.env.NVIDIA_API_KEY).toBeUndefined();
       expect(hookResult.env.MINIMAX_API_KEY).toBeUndefined();
       expect(hookResult.env.ANT_LING_API_KEY).toBeUndefined();
+      expect(hookResult.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
       // Non-secret env vars must still pass through (PATH is required for
       // commands to resolve; arbitrary operator env should not be lost).
       expect(hookResult.env.PATH).toBe("/usr/bin");
@@ -2203,6 +2247,56 @@ describe("AgentRunner", () => {
       const result = await runner.execute(makeExecuteParams());
 
       expect(result.tokens_used).toBe(800);
+    });
+
+    it("should include compaction summarization tokens in the total", async () => {
+      // The compaction LLM call is invisible to turn_end (which only carries
+      // assistant-message usage), so without counting compaction_end the long
+      // investigations that actually compact under-report their cost.
+      mockSession.prompt.mockImplementationOnce(async () => {
+        for (const sub of mockSession._subscribers) {
+          sub({
+            type: "turn_end",
+            message: { role: "assistant", usage: { totalTokens: 500 } },
+            toolResults: [],
+          });
+          sub({
+            type: "compaction_end",
+            reason: "threshold",
+            aborted: false,
+            willRetry: false,
+            result: { summary: "s", firstKeptEntryId: "e1", tokensBefore: 9000, usage: { totalTokens: 250 } },
+          });
+        }
+      });
+
+      const result = await runner.execute(makeExecuteParams());
+
+      expect(result.tokens_used).toBe(750);
+    });
+
+    it("should not count compaction tokens when usage is absent (aborted compaction)", async () => {
+      mockSession.prompt.mockImplementationOnce(async () => {
+        for (const sub of mockSession._subscribers) {
+          sub({
+            type: "turn_end",
+            message: { role: "assistant", usage: { totalTokens: 500 } },
+            toolResults: [],
+          });
+          // Aborted compaction carries no result — must not throw or miscount.
+          sub({
+            type: "compaction_end",
+            reason: "overflow",
+            aborted: true,
+            willRetry: false,
+            result: undefined,
+          });
+        }
+      });
+
+      const result = await runner.execute(makeExecuteParams());
+
+      expect(result.tokens_used).toBe(500);
     });
   });
 

@@ -377,6 +377,8 @@ export class Orchestrator {
       user: msg.user,
       maxTokens: msg.max_tokens,
       temperature: msg.temperature,
+      topP: msg.top_p,
+      topK: msg.top_k,
       llmSettings,
       proxyConfig,
     })
@@ -467,6 +469,12 @@ export class Orchestrator {
       model: msg.model ?? "gpt-5.5",
       thinking_level: this.mapThinkingLevel(msg.thinking_level),
       base_url: msg.base_url,
+      // Copied verbatim: an absent field must stay absent so the request omits
+      // the parameter rather than substituting a worker-side default.
+      temperature: msg.temperature,
+      top_p: msg.top_p,
+      top_k: msg.top_k,
+      max_tokens: msg.max_tokens,
     };
   }
 

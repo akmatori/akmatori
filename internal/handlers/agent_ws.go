@@ -95,12 +95,24 @@ type AgentMessage struct {
 	ToolAllowlist []services.ToolAllowlistEntry `json:"tool_allowlist"`
 
 	// One-shot LLM request/response correlation fields
-	RequestID   string  `json:"request_id,omitempty"`
-	System      string  `json:"system,omitempty"`
-	User        string  `json:"user,omitempty"`
-	MaxTokens   int     `json:"max_tokens,omitempty"`
-	Temperature float64 `json:"temperature,omitempty"`
-	Summary     string  `json:"summary,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
+	System    string `json:"system,omitempty"`
+	User      string `json:"user,omitempty"`
+	Summary   string `json:"summary,omitempty"`
+
+	// Sampling parameters, sent on new_incident/continue_incident (from the
+	// active LLM config) and on oneshot_llm_request (call-site value, overridden
+	// by the config when the operator set one).
+	//
+	// These MUST stay pointers: `omitempty` on a float64/int drops the zero
+	// value, so a deliberate temperature of 0 would silently vanish from the
+	// frame and the provider would fall back to its own default (~1.0) — the
+	// exact opposite of what a 0 asks for. A nil pointer is the real "unset"
+	// signal, which the worker turns into "send no such parameter".
+	MaxTokens   *int     `json:"max_tokens,omitempty"`
+	Temperature *float64 `json:"temperature,omitempty"`
+	TopP        *float64 `json:"top_p,omitempty"`
+	TopK        *int     `json:"top_k,omitempty"`
 
 	// RunID identifies a single StartIncident/ContinueIncident invocation.
 	// The API generates a fresh run_id per call; the worker echoes it on every
@@ -729,6 +741,7 @@ func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettings
 		msg.Model = llm.Model
 		msg.ThinkingLevel = llm.ThinkingLevel
 		msg.BaseURL = llm.BaseURL
+		applySamplingSettings(&msg, llm)
 	}
 
 	// Fetch proxy settings from database and include in message
@@ -765,6 +778,7 @@ func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string,
 		msg.Model = llm.Model
 		msg.ThinkingLevel = llm.ThinkingLevel
 		msg.BaseURL = llm.BaseURL
+		applySamplingSettings(&msg, llm)
 	}
 
 	// Fetch proxy settings from database and include in message
@@ -919,8 +933,8 @@ func (h *AgentWSHandler) OneShotLLM(ctx context.Context, llm *LLMSettingsForWork
 		RequestID:   requestID,
 		System:      system,
 		User:        user,
-		MaxTokens:   maxTokens,
-		Temperature: temperature,
+		MaxTokens:   &maxTokens,
+		Temperature: &temperature,
 	}
 
 	if llm != nil {
@@ -929,6 +943,9 @@ func (h *AgentWSHandler) OneShotLLM(ctx context.Context, llm *LLMSettingsForWork
 		msg.Model = llm.Model
 		msg.ThinkingLevel = llm.ThinkingLevel
 		msg.BaseURL = llm.BaseURL
+		// Operator-configured sampling wins over the call-site defaults each
+		// one-shot caller hardcodes (0.0 for classification, 0.3 for titles, …).
+		applySamplingSettings(&msg, llm)
 	}
 
 	// Reuse the same proxy-settings pattern as StartIncident/ContinueIncident.
@@ -1034,6 +1051,35 @@ func (h *AgentWSHandler) BroadcastProxyConfig(settings *database.ProxySettings) 
 	}
 
 	return h.SendToWorker(msg)
+}
+
+// applySamplingSettings copies the operator-configured sampling overrides from
+// the active LLM config onto an outbound frame. Each field is copied only when
+// the operator set it, so an unconfigured model leaves the frame untouched and
+// the worker sends no sampling parameters at all — the pre-feature behaviour.
+//
+// On oneshot_llm_request the frame already carries the call site's own
+// max_tokens/temperature; a configured override deliberately replaces them.
+func applySamplingSettings(msg *AgentMessage, llm *LLMSettingsForWorker) {
+	if llm == nil {
+		return
+	}
+	if llm.Temperature != nil {
+		v := *llm.Temperature
+		msg.Temperature = &v
+	}
+	if llm.TopP != nil {
+		v := *llm.TopP
+		msg.TopP = &v
+	}
+	if llm.TopK != nil {
+		v := *llm.TopK
+		msg.TopK = &v
+	}
+	if llm.MaxTokens != nil {
+		v := *llm.MaxTokens
+		msg.MaxTokens = &v
+	}
 }
 
 // BuildLLMSettingsForWorker is a thin re-export of the canonical implementation

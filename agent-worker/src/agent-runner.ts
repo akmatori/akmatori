@@ -11,8 +11,7 @@ import * as path from "node:path";
 import {
   createAgentSession,
   AgentSession,
-  AuthStorage,
-  ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
   DefaultResourceLoader,
@@ -24,6 +23,7 @@ import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import type { Model, ThinkingLevel as PiThinkingLevel } from "@earendil-works/pi-ai";
 import type { LLMSettings, ExecuteResult, ProxyConfig, ThinkingLevel, ToolAllowlistEntry } from "./types.js";
 import { applyProxyConfig } from "./proxy.js";
+import { createSamplingPayloadHook, pickSamplingParams } from "./sampling.js";
 import {
   formatToolArgs,
   formatToolOutput,
@@ -366,6 +366,16 @@ const AKMATORI_CUSTOM_PROVIDER_KEY = "akmatori-custom" as const;
 const AKMATORI_CUSTOM_API_KEY_ENV = "AKMATORI_CUSTOM_PROVIDER_API_KEY" as const;
 
 /**
+ * Additional credential-bearing env vars pi itself recognizes but akmatori
+ * never sets. `ANTHROPIC_AUTH_TOKEN` (pi 0.82.1) authenticates against
+ * Anthropic-compatible gateways with `Authorization: Bearer` — an operator
+ * running an on-prem gateway may well set it on the agent container. We do not
+ * populate it, but we must still strip it at the bash boundary so it cannot be
+ * read back out through tool output.
+ */
+const EXTRA_CREDENTIAL_ENV_VARS: readonly string[] = ["ANTHROPIC_AUTH_TOKEN"];
+
+/**
  * Env var names that may carry a provider API key in this process. Bash
  * spawns inherit process.env by default (pi-mono's getShellEnv() spreads it),
  * so without scrubbing, a prompt-injected `env` or `echo $ANTHROPIC_API_KEY`
@@ -385,6 +395,7 @@ const AKMATORI_CUSTOM_API_KEY_ENV = "AKMATORI_CUSTOM_PROVIDER_API_KEY" as const;
 const PROVIDER_API_KEY_ENV_VARS: readonly string[] = [
   ...Object.values(PROVIDER_ENV_KEY),
   AKMATORI_CUSTOM_API_KEY_ENV,
+  ...EXTRA_CREDENTIAL_ENV_VARS,
 ];
 
 function scrubProviderApiKeysFromEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -451,9 +462,9 @@ function isBuiltInModelKnown(provider: string, model: string): boolean {
 /**
  * Write `<agentDir>/models.json` so child `pi` processes spawned by
  * pi-subagents can resolve the parent's UI-selected model. The parent's
- * `ModelRegistry.inMemory(authStorage)` plus `resolveModel(provider, model,
- * baseUrl)` builds the model spec in this process's memory only — the
- * spawned subagent runs `pi` with `ModelRegistry.create(...)`, which reads
+ * in-memory `ModelRuntime` plus `resolveModel(provider, model, baseUrl)`
+ * builds the model spec in this process's memory only — the spawned subagent
+ * runs `pi` with its own model runtime, which reads
  * `<agentDir>/models.json` from disk. Without this file the child cannot
  * find the model id and every `subagent({...})` call (runbook-searcher,
  * memory-searcher, memory-writer) either fails to start or silently runs
@@ -905,12 +916,26 @@ export class AgentRunner {
     // Set up proxy env vars before creating session
     applyProxyConfig(params.proxyConfig);
 
-    // Auth
-    const authStorage = AuthStorage.inMemory();
-    authStorage.setRuntimeApiKey(params.llmSettings.provider, params.llmSettings.api_key);
-    // pi-subagents spawns each subagent in a child `pi` process whose
-    // AuthStorage is independent from this one — `setRuntimeApiKey` lives in
-    // the parent's memory only. The child resolves keys from env vars (pi-ai
+    // Auth & model runtime. pi 0.81 replaced AuthStorage + ModelRegistry with
+    // the async ModelRuntime facade. `setRuntimeApiKey` stores the operator key
+    // in an in-memory RuntimeCredentials overlay: never written to auth.json and
+    // taken literally (no `$ENV` resolution), so keys containing `$` stay safe —
+    // the same guarantees the old `AuthStorage.setRuntimeApiKey` gave us.
+    // `modelsPath: null` keeps this parent runtime from reading agentDir
+    // models.json (the parent drives the session with the explicit `model`
+    // object resolved below); `allowModelNetwork: false` keeps startup offline.
+    const modelRuntime = await ModelRuntime.create({
+      modelsPath: null,
+      allowModelNetwork: false,
+    });
+    await modelRuntime.setRuntimeApiKey(
+      params.llmSettings.provider,
+      params.llmSettings.api_key,
+      { allowNetwork: false },
+    );
+    // pi-subagents spawns each subagent in a child `pi` process whose model
+    // runtime is independent from this one — the runtime key lives in the
+    // parent's memory only. The child resolves keys from env vars (pi-ai
     // env-api-keys.js), so we mirror the active key into process.env using the
     // provider's canonical variable name. Without this, every `subagent({...})`
     // invocation fails with "no API key configured".
@@ -973,7 +998,6 @@ export class AgentRunner {
     const settingsManager = SettingsManager.inMemory({
       retry: { provider: DEFAULT_PROVIDER_RETRY },
     });
-    const modelRegistry = ModelRegistry.inMemory(authStorage);
 
     // Create resource loader with skills directory for pi-mono's native skill system.
     // This discovers SKILL.md files and includes name+description in the system prompt,
@@ -1060,8 +1084,7 @@ export class AgentRunner {
 
     const { session } = await createAgentSession({
       cwd: params.workDir,
-      authStorage,
-      modelRegistry,
+      modelRuntime,
       model,
       thinkingLevel,
       // bashToolDef has specific type parameters (BashToolDetails, BashRenderState)
@@ -1072,6 +1095,34 @@ export class AgentRunner {
       sessionManager,
       settingsManager,
     });
+
+    // Sampling overrides for the agent loop. pi-agent-core's createLoopConfig
+    // carries no temperature/maxTokens at all — it forwards `agent.onPayload`
+    // to every request instead — so this hook is the only place the operator's
+    // settings can reach a provider on the agent path. Left unset (undefined)
+    // when nothing is configured, which keeps requests byte-identical to the
+    // pre-feature behaviour.
+    //
+    // Note: subagents run in child `pi` processes with their own request
+    // pipeline and do NOT inherit this hook; they continue on provider
+    // defaults. Same for `thinkingLevel`, which we pin via the child settings
+    // file — pi's settings.json has no sampling equivalent to pin.
+    const samplingHook = createSamplingPayloadHook(
+      pickSamplingParams(params.llmSettings),
+      (message) => console.warn(`[agent-runner] incident ${params.incidentId}: ${message}`),
+    );
+    if (samplingHook) {
+      // createAgentSession already installs an onPayload of its own that
+      // dispatches the `before_provider_request` extension event, so this must
+      // chain rather than assign — a bare assignment would silently drop that
+      // event for the whole session. Extensions transform the payload first;
+      // the operator's sampling settings are applied to their result and win.
+      const upstream = session.agent.onPayload;
+      session.agent.onPayload = async (payload: unknown, model: Parameters<typeof samplingHook>[1]) => {
+        const base = (await upstream?.(payload, model as never)) ?? payload;
+        return samplingHook(base, model) ?? base;
+      };
+    }
 
     this.activeSessions.set(params.incidentId, session);
     // Signal the orchestrator that this launch has registered so it can
@@ -1356,6 +1407,20 @@ export class AgentRunner {
       }
 
       case "compaction_end": {
+        // Compaction runs its own summarization LLM call, which `turn_end`
+        // never sees (that only carries assistant-message usage). pi 0.81.0+
+        // attributes those tokens to the compaction result, so without this
+        // the incidents that actually compact — the long, expensive ones —
+        // silently under-report `tokens_used`.
+        //
+        // Counted here rather than from session entries because this fires
+        // once per live compaction: summing `sessionManager.getEntries()`
+        // would re-count prior runs' compactions on every resume.
+        const compactionTokens = event.result?.usage?.totalTokens;
+        if (compactionTokens) {
+          onTokens(compactionTokens);
+        }
+
         let compactResult: string;
         if (event.aborted) {
           compactResult = "\n📦 Context compaction aborted";
