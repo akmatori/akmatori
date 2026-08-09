@@ -52,10 +52,10 @@ describe('MODEL_SUGGESTIONS', () => {
 
   it('marks exactly one Recommended entry per non-custom provider', () => {
     const expected: Record<string, string> = {
-      openai: 'gpt-5.5',
+      openai: 'gpt-5.6-terra',
       anthropic: 'claude-sonnet-5',
       google: 'gemini-3-pro-preview',
-      openrouter: 'openai/gpt-5.5',
+      openrouter: 'openai/gpt-5.6-terra',
     };
     for (const [provider, value] of Object.entries(expected)) {
       const recommended = MODEL_SUGGESTIONS[provider as keyof typeof MODEL_SUGGESTIONS].filter(

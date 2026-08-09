@@ -2,8 +2,14 @@ import type { LLMProvider } from '../../types';
 
 export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: string }[]> = {
   openai: [
-    { value: 'gpt-5.5', label: 'gpt-5.5 (Recommended)' },
-    { value: 'gpt-5.5-pro', label: 'gpt-5.5-pro (Most capable)' },
+    // gpt-5.6 ships as three named variants; there is no plain `gpt-5.6` id.
+    // Ordering follows their catalogue pricing (sol > terra > luna), the only
+    // capability signal the model catalog exposes.
+    { value: 'gpt-5.6-terra', label: 'gpt-5.6-terra (Recommended)' },
+    { value: 'gpt-5.6-sol', label: 'gpt-5.6-sol (Most capable)' },
+    { value: 'gpt-5.6-luna', label: 'gpt-5.6-luna (Budget)' },
+    { value: 'gpt-5.5', label: 'gpt-5.5' },
+    { value: 'gpt-5.5-pro', label: 'gpt-5.5-pro' },
     { value: 'gpt-5.4', label: 'gpt-5.4' },
     { value: 'gpt-5.4-mini', label: 'gpt-5.4-mini (Fast)' },
     { value: 'gpt-5.3-codex', label: 'gpt-5.3-codex' },
@@ -30,9 +36,12 @@ export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: stri
     { value: 'anthropic/claude-fable-5', label: 'anthropic/claude-fable-5 (Most capable)' },
     { value: 'anthropic/claude-sonnet-5', label: 'anthropic/claude-sonnet-5' },
     { value: 'anthropic/claude-opus-4.8', label: 'anthropic/claude-opus-4.8' },
-    { value: 'openai/gpt-5.5', label: 'openai/gpt-5.5 (Recommended)' },
+    { value: 'openai/gpt-5.6-terra', label: 'openai/gpt-5.6-terra (Recommended)' },
+    { value: 'openai/gpt-5.6-sol', label: 'openai/gpt-5.6-sol' },
+    { value: 'openai/gpt-5.6-luna', label: 'openai/gpt-5.6-luna (Budget)' },
     { value: 'google/gemini-3.1-pro-preview', label: 'google/gemini-3.1-pro-preview' },
     { value: 'anthropic/claude-sonnet-4.6', label: 'anthropic/claude-sonnet-4.6' },
+    { value: 'openai/gpt-5.5', label: 'openai/gpt-5.5' },
     { value: 'openai/gpt-5.4', label: 'openai/gpt-5.4' },
     { value: 'openai/gpt-5.4-mini', label: 'openai/gpt-5.4-mini' },
     { value: 'google/gemini-2.5-pro', label: 'google/gemini-2.5-pro' },
