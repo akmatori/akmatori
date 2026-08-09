@@ -54,9 +54,21 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
     session: mockSession,
   })),
   ModelRuntime: {
-    create: vi.fn(async () => ({
-      setRuntimeApiKey: vi.fn(async () => {}),
-    })),
+    create: vi.fn(async () => {
+      // getAuth/registerProvider mirror the real runtime: auth resolves only
+      // for providers in the registry, so a non-built-in provider must be
+      // registered before its stored key becomes usable.
+      const registered = new Set<string>();
+      return {
+        setRuntimeApiKey: vi.fn(async () => {}),
+        registerProvider: vi.fn((id: string) => registered.add(id)),
+        getAuth: vi.fn(async (model: any) =>
+          model?.provider === "custom" && !registered.has("custom")
+            ? undefined
+            : { auth: { apiKey: "resolved" } },
+        ),
+      };
+    }),
   },
   SessionManager: {
     inMemory: vi.fn(() => ({

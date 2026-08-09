@@ -66,6 +66,18 @@ function createMockSession() {
 
 let mockSession = createMockSession();
 let createAgentSessionCalls: any[] = [];
+// Provider ids pi ships itself; anything else needs an explicit registration
+// before auth can resolve. Confirmed against the live SDK.
+const PI_BUILTIN_PROVIDERS = new Set([
+  "openai",
+  "anthropic",
+  "google",
+  "openrouter",
+  "nvidia",
+  "minimax",
+  "ant-ling",
+]);
+let registeredProviders: string[] = [];
 
 vi.mock("@earendil-works/pi-coding-agent", () => {
   return {
@@ -75,9 +87,25 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
     }),
     AgentSession: vi.fn(),
     ModelRuntime: {
-      create: vi.fn(async () => ({
-        setRuntimeApiKey: vi.fn(async () => {}),
-      })),
+      create: vi.fn(async () => {
+        // Mirrors the real ModelRuntime: pi's Models.getAuth resolves only for
+        // providers present in the registry, regardless of stored credentials
+        // (`if (!providers.get(id)) return undefined`). Verified against the
+        // live SDK — every Akmatori provider except "custom" is a pi built-in.
+        const registered = new Set<string>();
+        return {
+          setRuntimeApiKey: vi.fn(async () => {}),
+          registerProvider: vi.fn((id: string) => {
+            registered.add(id);
+            registeredProviders.push(id);
+          }),
+          getAuth: vi.fn(async (model: any) =>
+            PI_BUILTIN_PROVIDERS.has(model?.provider) || registered.has(model?.provider)
+              ? { auth: { apiKey: "resolved" } }
+              : undefined,
+          ),
+        };
+      }),
     },
     SessionManager: {
       inMemory: vi.fn(() => ({
@@ -412,6 +440,7 @@ describe("AgentRunner", () => {
     vi.clearAllMocks();
     mockSession = createMockSession();
     createAgentSessionCalls = [];
+    registeredProviders = [];
     runner = new AgentRunner({ mcpGatewayUrl: "http://mcp-gateway:8080" });
     // Reset env (both case variants — proxy.ts syncs both)
     delete process.env.HTTP_PROXY;
@@ -441,6 +470,61 @@ describe("AgentRunner", () => {
       expect(opts.cwd).toBe("/tmp/workspace");
       expect(opts.model.id).toBe("claude-sonnet-4-5-20250929");
       expect(opts.thinkingLevel).toBe("medium");
+    });
+
+    // Regression: pi resolves auth via the provider registry, not the credential
+    // store, so setRuntimeApiKey alone leaves a non-built-in provider
+    // unauthenticated. A custom endpoint failed its first turn with "No API key
+    // found for custom" while the key sat unused in memory.
+    it("should register a custom provider so its API key can resolve", async () => {
+      await runner.execute(
+        makeExecuteParams({
+          llmSettings: {
+            ...makeLLMSettings(),
+            provider: "custom",
+            model: "deepseek-ai/DeepSeek-V4-Flash",
+            base_url: "https://endpoint.example.com/v1",
+          },
+        }),
+      );
+
+      expect(registeredProviders).toContain("custom");
+
+      const runtime = await (
+        await import("@earendil-works/pi-coding-agent")
+      ).ModelRuntime.create.mock.results.at(-1)!.value;
+      // The provider entry must carry the operator's endpoint and the model,
+      // otherwise pi has a provider it cannot route.
+      const [, config] = (runtime.registerProvider as any).mock.calls[0];
+      expect(config.baseUrl).toBe("https://endpoint.example.com/v1");
+      expect(config.models[0].id).toBe("deepseek-ai/DeepSeek-V4-Flash");
+      // Auth resolves once registered — the condition that was failing.
+      await expect(
+        runtime.getAuth({ provider: "custom", id: "deepseek-ai/DeepSeek-V4-Flash" }),
+      ).resolves.toBeTruthy();
+    });
+
+    it("should survive a failing auth probe instead of breaking the run", async () => {
+      const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
+      (ModelRuntime.create as any).mockImplementationOnce(async () => ({
+        setRuntimeApiKey: vi.fn(async () => {}),
+        registerProvider: vi.fn(),
+        getAuth: vi.fn(async () => {
+          throw new Error("credential store unavailable");
+        }),
+      }));
+
+      const result = await runner.execute(
+        makeExecuteParams({ llmSettings: { ...makeLLMSettings(), provider: "anthropic" } }),
+      );
+      expect(result.error).toBeUndefined();
+    });
+
+    it("should not register providers pi already ships", async () => {
+      await runner.execute(
+        makeExecuteParams({ llmSettings: { ...makeLLMSettings(), provider: "anthropic" } }),
+      );
+      expect(registeredProviders).toEqual([]);
     });
 
     it("should not install a payload hook when no sampling params are configured", async () => {

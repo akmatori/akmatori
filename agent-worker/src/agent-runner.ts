@@ -750,6 +750,86 @@ function writeCustomProviderModelsJson(
 }
 
 /**
+ * The subset of ModelRuntime this module needs to register a provider. Kept
+ * structural so tests can supply a fake without constructing a real runtime.
+ */
+export interface ProviderRegisteringRuntime {
+  getAuth(model: Model<any>): Promise<unknown>;
+  registerProvider(providerId: string, config: Record<string, unknown>): void;
+  setRuntimeApiKey(
+    providerId: string,
+    apiKey: string,
+    refreshOptions?: { allowNetwork?: boolean },
+  ): Promise<void>;
+}
+
+/**
+ * Make the parent runtime able to authenticate `model`'s provider.
+ *
+ * pi resolves auth through the provider *registry*, not the credential store:
+ * `Models.getAuth` bails with `if (!providers.get(id)) return undefined` before
+ * it ever looks at credentials. `setRuntimeApiKey` only stores a credential —
+ * it does not create a provider entry. Our parent runtime is built with
+ * `modelsPath: null`, so the only providers it knows are pi's built-ins, and
+ * `custom` is not one of them.
+ *
+ * The result was that an operator-configured custom endpoint failed its very
+ * first turn with "No API key found for custom" while the key sat unused in
+ * memory — one-shot calls kept working because they pass `apiKey` straight to
+ * `complete()` and never consult the runtime.
+ *
+ * Probing with getAuth first keeps this self-limiting: built-in providers are
+ * left untouched, and it degrades to a no-op if pi ever ships `custom` itself.
+ */
+export async function ensureProviderAuthResolvable(
+  runtime: ProviderRegisteringRuntime,
+  provider: string,
+  apiKey: string,
+  model: Model<any>,
+): Promise<boolean> {
+  let resolved: unknown;
+  try {
+    resolved = await runtime.getAuth(model);
+  } catch (err) {
+    // The probe runs for every provider, including the built-ins that already
+    // work. If it ever throws, fall back to the pre-fix behaviour rather than
+    // letting a diagnostic turn a narrow bug into an outage for everyone.
+    console.warn(
+      `[agent-runner] provider auth probe failed for "${provider}": ${(err as Error).message}`,
+    );
+    return false;
+  }
+  if (resolved) {
+    return false;
+  }
+  runtime.registerProvider(provider, {
+    name: provider,
+    ...(model.baseUrl ? { baseUrl: model.baseUrl } : {}),
+    api: model.api,
+    models: [
+      {
+        id: model.id,
+        name: model.name ?? model.id,
+        api: model.api,
+        ...(model.baseUrl ? { baseUrl: model.baseUrl } : {}),
+        reasoning: model.reasoning ?? true,
+        input: model.input ?? ["text"],
+        cost: model.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: model.contextWindow ?? 128_000,
+        maxTokens: model.maxTokens ?? 16_384,
+        ...((model as { compat?: unknown }).compat
+          ? { compat: (model as { compat?: unknown }).compat }
+          : {}),
+      },
+    ],
+  });
+  // Re-assert the key so the runtime's snapshot (auth + available models) is
+  // rebuilt with the provider now present.
+  await runtime.setRuntimeApiKey(provider, apiKey, { allowNetwork: false });
+  return true;
+}
+
+/**
  * Write `<agentDir>/settings.json` (global) AND `<workDir>/.pi/settings.json`
  * (project) so child `pi` processes pick the same provider+model+thinking the
  * parent session uses. Without this, the child's `findInitialModel` falls back
@@ -957,6 +1037,24 @@ export class AgentRunner {
       params.llmSettings.model,
       params.llmSettings.base_url,
     );
+
+    // `setRuntimeApiKey` above stores the credential but does not create a
+    // provider entry, and pi refuses to resolve auth for a provider it has no
+    // registry entry for. Register one for provider ids pi does not ship —
+    // in practice `custom`, the on-prem/OpenAI-compatible endpoint option.
+    if (
+      await ensureProviderAuthResolvable(
+        modelRuntime as unknown as ProviderRegisteringRuntime,
+        params.llmSettings.provider,
+        params.llmSettings.api_key,
+        model,
+      )
+    ) {
+      console.log(
+        `[agent-runner] registered provider "${params.llmSettings.provider}" on the parent runtime (not a pi built-in)`,
+      );
+    }
+
     const thinkingLevel = mapThinkingLevel(params.llmSettings.thinking_level);
 
     // Pin the child's default provider+model+thinking so subagents run on the
