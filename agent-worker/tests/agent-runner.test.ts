@@ -709,14 +709,57 @@ describe("AgentRunner", () => {
       });
       await runner.execute(params);
 
-      // ModelRuntime.create() was called and setRuntimeApiKey was called on the
-      // resulting runtime with allowNetwork:false (offline, memory-only overlay).
+      // setRuntimeApiKey is called on the runtime with no third argument: pi
+      // 0.84.0 repurposed it from catalog-refresh options to auth cancellation
+      // options, and offline startup is guaranteed by allowModelNetwork:false at
+      // create() instead. Passing the old `{allowNetwork:false}` would now be a
+      // silently-ignored unknown option.
       const runtimeInstance = await (ModelRuntime as any).create.mock.results[0].value;
-      expect(runtimeInstance.setRuntimeApiKey).toHaveBeenCalledWith(
-        "anthropic",
-        "sk-ant-my-key",
-        { allowNetwork: false },
+      expect(runtimeInstance.setRuntimeApiKey).toHaveBeenCalledWith("anthropic", "sk-ant-my-key");
+      expect((ModelRuntime as any).create).toHaveBeenCalledWith(
+        expect.objectContaining({ allowModelNetwork: false, modelsPath: null }),
       );
+    });
+
+    it("should not fail a run when the credential commits but fails to synchronize", async () => {
+      // pi 0.84.0 routes setRuntimeApiKey through synchronizeCredentialState,
+      // which raises CredentialSynchronizationError *after* the credential is
+      // committed. This call sits on every incident's critical path, so the
+      // throw must not fail the investigation.
+      const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
+      (ModelRuntime.create as any).mockImplementationOnce(async () => {
+        const err = new Error("Credential setRuntimeApiKey committed for anthropic, but local synchronization failed");
+        err.name = "CredentialSynchronizationError";
+        return {
+          setRuntimeApiKey: vi.fn(async () => {
+            throw err;
+          }),
+          registerProvider: vi.fn(),
+          getAuth: vi.fn(async () => ({ auth: { apiKey: "resolved" } })),
+        };
+      });
+
+      const result = await runner.execute(
+        makeExecuteParams({ llmSettings: { ...makeLLMSettings(), provider: "anthropic" } }),
+      );
+      expect(result.error).toBeUndefined();
+    });
+
+    it("should still propagate unrelated setRuntimeApiKey failures", async () => {
+      const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
+      (ModelRuntime.create as any).mockImplementationOnce(async () => ({
+        setRuntimeApiKey: vi.fn(async () => {
+          throw new Error("auth store is corrupt");
+        }),
+        registerProvider: vi.fn(),
+        getAuth: vi.fn(async () => ({ auth: { apiKey: "resolved" } })),
+      }));
+
+      await expect(
+        runner.execute(
+          makeExecuteParams({ llmSettings: { ...makeLLMSettings(), provider: "anthropic" } }),
+        ),
+      ).rejects.toThrow("auth store is corrupt");
     });
 
     it("should create a ModelRuntime and pass it to the session (no direct key resolution)", async () => {
@@ -1951,6 +1994,51 @@ describe("AgentRunner", () => {
         expect(config.providers["akmatori-custom"].apiKey).toBe("$AKMATORI_CUSTOM_PROVIDER_API_KEY");
         // The env var carries the live secret so the child resolves it.
         expect(process.env.AKMATORI_CUSTOM_PROVIDER_API_KEY).toBe("sk-secret-custom-key");
+      });
+
+      // pi 0.84.0 `samplingParams`. The parent's onPayload hook cannot reach
+      // child `pi` processes, so without this a subagent silently runs at
+      // provider defaults while the parent honours the operator's settings.
+      it("writes samplingParams into models.json so subagents inherit them", async () => {
+        await runner.execute(
+          makeExecuteParams({
+            workDir: tmpWorkDir,
+            llmSettings: makeLLMSettings({
+              provider: "custom",
+              model: "custom-model",
+              base_url: "https://gateway.example/v1",
+              temperature: 0.2,
+              top_p: 0.95,
+              top_k: 40,
+              max_tokens: 8192,
+            }),
+          }),
+        );
+
+        const config = JSON.parse(fs.readFileSync(path.join(tmpAgentDir, "models.json"), "utf-8"));
+        const entry = config.providers["akmatori-custom"].models[0];
+        expect(entry.samplingParams).toEqual({ temperature: 0.2, top_p: 0.95, top_k: 40 });
+        // max_tokens is excluded on purpose: samplingParams merges verbatim and
+        // the correct field name differs per adapter (max_tokens vs
+        // max_output_tokens), so output length stays with the per-API mapping.
+        expect(entry.samplingParams).not.toHaveProperty("max_tokens");
+        expect(entry.maxTokens).toBe(16384);
+      });
+
+      it("omits samplingParams when the operator configured none", async () => {
+        await runner.execute(
+          makeExecuteParams({
+            workDir: tmpWorkDir,
+            llmSettings: makeLLMSettings({
+              provider: "custom",
+              model: "custom-model",
+              base_url: "https://gateway.example/v1",
+            }),
+          }),
+        );
+
+        const config = JSON.parse(fs.readFileSync(path.join(tmpAgentDir, "models.json"), "utf-8"));
+        expect(config.providers["akmatori-custom"].models[0]).not.toHaveProperty("samplingParams");
       });
     });
   });

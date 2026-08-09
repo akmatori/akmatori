@@ -269,6 +269,27 @@ describe("runOneshotLLM", () => {
     ).rejects.toThrow(/aborted/);
   });
 
+  // pi 0.83.0 added "pending", 0.84.0 added "deferred". Both mean the text is
+  // not final; returning it as an answer would silently corrupt an incident
+  // title or an alert extraction instead of falling back deterministically.
+  it.each(["pending", "deferred"] as const)(
+    "throws rather than returning a non-final %s response",
+    async (stopReason) => {
+      completeMock.mockResolvedValue({
+        ...assistantText("half an ans"),
+        stopReason,
+      });
+
+      await expect(
+        runOneshotLLM({
+          requestId: `req-${stopReason}`,
+          user: "ping",
+          llmSettings: validSettings,
+        }),
+      ).rejects.toThrow(new RegExp(stopReason));
+    },
+  );
+
   it("rejects when request_id missing", async () => {
     await expect(
       runOneshotLLM({

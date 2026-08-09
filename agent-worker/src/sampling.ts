@@ -62,6 +62,42 @@ export interface ApplySamplingResult {
   drops: SamplingDrop[];
 }
 
+/**
+ * APIs whose adapters apply pi's native `samplingParams` (a free-form object
+ * merged verbatim into the request body). Everything else ignores it and needs
+ * the per-API mapping below.
+ */
+export const OPENAI_COMPATIBLE_APIS = new Set([
+  "openai-completions",
+  "openai-responses",
+  "azure-openai-responses",
+]);
+
+/**
+ * Render the overrides as pi's native `samplingParams` (pi 0.84.0+).
+ *
+ * Used for the one place `onPayload` cannot reach: child `pi` subagent
+ * processes, which run their own request pipeline and read these off
+ * `models.json`. Only meaningful for OpenAI-compatible APIs.
+ *
+ * `max_tokens` is deliberately excluded. `samplingParams` is merged verbatim,
+ * but the correct output-length field differs by adapter (`max_tokens` for
+ * completions, `max_output_tokens` for the Responses API), so a verbatim merge
+ * would send the wrong name to one of them. Output length stays with the
+ * per-API mapping in `applySamplingToPayload`, which already gets it right.
+ */
+export function toOpenAISamplingParams(
+  params: SamplingParams | undefined,
+): Record<string, number> | undefined {
+  if (!hasSamplingParams(params)) return undefined;
+  const p = params as SamplingParams;
+  const out: Record<string, number> = {};
+  if (p.temperature !== undefined) out.temperature = p.temperature;
+  if (p.top_p !== undefined) out.top_p = p.top_p;
+  if (p.top_k !== undefined) out.top_k = p.top_k;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 /** True when at least one override is set. */
 export function hasSamplingParams(params: SamplingParams | undefined): boolean {
   if (!params) return false;

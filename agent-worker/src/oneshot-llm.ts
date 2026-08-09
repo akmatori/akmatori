@@ -139,6 +139,16 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
   if (result.stopReason === "aborted") {
     throw new Error("oneshot_llm: request aborted");
   }
+  // "pending" (pi 0.83.0, partial streaming message) and "deferred" (pi 0.84.0,
+  // response retrievable later through a durable handle) both mean the text is
+  // not final. `complete()` should never surface either, but treating one as a
+  // finished answer would silently corrupt an incident title or an extraction
+  // result — fail loudly so the caller's deterministic fallback takes over.
+  if (result.stopReason === "pending" || result.stopReason === "deferred") {
+    throw new Error(
+      `oneshot_llm: provider returned a non-final response (${result.stopReason})`,
+    );
+  }
 
   const text = result.content
     .filter((block): block is { type: "text"; text: string } => block.type === "text")

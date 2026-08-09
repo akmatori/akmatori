@@ -23,7 +23,12 @@ import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import type { Model, ThinkingLevel as PiThinkingLevel } from "@earendil-works/pi-ai";
 import type { LLMSettings, ExecuteResult, ProxyConfig, ThinkingLevel, ToolAllowlistEntry } from "./types.js";
 import { applyProxyConfig } from "./proxy.js";
-import { createSamplingPayloadHook, pickSamplingParams } from "./sampling.js";
+import {
+  OPENAI_COMPATIBLE_APIS,
+  createSamplingPayloadHook,
+  pickSamplingParams,
+  toOpenAISamplingParams,
+} from "./sampling.js";
 import {
   formatToolArgs,
   formatToolOutput,
@@ -174,6 +179,27 @@ export function mapThinkingLevel(level: ThinkingLevel): PiThinkingLevel | "off" 
  * Falls back to creating a custom model spec if the model isn't in the
  * built-in registry (e.g. custom endpoints or new models).
  */
+/**
+ * Provider → pi API used when a model is not in the built-in registry. Also
+ * tells us which providers reach an OpenAI-compatible adapter, which is what
+ * pi's native `samplingParams` applies to.
+ */
+const PROVIDER_API_MAP: Record<string, string> = {
+  openai: "openai-responses",
+  anthropic: "anthropic-messages",
+  google: "google-generative-ai",
+  openrouter: "openai-completions",
+  custom: "openai-completions",
+  nvidia: "openai-completions",
+  minimax: "anthropic-messages",
+  "ant-ling": "openai-completions",
+};
+
+/** True when this provider's requests go through an OpenAI-compatible adapter. */
+export function providerUsesOpenAICompatibleApi(provider: string): boolean {
+  return OPENAI_COMPATIBLE_APIS.has(PROVIDER_API_MAP[provider] ?? "openai-completions");
+}
+
 export function resolveModel(
   provider: string,
   modelId: string,
@@ -219,18 +245,7 @@ export function resolveModel(
 
   // Model not in built-in registry - create a custom model spec.
   // This handles custom providers, openrouter, and newly released models.
-  const apiMap: Record<string, string> = {
-    openai: "openai-responses",
-    anthropic: "anthropic-messages",
-    google: "google-generative-ai",
-    openrouter: "openai-completions",
-    custom: "openai-completions",
-    nvidia: "openai-completions",
-    minimax: "anthropic-messages",
-    "ant-ling": "openai-completions",
-  };
-
-  const apiType = apiMap[provider] ?? "openai-completions";
+  const apiType = PROVIDER_API_MAP[provider] ?? "openai-completions";
 
   // Build compat flags for the synthesized model spec:
   // - Disable OpenAI-specific cache fields for custom (OpenAI-compatible) endpoints;
@@ -509,6 +524,11 @@ function writeCustomProviderModelsJson(
   provider: string,
   model: string,
   baseUrl: string | undefined,
+  // pi 0.84.0+. Written onto the managed model entry so child `pi` subagent
+  // processes honour the operator's sampling settings: they run their own
+  // request pipeline and never see the parent's `onPayload` hook. Ignored by
+  // non-OpenAI-compatible adapters, so only set for providers that reach one.
+  samplingParams?: Record<string, number>,
 ): void {
   const agentDir = getAgentDir();
   const modelsPath = path.join(agentDir, "models.json");
@@ -659,6 +679,7 @@ function writeCustomProviderModelsJson(
             input: ["text"],
             contextWindow: 128000,
             maxTokens: 16384,
+            ...(samplingParams ? { samplingParams } : {}),
           },
         ],
         [AKMATORI_MANAGED_MARKER]: true,
@@ -716,6 +737,7 @@ function writeCustomProviderModelsJson(
                   input: ["text"],
                   contextWindow: 128000,
                   maxTokens: 16384,
+                  ...(samplingParams ? { samplingParams } : {}),
                   [AKMATORI_MANAGED_MARKER]: true,
                 },
               ],
@@ -756,10 +778,13 @@ function writeCustomProviderModelsJson(
 export interface ProviderRegisteringRuntime {
   getAuth(model: Model<any>): Promise<unknown>;
   registerProvider(providerId: string, config: Record<string, unknown>): void;
+  // pi 0.84.0 changed the third argument from catalog-refresh options to auth
+  // cancellation options (`AuthOperationOptions`). Mirror that here — a stale
+  // shape would typecheck locally while diverging from the real runtime.
   setRuntimeApiKey(
     providerId: string,
     apiKey: string,
-    refreshOptions?: { allowNetwork?: boolean },
+    options?: { signal?: AbortSignal },
   ): Promise<void>;
 }
 
@@ -824,9 +849,42 @@ export async function ensureProviderAuthResolvable(
     ],
   });
   // Re-assert the key so the runtime's snapshot (auth + available models) is
-  // rebuilt with the provider now present.
-  await runtime.setRuntimeApiKey(provider, apiKey, { allowNetwork: false });
+  // rebuilt with the provider now present. No third argument: pi 0.84.0 stopped
+  // accepting catalog-refresh options here, and offline startup is guaranteed by
+  // `allowModelNetwork: false` at ModelRuntime.create() instead.
+  await setRuntimeApiKeyTolerantly(runtime, provider, apiKey);
   return true;
+}
+
+/**
+ * Install a runtime API key, tolerating a post-commit synchronization failure.
+ *
+ * pi 0.84.0 routes `setRuntimeApiKey` through `synchronizeCredentialState`, which
+ * can raise `CredentialSynchronizationError` — defined as "credential changes
+ * that commit successfully but fail to synchronize local model state". The
+ * credential is therefore already in place, and this call sits on the critical
+ * path of every incident, so letting the throw escape would fail investigations
+ * for a non-fatal bookkeeping problem.
+ */
+export async function setRuntimeApiKeyTolerantly(
+  runtime: Pick<ProviderRegisteringRuntime, "setRuntimeApiKey">,
+  provider: string,
+  apiKey: string,
+): Promise<void> {
+  try {
+    await runtime.setRuntimeApiKey(provider, apiKey);
+  } catch (err) {
+    // Matched by name rather than `instanceof`: the class is only reachable
+    // through the package root, which the worker's tests replace with a mock,
+    // and a duplicated package instance would defeat an identity check anyway.
+    // pi sets `name` explicitly in the constructor.
+    if ((err as Error)?.name !== "CredentialSynchronizationError") {
+      throw err;
+    }
+    console.warn(
+      `[agent-runner] credential state for "${provider}" committed but did not synchronize: ${(err as Error).message}`,
+    );
+  }
 }
 
 /**
@@ -996,22 +1054,22 @@ export class AgentRunner {
     // Set up proxy env vars before creating session
     applyProxyConfig(params.proxyConfig);
 
-    // Auth & model runtime. pi 0.81 replaced AuthStorage + ModelRegistry with
-    // the async ModelRuntime facade. `setRuntimeApiKey` stores the operator key
-    // in an in-memory RuntimeCredentials overlay: never written to auth.json and
-    // taken literally (no `$ENV` resolution), so keys containing `$` stay safe —
-    // the same guarantees the old `AuthStorage.setRuntimeApiKey` gave us.
+    // Auth & model runtime. `setRuntimeApiKey` stores the operator key in an
+    // in-memory RuntimeCredentials overlay: never written to auth.json and taken
+    // literally (no `$ENV` resolution), so keys containing `$` stay safe.
     // `modelsPath: null` keeps this parent runtime from reading agentDir
     // models.json (the parent drives the session with the explicit `model`
-    // object resolved below); `allowModelNetwork: false` keeps startup offline.
+    // object resolved below); `allowModelNetwork: false` keeps startup offline —
+    // since pi 0.84.0 that flag is the *only* thing gating network access here,
+    // because setRuntimeApiKey no longer accepts catalog-refresh options.
     const modelRuntime = await ModelRuntime.create({
       modelsPath: null,
       allowModelNetwork: false,
     });
-    await modelRuntime.setRuntimeApiKey(
+    await setRuntimeApiKeyTolerantly(
+      modelRuntime as unknown as ProviderRegisteringRuntime,
       params.llmSettings.provider,
       params.llmSettings.api_key,
-      { allowNetwork: false },
     );
     // pi-subagents spawns each subagent in a child `pi` process whose model
     // runtime is independent from this one — the runtime key lives in the
@@ -1029,6 +1087,9 @@ export class AgentRunner {
       params.llmSettings.provider,
       params.llmSettings.model,
       params.llmSettings.base_url,
+      providerUsesOpenAICompatibleApi(params.llmSettings.provider)
+        ? toOpenAISamplingParams(pickSamplingParams(params.llmSettings))
+        : undefined,
     );
 
     // Model
