@@ -6,10 +6,12 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/output"
 	"github.com/akmatori/akmatori/internal/services"
 	"github.com/akmatori/akmatori/internal/utils"
 	"github.com/google/uuid"
@@ -64,6 +66,17 @@ type AgentMessage struct {
 	// Execution metrics (sent with agent_completed)
 	TokensUsed      int   `json:"tokens_used,omitempty"`
 	ExecutionTimeMs int64 `json:"execution_time_ms,omitempty"`
+
+	// Granular usage (sent with agent_completed). Splits of TokensUsed as
+	// reported by the provider; CostUSD is the run's dollar cost computed
+	// worker-side from the SDK's per-model pricing at run time (0 for
+	// custom/on-prem models with no known pricing). Persisted per run on
+	// agent_runs for model performance stats.
+	InputTokens      int64   `json:"input_tokens,omitempty"`
+	OutputTokens     int64   `json:"output_tokens,omitempty"`
+	CacheReadTokens  int64   `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64   `json:"cache_write_tokens,omitempty"`
+	CostUSD          float64 `json:"cost_usd,omitempty"`
 
 	// LastSkill is the name of the last skill whose SKILL.md the agent read
 	// during the run (sent with agent_completed). Persisted onto the Incident
@@ -493,6 +506,37 @@ func (h *AgentWSHandler) dispatchOnOutput(msg AgentMessage) bool {
 func (h *AgentWSHandler) handleAgentCompleted(msg AgentMessage) {
 	slog.Info("incident completed", "incident_id", msg.IncidentID, "session_id", msg.SessionID, "tokens_used", msg.TokensUsed, "execution_time_ms", msg.ExecutionTimeMs)
 
+	// Finalize the per-run telemetry row keyed by run_id. Parsed from the raw
+	// agent output (before the response formatter can rewrite it). Runs
+	// unconditionally — even a superseded run's numbers are recorded (its
+	// status stays "superseded"); only the incident row is guarded below.
+	outcome := parseRunOutcome(msg.Output)
+	if msg.RunID != "" {
+		if err := database.CompleteAgentRun(msg.RunID, database.AgentRunMetrics{
+			TokensUsed:       int64(msg.TokensUsed),
+			InputTokens:      msg.InputTokens,
+			OutputTokens:     msg.OutputTokens,
+			CacheReadTokens:  msg.CacheReadTokens,
+			CacheWriteTokens: msg.CacheWriteTokens,
+			CostUSD:          msg.CostUSD,
+			ExecutionTimeMs:  msg.ExecutionTimeMs,
+		}, outcome); err != nil {
+			slog.Warn("failed to finalize agent run record", "incident_id", msg.IncidentID, "run_id", msg.RunID, "err", err)
+		}
+	}
+
+	// Persist the agent's self-reported outcome BEFORE the completion
+	// callback fires, mirroring the last_skill contract below, so the
+	// finalizer goroutine sees it on the incident row. Guarded so a
+	// superseded run's late frame cannot overwrite the current run's verdict.
+	if outcome != "" && h.isCurrentRun(msg.IncidentID, msg.RunID) {
+		if err := database.GetDB().Model(&database.Incident{}).
+			Where("uuid = ?", msg.IncidentID).
+			Update("result_status", outcome).Error; err != nil {
+			slog.Warn("failed to persist result status", "incident_id", msg.IncidentID, "err", err)
+		}
+	}
+
 	// Persist the last skill BEFORE the completion callback fires: the
 	// finalizer goroutine unblocked by OnCompleted reads the incident row
 	// (BuildFormatFlow) to match formatting rules, so the column must be
@@ -538,15 +582,39 @@ func (h *AgentWSHandler) handleAgentCompleted(msg AgentMessage) {
 	if err := database.GetDB().Model(&database.Incident{}).
 		Where("uuid = ?", msg.IncidentID).
 		Updates(map[string]interface{}{
-			"status":            database.IncidentStatusCompleted,
-			"session_id":        msg.SessionID,
-			"response":          responseWithMetrics,
-			"tokens_used":       msg.TokensUsed,
-			"execution_time_ms": msg.ExecutionTimeMs,
+			"status":     database.IncidentStatusCompleted,
+			"session_id": msg.SessionID,
+			"response":   responseWithMetrics,
+			// Accumulate across runs: multi-turn incidents (Slack chat)
+			// complete once per turn, and the incident-level numbers are the
+			// total spend, not the last run's. Per-run numbers live on
+			// agent_runs.
+			"tokens_used":       gorm.Expr("tokens_used + ?", msg.TokensUsed),
+			"execution_time_ms": gorm.Expr("execution_time_ms + ?", msg.ExecutionTimeMs),
 			"last_skill_used":   msg.LastSkill,
 			"completed_at":      &now,
 		}).Error; err != nil {
 		slog.Error("failed to update incident completion", "err", err)
+	}
+}
+
+// parseRunOutcome extracts the agent's self-reported [FINAL_RESULT] status
+// from raw run output. Returns one of resolved/unresolved/escalate, or ""
+// when the output has no FINAL_RESULT block or an unknown status value
+// (cron runs, proposal chat, free-form answers).
+func parseRunOutcome(rawOutput string) string {
+	if rawOutput == "" {
+		return ""
+	}
+	parsed := output.Parse(rawOutput)
+	if parsed.FinalResult == nil {
+		return ""
+	}
+	switch status := strings.ToLower(strings.TrimSpace(parsed.FinalResult.Status)); status {
+	case database.AgentRunOutcomeResolved, database.AgentRunOutcomeUnresolved, database.AgentRunOutcomeEscalate:
+		return status
+	default:
+		return ""
 	}
 }
 
@@ -627,6 +695,15 @@ func (h *AgentWSHandler) dispatchOnCompleted(msg AgentMessage, output string) bo
 // fire OnSuperseded between snapshot and call.
 func (h *AgentWSHandler) handleAgentError(msg AgentMessage) {
 	slog.Error("incident failed", "incident_id", msg.IncidentID, "err", msg.Error)
+
+	// Finalize the per-run telemetry row. Unconditional (mirrors
+	// handleAgentCompleted): a superseded run keeps its status but records
+	// the error text.
+	if msg.RunID != "" {
+		if err := database.FailAgentRun(msg.RunID, msg.Error); err != nil {
+			slog.Warn("failed to finalize agent run record", "incident_id", msg.IncidentID, "run_id", msg.RunID, "err", err)
+		}
+	}
 
 	if h.dispatchOnError(msg) {
 		return
@@ -896,6 +973,19 @@ func (h *AgentWSHandler) sendIncidentMessage(incidentID string, callback Inciden
 	}
 	h.callbackMu.Unlock()
 	h.mu.Unlock()
+
+	// Record the run for model performance telemetry. Best-effort: a failed
+	// insert (e.g. schema-less test DB) must never block the investigation.
+	if err := database.CreateAgentRun(runID, incidentID, msg.Provider, msg.Model, msg.ThinkingLevel); err != nil {
+		slog.Warn("failed to record agent run start", "incident_id", incidentID, "run_id", runID, "err", err)
+	}
+	// The displaced run's row stays queryable but is labeled so stats can
+	// exclude work whose completion frames were dropped.
+	if hadPrevious && previous.runID != "" && !previous.finalized {
+		if err := database.SupersedeAgentRun(previous.runID); err != nil {
+			slog.Warn("failed to mark agent run superseded", "incident_id", incidentID, "run_id", previous.runID, "err", err)
+		}
+	}
 
 	// Fire the displaced callback outside both locks. OnSuperseded is the
 	// preferred signal — it tells the displaced caller to unblock and exit

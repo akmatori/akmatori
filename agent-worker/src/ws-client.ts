@@ -148,6 +148,13 @@ export class WebSocketClient {
     tokensUsed: number,
     executionTimeMs: number,
     lastSkill?: string,
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_read_tokens?: number;
+      cache_write_tokens?: number;
+      cost_usd?: number;
+    },
   ): void {
     this.send({
       type: "agent_completed",
@@ -158,6 +165,7 @@ export class WebSocketClient {
       execution_time_ms: executionTimeMs,
       ...(runId ? { run_id: runId } : {}),
       ...(lastSkill ? { last_skill: lastSkill } : {}),
+      ...(usage ?? {}),
     });
   }
 

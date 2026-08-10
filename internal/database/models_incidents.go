@@ -79,6 +79,14 @@ type Incident struct {
 	// formatting-rule match dimension.
 	LastSkillUsed string `gorm:"size:64" json:"last_skill_used,omitempty"`
 
+	// ResultStatus is the agent's self-reported [FINAL_RESULT] status from
+	// the most recent completed run: "resolved" | "unresolved" | "escalate".
+	// Empty when the run produced no FINAL_RESULT block. Persisted from the
+	// raw agent output before the response formatter can rewrite it. A
+	// self-report, not ground truth — resolution quality signals additionally
+	// come from the monitor window and alert resolved_at.
+	ResultStatus string `gorm:"size:16;index" json:"result_status,omitempty"`
+
 	// AlertCount is not stored; populated by API handlers via COUNT query.
 	AlertCount int64 `gorm:"-" json:"alert_count"`
 

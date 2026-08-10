@@ -662,12 +662,15 @@ func (s *SkillService) UpdateIncidentStatus(incidentUUID string, status database
 func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status database.IncidentStatus, sessionID string, fullLog string, response string, tokensUsed int, executionTimeMs int64) error {
 	now := time.Now()
 	updates := map[string]interface{}{
-		"status":            status,
-		"session_id":        sessionID,
-		"full_log":          fullLog,
-		"response":          response,
-		"tokens_used":       tokensUsed,
-		"execution_time_ms": executionTimeMs,
+		"status":     status,
+		"session_id": sessionID,
+		"full_log":   fullLog,
+		"response":   response,
+		// Accumulate across runs: multi-turn incidents (Slack chat, proposal
+		// refinement) complete once per turn and the incident-level numbers
+		// are the total spend. Per-run numbers live on agent_runs.
+		"tokens_used":       gorm.Expr("tokens_used + ?", tokensUsed),
+		"execution_time_ms": gorm.Expr("execution_time_ms + ?", executionTimeMs),
 		"completed_at":      &now,
 	}
 

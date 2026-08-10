@@ -171,6 +171,60 @@ export function mapThinkingLevel(level: ThinkingLevel): PiThinkingLevel | "off" 
 }
 
 // ---------------------------------------------------------------------------
+// Usage accumulation
+// ---------------------------------------------------------------------------
+
+/**
+ * The slice of pi-ai's Usage object the worker reads. `cost` is computed by
+ * the SDK from the model's per-token pricing at request time — an all-zeros
+ * cost table (synthesized custom models) yields cost.total 0.
+ */
+export interface RunUsage {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  totalTokens?: number;
+  cost?: { total?: number };
+}
+
+/** Per-run usage totals summed across turn_end and compaction_end events. */
+export interface UsageTotals {
+  totalTokens: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  costUsd: number;
+}
+
+export function addUsage(totals: UsageTotals, usage: RunUsage): void {
+  totals.totalTokens += usage.totalTokens ?? 0;
+  totals.input += usage.input ?? 0;
+  totals.output += usage.output ?? 0;
+  totals.cacheRead += usage.cacheRead ?? 0;
+  totals.cacheWrite += usage.cacheWrite ?? 0;
+  totals.costUsd += usage.cost?.total ?? 0;
+}
+
+/** Map accumulated totals onto ExecuteResult's wire-named usage fields. */
+export function usageResultFields(totals: UsageTotals): {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd: number;
+} {
+  return {
+    input_tokens: totals.input,
+    output_tokens: totals.output,
+    cache_read_tokens: totals.cacheRead,
+    cache_write_tokens: totals.cacheWrite,
+    cost_usd: totals.costUsd,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Model resolution
 // ---------------------------------------------------------------------------
 
@@ -278,7 +332,10 @@ export function resolveModel(
     id: modelId,
     name: modelId,
     api: apiType,
-    provider,
+    // Use the runtime id, not the Akmatori provider name: subagents inherit
+    // this value as their `--model <provider>/<id>` argument and must find the
+    // same provider in their own registry.
+    provider: runtimeProviderId(provider),
     baseUrl: baseUrl ?? "",
     reasoning: true,
     input: ["text"],
@@ -365,6 +422,23 @@ const ADAPTIVE_THINKING_REQUIRED_PROVIDERS = new Set(["minimax"]);
  * regardless of operator state.
  */
 const AKMATORI_CUSTOM_PROVIDER_KEY = "akmatori-custom" as const;
+
+/**
+ * Map an Akmatori provider name to the provider id used by every pi runtime,
+ * parent and child alike.
+ *
+ * Only "custom" is renamed, to the dedicated slot above. The two ids MUST agree
+ * across the parent session and the child `pi` processes. pi-subagents derives
+ * the child's model argument from the parent session's model as
+ * `${parentModel.provider}/${parentModel.id}` (model-fallback.ts) and passes it
+ * as `--model`. When the parent said "custom" but the child's models.json only
+ * knew "akmatori-custom", the child could not resolve the model and every
+ * subagent call failed with "model <id> not found" — while the parent itself
+ * ran normally, because it drives the session with an explicit model object.
+ */
+function runtimeProviderId(provider: string): string {
+  return provider === "custom" ? AKMATORI_CUSTOM_PROVIDER_KEY : provider;
+}
 
 /**
  * Env var name referenced from models.json's apiKey field for the
@@ -952,7 +1026,7 @@ function writeSubagentDefaultsSettings(
 ): void {
   // For UI-selected "custom", route the child at the dedicated akmatori
   // slot so the operator's `providers.custom` (if any) cannot intercept.
-  const targetProvider = provider === "custom" ? AKMATORI_CUSTOM_PROVIDER_KEY : provider;
+  const targetProvider = runtimeProviderId(provider);
 
   const globalPath = path.join(getAgentDir(), "settings.json");
   writeSubagentSettingsFile(globalPath, targetProvider, model, thinkingLevel);
@@ -1066,9 +1140,11 @@ export class AgentRunner {
       modelsPath: null,
       allowModelNetwork: false,
     });
+    // Key the credential by the runtime provider id, which is what the resolved
+    // model carries and therefore what pi looks up during auth.
     await setRuntimeApiKeyTolerantly(
       modelRuntime as unknown as ProviderRegisteringRuntime,
-      params.llmSettings.provider,
+      runtimeProviderId(params.llmSettings.provider),
       params.llmSettings.api_key,
     );
     // pi-subagents spawns each subagent in a child `pi` process whose model
@@ -1106,13 +1182,13 @@ export class AgentRunner {
     if (
       await ensureProviderAuthResolvable(
         modelRuntime as unknown as ProviderRegisteringRuntime,
-        params.llmSettings.provider,
+        runtimeProviderId(params.llmSettings.provider),
         params.llmSettings.api_key,
         model,
       )
     ) {
       console.log(
-        `[agent-runner] registered provider "${params.llmSettings.provider}" on the parent runtime (not a pi built-in)`,
+        `[agent-runner] registered provider "${runtimeProviderId(params.llmSettings.provider)}" on the parent runtime (not a pi built-in)`,
       );
     }
 
@@ -1293,7 +1369,14 @@ export class AgentRunner {
     // Accumulate response and token usage
     let responseText = "";
     let fullLog = "";
-    let totalTokens = 0;
+    const usageTotals: UsageTotals = {
+      totalTokens: 0,
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      costUsd: 0,
+    };
     const toolTraces = new Map<string, ToolExecutionTrace>();
     const thinkingBuffers = new Map<number, string>();
 
@@ -1339,8 +1422,8 @@ export class AgentRunner {
         fullLog += text;
       }, (text) => {
         fullLog += text;
-      }, (tokens) => {
-        totalTokens += tokens;
+      }, (usage) => {
+        addUsage(usageTotals, usage);
       }, toolTraces, thinkingBuffers);
     });
 
@@ -1363,8 +1446,9 @@ export class AgentRunner {
         // Propagate API-level errors (quota, auth, model not found) even when
         // partial response text was collected from earlier turns.
         error: lastErrorMessage || undefined,
-        tokens_used: totalTokens,
+        tokens_used: usageTotals.totalTokens,
         execution_time_ms: Date.now() - startTime,
+        ...usageResultFields(usageTotals),
         session_export: sessionExportPath,
         last_skill: lastSkillName,
       };
@@ -1376,8 +1460,9 @@ export class AgentRunner {
         response: responseText,
         full_log: fullLog,
         error: (err as Error).message,
-        tokens_used: totalTokens,
+        tokens_used: usageTotals.totalTokens,
         execution_time_ms: Date.now() - startTime,
+        ...usageResultFields(usageTotals),
         session_export: sessionExportPath,
         last_skill: lastSkillName,
       };
@@ -1473,7 +1558,7 @@ export class AgentRunner {
     onOutput: (text: string) => void,
     onResponseText: (text: string) => void,
     onLogText: (text: string) => void,
-    onTokens: (tokens: number) => void,
+    onUsage: (usage: RunUsage) => void,
     toolTraces: Map<string, ToolExecutionTrace>,
     thinkingBuffers: Map<number, string>,
   ): void {
@@ -1550,10 +1635,7 @@ export class AgentRunner {
       case "turn_end": {
         // Extract token usage from the assistant message
         if (event.message && "usage" in event.message && event.message.usage) {
-          const usage = event.message.usage as { totalTokens?: number };
-          if (usage.totalTokens) {
-            onTokens(usage.totalTokens);
-          }
+          onUsage(event.message.usage as RunUsage);
         }
         break;
       }
@@ -1575,9 +1657,9 @@ export class AgentRunner {
         // Counted here rather than from session entries because this fires
         // once per live compaction: summing `sessionManager.getEntries()`
         // would re-count prior runs' compactions on every resume.
-        const compactionTokens = event.result?.usage?.totalTokens;
-        if (compactionTokens) {
-          onTokens(compactionTokens);
+        const compactionUsage = event.result?.usage;
+        if (compactionUsage) {
+          onUsage(compactionUsage as RunUsage);
         }
 
         let compactResult: string;

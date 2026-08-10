@@ -116,6 +116,16 @@ export interface WebSocketMessage {
   tokens_used?: number;
   execution_time_ms?: number;
 
+  // Granular usage (sent with agent_completed): provider-reported splits of
+  // tokens_used, plus the run's dollar cost computed from the SDK's
+  // per-model pricing at run time (0 when pricing is unknown, e.g. custom
+  // providers). Persisted per run by the API for model performance stats.
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  cost_usd?: number;
+
   // Name of the last skill whose SKILL.md the agent read (sent with
   // agent_completed; drives formatting-rule matching on the API side)
   last_skill?: string;
@@ -170,6 +180,13 @@ export interface ExecuteResult {
   error?: string;
   tokens_used: number;
   execution_time_ms: number;
+  /** Provider-reported token splits summed across turns + compactions. */
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  /** Run cost in USD from the SDK's per-model pricing (0 when unknown). */
+  cost_usd?: number;
   /** Path to JSONL session export file (for post-mortem analysis) */
   session_export?: string;
   /** Name of the last skill whose SKILL.md the agent read during the run */

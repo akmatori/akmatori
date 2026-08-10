@@ -162,6 +162,7 @@ func runMigrations(db *gorm.DB) error {
 		&SkillTool{},
 		&EventSource{},
 		&Incident{},
+		&AgentRun{},
 		&APIKeySettings{},
 		// Alert source models
 		&AlertSourceType{},

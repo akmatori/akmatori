@@ -317,15 +317,34 @@ describe("resolveModel", () => {
   it("should create custom model spec for unknown provider/model", () => {
     const model = resolveModel("custom", "my-model", "https://my-api.example.com");
     expect(model.id).toBe("my-model");
-    expect(model.provider).toBe("custom");
+    // Not "custom": pi-subagents derives the child's `--model <provider>/<id>`
+    // from this field, and the child's registry only knows "akmatori-custom".
+    expect(model.provider).toBe("akmatori-custom");
     expect(model.api).toBe("openai-completions");
     expect(model.baseUrl).toBe("https://my-api.example.com");
+  });
+
+  // Regression: subagents on a custom endpoint all failed with "model <id> not
+  // found" while the parent ran normally. pi-subagents builds the child's
+  // `--model` argument as `${parentModel.provider}/${parentModel.id}`, so the
+  // provider on the resolved model must be the same id the child's models.json
+  // and settings.json use. It was "custom" on one side and "akmatori-custom" on
+  // the other.
+  it("should resolve custom models under the same provider id the child uses", () => {
+    const model = resolveModel("custom", "deepseek-ai/DeepSeek-V4-Flash", "https://e.example/v1");
+    const childModelArg = `${model.provider}/${model.id}`;
+    expect(childModelArg).toBe("akmatori-custom/deepseek-ai/DeepSeek-V4-Flash");
+  });
+
+  it("should leave built-in provider ids untouched", () => {
+    expect(resolveModel("anthropic", "claude-sonnet-5").provider).toBe("anthropic");
+    expect(resolveModel("nvidia", "meta/llama-3.3-70b-instruct").provider).toBe("nvidia");
   });
 
   it("should create custom model spec when getModel returns undefined", () => {
     const model = resolveModel("custom", "my-model-undefined-return", "https://my-api.example.com");
     expect(model.id).toBe("my-model-undefined-return");
-    expect(model.provider).toBe("custom");
+    expect(model.provider).toBe("akmatori-custom");
     expect(model.api).toBe("openai-completions");
     expect(model.baseUrl).toBe("https://my-api.example.com");
   });
@@ -488,7 +507,7 @@ describe("AgentRunner", () => {
         }),
       );
 
-      expect(registeredProviders).toContain("custom");
+      expect(registeredProviders).toContain("akmatori-custom");
 
       const runtime = await (
         await import("@earendil-works/pi-coding-agent")
@@ -498,9 +517,11 @@ describe("AgentRunner", () => {
       const [, config] = (runtime.registerProvider as any).mock.calls[0];
       expect(config.baseUrl).toBe("https://endpoint.example.com/v1");
       expect(config.models[0].id).toBe("deepseek-ai/DeepSeek-V4-Flash");
-      // Auth resolves once registered — the condition that was failing.
+      // Auth resolves once registered — the condition that was failing. The
+      // lookup uses the runtime provider id, which is what the resolved model
+      // carries and what the child processes also use.
       await expect(
-        runtime.getAuth({ provider: "custom", id: "deepseek-ai/DeepSeek-V4-Flash" }),
+        runtime.getAuth({ provider: "akmatori-custom", id: "deepseek-ai/DeepSeek-V4-Flash" }),
       ).resolves.toBeTruthy();
     });
 

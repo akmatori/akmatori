@@ -438,6 +438,13 @@ export class Orchestrator {
         result.tokens_used,
         result.execution_time_ms,
         result.last_skill,
+        {
+          input_tokens: result.input_tokens,
+          output_tokens: result.output_tokens,
+          cache_read_tokens: result.cache_read_tokens,
+          cache_write_tokens: result.cache_write_tokens,
+          cost_usd: result.cost_usd,
+        },
       );
 
       this.log(
