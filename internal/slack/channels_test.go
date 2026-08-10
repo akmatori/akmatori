@@ -1,7 +1,12 @@
 package slack
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/slack-go/slack"
 )
 
 // --- isChannelID tests ---
@@ -56,6 +61,24 @@ func TestIsChannelID_InvalidChannelID(t *testing.T) {
 }
 
 // --- ChannelResolver tests (unit tests without Slack API) ---
+
+func TestNewChannelResolver(t *testing.T) {
+	client := slack.New("test-token")
+	resolver := NewChannelResolver(client)
+
+	if resolver == nil {
+		t.Fatal("NewChannelResolver returned nil")
+	}
+	if resolver.client != client {
+		t.Error("resolver should keep the provided Slack client")
+	}
+	if resolver.cache == nil {
+		t.Fatal("resolver cache should be initialized")
+	}
+	if len(resolver.cache) != 0 {
+		t.Errorf("new resolver cache should be empty, got %d entries", len(resolver.cache))
+	}
+}
 
 func TestChannelResolver_ResolveChannel_AlreadyChannelID(t *testing.T) {
 	// When given a valid channel ID, it should be returned as-is
@@ -132,6 +155,118 @@ func TestChannelResolver_ResolveChannel_CacheHit(t *testing.T) {
 	}
 }
 
+func TestChannelResolver_ResolveChannel_SlackLookup(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		responses  map[string]slackConversationsResponse
+		want       string
+		wantTypes  []string
+		wantErr    bool
+		wantCached bool
+	}{
+		{
+			name:  "public channel match caches result",
+			input: "#alerts",
+			responses: map[string]slackConversationsResponse{
+				"public_channel": {
+					Ok:       true,
+					Channels: []slackTestChannel{{ID: "C111111111", Name: "alerts"}},
+				},
+			},
+			want:       "C111111111",
+			wantTypes:  []string{"public_channel"},
+			wantCached: true,
+		},
+		{
+			name:  "private channel fallback",
+			input: "incidents",
+			responses: map[string]slackConversationsResponse{
+				"public_channel": {Ok: true},
+				"private_channel": {
+					Ok:       true,
+					Channels: []slackTestChannel{{ID: "G222222222", Name: "incidents"}},
+				},
+			},
+			want:       "G222222222",
+			wantTypes:  []string{"public_channel", "private_channel"},
+			wantCached: true,
+		},
+		{
+			name:  "not found after public and private lookup",
+			input: "missing",
+			responses: map[string]slackConversationsResponse{
+				"public_channel":  {Ok: true},
+				"private_channel": {Ok: true},
+			},
+			wantTypes: []string{"public_channel", "private_channel"},
+			wantErr:   true,
+		},
+		{
+			name:  "private lookup error reports channel not found",
+			input: "secret-alerts",
+			responses: map[string]slackConversationsResponse{
+				"public_channel":  {Ok: true},
+				"private_channel": {Ok: false, Error: "missing_scope"},
+			},
+			wantTypes: []string{"public_channel", "private_channel"},
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, gotTypes := newSlackConversationsTestClient(t, tt.responses)
+			resolver := NewChannelResolver(client)
+
+			got, err := resolver.ResolveChannel(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("ResolveChannel(%q) expected error, got nil", tt.input)
+				}
+			} else if err != nil {
+				t.Fatalf("ResolveChannel(%q) unexpected error: %v", tt.input, err)
+			}
+			if got != tt.want {
+				t.Errorf("ResolveChannel(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+			if !equalStrings(gotTypes(), tt.wantTypes) {
+				t.Errorf("Slack lookup types = %v, want %v", gotTypes(), tt.wantTypes)
+			}
+
+			cacheKey := tt.input
+			if cacheKey != "" && cacheKey[0] == '#' {
+				cacheKey = cacheKey[1:]
+			}
+			_, cached := resolver.cache[cacheKey]
+			if cached != tt.wantCached {
+				t.Errorf("cache entry for %q exists = %v, want %v", cacheKey, cached, tt.wantCached)
+			}
+		})
+	}
+}
+
+func TestChannelResolver_ResolveChannel_PublicLookupError(t *testing.T) {
+	client, gotTypes := newSlackConversationsTestClient(t, map[string]slackConversationsResponse{
+		"public_channel": {Ok: false, Error: "invalid_auth"},
+	})
+	resolver := NewChannelResolver(client)
+
+	got, err := resolver.ResolveChannel("alerts")
+	if err == nil {
+		t.Fatal("ResolveChannel expected error, got nil")
+	}
+	if got != "" {
+		t.Errorf("ResolveChannel returned ID %q on error, want empty", got)
+	}
+	if !equalStrings(gotTypes(), []string{"public_channel"}) {
+		t.Errorf("Slack lookup types = %v, want [public_channel]", gotTypes())
+	}
+	if len(resolver.cache) != 0 {
+		t.Errorf("resolver should not cache failed lookup, got %d entries", len(resolver.cache))
+	}
+}
+
 func TestChannelResolver_ClearCache(t *testing.T) {
 	resolver := &ChannelResolver{
 		client: nil,
@@ -154,6 +289,65 @@ func TestChannelResolver_ClearCache(t *testing.T) {
 	if len(resolver.cache) != 0 {
 		t.Errorf("cache should be empty after clear, got %d entries", len(resolver.cache))
 	}
+}
+
+type slackTestChannel struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type slackConversationsResponse struct {
+	Ok       bool               `json:"ok"`
+	Error    string             `json:"error,omitempty"`
+	Channels []slackTestChannel `json:"channels,omitempty"`
+}
+
+func newSlackConversationsTestClient(t *testing.T, responses map[string]slackConversationsResponse) (*slack.Client, func() []string) {
+	t.Helper()
+
+	var gotTypes []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/conversations.list" {
+			t.Errorf("unexpected Slack API path %q", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("ParseForm failed: %v", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		typeName := r.FormValue("types")
+		gotTypes = append(gotTypes, typeName)
+		response, ok := responses[typeName]
+		if !ok {
+			t.Errorf("unexpected conversation type lookup %q", typeName)
+			response = slackConversationsResponse{Ok: true}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Errorf("encoding response: %v", err)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := slack.New("test-token", slack.OptionAPIURL(server.URL+"/"))
+	return client, func() []string {
+		return append([]string(nil), gotTypes...)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestChannelResolver_ConcurrentCacheRead(t *testing.T) {
