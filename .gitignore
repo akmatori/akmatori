@@ -1,4 +1,7 @@
-.claude
+# Local Claude Code config stays untracked, but the path-scoped rules that
+# accompany CLAUDE.md ship with the repo.
+.claude/*
+!.claude/rules/
 akmatori_data/*
 # System-supplied subagent definitions ship with the repo so operators get
 # runbook-searcher / memory-searcher / memory-writer out of the box. Operator
