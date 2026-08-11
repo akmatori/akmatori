@@ -16,15 +16,37 @@ import (
 // error string instead of duplicating the literal at each call site.
 var errInvalidSlackExternalID = errors.New("slack external_id must not contain spaces or commas")
 
+// errInvalidTelegramExternalID is the typed error returned when a Telegram
+// channel's external_id is not a valid numeric chat ID.
+var errInvalidTelegramExternalID = errors.New("telegram external_id must be a numeric chat ID (e.g. -1001234567890)")
+
 // validateProviderExternalID applies provider-specific syntax checks to a
 // channel's external_id. Returns nil when no provider-level constraint
 // applies. The Slack guard rejects spaces and commas because the legacy
 // loader path splits comma-delimited handles and Slack itself disallows
-// whitespace in channel IDs / names.
+// whitespace in channel IDs / names. The Telegram guard requires a numeric
+// chat ID (optionally prefixed with a dash for private groups, or 100- for
+// supergroups and channels).
 func validateProviderExternalID(provider database.MessagingProvider, externalID string) error {
 	if provider == database.MessagingProviderSlack {
 		if strings.ContainsAny(externalID, " ,") {
 			return errInvalidSlackExternalID
+		}
+	}
+	if provider == database.MessagingProviderTelegram {
+		if externalID == "" {
+			return errInvalidTelegramExternalID
+		}
+		// Telegram chat IDs are numeric, optionally with a leading dash.
+		// Strip leading dash and verify the rest is digits.
+		trimmed := strings.TrimPrefix(externalID, "-")
+		if trimmed == "" {
+			return errInvalidTelegramExternalID
+		}
+		for _, r := range trimmed {
+			if r < '0' || r > '9' {
+				return errInvalidTelegramExternalID
+			}
 		}
 	}
 	return nil

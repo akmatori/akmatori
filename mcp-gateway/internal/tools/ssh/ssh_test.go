@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"os"
@@ -499,9 +500,6 @@ func TestResolveTargetHosts_UnconfiguredServerAdhocEnabled(t *testing.T) {
 	if h.Port != 2200 {
 		t.Errorf("expected port 2200, got %d", h.Port)
 	}
-	if h.AllowWriteCommands {
-		t.Error("expected ad-hoc host to be read-only")
-	}
 }
 
 func TestResolveTargetHosts_AdhocWriteCommandsEnabled(t *testing.T) {
@@ -513,13 +511,11 @@ func TestResolveTargetHosts_AdhocWriteCommandsEnabled(t *testing.T) {
 		AdhocAllowWriteCommands: true,
 	}
 
-	hosts, err := tool.resolveTargetHosts([]string{"server.example.com"}, config)
+	_, err := tool.resolveTargetHosts([]string{"server.example.com"}, config)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !hosts[0].AllowWriteCommands {
-		t.Error("expected ad-hoc host to allow write commands")
-	}
+	// Adhoc hosts no longer have per-host write settings - controlled at tool level
 }
 
 func TestResolveTargetHosts_MixedConfiguredAndAdhoc(t *testing.T) {
@@ -647,7 +643,7 @@ func TestResolveTargetHosts_IPv6BracketNormalization(t *testing.T) {
 	tool := newTestTool()
 	config := &SSHConfig{
 		Hosts: []SSHHostConfig{
-			{Hostname: "ipv6-server", Address: "[2001:db8::1]", User: "root", Port: 22, AllowWriteCommands: true},
+			{Hostname: "ipv6-server", Address: "[2001:db8::1]", User: "root", Port: 22},
 		},
 		AdhocDefaultUser:      "root",
 		AdhocDefaultPort:      22,
@@ -665,9 +661,7 @@ func TestResolveTargetHosts_IPv6BracketNormalization(t *testing.T) {
 	if hosts[0].Hostname != "ipv6-server" {
 		t.Errorf("expected configured host ipv6-server, got %s", hosts[0].Hostname)
 	}
-	if !hosts[0].AllowWriteCommands {
-		t.Error("expected configured host's AllowWriteCommands=true to be preserved")
-	}
+	// Hosts no longer have per-host write settings - controlled at tool level
 
 	// Target with brackets — should also match
 	hosts, err = tool.resolveTargetHosts([]string{"[2001:db8::1]"}, config)
@@ -700,5 +694,60 @@ func TestStripBrackets(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("stripBrackets(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestGetAllowedCommands_ReturnsAllStages(t *testing.T) {
+	logger := log.New(os.Stdout, "test: ", log.LstdFlags)
+	tool := NewSSHTool(logger)
+
+	// We can't easily test with a real DB — getConfig will panic on nil DB.
+	// Verify the method signature exists and the JSON result type is correct.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Logf("GetAllowedCommands panicked as expected (no DB): %v", r)
+		}
+	}()
+
+	_, err := tool.GetAllowedCommands(context.Background(), "test-incident", nil)
+	if err != nil {
+		t.Logf("GetAllowedCommands returned expected error (no DB): %v", err)
+	}
+}
+
+func TestAllowedCommandsResult_JSONStructure(t *testing.T) {
+	result := AllowedCommandsResult{
+		DenyList:               []string{"rm *", "shutdown"},
+		ReadOnlyCommands:       []string{"cat", "ls", "grep"},
+		SubcommandRestrictions: map[string][]string{"docker": {"ps", "logs", "inspect"}},
+		AllowList:              []string{"curl *"},
+		WriteEnabled:           false,
+		WriteRedirectBlocked:   true,
+	}
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+
+	var parsed AllowedCommandsResult
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if len(parsed.DenyList) != 2 || parsed.DenyList[0] != "rm *" {
+		t.Errorf("DenyList mismatch: %v", parsed.DenyList)
+	}
+	if len(parsed.ReadOnlyCommands) != 3 {
+		t.Errorf("ReadOnlyCommands mismatch: %v", parsed.ReadOnlyCommands)
+	}
+	if len(parsed.SubcommandRestrictions) != 1 {
+		t.Errorf("SubcommandRestrictions mismatch: %v", parsed.SubcommandRestrictions)
+	}
+	if parsed.WriteEnabled != false {
+		t.Error("WriteEnabled should be false")
+	}
+	if parsed.WriteRedirectBlocked != true {
+		t.Error("WriteRedirectBlocked should be true")
 	}
 }

@@ -643,7 +643,8 @@ export interface SSHHostConfig {
   jumphost_address?: string;
   jumphost_user?: string;
   jumphost_port?: number;
-  allow_write_commands?: boolean;
+  // Note: Command validation is now configured at tool level, not per-host
+  // Use ssh_deny_list, ssh_allow_list, ssh_allow_write_commands in tool settings
 }
 
 // Events feed

@@ -135,6 +135,7 @@ type IncidentCallback struct {
 // without spinning up a real WebSocket).
 type IncidentRunner interface {
 	IsWorkerConnected() bool
+	WaitForWorkerConnected(ctx context.Context) error
 	StartIncident(incidentID, task string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []ToolAllowlistEntry, callback IncidentCallback) (string, error)
 	ReleaseRun(incidentID, runID string) bool
 }

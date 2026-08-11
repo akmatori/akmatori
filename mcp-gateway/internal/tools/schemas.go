@@ -67,6 +67,7 @@ func GetToolSchemas() map[string]ToolTypeSchema {
 		"netbox":           getNetBoxSchema(),
 		"kubernetes":       getK8sSchema(),
 		"jira":             getJiraSchema(),
+		"telegram":         getTelegramSchema(),
 	}
 }
 
@@ -173,15 +174,33 @@ func getSSHSchema() ToolTypeSchema {
 								Maximum:     intPtr(65535),
 								Advanced:    true,
 							},
-							"allow_write_commands": {
-								Type:        "boolean",
-								Description: "Allow write/destructive commands (WARNING: security risk)",
-								Default:     false,
-								Advanced:    true,
-								Warning:     "Enabling this allows destructive commands like rm, mv, kill, etc.",
-							},
 						},
 					},
+				},
+				"ssh_deny_list": {
+					Type:        "array",
+					Description: "Global deny list of command patterns (Claude Code wildcard syntax). Commands matching these patterns are ALWAYS blocked. Applied to all hosts. Example: ['rm *', 'shutdown', 'kill *', 'docker stop *']",
+					Advanced:    true,
+					Items: &ItemSchema{
+						Type: "string",
+					},
+					Example: []string{"rm *", "shutdown", "kill *", "docker stop *", "kubectl delete *"},
+				},
+				"ssh_allow_list": {
+					Type:        "array",
+					Description: "Global allow list of command patterns (Claude Code wildcard syntax). Commands matching these patterns are explicitly allowed even if not in the default read-only list. Applied to all hosts. Example: ['curl *', 'wget *', 'scp *']",
+					Advanced:    true,
+					Items: &ItemSchema{
+						Type: "string",
+					},
+					Example: []string{"curl *", "wget *", "scp *", "rsync *"},
+				},
+				"ssh_allow_write_commands": {
+					Type:        "boolean",
+					Description: "Allow write/destructive commands that are not in the default read-only list and not explicitly blocked by the deny list. WARNING: This allows commands like rm, mv, kill, systemctl restart, etc.",
+					Default:     false,
+					Advanced:    true,
+					Warning:     "Enabling this allows destructive commands. Commands in the deny list are still blocked.",
 				},
 				"ssh_command_timeout": {
 					Type:        "integer",
@@ -243,21 +262,27 @@ func getSSHSchema() ToolTypeSchema {
 		Functions: []ToolFunction{
 			{
 				Name:        "execute_command",
-				Description: "Execute a command on all or specified servers in parallel. Commands are validated against read-only mode (blocks rm, mv, kill, etc. by default).",
+				Description: "Execute a command on all or specified servers in parallel. Commands are validated against read-only mode (blocks rm, mv, kill, etc. by default). Instance parameter is required.",
 				Parameters:  "command: str - The shell command to execute; servers: list[str] - Optional list of hostnames to target (defaults to all)",
 				Returns:     "JSON string with per-server results: {results: [{server, success, stdout, stderr, exit_code, duration_ms}], summary: {total, succeeded, failed}}",
 			},
 			{
 				Name:        "test_connectivity",
-				Description: "Test SSH connectivity to specified or all configured servers (including through jumphosts if configured). When ad-hoc connections are enabled, can test connectivity to any server.",
+				Description: "Test SSH connectivity to specified or all configured servers (including through jumphosts if configured). When ad-hoc connections are enabled, can test connectivity to any server. Instance parameter is required.",
 				Parameters:  "servers: list[str] - Optional list of server hostnames/addresses to test (defaults to all configured servers)",
 				Returns:     "JSON string with connectivity status: {results: [{server, reachable, error}], summary: {total, reachable, unreachable}}",
 			},
 			{
 				Name:        "get_server_info",
-				Description: "Get basic system information (hostname, OS, uptime) from all servers",
+				Description: "Get basic system information (hostname, OS, uptime) from all servers. Instance parameter is required.",
 				Parameters:  "None",
 				Returns:     "JSON string with server info: {results: [{server, success, stdout, stderr}]}",
+			},
+			{
+				Name:        "get_allowed_commands",
+				Description: "Get the current command validation policies for a specific SSH tool instance. Returns all 4 stages: deny_list (Stage 1), read_only_commands (Stage 2), allow_list (Stage 3), write_enabled (Stage 4), and subcommand_restrictions. Instance parameter is required.",
+				Parameters:  "None (instance parameter is required)",
+				Returns:     "JSON string with command policies: {deny_list: [str], read_only_commands: [str], subcommand_restrictions: {str: [str]}, allow_list: [str], write_enabled: bool, write_redirect_blocked: bool}",
 			},
 		},
 	}
@@ -1480,6 +1505,69 @@ func getJiraSchema() ToolTypeSchema {
 				Description: "Update fields on an existing issue. Requires jira_allow_writes=true on the instance.",
 				Parameters:  "key (required), fields (required)",
 				Returns:     "JSON status object",
+			},
+		},
+	}
+}
+
+func getTelegramSchema() ToolTypeSchema {
+	return ToolTypeSchema{
+		Name:        "telegram",
+		Description: "Telegram Bot API integration. Send messages to Telegram chats, verify bot configuration, and retrieve chat information.",
+		Version:     "1.0.0",
+		SettingsSchema: SettingsSchema{
+			Type:     "object",
+			Required: []string{"telegram_bot_token"},
+			Properties: map[string]PropertySchema{
+				"telegram_bot_token": {
+					Type:        "string",
+					Description: "Telegram Bot API token (from @BotFather)",
+					Secret:      true,
+				},
+				"telegram_chat_id": {
+					Type:        "string",
+					Description: "Default Telegram chat ID to send messages to (can be overridden per-call)",
+				},
+				"telegram_base_url": {
+					Type:        "string",
+					Description: "Telegram Bot API base URL",
+					Default:     "https://api.telegram.org",
+					Advanced:    true,
+				},
+				"telegram_verify_ssl": {
+					Type:        "boolean",
+					Description: "Verify SSL certificates",
+					Default:     true,
+					Advanced:    true,
+				},
+				"telegram_timeout": {
+					Type:        "integer",
+					Description: "API request timeout in seconds",
+					Default:     30,
+					Minimum:     intPtr(5),
+					Maximum:     intPtr(60),
+					Advanced:    true,
+				},
+			},
+		},
+		Functions: []ToolFunction{
+			{
+				Name:        "send_message",
+				Description: "Send a text message to a Telegram chat",
+				Parameters:  "text (required), chat_id (optional override), parse_mode (default: Markdown), disable_notification",
+				Returns:     "JSON with success status and message_id",
+			},
+			{
+				Name:        "get_me",
+				Description: "Get basic information about the bot (verifies token)",
+				Parameters:  "(none)",
+				Returns:     "JSON with bot user information",
+			},
+			{
+				Name:        "get_chat_info",
+				Description: "Get information about a chat (verifies chat_id)",
+				Parameters:  "chat_id (optional override)",
+				Returns:     "JSON with chat information",
 			},
 		},
 	}
