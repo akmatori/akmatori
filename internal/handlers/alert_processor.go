@@ -166,6 +166,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		slog.Info("created incident for alert", "incident_id", incidentUUID)
 
 		// Post alert to the first available messaging provider (Slack, then Telegram).
+		// Returns the resolved Channel, external ID, and message ID for result posting.
 		var postChannel *database.Channel
 		var postExternalID, postMessageID string
 		var postProvider database.MessagingProvider
@@ -754,7 +755,6 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 		// matches the incident's flow.
 		formattedResponse := applyResponseFormatter(context.Background(), h.responseFormatter, hasError, response, taskHeader+lastStreamedLog,
 			services.BuildFormatFlow(incidentUUID, ""))
-
 
 		// Re-attach the metrics footer AFTER formatting so the LLM never
 		// sees it (and therefore cannot strip or rewrite ⏱️ Time / 🎯

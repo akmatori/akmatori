@@ -739,7 +739,7 @@ func (r *Registry) registerSSHTools() {
 	r.server.RegisterTool(
 		mcp.Tool{
 			Name:        "ssh.execute_command",
-			Description: "Execute a shell command on configured SSH servers in parallel",
+			Description: "Execute a shell command on configured SSH servers in parallel. Requires instance parameter to specify which SSH tool instance to use.",
 			InputSchema: mcp.InputSchema{
 				Type: "object",
 				Properties: map[string]mcp.Property{
@@ -758,6 +758,9 @@ func (r *Registry) registerSSHTools() {
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
 			logicalName := extractLogicalName(args)
+			if logicalName == "" {
+				return "", fmt.Errorf("instance is required: specify which SSH tool instance to use (use list_tools_for_tool_type to see available instances)")
+			}
 			command, _ := args["command"].(string)
 			servers := extractServers(args)
 			return sshTool.ExecuteCommand(ctx, incidentID, command, servers, nil, logicalName)
@@ -768,7 +771,7 @@ func (r *Registry) registerSSHTools() {
 	r.server.RegisterTool(
 		mcp.Tool{
 			Name:        "ssh.test_connectivity",
-			Description: "Test SSH connectivity to configured servers, or specific servers when ad-hoc connections are enabled",
+			Description: "Test SSH connectivity to configured servers, or specific servers when ad-hoc connections are enabled. Requires instance parameter to specify which SSH tool instance to use.",
 			InputSchema: mcp.InputSchema{
 				Type: "object",
 				Properties: map[string]mcp.Property{
@@ -782,6 +785,9 @@ func (r *Registry) registerSSHTools() {
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
 			logicalName := extractLogicalName(args)
+			if logicalName == "" {
+				return "", fmt.Errorf("instance is required: specify which SSH tool instance to use (use list_tools_for_tool_type to see available instances)")
+			}
 			servers := extractServers(args)
 			return sshTool.TestConnectivity(ctx, incidentID, servers, nil, logicalName)
 		},
@@ -791,7 +797,7 @@ func (r *Registry) registerSSHTools() {
 	r.server.RegisterTool(
 		mcp.Tool{
 			Name:        "ssh.get_server_info",
-			Description: "Get basic system information (hostname, OS, uptime) from specified servers",
+			Description: "Get basic system information (hostname, OS, uptime) from specified servers. Requires instance parameter to specify which SSH tool instance to use.",
 			InputSchema: mcp.InputSchema{
 				Type: "object",
 				Properties: map[string]mcp.Property{
@@ -805,8 +811,30 @@ func (r *Registry) registerSSHTools() {
 		},
 		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
 			logicalName := extractLogicalName(args)
+			if logicalName == "" {
+				return "", fmt.Errorf("instance is required: specify which SSH tool instance to use (use list_tools_for_tool_type to see available instances)")
+			}
 			servers := extractServers(args)
 			return sshTool.GetServerInfo(ctx, incidentID, servers, nil, logicalName)
+		},
+	)
+
+	// ssh.get_allowed_commands
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "ssh.get_allowed_commands",
+			Description: "Get the current command validation policies for a specific SSH tool instance. Returns all 4 stages of the command validation pipeline: deny list, read-only commands, allow list, and whether write commands are enabled. Use this to discover which commands the agent is allowed to execute before calling ssh.execute_command. Requires instance parameter.",
+			InputSchema: mcp.InputSchema{
+				Type:       "object",
+				Properties: map[string]mcp.Property{},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			logicalName := extractLogicalName(args)
+			if logicalName == "" {
+				return "", fmt.Errorf("instance is required: specify which SSH tool instance to query (use list_tools_for_tool_type to see available instances)")
+			}
+			return sshTool.GetAllowedCommands(ctx, incidentID, nil, logicalName)
 		},
 	)
 }

@@ -142,79 +142,99 @@ func (h *AlertHandler) postAlertToSlack(alert alerts.NormalizedAlert, instance *
 }
 
 // postAlertToChannel resolves the outbound destination for an alert and posts
-// via the appropriate provider. Tries Slack first (backward-compatible), then
-// Telegram. Returns the resolved Channel, external ID, message ID, and provider
-// for later result posting. Returns (nil, "", "", "", nil) when no provider
+// via the appropriate provider. Resolution order:
+//  1. Explicit notification channel on the alert source (any provider)
+//  2. Default Telegram channel
+//  3. Default Slack channel
+//
+// Returns the resolved Channel, external ID, message ID, and provider for
+// later result posting. Returns (nil, "", "", "", nil) when no provider
 // is available — callers skip posting.
 func (h *AlertHandler) postAlertToChannel(alert alerts.NormalizedAlert, instance *database.AlertSourceInstance) (*database.Channel, string, string, database.MessagingProvider, error) {
 	if h.channelService == nil || h.providerRegistry == nil {
 		return nil, "", "", "", nil
 	}
 
-	// Try Slack first (backward-compatible: existing installs with Slack
-	// configured behave identically).
-	if h.isSlackEnabled() {
-		ch, resolvedID := h.resolveOutboundSlackChannel(instance)
-		if ch != nil && resolvedID != "" {
-			emoji := database.GetSeverityEmoji(alert.Severity)
-			message := fmt.Sprintf(`%s *Alert: %s*
+	// Build provider-agnostic alert message.
+	message := messaging.FormatAlertMessage(alert, instance.AlertSourceType.DisplayName, instance.Name)
+	if alert.RunbookURL != "" {
+		message += fmt.Sprintf("\n📖 *Runbook:* [Runbook](%s)", messaging.EscapeMarkdownV2(alert.RunbookURL))
+	}
 
-:label: *Source:* %s (%s)
-:computer: *Host:* %s
-:gear: *Service:* %s
-:warning: *Severity:* %s
-:memo: *Summary:* %s`,
-				emoji,
-				alert.AlertName,
-				instance.AlertSourceType.DisplayName,
-				instance.Name,
-				alert.TargetHost,
-				alert.TargetService,
-				alert.Severity,
-				alert.Summary,
-			)
-			if alert.RunbookURL != "" {
-				message += fmt.Sprintf("\n:book: *Runbook:* %s", alert.RunbookURL)
-			}
-
-			ts, err := h.postViaProvider(context.Background(), ch, resolvedID, message)
-			if err != nil {
-				return nil, "", "", "", err
-			}
-			if ts != "" {
-				// Add reaction (Slack-specific, best-effort)
-				if slackClient := h.slackManager.GetClient(); slackClient != nil {
-					_ = slackClient.AddReaction("rotating_light", slack.ItemRef{
-						Channel:   resolvedID,
-						Timestamp: ts,
-					})
-				}
-				return ch, resolvedID, ts, database.MessagingProviderSlack, nil
+	// 1. Try explicit notification channel on the alert source (any provider).
+	// ResolveForAlertSource returns the explicit channel when set, regardless
+	// of the provider hint — we pass Telegram as hint only to control the
+	// fallback when no explicit channel exists.
+	if instance.NotificationChannelID != nil {
+		ch, err := h.channelService.ResolveForAlertSource(instance, database.MessagingProviderTelegram)
+		if err == nil && ch != nil {
+			if posted, ok := h.postToChannel(context.Background(), ch, message); ok {
+				return ch, posted.resolvedID, posted.messageID, posted.provider, nil
 			}
 		}
 	}
 
-	// Fall back to Telegram.
-	ch, err := h.channelService.ResolveDefault(database.MessagingProviderTelegram)
-	if err != nil || ch == nil {
-		return nil, "", "", "", nil
+	// 2. Try default channels — Telegram first, then Slack.
+	for _, provider := range []database.MessagingProvider{
+		database.MessagingProviderTelegram,
+		database.MessagingProviderSlack,
+	} {
+		ch, err := h.channelService.ResolveDefault(provider)
+		if err != nil || ch == nil {
+			continue
+		}
+
+		if posted, ok := h.postToChannel(context.Background(), ch, message); ok {
+			return ch, posted.resolvedID, posted.messageID, posted.provider, nil
+		}
 	}
 
-	provider, err := h.providerRegistry.Get(database.MessagingProviderTelegram)
+	return nil, "", "", "", nil
+}
+
+// postResult holds the result of a successful post attempt.
+type postResult struct {
+	resolvedID string
+	messageID  string
+	provider   database.MessagingProvider
+}
+
+// postToChannel resolves the external ID (Slack name→ID if needed) and posts
+// the message via the provider registry. Returns (result, true) on success.
+func (h *AlertHandler) postToChannel(ctx context.Context, ch *database.Channel, message string) (postResult, bool) {
+	if ch == nil || ch.ExternalID == "" {
+		return postResult{}, false
+	}
+
+	provider := ch.Integration.Provider
+	resolvedID := ch.ExternalID
+	if provider == database.MessagingProviderSlack {
+		resolvedID = h.resolveSlackExternalID(ch.ExternalID)
+	}
+	if resolvedID == "" {
+		return postResult{}, false
+	}
+
+	postedID, err := h.postViaProvider(ctx, ch, resolvedID, message)
 	if err != nil {
-		return nil, "", "", "", nil
+		slog.Warn("failed to post alert via provider", "provider", provider, "err", err)
+		return postResult{}, false
+	}
+	if postedID == "" {
+		return postResult{}, false
 	}
 
-	message := messaging.FormatAlertMessage(alert, instance.AlertSourceType.DisplayName, instance.Name)
-	posted, err := provider.PostMessage(context.Background(), ch, message)
-	if err != nil {
-		return nil, "", "", "", err
-	}
-	if posted == nil {
-		return nil, "", "", "", nil
+	// Slack-specific: add reaction (best-effort)
+	if provider == database.MessagingProviderSlack {
+		if slackClient := h.slackManager.GetClient(); slackClient != nil {
+			_ = slackClient.AddReaction("rotating_light", slack.ItemRef{
+				Channel:   resolvedID,
+				Timestamp: postedID,
+			})
+		}
 	}
 
-	return ch, ch.ExternalID, posted.MessageID, database.MessagingProviderTelegram, nil
+	return postResult{resolvedID: resolvedID, messageID: postedID, provider: provider}, true
 }
 
 // postInvestigationResult posts the investigation result to the appropriate

@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags: ['v*']
-    branches: [main,dev]
+    branches: [main, dev]
   workflow_dispatch:
 
 permissions:
@@ -70,12 +70,8 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAMESPACE }}/${{ matrix.service }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=branch,suffix=-{{sha}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,prefix=sha-
+            type=raw,value=dev,enable=${{ github.ref_name == 'dev' }}
+            type=raw,value=stable,enable=${{ github.ref_name == 'main' }}
           flavor: |
             latest=auto
 
@@ -151,12 +147,8 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAMESPACE }}/${{ matrix.service }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=branch,suffix=-{{sha}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,prefix=sha-
+            type=raw,value=dev,enable=${{ github.ref_name == 'dev' }}
+            type=raw,value=stable,enable=${{ github.ref_name == 'main' }}
           flavor: |
             latest=auto
 
@@ -171,29 +163,3 @@ jobs:
         run: |
           docker buildx imagetools inspect \
             "${{ env.IMAGE_NAMESPACE }}/${{ matrix.service }}:${{ steps.meta.outputs.version }}"
-
-  release:
-    name: GitHub Release
-    needs: manifest
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          # Semver prerelease tags (anything with a hyphen after the version,
-          # e.g. v1.0.0-rc.1, v1.0.0-beta.2) must not be promoted to the
-          # GitHub "latest release" view, otherwise the install snippet
-          # `/releases/latest/download/docker-compose.yml` would serve the
-          # RC's compose file to end users. Mirrors the docker tag scheme
-          # where metadata-action's `latest=auto` flavor already excludes
-          # prerelease tags from the `:latest` docker tag.
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          make_latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
-          files: |
-            docker-compose.yml
-            proxy/nginx.conf

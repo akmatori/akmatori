@@ -350,6 +350,14 @@ func (f *fakeIncidentRunner) IsWorkerConnected() bool {
 	return f.connected
 }
 
+func (f *fakeIncidentRunner) WaitForWorkerConnected(ctx context.Context) error {
+	if f.IsWorkerConnected() {
+		return nil
+	}
+	<-ctx.Done()
+	return ErrWorkerNotConnected
+}
+
 func (f *fakeIncidentRunner) StartIncident(incidentID, task string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []ToolAllowlistEntry, callback IncidentCallback) (string, error) {
 	f.mu.Lock()
 	if f.startErr != nil {
@@ -1653,6 +1661,91 @@ func TestCronRunner_FormatMessages_RespectsByteCap(t *testing.T) {
 	short := formatCronAgentMessage(job, "OK", false, "")
 	if !strings.Contains(short, "OK") || strings.Contains(short, "truncated") {
 		t.Errorf("short input unexpectedly modified: %q", short)
+	}
+}
+
+// TestCronRunner_FormatCronAgentMessageTelegram_EscapesMarkdownV2 verifies
+// that cron messages destined for Telegram are properly escaped for
+// MarkdownV2 so special characters (., *, _, etc.) don't cause API errors.
+func TestCronRunner_FormatCronAgentMessageTelegram_EscapesMarkdownV2(t *testing.T) {
+	job := &database.CronJob{Name: "Daily report"}
+
+	// Response contains characters that are reserved in MarkdownV2
+	response := "Status: all systems operational. Model v2.0 running on host_01 (uptime: 99.9%)"
+
+	ch := &database.Channel{
+		Integration: database.Integration{
+			Provider: database.MessagingProviderTelegram,
+		},
+	}
+
+	body := formatCronAgentMessageForProvider(ch, job, response, false, "")
+
+	// The cron name header should be present (escaped)
+	if !strings.Contains(body, "*Daily report*") {
+		t.Errorf("expected cron name header in output: %q", body)
+	}
+
+	// The period should be escaped for MarkdownV2
+	if !strings.Contains(body, "\\.") {
+		t.Errorf("expected escaped period in output: %q", body)
+	}
+
+	// Underscore should be escaped
+	if !strings.Contains(body, "\\_") {
+		t.Errorf("expected escaped underscore in output: %q", body)
+	}
+
+	// Parentheses should be escaped
+	if !strings.Contains(body, "\\(") || !strings.Contains(body, "\\)") {
+		t.Errorf("expected escaped parentheses in output: %q", body)
+	}
+}
+
+// TestCronRunner_FormatCronAgentMessageTelegram_ErrorPath verifies the error
+// path also escapes MarkdownV2 special characters.
+func TestCronRunner_FormatCronAgentMessageTelegram_ErrorPath(t *testing.T) {
+	job := &database.CronJob{Name: "Test.cron"}
+
+	ch := &database.Channel{
+		Integration: database.Integration{
+			Provider: database.MessagingProviderTelegram,
+		},
+	}
+
+	body := formatCronAgentMessageForProvider(ch, job, "", true, "failed: connection.timeout")
+
+	// Cron name with period should be escaped
+	if !strings.Contains(body, "Test\\.cron") {
+		t.Errorf("expected escaped cron name: %q", body)
+	}
+
+	// Error message period should be escaped
+	if !strings.Contains(body, "connection\\.timeout") {
+		t.Errorf("expected escaped error message: %q", body)
+	}
+}
+
+// TestCronRunner_FormatCronAgentMessageForProvider_SlackPassthrough verifies
+// that non-Telegram providers still use the raw (unescaped) format.
+func TestCronRunner_FormatCronAgentMessageForProvider_SlackPassthrough(t *testing.T) {
+	job := &database.CronJob{Name: "Daily report"}
+	response := "Status: all systems operational."
+
+	ch := &database.Channel{
+		Integration: database.Integration{
+			Provider: database.MessagingProviderSlack,
+		},
+	}
+
+	body := formatCronAgentMessageForProvider(ch, job, response, false, "")
+
+	// Slack path should NOT escape MarkdownV2 characters
+	if strings.Contains(body, "\\.") {
+		t.Errorf("Slack path should not escape periods: %q", body)
+	}
+	if !strings.Contains(body, "Status: all systems operational.") {
+		t.Errorf("expected raw response in output: %q", body)
 	}
 }
 
