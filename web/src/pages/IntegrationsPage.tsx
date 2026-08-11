@@ -6,7 +6,7 @@ export default function IntegrationsPage() {
     <div className="animate-fade-in max-w-4xl mx-auto">
       <PageHeader
         title="Integrations"
-        description="Connect Akmatori to messaging providers like Slack and (soon) Telegram."
+        description="Connect Akmatori to messaging providers like Slack and Telegram."
       />
       <IntegrationsManager />
     </div>

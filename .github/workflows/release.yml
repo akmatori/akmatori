@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags: ['v*']
-    branches: [main]
+    branches: [main,dev]
   workflow_dispatch:
 
 permissions:
@@ -19,7 +19,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAMESPACE: ghcr.io/akmatori
+  IMAGE_NAMESPACE: ghcr.io/luca-bke/akmatori
 
 jobs:
   build:

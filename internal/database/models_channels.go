@@ -14,8 +14,6 @@ const (
 )
 
 // ValidMessagingProviders returns all known messaging provider identifiers.
-// Telegram is included as a registry placeholder; the actual implementation is
-// a stub until the provider lands.
 func ValidMessagingProviders() []MessagingProvider {
 	return []MessagingProvider{
 		MessagingProviderSlack,

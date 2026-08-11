@@ -26,6 +26,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/tools/postgresql"
 	"github.com/akmatori/mcp-gateway/internal/tools/proposals"
 	"github.com/akmatori/mcp-gateway/internal/tools/ssh"
+	"github.com/akmatori/mcp-gateway/internal/tools/telegram"
 	"github.com/akmatori/mcp-gateway/internal/tools/victoriametrics"
 	"github.com/akmatori/mcp-gateway/internal/tools/zabbix"
 )
@@ -52,6 +53,8 @@ const (
 	K8sBurstCapacity         = 20 // burst capacity
 	JiraRatePerSecond        = 10 // requests per second
 	JiraBurstCapacity        = 20 // burst capacity
+	TelegramRatePerSecond    = 10 // requests per second
+	TelegramBurstCapacity    = 20 // burst capacity
 )
 
 // Registry manages tool registration
@@ -78,6 +81,8 @@ type Registry struct {
 	k8sLimit         *ratelimit.Limiter
 	jiraTool         *jira.JiraTool
 	jiraLimit        *ratelimit.Limiter
+	telegramTool     *telegram.TelegramTool
+	telegramLimit    *ratelimit.Limiter
 	incidentsTool    *incidents.IncidentsTool
 	proposalsTool    *proposals.ProposalsTool
 
@@ -177,6 +182,13 @@ func (r *Registry) RegisterAllTools() {
 	// Register Jira tools with rate limiter
 	r.registerJiraTools()
 
+	// Create rate limiter for Telegram: 10 req/sec, burst 20
+	r.telegramLimit = ratelimit.New(TelegramRatePerSecond, TelegramBurstCapacity)
+	r.logger.Printf("Telegram rate limiter created: %d req/sec, burst %d", TelegramRatePerSecond, TelegramBurstCapacity)
+
+	// Register Telegram tools with rate limiter
+	r.registerTelegramTools()
+
 	// Register Incidents tools (no rate limiter — local DB queries)
 	r.registerIncidentsTools()
 
@@ -241,6 +253,7 @@ var builtInToolNamespaces = map[string]bool{
 	"netbox":           true,
 	"kubernetes":       true,
 	"jira":             true,
+	"telegram":         true,
 	"incidents":        true,
 	"proposals":        true,
 }
@@ -4982,4 +4995,92 @@ func (r *Registry) registerProposalsTools() {
 	)
 
 	r.logger.Println("Proposals tools registered (5 methods)")
+}
+
+// registerTelegramTools registers all Telegram tool methods
+func (r *Registry) registerTelegramTools() {
+	r.telegramTool = telegram.NewTelegramTool(r.logger, r.telegramLimit)
+
+	// telegram.send_message
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "telegram.send_message",
+			Description: "Send a text message to a Telegram chat. Supports Markdown and HTML parse modes.",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"text": {
+						Type:        "string",
+						Description: "Message text to send (required)",
+					},
+					"chat_id": {
+						Type:        "string",
+						Description: "Telegram chat ID (overrides configured default if provided)",
+					},
+					"parse_mode": {
+						Type:        "string",
+						Description: "Parse mode for message text: Markdown or HTML (default: Markdown)",
+					},
+					"disable_notification": {
+						Type:        "boolean",
+						Description: "Send message silently (no notification)",
+					},
+					"logical_name": {
+						Type:        "string",
+						Description: "Logical name of the tool instance to use",
+					},
+				},
+				Required: []string{"text"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.telegramTool.SendMessage(ctx, incidentID, args)
+		},
+	)
+
+	// telegram.get_me
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "telegram.get_me",
+			Description: "Get basic information about the bot. Useful for verifying the bot token is valid.",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"logical_name": {
+						Type:        "string",
+						Description: "Logical name of the tool instance to use",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.telegramTool.GetMe(ctx, incidentID, args)
+		},
+	)
+
+	// telegram.get_chat_info
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "telegram.get_chat_info",
+			Description: "Get information about a Telegram chat. Useful for verifying the chat ID is valid.",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"chat_id": {
+						Type:        "string",
+						Description: "Telegram chat ID (overrides configured default if provided)",
+					},
+					"logical_name": {
+						Type:        "string",
+						Description: "Logical name of the tool instance to use",
+					},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.telegramTool.GetChatInfo(ctx, incidentID, args)
+		},
+	)
+
+	r.logger.Println("Telegram tools registered (3 methods)")
 }
