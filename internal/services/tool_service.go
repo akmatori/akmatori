@@ -175,6 +175,7 @@ func (s *ToolService) EnsureToolTypes() error {
 		{Name: "netbox", Description: "NetBox CMDB integration for DCIM, IPAM, circuits, virtualization, and tenancy"},
 		{Name: "kubernetes", Description: "Kubernetes read-only diagnostics for pods, deployments, nodes, services, events, and logs"},
 		{Name: "jira", Description: "Jira issue tracking integration (Cloud and Server/Data Center) for searching, viewing, commenting, and transitioning issues"},
+		{Name: "telegram", Description: "Telegram Bot API integration for sending messages to chats"},
 		{Name: "incidents", Description: "Read-only access to Akmatori's own incidents (list and get) for digests and reporting"},
 		{Name: "proposals", Description: "Create, inspect, and revise self-improvement proposals reviewed by operators in the Proposals tab"},
 	}

@@ -67,6 +67,7 @@ func GetToolSchemas() map[string]ToolTypeSchema {
 		"netbox":           getNetBoxSchema(),
 		"kubernetes":       getK8sSchema(),
 		"jira":             getJiraSchema(),
+		"telegram":         getTelegramSchema(),
 	}
 }
 
@@ -1480,6 +1481,69 @@ func getJiraSchema() ToolTypeSchema {
 				Description: "Update fields on an existing issue. Requires jira_allow_writes=true on the instance.",
 				Parameters:  "key (required), fields (required)",
 				Returns:     "JSON status object",
+			},
+		},
+	}
+}
+
+func getTelegramSchema() ToolTypeSchema {
+	return ToolTypeSchema{
+		Name:        "telegram",
+		Description: "Telegram Bot API integration. Send messages to Telegram chats, verify bot configuration, and retrieve chat information.",
+		Version:     "1.0.0",
+		SettingsSchema: SettingsSchema{
+			Type:     "object",
+			Required: []string{"telegram_bot_token"},
+			Properties: map[string]PropertySchema{
+				"telegram_bot_token": {
+					Type:        "string",
+					Description: "Telegram Bot API token (from @BotFather)",
+					Secret:      true,
+				},
+				"telegram_chat_id": {
+					Type:        "string",
+					Description: "Default Telegram chat ID to send messages to (can be overridden per-call)",
+				},
+				"telegram_base_url": {
+					Type:        "string",
+					Description: "Telegram Bot API base URL",
+					Default:     "https://api.telegram.org",
+					Advanced:    true,
+				},
+				"telegram_verify_ssl": {
+					Type:        "boolean",
+					Description: "Verify SSL certificates",
+					Default:     true,
+					Advanced:    true,
+				},
+				"telegram_timeout": {
+					Type:        "integer",
+					Description: "API request timeout in seconds",
+					Default:     30,
+					Minimum:     intPtr(5),
+					Maximum:     intPtr(60),
+					Advanced:    true,
+				},
+			},
+		},
+		Functions: []ToolFunction{
+			{
+				Name:        "send_message",
+				Description: "Send a text message to a Telegram chat",
+				Parameters:  "text (required), chat_id (optional override), parse_mode (default: Markdown), disable_notification",
+				Returns:     "JSON with success status and message_id",
+			},
+			{
+				Name:        "get_me",
+				Description: "Get basic information about the bot (verifies token)",
+				Parameters:  "(none)",
+				Returns:     "JSON with bot user information",
+			},
+			{
+				Name:        "get_chat_info",
+				Description: "Get information about a chat (verifies chat_id)",
+				Parameters:  "chat_id (optional override)",
+				Returns:     "JSON with chat information",
 			},
 		},
 	}

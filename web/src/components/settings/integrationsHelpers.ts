@@ -23,9 +23,7 @@ export interface ProviderUIConfig {
 }
 
 // PROVIDER_CONFIGS is the single source of truth for which providers the UI
-// supports and which are "coming soon". Telegram is intentionally present but
-// disabled — the data model accepts a Telegram integration so operators can
-// pre-configure one, but the IntegrationsManager UI marks it as not yet ready.
+// supports. Telegram is fully available for outbound notifications.
 export const PROVIDER_CONFIGS: ProviderUIConfig[] = [
   {
     provider: 'slack',
@@ -60,14 +58,15 @@ export const PROVIDER_CONFIGS: ProviderUIConfig[] = [
     provider: 'telegram',
     label: 'Telegram',
     iconText: 'TG',
-    available: false,
-    description: 'Telegram integration is not yet available. The data model is ready for when the provider lands.',
+    available: true,
+    description: 'Connect a Telegram bot for outbound alert notifications and investigation results.',
     credentialFields: [
       {
         name: 'bot_token',
         label: 'Bot Token',
         secret: true,
-        placeholder: 'Available in a future release',
+        placeholder: '123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11',
+        hint: 'Get it from @BotFather on Telegram (/token command).',
       },
     ],
   },

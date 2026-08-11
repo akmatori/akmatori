@@ -17,6 +17,7 @@ import (
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
+	"github.com/akmatori/akmatori/internal/messaging"
 	"github.com/akmatori/akmatori/internal/services"
 	slackutil "github.com/akmatori/akmatori/internal/slack"
 	"github.com/slack-go/slack"
@@ -164,19 +165,15 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 
 		slog.Info("created incident for alert", "incident_id", incidentUUID)
 
-		// Post to Slack
-		var channelID, threadTS, channelUUID string
-		if h.isSlackEnabled() {
+		// Post alert to the first available messaging provider (Slack, then Telegram).
+		var postChannel *database.Channel
+		var postExternalID, postMessageID string
+		var postProvider database.MessagingProvider
+		if h.channelService != nil && h.providerRegistry != nil {
 			var err error
-			channelID, threadTS, channelUUID, err = h.postAlertToSlack(normalized, instance)
+			postChannel, postExternalID, postMessageID, postProvider, err = h.postAlertToChannel(normalized, instance)
 			if err != nil {
-				slog.Warn("failed to post alert to Slack", "err", err)
-			}
-		}
-
-		if channelID != "" && threadTS != "" {
-			if err := h.updateIncidentSlackContext(incidentUUID, channelID, threadTS); err != nil {
-				slog.Warn("failed to update incident Slack context", "err", err)
+				slog.Warn("failed to post alert to messaging provider", "err", err)
 			}
 		}
 
@@ -184,7 +181,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
 			slog.Warn("failed to update incident status", "err", err)
 		}
-		go h.runInvestigation(incidentUUID, normalized, instance, channelID, threadTS, channelUUID)
+		go h.runInvestigation(incidentUUID, normalized, instance, postChannel, postExternalID, postMessageID, postProvider)
 
 		return nil, nil
 	})
@@ -193,9 +190,29 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		slog.Error("failed to process alert", "err", sfErr)
 		return
 	}
+
 	// Followers (isLeader==false): singleflight collapsed the burst; the leader
 	// owned all work. The partial-unique index on alerts prevents duplicate rows
 	// if the same alert arrives again before the leader's insert commits.
+
+	// Post alert to the first available messaging provider (Slack, then Telegram).
+	// Returns the resolved Channel, external ID, and message ID for result posting.
+	var postChannel *database.Channel
+	var postExternalID, postMessageID string
+	var postProvider database.MessagingProvider
+	if h.channelService != nil && h.providerRegistry != nil {
+		var err error
+		postChannel, postExternalID, postMessageID, postProvider, err = h.postAlertToChannel(normalized, instance)
+		if err != nil {
+			slog.Warn("failed to post alert to messaging provider", "err", err)
+		}
+	}
+
+	// Update incident status and run investigation
+	if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
+		slog.Warn("failed to update incident status", "err", err)
+	}
+	go h.runInvestigation(incidentUUID, normalized, instance, postChannel, postExternalID, postMessageID, postProvider)
 }
 
 // ProcessAlertFromListenerChannel processes an alert that originated from a
@@ -596,35 +613,55 @@ Be specific and actionable. Reference any relevant data sources or scripts you u
 	return prompt
 }
 
-func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, channelID, threadTS, channelUUID string) {
+func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, postChannel *database.Channel, postExternalID, postMessageID string, postProvider database.MessagingProvider) {
 	slog.Info("starting investigation for alert", "alert_name", alert.AlertName, "incident_id", incidentUUID)
 
 	// Build investigation prompt
 	investigationPrompt := h.buildInvestigationPrompt(alert, instance)
 	taskWithGuidance := executor.PrependGuidance(investigationPrompt)
 
-	// Show "is investigating..." in the alert thread for the duration of the
-	// agent run when Slack is configured. The reaction lands on the bot's own
-	// alert message (threadTS). Skipping when threadTS=="" because Slack
-	// posting was disabled or failed earlier.
-	//
-	// Hoisted to function scope so the OnSuperseded callback can call
-	// typing.Discard() — without that, the deferred Stop on a displaced run
-	// fires setStatus("") + RemoveReaction against the shared thread and
-	// erases the replacement run's banner + hourglass.
-	var typing slackutil.TypingController
-	if threadTS != "" && channelID != "" {
-		if slackClient := h.slackManager.GetClient(); slackClient != nil {
-			typing = slackutil.NewTypingController(slackutil.TypingControllerConfig{
-				Client:      slackClient,
-				ChannelID:   channelID,
-				ThreadTS:    threadTS,
-				ReactionRef: slack.ItemRef{Channel: channelID, Timestamp: threadTS},
-			})
-			typing.Start(context.Background())
-			defer typing.Stop()
+	// Show "is investigating..." indicator for the duration of the agent run.
+	// Provider-specific: Slack uses TypingController (banner + reaction),
+	// Telegram uses sendChatAction with keepalive.
+	// Both are stopped when the investigation completes.
+	var slackTyping slackutil.TypingController
+	var telegramTyping *messaging.TelegramTypingControllerWithChannel
+	if postMessageID != "" && postExternalID != "" && postChannel != nil {
+		switch postProvider {
+		case database.MessagingProviderSlack:
+			if slackClient := h.slackManager.GetClient(); slackClient != nil {
+				slackTyping = slackutil.NewTypingController(slackutil.TypingControllerConfig{
+					Client:      slackClient,
+					ChannelID:   postExternalID,
+					ThreadTS:    postMessageID,
+					ReactionRef: slack.ItemRef{Channel: postExternalID, Timestamp: postMessageID},
+				})
+				slackTyping.Start(context.Background())
+			}
+		case database.MessagingProviderTelegram:
+			if h.providerRegistry != nil {
+				p, err := h.providerRegistry.Get(database.MessagingProviderTelegram)
+				if err == nil {
+					if telegramProvider, ok := p.(*messaging.TelegramProvider); ok {
+						telegramTyping = messaging.NewTelegramTypingControllerWithChannel(telegramProvider, postChannel)
+						if telegramTyping != nil {
+							telegramTyping.Start(context.Background())
+						}
+					}
+				}
+			}
 		}
 	}
+
+	// Ensure typing indicators are stopped when investigation completes.
+	defer func() {
+		if slackTyping != nil {
+			slackTyping.Stop()
+		}
+		if telegramTyping != nil {
+			telegramTyping.Stop()
+		}
+	}()
 
 	// Use WebSocket-based agent worker
 	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {
@@ -683,9 +720,11 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 			// replacement run has already established.
 			OnSuperseded: func() {
 				superseded.Store(true)
-				if typing != nil {
-					typing.Discard()
+				if slackTyping != nil {
+					slackTyping.Discard()
 				}
+				// Telegram typing doesn't have Discard; Stop is idempotent
+				// and the deferred Stop handles cleanup.
 				closeOnce.Do(func() { close(done) })
 			},
 		}
@@ -697,30 +736,30 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg, 0, 0); updateErr != nil {
 				slog.Error("failed to update incident status", "err", updateErr)
 			}
-			h.updateSlackWithResult(channelID, threadTS, errorMsg, true)
+			h.postInvestigationResult(postChannel, postExternalID, postMessageID, errorMsg, postProvider, true)
 			return
 		}
 
 		// Wait for completion
 		<-done
 
-		// Replacement run owns finalization — exit before touching the DB or Slack.
+		// Replacement run owns finalization — exit before touching the DB or messaging.
 		if superseded.Load() {
 			slog.Info("alert investigation superseded; leaving finalization to the new run", "incident_id", incidentUUID)
 			return
 		}
 
 		// Apply the first matching formatting rule before persistence and
-		// Slack posting. Passthrough on error/empty or when no rule
+		// posting. Passthrough on error/empty or when no rule
 		// matches the incident's flow.
 		formattedResponse := applyResponseFormatter(context.Background(), h.responseFormatter, hasError, response, taskHeader+lastStreamedLog,
-			services.BuildFormatFlow(incidentUUID, channelUUID))
+			services.BuildFormatFlow(incidentUUID, ""))
+
 
 		// Re-attach the metrics footer AFTER formatting so the LLM never
 		// sees it (and therefore cannot strip or rewrite ⏱️ Time / 🎯
 		// Tokens). The deterministic footer lands at the end of the
-		// stored DB response and the Slack final-message body, where
-		// buildSlackFooter extracts it for the trailing metrics line.
+		// stored DB response and the messaging final-message body.
 		formattedWithMetrics := appendFinalizeMetrics(formattedResponse, finalExecutionTimeMs, finalTokensUsed, hasError)
 		rawWithMetrics := appendFinalizeMetrics(response, finalExecutionTimeMs, finalTokensUsed, hasError)
 
@@ -731,9 +770,9 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 			fullLog += "\n\n--- Final Response ---\n\n" + rawWithMetrics
 		}
 
-		// Format response for Slack: parse structured blocks, summarize when
+		// Format response for posting: parse structured blocks, summarize when
 		// over budget, append the footer. Run the summarizer BEFORE
-		// ReleaseRun so the slack-summarizer LLM call (which can take
+		// ReleaseRun so the summarizer LLM call (which can take
 		// several seconds) is also covered by the entry-still-in-map
 		// invariant — a newer Start/Continue arriving during this call
 		// can still fire OnSuperseded on the displaced waiter, and the
@@ -749,22 +788,14 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 		}
 
 		// Claim ownership of finalization atomically. A newer alert / Slack
-		// reply that displaced us during the formatter or slack summarizer
+		// reply that displaced us during the formatter or summarizer
 		// invalidates this run's finalization — exit silently and let the
-		// replacement own the DB + Slack post.
-		//
-		// Discard the typing controller in the displaced path too: the
-		// replacement's sendIncidentMessage may not have fired our
-		// OnSuperseded yet (it fires after the map swap, and we win the
-		// race to ReleaseRun), so without an explicit Discard here the
-		// deferred typing.Stop() would issue setStatus("") + RemoveReaction
-		// against the shared thread and erase the replacement run's banner
-		// + hourglass.
+		// replacement own the DB + messaging post.
 		if !h.agentWSHandler.ReleaseRun(incidentUUID, runID) {
-			if typing != nil {
-				typing.Discard()
+			if slackTyping != nil {
+				slackTyping.Discard()
 			}
-			slog.Info("alert investigation displaced during finalization; leaving DB + Slack post to the new run", "incident_id", incidentUUID)
+			slog.Info("alert investigation displaced during finalization; leaving DB + messaging post to the new run", "incident_id", incidentUUID)
 			return
 		}
 
@@ -778,7 +809,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 			slog.Error("failed to update incident complete", "err", err)
 		}
 
-		h.updateSlackWithResult(channelID, threadTS, formattedResp, hasError)
+		h.postInvestigationResult(postChannel, postExternalID, postMessageID, formattedResp, postProvider, hasError)
 
 		slog.Info("investigation completed for alert via WebSocket", "alert_name", alert.AlertName)
 		return
@@ -790,7 +821,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 	if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg, 0, 0); updateErr != nil {
 		slog.Error("failed to update incident status", "err", updateErr)
 	}
-	h.updateSlackWithResult(channelID, threadTS, errorMsg, true)
+	h.postInvestigationResult(postChannel, postExternalID, postMessageID, errorMsg, postProvider, true)
 }
 
 // runListenerChannelInvestigation runs investigation and posts results to the
