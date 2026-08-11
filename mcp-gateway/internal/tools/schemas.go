@@ -262,21 +262,27 @@ func getSSHSchema() ToolTypeSchema {
 		Functions: []ToolFunction{
 			{
 				Name:        "execute_command",
-				Description: "Execute a command on all or specified servers in parallel. Commands are validated against read-only mode (blocks rm, mv, kill, etc. by default).",
+				Description: "Execute a command on all or specified servers in parallel. Commands are validated against read-only mode (blocks rm, mv, kill, etc. by default). Instance parameter is required.",
 				Parameters:  "command: str - The shell command to execute; servers: list[str] - Optional list of hostnames to target (defaults to all)",
 				Returns:     "JSON string with per-server results: {results: [{server, success, stdout, stderr, exit_code, duration_ms}], summary: {total, succeeded, failed}}",
 			},
 			{
 				Name:        "test_connectivity",
-				Description: "Test SSH connectivity to specified or all configured servers (including through jumphosts if configured). When ad-hoc connections are enabled, can test connectivity to any server.",
+				Description: "Test SSH connectivity to specified or all configured servers (including through jumphosts if configured). When ad-hoc connections are enabled, can test connectivity to any server. Instance parameter is required.",
 				Parameters:  "servers: list[str] - Optional list of server hostnames/addresses to test (defaults to all configured servers)",
 				Returns:     "JSON string with connectivity status: {results: [{server, reachable, error}], summary: {total, reachable, unreachable}}",
 			},
 			{
 				Name:        "get_server_info",
-				Description: "Get basic system information (hostname, OS, uptime) from all servers",
+				Description: "Get basic system information (hostname, OS, uptime) from all servers. Instance parameter is required.",
 				Parameters:  "None",
 				Returns:     "JSON string with server info: {results: [{server, success, stdout, stderr}]}",
+			},
+			{
+				Name:        "get_allowed_commands",
+				Description: "Get the current command validation policies for a specific SSH tool instance. Returns all 4 stages: deny_list (Stage 1), read_only_commands (Stage 2), allow_list (Stage 3), write_enabled (Stage 4), and subcommand_restrictions. Instance parameter is required.",
+				Parameters:  "None (instance parameter is required)",
+				Returns:     "JSON string with command policies: {deny_list: [str], read_only_commands: [str], subcommand_restrictions: {str: [str]}, allow_list: [str], write_enabled: bool, write_redirect_blocked: bool}",
 			},
 		},
 	}

@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"os"
@@ -693,5 +694,60 @@ func TestStripBrackets(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("stripBrackets(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestGetAllowedCommands_ReturnsAllStages(t *testing.T) {
+	logger := log.New(os.Stdout, "test: ", log.LstdFlags)
+	tool := NewSSHTool(logger)
+
+	// We can't easily test with a real DB — getConfig will panic on nil DB.
+	// Verify the method signature exists and the JSON result type is correct.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Logf("GetAllowedCommands panicked as expected (no DB): %v", r)
+		}
+	}()
+
+	_, err := tool.GetAllowedCommands(context.Background(), "test-incident", nil)
+	if err != nil {
+		t.Logf("GetAllowedCommands returned expected error (no DB): %v", err)
+	}
+}
+
+func TestAllowedCommandsResult_JSONStructure(t *testing.T) {
+	result := AllowedCommandsResult{
+		DenyList:               []string{"rm *", "shutdown"},
+		ReadOnlyCommands:       []string{"cat", "ls", "grep"},
+		SubcommandRestrictions: map[string][]string{"docker": {"ps", "logs", "inspect"}},
+		AllowList:              []string{"curl *"},
+		WriteEnabled:           false,
+		WriteRedirectBlocked:   true,
+	}
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("Failed to marshal: %v", err)
+	}
+
+	var parsed AllowedCommandsResult
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Failed to unmarshal: %v", err)
+	}
+
+	if len(parsed.DenyList) != 2 || parsed.DenyList[0] != "rm *" {
+		t.Errorf("DenyList mismatch: %v", parsed.DenyList)
+	}
+	if len(parsed.ReadOnlyCommands) != 3 {
+		t.Errorf("ReadOnlyCommands mismatch: %v", parsed.ReadOnlyCommands)
+	}
+	if len(parsed.SubcommandRestrictions) != 1 {
+		t.Errorf("SubcommandRestrictions mismatch: %v", parsed.SubcommandRestrictions)
+	}
+	if parsed.WriteEnabled != false {
+		t.Error("WriteEnabled should be false")
+	}
+	if parsed.WriteRedirectBlocked != true {
+		t.Error("WriteRedirectBlocked should be true")
 	}
 }

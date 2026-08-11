@@ -794,6 +794,43 @@ func (t *SSHTool) GetServerInfo(ctx context.Context, incidentID string, servers 
 	return t.ExecuteCommand(ctx, incidentID, infoCommand, servers, instanceID, logicalName...)
 }
 
+// AllowedCommandsResult represents the command policies for an SSH tool instance.
+type AllowedCommandsResult struct {
+	// Stage 1: Global deny list (always active, from ssh_deny_list)
+	DenyList []string `json:"deny_list"`
+	// Stage 2: Default read-only commands (hardcoded, always available)
+	ReadOnlyCommands []string `json:"read_only_commands"`
+	// Subcommand restrictions for read-only commands (docker, kubectl, etc.)
+	SubcommandRestrictions map[string][]string `json:"subcommand_restrictions"`
+	// Stage 3: Global allow list (from ssh_allow_list)
+	AllowList []string `json:"allow_list"`
+	// Stage 4: Whether write/destructive commands are enabled (from ssh_allow_write_commands)
+	WriteEnabled bool `json:"write_enabled"`
+	// Whether write redirects (>, >>) are always blocked
+	WriteRedirectBlocked bool `json:"write_redirect_blocked"`
+}
+
+// GetAllowedCommands returns the current command validation policies for this
+// SSH tool instance. The agent can use this to discover which commands are
+// allowed before calling execute_command.
+func (t *SSHTool) GetAllowedCommands(ctx context.Context, incidentID string, instanceID *uint, logicalName ...string) (string, error) {
+	config, err := t.getConfig(ctx, incidentID, instanceID, logicalName...)
+	if err != nil {
+		return "", err
+	}
+
+	result := AllowedCommandsResult{
+		DenyList:               config.DenyList,
+		ReadOnlyCommands:       GetReadOnlyCommands(),
+		SubcommandRestrictions: GetSubcommandRestrictions(),
+		AllowList:              config.AllowList,
+		WriteEnabled:           config.WriteEnabled,
+		WriteRedirectBlocked:   true,
+	}
+
+	return t.jsonResult(result)
+}
+
 // jsonResult converts a result to JSON string
 func (t *SSHTool) jsonResult(v interface{}) (string, error) {
 	data, err := json.Marshal(v)

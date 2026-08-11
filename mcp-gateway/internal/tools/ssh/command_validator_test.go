@@ -678,3 +678,60 @@ func TestEnvironmentVariablePrefix(t *testing.T) {
 		t.Errorf("Expected 'LANG=C cat ...' to work, got error: %v", err)
 	}
 }
+
+func TestGetReadOnlyCommands_ReturnsNonEmpty(t *testing.T) {
+	cmds := GetReadOnlyCommands()
+	if len(cmds) == 0 {
+		t.Error("Expected non-empty read-only commands list")
+	}
+	// Should contain common read-only commands
+	found := false
+	for _, cmd := range cmds {
+		if cmd == "cat" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected 'cat' to be in read-only commands")
+	}
+}
+
+func TestGetReadOnlyCommands_ReturnsSortedCopy(t *testing.T) {
+	cmds1 := GetReadOnlyCommands()
+	cmds2 := GetReadOnlyCommands()
+	if len(cmds1) != len(cmds2) {
+		t.Fatal("Expected same length")
+	}
+	for i := range cmds1 {
+		if cmds1[i] != cmds2[i] {
+			t.Fatalf("Expected identical sorted order at index %d: %s vs %s", i, cmds1[i], cmds2[i])
+		}
+	}
+}
+
+func TestGetSubcommandRestrictions_ReturnsNonEmpty(t *testing.T) {
+	subs := GetSubcommandRestrictions()
+	if len(subs) == 0 {
+		t.Error("Expected non-empty subcommand restrictions")
+	}
+	// Should contain docker
+	dockerCmds, ok := subs["docker"]
+	if !ok {
+		t.Error("Expected 'docker' in subcommand restrictions")
+	}
+	if len(dockerCmds) == 0 {
+		t.Error("Expected non-empty docker subcommand list")
+	}
+}
+
+func TestGetSubcommandRestrictions_ReturnsCopy(t *testing.T) {
+	subs := GetSubcommandRestrictions()
+	// Modify the returned map
+	subs["new_cmd"] = []string{"test"}
+	// Re-fetch and verify it doesn't contain the modification
+	subs2 := GetSubcommandRestrictions()
+	if _, ok := subs2["new_cmd"]; ok {
+		t.Error("GetSubcommandRestrictions should return a copy, not the original map")
+	}
+}

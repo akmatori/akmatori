@@ -3,6 +3,7 @@ package ssh
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -109,6 +110,29 @@ func allowedSubcommandsMap() map[string][]string {
 		"dpkg":      {"-l", "-L", "-s", "--list", "--listfiles", "--status"},
 		"rpm":       {"-qa", "-qi", "-ql", "--query"},
 	}
+}
+
+// GetReadOnlyCommands returns a copy of the default read-only command set as a sorted slice.
+func GetReadOnlyCommands() []string {
+	cmds := readOnlyCommandsSet()
+	result := make([]string, 0, len(cmds))
+	for cmd := range cmds {
+		result = append(result, cmd)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// GetSubcommandRestrictions returns a copy of the allowed subcommands map.
+func GetSubcommandRestrictions() map[string][]string {
+	subs := allowedSubcommandsMap()
+	result := make(map[string][]string, len(subs))
+	for k, v := range subs {
+		allowed := make([]string, len(v))
+		copy(allowed, v)
+		result[k] = allowed
+	}
+	return result
 }
 
 // compilePatterns converts Claude Code wildcard patterns to compiled regexes.
