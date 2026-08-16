@@ -348,6 +348,13 @@ func main() {
 	proposalService := services.NewProposalService(database.GetDB(), runbookService, memoryService, cronRunner, skillService)
 	apiHandler.SetProposalService(proposalService)
 
+	// Stale incident close: closes alert-sourced incidents that have seen no
+	// alert or investigation activity for the configured window. Constructed
+	// here so the on-demand/dry-run endpoint is live from the moment routes are
+	// registered; the background ticker starts further down, once ctx exists.
+	staleCloseService := services.NewStaleCloseService(database.GetDB())
+	apiHandler.SetStaleIncidentCloser(staleCloseService)
+
 	// Wire listener channel reload: when channels (or, transitionally, alert
 	// sources) are created/updated/deleted via API, reload the Slack handler's
 	// channel mappings so changes take effect immediately.
@@ -434,6 +441,13 @@ func main() {
 	monitorSweepService := services.NewMonitorSweepService(database.GetDB())
 	go monitorSweepService.StartBackgroundSweep(ctx)
 	slog.Info("monitor sweep service started")
+
+	// Start the stale incident close ticker. Covers the incidents the monitor
+	// sweep cannot reach — those held at "completed" by an alert their source
+	// never resolved. The service itself was constructed above, with the API
+	// handler wiring.
+	go staleCloseService.StartBackgroundSweep(ctx)
+	slog.Info("stale incident close service started")
 
 	// Start watching for Slack settings reload requests
 	go slackManager.WatchForReloads(ctx)

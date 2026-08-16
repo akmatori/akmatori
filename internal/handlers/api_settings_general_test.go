@@ -134,3 +134,128 @@ func TestHandleGeneralSettings_AlertMonitorWindowMinutes_InvalidValue(t *testing
 		})
 	}
 }
+
+// TestHandleGeneralSettings_AutoClose_Defaults verifies the shipped defaults
+// for the stale-close gate. Unlike the correlation and merge gates it defaults
+// ON, so an install that never touches the setting still gets its incidents
+// closed rather than accumulating them forever.
+func TestHandleGeneralSettings_AutoClose_Defaults(t *testing.T) {
+	testhelpers.NewGlobalSQLiteDB(t,
+		&database.GeneralSettings{},
+	)
+
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/general", nil)
+	rec := httptest.NewRecorder()
+	h.handleGeneralSettings(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if v, ok := body["incident_auto_close_enabled"].(bool); !ok || !v {
+		t.Errorf("expected incident_auto_close_enabled=true by default, got %v", body["incident_auto_close_enabled"])
+	}
+	if v, _ := body["incident_auto_close_minutes"].(float64); int(v) != database.DefaultIncidentAutoCloseMinutes {
+		t.Errorf("expected incident_auto_close_minutes=%d, got %v",
+			database.DefaultIncidentAutoCloseMinutes, v)
+	}
+}
+
+// TestHandleGeneralSettings_AutoClose_PersistAndGet verifies both fields round
+// trip, including turning the gate off — which must persist as an explicit
+// false rather than reverting to the nil-means-enabled default.
+func TestHandleGeneralSettings_AutoClose_PersistAndGet(t *testing.T) {
+	testhelpers.NewGlobalSQLiteDB(t,
+		&database.GeneralSettings{},
+	)
+
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	body := `{"incident_auto_close_enabled": false, "incident_auto_close_minutes": 1440}`
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/general", bytes.NewBufferString(body))
+	putReq.Header.Set("Content-Type", "application/json")
+	putRec := httptest.NewRecorder()
+	h.handleGeneralSettings(putRec, putReq)
+
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("PUT expected 200, got %d: %s", putRec.Code, putRec.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/settings/general", nil)
+	getRec := httptest.NewRecorder()
+	h.handleGeneralSettings(getRec, getReq)
+
+	var getBody map[string]interface{}
+	if err := json.NewDecoder(getRec.Body).Decode(&getBody); err != nil {
+		t.Fatalf("decode GET response: %v", err)
+	}
+	if v, ok := getBody["incident_auto_close_enabled"].(bool); !ok || v {
+		t.Errorf("expected incident_auto_close_enabled=false, got %v", getBody["incident_auto_close_enabled"])
+	}
+	if v, _ := getBody["incident_auto_close_minutes"].(float64); v != 1440 {
+		t.Errorf("expected incident_auto_close_minutes=1440, got %v", v)
+	}
+}
+
+// TestHandleGeneralSettings_AutoCloseMinutes_InvalidValue verifies the window
+// bounds are enforced. A sub-hour window would race normal investigation
+// turnaround and close incidents under an operator.
+func TestHandleGeneralSettings_AutoCloseMinutes_InvalidValue(t *testing.T) {
+	cases := []struct {
+		name  string
+		value int
+	}{
+		{"zero", 0},
+		{"negative", -1},
+		{"below the one-hour floor", 59},
+		{"above the ninety-day ceiling", 90*24*60 + 1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			testhelpers.NewGlobalSQLiteDB(t,
+				&database.GeneralSettings{},
+			)
+
+			h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+			body, _ := json.Marshal(map[string]int{"incident_auto_close_minutes": tc.value})
+			req := httptest.NewRequest(http.MethodPut, "/api/settings/general", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			h.handleGeneralSettings(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("expected 400 for value %d, got %d: %s", tc.value, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestHandleGeneralSettings_AutoCloseMinutes_BoundsAccepted verifies the
+// inclusive edges of the accepted range are not rejected.
+func TestHandleGeneralSettings_AutoCloseMinutes_BoundsAccepted(t *testing.T) {
+	for _, value := range []int{minIncidentAutoCloseMinutes, maxIncidentAutoCloseMinutes} {
+		testhelpers.NewGlobalSQLiteDB(t,
+			&database.GeneralSettings{},
+		)
+
+		h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+		body, _ := json.Marshal(map[string]int{"incident_auto_close_minutes": value})
+		req := httptest.NewRequest(http.MethodPut, "/api/settings/general", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		h.handleGeneralSettings(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected 200 for boundary value %d, got %d: %s", value, rec.Code, rec.Body.String())
+		}
+	}
+}

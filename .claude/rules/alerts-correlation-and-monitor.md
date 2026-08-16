@@ -7,14 +7,41 @@ paths:
   - "**/internal/services/alert_*"
   - "**/internal/services/incident_merger.go"
   - "**/internal/services/monitor_sweep_service.go"
+  - "**/internal/services/stale_close_service.go"
+  - "**/internal/services/incident_activity.go"
   - "**/internal/database/models_alerts.go"
 ---
 
 # Alert correlation gate
 
-Before spawning a new incident, `AlertHandler` runs `AlertCorrelator.Correlate` to ask the LLM
-whether the incoming alert belongs to a recent open or monitor-mode incident. On a confident match,
-`LinkAlertToIncident` is called instead of `SpawnIncidentManager`.
+Before spawning a new incident, `AlertHandler` runs `AlertCorrelator.Correlate`, which tries a
+deterministic fingerprint match first and falls back to asking the LLM whether the incoming alert
+belongs to a recent open or monitor-mode incident. On a confident match, `LinkAlertToIncident` is
+called instead of `SpawnIncidentManager`.
+
+- **fingerprint fast path runs first**: `matchByFingerprint` looks for a live incident carrying the
+  same fingerprint with activity inside `fingerprintFastPathWindow` (48h); a hit returns
+  `Correlated=true, Confidence=1.0` and no LLM call is made
+- it matches BOTH `incidents.alert_fingerprint` (the spawning alert) AND `alerts.fingerprint` of
+  every linked alert — once the LLM decides alert Y belongs to incident A, later fires of Y follow
+  that decision deterministically instead of being re-judged (and possibly answered differently)
+- linked alerts match regardless of alert status; restricting to firing alerts would break monitor
+  mode, whose incidents have resolved alerts by definition
+- **alerts with no `target_host` skip the fast path entirely** and go to the LLM: the fingerprint is
+  only `hash(source, alertName, targetHost)`, so a host-less alert collapses fleet-wide onto one
+  fingerprint — too coarse to link on deterministically
+- the window is 48h, NOT 24h, deliberately: installs carry alerts re-firing on a near-exact daily
+  cadence, and a 24h window lands on that period (observed gaps of 22h46m vs 24h00m31s for the same
+  alert on the same host), making collapse-vs-spawn depend on seconds of jitter. Keep the window
+  clearly wider than the target install's re-fire interval, and under the stale-close window
+- it sits BEFORE the `caller == nil` check on purpose — deterministic dedup must keep working with
+  no LLM configured or the worker disconnected; it is still gated on `AlertCorrelationEnabled`
+- a fast-path DB error is logged and falls through to the LLM path, never out of the gate
+- `idx_alerts_incident_fingerprint` on `alerts (incident_uuid, fingerprint)` serves the linked-alert
+  EXISTS lookup
+- `liveTargetCond` is the single "viable recurrence target" predicate, shared by `fetchCandidates`
+  and the fast path — never duplicate that status logic, or the two routes will disagree about
+  where a recurrence belongs
 
 - gate is flag-gated (`AlertCorrelationEnabled` in `GeneralSettings`, default false); when disabled,
   no LLM call and all alerts spawn normally (fail-open)
@@ -59,6 +86,35 @@ that recurrences are correlated rather than spawning duplicate investigations.
 - `MonitorSweepService` runs at startup and every 15m, closes expired monitor incidents, resolves
   any lingering firing alerts first, and clears `monitor_until`
 
+# Incident activity clock and stale close
+
+`monitor` is not the only way out of an open incident. An alert-sourced incident whose source never
+sends a matching resolve is held at `completed` by its still-firing alert, so the monitor sweep can
+never reach it and it stays open forever. `StaleCloseService` is that missing lifecycle exit.
+
+- **one activity definition**, in `incident_activity.go`: last activity = max of
+  `MAX(COALESCE(alerts.last_seen_at, alerts.fired_at))`, `completed_at`, `started_at`. Consumed by
+  the sweep AND the correlator fast path — they must never diverge
+- `staleIncidentCond` / `liveIncidentCond` are conjunction/disjunction forms, NOT `GREATEST(...)`:
+  prod is PostgreSQL, tests are SQLite, and the two have no common multi-arg max
+- `Alert.LastSeenAt` is the load-bearing piece. Sources with a stable `source_fingerprint`
+  (Alertmanager) hit `uniq_firing_alert` on every re-send, so the insert is dropped and the row's
+  timestamps freeze. BOTH insert paths call `bumpAlertLastSeen` on their `RowsAffected == 0` branch;
+  drop that and the sweep closes incidents whose alert is firing right now
+- scope is `source_kind='alert'` and status `completed`/`monitor` only. NOT pending/running/diagnosed
+  (a stuck run is an orphaned-agent bug; closing it hides the bug), NOT `failed` (already terminal
+  and already out of the open view), NOT merged, NOT cron
+- gate is `IncidentAutoCloseEnabled` — nil means **enabled**, unlike every other gate; window is
+  `IncidentAutoCloseMinutes` (default 4320 = 3 days, API bounds 60..129600)
+- the sweep re-applies the staleness condition to its UPDATE, so an alert landing between the
+  candidate query and the write leaves its incident open
+- batched at `staleCloseBatchLimit` (500) per tick; a first-run backlog drains over successive ticks
+  and `Truncated` reports there is more
+- `POST /api/incidents/sweep-stale?dry_run=true` previews candidates and works even when the gate is
+  off — that is the point, so an operator can size the blast radius before enabling it
+- every close path stamps `Incident.ClosedReason` (`manual` / `monitor_expired` / `auto_stale`) and
+  the UI shows it; a close with no visible cause reads as data loss
+
 # Post-investigation incident merge
 
 `IncidentMerger` (`internal/services/incident_merger.go`): when an alert-sourced investigation
@@ -93,7 +149,9 @@ Keep those responsibilities separate.
 - adapter integration tests: real `AlertService` + real adapter for happy, bad-secret,
   malformed-payload, and persisted firing-alert-row paths
 
-Key files: `internal/handlers/alert_processor.go` (main investigation path; sets
+Key files: `internal/services/stale_close_service.go` (sweep, dry run, batching),
+`internal/services/incident_activity.go` (the shared activity predicates),
+`internal/handlers/alert_processor.go` (main investigation path; sets
 `source_kind`/`source_uuid`), `internal/services/alert_correlator.go` (`CorrelationConfig`,
 `CorrelationVerdict`, `AlertCorrelator`), `internal/services/alert_fingerprint.go`,
 `internal/services/monitor_sweep_service.go`, `internal/database/models_alerts.go` (`Alert` model,

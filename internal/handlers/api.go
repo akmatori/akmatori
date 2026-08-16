@@ -26,6 +26,7 @@ type APIHandler struct {
 	providerRegistry     services.ProviderRegistry
 	cronService          services.CronJobManager
 	proposalService      services.ProposalManager
+	staleIncidentCloser  services.StaleIncidentCloser
 	responseFormatter    *services.ResponseFormatter
 	alertChannelReloader func()       // called after alert source create/update/delete to reload Slack channel mappings
 	gatewayReloader      func() error // called after HTTP connector CRUD to reload gateway tools
@@ -104,6 +105,14 @@ func (h *APIHandler) SetProposalService(svc services.ProposalManager) {
 	h.proposalService = svc
 }
 
+// SetStaleIncidentCloser wires the stale-close sweep behind
+// /api/incidents/sweep-stale. Optional — when unset the endpoint returns 503;
+// the background ticker in main.go is what actually keeps incidents tidy, so
+// the API surface is a convenience, not a requirement.
+func (h *APIHandler) SetStaleIncidentCloser(svc services.StaleIncidentCloser) {
+	h.staleIncidentCloser = svc
+}
+
 // reloadAlertChannels triggers the alert channel reload callback if set
 func (h *APIHandler) reloadAlertChannels() {
 	if h.alertChannelReloader != nil {
@@ -129,6 +138,7 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/incidents/{uuid}/response", h.handleIncidentResponse)
 	mux.HandleFunc("GET /api/incidents/{uuid}", h.handleIncidentByID)
 	mux.HandleFunc("POST /api/incidents/{uuid}/close", h.handleIncidentClose)
+	mux.HandleFunc("POST /api/incidents/sweep-stale", h.handleIncidentSweepStale)
 
 	// Alert management: unlink spawns a fresh investigation; move reassigns the
 	// alert to a chosen incident (empty target == unlink); resolve manually

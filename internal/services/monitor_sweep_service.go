@@ -65,6 +65,7 @@ func (s *MonitorSweepService) RunSweep() (*SweepResult, error) {
 				"status":        database.IncidentStatusClosed,
 				"resolved_at":   &now,
 				"monitor_until": nil,
+				"closed_reason": database.CloseReasonMonitorExpired,
 			})
 		if update.Error != nil {
 			return fmt.Errorf("close expired-monitor incidents: %w", update.Error)

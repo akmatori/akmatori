@@ -17,6 +17,16 @@ type Alert struct {
 	ResolvedAt        *time.Time  `json:"resolved_at,omitempty"`
 	RawPayload        JSONB       `gorm:"type:jsonb" json:"raw_payload"`
 
+	// LastSeenAt is the last time the alerting system re-sent this alert while
+	// it was still firing. Sources that keep a stable source_fingerprint across
+	// re-sends (Alertmanager and friends) hit the uniq_firing_alert partial
+	// index on every repeat, so the insert is dropped and no new row appears —
+	// without this column a continuously firing alert is indistinguishable from
+	// one that stopped days ago. Both insert paths (InsertFiringAlert,
+	// LinkAlertToIncident) bump it on the conflict branch. Nil means the alert
+	// was never re-sent, in which case FiredAt is the last activity.
+	LastSeenAt *time.Time `gorm:"index" json:"last_seen_at,omitempty"`
+
 	// Correlation fields: set when this alert is linked to an existing incident.
 	Correlated              bool     `gorm:"default:false" json:"correlated"`
 	CorrelationConfidence   *float64 `json:"correlation_confidence,omitempty"`

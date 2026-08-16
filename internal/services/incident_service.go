@@ -47,9 +47,41 @@ func (s *SkillService) InsertFiringAlert(ctx context.Context, incidentUUID strin
 	}
 	if result.RowsAffected == 0 {
 		// Unique constraint fired: another process already claimed this alert.
+		// Record that the alerting system re-sent it so the incident's activity
+		// clock advances (see bumpAlertLastSeen).
+		bumpAlertLastSeen(s.db.WithContext(ctx), sourceUUID, alert.SourceFingerprint, time.Now())
 		return ErrAlertAlreadyClaimed
 	}
 	return nil
+}
+
+// bumpAlertLastSeen records a re-send of an already-firing alert on the row
+// that owns the uniq_firing_alert index slot for (sourceUUID,
+// sourceFingerprint). Sources that keep a stable fingerprint across re-sends
+// hit OnConflict-DoNothing on every repeat, so without this the row's
+// timestamps freeze at the first fire and the incident looks inactive to the
+// stale-close sweep and the fingerprint fast path.
+//
+// seenAt must be receipt time, NOT the alert's own start time: Alertmanager
+// and friends send a constant startsAt on every re-send, so recording that
+// would advance nothing and defeat the whole point.
+//
+// Best-effort: a failure here only costs activity resolution, never
+// correctness of the insert that triggered it, so errors are logged and
+// swallowed. Empty fingerprints are skipped — they are excluded from the
+// partial unique index, so they never conflict in the first place.
+func bumpAlertLastSeen(db *gorm.DB, sourceUUID, sourceFingerprint string, seenAt time.Time) {
+	if sourceFingerprint == "" {
+		return
+	}
+	err := db.Model(&database.Alert{}).
+		Where("source_uuid = ? AND source_fingerprint = ? AND status = ? AND resolved_at IS NULL",
+			sourceUUID, sourceFingerprint, string(database.AlertStatusFiring)).
+		Update("last_seen_at", seenAt).Error
+	if err != nil {
+		slog.Warn("bumpAlertLastSeen: could not record alert re-send",
+			"source_uuid", sourceUUID, "source_fingerprint", sourceFingerprint, "err", err)
+	}
 }
 
 // LinkAlertToIncident records an incoming alert against an existing incident
@@ -97,6 +129,9 @@ func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID str
 		}
 		if result.RowsAffected == 0 {
 			// Duplicate alert already linked; do not extend the monitor window.
+			// Still record the re-send so the activity clock advances. `now` is
+			// receipt time — see bumpAlertLastSeen on why firedAt is wrong here.
+			bumpAlertLastSeen(tx, sourceUUID, alert.SourceFingerprint, now)
 			return nil
 		}
 
@@ -294,6 +329,7 @@ func (s *SkillService) CloseIncident(ctx context.Context, incidentUUID string, c
 			"status":        database.IncidentStatusClosed,
 			"resolved_at":   &now,
 			"monitor_until": nil,
+			"closed_reason": database.CloseReasonManual,
 		}).Error; err != nil {
 			return fmt.Errorf("CloseIncident: update incident: %w", err)
 		}

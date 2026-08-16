@@ -216,7 +216,28 @@ export default function Incidents() {
     };
   }, [showModal, selectedIncident?.uuid, selectedIncident?.status, autoRefresh]);
 
-  const getStatusConfig = (status: string, monitorUntil?: string, sourceKind?: string) => {
+  // An incident that closed with no visible cause reads as data loss, so a
+  // closed badge carries why. Rows closed before closed_reason existed have no
+  // value and simply show "Closed".
+  const closedReasonLabel = (reason?: string) => {
+    switch (reason) {
+      case 'auto_stale':
+        return 'Auto-closed — inactive';
+      case 'monitor_expired':
+        return 'Monitor window ended';
+      case 'manual':
+        return 'Closed by operator';
+      default:
+        return undefined;
+    }
+  };
+
+  const getStatusConfig = (
+    status: string,
+    monitorUntil?: string,
+    sourceKind?: string,
+    closedReason?: string
+  ) => {
     switch (status) {
       case 'completed':
         if (sourceKind === 'alert') {
@@ -236,7 +257,12 @@ export default function Incidents() {
           subLabel: monitorUntil ? formatCountdown(monitorUntil) : undefined,
         };
       case 'closed':
-        return { class: 'badge-default', icon: XCircle, label: 'Closed', subLabel: undefined };
+        return {
+          class: 'badge-default',
+          icon: XCircle,
+          label: 'Closed',
+          subLabel: closedReasonLabel(closedReason),
+        };
       case 'merged':
         return { class: 'badge-default', icon: GitMerge, label: 'Merged', subLabel: undefined };
       case 'pending':
@@ -381,7 +407,12 @@ export default function Incidents() {
   };
 
   const selectedStatusConfig = selectedIncident
-    ? getStatusConfig(selectedIncident.status, selectedIncident.monitor_until, selectedIncident.source_kind)
+    ? getStatusConfig(
+        selectedIncident.status,
+        selectedIncident.monitor_until,
+        selectedIncident.source_kind,
+        selectedIncident.closed_reason
+      )
     : null;
 
   return (
@@ -494,7 +525,12 @@ export default function Incidents() {
                 </thead>
                 <tbody>
                   {incidents.map((incident) => {
-                    const statusConfig = getStatusConfig(incident.status, incident.monitor_until, incident.source_kind);
+                    const statusConfig = getStatusConfig(
+                      incident.status,
+                      incident.monitor_until,
+                      incident.source_kind,
+                      incident.closed_reason
+                    );
                     const StatusIcon = statusConfig.icon;
                     const alertCount = incident.alert_count ?? 0;
 

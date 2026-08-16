@@ -217,3 +217,12 @@ type MCPServerManager interface {
 	DeleteMCPServer(id uint) error
 	ListMCPServers() ([]database.MCPServerConfig, error)
 }
+
+// StaleIncidentCloser is the handler-facing surface of the stale-close sweep.
+// The background ticker owns the scheduled runs; this exists so an operator
+// can preview the effect of the current window (dry run) before the first
+// bulk close, and fire the sweep on demand afterwards. Satisfied by
+// *StaleCloseService.
+type StaleIncidentCloser interface {
+	Run(ctx context.Context, dryRun bool) (*StaleCloseResult, error)
+}

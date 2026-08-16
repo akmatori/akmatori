@@ -51,6 +51,9 @@ export interface Incident {
   started_at: string;
   completed_at?: string;
   monitor_until?: string;
+  // Why the incident closed: 'manual' | 'monitor_expired' | 'auto_stale'.
+  // Absent on open incidents and on rows closed before the field existed.
+  closed_reason?: string;
   alert_count?: number;
   source_kind?: string;
   first_seen?: string;
@@ -612,6 +615,9 @@ export interface GeneralSettings {
   alert_correlation_enabled: boolean;
   alert_monitor_window_minutes: number;
   incident_merge_enabled: boolean;
+  // Stale-close sweep. Defaults ON, unlike the correlation and merge gates.
+  incident_auto_close_enabled: boolean;
+  incident_auto_close_minutes: number;
 }
 
 export interface GeneralSettingsUpdate {
@@ -619,6 +625,8 @@ export interface GeneralSettingsUpdate {
   alert_correlation_enabled?: boolean;
   alert_monitor_window_minutes?: number;
   incident_merge_enabled?: boolean;
+  incident_auto_close_enabled?: boolean;
+  incident_auto_close_minutes?: number;
 }
 
 // Pagination

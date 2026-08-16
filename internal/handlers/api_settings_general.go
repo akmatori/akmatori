@@ -9,6 +9,15 @@ import (
 
 const defaultAlertMonitorWindowMinutes = 60
 
+// Bounds for incident_auto_close_minutes. The floor is one hour: anything
+// shorter would race normal investigation turnaround and close incidents under
+// an operator. The ceiling is 90 days, past which the setting is effectively
+// "never" and the operator should turn the gate off instead.
+const (
+	minIncidentAutoCloseMinutes = 60
+	maxIncidentAutoCloseMinutes = 90 * 24 * 60
+)
+
 // applyGeneralSettingsDefaults fills nil alert config pointers with effective
 // code defaults so the GET response never contains null. It modifies the struct
 // in-place; callers must not persist the result back to the DB.
@@ -24,6 +33,16 @@ func applyGeneralSettingsDefaults(s *database.GeneralSettings) {
 	if s.IncidentMergeEnabled == nil {
 		v := false
 		s.IncidentMergeEnabled = &v
+	}
+	// Note the inverted default: the stale-close gate is on unless explicitly
+	// disabled. See GeneralSettings.IncidentAutoCloseEnabled.
+	if s.IncidentAutoCloseEnabled == nil {
+		v := true
+		s.IncidentAutoCloseEnabled = &v
+	}
+	if s.IncidentAutoCloseMinutes == nil {
+		v := database.DefaultIncidentAutoCloseMinutes
+		s.IncidentAutoCloseMinutes = &v
 	}
 }
 
@@ -74,6 +93,18 @@ func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Reques
 		}
 		if req.IncidentMergeEnabled != nil {
 			settings.IncidentMergeEnabled = req.IncidentMergeEnabled
+		}
+		if req.IncidentAutoCloseEnabled != nil {
+			settings.IncidentAutoCloseEnabled = req.IncidentAutoCloseEnabled
+		}
+		if req.IncidentAutoCloseMinutes != nil {
+			if *req.IncidentAutoCloseMinutes < minIncidentAutoCloseMinutes ||
+				*req.IncidentAutoCloseMinutes > maxIncidentAutoCloseMinutes {
+				api.RespondError(w, http.StatusBadRequest,
+					"incident_auto_close_minutes must be between 60 and 129600")
+				return
+			}
+			settings.IncidentAutoCloseMinutes = req.IncidentAutoCloseMinutes
 		}
 
 		if err := database.UpdateGeneralSettings(settings); err != nil {

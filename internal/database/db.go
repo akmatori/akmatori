@@ -131,6 +131,13 @@ func runMigrations(db *gorm.DB) error {
 		return err
 	}
 
+	// Pre-migration: drop the orphaned correlation-tuning columns from
+	// general_settings. They were left behind when the correlation gate was
+	// simplified to a single Enabled flag; no Go code has read them since.
+	if err := preMigrateGeneralSettingsDropDeadColumns(db); err != nil {
+		return err
+	}
+
 	// Pre-migration: drop the orphaned legacy `incident_alerts` table left behind
 	// by the alert correlation redesign. Its no-cascade FK to incidents otherwise
 	// blocks retention cleanup. Superseded by the new alerts table.
@@ -310,6 +317,53 @@ func preMigrateIncidentsDropCorrelatedCount(db *gorm.DB) error {
 		return fmt.Errorf("drop incidents.correlated_count column: %w", err)
 	}
 	slog.Info("dropped incidents.correlated_count column (alert correlation redesign)")
+	return nil
+}
+
+// deadGeneralSettingsColumns are general_settings columns with no
+// corresponding field on the GeneralSettings model. Older releases exposed a
+// tunable correlation window, threshold, candidate cap, and a whole alert
+// suppression gate; the redesign replaced all of it with a single
+// AlertCorrelationEnabled flag plus package-level constants in
+// alert_correlator.go. GORM AutoMigrate never drops columns, so upgrade
+// installs still carry these with stale values that look configurable but
+// affect nothing.
+//
+// Note this drops the columns only. The alert_suppression_logs table is left
+// alone: migrateBackfillAlerts still reads it to skip incidents that were
+// suppressed before the alerts table existed.
+var deadGeneralSettingsColumns = []string{
+	"alert_correlation_window_minutes",
+	"alert_correlation_threshold",
+	"alert_correlation_max_candidates",
+	"alert_correlation_long_window_days",
+	"alert_correlation_fingerprint_window_minutes",
+	"alert_suppression_enabled",
+	"alert_suppression_threshold",
+}
+
+// preMigrateGeneralSettingsDropDeadColumns removes the orphaned columns listed
+// in deadGeneralSettingsColumns. Idempotent via a HasColumn check per column;
+// the whole migration runs under the pg_advisory_lock held by AutoMigrate, so
+// two starting replicas cannot race each other here. Plain DROP COLUMN (no IF
+// EXISTS) keeps this working on SQLite, which tests use.
+func preMigrateGeneralSettingsDropDeadColumns(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&GeneralSettings{}) {
+		return nil
+	}
+	dropped := make([]string, 0, len(deadGeneralSettingsColumns))
+	for _, col := range deadGeneralSettingsColumns {
+		if !db.Migrator().HasColumn(&GeneralSettings{}, col) {
+			continue
+		}
+		if err := db.Exec("ALTER TABLE general_settings DROP COLUMN " + col).Error; err != nil {
+			return fmt.Errorf("drop general_settings.%s column: %w", col, err)
+		}
+		dropped = append(dropped, col)
+	}
+	if len(dropped) > 0 {
+		slog.Info("dropped dead general_settings columns (correlation redesign)", "columns", dropped)
+	}
 	return nil
 }
 
@@ -1545,6 +1599,13 @@ func ensureAlertsIndexes(db *gorm.DB) error {
 		{
 			"idx_alerts_source_fp_status_fired",
 			"CREATE INDEX IF NOT EXISTS idx_alerts_source_fp_status_fired ON alerts (source_uuid, fingerprint, status, fired_at)",
+		},
+		{
+			// Serves the correlator's fingerprint fast path, which asks
+			// "does this incident already carry an alert with fingerprint F?"
+			// as a correlated EXISTS per candidate incident.
+			"idx_alerts_incident_fingerprint",
+			"CREATE INDEX IF NOT EXISTS idx_alerts_incident_fingerprint ON alerts (incident_uuid, fingerprint)",
 		},
 		{
 			"uniq_firing_alert",

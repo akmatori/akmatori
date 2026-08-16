@@ -94,29 +94,18 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				trendWindow = time.Hour
 			}
 
-			// Batch 1: count + first/last seen per incident.
-			type alertAggRow struct {
-				IncidentUUID string
-				Count        int64
-				FirstSeen    *time.Time
-				LastSeen     *time.Time
-			}
-			var aggRows []alertAggRow
-			if err := db.Model(&database.Alert{}).
-				Select("incident_uuid, COUNT(*) as count, MIN(fired_at) as first_seen, MAX(fired_at) as last_seen").
-				Where("incident_uuid IN ?", uuids).
-				Group("incident_uuid").
-				Scan(&aggRows).Error; err != nil {
-				slog.Warn("failed to fetch alert aggregates", "err", err)
-			}
-			aggMap := make(map[string]alertAggRow, len(aggRows))
-			for _, row := range aggRows {
-				aggMap[row.IncidentUUID] = row
-			}
-
-			// Batch 2: timestamps within the trend window for sparkline.
+			// One pass over the page's alert rows supplies both the
+			// count/first/last aggregate and the in-window sparkline buckets.
+			//
+			// This deliberately selects fired_at per row and folds in Go rather
+			// than using MIN()/MAX() in SQL: a computed datetime comes back
+			// from SQLite as a string the driver cannot scan into time.Time, so
+			// the aggregate form silently dropped every enrichment under tests
+			// (it works on PostgreSQL, which types the result). Folding in Go
+			// works on both and costs one query instead of two.
 			windowEnd := time.Now()
 			windowStart := windowEnd.Add(-trendWindow)
+
 			type alertTsRow struct {
 				IncidentUUID string
 				FiredAt      time.Time
@@ -124,13 +113,34 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 			var tsRows []alertTsRow
 			if err := db.Model(&database.Alert{}).
 				Select("incident_uuid, fired_at").
-				Where("incident_uuid IN ? AND fired_at >= ?", uuids, windowStart).
+				Where("incident_uuid IN ?", uuids).
 				Scan(&tsRows).Error; err != nil {
 				slog.Warn("failed to fetch alert timestamps", "err", err)
 			}
+
+			type alertAggRow struct {
+				Count     int64
+				FirstSeen *time.Time
+				LastSeen  *time.Time
+			}
+			aggMap := make(map[string]alertAggRow, len(incidents))
 			tsMap := make(map[string][]time.Time, len(incidents))
 			for _, row := range tsRows {
-				tsMap[row.IncidentUUID] = append(tsMap[row.IncidentUUID], row.FiredAt)
+				agg := aggMap[row.IncidentUUID]
+				agg.Count++
+				if agg.FirstSeen == nil || row.FiredAt.Before(*agg.FirstSeen) {
+					firedAt := row.FiredAt
+					agg.FirstSeen = &firedAt
+				}
+				if agg.LastSeen == nil || row.FiredAt.After(*agg.LastSeen) {
+					firedAt := row.FiredAt
+					agg.LastSeen = &firedAt
+				}
+				aggMap[row.IncidentUUID] = agg
+
+				if !row.FiredAt.Before(windowStart) {
+					tsMap[row.IncidentUUID] = append(tsMap[row.IncidentUUID], row.FiredAt)
+				}
 			}
 
 			const trendBuckets = 12
@@ -332,6 +342,40 @@ func (h *APIHandler) handleIncidentClose(w http.ResponseWriter, r *http.Request)
 		slog.Error("CloseIncident failed", "incident", incidentUUID, "err", err)
 		api.RespondError(w, http.StatusInternalServerError, "Failed to close incident")
 	}
+}
+
+// handleIncidentSweepStale handles POST /api/incidents/sweep-stale. It runs
+// the stale-incident close sweep on demand.
+//
+// With ?dry_run=true it reports what would close without changing anything,
+// and does so even when the gate is disabled — that is the point: an operator
+// upgrading an install with a large backlog can see the blast radius, and tune
+// incident_auto_close_minutes, before the first real sweep runs.
+func (h *APIHandler) handleIncidentSweepStale(w http.ResponseWriter, r *http.Request) {
+	if h.staleIncidentCloser == nil {
+		api.RespondError(w, http.StatusServiceUnavailable, "stale incident close service not available")
+		return
+	}
+
+	dryRun := r.URL.Query().Get("dry_run") == "true"
+
+	result, err := h.staleIncidentCloser.Run(r.Context(), dryRun)
+	if err != nil {
+		slog.Error("stale incident sweep failed", "dry_run", dryRun, "err", err)
+		api.RespondError(w, http.StatusInternalServerError, "Failed to run stale incident sweep")
+		return
+	}
+
+	api.RespondJSON(w, http.StatusOK, map[string]interface{}{
+		"dry_run":          dryRun,
+		"enabled":          result.Enabled,
+		"window_minutes":   result.WindowMinutes,
+		"cutoff":           result.Cutoff,
+		"candidate_count":  len(result.Candidates),
+		"candidates":       result.Candidates,
+		"incidents_closed": result.IncidentsClosed,
+		"truncated":        result.Truncated,
+	})
 }
 
 // runAgentInvestigation runs a full agent investigation for the given incident.

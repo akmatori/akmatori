@@ -256,6 +256,46 @@ type GeneralSettings struct {
 	// cause against recent investigated incidents and merges on a confident
 	// match. Nil/false = disabled (default).
 	IncidentMergeEnabled *bool `gorm:"default:null" json:"incident_merge_enabled"`
+
+	// IncidentAutoCloseEnabled gates the stale-close sweep: alert-sourced
+	// incidents with no alert or investigation activity for
+	// IncidentAutoCloseMinutes are closed automatically.
+	//
+	// Unlike the correlation and merge gates, nil means ENABLED. Those are
+	// opt-in AI features; this one is lifecycle hygiene. Without it an
+	// incident whose alerting system never sends a resolve stays open forever
+	// (it is held out of monitor mode by its still-firing alert, and the
+	// monitor sweep only ever looks at monitor rows), so every install
+	// eventually accumulates a pile of permanently open incidents. Defaulting
+	// off would mean shipping that pile-up to everyone who never finds the
+	// setting.
+	IncidentAutoCloseEnabled *bool `gorm:"default:null" json:"incident_auto_close_enabled"`
+
+	// IncidentAutoCloseMinutes is the inactivity window before the stale-close
+	// sweep closes an incident. Nil means the 3-day default.
+	IncidentAutoCloseMinutes *int `gorm:"default:null" json:"incident_auto_close_minutes"`
+}
+
+// DefaultIncidentAutoCloseMinutes is the inactivity window applied when
+// IncidentAutoCloseMinutes is unset: 3 days. Long enough that a slow
+// weekday investigation is never closed under an operator, short enough that
+// abandoned incidents do not accumulate.
+const DefaultIncidentAutoCloseMinutes = 3 * 24 * 60
+
+// GetIncidentAutoCloseEnabled returns the effective stale-close gate,
+// defaulting to true when unset. See the field comment for why this default
+// differs from the other gates.
+func (s *GeneralSettings) GetIncidentAutoCloseEnabled() bool {
+	return s.IncidentAutoCloseEnabled == nil || *s.IncidentAutoCloseEnabled
+}
+
+// GetIncidentAutoCloseWindow returns the configured stale-close inactivity
+// window, defaulting to DefaultIncidentAutoCloseMinutes when unset.
+func (s *GeneralSettings) GetIncidentAutoCloseWindow() time.Duration {
+	if s.IncidentAutoCloseMinutes == nil {
+		return DefaultIncidentAutoCloseMinutes * time.Minute
+	}
+	return time.Duration(*s.IncidentAutoCloseMinutes) * time.Minute
 }
 
 // GetIncidentMergeEnabled returns the effective merge-gate flag, defaulting

@@ -18,6 +18,32 @@ const (
 	correlationTimeout       = 15 * time.Second
 	correlationMaxCandidates = 25
 	correlationThreshold     = 0.7
+
+	// fingerprintFastPathWindow bounds how far back the deterministic
+	// fingerprint match will reach. Liveness alone is not enough of a bound:
+	// an incident held at "completed" by an alert its source never resolved
+	// stays "live" indefinitely, and without a time bound it would absorb
+	// every future recurrence of that alert forever, hiding real events.
+	//
+	// Measured against last activity (see liveIncidentCond), not started_at,
+	// so an incident that keeps receiving alerts stays a valid target however
+	// old it is. Sized under the stale-close default (3 days) so the fast path
+	// stops attaching to an incident well before the sweep closes it.
+	//
+	// 48h rather than 24h on purpose: real installs carry alerts that re-fire
+	// on a near-exact daily cadence, and a 24h window lands directly on that
+	// period — observed gaps of 22h46m and 24h00m31s for the same alert on the
+	// same host would fall on opposite sides of the boundary, so whether a
+	// recurrence collapsed or spawned came down to seconds of jitter. A window
+	// clearly wider than the cadence makes the behaviour deterministic: a
+	// daily-recurring alert stays one rolling incident. Narrow this only after
+	// checking it against the target install's actual re-fire intervals.
+	fingerprintFastPathWindow = 48 * time.Hour
+
+	// fingerprintFastPathReasoning is recorded on the alert row in place of an
+	// LLM explanation. It has to read as an explanation to an operator looking
+	// at why their alert was deduplicated.
+	fingerprintFastPathReasoning = "exact alert fingerprint match (same source, alert name, and host) against an alert already on this live incident; linked without an LLM call"
 )
 
 // CorrelationConfig holds parameters for the AI correlation gate.
@@ -94,15 +120,49 @@ type candidateRow struct {
 func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, alert alerts.NormalizedAlert) (CorrelationVerdict, error) {
 	noMatch := CorrelationVerdict{}
 
-	if c.caller == nil {
-		return noMatch, nil
-	}
-
 	cfg, err := c.loadConfig()
 	if err != nil {
 		return noMatch, fmt.Errorf("correlate: %w", err)
 	}
 	if !cfg.Enabled {
+		return noMatch, nil
+	}
+
+	// Fast path: an identical fingerprint on a live incident is a recurrence
+	// by construction, so link it without an LLM call. Deliberately ahead of
+	// the nil-caller check — deterministic deduplication should keep working
+	// on an install with no LLM configured or a disconnected worker.
+	//
+	// Skipped entirely when the alert carries no target host. The fingerprint
+	// is only hash(source, alertName, targetHost), so a host-less alert
+	// collapses to its rule name across the whole fleet — every
+	// "Balancer has more than 25 POPs disabled", wherever it fired, shares one
+	// fingerprint. That is too coarse to link on deterministically, so those
+	// alerts go to the LLM, which can weigh the summary and labels the
+	// fingerprint throws away.
+	if alert.TargetHost == "" {
+		slog.Debug("alert correlator: no target host, skipping fingerprint fast path",
+			"alert_name", alert.AlertName)
+	} else {
+		fingerprint := ComputeAlertFingerprint(sourceUUID, alert.AlertName, alert.TargetHost)
+		matchUUID, err := c.matchByFingerprint(ctx, fingerprint, time.Now())
+		if err != nil {
+			// Fail-open into the LLM path rather than out of correlation
+			// entirely: a DB hiccup should cost the shortcut, not the gate.
+			slog.Warn("alert correlator: fingerprint fast path failed, falling back to LLM", "err", err)
+		} else if matchUUID != "" {
+			slog.Info("alert correlated by fingerprint fast path",
+				"incident_uuid", matchUUID, "fingerprint", fingerprint)
+			return CorrelationVerdict{
+				Correlated:   true,
+				IncidentUUID: matchUUID,
+				Confidence:   1.0,
+				Reasoning:    fingerprintFastPathReasoning,
+			}, nil
+		}
+	}
+
+	if c.caller == nil {
 		return noMatch, nil
 	}
 
@@ -173,21 +233,13 @@ func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, aler
 // perspective even though status reads "completed", so they must stay
 // eligible until ResolveAlertTx promotes them to monitor.
 func (c *AlertCorrelator) fetchCandidates(ctx context.Context) ([]candidateRow, error) {
-	now := time.Now()
-	activeStatuses := []string{
-		string(database.IncidentStatusPending),
-		string(database.IncidentStatusRunning),
-		string(database.IncidentStatusDiagnosed),
-	}
+	cond, args := liveTargetCond(time.Now())
 
 	var rows []candidateRow
 	err := c.db.WithContext(ctx).
 		Model(&database.Incident{}).
 		Select("uuid, title, status, response, context, started_at, alert_fingerprint").
-		Where("source_kind = ? AND (status IN ? OR (status = ? AND monitor_until >= ?) OR (status = ? AND EXISTS (SELECT 1 FROM alerts WHERE alerts.incident_uuid = incidents.uuid AND alerts.status = ? AND alerts.resolved_at IS NULL)))",
-			database.IncidentSourceKindAlert, activeStatuses,
-			string(database.IncidentStatusMonitor), now,
-			string(database.IncidentStatusCompleted), string(database.AlertStatusFiring)).
+		Where(cond, args...).
 		Order("started_at DESC").
 		Limit(correlationMaxCandidates).
 		Scan(&rows).Error
@@ -195,6 +247,80 @@ func (c *AlertCorrelator) fetchCandidates(ctx context.Context) ([]candidateRow, 
 		return nil, err
 	}
 	return rows, nil
+}
+
+// liveTargetCond builds the "viable recurrence target" predicate shared by the
+// LLM candidate query and the fingerprint fast path. Keeping one definition
+// matters: if the fast path considered an incident live that the candidate
+// query did not, the two correlation routes would disagree about where a
+// recurrence belongs.
+func liveTargetCond(now time.Time) (string, []interface{}) {
+	activeStatuses := []string{
+		string(database.IncidentStatusPending),
+		string(database.IncidentStatusRunning),
+		string(database.IncidentStatusDiagnosed),
+	}
+	cond := "source_kind = ? AND (status IN ? OR (status = ? AND monitor_until >= ?) OR " +
+		"(status = ? AND EXISTS (SELECT 1 FROM alerts WHERE alerts.incident_uuid = incidents.uuid " +
+		"AND alerts.status = ? AND alerts.resolved_at IS NULL)))"
+	args := []interface{}{
+		database.IncidentSourceKindAlert, activeStatuses,
+		string(database.IncidentStatusMonitor), now,
+		string(database.IncidentStatusCompleted), string(database.AlertStatusFiring),
+	}
+	return cond, args
+}
+
+// matchByFingerprint looks for a live incident already carrying the exact same
+// alert fingerprint — same source instance, same alert name, same target host —
+// with activity inside fingerprintFastPathWindow.
+//
+// This is the deterministic half of the correlation gate. A repeat fire of an
+// identical alert is a recurrence by definition; asking an LLM to confirm that
+// costs a call and adds latency. Returns an empty UUID when there is no match,
+// which sends the alert on to the LLM.
+//
+// The fingerprint is matched against BOTH the incident's own
+// alert_fingerprint (the alert that spawned it) AND the fingerprint of every
+// alert linked to it. The second half matters: once the LLM has decided alert
+// Y belongs to incident A, every later fire of Y should follow that decision
+// deterministically rather than being re-litigated by another LLM call that
+// might answer differently. Matching only the spawning alert would send those
+// recurrences back to the LLM forever.
+//
+// Linked alerts are matched regardless of their own status. A resolved alert
+// on a monitor-status incident is precisely the recurrence case monitor mode
+// exists for, so restricting this to still-firing alerts would break it.
+//
+// Most-recently-started wins: when several live incidents share a fingerprint,
+// the newest is the one an operator is actually looking at.
+func (c *AlertCorrelator) matchByFingerprint(ctx context.Context, fingerprint string, now time.Time) (string, error) {
+	if fingerprint == "" {
+		return "", nil
+	}
+
+	liveCond, liveArgs := liveTargetCond(now)
+	activityCond, activityArgs := liveIncidentCond(now.Add(-fingerprintFastPathWindow))
+
+	fingerprintCond := "(incidents.alert_fingerprint = ? OR EXISTS (" +
+		"SELECT 1 FROM alerts WHERE alerts.incident_uuid = incidents.uuid AND alerts.fingerprint = ?))"
+
+	args := append([]interface{}{}, liveArgs...)
+	args = append(args, activityArgs...)
+	args = append(args, fingerprint, fingerprint)
+
+	var uuid string
+	err := c.db.WithContext(ctx).
+		Model(&database.Incident{}).
+		Select("uuid").
+		Where(liveCond+" AND "+activityCond+" AND "+fingerprintCond, args...).
+		Order("started_at DESC").
+		Limit(1).
+		Scan(&uuid).Error
+	if err != nil {
+		return "", err
+	}
+	return uuid, nil
 }
 
 // buildCorrelationUserPrompt produces the numbered candidate list shown to the

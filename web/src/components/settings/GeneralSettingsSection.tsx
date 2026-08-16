@@ -10,6 +10,12 @@ interface GeneralSettingsSectionProps {
   onStatusChange?: (status: 'configured' | undefined) => void;
 }
 
+// Mirrors the backend bounds on incident_auto_close_minutes (60..129600) and
+// its three-day default, expressed in hours for the form.
+const DEFAULT_AUTO_CLOSE_HOURS = 72;
+const MIN_AUTO_CLOSE_HOURS = 1;
+const MAX_AUTO_CLOSE_HOURS = 90 * 24;
+
 export default function GeneralSettingsSection({ onStatusChange }: GeneralSettingsSectionProps) {
   const [, setGeneralSettings] = useState<GeneralSettingsType | null>(null);
   const [generalLoading, setGeneralLoading] = useState(true);
@@ -22,6 +28,11 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
   const [correlationEnabled, setCorrelationEnabled] = useState(false);
   const [monitorWindowMinutes, setMonitorWindowMinutes] = useState(60);
   const [incidentMergeEnabled, setIncidentMergeEnabled] = useState(false);
+
+  // Stale incident close. Stored in minutes by the API, edited in hours here:
+  // the default is three days, and "72" reads better than "4320".
+  const [autoCloseEnabled, setAutoCloseEnabled] = useState(true);
+  const [autoCloseHours, setAutoCloseHours] = useState(DEFAULT_AUTO_CLOSE_HOURS);
 
   useEffect(() => {
     loadGeneralSettings();
@@ -36,6 +47,10 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
       setCorrelationEnabled(data.alert_correlation_enabled);
       setMonitorWindowMinutes(data.alert_monitor_window_minutes ?? 60);
       setIncidentMergeEnabled(data.incident_merge_enabled ?? false);
+      setAutoCloseEnabled(data.incident_auto_close_enabled ?? true);
+      setAutoCloseHours(
+        Math.round((data.incident_auto_close_minutes ?? DEFAULT_AUTO_CLOSE_HOURS * 60) / 60)
+      );
       setGeneralError(null);
       onStatusChange?.(data.base_url ? 'configured' : undefined);
     } catch (err) {
@@ -57,6 +72,8 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
         alert_correlation_enabled: correlationEnabled,
         alert_monitor_window_minutes: monitorWindowMinutes,
         incident_merge_enabled: incidentMergeEnabled,
+        incident_auto_close_enabled: autoCloseEnabled,
+        incident_auto_close_minutes: autoCloseHours * 60,
       });
       setGeneralSettings(updated);
       onStatusChange?.(updated.base_url ? 'configured' : undefined);
@@ -142,6 +159,41 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
           />
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
             How long a completed incident stays in monitor mode after resolution.
+          </p>
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex items-center gap-2 mb-3">
+            <input
+              id="auto-close-enabled"
+              type="checkbox"
+              checked={autoCloseEnabled}
+              onChange={(e) => setAutoCloseEnabled(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <label htmlFor="auto-close-enabled" className="text-sm text-gray-700 dark:text-gray-300">
+              Auto-close inactive incidents
+            </label>
+          </div>
+
+          <div className="w-1/3">
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+              Close after inactivity (hours)
+            </label>
+            <input
+              type="number"
+              min={MIN_AUTO_CLOSE_HOURS}
+              max={MAX_AUTO_CLOSE_HOURS}
+              value={autoCloseHours}
+              disabled={!autoCloseEnabled}
+              onChange={(e) => setAutoCloseHours(Number(e.target.value))}
+              className="input-field text-sm disabled:opacity-50"
+            />
+          </div>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Closes an alert incident once no alert has fired, been re-sent, or been investigated for
+            this long. Covers incidents whose monitoring system never sent a matching resolve, which
+            would otherwise stay open forever.
           </p>
         </div>
       </div>

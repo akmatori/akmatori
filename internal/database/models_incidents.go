@@ -33,6 +33,19 @@ const (
 	IncidentSourceKindProposal     = "proposal"
 )
 
+// IncidentCloseReason records why an incident reached "closed" status. An
+// incident that closes with no visible cause reads as data loss to an
+// operator, so every close path stamps its reason and the UI surfaces it.
+const (
+	// CloseReasonManual — an operator closed it via POST /api/incidents/{uuid}/close.
+	CloseReasonManual = "manual"
+	// CloseReasonMonitorExpired — the monitor window elapsed with no recurrence.
+	CloseReasonMonitorExpired = "monitor_expired"
+	// CloseReasonAutoStale — the stale-close sweep found no alert or
+	// investigation activity within the configured inactivity window.
+	CloseReasonAutoStale = "auto_stale"
+)
+
 // Incident represents a spawned incident manager session
 type Incident struct {
 	ID              uint           `gorm:"primaryKey" json:"id"`
@@ -68,6 +81,11 @@ type Incident struct {
 	// Distinct from SourceFingerprint (adapter-supplied external ID) and
 	// alertSpawnKey (includes SourceFingerprint for exact-burst dedup).
 	AlertFingerprint string `gorm:"size:32;index" json:"alert_fingerprint"`
+
+	// ClosedReason records which close path set Status to "closed": one of
+	// the CloseReason* constants. Empty for incidents that never closed and
+	// for rows closed before this field existed.
+	ClosedReason string `gorm:"size:24" json:"closed_reason,omitempty"`
 
 	// MergedIntoUUID points at the surviving incident when Status is
 	// "merged" (post-investigation root-cause merge). Empty otherwise.
