@@ -3,7 +3,12 @@ import * as http from "node:http";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { GatewayClient, GatewayError, buildSmartPreview } from "../src/gateway-client.js";
+import {
+  GatewayClient,
+  GatewayError,
+  assertAgentStateWritable,
+  buildSmartPreview,
+} from "../src/gateway-client.js";
 
 // ---------------------------------------------------------------------------
 // Mock HTTP server helpers
@@ -493,6 +498,41 @@ describe("GatewayClient", () => {
       await expect(client.call("tool", {})).rejects.toThrow("Connection error");
     });
 
+    it("latches access failures without exposing the response body", async () => {
+      const mock = await createMockGateway(() => ({
+        status: 403,
+        body: { secret: "must-not-appear" },
+      }));
+      try {
+        const client = new GatewayClient({ gatewayUrl: mock.url, incidentId: "inc-1" });
+        await expect(client.call("ssh.execute_command", {})).rejects.toThrow(GatewayError);
+        expect(client.getBlockingError()).toMatch(/Investigation blocked/);
+        expect(client.getBlockingError()).not.toContain("must-not-appear");
+      } finally {
+        mock.server.close();
+      }
+    });
+
+    it("clears an instance blocker after a successful retry", async () => {
+      let failed = true;
+      const mock = await createMockGateway(() => {
+        if (failed) {
+          failed = false;
+          return { status: 503, body: { error: "temporary" } };
+        }
+        return jsonRpcSuccess({ content: [{ type: "text", text: '{"ok":true}' }] });
+      });
+      try {
+        const client = new GatewayClient({ gatewayUrl: mock.url, incidentId: "inc-1" });
+        await expect(client.call("ssh.execute_command", {})).rejects.toThrow(GatewayError);
+        expect(client.getBlockingError()).toMatch(/Investigation blocked/);
+        await client.call("ssh.execute_command", {});
+        expect(client.getBlockingError()).toBeUndefined();
+      } finally {
+        mock.server.close();
+      }
+    });
+
     it("handles null result", async () => {
       const mock = await createMockGateway(() => jsonRpcSuccess(null));
 
@@ -782,5 +822,12 @@ describe("buildSmartPreview", () => {
       expect(result).toContain(`Full output saved to: ${OUTPUT_FILE}`);
       expect(result).toContain(`fs.readFileSync('${OUTPUT_FILE}', 'utf-8')`);
     }
+  });
+});
+
+describe("agent state preflight", () => {
+  it("rejects inaccessible state directories and accepts writable ones", () => {
+    expect(() => assertAgentStateWritable("/dev/null")).toThrow(/agent state directory/);
+    expect(() => assertAgentStateWritable("/tmp")).not.toThrow();
   });
 });

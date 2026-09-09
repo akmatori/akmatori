@@ -89,17 +89,17 @@ services:
         condition: service_healthy
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-akmatori}
-      - POSTGRES_HOST=postgres
+      - POSTGRES_HOST=akmatori-postgres
       - POSTGRES_DB=${POSTGRES_DB:-akmatori}
       - POSTGRES_PASSWORD_FILE=/akmatori/secrets/postgres_password
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - JWT_SECRET=${JWT_SECRET:-}
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
-      - NO_PROXY=${NO_PROXY:-postgres,akmatori-api,mcp-gateway,akmatori-agent,frontend,localhost,127.0.0.1}
+      - NO_PROXY=${NO_PROXY:-postgres,akmatori-postgres,akmatori-api,mcp-gateway,akmatori-mcp-gateway,akmatori-agent,frontend,localhost,127.0.0.1}
       - http_proxy=${http_proxy:-}
       - https_proxy=${https_proxy:-}
-      - no_proxy=${no_proxy:-postgres,akmatori-api,mcp-gateway,akmatori-agent,frontend,localhost,127.0.0.1}
+      - no_proxy=${no_proxy:-postgres,akmatori-postgres,akmatori-api,mcp-gateway,akmatori-mcp-gateway,akmatori-agent,frontend,localhost,127.0.0.1}
     volumes:
       - ./akmatori_data:/akmatori
     healthcheck:
@@ -128,16 +128,16 @@ services:
         condition: service_healthy
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-akmatori}
-      - POSTGRES_HOST=postgres
+      - POSTGRES_HOST=akmatori-postgres
       - POSTGRES_DB=${POSTGRES_DB:-akmatori}
       - POSTGRES_PASSWORD_FILE=/akmatori/secrets/postgres_password
       - PORT=8080
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
-      - NO_PROXY=${NO_PROXY:-postgres,akmatori-api,mcp-gateway,akmatori-agent,frontend,localhost,127.0.0.1}
+      - NO_PROXY=${NO_PROXY:-postgres,akmatori-postgres,akmatori-api,mcp-gateway,akmatori-mcp-gateway,akmatori-agent,frontend,localhost,127.0.0.1}
       - http_proxy=${http_proxy:-}
       - https_proxy=${https_proxy:-}
-      - no_proxy=${no_proxy:-postgres,akmatori-api,mcp-gateway,akmatori-agent,frontend,localhost,127.0.0.1}
+      - no_proxy=${no_proxy:-postgres,akmatori-postgres,akmatori-api,mcp-gateway,akmatori-mcp-gateway,akmatori-agent,frontend,localhost,127.0.0.1}
     volumes:
       - ./akmatori_data/secrets:/akmatori/secrets:ro
     healthcheck:
@@ -164,16 +164,16 @@ services:
       - mcp-gateway
     environment:
       - API_WS_URL=ws://akmatori-api:3000/ws/agent
-      - MCP_GATEWAY_URL=http://mcp-gateway:8080
+      - MCP_GATEWAY_URL=http://akmatori-mcp-gateway:8080
       - WORKSPACE_DIR=/workspaces
       - SKILLS_DIR=/akmatori/skills
       - PI_CACHE_RETENTION=long  # Extended prompt caching: 1hr Anthropic, 24hr OpenAI
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
-      - NO_PROXY=${NO_PROXY:-postgres,akmatori-api,mcp-gateway,akmatori-agent,frontend,localhost,127.0.0.1}
+      - NO_PROXY=${NO_PROXY:-postgres,akmatori-postgres,akmatori-api,mcp-gateway,akmatori-mcp-gateway,akmatori-agent,frontend,localhost,127.0.0.1}
       - http_proxy=${http_proxy:-}
       - https_proxy=${https_proxy:-}
-      - no_proxy=${no_proxy:-postgres,akmatori-api,mcp-gateway,akmatori-agent,frontend,localhost,127.0.0.1}
+      - no_proxy=${no_proxy:-postgres,akmatori-postgres,akmatori-api,mcp-gateway,akmatori-mcp-gateway,akmatori-agent,frontend,localhost,127.0.0.1}
     volumes:
       - agent_sessions:/home/agent/.pi               # Persistent session data
       - ./akmatori_data/incidents:/workspaces:rw      # ONLY incidents - no access to skills/tools source

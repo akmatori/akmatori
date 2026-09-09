@@ -35,7 +35,7 @@ import {
   extractToolText,
   type ToolExecutionTrace,
 } from "./tool-output-formatter.js";
-import { GatewayClient } from "./gateway-client.js";
+import { GatewayClient, assertAgentStateWritable } from "./gateway-client.js";
 import { createGatewayCallTool, createListToolsForToolTypeTool, createGetToolDetailTool, createListToolTypesTool, createExecuteScriptTool } from "./gateway-tools.js";
 
 // ---------------------------------------------------------------------------
@@ -1125,6 +1125,8 @@ export class AgentRunner {
   ): Promise<ExecuteResult> {
     const startTime = Date.now();
 
+    assertAgentStateWritable(getAgentDir());
+
     // Set up proxy env vars before creating session
     applyProxyConfig(params.proxyConfig);
 
@@ -1445,7 +1447,7 @@ export class AgentRunner {
         full_log: fullLog,
         // Propagate API-level errors (quota, auth, model not found) even when
         // partial response text was collected from earlier turns.
-        error: lastErrorMessage || undefined,
+        error: gatewayClient.getBlockingError() ?? (lastErrorMessage || undefined),
         tokens_used: usageTotals.totalTokens,
         execution_time_ms: Date.now() - startTime,
         ...usageResultFields(usageTotals),
