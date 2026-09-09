@@ -11,6 +11,32 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ToolAllowlistEntry } from "./types.js";
 
+const ACCESS_FAILURE_PATTERNS = [
+  /Gateway returned HTTP (?:401|403|407|5\d\d)\b/i,
+  /Connection error:/i,
+  /Invalid JSON response:/i,
+  /Request timed out/i,
+  /\b(?:EACCES|ENOTFOUND|ECONNREFUSED|EHOSTUNREACH)\b/i,
+  /permission denied|unauthori[sz]ed|forbidden/i,
+];
+
+function isAccessFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return ACCESS_FAILURE_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+/** Check that pi-mono can create its state files before a session starts. */
+export function assertAgentStateWritable(directory: string): void {
+  try {
+    fs.accessSync(directory, fs.constants.W_OK | fs.constants.X_OK);
+  } catch {
+    throw new Error(
+      "Investigation blocked: agent state directory is not writable; " +
+        "subagents cannot initialize. Repair the agent volume ownership before retrying.",
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -179,6 +205,8 @@ export class GatewayClient {
   private readonly timeoutMs: number;
   private readonly toolAllowlist: ToolAllowlistEntry[] | undefined;
   private requestId = 0;
+  private gatewayAccessFailed = false;
+  private inaccessibleInstances = new Set<string>();
 
   constructor(options: GatewayClientOptions) {
     this.gatewayUrl = options.gatewayUrl.replace(/\/+$/, "");
@@ -200,7 +228,8 @@ export class GatewayClient {
     instanceHint?: string,
     signal?: AbortSignal,
   ): Promise<CallResult> {
-    return orphanSafe(async () => {
+    const key = instanceHint ?? toolName.split(".")[0];
+    const result = orphanSafe(async () => {
       const params: Record<string, unknown> = {
         name: toolName,
         arguments: args,
@@ -224,6 +253,17 @@ export class GatewayClient {
 
       return { data };
     });
+    const tracked = result
+      .then((value) => {
+        this.inaccessibleInstances.delete(key);
+        return value;
+      })
+      .catch((error: unknown) => {
+        if (isAccessFailure(error)) this.inaccessibleInstances.add(key);
+        throw error;
+      });
+    tracked.catch(() => {});
+    return tracked;
   }
 
   /** List tools filtered by tool type. */
@@ -250,6 +290,16 @@ export class GatewayClient {
     );
   }
 
+  getBlockingError(): string | undefined {
+    if (this.gatewayAccessFailed || this.inaccessibleInstances.size > 0) {
+      return (
+        "Investigation blocked: infrastructure tool access failed and did not recover. " +
+        "Review the tool log and repair gateway connectivity, authentication or permissions before retrying."
+      );
+    }
+    return undefined;
+  }
+
   // -------------------------------------------------------------------------
   // Internal
   // -------------------------------------------------------------------------
@@ -260,6 +310,17 @@ export class GatewayClient {
 
   /** Send a JSON-RPC 2.0 request to the gateway. */
   private async rpc(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
+    try {
+      const result = await this.rpcRaw(method, params, signal);
+      this.gatewayAccessFailed = false;
+      return result;
+    } catch (error: unknown) {
+      if (isAccessFailure(error)) this.gatewayAccessFailed = true;
+      throw error;
+    }
+  }
+
+  private async rpcRaw(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
     const body = JSON.stringify({
       jsonrpc: "2.0",
       method,

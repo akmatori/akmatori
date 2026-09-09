@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   AgentRunner,
@@ -457,6 +458,7 @@ describe("AgentRunner", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    fs.mkdirSync("/tmp/mock-agent-dir", { recursive: true });
     mockSession = createMockSession();
     createAgentSessionCalls = [];
     registeredProviders = [];
@@ -984,7 +986,7 @@ describe("AgentRunner", () => {
         (getAgentDir as unknown as ReturnType<typeof vi.fn>).mockReturnValue(tmpAgentDir);
       });
 
-      afterEach(() => {
+      afterEach(async () => {
         try {
           fs.rmSync(tmpAgentDir, { recursive: true, force: true });
         } catch {
@@ -997,6 +999,9 @@ describe("AgentRunner", () => {
         }
         // Don't leak the custom-provider API key env var into sibling tests.
         delete process.env.AKMATORI_CUSTOM_PROVIDER_API_KEY;
+        const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
+        (getAgentDir as unknown as ReturnType<typeof vi.fn>).mockReturnValue("/tmp/mock-agent-dir");
+        fs.mkdirSync("/tmp/mock-agent-dir", { recursive: true });
       });
 
 
