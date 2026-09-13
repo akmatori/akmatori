@@ -4,6 +4,7 @@ import {
   extractSkillNameFromReadPath,
   mapThinkingLevel,
   resolveModel,
+  subagentChildUsage,
   type ExecuteParams,
   type ResumeParams,
 } from "../src/agent-runner.js";
@@ -2442,6 +2443,67 @@ describe("AgentRunner", () => {
       expect(result.tokens_used).toBe(800);
     });
 
+    it("should include subagent child usage reported on the tool result", async () => {
+      // Subagent children run in separate `pi` processes, so their tokens
+      // never reach turn_end. pi-subagents 0.59.0+ reports them on
+      // details.totalChildUsage of the `subagent` tool result.
+      mockSession.prompt.mockImplementationOnce(async () => {
+        for (const sub of mockSession._subscribers) {
+          sub({
+            type: "tool_execution_end",
+            toolCallId: "tc-sub",
+            toolName: "subagent",
+            result: {
+              content: [{ type: "text", text: "found 2 runbooks" }],
+              details: {
+                mode: "single",
+                results: [],
+                totalChildUsage: { input: 100, output: 50, cacheRead: 20, cacheWrite: 5, cost: 0.0125, turns: 2 },
+              },
+            },
+            isError: false,
+          });
+          sub({
+            type: "turn_end",
+            message: { role: "assistant", usage: { totalTokens: 500, input: 400, output: 100, cost: { total: 0.01 } } },
+            toolResults: [],
+          });
+        }
+      });
+
+      const result = await runner.execute(makeExecuteParams());
+
+      expect(result.tokens_used).toBe(675);
+      expect(result.input_tokens).toBe(500);
+      expect(result.output_tokens).toBe(150);
+      expect(result.cache_read_tokens).toBe(20);
+      expect(result.cache_write_tokens).toBe(5);
+      expect(result.cost_usd).toBeCloseTo(0.0225, 6);
+    });
+
+    it("should leave usage untouched when a subagent result carries no child usage", async () => {
+      mockSession.prompt.mockImplementationOnce(async () => {
+        for (const sub of mockSession._subscribers) {
+          sub({
+            type: "tool_execution_end",
+            toolCallId: "tc-sub",
+            toolName: "subagent",
+            result: { content: [{ type: "text", text: "no agents" }], details: { mode: "management", results: [] } },
+            isError: false,
+          });
+          sub({
+            type: "turn_end",
+            message: { role: "assistant", usage: { totalTokens: 500 } },
+            toolResults: [],
+          });
+        }
+      });
+
+      const result = await runner.execute(makeExecuteParams());
+
+      expect(result.tokens_used).toBe(500);
+    });
+
     it("should include compaction summarization tokens in the total", async () => {
       // The compaction LLM call is invisible to turn_end (which only carries
       // assistant-message usage), so without counting compaction_end the long
@@ -2757,5 +2819,29 @@ describe("extractSkillNameFromReadPath", () => {
     expect(extractSkillNameFromReadPath(skillsDir, undefined)).toBeUndefined();
     expect(extractSkillNameFromReadPath(skillsDir, 42)).toBeUndefined();
     expect(extractSkillNameFromReadPath(skillsDir, "")).toBeUndefined();
+  });
+});
+
+describe("subagentChildUsage", () => {
+  it("maps pi-subagents totalChildUsage onto RunUsage", () => {
+    const usage = subagentChildUsage({
+      content: [],
+      details: { totalChildUsage: { input: 10, output: 5, cacheRead: 3, cacheWrite: 2, cost: 0.5, turns: 1 } },
+    });
+    expect(usage).toEqual({ input: 10, output: 5, cacheRead: 3, cacheWrite: 2, totalTokens: 20, cost: { total: 0.5 } });
+  });
+
+  it("returns undefined for missing, malformed, or all-zero usage", () => {
+    expect(subagentChildUsage(undefined)).toBeUndefined();
+    expect(subagentChildUsage("text")).toBeUndefined();
+    expect(subagentChildUsage({ content: [] })).toBeUndefined();
+    expect(subagentChildUsage({ details: { totalChildUsage: "n/a" } })).toBeUndefined();
+    expect(subagentChildUsage({ details: { totalChildUsage: { input: "7", output: NaN } } })).toBeUndefined();
+    expect(subagentChildUsage({ details: { totalChildUsage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 } } })).toBeUndefined();
+  });
+
+  it("ignores non-numeric fields but keeps the numeric ones", () => {
+    const usage = subagentChildUsage({ details: { totalChildUsage: { input: 8, output: "x", cost: null } } });
+    expect(usage).toEqual({ input: 8, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 8, cost: { total: 0 } });
   });
 });

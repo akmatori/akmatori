@@ -2,11 +2,17 @@ import type { LLMProvider } from '../../types';
 
 export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: string }[]> = {
   openai: [
+    // gpt-6-astra (pi-ai 0.85.1): base, -fast, and -pro variants. No plain
+    // `gpt-6` id exists in the catalog. Not marked Recommended until it has
+    // run through the bench; gpt-5.6-terra stays the known-good default.
+    { value: 'gpt-6-astra', label: 'gpt-6-astra' },
+    { value: 'gpt-6-astra-pro', label: 'gpt-6-astra-pro (Most capable)' },
+    { value: 'gpt-6-astra-fast', label: 'gpt-6-astra-fast (Fast)' },
     // gpt-5.6 ships as three named variants; there is no plain `gpt-5.6` id.
     // Ordering follows their catalogue pricing (sol > terra > luna), the only
     // capability signal the model catalog exposes.
     { value: 'gpt-5.6-terra', label: 'gpt-5.6-terra (Recommended)' },
-    { value: 'gpt-5.6-sol', label: 'gpt-5.6-sol (Most capable)' },
+    { value: 'gpt-5.6-sol', label: 'gpt-5.6-sol' },
     { value: 'gpt-5.6-luna', label: 'gpt-5.6-luna (Budget)' },
     { value: 'gpt-5.5', label: 'gpt-5.5' },
     { value: 'gpt-5.5-pro', label: 'gpt-5.5-pro' },

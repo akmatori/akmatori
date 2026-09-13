@@ -18,7 +18,7 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
 
 # SDK notes (`@earendil-works/pi-coding-agent`)
 
-- Versions: pi-coding-agent/pi-ai/pi-agent-core `0.84.1`, pi-subagents `0.45.1`; child `pi` CLI =
+- Versions: pi-coding-agent/pi-ai/pi-agent-core `0.85.1`, pi-subagents `0.67.0`; child `pi` CLI =
   `node_modules/.bin/pi`. `pi auth check --provider <id>` / `--model <provider>/<id>` (0.84.1) is the
   fastest way to diagnose a provider or model that will not resolve
 - pi-subagents peers are `optional`; loader aliases `@earendil-works/*` to pi's bundled copies —
@@ -29,7 +29,9 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
   `agent_completed` as `input_tokens`/`output_tokens`/`cache_read_tokens`/`cache_write_tokens`/`cost_usd`
   and persisted per run in the API's `agent_runs` table (keyed by `run_id`; rows survive incident
   retention). Incident-level `tokens_used`/`execution_time_ms` ACCUMULATE across runs; per-run
-  numbers live on `agent_runs`. One-shot calls and subagent child processes remain untracked
+  numbers live on `agent_runs`. Subagent children run in their own `pi` processes, so their
+  usage arrives only via `details.totalChildUsage` on the `subagent` tool result (pi-subagents
+  0.59+); `subagentChildUsage()` folds it in on `tool_execution_end`. One-shot calls remain untracked
 - `PROVIDER_API_KEY_ENV_VARS` (bash scrub) must cover every credential env var pi reads — incl.
   `ANTHROPIC_AUTH_TOKEN` (0.82.1 bearer)
 - pi-ai root is core-only: `complete` from `/compat`, `getBuiltinModel` from `/providers/all`; the
@@ -42,6 +44,11 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
   Go (`models_settings.go`, `api_settings_llm.go`), web (types, `LLMSettingsSection.tsx`)
 - pi-subagents reads `<agentDir>/extensions/subagent/config.json` (strict JSON); repo ships it with
   `toolDescriptionMode: "compact"`
+- pi-subagents 0.61+ registers `subagent` + `bg_wait` (the old `subagent_wait` alias is gone); 0.50/0.55
+  fail a child launch closed when its model is missing from the host registry or the child reports a
+  different provider/model than requested — the one-provider-id invariant below is what satisfies it.
+  Foreground children load no ambient extensions (0.65) and omit the operator's global context (0.58)
+- Never pin pi `0.85.0`: it accidentally shipped internal experimental code; `0.85.1` fixed the SDK imports
 - Auth/model runtime: `ModelRuntime.create({modelsPath: null, allowModelNetwork: false})` +
   `setRuntimeApiKey(provider, key)` → pass `modelRuntime` to `createAgentSession`; key in-memory only
   (`RuntimeCredentials`, `$`-safe), `modelsPath: null` = parent uses explicit `model`. Since 0.84.0

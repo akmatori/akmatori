@@ -7,7 +7,7 @@ analyzes them with multi-provider LLM agents, and can execute remediation throug
 
 - Docker deployment: API, Agent Worker, MCP Gateway, PostgreSQL
 - Backend: Go 1.25 · Database: PostgreSQL 16 + GORM
-- Agent Worker: Node.js 22+ / TypeScript with `@earendil-works/pi-coding-agent` (`v0.82.1`)
+- Agent Worker: Node.js 22+ / TypeScript with `@earendil-works/pi-coding-agent` (`v0.85.1`)
 - Frontend: React 19 + TypeScript + Vite + Tailwind
 - LLM providers: Anthropic, OpenAI, Google, OpenRouter, NVIDIA NIM, MiniMax, Ant Ling, custom/on-prem
 

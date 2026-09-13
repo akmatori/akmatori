@@ -207,6 +207,34 @@ export function addUsage(totals: UsageTotals, usage: RunUsage): void {
   totals.costUsd += usage.cost?.total ?? 0;
 }
 
+/**
+ * Extract delegated child usage from a pi-subagents `subagent` tool result.
+ *
+ * pi-subagents 0.59.0+ attaches `details.totalChildUsage`
+ * ({input, output, cacheRead, cacheWrite, cost, turns}) to every foreground
+ * run. Children run in separate `pi` processes, so their tokens never reach
+ * `turn_end`; without this every runbook/memory search is invisible to
+ * `agent_runs`. Returns undefined when the block is missing, malformed, or
+ * all-zero so accounting stays byte-identical to the pre-feature behaviour.
+ */
+export function subagentChildUsage(result: unknown): RunUsage | undefined {
+  if (!result || typeof result !== "object") return undefined;
+  const details = (result as { details?: unknown }).details;
+  if (!details || typeof details !== "object") return undefined;
+  const raw = (details as { totalChildUsage?: unknown }).totalChildUsage;
+  if (!raw || typeof raw !== "object") return undefined;
+  const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const u = raw as Record<string, unknown>;
+  const input = num(u.input);
+  const output = num(u.output);
+  const cacheRead = num(u.cacheRead);
+  const cacheWrite = num(u.cacheWrite);
+  const cost = num(u.cost);
+  const totalTokens = input + output + cacheRead + cacheWrite;
+  if (totalTokens === 0 && cost === 0) return undefined;
+  return { input, output, cacheRead, cacheWrite, totalTokens, cost: { total: cost } };
+}
+
 /** Map accumulated totals onto ExecuteResult's wire-named usage fields. */
 export function usageResultFields(totals: UsageTotals): {
   input_tokens: number;
@@ -1629,6 +1657,15 @@ export class AgentRunner {
         onOutput(resultSummary);
         onLogText(resultSummary);
         toolTraces.delete(event.toolCallId);
+
+        // Subagent children run in their own `pi` processes; their usage only
+        // reaches us through the tool result (pi-subagents 0.59.0+).
+        if (event.toolName === "subagent") {
+          const childUsage = subagentChildUsage(event.result);
+          if (childUsage) {
+            onUsage(childUsage);
+          }
+        }
         break;
       }
 

@@ -7,6 +7,7 @@ describe('MODEL_SUGGESTIONS', () => {
 
   it('includes the new OpenAI frontier models', () => {
     expect(ids('openai')).toEqual(expect.arrayContaining(['gpt-5.5', 'gpt-5.5-pro']));
+    expect(ids('openai')).toEqual(expect.arrayContaining(['gpt-6-astra', 'gpt-6-astra-pro', 'gpt-6-astra-fast']));
   });
 
   it('includes the Anthropic Claude 5 models', () => {
