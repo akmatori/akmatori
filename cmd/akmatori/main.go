@@ -260,6 +260,7 @@ func main() {
 	// credential edits take effect without a reload.
 	providerRegistry.Register(messaging.NewTelegramProvider())
 	providerRegistry.Register(messaging.NewDiscordProvider())
+	providerRegistry.Register(messaging.NewZulipProvider())
 	alertHandler.SetChannelService(channelService)
 	alertHandler.SetProviderRegistry(providerRegistry)
 

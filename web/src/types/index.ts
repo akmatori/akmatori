@@ -476,7 +476,7 @@ export interface ScriptInfo {
 
 // Messaging integrations & channels
 
-export type MessagingProvider = 'slack' | 'telegram' | 'discord';
+export type MessagingProvider = 'slack' | 'telegram' | 'discord' | 'zulip';
 
 export interface Integration {
   id: number;
@@ -846,4 +846,3 @@ export interface EventFeedItem {
   incident_title?: string;
   incident_status?: string;
 }
-

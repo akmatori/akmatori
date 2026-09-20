@@ -3,7 +3,7 @@ package database
 import "time"
 
 // MessagingProvider is the string identifier for a messaging integration
-// (e.g. "slack", "telegram"). Stored on the integrations table as a plain
+// (e.g. "slack", "zulip", "telegram"). Stored on the integrations table as a plain
 // string so the registry can resolve a provider implementation without coupling
 // the data model to a closed enum.
 type MessagingProvider string
@@ -12,15 +12,17 @@ const (
 	MessagingProviderSlack    MessagingProvider = "slack"
 	MessagingProviderTelegram MessagingProvider = "telegram"
 	MessagingProviderDiscord  MessagingProvider = "discord"
+	MessagingProviderZulip    MessagingProvider = "zulip"
 )
 
 // ValidMessagingProviders returns all known messaging provider identifiers.
-// Telegram and Discord are outbound-only (no listening) for now.
+// Telegram, Discord and Zulip are outbound-only (no listening) for now.
 func ValidMessagingProviders() []MessagingProvider {
 	return []MessagingProvider{
 		MessagingProviderSlack,
 		MessagingProviderTelegram,
 		MessagingProviderDiscord,
+		MessagingProviderZulip,
 	}
 }
 
@@ -57,7 +59,7 @@ func (Integration) TableName() string {
 }
 
 // Channel is a specific addressable destination within an Integration (a Slack
-// channel, a Telegram chat). Capability flags determine which triggers can
+// channel, Zulip stream, or Telegram chat). Capability flags determine which triggers can
 // reference it. IsDefaultPost marks the per-provider workspace default for
 // outbound posting; at most one per provider is enforced by a partial-unique
 // DB index plus a service-layer check.
