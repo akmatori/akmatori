@@ -42,6 +42,9 @@ export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: stri
     { value: 'anthropic/claude-fable-5', label: 'anthropic/claude-fable-5 (Most capable)' },
     { value: 'anthropic/claude-sonnet-5', label: 'anthropic/claude-sonnet-5' },
     { value: 'anthropic/claude-opus-4.8', label: 'anthropic/claude-opus-4.8' },
+    // OpenRouter lists gpt-6-astra and -pro only (no -fast); ids checked 2026-09-20.
+    { value: 'openai/gpt-6-astra', label: 'openai/gpt-6-astra' },
+    { value: 'openai/gpt-6-astra-pro', label: 'openai/gpt-6-astra-pro' },
     { value: 'openai/gpt-5.6-terra', label: 'openai/gpt-5.6-terra (Recommended)' },
     { value: 'openai/gpt-5.6-sol', label: 'openai/gpt-5.6-sol' },
     { value: 'openai/gpt-5.6-luna', label: 'openai/gpt-5.6-luna (Budget)' },

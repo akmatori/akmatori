@@ -43,7 +43,7 @@ infrastructure through real tools, and executes remediation behind approval gate
 
 | Provider | Models |
 |----------|--------|
-| **OpenAI** | GPT-5.6 (Terra / Sol / Luna), GPT-5.5, GPT-5.5 Pro, GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex, o4-mini |
+| **OpenAI** | GPT-6 Astra (Standard / Pro / Fast), GPT-5.6 (Terra / Sol / Luna), GPT-5.5, GPT-5.5 Pro, GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex, GPT-5 Mini, o4-mini |
 | **Anthropic** | Claude Fable 5, Sonnet 5, Opus 4.8 / 4.7, Sonnet 4.6, Haiku 4.5 |
 | **Google** | Gemini 3.1 Pro Preview, Gemini 3 Pro / Flash Preview, Gemini 2.5 Pro / Flash, 2.0 Flash |
 | **OpenRouter** | 100+ models from every major lab |
