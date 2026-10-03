@@ -640,7 +640,7 @@ func InitializeDefaults() error {
 var defaultModelsPerProvider = map[LLMProvider]string{
 	LLMProviderOpenAI:     "gpt-5.5",
 	LLMProviderAnthropic:  "claude-sonnet-4-6",
-	LLMProviderGoogle:     "gemini-3-pro-preview",
+	LLMProviderGoogle:     "gemini-3.1-pro-preview",
 	LLMProviderOpenRouter: "openai/gpt-5.5",
 	LLMProviderCustom:     "",
 	LLMProviderNvidiaNIM:  "meta/llama-3.3-70b-instruct",

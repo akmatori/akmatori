@@ -5,6 +5,7 @@ import {
   mapThinkingLevel,
   resolveModel,
   subagentChildUsage,
+  logActiveToolSet,
   type ExecuteParams,
   type ResumeParams,
 } from "../src/agent-runner.js";
@@ -2843,5 +2844,42 @@ describe("subagentChildUsage", () => {
   it("ignores non-numeric fields but keeps the numeric ones", () => {
     const usage = subagentChildUsage({ details: { totalChildUsage: { input: 8, output: "x", cost: null } } });
     expect(usage).toEqual({ input: 8, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 8, cost: { total: 0 } });
+  });
+});
+
+describe("logActiveToolSet", () => {
+  it("logs the active tool names and stays quiet when subagent is eager", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    logActiveToolSet("inc-1", { getActiveToolNames: () => ["bash", "gateway_call", "subagent", "bg_wait"] });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("active tools: bash, gateway_call, subagent, bg_wait"));
+    expect(warn).not.toHaveBeenCalled();
+    log.mockRestore();
+    warn.mockRestore();
+  });
+
+  it("warns when the pi-subagents lazy loader is active", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    logActiveToolSet("inc-2", { getActiveToolNames: () => ["bash", "subagent", "subagents_enable"] });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("toolActivation"));
+    log.mockRestore();
+    warn.mockRestore();
+  });
+
+  it("warns when the subagent tool is missing entirely", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    logActiveToolSet("inc-3", { getActiveToolNames: () => ["bash", "gateway_call"] });
+    expect(warn).toHaveBeenCalledTimes(1);
+    log.mockRestore();
+    warn.mockRestore();
+  });
+
+  it("is a no-op for sessions without getActiveToolNames", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    logActiveToolSet("inc-4", {});
+    expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
   });
 });

@@ -235,6 +235,32 @@ export function subagentChildUsage(result: unknown): RunUsage | undefined {
   return { input, output, cacheRead, cacheWrite, totalTokens, cost: { total: cost } };
 }
 
+/**
+ * Log the tool set the model will see on this session's first request and
+ * warn when pi-subagents' lazy loader is in play.
+ *
+ * pi-subagents 0.71+ can start a session with a `subagents_enable` loader
+ * instead of `subagent` (its `toolActivation` setting, default "auto"). Our
+ * prompts call `subagent(...)` directly, so akmatori_data/extensions/subagent/
+ * config.json pins `"toolActivation": "eager"`. pi-subagents 0.75+ fails the
+ * whole config load on any invalid key, which would silently drop us back to
+ * "auto". This line makes either regression visible in `docker logs`.
+ */
+export function logActiveToolSet(
+  incidentId: string,
+  session: { getActiveToolNames?: () => string[] },
+): void {
+  const names = session.getActiveToolNames?.();
+  if (!Array.isArray(names)) return;
+  console.log(`[agent-runner] incident ${incidentId}: active tools: ${names.join(", ")}`);
+  if (names.includes("subagents_enable") || !names.includes("subagent")) {
+    console.warn(
+      `[agent-runner] incident ${incidentId}: pi-subagents lazy loader active or subagent tool missing — ` +
+        `check akmatori_data/extensions/subagent/config.json has "toolActivation": "eager" and loads without errors`,
+    );
+  }
+}
+
 /** Map accumulated totals onto ExecuteResult's wire-named usage fields. */
 export function usageResultFields(totals: UsageTotals): {
   input_tokens: number;
@@ -1388,6 +1414,7 @@ export class AgentRunner {
     }
 
     this.activeSessions.set(params.incidentId, session);
+    logActiveToolSet(params.incidentId, session);
     // Signal the orchestrator that this launch has registered so it can
     // release the per-incident launch chain. Subsequent launches that were
     // queued behind us now see a populated activeSessions slot and their

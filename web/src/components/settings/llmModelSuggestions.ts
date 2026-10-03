@@ -2,12 +2,16 @@ import type { LLMProvider } from '../../types';
 
 export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: string }[]> = {
   openai: [
-    // gpt-6-astra (pi-ai 0.85.1): base, -fast, and -pro variants. No plain
-    // `gpt-6` id exists in the catalog. Not marked Recommended until it has
-    // run through the bench; gpt-5.6-terra stays the known-good default.
+    // GPT-6 line (pi-ai 1.0.1 OpenAI catalog): gpt-6.1-sol, gpt-6-sol,
+    // gpt-6-luna, gpt-6-astra. There is no plain `gpt-6` id, and the
+    // `gpt-6-astra-pro` / `-fast` ids exist only in the OpenRouter and Vercel
+    // AI Gateway catalogs, NOT at OpenAI — do not list them here. Not marked
+    // Recommended until they have run through the bench; gpt-5.6-terra stays
+    // the known-good default.
+    { value: 'gpt-6.1-sol', label: 'gpt-6.1-sol' },
+    { value: 'gpt-6-sol', label: 'gpt-6-sol' },
     { value: 'gpt-6-astra', label: 'gpt-6-astra' },
-    { value: 'gpt-6-astra-pro', label: 'gpt-6-astra-pro (Most capable)' },
-    { value: 'gpt-6-astra-fast', label: 'gpt-6-astra-fast (Fast)' },
+    { value: 'gpt-6-luna', label: 'gpt-6-luna (Budget)' },
     // gpt-5.6 ships as three named variants; there is no plain `gpt-5.6` id.
     // Ordering follows their catalogue pricing (sol > terra > luna), the only
     // capability signal the model catalog exposes.
@@ -23,7 +27,13 @@ export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: stri
     { value: 'o4-mini', label: 'o4-mini (Reasoning)' },
   ],
   anthropic: [
-    { value: 'claude-fable-5', label: 'claude-fable-5 (Most capable)' },
+    // pi-ai 1.0.1 catalog. Opus 5.5 / Sonnet 5.5 carry a 1M context window
+    // and adaptive thinking.
+    { value: 'claude-fable-5-1', label: 'claude-fable-5-1 (Most capable)' },
+    { value: 'claude-fable-5', label: 'claude-fable-5' },
+    { value: 'claude-opus-5-5', label: 'claude-opus-5-5' },
+    { value: 'claude-sonnet-5-5', label: 'claude-sonnet-5-5' },
+    { value: 'claude-opus-5', label: 'claude-opus-5' },
     { value: 'claude-sonnet-5', label: 'claude-sonnet-5 (Recommended)' },
     { value: 'claude-opus-4-8', label: 'claude-opus-4-8' },
     { value: 'claude-opus-4-7', label: 'claude-opus-4-7' },
@@ -31,12 +41,20 @@ export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: stri
     { value: 'claude-haiku-4-5', label: 'claude-haiku-4-5 (Fast)' },
   ],
   google: [
-    { value: 'gemini-3-pro-preview', label: 'gemini-3-pro-preview (Recommended)' },
-    { value: 'gemini-3.1-pro-preview', label: 'gemini-3.1-pro-preview (Preview)' },
-    { value: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview (Fast)' },
+    // pi-ai 1.0.1 catalog no longer lists gemini-3-pro-preview or
+    // gemini-2.0-flash; they still resolve through the synthesized spec
+    // (cost reported as 0) and are kept for existing configs.
+    { value: 'gemini-3.1-pro-preview', label: 'gemini-3.1-pro-preview (Recommended)' },
+    { value: 'gemini-3.8-flash', label: 'gemini-3.8-flash (Fast)' },
+    { value: 'gemini-3.7-flash', label: 'gemini-3.7-flash' },
+    { value: 'gemini-3.6-flash', label: 'gemini-3.6-flash' },
+    { value: 'gemini-3.5-flash', label: 'gemini-3.5-flash' },
+    { value: 'gemini-3.1-flash-lite', label: 'gemini-3.1-flash-lite (Budget)' },
+    { value: 'gemini-3-pro-preview', label: 'gemini-3-pro-preview' },
+    { value: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview' },
     { value: 'gemini-2.5-pro', label: 'gemini-2.5-pro' },
     { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash' },
-    { value: 'gemini-2.0-flash', label: 'gemini-2.0-flash (Stable)' },
+    { value: 'gemini-2.0-flash', label: 'gemini-2.0-flash' },
   ],
   openrouter: [
     { value: 'anthropic/claude-fable-5', label: 'anthropic/claude-fable-5 (Most capable)' },
@@ -58,8 +76,15 @@ export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: stri
   nvidia: [
     { value: 'meta/llama-3.3-70b-instruct', label: 'meta/llama-3.3-70b-instruct (Recommended)' },
     { value: 'meta/llama-3.1-70b-instruct', label: 'meta/llama-3.1-70b-instruct' },
-    { value: 'nvidia/nemotron-3-super-120b-a12b', label: 'nvidia/nemotron-3-super-120b-a12b (Most capable)' },
-    { value: 'nvidia/nemotron-3-nano-30b-a3b', label: 'nvidia/nemotron-3-nano-30b-a3b (Fast)' },
+    // nemotron-3-super-120b-a12b was removed: NVIDIA no longer serves it
+    // (pi 1.0.1 changelog). The ids below are pi-ai 1.0.1's NIM catalog;
+    // the Llama entries above are no longer in it but still resolve via the
+    // synthesized spec (cost reported as 0).
+    { value: 'nvidia/nemotron-3-ultra-550b-a55b', label: 'nvidia/nemotron-3-ultra-550b-a55b (Most capable)' },
+    { value: 'nvidia/nemotron-3.5-lightning-30b-a3b', label: 'nvidia/nemotron-3.5-lightning-30b-a3b (Fast)' },
+    { value: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning', label: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning' },
+    { value: 'nvidia/llama-3.1-nemotron-70b-instruct', label: 'nvidia/llama-3.1-nemotron-70b-instruct' },
+    { value: 'nvidia/nemotron-3-nano-30b-a3b', label: 'nvidia/nemotron-3-nano-30b-a3b' },
   ],
   minimax: [
     { value: 'MiniMax-M3', label: 'MiniMax-M3 (Recommended)' },

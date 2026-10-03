@@ -11,10 +11,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.85.1",
-    "@earendil-works/pi-ai": "^0.85.1",
-    "@earendil-works/pi-coding-agent": "^0.85.1",
-    "pi-subagents": "^0.67.0",
+    "@earendil-works/pi-agent-core": "^1.0.1",
+    "@earendil-works/pi-ai": "^1.0.1",
+    "@earendil-works/pi-coding-agent": "^1.0.1",
+    "pi-subagents": "^0.75.0",
     "typebox": "^1.1.24",
     "undici": "^8.0.0",
     "ws": "^8.18.0"

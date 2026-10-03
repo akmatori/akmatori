@@ -7,7 +7,12 @@ describe('MODEL_SUGGESTIONS', () => {
 
   it('includes the new OpenAI frontier models', () => {
     expect(ids('openai')).toEqual(expect.arrayContaining(['gpt-5.5', 'gpt-5.5-pro']));
-    expect(ids('openai')).toEqual(expect.arrayContaining(['gpt-6-astra', 'gpt-6-astra-pro', 'gpt-6-astra-fast']));
+    expect(ids('openai')).toEqual(expect.arrayContaining(['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6.1-sol']));
+    // Only OpenRouter / Vercel AI Gateway serve these ids; they are not OpenAI built-ins.
+    expect(ids('openai')).not.toContain('gpt-6-astra-pro');
+    expect(ids('openai')).not.toContain('gpt-6-astra-fast');
+    expect(ids('anthropic')).toEqual(expect.arrayContaining(['claude-opus-5-5', 'claude-sonnet-5-5']));
+    expect(ids('nvidia')).not.toContain('nvidia/nemotron-3-super-120b-a12b');
   });
 
   it('includes the Anthropic Claude 5 models', () => {
@@ -55,7 +60,7 @@ describe('MODEL_SUGGESTIONS', () => {
     const expected: Record<string, string> = {
       openai: 'gpt-5.6-terra',
       anthropic: 'claude-sonnet-5',
-      google: 'gemini-3-pro-preview',
+      google: 'gemini-3.1-pro-preview',
       openrouter: 'openai/gpt-5.6-terra',
     };
     for (const [provider, value] of Object.entries(expected)) {

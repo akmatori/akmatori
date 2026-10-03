@@ -43,11 +43,11 @@ infrastructure through real tools, and executes remediation behind approval gate
 
 | Provider | Models |
 |----------|--------|
-| **OpenAI** | GPT-6 Astra (Standard / Pro / Fast), GPT-5.6 (Terra / Sol / Luna), GPT-5.5, GPT-5.5 Pro, GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex, GPT-5 Mini, o4-mini |
-| **Anthropic** | Claude Fable 5, Sonnet 5, Opus 4.8 / 4.7, Sonnet 4.6, Haiku 4.5 |
-| **Google** | Gemini 3.1 Pro Preview, Gemini 3 Pro / Flash Preview, Gemini 2.5 Pro / Flash, 2.0 Flash |
+| **OpenAI** | GPT-6.1 Sol, GPT-6 (Sol / Astra / Luna), GPT-5.6 (Terra / Sol / Luna), GPT-5.5, GPT-5.5 Pro, GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex, GPT-5 Mini, o4-mini |
+| **Anthropic** | Claude Fable 5.1 / 5, Opus 5.5, Sonnet 5.5, Opus 5, Sonnet 5, Opus 4.8 / 4.7, Sonnet 4.6, Haiku 4.5 |
+| **Google** | Gemini 3.1 Pro Preview, Gemini 3.5 – 3.8 Flash, Gemini 3.1 Flash Lite, Gemini 3 Pro / Flash Preview, Gemini 2.5 Pro / Flash, 2.0 Flash |
 | **OpenRouter** | 100+ models from every major lab |
-| **NVIDIA NIM** | Llama 3.3 / 3.1 70B Instruct, Nemotron 3 Super / Nano |
+| **NVIDIA NIM** | Llama 3.3 / 3.1 70B Instruct, Nemotron 3 Ultra, Nemotron 3.5 Lightning, Nemotron 3 Nano / Nano Omni, Llama 3.1 Nemotron 70B |
 | **MiniMax** | MiniMax M3, M2.7, M2.7-highspeed |
 | **Ant Ling** | Ling-2.6-1T, Ling-2.6-flash, Ring-2.6-1T |
 | **Custom / On-prem** | Any OpenAI-compatible endpoint (GLM, Kimi, Mistral, LLaMA, vLLM, …) |

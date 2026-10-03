@@ -18,7 +18,7 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
 
 # SDK notes (`@earendil-works/pi-coding-agent`)
 
-- Versions: pi-coding-agent/pi-ai/pi-agent-core `0.85.1`, pi-subagents `0.67.0`; child `pi` CLI =
+- Versions: pi-coding-agent/pi-ai/pi-agent-core `1.0.1`, pi-subagents `0.75.0`; child `pi` CLI =
   `node_modules/.bin/pi`. `pi auth check --provider <id>` / `--model <provider>/<id>` (0.84.1) is the
   fastest way to diagnose a provider or model that will not resolve
 - pi-subagents peers are `optional`; loader aliases `@earendil-works/*` to pi's bundled copies —
@@ -49,6 +49,22 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
   different provider/model than requested — the one-provider-id invariant below is what satisfies it.
   Foreground children load no ambient extensions (0.65) and omit the operator's global context (0.58)
 - Never pin pi `0.85.0`: it accidentally shipped internal experimental code; `0.85.1` fixed the SDK imports
+- pi-subagents ≥ 0.71 needs pi-ai ≥ 0.86.1, and 0.74.0 is broken on pi 1.0 — bump both packages
+  together, never pin 0.74.0 with pi ≥ 1.0. Since 0.74 the package ships compiled `index.js`
+  (manifest `pi.extensions: ["./index.js"]`); the Dockerfile's whole-package copy still works
+- **Tool activation.** pi-subagents ≥ 0.71 can start a session with a `subagents_enable` loader instead
+  of `subagent` (`toolActivation`, default `auto`, decided per model). Our prompts call `subagent(...)`
+  directly and every incident is a fresh session, so `akmatori_data/extensions/subagent/config.json`
+  pins `"toolActivation": "eager"` (verified: session starts with exactly `subagent` + `bg_wait`).
+  pi-subagents ≥ 0.75 fails the WHOLE config load on any invalid key, which drops us back to `auto`;
+  `logActiveToolSet()` logs the active tool names on every session and warns when the loader is
+  present or `subagent` is missing — grep `docker logs akmatori-agent` for "active tools:"
+- pi ≥ 1.0.1 ships no `npm-shrinkwrap.json`: pi's transitive deps are pinned by OUR lockfile only. The
+  Dockerfile uses `npm ci`, so review the `package-lock.json` diff on every bump
+- Model catalog drift: `gpt-6-astra-pro` / `-fast` exist only in the OpenRouter / Vercel catalogs, not at
+  OpenAI; `gemini-3-pro-preview`, `gemini-2.0-flash`, `meta/llama-3.*` on NIM are no longer in pi's
+  catalog (they still resolve via the synthesized spec, cost reported as 0). Check
+  `getBuiltinModels(provider)` from `@earendil-works/pi-ai/providers/all` before adding a picker id
 - Auth/model runtime: `ModelRuntime.create({modelsPath: null, allowModelNetwork: false})` +
   `setRuntimeApiKey(provider, key)` → pass `modelRuntime` to `createAgentSession`; key in-memory only
   (`RuntimeCredentials`, `$`-safe), `modelsPath: null` = parent uses explicit `model`. Since 0.84.0
