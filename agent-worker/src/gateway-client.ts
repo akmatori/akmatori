@@ -42,6 +42,16 @@ export interface ToolDetailResult {
   instances: Array<{ id: number; logical_name: string; name: string }>;
 }
 
+export interface CallOptions {
+  /**
+   * Return the complete result inline and never write the output file.
+   * Used by the codemode-only `gateway_fetch` tool: a script reduces the
+   * payload itself, so the 4 KB preview would only get in its way. Never set
+   * this on the model-facing `gateway_call`.
+   */
+  inline?: boolean;
+}
+
 export interface CallResult {
   /** The tool result (inline or truncated preview) */
   data: unknown;
@@ -199,6 +209,7 @@ export class GatewayClient {
     args: Record<string, unknown> = {},
     instanceHint?: string,
     signal?: AbortSignal,
+    options?: CallOptions,
   ): Promise<CallResult> {
     return orphanSafe(async () => {
       const params: Record<string, unknown> = {
@@ -216,7 +227,7 @@ export class GatewayClient {
 
       // Output management: large responses go to file
       const serialized = typeof data === "string" ? data : JSON.stringify(data);
-      if (serialized.length >= OUTPUT_SIZE_THRESHOLD && this.workDir) {
+      if (!options?.inline && serialized.length >= OUTPUT_SIZE_THRESHOLD && this.workDir) {
         const outputFile = this.writeOutputFile(toolName, serialized);
         const preview = buildSmartPreview(serialized, outputFile);
         return { data: preview, outputFile };

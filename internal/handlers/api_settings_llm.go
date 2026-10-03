@@ -147,6 +147,10 @@ func (h *APIHandler) createLLMConfig(w http.ResponseWriter, r *http.Request) {
 		api.RespondError(w, http.StatusBadRequest, msg)
 		return
 	}
+	if req.SubagentThinkingLevel != nil && *req.SubagentThinkingLevel != "" && !database.IsValidThinkingLevel(*req.SubagentThinkingLevel) {
+		api.RespondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid subagent_thinking_level: %s. Valid options: off, minimal, low, medium, high, xhigh, max", *req.SubagentThinkingLevel))
+		return
+	}
 
 	thinkingLevel := database.ThinkingLevelMedium
 	if req.ThinkingLevel != "" {
@@ -165,6 +169,9 @@ func (h *APIHandler) createLLMConfig(w http.ResponseWriter, r *http.Request) {
 		TopP:          req.TopP,
 		TopK:          req.TopK,
 		MaxTokens:     req.MaxTokens,
+		// Blank strings mean "unset" on create, same as omitting the key.
+		SubagentModel:         nonBlankString(req.SubagentModel),
+		SubagentThinkingLevel: nonBlankString(req.SubagentThinkingLevel),
 	}
 
 	if err := database.CreateLLMSettings(settings); err != nil {
@@ -226,6 +233,10 @@ func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id 
 		api.RespondError(w, http.StatusBadRequest, msg)
 		return
 	}
+	if req.SubagentThinkingLevel.Set && req.SubagentThinkingLevel.Value != nil && *req.SubagentThinkingLevel.Value != "" && !database.IsValidThinkingLevel(*req.SubagentThinkingLevel.Value) {
+		api.RespondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid subagent_thinking_level: %s. Valid options: off, minimal, low, medium, high, xhigh, max", *req.SubagentThinkingLevel.Value))
+		return
+	}
 
 	updates := make(map[string]interface{})
 	if req.Name != nil {
@@ -257,6 +268,13 @@ func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id 
 	}
 	if req.MaxTokens.Set {
 		updates["max_tokens"] = req.MaxTokens.Value
+	}
+	// Subagent override: explicit null or "" clears back to "same as parent".
+	if req.SubagentModel.Set {
+		updates["subagent_model"] = nonBlankString(req.SubagentModel.Value)
+	}
+	if req.SubagentThinkingLevel.Set {
+		updates["subagent_thinking_level"] = nonBlankString(req.SubagentThinkingLevel.Value)
 	}
 
 	if len(updates) == 0 {
@@ -349,7 +367,20 @@ func llmConfigResponse(s *database.LLMSettings) map[string]interface{} {
 		"top_p":       s.TopP,
 		"top_k":       s.TopK,
 		"max_tokens":  s.MaxTokens,
-		"created_at":  s.CreatedAt,
-		"updated_at":  s.UpdatedAt,
+		// null = same model / thinking level as the parent session.
+		"subagent_model":          s.SubagentModel,
+		"subagent_thinking_level": s.SubagentThinkingLevel,
+		"created_at":              s.CreatedAt,
+		"updated_at":              s.UpdatedAt,
 	}
+}
+
+// nonBlankString maps nil and "" to a typed nil *string so GORM writes SQL
+// NULL ("unset") instead of storing an empty override.
+func nonBlankString(s *string) *string {
+	if s == nil || *s == "" {
+		return nil
+	}
+	v := *s
+	return &v
 }

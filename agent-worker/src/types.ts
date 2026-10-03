@@ -79,6 +79,12 @@ export interface LLMSettings {
   top_p?: number;
   top_k?: number;
   max_tokens?: number;
+
+  // Subagent model override (same provider). Absent = children run on the
+  // parent's model and thinking level, the historical behaviour. Written into
+  // the child's pi settings as `subagents.defaultModel` / `defaultThinking`.
+  subagent_model?: string;
+  subagent_thinking_level?: ThinkingLevel;
 }
 
 // ---------------------------------------------------------------------------
@@ -161,6 +167,11 @@ export interface WebSocketMessage {
   temperature?: number;
   top_p?: number;
   top_k?: number;
+
+  // Subagent model override from the active LLM config (pointers on the Go
+  // side; absent = same as parent).
+  subagent_model?: string;
+  subagent_thinking_level?: string;
 
   // Per-call run identifier. The API stamps a fresh run_id on every
   // new_incident / continue_incident; the worker must echo it back on every

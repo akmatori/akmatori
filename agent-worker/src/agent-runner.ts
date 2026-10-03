@@ -16,6 +16,7 @@ import {
   SettingsManager,
   DefaultResourceLoader,
   createBashToolDefinition,
+  createCodemodeExtension,
   getAgentDir,
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
@@ -36,7 +37,7 @@ import {
   type ToolExecutionTrace,
 } from "./tool-output-formatter.js";
 import { GatewayClient } from "./gateway-client.js";
-import { createGatewayCallTool, createListToolsForToolTypeTool, createGetToolDetailTool, createListToolTypesTool, createExecuteScriptTool } from "./gateway-tools.js";
+import { createGatewayCallTool, createGatewayFetchTool, createListToolsForToolTypeTool, createGetToolDetailTool, createListToolTypesTool, createExecuteScriptTool } from "./gateway-tools.js";
 
 // ---------------------------------------------------------------------------
 // Tool calling guidelines attached to the bash tool definition via typed
@@ -123,6 +124,14 @@ export interface AgentRunnerConfig {
   mcpGatewayUrl: string;
   /** Directory containing SKILL.md definitions for pi-mono resource loader */
   skillsDir?: string;
+  /**
+   * Spike flag (AKMATORI_CODEMODE=1): enable pi's built-in `codemode` tool
+   * next to `execute_script`. Scripts run in pi's QuickJS sandbox and reach
+   * the gateway through the codemode-only `gateway_fetch` tool, which returns
+   * complete results instead of the 4 KB preview. Off by default until the
+   * bench compares the two.
+   */
+  codemode?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -397,6 +406,11 @@ export function resolveModel(
     contextWindow: 128_000,
     maxTokens: 16_384,
     ...(compat ? { compat } : {}),
+    // pi's prompt-cache warming (default `cacheWarming: "streaming"`, 0.86.0+)
+    // only acts on models that declare a cache lifetime. Built-in Anthropic
+    // models carry one; a synthesized spec for an unlisted Claude id would
+    // silently opt out, so declare Anthropic's 5-minute tier here.
+    ...(apiType === "anthropic-messages" ? { promptCache: { short: 300 } } : {}),
   } as Model<any>;
 }
 
@@ -652,6 +666,10 @@ function writeCustomProviderModelsJson(
   provider: string,
   model: string,
   baseUrl: string | undefined,
+  // Additional ids the child must be able to resolve from the same provider
+  // slot — today only the operator's subagent model override. Entries are
+  // materialized exactly like the parent model (same marker, same compat).
+  extraModels: string[] = [],
   // pi 0.84.0+. Written onto the managed model entry so child `pi` subagent
   // processes honour the operator's sampling settings: they run their own
   // request pipeline and never see the parent's `onPayload` hook. Ignored by
@@ -799,17 +817,15 @@ function writeCustomProviderModelsJson(
         api: "openai-completions",
         apiKey: `$${AKMATORI_CUSTOM_API_KEY_ENV}`,
         compat: { supportsLongCacheRetention: false },
-        models: [
-          {
-            id: model,
-            name: model,
-            reasoning: true,
-            input: ["text"],
-            contextWindow: 128000,
-            maxTokens: 16384,
-            ...(samplingParams ? { samplingParams } : {}),
-          },
-        ],
+        models: [model, ...extraModels.filter((m) => m !== model)].map((id) => ({
+          id,
+          name: id,
+          reasoning: true,
+          input: ["text"],
+          contextWindow: 128000,
+          maxTokens: 16384,
+          ...(samplingParams ? { samplingParams } : {}),
+        })),
         [AKMATORI_MANAGED_MARKER]: true,
       };
     }
@@ -836,8 +852,11 @@ function writeCustomProviderModelsJson(
     // thinking with the interleaved-thinking beta header, which the provider
     // endpoint rejects.
     const modelUnknown = !isBuiltInModelKnown(provider, model);
+    const unknownModels = [model, ...extraModels].filter(
+      (m, i, all) => all.indexOf(m) === i && !isBuiltInModelKnown(provider, m),
+    );
     const needsCompatOverride = ADAPTIVE_THINKING_REQUIRED_PROVIDERS.has(provider);
-    if (modelUnknown || baseUrl || needsCompatOverride) {
+    if (modelUnknown || unknownModels.length > 0 || baseUrl || needsCompatOverride) {
       const existing = (providers[provider] as Record<string, unknown> | undefined) ?? {};
       const existingModels = Array.isArray(existing.models)
         ? (existing.models as Array<Record<string, unknown>>)
@@ -854,20 +873,20 @@ function writeCustomProviderModelsJson(
       providers[provider] = {
         ...existing,
         ...(baseUrl ? { baseUrl, [AKMATORI_MANAGED_BASE_URL_MARKER]: true } : {}),
-        ...(modelUnknown
+        ...(unknownModels.length > 0
           ? {
               models: [
                 ...existingModels,
-                {
-                  id: model,
-                  name: model,
+                ...unknownModels.map((id) => ({
+                  id,
+                  name: id,
                   reasoning: true,
                   input: ["text"],
                   contextWindow: 128000,
                   maxTokens: 16384,
                   ...(samplingParams ? { samplingParams } : {}),
                   [AKMATORI_MANAGED_MARKER]: true,
-                },
+                })),
               ],
             }
           : {}),
@@ -1072,24 +1091,98 @@ export async function setRuntimeApiKeyTolerantly(
  * operator's settings on every incident would be worse than the subagent
  * picking a default.
  */
-function writeSubagentDefaultsSettings(
+/**
+ * Operator's subagent model override, resolved for the child settings file.
+ * `undefined` = children inherit the parent (historical behaviour).
+ */
+export interface SubagentModelOverride {
+  model: string;
+  thinkingLevel?: PiThinkingLevel | "off";
+}
+
+/** Agents that must always run on the parent model, whatever the override. */
+const SUBAGENT_INHERIT_PARENT_MODEL = ["memory-writer"] as const;
+
+export function writeSubagentDefaultsSettings(
   provider: string,
   model: string,
   thinkingLevel: PiThinkingLevel | "off",
   workDir: string,
+  subagent?: SubagentModelOverride,
 ): void {
   // For UI-selected "custom", route the child at the dedicated akmatori
   // slot so the operator's `providers.custom` (if any) cannot intercept.
   const targetProvider = runtimeProviderId(provider);
 
   const globalPath = path.join(getAgentDir(), "settings.json");
-  writeSubagentSettingsFile(globalPath, targetProvider, model, thinkingLevel);
+  writeSubagentSettingsFile(globalPath, targetProvider, model, thinkingLevel, subagent);
 
   // Project scope wins over global. We unconditionally pin the same values
   // at workDir/.pi/settings.json so any project-level override (intentional
   // or accidental) cannot shadow the parent's selection.
   const projectPath = path.join(workDir, ".pi", "settings.json");
-  writeSubagentSettingsFile(projectPath, targetProvider, model, thinkingLevel);
+  writeSubagentSettingsFile(projectPath, targetProvider, model, thinkingLevel, subagent);
+}
+
+/**
+ * Compute the `subagents` block pi-subagents reads from settings.json.
+ *
+ * Akmatori owns three keys in it — `defaultModel`, `defaultThinking` and
+ * `agentOverrides["memory-writer"].model` — exactly like it owns the top-level
+ * `defaultProvider` / `defaultModel`. Everything else an operator put under
+ * `subagents` (modelScope, watchdog, ...) is preserved. With no override the
+ * three keys are removed so children fall back to the parent model, which is
+ * pi-subagents' own default.
+ *
+ * `defaultModel` is written provider-qualified (`<provider>/<id>`): bare ids
+ * are matched fuzzily across every registered provider and could land on a
+ * provider the child has no credential for.
+ */
+export function buildSubagentsSettingsBlock(
+  existing: unknown,
+  targetProvider: string,
+  subagent: SubagentModelOverride | undefined,
+): Record<string, unknown> | undefined {
+  const base: Record<string, unknown> =
+    existing && typeof existing === "object" && !Array.isArray(existing)
+      ? { ...(existing as Record<string, unknown>) }
+      : {};
+  const overrides: Record<string, unknown> =
+    base.agentOverrides && typeof base.agentOverrides === "object" && !Array.isArray(base.agentOverrides)
+      ? { ...(base.agentOverrides as Record<string, unknown>) }
+      : {};
+
+  if (!subagent) {
+    delete base.defaultModel;
+    delete base.defaultThinking;
+    for (const name of SUBAGENT_INHERIT_PARENT_MODEL) {
+      const entry = overrides[name];
+      if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+        const rest = { ...(entry as Record<string, unknown>) };
+        delete rest.model;
+        if (Object.keys(rest).length === 0) delete overrides[name];
+        else overrides[name] = rest;
+      }
+    }
+  } else {
+    base.defaultModel = `${targetProvider}/${subagent.model}`;
+    if (subagent.thinkingLevel !== undefined) {
+      base.defaultThinking = subagent.thinkingLevel;
+    } else {
+      delete base.defaultThinking;
+    }
+    for (const name of SUBAGENT_INHERIT_PARENT_MODEL) {
+      const entry = overrides[name];
+      overrides[name] = {
+        ...(entry && typeof entry === "object" && !Array.isArray(entry) ? (entry as Record<string, unknown>) : {}),
+        model: "inherit",
+      };
+    }
+  }
+
+  if (Object.keys(overrides).length > 0) base.agentOverrides = overrides;
+  else delete base.agentOverrides;
+  return Object.keys(base).length > 0 ? base : undefined;
 }
 
 function writeSubagentSettingsFile(
@@ -1097,6 +1190,7 @@ function writeSubagentSettingsFile(
   targetProvider: string,
   model: string,
   thinkingLevel: PiThinkingLevel | "off",
+  subagent?: SubagentModelOverride,
 ): void {
   let settings: Record<string, unknown> = {};
   const fileExists = fs.existsSync(settingsPath);
@@ -1116,11 +1210,13 @@ function writeSubagentSettingsFile(
   }
 
   const hadEnabledModels = Object.prototype.hasOwnProperty.call(settings, "enabledModels");
+  const subagentsBlock = buildSubagentsSettingsBlock(settings.subagents, targetProvider, subagent);
   if (
     settings.defaultProvider === targetProvider &&
     settings.defaultModel === model &&
     settings.defaultThinkingLevel === thinkingLevel &&
-    !hadEnabledModels
+    !hadEnabledModels &&
+    JSON.stringify(settings.subagents ?? null) === JSON.stringify(subagentsBlock ?? null)
   ) {
     // Avoid touching mtime when nothing changed; reduces noise for
     // operators watching for unexpected config drift.
@@ -1133,6 +1229,8 @@ function writeSubagentSettingsFile(
   if (hadEnabledModels) {
     delete settings.enabledModels;
   }
+  if (subagentsBlock) settings.subagents = subagentsBlock;
+  else delete settings.subagents;
 
   try {
     writeFileAtomic(settingsPath, JSON.stringify(settings, null, 2));
@@ -1148,11 +1246,13 @@ function writeSubagentSettingsFile(
 export class AgentRunner {
   private readonly mcpGatewayUrl: string;
   private readonly skillsDir?: string;
+  private readonly codemode: boolean;
   private activeSessions = new Map<string, AgentSession>();
 
   constructor(config: AgentRunnerConfig) {
     this.mcpGatewayUrl = config.mcpGatewayUrl;
     this.skillsDir = config.skillsDir;
+    this.codemode = config.codemode ?? false;
   }
 
   /**
@@ -1217,6 +1317,7 @@ export class AgentRunner {
       params.llmSettings.provider,
       params.llmSettings.model,
       params.llmSettings.base_url,
+      params.llmSettings.subagent_model ? [params.llmSettings.subagent_model] : [],
       providerUsesOpenAICompatibleApi(params.llmSettings.provider)
         ? toOpenAISamplingParams(pickSamplingParams(params.llmSettings))
         : undefined,
@@ -1262,6 +1363,14 @@ export class AgentRunner {
       params.llmSettings.model,
       thinkingLevel,
       params.workDir,
+      params.llmSettings.subagent_model
+        ? {
+            model: params.llmSettings.subagent_model,
+            thinkingLevel: params.llmSettings.subagent_thinking_level
+              ? mapThinkingLevel(params.llmSettings.subagent_thinking_level)
+              : undefined,
+          }
+        : undefined,
     );
 
     // Session management: persist to disk so resume can restore conversation history.
@@ -1286,6 +1395,10 @@ export class AgentRunner {
     }
     const settingsManager = SettingsManager.inMemory({
       retry: { provider: DEFAULT_PROVIDER_RETRY },
+      // `+codemode` adds pi's codemode tool to the default built-in set
+      // without touching the rest (0.99.0 `+name` syntax); customTools are
+      // unaffected by defaultTools since 0.84.2.
+      ...(this.codemode ? { defaultTools: ["+codemode"] } : {}),
     });
 
     // Create resource loader with skills directory for pi-mono's native skill system.
@@ -1304,6 +1417,12 @@ export class AgentRunner {
       agentDir: getAgentDir(),
       additionalSkillPaths: this.skillsDir ? [this.skillsDir] : [],
       additionalExtensionPaths: ["/opt/pi-extensions/pi-subagents"],
+      // SDK sessions do not load pi's built-in extensions; codemode must be
+      // added explicitly. `models: false` keeps the model catalog and
+      // classifier API out of scripts — incidents never need them.
+      ...(this.codemode
+        ? { extensionFactories: [createCodemodeExtension({ mode: "on", models: false })] }
+        : {}),
       noExtensions: false,
       noPromptTemplates: true,
       noThemes: true,
@@ -1370,6 +1489,15 @@ export class AgentRunner {
       client: gatewayClient,
       workDir: params.workDir,
     });
+    // Codemode spike: the script-only gateway_fetch tool (exposure "codemode")
+    // plus a hint on gateway_call so the model knows the parallel path exists.
+    const codemodeTools = this.codemode ? [createGatewayFetchTool(gatewayToolCtx)] : [];
+    if (this.codemode) {
+      gatewayCallTool.promptGuidelines = [
+        ...(gatewayCallTool.promptGuidelines ?? []),
+        "For batch work across many hosts or large result sets, prefer the codemode tool: write JavaScript that calls `await tools.gateway_fetch({ tool_name, args, instance })` (complete result, no file) — in parallel with Promise.allSettled when calls are independent — reduce the data in the script and return only what matters.",
+      ];
+    }
 
     const { session } = await createAgentSession({
       cwd: params.workDir,
@@ -1379,7 +1507,7 @@ export class AgentRunner {
       // bashToolDef has specific type parameters (BashToolDetails, BashRenderState)
       // that are contravariant with ToolDefinition<TSchema, unknown, any> via renderCall/renderResult.
       // The cast is safe — AgentSession only reads name, execute, promptGuidelines, promptSnippet.
-      customTools: [bashToolDef as unknown as import("@earendil-works/pi-coding-agent").ToolDefinition, gatewayCallTool, listToolsForToolTypeTool, getToolDetailTool, listToolTypesTool, executeScriptTool],
+      customTools: [bashToolDef as unknown as import("@earendil-works/pi-coding-agent").ToolDefinition, gatewayCallTool, listToolsForToolTypeTool, getToolDetailTool, listToolTypesTool, executeScriptTool, ...codemodeTools],
       resourceLoader,
       sessionManager,
       settingsManager,

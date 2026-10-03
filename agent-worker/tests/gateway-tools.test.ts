@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   createGatewayCallTool,
+  createGatewayFetchTool,
   createListToolsForToolTypeTool,
   createGetToolDetailTool,
   createListToolTypesTool,
@@ -912,5 +913,33 @@ describe("typebox 1.x schema JSON serialization", () => {
     expect(parsed.type).toBe("object");
     expect(parsed.properties.tool_type.type).toBe("string");
     expect(parsed.required).toContain("tool_type");
+  });
+});
+
+describe("createGatewayFetchTool (codemode-only)", () => {
+  it("is exposed to codemode scripts only, under the akmatori namespace", () => {
+    const tool = createGatewayFetchTool({ client: createMockClient() }) as any;
+    expect(tool.name).toBe("gateway_fetch");
+    expect(tool.exposure).toBe("codemode");
+    expect(tool.namespace.name).toBe("akmatori");
+  });
+
+  it("asks the client for the inline result and returns it as JSON text without a file hint", async () => {
+    const big = { rows: Array.from({ length: 500 }, (_, i) => ({ i, host: `web-${i}` })) };
+    const mockClient = createMockClient({ call: vi.fn(async () => ({ data: big } as CallResult)) });
+    const tool = createGatewayFetchTool({ client: mockClient });
+    const result = await tool.execute("tc-1", { tool_name: "zabbix.get_hosts", args: { group: "web" }, instance: "prod" } as GatewayCallInput, undefined, undefined, {} as any);
+
+    expect(mockClient.call).toHaveBeenCalledWith("zabbix.get_hosts", { group: "web" }, "prod", undefined, { inline: true });
+    const text = (result.content[0] as any).text as string;
+    expect(text).not.toContain("Full output saved to");
+    expect(JSON.parse(text).rows).toHaveLength(500);
+  });
+
+  it("returns gateway errors as text instead of throwing", async () => {
+    const mockClient = createMockClient({ call: vi.fn(async () => { throw new Error("MCP Error -32000: denied"); }) });
+    const tool = createGatewayFetchTool({ client: mockClient });
+    const result = await tool.execute("tc-2", { tool_name: "ssh.execute_command", args: {} } as GatewayCallInput, undefined, undefined, {} as any);
+    expect((result.content[0] as any).text).toContain("Error: MCP Error -32000: denied");
   });
 });

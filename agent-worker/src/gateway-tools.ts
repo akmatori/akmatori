@@ -72,6 +72,61 @@ export type ExecuteScriptInput = Static<typeof ExecuteScriptParams>;
  * The returned object conforms to the `ToolDefinition` interface expected by
  * `createAgentSession({ customTools: [...] })`.
  */
+/**
+ * Codemode-only companion of `gateway_call`.
+ *
+ * pi's `codemode` tool runs model-written JavaScript in a QuickJS sandbox
+ * with no file system, so a script cannot follow the "full output saved to
+ * <file>" hint that `gateway_call` returns for results >= 4 KB. This tool has
+ * `exposure: "codemode"`: it is never declared to the model directly, only
+ * callable as `tools.gateway_fetch(...)` from a script, and it returns the
+ * complete result inline (JSON text) so the script can filter it and return
+ * a small summary. Same gateway, same incident allowlist, same routing.
+ */
+export function createGatewayFetchTool(ctx: GatewayToolContext) {
+  return defineTool({
+    name: "gateway_fetch",
+    label: "Gateway Fetch (codemode)",
+    description:
+      "Call a tool on the MCP Gateway from a codemode script and receive the COMPLETE result as JSON text " +
+      "(no 4 KB preview, no output file). Same tool names, args and instance names as gateway_call. " +
+      "Reduce the data in the script and return only what the investigation needs.",
+    parameters: GatewayCallParams,
+    exposure: "codemode",
+    namespace: {
+      name: "akmatori",
+      description: "Akmatori MCP Gateway tools (SSH, Zabbix, VictoriaMetrics, Grafana, ...)",
+    },
+    execute: async (
+      _toolCallId: string,
+      params: GatewayCallInput,
+      signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+    ) => {
+      try {
+        const result: CallResult = await ctx.client.call(
+          params.tool_name,
+          params.args as Record<string, unknown>,
+          params.instance,
+          signal,
+          { inline: true },
+        );
+        const text = typeof result.data === "string" ? result.data : JSON.stringify(result.data);
+        return {
+          content: [{ type: "text" as const, text }],
+          details: {},
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text" as const, text: `Error: ${message}` }],
+          details: {},
+        };
+      }
+    },
+  });
+}
+
 export function createGatewayCallTool(ctx: GatewayToolContext) {
   return defineTool({
     name: "gateway_call",

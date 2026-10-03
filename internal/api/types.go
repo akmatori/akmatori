@@ -100,6 +100,9 @@ type CreateLLMSettingsRequest struct {
 	TopP          *float64 `json:"top_p"`
 	TopK          *int     `json:"top_k"`
 	MaxTokens     *int     `json:"max_tokens"`
+	// Subagent model override (same provider); omitted/null = same as parent.
+	SubagentModel         *string `json:"subagent_model"`
+	SubagentThinkingLevel *string `json:"subagent_thinking_level"`
 }
 
 // UpdateLLMSettingsRequest is the request body for PUT /api/settings/llm/{id}.
@@ -115,6 +118,9 @@ type UpdateLLMSettingsRequest struct {
 	TopP          Nullable[float64] `json:"top_p"`
 	TopK          Nullable[int]     `json:"top_k"`
 	MaxTokens     Nullable[int]     `json:"max_tokens"`
+	// Explicit null clears the override back to "same as parent".
+	SubagentModel         Nullable[string] `json:"subagent_model"`
+	SubagentThinkingLevel Nullable[string] `json:"subagent_thinking_level"`
 }
 
 // UpdateProxySettingsRequest is the request body for PUT /api/settings/proxy.
@@ -157,12 +163,12 @@ type UpdateProxySettingsRequest struct {
 
 // UpdateGeneralSettingsRequest is the request body for PUT /api/settings/general.
 type UpdateGeneralSettingsRequest struct {
-	BaseURL                  *string `json:"base_url"`
-	AlertCorrelationEnabled  *bool   `json:"alert_correlation_enabled"`
-	AlertMonitorWindowMinutes *int   `json:"alert_monitor_window_minutes"`
-	IncidentMergeEnabled     *bool   `json:"incident_merge_enabled"`
-	IncidentAutoCloseEnabled *bool   `json:"incident_auto_close_enabled"`
-	IncidentAutoCloseMinutes *int    `json:"incident_auto_close_minutes"`
+	BaseURL                   *string `json:"base_url"`
+	AlertCorrelationEnabled   *bool   `json:"alert_correlation_enabled"`
+	AlertMonitorWindowMinutes *int    `json:"alert_monitor_window_minutes"`
+	IncidentMergeEnabled      *bool   `json:"incident_merge_enabled"`
+	IncidentAutoCloseEnabled  *bool   `json:"incident_auto_close_enabled"`
+	IncidentAutoCloseMinutes  *int    `json:"incident_auto_close_minutes"`
 }
 
 // UpdateRetentionSettingsRequest is the request body for PUT /api/settings/retention.

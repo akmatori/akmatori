@@ -127,6 +127,11 @@ type AgentMessage struct {
 	TopP        *float64 `json:"top_p,omitempty"`
 	TopK        *int     `json:"top_k,omitempty"`
 
+	// Subagent model override (new_incident/continue_incident). nil = the
+	// worker pins children to the parent's model, as before.
+	SubagentModel         *string `json:"subagent_model,omitempty"`
+	SubagentThinkingLevel *string `json:"subagent_thinking_level,omitempty"`
+
 	// RunID identifies a single StartIncident/ContinueIncident invocation.
 	// The API generates a fresh run_id per call; the worker echoes it on every
 	// agent_output / agent_completed / agent_error frame for that run. The API
@@ -819,6 +824,7 @@ func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettings
 		msg.ThinkingLevel = llm.ThinkingLevel
 		msg.BaseURL = llm.BaseURL
 		applySamplingSettings(&msg, llm)
+		applySubagentSettings(&msg, llm)
 	}
 
 	// Fetch proxy settings from database and include in message
@@ -856,6 +862,7 @@ func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string,
 		msg.ThinkingLevel = llm.ThinkingLevel
 		msg.BaseURL = llm.BaseURL
 		applySamplingSettings(&msg, llm)
+		applySubagentSettings(&msg, llm)
 	}
 
 	// Fetch proxy settings from database and include in message
@@ -1150,6 +1157,23 @@ func (h *AgentWSHandler) BroadcastProxyConfig(settings *database.ProxySettings) 
 //
 // On oneshot_llm_request the frame already carries the call site's own
 // max_tokens/temperature; a configured override deliberately replaces them.
+// applySubagentSettings copies the subagent model override onto the frame.
+// Only set when the operator configured one; a nil field stays off the wire so
+// the worker keeps pinning children to the parent model.
+func applySubagentSettings(msg *AgentMessage, llm *LLMSettingsForWorker) {
+	if llm == nil {
+		return
+	}
+	if llm.SubagentModel != nil && *llm.SubagentModel != "" {
+		v := *llm.SubagentModel
+		msg.SubagentModel = &v
+	}
+	if llm.SubagentThinkingLevel != nil && *llm.SubagentThinkingLevel != "" {
+		v := *llm.SubagentThinkingLevel
+		msg.SubagentThinkingLevel = &v
+	}
+}
+
 func applySamplingSettings(msg *AgentMessage, llm *LLMSettingsForWorker) {
 	if llm == nil {
 		return

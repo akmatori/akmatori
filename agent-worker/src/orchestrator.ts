@@ -29,6 +29,8 @@ export interface OrchestratorConfig {
   workspaceDir: string;
   /** Directory containing SKILL.md definitions for pi-mono resource loader */
   skillsDir?: string;
+  /** Codemode spike flag (see AgentRunnerConfig.codemode) */
+  codemode?: boolean;
   /** Logger function */
   logger?: (msg: string) => void;
 }
@@ -70,6 +72,7 @@ export class Orchestrator {
     this.runner = new AgentRunner({
       mcpGatewayUrl: config.mcpGatewayUrl,
       skillsDir: config.skillsDir,
+      codemode: config.codemode,
     });
   }
 
@@ -482,6 +485,11 @@ export class Orchestrator {
       top_p: msg.top_p,
       top_k: msg.top_k,
       max_tokens: msg.max_tokens,
+      // Subagent override: absent stays absent (children inherit the parent).
+      subagent_model: msg.subagent_model || undefined,
+      subagent_thinking_level: msg.subagent_thinking_level
+        ? this.mapThinkingLevel(msg.subagent_thinking_level)
+        : undefined,
     };
   }
 

@@ -61,6 +61,22 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
   present or `subagent` is missing — grep `docker logs akmatori-agent` for "active tools:"
 - pi ≥ 1.0.1 ships no `npm-shrinkwrap.json`: pi's transitive deps are pinned by OUR lockfile only. The
   Dockerfile uses `npm ci`, so review the `package-lock.json` diff on every bump
+- **Subagent model override** (`LLMSettings.subagent_model` / `subagent_thinking_level`, NULL = inherit):
+  the worker writes `subagents.defaultModel` (provider-qualified `<runtimeProviderId>/<id>`),
+  `subagents.defaultThinking` and `agentOverrides["memory-writer"].model = "inherit"` into BOTH child
+  settings files via `buildSubagentsSettingsBlock()`; Akmatori owns exactly those three keys, other
+  `subagents.*` keys are preserved. For `custom` the extra id is also materialized in `models.json`
+  (`writeCustomProviderModelsJson(..., extraModels)`). Must be the SAME provider — the child authenticates
+  with the parent credential. pi-subagents fails a launch closed on an unknown id
+- **Codemode spike** (`AKMATORI_CODEMODE=1`, off by default): adds `createCodemodeExtension({mode:"on",
+  models:false})` to `extensionFactories`, `defaultTools: ["+codemode"]` to the in-memory settings, and
+  the codemode-only `gateway_fetch` tool (`exposure: "codemode"`, namespace `akmatori`) which calls the
+  gateway with `{ inline: true }` so scripts get the COMPLETE result (no 4 KB preview). Scripts run in
+  pi's QuickJS sandbox: no fs, no network, no timers. `execute_script` stays registered until the bench
+  decides. `tool_execution_*` events of nested calls carry `parentToolCallId`
+- Cache warming is ON by default (`cacheWarming: "streaming"`, pi 0.86+) but only for models that declare
+  `promptCache`; built-in Anthropic models do, and `resolveModel()` adds `{ short: 300 }` to synthesized
+  `anthropic-messages` specs. OpenAI/Google/OpenRouter catalogs declare none (1.0.1)
 - Model catalog drift: `gpt-6-astra-pro` / `-fast` exist only in the OpenRouter / Vercel catalogs, not at
   OpenAI; `gemini-3-pro-preview`, `gemini-2.0-flash`, `meta/llama-3.*` on NIM are no longer in pi's
   catalog (they still resolve via the synthesized spec, cost reported as 0). Check

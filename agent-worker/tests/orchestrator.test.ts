@@ -974,6 +974,46 @@ describe("Orchestrator", () => {
   // -----------------------------------------------------------------------
 
   describe("LLM settings extraction", () => {
+    it("forwards the subagent model override and leaves it absent when unset", async () => {
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
+
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      // The runner receives the extracted LLMSettings; spy on it to read them.
+      const runner = (orchestrator as any).runner;
+      const executeSpy = vi.spyOn(runner, "execute");
+
+      sendFromServer({
+        type: "new_incident",
+        incident_id: "incident-subagent-001",
+        task: "Test subagent override",
+        api_key: "sk-key",
+        provider: "anthropic",
+        model: "claude-sonnet-5",
+        subagent_model: "claude-haiku-4-5",
+        subagent_thinking_level: "low",
+      });
+      await waitForMessage((m) => m.type === "agent_completed" && m.incident_id === "incident-subagent-001");
+      let params = executeSpy.mock.calls.at(-1)?.[0] as any;
+      expect(params.llmSettings.subagent_model).toBe("claude-haiku-4-5");
+      expect(params.llmSettings.subagent_thinking_level).toBe("low");
+
+      sendFromServer({
+        type: "new_incident",
+        incident_id: "incident-subagent-002",
+        task: "Test no override",
+        api_key: "sk-key",
+        provider: "anthropic",
+        model: "claude-sonnet-5",
+      });
+      await waitForMessage((m) => m.type === "agent_completed" && m.incident_id === "incident-subagent-002");
+      params = executeSpy.mock.calls.at(-1)?.[0] as any;
+      expect(params.llmSettings.subagent_model).toBeUndefined();
+      expect(params.llmSettings.subagent_thinking_level).toBeUndefined();
+      expect(createAgentSession).toHaveBeenCalled();
+    });
+
     it("should map thinking_level to thinking_level", async () => {
       const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
 

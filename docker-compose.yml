@@ -167,6 +167,9 @@ services:
       - MCP_GATEWAY_URL=http://mcp-gateway:8080
       - WORKSPACE_DIR=/workspaces
       - SKILLS_DIR=/akmatori/skills
+      # Spike: pi codemode next to execute_script (QuickJS sandbox, parallel
+      # gateway calls via tools.gateway_fetch). Off until the bench compares them.
+      - AKMATORI_CODEMODE=${AKMATORI_CODEMODE:-0}
       - PI_CACHE_RETENTION=long  # Extended prompt caching: 1hr Anthropic, 24hr OpenAI
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}

@@ -222,6 +222,32 @@ describe("GatewayClient", () => {
       }
     });
 
+    it("returns large responses inline and writes no file when options.inline is set", async () => {
+      const largeData = { data: "y".repeat(5000) };
+      const mock = await createMockGateway(() =>
+        jsonRpcSuccess({
+          content: [{ type: "text", text: JSON.stringify(largeData) }],
+        }),
+      );
+
+      try {
+        const client = new GatewayClient({
+          gatewayUrl: mock.url,
+          incidentId: "inc-1",
+          workDir: tmpDir,
+        });
+
+        const result = await client.call("tool.large", {}, undefined, undefined, { inline: true });
+        expect(result.outputFile).toBeUndefined();
+        expect(result.data).toEqual(largeData);
+        const outputsDir = path.join(tmpDir, "tool_outputs");
+        const written = fs.existsSync(outputsDir) ? fs.readdirSync(outputsDir) : [];
+        expect(written.filter((f) => f.startsWith("tool_large"))).toHaveLength(0);
+      } finally {
+        mock.server.close();
+      }
+    });
+
     it("writes large responses (>= 4KB) to file", async () => {
       const largeData = { data: "x".repeat(5000) };
       const mock = await createMockGateway(() =>

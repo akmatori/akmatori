@@ -1102,10 +1102,22 @@ paths:
                   type: string
                 thinking_level:
                   type: string
-                  enum: [off, minimal, low, medium, high, xhigh]
+                  enum: [off, minimal, low, medium, high, xhigh, max]
                 base_url:
                   type: string
                   format: uri
+                subagent_model:
+                  type: string
+                  nullable: true
+                  description: >-
+                    Model id (same provider) for the runbook/memory search subagents.
+                    Omit to leave unchanged, null or "" to clear. Unset = same as parent;
+                    memory-writer always keeps the parent model.
+                subagent_thinking_level:
+                  type: string
+                  nullable: true
+                  enum: [off, minimal, low, medium, high, xhigh, max]
+                  description: Thinking level for the subagents; only applies with subagent_model. Unset = same as parent.
                 temperature:
                   type: number
                   nullable: true

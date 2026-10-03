@@ -6,6 +6,7 @@ import {
   resolveModel,
   subagentChildUsage,
   logActiveToolSet,
+  buildSubagentsSettingsBlock,
   type ExecuteParams,
   type ResumeParams,
 } from "../src/agent-runner.js";
@@ -147,6 +148,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
       getPathMetadata: vi.fn(() => new Map()),
       extendResources: vi.fn(),
     })),
+    createCodemodeExtension: vi.fn((opts: any) => ({ __codemodeFactory: true, opts })),
     createBashToolDefinition: vi.fn((_cwd: string, _opts?: any) => ({
       name: "bash",
       label: "Bash",
@@ -2022,6 +2024,80 @@ describe("AgentRunner", () => {
       // pi 0.84.0 `samplingParams`. The parent's onPayload hook cannot reach
       // child `pi` processes, so without this a subagent silently runs at
       // provider defaults while the parent honours the operator's settings.
+      it("writes subagents.defaultModel/defaultThinking and pins memory-writer when a subagent model is set", async () => {
+        await runner.execute(
+          makeExecuteParams({
+            workDir: tmpWorkDir,
+            llmSettings: makeLLMSettings({
+              provider: "anthropic",
+              api_key: "sk-ant",
+              model: "claude-sonnet-5",
+              thinking_level: "medium",
+              subagent_model: "claude-haiku-4-5",
+              subagent_thinking_level: "low",
+            }),
+          }),
+        );
+
+        for (const file of [path.join(tmpAgentDir, "settings.json"), path.join(tmpWorkDir, ".pi", "settings.json")]) {
+          const settings = JSON.parse(fs.readFileSync(file, "utf-8"));
+          expect(settings.defaultModel).toBe("claude-sonnet-5");
+          expect(settings.subagents).toEqual({
+            defaultModel: "anthropic/claude-haiku-4-5",
+            defaultThinking: "low",
+            agentOverrides: { "memory-writer": { model: "inherit" } },
+          });
+        }
+      });
+
+      it("removes the managed subagents keys when no subagent model is set, keeping operator keys", async () => {
+        fs.writeFileSync(
+          path.join(tmpAgentDir, "settings.json"),
+          JSON.stringify({
+            subagents: {
+              defaultModel: "anthropic/claude-haiku-4-5",
+              defaultThinking: "low",
+              modelScope: { enforce: true },
+              agentOverrides: { "memory-writer": { model: "inherit", thinking: "high" }, reviewer: { model: "x" } },
+            },
+          }),
+        );
+        await runner.execute(
+          makeExecuteParams({
+            workDir: tmpWorkDir,
+            llmSettings: makeLLMSettings({ provider: "anthropic", api_key: "sk-ant", model: "claude-sonnet-5" }),
+          }),
+        );
+
+        const settings = JSON.parse(fs.readFileSync(path.join(tmpAgentDir, "settings.json"), "utf-8"));
+        expect(settings.subagents).toEqual({
+          modelScope: { enforce: true },
+          agentOverrides: { "memory-writer": { thinking: "high" }, reviewer: { model: "x" } },
+        });
+      });
+
+      it("materializes the subagent model in models.json for the custom provider", async () => {
+        await runner.execute(
+          makeExecuteParams({
+            workDir: tmpWorkDir,
+            llmSettings: makeLLMSettings({
+              provider: "custom",
+              api_key: "sk-custom",
+              model: "big-model",
+              base_url: "https://gateway.example/v1",
+              subagent_model: "small-model",
+            }),
+          }),
+        );
+
+        const config = JSON.parse(fs.readFileSync(path.join(tmpAgentDir, "models.json"), "utf-8"));
+        const ids = config.providers["akmatori-custom"].models.map((m: any) => m.id);
+        expect(ids).toEqual(["big-model", "small-model"]);
+        const settings = JSON.parse(fs.readFileSync(path.join(tmpAgentDir, "settings.json"), "utf-8"));
+        expect(settings.subagents.defaultModel).toBe("akmatori-custom/small-model");
+        expect(settings.subagents.defaultThinking).toBeUndefined();
+      });
+
       it("writes samplingParams into models.json so subagents inherit them", async () => {
         await runner.execute(
           makeExecuteParams({
@@ -2881,5 +2957,96 @@ describe("logActiveToolSet", () => {
     logActiveToolSet("inc-4", {});
     expect(log).not.toHaveBeenCalled();
     log.mockRestore();
+  });
+});
+
+describe("codemode spike flag", () => {
+  beforeEach(() => {
+    createAgentSessionCalls = [];
+  });
+
+  it("is off by default: no gateway_fetch, no codemode extension, no defaultTools", async () => {
+    const { DefaultResourceLoader, SettingsManager } = await import("@earendil-works/pi-coding-agent");
+    const runner = new AgentRunner({ mcpGatewayUrl: "http://mcp-gateway:8080" });
+    await runner.execute(makeExecuteParams({ incidentId: "inc-cm-off" }));
+
+    const opts = createAgentSessionCalls[0];
+    const names = opts.customTools.map((t: any) => t.name);
+    expect(names).not.toContain("gateway_fetch");
+    const loaderArgs = (DefaultResourceLoader as any).mock.calls.at(-1)[0];
+    expect(loaderArgs.extensionFactories).toBeUndefined();
+    const settingsArgs = (SettingsManager.inMemory as any).mock.calls.at(-1)[0];
+    expect(settingsArgs.defaultTools).toBeUndefined();
+    const gatewayCall = opts.customTools.find((t: any) => t.name === "gateway_call");
+    expect(gatewayCall.promptGuidelines.join("\n")).not.toContain("codemode");
+  });
+
+  it("when on: adds gateway_fetch (codemode exposure), the codemode extension and +codemode default tool", async () => {
+    const { DefaultResourceLoader, SettingsManager, createCodemodeExtension } = await import("@earendil-works/pi-coding-agent");
+    const runner = new AgentRunner({ mcpGatewayUrl: "http://mcp-gateway:8080", codemode: true });
+    await runner.execute(makeExecuteParams({ incidentId: "inc-cm-on" }));
+
+    const opts = createAgentSessionCalls[0];
+    const fetchTool = opts.customTools.find((t: any) => t.name === "gateway_fetch");
+    expect(fetchTool).toBeDefined();
+    expect(fetchTool.exposure).toBe("codemode");
+    expect(fetchTool.namespace?.name).toBe("akmatori");
+    expect(opts.customTools).toHaveLength(7);
+    expect(createCodemodeExtension).toHaveBeenCalledWith({ mode: "on", models: false });
+    const loaderArgs = (DefaultResourceLoader as any).mock.calls.at(-1)[0];
+    expect(loaderArgs.extensionFactories).toHaveLength(1);
+    const settingsArgs = (SettingsManager.inMemory as any).mock.calls.at(-1)[0];
+    expect(settingsArgs.defaultTools).toEqual(["+codemode"]);
+    const gatewayCall = opts.customTools.find((t: any) => t.name === "gateway_call");
+    expect(gatewayCall.promptGuidelines.join("\n")).toContain("tools.gateway_fetch");
+  });
+});
+
+describe("resolveModel prompt-cache lifetime", () => {
+  it("declares Anthropic's 5-minute cache tier on a synthesized anthropic-messages spec", () => {
+    const model = resolveModel("anthropic", "claude-not-in-catalog-9") as any;
+    expect(model.api).toBe("anthropic-messages");
+    expect(model.promptCache).toEqual({ short: 300 });
+  });
+
+  it("leaves promptCache unset on non-Anthropic synthesized specs", () => {
+    const model = resolveModel("custom", "my-local-model", "http://llm.internal/v1") as any;
+    expect(model.promptCache).toBeUndefined();
+  });
+});
+
+describe("buildSubagentsSettingsBlock", () => {
+  it("returns undefined when nothing is set and nothing existed", () => {
+    expect(buildSubagentsSettingsBlock(undefined, "anthropic", undefined)).toBeUndefined();
+  });
+
+  it("writes a provider-qualified defaultModel and pins memory-writer to inherit", () => {
+    expect(buildSubagentsSettingsBlock(undefined, "openai", { model: "gpt-6-luna", thinkingLevel: "minimal" })).toEqual({
+      defaultModel: "openai/gpt-6-luna",
+      defaultThinking: "minimal",
+      agentOverrides: { "memory-writer": { model: "inherit" } },
+    });
+  });
+
+  it("preserves unrelated operator keys and merges the memory-writer override", () => {
+    const existing = { watchdog: { enabled: true }, agentOverrides: { "memory-writer": { thinking: "high" } } };
+    expect(buildSubagentsSettingsBlock(existing, "anthropic", { model: "claude-haiku-4-5" })).toEqual({
+      watchdog: { enabled: true },
+      defaultModel: "anthropic/claude-haiku-4-5",
+      agentOverrides: { "memory-writer": { thinking: "high", model: "inherit" } },
+    });
+  });
+
+  it("strips only the managed keys when the override is removed", () => {
+    const existing = { defaultModel: "anthropic/claude-haiku-4-5", defaultThinking: "low", agentOverrides: { "memory-writer": { model: "inherit" } } };
+    expect(buildSubagentsSettingsBlock(existing, "anthropic", undefined)).toBeUndefined();
+  });
+
+  it("tolerates malformed existing values", () => {
+    expect(buildSubagentsSettingsBlock("junk", "anthropic", { model: "m" })).toEqual({
+      defaultModel: "anthropic/m",
+      agentOverrides: { "memory-writer": { model: "inherit" } },
+    });
+    expect(buildSubagentsSettingsBlock({ agentOverrides: [] }, "anthropic", undefined)).toBeUndefined();
   });
 });

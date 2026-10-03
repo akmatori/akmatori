@@ -58,6 +58,9 @@ interface FormState {
   thinkingLevel: ThinkingLevel;
   baseUrl: string;
   sampling: SamplingFormState;
+  // Subagent override. Blank model = same as parent; blank level = same as parent.
+  subagentModel: string;
+  subagentThinkingLevel: '' | ThinkingLevel;
 }
 
 const emptyForm: FormState = {
@@ -68,6 +71,8 @@ const emptyForm: FormState = {
   thinkingLevel: 'medium',
   baseUrl: '',
   sampling: EMPTY_SAMPLING_FORM,
+  subagentModel: '',
+  subagentThinkingLevel: '',
 };
 
 // Order the sampling inputs are rendered in.
@@ -137,11 +142,14 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
       thinkingLevel: config.thinking_level || 'medium',
       baseUrl: config.base_url || '',
       sampling,
+      subagentModel: config.subagent_model || '',
+      subagentThinkingLevel: config.subagent_thinking_level || '',
     });
     setFormMode('edit');
     setEditingId(config.id);
     setShowAdvanced(!!config.base_url || (config.thinking_level && config.thinking_level !== 'medium')
       || hasSamplingOverrides(sampling)
+      || !!config.subagent_model
       || config.provider === 'nvidia' || config.provider === 'minimax' || config.provider === 'ant-ling');
     setError(null);
   };
@@ -182,6 +190,8 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
           thinking_level: form.thinkingLevel || undefined,
           base_url: form.baseUrl || undefined,
           ...dehydrateSamplingForCreate(form.sampling),
+          subagent_model: form.subagentModel.trim() || undefined,
+          subagent_thinking_level: form.subagentModel.trim() ? form.subagentThinkingLevel || undefined : undefined,
         });
         showSuccess('Configuration created');
       } else if (formMode === 'edit' && editingId) {
@@ -193,6 +203,10 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
         updates.model = form.model;
         updates.thinking_level = form.thinkingLevel;
         updates.base_url = form.baseUrl;
+        // Blank → explicit null so clearing the override sticks. The thinking
+        // level only means something next to a model, so it is cleared with it.
+        updates.subagent_model = form.subagentModel.trim() || null;
+        updates.subagent_thinking_level = form.subagentModel.trim() ? form.subagentThinkingLevel || null : null;
         if (form.apiKey && !form.apiKey.startsWith('****')) {
           updates.api_key = form.apiKey;
         }
@@ -395,7 +409,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
         >
           {showAdvanced ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
           Advanced settings
-          {(form.thinkingLevel !== 'medium' || form.baseUrl || hasSamplingOverrides(form.sampling)) && (
+          {(form.thinkingLevel !== 'medium' || form.baseUrl || hasSamplingOverrides(form.sampling) || form.subagentModel) && (
             <span className="text-xs text-primary-600 dark:text-primary-400">(customized)</span>
           )}
         </button>
@@ -439,6 +453,48 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                 </p>
               </div>
             )}
+
+            {/* Subagent model override — the runbook/memory search children. */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                Subagent model
+              </label>
+              <input
+                type="text"
+                list="subagent-model-suggestions"
+                value={form.subagentModel}
+                onChange={(e) => setForm(prev => ({ ...prev, subagentModel: e.target.value }))}
+                placeholder="Same as parent model"
+                className="input-field"
+              />
+              <datalist id="subagent-model-suggestions">
+                {(MODEL_SUGGESTIONS[form.provider] || []).map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </datalist>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Cheaper model from the same provider for the runbook and memory search subagents.
+                They are read-only lookups that run on every incident. memory-writer always keeps the parent model.
+                Blank = same as parent.
+              </p>
+              {form.subagentModel.trim() && (
+                <div className="mt-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    Subagent thinking level
+                  </label>
+                  <select
+                    value={form.subagentThinkingLevel}
+                    onChange={(e) => setForm(prev => ({ ...prev, subagentThinkingLevel: e.target.value as '' | ThinkingLevel }))}
+                    className="input-field"
+                  >
+                    <option value="">Same as parent</option>
+                    {THINKING_LEVELS.map((level) => (
+                      <option key={level.value} value={level.value}>{level.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
 
             {/* Sampling parameters — every box is optional. */}
             <div>
@@ -540,6 +596,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                 {activeConfig.thinking_level && activeConfig.thinking_level !== 'medium' && ` \u00B7 Thinking: ${activeConfig.thinking_level}`}
                 {activeConfig.base_url && ` \u00B7 Custom URL`}
                 {describeSampling(activeConfig) && ` \u00B7 ${describeSampling(activeConfig)}`}
+                {activeConfig.subagent_model && ` \u00B7 Subagents: ${activeConfig.subagent_model}`}
               </p>
             </div>
             <button
@@ -593,6 +650,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                     {config.thinking_level && config.thinking_level !== 'medium' && ` \u00B7 Thinking: ${config.thinking_level}`}
                     {config.base_url && ` \u00B7 Custom URL`}
                     {describeSampling(config) && ` \u00B7 ${describeSampling(config)}`}
+                    {config.subagent_model && ` \u00B7 Subagents: ${config.subagent_model}`}
                   </p>
                 </div>
                 <div className="flex items-center gap-1 ml-3">
