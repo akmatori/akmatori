@@ -104,7 +104,7 @@ export interface CreateIncidentResponse {
   message: string;
 }
 
-export type LLMProvider = 'openai' | 'anthropic' | 'google' | 'openrouter' | 'custom' | 'nvidia' | 'minimax' | 'ant-ling';
+export type LLMProvider = 'openai-codex' | 'openai' | 'anthropic' | 'google' | 'openrouter' | 'custom' | 'nvidia' | 'minimax' | 'ant-ling';
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface LLMConfig {
@@ -116,6 +116,7 @@ export interface LLMConfig {
   base_url: string;
   api_key: string;  // Masked for display
   is_configured: boolean;
+  uses_subscription?: boolean;
   enabled: boolean;
   active: boolean;
   // Sampling overrides. null means unset — the request omits the parameter and
