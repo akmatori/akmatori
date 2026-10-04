@@ -48,7 +48,7 @@ func (t *TitleGenerator) GenerateTitle(messageOrAlert string, source string) (st
 		return "", fmt.Errorf("failed to get LLM settings: %w", err)
 	}
 
-	if settings.APIKey == "" {
+	if !settings.IsConfigured() {
 		return t.GenerateFallbackTitle(messageOrAlert, source), nil
 	}
 

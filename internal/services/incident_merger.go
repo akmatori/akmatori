@@ -92,7 +92,7 @@ func (m *IncidentMerger) EvaluateAndMerge(ctx context.Context, incidentUUID stri
 	if err != nil {
 		return fmt.Errorf("merge: load llm settings: %w", err)
 	}
-	if settings == nil || settings.APIKey == "" {
+	if settings == nil || !settings.IsConfigured() {
 		return fmt.Errorf("merge: LLM settings not configured")
 	}
 	worker := BuildLLMSettingsForWorker(settings)

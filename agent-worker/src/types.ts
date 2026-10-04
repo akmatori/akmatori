@@ -48,6 +48,7 @@ export interface ProxyConfig {
 
 export type LLMProvider =
   | "openai"
+  | "openai-codex"
   | "anthropic"
   | "google"
   | "openrouter"

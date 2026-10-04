@@ -60,6 +60,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
       // registered before its stored key becomes usable.
       const registered = new Set<string>();
       return {
+        listCredentials: vi.fn(async () => [{ providerId: "openai-codex", type: "oauth" }]),
         setRuntimeApiKey: vi.fn(async () => {}),
         registerProvider: vi.fn((id: string) => registered.add(id)),
         getAuth: vi.fn(async (model: any) =>
@@ -116,11 +117,11 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 const completeMock = vi.fn();
 
 vi.mock("@earendil-works/pi-ai/providers/all", () => ({
-  getBuiltinModel: vi.fn(() => ({
-    id: "o4-mini",
-    name: "o4-mini",
-    api: "openai-responses",
-    provider: "openai",
+  getBuiltinModel: vi.fn((provider: string, model: string) => ({
+    id: model,
+    name: model,
+    api: provider === "openai-codex" ? "openai-codex-responses" : "openai-responses",
+    provider,
   })),
 }));
 
@@ -315,6 +316,15 @@ describe("Orchestrator", () => {
   // -----------------------------------------------------------------------
 
   describe("new_incident routing", () => {
+    it("routes a subscription investigation without an API key", async () => {
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+      sendFromServer({ type: "new_incident", incident_id: "subscription-001", task: "Investigate CPU",
+        provider: "openai-codex", model: "gpt-5.5", thinking_level: "medium" });
+      const completed = await waitForMessage((m) => m.type === "agent_completed" && m.incident_id === "subscription-001");
+      expect(completed).toBeDefined();
+    });
+
     it("should execute agent and send completion on new_incident", async () => {
       await orchestrator.start();
 
