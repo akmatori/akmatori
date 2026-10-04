@@ -43,16 +43,10 @@ The requested providers are Codex, Claude Code, and Gemini CLI (Google AI Pro).
 - No production accounts, paid inference, or production deployments are used for
   validation. Live subscription verification needs an operator-owned account.
 
-## Contribution
-
-Use an English issue and pull request from a contributor fork. Commits use
-Conventional Commits without scope or generated-by/co-author trailers. Do not
-merge or deploy as part of this change.
-
 ## Outcome
 
 The first contribution implements Codex subscription access across configuration,
 investigations, child-agent configuration, and one-shot tasks. No schema migration
 or new package is required. Claude Code and Gemini CLI need separate official-client
 execution integrations and remain tracked in issue #29. Validation and remaining
-checks are recorded in `docs/security/scans/2026-10-03-subscription-auth.md`.
+checks are recorded in the pull request.
