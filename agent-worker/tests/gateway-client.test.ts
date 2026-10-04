@@ -222,6 +222,37 @@ describe("GatewayClient", () => {
       }
     });
 
+    it("does not leave an unhandled rejection when the signal aborts a call nobody awaits", async () => {
+      // Regression: the abort listener rejected the HTTP promise while the
+      // script executor had already given up on the call; Node 22 turned the
+      // orphaned rejection into a process crash. vitest fails the run on any
+      // unhandled rejection, so this test only has to provoke the sequence.
+      // A server that accepts the request and never answers.
+      const server = http.createServer(() => {});
+      await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+      const port = (server.address() as { port: number }).port;
+      try {
+        const client = new GatewayClient({ gatewayUrl: `http://127.0.0.1:${port}`, incidentId: "inc-1" });
+        const controller = new AbortController();
+        const unhandled: unknown[] = [];
+        const onUnhandled = (reason: unknown) => unhandled.push(reason);
+        process.on("unhandledRejection", onUnhandled);
+        try {
+          void client.call("tool.slow", {}, undefined, controller.signal);
+          await new Promise((r) => setTimeout(r, 20));
+          controller.abort();
+          await new Promise((r) => setTimeout(r, 20));
+        } finally {
+          process.off("unhandledRejection", onUnhandled);
+        }
+        expect(unhandled).toHaveLength(0);
+        await expect(client.call("tool.x", {}, undefined, controller.signal)).rejects.toThrow("Request aborted");
+      } finally {
+        server.closeAllConnections?.();
+        server.close();
+      }
+    });
+
     it("returns large responses inline and writes no file when options.inline is set", async () => {
       const largeData = { data: "y".repeat(5000) };
       const mock = await createMockGateway(() =>

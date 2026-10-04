@@ -1,4 +1,5 @@
 {
   "toolDescriptionMode": "compact",
-  "toolActivation": "eager"
+  "toolActivation": "eager",
+  "asyncByDefault": false
 }

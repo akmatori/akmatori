@@ -342,7 +342,7 @@ export class GatewayClient {
 
   /** HTTP POST to the gateway /mcp endpoint, bypassing proxy. */
   private httpPost(body: string, signal?: AbortSignal): Promise<string> {
-    return new Promise((resolve, reject) => {
+    return orphanSafe(() => new Promise((resolve, reject) => {
       // If already aborted, reject immediately without starting the request.
       if (signal?.aborted) {
         reject(new GatewayError(-32000, "Request aborted"));
@@ -408,7 +408,7 @@ export class GatewayClient {
 
       req.write(body);
       req.end();
-    });
+    }));
   }
 }
 
@@ -419,6 +419,16 @@ export class GatewayClient {
  * an agent script, or a concurrent call where `Promise.race` / `Promise.all`
  * settled with another result first) are absorbed instead of becoming
  * unhandled, which Node 22 treats as fatal.
+ */
+/**
+ * Mark a promise as "handled" without swallowing it for real awaiters.
+ *
+ * The gateway HTTP promise is rejected from an AbortSignal listener. When the
+ * abort is dispatched synchronously from the script executor's cleanup, the
+ * rejection can land on a promise no one is awaiting any more (Node 22
+ * default: crash the process, killing every in-flight incident — observed on
+ * gcore 2026-10-04 21:08 UTC). A no-op catch keeps the rejection observable
+ * to callers that do await it and inert otherwise.
  */
 export function orphanSafe<T>(work: () => Promise<T>): Promise<T> {
   const p = work();

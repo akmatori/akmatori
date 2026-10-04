@@ -59,6 +59,15 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
   pi-subagents ≥ 0.75 fails the WHOLE config load on any invalid key, which drops us back to `auto`;
   `logActiveToolSet()` logs the active tool names on every session and warns when the loader is
   present or `subagent` is missing — grep `docker logs akmatori-agent` for "active tools:"
+- **Child launches need the pi package root** (pi-subagents ≥ 0.70): it walks up from `process.argv[1]`
+  looking for `@earendil-works/pi-coding-agent/package.json`; our entrypoint is `dist/index.js`, so the
+  Dockerfile sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT=/home/agent/app/node_modules/@earendil-works/pi-coding-agent`
+  (read by the background runner AND `loadHostPiCodingAgent()` for foreground children). Without it every
+  `subagent(...)` fails with "Background children require a supported standalone Pi host or the installed
+  npm package". `config.json` also pins `"asyncByDefault": false` so a plain `{agent, task}` launch runs
+  foreground and returns its result inline — our prompts consume it in the same turn and never `bg_wait`.
+  Beware: a `subagent` call that returns an error TEXT still logs as "✅ Ran: subagent"; grep incident
+  `full_log` for "Failed to start" / "was removed" before trusting a Ran count
 - pi ≥ 1.0.1 ships no `npm-shrinkwrap.json`: pi's transitive deps are pinned by OUR lockfile only. The
   Dockerfile uses `npm ci`, so review the `package-lock.json` diff on every bump
 - **Subagent model override** (`LLMSettings.subagent_model` / `subagent_thinking_level`, NULL = inherit):

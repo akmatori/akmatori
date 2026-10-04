@@ -61,6 +61,15 @@ async function main(): Promise<void> {
     logger: log,
   };
 
+  // A long-running worker must not die on a stray promise rejection: every
+  // in-flight incident would be lost (3 incidents failed when this happened
+  // on gcore, 2026-10-04). Log loudly and keep serving; uncaught synchronous
+  // exceptions still terminate the process as before.
+  process.on("unhandledRejection", (reason) => {
+    const err = reason instanceof Error ? reason : new Error(String(reason));
+    log(`UNHANDLED REJECTION (worker kept running): ${err.stack ?? err.message}`);
+  });
+
   const orchestrator = new Orchestrator(config);
 
   // Connect with retry (forever until success, matching Go behavior)

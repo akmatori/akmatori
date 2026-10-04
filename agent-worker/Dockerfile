@@ -102,6 +102,13 @@ USER agent
 # Put the local node_modules/.bin on PATH so subagent subprocesses can spawn
 # the bundled `pi` CLI without an absolute path.
 ENV PATH=/home/agent/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# pi-subagents >= 0.70 locates the host pi package by walking up from
+# process.argv[1]; our entrypoint is dist/index.js (not pi), so that lookup
+# fails and every child launch died with "Background children require a
+# supported standalone Pi host or the installed npm package". This env var is
+# the documented override, read by both the background runner and the
+# foreground child loader.
+ENV PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT=/home/agent/app/node_modules/@earendil-works/pi-coding-agent
 ENV API_WS_URL=ws://akmatori-api:3000/ws/agent
 ENV MCP_GATEWAY_URL=http://mcp-gateway:8080
 ENV WORKSPACE_DIR=/workspaces
