@@ -638,6 +638,7 @@ func InitializeDefaults() error {
 // must use IDs registered by the active pi-mono SDK (note OpenRouter aliases
 // use dot-form, e.g. anthropic/claude-sonnet-4.6).
 var defaultModelsPerProvider = map[LLMProvider]string{
+	LLMProviderCodex:      "gpt-5.5",
 	LLMProviderOpenAI:     "gpt-5.5",
 	LLMProviderAnthropic:  "claude-sonnet-4-6",
 	LLMProviderGoogle:     "gemini-3.1-pro-preview",
@@ -1364,7 +1365,7 @@ func SetActiveLLMConfig(id uint) error {
 		if target == nil {
 			return fmt.Errorf("LLM config with id %d not found", id)
 		}
-		if target.APIKey == "" {
+		if !target.IsConfigured() {
 			return fmt.Errorf("cannot activate a configuration without an API key")
 		}
 		if err := tx.Model(&LLMSettings{}).Where("active = ?", true).Update("active", false).Error; err != nil {
@@ -1397,7 +1398,7 @@ func UpdateLLMSettings(id uint, updates map[string]interface{}) (*LLMSettings, e
 		}
 		// Prevent clearing the API key on the active config
 		if apiKey, ok := updates["api_key"]; ok {
-			if apiKey == "" && settings.Active {
+			if apiKey == "" && settings.Active && !settings.Provider.UsesSubscription() {
 				return fmt.Errorf("cannot clear the API key on the active configuration")
 			}
 		}

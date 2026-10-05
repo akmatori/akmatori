@@ -24,6 +24,7 @@ import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import type { Model, ThinkingLevel as PiThinkingLevel } from "@earendil-works/pi-ai";
 import type { LLMSettings, ExecuteResult, ProxyConfig, ThinkingLevel, ToolAllowlistEntry } from "./types.js";
 import { applyProxyConfig } from "./proxy.js";
+import { usesSubscription, validateSubscriptionSettings, requireSubscriptionLogin } from "./subscription-auth.js";
 import {
   OPENAI_COMPATIBLE_APIS,
   createSamplingPayloadHook,
@@ -303,6 +304,7 @@ export function usageResultFields(totals: UsageTotals): {
  */
 const PROVIDER_API_MAP: Record<string, string> = {
   openai: "openai-responses",
+  "openai-codex": "openai-codex-responses",
   anthropic: "anthropic-messages",
   google: "google-generative-ai",
   openrouter: "openai-completions",
@@ -322,6 +324,9 @@ export function resolveModel(
   modelId: string,
   baseUrl?: string,
 ): Model<any> {
+  if (usesSubscription(provider) && baseUrl) {
+    throw new Error("Subscription providers do not accept custom endpoints");
+  }
   try {
     const builtInModel = getBuiltinModel(provider as any, modelId as any);
     // pi-ai may return undefined for unknown/custom models instead of throwing.
@@ -358,6 +363,10 @@ export function resolveModel(
     }
   } catch {
     // Continue to fallback model spec below.
+  }
+
+  if (usesSubscription(provider)) {
+    throw new Error(`Unknown subscription model: ${modelId}. Choose a model from the worker catalog.`);
   }
 
   // Model not in built-in registry - create a custom model spec.
@@ -1282,6 +1291,9 @@ export class AgentRunner {
     // Set up proxy env vars before creating session
     applyProxyConfig(params.proxyConfig);
 
+    validateSubscriptionSettings(params.llmSettings);
+    const subscription = usesSubscription(params.llmSettings.provider);
+
     // Auth & model runtime. `setRuntimeApiKey` stores the operator key in an
     // in-memory RuntimeCredentials overlay: never written to auth.json and taken
     // literally (no `$ENV` resolution), so keys containing `$` stay safe.
@@ -1296,11 +1308,15 @@ export class AgentRunner {
     });
     // Key the credential by the runtime provider id, which is what the resolved
     // model carries and therefore what pi looks up during auth.
-    await setRuntimeApiKeyTolerantly(
-      modelRuntime as unknown as ProviderRegisteringRuntime,
-      runtimeProviderId(params.llmSettings.provider),
-      params.llmSettings.api_key,
-    );
+    if (subscription) {
+      await requireSubscriptionLogin(modelRuntime, params.llmSettings.provider);
+    } else {
+      await setRuntimeApiKeyTolerantly(
+        modelRuntime as unknown as ProviderRegisteringRuntime,
+        runtimeProviderId(params.llmSettings.provider),
+        params.llmSettings.api_key,
+      );
+    }
     // pi-subagents spawns each subagent in a child `pi` process whose model
     // runtime is independent from this one — the runtime key lives in the
     // parent's memory only. The child resolves keys from env vars (pi-ai
@@ -1335,7 +1351,7 @@ export class AgentRunner {
     // registry entry for. Register one for provider ids pi does not ship —
     // in practice `custom`, the on-prem/OpenAI-compatible endpoint option.
     if (
-      await ensureProviderAuthResolvable(
+      !subscription && await ensureProviderAuthResolvable(
         modelRuntime as unknown as ProviderRegisteringRuntime,
         runtimeProviderId(params.llmSettings.provider),
         params.llmSettings.api_key,
@@ -1347,6 +1363,9 @@ export class AgentRunner {
       );
     }
 
+    if (subscription && params.llmSettings.subagent_model) {
+      resolveModel(params.llmSettings.provider, params.llmSettings.subagent_model);
+    }
     const thinkingLevel = mapThinkingLevel(params.llmSettings.thinking_level);
 
     // Pin the child's default provider+model+thinking so subagents run on the
@@ -1631,7 +1650,7 @@ export class AgentRunner {
         error: lastErrorMessage || undefined,
         tokens_used: usageTotals.totalTokens,
         execution_time_ms: Date.now() - startTime,
-        ...usageResultFields(usageTotals),
+        ...usageResultFields(subscription ? { ...usageTotals, costUsd: 0 } : usageTotals),
         session_export: sessionExportPath,
         last_skill: lastSkillName,
       };
@@ -1645,7 +1664,7 @@ export class AgentRunner {
         error: (err as Error).message,
         tokens_used: usageTotals.totalTokens,
         execution_time_ms: Date.now() - startTime,
-        ...usageResultFields(usageTotals),
+        ...usageResultFields(subscription ? { ...usageTotals, costUsd: 0 } : usageTotals),
         session_export: sessionExportPath,
         last_skill: lastSkillName,
       };

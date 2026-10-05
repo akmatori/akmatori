@@ -93,7 +93,7 @@ func (s *SlackSummarizer) summarizeViaLLM(ctx context.Context, formattedText str
 		slog.Warn("slack summarizer: failed to load llm settings, using fallback", "err", err)
 		return "", false
 	}
-	if settings == nil || settings.APIKey == "" {
+	if settings == nil || !settings.IsConfigured() {
 		return "", false
 	}
 

@@ -44,6 +44,7 @@ infrastructure through real tools, and executes remediation behind approval gate
 | Provider | Models |
 |----------|--------|
 | **OpenAI** | GPT-6.1 Sol, GPT-6 (Sol / Astra / Luna), GPT-5.6 (Terra / Sol / Luna), GPT-5.5, GPT-5.5 Pro, GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex, GPT-5 Mini, o4-mini |
+| **Codex subscription** | Eligible ChatGPT plans through worker-side OAuth; see [subscription setup](docs/SUBSCRIPTIONS.md) |
 | **Anthropic** | Claude Fable 5.1 / 5, Opus 5.5, Sonnet 5.5, Opus 5, Sonnet 5, Opus 4.8 / 4.7, Sonnet 4.6, Haiku 4.5 |
 | **Google** | Gemini 3.1 Pro Preview, Gemini 3.5 – 3.8 Flash, Gemini 3.1 Flash Lite, Gemini 3 Pro / Flash Preview, Gemini 2.5 Pro / Flash, 2.0 Flash |
 | **OpenRouter** | 100+ models from every major lab |
@@ -52,13 +53,13 @@ infrastructure through real tools, and executes remediation behind approval gate
 | **Ant Ling** | Ling-2.6-1T, Ling-2.6-flash, Ring-2.6-1T |
 | **Custom / On-prem** | Any OpenAI-compatible endpoint (GLM, Kimi, Mistral, LLaMA, vLLM, …) |
 
-Model lists track the in-app picker; the model field is free-text, so newer model IDs work without an upgrade.
+Model lists track the in-app picker. API providers accept free-text model IDs; Codex subscription models must exist in the worker catalog. See [subscription connections](docs/SUBSCRIPTIONS.md) for setup and the Claude Code / Gemini CLI limitations.
 
 ## Quick Start
 
 The recommended install pulls pre-built multi-arch images from GHCR — no `git clone`, no local build.
 
-**Prerequisites:** Docker with Compose v2+, an API key for any supported LLM provider (or an on-prem OpenAI-compatible endpoint), and optionally a Slack App.
+**Prerequisites:** Docker with Compose v2+, an API key for a supported LLM provider, an eligible Codex subscription, or an on-prem OpenAI-compatible endpoint, and optionally a Slack App.
 
 1. Download the release assets (compose file + nginx config):
 
