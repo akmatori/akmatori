@@ -20,6 +20,13 @@ describe('PROVIDER_CONFIGS', () => {
     expect(tg!.description.toLowerCase()).toContain('not yet available');
   });
 
+  it('marks Zulip as available with the bot credentials required by its API', () => {
+    const zulip = getProviderConfig('zulip');
+    expect(zulip).not.toBeNull();
+    expect(zulip!.available).toBe(true);
+    expect(zulip!.credentialFields.map((field) => field.name)).toEqual(['site_url', 'email', 'api_key']);
+  });
+
   it('lists all three Slack credentials so the IntegrationsManager renders the right form', () => {
     const slack = getProviderConfig('slack')!;
     const names = slack.credentialFields.map((f) => f.name);

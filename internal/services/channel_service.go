@@ -71,7 +71,7 @@ func (s *ChannelService) GetIntegrationByUUID(uuidStr string) (*database.Integra
 }
 
 // CreateIntegration persists a new integration. The Provider value must be a
-// registered messaging provider (slack / telegram); the caller supplies
+// registered messaging provider (slack / zulip / telegram); the caller supplies
 // credentials as a JSONB blob since each provider expects different fields.
 func (s *ChannelService) CreateIntegration(provider database.MessagingProvider, name string, credentials database.JSONB, enabled bool) (*database.Integration, error) {
 	if !database.IsValidMessagingProvider(string(provider)) {

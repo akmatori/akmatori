@@ -7,6 +7,8 @@ export function providerLabel(provider: MessagingProvider | string): string {
       return 'Slack';
     case 'telegram':
       return 'Telegram';
+    case 'zulip':
+      return 'Zulip';
     default:
       return String(provider);
   }
@@ -21,6 +23,8 @@ export function providerIconText(provider: MessagingProvider | string): string {
       return 'SL';
     case 'telegram':
       return 'TG';
+    case 'zulip':
+      return 'ZU';
     default:
       return String(provider).slice(0, 2).toUpperCase();
   }

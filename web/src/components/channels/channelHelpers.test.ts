@@ -55,6 +55,7 @@ describe('providerLabel', () => {
   it('renders friendly labels for known providers', () => {
     expect(providerLabel('slack')).toBe('Slack');
     expect(providerLabel('telegram')).toBe('Telegram');
+    expect(providerLabel('zulip')).toBe('Zulip');
   });
 
   it('falls back to the raw provider string', () => {
@@ -66,6 +67,7 @@ describe('providerIconText', () => {
   it('uses two-letter codes for known providers', () => {
     expect(providerIconText('slack')).toBe('SL');
     expect(providerIconText('telegram')).toBe('TG');
+    expect(providerIconText('zulip')).toBe('ZU');
   });
 
   it('falls back to first two letters of unknown providers', () => {

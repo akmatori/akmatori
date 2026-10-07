@@ -71,6 +71,31 @@ export const PROVIDER_CONFIGS: ProviderUIConfig[] = [
       },
     ],
   },
+  {
+    provider: 'zulip',
+    label: 'Zulip',
+    iconText: 'ZU',
+    available: true,
+    description: 'Connect a Zulip bot for outbound notifications to streams and topics.',
+    credentialFields: [
+      {
+        name: 'site_url',
+        label: 'Organization URL',
+        placeholder: 'https://your-org.zulipchat.com',
+      },
+      {
+        name: 'email',
+        label: 'Bot Email',
+        placeholder: 'akmatori-bot@your-org.zulipchat.com',
+      },
+      {
+        name: 'api_key',
+        label: 'API Key',
+        secret: true,
+        placeholder: 'Zulip bot API key',
+      },
+    ],
+  },
 ];
 
 // getProviderConfig returns the UI config for a provider, or null when no
