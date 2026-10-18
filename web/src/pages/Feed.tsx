@@ -1,13 +1,14 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { RefreshCw, Rss, Search, X } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
-import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage, { SuccessMessage } from '../components/ErrorMessage';
 import TimeRangePicker from '../components/TimeRangePicker';
 import MoveIncidentModal from '../components/MoveIncidentModal';
 import EmptyState from '../components/shared/EmptyState';
 import Pagination from '../components/shared/Pagination';
+import SegmentedControl from '../components/shared/SegmentedControl';
+import { bucketSize, groupEvents } from '../components/feed/feedHelpers';
 import FeedEventRow from '../components/feed/FeedEventRow';
 import type { RawState } from '../components/feed/RawEventContent';
 import type { ResponseState } from '../components/feed/IncidentResponseContent';
@@ -265,123 +266,105 @@ export default function Feed() {
     loadFeed(undefined, undefined, false, 1);
   }, [loadFeed]);
 
+  const groups = useMemo(
+    () => groupEvents(items, bucketSize(timeTo - timeFrom)),
+    [items, timeFrom, timeTo],
+  );
+
   return (
-    <div>
-      <PageHeader
-        title="Feed"
-        description="All incoming events — alerts, cron runs, and manual triggers"
-        action={
-          <div className="flex items-center gap-3">
-            <TimeRangePicker
-              from={timeFrom}
-              to={timeTo}
-              refreshInterval={refreshInterval}
-              onChange={handleTimeRangeChange}
-              onRefreshIntervalChange={setRefreshInterval}
-            />
-            <button onClick={() => loadFeed()} className="btn btn-secondary" disabled={loading}>
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <label className="relative flex-[1_1_260px] max-w-md">
+          <span className="sr-only">Search events</span>
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-subtle pointer-events-none" aria-hidden="true" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => handleSearchInput(e.target.value)}
+            placeholder="Search by event ID, title or host"
+            className="input-field h-9 !pl-8 !pr-8"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={clearSearch}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-fg-subtle hover:text-fg"
+              title="Clear search"
+              aria-label="Clear search"
+            >
+              <X size={14} />
             </button>
-          </div>
-        }
-      />
+          )}
+        </label>
+        <SegmentedControl value={typeFilter} options={TYPE_FILTER_OPTIONS} onChange={handleTypeFilter} />
+        <TimeRangePicker
+          from={timeFrom}
+          to={timeTo}
+          refreshInterval={refreshInterval}
+          onChange={handleTimeRangeChange}
+          onRefreshIntervalChange={setRefreshInterval}
+        />
+        <span className="flex-1" />
+        <button
+          type="button"
+          onClick={() => loadFeed()}
+          disabled={loading}
+          className="btn btn-ghost h-9 w-9 p-0 inline-flex items-center justify-center"
+          title="Refresh"
+          aria-label="Refresh"
+        >
+          <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+        </button>
+      </div>
 
       {error && <ErrorMessage message={error} />}
       {successMsg && <SuccessMessage message={successMsg} />}
 
-      {/* Type filter chips + search */}
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
-        {TYPE_FILTER_OPTIONS.map(opt => (
-          <button
-            key={opt.value}
-            onClick={() => handleTypeFilter(opt.value)}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors border ${
-              typeFilter === opt.value
-                ? 'bg-primary-500 text-white border-primary-500'
-                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-        <div className="relative ml-auto min-w-[280px]">
-          <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => handleSearchInput(e.target.value)}
-            placeholder="Search by event ID, title, or host…"
-            className="input-field pl-8 pr-8 py-1.5 text-sm w-full"
-          />
-          {search && (
-            <button
-              onClick={clearSearch}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              title="Clear search"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {loading ? (
+      {loading && items.length === 0 ? (
         <LoadingSpinner />
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon={Rss}
+          title="No events in this time range"
+          description="Choose a longer time range or another event type."
+        />
       ) : (
-        <div className="card">
-          {items.length === 0 ? (
-            <EmptyState
-              icon={Rss}
-              title="No events in the selected time range"
-              description="Adjust the time range or type filter to see events"
-            />
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Time</th>
-                      <th>ID</th>
-                      <th>Type</th>
-                      <th>Title</th>
-                      <th>Status</th>
-                      <th>Incident</th>
-                      <th>Correlation</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.map((item) => (
-                      <FeedEventRow
-                        key={item.event_uuid}
-                        item={item}
-                        reasoningExpanded={reasoningExpanded.has(item.event_uuid)}
-                        rawExpanded={rawExpanded.has(item.event_uuid)}
-                        responseExpanded={responseExpanded.has(item.event_uuid)}
-                        rawState={rawData[item.event_uuid]}
-                        responseState={item.incident_uuid ? responseData[item.incident_uuid] : undefined}
-                        onToggleDetails={() => toggleRowDetails(item)}
-                        onFilterByEventId={() => filterByEventId(item.event_uuid)}
-                        onToggleResponse={() => toggleResponse(item)}
-                        onToggleReasoning={() => toggleReasoning(item.event_uuid)}
-                        onToggleRaw={() => toggleRaw(item)}
-                        onMove={() => setMoveTarget(item)}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <Pagination
-                page={page}
-                totalPages={totalPages}
-                totalItems={totalItems}
-                onPageChange={handlePageChange}
-              />
-            </>
-          )}
+        <div className="flex flex-col gap-5">
+          {groups.map((group) => (
+            <section key={group.key} aria-labelledby={`events-${group.key}`}>
+              <h2 id={`events-${group.key}`} className="flex items-baseline gap-2 mb-2 text-sm">
+                <span className="font-medium text-fg">{group.label}</span>
+                <span className="text-fg-subtle">
+                  {group.items.length} {group.items.length === 1 ? 'event' : 'events'}
+                </span>
+              </h2>
+              <ul className="rounded-xl border border-line bg-surface overflow-hidden">
+                {group.items.map((item) => (
+                  <FeedEventRow
+                    key={item.event_uuid}
+                    item={item}
+                    reasoningExpanded={reasoningExpanded.has(item.event_uuid)}
+                    rawExpanded={rawExpanded.has(item.event_uuid)}
+                    responseExpanded={responseExpanded.has(item.event_uuid)}
+                    rawState={rawData[item.event_uuid]}
+                    responseState={item.incident_uuid ? responseData[item.incident_uuid] : undefined}
+                    onToggleDetails={() => toggleRowDetails(item)}
+                    onFilterByEventId={() => filterByEventId(item.event_uuid)}
+                    onToggleResponse={() => toggleResponse(item)}
+                    onToggleReasoning={() => toggleReasoning(item.event_uuid)}
+                    onToggleRaw={() => toggleRaw(item)}
+                    onMove={() => setMoveTarget(item)}
+                  />
+                ))}
+              </ul>
+            </section>
+          ))}
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            onPageChange={handlePageChange}
+          />
         </div>
       )}
 

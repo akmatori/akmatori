@@ -38,6 +38,16 @@ export function formatShortDateTime(iso: string): string {
   });
 }
 
+// formatClock renders the local time of day as "14:02" or, with seconds,
+// "14:02:11" (24-hour clock; timeline rows).
+export function formatClock(iso: string, seconds = false): string {
+  return new Date(iso).toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(seconds ? { second: '2-digit' } : {}),
+  });
+}
+
 // formatCountdown renders the time left until an ISO timestamp, or "expired".
 export function formatCountdown(iso: string): string {
   const remainingMs = new Date(iso).getTime() - Date.now();
