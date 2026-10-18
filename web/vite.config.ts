@@ -12,12 +12,12 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    proxy: {
-      '/api': {
-        // Point local dev at another install: AKMATORI_API_URL=http://host:8080 npm run dev
-        target: process.env.AKMATORI_API_URL ?? 'https://api.vibevm.akmatori.com',
-        changeOrigin: true,
-      },
-    },
+    // Point local dev at another install: AKMATORI_API_URL=http://host:8080 npm run dev
+    proxy: Object.fromEntries(
+      ['/api', '/auth'].map((path) => [
+        path,
+        { target: process.env.AKMATORI_API_URL ?? 'https://api.vibevm.akmatori.com', changeOrigin: true },
+      ]),
+    ),
   },
 })
