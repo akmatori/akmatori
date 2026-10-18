@@ -194,7 +194,13 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 	// thread reply when the agent finishes.
 	progressStreamer := NewSlackProgressStreamer(typing.UpdateLoadingMessage, slackAppendInterval)
 
-	taskWithGuidance := executor.PrependGuidance(text)
+	// Name the originating channel in the prompt. Skills branch on it (the
+	// freemember skill drills into per-product agencies for the per-product
+	// downtime channel rather than sweeping all four projects), and the agent
+	// has no other way to see where the message came from.
+	taskWithGuidance := executor.PrependGuidance(
+		withSourceChannel(h.channelResolver.ResolveLabel(channel), text),
+	)
 
 	// Execute via WebSocket-based agent worker
 	if h.agentWSHandler != nil && h.agentWSHandler.IsWorkerConnected() {

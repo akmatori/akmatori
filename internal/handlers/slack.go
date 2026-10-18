@@ -11,6 +11,7 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/services"
+	slackutil "github.com/akmatori/akmatori/internal/slack"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
@@ -42,6 +43,11 @@ type SlackHandler struct {
 	alertHandler    *AlertHandler
 	alertService    services.AlertManager
 	channelService  services.ChannelManager
+
+	// channelResolver maps a channel ID back to its name so the agent prompt
+	// can name the channel a message came from. Nil-safe: ResolveLabel
+	// returns "" for a nil resolver or a client-less handler.
+	channelResolver *slackutil.ChannelResolver
 	botUserID       string // Bot's user ID for self-message filtering
 	teamID          string // Workspace team ID (required for Streaming API)
 
@@ -78,6 +84,9 @@ func NewSlackHandler(
 		skillService:   skillService,
 		alertChannels:  make(map[string]*database.Channel),
 		alertExtractor: extraction.NewAlertExtractor(oneShotCaller),
+	}
+	if client != nil {
+		h.channelResolver = slackutil.NewChannelResolver(client)
 	}
 	h.runMentionContinuation = h.handleBotMentionInThread
 	// Wire the default ack adapter only when a real client is present, so a

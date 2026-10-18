@@ -601,7 +601,9 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 
 	// Build investigation prompt
 	investigationPrompt := h.buildInvestigationPrompt(alert, instance)
-	taskWithGuidance := executor.PrependGuidance(investigationPrompt)
+	taskWithGuidance := executor.PrependGuidance(
+		withSourceChannel(h.channelResolver.ResolveLabel(channelID), investigationPrompt),
+	)
 
 	// Show "is investigating..." in the alert thread for the duration of the
 	// agent run when Slack is configured. The reaction lands on the bot's own
@@ -814,7 +816,9 @@ func (h *AlertHandler) runListenerChannelInvestigation(
 
 	// Build investigation prompt
 	investigationPrompt := h.buildInvestigationPromptForChannel(alert, channel)
-	taskWithGuidance := executor.PrependGuidance(investigationPrompt)
+	taskWithGuidance := executor.PrependGuidance(
+		withSourceChannel(h.channelResolver.ResolveLabel(slackChannelID), investigationPrompt),
+	)
 
 	// Show "is investigating..." in the thread header and put a hourglass
 	// reaction on the original Slack-channel alert message for the duration

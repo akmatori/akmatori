@@ -14,13 +14,20 @@ type ChannelResolver struct {
 	client *slack.Client
 	cache  map[string]string // name -> id
 	mu     sync.RWMutex
+
+	// Reverse direction (id -> label) used to tell the agent which channel a
+	// message came from. Separate lock so a label lookup never blocks a
+	// name->id resolve. See channel_label.go.
+	labelCache map[string]channelLabel // id -> label
+	labelMu    sync.RWMutex
 }
 
 // NewChannelResolver creates a new channel resolver
 func NewChannelResolver(client *slack.Client) *ChannelResolver {
 	return &ChannelResolver{
-		client: client,
-		cache:  make(map[string]string),
+		client:     client,
+		cache:      make(map[string]string),
+		labelCache: make(map[string]channelLabel),
 	}
 }
 
