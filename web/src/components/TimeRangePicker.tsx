@@ -198,13 +198,13 @@ export default function TimeRangePicker({
           group flex items-center gap-2.5 px-3 py-2
           bg-gray-100 dark:bg-gray-800/80
           hover:bg-gray-200 dark:hover:bg-gray-700/80
-          border border-gray-200 dark:border-gray-700
+          border border-line
           rounded-lg transition-all duration-150
-          text-gray-700 dark:text-gray-200
+          text-fg
           shadow-sm hover:shadow
         "
       >
-        <Clock className="w-4 h-4 text-gray-500 dark:text-gray-400 group-hover:text-primary-500 transition-colors" />
+        <Clock className="w-4 h-4 text-fg-subtle group-hover:text-primary-500 transition-colors" />
         <span className="text-sm font-medium tracking-tight">
           {formatTimeRange(from, to)}
         </span>
@@ -216,9 +216,9 @@ export default function TimeRangePicker({
 
         {/* Refresh indicator */}
         {refreshInterval > 0 && (
-          <div className="flex items-center gap-1.5 ml-1 pl-2.5 border-l border-gray-300 dark:border-gray-600">
+          <div className="flex items-center gap-1.5 ml-1 pl-2.5 border-l border-line">
             <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-            <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
+            <span className="text-xs text-fg-subtle font-mono">
               {REFRESH_OPTIONS.find((r) => r.value === refreshInterval)?.label || ''}
             </span>
           </div>
@@ -232,15 +232,15 @@ export default function TimeRangePicker({
           className="
             absolute right-0 top-full mt-2 z-50
             w-80
-            bg-white dark:bg-gray-800
-            border border-gray-200 dark:border-gray-700
+            bg-surface
+            border border-line
             rounded-xl shadow-xl
             overflow-hidden
             animate-fade-in
           "
         >
           {/* Tabs */}
-          <div className="flex border-b border-gray-200 dark:border-gray-700">
+          <div className="flex border-b border-line">
             <button
               onClick={() => handleTabChange('relative')}
               className={`
@@ -249,7 +249,7 @@ export default function TimeRangePicker({
                 ${
                   activeTab === 'relative'
                     ? 'text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-500/10 border-b-2 border-primary-500'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                    : 'text-fg-subtle hover:text-fg hover:bg-surface-2'
                 }
               `}
             >
@@ -264,7 +264,7 @@ export default function TimeRangePicker({
                 ${
                   activeTab === 'absolute'
                     ? 'text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-500/10 border-b-2 border-primary-500'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                    : 'text-fg-subtle hover:text-fg hover:bg-surface-2'
                 }
               `}
             >
@@ -287,7 +287,7 @@ export default function TimeRangePicker({
                       ${
                         currentPreset?.label === preset.label
                           ? 'bg-primary-500 text-white shadow-md shadow-primary-500/25'
-                          : 'bg-gray-100 dark:bg-gray-700/50 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600/50'
+                          : 'bg-gray-100 dark:bg-gray-700/50 text-fg hover:bg-gray-200 dark:hover:bg-gray-600/50'
                       }
                     `}
                   >
@@ -298,7 +298,7 @@ export default function TimeRangePicker({
             ) : (
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
+                  <label className="block text-xs font-medium text-fg-subtle mb-1.5">
                     From
                   </label>
                   <input
@@ -307,16 +307,16 @@ export default function TimeRangePicker({
                     onChange={(e) => setCustomFrom(e.target.value)}
                     className="
                       w-full px-3 py-2.5
-                      bg-gray-50 dark:bg-gray-700/50
-                      border border-gray-200 dark:border-gray-600
+                      bg-surface-2
+                      border border-line
                       rounded-lg text-sm
-                      text-gray-700 dark:text-gray-200
+                      text-fg
                       focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500
                     "
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 uppercase tracking-wide">
+                  <label className="block text-xs font-medium text-fg-subtle mb-1.5">
                     To
                   </label>
                   <input
@@ -325,10 +325,10 @@ export default function TimeRangePicker({
                     onChange={(e) => setCustomTo(e.target.value)}
                     className="
                       w-full px-3 py-2.5
-                      bg-gray-50 dark:bg-gray-700/50
-                      border border-gray-200 dark:border-gray-600
+                      bg-surface-2
+                      border border-line
                       rounded-lg text-sm
-                      text-gray-700 dark:text-gray-200
+                      text-fg
                       focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500
                     "
                   />
@@ -352,7 +352,7 @@ export default function TimeRangePicker({
           </div>
 
           {/* Refresh Interval Footer */}
-          <div className="px-3 py-3 bg-gray-50 dark:bg-gray-900/50 border-t border-gray-200 dark:border-gray-700">
+          <div className="px-3 py-3 bg-surface-2 border-t border-line">
             <div className="flex items-center gap-3">
               {/* Play/Pause Button */}
               <button
@@ -363,7 +363,7 @@ export default function TimeRangePicker({
                   ${
                     isRefreshing
                       ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/30'
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600'
+                      : 'bg-gray-200 dark:bg-gray-700 text-fg-subtle hover:bg-gray-300 dark:hover:bg-gray-600'
                   }
                 `}
                 title={isRefreshing ? 'Pause auto-refresh' : 'Start auto-refresh'}
@@ -387,7 +387,7 @@ export default function TimeRangePicker({
                       ${
                         refreshInterval === option.value
                           ? 'bg-primary-500 text-white'
-                          : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                          : 'text-fg-subtle hover:bg-gray-200 dark:hover:bg-gray-700'
                       }
                     `}
                   >

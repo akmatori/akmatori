@@ -36,12 +36,12 @@ export default function CreateIncidentModal({ onClose, onCreated, onError }: Cre
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-2xl w-full animate-fade-in">
+      <div className="bg-surface rounded-xl shadow-2xl max-w-2xl w-full animate-fade-in">
         {/* Modal Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between p-6 border-b border-line">
           <div>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Create Incident</h2>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            <h2 className="text-xl font-semibold text-fg">Create incident</h2>
+            <p className="mt-1 text-sm text-fg-subtle">
               Start an incident investigation by providing a task description
             </p>
           </div>
@@ -52,7 +52,7 @@ export default function CreateIncidentModal({ onClose, onCreated, onError }: Cre
 
         {/* Modal Body */}
         <div className="p-6">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          <label className="block text-sm font-medium text-fg mb-2">
             Task Description <span className="text-red-500">*</span>
           </label>
           <textarea
@@ -62,13 +62,13 @@ export default function CreateIncidentModal({ onClose, onCreated, onError }: Cre
             className="input-field min-h-[180px] resize-y"
             autoFocus
           />
-          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+          <p className="mt-2 text-xs text-fg-subtle">
             The incident manager will analyze this task and coordinate with skills to resolve it.
           </p>
         </div>
 
         {/* Modal Footer */}
-        <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+        <div className="flex items-center justify-end gap-3 p-6 border-t border-line bg-surface-2">
           <button onClick={onClose} className="btn btn-secondary" disabled={creating}>
             Cancel
           </button>

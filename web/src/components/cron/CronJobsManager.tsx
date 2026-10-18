@@ -2,6 +2,7 @@ import EmptyState from '../shared/EmptyState';
 import { useCallback, useEffect, useState } from 'react';
 import { Plus, Trash2, Edit2, Play, Power, PowerOff, Shield, Wrench } from 'lucide-react';
 import LoadingSpinner from '../LoadingSpinner';
+import PageHeader from '../PageHeader';
 import ErrorMessage from '../ErrorMessage';
 import { cronJobsApi } from '../../api/client';
 import type { CronJob } from '../../types';
@@ -106,18 +107,17 @@ export default function CronJobsManager() {
   if (loading) return <LoadingSpinner />;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <p className="text-sm text-gray-600 dark:text-gray-400">
-          Scheduled agent investigations posted to a Channel on a cron cadence.
-        </p>
-        {!isCreating && !editing && (
-          <button className="btn btn-primary" onClick={startCreate}>
-            <Plus className="w-4 h-4" />
-            New Cron Job
+    <div className="space-y-5">
+      <PageHeader
+        title="Cron jobs"
+        description="Recurring schedules that run a one-shot LLM completion or a full agent investigation, and post the result to a channel."
+        action={!isCreating && !editing && (
+          <button type="button" className="btn btn-primary" onClick={startCreate}>
+            <Plus className="w-4 h-4" aria-hidden="true" />
+            New cron job
           </button>
         )}
-      </div>
+      />
 
       {error && <ErrorMessage message={error} />}
 
@@ -133,26 +133,26 @@ export default function CronJobsManager() {
       {jobs.length === 0 ? (
         <EmptyState padding="py-12" title="No cron jobs configured" description="Create one to schedule recurring reports or investigations." />
       ) : (
-        <div className="overflow-x-auto">
+        <div className="card p-0 overflow-x-auto">
           <table className="w-full text-left">
             <thead>
-              <tr className="border-b border-gray-200 dark:border-gray-700">
-                <th className="py-2 px-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <tr className="border-b border-line">
+                <th className="py-2 px-3 text-xs text-fg-subtle">
                   Name
                 </th>
-                <th className="py-2 px-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                <th className="py-2 px-3 text-xs text-fg-subtle">
                   Schedule
                 </th>
-                <th className="py-2 px-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                <th className="py-2 px-3 text-xs text-fg-subtle">
                   Channel
                 </th>
-                <th className="py-2 px-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                <th className="py-2 px-3 text-xs text-fg-subtle">
                   Tools
                 </th>
-                <th className="py-2 px-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                <th className="py-2 px-3 text-xs text-fg-subtle">
                   Status
                 </th>
-                <th className="py-2 px-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                <th className="py-2 px-3 text-xs text-fg-subtle">
                   Last run
                 </th>
                 <th className="py-2 px-3"></th>
@@ -171,10 +171,10 @@ export default function CronJobsManager() {
                   : '—';
                 const toolCount = job.tools?.length ?? 0;
                 return (
-                  <tr key={job.uuid} className="border-b border-gray-100 dark:border-gray-800">
+                  <tr key={job.uuid} className="border-b border-line">
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-medium text-gray-900 dark:text-white">
+                        <span className="text-sm font-medium text-fg">
                           {job.name}
                         </span>
                         {job.is_system && (
@@ -189,19 +189,19 @@ export default function CronJobsManager() {
                       </div>
                     </td>
                     <td className="py-3 px-3">
-                      <code className="text-xs text-gray-700 dark:text-gray-300">
+                      <code className="text-xs text-fg">
                         {job.schedule}
                       </code>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      <div className="text-xs text-fg-subtle mt-0.5">
                         Next: {nextRunText}
                       </div>
                     </td>
                     <td className="py-3 px-3">
-                      <span className="text-sm text-gray-700 dark:text-gray-300">{channelText}</span>
+                      <span className="text-sm text-fg">{channelText}</span>
                     </td>
                     <td className="py-3 px-3">
                       {toolCount === 0 ? (
-                        <span className="text-xs text-gray-400 dark:text-gray-500">None</span>
+                        <span className="text-xs text-fg-subtle">None</span>
                       ) : (
                         <span
                           className="badge badge-default text-xs"
@@ -225,7 +225,7 @@ export default function CronJobsManager() {
                       </div>
                     </td>
                     <td className="py-3 px-3">
-                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                      <span className="text-xs text-fg-subtle">
                         {job.last_run_at
                           ? new Date(job.last_run_at).toLocaleString()
                           : '—'}
@@ -234,7 +234,7 @@ export default function CronJobsManager() {
                     <td className="py-3 px-3 text-right">
                       <div className="flex gap-2 justify-end">
                         <button
-                          className="btn btn-ghost p-2 text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20"
+                          className="btn btn-ghost p-2"
                           onClick={() => runNow(job.uuid)}
                           disabled={runningUUID === job.uuid}
                           title="Run now"
@@ -242,7 +242,7 @@ export default function CronJobsManager() {
                           <Play className="w-4 h-4" />
                         </button>
                         <button
-                          className="btn btn-ghost p-2 text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20"
+                          className="btn btn-ghost p-2"
                           onClick={() => startEdit(job)}
                           title="Edit"
                         >
@@ -250,7 +250,7 @@ export default function CronJobsManager() {
                         </button>
                         {!job.is_system && (
                           <button
-                            className="btn btn-ghost p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                            className="btn btn-ghost p-2 text-state-fail hover:bg-state-fail/10"
                             onClick={() => remove(job.uuid)}
                             title="Delete"
                           >

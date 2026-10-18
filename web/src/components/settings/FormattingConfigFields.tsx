@@ -43,14 +43,14 @@ export default function FormattingConfigFields({
     <div className="space-y-5">
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+          <label className="block text-sm font-medium text-fg">
             System prompt
           </label>
           <button
             type="button"
             onClick={() => onChange({ systemPrompt: '' })}
             disabled={disabled}
-            className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex items-center gap-1 text-xs text-fg-subtle hover:text-fg disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <RotateCcw className="w-3 h-3" />
             Clear
@@ -65,11 +65,11 @@ export default function FormattingConfigFields({
           className="input-field font-mono text-xs"
         />
         <div className="mt-1 flex items-center justify-between">
-          <p className="text-xs text-gray-500 dark:text-gray-400">
+          <p className="text-xs text-fg-subtle">
             Instructs the LLM how to structure the summary. Clear the box to fall back to the
             built-in default.
           </p>
-          <p className={`text-xs ${promptTooLong ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
+          <p className={`text-xs ${promptTooLong ? 'text-state-fail' : 'text-fg-subtle'}`}>
             {promptBytes} / {SYSTEM_PROMPT_MAX_BYTES} bytes
           </p>
         </div>
@@ -77,7 +77,7 @@ export default function FormattingConfigFields({
 
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+          <label className="block text-sm font-medium text-fg">
             Output shape
           </label>
           <button
@@ -87,7 +87,7 @@ export default function FormattingConfigFields({
               onSchemaJsonError(null);
             }}
             disabled={disabled}
-            className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex items-center gap-1 text-xs text-fg-subtle hover:text-fg disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <RotateCcw className="w-3 h-3" />
             Clear
@@ -108,19 +108,19 @@ export default function FormattingConfigFields({
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="flex-1">
             {schemaJsonError ? (
-              <p className="text-xs text-red-600 dark:text-red-400">{schemaJsonError}</p>
+              <p className="text-xs text-state-fail">{schemaJsonError}</p>
             ) : schemaTooLong ? (
-              <p className="text-xs text-red-600 dark:text-red-400">
+              <p className="text-xs text-state-fail">
                 Output shape must be {OUTPUT_SCHEMA_EXAMPLE_MAX_BYTES} bytes or fewer
               </p>
             ) : (
-              <p className="text-xs text-gray-500 dark:text-gray-400">
+              <p className="text-xs text-fg-subtle">
                 An example of the JSON object you want as the final summary. The LLM will be
                 instructed to return exactly this shape.
               </p>
             )}
           </div>
-          <p className={`text-xs flex-shrink-0 ${schemaTooLong ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
+          <p className={`text-xs flex-shrink-0 ${schemaTooLong ? 'text-state-fail' : 'text-fg-subtle'}`}>
             {schemaBytes} / {OUTPUT_SCHEMA_EXAMPLE_MAX_BYTES} bytes
           </p>
         </div>
@@ -128,7 +128,7 @@ export default function FormattingConfigFields({
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+          <label className="block text-sm font-medium text-fg mb-1.5">
             Max tokens
           </label>
           <input
@@ -140,13 +140,13 @@ export default function FormattingConfigFields({
             disabled={disabled}
             className="input-field"
           />
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          <p className="mt-1 text-xs text-fg-subtle">
             Upper bound on the formatted response length (1 - 8000).
           </p>
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+          <label className="block text-sm font-medium text-fg mb-1.5">
             Temperature
           </label>
           <input
@@ -159,7 +159,7 @@ export default function FormattingConfigFields({
             disabled={disabled}
             className="input-field"
           />
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          <p className="mt-1 text-xs text-fg-subtle">
             Sampling temperature (0 - 2). Lower values produce more deterministic output.
           </p>
         </div>

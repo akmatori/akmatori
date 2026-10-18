@@ -43,7 +43,7 @@ export default function SSHKeysSection({
   return (
     <div className="space-y-4 mb-6">
       <div className="flex items-center justify-between">
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+        <label className="block text-sm font-medium text-fg">
           <Key className="w-4 h-4 inline mr-1" />
           SSH Keys
         </label>
@@ -61,10 +61,10 @@ export default function SSHKeysSection({
       {/* Add Key Form */}
       {showAddKey && (
         <div className="border border-blue-200 dark:border-blue-800 rounded-lg p-4 bg-blue-50 dark:bg-blue-900/20">
-          <h4 className="font-medium text-gray-900 dark:text-white mb-4">Add New SSH Key</h4>
+          <h4 className="font-medium text-fg mb-4">Add New SSH Key</h4>
           <div className="space-y-4">
             <div>
-              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+              <label className="block text-xs text-fg-subtle mb-1">
                 Key Name <span className="text-red-500">*</span>
               </label>
               <input
@@ -76,7 +76,7 @@ export default function SSHKeysSection({
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+              <label className="block text-xs text-fg-subtle mb-1">
                 Private Key (PEM format) <span className="text-red-500">*</span>
               </label>
               <textarea
@@ -93,7 +93,7 @@ export default function SSHKeysSection({
                 checked={newKeyIsDefault}
                 onChange={(e) => setNewKeyIsDefault(e.target.checked)}
               />
-              <label htmlFor="newKeyIsDefault" className="text-sm text-gray-700 dark:text-gray-300">
+              <label htmlFor="newKeyIsDefault" className="text-sm text-fg">
                 Set as default key
               </label>
             </div>
@@ -126,30 +126,30 @@ export default function SSHKeysSection({
       {sshKeysLoading ? (
         <div className="text-center py-4 text-gray-500">Loading keys...</div>
       ) : sshKeys.length === 0 && !isCreating ? (
-        <div className="text-center py-6 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
+        <div className="text-center py-6 border-2 border-dashed border-line rounded-lg">
           <Key className="w-8 h-8 mx-auto text-gray-400 mb-2" />
-          <p className="text-sm text-gray-500 dark:text-gray-400">No SSH keys configured</p>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Click "Add Key" to add your first SSH key</p>
+          <p className="text-sm text-fg-subtle">No SSH keys configured</p>
+          <p className="text-xs text-fg-subtle mt-1">Click "Add Key" to add your first SSH key</p>
         </div>
       ) : isCreating ? (
-        <div className="text-center py-6 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
+        <div className="text-center py-6 border-2 border-dashed border-line rounded-lg">
           <Key className="w-8 h-8 mx-auto text-gray-400 mb-2" />
-          <p className="text-sm text-gray-500 dark:text-gray-400">Save the tool first to add SSH keys</p>
+          <p className="text-sm text-fg-subtle">Save the tool first to add SSH keys</p>
         </div>
       ) : (
-        <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+        <div className="border border-line rounded-lg overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 dark:bg-gray-800">
               <tr>
-                <th className="px-4 py-2 text-left text-gray-600 dark:text-gray-300">Name</th>
-                <th className="px-4 py-2 text-left text-gray-600 dark:text-gray-300">Default</th>
-                <th className="px-4 py-2 text-right text-gray-600 dark:text-gray-300">Actions</th>
+                <th className="px-4 py-2 text-left text-fg-muted">Name</th>
+                <th className="px-4 py-2 text-left text-fg-muted">Default</th>
+                <th className="px-4 py-2 text-right text-fg-muted">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+            <tbody className="divide-y divide-line">
               {sshKeys.map((key) => (
-                <tr key={key.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                  <td className="px-4 py-2 text-gray-900 dark:text-white font-medium">
+                <tr key={key.id} className="hover:bg-surface-2">
+                  <td className="px-4 py-2 text-fg font-medium">
                     {key.name}
                   </td>
                   <td className="px-4 py-2">
@@ -161,7 +161,7 @@ export default function SSHKeysSection({
                       <button
                         type="button"
                         onClick={() => onSetDefaultKey(key.id)}
-                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-xs"
+                        className="text-gray-400 hover:text-fg text-xs"
                       >
                         Set as default
                       </button>
@@ -186,7 +186,7 @@ export default function SSHKeysSection({
 
       {/* Info about default key */}
       {sshKeys.length > 0 && defaultKey && (
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+        <p className="text-xs text-fg-subtle">
           Default key: <span className="font-medium">{defaultKey.name}</span> - used for all hosts unless overridden
         </p>
       )}

@@ -161,7 +161,7 @@ export default function ChannelsManager() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <p className="text-sm text-gray-600 dark:text-gray-400">
+        <p className="text-sm text-fg-muted">
           Channels are addressable destinations inside an Integration. Use them to route alert notifications, listen for inbound messages, or set a default outbound destination.
         </p>
         {!isCreating && !editing && (
@@ -172,7 +172,7 @@ export default function ChannelsManager() {
             title={integrations.length === 0 ? 'Add an Integration first' : 'Add channel'}
           >
             <Plus className="w-4 h-4" />
-            New Channel
+            New channel
           </button>
         )}
       </div>
@@ -180,13 +180,13 @@ export default function ChannelsManager() {
       {error && <ErrorMessage message={error} />}
 
       {(isCreating || editing) && (
-        <div className="p-6 bg-gray-50 dark:bg-gray-900/50 rounded-lg border border-gray-200 dark:border-gray-700 animate-fade-in">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-            {isCreating ? 'Add Channel' : 'Edit Channel'}
+        <div className="p-6 bg-surface-2 rounded-lg border border-line animate-fade-in">
+          <h3 className="text-lg font-semibold text-fg mb-4">
+            {isCreating ? 'Add channel' : 'Edit channel'}
           </h3>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-fg mb-1">
                 Integration <span className="text-red-500">*</span>
               </label>
               <select
@@ -205,7 +205,7 @@ export default function ChannelsManager() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-fg mb-1">
                 External ID <span className="text-red-500">*</span>
               </label>
               <input
@@ -215,13 +215,13 @@ export default function ChannelsManager() {
                 value={form.external_id}
                 onChange={(e) => setForm({ ...form, external_id: e.target.value })}
               />
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              <p className="mt-1 text-xs text-fg-subtle">
                 For Slack: the Channel ID (not the name).
               </p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-fg mb-1">
                 Display Name
               </label>
               <input
@@ -233,14 +233,14 @@ export default function ChannelsManager() {
               />
             </div>
 
-            <div className="flex flex-wrap gap-4 p-3 rounded bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+            <div className="flex flex-wrap gap-4 p-3 rounded bg-surface border border-line">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={form.can_post}
                   onChange={(e) => setForm({ ...form, can_post: e.target.checked })}
                 />
-                <span className="text-sm text-gray-700 dark:text-gray-300">Can post</span>
+                <span className="text-sm text-fg">Can post</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -248,7 +248,7 @@ export default function ChannelsManager() {
                   checked={form.can_listen}
                   onChange={(e) => setForm({ ...form, can_listen: e.target.checked })}
                 />
-                <span className="text-sm text-gray-700 dark:text-gray-300">Can listen</span>
+                <span className="text-sm text-fg">Can listen</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -257,7 +257,7 @@ export default function ChannelsManager() {
                   onChange={(e) => setForm({ ...form, is_default_post: e.target.checked })}
                   disabled={!form.can_post}
                 />
-                <span className="text-sm text-gray-700 dark:text-gray-300">Default post target</span>
+                <span className="text-sm text-fg">Default post target</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -265,10 +265,10 @@ export default function ChannelsManager() {
                   checked={form.enabled}
                   onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
                 />
-                <span className="text-sm text-gray-700 dark:text-gray-300">Enabled</span>
+                <span className="text-sm text-fg">Enabled</span>
               </label>
               {form.can_listen && !form.can_post && (
-                <span className="w-full text-xs text-gray-500 dark:text-gray-400">
+                <span className="w-full text-xs text-fg-subtle">
                   Silent listener: alerts from this channel are investigated and shown in the
                   incidents UI, but Akmatori never posts replies, reactions, or status back to the
                   channel.
@@ -279,7 +279,7 @@ export default function ChannelsManager() {
             {form.can_listen && (
               <>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <label className="block text-sm font-medium text-fg mb-1">
                     Custom Extraction Prompt (optional)
                   </label>
                   <textarea
@@ -288,7 +288,7 @@ export default function ChannelsManager() {
                     value={form.extraction_prompt}
                     onChange={(e) => setForm({ ...form, extraction_prompt: e.target.value })}
                   />
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  <p className="mt-1 text-xs text-fg-subtle">
                     Leave empty to use the default. Use %s as a placeholder for the message text.
                   </p>
                 </div>
@@ -298,7 +298,7 @@ export default function ChannelsManager() {
                     checked={form.process_bot_messages}
                     onChange={(e) => setForm({ ...form, process_bot_messages: e.target.checked })}
                   />
-                  <span className="text-sm text-gray-700 dark:text-gray-300">
+                  <span className="text-sm text-fg">
                     Process bot messages as alerts
                   </span>
                 </label>
@@ -308,12 +308,12 @@ export default function ChannelsManager() {
                     checked={form.process_human_messages}
                     onChange={(e) => setForm({ ...form, process_human_messages: e.target.checked })}
                   />
-                  <span className="text-sm text-gray-700 dark:text-gray-300">
+                  <span className="text-sm text-fg">
                     Process human messages as alerts
                   </span>
                 </label>
                 {!form.process_bot_messages && !form.process_human_messages && (
-                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                  <p className="text-xs text-state-need">
                     Neither source is selected: this channel will not create alerts. Only explicit
                     @mentions of the bot will be handled.
                   </p>
@@ -321,7 +321,7 @@ export default function ChannelsManager() {
               </>
             )}
 
-            <div className="flex gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+            <div className="flex gap-3 pt-2 border-t border-line">
               <button onClick={save} className="btn btn-primary">
                 <Save className="w-4 h-4" />
                 Save
@@ -341,10 +341,10 @@ export default function ChannelsManager() {
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
-              <tr className="border-b border-gray-200 dark:border-gray-700">
-                <th className="py-2 px-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Integration</th>
-                <th className="py-2 px-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Channel</th>
-                <th className="py-2 px-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Roles</th>
+              <tr className="border-b border-line">
+                <th className="py-2 px-3 text-xs text-fg-subtle">Integration</th>
+                <th className="py-2 px-3 text-xs text-fg-subtle">Channel</th>
+                <th className="py-2 px-3 text-xs text-fg-subtle">Roles</th>
                 <th className="py-2 px-3"></th>
               </tr>
             </thead>
@@ -353,27 +353,27 @@ export default function ChannelsManager() {
                 const integ = integrationByID(ch.integration_id);
                 const provider = integ?.provider ?? '';
                 return (
-                  <tr key={ch.uuid} className="border-b border-gray-100 dark:border-gray-800">
+                  <tr key={ch.uuid} className="border-b border-line">
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2">
                         <div className={`source-icon source-icon-${provider}`}>
                           {providerIconText(provider)}
                         </div>
                         <div>
-                          <div className="text-sm text-gray-900 dark:text-white">
+                          <div className="text-sm text-fg">
                             {integ?.name ?? 'unknown'}
                           </div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                          <div className="text-xs text-fg-subtle">
                             {providerLabel(provider)}
                           </div>
                         </div>
                       </div>
                     </td>
                     <td className="py-3 px-3">
-                      <div className="text-sm text-gray-900 dark:text-white">
+                      <div className="text-sm text-fg">
                         {ch.display_name || ch.external_id}
                       </div>
-                      <code className="text-xs text-gray-500 dark:text-gray-400">{ch.external_id}</code>
+                      <code className="text-xs text-fg-subtle">{ch.external_id}</code>
                     </td>
                     <td className="py-3 px-3">
                       <div className="flex flex-wrap gap-1.5">
@@ -387,14 +387,14 @@ export default function ChannelsManager() {
                     <td className="py-3 px-3 text-right">
                       <div className="flex gap-2 justify-end">
                         <button
-                          className="btn btn-ghost p-2 text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20"
+                          className="btn btn-ghost p-2"
                           onClick={() => startEdit(ch)}
                           title="Edit"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button
-                          className="btn btn-ghost p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                          className="btn btn-ghost p-2 text-state-fail hover:bg-state-fail/10"
                           onClick={() => remove(ch.uuid)}
                           title="Delete"
                         >

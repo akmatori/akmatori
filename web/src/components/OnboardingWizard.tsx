@@ -49,14 +49,14 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
   if (success) {
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full p-8 text-center animate-fade-in">
+        <div className="bg-surface rounded-2xl shadow-2xl max-w-md w-full p-8 text-center animate-fade-in">
           <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
             <CheckCircle className="w-8 h-8 text-green-600 dark:text-green-400" />
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+          <h2 className="text-2xl font-bold text-fg mb-2">
             You're all set!
           </h2>
-          <p className="text-gray-600 dark:text-gray-400">
+          <p className="text-fg-muted">
             Akmatori is ready to investigate incidents.
           </p>
         </div>
@@ -66,16 +66,16 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full animate-fade-in">
+      <div className="bg-surface rounded-2xl shadow-2xl max-w-md w-full animate-fade-in">
         {/* Header */}
         <div className="p-8 pb-6 text-center">
           <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-primary-100 dark:bg-primary-900/30 flex items-center justify-center">
             <Sparkles className="w-8 h-8 text-primary-600 dark:text-primary-400" />
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+          <h2 className="text-2xl font-bold text-fg mb-2">
             Welcome to Akmatori
           </h2>
-          <p className="text-gray-600 dark:text-gray-400">
+          <p className="text-fg-muted">
             Let's get you started in under a minute.
           </p>
         </div>
@@ -83,7 +83,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
         {/* Form */}
         <form onSubmit={handleSubmit} className="px-8 pb-8">
           <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-fg mb-2">
               LLM API Key
             </label>
             <input
@@ -95,13 +95,13 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
               autoFocus
               disabled={saving}
             />
-            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+            <p className="mt-2 text-sm text-fg-subtle">
               Enter an API key for your LLM provider. You can configure the provider in Settings.
             </p>
           </div>
 
           {error && (
-            <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">
+            <div className="mb-4 p-3 bg-state-fail/10 border border-state-fail/40 rounded-lg text-sm text-state-fail">
               {error}
             </div>
           )}
@@ -127,7 +127,7 @@ export default function OnboardingWizard({ onComplete, onSkip }: OnboardingWizar
           <button
             type="button"
             onClick={onSkip}
-            className="w-full mt-3 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+            className="w-full mt-3 text-sm text-fg-subtle hover:text-fg transition-colors"
           >
             Skip for now
           </button>

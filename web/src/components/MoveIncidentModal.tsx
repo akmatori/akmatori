@@ -75,21 +75,21 @@ export default function MoveIncidentModal({
     <div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="move-modal-title">
       <div className="fixed inset-0 bg-black/50 transition-opacity" onClick={submitting ? undefined : onClose} />
       <div className="flex min-h-full items-center justify-center p-4">
-        <div className="relative w-full max-w-lg bg-white dark:bg-gray-800 rounded-xl shadow-xl">
+        <div className="relative w-full max-w-lg bg-surface rounded-xl shadow-xl">
           {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-line">
             <div>
-              <h2 id="move-modal-title" className="text-base font-semibold text-gray-900 dark:text-gray-100">
+              <h2 id="move-modal-title" className="text-base font-semibold text-fg">
                 Move alert
               </h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate max-w-md" title={alertTitle}>
+              <p className="text-xs text-fg-subtle mt-0.5 truncate max-w-md" title={alertTitle}>
                 {alertTitle || 'Untitled alert'}
               </p>
             </div>
             <button
               onClick={onClose}
               disabled={submitting}
-              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 disabled:opacity-50"
+              className="text-gray-400 hover:text-fg disabled:opacity-50"
             >
               <X className="w-5 h-5" />
             </button>
@@ -97,7 +97,7 @@ export default function MoveIncidentModal({
 
           <div className="p-6 space-y-4">
             {error && (
-              <div className="px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-sm">
+              <div className="px-3 py-2 rounded-lg bg-state-fail/10 text-state-fail text-sm">
                 {error}
               </div>
             )}
@@ -115,7 +115,7 @@ export default function MoveIncidentModal({
 
             <div className="flex items-center gap-3">
               <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
-              <span className="text-xs text-gray-400 uppercase tracking-wide">or link to an existing incident</span>
+              <span className="text-xs text-gray-400">or link to an existing incident</span>
               <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
             </div>
 
@@ -127,12 +127,12 @@ export default function MoveIncidentModal({
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Search incidents by title or UUID…"
-                className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-sm text-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                className="w-full pl-9 pr-3 py-2 rounded-lg border border-line bg-surface text-sm text-fg focus:outline-none focus:ring-2 focus:ring-primary-500"
               />
             </div>
 
             {/* Incident list */}
-            <div className="max-h-64 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-100 dark:divide-gray-800">
+            <div className="max-h-64 overflow-y-auto border border-line rounded-lg divide-y divide-gray-100 dark:divide-gray-800">
               {loading ? (
                 <div className="flex items-center justify-center py-8 text-gray-400">
                   <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading incidents…
@@ -145,10 +145,10 @@ export default function MoveIncidentModal({
                     key={inc.uuid}
                     onClick={() => doMove(inc.uuid)}
                     disabled={submitting}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-gray-50 dark:hover:bg-gray-700/50 disabled:opacity-50 transition-colors"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-surface-2 disabled:opacity-50 transition-colors"
                   >
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm text-gray-800 dark:text-gray-100 truncate">
+                      <div className="text-sm text-fg truncate">
                         {inc.title || <span className="italic text-gray-400">Untitled</span>}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5">

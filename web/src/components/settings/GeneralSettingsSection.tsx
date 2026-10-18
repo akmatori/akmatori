@@ -100,7 +100,7 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
       {generalSuccess && <SuccessMessage message="Settings saved" />}
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+        <label className="block text-sm font-medium text-fg mb-1.5">
           Base URL
         </label>
         <input
@@ -110,15 +110,15 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
           placeholder="https://akmatori.example.com"
           className="input-field"
         />
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+        <p className="mt-1 text-xs text-fg-subtle">
           External URL for accessing this Akmatori instance. Used in Slack message links.
         </p>
       </div>
 
       {/* Alert Correlation */}
-      <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Alert Correlation</h3>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+      <div className="border-t border-line pt-4">
+        <h3 className="text-sm font-semibold text-fg mb-3">Alert Correlation</h3>
+        <p className="text-xs text-fg-subtle mb-3">
           Before spawning a new incident, ask an LLM whether the incoming alert is a recurrence of a recent one.
           Changes take effect on the next alert without a restart.
         </p>
@@ -131,7 +131,7 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
             onChange={(e) => setCorrelationEnabled(e.target.checked)}
             className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
           />
-          <label htmlFor="correlation-enabled" className="text-sm text-gray-700 dark:text-gray-300">
+          <label htmlFor="correlation-enabled" className="text-sm text-fg">
             Enable alert correlation gate
           </label>
         </div>
@@ -144,13 +144,13 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
             onChange={(e) => setIncidentMergeEnabled(e.target.checked)}
             className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
           />
-          <label htmlFor="incident-merge-enabled" className="text-sm text-gray-700 dark:text-gray-300">
+          <label htmlFor="incident-merge-enabled" className="text-sm text-fg">
             Merge incidents with the same root cause after investigation
           </label>
         </div>
 
         <div className="w-1/3">
-          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+          <label className="block text-xs font-medium text-fg-muted mb-1">
             Monitor window (minutes)
           </label>
           <input
@@ -160,12 +160,12 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
             onChange={(e) => setMonitorWindowMinutes(Number(e.target.value))}
             className="input-field text-sm"
           />
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          <p className="mt-1 text-xs text-fg-subtle">
             How long a completed incident stays in monitor mode after resolution.
           </p>
         </div>
 
-        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+        <div className="mt-4 pt-4 border-t border-line">
           <div className="flex items-center gap-2 mb-3">
             <input
               id="auto-close-enabled"
@@ -174,13 +174,13 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
               onChange={(e) => setAutoCloseEnabled(e.target.checked)}
               className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
-            <label htmlFor="auto-close-enabled" className="text-sm text-gray-700 dark:text-gray-300">
+            <label htmlFor="auto-close-enabled" className="text-sm text-fg">
               Auto-close inactive incidents
             </label>
           </div>
 
           <div className="w-1/3">
-            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+            <label className="block text-xs font-medium text-fg-muted mb-1">
               Close after inactivity (hours)
             </label>
             <input
@@ -193,7 +193,7 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
               className="input-field text-sm disabled:opacity-50"
             />
           </div>
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          <p className="mt-1 text-xs text-fg-subtle">
             Closes an alert incident once no alert has fired, been re-sent, or been investigated for
             this long. Covers incidents whose monitoring system never sent a matching resolve, which
             would otherwise stay open forever.
@@ -201,8 +201,8 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
         </div>
       </div>
 
-      <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
-        <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+      <div className="flex items-center justify-between pt-4 border-t border-line">
+        <p className="text-xs text-fg-subtle flex items-center gap-1.5">
           <Info className="w-3.5 h-3.5" />
           Correlation changes take effect immediately
         </p>

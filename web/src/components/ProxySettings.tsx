@@ -21,18 +21,18 @@ function ServiceToggle({ name, description, icon: Icon, enabled, supported, disa
   return (
     <label className={`flex items-center justify-between p-3 rounded-lg border ${
       isDisabled
-        ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 opacity-60'
-        : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50'
+        ? 'border-line bg-gray-50 dark:bg-gray-800/50 opacity-60'
+        : 'border-line hover:bg-surface-2'
     } ${!isDisabled ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
       <div className="flex items-center gap-3">
-        <div className={`p-2 rounded-lg ${isDisabled ? 'bg-gray-200 dark:bg-gray-700' : 'bg-gray-100 dark:bg-gray-800'}`}>
-          <Icon className={`w-4 h-4 ${isDisabled ? 'text-gray-400' : 'text-gray-600 dark:text-gray-400'}`} />
+        <div className={`p-2 rounded-lg ${isDisabled ? 'bg-gray-200 dark:bg-gray-700' : 'bg-surface-2'}`}>
+          <Icon className={`w-4 h-4 ${isDisabled ? 'text-gray-400' : 'text-fg-muted'}`} />
         </div>
         <div>
-          <div className={`font-medium ${isDisabled ? 'text-gray-400 dark:text-gray-500' : 'text-gray-900 dark:text-white'}`}>
+          <div className={`font-medium ${isDisabled ? 'text-fg-subtle' : 'text-fg'}`}>
             {name}
           </div>
-          <div className="text-sm text-gray-500 dark:text-gray-400">
+          <div className="text-sm text-fg-subtle">
             {!supported ? 'Does not support HTTP proxy' : description}
           </div>
         </div>
@@ -141,7 +141,7 @@ export default function ProxySettings() {
 
       {/* Proxy URL */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+        <label className="block text-sm font-medium text-fg mb-2">
           Proxy URL
         </label>
         <input
@@ -149,16 +149,16 @@ export default function ProxySettings() {
           value={proxyUrl}
           onChange={(e) => setProxyUrl(e.target.value)}
           placeholder="http://proxy:8080"
-          className="w-full px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-full px-4 py-2.5 rounded-lg border border-line bg-surface text-fg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         />
-        <p className="mt-1.5 text-sm text-gray-500 dark:text-gray-400">
+        <p className="mt-1.5 text-sm text-fg-subtle">
           HTTP or HTTPS proxy for outbound connections
         </p>
       </div>
 
       {/* No Proxy */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+        <label className="block text-sm font-medium text-fg mb-2">
           No Proxy
         </label>
         <input
@@ -166,20 +166,20 @@ export default function ProxySettings() {
           value={noProxy}
           onChange={(e) => setNoProxy(e.target.value)}
           placeholder="localhost,127.0.0.1,*.internal"
-          className="w-full px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-full px-4 py-2.5 rounded-lg border border-line bg-surface text-fg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         />
-        <p className="mt-1.5 text-sm text-gray-500 dark:text-gray-400">
+        <p className="mt-1.5 text-sm text-fg-subtle">
           Comma-separated hosts that bypass the proxy
         </p>
       </div>
 
       {/* Services */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+        <label className="block text-sm font-medium text-fg mb-3">
           Services
         </label>
         {!hasProxy && (
-          <p className="mb-3 text-sm text-amber-600 dark:text-amber-400">
+          <p className="mb-3 text-sm text-state-need">
             Configure a proxy URL to enable service toggles
           </p>
         )}

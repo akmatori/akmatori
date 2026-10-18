@@ -53,7 +53,7 @@ export default function Tools() {
           !isCreating && !editingTool && (
             <button onClick={handleCreate} className="btn btn-primary">
               <Plus className="w-4 h-4" />
-              New Tool
+              New tool
             </button>
           )
         }
@@ -96,25 +96,21 @@ export default function Tools() {
           )}
 
           {/* Tools List */}
-          <div className="card">
+          <div className="card p-0 overflow-hidden">
             {tools.length === 0 ? (
-              <EmptyState icon={Wrench} title="No tool instances yet" description="Create one to get started" />
+              <div className="p-4"><EmptyState icon={Wrench} title="No tools yet" description="Add a tool so the agent can reach your systems." /></div>
             ) : (
-              <div className="space-y-4">
+              <div className="divide-y divide-line">
                 {tools.map((tool) => (
                   <div
                     key={tool.id}
-                    className={`border rounded-lg transition-all ${
-                      tool.enabled
-                        ? 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
-                        : 'border-gray-100 dark:border-gray-800 opacity-60'
-                    }`}
+                    className={`hover:bg-surface-2 transition-colors ${tool.enabled ? '' : 'opacity-60'}`}
                   >
-                    <div className="p-6">
+                    <div className="px-5 py-4">
                       <div className="flex items-start justify-between">
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-3 mb-2">
-                            <h3 className="font-semibold text-gray-900 dark:text-white">
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                            <h3 className="font-medium text-fg">
                               {tool.name}
                             </h3>
                             <span className="badge badge-primary">
@@ -124,7 +120,7 @@ export default function Tools() {
                               {tool.enabled ? 'Enabled' : 'Disabled'}
                             </span>
                           </div>
-                          <p className="text-gray-600 dark:text-gray-400 text-sm">
+                          <p className="text-fg-muted text-sm">
                             {tool.tool_type?.description}
                           </p>
                         </div>
@@ -132,14 +128,14 @@ export default function Tools() {
                         <div className="flex gap-2 ml-4 flex-shrink-0">
                           <button
                             onClick={() => handleEdit(tool)}
-                            className="btn btn-ghost p-2 text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20"
+                            className="btn btn-ghost p-2"
                             title="Edit"
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => handleDelete(tool.id)}
-                            className="btn btn-ghost p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                            className="btn btn-ghost p-2 text-state-fail hover:bg-state-fail/10"
                             title="Delete"
                           >
                             <Trash2 className="w-4 h-4" />

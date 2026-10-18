@@ -25,16 +25,17 @@ export default function Pagination({
   if (totalPages <= 1) return null;
 
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+    <div className="flex items-center justify-between flex-wrap gap-3 px-4 py-3 border-t border-line">
       <div className="flex items-center gap-4">
-        <span className="text-sm text-gray-500 dark:text-gray-400">
+        <span className="text-sm text-fg-subtle">
           Page {page} of {totalPages} ({totalItems.toLocaleString()} total)
         </span>
         {perPage !== undefined && onPerPageChange && (
           <select
             value={perPage}
             onChange={(e) => onPerPageChange(Number(e.target.value))}
-            className="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+            aria-label="Rows per page"
+            className="input-field h-8 w-auto py-0 text-sm"
           >
             {perPageOptions.map((n) => (
               <option key={n} value={n}>{n} per page</option>
@@ -46,7 +47,7 @@ export default function Pagination({
         <button
           onClick={() => onPageChange(page - 1)}
           disabled={page <= 1}
-          className="btn btn-secondary p-1.5 disabled:opacity-50"
+          className="btn btn-secondary w-8 h-8 p-0"
           aria-label="Previous page"
         >
           <ChevronLeft className="w-4 h-4" />
@@ -54,7 +55,7 @@ export default function Pagination({
         <button
           onClick={() => onPageChange(page + 1)}
           disabled={page >= totalPages}
-          className="btn btn-secondary p-1.5 disabled:opacity-50"
+          className="btn btn-secondary w-8 h-8 p-0"
           aria-label="Next page"
         >
           <ChevronRight className="w-4 h-4" />

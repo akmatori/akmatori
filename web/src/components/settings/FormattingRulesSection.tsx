@@ -267,7 +267,7 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
       </div>
 
       {rules.length === 0 && !editorOpen && (
-        <p className="text-sm text-gray-500 dark:text-gray-400">
+        <p className="text-sm text-fg-subtle">
           No formatting rules yet — responses are delivered as the agent wrote them.
         </p>
       )}
@@ -276,7 +276,7 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
         {rules.map((rule, index) => (
           <li
             key={rule.uuid}
-            className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 flex items-center gap-3"
+            className="rounded-lg border border-line p-3 flex items-center gap-3"
           >
             <div className="flex flex-col gap-0.5">
               <button
@@ -284,7 +284,7 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
                 onClick={() => handleMove(index, -1)}
                 disabled={index === 0}
                 aria-label="Move rule up"
-                className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                className="text-gray-400 hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 <ArrowUp className="w-3.5 h-3.5" />
               </button>
@@ -293,21 +293,21 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
                 onClick={() => handleMove(index, 1)}
                 disabled={index === rules.length - 1}
                 aria-label="Move rule down"
-                className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                className="text-gray-400 hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 <ArrowDown className="w-3.5 h-3.5" />
               </button>
             </div>
 
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+              <p className="text-sm font-medium text-fg truncate">
                 {rule.name}
               </p>
               <div className="mt-1 flex flex-wrap gap-1.5">
                 {ruleConditionSummary(rule, lookups).map((chip) => (
                   <span
                     key={chip}
-                    className="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-700 px-2 py-0.5 text-xs text-gray-600 dark:text-gray-300"
+                    className="inline-flex items-center rounded-full bg-surface-2 px-2 py-0.5 text-xs text-fg-muted"
                   >
                     {chip}
                   </span>
@@ -345,7 +345,7 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
               type="button"
               onClick={() => handleDelete(rule)}
               aria-label={`Delete rule ${rule.name}`}
-              className="text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+              className="text-gray-400 hover:text-state-fail"
             >
               <Trash2 className="w-4 h-4" />
             </button>
@@ -361,14 +361,14 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
       )}
 
       {editorOpen && (
-        <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-5">
-          <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+        <div className="rounded-lg border border-line p-4 space-y-5">
+          <h4 className="text-sm font-semibold text-fg">
             {editingUUID === '' ? 'New formatting rule' : 'Edit formatting rule'}
           </h4>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <label className="block text-sm font-medium text-fg mb-1.5">
                 Name
               </label>
               <input
@@ -380,7 +380,7 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
               />
             </div>
             <div className="flex items-end pb-1">
-              <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <label className="flex items-center gap-2 text-sm text-fg">
                 <input
                   type="checkbox"
                   checked={form.enabled}
@@ -394,14 +394,14 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
 
           <div className="flex items-center justify-between">
             <div className="space-y-1">
-              <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Match conditions</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
+              <p className="text-sm font-medium text-fg">Match conditions</p>
+              <p className="text-xs text-fg-subtle">
                 {form.matchMode === 'simple'
                   ? 'All selected conditions must match ("Any" = wildcard). Leave everything on "Any" for a catch-all rule.'
                   : 'Boolean expression over source_kind / trigger / channel / skill. Combine conditions with && (and), || (or), ! (not) and parentheses.'}
               </p>
             </div>
-            <div className="flex rounded-md border border-gray-300 dark:border-gray-600 overflow-hidden text-xs flex-shrink-0">
+            <div className="flex rounded-md border border-line overflow-hidden text-xs flex-shrink-0">
               {(['simple', 'expression'] as const).map((mode) => (
                 <button
                   key={mode}
@@ -410,7 +410,7 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
                   className={`px-3 py-1.5 ${
                     form.matchMode === mode
                       ? 'bg-blue-600 text-white'
-                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                      : 'bg-surface text-fg-muted hover:bg-surface-2'
                   }`}
                 >
                   {mode === 'simple' ? 'Simple' : 'Expression'}
@@ -421,9 +421,9 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
 
           {form.matchMode === 'expression' && (
             <div className="space-y-3">
-              <div className="flex flex-wrap items-end gap-2 rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 p-3">
+              <div className="flex flex-wrap items-end gap-2 rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-line p-3">
                 <div>
-                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Field</label>
+                  <label className="block text-xs text-fg-subtle mb-1">Field</label>
                   <select
                     value={insField}
                     onChange={(e) => {
@@ -439,7 +439,7 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Operator</label>
+                  <label className="block text-xs text-fg-subtle mb-1">Operator</label>
                   <select
                     value={insOp}
                     onChange={(e) => setInsOp(e.target.value as typeof insOp)}
@@ -450,7 +450,7 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
                   </select>
                 </div>
                 <div className="min-w-[10rem]">
-                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Value</label>
+                  <label className="block text-xs text-fg-subtle mb-1">Value</label>
                   <select
                     value={insValue}
                     onChange={(e) => setInsValue(e.target.value)}
@@ -466,7 +466,7 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
                 </div>
                 {form.matchExpression.trim() !== '' && (
                   <div>
-                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Join with</label>
+                    <label className="block text-xs text-fg-subtle mb-1">Join with</label>
                     <select
                       value={insConnector}
                       onChange={(e) => setInsConnector(e.target.value as typeof insConnector)}
@@ -500,9 +500,9 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
                 className={`input-field font-mono text-xs ${exprError ? 'border-red-500 dark:border-red-500' : ''}`}
               />
               {exprError ? (
-                <p className="text-xs text-red-600 dark:text-red-400">{exprError}</p>
+                <p className="text-xs text-state-fail">{exprError}</p>
               ) : form.matchExpression.trim() ? (
-                <p className="text-xs text-gray-500 dark:text-gray-400">
+                <p className="text-xs text-fg-subtle">
                   Reads as:{' '}
                   <span className="font-mono">
                     {substituteUUIDsForDisplay(form.matchExpression, {
@@ -512,7 +512,7 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
                   </span>
                 </p>
               ) : (
-                <p className="text-xs text-gray-500 dark:text-gray-400">
+                <p className="text-xs text-fg-subtle">
                   Empty expression matches everything. Use the pickers above to insert conditions —
                   UUIDs are filled in for you.
                 </p>
@@ -523,7 +523,7 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
           {form.matchMode === 'simple' && (
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <label className="block text-sm font-medium text-fg mb-1.5">
                 Source kind
               </label>
               <select
@@ -540,7 +540,7 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <label className="block text-sm font-medium text-fg mb-1.5">
                 Trigger
               </label>
               <select
@@ -589,7 +589,7 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <label className="block text-sm font-medium text-fg mb-1.5">
                 Last used skill
               </label>
               <select
@@ -604,15 +604,15 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
                   </option>
                 ))}
               </select>
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              <p className="mt-1 text-xs text-fg-subtle">
                 Matches the last skill the agent consulted during the investigation.
               </p>
             </div>
           </div>
           )}
 
-          <div className="space-y-1 pt-2 border-t border-gray-200 dark:border-gray-700">
-            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Output format</p>
+          <div className="space-y-1 pt-2 border-t border-line">
+            <p className="text-sm font-medium text-fg">Output format</p>
           </div>
 
           <FormattingConfigFields
@@ -627,7 +627,7 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
             onSchemaJsonError={setSchemaJsonError}
           />
 
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-line">
             <button type="button" onClick={closeEditor} className="btn btn-secondary">
               Cancel
             </button>

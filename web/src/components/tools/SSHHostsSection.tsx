@@ -25,7 +25,7 @@ export default function SSHHostsSection({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+        <label className="block text-sm font-medium text-fg">
           SSH Hosts <span className="text-red-500">*</span>
         </label>
         <button
@@ -38,17 +38,17 @@ export default function SSHHostsSection({
       </div>
 
       {hosts.length === 0 && (
-        <div className="text-center py-8 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
+        <div className="text-center py-8 border-2 border-dashed border-line rounded-lg">
           <Server className="w-8 h-8 mx-auto text-gray-400 mb-2" />
-          <p className="text-sm text-gray-500 dark:text-gray-400">No hosts configured</p>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Click "Add Host" to add your first server</p>
+          <p className="text-sm text-fg-subtle">No hosts configured</p>
+          <p className="text-xs text-fg-subtle mt-1">Click "Add Host" to add your first server</p>
         </div>
       )}
 
       {hosts.map((host: SSHHostConfig, index: number) => (
-        <div key={index} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+        <div key={index} className="border border-line rounded-lg p-4">
           <div className="flex items-start justify-between mb-4">
-            <h4 className="font-medium text-gray-900 dark:text-white">
+            <h4 className="font-medium text-fg">
               {host.hostname || `Host #${index + 1}`}
             </h4>
             <div className="flex items-center gap-2">
@@ -88,7 +88,7 @@ export default function SSHHostsSection({
           {/* Required Fields (always visible) */}
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div>
-              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+              <label className="block text-xs text-fg-subtle mb-1">
                 Hostname (display name) *
               </label>
               <input
@@ -100,7 +100,7 @@ export default function SSHHostsSection({
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+              <label className="block text-xs text-fg-subtle mb-1">
                 Address (IP or FQDN) *
               </label>
               <input
@@ -115,13 +115,13 @@ export default function SSHHostsSection({
 
           {/* Advanced Fields (collapsible) */}
           {expandedHosts.includes(index) && (
-            <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4 space-y-4">
-              <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Advanced Options</p>
+            <div className="border-t border-line pt-4 mt-4 space-y-4">
+              <p className="text-xs text-fg-subtle font-medium">Advanced Options</p>
 
               {/* User and Port */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                  <label className="block text-xs text-fg-subtle mb-1">
                     SSH User <span className="text-gray-400">(default: root)</span>
                   </label>
                   <input
@@ -133,7 +133,7 @@ export default function SSHHostsSection({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                  <label className="block text-xs text-fg-subtle mb-1">
                     SSH Port <span className="text-gray-400">(default: 22)</span>
                   </label>
                   <input
@@ -149,7 +149,7 @@ export default function SSHHostsSection({
               {/* SSH Key Selection */}
               {sshKeys.length > 0 && (
                 <div>
-                  <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                  <label className="block text-xs text-fg-subtle mb-1">
                     <Key className="w-3 h-3 inline mr-1" />
                     SSH Key
                   </label>
@@ -171,14 +171,14 @@ export default function SSHHostsSection({
               )}
 
               {/* Jumphost Configuration */}
-              <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-3">
-                <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-3">
+              <div className="bg-surface-2 rounded-lg p-3">
+                <p className="text-xs font-medium text-fg mb-3">
                   <Server className="w-3 h-3 inline mr-1" />
                   Jumphost / Bastion (optional)
                 </p>
                 <div className="grid grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Address</label>
+                    <label className="block text-xs text-fg-subtle mb-1">Address</label>
                     <input
                       type="text"
                       className="input-field"
@@ -188,7 +188,7 @@ export default function SSHHostsSection({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">User</label>
+                    <label className="block text-xs text-fg-subtle mb-1">User</label>
                     <input
                       type="text"
                       className="input-field"
@@ -198,7 +198,7 @@ export default function SSHHostsSection({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Port</label>
+                    <label className="block text-xs text-fg-subtle mb-1">Port</label>
                     <input
                       type="number"
                       className="input-field"

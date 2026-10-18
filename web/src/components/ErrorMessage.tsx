@@ -18,14 +18,14 @@ export default function ErrorMessage({ message, dismissible = false, onDismiss }
   };
 
   return (
-    <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 mb-4 animate-fade-in">
+    <div className="rounded-lg bg-state-fail/10 border border-state-fail/40 px-4 py-3 mb-4 animate-fade-in">
       <div className="flex items-start gap-3">
-        <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-        <p className="text-sm text-red-700 dark:text-red-300 flex-1">{message}</p>
+        <AlertCircle className="w-4 h-4 text-state-fail flex-shrink-0 mt-0.5" />
+        <p className="text-sm text-fg flex-1">{message}</p>
         {dismissible && (
           <button
             onClick={handleDismiss}
-            className="flex-shrink-0 text-red-400 hover:text-red-600 dark:hover:text-red-300 transition-colors"
+            className="flex-shrink-0 text-fg-subtle hover:text-fg transition-colors"
             aria-label="Dismiss"
           >
             <X size={16} />
@@ -47,14 +47,14 @@ export function SuccessMessage({ message, dismissible = true, onDismiss }: Messa
   };
 
   return (
-    <div className="rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 p-4 mb-4 animate-fade-in">
+    <div className="rounded-lg bg-state-ok/10 border border-state-ok/40 px-4 py-3 mb-4 animate-fade-in">
       <div className="flex items-start gap-3">
-        <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
-        <p className="text-sm text-green-700 dark:text-green-300 flex-1">{message}</p>
+        <CheckCircle className="w-4 h-4 text-state-ok flex-shrink-0 mt-0.5" />
+        <p className="text-sm text-fg flex-1">{message}</p>
         {dismissible && (
           <button
             onClick={handleDismiss}
-            className="flex-shrink-0 text-green-400 hover:text-green-600 dark:hover:text-green-300 transition-colors"
+            className="flex-shrink-0 text-fg-subtle hover:text-fg transition-colors"
             aria-label="Dismiss"
           >
             <X size={16} />
@@ -76,14 +76,14 @@ export function WarningMessage({ message, dismissible = false, onDismiss }: Mess
   };
 
   return (
-    <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-4 mb-4 animate-fade-in">
+    <div className="rounded-lg bg-state-need/10 border border-state-need/40 px-4 py-3 mb-4 animate-fade-in">
       <div className="flex items-start gap-3">
-        <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
-        <p className="text-sm text-amber-700 dark:text-amber-300 flex-1">{message}</p>
+        <AlertTriangle className="w-4 h-4 text-state-need flex-shrink-0 mt-0.5" />
+        <p className="text-sm text-fg flex-1">{message}</p>
         {dismissible && (
           <button
             onClick={handleDismiss}
-            className="flex-shrink-0 text-amber-400 hover:text-amber-600 dark:hover:text-amber-300 transition-colors"
+            className="flex-shrink-0 text-fg-subtle hover:text-fg transition-colors"
             aria-label="Dismiss"
           >
             <X size={16} />

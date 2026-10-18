@@ -23,14 +23,15 @@ describe('PageHeader', () => {
     expect(screen.getByRole('button', { name: 'Do it' })).toBeTruthy();
   });
 
-  it('wraps action in a flex-shrink-0 container to prevent shrinking on long titles', () => {
-    const { container } = render(<PageHeader title="Title" action={<button>Act</button>} />);
-    const header = container.querySelector('.mb-6 > div');
-    const children = Array.from(header?.children ?? []);
-    // The action is wrapped in a flex-shrink-0 div so it never compresses when the title is long
-    const actionWrapper = children[children.length - 1] as HTMLElement;
-    expect(actionWrapper?.tagName).toBe('DIV');
-    expect(actionWrapper?.className).toContain('flex-shrink-0');
-    expect(actionWrapper?.querySelector('button')).toBeTruthy();
+  it('keeps the title as a screen-reader h1, since the top bar shows the page name', () => {
+    render(<PageHeader title="Title" />);
+    const h1 = screen.getByRole('heading', { level: 1, name: 'Title' });
+    expect(h1.className).toContain('sr-only');
+  });
+
+  it('pushes actions to the end of the row', () => {
+    render(<PageHeader title="Title" action={<button>Act</button>} />);
+    const wrapper = screen.getByRole('button', { name: 'Act' }).parentElement as HTMLElement;
+    expect(wrapper.className).toContain('ml-auto');
   });
 });
