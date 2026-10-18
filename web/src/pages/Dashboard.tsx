@@ -1,250 +1,171 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Activity, CheckCircle, AlertCircle, Clock, ArrowRight, AlertTriangle, CheckCircle2 } from 'lucide-react';
-import QuickIncidentInput from '../components/QuickIncidentInput';
+import { AlertTriangle } from 'lucide-react';
+import InvestigateBar from '../components/overview/InvestigateBar';
+import { OverviewColumn, OverviewRow } from '../components/overview/OverviewColumn';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
-import { SuccessMessage } from '../components/ErrorMessage';
-import { incidentsApi, llmSettingsApi, alertSourcesApi } from '../api/client';
+import { useOverviewData } from '../hooks/useOverviewData';
+import { useSystemStatus } from '../hooks/useSystemStatus';
+import { formatCountdown, formatRelativeAgo, formatRelativeShort } from '../utils/format';
 import type { Incident } from '../types';
+
+const NEEDS_ROW_LIMIT = 8;
+
+function incidentTitle(incident: Incident): string {
+  return incident.title || `Incident ${incident.uuid.slice(0, 8)}`;
+}
+
+// attentionReason says why an incident sits in "Needs you".
+function attentionReason(incident: Incident): string {
+  switch (incident.status) {
+    case 'diagnosed':
+      return 'Diagnosed, action needed';
+    case 'failed':
+      return 'Investigation failed';
+    case 'running':
+      return `No progress for ${formatRelativeShort(incident.updated_at)}`;
+    default:
+      return 'Agent finished, alert still firing';
+  }
+}
+
+interface HealthIssue {
+  message: string;
+  to?: string;
+  action?: string;
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const { data, error } = useOverviewData();
+  const { apiAvailable, llm } = useSystemStatus();
+  const [startError, setStartError] = useState('');
 
-  // System health state
-  const [llmConfigured, setLlmConfigured] = useState<boolean | null>(null);
-  const [alertSourcesCount, setAlertSourcesCount] = useState<number>(0);
+  if (!data && !error) return <LoadingSpinner />;
 
-  useEffect(() => {
-    loadDashboardData();
-  }, []);
+  // The health strip shows only when something is degraded.
+  const issues: HealthIssue[] = [];
+  if (!apiAvailable) issues.push({ message: 'The API does not respond. Data on this page can be out of date.' });
+  if (llm && !llm.configured) {
+    issues.push({ message: 'No LLM is configured, so the agent cannot investigate.', to: '/settings/ai', action: 'Configure an LLM' });
+  }
 
-  const loadDashboardData = async () => {
-    try {
-      setLoading(true);
-      setError('');
-
-      const [incidentsData, llmSettings, alertSources] = await Promise.all([
-        incidentsApi.list(),
-        llmSettingsApi.list().catch(() => null),
-        alertSourcesApi.list().catch(() => []),
-      ]);
-
-      setIncidents(incidentsData?.data?.slice(0, 5) ?? []);
-      const activeConfig = llmSettings?.configs?.find(c => c.id === llmSettings.active_id);
-      setLlmConfigured(activeConfig?.is_configured ?? false);
-      setAlertSourcesCount(alertSources?.length ?? 0);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load dashboard');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleIncidentCreated = () => {
-    setSuccess(`Investigation started`);
-    setTimeout(() => {
-      setSuccess('');
-      navigate('/incidents');
-    }, 1500);
-    loadDashboardData();
-  };
-
-  const handleIncidentError = (errorMsg: string) => {
-    setError(errorMsg);
-    setTimeout(() => setError(''), 5000);
-  };
-
-  const getStatusConfig = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return { class: 'text-green-600 dark:text-green-400', icon: CheckCircle, label: 'Completed' };
-      case 'monitor':
-        return { class: 'text-green-600 dark:text-green-400', icon: CheckCircle, label: 'Monitor' };
-      case 'running':
-        return { class: 'text-primary-600 dark:text-primary-400', icon: Activity, label: 'Running' };
-      case 'failed':
-        return { class: 'text-red-600 dark:text-red-400', icon: AlertCircle, label: 'Failed' };
-      default:
-        return { class: 'text-gray-500 dark:text-gray-400', icon: Clock, label: 'Pending' };
-    }
-  };
-
-  const runningCount = incidents.filter(i => i.status === 'running').length;
-  const completedCount = incidents.filter(i => i.status === 'completed' || i.status === 'monitor').length;
-  const failedCount = incidents.filter(i => i.status === 'failed').length;
-
-  if (loading) return <LoadingSpinner />;
+  // Proposals collapse into one row: an install can hold hundreds.
+  const needsRows = data ? Math.min(data.needsAttention.length, NEEDS_ROW_LIMIT) + (data.day.proposals > 0 ? 1 : 0) : 0;
 
   return (
-    <div className="max-w-4xl mx-auto">
-      {/* Hero Section */}
-      <div className="py-12 text-center">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-          Akmatori
-        </h1>
-        <p className="text-gray-500 dark:text-gray-400 mb-8">
-          AI-powered incident investigation and remediation
-        </p>
+    <div className="flex flex-col gap-6">
+      <InvestigateBar
+        onStarted={(uuid) => navigate(`/incidents/${uuid}`)}
+        onError={setStartError}
+      />
 
-        {/* Hero Input */}
-        <div className="max-w-2xl mx-auto">
-          <QuickIncidentInput
-            onSuccess={handleIncidentCreated}
-            onError={handleIncidentError}
-          />
-        </div>
-      </div>
-
-      {/* Messages */}
+      {startError && <ErrorMessage message={startError} />}
       {error && <ErrorMessage message={error} />}
-      {success && <SuccessMessage message={success} />}
 
-      {/* Two Column Layout */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
-        {/* Live Activity */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-semibold text-gray-900 dark:text-white">Live Activity</h2>
-            <div className="flex items-center gap-3 text-sm">
-              {runningCount > 0 && (
-                <span className="flex items-center gap-1 text-primary-600 dark:text-primary-400">
-                  <span className="w-2 h-2 rounded-full bg-primary-500 animate-pulse" />
-                  {runningCount} running
-                </span>
-              )}
-            </div>
-          </div>
-
-          {incidents.length === 0 ? (
-            <div className="py-8 text-center text-gray-400 dark:text-gray-500">
-              <Activity className="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">No recent incidents</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {incidents.slice(0, 5).map((incident) => {
-                const statusConfig = getStatusConfig(incident.status);
-                const StatusIcon = statusConfig.icon;
-
-                return (
-                  <Link
-                    key={incident.id}
-                    to="/incidents"
-                    className="flex items-center gap-3 p-3 -mx-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
-                  >
-                    <StatusIcon className={`w-4 h-4 ${statusConfig.class} ${incident.status === 'running' ? 'animate-pulse' : ''}`} />
-                    <span className="flex-1 text-sm text-gray-700 dark:text-gray-300 truncate">
-                      {incident.title || `Incident ${incident.uuid.slice(0, 8)}`}
-                    </span>
-                    <span className="text-xs text-gray-400 dark:text-gray-500">
-                      {new Date(incident.started_at).toLocaleTimeString('en-US', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        hour12: false
-                      })}
-                    </span>
-                  </Link>
-                );
-              })}
-            </div>
+      {issues.map((issue) => (
+        <div
+          key={issue.message}
+          role="status"
+          className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3.5 py-2.5 rounded-lg border border-state-need/40 bg-state-need/10 text-sm text-fg"
+        >
+          <AlertTriangle size={16} className="text-state-need flex-shrink-0" aria-hidden="true" />
+          <span className="flex-[1_1_320px]">{issue.message}</span>
+          {issue.to && (
+            <Link to={issue.to} className="font-medium text-state-need hover:underline">{issue.action}</Link>
           )}
+        </div>
+      ))}
 
-          <Link
-            to="/incidents"
-            className="flex items-center justify-center gap-1 mt-4 pt-4 border-t border-gray-100 dark:border-gray-700 text-sm text-primary-600 dark:text-primary-400 hover:underline"
+      {data && (
+        <>
+          <div className="grid items-start gap-4 grid-cols-[repeat(auto-fit,minmax(300px,1fr))]">
+            <OverviewColumn id="col-need" title="Needs you" tone="need" count={data.needsAttention.length} rows={needsRows} empty="Nothing waits for you.">
+              {data.day.proposals > 0 && (
+                <OverviewRow to="/proposals">
+                  <span className="text-xs text-state-need">Self-improvement</span>
+                  <span className="font-medium">
+                    {data.day.proposals} {data.day.proposals === 1 ? 'proposal waits' : 'proposals wait'} for review
+                  </span>
+                  {data.latestProposal && (
+                    <span className="text-xs text-fg-subtle truncate">Latest: {data.latestProposal.title}</span>
+                  )}
+                </OverviewRow>
+              )}
+              {data.needsAttention.slice(0, NEEDS_ROW_LIMIT).map((i) => (
+                <OverviewRow key={i.uuid} to={`/incidents/${i.uuid}`}>
+                  <span className={`text-xs ${i.status === 'failed' || i.status === 'running' ? 'text-state-fail' : 'text-state-need'}`}>
+                    {attentionReason(i)}
+                  </span>
+                  <span className="font-medium line-clamp-2">{incidentTitle(i)}</span>
+                  <span className="flex gap-3 text-xs text-fg-subtle">
+                    <span>{i.source}</span>
+                    <span>{formatRelativeAgo(i.started_at)}</span>
+                  </span>
+                </OverviewRow>
+              ))}
+              {data.needsAttention.length > NEEDS_ROW_LIMIT && (
+                <li className="border-t border-line">
+                  <Link to="/incidents" className="block px-4 py-2.5 text-sm text-primary-400 hover:bg-surface-2">
+                    {data.needsAttention.length - NEEDS_ROW_LIMIT} more in Incidents
+                  </Link>
+                </li>
+              )}
+            </OverviewColumn>
+
+            <OverviewColumn id="col-work" title="Agent working" tone="work" count={data.working.length} rows={data.working.length} empty="The agent is idle.">
+              {data.working.map((i) => (
+                <OverviewRow key={i.uuid} to={`/incidents/${i.uuid}`}>
+                  <span className="font-medium line-clamp-2">{incidentTitle(i)}</span>
+                  <span className="flex items-center gap-2 text-xs text-state-work">
+                    <span className="w-1.5 h-1.5 rounded-full bg-state-work animate-pulse" aria-hidden="true" />
+                    {i.status === 'pending' ? 'Queued' : 'Investigating'}
+                  </span>
+                  <span className="flex gap-3 text-xs text-fg-subtle">
+                    <span>{i.source}</span>
+                    <span>started {formatRelativeAgo(i.started_at)}</span>
+                  </span>
+                </OverviewRow>
+              ))}
+            </OverviewColumn>
+
+            <OverviewColumn id="col-mon" title="Monitoring" tone="ok" count={data.day.monitoring} rows={data.monitoring.length} empty="No incidents are in a monitor window.">
+              {data.monitoring.map((i) => (
+                <OverviewRow key={i.uuid} to={`/incidents/${i.uuid}`}>
+                  <span className="flex items-start gap-3">
+                    <span className="flex-1 min-w-0 font-medium line-clamp-2">{incidentTitle(i)}</span>
+                    {i.monitor_until && (
+                      <span className="text-xs text-state-ok tabular-nums whitespace-nowrap">{formatCountdown(i.monitor_until)}</span>
+                    )}
+                  </span>
+                  {i.completed_at && (
+                    <span className="text-xs text-fg-subtle">Resolved {formatRelativeAgo(i.completed_at)}</span>
+                  )}
+                </OverviewRow>
+              ))}
+            </OverviewColumn>
+          </div>
+
+          <section
+            aria-labelledby="overview-day"
+            className="flex flex-wrap items-center gap-x-10 gap-y-3 px-4 py-4 rounded-xl border border-line"
           >
-            View all incidents
-            <ArrowRight className="w-3 h-3" />
-          </Link>
-        </div>
-
-        {/* System Health */}
-        <div className="card">
-          <h2 className="font-semibold text-gray-900 dark:text-white mb-4">System Health</h2>
-
-          <div className="space-y-3">
-            {/* LLM Status */}
-            <div className="flex items-center justify-between py-2">
-              <span className="text-sm text-gray-600 dark:text-gray-400">LLM Provider</span>
-              {llmConfigured === null ? (
-                <span className="text-sm text-gray-400">Checking...</span>
-              ) : llmConfigured ? (
-                <span className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400">
-                  <CheckCircle2 className="w-4 h-4" />
-                  Connected
-                </span>
-              ) : (
-                <Link to="/settings" className="flex items-center gap-1.5 text-sm text-amber-600 dark:text-amber-400 hover:underline">
-                  <AlertTriangle className="w-4 h-4" />
-                  Not configured
-                </Link>
-              )}
-            </div>
-
-            {/* Alert Sources */}
-            <div className="flex items-center justify-between py-2">
-              <span className="text-sm text-gray-600 dark:text-gray-400">Alert Sources</span>
-              {alertSourcesCount > 0 ? (
-                <span className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400">
-                  <CheckCircle2 className="w-4 h-4" />
-                  {alertSourcesCount} active
-                </span>
-              ) : (
-                <Link to="/settings" className="flex items-center gap-1.5 text-sm text-gray-400 dark:text-gray-500 hover:underline">
-                  <AlertTriangle className="w-4 h-4" />
-                  None configured
-                </Link>
-              )}
-            </div>
-
-            {/* Incident Stats */}
-            <div className="pt-3 mt-3 border-t border-gray-100 dark:border-gray-700">
-              <div className="grid grid-cols-3 gap-4 text-center">
-                <div>
-                  <p className="text-2xl font-semibold text-primary-600 dark:text-primary-400">{runningCount}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Running</p>
-                </div>
-                <div>
-                  <p className="text-2xl font-semibold text-green-600 dark:text-green-400">{completedCount}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Completed</p>
-                </div>
-                <div>
-                  <p className="text-2xl font-semibold text-red-600 dark:text-red-400">{failedCount}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Failed</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Setup hint for new users */}
-      {!llmConfigured && (
-        <div className="mt-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                Setup Required
-              </p>
-              <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
-                Configure your LLM provider in Settings to start using Akmatori.
-              </p>
-              <Link
-                to="/settings"
-                className="inline-flex items-center gap-1 mt-2 text-sm font-medium text-amber-700 dark:text-amber-300 hover:underline"
-              >
-                Go to Settings
-                <ArrowRight className="w-3 h-3" />
-              </Link>
-            </div>
-          </div>
-        </div>
+            <h2 id="overview-day" className="text-sm font-semibold text-fg-muted">Last 24 hours</h2>
+            {[
+              { v: data.day.incidents, l: 'incidents' },
+              { v: data.day.failed, l: 'failed investigations' },
+              { v: data.day.monitoring, l: 'in monitor window now' },
+              { v: data.day.proposals, l: 'proposals to review' },
+            ].map((d) => (
+              <span key={d.l} className="flex items-baseline gap-2">
+                <span className="text-xl font-medium tabular-nums text-fg">{d.v}</span>
+                <span className="text-sm text-fg-subtle">{d.l}</span>
+              </span>
+            ))}
+            <Link to="/incidents" className="ml-auto text-sm text-primary-400 hover:underline">Open incidents</Link>
+          </section>
+        </>
       )}
     </div>
   );
