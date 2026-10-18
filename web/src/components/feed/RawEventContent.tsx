@@ -20,7 +20,7 @@ const jsonViewerStyles = {
   stringValue: 'text-green-400',
   booleanValue: 'text-red-400',
   numberValue: 'text-orange-400',
-  otherValue: 'text-gray-300',
+  otherValue: 'text-fg-muted',
   punctuation: 'text-gray-500',
   expandIcon: 'text-gray-400 cursor-pointer select-none',
   collapseIcon: 'text-gray-400 cursor-pointer select-none',
@@ -30,17 +30,17 @@ const jsonViewerStyles = {
 export default function RawEventContent({ state }: { state?: RawState }) {
   if (!state || state.loading) {
     return (
-      <div className="flex items-center gap-2 text-gray-400 text-xs">
+      <div className="flex items-center gap-2 text-fg-subtle text-xs">
         <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading raw message…
       </div>
     );
   }
   if (state.error) {
-    return <p className="text-red-400 text-xs">{state.error}</p>;
+    return <p className="text-state-fail text-xs">{state.error}</p>;
   }
   if (state.original_message) {
     return (
-      <pre className="whitespace-pre-wrap text-gray-300 font-mono text-xs max-h-80 overflow-y-auto">
+      <pre className="whitespace-pre-wrap text-fg-muted font-mono text-xs max-h-80 overflow-y-auto">
         {state.original_message}
       </pre>
     );
@@ -53,7 +53,7 @@ export default function RawEventContent({ state }: { state?: RawState }) {
         </div>
       );
     }
-    return <pre className="whitespace-pre-wrap text-gray-300 font-mono text-xs">{String(state.raw)}</pre>;
+    return <pre className="whitespace-pre-wrap text-fg-muted font-mono text-xs">{String(state.raw)}</pre>;
   }
-  return <p className="text-gray-500 text-xs">No raw message available for this event</p>;
+  return <p className="text-fg-subtle text-xs">No raw message available for this event</p>;
 }
