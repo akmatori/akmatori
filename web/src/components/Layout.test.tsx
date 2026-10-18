@@ -31,6 +31,11 @@ vi.mock('./OnboardingWizard', () => ({ default: () => null }));
 
 vi.mock('../api/client', () => ({
   proposalsApi: { pendingCount: () => Promise.resolve({ pending: 0 }) },
+  llmSettingsApi: { list: () => Promise.resolve({ configs: [], active_id: 0 }) },
+  subscribeApiAvailability: (listener: (available: boolean) => void) => {
+    listener(true);
+    return () => {};
+  },
 }));
 
 function renderLayout() {
@@ -103,9 +108,9 @@ describe('Layout mobile sidebar', () => {
     const collapseBtn = screen.getByTitle('Collapse sidebar');
     fireEvent.click(collapseBtn);
     const aside = document.querySelector('aside');
-    expect(aside?.className).toContain('w-64');
-    // md:w-16 is present in the class string but only applies at ≥768px — on mobile the sidebar stays w-64
-    expect(aside?.className).not.toMatch(/(?<![:\w])w-16(?!\w)/);
+    expect(aside?.className).toContain('w-60');
+    // md:w-14 is present in the class string but only applies at ≥768px — on mobile the sidebar stays w-60
+    expect(aside?.className).not.toMatch(/(?<![:\w])w-14(?!\w)/);
   });
 
   it('nav labels visible in mobile drawer even when sidebar was collapsed on desktop', () => {
@@ -117,7 +122,7 @@ describe('Layout mobile sidebar', () => {
     fireEvent.click(screen.getByLabelText('Open menu'));
     // Nav item labels must be visible in the drawer — query within <nav> to avoid matching the <h2> header
     const nav = document.querySelector('nav');
-    expect(nav?.textContent).toContain('Dashboard');
+    expect(nav?.textContent).toContain('Overview');
     expect(nav?.textContent).toContain('Incidents');
   });
 

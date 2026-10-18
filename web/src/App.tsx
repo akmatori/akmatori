@@ -14,8 +14,6 @@ import Tools from './pages/Tools';
 import ContextFiles from './pages/ContextFiles';
 import Runbooks from './pages/Runbooks';
 import Settings from './pages/Settings';
-import IntegrationsPage from './pages/IntegrationsPage';
-import ChannelsPage from './pages/ChannelsPage';
 import CronJobsPage from './pages/CronJobsPage';
 import Feed from './pages/Feed';
 import Proposals from './pages/Proposals';
@@ -47,10 +45,8 @@ function App() {
                       <Route path="/context" element={<ContextFiles />} />
                       <Route path="/runbooks" element={<Runbooks />} />
                       <Route path="/cron" element={<CronJobsPage />} />
-                      <Route path="/settings/integrations" element={<IntegrationsPage />} />
-                      <Route path="/settings/channels" element={<ChannelsPage />} />
                       <Route path="/settings/slack" element={<Navigate to="/settings/integrations" replace />} />
-                      <Route path="/settings" element={<Settings />} />
+                      <Route path="/settings/:section?" element={<Settings />} />
                     </Routes>
                   </Layout>
                 </ProtectedRoute>
