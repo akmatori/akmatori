@@ -15,11 +15,11 @@ beforeAll(() => {
   });
 });
 
-vi.mock('../context/AuthContext', () => ({
+vi.mock('../context/useAuth', () => ({
   useAuth: () => ({ user: { username: 'tester' }, logout: vi.fn() }),
 }));
 
-vi.mock('../context/ThemeContext', () => ({
+vi.mock('../context/useTheme', () => ({
   useTheme: () => ({ theme: 'light', setTheme: vi.fn() }),
 }));
 

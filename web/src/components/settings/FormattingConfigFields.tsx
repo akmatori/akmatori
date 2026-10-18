@@ -7,6 +7,7 @@ import {
   clampMaxTokens,
   clampTemperature,
   systemPromptByteLength,
+  validateSchemaExampleText,
 } from './formattingSettingsHelpers';
 
 export interface FormattingConfigValues {
@@ -22,21 +23,6 @@ interface FormattingConfigFieldsProps {
   disabled?: boolean;
   schemaJsonError: string | null;
   onSchemaJsonError: (error: string | null) => void;
-}
-
-// validateSchemaExampleText mirrors the backend's "JSON object" constraint for
-// blur-time feedback. Empty text is valid (built-in default applies).
-export function validateSchemaExampleText(text: string): string | null {
-  if (!text.trim()) return null;
-  try {
-    const parsed = JSON.parse(text);
-    if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
-      return 'Must be a JSON object (not an array or scalar)';
-    }
-    return null;
-  } catch (e) {
-    return e instanceof Error ? e.message : 'Invalid JSON';
-  }
 }
 
 // FormattingConfigFields renders the four format-config inputs (system

@@ -8,7 +8,7 @@ interface SSHHostsSectionProps {
   getDefaultKey: () => SSHKey | undefined;
   onAddHost: () => void;
   onRemoveHost: (index: number) => void;
-  onUpdateHost: (index: number, field: string, value: any) => void;
+  onUpdateHost: <K extends keyof SSHHostConfig>(index: number, field: K, value: SSHHostConfig[K]) => void;
   onToggleHostExpand: (index: number) => void;
 }
 

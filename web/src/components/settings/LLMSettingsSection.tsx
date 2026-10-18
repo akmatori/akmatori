@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useLatestRef } from '../../hooks/useLatestRef';
 import { Save, Plus, Trash2, Edit2, X, ChevronDown, ChevronRight } from 'lucide-react';
 import LoadingSpinner from '../LoadingSpinner';
 import ErrorMessage from '../ErrorMessage';
 import { SuccessMessage } from '../ErrorMessage';
+import { getErrorMessage } from '../../utils/errors';
 import { llmSettingsApi } from '../../api/client';
 import type { LLMConfig, LLMProvider, ThinkingLevel } from '../../types';
 import { MODEL_SUGGESTIONS } from './llmModelSuggestions';
@@ -97,11 +99,9 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
-  useEffect(() => {
-    loadConfigs();
-  }, []);
+  const onStatusChangeRef = useLatestRef(onStatusChange);
 
-  const loadConfigs = async () => {
+  const loadConfigs = useCallback(async () => {
     try {
       setLoading(true);
       const data = await llmSettingsApi.list();
@@ -110,14 +110,18 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
       setError(null);
       const activeConfig = (data.configs || []).find(c => c.id === data.active_id);
       const isConfigured = activeConfig?.is_configured ?? false;
-      onStatusChange?.(isConfigured ? 'configured' : 'not-configured');
+      onStatusChangeRef.current?.(isConfigured ? 'configured' : 'not-configured');
     } catch (err) {
       setError('Failed to load LLM settings');
       console.error(err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [onStatusChangeRef]);
+
+  useEffect(() => {
+    void loadConfigs();
+  }, [loadConfigs]);
 
   const showSuccess = (msg: string) => {
     setSuccess(msg);
@@ -216,8 +220,8 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
 
       closeForm();
       await loadConfigs();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to save configuration');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to save configuration'));
     } finally {
       setSaving(false);
     }
@@ -231,8 +235,8 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
       setDeleteConfirmId(null);
       showSuccess('Configuration deleted');
       await loadConfigs();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to delete configuration');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to delete configuration'));
     } finally {
       setSaving(false);
     }
@@ -245,8 +249,8 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
       await llmSettingsApi.activate(id);
       showSuccess('Configuration activated');
       await loadConfigs();
-    } catch (err: any) {
-      setError(err?.message || 'Failed to activate configuration');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to activate configuration'));
     } finally {
       setSaving(false);
     }

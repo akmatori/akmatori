@@ -1,24 +1,16 @@
 import { Save, X, Power, PowerOff } from 'lucide-react';
-import type { AlertSourceType } from '../../types';
+import type { AlertSourceType, AlertSourceInstance } from '../../types';
+import type { AlertSourceFormData } from '../../hooks/useAlertSourceManagement';
 import ChannelPicker from '../channels/ChannelPicker';
 import { visibleAlertSourceTypes, isWebhookSourceType } from './alertSourceHelpers';
 
 interface AlertSourceFormProps {
   isCreating: boolean;
-  formData: {
-    source_type_name: string;
-    name: string;
-    description: string;
-    webhook_secret: string;
-    field_mappings: Record<string, string>;
-    settings: Record<string, any>;
-    notification_channel_uuid: string | null;
-    enabled: boolean;
-  };
-  setFormData: (data: any) => void;
+  formData: AlertSourceFormData;
+  setFormData: (data: AlertSourceFormData) => void;
   sourceTypes: AlertSourceType[];
   selectedType: AlertSourceType | undefined;
-  editingSource: any;
+  editingSource: AlertSourceInstance | null;
   onSave: () => void;
   onCancel: () => void;
 }

@@ -1,9 +1,12 @@
+import EmptyState from './shared/EmptyState';
 import { useState, useEffect, useRef } from 'react';
 import { contextApi } from '../api/client';
 import type { ContextFile } from '../types';
 import { Upload, FileText, Download, Trash2, AlertCircle, Check, X } from 'lucide-react';
 import ErrorMessage from './ErrorMessage';
 import { SuccessMessage } from './ErrorMessage';
+import { getErrorMessage } from '../utils/errors';
+import { formatFileSize } from '../utils/format';
 
 const ALLOWED_EXTENSIONS = ['.md', '.txt', '.json', '.yaml', '.yml', '.xml', '.csv', '.log', '.conf', '.cfg', '.ini', '.sh', '.py', '.pdf'];
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -108,8 +111,8 @@ export default function ContextFilesManager({ onFilesChange }: ContextFilesManag
 
       await loadFiles();
       onFilesChange?.();
-    } catch (err: any) {
-      setError(err.message || 'Failed to upload file');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to upload file'));
     } finally {
       setUploading(false);
     }
@@ -124,15 +127,9 @@ export default function ContextFilesManager({ onFilesChange }: ContextFilesManag
       setTimeout(() => setSuccess(null), 3000);
       await loadFiles();
       onFilesChange?.();
-    } catch (err: any) {
-      setError(err.message || 'Failed to delete file');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to delete file'));
     }
-  };
-
-  const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   const getFileExtension = (filename: string): string => {
@@ -257,10 +254,7 @@ export default function ContextFilesManager({ onFilesChange }: ContextFilesManag
             <p className="mt-4 text-gray-500 dark:text-gray-400 text-sm">Loading...</p>
           </div>
         ) : files.length === 0 ? (
-          <div className="py-16 text-center border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
-            <FileText size={48} className="mx-auto text-gray-400 mb-4" />
-            <p className="text-gray-500 dark:text-gray-400">No context files uploaded yet</p>
-          </div>
+          <EmptyState icon={FileText} title="No context files uploaded yet" />
         ) : (
           <div className="card divide-y divide-gray-100 dark:divide-gray-700 p-0 overflow-hidden">
             {files.map((file) => (

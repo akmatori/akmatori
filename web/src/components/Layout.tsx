@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, createContext, useContext } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -17,8 +17,8 @@ import {
   Rss,
   Lightbulb,
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
-import { useTheme } from '../context/ThemeContext';
+import { useAuth } from '../context/useAuth';
+import { useTheme } from '../context/useTheme';
 import { useSetupStatus } from '../hooks/useSetupStatus';
 import OnboardingWizard from './OnboardingWizard';
 import { proposalsApi } from '../api/client';
@@ -26,10 +26,6 @@ import { proposalsApi } from '../api/client';
 interface LayoutProps {
   children: React.ReactNode;
 }
-
-// Sidebar context
-const SidebarContext = createContext<{ collapsed: boolean }>({ collapsed: false });
-export const useSidebar = () => useContext(SidebarContext);
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -82,9 +78,14 @@ export default function Layout({ children }: LayoutProps) {
   const { showOnboarding, dismissOnboarding, markComplete } = useSetupStatus();
   const pendingProposals = usePendingProposalsCount();
 
-  useEffect(() => {
+  // Close the mobile drawer on navigation. Compared during render against the
+  // last seen pathname so the close happens in the same render as the route
+  // change instead of one effect later.
+  const [lastPathname, setLastPathname] = useState(location.pathname);
+  if (location.pathname !== lastPathname) {
+    setLastPathname(location.pathname);
     setMobileOpen(false);
-  }, [location.pathname]);
+  }
 
   useEffect(() => {
     document.body.classList.toggle('overflow-hidden', mobileOpen);
@@ -127,7 +128,7 @@ export default function Layout({ children }: LayoutProps) {
   }, []);
 
   return (
-    <SidebarContext.Provider value={{ collapsed }}>
+    <>
       {/* Onboarding Wizard */}
       {showOnboarding && (
         <OnboardingWizard
@@ -292,6 +293,6 @@ export default function Layout({ children }: LayoutProps) {
             </div>
           </main>
         </div>
-      </SidebarContext.Provider>
+    </>
   );
 }

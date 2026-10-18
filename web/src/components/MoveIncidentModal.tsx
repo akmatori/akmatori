@@ -28,7 +28,6 @@ export default function MoveIncidentModal({
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     incidentsApi.list(undefined, undefined, 1, 50)
       .then(res => {
         if (!cancelled) {

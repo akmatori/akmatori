@@ -1,22 +1,10 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import type { AuthUser, LoginResponse, SetupStatusResponse } from '../types';
+import { AuthContext } from './auth-context';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const TOKEN_KEY = 'aiops_auth_token';
 const USER_KEY = 'aiops_auth_user';
-
-interface AuthContextType {
-  user: AuthUser | null;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  setupRequired: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  completeSetup: (password: string, confirmPassword: string) => Promise<void>;
-  logout: () => void;
-  getToken: () => string | null;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -168,12 +156,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
 }

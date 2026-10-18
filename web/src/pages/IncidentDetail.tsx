@@ -1,13 +1,23 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Activity, Clock, CheckCircle, AlertCircle, Timer, Zap, XCircle, GitMerge } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import IncidentDetailView from '../components/IncidentDetailView';
 import CloseIncidentModal from '../components/CloseIncidentModal';
-import { incidentsApi, ApiError } from '../api/client';
+import { isFinishedStatus } from '../components/incidents/incidentStatus';
+import { incidentsApi } from '../api/client';
 import type { Incident } from '../types';
+import { useCloseIncident } from '../hooks/useCloseIncident';
+import { useInterval } from '../hooks/useInterval';
+import { formatAbsolute, formatExecutionTime, formatTokens } from '../utils/format';
+import { getErrorMessage } from '../utils/errors';
 
+// Poll a running incident this often while auto-refresh is on.
+const RUNNING_POLL_INTERVAL = 2000;
+
+// The standalone page uses the raw status vocabulary (Running, Diagnosed,
+// Monitor) rather than the list's collapsed "Ongoing" label.
 const getStatusConfig = (status: string) => {
   switch (status) {
     case 'completed':
@@ -29,34 +39,12 @@ const getStatusConfig = (status: string) => {
   }
 };
 
-const formatExecutionTime = (ms: number): string => {
-  if (!ms || ms <= 0) return '-';
-  if (ms < 1000) return `${ms}ms`;
-  const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  if (minutes < 60) return `${minutes}m ${Math.round(remainingSeconds)}s`;
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return `${hours}h ${remainingMinutes}m`;
-};
-
-const formatTokens = (tokens: number): string => {
-  if (!tokens || tokens <= 0) return '-';
-  return tokens.toLocaleString();
-};
-
 export default function IncidentDetail() {
   const { uuid } = useParams<{ uuid: string }>();
   const [incident, setIncident] = useState<Incident | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const refreshIntervalRef = useRef<number | null>(null);
-  const [closing, setClosing] = useState(false);
-  const [closeError, setCloseError] = useState('');
-  const [confirmClose, setConfirmClose] = useState<{ firingAlertCount: number; inProgress: boolean } | null>(null);
 
   useEffect(() => {
     if (!uuid) return;
@@ -67,7 +55,7 @@ export default function IncidentDetail() {
         setIncident(data);
         setError('');
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load incident');
+        setError(getErrorMessage(err, 'Failed to load incident'));
       } finally {
         setLoading(false);
       }
@@ -75,56 +63,20 @@ export default function IncidentDetail() {
     load();
   }, [uuid]);
 
-  // Auto-refresh while running
-  useEffect(() => {
-    if (!incident || incident.status !== 'running' || !autoRefresh || !uuid) return;
-
-    refreshIntervalRef.current = window.setInterval(async () => {
-      try {
-        const updated = await incidentsApi.get(uuid);
-        setIncident(updated);
-      } catch (err) {
-        console.error('Failed to refresh incident:', err);
-      }
-    }, 2000);
-
-    return () => {
-      if (refreshIntervalRef.current) {
-        clearInterval(refreshIntervalRef.current);
-        refreshIntervalRef.current = null;
-      }
-    };
-  }, [incident?.status, autoRefresh, uuid]);
-
-  const refreshIncident = async () => {
+  const refreshIncident = useCallback(async () => {
     if (!uuid) return;
     try {
       setIncident(await incidentsApi.get(uuid));
     } catch (err) {
       console.error('Failed to refresh incident:', err);
     }
-  };
+  }, [uuid]);
 
-  const handleCloseClick = async () => {
-    if (!uuid) return;
-    setCloseError('');
-    setClosing(true);
-    try {
-      await incidentsApi.close(uuid, false);
-      await refreshIncident();
-    } catch (err) {
-      const body = err instanceof ApiError && err.status === 409
-        ? err.body as { requires_confirmation?: boolean; firing_alert_count?: number; in_progress?: boolean } | undefined
-        : undefined;
-      if (body?.requires_confirmation) {
-        setConfirmClose({ firingAlertCount: body.firing_alert_count ?? 0, inProgress: body.in_progress ?? false });
-      } else {
-        setCloseError(err instanceof Error ? err.message : 'Failed to close incident');
-      }
-    } finally {
-      setClosing(false);
-    }
-  };
+  // Auto-refresh while running
+  const pollingActive = !!uuid && incident?.status === 'running' && autoRefresh;
+  useInterval(() => { void refreshIncident(); }, pollingActive ? RUNNING_POLL_INTERVAL : null);
+
+  const close = useCloseIncident(uuid, refreshIncident);
 
   if (loading) {
     return (
@@ -172,7 +124,7 @@ export default function IncidentDetail() {
                 <span className="text-gray-300 dark:text-gray-600">|</span>
                 <span>Source: {incident.source}</span>
                 <span className="text-gray-300 dark:text-gray-600">|</span>
-                <span>{new Date(incident.started_at).toLocaleString()}</span>
+                <span>{formatAbsolute(incident.started_at)}</span>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -182,20 +134,20 @@ export default function IncidentDetail() {
               </span>
               {incident.status !== 'closed' && (
                 <button
-                  onClick={handleCloseClick}
-                  disabled={closing}
+                  onClick={close.requestClose}
+                  disabled={close.closing}
                   className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
                 >
                   <XCircle className="w-3.5 h-3.5" />
-                  {closing ? 'Closing…' : 'Close Incident'}
+                  {close.closing ? 'Closing…' : 'Close Incident'}
                 </button>
               )}
             </div>
           </div>
 
-          {closeError && (
+          {close.closeError && (
             <div className="mt-3 px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-sm">
-              {closeError}
+              {close.closeError}
             </div>
           )}
 
@@ -211,7 +163,7 @@ export default function IncidentDetail() {
                 <span>Auto-refresh (2s)</span>
               </label>
             )}
-            {(incident.status === 'completed' || incident.status === 'monitor' || incident.status === 'failed') && (
+            {isFinishedStatus(incident.status) && (
               <>
                 {incident.execution_time_ms > 0 && (
                   <span className="flex items-center gap-1.5">
@@ -234,16 +186,13 @@ export default function IncidentDetail() {
         <IncidentDetailView incident={incident} autoRefresh={autoRefresh} />
       </div>
 
-      {confirmClose && (
+      {close.confirmClose && (
         <CloseIncidentModal
           incidentUUID={incident.uuid}
-          firingAlertCount={confirmClose.firingAlertCount}
-          inProgress={confirmClose.inProgress}
-          onClose={() => setConfirmClose(null)}
-          onClosed={() => {
-            setConfirmClose(null);
-            refreshIncident();
-          }}
+          firingAlertCount={close.confirmClose.firingAlertCount}
+          inProgress={close.confirmClose.inProgress}
+          onClose={close.dismissConfirm}
+          onClosed={close.handleConfirmed}
         />
       )}
     </div>

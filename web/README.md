@@ -1,73 +1,46 @@
-# React + TypeScript + Vite
+# Akmatori web UI
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React 19 + TypeScript + Vite + Tailwind. This is the operator console served by the
+`frontend` container; it talks to the Go API under `/api` and to the MCP gateway under `/mcp`.
 
-Currently, two official plugins are available:
+## Commands
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run dev       # Vite dev server on :5173, /api proxied (see vite.config.ts)
+npm run build     # tsc -b && vite build  → dist/
+npm run lint      # eslint (must report 0 problems)
+npm test          # vitest (jsdom)
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+From the repo root, `make test-web` runs the tests.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Layout
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```text
+src/
+  api/client.ts          fetch wrapper, ApiError, one `xxxApi` object per resource
+  types/index.ts         API types (mirror docs/openapi.yaml)
+  utils/                 pure helpers: errors.ts (getErrorMessage), format.ts (dates, durations, sizes)
+  hooks/                 reusable hooks: useInterval, useLatestRef, useCloseIncident, use*Management
+  context/               AuthProvider / ThemeProvider (+ their hooks in useAuth.ts / useTheme.ts)
+  components/shared/     EmptyState, Pagination, SegmentedControl, SourceKindChip
+  components/<area>/     feature components: feed/, incidents/, alerts/, channels/, cron/,
+                         proposals/, settings/, tools/  (pure helpers live next to them as *Helpers.ts)
+  pages/                 one component per route; wires hooks + components, holds page state
+  App.tsx                routes
 ```
+
+## Conventions
+
+- **No `any`.** Free-form JSON is `Record<string, unknown>`; narrow at the point of use.
+- **Error text goes through `getErrorMessage(err, fallback)`.** Never `err.message` on an unknown.
+- **Display formatting goes through `utils/format.ts`.** Do not re-implement relative times,
+  durations or token counts inside a page.
+- **Timers go through `useInterval`.** It reads the callback through a ref, so list-refresh and
+  polling intervals do not restart when page state changes.
+- **Reset-on-prop-change happens during render**, not in an effect (compare against the last seen
+  value in state), so the lint rule `react-hooks/set-state-in-effect` stays green.
+- **Context modules only export components.** The context object lives in `*-context.ts`, the
+  hook in `use*.ts`, the provider in `*Context.tsx` (required by `react-refresh/only-export-components`).
+- **Pure logic is tested.** Helpers (`*Helpers.ts`, `incidentStatus.ts`, `utils/*`) get a
+  colocated `*.test.ts`; components get a render test only when they carry behavior.

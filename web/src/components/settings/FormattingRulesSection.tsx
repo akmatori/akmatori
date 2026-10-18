@@ -12,7 +12,7 @@ import {
   skillsApi,
 } from '../../api/client';
 import type { AlertSourceInstance, Channel, CronJob, FormattingRule, Skill } from '../../types';
-import FormattingConfigFields, { validateSchemaExampleText } from './FormattingConfigFields';
+import FormattingConfigFields from './FormattingConfigFields';
 import {
   MATCH_SOURCE_KINDS,
   buildRulePayload,
@@ -27,6 +27,7 @@ import {
   OUTPUT_SCHEMA_EXAMPLE_MAX_BYTES,
   SYSTEM_PROMPT_MAX_BYTES,
   systemPromptByteLength,
+  validateSchemaExampleText,
 } from './formattingSettingsHelpers';
 
 interface FormattingRulesSectionProps {

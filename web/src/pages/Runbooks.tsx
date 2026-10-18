@@ -3,6 +3,8 @@ import { Plus, Pencil, Trash2, BookOpen, X } from 'lucide-react';
 import { runbooksApi } from '../api/client';
 import type { Runbook } from '../types';
 import PageHeader from '../components/PageHeader';
+import { getErrorMessage } from '../utils/errors';
+import { formatShortDateTime } from '../utils/format';
 
 export default function Runbooks() {
   const [runbooks, setRunbooks] = useState<Runbook[]>([]);
@@ -22,8 +24,8 @@ export default function Runbooks() {
       const data = await runbooksApi.list();
       setRunbooks(data);
       setError(null);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load runbooks');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to load runbooks'));
     } finally {
       setLoading(false);
     }
@@ -58,8 +60,8 @@ export default function Runbooks() {
       }
       setShowModal(false);
       loadRunbooks();
-    } catch (err: any) {
-      setError(err.message || 'Failed to save runbook');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to save runbook'));
     } finally {
       setSaving(false);
     }
@@ -70,19 +72,9 @@ export default function Runbooks() {
       await runbooksApi.delete(id);
       setDeleteConfirm(null);
       loadRunbooks();
-    } catch (err: any) {
-      setError(err.message || 'Failed to delete runbook');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to delete runbook'));
     }
-  };
-
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
   };
 
   return (
@@ -133,7 +125,7 @@ export default function Runbooks() {
               <div className="min-w-0 flex-1">
                 <h3 className="text-sm font-medium text-gray-900 dark:text-white truncate">{runbook.title}</h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Updated {formatDate(runbook.updated_at)}
+                  Updated {formatShortDateTime(runbook.updated_at)}
                 </p>
               </div>
               <div className="flex items-center gap-2 ml-4">

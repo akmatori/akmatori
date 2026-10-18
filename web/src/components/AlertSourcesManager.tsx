@@ -1,3 +1,4 @@
+import EmptyState from './shared/EmptyState';
 import {
   Plus,
   Edit2,
@@ -85,13 +86,7 @@ export default function AlertSourcesManager() {
 
       {/* Sources List */}
       {sources.length === 0 ? (
-        <div className="py-16 text-center border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
-          <Bell className="w-12 h-12 mx-auto text-gray-400 mb-3" />
-          <p className="text-gray-500 dark:text-gray-400">No alert sources configured</p>
-          <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-            Create one to start receiving alerts
-          </p>
-        </div>
+        <EmptyState icon={Bell} title="No alert sources configured" description="Create one to start receiving alerts" />
       ) : (
         <div className="space-y-4">
           {sources.map((source) => {

@@ -15,7 +15,7 @@ export interface ToolType {
   id: number;
   name: string;
   description: string;
-  schema: Record<string, any>;
+  schema: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -25,7 +25,7 @@ export interface ToolInstance {
   tool_type_id: number;
   name: string;
   logical_name: string;
-  settings: Record<string, any>;
+  settings: Record<string, unknown>;
   enabled: boolean;
   created_at: string;
   updated_at: string;
@@ -41,7 +41,7 @@ export interface Incident {
   source_id: string;
   title: string;  // LLM-generated title summarizing the incident
   status: IncidentStatus;
-  context: Record<string, any>;
+  context: Record<string, unknown>;
   session_id: string;
   working_dir: string;
   full_log: string;
@@ -77,7 +77,7 @@ export interface Alert {
   correlation_confidence?: number;
   correlation_reasoning?: string;
   correlation_decision?: string;
-  raw_payload: any;
+  raw_payload: unknown;
   created_at: string;
   updated_at: string;
 }
@@ -86,7 +86,7 @@ export interface EventSource {
   id: number;
   type: 'slack' | 'zabbix' | 'webhook';
   name: string;
-  settings: Record<string, any>;
+  settings: Record<string, unknown>;
   enabled: boolean;
   created_at: string;
   updated_at: string;
@@ -94,7 +94,7 @@ export interface EventSource {
 
 export interface CreateIncidentRequest {
   task: string;
-  context?: Record<string, any>;
+  context?: Record<string, unknown>;
 }
 
 export interface CreateIncidentResponse {
@@ -357,7 +357,7 @@ export interface Integration {
   uuid: string;
   provider: MessagingProvider;
   name: string;
-  credentials: Record<string, any>;
+  credentials: Record<string, unknown>;
   enabled: boolean;
   created_at: string;
   updated_at: string;
@@ -366,13 +366,13 @@ export interface Integration {
 export interface CreateIntegrationRequest {
   provider: MessagingProvider;
   name: string;
-  credentials?: Record<string, any>;
+  credentials?: Record<string, unknown>;
   enabled?: boolean;
 }
 
 export interface UpdateIntegrationRequest {
   name?: string;
-  credentials?: Record<string, any>;
+  credentials?: Record<string, unknown>;
   enabled?: boolean;
 }
 
@@ -446,7 +446,7 @@ export interface AlertSourceInstance {
   description: string;
   webhook_secret: string;
   field_mappings: Record<string, string>;
-  settings: Record<string, any>;
+  settings: Record<string, unknown>;
   notification_channel_id?: number | null;
   enabled: boolean;
   created_at: string;
@@ -461,7 +461,7 @@ export interface CreateAlertSourceRequest {
   description?: string;
   webhook_secret?: string;
   field_mappings?: Record<string, string>;
-  settings?: Record<string, any>;
+  settings?: Record<string, unknown>;
   notification_channel_uuid?: string | null;
 }
 
@@ -470,7 +470,7 @@ export interface UpdateAlertSourceRequest {
   description?: string;
   webhook_secret?: string;
   field_mappings?: Record<string, string>;
-  settings?: Record<string, any>;
+  settings?: Record<string, unknown>;
   enabled?: boolean;
   notification_channel_uuid?: string | null;
 }

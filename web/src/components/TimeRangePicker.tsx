@@ -93,16 +93,31 @@ export default function TimeRangePicker({
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(refreshInterval > 0);
+  // Unix seconds at the moment the dropdown was last opened. Preset
+  // highlighting compares `to` against this instead of calling Date.now()
+  // during render, which would make the component impure.
+  const [openedAt, setOpenedAt] = useState(0);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  // Update custom fields when opening absolute tab
-  useEffect(() => {
+  // Seed the custom fields from the current range when the absolute tab is
+  // shown, and keep them in sync if the range changes while it is visible.
+  const handleTabChange = useCallback((tab: 'relative' | 'absolute') => {
+    setActiveTab(tab);
+    if (tab === 'absolute') {
+      setCustomFrom(toLocalDateTimeString(from));
+      setCustomTo(toLocalDateTimeString(to));
+    }
+  }, [from, to]);
+
+  const [lastRange, setLastRange] = useState({ from, to });
+  if (from !== lastRange.from || to !== lastRange.to) {
+    setLastRange({ from, to });
     if (activeTab === 'absolute') {
       setCustomFrom(toLocalDateTimeString(from));
       setCustomTo(toLocalDateTimeString(to));
     }
-  }, [activeTab, from, to]);
+  }
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -161,10 +176,14 @@ export default function TimeRangePicker({
     [onRefreshIntervalChange]
   );
 
-  // Find current preset match
-  const now = Math.floor(Date.now() / 1000);
+  const toggleOpen = useCallback(() => {
+    setOpenedAt(Math.floor(Date.now() / 1000));
+    setIsOpen((open) => !open);
+  }, []);
+
+  // Find current preset match (only rendered while the dropdown is open)
   const diff = to - from;
-  const isRelative = Math.abs(to - now) < 60;
+  const isRelative = Math.abs(to - openedAt) < 60;
   const currentPreset = isRelative
     ? TIME_PRESETS.find((p) => Math.abs(diff - p.value) < 60)
     : null;
@@ -174,7 +193,7 @@ export default function TimeRangePicker({
       {/* Main Button */}
       <button
         ref={buttonRef}
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={toggleOpen}
         className="
           group flex items-center gap-2.5 px-3 py-2
           bg-gray-100 dark:bg-gray-800/80
@@ -223,7 +242,7 @@ export default function TimeRangePicker({
           {/* Tabs */}
           <div className="flex border-b border-gray-200 dark:border-gray-700">
             <button
-              onClick={() => setActiveTab('relative')}
+              onClick={() => handleTabChange('relative')}
               className={`
                 flex-1 flex items-center justify-center gap-2 px-4 py-3
                 text-sm font-medium transition-colors
@@ -238,7 +257,7 @@ export default function TimeRangePicker({
               Relative
             </button>
             <button
-              onClick={() => setActiveTab('absolute')}
+              onClick={() => handleTabChange('absolute')}
               className={`
                 flex-1 flex items-center justify-center gap-2 px-4 py-3
                 text-sm font-medium transition-colors

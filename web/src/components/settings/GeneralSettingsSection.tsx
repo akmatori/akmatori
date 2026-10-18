@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useLatestRef } from '../../hooks/useLatestRef';
 import { Save, Info } from 'lucide-react';
 import LoadingSpinner from '../LoadingSpinner';
 import ErrorMessage from '../ErrorMessage';
@@ -34,11 +35,9 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
   const [autoCloseEnabled, setAutoCloseEnabled] = useState(true);
   const [autoCloseHours, setAutoCloseHours] = useState(DEFAULT_AUTO_CLOSE_HOURS);
 
-  useEffect(() => {
-    loadGeneralSettings();
-  }, []);
+  const onStatusChangeRef = useLatestRef(onStatusChange);
 
-  const loadGeneralSettings = async () => {
+  const loadGeneralSettings = useCallback(async () => {
     try {
       setGeneralLoading(true);
       const data = await generalSettingsApi.get();
@@ -52,14 +51,18 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
         Math.round((data.incident_auto_close_minutes ?? DEFAULT_AUTO_CLOSE_HOURS * 60) / 60)
       );
       setGeneralError(null);
-      onStatusChange?.(data.base_url ? 'configured' : undefined);
+      onStatusChangeRef.current?.(data.base_url ? 'configured' : undefined);
     } catch (err) {
       setGeneralError('Failed to load general settings');
       console.error(err);
     } finally {
       setGeneralLoading(false);
     }
-  };
+  }, [onStatusChangeRef]);
+
+  useEffect(() => {
+    void loadGeneralSettings();
+  }, [loadGeneralSettings]);
 
   const handleGeneralSave = async () => {
     try {
@@ -76,7 +79,7 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
         incident_auto_close_minutes: autoCloseHours * 60,
       });
       setGeneralSettings(updated);
-      onStatusChange?.(updated.base_url ? 'configured' : undefined);
+      onStatusChangeRef.current?.(updated.base_url ? 'configured' : undefined);
       setGeneralSuccess(true);
       setTimeout(() => setGeneralSuccess(false), 3000);
     } catch (err) {

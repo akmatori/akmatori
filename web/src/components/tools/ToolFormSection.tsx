@@ -1,23 +1,21 @@
 import { Save, X, Power, PowerOff, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
-import type { ToolType, SSHKey } from '../../types';
+import type { ToolType, SSHKey, SSHHostConfig } from '../../types';
 import SSHKeysSection from './SSHKeysSection';
 import SSHHostsSection from './SSHHostsSection';
-import { useState, useEffect } from 'react';
-
-interface ToolSchema {
-  name: string;
-  settings_schema: {
-    type: string;
-    required?: string[];
-    properties: Record<string, any>;
-  };
-}
+import { useState } from 'react';
+import {
+  inputValue,
+  type ToolFormData,
+  type ToolSchema,
+  type ToolSchemaProperty,
+  type ToolSettingsSchema,
+} from './toolFormTypes';
 
 interface ToolFormSectionProps {
   isCreating: boolean;
-  formData: any;
-  setFormData: (data: any) => void;
-  updateSetting: (key: string, value: any) => void;
+  formData: ToolFormData;
+  setFormData: (data: ToolFormData) => void;
+  updateSetting: (key: string, value: unknown) => void;
   toolTypes: ToolType[];
   selectedType: ToolType | undefined;
   selectedSchema: ToolSchema | null;
@@ -40,13 +38,18 @@ interface ToolFormSectionProps {
   onCancel: () => void;
 }
 
-function getSchemaProperties(schema: any) {
-  const properties = schema?.properties || {};
-  const basicProps: [string, any][] = [];
-  const advancedProps: [string, any][] = [];
+type SchemaEntry = [string, ToolSchemaProperty];
 
-  Object.entries(properties).forEach(([key, prop]: [string, any]) => {
-    if (key === 'ssh_hosts' || key === 'ssh_keys' || key === 'ssh_private_key') return;
+// SSH keys/hosts have dedicated sections; never render them as generic inputs.
+const SPECIAL_PROPERTIES = new Set(['ssh_hosts', 'ssh_keys', 'ssh_private_key']);
+
+function getSchemaProperties(schema: ToolSettingsSchema | undefined) {
+  const properties = schema?.properties || {};
+  const basicProps: SchemaEntry[] = [];
+  const advancedProps: SchemaEntry[] = [];
+
+  Object.entries(properties).forEach(([key, prop]) => {
+    if (SPECIAL_PROPERTIES.has(key)) return;
 
     if (prop.advanced) {
       advancedProps.push([key, prop]);
@@ -87,25 +90,30 @@ export default function ToolFormSection({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [expandedHosts, setExpandedHosts] = useState<number[]>([]);
 
-  // Reset local UI state when switching between tools
-  useEffect(() => {
+  // Reset local UI state when switching between tools. Done during render
+  // (compare against the previous key) rather than in an effect so the reset
+  // does not cause a second render with stale state.
+  const resetKey = `${editingToolId ?? ''}|${isCreating}|${formData.tool_type_id}`;
+  const [lastResetKey, setLastResetKey] = useState(resetKey);
+  if (resetKey !== lastResetKey) {
+    setLastResetKey(resetKey);
     setShowAdvanced(false);
     setExpandedHosts([]);
-  }, [editingToolId, isCreating, formData.tool_type_id]);
+  }
+
+  const hosts: SSHHostConfig[] = formData.settings.ssh_hosts || [];
 
   const addHost = () => {
-    const currentHosts = formData.settings.ssh_hosts || [];
-    updateSetting('ssh_hosts', [...currentHosts, { hostname: '', address: '' }]);
+    updateSetting('ssh_hosts', [...hosts, { hostname: '', address: '' }]);
   };
 
   const removeHost = (index: number) => {
-    const currentHosts = formData.settings.ssh_hosts || [];
-    updateSetting('ssh_hosts', currentHosts.filter((_: any, i: number) => i !== index));
+    updateSetting('ssh_hosts', hosts.filter((_, i) => i !== index));
     setExpandedHosts(expandedHosts.filter(i => i !== index).map(i => i > index ? i - 1 : i));
   };
 
-  const updateHost = (index: number, field: string, value: any) => {
-    const currentHosts = [...(formData.settings.ssh_hosts || [])];
+  const updateHost = <K extends keyof SSHHostConfig>(index: number, field: K, value: SSHHostConfig[K]) => {
+    const currentHosts = [...hosts];
     currentHosts[index] = { ...currentHosts[index], [field]: value };
     updateSetting('ssh_hosts', currentHosts);
   };
@@ -118,8 +126,9 @@ export default function ToolFormSection({
     }
   };
 
-  const renderPropertyInput = (key: string, prop: any, isRequired: boolean) => {
+  const renderPropertyInput = (key: string, prop: ToolSchemaProperty, isRequired: boolean) => {
     const inputType = prop.secret ? 'password' : prop.type === 'integer' ? 'number' : prop.type === 'boolean' ? 'checkbox' : 'text';
+    const current = formData.settings[key];
 
     if (prop.type === 'boolean') {
       return (
@@ -127,7 +136,7 @@ export default function ToolFormSection({
           <input
             type="checkbox"
             id={key}
-            checked={formData.settings[key] || false}
+            checked={Boolean(current)}
             onChange={(e) => updateSetting(key, e.target.checked)}
           />
           <label htmlFor={key} className="text-sm text-gray-700 dark:text-gray-300">
@@ -153,7 +162,7 @@ export default function ToolFormSection({
           <textarea
             className="input-field min-h-[100px] font-mono text-sm"
             placeholder={prop.example || ''}
-            value={formData.settings[key] || ''}
+            value={inputValue(current) || ''}
             onChange={(e) => updateSetting(key, e.target.value)}
           />
         </div>
@@ -169,10 +178,10 @@ export default function ToolFormSection({
           </label>
           <select
             className="input-field"
-            value={formData.settings[key] || prop.default || ''}
+            value={inputValue(current) || inputValue(prop.default) || ''}
             onChange={(e) => updateSetting(key, e.target.value)}
           >
-            {prop.enum.map((opt: string) => (
+            {prop.enum.map((opt) => (
               <option key={opt} value={opt}>{opt}</option>
             ))}
           </select>
@@ -193,12 +202,16 @@ export default function ToolFormSection({
           type={inputType}
           className="input-field"
           placeholder={prop.example || ''}
-          value={formData.settings[key] ?? ''}
+          value={inputValue(current)}
           onChange={(e) => updateSetting(key, inputType === 'number' ? (e.target.value ? Number(e.target.value) : undefined) : e.target.value)}
         />
       </div>
     );
   };
+
+  const schema = selectedSchema?.settings_schema;
+  const { basicProps, advancedProps } = getSchemaProperties(schema);
+  const isRequired = (key: string) => schema?.required?.includes(key) || false;
 
   return (
     <div className="card mb-8 animate-fade-in">
@@ -274,7 +287,7 @@ export default function ToolFormSection({
               {/* SSH Hosts - Special handling */}
               {selectedType.name === 'ssh' && (
                 <SSHHostsSection
-                  hosts={formData.settings.ssh_hosts || []}
+                  hosts={hosts}
                   expandedHosts={expandedHosts}
                   sshKeys={sshKeys}
                   getDefaultKey={getDefaultKey}
@@ -286,42 +299,31 @@ export default function ToolFormSection({
               )}
 
               {/* Basic (non-advanced) properties */}
-              {(() => {
-                const { basicProps, advancedProps } = getSchemaProperties(selectedSchema.settings_schema);
-                return (
-                  <>
-                    {basicProps.map(([key, prop]) =>
-                      renderPropertyInput(key, prop, selectedSchema.settings_schema.required?.includes(key) || false)
-                    )}
+              {basicProps.map(([key, prop]) => renderPropertyInput(key, prop, isRequired(key)))}
 
-                    {/* Advanced toggle */}
-                    {advancedProps.length > 0 && (
-                      <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-                        <button
-                          type="button"
-                          onClick={() => setShowAdvanced(!showAdvanced)}
-                          className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
-                        >
-                          {showAdvanced ? (
-                            <ChevronUp className="w-4 h-4" />
-                          ) : (
-                            <ChevronDown className="w-4 h-4" />
-                          )}
-                          {showAdvanced ? 'Hide' : 'Show'} Advanced Settings ({advancedProps.length})
-                        </button>
-
-                        {showAdvanced && (
-                          <div className="mt-4 space-y-4 pl-4 border-l-2 border-gray-200 dark:border-gray-700">
-                            {advancedProps.map(([key, prop]) =>
-                              renderPropertyInput(key, prop, selectedSchema.settings_schema.required?.includes(key) || false)
-                            )}
-                          </div>
-                        )}
-                      </div>
+              {/* Advanced toggle */}
+              {advancedProps.length > 0 && (
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvanced(!showAdvanced)}
+                    className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                  >
+                    {showAdvanced ? (
+                      <ChevronUp className="w-4 h-4" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4" />
                     )}
-                  </>
-                );
-              })()}
+                    {showAdvanced ? 'Hide' : 'Show'} Advanced Settings ({advancedProps.length})
+                  </button>
+
+                  {showAdvanced && (
+                    <div className="mt-4 space-y-4 pl-4 border-l-2 border-gray-200 dark:border-gray-700">
+                      {advancedProps.map(([key, prop]) => renderPropertyInput(key, prop, isRequired(key)))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -78,3 +78,18 @@ export function clampTemperature(raw: number): number {
 export function systemPromptByteLength(prompt: string): number {
   return new TextEncoder().encode(prompt).length;
 }
+
+// validateSchemaExampleText mirrors the backend's "JSON object" constraint for
+// blur-time feedback. Empty text is valid (built-in default applies).
+export function validateSchemaExampleText(text: string): string | null {
+  if (!text.trim()) return null;
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
+      return 'Must be a JSON object (not an array or scalar)';
+    }
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Invalid JSON';
+  }
+}

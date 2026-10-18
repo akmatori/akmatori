@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useLatestRef } from '../../hooks/useLatestRef';
 import { Save, Info } from 'lucide-react';
 import LoadingSpinner from '../LoadingSpinner';
 import ErrorMessage from '../ErrorMessage';
@@ -18,11 +19,9 @@ export default function RetentionSettingsSection({ onStatusChange }: RetentionSe
   const [retentionDays, setRetentionDays] = useState(90);
   const [cleanupIntervalHours, setCleanupIntervalHours] = useState(6);
 
-  useEffect(() => {
-    loadSettings();
-  }, []);
+  const onStatusChangeRef = useLatestRef(onStatusChange);
 
-  const loadSettings = async () => {
+  const loadSettings = useCallback(async () => {
     try {
       setLoading(true);
       const data = await retentionSettingsApi.get();
@@ -30,14 +29,18 @@ export default function RetentionSettingsSection({ onStatusChange }: RetentionSe
       setRetentionDays(data.retention_days);
       setCleanupIntervalHours(data.cleanup_interval_hours);
       setError(null);
-      onStatusChange?.(data.enabled ? 'configured' : 'disabled');
+      onStatusChangeRef.current?.(data.enabled ? 'configured' : 'disabled');
     } catch (err) {
       setError('Failed to load retention settings');
       console.error(err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [onStatusChangeRef]);
+
+  useEffect(() => {
+    void loadSettings();
+  }, [loadSettings]);
 
   const handleSave = async () => {
     try {
@@ -50,7 +53,7 @@ export default function RetentionSettingsSection({ onStatusChange }: RetentionSe
         retention_days: retentionDays,
         cleanup_interval_hours: cleanupIntervalHours,
       });
-      onStatusChange?.(updated.enabled ? 'configured' : 'disabled');
+      onStatusChangeRef.current?.(updated.enabled ? 'configured' : 'disabled');
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {

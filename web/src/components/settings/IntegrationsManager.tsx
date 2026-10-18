@@ -1,3 +1,4 @@
+import EmptyState from '../shared/EmptyState';
 import { useCallback, useEffect, useState } from 'react';
 import { Plus, Save, X, Trash2, Edit2, Power, PowerOff } from 'lucide-react';
 import LoadingSpinner from '../LoadingSpinner';
@@ -232,12 +233,7 @@ export default function IntegrationsManager() {
       )}
 
       {integrations.length === 0 ? (
-        <div className="py-12 text-center border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
-          <p className="text-gray-500 dark:text-gray-400">No integrations configured</p>
-          <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-            Add a Slack integration to get started.
-          </p>
-        </div>
+        <EmptyState padding="py-12" title="No integrations configured" description="Add a Slack integration to get started." />
       ) : (
         <div className="space-y-3">
           {integrations.map((row) => {

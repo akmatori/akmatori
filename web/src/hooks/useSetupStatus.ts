@@ -25,7 +25,7 @@ export function useSetupStatus(): SetupStatus {
       const response = await llmSettingsApi.list();
       const activeConfig = response.configs.find(c => c.id === response.active_id);
       setIsConfigured(activeConfig?.is_configured ?? false);
-    } catch (err) {
+    } catch {
       // If we can't check, assume not configured
       setIsConfigured(false);
     } finally {

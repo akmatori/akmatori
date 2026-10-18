@@ -1,23 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toolsApi, toolTypesApi } from '../api/client';
 import type { ToolInstance, ToolType } from '../types';
-
-interface ToolSchema {
-  name: string;
-  description: string;
-  version: string;
-  settings_schema: {
-    type: string;
-    required?: string[];
-    properties: Record<string, any>;
-  };
-  functions: Array<{
-    name: string;
-    description: string;
-    parameters?: string;
-    returns?: string;
-  }>;
-}
+import { EMPTY_TOOL_FORM, type ToolFormData, type ToolSchema } from '../components/tools/toolFormTypes';
+import { getErrorMessage } from '../utils/errors';
 
 const MANAGED_SETTINGS_FIELDS = ['ssh_keys'];
 
@@ -29,12 +14,7 @@ export function useToolManagement() {
   const [error, setError] = useState('');
   const [editingTool, setEditingTool] = useState<ToolInstance | null>(null);
   const [isCreating, setIsCreating] = useState(false);
-  const [formData, setFormData] = useState<any>({
-    tool_type_id: 0,
-    name: '',
-    settings: {},
-    enabled: true,
-  });
+  const [formData, setFormData] = useState<ToolFormData>(EMPTY_TOOL_FORM);
 
   const loadData = useCallback(async () => {
     try {
@@ -43,13 +23,13 @@ export function useToolManagement() {
       const [toolsData, typesData, schemasData] = await Promise.all([
         toolsApi.list(),
         toolTypesApi.list(),
-        fetch('/mcp/tools').then(res => res.json()),
+        fetch('/mcp/tools').then(res => res.json() as Promise<Record<string, ToolSchema>>),
       ]);
       setTools(toolsData);
       setToolTypes(typesData);
       setToolSchemas(schemasData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
+      setError(getErrorMessage(err, 'Failed to load data'));
     } finally {
       setLoading(false);
     }
@@ -62,10 +42,8 @@ export function useToolManagement() {
   const handleCreate = useCallback(() => {
     setIsCreating(true);
     setFormData({
+      ...EMPTY_TOOL_FORM,
       tool_type_id: toolTypes[0]?.id || 0,
-      name: '',
-      settings: {},
-      enabled: true,
     });
     setEditingTool(null);
   }, [toolTypes]);
@@ -114,10 +92,10 @@ export function useToolManagement() {
 
       setIsCreating(false);
       setEditingTool(null);
-      setFormData({ tool_type_id: 0, name: '', settings: {}, enabled: true });
+      setFormData(EMPTY_TOOL_FORM);
       loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save tool');
+      setError(getErrorMessage(err, 'Failed to save tool'));
     }
   }, [formData, isCreating, editingTool, loadData]);
 
@@ -129,18 +107,18 @@ export function useToolManagement() {
       await toolsApi.delete(id);
       loadData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete tool');
+      setError(getErrorMessage(err, 'Failed to delete tool'));
     }
   }, [loadData]);
 
   const handleCancel = useCallback(() => {
     setIsCreating(false);
     setEditingTool(null);
-    setFormData({ tool_type_id: 0, name: '', settings: {}, enabled: true });
+    setFormData(EMPTY_TOOL_FORM);
   }, []);
 
-  const updateSetting = useCallback((key: string, value: any) => {
-    setFormData((prev: any) => ({
+  const updateSetting = useCallback((key: string, value: unknown) => {
+    setFormData((prev) => ({
       ...prev,
       settings: {
         ...prev.settings,

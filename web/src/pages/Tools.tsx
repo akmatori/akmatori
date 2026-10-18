@@ -5,6 +5,8 @@ import ErrorMessage from '../components/ErrorMessage';
 import ToolFormSection from '../components/tools/ToolFormSection';
 import { useToolManagement } from '../hooks/useToolManagement';
 import { useSSHKeyManagement } from '../hooks/useSSHKeyManagement';
+import EmptyState from '../components/shared/EmptyState';
+import type { ToolInstance } from '../types';
 
 export default function Tools() {
   const {
@@ -29,7 +31,7 @@ export default function Tools() {
 
   const ssh = useSSHKeyManagement(setError);
 
-  const handleEdit = async (tool: any) => {
+  const handleEdit = async (tool: ToolInstance) => {
     ssh.resetKeyForm();
     baseHandleEdit(tool);
     if (tool.tool_type?.name === 'ssh') {
@@ -96,11 +98,7 @@ export default function Tools() {
           {/* Tools List */}
           <div className="card">
             {tools.length === 0 ? (
-              <div className="py-16 text-center border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
-                <Wrench className="w-12 h-12 mx-auto text-gray-400 mb-3" />
-                <p className="text-gray-500 dark:text-gray-400">No tool instances yet</p>
-                <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Create one to get started</p>
-              </div>
+              <EmptyState icon={Wrench} title="No tool instances yet" description="Create one to get started" />
             ) : (
               <div className="space-y-4">
                 {tools.map((tool) => (

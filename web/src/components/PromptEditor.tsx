@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { contextApi } from '../api/client';
 import type { ContextFile, ValidateReferencesResponse } from '../types';
 import { Check, X, FileText, AlertCircle, Loader2 } from 'lucide-react';
@@ -30,11 +30,7 @@ export default function PromptEditor({
   const autocompleteRef = useRef<HTMLDivElement>(null);
   const triggerPositionRef = useRef<number>(0);
 
-  useEffect(() => {
-    loadContextFiles();
-  }, []);
-
-  const loadContextFiles = async () => {
+  const loadContextFiles = useCallback(async () => {
     try {
       const files = await contextApi.list();
       setContextFiles(files || []);
@@ -42,21 +38,13 @@ export default function PromptEditor({
       console.error('Failed to load context files:', err);
       setContextFiles([]);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    if (!value) {
-      setValidation(null);
-      return;
-    }
+    loadContextFiles();
+  }, [loadContextFiles]);
 
-    const timer = setTimeout(() => {
-      validateReferences();
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [value]);
-
-  const validateReferences = async () => {
+  const validateReferences = useCallback(async () => {
     if (!value || !value.includes('[[')) {
       setValidation(null);
       return;
@@ -71,7 +59,20 @@ export default function PromptEditor({
     } finally {
       setValidating(false);
     }
-  };
+  }, [value]);
+
+  // Debounce reference validation while the user types.
+  useEffect(() => {
+    if (!value) {
+      setValidation(null);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      validateReferences();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [value, validateReferences]);
 
   const filteredFiles = (contextFiles || []).filter((file) =>
     file?.filename?.toLowerCase().includes((autocompleteFilter || '').toLowerCase())

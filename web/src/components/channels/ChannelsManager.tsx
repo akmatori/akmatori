@@ -1,3 +1,4 @@
+import EmptyState from '../shared/EmptyState';
 import { useCallback, useEffect, useState } from 'react';
 import { Plus, Save, X, Trash2, Edit2 } from 'lucide-react';
 import LoadingSpinner from '../LoadingSpinner';
@@ -335,12 +336,7 @@ export default function ChannelsManager() {
       )}
 
       {channels.length === 0 ? (
-        <div className="py-12 text-center border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
-          <p className="text-gray-500 dark:text-gray-400">No channels configured</p>
-          <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-            Add a channel to start routing messages.
-          </p>
-        </div>
+        <EmptyState padding="py-12" title="No channels configured" description="Add a channel to start routing messages." />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left">

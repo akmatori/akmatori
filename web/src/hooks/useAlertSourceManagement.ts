@@ -3,13 +3,13 @@ import { alertSourceTypesApi, alertSourcesApi, channelsApi } from '../api/client
 import type { AlertSourceType, AlertSourceInstance, Channel } from '../types';
 import { visibleAlertSourceTypes } from '../components/alerts/alertSourceHelpers';
 
-interface AlertSourceFormData {
+export interface AlertSourceFormData {
   source_type_name: string;
   name: string;
   description: string;
   webhook_secret: string;
   field_mappings: Record<string, string>;
-  settings: Record<string, any>;
+  settings: Record<string, unknown>;
   notification_channel_uuid: string | null;
   enabled: boolean;
 }
