@@ -2,14 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { incidentsApi, proposalsApi } from '../api/client';
 import { getErrorMessage } from '../utils/errors';
 import type { Incident, Proposal } from '../types';
+import { isStalled } from '../components/incidents/incidentStatus';
 import { useInterval } from './useInterval';
 import { useLatestRef } from './useLatestRef';
 
 const POLL_INTERVAL = 15_000;
 const DAY_SECONDS = 24 * 60 * 60;
 const COLUMN_LIMIT = 8;
-// A running incident with no update for this long is shown as stalled.
-const STALL_MS = 30 * 60 * 1000;
 
 export interface OverviewData {
   // Work that waits for an operator: proposals to review, diagnosed
@@ -40,8 +39,6 @@ export function useOverviewData() {
         incidentsApi.list(undefined, undefined, 1, COLUMN_LIMIT, undefined, 'monitor'),
         incidentsApi.list(dayAgo, now, 1, 1),
       ]);
-      const isStalled = (i: Incident) =>
-        i.status === 'running' && Date.now() - new Date(i.updated_at).getTime() > STALL_MS;
       setData({
         latestProposal: proposals.data[0] ?? null,
         needsAttention: [...attention.data, ...active.data.filter(isStalled), ...failed.data].sort(
