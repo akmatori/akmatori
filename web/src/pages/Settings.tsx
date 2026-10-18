@@ -1,18 +1,14 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Navigate, NavLink, useParams } from 'react-router-dom';
 import {
   MessageSquare,
   Cpu,
   Bell,
-  ChevronDown,
-  ChevronRight,
-  CheckCircle2,
-  AlertTriangle,
   Globe,
   Settings2,
   Trash2,
   Sparkles,
   Hash,
+  type LucideIcon,
 } from 'lucide-react';
 import AlertSourcesManager from '../components/AlertSourcesManager';
 import ProxySettings from '../components/ProxySettings';
@@ -20,185 +16,112 @@ import LLMSettingsSection from '../components/settings/LLMSettingsSection';
 import GeneralSettingsSection from '../components/settings/GeneralSettingsSection';
 import RetentionSettingsSection from '../components/settings/RetentionSettingsSection';
 import FormattingRulesSection from '../components/settings/FormattingRulesSection';
+import IntegrationsManager from '../components/settings/IntegrationsManager';
+import ChannelsManager from '../components/channels/ChannelsManager';
 
-function SettingsSection({
-  title,
-  description,
-  icon: Icon,
-  status,
-  children,
-  defaultExpanded = false,
-}: {
+interface SettingsSectionDef {
+  id: string;
   title: string;
   description: string;
-  icon: React.ElementType;
-  status?: 'configured' | 'not-configured' | 'disabled';
-  children: React.ReactNode;
-  defaultExpanded?: boolean;
-}) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
-
-  return (
-    <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between p-5 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors text-left"
-      >
-        <div className="flex items-center gap-4">
-          <div className="p-2.5 rounded-lg bg-gray-100 dark:bg-gray-800">
-            <Icon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-          </div>
-          <div>
-            <h3 className="font-semibold text-gray-900 dark:text-white">{title}</h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400">{description}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          {status === 'configured' && (
-            <span className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400">
-              <CheckCircle2 className="w-4 h-4" />
-              Configured
-            </span>
-          )}
-          {status === 'not-configured' && (
-            <span className="flex items-center gap-1.5 text-sm text-amber-600 dark:text-amber-400">
-              <AlertTriangle className="w-4 h-4" />
-              Setup required
-            </span>
-          )}
-          {status === 'disabled' && (
-            <span className="text-sm text-gray-400 dark:text-gray-500">Disabled</span>
-          )}
-          {expanded ? (
-            <ChevronDown className="w-5 h-5 text-gray-400" />
-          ) : (
-            <ChevronRight className="w-5 h-5 text-gray-400" />
-          )}
-        </div>
-      </button>
-      {expanded && (
-        <div className="border-t border-gray-200 dark:border-gray-700 p-6 bg-gray-50/50 dark:bg-gray-900/30">
-          {children}
-        </div>
-      )}
-    </div>
-  );
+  icon: LucideIcon;
+  render: () => React.ReactNode;
 }
 
-function NavigationCard({
-  title,
-  description,
-  icon: Icon,
-  to,
-}: {
-  title: string;
-  description: string;
-  icon: React.ElementType;
-  to: string;
-}) {
-  return (
-    <Link
-      to={to}
-      className="block border border-gray-200 dark:border-gray-700 rounded-xl p-5 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
-    >
-      <div className="flex items-center gap-4">
-        <div className="p-2.5 rounded-lg bg-gray-100 dark:bg-gray-800">
-          <Icon className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-        </div>
-        <div className="flex-1">
-          <h3 className="font-semibold text-gray-900 dark:text-white">{title}</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{description}</p>
-        </div>
-        <ChevronRight className="w-5 h-5 text-gray-400" />
-      </div>
-    </Link>
-  );
-}
+// Each section has its own URL (/settings/<id>) so a section can be linked
+// to directly, e.g. from the top-bar "LLM not configured" status.
+const SECTIONS: SettingsSectionDef[] = [
+  {
+    id: 'general',
+    title: 'General',
+    description: 'Instance name and the external URL used in links.',
+    icon: Settings2,
+    render: () => <GeneralSettingsSection />,
+  },
+  {
+    id: 'ai',
+    title: 'AI models',
+    description: 'The LLM provider and model the agent uses to investigate.',
+    icon: Cpu,
+    render: () => <LLMSettingsSection />,
+  },
+  {
+    id: 'integrations',
+    title: 'Integrations',
+    description: 'Messaging providers such as Slack.',
+    icon: MessageSquare,
+    render: () => <IntegrationsManager />,
+  },
+  {
+    id: 'channels',
+    title: 'Channels',
+    description: 'Where alert notifications go and which channels the agent listens to.',
+    icon: Hash,
+    render: () => <ChannelsManager />,
+  },
+  {
+    id: 'alert-sources',
+    title: 'Alert sources',
+    description: 'Webhooks that receive alerts from your monitoring systems.',
+    icon: Bell,
+    render: () => <AlertSourcesManager />,
+  },
+  {
+    id: 'formatting',
+    title: 'Response formatting',
+    description: 'Rules that reshape agent responses before they are delivered.',
+    icon: Sparkles,
+    render: () => <FormattingRulesSection />,
+  },
+  {
+    id: 'retention',
+    title: 'Data retention',
+    description: 'How long incident data is kept before automatic cleanup.',
+    icon: Trash2,
+    render: () => <RetentionSettingsSection />,
+  },
+  {
+    id: 'proxy',
+    title: 'Proxy',
+    description: 'HTTP proxy for outbound connections.',
+    icon: Globe,
+    render: () => <ProxySettings />,
+  },
+];
 
 export default function Settings() {
-  const [llmStatus, setLlmStatus] = useState<'configured' | 'not-configured'>('not-configured');
-  const [generalStatus, setGeneralStatus] = useState<'configured' | undefined>();
-  const [retentionStatus, setRetentionStatus] = useState<'configured' | 'disabled' | undefined>();
-  const [formattingStatus, setFormattingStatus] = useState<'configured' | 'disabled' | undefined>();
+  const { section } = useParams<{ section?: string }>();
+  const active = SECTIONS.find((s) => s.id === section);
+  if (!active) return <Navigate to="/settings/general" replace />;
 
   return (
-    <div className="animate-fade-in max-w-3xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
-        <p className="mt-1 text-gray-600 dark:text-gray-400">
-          Configure your Akmatori instance
-        </p>
-      </div>
+    <div className="flex flex-col md:flex-row gap-6 md:gap-10">
+      <nav aria-label="Settings" className="md:w-52 flex-shrink-0">
+        <ul className="flex md:flex-col gap-0.5 overflow-x-auto md:overflow-visible -mx-1 px-1 pb-1 md:pb-0">
+          {SECTIONS.map(({ id, title, icon: Icon }) => (
+            <li key={id} className="flex-shrink-0">
+              <NavLink
+                to={`/settings/${id}`}
+                className={({ isActive }) =>
+                  `flex items-center gap-2.5 h-9 px-2.5 rounded-md text-sm whitespace-nowrap transition-colors ${
+                    isActive ? 'bg-surface-2 text-fg' : 'text-fg-muted hover:bg-surface-2 hover:text-fg'
+                  }`
+                }
+              >
+                <Icon size={15} aria-hidden="true" />
+                {title}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      </nav>
 
-      <div className="space-y-4">
-        <SettingsSection
-          title="General"
-          description="Instance configuration and external access"
-          icon={Settings2}
-          status={generalStatus}
-        >
-          <GeneralSettingsSection onStatusChange={setGeneralStatus} />
-        </SettingsSection>
-
-        <SettingsSection
-          title="AI Configuration"
-          description="LLM provider settings for incident analysis"
-          icon={Cpu}
-          status={llmStatus}
-          defaultExpanded={llmStatus === 'not-configured'}
-        >
-          <LLMSettingsSection onStatusChange={setLlmStatus} />
-        </SettingsSection>
-
-        <NavigationCard
-          title="Integrations"
-          description="Slack and other messaging providers (Telegram coming soon)"
-          icon={MessageSquare}
-          to="/settings/integrations"
-        />
-
-        <NavigationCard
-          title="Channels"
-          description="Addressable destinations within your integrations"
-          icon={Hash}
-          to="/settings/channels"
-        />
-
-        <SettingsSection
-          title="Proxy"
-          description="HTTP proxy configuration for outbound connections"
-          icon={Globe}
-          defaultExpanded={false}
-        >
-          <ProxySettings />
-        </SettingsSection>
-
-        <SettingsSection
-          title="Data Retention"
-          description="Automatic cleanup of old incident data"
-          icon={Trash2}
-          status={retentionStatus}
-        >
-          <RetentionSettingsSection onStatusChange={setRetentionStatus} />
-        </SettingsSection>
-
-        <SettingsSection
-          title="Response Formatting"
-          description="Per-flow formatting rules that reshape agent responses before delivery"
-          icon={Sparkles}
-          status={formattingStatus}
-        >
-          <FormattingRulesSection onStatusChange={setFormattingStatus} />
-        </SettingsSection>
-
-        <SettingsSection
-          title="Alert Sources"
-          description="Webhook integrations for monitoring systems"
-          icon={Bell}
-        >
-          <AlertSourcesManager />
-        </SettingsSection>
-      </div>
+      <section aria-labelledby="settings-title" className="flex-1 min-w-0 max-w-4xl">
+        <header className="mb-6">
+          <h1 id="settings-title" className="text-xl font-semibold text-fg">{active.title}</h1>
+          <p className="mt-1 text-fg-muted">{active.description}</p>
+        </header>
+        {active.render()}
+      </section>
     </div>
   );
 }

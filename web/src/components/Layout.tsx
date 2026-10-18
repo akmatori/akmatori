@@ -1,68 +1,67 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import {
-  LayoutDashboard,
-  Bot,
-  Wrench,
-  Settings,
-  Activity,
-  FileText,
-  BookOpen,
-  Clock,
-  ChevronLeft,
-  Menu,
-  Sun,
-  Moon,
-  LogOut,
-  Rss,
-  Lightbulb,
-} from 'lucide-react';
+import { ChevronLeft, Menu, Sun, Moon, LogOut } from 'lucide-react';
 import { useAuth } from '../context/useAuth';
 import { useTheme } from '../context/useTheme';
 import { useSetupStatus } from '../hooks/useSetupStatus';
+import { useSystemStatus } from '../hooks/useSystemStatus';
+import { useInterval } from '../hooks/useInterval';
+import { useLatestRef } from '../hooks/useLatestRef';
 import OnboardingWizard from './OnboardingWizard';
 import { proposalsApi } from '../api/client';
+import { NAV_GROUPS, SETTINGS_NAV_ITEM, findNavItem, type NavItem } from './layout/navigation';
 
 interface LayoutProps {
   children: React.ReactNode;
 }
-
-const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Incidents', href: '/incidents', icon: Activity },
-  { name: 'Feed', href: '/feed', icon: Rss },
-  { name: 'Proposals', href: '/proposals', icon: Lightbulb },
-  { name: 'Skills', href: '/skills', icon: Bot },
-  { name: 'Tools', href: '/tools', icon: Wrench },
-  { name: 'Context Files', href: '/context', icon: FileText },
-  { name: 'Runbooks', href: '/runbooks', icon: BookOpen },
-  { name: 'Cron Jobs', href: '/cron', icon: Clock },
-  { name: 'Settings', href: '/settings', icon: Settings },
-];
 
 // usePendingProposalsCount polls the pending-proposals count for the nav
 // badge. Failures render nothing (count 0) — the badge is decorative and
 // must never break navigation.
 function usePendingProposalsCount(): number {
   const [count, setCount] = useState(0);
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const res = await proposalsApi.pendingCount();
-        if (!cancelled) setCount(res.pending);
-      } catch {
-        if (!cancelled) setCount(0);
-      }
-    };
-    load();
-    const interval = window.setInterval(load, 60_000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
+  const load = useCallback(async () => {
+    try {
+      const res = await proposalsApi.pendingCount();
+      setCount(res.pending);
+    } catch {
+      setCount(0);
+    }
   }, []);
+  const loadRef = useLatestRef(load);
+  useEffect(() => {
+    void loadRef.current();
+  }, [loadRef]);
+  useInterval(() => { void load(); }, 60_000);
   return count;
+}
+
+function StatusDot({ tone }: { tone: 'ok' | 'need' | 'fail' }) {
+  const color = tone === 'ok' ? 'bg-state-ok' : tone === 'need' ? 'bg-state-need' : 'bg-state-fail';
+  return <span aria-hidden="true" className={`w-[7px] h-[7px] rounded-full ${color}`} />;
+}
+
+function SystemStatusIndicator() {
+  const { apiAvailable, llm } = useSystemStatus();
+  return (
+    <div className="hidden sm:flex items-center gap-4 text-[13px] text-fg-muted">
+      <span className="inline-flex items-center gap-1.5">
+        <StatusDot tone={apiAvailable ? 'ok' : 'fail'} />
+        {apiAvailable ? 'API connected' : 'API unreachable'}
+      </span>
+      {llm && (llm.configured ? (
+        <span className="inline-flex items-center gap-1.5" title="Active LLM model">
+          <StatusDot tone="ok" />
+          <span className="font-mono text-xs">{llm.model || 'LLM ready'}</span>
+        </span>
+      ) : (
+        <Link to="/settings/ai" className="inline-flex items-center gap-1.5 text-state-need hover:underline">
+          <StatusDot tone="need" />
+          LLM not configured
+        </Link>
+      ))}
+    </div>
+  );
 }
 
 export default function Layout({ children }: LayoutProps) {
@@ -77,6 +76,9 @@ export default function Layout({ children }: LayoutProps) {
   const drawerWasOpen = useRef(false);
   const { showOnboarding, dismissOnboarding, markComplete } = useSetupStatus();
   const pendingProposals = usePendingProposalsCount();
+  const activeItem = findNavItem(location.pathname);
+  const showLabels = !collapsed || mobileOpen;
+  const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
   // Close the mobile drawer on navigation. Compared during render against the
   // last seen pathname so the close happens in the same render as the route
@@ -127,9 +129,38 @@ export default function Layout({ children }: LayoutProps) {
     return () => mq.removeEventListener('change', onChange);
   }, []);
 
+  const renderNavLink = (item: NavItem) => {
+    const Icon = item.icon;
+    const isActive = activeItem?.href === item.href;
+    const badge = item.href === '/proposals' && pendingProposals > 0 ? pendingProposals : 0;
+    return (
+      <Link
+        key={item.href}
+        to={item.href}
+        onClick={() => setMobileOpen(false)}
+        aria-current={isActive ? 'page' : undefined}
+        title={showLabels ? undefined : item.name}
+        className={`relative flex items-center gap-2.5 h-9 px-2.5 rounded-md text-sm transition-colors duration-100 ${
+          isActive
+            ? 'bg-surface-2 text-fg shadow-[inset_2px_0_0_var(--color-primary-500)]'
+            : 'text-fg-muted hover:bg-surface-2 hover:text-fg'
+        }`}
+      >
+        <Icon size={16} className="flex-shrink-0" aria-hidden="true" />
+        {showLabels && <span className="flex-1 truncate">{item.name}</span>}
+        {badge > 0 && (showLabels ? (
+          <span className="min-w-5 h-5 px-1.5 inline-flex items-center justify-center rounded-full text-xs bg-state-need/15 text-state-need tabular-nums">
+            {badge}
+          </span>
+        ) : (
+          <span aria-label={`${badge} pending`} className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-state-need" />
+        ))}
+      </Link>
+    );
+  };
+
   return (
     <>
-      {/* Onboarding Wizard */}
       {showOnboarding && (
         <OnboardingWizard
           onComplete={markComplete}
@@ -137,162 +168,110 @@ export default function Layout({ children }: LayoutProps) {
         />
       )}
 
-      <div className="flex h-dvh bg-gray-50 dark:bg-gray-900">
-          {/* Mobile backdrop */}
-          {mobileOpen && (
-            <div
-              className="fixed inset-0 z-30 bg-black/40 md:hidden"
-              onClick={() => setMobileOpen(false)}
-            />
-          )}
+      <div className="flex h-dvh bg-canvas">
+        {/* Mobile backdrop */}
+        {mobileOpen && (
+          <div
+            className="fixed inset-0 z-30 bg-black/50 md:hidden"
+            onClick={() => setMobileOpen(false)}
+          />
+        )}
 
-          {/* Sidebar */}
-          <aside
-            ref={sidebarRef}
-            id="mobile-sidebar"
-            inert={isMobile && !mobileOpen ? true : undefined}
-            className={`
-              flex flex-col border-r border-gray-200 dark:border-gray-700
-              bg-white dark:bg-gray-800 transition-all duration-200 ease-in-out
-              fixed inset-y-0 left-0 z-40 md:static md:inset-auto
-              ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0
-              ${collapsed ? 'w-64 md:w-16' : 'w-64'}
-            `}
-          >
-            {/* Logo */}
-            <div className="flex items-center h-16 px-4 border-b border-gray-200 dark:border-gray-700">
-              <div className="flex items-center gap-3">
-                <img
-                  src="/akmatori.svg"
-                  alt="Akmatori"
-                  className="w-8 h-8 flex-shrink-0"
-                />
-                {(!collapsed || mobileOpen) && (
-                  <h1 className="font-semibold text-gray-900 dark:text-white animate-fade-in">
-                    Akmatori
-                  </h1>
+        <aside
+          ref={sidebarRef}
+          id="mobile-sidebar"
+          inert={isMobile && !mobileOpen ? true : undefined}
+          className={`
+            flex flex-col border-r border-line bg-surface dark:bg-[#15191f]
+            transition-[width,transform] duration-200 ease-in-out
+            fixed inset-y-0 left-0 z-40 md:static md:inset-auto
+            ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0
+            ${collapsed ? 'w-60 md:w-14' : 'w-60'}
+          `}
+        >
+          <div className="flex items-center gap-2.5 h-14 px-3.5 flex-shrink-0">
+            <img src="/akmatori.svg" alt="" className="w-7 h-7 flex-shrink-0" />
+            {showLabels && <span className="font-semibold text-[15px] text-fg">Akmatori</span>}
+          </div>
+
+          <nav aria-label="Main" className="flex-1 px-2 pb-3 overflow-y-auto flex flex-col gap-4">
+            {NAV_GROUPS.map((group) => (
+              <div key={group.label} className="flex flex-col gap-0.5">
+                {showLabels ? (
+                  <span className="px-2.5 pb-1 text-xs text-fg-subtle">{group.label}</span>
+                ) : (
+                  <span aria-hidden="true" className="mx-3 mb-1 border-t border-line" />
                 )}
+                {group.items.map(renderNavLink)}
               </div>
-            </div>
+            ))}
+          </nav>
 
-            {/* Navigation */}
-            <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-              {navigation.map((item) => {
-                const Icon = item.icon;
-                const isActive = location.pathname === item.href;
-
-                return (
-                  <Link
-                    key={item.name}
-                    to={item.href}
-                    onClick={() => setMobileOpen(false)}
-                    className={`
-                      flex items-center gap-3 px-3 py-2.5 rounded-lg
-                      transition-colors duration-150
-                      ${isActive
-                        ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400'
-                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50'
-                      }
-                    `}
-                    title={collapsed ? item.name : undefined}
-                  >
-                    <Icon size={20} className={isActive ? 'text-primary-500' : ''} />
-                    {(!collapsed || mobileOpen) && (
-                      <span className="text-sm font-medium flex-1">{item.name}</span>
-                    )}
-                    {(!collapsed || mobileOpen) && item.href === '/proposals' && pendingProposals > 0 && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-                        {pendingProposals}
-                      </span>
-                    )}
-                  </Link>
-                );
-              })}
-            </nav>
-
-            {/* Footer */}
-            <div className="p-3 border-t border-gray-200 dark:border-gray-700 space-y-2">
-              {/* User Info & Logout */}
-              {user && (
-                <div className={`flex ${(collapsed && !mobileOpen) ? 'justify-center' : 'justify-between'} items-center px-3 py-2`}>
-                  {(!collapsed || mobileOpen) && (
-                    <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                      {user.username}
-                    </span>
-                  )}
-                  <button
-                    onClick={logout}
-                    className="p-2.5 rounded-md text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
-                    title="Sign out"
-                  >
-                    <LogOut size={14} />
-                  </button>
-                </div>
+          <div className="px-2 py-2 border-t border-line flex flex-col gap-0.5">
+            {renderNavLink(SETTINGS_NAV_ITEM)}
+            <div className={`flex items-center gap-1 pt-1 ${showLabels ? 'px-2.5' : 'flex-col'}`}>
+              {user && showLabels && (
+                <span className="flex-1 text-[13px] text-fg-subtle truncate">{user.username}</span>
               )}
-
-              {/* Theme Toggle & Collapse */}
-              <div className={`flex ${(collapsed && !mobileOpen) ? 'justify-center' : 'justify-between'} items-center px-3 py-2`}>
-                {/* Dark/Light Mode Toggle */}
-                <button
-                  onClick={() => setTheme(theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'light' : 'dark')}
-                  className="p-2.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
-                  title={theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'Switch to light mode' : 'Switch to dark mode'}
-                >
-                  {theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? (
-                    <Sun size={16} />
-                  ) : (
-                    <Moon size={16} />
-                  )}
-                </button>
-
-                {/* Collapse Toggle */}
-                <button
-                  onClick={() => setCollapsed(!collapsed)}
-                  className="hidden md:inline-flex items-center justify-center p-2.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
-                  title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                >
-                  {collapsed ? <Menu size={16} /> : <ChevronLeft size={16} />}
-                </button>
-              </div>
-            </div>
-          </aside>
-
-          {/* Main content */}
-          <main inert={mobileOpen || undefined} className="flex-1 min-w-0 flex flex-col overflow-hidden">
-            {/* Top bar */}
-            <header className="h-16 flex items-center justify-between px-4 md:px-6 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
               <button
-                ref={hamburgerRef}
                 type="button"
-                className="block md:hidden p-2 rounded-md text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
-                onClick={() => setMobileOpen(true)}
-                aria-label="Open menu"
-                aria-expanded={mobileOpen}
-                aria-controls="mobile-sidebar"
+                onClick={() => setTheme(isDark ? 'light' : 'dark')}
+                className="rounded-md p-2 text-fg-subtle hover:text-fg hover:bg-surface-2"
+                aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+                title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
               >
-                <Menu size={20} />
+                {isDark ? <Sun size={15} /> : <Moon size={15} />}
               </button>
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {navigation.find(n => n.href === location.pathname)?.name || 'Page'}
-                </h2>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                  <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                  <span>System Online</span>
-                </div>
-              </div>
-            </header>
-
-            {/* Content */}
-            <div className="flex-1 overflow-auto">
-              <div className="p-3 sm:p-6 max-w-7xl mx-auto">
-                {children}
-              </div>
+              <button
+                type="button"
+                onClick={() => setCollapsed(!collapsed)}
+                className="hidden md:inline-flex rounded-md p-2 text-fg-subtle hover:text-fg hover:bg-surface-2"
+                aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              >
+                {collapsed ? <Menu size={15} /> : <ChevronLeft size={15} />}
+              </button>
+              {user && (
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="rounded-md p-2 text-fg-subtle hover:text-state-fail hover:bg-surface-2"
+                  aria-label="Sign out"
+                  title="Sign out"
+                >
+                  <LogOut size={15} />
+                </button>
+              )}
             </div>
-          </main>
-        </div>
+          </div>
+        </aside>
+
+        <main inert={mobileOpen || undefined} className="flex-1 min-w-0 flex flex-col overflow-hidden">
+          <header className="h-14 flex-shrink-0 flex items-center gap-4 px-4 md:px-7 border-b border-line bg-canvas">
+            <button
+              ref={hamburgerRef}
+              type="button"
+              className="block md:hidden p-2 -ml-2 rounded-md text-fg-muted hover:text-fg hover:bg-surface-2"
+              onClick={() => setMobileOpen(true)}
+              aria-label="Open menu"
+              aria-expanded={mobileOpen}
+              aria-controls="mobile-sidebar"
+            >
+              <Menu size={20} />
+            </button>
+            <h2 className="flex-1 min-w-0 truncate text-base font-semibold text-fg">
+              {activeItem?.name ?? 'Akmatori'}
+            </h2>
+            <SystemStatusIndicator />
+          </header>
+
+          <div className="flex-1 overflow-auto">
+            <div className="p-4 sm:p-7 max-w-[1400px] mx-auto">
+              {children}
+            </div>
+          </div>
+        </main>
+      </div>
     </>
   );
 }
