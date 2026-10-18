@@ -8,7 +8,6 @@ import Login from './pages/Login';
 import Setup from './pages/Setup';
 import Dashboard from './pages/Dashboard';
 import Incidents from './pages/Incidents';
-import IncidentDetail from './pages/IncidentDetail';
 import Skills from './pages/Skills';
 import Tools from './pages/Tools';
 import ContextFiles from './pages/ContextFiles';
@@ -35,8 +34,7 @@ function App() {
                   <Layout>
                     <Routes>
                       <Route path="/" element={<Dashboard />} />
-                      <Route path="/incidents/:uuid" element={<IncidentDetail />} />
-                      <Route path="/incidents" element={<Incidents />} />
+                      <Route path="/incidents/:uuid?" element={<Incidents />} />
                       <Route path="/feed" element={<Feed />} />
                       <Route path="/proposals/:uuid" element={<ProposalDetail />} />
                       <Route path="/proposals" element={<Proposals />} />

@@ -1,39 +1,29 @@
-import { useEffect, useState, useCallback } from 'react';
-import { RefreshCw, Plus, Activity } from 'lucide-react';
-import PageHeader from '../components/PageHeader';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Plus, RefreshCw, Search, Activity } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
-import ErrorMessage, { SuccessMessage } from '../components/ErrorMessage';
+import ErrorMessage from '../components/ErrorMessage';
 import TimeRangePicker from '../components/TimeRangePicker';
 import EmptyState from '../components/shared/EmptyState';
 import Pagination from '../components/shared/Pagination';
 import SegmentedControl from '../components/shared/SegmentedControl';
-import IncidentsTable from '../components/incidents/IncidentsTable';
-import IncidentDetailModal from '../components/incidents/IncidentDetailModal';
+import IncidentList from '../components/incidents/IncidentList';
+import IncidentPanel from '../components/incidents/IncidentPanel';
 import CreateIncidentModal from '../components/incidents/CreateIncidentModal';
 import { incidentsApi } from '../api/client';
 import type { Incident } from '../types';
 import { useInterval } from '../hooks/useInterval';
-import { useLatestRef } from '../hooks/useLatestRef';
 import { getErrorMessage } from '../utils/errors';
 
-// Default: last 30 minutes
-const DEFAULT_TIME_RANGE = 30 * 60;
-// Default: refresh every 1 minute
+// History defaults to the last 24 hours; the list refreshes every minute.
+const DEFAULT_TIME_RANGE = 24 * 60 * 60;
 const DEFAULT_REFRESH_INTERVAL = 60000;
-// Poll a running incident shown in the modal this often
-const RUNNING_POLL_INTERVAL = 2000;
 
 type IncidentView = 'open' | 'history';
-type TrendWindow = '1h' | '3h';
 
 const VIEW_OPTIONS: { value: IncidentView; label: string }[] = [
   { value: 'open', label: 'Open' },
   { value: 'history', label: 'History' },
-];
-
-const TREND_OPTIONS: { value: TrendWindow; label: string; title: string }[] = [
-  { value: '1h', label: '1h', title: 'Show 1-hour trend' },
-  { value: '3h', label: '3h', title: 'Show 3-hour trend' },
 ];
 
 // alert_active = "completed" alert-sourced incidents whose linked alert is
@@ -41,267 +31,203 @@ const TREND_OPTIONS: { value: TrendWindow; label: string; title: string }[] = [
 const OPEN_STATUS_FILTER = 'pending,running,diagnosed,monitor,alert_active';
 const HISTORY_STATUS_FILTER = 'completed,failed,closed';
 
+interface ListQuery {
+  view: IncidentView;
+  page: number;
+  perPage: number;
+  from: number;
+  to: number;
+  // Seconds for a relative range ("last 30 min"); null for an absolute one.
+  relative: number | null;
+}
+
+interface ListResult {
+  key: string;
+  incidents: Incident[];
+  total: number;
+  totalPages: number;
+}
+
+async function fetchList(q: ListQuery) {
+  let from: number | undefined;
+  let to: number | undefined;
+  if (q.view === 'history') {
+    const now = Math.floor(Date.now() / 1000);
+    from = q.relative !== null ? now - q.relative : q.from;
+    to = q.relative !== null ? now : q.to;
+  }
+  const status = q.view === 'open' ? OPEN_STATUS_FILTER : HISTORY_STATUS_FILTER;
+  const res = await incidentsApi.list(from, to, q.page, q.perPage, '1h', status);
+  return { incidents: res.data, total: res.pagination.total, totalPages: res.pagination.total_pages };
+}
+
+// Incidents is a split view: the list on the left, the selected incident
+// (/incidents/:uuid) on the right. Below lg only one side shows at a time.
 export default function Incidents() {
-  const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { uuid } = useParams<{ uuid?: string }>();
+  const navigate = useNavigate();
+  const [query, setQuery] = useState<ListQuery>(() => {
+    const now = Math.floor(Date.now() / 1000);
+    return { view: 'open', page: 1, perPage: 50, from: now - DEFAULT_TIME_RANGE, to: now, relative: DEFAULT_TIME_RANGE };
+  });
+  const [result, setResult] = useState<ListResult | null>(null);
   const [error, setError] = useState('');
-  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
-  const [showModal, setShowModal] = useState(false);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createSuccess, setCreateSuccess] = useState<string | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [filter, setFilter] = useState('');
+  const [refreshInterval, setRefreshInterval] = useState(DEFAULT_REFRESH_INTERVAL);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
 
-  // Open/History view toggle
-  const [view, setView] = useState<IncidentView>('open');
+  const queryKey = JSON.stringify(query);
+  const loading = result?.key !== queryKey;
 
-  // Trend window
-  const [trendWindow, setTrendWindow] = useState<TrendWindow>('1h');
+  useEffect(() => {
+    let cancelled = false;
+    fetchList(query)
+      .then((r) => {
+        if (cancelled) return;
+        setResult({ key: queryKey, ...r });
+        setError('');
+      })
+      .catch((err: unknown) => { if (!cancelled) setError(getErrorMessage(err, 'Failed to load incidents')); });
+    return () => { cancelled = true; };
+  }, [query, queryKey]);
 
-  // Pagination state
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(50);
-  const [totalPages, setTotalPages] = useState(0);
-  const [totalIncidents, setTotalIncidents] = useState(0);
-
-  // Time range picker state (used only in history view)
-  const [initialNow] = useState(() => Math.floor(Date.now() / 1000));
-  const [timeFrom, setTimeFrom] = useState(initialNow - DEFAULT_TIME_RANGE);
-  const [timeTo, setTimeTo] = useState(initialNow);
-  // Track relative time range duration (null = absolute range)
-  const [relativeRange, setRelativeRange] = useState<number | null>(DEFAULT_TIME_RANGE);
-  const [listRefreshInterval, setListRefreshInterval] = useState(DEFAULT_REFRESH_INTERVAL);
-
-  // Load incidents — view-aware: open view omits from/to and applies status filter
-  const loadIncidents = useCallback(async (
-    from?: number,
-    to?: number,
-    isRefresh?: boolean,
-    pageOverride?: number,
-    perPageOverride?: number,
-    trendWindowOverride?: TrendWindow,
-    viewOverride?: IncidentView,
-  ) => {
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
     try {
-      setLoading(true);
+      setResult({ key: queryKey, ...(await fetchList(query)) });
       setError('');
-      const currentNow = Math.floor(Date.now() / 1000);
-      const effectiveView = viewOverride ?? view;
-
-      let effectiveFrom: number | undefined;
-      let effectiveTo: number | undefined;
-      let statusFilter: string;
-
-      if (effectiveView === 'open') {
-        effectiveFrom = undefined;
-        effectiveTo = undefined;
-        statusFilter = OPEN_STATUS_FILTER;
-      } else {
-        statusFilter = HISTORY_STATUS_FILTER;
-        if (isRefresh && relativeRange !== null) {
-          effectiveFrom = currentNow - relativeRange;
-          effectiveTo = currentNow;
-        } else {
-          effectiveFrom = from ?? timeFrom;
-          effectiveTo = to ?? timeTo;
-        }
-      }
-
-      const currentPage = pageOverride ?? page;
-      const currentPerPage = perPageOverride ?? perPage;
-      const effectiveTrendWindow = trendWindowOverride ?? trendWindow;
-      const result = await incidentsApi.list(effectiveFrom, effectiveTo, currentPage, currentPerPage, effectiveTrendWindow, statusFilter);
-      setIncidents(result.data);
-      setTotalPages(result.pagination.total_pages);
-      setTotalIncidents(result.pagination.total);
-
-      // Update time display state for relative ranges in history view
-      if (effectiveView === 'history' && isRefresh && relativeRange !== null) {
-        setTimeFrom(effectiveFrom!);
-        setTimeTo(effectiveTo!);
-      }
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to load incidents'));
     } finally {
-      setLoading(false);
+      setRefreshing(false);
     }
-  }, [timeFrom, timeTo, relativeRange, page, perPage, trendWindow, view]);
+  }, [query, queryKey]);
+  useInterval(() => { void refresh(); }, refreshInterval);
 
-  // Initial load (read through a ref so the effect runs exactly once)
-  const loadIncidentsRef = useLatestRef(loadIncidents);
-  useEffect(() => {
-    void loadIncidentsRef.current();
-  }, [loadIncidentsRef]);
-
-  // Auto-refresh for incidents list
-  useInterval(() => { void loadIncidents(undefined, undefined, true); }, listRefreshInterval);
-
-  // Handle time range change
-  const handleTimeRangeChange = useCallback((from: number, to: number, relativeDuration?: number | null) => {
-    setTimeFrom(from);
-    setTimeTo(to);
-    setPage(1);
-    // Track if this is a relative range (for auto-refresh recalculation)
-    setRelativeRange(relativeDuration ?? null);
-    loadIncidents(from, to, false, 1);
-  }, [loadIncidents]);
-
-  // Handle page change
-  const handlePageChange = useCallback((newPage: number) => {
-    setPage(newPage);
-    loadIncidents(undefined, undefined, false, newPage);
-  }, [loadIncidents]);
-
-  const handlePerPageChange = useCallback((newPerPage: number) => {
-    setPerPage(newPerPage);
-    setPage(1);
-    loadIncidents(undefined, undefined, false, 1, newPerPage);
-  }, [loadIncidents]);
-
-  const handleTrendWindowChange = useCallback((newWindow: TrendWindow) => {
-    setTrendWindow(newWindow);
-    loadIncidents(undefined, undefined, false, undefined, undefined, newWindow);
-  }, [loadIncidents]);
-
-  const handleViewChange = useCallback((newView: IncidentView) => {
-    setView(newView);
-    setPage(1);
-    loadIncidents(undefined, undefined, false, 1, undefined, undefined, newView);
-  }, [loadIncidents]);
-
-  // Apply a refreshed incident to both the modal and its list row. The list
-  // endpoint carries aggregate fields the single-incident endpoint lacks, so
-  // keep those when the fresh copy omits them.
-  const applyIncidentUpdate = useCallback((updated: Incident) => {
-    setSelectedIncident(updated);
-    setIncidents(prev => prev.map(i => {
-      if (i.uuid !== updated.uuid) return i;
-      return {
+  // Keep the list row in step with the panel's polling. The list endpoint
+  // carries aggregate fields the single-incident endpoint lacks; keep them.
+  const handlePanelUpdate = useCallback((updated: Incident) => {
+    setResult((prev) => prev && {
+      ...prev,
+      incidents: prev.incidents.map((i) => (i.uuid !== updated.uuid ? i : {
         ...updated,
         first_seen: updated.first_seen ?? i.first_seen,
         last_seen: updated.last_seen ?? i.last_seen,
         trend: updated.trend ?? i.trend,
-      };
-    }));
+        alert_count: updated.alert_count ?? i.alert_count,
+      })),
+    });
   }, []);
 
-  // Poll the selected incident while it is running and the modal is open.
-  const pollSelectedIncident = useCallback(async () => {
-    if (!selectedIncident) return;
-    try {
-      applyIncidentUpdate(await incidentsApi.get(selectedIncident.uuid));
-    } catch (err) {
-      console.error('Failed to refresh incident:', err);
-    }
-  }, [selectedIncident, applyIncidentUpdate]);
+  const visible = useMemo(() => {
+    const incidents = result?.incidents ?? [];
+    const needle = filter.trim().toLowerCase();
+    if (!needle) return incidents;
+    return incidents.filter((i) =>
+      `${i.title} ${i.uuid} ${i.source}`.toLowerCase().includes(needle),
+    );
+  }, [result, filter]);
 
-  const pollingActive = showModal && selectedIncident?.status === 'running' && autoRefresh;
-  useInterval(() => { void pollSelectedIncident(); }, pollingActive ? RUNNING_POLL_INTERVAL : null);
-
-  const openModal = useCallback(async (incident: Incident) => {
-    try {
-      const latest = await incidentsApi.get(incident.uuid);
-      setSelectedIncident(latest);
-    } catch {
-      setSelectedIncident(incident);
-    }
-    setShowModal(true);
-  }, []);
-
-  const closeModal = useCallback(() => {
-    setShowModal(false);
-    setSelectedIncident(null);
-  }, []);
-
-  const handleIncidentCreated = useCallback((incident: Incident) => {
-    // Only the open view lists a brand-new (pending) incident — it would be
-    // out of place in the history view which filters for completed/failed.
-    if (view === 'open') {
-      setIncidents(prev => [incident, ...prev]);
-    }
-    setError('');
-    setCreateSuccess(`Incident created: ${incident.uuid.slice(0, 8)}...`);
-    setShowCreateModal(false);
-    setTimeout(() => setCreateSuccess(null), 5000);
-  }, [view]);
-
-  return (
-    <div>
-      <PageHeader
-        title="Incidents"
-        description="Monitor all incident manager sessions and execution logs"
-        action={
-          <div className="flex items-center gap-3">
-            <SegmentedControl value={view} options={VIEW_OPTIONS} onChange={handleViewChange} />
-            <SegmentedControl
-              value={trendWindow}
-              options={TREND_OPTIONS}
-              onChange={handleTrendWindowChange}
-              buttonClassName="px-2.5 py-1"
-            />
-            {view === 'history' && (
-              <TimeRangePicker
-                from={timeFrom}
-                to={timeTo}
-                refreshInterval={listRefreshInterval}
-                onChange={handleTimeRangeChange}
-                onRefreshIntervalChange={setListRefreshInterval}
-              />
-            )}
-            <button onClick={() => setShowCreateModal(true)} className="btn btn-primary">
-              <Plus className="w-4 h-4" />
-              New Incident
-            </button>
-            <button onClick={() => loadIncidents()} className="btn btn-secondary" disabled={loading}>
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
-          </div>
-        }
-      />
-
-      {error && <ErrorMessage message={error} />}
-      {createSuccess && <SuccessMessage message={createSuccess} />}
-
-      {loading ? (
-        <LoadingSpinner />
-      ) : (
-        <div className="card">
-          {incidents.length === 0 ? (
+  const listPane = (
+    <div className={`${uuid ? 'hidden lg:flex' : 'flex'} flex-col min-h-0 lg:border-r border-line`}>
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {loading && !error ? (
+          <LoadingSpinner />
+        ) : visible.length === 0 ? (
+          <div className="p-4">
             <EmptyState
               icon={Activity}
-              title={view === 'open' ? 'No open incidents' : 'No incidents found'}
-              description={view === 'open' ? 'All clear — no active or monitoring incidents' : 'Create a new incident to get started'}
+              padding="py-12"
+              title={filter ? 'No incident on this page matches the filter' : query.view === 'open' ? 'No open incidents' : 'No incidents in this time range'}
+              description={query.view === 'open' && !filter ? 'Nothing is running, firing or in a monitor window.' : undefined}
             />
-          ) : (
-            <>
-              <IncidentsTable incidents={incidents} onOpen={openModal} />
-              <Pagination
-                page={page}
-                totalPages={totalPages}
-                totalItems={totalIncidents}
-                onPageChange={handlePageChange}
-                perPage={perPage}
-                onPerPageChange={handlePerPageChange}
-              />
-            </>
-          )}
-        </div>
-      )}
-
-      {showModal && selectedIncident && (
-        <IncidentDetailModal
-          incident={selectedIncident}
-          autoRefresh={autoRefresh}
-          onAutoRefreshChange={setAutoRefresh}
-          onIncidentUpdate={applyIncidentUpdate}
-          onClose={closeModal}
+          </div>
+        ) : (
+          <IncidentList incidents={visible} selectedUUID={uuid} />
+        )}
+      </div>
+      {result && (
+        <Pagination
+          page={query.page}
+          totalPages={result.totalPages}
+          totalItems={result.total}
+          onPageChange={(page) => setQuery((q) => ({ ...q, page }))}
+          perPage={query.perPage}
+          onPerPageChange={(perPage) => setQuery((q) => ({ ...q, perPage, page: 1 }))}
         />
       )}
+    </div>
+  );
 
-      {showCreateModal && (
+  return (
+    <div className="flex flex-col gap-4 lg:h-[calc(100dvh-7rem)]">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <SegmentedControl
+          value={query.view}
+          options={VIEW_OPTIONS.map((o) =>
+            o.value === query.view && result && !loading ? { ...o, label: `${o.label} ${result.total}` } : o,
+          )}
+          onChange={(view) => setQuery((q) => ({ ...q, view, page: 1 }))}
+        />
+        {query.view === 'history' && (
+          <TimeRangePicker
+            from={query.from}
+            to={query.to}
+            refreshInterval={refreshInterval}
+            onChange={(from, to, relative) => setQuery((q) => ({ ...q, from, to, relative: relative ?? null, page: 1 }))}
+            onRefreshIntervalChange={setRefreshInterval}
+          />
+        )}
+        <label className="relative flex-[1_1_220px] max-w-sm">
+          <span className="sr-only">Filter incidents on this page</span>
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-subtle" aria-hidden="true" />
+          <input
+            type="search"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter by title, source or ID"
+            className="input-field h-9 !pl-8"
+          />
+        </label>
+        <span className="flex-1" />
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          disabled={refreshing}
+          className="btn btn-ghost h-9 w-9 p-0 inline-flex items-center justify-center"
+          title="Refresh"
+          aria-label="Refresh"
+        >
+          <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
+        </button>
+        <button type="button" onClick={() => setShowCreate(true)} className="btn btn-primary h-9 inline-flex items-center gap-1.5">
+          <Plus size={15} aria-hidden="true" />
+          New incident
+        </button>
+      </div>
+
+      {error && <ErrorMessage message={error} />}
+
+      <div className="flex-1 min-h-0 grid lg:grid-cols-[minmax(320px,420px)_1fr] rounded-xl border border-line bg-surface overflow-hidden">
+        {listPane}
+        <div className={`${uuid ? 'flex' : 'hidden lg:flex'} flex-col min-h-0`}>
+          {uuid ? (
+            <IncidentPanel key={uuid} uuid={uuid} onUpdate={handlePanelUpdate} />
+          ) : (
+            <p className="m-auto px-6 text-center text-fg-subtle">Select an incident to see the summary, the agent timeline and the alerts.</p>
+          )}
+        </div>
+      </div>
+
+      {showCreate && (
         <CreateIncidentModal
-          onClose={() => setShowCreateModal(false)}
-          onCreated={handleIncidentCreated}
+          onClose={() => setShowCreate(false)}
+          onCreated={(incident) => {
+            setShowCreate(false);
+            navigate(`/incidents/${incident.uuid}`);
+            void refresh();
+          }}
           onError={setError}
         />
       )}

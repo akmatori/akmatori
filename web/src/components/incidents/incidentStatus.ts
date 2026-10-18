@@ -1,5 +1,6 @@
 import { Activity, Clock, CheckCircle, AlertCircle, XCircle, GitMerge, type LucideIcon } from 'lucide-react';
-import { formatCountdown } from '../../utils/format';
+import { formatCountdown, formatRelativeShort } from '../../utils/format';
+import type { Incident } from '../../types';
 
 export interface IncidentStatusConfig {
   class: string;
@@ -75,4 +76,62 @@ export function getIncidentStatusConfig(
 // (and so shows execution metrics instead of the auto-refresh toggle).
 export function isFinishedStatus(status: string): boolean {
   return status === 'completed' || status === 'monitor' || status === 'failed';
+}
+
+// A running incident with no update for this long is shown as stalled: the
+// worker died or lost the run, and nobody else will notice.
+export const STALL_MS = 30 * 60 * 1000;
+
+export function isStalled(incident: Pick<Incident, 'status' | 'updated_at'>): boolean {
+  return incident.status === 'running' && Date.now() - new Date(incident.updated_at).getTime() > STALL_MS;
+}
+
+export type IncidentTone = 'work' | 'need' | 'fail' | 'ok' | 'closed';
+
+export interface IncidentState {
+  tone: IncidentTone;
+  label: string;
+}
+
+// Literal class names per tone so Tailwind picks them up: the left rail of a
+// list row, the state text, and the state dot.
+export const TONE_CLASSES: Record<IncidentTone, { rail: string; text: string; dot: string }> = {
+  work: { rail: 'border-l-state-work', text: 'text-state-work', dot: 'bg-state-work' },
+  need: { rail: 'border-l-state-need', text: 'text-state-need', dot: 'bg-state-need' },
+  fail: { rail: 'border-l-state-fail', text: 'text-state-fail', dot: 'bg-state-fail' },
+  ok: { rail: 'border-l-state-ok', text: 'text-state-ok', dot: 'bg-state-ok' },
+  closed: { rail: 'border-l-state-closed', text: 'text-state-closed', dot: 'bg-state-closed' },
+};
+
+// getIncidentState is the split view's state vocabulary: what the incident
+// needs from a person, in one short label with a color tone.
+export function getIncidentState(
+  incident: Pick<Incident, 'status' | 'monitor_until' | 'source_kind' | 'closed_reason'> & Partial<Pick<Incident, 'updated_at'>>,
+): IncidentState {
+  if (incident.updated_at && isStalled({ status: incident.status, updated_at: incident.updated_at })) {
+    return { tone: 'fail', label: `No progress for ${formatRelativeShort(incident.updated_at)}` };
+  }
+  switch (incident.status) {
+    case 'pending':
+      return { tone: 'work', label: 'Queued' };
+    case 'running':
+      return { tone: 'work', label: 'Agent working' };
+    case 'diagnosed':
+      return { tone: 'need', label: 'Needs action' };
+    case 'completed':
+      return incident.source_kind === 'alert'
+        ? { tone: 'need', label: 'Alert still firing' }
+        : { tone: 'ok', label: 'Completed' };
+    case 'monitor':
+      return {
+        tone: 'ok',
+        label: incident.monitor_until ? `Monitoring, ${formatCountdown(incident.monitor_until)}` : 'Monitoring',
+      };
+    case 'failed':
+      return { tone: 'fail', label: 'Failed' };
+    case 'merged':
+      return { tone: 'closed', label: 'Merged' };
+    default:
+      return { tone: 'closed', label: closedReasonLabel(incident.closed_reason) ?? 'Closed' };
+  }
 }
