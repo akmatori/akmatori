@@ -235,15 +235,15 @@ export default function PromptEditor({
       {showAutocomplete && filteredFiles.length > 0 && (
         <div
           ref={autocompleteRef}
-          className="absolute z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-48 overflow-y-auto"
+          className="absolute z-50 bg-surface border border-line rounded-lg shadow-lg max-h-48 overflow-y-auto"
           style={{
             top: autocompletePosition.top,
             left: autocompletePosition.left,
             minWidth: '260px',
           }}
         >
-          <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
-            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Context Files</span>
+          <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-700 bg-surface-2">
+            <span className="text-xs font-medium text-fg-subtle">Context Files</span>
           </div>
 
           {filteredFiles.map((file, index) => (
@@ -252,7 +252,7 @@ export default function PromptEditor({
               className={`px-3 py-2 cursor-pointer flex items-start gap-3 transition-colors ${
                 index === selectedIndex
                   ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
-                  : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-700 dark:text-gray-300'
+                  : 'hover:bg-surface-2 text-fg'
               }`}
               onClick={() => insertFile(file)}
             >
@@ -260,7 +260,7 @@ export default function PromptEditor({
               <div className="flex-1 min-w-0">
                 <div className="font-mono text-sm font-medium truncate">{file.filename}</div>
                 {file.description && (
-                  <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">{file.description}</div>
+                  <div className="text-xs text-fg-subtle truncate mt-0.5">{file.description}</div>
                 )}
               </div>
             </div>
@@ -272,14 +272,14 @@ export default function PromptEditor({
       {showAutocomplete && filteredFiles.length === 0 && autocompleteFilter && (
         <div
           ref={autocompleteRef}
-          className="absolute z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg px-4 py-3"
+          className="absolute z-50 bg-surface border border-line rounded-lg shadow-lg px-4 py-3"
           style={{
             top: autocompletePosition.top,
             left: autocompletePosition.left,
             minWidth: '200px',
           }}
         >
-          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+          <div className="flex items-center gap-2 text-fg-subtle">
             <AlertCircle size={14} />
             <span className="text-sm">No matching files</span>
           </div>
@@ -292,7 +292,7 @@ export default function PromptEditor({
           {(validation.found || []).map((filename) => (
             <span
               key={filename}
-              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300"
+              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-state-ok/10 text-state-ok"
             >
               <Check size={12} />
               <span>{filename}</span>
@@ -301,7 +301,7 @@ export default function PromptEditor({
           {(validation.missing || []).map((filename) => (
             <span
               key={filename}
-              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300"
+              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-state-fail/10 text-state-fail"
             >
               <X size={12} />
               <span>{filename}</span>
@@ -312,9 +312,9 @@ export default function PromptEditor({
       )}
 
       {/* Hint */}
-      <div className="mt-2 flex items-center gap-3 text-gray-500 dark:text-gray-400">
+      <div className="mt-2 flex items-center gap-3 text-fg-subtle">
         <span className="text-xs">
-          Type <code className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-primary-600 dark:text-primary-400">[[</code> to reference context files
+          Type <code className="px-1.5 py-0.5 bg-surface-2 rounded text-primary-600 dark:text-primary-400">[[</code> to reference context files
         </span>
         {validating && (
           <span className="flex items-center gap-1 text-xs">

@@ -107,13 +107,13 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
         <div className="fixed inset-0 bg-black/50 transition-opacity" onClick={onClose} />
 
         {/* Modal */}
-        <div className="relative w-full max-w-2xl bg-white dark:bg-gray-800 rounded-xl shadow-2xl transform transition-all">
+        <div className="relative w-full max-w-2xl bg-surface rounded-xl shadow-2xl transform transition-all">
           {/* Header */}
-          <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between p-6 border-b border-line">
             <div className="flex items-center gap-3">
               {isSystemSkill && <Shield className="w-5 h-5 text-primary-500" />}
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                {isCreating ? 'Create Skill' : isViewOnly ? `View: ${skill?.name}` : `Edit: ${skill?.name}`}
+              <h2 className="text-lg font-semibold text-fg">
+                {isCreating ? 'Create skill' : isViewOnly ? `View: ${skill?.name}` : `Edit: ${skill?.name}`}
               </h2>
               {isSystemSkill && (
                 <span className="badge badge-primary text-xs">System</span>
@@ -121,7 +121,7 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
             </div>
             <button
               onClick={onClose}
-              className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+              className="p-2 text-gray-400 hover:text-fg rounded-lg hover:bg-surface-2"
             >
               <X className="w-5 h-5" />
             </button>
@@ -130,7 +130,7 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
           {/* Body */}
           <div className="p-6 space-y-5 max-h-[70vh] overflow-y-auto">
             {error && (
-              <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm">
+              <div className="p-3 bg-state-fail/10 border border-state-fail/40 rounded-lg text-state-fail text-sm">
                 {error}
               </div>
             )}
@@ -152,7 +152,7 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
 
             {/* Skill Name */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-fg mb-1">
                 Skill Name {!isViewOnly && <span className="text-red-500">*</span>}
               </label>
               <input
@@ -164,7 +164,7 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
                 disabled={!isCreating || isViewOnly}
               />
               {isCreating && !isViewOnly && (
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                <p className="mt-1 text-xs text-fg-subtle">
                   Must be in kebab-case (lowercase with hyphens)
                 </p>
               )}
@@ -172,7 +172,7 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
 
             {/* Description */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-fg mb-1">
                 Description {!isViewOnly && <span className="text-red-500">*</span>}
               </label>
               <textarea
@@ -187,12 +187,12 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
 
             {/* Prompt */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-fg mb-1">
                 Prompt {!isViewOnly && <span className="text-red-500">*</span>}
               </label>
               {isViewOnly ? (
-                <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4 max-h-64 overflow-y-auto">
-                  <pre className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap font-mono">
+                <div className="bg-surface-2 border border-line rounded-lg p-4 max-h-64 overflow-y-auto">
+                  <pre className="text-sm text-fg whitespace-pre-wrap font-mono">
                     {formData.prompt}
                   </pre>
                 </div>
@@ -208,7 +208,7 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
 
             {/* Enabled Toggle - not for view only */}
             {!isViewOnly && (
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-900/50">
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-surface-2">
                 <input
                   type="checkbox"
                   id="enabled"
@@ -222,7 +222,7 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
                   ) : (
                     <PowerOff className="w-4 h-4 text-gray-400" />
                   )}
-                  <span className="text-sm text-gray-700 dark:text-gray-300">
+                  <span className="text-sm text-fg">
                     {formData.enabled ? 'Enabled' : 'Disabled'}
                   </span>
                 </label>
@@ -232,14 +232,14 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
             {/* Tool Assignments - only for non-system, non-view-only skills */}
             {!isSystemSkill && !isViewOnly && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-fg mb-2">
                   Tool Connections
                 </label>
-                <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 max-h-48 overflow-y-auto bg-gray-50 dark:bg-gray-900/50">
+                <div className="border border-line rounded-lg p-3 max-h-48 overflow-y-auto bg-surface-2">
                   {toolInstances.length === 0 ? (
                     <div className="text-center py-4">
                       <Wrench className="w-6 h-6 mx-auto text-gray-400 mb-1" />
-                      <p className="text-gray-500 dark:text-gray-400 text-sm">No tools available</p>
+                      <p className="text-fg-subtle text-sm">No tools available</p>
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -249,7 +249,7 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
                           className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-all ${
                             formData.toolIds.includes(tool.id)
                               ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
+                              : 'border-line hover:border-gray-300'
                           }`}
                           onClick={() => toggleToolSelection(tool.id)}
                         >
@@ -261,10 +261,10 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
                             className="w-4 h-4"
                           />
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium text-gray-900 dark:text-white text-sm truncate">
+                            <div className="font-medium text-fg text-sm truncate">
                               {tool.name}
                             </div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                            <div className="text-xs text-fg-subtle truncate">
                               {tool.tool_type?.description}
                             </div>
                           </div>
@@ -278,7 +278,7 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 rounded-b-xl">
+          <div className="flex items-center justify-end gap-3 p-6 border-t border-line bg-surface-2 rounded-b-xl">
             <button onClick={onClose} disabled={saving} className="btn btn-secondary">
               {isViewOnly ? 'Close' : 'Cancel'}
             </button>
@@ -439,7 +439,7 @@ export default function Skills() {
             </button>
             <button onClick={handleCreate} className="btn btn-primary">
               <Plus className="w-4 h-4" />
-              New Skill
+              New skill
             </button>
           </div>
         }
@@ -451,19 +451,19 @@ export default function Skills() {
       {loading ? (
         <LoadingSpinner />
       ) : (
-        <div className="card">
+        <div className="card p-0 overflow-hidden">
           {sortedSkills.length === 0 ? (
             <EmptyState icon={Bot} title="No skills yet" description="Create one or sync from filesystem" />
           ) : (
-            <div className="divide-y divide-gray-200 dark:divide-gray-700">
+            <div className="divide-y divide-line">
               {sortedSkills.map((skill) => (
                 <div
                   key={skill.id}
                   onClick={() => handleEdit(skill)}
-                  className={`flex items-center justify-between p-4 cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-gray-800/50 ${
+                  className={`flex items-center justify-between p-4 cursor-pointer transition-all hover:bg-surface-2 ${
                     !skill.enabled ? 'opacity-60' : ''
                   } ${
-                    skill.is_system ? 'bg-primary-50/50 dark:bg-primary-900/10' : ''
+                    ''
                   }`}
                 >
                   <div className="flex items-center gap-4 min-w-0 flex-1">
@@ -471,19 +471,19 @@ export default function Skills() {
                     <div className={`p-2 rounded-lg flex-shrink-0 ${
                       skill.is_system
                         ? 'bg-primary-100 dark:bg-primary-900/30'
-                        : 'bg-gray-100 dark:bg-gray-700'
+                        : 'bg-surface-2'
                     }`}>
                       {skill.is_system ? (
                         <Shield className="w-5 h-5 text-primary-600 dark:text-primary-400" />
                       ) : (
-                        <Bot className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                        <Bot className="w-5 h-5 text-fg-muted" />
                       )}
                     </div>
 
                     {/* Content */}
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-semibold text-gray-900 dark:text-white font-mono">
+                        <h3 className="font-medium text-fg font-mono">
                           {skill.name}
                         </h3>
                         {skill.is_system && (
@@ -499,7 +499,7 @@ export default function Skills() {
                           </span>
                         )}
                       </div>
-                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 truncate">
+                      <p className="text-sm text-fg-subtle mt-1 truncate">
                         {skill.description || 'No description'}
                       </p>
                     </div>
@@ -510,7 +510,7 @@ export default function Skills() {
                     {skill.is_system ? (
                       <button
                         onClick={() => handleView(skill)}
-                        className="p-2 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                        className="p-2 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 rounded-lg hover:bg-surface-2 transition-colors"
                         title="View"
                       >
                         <Eye className="w-4 h-4" />
@@ -519,14 +519,14 @@ export default function Skills() {
                       <>
                         <button
                           onClick={() => handleEdit(skill)}
-                          className="p-2 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          className="p-2 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 rounded-lg hover:bg-surface-2 transition-colors"
                           title="Edit"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleDelete(skill)}
-                          className="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          className="p-2 text-gray-400 hover:text-state-fail rounded-lg hover:bg-surface-2 transition-colors"
                           title="Delete"
                         >
                           <Trash2 className="w-4 h-4" />

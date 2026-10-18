@@ -55,7 +55,7 @@ export default function Proposals() {
         action={
           <button
             onClick={load}
-            className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-line text-fg-muted hover:bg-surface-2 transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
             Refresh
@@ -66,7 +66,7 @@ export default function Proposals() {
       {error && <ErrorMessage message={error} onDismiss={() => setError('')} />}
 
       {/* Status filter tabs */}
-      <div className="flex items-center gap-1 mb-4 border-b border-gray-200 dark:border-gray-700">
+      <div className="flex items-center gap-1 mb-4 border-b border-line">
         {STATUS_TABS.map((tab) => (
           <button
             key={tab.value}
@@ -74,7 +74,7 @@ export default function Proposals() {
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
               status === tab.value
                 ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                : 'border-transparent text-fg-subtle hover:text-fg'
             }`}
           >
             {tab.label}
@@ -90,20 +90,20 @@ export default function Proposals() {
           <LoadingSpinner />
         </div>
       ) : proposals.length === 0 ? (
-        <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+        <div className="text-center py-16 bg-surface rounded-xl border border-line">
           <Lightbulb className="w-10 h-10 mx-auto text-gray-300 dark:text-gray-600 mb-3" />
-          <p className="text-gray-500 dark:text-gray-400">
+          <p className="text-fg-subtle">
             {status === 'pending'
               ? 'No pending proposals. Enable the improvement-evaluator cron job to generate them from recent incidents.'
               : `No ${STATUS_TABS.find((t) => t.value === status)?.label.toLowerCase()} proposals.`}
           </p>
         </div>
       ) : (
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div className="bg-surface rounded-xl shadow-sm border border-line overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-200 dark:border-gray-700 text-left text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <tr className="border-b border-line text-left text-xs text-fg-subtle">
                 <th className="px-4 py-3 font-medium">Type</th>
                 <th className="px-4 py-3 font-medium">Title</th>
                 <th className="px-4 py-3 font-medium">Target</th>
@@ -121,21 +121,21 @@ export default function Proposals() {
                   <tr
                     key={p.uuid}
                     onClick={() => navigate(`/proposals/${p.uuid}`)}
-                    className="border-b border-gray-100 dark:border-gray-700/50 last:border-0 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors"
+                    className="border-b border-line last:border-0 cursor-pointer hover:bg-surface-2 transition-colors"
                   >
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span className="badge badge-primary">{kc.label}</span>
                     </td>
-                    <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
+                    <td className="px-4 py-3 font-medium text-fg">
                       {p.title}
                     </td>
-                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                    <td className="px-4 py-3 text-fg-subtle whitespace-nowrap">
                       {p.target_ref || '—'}
                     </td>
-                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                    <td className="px-4 py-3 text-fg-subtle whitespace-nowrap">
                       {evidence > 0 ? `${evidence} incident${evidence > 1 ? 's' : ''}` : '—'}
                     </td>
-                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                    <td className="px-4 py-3 text-fg-subtle whitespace-nowrap">
                       {formatAge(p.created_at)}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">

@@ -75,10 +75,10 @@ export default function RetentionSettingsSection({ onStatusChange }: RetentionSe
 
       <div className="flex items-center justify-between">
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+          <label className="block text-sm font-medium text-fg">
             Enable automatic cleanup
           </label>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
+          <p className="text-xs text-fg-subtle">
             Automatically delete old incident data (working directories and database records)
           </p>
         </div>
@@ -100,7 +100,7 @@ export default function RetentionSettingsSection({ onStatusChange }: RetentionSe
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+        <label className="block text-sm font-medium text-fg mb-1.5">
           Retention period (days)
         </label>
         <input
@@ -112,13 +112,13 @@ export default function RetentionSettingsSection({ onStatusChange }: RetentionSe
           disabled={!enabled}
           className="input-field"
         />
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+        <p className="mt-1 text-xs text-fg-subtle">
           Incidents older than this will be deleted. Includes working directories, logs, and database records.
         </p>
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+        <label className="block text-sm font-medium text-fg mb-1.5">
           Cleanup interval (hours)
         </label>
         <input
@@ -130,13 +130,13 @@ export default function RetentionSettingsSection({ onStatusChange }: RetentionSe
           disabled={!enabled}
           className="input-field"
         />
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+        <p className="mt-1 text-xs text-fg-subtle">
           How often the background cleanup runs.
         </p>
       </div>
 
-      <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
-        <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+      <div className="flex items-center justify-between pt-4 border-t border-line">
+        <p className="text-xs text-fg-subtle flex items-center gap-1.5">
           <Info className="w-3.5 h-3.5" />
           Changes take effect on the next cleanup cycle
         </p>

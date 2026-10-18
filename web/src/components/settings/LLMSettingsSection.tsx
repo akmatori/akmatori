@@ -286,12 +286,12 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
     const suggestions = MODEL_SUGGESTIONS[currentProvider] || [];
 
     return (
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5 space-y-4">
+      <div className="bg-surface border border-line rounded-lg p-5 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-            {isCreate ? 'New Configuration' : 'Edit Configuration'}
+          <h3 className="text-sm font-semibold text-fg">
+            {isCreate ? 'New LLM configuration' : 'Edit LLM configuration'}
           </h3>
-          <button onClick={closeForm} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+          <button onClick={closeForm} className="text-gray-400 hover:text-fg">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -299,7 +299,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
         {/* Provider (only on create) */}
         {isCreate && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+            <label className="block text-sm font-medium text-fg mb-1.5">
               Provider <span className="text-red-500">*</span>
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -311,7 +311,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                   className={`flex items-center justify-center p-2 rounded-lg border text-sm transition-colors ${
                     currentProvider === opt.value
                       ? 'bg-primary-50 dark:bg-primary-900/20 border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-300 font-medium'
-                      : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-900 dark:text-white'
+                      : 'bg-surface border-line hover:bg-surface-2 text-fg'
                   }`}
                 >
                   {opt.label}
@@ -323,7 +323,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
 
         {/* Name */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+          <label className="block text-sm font-medium text-fg mb-1.5">
             Name <span className="text-red-500">*</span>
           </label>
           <input
@@ -338,7 +338,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
 
         {/* API Key */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+          <label className="block text-sm font-medium text-fg mb-1.5">
             API Key {isCreate && <span className="text-red-500">*</span>}
           </label>
           <input
@@ -352,7 +352,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
             className="input-field"
           />
           {!isCreate && editingId && (
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            <p className="mt-1 text-xs text-fg-subtle">
               Leave blank to keep existing key
             </p>
           )}
@@ -360,7 +360,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
 
         {/* Model Selection */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+          <label className="block text-sm font-medium text-fg mb-1.5">
             Model
           </label>
           {suggestions.length > 0 ? (
@@ -409,7 +409,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
         <button
           type="button"
           onClick={() => setShowAdvanced(!showAdvanced)}
-          className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
+          className="flex items-center gap-2 text-sm text-fg-muted hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
         >
           {showAdvanced ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
           Advanced settings
@@ -419,9 +419,9 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
         </button>
 
         {showAdvanced && (
-          <div className="space-y-4 pl-4 border-l-2 border-gray-200 dark:border-gray-700">
+          <div className="space-y-4 pl-4 border-l-2 border-line">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <label className="block text-sm font-medium text-fg mb-1.5">
                 Thinking Level
               </label>
               <select
@@ -433,14 +433,14 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                   <option key={level.value} value={level.value}>{level.label}</option>
                 ))}
               </select>
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              <p className="mt-1 text-xs text-fg-subtle">
                 Controls how much the model reasons before responding
               </p>
             </div>
 
             {showBaseUrl && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                <label className="block text-sm font-medium text-fg mb-1.5">
                   Base URL
                 </label>
                 <input
@@ -450,7 +450,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                   placeholder={currentProvider === 'openrouter' ? 'https://openrouter.ai/api/v1' : 'https://your-endpoint.example.com/v1'}
                   className="input-field"
                 />
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                <p className="mt-1 text-xs text-fg-subtle">
                   {currentProvider === 'openrouter'
                     ? 'OpenRouter API endpoint (defaults to https://openrouter.ai/api/v1)'
                     : 'Custom OpenAI-compatible API endpoint'}
@@ -460,7 +460,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
 
             {/* Subagent model override — the runbook/memory search children. */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <label className="block text-sm font-medium text-fg mb-1.5">
                 Subagent model
               </label>
               <input
@@ -476,14 +476,14 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                   <option key={s.value} value={s.value}>{s.label}</option>
                 ))}
               </datalist>
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              <p className="mt-1 text-xs text-fg-subtle">
                 Cheaper model from the same provider for the runbook and memory search subagents.
                 They are read-only lookups that run on every incident. memory-writer always keeps the parent model.
                 Blank = same as parent.
               </p>
               {form.subagentModel.trim() && (
                 <div className="mt-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                  <label className="block text-sm font-medium text-fg mb-1.5">
                     Subagent thinking level
                   </label>
                   <select
@@ -503,7 +503,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
             {/* Sampling parameters — every box is optional. */}
             <div>
               <div className="flex items-baseline justify-between mb-1.5">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                <span className="text-sm font-medium text-fg">
                   Sampling parameters
                 </span>
                 {hasSamplingOverrides(form.sampling) && (
@@ -521,7 +521,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                   const bounds = SAMPLING_BOUNDS[key];
                   return (
                     <div key={key}>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      <label className="block text-xs font-medium text-fg-muted mb-1">
                         {bounds.label}
                       </label>
                       <input
@@ -538,12 +538,12 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                         placeholder="Provider default"
                         className="input-field"
                       />
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{hint}</p>
+                      <p className="mt-1 text-xs text-fg-subtle">{hint}</p>
                     </div>
                   );
                 })}
               </div>
-              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              <p className="mt-2 text-xs text-fg-subtle">
                 Leave blank to send no value and let the provider decide — this is the default.
                 Applies to investigations and to internal one-shot calls (titles, alert
                 extraction, correlation). Anthropic ignores temperature, Top P, and Top K while
@@ -554,7 +554,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
         )}
 
         {/* Save / Cancel */}
-        <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-end gap-3 pt-3 border-t border-line">
           <button onClick={closeForm} className="btn btn-secondary" disabled={saving}>
             Cancel
           </button>
@@ -581,21 +581,21 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
 
       {/* Active Provider hero card */}
       {activeConfig && activeConfig.is_configured ? (
-        <div className="rounded-lg border-l-4 border-l-primary-500 border border-gray-200 dark:border-gray-700 bg-primary-50 dark:bg-primary-900/20 p-4">
+        <div className="rounded-lg border-l-4 border-l-primary-500 border border-line bg-primary-50 dark:bg-primary-900/20 p-4">
           <div className="flex items-center justify-between">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-primary-100 dark:bg-primary-800 text-primary-700 dark:text-primary-300">
                   Active
                 </span>
-                <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                <span className="text-xs font-medium text-fg-subtle">
                   {PROVIDER_LABELS[activeConfig.provider] || activeConfig.provider}
                 </span>
               </div>
-              <p className="text-sm font-semibold text-gray-900 dark:text-white mt-1">
+              <p className="text-sm font-semibold text-fg mt-1">
                 {activeConfig.name}
               </p>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              <p className="text-xs text-fg-subtle mt-0.5">
                 {activeConfig.model || 'No model set'}
                 {activeConfig.thinking_level && activeConfig.thinking_level !== 'medium' && ` \u00B7 Thinking: ${activeConfig.thinking_level}`}
                 {activeConfig.base_url && ` \u00B7 Custom URL`}
@@ -606,7 +606,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
             <button
               onClick={() => openEditForm(activeConfig)}
               disabled={saving || formMode !== 'closed'}
-              className="p-1.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              className="p-1.5 rounded text-gray-400 hover:text-fg hover:bg-surface-2 transition-colors"
               title="Edit"
             >
               <Edit2 className="w-4 h-4" />
@@ -631,25 +631,25 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
       {/* Other configured providers */}
       {otherConfigured.length > 0 && (
         <div>
-          <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+          <h3 className="text-xs font-semibold text-fg-subtler mb-2">
             Other Configured Providers
           </h3>
           <div className="space-y-2">
             {otherConfigured.map((config) => (
               <div
                 key={config.id}
-                className="relative flex items-center justify-between p-4 rounded-lg border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 transition-colors"
+                className="relative flex items-center justify-between p-4 rounded-lg border bg-surface border-line transition-colors"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                    <span className="text-sm font-medium text-fg truncate">
                       {config.name}
                     </span>
-                    <span className="text-xs text-gray-400 dark:text-gray-500">
+                    <span className="text-xs text-fg-subtle">
                       {PROVIDER_LABELS[config.provider] || config.provider}
                     </span>
                   </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  <p className="text-xs text-fg-subtle mt-0.5">
                     {config.model || 'No model set'}
                     {config.thinking_level && config.thinking_level !== 'medium' && ` \u00B7 Thinking: ${config.thinking_level}`}
                     {config.base_url && ` \u00B7 Custom URL`}
@@ -668,7 +668,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                   <button
                     onClick={() => openEditForm(config)}
                     disabled={saving || formMode !== 'closed'}
-                    className="p-1.5 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    className="p-1.5 rounded text-gray-400 hover:text-fg hover:bg-surface-2 transition-colors"
                     title="Edit"
                   >
                     <Edit2 className="w-4 h-4" />
@@ -678,13 +678,13 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                       <button
                         onClick={() => handleDelete(config.id)}
                         disabled={saving}
-                        className="px-2 py-1 rounded text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
+                        className="px-2 py-1 rounded text-xs font-medium text-state-fail bg-state-fail/10 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
                       >
                         Confirm
                       </button>
                       <button
                         onClick={() => setDeleteConfirmId(null)}
-                        className="px-2 py-1 rounded text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+                        className="px-2 py-1 rounded text-xs text-gray-500 hover:text-fg transition-colors"
                       >
                         Cancel
                       </button>
@@ -693,7 +693,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                     <button
                       onClick={() => setDeleteConfirmId(config.id)}
                       disabled={saving || formMode !== 'closed'}
-                      className="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      className="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-surface-2 transition-colors"
                       title="Delete"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -715,7 +715,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
       )}
 
       {!hasConfigured && formMode === 'closed' && (
-        <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-6">
+        <p className="text-sm text-fg-subtle text-center py-6">
           No LLM providers configured yet. Add one to get started.
         </p>
       )}

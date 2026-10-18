@@ -18,21 +18,23 @@ export default function SegmentedControl<T extends string>({
   value,
   options,
   onChange,
-  buttonClassName = 'px-3 py-1',
+  buttonClassName = 'h-8 px-3',
 }: SegmentedControlProps<T>) {
   return (
-    <div className="flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden">
+    <div role="group" className="flex flex-shrink-0 rounded-md border border-line overflow-hidden">
       {options.map((opt, i) => (
         <button
           key={opt.value}
+          type="button"
           onClick={() => onChange(opt.value)}
+          aria-pressed={value === opt.value}
           title={opt.title}
           className={`${buttonClassName} text-xs font-medium transition-colors ${
-            i > 0 ? 'border-l border-gray-300 dark:border-gray-600 ' : ''
+            i > 0 ? 'border-l border-line ' : ''
           }${
             value === opt.value
-              ? 'bg-primary-500 text-white'
-              : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
+              ? 'bg-primary-500/15 text-fg'
+              : 'bg-surface text-fg-muted hover:bg-surface-2 hover:text-fg'
           }`}
         >
           {opt.label}

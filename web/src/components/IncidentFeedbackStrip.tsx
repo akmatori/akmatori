@@ -36,7 +36,7 @@ export default function IncidentFeedbackStrip({ incidentUUID }: IncidentFeedback
 
   if (submitted) {
     return (
-      <div className="mt-4 flex items-center gap-2 px-4 py-3 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 text-sm">
+      <div className="mt-4 flex items-center gap-2 px-4 py-3 rounded-lg bg-state-ok/10 text-state-ok text-sm">
         <Check className="w-4 h-4" />
         <span>
           Feedback saved as memory — it will inform future investigations and the next
@@ -47,14 +47,14 @@ export default function IncidentFeedbackStrip({ incidentUUID }: IncidentFeedback
   }
 
   return (
-    <div className="mt-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+    <div className="mt-4 border border-line rounded-lg">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 px-4 py-3 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors rounded-lg"
+        className="w-full flex items-center gap-2 px-4 py-3 text-sm text-fg-muted hover:bg-surface-2 transition-colors rounded-lg"
       >
         <MessageSquarePlus className="w-4 h-4 text-primary-500" />
         <span className="font-medium">Rate this resolution</span>
-        <span className="text-gray-400 dark:text-gray-500 text-xs">
+        <span className="text-fg-subtle text-xs">
           — was the root cause right? What was missed?
         </span>
         <span className="ml-auto">
@@ -68,7 +68,7 @@ export default function IncidentFeedbackStrip({ incidentUUID }: IncidentFeedback
             onChange={(e) => setText(e.target.value)}
             placeholder="e.g. Root cause was actually a stale DNS cache, not the upstream — next time check resolv.conf on the edge hosts first."
             rows={3}
-            className="w-full resize-none rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="w-full resize-none rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
           {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
           <div className="mt-2 flex justify-end">

@@ -88,17 +88,17 @@ export default function ProposalDetail() {
       <BackLink />
 
       {/* Header */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-4">
+      <div className="bg-surface rounded-xl shadow-sm border border-line p-6 mb-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2 mb-2">
               <span className="badge badge-primary">{kc.label}</span>
               <span className={`badge ${sc.badgeClass}`}>{sc.label}</span>
             </div>
-            <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
+            <h1 className="text-xl font-semibold text-fg">
               {proposal.title}
             </h1>
-            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-500 dark:text-gray-400">
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-fg-subtle">
               {proposal.target_ref && (
                 <span>
                   {kc.target}: <code className="text-primary-600 dark:text-primary-400">{proposal.target_ref}</code>
@@ -115,7 +115,7 @@ export default function ProposalDetail() {
               <button
                 onClick={() => decide('reject')}
                 disabled={acting}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 disabled:opacity-50 transition-colors"
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-line text-fg-muted hover:bg-surface-2 disabled:opacity-50 transition-colors"
               >
                 <X className="w-4 h-4" />
                 Reject
@@ -148,17 +148,17 @@ export default function ProposalDetail() {
         {/* Reasoning + evidence */}
         {proposal.reasoning && (
           <div className="mt-4">
-            <h3 className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1.5">
+            <h3 className="text-xs font-medium text-fg-subtle mb-1.5">
               Why
             </h3>
-            <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+            <p className="text-sm text-fg whitespace-pre-wrap">
               {proposal.reasoning}
             </p>
           </div>
         )}
         {evidence.length > 0 && (
           <div className="mt-4">
-            <h3 className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1.5">
+            <h3 className="text-xs font-medium text-fg-subtle mb-1.5">
               Evidence incidents
             </h3>
             <div className="flex flex-wrap gap-2">
@@ -166,7 +166,7 @@ export default function ProposalDetail() {
                 <Link
                   key={iu}
                   to={`/incidents/${iu}`}
-                  className="text-xs font-mono px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-primary-600 dark:text-primary-400 hover:underline"
+                  className="text-xs font-mono px-2 py-1 rounded bg-surface-2 text-primary-600 dark:text-primary-400 hover:underline"
                 >
                   {iu.slice(0, 8)}
                 </Link>
@@ -178,15 +178,15 @@ export default function ProposalDetail() {
 
       {/* Diff + chat */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 overflow-y-auto max-h-[calc(100vh-360px)]">
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+        <div className="bg-surface rounded-xl shadow-sm border border-line p-6 overflow-y-auto max-h-[calc(100vh-360px)]">
+          <h2 className="text-sm font-semibold text-fg mb-4">
             Proposed change
           </h2>
           <ProposalDiff proposal={proposal} />
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 flex flex-col max-h-[calc(100vh-360px)]">
-          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
+        <div className="bg-surface rounded-xl shadow-sm border border-line flex flex-col max-h-[calc(100vh-360px)]">
+          <div className="px-6 py-4 border-b border-line">
+            <h2 className="text-sm font-semibold text-fg">
               Refine with the assistant
             </h2>
           </div>
@@ -216,8 +216,8 @@ function BackLink() {
 function Banner({ tone, children }: { tone: 'warning' | 'error'; children: React.ReactNode }) {
   const classes =
     tone === 'warning'
-      ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300'
-      : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300';
+      ? 'bg-state-need/10 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300'
+      : 'bg-state-fail/10 border-state-fail/40 text-state-fail';
   return (
     <div className={`mt-4 flex items-start gap-2 rounded-lg border p-3 text-sm ${classes}`}>
       <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />

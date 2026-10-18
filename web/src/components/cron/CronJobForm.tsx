@@ -112,14 +112,14 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
   const enabledTools = toolInstances.filter((t) => t.enabled);
 
   return (
-    <div className="p-6 bg-gray-50 dark:bg-gray-900/50 rounded-lg border border-gray-200 dark:border-gray-700 animate-fade-in">
-      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">
-        {isCreating ? 'Create Cron Job' : 'Edit Cron Job'}
+    <div className="p-6 bg-surface-2 rounded-lg border border-line animate-fade-in">
+      <h3 className="text-lg font-semibold text-fg mb-6">
+        {isCreating ? 'New cron job' : 'Edit cron job'}
       </h3>
 
       <div className="space-y-6">
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label className="block text-sm font-medium text-fg mb-1">
             Name <span className="text-red-500">*</span>
           </label>
           <input
@@ -132,7 +132,7 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label className="block text-sm font-medium text-fg mb-1">
             Schedule <span className="text-red-500">*</span>
           </label>
           <select
@@ -158,17 +158,17 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
             />
           )}
           {!validation.valid && (
-            <p className="mt-1 text-xs text-red-600 dark:text-red-400">{validation.message}</p>
+            <p className="mt-1 text-xs text-state-fail">{validation.message}</p>
           )}
           {validation.valid && nextRunPreview && (
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            <p className="mt-1 text-xs text-fg-subtle">
               Next run {formatRelativeTime(nextRunPreview)} ({nextRunPreview.toLocaleString()})
             </p>
           )}
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label className="block text-sm font-medium text-fg mb-1">
             Prompt <span className="text-red-500">*</span>
           </label>
           <textarea
@@ -177,29 +177,29 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
             value={form.prompt}
             onChange={(e) => setForm({ ...form, prompt: e.target.value })}
           />
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          <p className="mt-1 text-xs text-fg-subtle">
             The prompt is handed to the cron-agent skill as its initial task. The agent uses the
             tools you assign below plus memory + runbook recall.
           </p>
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          <label className="block text-sm font-medium text-fg mb-2">
             Tools
           </label>
-          <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 max-h-48 overflow-y-auto bg-white dark:bg-gray-800">
+          <div className="border border-line rounded-lg p-3 max-h-48 overflow-y-auto bg-surface">
             {toolsLoading ? (
-              <div className="text-center py-4 text-sm text-gray-500 dark:text-gray-400">
+              <div className="text-center py-4 text-sm text-fg-subtle">
                 Loading tools…
               </div>
             ) : toolsError ? (
-              <div className="text-center py-4 text-sm text-red-600 dark:text-red-400">
+              <div className="text-center py-4 text-sm text-state-fail">
                 {toolsError}
               </div>
             ) : enabledTools.length === 0 ? (
               <div className="text-center py-4">
                 <Wrench className="w-6 h-6 mx-auto text-gray-400 mb-1" />
-                <p className="text-gray-500 dark:text-gray-400 text-sm">No tools available</p>
+                <p className="text-fg-subtle text-sm">No tools available</p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -209,7 +209,7 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
                     className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-all ${
                       form.tool_instance_ids.includes(tool.id)
                         ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                        : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
+                        : 'border-line hover:border-gray-300'
                     }`}
                   >
                     <input
@@ -219,10 +219,10 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
                       className="w-4 h-4"
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-gray-900 dark:text-white text-sm truncate">
+                      <div className="font-medium text-fg text-sm truncate">
                         {tool.name}
                       </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                      <div className="text-xs text-fg-subtle truncate">
                         {tool.tool_type?.name ?? '—'}
                       </div>
                     </div>
@@ -231,13 +231,13 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
               </div>
             )}
           </div>
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          <p className="mt-1 text-xs text-fg-subtle">
             Each cron has its own allowlist — independent of the incident-manager's global tool
             set.
           </p>
         </div>
 
-        <div className="flex items-center gap-3 p-4 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+        <div className="flex items-center gap-3 p-4 rounded-lg bg-surface border border-line">
           <input
             type="checkbox"
             id="cron-post-results"
@@ -245,10 +245,10 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
             onChange={(e) => setForm({ ...form, post_results: e.target.checked })}
           />
           <label htmlFor="cron-post-results" className="cursor-pointer">
-            <span className="text-sm text-gray-700 dark:text-gray-300">
+            <span className="text-sm text-fg">
               {form.post_results ? 'Post results to a channel' : "Don't post results anywhere"}
             </span>
-            <span className="block text-xs text-gray-500 dark:text-gray-400">
+            <span className="block text-xs text-fg-subtle">
               {form.post_results
                 ? 'The final summary is posted to the selected channel (or the workspace default).'
                 : 'The run still executes and its outcome is recorded on the incident — nothing is sent to Slack.'}
@@ -264,7 +264,7 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
           />
         )}
 
-        <div className="flex items-center gap-3 p-4 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+        <div className="flex items-center gap-3 p-4 rounded-lg bg-surface border border-line">
           <input
             type="checkbox"
             id="cron-enabled"
@@ -277,19 +277,19 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
             ) : (
               <PowerOff className="w-4 h-4 text-gray-400" />
             )}
-            <span className="text-sm text-gray-700 dark:text-gray-300">
+            <span className="text-sm text-fg">
               {form.enabled ? 'Enabled' : 'Disabled (will not fire)'}
             </span>
           </label>
         </div>
 
         {error && (
-          <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-3 rounded">
+          <div className="text-sm text-state-fail bg-state-fail/10 border border-state-fail/40 p-3 rounded">
             {error}
           </div>
         )}
 
-        <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+        <div className="flex gap-3 pt-4 border-t border-line">
           <button
             onClick={submit}
             className="btn btn-primary"

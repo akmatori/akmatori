@@ -28,14 +28,14 @@ export default function AlertSourceForm({
   const pickerTypes = visibleAlertSourceTypes(sourceTypes);
 
   return (
-    <div className="p-6 bg-gray-50 dark:bg-gray-900/50 rounded-lg border border-gray-200 dark:border-gray-700 animate-fade-in">
-      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">
-        {isCreating ? 'Create Alert Source' : 'Edit Alert Source'}
+    <div className="p-6 bg-surface-2 rounded-lg border border-line animate-fade-in">
+      <h3 className="text-lg font-semibold text-fg mb-6">
+        {isCreating ? 'Add alert source' : 'Edit alert source'}
       </h3>
 
       <div className="space-y-6">
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label className="block text-sm font-medium text-fg mb-1">
             Source Type <span className="text-red-500">*</span>
           </label>
           <select
@@ -55,7 +55,7 @@ export default function AlertSourceForm({
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label className="block text-sm font-medium text-fg mb-1">
             Instance Name <span className="text-red-500">*</span>
           </label>
           <input
@@ -68,7 +68,7 @@ export default function AlertSourceForm({
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label className="block text-sm font-medium text-fg mb-1">
             Description
           </label>
           <input
@@ -82,7 +82,7 @@ export default function AlertSourceForm({
 
         {isWebhookSourceType(formData.source_type_name) && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label className="block text-sm font-medium text-fg mb-1">
               Webhook Secret
             </label>
             <input
@@ -93,7 +93,7 @@ export default function AlertSourceForm({
               onChange={(e) => setFormData({ ...formData, webhook_secret: e.target.value })}
             />
             {selectedType && (
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              <p className="mt-1 text-xs text-fg-subtle">
                 Header: <code>{selectedType.webhook_secret_header}</code>
               </p>
             )}
@@ -106,7 +106,7 @@ export default function AlertSourceForm({
           onChange={(uuid) => setFormData({ ...formData, notification_channel_uuid: uuid })}
         />
 
-        <div className="flex items-center gap-3 p-4 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+        <div className="flex items-center gap-3 p-4 rounded-lg bg-surface border border-line">
           <input
             type="checkbox"
             id="enabled"
@@ -119,13 +119,13 @@ export default function AlertSourceForm({
             ) : (
               <PowerOff className="w-4 h-4 text-gray-400" />
             )}
-            <span className="text-sm text-gray-700 dark:text-gray-300">
+            <span className="text-sm text-fg">
               {formData.enabled ? 'Enabled' : 'Disabled'}
             </span>
           </label>
         </div>
 
-        <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+        <div className="flex gap-3 pt-4 border-t border-line">
           <button onClick={onSave} className="btn btn-primary">
             <Save className="w-4 h-4" />
             Save

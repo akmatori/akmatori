@@ -139,7 +139,7 @@ export default function ToolFormSection({
             checked={Boolean(current)}
             onChange={(e) => updateSetting(key, e.target.checked)}
           />
-          <label htmlFor={key} className="text-sm text-gray-700 dark:text-gray-300">
+          <label htmlFor={key} className="text-sm text-fg">
             {prop.description || key}
             {prop.warning && (
               <span className="ml-2 text-yellow-600 dark:text-yellow-400 text-xs">
@@ -155,7 +155,7 @@ export default function ToolFormSection({
     if (prop.format === 'textarea') {
       return (
         <div key={key}>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label className="block text-sm font-medium text-fg mb-1">
             {prop.description || key}
             {isRequired && <span className="text-red-500 ml-1">*</span>}
           </label>
@@ -172,7 +172,7 @@ export default function ToolFormSection({
     if (prop.enum) {
       return (
         <div key={key}>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label className="block text-sm font-medium text-fg mb-1">
             {prop.description || key}
             {isRequired && <span className="text-red-500 ml-1">*</span>}
           </label>
@@ -191,7 +191,7 @@ export default function ToolFormSection({
 
     return (
       <div key={key}>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+        <label className="block text-sm font-medium text-fg mb-1">
           {prop.description || key}
           {isRequired && <span className="text-red-500 ml-1">*</span>}
           {prop.default !== undefined && (
@@ -215,14 +215,14 @@ export default function ToolFormSection({
 
   return (
     <div className="card mb-8 animate-fade-in">
-      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">
-        {isCreating ? 'Create Tool Instance' : 'Edit Tool Instance'}
+      <h3 className="text-lg font-semibold text-fg mb-6">
+        {isCreating ? 'Add a tool' : 'Edit tool'}
       </h3>
 
       <div className="space-y-6">
         {/* Tool Type */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label className="block text-sm font-medium text-fg mb-1">
             Tool Type <span className="text-red-500">*</span>
           </label>
           <select
@@ -243,7 +243,7 @@ export default function ToolFormSection({
 
         {/* Instance Name */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label className="block text-sm font-medium text-fg mb-1">
             Instance Name <span className="text-red-500">*</span>
           </label>
           <input
@@ -258,10 +258,10 @@ export default function ToolFormSection({
         {/* Settings based on schema */}
         {selectedType && selectedSchema && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-fg mb-2">
               Settings
             </label>
-            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4 bg-gray-50 dark:bg-gray-900/50">
+            <div className="border border-line rounded-lg p-4 space-y-4 bg-surface-2">
               {/* SSH Keys - Special handling */}
               {selectedType.name === 'ssh' && (
                 <SSHKeysSection
@@ -303,11 +303,11 @@ export default function ToolFormSection({
 
               {/* Advanced toggle */}
               {advancedProps.length > 0 && (
-                <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                <div className="border-t border-line pt-4">
                   <button
                     type="button"
                     onClick={() => setShowAdvanced(!showAdvanced)}
-                    className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                    className="flex items-center gap-2 text-sm text-fg-muted hover:text-gray-800 dark:hover:text-gray-200"
                   >
                     {showAdvanced ? (
                       <ChevronUp className="w-4 h-4" />
@@ -318,7 +318,7 @@ export default function ToolFormSection({
                   </button>
 
                   {showAdvanced && (
-                    <div className="mt-4 space-y-4 pl-4 border-l-2 border-gray-200 dark:border-gray-700">
+                    <div className="mt-4 space-y-4 pl-4 border-l-2 border-line">
                       {advancedProps.map(([key, prop]) => renderPropertyInput(key, prop, isRequired(key)))}
                     </div>
                   )}
@@ -329,7 +329,7 @@ export default function ToolFormSection({
         )}
 
         {/* Enabled Toggle */}
-        <div className="flex items-center gap-3 p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50">
+        <div className="flex items-center gap-3 p-4 rounded-lg bg-surface-2">
           <input
             type="checkbox"
             id="enabled"
@@ -342,14 +342,14 @@ export default function ToolFormSection({
             ) : (
               <PowerOff className="w-4 h-4 text-gray-400" />
             )}
-            <span className="text-sm text-gray-700 dark:text-gray-300">
+            <span className="text-sm text-fg">
               {formData.enabled ? 'Enabled' : 'Disabled'}
             </span>
           </label>
         </div>
 
         {/* Form Actions */}
-        <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+        <div className="flex gap-3 pt-4 border-t border-line">
           <button onClick={onSave} className="btn btn-primary">
             <Save className="w-4 h-4" />
             Save

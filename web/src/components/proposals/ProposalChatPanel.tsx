@@ -88,7 +88,7 @@ export default function ProposalChatPanel({
       {/* Transcript */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[200px]">
         {messages.length === 0 && !isRunning && (
-          <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-8">
+          <p className="text-sm text-fg-subtle text-center py-8">
             Ask the assistant to explain, verify, or revise this proposal. It can
             read the cited incidents, runbooks, and memories before editing the draft.
           </p>
@@ -102,7 +102,7 @@ export default function ProposalChatPanel({
               className={`max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words ${
                 m.role === 'operator'
                   ? 'bg-primary-500 text-white'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100'
+                  : 'bg-surface-2 text-fg'
               }`}
             >
               {m.content}
@@ -113,7 +113,7 @@ export default function ProposalChatPanel({
           </div>
         ))}
         {isRunning && (
-          <div className="flex gap-2 items-center text-sm text-gray-400 dark:text-gray-500">
+          <div className="flex gap-2 items-center text-sm text-fg-subtle">
             <Bot className="w-5 h-5 text-primary-500" />
             <span className="animate-pulse">Assistant is working…</span>
           </div>
@@ -121,7 +121,7 @@ export default function ProposalChatPanel({
       </div>
 
       {/* Composer */}
-      <div className="border-t border-gray-200 dark:border-gray-700 p-3">
+      <div className="border-t border-line p-3">
         {error && <p className="text-xs text-red-500 mb-2">{error}</p>}
         <div className="flex gap-2">
           <textarea
@@ -140,7 +140,7 @@ export default function ProposalChatPanel({
             }
             disabled={disabled || isRunning}
             rows={2}
-            className="flex-1 resize-none rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
+            className="flex-1 resize-none rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
           />
           <button
             onClick={send}

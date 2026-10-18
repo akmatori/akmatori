@@ -14,7 +14,7 @@ export default defineConfig({
     port: 5173,
     // Point local dev at another install: AKMATORI_API_URL=http://host:8080 npm run dev
     proxy: Object.fromEntries(
-      ['/api', '/auth'].map((path) => [
+      ['/api', '/auth', '/mcp'].map((path) => [
         path,
         { target: process.env.AKMATORI_API_URL ?? 'https://api.vibevm.akmatori.com', changeOrigin: true },
       ]),

@@ -30,7 +30,7 @@ export default function ProposalDiff({ proposal }: ProposalDiffProps) {
         return (
           <div key={field}>
             <div className="flex items-center gap-2 mb-1.5">
-              <span className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <span className="text-xs font-medium text-fg-subtle">
                 {fieldLabel(field)}
               </span>
               {changed && (
@@ -66,10 +66,10 @@ function DiffCell({
       ? 'bg-green-50 dark:bg-green-900/10 border-green-200 dark:border-green-800/50'
       : tone === 'removed'
         ? 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800/50'
-        : 'bg-gray-50 dark:bg-gray-900/30 border-gray-200 dark:border-gray-700';
+        : 'bg-gray-50 dark:bg-gray-900/30 border-line';
   return (
     <div>
-      <div className="text-xs text-gray-400 dark:text-gray-500 mb-1">{label}</div>
+      <div className="text-xs text-fg-subtle mb-1">{label}</div>
       <pre
         className={`whitespace-pre-wrap break-words font-mono text-xs rounded-lg border p-3 max-h-72 overflow-y-auto text-gray-800 dark:text-gray-200 ${toneClasses}`}
       >

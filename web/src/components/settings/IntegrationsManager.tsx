@@ -129,7 +129,7 @@ export default function IntegrationsManager() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <p className="text-sm text-gray-600 dark:text-gray-400">
+        <p className="text-sm text-fg-muted">
           Configure connections to messaging providers. Each integration can be referenced by one or more Channels.
         </p>
         <div className="flex gap-2">
@@ -152,13 +152,13 @@ export default function IntegrationsManager() {
       {error && <ErrorMessage message={error} />}
 
       {(isCreating || editing) && activeConfig && (
-        <div className="p-6 bg-gray-50 dark:bg-gray-900/50 rounded-lg border border-gray-200 dark:border-gray-700 animate-fade-in">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+        <div className="p-6 bg-surface-2 rounded-lg border border-line animate-fade-in">
+          <h3 className="text-lg font-semibold text-fg mb-4">
             {isCreating ? `Add ${activeConfig.label} Integration` : `Edit ${activeConfig.label} Integration`}
           </h3>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label className="block text-sm font-medium text-fg mb-1">
                 Name <span className="text-red-500">*</span>
               </label>
               <input
@@ -172,7 +172,7 @@ export default function IntegrationsManager() {
 
             {activeConfig.credentialFields.map((field) => (
               <div key={field.name}>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium text-fg mb-1">
                   {field.label}
                   {isCreating && <span className="text-red-500"> *</span>}
                 </label>
@@ -189,17 +189,17 @@ export default function IntegrationsManager() {
                   }
                 />
                 {field.hint && (
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{field.hint}</p>
+                  <p className="mt-1 text-xs text-fg-subtle">{field.hint}</p>
                 )}
                 {!isCreating && (
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  <p className="mt-1 text-xs text-fg-subtle">
                     Leave blank to keep existing value.
                   </p>
                 )}
               </div>
             ))}
 
-            <div className="flex items-center gap-3 p-3 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-surface border border-line">
               <input
                 type="checkbox"
                 id="integration-enabled"
@@ -212,13 +212,13 @@ export default function IntegrationsManager() {
                 ) : (
                   <PowerOff className="w-4 h-4 text-gray-400" />
                 )}
-                <span className="text-sm text-gray-700 dark:text-gray-300">
+                <span className="text-sm text-fg">
                   {form.enabled ? 'Enabled' : 'Disabled'}
                 </span>
               </label>
             </div>
 
-            <div className="flex gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+            <div className="flex gap-3 pt-2 border-t border-line">
               <button onClick={save} className="btn btn-primary">
                 <Save className="w-4 h-4" />
                 Save
@@ -241,7 +241,7 @@ export default function IntegrationsManager() {
             return (
               <div
                 key={row.uuid}
-                className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 flex items-center justify-between"
+                className="border border-line rounded-lg p-4 flex items-center justify-between"
               >
                 <div className="flex items-center gap-3">
                   <div className={`source-icon source-icon-${row.provider}`}>
@@ -249,14 +249,14 @@ export default function IntegrationsManager() {
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <h4 className="font-semibold text-gray-900 dark:text-white">{row.name}</h4>
+                      <h4 className="font-semibold text-fg">{row.name}</h4>
                       <span className="badge badge-primary">{cfg?.label ?? row.provider}</span>
                       <span className={`badge ${row.enabled ? 'badge-success' : 'badge-default'}`}>
                         {row.enabled ? 'Enabled' : 'Disabled'}
                       </span>
                     </div>
                     {cfg && (
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      <p className="text-xs text-fg-subtle mt-0.5">
                         {cfg.description}
                       </p>
                     )}
@@ -264,14 +264,14 @@ export default function IntegrationsManager() {
                 </div>
                 <div className="flex gap-2">
                   <button
-                    className="btn btn-ghost p-2 text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20"
+                    className="btn btn-ghost p-2"
                     onClick={() => startEdit(row)}
                     title="Edit"
                   >
                     <Edit2 className="w-4 h-4" />
                   </button>
                   <button
-                    className="btn btn-ghost p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                    className="btn btn-ghost p-2 text-state-fail hover:bg-state-fail/10"
                     onClick={() => remove(row.uuid)}
                     title="Delete"
                   >

@@ -47,15 +47,15 @@ export default function CloseIncidentModal({
     <div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="close-incident-modal-title">
       <div className="fixed inset-0 bg-black/50 transition-opacity" onClick={submitting ? undefined : onClose} />
       <div className="flex min-h-full items-center justify-center p-4">
-        <div className="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-xl shadow-xl">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 id="close-incident-modal-title" className="text-base font-semibold text-gray-900 dark:text-gray-100">
+        <div className="relative w-full max-w-md bg-surface rounded-xl shadow-xl">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-line">
+            <h2 id="close-incident-modal-title" className="text-base font-semibold text-fg">
               Close incident?
             </h2>
             <button
               onClick={onClose}
               disabled={submitting}
-              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 disabled:opacity-50"
+              className="text-gray-400 hover:text-fg disabled:opacity-50"
             >
               <X className="w-5 h-5" />
             </button>
@@ -63,7 +63,7 @@ export default function CloseIncidentModal({
 
           <div className="p-6 space-y-4">
             {inProgress && (
-              <div className="flex items-start gap-3 px-3 py-2.5 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 text-sm">
+              <div className="flex items-start gap-3 px-3 py-2.5 rounded-lg bg-state-need/10 text-state-need text-sm">
                 <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                 <span>
                   This incident's investigation is still pending/running. Closing it now will force-stop
@@ -73,7 +73,7 @@ export default function CloseIncidentModal({
               </div>
             )}
             {firingAlertCount > 0 && (
-              <div className="flex items-start gap-3 px-3 py-2.5 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 text-sm">
+              <div className="flex items-start gap-3 px-3 py-2.5 rounded-lg bg-state-need/10 text-state-need text-sm">
                 <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                 <span>
                   {firingAlertCount} alert{firingAlertCount === 1 ? ' is' : 's are'} still firing on this incident.
@@ -83,7 +83,7 @@ export default function CloseIncidentModal({
             )}
 
             {error && (
-              <div className="px-3 py-2 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-sm">
+              <div className="px-3 py-2 rounded-lg bg-state-fail/10 text-state-fail text-sm">
                 {error}
               </div>
             )}
@@ -92,7 +92,7 @@ export default function CloseIncidentModal({
               <button
                 onClick={onClose}
                 disabled={submitting}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
+                className="px-4 py-2 rounded-lg text-sm font-medium text-fg-muted hover:bg-surface-2 disabled:opacity-50 transition-colors"
               >
                 Cancel
               </button>

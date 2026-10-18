@@ -47,14 +47,14 @@ export default function Setup() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+      <div className="min-h-screen flex items-center justify-center bg-surface-2">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-surface-2 px-4">
       <div className="max-w-md w-full">
         {/* Logo */}
         <div className="text-center mb-8">
@@ -63,22 +63,22 @@ export default function Setup() {
             alt="Akmatori"
             className="w-32 h-32 mx-auto mb-4"
           />
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Welcome to Akmatori</h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-2">Create your admin password to get started</p>
+          <h1 className="text-2xl font-bold text-fg">Welcome to Akmatori</h1>
+          <p className="text-fg-subtle mt-2">Create your admin password to get started</p>
         </div>
 
         {/* Setup Form */}
         <div className="card">
           <form onSubmit={handleSubmit} className="space-y-6">
             {error && (
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm">
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-state-fail/10 text-state-fail text-sm">
                 <AlertCircle size={16} />
                 <span>{error}</span>
               </div>
             )}
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label htmlFor="password" className="block text-sm font-medium text-fg mb-1">
                 Admin Password
               </label>
               <input
@@ -95,7 +95,7 @@ export default function Setup() {
             </div>
 
             <div>
-              <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label htmlFor="confirmPassword" className="block text-sm font-medium text-fg mb-1">
                 Confirm Password
               </label>
               <input
@@ -108,7 +108,7 @@ export default function Setup() {
                 required
                 autoComplete="new-password"
               />
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Minimum 8 characters</p>
+              <p className="mt-1 text-xs text-fg-subtle">Minimum 8 characters</p>
             </div>
 
             <button

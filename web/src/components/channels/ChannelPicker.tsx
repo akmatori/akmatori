@@ -59,7 +59,7 @@ export default function ChannelPicker({
 
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+      <label className="block text-sm font-medium text-fg mb-1">
         {label}
       </label>
       <select
@@ -80,10 +80,10 @@ export default function ChannelPicker({
         ))}
       </select>
       {error && (
-        <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>
+        <p className="mt-1 text-xs text-state-fail">{error}</p>
       )}
       {!error && options.length === 0 && (
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+        <p className="mt-1 text-xs text-fg-subtle">
           No post-capable channels configured. Add one under Settings &rarr; Channels.
         </p>
       )}
