@@ -6,6 +6,14 @@
     <link rel="icon" type="image/png" href="/akmatori.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Akmatori</title>
+    <script>
+      // Apply the theme class before first paint (ThemeProvider takes over after mount).
+      try {
+        var t = localStorage.getItem('theme') || 'dark';
+        if (t === 'system') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        document.documentElement.classList.add(t);
+      } catch (e) { document.documentElement.classList.add('dark'); }
+    </script>
   </head>
   <body>
     <div id="root"></div>
