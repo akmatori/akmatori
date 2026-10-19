@@ -1081,29 +1081,35 @@ paths:
       tags: [Settings]
       responses:
         '200':
-          description: Per-provider LLM settings
-    put:
-      summary: Update LLM settings
-      operationId: updateLLMSettings
+          description: Named configurations and active_id. uses_subscription identifies worker OAuth; is_configured validates configuration, not live sign-in.
+    post:
+      summary: Create a named LLM configuration
+      operationId: createLLMSettings
       tags: [Settings]
       requestBody:
         content:
           application/json:
             schema:
               type: object
-              required: [provider]
+              required: [provider, name]
               properties:
+                name:
+                  type: string
+                  maxLength: 100
                 provider:
                   type: string
-                  enum: [openai, anthropic, google, openrouter, custom]
+                  enum: [openai, openai-codex, anthropic, google, openrouter, nvidia, minimax, ant-ling, custom]
                 api_key:
                   type: string
+                  description: API credential. Must be absent or empty for openai-codex.
                 model:
                   type: string
+                  description: Required and nonblank for openai-codex; must exist in the worker catalog.
                 thinking_level:
                   type: string
                   enum: [off, minimal, low, medium, high, xhigh, max]
                 base_url:
+                  description: Custom API endpoint. Must be absent or empty for openai-codex.
                   type: string
                   format: uri
                 subagent_model:
@@ -1147,10 +1153,116 @@ paths:
                   maximum: 1000000
                   description: Output token cap override; null clears it back to the model default.
       responses:
-        '200':
-          description: Updated settings
+        '201':
+          description: Configuration created
         '400':
           description: Validation error (sampling parameter out of range, invalid provider/thinking_level/base_url)
+
+  /settings/llm/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: integer, minimum: 1}
+    get:
+      summary: Get a named LLM configuration
+      tags: [Settings]
+      responses:
+        '200': {description: Configuration with a masked API key}
+        '404': {description: Configuration not found}
+    put:
+      summary: Update a named LLM configuration
+      description: Provider is immutable. Omitted fields remain unchanged. Subscription configurations reject API keys, custom endpoints, and blank models.
+      operationId: updateLLMSettings
+      tags: [Settings]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                api_key:
+                  type: string
+                  description: API credential. Must be absent or empty for openai-codex.
+                model:
+                  type: string
+                  description: Required and nonblank for openai-codex; must exist in the worker catalog.
+                thinking_level:
+                  type: string
+                  enum: [off, minimal, low, medium, high, xhigh, max]
+                base_url:
+                  description: Custom API endpoint. Must be absent or empty for openai-codex.
+                  type: string
+                  format: uri
+                subagent_model:
+                  type: string
+                  nullable: true
+                  description: >-
+                    Model id (same provider) for the runbook/memory search subagents.
+                    Omit to leave unchanged, null or "" to clear. Unset = same as parent;
+                    memory-writer always keeps the parent model.
+                subagent_thinking_level:
+                  type: string
+                  nullable: true
+                  enum: [off, minimal, low, medium, high, xhigh, max]
+                  description: Thinking level for the subagents; only applies with subagent_model. Unset = same as parent.
+                temperature:
+                  type: number
+                  nullable: true
+                  minimum: 0
+                  maximum: 2
+                  description: >-
+                    Sampling override. Omit to leave unchanged, null to clear.
+                    When unset, no temperature is sent and the provider default applies.
+                top_p:
+                  type: number
+                  nullable: true
+                  minimum: 0
+                  maximum: 1
+                  description: Nucleus sampling override; null clears it back to the provider default.
+                top_k:
+                  type: integer
+                  nullable: true
+                  minimum: 1
+                  maximum: 1000
+                  description: >-
+                    Top-k sampling override; null clears it. Dropped for providers whose
+                    API has no top_k (OpenAI, Mistral).
+                max_tokens:
+                  type: integer
+                  nullable: true
+                  minimum: 1
+                  maximum: 1000000
+                  description: Output token cap override; null clears it back to the model default.
+      responses:
+        '200': {description: Configuration updated}
+        '400': {description: Invalid settings}
+        '404': {description: Configuration not found}
+    delete:
+      summary: Delete an inactive configuration
+      tags: [Settings]
+      responses:
+        '200': {description: Configuration deleted; worker subscription login is not revoked}
+        '400': {description: Cannot delete the active or last configuration}
+        '404': {description: Configuration not found}
+
+  /settings/llm/{id}/activate:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: integer, minimum: 1}
+    put:
+      summary: Select the active LLM configuration
+      description: Validates configuration only. Subscription authentication is checked by the worker at request time.
+      tags: [Settings]
+      responses:
+        '200': {description: Configuration activated}
+        '400': {description: Configuration is incomplete}
+        '404': {description: Configuration not found}
 
   /settings/proxy:
     get:

@@ -421,3 +421,20 @@ func BenchmarkTruncateForPrompt(b *testing.B) {
 		truncateForPrompt(input, 2000)
 	}
 }
+
+func TestTitleGeneratorSubscription(t *testing.T) {
+	db := setupTitleGeneratorTestDB(t)
+	if err := db.Create(&database.LLMSettings{
+		Name: "Subscription", Provider: database.LLMProviderCodex, Model: "gpt-5.5", Enabled: true, Active: true,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	caller := &fakeOneShotLLMCaller{respond: func(context.Context) (string, error) { return "Database unavailable", nil }}
+	title, err := NewTitleGenerator(caller).GenerateTitle("Database connections are failing across the cluster", "Monitoring")
+	if err != nil || title != "Database unavailable" || caller.callCount() != 1 {
+		t.Fatalf("subscription title: %q, %v, calls=%d", title, err, caller.callCount())
+	}
+	if caller.lastLLM == nil || caller.lastLLM.Provider != "openai-codex" || caller.lastLLM.APIKey != "" {
+		t.Fatalf("invalid subscription settings: %+v", caller.lastLLM)
+	}
+}

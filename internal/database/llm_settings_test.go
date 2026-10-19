@@ -439,8 +439,8 @@ func TestSeedLLMProviders_SetsNames(t *testing.T) {
 	var rows []LLMSettings
 	db.Order("provider asc").Find(&rows)
 
-	if len(rows) != 8 {
-		t.Fatalf("expected 8 rows, got %d", len(rows))
+	if len(rows) != len(ValidLLMProviders()) {
+		t.Fatalf("expected %d rows, got %d", len(ValidLLMProviders()), len(rows))
 	}
 
 	// Verify each row has a non-empty name matching its provider display name

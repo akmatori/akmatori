@@ -1,6 +1,11 @@
 import type { LLMProvider } from '../../types';
 
 export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: string }[]> = {
+  'openai-codex': [
+    { value: 'gpt-5.6-terra', label: 'gpt-5.6-terra (Recommended)' },
+    { value: 'gpt-5.5', label: 'gpt-5.5' },
+    { value: 'gpt-6.1-sol', label: 'gpt-6.1-sol' },
+  ],
   openai: [
     // GPT-6 line (pi-ai 1.0.1 OpenAI catalog): gpt-6.1-sol, gpt-6-sol,
     // gpt-6-luna, gpt-6-astra. There is no plain `gpt-6` id, and the

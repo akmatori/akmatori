@@ -97,7 +97,7 @@ func (e *AlertExtractor) ExtractWithPrompt(ctx context.Context, messageText, cus
 		return e.createFallbackAlert(messageText), nil
 	}
 
-	if settings == nil || settings.APIKey == "" {
+	if settings == nil || !settings.IsConfigured() {
 		slog.Info("LLM not configured, using fallback extraction")
 		return e.createFallbackAlert(messageText), nil
 	}

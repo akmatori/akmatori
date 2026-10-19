@@ -62,7 +62,7 @@ func (c *FeedbackClassifier) Classify(ctx context.Context, message string, incid
 	if err != nil {
 		return FeedbackVerdict{}, fmt.Errorf("classify: load llm settings: %w", err)
 	}
-	if settings == nil || settings.APIKey == "" {
+	if settings == nil || !settings.IsConfigured() {
 		return FeedbackVerdict{}, ErrWorkerNotConnected
 	}
 	worker := BuildLLMSettingsForWorker(settings)

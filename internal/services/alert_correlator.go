@@ -178,7 +178,7 @@ func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, aler
 	if err != nil {
 		return noMatch, fmt.Errorf("correlate: load llm settings: %w", err)
 	}
-	if settings == nil || settings.APIKey == "" {
+	if settings == nil || !settings.IsConfigured() {
 		return noMatch, fmt.Errorf("correlate: LLM settings not configured")
 	}
 	worker := BuildLLMSettingsForWorker(settings)

@@ -13,6 +13,8 @@
 // removes /compat (after coding-agent's own ModelManager migration), port this
 // to per-api `streamSimple` dispatch or a Models collection with a registered
 // provider factory.
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { usesSubscription, validateSubscriptionSettings, requireSubscriptionLogin } from "./subscription-auth.js";
 import { complete } from "@earendil-works/pi-ai/compat";
 import type { AssistantMessage, Context, Message } from "@earendil-works/pi-ai";
 import type { LLMSettings, ProxyConfig } from "./types.js";
@@ -59,10 +61,11 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
   if (!params.user) {
     throw new Error("oneshot_llm: missing user prompt");
   }
-  if (!params.llmSettings || !params.llmSettings.api_key) {
+  if (!params.llmSettings || (!params.llmSettings.api_key && !usesSubscription(params.llmSettings.provider))) {
     throw new Error("oneshot_llm: missing LLM settings (no API key)");
   }
 
+  validateSubscriptionSettings(params.llmSettings);
   applyProxyConfig(params.proxyConfig);
 
   const model = resolveModel(
@@ -94,7 +97,7 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
   );
 
   const baseOptions = {
-    apiKey: params.llmSettings.api_key,
+    ...(usesSubscription(params.llmSettings.provider) ? {} : { apiKey: params.llmSettings.api_key }),
     maxTokens: params.maxTokens,
     timeoutMs: params.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     signal: params.signal,
@@ -105,9 +108,20 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
   const sendTemperature =
     params.temperature !== undefined && !temperatureRejectedModels.has(modelKey);
 
-  let result: AssistantMessage = await complete(
-    model,
-    context,
+  // The runtime preserves OAuth headers and refreshes credentials before each
+  // request. Passing an access token to the API-key path would lose that context.
+  const subscriptionRuntime = usesSubscription(params.llmSettings.provider)
+    ? await ModelRuntime.create({ modelsPath: null, allowModelNetwork: false, signal: params.signal })
+    : undefined;
+  if (subscriptionRuntime) {
+    await requireSubscriptionLogin(subscriptionRuntime, params.llmSettings.provider, params.signal);
+  }
+  const completeRequest = (options: typeof baseOptions & { temperature?: number }) =>
+    subscriptionRuntime
+      ? subscriptionRuntime.complete(model, context, options)
+      : complete(model, context, options);
+
+  let result: AssistantMessage = await completeRequest(
     sendTemperature ? { ...baseOptions, temperature: params.temperature } : baseOptions,
   );
 
@@ -130,7 +144,7 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
       `oneshot_llm ${params.requestId}: provider rejected temperature (${result.errorMessage}); retrying without it`,
     );
     temperatureRejectedModels.add(modelKey);
-    result = await complete(model, context, baseOptions);
+    result = await completeRequest(baseOptions);
   }
 
   if (result.stopReason === "error") {

@@ -1,3 +1,5 @@
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ---------------------------------------------------------------------------
@@ -54,6 +56,8 @@ function assistantText(text: string) {
 }
 
 beforeEach(() => {
+  vi.restoreAllMocks();
+  vi.mocked(getBuiltinModel).mockReturnValue(undefined as never);
   completeMock.mockReset();
   applyProxyConfigMock.mockReset();
 });
@@ -339,5 +343,39 @@ describe("runOneshotLLM", () => {
       llmSettings: validSettings,
     });
     expect(out).toBe("hello world");
+  });
+});
+
+
+describe("subscription one-shot calls", () => {
+  it("uses runtime OAuth authentication rather than the API-key completion path", async () => {
+    const model = { id: "gpt-5.5", provider: "openai-codex", api: "openai-codex-responses" };
+    vi.mocked(getBuiltinModel).mockReturnValue(model as never);
+    const runtime = {
+      listCredentials: vi.fn().mockResolvedValue([{ providerId: "openai-codex", type: "oauth" }]),
+      getAuth: vi.fn().mockResolvedValue({ auth: { apiKey: "test-token" } }),
+      complete: vi.fn().mockResolvedValue(assistantText("Subscription title")),
+    };
+    vi.spyOn(ModelRuntime, "create").mockResolvedValue(runtime as unknown as ModelRuntime);
+    const result = await runOneshotLLM({
+      requestId: "subscription", user: "Summarize the alert", maxTokens: 50,
+      llmSettings: { ...validSettings, provider: "openai-codex", model: "gpt-5.5", api_key: "" },
+    });
+    expect(result).toBe("Subscription title");
+    expect(completeMock).not.toHaveBeenCalled();
+    expect(runtime.complete.mock.calls[0][2]).not.toHaveProperty("apiKey");
+    expect(runtime.complete.mock.calls[0][2]).toHaveProperty("maxTokens", 50);
+  });
+
+  it("rejects a missing subscription login without falling back to the API", async () => {
+    vi.mocked(getBuiltinModel).mockReturnValue({ id: "gpt-5.5", provider: "openai-codex" } as never);
+    const runtime = { listCredentials: vi.fn().mockResolvedValue([]), getAuth: vi.fn(), complete: vi.fn() };
+    vi.spyOn(ModelRuntime, "create").mockResolvedValue(runtime as unknown as ModelRuntime);
+    await expect(runOneshotLLM({
+      requestId: "subscription", user: "Summarize the alert",
+      llmSettings: { ...validSettings, provider: "openai-codex", model: "gpt-5.5", api_key: "" },
+    })).rejects.toThrow("sign-in required");
+    expect(completeMock).not.toHaveBeenCalled();
+    expect(runtime.complete).not.toHaveBeenCalled();
   });
 });

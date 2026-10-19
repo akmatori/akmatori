@@ -471,11 +471,11 @@ export class Orchestrator {
    */
   private extractLLMSettings(msg: WebSocketMessage): LLMSettings | null {
     const apiKey = msg.api_key;
-    if (!apiKey) return null;
+    if (!apiKey && msg.provider !== "openai-codex") return null;
 
     return {
       provider: (msg.provider as LLMSettings["provider"]) ?? "openai",
-      api_key: apiKey,
+      api_key: apiKey ?? "",
       model: msg.model ?? "gpt-5.5",
       thinking_level: this.mapThinkingLevel(msg.thinking_level),
       base_url: msg.base_url,

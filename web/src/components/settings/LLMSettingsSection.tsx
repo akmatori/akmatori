@@ -32,7 +32,8 @@ const THINKING_LEVELS: { value: ThinkingLevel; label: string }[] = [
 ];
 
 const PROVIDER_OPTIONS: { value: LLMProvider; label: string }[] = [
-  { value: 'openai', label: 'OpenAI' },
+  { value: 'openai', label: 'OpenAI (API key)' },
+  { value: 'openai-codex', label: 'Codex (subscription)' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'google', label: 'Google' },
   { value: 'openrouter', label: 'OpenRouter' },
@@ -171,6 +172,8 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
     setForm(prev => ({
       ...prev,
       provider,
+      apiKey: '',
+      baseUrl: '',
       model: recommended?.value ?? fallback,
     }));
   };
@@ -283,6 +286,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
   const renderForm = () => {
     const isCreate = formMode === 'create';
     const currentProvider = form.provider;
+    const subscription = currentProvider === 'openai-codex';
     const suggestions = MODEL_SUGGESTIONS[currentProvider] || [];
 
     return (
@@ -336,8 +340,15 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
           />
         </div>
 
+        {subscription && (
+          <div className="rounded-lg bg-gray-50 dark:bg-gray-900 p-3 text-sm space-y-2">
+            <p>Uses your eligible ChatGPT subscription for Codex. Subscription limits apply; API credits are separate.</p>
+            <p>Ask your deployment operator to sign in on the agent worker using <code>pi</code> and <code>/login</code>, selecting the Codex provider. Saving this configuration does not verify the worker login.</p>
+            <p>Credentials stay on the worker. If sign-in expires, requests fail until you reconnect; there is no automatic API billing fallback.</p>
+          </div>
+        )}
         {/* API Key */}
-        <div>
+        {!subscription && <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
             API Key {isCreate && <span className="text-red-500">*</span>}
           </label>
@@ -356,7 +367,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
               Leave blank to keep existing key
             </p>
           )}
-        </div>
+        </div>}
 
         {/* Model Selection */}
         <div>
@@ -438,7 +449,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
               </p>
             </div>
 
-            {showBaseUrl && (
+            {showBaseUrl && !subscription && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                   Base URL
@@ -560,7 +571,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
           </button>
           <button
             onClick={handleSave}
-            disabled={saving || !form.name.trim() || (isCreate && !form.apiKey)}
+            disabled={saving || !form.name.trim() || (isCreate && !subscription && !form.apiKey) || (subscription && !form.model.trim())}
             className="btn btn-primary"
           >
             <Save className="w-4 h-4" />
@@ -576,6 +587,9 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
       {error && <ErrorMessage message={error} />}
       {success && <SuccessMessage message={success} />}
 
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        Claude and Google API keys use separate API billing. Claude Code and Gemini Pro subscriptions cannot be entered as API keys.
+      </p>
       {/* Create/Edit Form */}
       {formMode !== 'closed' && renderForm()}
 

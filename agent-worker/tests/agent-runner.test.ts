@@ -73,6 +73,7 @@ let createAgentSessionCalls: any[] = [];
 // before auth can resolve. Confirmed against the live SDK.
 const PI_BUILTIN_PROVIDERS = new Set([
   "openai",
+  "openai-codex",
   "anthropic",
   "google",
   "openrouter",
@@ -97,13 +98,14 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
         // live SDK — every Akmatori provider except "custom" is a pi built-in.
         const registered = new Set<string>();
         return {
+          listCredentials: vi.fn(async () => [{ providerId: "openai-codex", type: "oauth" }]),
           setRuntimeApiKey: vi.fn(async () => {}),
           registerProvider: vi.fn((id: string) => {
             registered.add(id);
             registeredProviders.push(id);
           }),
           getAuth: vi.fn(async (model: any) =>
-            PI_BUILTIN_PROVIDERS.has(model?.provider) || registered.has(model?.provider)
+            PI_BUILTIN_PROVIDERS.has(typeof model === "string" ? model : model?.provider) || registered.has(model?.provider)
               ? { auth: { apiKey: "resolved" } }
               : undefined,
           ),
@@ -165,6 +167,9 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
 vi.mock("@earendil-works/pi-ai/providers/all", () => {
   return {
     getBuiltinModel: vi.fn((provider: string, modelId: string) => {
+      if (provider === "openai-codex" && modelId === "gpt-5.5") {
+        return { id: modelId, name: modelId, provider, api: "openai-codex-responses", baseUrl: "https://chatgpt.com/backend-api", reasoning: true, input: ["text"], cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 16384 };
+      }
       // Return a mock model for known combinations
       if (provider === "anthropic" && modelId === "claude-sonnet-4-5-20250929") {
         return {
@@ -484,6 +489,20 @@ describe("AgentRunner", () => {
   // -----------------------------------------------------------------------
 
   describe("execute", () => {
+    it("runs a subscription session without installing an API key", async () => {
+      const { ModelRuntime } = await import("@earendil-works/pi-coding-agent");
+      const result = await runner.execute(makeExecuteParams({
+        llmSettings: makeLLMSettings({ provider: "openai-codex", model: "gpt-5.5", api_key: "" }),
+      }));
+      const runtime = await vi.mocked(ModelRuntime.create).mock.results.at(-1)!.value;
+      expect(runtime.setRuntimeApiKey).not.toHaveBeenCalled();
+      expect(runtime.registerProvider).not.toHaveBeenCalled();
+      expect(runtime.getAuth).toHaveBeenCalledWith("openai-codex", { signal: undefined });
+      expect(createAgentSessionCalls[0].model.provider).toBe("openai-codex");
+      expect(result.response).toBe("Analysis complete.");
+      expect(result.cost_usd).toBe(0);
+    });
+
     it("should create a session with correct parameters", async () => {
       const params = makeExecuteParams();
       await runner.execute(params);

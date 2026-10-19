@@ -43,6 +43,7 @@ type LLMProvider string
 
 const (
 	LLMProviderOpenAI     LLMProvider = "openai"
+	LLMProviderCodex      LLMProvider = "openai-codex"
 	LLMProviderAnthropic  LLMProvider = "anthropic"
 	LLMProviderGoogle     LLMProvider = "google"
 	LLMProviderOpenRouter LLMProvider = "openrouter"
@@ -56,6 +57,7 @@ const (
 func ValidLLMProviders() []LLMProvider {
 	return []LLMProvider{
 		LLMProviderOpenAI,
+		LLMProviderCodex,
 		LLMProviderAnthropic,
 		LLMProviderGoogle,
 		LLMProviderOpenRouter,
@@ -71,6 +73,8 @@ func ProviderDisplayName(p LLMProvider) string {
 	switch p {
 	case LLMProviderOpenAI:
 		return "OpenAI"
+	case LLMProviderCodex:
+		return "Codex subscription"
 	case LLMProviderAnthropic:
 		return "Anthropic"
 	case LLMProviderGoogle:
@@ -208,8 +212,16 @@ func ValidateSamplingParams(temperature, topP *float64, topK, maxTokens *int) st
 	return ""
 }
 
-// IsConfigured returns true if the LLM provider has an API key set
+// UsesSubscription reports whether credentials are managed by the worker.
+func (p LLMProvider) UsesSubscription() bool {
+	return p == LLMProviderCodex
+}
+
+// IsConfigured validates configuration, not the worker's live login status.
 func (l *LLMSettings) IsConfigured() bool {
+	if l.Provider.UsesSubscription() {
+		return strings.TrimSpace(l.Model) != "" && l.APIKey == "" && l.BaseURL == ""
+	}
 	return l.APIKey != ""
 }
 

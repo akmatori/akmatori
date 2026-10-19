@@ -90,7 +90,7 @@ type LLMSettingsForWorker struct {
 }
 
 // BuildLLMSettingsForWorker creates LLMSettingsForWorker from database LLMSettings.
-// Returns nil if settings are nil, disabled, or missing an API key.
+// Returns nil if settings are nil, disabled, or not configured.
 func BuildLLMSettingsForWorker(dbSettings *database.LLMSettings) *LLMSettingsForWorker {
 	if dbSettings == nil || !dbSettings.IsActive() {
 		return nil

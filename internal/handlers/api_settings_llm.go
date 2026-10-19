@@ -131,7 +131,7 @@ func (h *APIHandler) createLLMConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !database.IsValidLLMProvider(req.Provider) {
-		api.RespondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid provider: %s. Valid options: openai, anthropic, google, openrouter, nvidia, minimax, ant-ling, custom", req.Provider))
+		api.RespondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid provider: %s. Valid options: openai, openai-codex, anthropic, google, openrouter, nvidia, minimax, ant-ling, custom", req.Provider))
 		return
 	}
 	if req.BaseURL != "" && !isValidURL(req.BaseURL) {
@@ -152,6 +152,13 @@ func (h *APIHandler) createLLMConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if database.LLMProvider(req.Provider).UsesSubscription() {
+		if req.APIKey != "" || req.BaseURL != "" || strings.TrimSpace(req.Model) == "" {
+			api.RespondError(w, http.StatusBadRequest, "Subscription configurations require a model and do not accept API keys or custom endpoints")
+			return
+		}
+	}
+
 	thinkingLevel := database.ThinkingLevelMedium
 	if req.ThinkingLevel != "" {
 		thinkingLevel = database.ThinkingLevel(req.ThinkingLevel)
@@ -164,7 +171,7 @@ func (h *APIHandler) createLLMConfig(w http.ResponseWriter, r *http.Request) {
 		Model:         req.Model,
 		ThinkingLevel: thinkingLevel,
 		BaseURL:       req.BaseURL,
-		Enabled:       req.APIKey != "",
+		Enabled:       req.APIKey != "" || database.LLMProvider(req.Provider).UsesSubscription(),
 		Temperature:   req.Temperature,
 		TopP:          req.TopP,
 		TopK:          req.TopK,
@@ -199,7 +206,8 @@ func (h *APIHandler) getLLMConfig(w http.ResponseWriter, _ *http.Request, id uin
 // updateLLMConfig updates an existing LLM configuration by ID.
 func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id uint) {
 	// Quick existence check (non-authoritative, just for early 404)
-	if _, err := database.GetLLMSettingsByID(id); err != nil {
+	existing, err := database.GetLLMSettingsByID(id)
+	if err != nil {
 		api.RespondError(w, http.StatusNotFound, "LLM configuration not found")
 		return
 	}
@@ -238,13 +246,20 @@ func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 
+	if existing.Provider.UsesSubscription() {
+		if (req.APIKey != nil && *req.APIKey != "") || (req.BaseURL != nil && *req.BaseURL != "") || (req.Model != nil && strings.TrimSpace(*req.Model) == "") {
+			api.RespondError(w, http.StatusBadRequest, "Subscription configurations require a model and do not accept API keys or custom endpoints")
+			return
+		}
+	}
+
 	updates := make(map[string]interface{})
 	if req.Name != nil {
 		updates["name"] = *req.Name
 	}
 	if req.APIKey != nil {
 		updates["api_key"] = *req.APIKey
-		updates["enabled"] = *req.APIKey != ""
+		updates["enabled"] = *req.APIKey != "" || existing.Provider.UsesSubscription()
 	}
 	if req.Model != nil {
 		updates["model"] = *req.Model
@@ -352,16 +367,17 @@ func (h *APIHandler) activateLLMConfig(w http.ResponseWriter, _ *http.Request, i
 // llmConfigResponse builds a standard response map for an LLM config, masking the API key.
 func llmConfigResponse(s *database.LLMSettings) map[string]interface{} {
 	return map[string]interface{}{
-		"id":             s.ID,
-		"name":           s.Name,
-		"provider":       s.Provider,
-		"model":          s.Model,
-		"thinking_level": s.ThinkingLevel,
-		"base_url":       s.BaseURL,
-		"api_key":        maskToken(s.APIKey),
-		"is_configured":  s.APIKey != "",
-		"enabled":        s.Enabled,
-		"active":         s.Active,
+		"id":                s.ID,
+		"name":              s.Name,
+		"provider":          s.Provider,
+		"model":             s.Model,
+		"thinking_level":    s.ThinkingLevel,
+		"base_url":          s.BaseURL,
+		"api_key":           maskToken(s.APIKey),
+		"is_configured":     s.IsConfigured(),
+		"uses_subscription": s.Provider.UsesSubscription(),
+		"enabled":           s.Enabled,
+		"active":            s.Active,
 		// null = unset = provider default; the UI renders these as blank fields.
 		"temperature": s.Temperature,
 		"top_p":       s.TopP,
