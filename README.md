@@ -11,8 +11,9 @@ infrastructure through real tools, and executes remediation behind approval gate
 [![License](https://img.shields.io/github/license/akmatori/akmatori)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](go.mod)
 [![Docker](https://img.shields.io/badge/images-GHCR-2496ED?logo=docker&logoColor=white)](https://github.com/orgs/akmatori/packages)
+[![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/fMbAqqp7nY)
 
-[Website](https://akmatori.com) · [Documentation](https://akmatori.com/docs) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Issues](https://github.com/akmatori/akmatori/issues)
+[Website](https://akmatori.com) · [Documentation](https://akmatori.com/docs) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Issues](https://github.com/akmatori/akmatori/issues) · [Discord](https://discord.gg/fMbAqqp7nY)
 
 <img width="1436" height="659" alt="Akmatori incident dashboard" src="https://github.com/user-attachments/assets/b2c78bf5-9e20-47da-8ec6-b841c6a0a3de" />
 
@@ -215,9 +216,15 @@ make dev               # docker compose -f docker-compose.yml -f docker-compose.
 
 **Self-hosted API docs:** every install serves interactive documentation — Swagger UI at `http://localhost:8080/api/docs` and the raw OpenAPI 3.1 spec at `http://localhost:8080/api/openapi.yaml` (no authentication required).
 
+## Community
+
+Questions, setup help, and feature ideas: join the [Akmatori Discord](https://discord.gg/fMbAqqp7nY).
+Ask in `#help`, share your skills in `#skills-and-runbooks`, and talk about the code in `#dev`.
+
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Start with [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) and the
+[`good first issue`](https://github.com/akmatori/akmatori/labels/good%20first%20issue) label.
 
 ## License
 
