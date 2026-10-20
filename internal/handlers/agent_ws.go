@@ -188,6 +188,8 @@ type AgentWSHandler struct {
 	mu               sync.RWMutex
 	workerConn       *websocket.Conn
 	workerReady      bool
+	connectedAt      time.Time                        // when workerConn connected; zero when none
+	lastMessageAt    time.Time                        // last frame from workerConn, heartbeats included
 	callbacks        map[string]incidentCallbackEntry // incident_id -> callback + owning conn
 	callbackMu       sync.RWMutex
 	pendingOneshot   map[string]pendingOneshotEntry // request_id -> response channel + owning conn
@@ -249,6 +251,8 @@ func (h *AgentWSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 	}
 	h.workerConn = conn
 	h.workerReady = true
+	h.connectedAt = time.Now()
+	h.lastMessageAt = h.connectedAt
 	h.mu.Unlock()
 
 	defer h.cleanupWorkerConn(conn)
@@ -262,6 +266,7 @@ func (h *AgentWSHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 			}
 			return
 		}
+		h.markWorkerSeen(conn)
 
 		var msg AgentMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
@@ -322,6 +327,8 @@ func (h *AgentWSHandler) cleanupWorkerConn(conn *websocket.Conn) {
 	if h.workerConn == conn {
 		h.workerConn = nil
 		h.workerReady = false
+		h.connectedAt = time.Time{}
+		h.lastMessageAt = time.Time{}
 	}
 	h.mu.Unlock()
 	if err := conn.Close(); err != nil {
@@ -786,6 +793,34 @@ func (h *AgentWSHandler) IsWorkerConnected() bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.workerReady && h.workerConn != nil
+}
+
+// WorkerStatus is a snapshot of the worker connection for the UI status bar.
+// The worker sends a heartbeat every 30s, so a LastMessageAt much older than
+// that means the connection is up but the worker no longer responds.
+type WorkerStatus struct {
+	Connected     bool
+	ConnectedAt   time.Time
+	LastMessageAt time.Time
+}
+
+// WorkerStatus returns the current worker connection state.
+func (h *AgentWSHandler) WorkerStatus() WorkerStatus {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if !h.workerReady || h.workerConn == nil {
+		return WorkerStatus{}
+	}
+	return WorkerStatus{Connected: true, ConnectedAt: h.connectedAt, LastMessageAt: h.lastMessageAt}
+}
+
+// markWorkerSeen records a frame from conn, if conn still owns the slot.
+func (h *AgentWSHandler) markWorkerSeen(conn *websocket.Conn) {
+	h.mu.Lock()
+	if h.workerConn == conn {
+		h.lastMessageAt = time.Now()
+	}
+	h.mu.Unlock()
 }
 
 // SendToWorker sends a message to the agent worker

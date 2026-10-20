@@ -645,6 +645,16 @@ export interface PaginationMeta {
   total_pages: number;
 }
 
+// GET /api/system/status. Times are absent while no worker is connected.
+export interface SystemStatusResponse {
+  worker: {
+    connected: boolean;
+    connected_at?: string;
+    last_message_at?: string;
+    last_message_age_seconds?: number;
+  };
+}
+
 export interface PaginatedResponse<T> {
   data: T[];
   pagination: PaginationMeta;

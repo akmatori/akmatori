@@ -32,6 +32,7 @@ vi.mock('./OnboardingWizard', () => ({ default: () => null }));
 vi.mock('../api/client', () => ({
   proposalsApi: { pendingCount: () => Promise.resolve({ pending: 0 }) },
   llmSettingsApi: { list: () => Promise.resolve({ configs: [], active_id: 0 }) },
+  systemApi: { status: () => Promise.resolve({ worker: { connected: true, last_message_age_seconds: 5 } }) },
   subscribeApiAvailability: (listener: (available: boolean) => void) => {
     listener(true);
     return () => {};
@@ -124,6 +125,11 @@ describe('Layout mobile sidebar', () => {
     const nav = document.querySelector('nav');
     expect(nav?.textContent).toContain('Overview');
     expect(nav?.textContent).toContain('Incidents');
+  });
+
+  it('top bar shows the agent worker state from /api/system/status', async () => {
+    renderLayout();
+    expect(await screen.findByText('Worker connected')).toBeTruthy();
   });
 
   it('theme toggle is present in the sidebar (accessible on mobile)', () => {
