@@ -3,7 +3,7 @@
 //
 // The Provider interface is intentionally narrow: it is the surface area that
 // callers need to address a Channel without knowing which underlying SaaS
-// (Slack, Telegram, ...) backs it. Provider implementations live in this
+// (Slack, Zulip, Telegram, ...) backs it. Provider implementations live in this
 // package; consumers (handlers, services) depend on the interface via the
 // ProviderRegistry that internal/services/interfaces.go exposes.
 package messaging
@@ -28,7 +28,7 @@ var ErrProviderNotRegistered = errors.New("messaging provider not registered")
 
 // PostedMessage is the response shape returned by all Provider write methods.
 // MessageID is provider-defined: Slack uses the message timestamp (ts), other
-// providers use their own message identifier (e.g. Telegram message_id).
+// providers use their own message identifier (e.g. Zulip message ID).
 // Callers should treat it as an opaque string when threading replies or
 // updating the message.
 type PostedMessage struct {
@@ -37,7 +37,7 @@ type PostedMessage struct {
 
 // Provider is the cross-SaaS abstraction every messaging integration must
 // implement. The interface is deliberately limited to the methods that
-// outbound alert posting, cron-job posting, and Slack-thread replies need;
+// outbound alert posting, cron-job posting, and provider-thread replies need;
 // listener / read-side concerns remain provider-specific.
 type Provider interface {
 	// Name returns the canonical provider identifier (e.g. "slack",

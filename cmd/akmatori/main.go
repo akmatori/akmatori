@@ -237,6 +237,7 @@ func main() {
 	// "unknown provider" (ErrProviderNotRegistered). Without this, a
 	// Telegram-configured Channel would silently no-op at post time.
 	providerRegistry.Register(messaging.NewTelegramProvider())
+	providerRegistry.Register(messaging.NewZulipProvider())
 	alertHandler.SetChannelService(channelService)
 	alertHandler.SetProviderRegistry(providerRegistry)
 
