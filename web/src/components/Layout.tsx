@@ -5,6 +5,7 @@ import { useAuth } from '../context/useAuth';
 import { useTheme } from '../context/useTheme';
 import { useSetupStatus } from '../hooks/useSetupStatus';
 import { useSystemStatus } from '../hooks/useSystemStatus';
+import { WORKER_LABEL } from './layout/workerStatus';
 import { useInterval } from '../hooks/useInterval';
 import { useLatestRef } from '../hooks/useLatestRef';
 import OnboardingWizard from './OnboardingWizard';
@@ -42,13 +43,22 @@ function StatusDot({ tone }: { tone: 'ok' | 'need' | 'fail' }) {
 }
 
 function SystemStatusIndicator() {
-  const { apiAvailable, llm } = useSystemStatus();
+  const { apiAvailable, llm, worker } = useSystemStatus();
   return (
     <div className="hidden sm:flex items-center gap-4 text-[13px] text-fg-muted">
       <span className="inline-flex items-center gap-1.5">
         <StatusDot tone={apiAvailable ? 'ok' : 'fail'} />
         {apiAvailable ? 'API connected' : 'API unreachable'}
       </span>
+      {apiAvailable && worker && (
+        <span
+          className={`inline-flex items-center gap-1.5 ${worker === 'connected' ? '' : 'text-state-fail'}`}
+          title="The agent worker runs investigations"
+        >
+          <StatusDot tone={worker === 'connected' ? 'ok' : 'fail'} />
+          {WORKER_LABEL[worker]}
+        </span>
+      )}
       {llm && (llm.configured ? (
         <span className="inline-flex items-center gap-1.5" title="Active LLM model">
           <StatusDot tone="ok" />
