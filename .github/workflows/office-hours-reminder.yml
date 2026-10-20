@@ -1,0 +1,44 @@
+name: Office hours reminder
+
+# Office hours run every other Thursday at 18:00 UTC, starting 2026-10-29.
+# This posts a reminder to Discord #announcements the day before, at the
+# same time. GitHub cron has no "every two weeks", so the job runs every
+# Wednesday and skips the off weeks.
+on:
+  schedule:
+    - cron: '0 18 * * 3'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Post even in an off week'
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post reminder
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          FORCE: ${{ inputs.force || 'false' }}
+          FIRST_SESSION: '2026-10-29T18:00:00Z'
+          EVENT_URL: https://discord.com/events/1075821683878936637/1562198796648321109
+        run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "DISCORD_RELEASE_WEBHOOK not set, skipping"
+            exit 0
+          fi
+          first=$(date -u -d "$FIRST_SESSION" +%s)
+          # Next Thursday 18:00 UTC after now (the run is on Wednesday).
+          next=$(date -u -d "tomorrow 18:00" +%s)
+          weeks=$(( (next - first) / 604800 ))
+          if [ "$FORCE" != "true" ] && { [ "$next" -lt "$first" ] || [ $(( weeks % 2 )) -ne 0 ]; }; then
+            echo "No session on $(date -u -d @"$next" +%F), skipping"
+            exit 0
+          fi
+          msg="⏰ **Akmatori Office Hours tomorrow**, <t:${next}:F> (<t:${next}:R>)"$'\n'"30 minutes: what's new, then open Q&A. Bring your questions."$'\n'"${EVENT_URL}"
+          jq -n --arg content "$msg" '{content: $content, allowed_mentions: {parse: []}}' \
+            | curl -fsS -H 'Content-Type: application/json' -d @- "$DISCORD_WEBHOOK"
