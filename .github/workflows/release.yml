@@ -197,3 +197,19 @@ jobs:
           files: |
             docker-compose.yml
             proxy/nginx.conf
+
+      - name: Announce on Discord
+        # Stable releases only; skipped when the webhook secret is not set.
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          TAG: ${{ github.ref_name }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "DISCORD_RELEASE_WEBHOOK not set, skipping"
+            exit 0
+          fi
+          jq -n --arg content "**Akmatori ${TAG} is out** 🚀"$'\n'"${URL}" \
+            '{content: $content, allowed_mentions: {parse: []}}' \
+            | curl -fsS -H 'Content-Type: application/json' -d @- "$DISCORD_WEBHOOK"
