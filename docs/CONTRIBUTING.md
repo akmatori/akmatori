@@ -91,7 +91,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d <svc>
 
 Running `make dev` again rebuilds everything and restarts `akmatori-proxy` so nginx picks up new container IPs. Use `make docker-logs` to follow logs.
 
-**Frontend hot reload.** In `web/`, run `npm install`, then `AKMATORI_API_URL=http://localhost:8080 npm run dev` (Vite on `:5173`). Set `AKMATORI_API_URL`; the default target in `vite.config.ts` is not your local stack.
+**Frontend hot reload.** In `web/`, run `npm install`, then `npm run dev` (Vite on `:5173`). It proxies API calls to the `make dev` stack on `http://localhost:8080`. To use another install, set `AKMATORI_API_URL=http://host:8080`.
 
 ## Running tests
 
@@ -108,7 +108,7 @@ Run the smallest target for your change first, then `make verify` before you pus
 
 `make test-coverage` writes `coverage.html`. `make help` lists every target.
 
-There is no CI test run on pull requests at the moment, so run `make verify` locally and say so in the PR.
+CI (`.github/workflows/ci.yml`) runs the same checks on every pull request: Go vet and tests for the API and MCP Gateway, agent-worker build and tests, and web typecheck, lint, and tests. Run `make verify` locally first so CI stays green.
 
 ## Lint and format
 
