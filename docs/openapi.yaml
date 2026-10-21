@@ -323,6 +323,10 @@ components:
           description: Human-readable logical name for tool routing (auto-derived from name if empty)
         settings:
           type: object
+          description: >-
+            Tool-specific settings. Secret values (tokens, passwords) are
+            returned as "********" and SSH private keys are omitted from
+            ssh_keys entries.
         enabled:
           type: boolean
         tool_type:
@@ -986,6 +990,7 @@ paths:
           $ref: '#/components/responses/NotFound'
     put:
       summary: Update tool instance
+      description: Partial update. Omitted or null fields keep their stored value.
       operationId: updateTool
       tags: [Tools]
       requestBody:
@@ -998,9 +1003,13 @@ paths:
                   type: string
                 logical_name:
                   type: string
-                  description: Optional logical name; re-derived from name if empty
+                  description: Omitted keeps the stored slug; empty string re-derives it from name
                 settings:
                   type: object
+                  description: >-
+                    Replaces the stored settings. ssh_keys are always kept (use the
+                    ssh-keys endpoints). A secret key that is omitted or sent as
+                    "********" keeps its stored value; an empty string clears it.
                 enabled:
                   type: boolean
       responses:

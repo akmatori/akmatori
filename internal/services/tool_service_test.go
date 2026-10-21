@@ -115,7 +115,7 @@ func TestUpdateToolInstance_UpdatesLogicalName(t *testing.T) {
 		t.Fatalf("expected logical_name 'old-name', got %q", instance.LogicalName)
 	}
 
-	err = svc.UpdateToolInstance(instance.ID, "New Name", "", nil, true)
+	err = svc.UpdateToolInstance(instance.ID, ToolInstanceUpdate{Name: ptr("New Name"), LogicalName: ptr("")})
 	if err != nil {
 		t.Fatalf("UpdateToolInstance failed: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestUpdateToolInstance_HonorsProvidedLogicalName(t *testing.T) {
 		t.Fatalf("CreateToolInstance failed: %v", err)
 	}
 
-	err = svc.UpdateToolInstance(instance.ID, "New Name", "custom-logical", nil, true)
+	err = svc.UpdateToolInstance(instance.ID, ToolInstanceUpdate{Name: ptr("New Name"), LogicalName: ptr("custom-logical")})
 	if err != nil {
 		t.Fatalf("UpdateToolInstance failed: %v", err)
 	}
@@ -301,5 +301,163 @@ func TestEnsureToolTypes_SeedsEventsInstance(t *testing.T) {
 	db.Preload("ToolType").Where("logical_name = ?", "events").Find(&instances)
 	if len(instances) != 1 || instances[0].ToolType.Name != EventsToolType || !instances[0].Enabled {
 		t.Fatalf("events instances = %+v, want one enabled instance of the events type", instances)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+// seedZabbixInstance creates a zabbix tool instance with a secret, a plain
+// setting and an ssh_keys blob so partial-update tests can check each one.
+func seedZabbixInstance(t *testing.T, db *gorm.DB) (*ToolService, *database.ToolInstance) {
+	t.Helper()
+	toolType := database.ToolType{Name: "zabbix", Description: "Zabbix"}
+	if err := db.Create(&toolType).Error; err != nil {
+		t.Fatalf("failed to create tool type: %v", err)
+	}
+	svc := &ToolService{db: db}
+	instance, err := svc.CreateToolInstance(toolType.ID, "Prod Zabbix", "custom-zbx", database.JSONB{
+		"zabbix_url":   "https://zbx.example.com",
+		"zabbix_token": "real-token",
+		"ssh_keys":     []interface{}{map[string]interface{}{"id": "k1", "private_key": "PEM"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateToolInstance failed: %v", err)
+	}
+	return svc, instance
+}
+
+func TestUpdateToolInstance_EmptyUpdateChangesNothing(t *testing.T) {
+	db := setupToolTestDB(t)
+	svc, instance := seedZabbixInstance(t, db)
+	if err := db.Model(instance).Update("enabled", false).Error; err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+
+	if err := svc.UpdateToolInstance(instance.ID, ToolInstanceUpdate{}); err != nil {
+		t.Fatalf("UpdateToolInstance failed: %v", err)
+	}
+
+	got, err := svc.GetToolInstance(instance.ID)
+	if err != nil {
+		t.Fatalf("GetToolInstance failed: %v", err)
+	}
+	if got.Name != "Prod Zabbix" || got.LogicalName != "custom-zbx" || got.Enabled {
+		t.Errorf("unexpected row after empty update: name=%q logical=%q enabled=%v", got.Name, got.LogicalName, got.Enabled)
+	}
+	if got.Settings["zabbix_token"] != "real-token" || got.Settings["zabbix_url"] != "https://zbx.example.com" {
+		t.Errorf("settings changed by empty update: %v", got.Settings)
+	}
+}
+
+func TestUpdateToolInstance_OnlyEnabled(t *testing.T) {
+	db := setupToolTestDB(t)
+	svc, instance := seedZabbixInstance(t, db)
+
+	if err := svc.UpdateToolInstance(instance.ID, ToolInstanceUpdate{Enabled: ptr(false)}); err != nil {
+		t.Fatalf("UpdateToolInstance failed: %v", err)
+	}
+
+	got, _ := svc.GetToolInstance(instance.ID)
+	if got.Enabled {
+		t.Error("expected tool to be disabled")
+	}
+	if got.LogicalName != "custom-zbx" {
+		t.Errorf("logical_name changed: %q", got.LogicalName)
+	}
+	if got.Settings["zabbix_token"] != "real-token" {
+		t.Errorf("settings changed: %v", got.Settings)
+	}
+}
+
+func TestUpdateToolInstance_NameWithoutLogicalNameKeepsSlug(t *testing.T) {
+	db := setupToolTestDB(t)
+	svc, instance := seedZabbixInstance(t, db)
+
+	if err := svc.UpdateToolInstance(instance.ID, ToolInstanceUpdate{Name: ptr("Renamed")}); err != nil {
+		t.Fatalf("UpdateToolInstance failed: %v", err)
+	}
+
+	got, _ := svc.GetToolInstance(instance.ID)
+	if got.Name != "Renamed" || got.LogicalName != "custom-zbx" {
+		t.Errorf("name=%q logical=%q, want Renamed/custom-zbx", got.Name, got.LogicalName)
+	}
+	if !got.Enabled {
+		t.Error("omitted enabled must not disable the tool")
+	}
+}
+
+func TestUpdateToolInstance_RejectsEmptyName(t *testing.T) {
+	db := setupToolTestDB(t)
+	svc, instance := seedZabbixInstance(t, db)
+
+	err := svc.UpdateToolInstance(instance.ID, ToolInstanceUpdate{Name: ptr("  ")})
+	if err == nil || !strings.Contains(err.Error(), "validation failed") {
+		t.Fatalf("expected validation error, got %v", err)
+	}
+}
+
+func TestUpdateToolInstance_SettingsSecretsAndSSHKeys(t *testing.T) {
+	tests := []struct {
+		name      string
+		settings  database.JSONB
+		wantToken interface{}
+		wantURL   interface{}
+	}{
+		{
+			name:      "masked secret keeps stored value",
+			settings:  database.JSONB{"zabbix_url": "https://new.example.com", "zabbix_token": database.ToolSecretMask},
+			wantToken: "real-token",
+			wantURL:   "https://new.example.com",
+		},
+		{
+			name:      "omitted secret keeps stored value",
+			settings:  database.JSONB{"zabbix_url": "https://new.example.com"},
+			wantToken: "real-token",
+			wantURL:   "https://new.example.com",
+		},
+		{
+			name:      "new secret replaces stored value",
+			settings:  database.JSONB{"zabbix_url": "https://zbx.example.com", "zabbix_token": "rotated"},
+			wantToken: "rotated",
+			wantURL:   "https://zbx.example.com",
+		},
+		{
+			name:      "empty string clears secret",
+			settings:  database.JSONB{"zabbix_url": "https://zbx.example.com", "zabbix_token": ""},
+			wantToken: "",
+			wantURL:   "https://zbx.example.com",
+		},
+		{
+			name: "client ssh_keys are ignored",
+			settings: database.JSONB{
+				"zabbix_url": "https://zbx.example.com",
+				"ssh_keys":   []interface{}{map[string]interface{}{"id": "evil"}},
+			},
+			wantToken: "real-token",
+			wantURL:   "https://zbx.example.com",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupToolTestDB(t)
+			svc, instance := seedZabbixInstance(t, db)
+
+			if err := svc.UpdateToolInstance(instance.ID, ToolInstanceUpdate{Settings: &tt.settings}); err != nil {
+				t.Fatalf("UpdateToolInstance failed: %v", err)
+			}
+
+			got, _ := svc.GetToolInstance(instance.ID)
+			if got.Settings["zabbix_token"] != tt.wantToken {
+				t.Errorf("zabbix_token = %v, want %v", got.Settings["zabbix_token"], tt.wantToken)
+			}
+			if got.Settings["zabbix_url"] != tt.wantURL {
+				t.Errorf("zabbix_url = %v, want %v", got.Settings["zabbix_url"], tt.wantURL)
+			}
+			keys, _ := got.Settings["ssh_keys"].([]interface{})
+			if len(keys) != 1 || keys[0].(map[string]interface{})["private_key"] != "PEM" {
+				t.Errorf("ssh_keys not preserved: %v", got.Settings["ssh_keys"])
+			}
+		})
 	}
 }

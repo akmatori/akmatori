@@ -45,11 +45,15 @@ type CreateToolInstanceRequest struct {
 }
 
 // UpdateToolInstanceRequest is the request body for PUT /api/tools/:id.
+// It is a partial update: an omitted (or null) field leaves the stored value
+// unchanged. logical_name "" re-derives the slug from the name. settings, when
+// present, replaces the stored object, except that ssh_keys are always kept and
+// secret keys sent as the mask placeholder (or omitted) keep their stored value.
 type UpdateToolInstanceRequest struct {
-	Name        string         `json:"name"`
-	LogicalName string         `json:"logical_name"` // Optional; re-derived from Name if empty
-	Settings    database.JSONB `json:"settings"`
-	Enabled     bool           `json:"enabled"`
+	Name        *string         `json:"name"`
+	LogicalName *string         `json:"logical_name"`
+	Settings    *database.JSONB `json:"settings"`
+	Enabled     *bool           `json:"enabled"`
 }
 
 // CreateSSHKeyRequest is the request body for POST /api/tools/:id/ssh-keys.
