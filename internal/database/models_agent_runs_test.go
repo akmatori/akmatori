@@ -172,3 +172,44 @@ func TestAgentRunHelpers_NilDB(t *testing.T) {
 		t.Fatal("SupersedeAgentRun with nil DB: want error")
 	}
 }
+
+func TestFailInterruptedAgentRuns(t *testing.T) {
+	setupAgentRunsDB(t)
+
+	running, completed, superseded := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	for _, id := range []string{running, completed, superseded} {
+		if err := CreateAgentRun(id, uuid.NewString(), "anthropic", "claude-sonnet-5", ""); err != nil {
+			t.Fatalf("CreateAgentRun: %v", err)
+		}
+	}
+	if err := CompleteAgentRun(completed, AgentRunMetrics{TokensUsed: 10}, AgentRunOutcomeResolved); err != nil {
+		t.Fatalf("CompleteAgentRun: %v", err)
+	}
+	if err := SupersedeAgentRun(superseded); err != nil {
+		t.Fatalf("SupersedeAgentRun: %v", err)
+	}
+
+	n, err := FailInterruptedAgentRuns("interrupted")
+	if err != nil {
+		t.Fatalf("FailInterruptedAgentRuns: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("rows changed = %d, want 1", n)
+	}
+
+	run := mustGetRun(t, running)
+	if run.Status != AgentRunStatusFailed || run.ErrorMessage != "interrupted" || run.CompletedAt == nil {
+		t.Errorf("running run = {status %s, error %q, completed_at %v}, want failed/interrupted/set", run.Status, run.ErrorMessage, run.CompletedAt)
+	}
+	if got := mustGetRun(t, completed).Status; got != AgentRunStatusCompleted {
+		t.Errorf("completed run status = %s, want unchanged", got)
+	}
+	if got := mustGetRun(t, superseded).Status; got != AgentRunStatusSuperseded {
+		t.Errorf("superseded run status = %s, want unchanged", got)
+	}
+
+	// A second sweep finds nothing.
+	if n, _ := FailInterruptedAgentRuns("interrupted"); n != 0 {
+		t.Errorf("second sweep changed %d rows, want 0", n)
+	}
+}
