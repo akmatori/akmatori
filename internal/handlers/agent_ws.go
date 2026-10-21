@@ -358,20 +358,27 @@ func (h *AgentWSHandler) cleanupWorkerConn(conn *websocket.Conn) {
 // future callback bodies into a locked critical section.
 func (h *AgentWSHandler) failCallbacksForConn(conn *websocket.Conn, errMsg string) {
 	h.callbackMu.Lock()
-	var failed []IncidentCallback
+	var failed []incidentCallbackEntry
 	for incidentID, entry := range h.callbacks {
 		if entry.conn != conn || entry.finalized {
 			continue
 		}
-		failed = append(failed, entry.callback)
+		failed = append(failed, entry)
 		entry.finalized = true
 		h.callbacks[incidentID] = entry
 	}
 	h.callbackMu.Unlock()
 
-	for _, cb := range failed {
-		if cb.OnError != nil {
-			cb.OnError(errMsg)
+	for _, entry := range failed {
+		// No agent_error frame will arrive for these runs, so finalize the
+		// telemetry row here; otherwise it stays "running" forever.
+		if entry.runID != "" {
+			if err := database.FailAgentRun(entry.runID, errMsg); err != nil {
+				slog.Warn("failed to finalize agent run record", "run_id", entry.runID, "err", err)
+			}
+		}
+		if entry.callback.OnError != nil {
+			entry.callback.OnError(errMsg)
 		}
 	}
 }

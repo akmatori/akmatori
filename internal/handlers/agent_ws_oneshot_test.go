@@ -557,6 +557,43 @@ func TestStartIncident_WorkerDisconnectFiresOnError(t *testing.T) {
 	}
 }
 
+// TestStartIncident_WorkerDisconnectFailsRunRecord verifies that a worker
+// drop finalizes the agent_runs row. No agent_error frame arrives for an
+// interrupted run, so without this the row stays "running" forever.
+func TestStartIncident_WorkerDisconnectFailsRunRecord(t *testing.T) {
+	handler, conn, cleanup := setupOneshotTest(t)
+	defer cleanup()
+	if err := database.DB.AutoMigrate(&database.Incident{}, &database.AgentRun{}); err != nil {
+		t.Fatalf("migrate agent_runs: %v", err)
+	}
+
+	done := make(chan struct{})
+	cb := IncidentCallback{OnError: func(string) { close(done) }}
+	runID, err := handler.StartIncident("incident-disconnect-run", "task", nil, nil, nil, cb)
+	if err != nil {
+		t.Fatalf("StartIncident: %v", err)
+	}
+	_ = readNewIncidentRequest(t, conn)
+	_ = conn.Close()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnError was not invoked after worker disconnect")
+	}
+
+	var run database.AgentRun
+	if err := database.DB.Where("run_id = ?", runID).First(&run).Error; err != nil {
+		t.Fatalf("fetch run: %v", err)
+	}
+	if run.Status != database.AgentRunStatusFailed {
+		t.Errorf("status = %s, want failed", run.Status)
+	}
+	if run.ErrorMessage != ErrWorkerNotConnected.Error() {
+		t.Errorf("error_message = %q, want %q", run.ErrorMessage, ErrWorkerNotConnected.Error())
+	}
+}
+
 // TestStartIncident_NoWorkerReturnsError pins down the pre-condition that
 // makes the per-conn ownership story sound: registration + send happen
 // atomically under h.mu, so a not-yet-connected handler refuses the request

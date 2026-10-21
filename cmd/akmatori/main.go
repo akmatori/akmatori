@@ -65,6 +65,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Runs still marked running were in flight when the previous process
+	// stopped. Their callbacks died with it, so nothing else can finalize them.
+	if n, err := database.FailInterruptedAgentRuns("interrupted: the API restarted before the run finished"); err != nil {
+		slog.Warn("failed to finalize interrupted agent runs", "err", err)
+	} else if n > 0 {
+		slog.Info("finalized interrupted agent runs", "count", n)
+	}
+
 	// Step 4: Resolve secrets from env > DB > auto-generate
 	jwtSecret := setup.ResolveJWTSecret(cfg.JWTSecret)
 	passwordHash, setupRequired, err := setup.ResolveAdminPassword(cfg.AdminPassword)
