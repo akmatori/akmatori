@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and setup help
+    url: https://discord.gg/fMbAqqp7nY
+    about: Ask in the #help forum on the Akmatori Discord.
+  - name: Security vulnerability
+    url: https://akmatori.com/contact
+    about: Report vulnerabilities privately, not in a public issue.

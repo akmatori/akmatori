@@ -39,7 +39,7 @@ interface HealthIssue {
 export default function Dashboard() {
   const navigate = useNavigate();
   const { data, error } = useOverviewData();
-  const { apiAvailable, llm } = useSystemStatus();
+  const { apiAvailable, llm, worker } = useSystemStatus();
   const [startError, setStartError] = useState('');
 
   if (!data && !error) return <LoadingSpinner />;
@@ -47,6 +47,11 @@ export default function Dashboard() {
   // The health strip shows only when something is degraded.
   const issues: HealthIssue[] = [];
   if (!apiAvailable) issues.push({ message: 'The API does not respond. Data on this page can be out of date.' });
+  if (apiAvailable && worker === 'offline') {
+    issues.push({ message: 'The agent worker is not connected. New incidents wait until it reconnects.' });
+  } else if (apiAvailable && worker === 'unresponsive') {
+    issues.push({ message: 'The agent worker is connected but has not answered for over 90 seconds. Investigations can stall.' });
+  }
   if (llm && !llm.configured) {
     issues.push({ message: 'No LLM is configured, so the agent cannot investigate.', to: '/settings/ai', action: 'Configure an LLM' });
   }

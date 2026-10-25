@@ -1,5 +1,6 @@
 import type {
   Skill,
+  SystemStatusResponse,
   ToolType,
   ToolInstance,
   Incident,
@@ -332,6 +333,11 @@ export const proposalsApi = {
       method: 'POST',
       body: JSON.stringify({ message }),
     }),
+};
+
+// Runtime status for the top bar (worker connection)
+export const systemApi = {
+  status: () => fetchApi<SystemStatusResponse>('/api/system/status'),
 };
 
 // LLM Settings API

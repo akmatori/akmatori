@@ -149,6 +149,24 @@ func SupersedeAgentRun(runID string) error {
 		Update("status", AgentRunStatusSuperseded).Error
 }
 
+// FailInterruptedAgentRuns marks every run still in the running state as
+// failed. Call it once at startup, before the agent worker can connect: the
+// callbacks of runs that were in flight lived in the previous process, so no
+// frame can finalize those rows any more. Returns the number of rows changed.
+func FailInterruptedAgentRuns(reason string) (int64, error) {
+	if DB == nil {
+		return 0, gorm.ErrInvalidDB
+	}
+	res := DB.Model(&AgentRun{}).
+		Where("status = ?", AgentRunStatusRunning).
+		Updates(map[string]any{
+			"status":        AgentRunStatusFailed,
+			"error_message": reason,
+			"completed_at":  time.Now(),
+		})
+	return res.RowsAffected, res.Error
+}
+
 func finalizeAgentRun(runID string, terminal AgentRunStatus, updates map[string]any) error {
 	if DB == nil {
 		return gorm.ErrInvalidDB

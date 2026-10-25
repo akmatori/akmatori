@@ -1197,6 +1197,43 @@ paths:
         '200':
           description: Updated proxy settings
 
+  /system/status:
+    get:
+      summary: Get runtime status for the UI status bar
+      description: |
+        Reports whether the agent worker is connected over its WebSocket. The worker
+        sends a heartbeat every 30 seconds, so a large last_message_age_seconds means
+        the connection is open but the worker no longer responds. /health stays a bare
+        liveness probe.
+      operationId: getSystemStatus
+      tags: [Settings]
+      responses:
+        '200':
+          description: Runtime status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [worker]
+                properties:
+                  worker:
+                    type: object
+                    required: [connected]
+                    properties:
+                      connected:
+                        type: boolean
+                      connected_at:
+                        type: string
+                        format: date-time
+                        description: Absent when no worker is connected
+                      last_message_at:
+                        type: string
+                        format: date-time
+                        description: Last frame from the worker, heartbeats included
+                      last_message_age_seconds:
+                        type: integer
+                        description: Seconds since last_message_at, computed on the server
+
   /settings/formatting:
     get:
       summary: Get response-formatting settings

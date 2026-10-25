@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go (vet + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            mcp-gateway/go.sum
+
+      - name: API
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: MCP gateway
+        working-directory: mcp-gateway
+        run: |
+          go vet ./...
+          go test ./...
+
+  agent-worker:
+    name: Agent worker (build + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent-worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: agent-worker/package-lock.json
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  web:
+    name: Web (typecheck + lint + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+      - run: npx tsc -b
+      - run: npm run lint
+      - run: npm test

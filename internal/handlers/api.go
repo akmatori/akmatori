@@ -170,6 +170,9 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/settings/llm", h.handleLLMSettings)
 	mux.HandleFunc("/api/settings/llm/", h.handleLLMSettingsByID)
 
+	// Runtime status for the UI status bar (worker connection)
+	mux.HandleFunc("GET /api/system/status", h.handleSystemStatus)
+
 	// General settings
 	mux.HandleFunc("/api/settings/general", h.handleGeneralSettings)
 
