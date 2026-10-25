@@ -18,7 +18,7 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
 
 # SDK notes (`@earendil-works/pi-coding-agent`)
 
-- Versions: pi-coding-agent/pi-ai/pi-agent-core `1.4.0`, pi-subagents `0.81.0`; child `pi` CLI =
+- Versions: pi-coding-agent/pi-ai/pi-agent-core `1.4.0`, pi-subagents `0.82.1`; child `pi` CLI =
   `node_modules/.bin/pi`. `pi auth check --provider <id>` / `--model <provider>/<id>` (0.84.1) is the
   fastest way to diagnose a provider or model that will not resolve
 - pi-subagents peers are `optional`; loader aliases `@earendil-works/*` to pi's bundled copies —
@@ -52,6 +52,9 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
 - pi 1.3.0+ pins its internal `@earendil-works/*` deps exactly, and pi-subagents ≥ 0.80 needs pi ≥ 1.2.0:
   bump all three pi packages and pi-subagents in one commit. pi needs Node ≥ 22.19 (Dockerfile pins
   `node:22.23-bookworm`)
+- `undici` is forced to OUR version for the whole tree via `"overrides": {"undici": "$undici"}` in
+  package.json: pi 1.4.0 pins `undici` 8.10.2 exactly, which has a high-severity DoS advisory
+  (GHSA-xjj6-f33q-929c). Check `npm audit --omit=dev` and drop the override once pi pins ≥ 8.12.3
 - Codemode runs at most 2 QuickJS workers per process across all sessions; on 1.4.0 a third script waits
   up to 60 s, then fails. `PI_CODEMODE_MAX_WORKERS` raises the cap — size it before codemode leaves spike
 - pi-subagents 0.61+ registers `subagent` + `bg_wait` (the old `subagent_wait` alias is gone); 0.50/0.55
