@@ -72,6 +72,14 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
   pi-subagents ≥ 0.75 fails the WHOLE config load on any invalid key, which drops us back to `auto`;
   `logActiveToolSet()` logs the active tool names on every session and warns when the loader is
   present or `subagent` is missing — grep `docker logs akmatori-agent` for "active tools:"
+- **agentDir ownership.** `/home/agent/.pi/agent` must belong to `agent`. Compose bind-mounts `agents/`
+  and `extensions/` into it on top of the `agent_sessions` volume; if the image lacks the directory, Docker
+  creates it as root on a FRESH volume (every new install). Then `settings.json` / `models.json` writes
+  fail and every child dies with "Credential store read failed ... EACCES ... auth.json" while the parent
+  answers from the filesystem, so the incident still looks fine. The Dockerfile creates it (2026-10-25);
+  volumes created before that keep the root dir until
+  `docker exec -u root akmatori-agent chown agent:agent /home/agent/.pi/agent`.
+  `childConfigWriteWarning()` prints that command on EACCES/EPERM
 - **Child launches need the pi package root** (pi-subagents ≥ 0.70): it walks up from `process.argv[1]`
   looking for `@earendil-works/pi-coding-agent/package.json`; our entrypoint is `dist/index.js`, so the
   Dockerfile sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT=/home/agent/app/node_modules/@earendil-works/pi-coding-agent`

@@ -610,6 +610,25 @@ function writeFileAtomic(filePath: string, contents: string): void {
 }
 
 /**
+ * Warning text for a failed child-config write (settings.json / models.json).
+ *
+ * A permission error here means the agentDir is not ours: images before the
+ * Dockerfile created ~/.pi/agent let Docker create it as root on a fresh
+ * agent_sessions volume. Every subagent then fails with "EACCES ... auth.json"
+ * while the parent runs normally, so name the one-time fix in the log.
+ */
+export function childConfigWriteWarning(filePath: string, err: unknown): string {
+  const e = err as NodeJS.ErrnoException;
+  const base = `[agent-runner] failed to write ${filePath}: ${e?.message ?? String(err)}`;
+  if (e?.code !== "EACCES" && e?.code !== "EPERM") return base;
+  const dir = path.dirname(filePath);
+  return (
+    `${base} — ${dir} is not writable by the worker, so subagents will fail. ` +
+    `One-time fix: docker exec -u root akmatori-agent chown agent:agent ${dir}`
+  );
+}
+
+/**
  * Reports whether `(provider, model)` resolves through pi-ai's built-in
  * model catalogue. The parent's `resolveModel` papers over a registry miss
  * by synthesizing a custom Model spec in memory, but the child `pi` process
@@ -931,7 +950,7 @@ function writeCustomProviderModelsJson(
   try {
     writeFileAtomic(modelsPath, JSON.stringify({ providers }, null, 2));
   } catch (err) {
-    console.warn(`[agent-runner] failed to write ${modelsPath}: ${(err as Error).message}`);
+    console.warn(childConfigWriteWarning(modelsPath, err));
   }
 }
 
@@ -1252,7 +1271,7 @@ function writeSubagentSettingsFile(
   try {
     writeFileAtomic(settingsPath, JSON.stringify(settings, null, 2));
   } catch (err) {
-    console.warn(`[agent-runner] failed to write ${settingsPath}: ${(err as Error).message}`);
+    console.warn(childConfigWriteWarning(settingsPath, err));
   }
 }
 

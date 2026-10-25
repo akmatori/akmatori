@@ -7,6 +7,7 @@ import {
   subagentChildUsage,
   logActiveToolSet,
   buildSubagentsSettingsBlock,
+  childConfigWriteWarning,
   type ExecuteParams,
   type ResumeParams,
 } from "../src/agent-runner.js";
@@ -3048,5 +3049,23 @@ describe("buildSubagentsSettingsBlock", () => {
       agentOverrides: { "memory-writer": { model: "inherit" } },
     });
     expect(buildSubagentsSettingsBlock({ agentOverrides: [] }, "anthropic", undefined)).toBeUndefined();
+  });
+});
+
+describe("childConfigWriteWarning", () => {
+  const file = "/home/agent/.pi/agent/settings.json";
+
+  it("names the chown fix for a permission error", () => {
+    const err = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+    const msg = childConfigWriteWarning(file, err);
+    expect(msg).toContain("failed to write /home/agent/.pi/agent/settings.json: EACCES: permission denied");
+    expect(msg).toContain("docker exec -u root akmatori-agent chown agent:agent /home/agent/.pi/agent");
+  });
+
+  it("keeps other errors short", () => {
+    const err = Object.assign(new Error("ENOSPC: no space left"), { code: "ENOSPC" });
+    expect(childConfigWriteWarning(file, err)).toBe(
+      "[agent-runner] failed to write /home/agent/.pi/agent/settings.json: ENOSPC: no space left",
+    );
   });
 });

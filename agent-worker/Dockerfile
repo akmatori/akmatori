@@ -59,7 +59,14 @@ RUN groupadd -g 1001 agent && \
 # the host bind-mount on /home/agent/.pi/agent/extensions (operator-supplied
 # extensions) does not shadow it. The agent-runner passes this path via
 # additionalExtensionPaths to the pi-mono resource loader.
-RUN mkdir -p /home/agent/.pi /opt/pi-extensions/pi-subagents /workspaces && \
+#
+# ~/.pi/agent (pi's agentDir) must exist in the image and belong to `agent`.
+# Compose bind-mounts agents/ and extensions/ INTO it on top of the
+# agent_sessions volume; when the image lacks the directory, Docker creates it
+# as root on a fresh volume, and then the worker cannot write the child
+# settings.json and child `pi` fails every subagent launch with
+# "EACCES ... auth.json".
+RUN mkdir -p /home/agent/.pi/agent/agents /home/agent/.pi/agent/extensions /opt/pi-extensions/pi-subagents /workspaces && \
     chown -R agent:agent /home/agent /workspaces /opt/pi-extensions
 
 WORKDIR /home/agent/app
