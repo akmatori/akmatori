@@ -287,6 +287,28 @@ export function logActiveToolSet(
   }
 }
 
+/**
+ * pi-subagents runs `subagent` calls async unless config.json sets
+ * `"asyncByDefault": false`. We exclude `bg_wait`, and an SDK session is not
+ * woken when an async child finishes, so an async launch lets the parent end
+ * its turn before the searchers return (SRE Bench: Haiku 5.5 answered "the
+ * runbook search is running" on 10 of 12 incidents). docker-compose's
+ * init-dirs seeds the file, but keeps one an operator already has.
+ */
+export function subagentAsyncConfigWarning(configPath: string): string | undefined {
+  let config: unknown;
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  } catch (err) {
+    const reason = (err as NodeJS.ErrnoException)?.code === "ENOENT" ? "is missing" : "cannot be read";
+    return `[agent-runner] ${configPath} ${reason}, so subagent calls run async and the agent may stop before ` +
+      `runbook/memory search returns — add {"asyncByDefault": false} (see akmatori_data/extensions/subagent/config.json)`;
+  }
+  if ((config as { asyncByDefault?: unknown })?.asyncByDefault === false) return undefined;
+  return `[agent-runner] ${configPath} does not set "asyncByDefault": false, so subagent calls run async and the ` +
+    `agent may stop before runbook/memory search returns`;
+}
+
 /** Map accumulated totals onto ExecuteResult's wire-named usage fields. */
 export function usageResultFields(totals: UsageTotals): {
   input_tokens: number;
@@ -1580,6 +1602,10 @@ export class AgentRunner {
 
     this.activeSessions.set(params.incidentId, session);
     logActiveToolSet(params.incidentId, session);
+    const asyncWarning = subagentAsyncConfigWarning(
+      path.join(getAgentDir(), "extensions", "subagent", "config.json"),
+    );
+    if (asyncWarning) console.warn(asyncWarning);
     // Signal the orchestrator that this launch has registered so it can
     // release the per-incident launch chain. Subsequent launches that were
     // queued behind us now see a populated activeSessions slot and their

@@ -22,7 +22,11 @@ name: akmatori
 
 services:
   # Init service to create data directories with correct permissions
-  # Also auto-generates a postgres password if one doesn't exist yet
+  # Also auto-generates a postgres password if one doesn't exist yet, and seeds
+  # the pi-subagents config (same JSON as akmatori_data/extensions/subagent/
+  # config.json; installs that only download this file would otherwise run
+  # pi-subagents defaults, where `subagent` calls are async and the parent
+  # ends its turn before the searchers return). An existing file is kept.
   init-dirs:
     image: alpine:3.19
     container_name: akmatori-init
@@ -31,7 +35,11 @@ services:
       - ./akmatori_data:/akmatori
     command: >
       sh -c "
-        mkdir -p /akmatori/incidents /akmatori/context /akmatori/skills /akmatori/runbooks /akmatori/memory /akmatori/agents /akmatori/extensions /akmatori/secrets &&
+        mkdir -p /akmatori/incidents /akmatori/context /akmatori/skills /akmatori/runbooks /akmatori/memory /akmatori/agents /akmatori/extensions/subagent /akmatori/secrets &&
+        if [ ! -f /akmatori/extensions/subagent/config.json ]; then
+          printf '%s\n' '{\"toolDescriptionMode\":\"compact\",\"toolActivation\":\"eager\",\"asyncByDefault\":false,\"enableSlashCommands\":false}' > /akmatori/extensions/subagent/config.json;
+          echo 'Wrote default pi-subagents config';
+        fi &&
         if [ ! -f /akmatori/secrets/postgres_password ]; then
           head -c 32 /dev/urandom | base64 | tr -d '=/+' | head -c 32 > /akmatori/secrets/postgres_password;
           echo 'Generated new PostgreSQL password';
