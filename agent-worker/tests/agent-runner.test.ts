@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   AgentRunner,
   extractSkillNameFromReadPath,
@@ -8,6 +11,7 @@ import {
   logActiveToolSet,
   buildSubagentsSettingsBlock,
   childConfigWriteWarning,
+  subagentAsyncConfigWarning,
   type ExecuteParams,
   type ResumeParams,
 } from "../src/agent-runner.js";
@@ -3066,6 +3070,43 @@ describe("childConfigWriteWarning", () => {
     const err = Object.assign(new Error("ENOSPC: no space left"), { code: "ENOSPC" });
     expect(childConfigWriteWarning(file, err)).toBe(
       "[agent-runner] failed to write /home/agent/.pi/agent/settings.json: ENOSPC: no space left",
+    );
+  });
+});
+
+describe("subagentAsyncConfigWarning", () => {
+  const repoRoot = path.resolve(__dirname, "../..");
+  const repoConfig = path.join(repoRoot, "akmatori_data/extensions/subagent/config.json");
+  let dir: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-config-"));
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("accepts the shipped config", () => {
+    expect(subagentAsyncConfigWarning(repoConfig)).toBeUndefined();
+  });
+
+  it("warns when the file is missing", () => {
+    expect(subagentAsyncConfigWarning(path.join(dir, "config.json"))).toContain("is missing");
+  });
+
+  it("warns when asyncByDefault is not false", () => {
+    const file = path.join(dir, "config.json");
+    fs.writeFileSync(file, JSON.stringify({ toolDescriptionMode: "compact" }));
+    expect(subagentAsyncConfigWarning(file)).toContain('does not set "asyncByDefault": false');
+  });
+
+  it("matches the config docker-compose init-dirs seeds", () => {
+    // Compose-only installs get the JSON from init-dirs, not from this file.
+    const compose = fs.readFileSync(path.join(repoRoot, "docker-compose.yml"), "utf-8");
+    const seeded = compose.match(/printf '%s\\n' '(\{.*\})' > \/akmatori\/extensions\/subagent\/config\.json/);
+    expect(seeded).not.toBeNull();
+    expect(JSON.parse(seeded![1].replace(/\\"/g, '"'))).toEqual(
+      JSON.parse(fs.readFileSync(repoConfig, "utf-8")),
     );
   });
 });

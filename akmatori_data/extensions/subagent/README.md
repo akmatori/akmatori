@@ -12,6 +12,19 @@ falls back to `{}` (all defaults).
   description to the safety-critical orchestration guidance, saving prompt
   tokens on every incident investigation. Remove the key (or the file) to
   restore the full built-in description.
+- `"toolActivation": "eager"` registers `subagent` at session start (our
+  prompts call it directly; the default can start with a `subagents_enable`
+  loader instead).
+- `"asyncByDefault": false` is required. The default runs `subagent` calls in
+  the background; the worker removes `bg_wait`, so the agent ends its turn
+  before runbook/memory search returns. The worker logs a warning when this
+  key is missing.
+- `"enableSlashCommands": false` drops pi-subagents' interactive slash
+  commands, which the worker never uses.
+
+Installs that only download `docker-compose.yml` get this same JSON from the
+`init-dirs` service, which writes it when the file does not exist and never
+overwrites an operator's copy. Keep both in sync (a worker test checks it).
 
 Other supported keys are documented in the pi-subagents README
 (<https://www.npmjs.com/package/pi-subagents>).
