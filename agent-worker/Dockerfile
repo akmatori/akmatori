@@ -8,8 +8,9 @@
 # Tool credentials are fetched by MCP Gateway at execution time.
 # LLM API keys are passed via WebSocket from API.
 
-# Build stage
-FROM node:22-bookworm AS builder
+# Build stage. Node is pinned to a minor: pi >= 1.3.0 needs >= 22.19.0, and a
+# floating `22` tag would change the runtime under us on every rebuild.
+FROM node:22.23-bookworm AS builder
 
 WORKDIR /app
 
@@ -29,7 +30,7 @@ COPY agent-worker/src/ ./src/
 RUN npm run build
 
 # Runtime stage
-FROM node:22-bookworm
+FROM node:22.23-bookworm
 
 # Install system dependencies needed by pi-mono's bash tool and the
 # subagent search workflow. ripgrep + fzf back the runbook/memory recon
