@@ -10,6 +10,7 @@ import { Type, type Static } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { GatewayClient, CallResult, ListToolsResult, ToolDetailResult } from "./gateway-client.js";
 import { ScriptExecutor } from "./script-executor.js";
+import { limitToolOutput } from "./tool-output-limit.js";
 
 // Re-export the ToolDefinition type from pi-coding-agent for convenience.
 // We define our own compatible interface to avoid tight coupling with the
@@ -382,6 +383,7 @@ export function createExecuteScriptTool(ctx: ExecuteScriptToolContext) {
       "Example: const data = JSON.parse(fs.readFileSync('tool_outputs/result.json'));",
       "Example: const hosts = await gateway_call(\"zabbix.get_hosts\", {}); return hosts;",
       "Scripts time out after 5 minutes.",
+      "Script output over 50 KB is cut to a preview; filter or summarize data inside the script instead of printing it raw.",
     ],
     parameters: ExecuteScriptParams,
     execute: async (
@@ -398,8 +400,13 @@ export function createExecuteScriptTool(ctx: ExecuteScriptToolContext) {
           text += `\n\n--- Console Output ---\n${result.logs.join("\n")}`;
         }
 
+        // A script that prints a saved tool output re-inlines what gateway_call
+        // kept out of the context (a 9.4 MB minified-JS grep match once broke
+        // the next provider request), so cap it like gateway_call does.
+        const limited = limitToolOutput(text, { name: "execute_script", workDir: ctx.workDir });
+
         return {
-          content: [{ type: "text" as const, text }],
+          content: [{ type: "text" as const, text: limited.text }],
           details: {},
         };
       } catch (err) {

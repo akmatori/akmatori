@@ -696,6 +696,29 @@ describe("createExecuteScriptTool", () => {
       expect(result.content[0].text).toContain("debug info");
     });
 
+    it("caps a 10 MB console dump and saves the full text (kimi-k3.1-pro disk-full regression)", async () => {
+      // Reproduces the failing run: a saved grep result with one 9.4 MB
+      // minified-JS line, printed back through console.log.
+      const big = "/opt/app/viewer-runtime.js:1:" + "var a=1;".repeat(10 * 1024 * 1024 / 8);
+      fs.writeFileSync(path.join(tmpDir, "saved.txt"), big + "\n/etc/cron.d/bench:1:ok");
+      const tool = createExecuteScriptTool({ client: mockClient, workDir: tmpDir });
+
+      const result = await tool.execute(
+        "tc-es-big",
+        { code: 'console.log(fs.readFileSync("saved.txt", "utf-8"));' },
+        undefined,
+        undefined,
+      );
+
+      const text = result.content[0].text;
+      expect(Buffer.byteLength(text, "utf-8")).toBeLessThan(64 * 1024);
+      expect(text).toContain("[line truncated,");
+      expect(text).toContain("/etc/cron.d/bench:1:ok");
+      expect(text).toContain("[output truncated: 10.0 MB total");
+      const saved = /Full output saved to: (\S+)/.exec(text)![1];
+      expect(fs.readFileSync(saved, "utf-8")).toHaveLength(big.length + "\n/etc/cron.d/bench:1:ok".length);
+    });
+
     it("should handle script errors gracefully", async () => {
       const tool = createExecuteScriptTool({ client: mockClient, workDir: tmpDir });
 
