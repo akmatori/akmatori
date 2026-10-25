@@ -3102,8 +3102,12 @@ describe("subagentAsyncConfigWarning", () => {
 
   it("matches the config docker-compose init-dirs seeds", () => {
     // Compose-only installs get the JSON from init-dirs, not from this file.
+    // No backslash escapes besides \" in that line: Compose drops the
+    // backslash of `\n` inside a double-quoted command, so the old
+    // printf '%s\n' wrote a trailing literal `n` and pi-subagents fell
+    // back to defaults.
     const compose = fs.readFileSync(path.join(repoRoot, "docker-compose.yml"), "utf-8");
-    const seeded = compose.match(/printf '%s\\n' '(\{.*\})' > \/akmatori\/extensions\/subagent\/config\.json/);
+    const seeded = compose.match(/echo '(\{.*\})' > \/akmatori\/extensions\/subagent\/config\.json/);
     expect(seeded).not.toBeNull();
     expect(JSON.parse(seeded![1].replace(/\\"/g, '"'))).toEqual(
       JSON.parse(fs.readFileSync(repoConfig, "utf-8")),

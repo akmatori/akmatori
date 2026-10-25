@@ -37,7 +37,7 @@ services:
       sh -c "
         mkdir -p /akmatori/incidents /akmatori/context /akmatori/skills /akmatori/runbooks /akmatori/memory /akmatori/agents /akmatori/extensions/subagent /akmatori/secrets &&
         if [ ! -f /akmatori/extensions/subagent/config.json ]; then
-          printf '%s\n' '{\"toolDescriptionMode\":\"compact\",\"toolActivation\":\"eager\",\"asyncByDefault\":false,\"enableSlashCommands\":false}' > /akmatori/extensions/subagent/config.json;
+          echo '{\"toolDescriptionMode\":\"compact\",\"toolActivation\":\"eager\",\"asyncByDefault\":false,\"enableSlashCommands\":false}' > /akmatori/extensions/subagent/config.json;
           echo 'Wrote default pi-subagents config';
         fi &&
         if [ ! -f /akmatori/secrets/postgres_password ]; then
