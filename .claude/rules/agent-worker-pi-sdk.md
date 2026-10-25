@@ -18,7 +18,7 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
 
 # SDK notes (`@earendil-works/pi-coding-agent`)
 
-- Versions: pi-coding-agent/pi-ai/pi-agent-core `1.0.1`, pi-subagents `0.75.0`; child `pi` CLI =
+- Versions: pi-coding-agent/pi-ai/pi-agent-core `1.4.0`, pi-subagents `0.81.0`; child `pi` CLI =
   `node_modules/.bin/pi`. `pi auth check --provider <id>` / `--model <provider>/<id>` (0.84.1) is the
   fastest way to diagnose a provider or model that will not resolve
 - pi-subagents peers are `optional`; loader aliases `@earendil-works/*` to pi's bundled copies —
@@ -43,7 +43,17 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
 - Thinking level `max` (above `xhigh`); list mirrored in worker (agent-runner/types/orchestrator),
   Go (`models_settings.go`, `api_settings_llm.go`), web (types, `LLMSettingsSection.tsx`)
 - pi-subagents reads `<agentDir>/extensions/subagent/config.json` (strict JSON); repo ships it with
-  `toolDescriptionMode: "compact"`
+  `toolDescriptionMode: "compact"` and `enableSlashCommands: false` (0.80+; drops all 19 slash commands,
+  keeps the `subagent` tool — we delegate only through the model)
+- Parent tool set: since 0.79 a session with `subagent` also declares `contact_supervisor` (errors when a
+  parent calls it). `PARENT_EXCLUDED_TOOLS` (`bg_wait`, `contact_supervisor`) go to `excludeTools` on
+  `createAgentSession`; `waitTool: false` in config.json does NOT undeclare `bg_wait`. The "active tools:"
+  log line must list `subagent` and neither excluded tool
+- pi 1.3.0+ pins its internal `@earendil-works/*` deps exactly, and pi-subagents ≥ 0.80 needs pi ≥ 1.2.0:
+  bump all three pi packages and pi-subagents in one commit. pi needs Node ≥ 22.19 (Dockerfile pins
+  `node:22.23-bookworm`)
+- Codemode runs at most 2 QuickJS workers per process across all sessions; on 1.4.0 a third script waits
+  up to 60 s, then fails. `PI_CODEMODE_MAX_WORKERS` raises the cap — size it before codemode leaves spike
 - pi-subagents 0.61+ registers `subagent` + `bg_wait` (the old `subagent_wait` alias is gone); 0.50/0.55
   fail a child launch closed when its model is missing from the host registry or the child reports a
   different provider/model than requested — the one-provider-id invariant below is what satisfies it.
@@ -55,7 +65,7 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
 - **Tool activation.** pi-subagents ≥ 0.71 can start a session with a `subagents_enable` loader instead
   of `subagent` (`toolActivation`, default `auto`, decided per model). Our prompts call `subagent(...)`
   directly and every incident is a fresh session, so `akmatori_data/extensions/subagent/config.json`
-  pins `"toolActivation": "eager"` (verified: session starts with exactly `subagent` + `bg_wait`).
+  pins `"toolActivation": "eager"` (verified on 0.75: session starts with exactly `subagent` + `bg_wait`; see parent tool set below).
   pi-subagents ≥ 0.75 fails the WHOLE config load on any invalid key, which drops us back to `auto`;
   `logActiveToolSet()` logs the active tool names on every session and warns when the loader is
   present or `subagent` is missing — grep `docker logs akmatori-agent` for "active tools:"

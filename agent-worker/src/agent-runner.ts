@@ -245,6 +245,23 @@ export function subagentChildUsage(result: unknown): RunUsage | undefined {
 }
 
 /**
+ * pi-subagents tools the parent session never needs, removed from its active
+ * set via `excludeTools`.
+ *
+ * - `bg_wait` waits on background children. config.json pins
+ *   `"asyncByDefault": false`, so every launch runs foreground and returns its
+ *   result inline; `"waitTool": false` only makes the call return at once and
+ *   still declares the tool.
+ * - `contact_supervisor` is declared on any session that has `subagent`
+ *   (pi-subagents 0.79+) so a forked child shares the parent's tool set and
+ *   prompt cache. Called by a parent it only returns an error. We never fork.
+ *
+ * Together ~1.4K chars per request. Child sessions are unaffected: they run in
+ * their own `pi` processes with their own tool selection.
+ */
+export const PARENT_EXCLUDED_TOOLS = ["bg_wait", "contact_supervisor"] as const;
+
+/**
  * Log the tool set the model will see on this session's first request and
  * warn when pi-subagents' lazy loader is in play.
  *
@@ -1508,6 +1525,7 @@ export class AgentRunner {
       // that are contravariant with ToolDefinition<TSchema, unknown, any> via renderCall/renderResult.
       // The cast is safe — AgentSession only reads name, execute, promptGuidelines, promptSnippet.
       customTools: [bashToolDef as unknown as import("@earendil-works/pi-coding-agent").ToolDefinition, gatewayCallTool, listToolsForToolTypeTool, getToolDetailTool, listToolTypesTool, executeScriptTool, ...codemodeTools],
+      excludeTools: [...PARENT_EXCLUDED_TOOLS],
       resourceLoader,
       sessionManager,
       settingsManager,

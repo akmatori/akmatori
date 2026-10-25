@@ -466,6 +466,30 @@ describe("Orchestrator", () => {
       );
     });
 
+    it("should exclude pi-subagents tools the parent never uses", async () => {
+      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
+
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      sendFromServer({
+        type: "new_incident",
+        incident_id: "incident-exclude-tools",
+        task: "Test tool exclusion",
+        api_key: "sk-key",
+      });
+
+      await waitForMessage(
+        (m) => m.type === "agent_completed" && m.incident_id === "incident-exclude-tools",
+      );
+
+      expect(createAgentSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          excludeTools: ["bg_wait", "contact_supervisor"],
+        }),
+      );
+    });
+
     it("should echo run_id on agent_output and agent_completed frames", async () => {
       await orchestrator.start();
       await waitForMessage((m) => m.type === "status");

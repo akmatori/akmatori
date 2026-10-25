@@ -1,5 +1,6 @@
 {
   "toolDescriptionMode": "compact",
   "toolActivation": "eager",
-  "asyncByDefault": false
+  "asyncByDefault": false,
+  "enableSlashCommands": false
 }
