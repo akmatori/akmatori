@@ -151,6 +151,11 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
   entry (pi 0.84.0+, OpenAI-compatible adapters only — Anthropic/Google/Bedrock ignore it). Keep
   `max_tokens` OUT of `samplingParams`: the merge is verbatim and the field name differs per adapter
   (`max_tokens` vs `max_output_tokens`), so output length stays with the per-API mapping
+- **Tool output limits** (`tool-output-limit.ts`): `gateway_call` previews ≥ 4 KB, `execute_script`
+  cuts at 50 KB, and an always-on `tool_result` extension caps every top-level tool result at 256 KB
+  (nested codemode calls skipped). Over-limit text goes to `<workDir>/tool_outputs/`. Reason: one
+  tool result stays in context through compaction — a 9.4 MB minified-JS grep line printed by
+  `execute_script` broke kimi-k3.1-pro (Moonshot 8 MB cap). Never return a tool result unbounded
 - Bash tool stays local (TypeScript variance friction)
 - import `typebox` from `typebox`, not `@sinclair/typebox`
 - `DefaultResourceLoader` requires `agentDir` (`getAgentDir()` in prod and mocks)

@@ -2979,7 +2979,8 @@ describe("codemode spike flag", () => {
     const names = opts.customTools.map((t: any) => t.name);
     expect(names).not.toContain("gateway_fetch");
     const loaderArgs = (DefaultResourceLoader as any).mock.calls.at(-1)[0];
-    expect(loaderArgs.extensionFactories).toBeUndefined();
+    // Only the always-on tool output limit.
+    expect(loaderArgs.extensionFactories).toHaveLength(1);
     const settingsArgs = (SettingsManager.inMemory as any).mock.calls.at(-1)[0];
     expect(settingsArgs.defaultTools).toBeUndefined();
     const gatewayCall = opts.customTools.find((t: any) => t.name === "gateway_call");
@@ -2999,7 +3000,8 @@ describe("codemode spike flag", () => {
     expect(opts.customTools).toHaveLength(7);
     expect(createCodemodeExtension).toHaveBeenCalledWith({ mode: "on", models: false });
     const loaderArgs = (DefaultResourceLoader as any).mock.calls.at(-1)[0];
-    expect(loaderArgs.extensionFactories).toHaveLength(1);
+    expect(loaderArgs.extensionFactories).toHaveLength(2);
+    expect(loaderArgs.extensionFactories[1]).toEqual({ __codemodeFactory: true, opts: { mode: "on", models: false } });
     const settingsArgs = (SettingsManager.inMemory as any).mock.calls.at(-1)[0];
     expect(settingsArgs.defaultTools).toEqual(["+codemode"]);
     const gatewayCall = opts.customTools.find((t: any) => t.name === "gateway_call");

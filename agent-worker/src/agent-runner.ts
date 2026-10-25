@@ -37,6 +37,7 @@ import {
   type ToolExecutionTrace,
 } from "./tool-output-formatter.js";
 import { GatewayClient } from "./gateway-client.js";
+import { createToolOutputLimitExtension } from "./tool-output-limit.js";
 import { createGatewayCallTool, createGatewayFetchTool, createListToolsForToolTypeTool, createGetToolDetailTool, createListToolTypesTool, createExecuteScriptTool } from "./gateway-tools.js";
 
 // ---------------------------------------------------------------------------
@@ -1478,9 +1479,12 @@ export class AgentRunner {
       // SDK sessions do not load pi's built-in extensions; codemode must be
       // added explicitly. `models: false` keeps the model catalog and
       // classifier API out of scripts — incidents never need them.
-      ...(this.codemode
-        ? { extensionFactories: [createCodemodeExtension({ mode: "on", models: false })] }
-        : {}),
+      // The output limit runs for every session: no single tool result may
+      // flood the context (see tool-output-limit.ts).
+      extensionFactories: [
+        createToolOutputLimitExtension({ workDir: params.workDir }),
+        ...(this.codemode ? [createCodemodeExtension({ mode: "on", models: false })] : []),
+      ],
       noExtensions: false,
       noPromptTemplates: true,
       noThemes: true,
