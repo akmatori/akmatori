@@ -258,9 +258,18 @@ type GeneralSettings struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
-	// Alert correlation gate settings
+	// Alert correlation gate settings. Nil means ENABLED (see
+	// GetAlertCorrelationEnabled).
 	AlertCorrelationEnabled   *bool `gorm:"default:null" json:"alert_correlation_enabled"`
 	AlertMonitorWindowMinutes *int  `gorm:"default:null" json:"alert_monitor_window_minutes"`
+	// AlertCorrelationPrompt overrides the correlator's rules text (the JSON
+	// output contract is always appended in code). Nil or blank means the
+	// built-in default, so an install that never edited it picks up
+	// improvements to the default on upgrade.
+	AlertCorrelationPrompt *string `gorm:"type:text;default:null" json:"alert_correlation_prompt"`
+	// AlertCorrelationPromptDefault is filled on GET only, so the UI can show
+	// and restore the built-in rules. Never stored.
+	AlertCorrelationPromptDefault string `gorm:"-" json:"alert_correlation_prompt_default,omitempty"`
 
 	// IncidentMergeEnabled gates the post-investigation merge pass: after an
 	// alert-sourced incident completes, an LLM compares its diagnosed root
@@ -307,6 +316,14 @@ func (s *GeneralSettings) GetIncidentAutoCloseWindow() time.Duration {
 		return DefaultIncidentAutoCloseMinutes * time.Minute
 	}
 	return time.Duration(*s.IncidentAutoCloseMinutes) * time.Minute
+}
+
+// GetAlertCorrelationEnabled returns the effective correlation gate,
+// defaulting to true when unset. Without it every re-fire of a page starts a
+// full investigation, and the fingerprint fast path behind the gate is pure
+// deduplication that needs no LLM. An explicit false still turns it off.
+func (s *GeneralSettings) GetAlertCorrelationEnabled() bool {
+	return s.AlertCorrelationEnabled == nil || *s.AlertCorrelationEnabled
 }
 
 // GetIncidentMergeEnabled returns the effective merge-gate flag, defaulting

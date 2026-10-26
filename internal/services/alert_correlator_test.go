@@ -98,23 +98,20 @@ func newCorrelator(t *testing.T, caller OneShotLLMCaller, db *gorm.DB) *AlertCor
 
 // ---- tests ----
 
-func TestAlertCorrelator_FlagOff_NoLLMCall(t *testing.T) {
+func TestAlertCorrelator_NoSettingsRow_DefaultsOn(t *testing.T) {
 	db := setupCorrelatorDB(t)
 	seedIncident(t, db, "inc-1", "CPU high on web01", "running", time.Now().Add(-5*time.Minute))
-	// No GeneralSettings row → enabled defaults to false.
+	// No GeneralSettings row → the gate defaults to enabled, so the LLM is
+	// asked. An explicit false is covered by the DBStoredFlagOff test.
 
 	caller := &fakeOneShotLLMCaller{}
 	c := newCorrelator(t, caller, db)
 
-	verdict, err := c.Correlate(context.Background(), "src-1", alerts.NormalizedAlert{AlertName: "CPUHigh"})
-	if err != nil {
+	if _, err := c.Correlate(context.Background(), "src-1", alerts.NormalizedAlert{AlertName: "CPUHigh"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if verdict.Correlated {
-		t.Error("expected Correlated=false when flag is off")
-	}
-	if caller.callCount() != 0 {
-		t.Errorf("expected 0 LLM calls, got %d", caller.callCount())
+	if caller.callCount() != 1 {
+		t.Errorf("expected 1 LLM call with the gate on by default, got %d", caller.callCount())
 	}
 }
 
@@ -563,6 +560,60 @@ func TestFetchCandidates_CompletedNoAlerts_NotCandidate(t *testing.T) {
 	for _, row := range candidates {
 		if row.UUID == "completed-no-alerts" {
 			t.Error("expected completed incident with no alert rows to be excluded from candidates")
+		}
+	}
+}
+
+// TestAlertCorrelator_OperatorRules_ReplaceDefaultKeepContract verifies that
+// stored rules replace the built-in rules while the JSON output contract is
+// still appended, so an operator edit cannot break verdict parsing.
+func TestAlertCorrelator_OperatorRules_ReplaceDefaultKeepContract(t *testing.T) {
+	db := setupCorrelatorDB(t)
+	seedIncident(t, db, "inc-rules", "CPU high on web01", "running", time.Now().Add(-5*time.Minute))
+	enabled := true
+	rules := "Link alerts from the same rack only."
+	if err := db.Create(&database.GeneralSettings{
+		AlertCorrelationEnabled: &enabled,
+		AlertCorrelationPrompt:  &rules,
+	}).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	caller := &fakeOneShotLLMCaller{}
+	c := newCorrelator(t, caller, db)
+	if _, err := c.Correlate(context.Background(), "src-1", alerts.NormalizedAlert{AlertName: "CPUHigh"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.HasPrefix(caller.lastSystem, rules) {
+		t.Errorf("system prompt should start with the operator rules, got %q", caller.lastSystem)
+	}
+	if strings.Contains(caller.lastSystem, "Sibling:") {
+		t.Error("operator rules should replace the default rules, not extend them")
+	}
+	if !strings.Contains(caller.lastSystem, correlationOutputContract) {
+		t.Error("system prompt must always end with the output contract")
+	}
+}
+
+func TestCorrelationSystemPrompt_BlankRulesUseDefault(t *testing.T) {
+	got := correlationSystemPrompt("   ")
+	if !strings.HasPrefix(got, DefaultCorrelationRules) || !strings.HasSuffix(got, correlationOutputContract) {
+		t.Errorf("blank rules should give default rules + contract, got %q", got)
+	}
+}
+
+func TestBuildCorrelationUserPrompt_IncludesCandidateAlertAndHost(t *testing.T) {
+	candidates := []candidateRow{{
+		UUID:      "inc-wa2",
+		Status:    "pending",
+		StartedAt: time.Now(),
+		Context:   database.JSONB{"alert_name": "eu.pl.war.wa2 probe failed", "target_host": "wa2-gc5"},
+	}}
+	got := buildCorrelationUserPrompt(alerts.NormalizedAlert{AlertName: "eu.pl.war.wa2-tiktok probe failed"}, candidates)
+	for _, want := range []string{"Title: (no title yet)", "Alert: eu.pl.war.wa2 probe failed", "Host: wa2-gc5"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("user prompt missing %q:\n%s", want, got)
 		}
 	}
 }

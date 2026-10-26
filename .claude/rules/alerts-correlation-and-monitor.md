@@ -43,8 +43,12 @@ called instead of `SpawnIncidentManager`.
   and the fast path — never duplicate that status logic, or the two routes will disagree about
   where a recurrence belongs
 
-- gate is flag-gated (`AlertCorrelationEnabled` in `GeneralSettings`, default false); when disabled,
-  no LLM call and all alerts spawn normally (fail-open)
+- gate is flag-gated (`AlertCorrelationEnabled` in `GeneralSettings`; nil means **enabled**, read via
+  `GetAlertCorrelationEnabled()`, explicit false turns it off); when disabled, no LLM call and all
+  alerts spawn normally (fail-open)
+- an unparseable LLM verdict is logged at WARN and treated as no match. Watch for it: a reasoning
+  model that spends the whole output budget on thinking returns no text, and before the worker's
+  reasoning headroom this silently disabled LLM correlation on gcore (895 of 924 alerts)
 - `NewAlertCorrelator(caller, db)`, wired via `alertHandler.SetAlertCorrelator(c)`; reads config live
   (no restart needed)
 - both `processAlert` and `ProcessAlertFromListenerChannel` wrap evaluate-and-spawn in
@@ -61,8 +65,16 @@ called instead of `SpawnIncidentManager`.
   out of monitor mode by a still-firing alert
 - `ErrWorkerNotConnected` is fail-open (alert spawns normally)
 - hallucination guard: any UUID not in the fetched candidate set forces `Correlated=false`
-- `CorrelationConfig` holds only `Enabled bool`; `correlationMaxCandidates=25` and
+- `CorrelationConfig` holds `Enabled` and `Rules`; `correlationMaxCandidates=25` and
   `correlationThreshold=0.7` are package-level constants
+- system prompt = editable rules (`GeneralSettings.AlertCorrelationPrompt`, nil/blank =
+  `DefaultCorrelationRules`) + the fixed `correlationOutputContract`, which code always appends so an
+  operator edit cannot break `parseCorrelationVerdict`. PUT stores nil for "" or the default text, so
+  installs keep following improved defaults; GET adds `alert_correlation_prompt_default` (`gorm:"-"`)
+- default rules link RECURRENCES (same failure, same host/service) and SIBLINGS (active candidate,
+  same site/DC/PoP, within 10 min, same symptom). Candidate lines carry the spawning alert's name and
+  host from `Context`, because a just-spawned candidate has no title yet. Replayed on gcore's WA2 pair:
+  old rules 0/3 linked, new rules 3/3 linked; same alert from another site 0/3 linked
 - alert fingerprint: `ComputeAlertFingerprint(sourceUUID, lower(alertName), lower(targetHost))`
   stored as `alert_fingerprint` (32-char sha256) on each `Incident`
 

@@ -49,6 +49,9 @@ const (
 // CorrelationConfig holds parameters for the AI correlation gate.
 type CorrelationConfig struct {
 	Enabled bool
+	// Rules is the operator's correlation rules text; empty means
+	// DefaultCorrelationRules.
+	Rules string
 }
 
 // CorrelationVerdict is the structured output from the correlation gate.
@@ -85,9 +88,9 @@ func (c *AlertCorrelator) loadConfig() (CorrelationConfig, error) {
 	if err != nil {
 		return CorrelationConfig{}, fmt.Errorf("load general settings: %w", err)
 	}
-	var cfg CorrelationConfig
-	if gs.AlertCorrelationEnabled != nil {
-		cfg.Enabled = *gs.AlertCorrelationEnabled
+	cfg := CorrelationConfig{Enabled: gs.GetAlertCorrelationEnabled()}
+	if gs.AlertCorrelationPrompt != nil {
+		cfg.Rules = *gs.AlertCorrelationPrompt
 	}
 	return cfg, nil
 }
@@ -104,7 +107,7 @@ type candidateRow struct {
 	Title            string
 	Status           string
 	Response         string
-	Context          database.JSONB
+	Context          database.JSONB `gorm:"type:jsonb"`
 	StartedAt        time.Time
 	AlertFingerprint string
 }
@@ -191,7 +194,7 @@ func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, aler
 	callCtx, cancel := context.WithTimeout(ctx, correlationTimeout)
 	defer cancel()
 
-	raw, err := c.caller.OneShotLLM(callCtx, worker, correlationSystemPrompt, userPrompt, 250, 0.0)
+	raw, err := c.caller.OneShotLLM(callCtx, worker, correlationSystemPrompt(cfg.Rules), userPrompt, 250, 0.0)
 	if err != nil {
 		if errors.Is(err, ErrWorkerNotConnected) {
 			return noMatch, err
@@ -201,7 +204,7 @@ func (c *AlertCorrelator) Correlate(ctx context.Context, sourceUUID string, aler
 
 	verdict, err := parseCorrelationVerdict(raw)
 	if err != nil {
-		slog.Debug("alert correlator: invalid response", "err", err, "raw", raw)
+		slog.Warn("alert correlator: invalid response", "err", err, "raw", truncateForPrompt(raw, 500))
 		return noMatch, nil
 	}
 
@@ -360,6 +363,14 @@ func buildCorrelationUserPrompt(alert alerts.NormalizedAlert, candidates []candi
 
 		fmt.Fprintf(&sb, "\n%d. UUID: %s\n   Status: %s | Age: %s\n   Title: %s\n",
 			i+1, cand.UUID, sanitizeForPrompt(string(cand.Status)), age, sanitizeForPrompt(title))
+		// The spawning alert's name and host let the model match siblings on
+		// the same site even before the incident has a generated title.
+		if v, ok := cand.Context["alert_name"].(string); ok && v != "" {
+			fmt.Fprintf(&sb, "   Alert: %s\n", truncateForPrompt(sanitizeForPrompt(v), snippetCap))
+		}
+		if v, ok := cand.Context["target_host"].(string); ok && v != "" {
+			fmt.Fprintf(&sb, "   Host: %s\n", truncateForPrompt(sanitizeForPrompt(v), snippetCap))
+		}
 		if snippet != "" {
 			fmt.Fprintf(&sb, "   Snippet: %s\n", snippet)
 		}
@@ -405,21 +416,37 @@ func parseCorrelationVerdict(raw string) (CorrelationVerdict, error) {
 	return v, nil
 }
 
-const correlationSystemPrompt = `You decide whether an incoming alert is a RECURRENCE of a recent incident rather than a new event that needs its own investigation.
-
-Return STRICT JSON:
-  {"correlated": true|false, "incident_uuid": "<UUID or empty string>", "confidence": <0..1>, "reasoning": "<≤200 char explanation>"}
+// DefaultCorrelationRules is the operator-editable part of the correlation
+// system prompt: when to link an alert and how to score confidence. Operators
+// override it through GeneralSettings.AlertCorrelationPrompt; the output
+// contract below is always appended, so an edit cannot break verdict parsing.
+const DefaultCorrelationRules = `You decide whether an incoming alert belongs to a recent incident instead of needing its own investigation. It belongs when it is a RECURRENCE of the incident or a SIBLING of it.
 
 Rules:
-- Set correlated=true ONLY when the alert describes the same failure on the same host/service as one of the listed candidates.
-- incident_uuid MUST be one of the UUIDs from the candidate list. If correlated=false, set it to "".
-- Do NOT correlate alerts that have different alert names unless the context makes it unambiguous they are the same root cause.
+- Recurrence: the alert describes the same failure on the same host/service as a candidate.
+- Sibling: the candidate is active (pending, running or diagnosed), the alert is on the same site, DC or PoP (for example the same location code in the host or alert name), it fired within 10 minutes of the candidate start, and it shows the same kind of symptom. One investigation then covers both alerts.
+- Do NOT correlate alerts with different alert names on different sites.
 - When uncertain, prefer correlated=false (creating a new incident is safe; false deduplication hides real events).
 
 Confidence:
   0.9-1.0: identical alert name + host, active incident, timing consistent
-  0.7-0.8: same host/service, related alert name, timing consistent
+  0.7-0.8: same host/service with a related alert name, or a sibling on the same site within 10 minutes with the same symptom
   0.5-0.6: possibly related but significant uncertainty
-  0.0-0.4: different alert, different host, or not convinced
+  0.0-0.4: different alert, different site, or not convinced`
+
+// correlationOutputContract is the fixed tail of the correlation system
+// prompt. It is not editable: parseCorrelationVerdict depends on it.
+const correlationOutputContract = `Return STRICT JSON:
+  {"correlated": true|false, "incident_uuid": "<UUID or empty string>", "confidence": <0..1>, "reasoning": "<≤200 char explanation>"}
+
+incident_uuid MUST be one of the UUIDs from the candidate list. If correlated=false, set it to "".
 
 Output JSON only. No code fences.`
+
+// correlationSystemPrompt joins the effective rules with the output contract.
+func correlationSystemPrompt(rules string) string {
+	if strings.TrimSpace(rules) == "" {
+		rules = DefaultCorrelationRules
+	}
+	return strings.TrimSpace(rules) + "\n\n" + correlationOutputContract
+}

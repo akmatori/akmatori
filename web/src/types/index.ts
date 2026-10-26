@@ -622,6 +622,10 @@ export interface GeneralSettings {
   // Alert correlation gate (non-nullable after GET hydration with effective defaults)
   alert_correlation_enabled: boolean;
   alert_monitor_window_minutes: number;
+  // Correlator rules text; "" means the built-in rules, sent alongside as
+  // alert_correlation_prompt_default so the form can show and restore them.
+  alert_correlation_prompt: string;
+  alert_correlation_prompt_default: string;
   incident_merge_enabled: boolean;
   // Stale-close sweep. Defaults ON, unlike the correlation and merge gates.
   incident_auto_close_enabled: boolean;
@@ -632,6 +636,8 @@ export interface GeneralSettingsUpdate {
   base_url?: string;
   alert_correlation_enabled?: boolean;
   alert_monitor_window_minutes?: number;
+  // "" or the default text restores the built-in rules.
+  alert_correlation_prompt?: string;
   incident_merge_enabled?: boolean;
   incident_auto_close_enabled?: boolean;
   incident_auto_close_minutes?: number;

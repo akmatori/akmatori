@@ -23,6 +23,18 @@ import { createSamplingPayloadHook } from "./sampling.js";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
+ * Output tokens added on top of the caller's maxTokens for reasoning models.
+ * Callers size maxTokens for the ANSWER (a 50-token title, a 250-token JSON
+ * verdict), but providers count reasoning tokens against the same limit. A
+ * reasoning model then spends the whole budget thinking and returns no text:
+ * DeepSeek-V4.1-Flash used all 250 tokens of a correlation call on reasoning
+ * (finish=length, content=""), which every Go caller read as "no answer" and
+ * quietly replaced with its fallback. Non-reasoning models stop when the
+ * answer is done, so the headroom costs nothing there.
+ */
+export const REASONING_HEADROOM_TOKENS = 4096;
+
+/**
  * Models observed rejecting the temperature parameter (keyed
  * "provider/model"). Once a model lands here, subsequent calls skip
  * temperature up front instead of paying a failed request + retry every
@@ -95,7 +107,10 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
 
   const baseOptions = {
     apiKey: params.llmSettings.api_key,
-    maxTokens: params.maxTokens,
+    maxTokens:
+      params.maxTokens !== undefined && model.reasoning
+        ? params.maxTokens + REASONING_HEADROOM_TOKENS
+        : params.maxTokens,
     timeoutMs: params.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     signal: params.signal,
     ...(samplingHook ? { onPayload: samplingHook } : {}),
@@ -155,6 +170,15 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
     .map((block) => block.text)
     .join("")
     .trim();
+
+  // Hitting the limit before any answer text is a failure, not an empty
+  // answer: return "" and the caller cannot tell it from a model that chose
+  // to say nothing, so the failure never shows up in its error logs.
+  if (text === "" && result.stopReason === "length") {
+    throw new Error(
+      "oneshot_llm: output token limit reached before any answer text (reasoning used the budget)",
+    );
+  }
 
   return text;
 }

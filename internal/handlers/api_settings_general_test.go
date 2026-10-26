@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/services"
 	"github.com/akmatori/akmatori/internal/testhelpers"
 )
 
@@ -48,8 +50,8 @@ func TestHandleGeneralSettings_GET_NonNilDefaults(t *testing.T) {
 	}
 
 	// Verify effective defaults.
-	if v, _ := body["alert_correlation_enabled"].(bool); v {
-		t.Error("expected alert_correlation_enabled=false by default")
+	if v, _ := body["alert_correlation_enabled"].(bool); !v {
+		t.Error("expected alert_correlation_enabled=true by default")
 	}
 	if v, _ := body["alert_monitor_window_minutes"].(float64); v != 60 {
 		t.Errorf("expected alert_monitor_window_minutes=60, got %v", v)
@@ -257,5 +259,65 @@ func TestHandleGeneralSettings_AutoCloseMinutes_BoundsAccepted(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Errorf("expected 200 for boundary value %d, got %d: %s", value, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+// TestHandleGeneralSettings_CorrelationPrompt covers the editable correlator
+// rules: GET exposes the built-in default, PUT stores a custom text, and an
+// empty text or the default text clears the override so the install keeps
+// following future defaults.
+func TestHandleGeneralSettings_CorrelationPrompt(t *testing.T) {
+	testhelpers.NewGlobalSQLiteDB(t, &database.GeneralSettings{})
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	call := func(method, body string) (int, map[string]interface{}) {
+		t.Helper()
+		req := httptest.NewRequest(method, "/api/settings/general", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		h.handleGeneralSettings(rec, req)
+		var out map[string]interface{}
+		_ = json.NewDecoder(rec.Body).Decode(&out)
+		return rec.Code, out
+	}
+	stored := func() *string {
+		t.Helper()
+		s, err := database.GetOrCreateGeneralSettings()
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+		return s.AlertCorrelationPrompt
+	}
+
+	code, body := call(http.MethodGet, "")
+	if code != http.StatusOK {
+		t.Fatalf("GET: %d", code)
+	}
+	if body["alert_correlation_prompt"] != "" {
+		t.Errorf("unset prompt should read as empty, got %v", body["alert_correlation_prompt"])
+	}
+	if body["alert_correlation_prompt_default"] != services.DefaultCorrelationRules {
+		t.Error("GET should expose the built-in rules as alert_correlation_prompt_default")
+	}
+
+	custom, _ := json.Marshal(map[string]string{"alert_correlation_prompt": "  Link same-rack alerts only.  "})
+	if code, _ := call(http.MethodPut, string(custom)); code != http.StatusOK {
+		t.Fatalf("PUT custom: %d", code)
+	}
+	if p := stored(); p == nil || *p != "Link same-rack alerts only." {
+		t.Errorf("custom prompt not stored trimmed: %v", p)
+	}
+
+	asDefault, _ := json.Marshal(map[string]string{"alert_correlation_prompt": services.DefaultCorrelationRules})
+	if code, _ := call(http.MethodPut, string(asDefault)); code != http.StatusOK {
+		t.Fatalf("PUT default text: %d", code)
+	}
+	if p := stored(); p != nil {
+		t.Errorf("saving the default text should clear the override, got %q", *p)
+	}
+
+	tooLong, _ := json.Marshal(map[string]string{"alert_correlation_prompt": strings.Repeat("x", maxAlertCorrelationPromptBytes+1)})
+	if code, _ := call(http.MethodPut, string(tooLong)); code != http.StatusBadRequest {
+		t.Errorf("oversized prompt: expected 400, got %d", code)
 	}
 }
