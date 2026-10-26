@@ -44,7 +44,10 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
   Go (`models_settings.go`, `api_settings_llm.go`), web (types, `LLMSettingsSection.tsx`)
 - pi-subagents reads `<agentDir>/extensions/subagent/config.json` (strict JSON); repo ships it with
   `toolDescriptionMode: "compact"` and `enableSlashCommands: false` (0.80+; drops all 19 slash commands,
-  keeps the `subagent` tool — we delegate only through the model)
+  keeps the `subagent` tool — we delegate only through the model). Release installs download only
+  `docker-compose.yml`, so `init-dirs` seeds the same JSON when the file is missing (keep both in sync; a
+  worker test checks it). Inside that double-quoted compose command avoid backslash escapes other than
+  `\"` — Compose drops the backslash of `\n`, which once wrote invalid JSON and silently restored defaults
 - Parent tool set: since 0.79 a session with `subagent` also declares `contact_supervisor` (errors when a
   parent calls it). `PARENT_EXCLUDED_TOOLS` (`bg_wait`, `contact_supervisor`) go to `excludeTools` on
   `createAgentSession`; `waitTool: false` in config.json does NOT undeclare `bg_wait`. The "active tools:"
