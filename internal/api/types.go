@@ -166,9 +166,11 @@ type UpdateGeneralSettingsRequest struct {
 	BaseURL                   *string `json:"base_url"`
 	AlertCorrelationEnabled   *bool   `json:"alert_correlation_enabled"`
 	AlertMonitorWindowMinutes *int    `json:"alert_monitor_window_minutes"`
-	IncidentMergeEnabled      *bool   `json:"incident_merge_enabled"`
-	IncidentAutoCloseEnabled  *bool   `json:"incident_auto_close_enabled"`
-	IncidentAutoCloseMinutes  *int    `json:"incident_auto_close_minutes"`
+	// AlertCorrelationPrompt: "" (or the default text) restores the default.
+	AlertCorrelationPrompt   *string `json:"alert_correlation_prompt"`
+	IncidentMergeEnabled     *bool   `json:"incident_merge_enabled"`
+	IncidentAutoCloseEnabled *bool   `json:"incident_auto_close_enabled"`
+	IncidentAutoCloseMinutes *int    `json:"incident_auto_close_minutes"`
 }
 
 // UpdateRetentionSettingsRequest is the request body for PUT /api/settings/retention.

@@ -115,7 +115,7 @@ func (m *IncidentMerger) EvaluateAndMerge(ctx context.Context, incidentUUID stri
 
 	verdict, err := parseMergeVerdict(raw)
 	if err != nil {
-		slog.Debug("incident merger: invalid response", "err", err, "raw", raw)
+		slog.Warn("incident merger: invalid response", "err", err, "raw", truncateForPrompt(raw, 500))
 		return nil
 	}
 	if !verdict.Merge || verdict.Confidence < mergeThreshold {

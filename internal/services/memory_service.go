@@ -847,6 +847,13 @@ func canonicalIngestName(filename, name string) bool {
 // their created_by set via the INSERT path. Operator edits flow through
 // MemoryService.Update (a plain UPDATE), so this restriction only affects
 // the ingest/upsert collision case.
+//
+// The conflict update only fires when the content differs. IngestFromDisk
+// re-reads every file on disk, including the unchanged `<id>-<name>.md`
+// snapshots that SyncMemoryFiles wrote, so an unconditional update stamped
+// the whole table with one ingest time after every incident. The manifest
+// keeps the newest-by-UpdatedAt entries, so that made its selection
+// arbitrary.
 func (s *MemoryService) upsertByNameNoSync(m *database.Memory) (*database.Memory, error) {
 	if err := s.validate(m); err != nil {
 		return nil, err
@@ -859,6 +866,10 @@ func (s *MemoryService) upsertByNameNoSync(m *database.Memory) (*database.Memory
 		DoUpdates: clause.AssignmentColumns([]string{
 			"type", "description", "body", "incident_uuid", "updated_at",
 		}),
+		Where: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "memories.type <> excluded.type" +
+			" OR memories.description <> excluded.description" +
+			" OR memories.body <> excluded.body" +
+			" OR COALESCE(memories.incident_uuid, '') <> COALESCE(excluded.incident_uuid, '')"}}},
 	}).Create(m).Error; err != nil {
 		return nil, fmt.Errorf("failed to upsert memory: %w", err)
 	}

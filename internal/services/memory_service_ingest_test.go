@@ -171,6 +171,53 @@ func TestIngestFromDisk_IsIdempotent(t *testing.T) {
 	}
 }
 
+// TestIngestFromDisk_UnchangedFilesKeepUpdatedAt guards the manifest order.
+// Ingest re-reads every file on disk, including the canonical snapshots of
+// rows that did not change; those must not get a new updated_at, or every
+// incident restamps the whole table and the newest-first manifest cap picks
+// entries at random.
+func TestIngestFromDisk_UnchangedFilesKeepUpdatedAt(t *testing.T) {
+	svc := setupMemoryServiceTest(t)
+	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
+	writeMemoryFile(t, dir, "old-fact", "old description", MemoryTypeHost, MemoryScopeGlobal, "inc-1", "old body")
+	writeMemoryFile(t, dir, "edited-fact", "edited description", MemoryTypeHost, MemoryScopeGlobal, "inc-1", "v1 body")
+	if err := svc.IngestFromDisk(context.Background()); err != nil {
+		t.Fatalf("first ingest: %v", err)
+	}
+	before := map[string]time.Time{}
+	mems, _ := svc.ListMemoriesByScope(MemoryScopeGlobal)
+	for _, m := range mems {
+		before[m.Name] = m.UpdatedAt
+	}
+
+	time.Sleep(20 * time.Millisecond)
+	// A later incident writes one new memory and edits another; the
+	// canonical snapshot of old-fact is ingested again unchanged.
+	writeMemoryFile(t, dir, "new-fact", "new description", MemoryTypeHost, MemoryScopeGlobal, "inc-2", "new body")
+	writeMemoryFile(t, dir, "edited-fact", "edited description", MemoryTypeHost, MemoryScopeGlobal, "inc-2", "v2 body")
+	if err := svc.IngestFromDisk(context.Background()); err != nil {
+		t.Fatalf("second ingest: %v", err)
+	}
+
+	after := map[string]database.Memory{}
+	mems, _ = svc.ListMemoriesByScope(MemoryScopeGlobal)
+	for _, m := range mems {
+		after[m.Name] = m
+	}
+	if len(after) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(after))
+	}
+	if !after["old-fact"].UpdatedAt.Equal(before["old-fact"]) {
+		t.Errorf("unchanged memory got a new updated_at: %v -> %v", before["old-fact"], after["old-fact"].UpdatedAt)
+	}
+	if !after["edited-fact"].UpdatedAt.After(before["edited-fact"]) {
+		t.Errorf("edited memory kept its old updated_at %v", before["edited-fact"])
+	}
+	if !strings.Contains(after["edited-fact"].Body, "v2 body") {
+		t.Errorf("edited body not saved: %q", after["edited-fact"].Body)
+	}
+}
+
 func TestIngestFromDisk_SkipsManifestAndInvalidFiles(t *testing.T) {
 	svc := setupMemoryServiceTest(t)
 	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)

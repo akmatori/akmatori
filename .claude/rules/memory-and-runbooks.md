@@ -26,6 +26,9 @@ memory lives under `akmatori_data/memory/` (read-write). Agents reach both via p
   `created_by: operator` in their frontmatter and ingest preserves that
 - memory syncing is scope-aware and manifest-driven; upserts idempotent by `name:` slug + scope
 - manifest capped at `manifestMaxEntriesPerScope` (150) entries per scope by `UpdatedAt` descending
+- the upsert's conflict update fires ONLY when type/description/body/incident_uuid differ: ingest
+  re-reads every unchanged `<id>-<slug>.md` snapshot, and an unconditional update restamped the
+  whole table after every incident, which made the manifest cap pick entries at random
 - memory deletions: `memory-writer` accepts `Action: delete <slug>` and writes a tombstone
   (`name:` + `deleted: true` frontmatter only); `IngestFromDisk` deletes the matching row and the
   post-batch sync purges the tombstone and prior `<id>-<slug>.md` snapshot; unknown-slug tombstones

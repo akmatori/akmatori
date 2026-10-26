@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useLatestRef } from '../../hooks/useLatestRef';
-import { Save, Info } from 'lucide-react';
+import { Save, Info, RotateCcw } from 'lucide-react';
 import LoadingSpinner from '../LoadingSpinner';
 import ErrorMessage from '../ErrorMessage';
 import { SuccessMessage } from '../ErrorMessage';
@@ -29,6 +29,10 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
   const [correlationEnabled, setCorrelationEnabled] = useState(false);
   const [monitorWindowMinutes, setMonitorWindowMinutes] = useState(60);
   const [incidentMergeEnabled, setIncidentMergeEnabled] = useState(false);
+  // The textarea always shows the effective rules: the stored override, or the
+  // built-in default when none is stored.
+  const [correlationPrompt, setCorrelationPrompt] = useState('');
+  const [correlationPromptDefault, setCorrelationPromptDefault] = useState('');
 
   // Stale incident close. Stored in minutes by the API, edited in hours here:
   // the default is three days, and "72" reads better than "4320".
@@ -46,6 +50,8 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
       setCorrelationEnabled(data.alert_correlation_enabled);
       setMonitorWindowMinutes(data.alert_monitor_window_minutes ?? 60);
       setIncidentMergeEnabled(data.incident_merge_enabled ?? false);
+      setCorrelationPromptDefault(data.alert_correlation_prompt_default ?? '');
+      setCorrelationPrompt(data.alert_correlation_prompt || data.alert_correlation_prompt_default || '');
       setAutoCloseEnabled(data.incident_auto_close_enabled ?? true);
       setAutoCloseHours(
         Math.round((data.incident_auto_close_minutes ?? DEFAULT_AUTO_CLOSE_HOURS * 60) / 60)
@@ -74,6 +80,7 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
         base_url: instanceBaseUrl,
         alert_correlation_enabled: correlationEnabled,
         alert_monitor_window_minutes: monitorWindowMinutes,
+        alert_correlation_prompt: correlationPrompt,
         incident_merge_enabled: incidentMergeEnabled,
         incident_auto_close_enabled: autoCloseEnabled,
         incident_auto_close_minutes: autoCloseHours * 60,
@@ -119,8 +126,8 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
       <div className="border-t border-line pt-4">
         <h3 className="text-sm font-semibold text-fg mb-3">Alert Correlation</h3>
         <p className="text-xs text-fg-subtle mb-3">
-          Before spawning a new incident, ask an LLM whether the incoming alert is a recurrence of a recent one.
-          Changes take effect on the next alert without a restart.
+          Before spawning a new incident, ask an LLM whether the incoming alert is a recurrence of a recent
+          incident or a sibling of an active one. Changes take effect on the next alert without a restart.
         </p>
 
         <div className="flex items-center gap-2 mb-4">
@@ -147,6 +154,35 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
           <label htmlFor="incident-merge-enabled" className="text-sm text-fg">
             Merge incidents with the same root cause after investigation
           </label>
+        </div>
+
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-1">
+            <label htmlFor="correlation-prompt" className="block text-xs font-medium text-fg-muted">
+              Correlation rules
+            </label>
+            <button
+              type="button"
+              onClick={() => setCorrelationPrompt(correlationPromptDefault)}
+              disabled={correlationPrompt === correlationPromptDefault}
+              className="btn btn-ghost text-xs disabled:opacity-50"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Reset to default
+            </button>
+          </div>
+          <textarea
+            id="correlation-prompt"
+            value={correlationPrompt}
+            onChange={(e) => setCorrelationPrompt(e.target.value)}
+            disabled={!correlationEnabled}
+            rows={12}
+            className="input-field font-mono text-xs disabled:opacity-50"
+          />
+          <p className="mt-1 text-xs text-fg-subtle">
+            When to link an alert to an existing incident, and how to score confidence. Alerts link at
+            confidence 0.7 or higher. The JSON answer format is added automatically.
+          </p>
         </div>
 
         <div className="w-1/3">

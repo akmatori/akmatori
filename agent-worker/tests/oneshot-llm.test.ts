@@ -23,7 +23,8 @@ vi.mock("../src/proxy.js", () => ({
   applyProxyConfig: (...args: unknown[]) => applyProxyConfigMock(...args),
 }));
 
-import { runOneshotLLM } from "../src/oneshot-llm.js";
+import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
+import { runOneshotLLM, REASONING_HEADROOM_TOKENS } from "../src/oneshot-llm.js";
 import type { LLMSettings, ProxyConfig } from "../src/types.js";
 
 const validSettings: LLMSettings = {
@@ -84,7 +85,9 @@ describe("runOneshotLLM", () => {
 
     const opts = completeMock.mock.calls[0][2];
     expect(opts.temperature).toBe(0.42);
-    expect(opts.maxTokens).toBe(64);
+    // The synthesized spec for an unknown model declares reasoning, so the
+    // answer budget gets the reasoning headroom on top.
+    expect(opts.maxTokens).toBe(64 + REASONING_HEADROOM_TOKENS);
     expect(opts.apiKey).toBe("sk-test");
     // Default 30s timeout when unset
     expect(opts.timeoutMs).toBe(30_000);
@@ -339,5 +342,61 @@ describe("runOneshotLLM", () => {
       llmSettings: validSettings,
     });
     expect(out).toBe("hello world");
+  });
+
+  it("sends the caller's maxTokens unchanged for a non-reasoning model", async () => {
+    vi.mocked(getBuiltinModel).mockReturnValueOnce({
+      id: "gpt-4o-mini",
+      name: "gpt-4o-mini",
+      api: "openai-completions",
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128000,
+      maxTokens: 16384,
+    } as unknown as ReturnType<typeof getBuiltinModel>);
+    completeMock.mockResolvedValue(assistantText("ok"));
+
+    await runOneshotLLM({
+      requestId: "req-11",
+      user: "ping",
+      maxTokens: 64,
+      llmSettings: validSettings,
+    });
+
+    expect(completeMock.mock.calls[0][2].maxTokens).toBe(64);
+  });
+
+  it("throws when the token limit is hit before any answer text", async () => {
+    completeMock.mockResolvedValue({
+      ...assistantText(""),
+      content: [{ type: "thinking" as const, thinking: "still thinking..." }],
+      stopReason: "length" as const,
+    });
+
+    await expect(
+      runOneshotLLM({
+        requestId: "req-12",
+        user: "ping",
+        maxTokens: 250,
+        llmSettings: validSettings,
+      }),
+    ).rejects.toThrow(/token limit reached before any answer text/);
+  });
+
+  it("returns partial text cut by the token limit", async () => {
+    completeMock.mockResolvedValue({
+      ...assistantText("A long summary that was cut"),
+      stopReason: "length" as const,
+    });
+
+    const out = await runOneshotLLM({
+      requestId: "req-13",
+      user: "ping",
+      llmSettings: validSettings,
+    });
+    expect(out).toBe("A long summary that was cut");
   });
 });

@@ -1,13 +1,21 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/akmatori/akmatori/internal/api"
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/services"
 )
 
 const defaultAlertMonitorWindowMinutes = 60
+
+// maxAlertCorrelationPromptBytes caps the correlator rules text. The rules
+// ride every correlation call next to up to 25 candidates, so an unbounded
+// prompt would make each alert slower and costlier.
+const maxAlertCorrelationPromptBytes = 8000
 
 // Bounds for incident_auto_close_minutes. The floor is one hour: anything
 // shorter would race normal investigation turnaround and close incidents under
@@ -23,13 +31,20 @@ const (
 // in-place; callers must not persist the result back to the DB.
 func applyGeneralSettingsDefaults(s *database.GeneralSettings) {
 	if s.AlertCorrelationEnabled == nil {
-		v := false
+		v := true
 		s.AlertCorrelationEnabled = &v
 	}
 	if s.AlertMonitorWindowMinutes == nil {
 		v := defaultAlertMonitorWindowMinutes
 		s.AlertMonitorWindowMinutes = &v
 	}
+	// An empty prompt means "use the built-in rules"; the default text rides
+	// along so the UI can show it and offer a reset.
+	if s.AlertCorrelationPrompt == nil {
+		v := ""
+		s.AlertCorrelationPrompt = &v
+	}
+	s.AlertCorrelationPromptDefault = services.DefaultCorrelationRules
 	if s.IncidentMergeEnabled == nil {
 		v := false
 		s.IncidentMergeEnabled = &v
@@ -90,6 +105,21 @@ func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Reques
 				return
 			}
 			settings.AlertMonitorWindowMinutes = req.AlertMonitorWindowMinutes
+		}
+		if req.AlertCorrelationPrompt != nil {
+			prompt := strings.TrimSpace(*req.AlertCorrelationPrompt)
+			if len(prompt) > maxAlertCorrelationPromptBytes {
+				api.RespondError(w, http.StatusBadRequest,
+					fmt.Sprintf("alert_correlation_prompt must be at most %d bytes", maxAlertCorrelationPromptBytes))
+				return
+			}
+			// Store nil for the default text too, so this install keeps
+			// following the built-in rules when they improve.
+			if prompt == "" || prompt == strings.TrimSpace(services.DefaultCorrelationRules) {
+				settings.AlertCorrelationPrompt = nil
+			} else {
+				settings.AlertCorrelationPrompt = &prompt
+			}
 		}
 		if req.IncidentMergeEnabled != nil {
 			settings.IncidentMergeEnabled = req.IncidentMergeEnabled
