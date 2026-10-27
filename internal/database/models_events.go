@@ -28,6 +28,10 @@ const (
 	// not confident, so the event is an alert (a dropped real alert costs more
 	// than one extra investigation).
 	EventClassificationFallback = "fallback"
+	// EventClassificationReused — a re-send of an item the LLM classified
+	// in the last 24 h copied that class with no LLM call. It still gets its
+	// own row.
+	EventClassificationReused = "reused"
 	// EventClassificationSource — the source alone decides the kind (cron
 	// ticks, proposal chat, resolved notifications, follow-ups in an existing
 	// thread). No LLM call.
@@ -72,12 +76,6 @@ type Event struct {
 
 	ReceivedAt time.Time `gorm:"index:idx_events_source_fp,priority:3;index" json:"received_at"`
 	OccurredAt time.Time `gorm:"index:idx_events_kind_occurred,priority:2" json:"occurred_at"`
-	// RepeatCount and LastSeenAt record re-sends of the same item (same
-	// source, identity and status within 24 h). A re-send updates this row
-	// and keeps its class instead of writing a new row and paying for a new
-	// LLM call.
-	RepeatCount int        `gorm:"not null;default:0" json:"repeat_count"`
-	LastSeenAt  *time.Time `json:"last_seen_at,omitempty"`
 
 	Kind                     string   `gorm:"size:16;not null;index:idx_events_kind_occurred,priority:1" json:"kind"`
 	Classification           string   `gorm:"size:16;not null" json:"classification"`

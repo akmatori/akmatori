@@ -23,10 +23,10 @@ const (
 	// worker adds reasoning headroom on top for reasoning models.
 	eventClassifyMaxTokens = 200
 
-	// eventRepeatWindow bounds how far back a re-send of the same item is
-	// folded into the earlier event row (and takes its class with no LLM
-	// call). Alertmanager re-sends a firing group every repeat_interval.
-	eventRepeatWindow = 24 * time.Hour
+	// eventReuseWindow bounds how far back a re-send of the same item copies
+	// the class of an LLM-classified earlier event instead of making a new
+	// call. Alertmanager re-sends a firing group every repeat_interval.
+	eventReuseWindow = 24 * time.Hour
 
 	eventPromptFieldMax = 1500
 	eventPromptLabelMax = 30
@@ -176,9 +176,10 @@ func (s *EventService) SetCaller(caller OneShotLLMCaller) {
 }
 
 // RecordClassified stores a monitoring item (webhook alert item) after
-// classifying it. A re-send of the same item inside eventRepeatWindow updates
-// the earlier row and keeps its class, with no LLM call. Resolved items are
-// class alert by source: they only ever close an existing alert.
+// classifying it. Every item gets its own row. A re-send of an item that the
+// LLM classified inside eventReuseWindow copies that class with no LLM call
+// (classification=reused). Resolved items are class alert by source: they
+// only ever close an existing alert.
 //
 // Never fails the caller: a storage error is logged and the returned event
 // still carries the verdict, so the alert path keeps working without the
@@ -186,9 +187,16 @@ func (s *EventService) SetCaller(caller OneShotLLMCaller) {
 func (s *EventService) RecordClassified(ctx context.Context, in EventInput) *database.Event {
 	ev := s.newEvent(in)
 
-	if prev := s.findRepeat(ctx, ev); prev != nil {
-		s.touchRepeat(ctx, prev)
-		return prev
+	if prev := s.findClassified(ctx, ev); prev != nil {
+		conf := prev.ClassificationConfidence
+		applyVerdict(ev, EventVerdict{
+			Kind:           prev.Kind,
+			Classification: database.EventClassificationReused,
+			Confidence:     conf,
+			Reasoning:      fmt.Sprintf("same item as event %s: %s", prev.UUID, prev.ClassificationReasoning),
+		})
+		s.insert(ctx, ev)
+		return ev
 	}
 
 	var v EventVerdict
@@ -402,18 +410,19 @@ func applyVerdict(ev *database.Event, v EventVerdict) {
 	ev.ClassificationReasoning = v.Reasoning
 }
 
-// findRepeat returns the earlier row for a re-send of the same item: the
-// newest event of the same source and identity (external id when the source
-// has one, else the title+host fingerprint) inside eventRepeatWindow, when it
-// has the same status. A firing→resolved→firing sequence therefore writes a
-// new row for the second fire. Fallback classifications are not repeated, so
-// the next re-send retries the LLM.
-func (s *EventService) findRepeat(ctx context.Context, ev *database.Event) *database.Event {
+// findClassified returns the newest earlier event for a re-send of the same
+// item: same source, same identity (external id when the source has one, else
+// the title+host fingerprint) and same status, received inside
+// eventReuseWindow, whose class came from the LLM or the source. Reused rows
+// are not a source of reuse, so the class is re-checked at least once per
+// window; fallback rows are not either, so the next re-send retries the LLM.
+func (s *EventService) findClassified(ctx context.Context, ev *database.Event) *database.Event {
 	if ev.SourceUUID == "" {
 		return nil
 	}
 	q := s.db.WithContext(ctx).
-		Where("source_uuid = ? AND received_at >= ?", ev.SourceUUID, ev.ReceivedAt.Add(-eventRepeatWindow))
+		Where("source_uuid = ? AND status = ? AND received_at >= ?", ev.SourceUUID, ev.Status, ev.ReceivedAt.Add(-eventReuseWindow)).
+		Where("classification IN ?", []string{database.EventClassificationLLM, database.EventClassificationSource})
 	if ev.ExternalID != "" {
 		q = q.Where("external_id = ?", ev.ExternalID)
 	} else {
@@ -421,27 +430,13 @@ func (s *EventService) findRepeat(ctx context.Context, ev *database.Event) *data
 	}
 	var prev database.Event
 	if err := q.Order("received_at DESC").Limit(1).Find(&prev).Error; err != nil {
-		slog.Warn("events: repeat lookup failed", "err", err)
+		slog.Warn("events: reuse lookup failed", "err", err)
 		return nil
 	}
-	if prev.UUID == "" || prev.Status != ev.Status || prev.Classification == database.EventClassificationFallback {
+	if prev.UUID == "" {
 		return nil
 	}
 	return &prev
-}
-
-// touchRepeat records the re-send on the earlier row.
-func (s *EventService) touchRepeat(ctx context.Context, prev *database.Event) {
-	now := s.now()
-	if err := s.db.WithContext(ctx).Model(&database.Event{}).Where("uuid = ?", prev.UUID).
-		Updates(map[string]interface{}{
-			"repeat_count": gorm.Expr("repeat_count + 1"),
-			"last_seen_at": now,
-		}).Error; err != nil {
-		slog.Warn("events: record repeat failed", "event_uuid", prev.UUID, "err", err)
-	}
-	prev.RepeatCount++
-	prev.LastSeenAt = &now
 }
 
 func (s *EventService) insert(ctx context.Context, ev *database.Event) {

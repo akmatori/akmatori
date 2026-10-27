@@ -186,6 +186,15 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 		// correlation gate as a reported alert (only alerts open incidents);
 		// anything else is a request and starts an agent run as before.
 		eventUUID, reported, handled := h.classifyManualTask(r.Context(), req.Task)
+		if handled && reported.storedKind != "" {
+			api.RespondJSON(w, http.StatusCreated, api.CreateIncidentResponse{
+				Status:    "recorded",
+				Message:   fmt.Sprintf("Task stored as a %s event; no agent run started", reported.storedKind),
+				EventUUID: eventUUID,
+				EventKind: reported.storedKind,
+			})
+			return
+		}
 		if handled {
 			if reported.err != nil {
 				api.RespondError(w, http.StatusInternalServerError, "Failed to open incident for reported alert")
@@ -673,16 +682,20 @@ func splitCSV(s string) []string {
 	return out
 }
 
-// reportedResult is the outcome of a manual task that classified as an alert.
+// reportedResult is the outcome of a manual task that did not become a
+// request: storedKind is set for change/info (stored only); otherwise it was
+// an alert and the other fields hold the correlation outcome.
 type reportedResult struct {
+	storedKind   string
 	incidentUUID string
 	linked       bool
 	err          error
 }
 
 // classifyManualTask stores an API task as an event and classifies it.
-// handled is true when the task reported a problem and went through the
-// correlation gate. With no event intake wired it returns ("", _, false).
+// handled is true when the task did not become a request: it reported a
+// problem (correlation gate) or was a change/info event (stored only). With
+// no event intake wired it returns ("", _, false).
 func (h *APIHandler) classifyManualTask(ctx context.Context, task string) (eventUUID string, res reportedResult, handled bool) {
 	if h.eventService == nil || h.alertExtractor == nil {
 		return "", res, false
@@ -698,7 +711,7 @@ func (h *APIHandler) classifyManualTask(ctx context.Context, task string) (event
 		}, services.ClassificationOffVerdict(database.EventKindRequest))
 		return ev.UUID, res, false
 	}
-	allowed := []string{database.EventKindRequest}
+	allowed := []string{database.EventKindRequest, database.EventKindChange, database.EventKindInfo}
 	if h.reportedAlerts != nil {
 		allowed = append(allowed, database.EventKindAlert)
 	}
@@ -715,8 +728,12 @@ func (h *APIHandler) classifyManualTask(ctx context.Context, task string) (event
 		Severity:    string(normalized.Severity),
 		Labels:      normalized.TargetLabels,
 	}, verdict)
-	if ev.Kind != database.EventKindAlert {
+	switch ev.Kind {
+	case database.EventKindRequest:
 		return ev.UUID, res, false
+	case database.EventKindChange, database.EventKindInfo:
+		res.storedKind = ev.Kind
+		return ev.UUID, res, true
 	}
 
 	normalized.SourceFingerprint = "api:" + ev.UUID

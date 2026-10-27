@@ -1008,7 +1008,8 @@ paths:
         The task is stored as an event and classified first. A request starts an
         agent run (event_kind "request"). A reported problem goes through the
         alert correlation gate (event_kind "alert"): uuid is then the incident it
-        joined (status "linked") or opened (status "pending").
+        joined (status "linked") or opened (status "pending"). A change or info
+        report is stored only (status "recorded", empty uuid).
       responses:
         '201':
           description: Run started, or reported alert linked/opened
@@ -1021,7 +1022,7 @@ paths:
                     type: string
                   status:
                     type: string
-                    enum: [pending, linked]
+                    enum: [pending, linked, recorded]
                   working_dir:
                     type: string
                   message:
@@ -1030,7 +1031,7 @@ paths:
                     type: string
                   event_kind:
                     type: string
-                    enum: [alert, request]
+                    enum: [alert, change, info, request]
 
   /incidents/{uuid}:
     parameters:

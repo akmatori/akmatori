@@ -128,7 +128,7 @@ func TestEventService_Classify_PromptCarriesFieldsAndContract(t *testing.T) {
 	}
 }
 
-func TestEventService_RecordClassified_RepeatFoldsWithoutLLMCall(t *testing.T) {
+func TestEventService_RecordClassified_ResendGetsOwnRowWithoutLLMCall(t *testing.T) {
 	db := setupEventDB(t)
 	caller := &fakeOneShotLLMCaller{respond: answer(`{"kind":"info","confidence":0.9,"reasoning":"heartbeat"}`)}
 	s := NewEventService(db, caller)
@@ -136,21 +136,25 @@ func TestEventService_RecordClassified_RepeatFoldsWithoutLLMCall(t *testing.T) {
 
 	first := s.RecordClassified(context.Background(), in)
 	second := s.RecordClassified(context.Background(), in)
+	third := s.RecordClassified(context.Background(), in)
 
 	if caller.callCount() != 1 {
-		t.Fatalf("LLM calls = %d, want 1 (re-send reuses the class)", caller.callCount())
+		t.Fatalf("LLM calls = %d, want 1 (re-sends reuse the class)", caller.callCount())
 	}
-	if second.UUID != first.UUID || second.Kind != database.EventKindInfo {
-		t.Fatalf("re-send got event %s/%s, want the first row %s/info", second.UUID, second.Kind, first.UUID)
+	for _, ev := range []*database.Event{second, third} {
+		if ev.UUID == first.UUID || ev.Kind != database.EventKindInfo || ev.Classification != database.EventClassificationReused ||
+			!strings.Contains(ev.ClassificationReasoning, first.UUID) {
+			t.Fatalf("re-send = %+v, want its own reused info row pointing at %s", ev, first.UUID)
+		}
 	}
-	var rows []database.Event
-	db.Find(&rows)
-	if len(rows) != 1 || rows[0].RepeatCount != 1 || rows[0].LastSeenAt == nil {
-		t.Fatalf("rows = %+v, want one row with repeat_count 1", rows)
+	var count int64
+	db.Model(&database.Event{}).Count(&count)
+	if count != 3 {
+		t.Fatalf("rows = %d, want 3 (every re-send is shown)", count)
 	}
 }
 
-func TestEventService_RecordClassified_NewRowAfterStatusChange(t *testing.T) {
+func TestEventService_RecordClassified_StatusChangeIsNotReused(t *testing.T) {
 	db := setupEventDB(t)
 	caller := &fakeOneShotLLMCaller{respond: answer(`{"kind":"alert","confidence":0.9,"reasoning":"down"}`)}
 	s := NewEventService(db, caller)
@@ -165,16 +169,11 @@ func TestEventService_RecordClassified_NewRowAfterStatusChange(t *testing.T) {
 	if r.Classification != database.EventClassificationSource || r.Kind != database.EventKindAlert {
 		t.Fatalf("resolved item = %s/%s, want alert by source", r.Kind, r.Classification)
 	}
-	var count int64
-	db.Model(&database.Event{}).Count(&count)
-	if count != 3 {
-		t.Fatalf("rows = %d, want 3 (firing, resolved, firing again)", count)
+	if again.Classification != database.EventClassificationReused {
+		t.Fatalf("second fire within 24h = %s, want reused from the first fire", again.Classification)
 	}
-	if again.Classification != database.EventClassificationLLM {
-		t.Fatalf("second fire after resolve must be classified again, got %s", again.Classification)
-	}
-	if caller.callCount() != 2 {
-		t.Fatalf("LLM calls = %d, want 2 (resolved item makes no call)", caller.callCount())
+	if caller.callCount() != 1 {
+		t.Fatalf("LLM calls = %d, want 1", caller.callCount())
 	}
 }
 
@@ -195,7 +194,7 @@ func TestEventService_RecordClassified_FallbackIsRetried(t *testing.T) {
 	}
 }
 
-func TestEventService_RecordClassified_RepeatWindowExpires(t *testing.T) {
+func TestEventService_RecordClassified_ReuseWindowExpires(t *testing.T) {
 	db := setupEventDB(t)
 	caller := &fakeOneShotLLMCaller{respond: answer(`{"kind":"alert","confidence":0.9,"reasoning":"x"}`)}
 	s := NewEventService(db, caller)
@@ -204,7 +203,7 @@ func TestEventService_RecordClassified_RepeatWindowExpires(t *testing.T) {
 	in := EventInput{SourceKind: database.EventSourceWebhook, SourceUUID: "src-1", ExternalID: "fp-1", Title: "A", Status: "firing"}
 	s.RecordClassified(context.Background(), in)
 
-	s.now = func() time.Time { return base.Add(eventRepeatWindow + time.Minute) }
+	s.now = func() time.Time { return base.Add(eventReuseWindow + time.Minute) }
 	s.RecordClassified(context.Background(), in)
 
 	if caller.callCount() != 2 {
@@ -264,5 +263,24 @@ func TestEventService_Classify_OperatorRulesKeepContract(t *testing.T) {
 	if !strings.HasPrefix(caller.lastSystem, rules) || strings.Contains(caller.lastSystem, "Classes:\n- alert") ||
 		!strings.Contains(caller.lastSystem, "Return STRICT JSON") {
 		t.Fatalf("system prompt = %q", caller.lastSystem)
+	}
+}
+
+func TestEventService_RecordClassified_ReusedRowsDoNotExtendTheWindow(t *testing.T) {
+	db := setupEventDB(t)
+	caller := &fakeOneShotLLMCaller{respond: answer(`{"kind":"alert","confidence":0.9,"reasoning":"x"}`)}
+	s := NewEventService(db, caller)
+	base := time.Now()
+	in := EventInput{SourceKind: database.EventSourceWebhook, SourceUUID: "src-1", ExternalID: "fp-1", Title: "A", Status: "firing"}
+
+	s.now = func() time.Time { return base }
+	s.RecordClassified(context.Background(), in)
+	s.now = func() time.Time { return base.Add(20 * time.Hour) }
+	if ev := s.RecordClassified(context.Background(), in); ev.Classification != database.EventClassificationReused {
+		t.Fatalf("20h re-send = %s, want reused", ev.Classification)
+	}
+	s.now = func() time.Time { return base.Add(25 * time.Hour) }
+	if ev := s.RecordClassified(context.Background(), in); ev.Classification != database.EventClassificationLLM {
+		t.Fatalf("25h re-send = %s, want a fresh LLM call (reused rows are not a reuse source)", ev.Classification)
 	}
 }
