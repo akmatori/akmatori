@@ -8,15 +8,16 @@ DB layout redesign yes (phase 5), page renamed to Events at `/events`.
 
 ### What changed from the draft during implementation
 
-- **Re-sends fold into one row** instead of writing a new row with `classification=reused`: the
-  earlier row gets `repeat_count` and `last_seen_at`. Without this an Alertmanager group re-sent every
-  `repeat_interval` would flood the feed. The `reused` value is gone.
+- **Every re-send gets its own row** (decided 2026-10-27, after a first version folded re-sends into
+  one row): a webhook re-send within 24 h copies the class of the LLM-classified event
+  (`classification=reused`), with no LLM call.
 - **Backfilled rows** use `classification=backfill`, not `fallback`, so a backfilled row never looks
   like a failed classification.
 - **Allowed classes per source**: webhook and Slack listener → alert, change, info (fallback alert).
-  New-thread Slack mention and API task → alert, request (fallback request: the behaviour from before
-  events; a change report through a mention is answered as a request). Mention follow-ups in a known
-  thread, cron ticks and proposal chat → request by source, no LLM call.
+  New-thread Slack mention and API task → all four classes (fallback request: the behaviour from
+  before events). A change/info mention is stored and gets a short thread reply; a change/info API
+  task returns `status: recorded` with no incident UUID (decided 2026-10-27). Mention follow-ups in a
+  known thread, cron ticks and proposal chat → request by source, no LLM call.
 - **Mentions and API tasks use the extraction call** (`ExtractAndClassify`) so a reported alert also
   gets its alert fields (name, host) from the same single call.
 

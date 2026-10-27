@@ -17,18 +17,16 @@ import (
 // alert it created (correlation state, live firing/resolved status) and the
 // incident or agent run it opened, joined or continued.
 type EventFeedItem struct {
-	EventUUID                string     `json:"event_uuid"`
-	Kind                     string     `json:"kind"`
-	SourceKind               string     `json:"source_kind"`
-	SourceType               string     `json:"source_type,omitempty"`
-	SourceUUID               string     `json:"source_uuid,omitempty"`
-	Classification           string     `json:"classification"`
-	ClassificationConfidence *float64   `json:"classification_confidence,omitempty"`
-	ClassificationReasoning  string     `json:"classification_reasoning,omitempty"`
-	Title                    string     `json:"title"`
-	OccurredAt               time.Time  `json:"occurred_at"`
-	RepeatCount              int        `json:"repeat_count,omitempty"`
-	LastSeenAt               *time.Time `json:"last_seen_at,omitempty"`
+	EventUUID                string    `json:"event_uuid"`
+	Kind                     string    `json:"kind"`
+	SourceKind               string    `json:"source_kind"`
+	SourceType               string    `json:"source_type,omitempty"`
+	SourceUUID               string    `json:"source_uuid,omitempty"`
+	Classification           string    `json:"classification"`
+	ClassificationConfidence *float64  `json:"classification_confidence,omitempty"`
+	ClassificationReasoning  string    `json:"classification_reasoning,omitempty"`
+	Title                    string    `json:"title"`
+	OccurredAt               time.Time `json:"occurred_at"`
 	// Status is what the event means now: the alert's firing/resolved state
 	// for alert events, the run's status for request events, empty for
 	// change and info events.
@@ -139,8 +137,6 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 			ClassificationReasoning:  e.ClassificationReasoning,
 			Title:                    e.Title,
 			OccurredAt:               e.OccurredAt,
-			RepeatCount:              e.RepeatCount,
-			LastSeenAt:               e.LastSeenAt,
 			Status:                   e.Status,
 			TargetHost:               e.Host,
 			AlertUUID:                e.AlertUUID,

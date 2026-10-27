@@ -85,6 +85,8 @@ type CreateIncidentResponse struct {
 	// EventUUID and EventKind describe the events row the task was stored
 	// as. EventKind "alert" means the task reported a problem: UUID is then
 	// the incident it opened (Status "pending") or joined (Status "linked").
+	// EventKind "change" or "info" means the task was stored only: Status is
+	// "recorded" and UUID is empty.
 	EventUUID string `json:"event_uuid,omitempty"`
 	EventKind string `json:"event_kind,omitempty"`
 }

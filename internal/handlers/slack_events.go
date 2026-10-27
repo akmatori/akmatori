@@ -42,10 +42,14 @@ func (h *SlackHandler) recordMentionFollowUp(channelID, messageTS, text, inciden
 }
 
 // classifyNewMention stores a mention that starts a new thread and classifies
-// it in one LLM call (extraction + class). A report of a problem goes to the
-// correlation gate as a reported alert and handled is true. Anything else is
-// a request: the caller starts the agent run as before and links eventUUID.
-// Every failure is a request, which is the behaviour from before events.
+// it in one LLM call (extraction + class). handled is true when this function
+// finished the mention:
+//   - alert: a report of a problem goes to the correlation gate
+//   - change / info: stored, with a short reply in the thread
+//
+// A request returns handled=false: the caller starts the agent run as before
+// and links eventUUID. Every failure is a request, the behaviour from before
+// events.
 func (h *SlackHandler) classifyNewMention(channelID, threadID, messageTS, text string) (eventUUID string, handled bool) {
 	if h.eventService == nil {
 		return "", false
@@ -66,7 +70,7 @@ func (h *SlackHandler) classifyNewMention(channelID, threadID, messageTS, text s
 		return ev.UUID, false
 	}
 
-	allowed := []string{database.EventKindRequest}
+	allowed := []string{database.EventKindRequest, database.EventKindChange, database.EventKindInfo}
 	if h.alertHandler != nil {
 		allowed = append(allowed, database.EventKindAlert)
 	}
@@ -85,8 +89,12 @@ func (h *SlackHandler) classifyNewMention(channelID, threadID, messageTS, text s
 		Severity:    string(normalized.Severity),
 		Labels:      normalized.TargetLabels,
 	}, verdict)
-	if ev.Kind != database.EventKindAlert {
+	switch ev.Kind {
+	case database.EventKindRequest:
 		return ev.UUID, false
+	case database.EventKindChange, database.EventKindInfo:
+		h.postMentionAck(channelID, threadID, ev.Kind)
+		return ev.UUID, true
 	}
 
 	normalized.SourceFingerprint = fmt.Sprintf("slack:%s:%s", channelID, messageTS)
@@ -118,6 +126,28 @@ func (h *SlackHandler) classifyNewMention(channelID, threadID, messageTS, text s
 	}
 	slog.Info("Slack mention reported an alert", "event_uuid", ev.UUID, "incident_uuid", incidentUUID, "linked", linked)
 	return ev.UUID, true
+}
+
+// mentionAckText is the thread reply for a mention that is stored only. It
+// says what happened and how to get an answer, so the person is not left
+// waiting for a run that will not come.
+func mentionAckText(kind string) string {
+	if kind == database.EventKindChange {
+		return "📝 Recorded as a change event. I did not start an investigation. Ask me a question if you want me to look at something."
+	}
+	return "📝 Noted as an info event. I did not start an investigation. Ask me a question if you want me to look at something."
+}
+
+// postMentionAck posts mentionAckText in the mention's thread. Best-effort.
+func (h *SlackHandler) postMentionAck(channelID, threadID, kind string) {
+	if h.client == nil {
+		return
+	}
+	if _, _, err := h.client.PostMessage(channelID,
+		slack.MsgOptionText(mentionAckText(kind), false),
+		slack.MsgOptionTS(threadID)); err != nil {
+		slog.Warn("failed to post mention ack", "channel", channelID, "err", err)
+	}
 }
 
 // firstLineTruncated returns the first non-empty line of s, cut to max runes.

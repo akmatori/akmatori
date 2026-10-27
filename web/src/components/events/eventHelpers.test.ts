@@ -55,6 +55,8 @@ describe('classificationSummary', () => {
       .toBe('Alert by fallback: classification was not available or not confident');
     expect(classificationSummary({ ...base, kind: 'request', classification: 'source' }))
       .toBe('Request by source: no classification needed');
+    expect(classificationSummary({ ...base, kind: 'info', classification: 'reused' }))
+      .toBe('Info: same item as an event classified in the last 24 hours, no new LLM call');
     expect(classificationSummary({ ...base, classification: 'backfill' }))
       .toBe('Alert: recorded before event classification existed');
   });

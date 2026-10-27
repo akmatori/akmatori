@@ -29,7 +29,7 @@ Only `alert` events open or join incidents; everything else never touches the in
 |---|---|---|
 | `webhook` | alert, change, info | `RecordClassified`: one-shot LLM call; resolved items = alert by source |
 | `slack_listener` | alert, change, info | `ExtractAndClassify`: class fields appended to the extraction call (ONE call) |
-| `slack_mention` (new thread), `manual` (POST /api/incidents) | alert, request | `ExtractAndClassify`; alert → `ProcessReportedAlert` |
+| `slack_mention` (new thread), `manual` (POST /api/incidents) | all four | `ExtractAndClassify`; alert → `ProcessReportedAlert`; change/info → stored + thread ack (API: `status: recorded`) |
 | `slack_mention` follow-up in a known thread | request | source, no LLM call |
 | `cron`, `proposal` | request | source, no LLM call |
 
@@ -37,10 +37,11 @@ Only `alert` events open or join incidents; everything else never touches the in
   class below 0.7) gives the fallback class with `classification=fallback`. Webhook/listener fall back
   to `alert` (a dropped real alert is worse than an extra investigation); mentions/API fall back to
   `request` (the behaviour before events)
-- **re-sends fold**: the newest event of the same source + identity (`external_id`, else the
-  title+host fingerprint) inside 24 h with the SAME status takes the earlier row
-  (`repeat_count`, `last_seen_at`) and makes no LLM call. Fallback rows never fold, so the next re-send
-  retries the LLM. A firing→resolved→firing sequence writes a new row for the second fire
+- **every re-send gets its own row** (the Events page shows all of them). A webhook re-send copies
+  the class of the newest `llm`/`source` event with the same source + identity (`external_id`, else
+  the title+host fingerprint) + status from the last 24 h: `classification=reused`, no LLM call.
+  Reused and fallback rows are never a reuse source, so the class is re-checked at least daily and a
+  failed call is retried on the next re-send
 - recording is best-effort: an insert failure is logged and the verdict still drives the path, so
   the alert path works with no events table. The event→alert/incident link is written AFTER the
   link transaction commits (a failed statement would abort a PostgreSQL transaction)

@@ -83,11 +83,6 @@ export default function EventRow({
           <span className="flex flex-wrap gap-x-3 pl-5 text-xs text-fg-subtle">
             {item.status && <span className={tone.text}>{eventStatusLabel(item.status)}</span>}
             {item.target_host && <span className="font-mono">{item.target_host}</span>}
-            {!!item.repeat_count && (
-              <span title={item.last_seen_at ? `Last re-sent ${formatAbsolute(item.last_seen_at)}` : undefined}>
-                re-sent {item.repeat_count}×
-              </span>
-            )}
             <span className="md:hidden">{formatClock(item.occurred_at)}</span>
           </span>
         </button>

@@ -701,8 +701,6 @@ export interface EventFeedItem {
   classification_reasoning?: string;
   title: string;
   occurred_at: string;
-  repeat_count?: number;
-  last_seen_at?: string;
   // Alert events: the alert's firing/resolved state. Request events: the
   // run's status. Change and info events: empty.
   status: string;

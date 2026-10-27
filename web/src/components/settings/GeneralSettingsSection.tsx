@@ -138,8 +138,9 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
         <h3 className="text-sm font-semibold text-fg mb-3">Event Classification</h3>
         <p className="text-xs text-fg-subtle mb-3">
           Every inbound event (webhook alert, Slack message or mention, API task) gets one LLM call that
-          sorts it into alert, change, info or request. Only alerts open or join incidents. Changes take
-          effect on the next event without a restart.
+          sorts it into alert, change, info or request. Only alerts open or join incidents. A webhook alert
+          sent again within 24 hours reuses its class with no new call. Changes take effect on the next
+          event without a restart.
         </p>
 
         <div className="flex items-center gap-2 mb-4">

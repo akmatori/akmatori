@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -249,5 +250,41 @@ func TestClassifyManualTask_NoIntakeWired(t *testing.T) {
 	h := &APIHandler{}
 	if eventUUID, _, handled := h.classifyManualTask(context.Background(), "x"); handled || eventUUID != "" {
 		t.Fatalf("want no-op without intake, got %q %v", eventUUID, handled)
+	}
+}
+
+func TestHandleIncidentsPost_ChangeIsRecordedOnly(t *testing.T) {
+	db := setupEventsHandlerDB(t)
+	caller := &corrOneShotLLMCaller{respond: func(context.Context) (string, error) {
+		return `{"alert_name":"nginx 1.27 on wa2","target_host":"wa2","event_kind":"change","event_confidence":0.93,"event_reasoning":"deploy notice"}`, nil
+	}}
+	svc := &eventsSkillService{corrGateSkillService: &corrGateSkillService{}}
+	reported := &fakeReportedProcessor{}
+	h := &APIHandler{skillService: svc}
+	h.SetEventIntake(services.NewEventService(db, caller), extraction.NewAlertExtractor(caller), reported)
+
+	body, _ := json.Marshal(api.CreateIncidentRequest{Task: "deployed nginx 1.27 to wa2"})
+	rec := httptest.NewRecorder()
+	h.handleIncidents(rec, httptest.NewRequest(http.MethodPost, "/api/incidents", bytes.NewReader(body)))
+
+	var resp api.CreateIncidentResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if rec.Code != http.StatusCreated || resp.Status != "recorded" || resp.EventKind != database.EventKindChange || resp.UUID != "" || resp.EventUUID == "" {
+		t.Fatalf("status=%d resp=%+v, want a recorded change event", rec.Code, resp)
+	}
+	if svc.getSpawnCount() != 0 || len(reported.got) != 0 {
+		t.Fatalf("a change must start nothing: spawns=%d reported=%d", svc.getSpawnCount(), len(reported.got))
+	}
+	var ev database.Event
+	db.First(&ev, "uuid = ?", resp.EventUUID)
+	if ev.Kind != database.EventKindChange || ev.Host != "wa2" {
+		t.Fatalf("event = %+v", ev)
+	}
+}
+
+func TestMentionAckText(t *testing.T) {
+	if !strings.Contains(mentionAckText(database.EventKindChange), "change event") ||
+		!strings.Contains(mentionAckText(database.EventKindInfo), "info event") {
+		t.Fatal("ack text must name the class")
 	}
 }
