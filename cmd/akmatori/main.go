@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/akmatori/akmatori/internal/alerts/adapters"
+	"github.com/akmatori/akmatori/internal/alerts/extraction"
 	"github.com/akmatori/akmatori/internal/config"
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
@@ -254,6 +255,13 @@ func main() {
 	alertHandler.SetAlertCorrelator(alertCorrelator)
 	slog.Info("alert correlator ready (live config)")
 
+	// Event store: every inbound item (webhook items, Slack messages and
+	// mentions, API tasks, cron ticks, proposal chat) is stored and classified
+	// as alert, change, info or request. Only alerts reach the correlation
+	// gate above.
+	eventService := services.NewEventService(database.GetDB(), agentWSHandler)
+	alertHandler.SetEventService(eventService)
+
 	// Post-investigation merger: after an alert incident completes, compares
 	// its diagnosed root cause against recent investigated incidents and
 	// merges on a confident match. Flag-gated (IncidentMergeEnabled), config
@@ -276,6 +284,7 @@ func main() {
 
 		// Wire up alert channel support
 		handler.SetAlertHandler(alertHandler)
+		handler.SetEventService(eventService)
 		handler.SetAlertService(alertService)
 		// ChannelService is the source of truth for listener channels after
 		// Task 6 of the unified-channels plan; LoadListenerChannels reads
@@ -335,6 +344,7 @@ func main() {
 	mcpServerService := services.NewMCPServerService()
 	apiHandler := handlers.NewAPIHandler(skillService, toolService, contextService, alertService, agentExecutor, agentWSHandler, slackManager, runbookService, memoryService, httpConnectorService, mcpServerService)
 	apiHandler.SetResponseFormatter(responseFormatter)
+	apiHandler.SetEventIntake(eventService, extraction.NewAlertExtractor(agentWSHandler), alertHandler)
 	// Wire the Integrations + Channels CRUD surface. /api/settings/slack is
 	// retired (returns 410 Gone) — operators configure Slack via
 	// /api/integrations and /api/channels.
@@ -348,6 +358,7 @@ func main() {
 	// WebSocket as alert/Slack flows.
 	cronRunner := services.NewCronRunner(channelService, providerRegistry, skillService, agentWSHandler)
 	cronRunner.SetResponseFormatter(responseFormatter)
+	cronRunner.SetEventService(eventService)
 	apiHandler.SetCronJobManager(cronRunner)
 
 	// Self-improvement proposals: apply-on-approve goes through the same

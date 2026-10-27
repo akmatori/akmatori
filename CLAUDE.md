@@ -39,7 +39,8 @@ web/                        React frontend
 
 Backend flow:
 
-1. Adapters or Slack create/continue incidents.
+1. Every inbound item is stored as an event and classified (alert/change/info/request); only
+   alerts reach the correlation gate and open or join incidents.
 2. Handlers call services through interfaces from `internal/services/interfaces.go`.
 3. Agent runs happen through the worker WebSocket.
 4. Tool execution goes through MCP Gateway with incident-scoped auth.
@@ -50,7 +51,7 @@ Entry points: `internal/handlers/agent_ws.go` (worker transport and message type
 dependencies), `internal/services/incident_service.go` (agent spawning, AGENTS.md, root-skill prompts).
 
 Detailed subsystem rules live in `.claude/rules/` and load automatically when you touch the matching
-files: `alerts-correlation-and-monitor`, `cron-and-root-skills`, `formatting-rules`,
+files: `alerts-correlation-and-monitor`, `cron-and-root-skills`, `events`, `formatting-rules`,
 `memory-and-runbooks`, `messaging-channels-slack`, `mcp-gateway-tools`, `oneshot-llm`, `proposals`,
 `agent-worker-pi-sdk`.
 

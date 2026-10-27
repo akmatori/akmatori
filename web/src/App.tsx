@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -14,9 +14,16 @@ import ContextFiles from './pages/ContextFiles';
 import Runbooks from './pages/Runbooks';
 import Settings from './pages/Settings';
 import CronJobsPage from './pages/CronJobsPage';
-import Feed from './pages/Feed';
+import Events from './pages/Events';
 import Proposals from './pages/Proposals';
 import ProposalDetail from './pages/ProposalDetail';
+
+// FeedRedirect keeps old /feed links (and their ?search= / ?event= query)
+// working after the page moved to /events.
+function FeedRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={{ pathname: '/events', search }} replace />;
+}
 
 function App() {
   return (
@@ -35,7 +42,8 @@ function App() {
                     <Routes>
                       <Route path="/" element={<Dashboard />} />
                       <Route path="/incidents/:uuid?" element={<Incidents />} />
-                      <Route path="/feed" element={<Feed />} />
+                      <Route path="/events" element={<Events />} />
+                      <Route path="/feed" element={<FeedRedirect />} />
                       <Route path="/proposals/:uuid" element={<ProposalDetail />} />
                       <Route path="/proposals" element={<Proposals />} />
                       <Route path="/skills" element={<Skills />} />

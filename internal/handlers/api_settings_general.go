@@ -17,6 +17,10 @@ const defaultAlertMonitorWindowMinutes = 60
 // prompt would make each alert slower and costlier.
 const maxAlertCorrelationPromptBytes = 8000
 
+// maxEventClassificationPromptBytes caps the event classification rules text,
+// which rides every classification call.
+const maxEventClassificationPromptBytes = 8000
+
 // Bounds for incident_auto_close_minutes. The floor is one hour: anything
 // shorter would race normal investigation turnaround and close incidents under
 // an operator. The ceiling is 90 days, past which the setting is effectively
@@ -45,6 +49,15 @@ func applyGeneralSettingsDefaults(s *database.GeneralSettings) {
 		s.AlertCorrelationPrompt = &v
 	}
 	s.AlertCorrelationPromptDefault = services.DefaultCorrelationRules
+	if s.EventClassificationEnabled == nil {
+		v := true
+		s.EventClassificationEnabled = &v
+	}
+	if s.EventClassificationPrompt == nil {
+		v := ""
+		s.EventClassificationPrompt = &v
+	}
+	s.EventClassificationPromptDefault = services.DefaultEventClassificationRules
 	if s.IncidentMergeEnabled == nil {
 		v := false
 		s.IncidentMergeEnabled = &v
@@ -119,6 +132,22 @@ func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Reques
 				settings.AlertCorrelationPrompt = nil
 			} else {
 				settings.AlertCorrelationPrompt = &prompt
+			}
+		}
+		if req.EventClassificationEnabled != nil {
+			settings.EventClassificationEnabled = req.EventClassificationEnabled
+		}
+		if req.EventClassificationPrompt != nil {
+			prompt := strings.TrimSpace(*req.EventClassificationPrompt)
+			if len(prompt) > maxEventClassificationPromptBytes {
+				api.RespondError(w, http.StatusBadRequest,
+					fmt.Sprintf("event_classification_prompt must be at most %d bytes", maxEventClassificationPromptBytes))
+				return
+			}
+			if prompt == "" || prompt == strings.TrimSpace(services.DefaultEventClassificationRules) {
+				settings.EventClassificationPrompt = nil
+			} else {
+				settings.EventClassificationPrompt = &prompt
 			}
 		}
 		if req.IncidentMergeEnabled != nil {

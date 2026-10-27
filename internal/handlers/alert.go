@@ -12,6 +12,7 @@ import (
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/config"
+	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/services"
 	slackutil "github.com/akmatori/akmatori/internal/slack"
@@ -49,6 +50,7 @@ type AlertHandler struct {
 	channelService    services.ChannelManager
 	providerRegistry  services.ProviderRegistry
 	alertCorrelator   *services.AlertCorrelator
+	eventService      *services.EventService
 
 	// spawnGroup deduplicates concurrent alerts with the same
 	// (sourceUUID, alertName, targetHost) key so only one incident is created.
@@ -124,6 +126,13 @@ func (h *AlertHandler) SetProviderRegistry(r services.ProviderRegistry) {
 // a new investigation. Optional — when nil the handler spawns unconditionally.
 func (h *AlertHandler) SetAlertCorrelator(c *services.AlertCorrelator) {
 	h.alertCorrelator = c
+}
+
+// SetEventService wires the EventService that stores every inbound item and
+// classifies it. Optional — when nil every item is treated as an alert, as
+// before the events table existed.
+func (h *AlertHandler) SetEventService(s *services.EventService) {
+	h.eventService = s
 }
 
 // correlate delegates to the wired AlertCorrelator when present; otherwise
@@ -224,13 +233,45 @@ func (h *AlertHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("received alerts", "count", len(normalizedAlerts), "source_type", instance.AlertSourceType.Name, "instance", instance.Name)
 
-	// Process each alert
+	// Record, classify and process each item
 	for _, normalizedAlert := range normalizedAlerts {
-		go h.processAlert(instance, normalizedAlert)
+		go h.ingestWebhookItem(instance, normalizedAlert)
 	}
 
 	w.WriteHeader(http.StatusOK)
 	if _, err := fmt.Fprintf(w, "Received %d alerts", len(normalizedAlerts)); err != nil {
 		slog.Warn("failed to write webhook response", "err", err)
 	}
+}
+
+// ingestWebhookItem stores one webhook item as an event and classifies it.
+// Only class alert continues to the alert path (correlation gate, incident);
+// change and info events are stored for the feed and the agent's events tool.
+func (h *AlertHandler) ingestWebhookItem(instance *database.AlertSourceInstance, normalized alerts.NormalizedAlert) {
+	if h.eventService != nil {
+		ev := h.eventService.RecordClassified(context.Background(), services.EventInput{
+			SourceKind:  database.EventSourceWebhook,
+			SourceUUID:  instance.UUID,
+			SourceType:  instance.AlertSourceType.Name,
+			ExternalID:  normalized.SourceFingerprint,
+			Title:       normalized.AlertName,
+			Summary:     normalized.Summary,
+			Description: normalized.Description,
+			Host:        normalized.TargetHost,
+			Service:     normalized.TargetService,
+			Severity:    string(normalized.Severity),
+			Status:      string(normalized.Status),
+			Labels:      normalized.TargetLabels,
+			RawPayload:  normalized.RawPayload,
+			OccurredAt:  normalized.StartedAt,
+		})
+		normalized.EventUUID = ev.UUID
+		if ev.Kind != database.EventKindAlert {
+			slog.Info("webhook item is not an alert; stored as event, no investigation",
+				"alert_name", normalized.AlertName, "kind", ev.Kind,
+				"classification", ev.Classification, "event_uuid", ev.UUID)
+			return
+		}
+	}
+	h.processAlert(instance, normalized)
 }

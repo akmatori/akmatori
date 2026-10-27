@@ -8,12 +8,12 @@ import MoveIncidentModal from '../components/MoveIncidentModal';
 import EmptyState from '../components/shared/EmptyState';
 import Pagination from '../components/shared/Pagination';
 import SegmentedControl from '../components/shared/SegmentedControl';
-import { bucketSize, groupEvents } from '../components/feed/feedHelpers';
-import FeedEventRow from '../components/feed/FeedEventRow';
-import type { RawState } from '../components/feed/RawEventContent';
-import type { ResponseState } from '../components/feed/IncidentResponseContent';
+import { bucketSize, groupEvents } from '../components/events/eventHelpers';
+import EventRow from '../components/events/EventRow';
+import type { RawState } from '../components/events/RawEventContent';
+import type { ResponseState } from '../components/events/IncidentResponseContent';
 import { eventsApi } from '../api/client';
-import type { EventFeedItem } from '../types';
+import type { EventFeedItem, EventKind } from '../types';
 import { useInterval } from '../hooks/useInterval';
 import { useLatestRef } from '../hooks/useLatestRef';
 import { getErrorMessage } from '../utils/errors';
@@ -23,14 +23,14 @@ const DEFAULT_REFRESH_INTERVAL = 60000;
 const PER_PAGE = 50;
 const SEARCH_DEBOUNCE_MS = 400;
 
-type TypeFilter = 'all' | 'alert' | 'cron' | 'slack_mention' | 'manual';
+type KindFilter = 'all' | EventKind;
 
-const TYPE_FILTER_OPTIONS: { label: string; value: TypeFilter }[] = [
-  { label: 'All', value: 'all' },
-  { label: 'Alert', value: 'alert' },
-  { label: 'Cron', value: 'cron' },
-  { label: 'Slack', value: 'slack_mention' },
-  { label: 'Manual', value: 'manual' },
+const KIND_FILTER_OPTIONS: { label: string; value: KindFilter; title: string }[] = [
+  { label: 'All', value: 'all', title: 'Every inbound event' },
+  { label: 'Alerts', value: 'alert', title: 'Events that report a problem; only these open or join incidents' },
+  { label: 'Changes', value: 'change', title: 'Deploys, config changes, maintenance' },
+  { label: 'Info', value: 'info', title: 'Stored only; no action needed' },
+  { label: 'Requests', value: 'request', title: 'Work asked of the agent: questions, cron runs, proposal chat' },
 ];
 
 // toggleInSet returns a copy of `set` with `key` added or removed.
@@ -50,13 +50,13 @@ function withoutKey(set: Set<string>, key: string): Set<string> {
   return next;
 }
 
-export default function Feed() {
+export default function Events() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<EventFeedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [kindFilter, setKindFilter] = useState<KindFilter>('all');
   // Correlation-reasoning expansion, keyed by event UUID.
   const [reasoningExpanded, setReasoningExpanded] = useState<Set<string>>(new Set());
   // Raw-message expansion + per-event fetch cache.
@@ -86,12 +86,12 @@ export default function Feed() {
   const [relativeRange, setRelativeRange] = useState<number | null>(DEFAULT_TIME_RANGE);
   const [refreshInterval, setRefreshInterval] = useState(DEFAULT_REFRESH_INTERVAL);
 
-  const loadFeed = useCallback(async (
+  const loadEvents = useCallback(async (
     from?: number,
     to?: number,
     isRefresh?: boolean,
     pageOverride?: number,
-    typeOverride?: TypeFilter,
+    kindOverride?: KindFilter,
     searchOverride?: string,
   ) => {
     try {
@@ -109,7 +109,7 @@ export default function Feed() {
         effectiveTo = to ?? timeTo;
       }
 
-      const effectiveType = typeOverride ?? typeFilter;
+      const effectiveKind = kindOverride ?? kindFilter;
       const effectiveSearch = (searchOverride ?? activeSearch).trim();
       const currentPage = pageOverride ?? page;
       const result = await eventsApi.list({
@@ -117,7 +117,7 @@ export default function Feed() {
         to: effectiveTo,
         page: currentPage,
         perPage: PER_PAGE,
-        type: effectiveType === 'all' ? undefined : effectiveType,
+        kind: effectiveKind === 'all' ? undefined : effectiveKind,
         search: effectiveSearch || undefined,
       });
       setItems(result.data);
@@ -129,38 +129,38 @@ export default function Feed() {
         setTimeTo(effectiveTo!);
       }
     } catch (err) {
-      setError(getErrorMessage(err, 'Failed to load feed'));
+      setError(getErrorMessage(err, 'Failed to load events'));
     } finally {
       setLoading(false);
     }
-  }, [timeFrom, timeTo, relativeRange, page, typeFilter, activeSearch]);
+  }, [timeFrom, timeTo, relativeRange, page, kindFilter, activeSearch]);
 
   // Initial load (read through a ref so the effect runs exactly once)
-  const loadFeedRef = useLatestRef(loadFeed);
+  const loadEventsRef = useLatestRef(loadEvents);
   useEffect(() => {
-    void loadFeedRef.current();
-  }, [loadFeedRef]);
+    void loadEventsRef.current();
+  }, [loadEventsRef]);
 
-  useInterval(() => { void loadFeed(undefined, undefined, true); }, refreshInterval);
+  useInterval(() => { void loadEvents(undefined, undefined, true); }, refreshInterval);
 
   const handleTimeRangeChange = useCallback((from: number, to: number, relativeDuration?: number | null) => {
     setTimeFrom(from);
     setTimeTo(to);
     setPage(1);
     setRelativeRange(relativeDuration ?? null);
-    loadFeed(from, to, false, 1);
-  }, [loadFeed]);
+    loadEvents(from, to, false, 1);
+  }, [loadEvents]);
 
   const handlePageChange = useCallback((newPage: number) => {
     setPage(newPage);
-    loadFeed(undefined, undefined, false, newPage);
-  }, [loadFeed]);
+    loadEvents(undefined, undefined, false, newPage);
+  }, [loadEvents]);
 
-  const handleTypeFilter = useCallback((t: TypeFilter) => {
-    setTypeFilter(t);
+  const handleKindFilter = useCallback((k: KindFilter) => {
+    setKindFilter(k);
     setPage(1);
-    loadFeed(undefined, undefined, false, 1, t);
-  }, [loadFeed]);
+    loadEvents(undefined, undefined, false, 1, k);
+  }, [loadEvents]);
 
   const toggleReasoning = useCallback((uuid: string) => {
     setReasoningExpanded(prev => toggleInSet(prev, uuid));
@@ -171,7 +171,7 @@ export default function Feed() {
     const uuid = item.event_uuid;
     setRawData(prevData => {
       if (prevData[uuid] && !prevData[uuid].error) return prevData;
-      eventsApi.raw(item.event_type, uuid)
+      eventsApi.raw(uuid)
         .then(res => setRawData(d => ({ ...d, [uuid]: { loading: false, raw: res.raw, original_message: res.original_message } })))
         .catch(err => setRawData(d => ({ ...d, [uuid]: { loading: false, error: getErrorMessage(err, 'Failed to load raw message') } })));
       return { ...prevData, [uuid]: { loading: true } };
@@ -188,7 +188,7 @@ export default function Feed() {
   }, [fetchRaw]);
 
   // toggleRowDetails is the whole-row click target: it opens (or closes) the
-  // raw message and the correlation reasoning together.
+  // raw message, the class and the correlation reasoning together.
   const toggleRowDetails = useCallback((item: EventFeedItem) => {
     const uuid = item.event_uuid;
     const isOpen = rawExpanded.has(uuid) || reasoningExpanded.has(uuid);
@@ -235,8 +235,8 @@ export default function Feed() {
       next.delete('event');
       return next;
     }, { replace: true });
-    loadFeed(undefined, undefined, false, 1, undefined, trimmed);
-  }, [loadFeed, setSearchParams]);
+    loadEvents(undefined, undefined, false, 1, undefined, trimmed);
+  }, [loadEvents, setSearchParams]);
 
   const handleSearchInput = useCallback((value: string) => {
     setSearch(value);
@@ -244,7 +244,7 @@ export default function Feed() {
     searchDebounceRef.current = window.setTimeout(() => applySearch(value), SEARCH_DEBOUNCE_MS);
   }, [applySearch]);
 
-  // Clicking an event's ID chip filters the feed down to that event.
+  // Clicking an event's ID chip filters the list down to that event.
   const filterByEventId = useCallback((uuid: string) => {
     setSearch(uuid);
     if (searchDebounceRef.current) window.clearTimeout(searchDebounceRef.current);
@@ -263,8 +263,8 @@ export default function Feed() {
       : `Alert linked to incident ${result.incidentUUID.slice(0, 8)}…`);
     setTimeout(() => setSuccessMsg(null), 6000);
     setPage(1);
-    loadFeed(undefined, undefined, false, 1);
-  }, [loadFeed]);
+    loadEvents(undefined, undefined, false, 1);
+  }, [loadEvents]);
 
   const groups = useMemo(
     () => groupEvents(items, bucketSize(timeTo - timeFrom)),
@@ -296,7 +296,7 @@ export default function Feed() {
             </button>
           )}
         </label>
-        <SegmentedControl value={typeFilter} options={TYPE_FILTER_OPTIONS} onChange={handleTypeFilter} />
+        <SegmentedControl value={kindFilter} options={KIND_FILTER_OPTIONS} onChange={handleKindFilter} />
         <TimeRangePicker
           from={timeFrom}
           to={timeTo}
@@ -307,7 +307,7 @@ export default function Feed() {
         <span className="flex-1" />
         <button
           type="button"
-          onClick={() => loadFeed()}
+          onClick={() => loadEvents()}
           disabled={loading}
           className="btn btn-ghost h-9 w-9 p-0 inline-flex items-center justify-center"
           title="Refresh"
@@ -326,7 +326,7 @@ export default function Feed() {
         <EmptyState
           icon={Rss}
           title="No events in this time range"
-          description="Choose a longer time range or another event type."
+          description="Choose a longer time range or another event class."
         />
       ) : (
         <div className="flex flex-col gap-5">
@@ -340,7 +340,7 @@ export default function Feed() {
               </h2>
               <ul className="rounded-xl border border-line bg-surface overflow-hidden">
                 {group.items.map((item) => (
-                  <FeedEventRow
+                  <EventRow
                     key={item.event_uuid}
                     item={item}
                     reasoningExpanded={reasoningExpanded.has(item.event_uuid)}
@@ -368,9 +368,9 @@ export default function Feed() {
         </div>
       )}
 
-      {moveTarget && (
+      {moveTarget?.alert_uuid && (
         <MoveIncidentModal
-          alertUUID={moveTarget.event_uuid}
+          alertUUID={moveTarget.alert_uuid}
           alertTitle={moveTarget.title}
           currentIncidentUUID={moveTarget.incident_uuid}
           onClose={() => setMoveTarget(null)}

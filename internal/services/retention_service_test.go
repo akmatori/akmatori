@@ -22,6 +22,7 @@ func setupRetentionTestDB(t *testing.T) *gorm.DB {
 	err = db.AutoMigrate(
 		&database.Incident{},
 		&database.Alert{},
+		&database.Event{},
 		&database.RetentionSettings{},
 	)
 	if err != nil {
@@ -31,6 +32,7 @@ func setupRetentionTestDB(t *testing.T) *gorm.DB {
 	// Clean tables to prevent data leaking between tests
 	db.Exec("DELETE FROM incidents")
 	db.Exec("DELETE FROM alerts")
+	db.Exec("DELETE FROM events")
 	db.Exec("DELETE FROM retention_settings")
 
 	origDB := database.DB
@@ -629,5 +631,41 @@ func TestRunCleanup_FilesInDataDirIgnored(t *testing.T) {
 	// File should still exist
 	if _, err := os.Stat(filepath.Join(dataDir, "some-file.txt")); err != nil {
 		t.Error("expected file to still exist")
+	}
+}
+
+func TestRunCleanup_ExpiredEvents(t *testing.T) {
+	db := setupRetentionTestDB(t)
+	dataDir := t.TempDir()
+	db.Create(&database.RetentionSettings{Enabled: true, RetentionDays: 30, CleanupIntervalHours: 6})
+
+	// A recent incident keeps its old events; an expired incident's events go
+	// with it; old events with no incident go; recent events stay.
+	createExpiredIncident(t, db, "kept-incident", dataDir, 10)
+	createExpiredIncident(t, db, "gone-incident", dataDir, 60)
+	old := time.Now().AddDate(0, 0, -60)
+	recent := time.Now().AddDate(0, 0, -1)
+	for _, e := range []database.Event{
+		{UUID: "ev-old-kept", Kind: "alert", Classification: "llm", SourceKind: "webhook", ReceivedAt: old, IncidentUUID: "kept-incident"},
+		{UUID: "ev-old-gone-incident", Kind: "alert", Classification: "llm", SourceKind: "webhook", ReceivedAt: old, IncidentUUID: "gone-incident"},
+		{UUID: "ev-old-change", Kind: "change", Classification: "llm", SourceKind: "webhook", ReceivedAt: old},
+		{UUID: "ev-recent-change", Kind: "change", Classification: "llm", SourceKind: "webhook", ReceivedAt: recent},
+	} {
+		if err := db.Create(&e).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := NewRetentionService(dataDir, db).RunCleanup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExpiredEventsDeleted != 2 {
+		t.Errorf("events deleted = %d, want 2", result.ExpiredEventsDeleted)
+	}
+	var left []string
+	db.Model(&database.Event{}).Order("uuid").Pluck("uuid", &left)
+	if len(left) != 2 || left[0] != "ev-old-kept" || left[1] != "ev-recent-change" {
+		t.Errorf("events left = %v, want [ev-old-kept ev-recent-change]", left)
 	}
 }

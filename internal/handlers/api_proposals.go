@@ -249,6 +249,19 @@ func (h *APIHandler) handleProposalChatPost(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Every operator message is a request event by source (no LLM call).
+	var eventUUID string
+	if h.eventService != nil {
+		eventUUID = h.eventService.Record(r.Context(), services.EventInput{
+			SourceKind:   database.EventSourceProposal,
+			SourceUUID:   p.UUID,
+			SourceType:   "proposal",
+			Title:        fmt.Sprintf("Proposal chat: %s", p.Title),
+			Summary:      message,
+			IncidentUUID: p.ChatIncidentUUID,
+		}, services.SourceEventVerdict(database.EventKindRequest)).UUID
+	}
+
 	// First turn: spawn the backing incident for this proposal's chat.
 	chatIncidentUUID := p.ChatIncidentUUID
 	if chatIncidentUUID == "" {
@@ -262,7 +275,8 @@ func (h *APIHandler) handleProposalChatPost(w http.ResponseWriter, r *http.Reque
 				"proposal_kind":  p.Kind,
 				"proposal_title": p.Title,
 			},
-			Message: fmt.Sprintf("Proposal chat: %s", p.Title),
+			Message:   fmt.Sprintf("Proposal chat: %s", p.Title),
+			EventUUID: eventUUID,
 		}
 		var err error
 		chatIncidentUUID, _, err = h.skillService.SpawnAgentInvocation("proposal-editor", incidentCtx)

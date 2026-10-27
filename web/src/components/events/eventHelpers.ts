@@ -93,3 +93,31 @@ export function eventStatusLabel(status: string): string {
     default: return status;
   }
 }
+
+const KIND_LABELS: Record<string, string> = {
+  alert: 'Alert',
+  change: 'Change',
+  info: 'Info',
+  request: 'Request',
+};
+
+// classificationSummary is the one-line "how did this event get its class"
+// text in the row details.
+export function classificationSummary(item: EventFeedItem): string {
+  const kind = KIND_LABELS[item.kind] ?? item.kind;
+  const pct = item.classification_confidence !== undefined
+    ? ` (${Math.round(item.classification_confidence * 100)}%)`
+    : '';
+  switch (item.classification) {
+    case 'llm':
+      return `Classified as ${kind} by the LLM${pct}`;
+    case 'fallback':
+      return `${kind} by fallback: classification was not available or not confident${pct}`;
+    case 'source':
+      return `${kind} by source: no classification needed`;
+    case 'backfill':
+      return `${kind}: recorded before event classification existed`;
+    default:
+      return kind;
+  }
+}

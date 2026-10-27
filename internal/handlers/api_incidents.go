@@ -182,6 +182,29 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Classify the task first: a report of a problem goes to the
+		// correlation gate as a reported alert (only alerts open incidents);
+		// anything else is a request and starts an agent run as before.
+		eventUUID, reported, handled := h.classifyManualTask(r.Context(), req.Task)
+		if handled {
+			if reported.err != nil {
+				api.RespondError(w, http.StatusInternalServerError, "Failed to open incident for reported alert")
+				return
+			}
+			status, msg := "pending", "Reported alert opened a new incident"
+			if reported.linked {
+				status, msg = "linked", "Reported alert linked to an open incident"
+			}
+			api.RespondJSON(w, http.StatusCreated, api.CreateIncidentResponse{
+				UUID:      reported.incidentUUID,
+				Status:    status,
+				Message:   msg,
+				EventUUID: eventUUID,
+				EventKind: database.EventKindAlert,
+			})
+			return
+		}
+
 		incidentContext := &services.IncidentContext{
 			Source:     "api",
 			SourceKind: database.IncidentSourceKindManual,
@@ -190,7 +213,8 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 				"task":       req.Task,
 				"created_by": "api",
 			},
-			Message: req.Task,
+			Message:   req.Task,
+			EventUUID: eventUUID,
 		}
 
 		if req.Context != nil {
@@ -215,6 +239,8 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 			Status:     "pending",
 			WorkingDir: workingDir,
 			Message:    "Incident created and processing started",
+			EventUUID:  eventUUID,
+			EventKind:  eventKindIfRecorded(eventUUID, database.EventKindRequest),
 		})
 
 	default:
@@ -645,4 +671,76 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+// reportedResult is the outcome of a manual task that classified as an alert.
+type reportedResult struct {
+	incidentUUID string
+	linked       bool
+	err          error
+}
+
+// classifyManualTask stores an API task as an event and classifies it.
+// handled is true when the task reported a problem and went through the
+// correlation gate. With no event intake wired it returns ("", _, false).
+func (h *APIHandler) classifyManualTask(ctx context.Context, task string) (eventUUID string, res reportedResult, handled bool) {
+	if h.eventService == nil || h.alertExtractor == nil {
+		return "", res, false
+	}
+	// Gate off: every API task is a request, with no extraction call.
+	if !services.LoadEventClassificationConfig().Enabled {
+		ev := h.eventService.Record(ctx, services.EventInput{
+			SourceKind: database.EventSourceManual,
+			SourceUUID: manualEventSource,
+			SourceType: "api",
+			Title:      firstLineTruncated(task, mentionEventTitleMax),
+			Summary:    task,
+		}, services.ClassificationOffVerdict(database.EventKindRequest))
+		return ev.UUID, res, false
+	}
+	allowed := []string{database.EventKindRequest}
+	if h.reportedAlerts != nil {
+		allowed = append(allowed, database.EventKindAlert)
+	}
+	normalized, verdict := h.alertExtractor.ExtractAndClassify(ctx, task, "", allowed, database.EventKindRequest)
+	ev := h.eventService.Record(ctx, services.EventInput{
+		SourceKind:  database.EventSourceManual,
+		SourceUUID:  manualEventSource,
+		SourceType:  "api",
+		Title:       normalized.AlertName,
+		Summary:     task,
+		Description: normalized.Description,
+		Host:        normalized.TargetHost,
+		Service:     normalized.TargetService,
+		Severity:    string(normalized.Severity),
+		Labels:      normalized.TargetLabels,
+	}, verdict)
+	if ev.Kind != database.EventKindAlert {
+		return ev.UUID, res, false
+	}
+
+	normalized.SourceFingerprint = "api:" + ev.UUID
+	normalized.EventUUID = ev.UUID
+	res.incidentUUID, res.linked, res.err = h.reportedAlerts.ProcessReportedAlert(ReportedAlert{
+		SourceUUID:    manualEventSource,
+		SourceLabel:   "api",
+		SourceDisplay: "API-reported",
+		SourceName:    "API",
+		Alert:         *normalized,
+	})
+	if res.err != nil {
+		slog.Error("reported alert from API task failed", "event_uuid", ev.UUID, "err", res.err)
+	}
+	return ev.UUID, res, true
+}
+
+// manualEventSource is the source key of events and alerts from the API.
+const manualEventSource = "manual"
+
+// eventKindIfRecorded returns kind when an event row was recorded.
+func eventKindIfRecorded(eventUUID, kind string) string {
+	if eventUUID == "" {
+		return ""
+	}
+	return kind
 }

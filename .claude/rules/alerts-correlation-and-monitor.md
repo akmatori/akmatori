@@ -14,7 +14,9 @@ paths:
 
 # Alert correlation gate
 
-Before spawning a new incident, `AlertHandler` runs `AlertCorrelator.Correlate`, which tries a
+Only `alert` events reach this gate (see the `events` rule): webhook items and listener messages
+classified as alert, and alerts that people report through a Slack mention or the API
+(`ProcessReportedAlert`, same gate, same singleflight). Before spawning a new incident, `AlertHandler` runs `AlertCorrelator.Correlate`, which tries a
 deterministic fingerprint match first and falls back to asking the LLM whether the incoming alert
 belongs to a recent open or monitor-mode incident. On a confident match, `LinkAlertToIncident` is
 called instead of `SpawnIncidentManager`.

@@ -626,6 +626,11 @@ export interface GeneralSettings {
   // alert_correlation_prompt_default so the form can show and restore them.
   alert_correlation_prompt: string;
   alert_correlation_prompt_default: string;
+  // Event classification gate (default ON) and rules; same "" = default
+  // convention as the correlation rules.
+  event_classification_enabled: boolean;
+  event_classification_prompt: string;
+  event_classification_prompt_default: string;
   incident_merge_enabled: boolean;
   // Stale-close sweep. Defaults ON, unlike the correlation and merge gates.
   incident_auto_close_enabled: boolean;
@@ -638,6 +643,9 @@ export interface GeneralSettingsUpdate {
   alert_monitor_window_minutes?: number;
   // "" or the default text restores the built-in rules.
   alert_correlation_prompt?: string;
+  event_classification_enabled?: boolean;
+  // "" or the default text restores the built-in rules.
+  event_classification_prompt?: string;
   incident_merge_enabled?: boolean;
   incident_auto_close_enabled?: boolean;
   incident_auto_close_minutes?: number;
@@ -678,20 +686,33 @@ export interface SSHHostConfig {
   allow_write_commands?: boolean;
 }
 
-// Events feed
+// Events feed: one inbound item (webhook alert item, Slack message or
+// mention, API task, cron tick, proposal chat) with its class.
+export type EventKind = 'alert' | 'change' | 'info' | 'request';
+
 export interface EventFeedItem {
-  event_type: string;
   event_uuid: string;
+  kind: EventKind;
+  source_kind: string;
+  source_type?: string;
+  source_uuid?: string;
+  classification: string;
+  classification_confidence?: number;
+  classification_reasoning?: string;
   title: string;
   occurred_at: string;
+  repeat_count?: number;
+  last_seen_at?: string;
+  // Alert events: the alert's firing/resolved state. Request events: the
+  // run's status. Change and info events: empty.
   status: string;
-  incident_uuid: string;
+  target_host?: string;
+  alert_uuid?: string;
+  incident_uuid?: string;
   correlated: boolean;
   correlation_confidence?: number;
   correlation_reasoning?: string;
   correlation_decision?: string;
-  target_host?: string;
-  source_uuid?: string;
   incident_title?: string;
   incident_status?: string;
 }

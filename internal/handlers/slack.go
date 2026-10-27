@@ -40,6 +40,7 @@ type SlackHandler struct {
 	alertChannels   map[string]*database.Channel
 	alertChannelsMu sync.RWMutex
 	alertExtractor  *extraction.AlertExtractor
+	eventService    *services.EventService
 	alertHandler    *AlertHandler
 	alertService    services.AlertManager
 	channelService  services.ChannelManager
@@ -100,6 +101,12 @@ func NewSlackHandler(
 // SetAlertHandler sets the alert handler for processing Slack channel alerts
 func (h *SlackHandler) SetAlertHandler(alertHandler *AlertHandler) {
 	h.alertHandler = alertHandler
+}
+
+// SetEventService wires the EventService that stores inbound Slack messages
+// as events. Optional — when nil every listener message is an alert.
+func (h *SlackHandler) SetEventService(s *services.EventService) {
+	h.eventService = s
 }
 
 // SetSlackSummarizer wires the SlackSummarizer used for compressing final

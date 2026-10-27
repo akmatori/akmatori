@@ -17,6 +17,10 @@ type Alert struct {
 	ResolvedAt        *time.Time  `json:"resolved_at,omitempty"`
 	RawPayload        JSONB       `gorm:"type:jsonb" json:"raw_payload"`
 
+	// EventUUID is the events row that created this alert. Empty for rows
+	// created before the events table existed and not yet backfilled.
+	EventUUID string `gorm:"size:36;index" json:"event_uuid,omitempty"`
+
 	// LastSeenAt is the last time the alerting system re-sent this alert while
 	// it was still firing. Sources that keep a stable source_fingerprint across
 	// re-sends (Alertmanager and friends) hit the uniq_firing_alert partial
