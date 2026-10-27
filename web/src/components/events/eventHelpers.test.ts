@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import type { EventFeedItem } from '../../types';
-import { bucketSize, eventTone, groupEvents } from './feedHelpers';
+import { bucketSize, classificationSummary, eventTone, groupEvents } from './eventHelpers';
 
 const at = (iso: string): EventFeedItem => ({
-  event_type: 'alert', event_uuid: iso, title: 't', occurred_at: iso, status: 'firing', incident_uuid: '', correlated: false,
+  event_uuid: iso, kind: 'alert', source_kind: 'webhook', classification: 'llm',
+  title: 't', occurred_at: iso, status: 'firing', correlated: false,
 });
 
 describe('bucketSize', () => {
@@ -42,5 +43,19 @@ describe('eventTone', () => {
     expect(eventTone('resolved')).toBe('ok');
     expect(eventTone('running')).toBe('work');
     expect(eventTone('closed')).toBe('closed');
+  });
+});
+
+describe('classificationSummary', () => {
+  const base = at('2026-10-27T10:00:00Z');
+  it('describes each classification path', () => {
+    expect(classificationSummary({ ...base, kind: 'change', classification: 'llm', classification_confidence: 0.92 }))
+      .toBe('Classified as Change by the LLM (92%)');
+    expect(classificationSummary({ ...base, kind: 'alert', classification: 'fallback' }))
+      .toBe('Alert by fallback: classification was not available or not confident');
+    expect(classificationSummary({ ...base, kind: 'request', classification: 'source' }))
+      .toBe('Request by source: no classification needed');
+    expect(classificationSummary({ ...base, classification: 'backfill' }))
+      .toBe('Alert: recorded before event classification existed');
   });
 });

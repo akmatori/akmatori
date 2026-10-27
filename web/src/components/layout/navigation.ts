@@ -31,7 +31,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { name: 'Overview', href: '/', icon: LayoutDashboard },
       { name: 'Incidents', href: '/incidents', icon: Activity },
-      { name: 'Events', href: '/feed', icon: Rss },
+      { name: 'Events', href: '/events', icon: Rss },
       { name: 'Proposals', href: '/proposals', icon: Lightbulb },
     ],
   },

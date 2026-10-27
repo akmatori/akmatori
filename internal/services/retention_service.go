@@ -33,6 +33,7 @@ func NewRetentionService(dataDir string, db *gorm.DB) *RetentionService {
 type CleanupResult struct {
 	ExpiredIncidentsDeleted int
 	ExpiredAlertsDeleted    int
+	ExpiredEventsDeleted    int
 	ExpiredDirsDeleted      int
 	ExpiredBytesFreed       int64
 	OrphanedDirsDeleted     int
@@ -57,12 +58,17 @@ func (s *RetentionService) RunCleanup() (*CleanupResult, error) {
 	// Phase 1: Delete expired incidents
 	s.cleanupExpiredIncidents(settings.RetentionDays, result)
 
+	// Phase 1b: Delete expired events (after incidents, so events of
+	// incidents deleted above are no longer protected)
+	s.cleanupExpiredEvents(settings.RetentionDays, result)
+
 	// Phase 2: Delete orphaned directories
 	s.cleanupOrphanedDirectories(result)
 
 	logAttrs := []any{
 		"expired_incidents_deleted", result.ExpiredIncidentsDeleted,
 		"expired_alerts_deleted", result.ExpiredAlertsDeleted,
+		"expired_events_deleted", result.ExpiredEventsDeleted,
 		"expired_dirs_deleted", result.ExpiredDirsDeleted,
 		"expired_bytes_freed", result.ExpiredBytesFreed,
 		"orphaned_dirs_deleted", result.OrphanedDirsDeleted,
@@ -133,6 +139,25 @@ func (s *RetentionService) cleanupExpiredIncidents(retentionDays int, result *Cl
 			result.ExpiredAlertsDeleted += int(alertsDeleted)
 		}
 	}
+}
+
+// cleanupExpiredEvents deletes events received before the retention cutoff.
+// An event that still points at an existing incident is kept: the incident's
+// history (which alerts and reports joined it) stays complete for as long as
+// the incident exists.
+func (s *RetentionService) cleanupExpiredEvents(retentionDays int, result *CleanupResult) {
+	if !s.db.Migrator().HasTable(&database.Event{}) {
+		return
+	}
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+	del := s.db.Where("received_at < ?", cutoff).
+		Where("incident_uuid IS NULL OR incident_uuid = '' OR NOT EXISTS (SELECT 1 FROM incidents WHERE incidents.uuid = events.incident_uuid)").
+		Delete(&database.Event{})
+	if del.Error != nil {
+		result.Errors = append(result.Errors, fmt.Errorf("delete expired events: %w", del.Error))
+		return
+	}
+	result.ExpiredEventsDeleted = int(del.RowsAffected)
 }
 
 // removeIncidentDir removes an incident's working directory from disk.

@@ -321,3 +321,54 @@ func TestHandleGeneralSettings_CorrelationPrompt(t *testing.T) {
 		t.Errorf("oversized prompt: expected 400, got %d", code)
 	}
 }
+
+func TestHandleGeneralSettings_EventClassification(t *testing.T) {
+	testhelpers.NewGlobalSQLiteDB(t, &database.GeneralSettings{})
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	call := func(method, body string) (int, map[string]interface{}) {
+		t.Helper()
+		req := httptest.NewRequest(method, "/api/settings/general", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		h.handleGeneralSettings(rec, req)
+		var out map[string]interface{}
+		_ = json.NewDecoder(rec.Body).Decode(&out)
+		return rec.Code, out
+	}
+	load := func() *database.GeneralSettings {
+		t.Helper()
+		s, err := database.GetOrCreateGeneralSettings()
+		if err != nil {
+			t.Fatalf("load settings: %v", err)
+		}
+		return s
+	}
+
+	_, body := call(http.MethodGet, "")
+	if body["event_classification_enabled"] != true || body["event_classification_prompt"] != "" ||
+		body["event_classification_prompt_default"] != services.DefaultEventClassificationRules {
+		t.Fatalf("GET defaults = %v", body)
+	}
+
+	if code, _ := call(http.MethodPut, `{"event_classification_enabled": false, "event_classification_prompt": " Treat Watchdog as info. "}`); code != http.StatusOK {
+		t.Fatalf("PUT: %d", code)
+	}
+	s := load()
+	if s.GetEventClassificationEnabled() || s.EventClassificationPrompt == nil || *s.EventClassificationPrompt != "Treat Watchdog as info." {
+		t.Fatalf("stored = %v / %v", s.EventClassificationEnabled, s.EventClassificationPrompt)
+	}
+
+	asDefault, _ := json.Marshal(map[string]string{"event_classification_prompt": services.DefaultEventClassificationRules})
+	if code, _ := call(http.MethodPut, string(asDefault)); code != http.StatusOK {
+		t.Fatalf("PUT default: %d", code)
+	}
+	if load().EventClassificationPrompt != nil {
+		t.Error("saving the default text should clear the override")
+	}
+
+	tooLong, _ := json.Marshal(map[string]string{"event_classification_prompt": strings.Repeat("x", maxEventClassificationPromptBytes+1)})
+	if code, _ := call(http.MethodPut, string(tooLong)); code != http.StatusBadRequest {
+		t.Errorf("oversized prompt: expected 400, got %d", code)
+	}
+}

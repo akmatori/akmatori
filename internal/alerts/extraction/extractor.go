@@ -44,6 +44,11 @@ type ExtractedAlert struct {
 	TargetHost    string `json:"target_host"`
 	TargetService string `json:"target_service"`
 	SourceSystem  string `json:"source_system"`
+
+	// Event class fields, filled only by ExtractAndClassify.
+	EventKind       string   `json:"event_kind,omitempty"`
+	EventConfidence *float64 `json:"event_confidence,omitempty"`
+	EventReasoning  string   `json:"event_reasoning,omitempty"`
 }
 
 // NewAlertExtractor creates a new alert extractor that routes LLM calls through
@@ -79,6 +84,10 @@ Use null for fields that cannot be determined from the message.
 Message:
 %s`
 
+// classifyExtraTokens is the extra answer budget for the three event-class
+// fields that ExtractAndClassify adds to the extraction JSON.
+const classifyExtraTokens = 150
+
 // Extract extracts alert information from a message using AI
 func (e *AlertExtractor) Extract(ctx context.Context, messageText string) (*alerts.NormalizedAlert, error) {
 	return e.ExtractWithPrompt(ctx, messageText, "")
@@ -86,26 +95,68 @@ func (e *AlertExtractor) Extract(ctx context.Context, messageText string) (*aler
 
 // ExtractWithPrompt extracts alert information using a custom prompt
 func (e *AlertExtractor) ExtractWithPrompt(ctx context.Context, messageText, customPrompt string) (*alerts.NormalizedAlert, error) {
+	alert, _, err := e.extract(ctx, messageText, customPrompt, nil, "")
+	return alert, err
+}
+
+// ExtractAndClassify extracts the alert fields AND classifies the message as
+// an event in ONE LLM call: the classification instructions are appended to
+// the (default or channel-specific) extraction prompt. allowed lists the
+// classes the caller accepts; every failure gives the fallback class.
+func (e *AlertExtractor) ExtractAndClassify(ctx context.Context, messageText, customPrompt string, allowed []string, fallback string) (*alerts.NormalizedAlert, services.EventVerdict) {
+	alert, verdict, _ := e.extract(ctx, messageText, customPrompt, allowed, fallback)
+	return alert, verdict
+}
+
+// extract runs the extraction call. With a nil allowed list it extracts only
+// and the returned verdict is the zero value.
+func (e *AlertExtractor) extract(ctx context.Context, messageText, customPrompt string, allowed []string, fallback string) (*alerts.NormalizedAlert, services.EventVerdict, error) {
+	classify := len(allowed) > 0
+	var rules string
+	// offVerdict is set when the gate is off: extraction still runs (the
+	// listener needs the alert fields) but the class is the fallback.
+	var offVerdict *services.EventVerdict
+	if classify {
+		cfg := services.LoadEventClassificationConfig()
+		if cfg.Enabled {
+			rules = cfg.Rules
+		} else {
+			v := services.ClassificationOffVerdict(fallback)
+			offVerdict = &v
+			classify = false
+		}
+	}
+	fail := func(reason string) (*alerts.NormalizedAlert, services.EventVerdict, error) {
+		var v services.EventVerdict
+		switch {
+		case offVerdict != nil:
+			v = *offVerdict
+		case classify:
+			v = services.FallbackEventVerdict(fallback, reason)
+		}
+		return e.createFallbackAlert(messageText), v, nil
+	}
+
 	if e.caller == nil {
 		slog.Debug("alert extractor has no LLM caller, using fallback")
-		return e.createFallbackAlert(messageText), nil
+		return fail("no LLM caller")
 	}
 
 	settings, err := e.getLLMSettings()
 	if err != nil {
 		slog.Error("Failed to get LLM settings", "error", err)
-		return e.createFallbackAlert(messageText), nil
+		return fail("LLM settings unavailable")
 	}
 
 	if settings == nil || settings.APIKey == "" {
 		slog.Info("LLM not configured, using fallback extraction")
-		return e.createFallbackAlert(messageText), nil
+		return fail("LLM not configured")
 	}
 
 	worker := services.BuildLLMSettingsForWorker(settings)
 	if worker == nil {
 		slog.Info("LLM settings inactive, using fallback extraction")
-		return e.createFallbackAlert(messageText), nil
+		return fail("LLM settings inactive")
 	}
 
 	// Use custom prompt or default
@@ -115,6 +166,11 @@ func (e *AlertExtractor) ExtractWithPrompt(ctx context.Context, messageText, cus
 	}
 
 	userPrompt := fmt.Sprintf(prompt, truncateMessage(messageText, 3000))
+	maxTokens := 500
+	if classify {
+		userPrompt += services.EventClassificationExtractionAddendum(rules, allowed)
+		maxTokens += classifyExtraTokens
+	}
 
 	callCtx := ctx
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
@@ -123,20 +179,20 @@ func (e *AlertExtractor) ExtractWithPrompt(ctx context.Context, messageText, cus
 		defer cancel()
 	}
 
-	raw, err := e.caller.OneShotLLM(callCtx, worker, "", userPrompt, 500, 0.1)
+	raw, err := e.caller.OneShotLLM(callCtx, worker, "", userPrompt, maxTokens, 0.1)
 	if err != nil {
 		if errors.Is(err, services.ErrWorkerNotConnected) {
 			slog.Debug("oneshot LLM unavailable for alert extraction, using fallback")
-		} else {
-			slog.Warn("oneshot LLM call failed for alert extraction, using fallback", "err", err)
+			return fail("worker not connected")
 		}
-		return e.createFallbackAlert(messageText), nil
+		slog.Warn("oneshot LLM call failed for alert extraction, using fallback", "err", err)
+		return fail("extraction call failed")
 	}
 
 	content := strings.TrimSpace(raw)
 	if content == "" {
 		slog.Warn("empty oneshot LLM response for alert extraction, using fallback")
-		return e.createFallbackAlert(messageText), nil
+		return fail("empty extraction answer")
 	}
 
 	// Remove markdown code block if present
@@ -148,10 +204,21 @@ func (e *AlertExtractor) ExtractWithPrompt(ctx context.Context, messageText, cus
 	var extracted ExtractedAlert
 	if err := json.Unmarshal([]byte(content), &extracted); err != nil {
 		slog.Error("Failed to parse extracted alert JSON", "error", err, "content", content)
-		return e.createFallbackAlert(messageText), nil
+		return fail("unparseable extraction answer")
 	}
 
-	return e.toNormalizedAlert(extracted, messageText), nil
+	var verdict services.EventVerdict
+	if offVerdict != nil {
+		verdict = *offVerdict
+	}
+	if classify {
+		if extracted.EventKind == "" || extracted.EventConfidence == nil {
+			verdict = services.FallbackEventVerdict(fallback, "extraction answer has no event class")
+		} else {
+			verdict = services.ResolveEventVerdict(extracted.EventKind, *extracted.EventConfidence, extracted.EventReasoning, allowed, fallback)
+		}
+	}
+	return e.toNormalizedAlert(extracted, messageText), verdict, nil
 }
 
 // toNormalizedAlert converts ExtractedAlert to NormalizedAlert

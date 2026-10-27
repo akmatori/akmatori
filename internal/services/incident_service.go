@@ -38,6 +38,7 @@ func (s *SkillService) InsertFiringAlert(ctx context.Context, incidentUUID strin
 		TargetHost:           alert.TargetHost,
 		FiredAt:              firedAt,
 		RawPayload:           alert.RawPayload,
+		EventUUID:            alert.EventUUID,
 		CorrelationDecision:  decision,
 		CorrelationReasoning: reasoning,
 	}
@@ -50,9 +51,53 @@ func (s *SkillService) InsertFiringAlert(ctx context.Context, incidentUUID strin
 		// Record that the alerting system re-sent it so the incident's activity
 		// clock advances (see bumpAlertLastSeen).
 		bumpAlertLastSeen(s.db.WithContext(ctx), sourceUUID, alert.SourceFingerprint, time.Now())
+		linkEventToFiringAlert(s.db.WithContext(ctx), alert.EventUUID, sourceUUID, alert.SourceFingerprint)
 		return ErrAlertAlreadyClaimed
 	}
+	linkEventToAlert(s.db.WithContext(ctx), alert.EventUUID, row.UUID, incidentUUID)
 	return nil
+}
+
+// linkEventToAlert stamps the events row an alert came from with the alert
+// and incident it created or joined. Best-effort: the event link only feeds
+// the Events feed, so a failure is logged and never fails the alert path.
+func linkEventToAlert(db *gorm.DB, eventUUID, alertUUID, incidentUUID string) {
+	if eventUUID == "" {
+		return
+	}
+	if err := db.Model(&database.Event{}).Where("uuid = ?", eventUUID).
+		Updates(map[string]interface{}{"alert_uuid": alertUUID, "incident_uuid": incidentUUID}).Error; err != nil {
+		slog.Warn("link event to alert failed", "event_uuid", eventUUID, "alert_uuid", alertUUID, "err", err)
+	}
+}
+
+// linkEventToIncident stamps the incident (agent-run row) a request event
+// started. Best-effort, like linkEventToAlert.
+func linkEventToIncident(db *gorm.DB, eventUUID, incidentUUID string) {
+	if eventUUID == "" {
+		return
+	}
+	if err := db.Model(&database.Event{}).Where("uuid = ?", eventUUID).
+		Update("incident_uuid", incidentUUID).Error; err != nil {
+		slog.Warn("link event to incident failed", "event_uuid", eventUUID, "incident_uuid", incidentUUID, "err", err)
+	}
+}
+
+// linkEventToFiringAlert links an event whose alert insert hit the
+// uniq_firing_alert slot to the row that holds that slot (a re-send of an
+// alert that is still firing).
+func linkEventToFiringAlert(db *gorm.DB, eventUUID, sourceUUID, sourceFingerprint string) {
+	if eventUUID == "" || sourceFingerprint == "" {
+		return
+	}
+	var existing database.Alert
+	if err := db.Select("uuid, incident_uuid").
+		Where("source_uuid = ? AND source_fingerprint = ? AND status = ? AND resolved_at IS NULL",
+			sourceUUID, sourceFingerprint, string(database.AlertStatusFiring)).
+		Limit(1).Find(&existing).Error; err != nil || existing.UUID == "" {
+		return
+	}
+	linkEventToAlert(db, eventUUID, existing.UUID, existing.IncidentUUID)
 }
 
 // bumpAlertLastSeen records a re-send of an already-firing alert on the row
@@ -94,7 +139,11 @@ func bumpAlertLastSeen(db *gorm.DB, sourceUUID, sourceFingerprint string, seenAt
 // would strand the alert on a hidden incident with no monitor extension, so
 // the link follows merged_into_uuid to the live survivor first.
 func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	// The event link runs after commit: it is best-effort, and a failed
+	// statement inside the transaction would abort it on PostgreSQL.
+	var linkedAlertUUID string
+	duplicate := false
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		incident, err := loadLinkTargetTx(tx, incidentUUID)
 		if err != nil {
 			return err
@@ -118,6 +167,7 @@ func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID str
 			TargetHost:            alert.TargetHost,
 			FiredAt:               firedAt,
 			RawPayload:            alert.RawPayload,
+			EventUUID:             alert.EventUUID,
 			Correlated:            true,
 			CorrelationConfidence: &confidence,
 			CorrelationReasoning:  reasoning,
@@ -132,8 +182,10 @@ func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID str
 			// Still record the re-send so the activity clock advances. `now` is
 			// receipt time — see bumpAlertLastSeen on why firedAt is wrong here.
 			bumpAlertLastSeen(tx, sourceUUID, alert.SourceFingerprint, now)
+			duplicate = true
 			return nil
 		}
+		linkedAlertUUID = row.UUID
 
 		if incident.Status == database.IncidentStatusMonitor {
 			var settings database.GeneralSettings
@@ -151,6 +203,15 @@ func (s *SkillService) LinkAlertToIncident(ctx context.Context, incidentUUID str
 
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if duplicate {
+		linkEventToFiringAlert(s.db.WithContext(ctx), alert.EventUUID, sourceUUID, alert.SourceFingerprint)
+	} else {
+		linkEventToAlert(s.db.WithContext(ctx), alert.EventUUID, linkedAlertUUID, incidentUUID)
+	}
+	return nil
 }
 
 // linkRedirectMaxHops bounds how far loadLinkTargetTx follows the
@@ -509,6 +570,9 @@ type IncidentContext struct {
 	SourceUUID string         // UUID of the triggering entity (alert source instance, cron job, ...)
 	Context    database.JSONB // Event details
 	Message    string         // Original message/alert text for title generation
+	// EventUUID is the events row that started this run (request events).
+	// When set, the new incident row is linked back onto the event.
+	EventUUID string
 }
 
 // SpawnIncidentManager creates a new incident-manager-rooted agent invocation.
@@ -580,6 +644,7 @@ func (s *SkillService) SpawnAgentInvocation(rootSkillName string, ctx *IncidentC
 	if err := s.db.Create(incident).Error; err != nil {
 		return "", "", fmt.Errorf("failed to create incident record: %w", err)
 	}
+	linkEventToIncident(s.db, ctx.EventUUID, incidentUUID)
 
 	// Generate LLM title in background and update DB when ready
 	if ctx.Message != "" && len(ctx.Message) >= 10 {

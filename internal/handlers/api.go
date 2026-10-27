@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/akmatori/akmatori/internal/alerts/extraction"
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/services"
 	slackutil "github.com/akmatori/akmatori/internal/slack"
@@ -28,6 +29,9 @@ type APIHandler struct {
 	proposalService      services.ProposalManager
 	staleIncidentCloser  services.StaleIncidentCloser
 	responseFormatter    *services.ResponseFormatter
+	eventService         *services.EventService
+	alertExtractor       *extraction.AlertExtractor
+	reportedAlerts       reportedAlertProcessor
 	alertChannelReloader func()       // called after alert source create/update/delete to reload Slack channel mappings
 	gatewayReloader      func() error // called after HTTP connector CRUD to reload gateway tools
 	mcpServerReloader    func() error // called after MCP server CRUD to reload gateway MCP proxy tools
@@ -103,6 +107,21 @@ func (h *APIHandler) SetCronJobManager(svc services.CronJobManager) {
 // API boots without the self-improvement loop (graceful degradation).
 func (h *APIHandler) SetProposalService(svc services.ProposalManager) {
 	h.proposalService = svc
+}
+
+// reportedAlertProcessor runs an alert reported by a person through the
+// correlation gate. Implemented by AlertHandler.
+type reportedAlertProcessor interface {
+	ProcessReportedAlert(r ReportedAlert) (incidentUUID string, linked bool, err error)
+}
+
+// SetEventIntake wires event recording and classification for
+// POST /api/incidents and proposal chat. Optional — when unset, API tasks
+// start agent runs with no events row, as before.
+func (h *APIHandler) SetEventIntake(eventService *services.EventService, extractor *extraction.AlertExtractor, reported reportedAlertProcessor) {
+	h.eventService = eventService
+	h.alertExtractor = extractor
+	h.reportedAlerts = reported
 }
 
 // SetStaleIncidentCloser wires the stale-close sweep behind

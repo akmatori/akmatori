@@ -352,7 +352,8 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 			slog.Warn("failed to update incident status", "err", err)
 		}
 
-		go h.runListenerChannelInvestigation(incidentUUID, normalized, channel, slackChannelID, slackMessageTS)
+		go h.runListenerChannelInvestigation(incidentUUID, normalized, channel, slackChannelID, slackMessageTS,
+			h.buildInvestigationPromptForChannel(normalized, channel))
 
 		return nil, nil
 	})
@@ -381,7 +382,7 @@ func (h *AlertHandler) processResolvedAlert(sourceUUID string, normalized alerts
 
 	fingerprint := services.ComputeAlertFingerprint(sourceUUID, normalized.AlertName, normalized.TargetHost)
 	now := time.Now()
-	var linkedIncidentUUID string
+	var linkedIncidentUUID, resolvedAlertUUID string
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
 		// Prefer source_fingerprint (external adapter ID); fall back to the
@@ -414,6 +415,7 @@ func (h *AlertHandler) processResolvedAlert(sourceUUID string, normalized alerts
 		}
 
 		linkedIncidentUUID = a.IncidentUUID
+		resolvedAlertUUID = a.UUID
 
 		// Mark the alert resolved and advance the incident's monitor-mode
 		// state (shorten an existing monitor window, or promote a completed
@@ -435,6 +437,7 @@ func (h *AlertHandler) processResolvedAlert(sourceUUID string, normalized alerts
 
 	slog.Info("processResolvedAlert: alert resolved",
 		"alert_name", normalized.AlertName, "incident_uuid", linkedIncidentUUID)
+	h.eventService.LinkAlert(context.Background(), normalized.EventUUID, resolvedAlertUUID, linkedIncidentUUID)
 
 	// Best-effort Slack thread reply on the incident's source thread.
 	if h.skillService != nil {
@@ -799,11 +802,15 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 // Slack thread that originated the alert. Replaces the pre-Task-6
 // runSlackChannelInvestigation that took an AlertSourceInstance; the channel
 // row is the authoritative source for the prompt now.
+//
+// investigationPrompt is built by the caller: listener alerts name the channel
+// as their source, reported alerts (Slack mention, API) name the reporter.
 func (h *AlertHandler) runListenerChannelInvestigation(
 	incidentUUID string,
 	alert alerts.NormalizedAlert,
 	channel *database.Channel,
 	slackChannelID, slackMessageTS string,
+	investigationPrompt string,
 ) {
 	slog.Info("starting investigation for listener channel alert", "alert_name", alert.AlertName, "incident_id", incidentUUID)
 
@@ -814,8 +821,6 @@ func (h *AlertHandler) runListenerChannelInvestigation(
 	// handled by the mention flow and still get responses.
 	canPost := channel.CanPost
 
-	// Build investigation prompt
-	investigationPrompt := h.buildInvestigationPromptForChannel(alert, channel)
 	taskWithGuidance := executor.PrependGuidance(
 		withSourceChannel(h.channelResolver.ResolveLabel(slackChannelID), investigationPrompt),
 	)
@@ -837,16 +842,20 @@ func (h *AlertHandler) runListenerChannelInvestigation(
 	// erases the replacement run's banner + hourglass on the shared thread.
 	var progressStreamer *SlackProgressStreamer
 	var typing slackutil.TypingController
-	if slackClient := h.slackManager.GetClient(); slackClient != nil && canPost {
-		typing = slackutil.NewTypingController(slackutil.TypingControllerConfig{
-			Client:      slackClient,
-			ChannelID:   slackChannelID,
-			ThreadTS:    slackMessageTS,
-			ReactionRef: slack.ItemRef{Channel: slackChannelID, Timestamp: slackMessageTS},
-		})
-		typing.Start(context.Background())
-		defer typing.Stop()
-		progressStreamer = NewSlackProgressStreamer(typing.UpdateLoadingMessage, slackAppendInterval)
+	// canPost is checked first: reported alerts from the API run here with
+	// no Slack thread and must never touch the Slack client.
+	if canPost && h.slackManager != nil {
+		if slackClient := h.slackManager.GetClient(); slackClient != nil {
+			typing = slackutil.NewTypingController(slackutil.TypingControllerConfig{
+				Client:      slackClient,
+				ChannelID:   slackChannelID,
+				ThreadTS:    slackMessageTS,
+				ReactionRef: slack.ItemRef{Channel: slackChannelID, Timestamp: slackMessageTS},
+			})
+			typing.Start(context.Background())
+			defer typing.Stop()
+			progressStreamer = NewSlackProgressStreamer(typing.UpdateLoadingMessage, slackAppendInterval)
+		}
 	}
 
 	// Use WebSocket-based agent worker

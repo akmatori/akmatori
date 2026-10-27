@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/executor"
 	"github.com/akmatori/akmatori/internal/output"
@@ -128,6 +127,21 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		}
 	}
 
+	// Every mention is an event. A follow-up in a known thread is a request
+	// on that thread's run. A new thread is classified first: a report of a
+	// problem goes to the correlation gate (only alerts open incidents) and
+	// this run stops here.
+	var eventUUID string
+	if incidentUUID != "" {
+		h.recordMentionFollowUp(channel, messageTS, text, incidentUUID)
+	} else {
+		var handled bool
+		eventUUID, handled = h.classifyNewMention(channel, threadID, messageTS, text)
+		if handled {
+			return
+		}
+	}
+
 	if incidentUUID == "" {
 		// New thread - spawn incident manager
 		slog.Info("starting new session for thread", "thread_id", threadID)
@@ -142,7 +156,8 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 				"user":    user,
 				"text":    text,
 			},
-			Message: text, // Pass message for title generation
+			Message:   text, // Pass message for title generation
+			EventUUID: eventUUID,
 		}
 
 		var err error
@@ -474,21 +489,12 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 	// default behavior.
 	customPrompt := channel.ExtractionPrompt
 
-	// Extract alert fields via AI
+	// Extract the alert fields and classify the message in one LLM call. A
+	// listener message is not addressed to the agent, so it cannot be a
+	// request. Every failure classifies it as an alert, as before.
 	ctx := context.Background()
-	var normalized *alerts.NormalizedAlert
-	var err error
-
-	if customPrompt != "" {
-		normalized, err = h.alertExtractor.ExtractWithPrompt(ctx, messageText, customPrompt)
-	} else {
-		normalized, err = h.alertExtractor.Extract(ctx, messageText)
-	}
-
-	if err != nil {
-		slog.Warn("alert extraction failed, using fallback", "err", err)
-		// Fallback alert is created by the extractor
-	}
+	normalized, verdict := h.alertExtractor.ExtractAndClassify(ctx, messageText, customPrompt,
+		[]string{database.EventKindAlert, database.EventKindChange, database.EventKindInfo}, database.EventKindAlert)
 
 	// Set fingerprint and source fields (use message TS for uniqueness)
 	normalized.SourceFingerprint = fmt.Sprintf("slack:%s:%s", event.Channel, event.TimeStamp)
@@ -503,6 +509,30 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 	normalized.RawPayload["slack_channel_id"] = event.Channel
 	normalized.RawPayload["slack_message_ts"] = threadTS
 	normalized.RawPayload["slack_user"] = event.User
+
+	if h.eventService != nil {
+		ev := h.eventService.Record(ctx, services.EventInput{
+			SourceKind:  database.EventSourceSlackListener,
+			SourceUUID:  channel.UUID,
+			SourceType:  string(database.MessagingProviderSlack),
+			ExternalID:  event.TimeStamp,
+			Title:       normalized.AlertName,
+			Summary:     normalized.Summary,
+			Description: normalized.Description,
+			Host:        normalized.TargetHost,
+			Service:     normalized.TargetService,
+			Severity:    string(normalized.Severity),
+			Status:      string(normalized.Status),
+			Labels:      normalized.TargetLabels,
+			RawPayload:  normalized.RawPayload,
+		}, verdict)
+		normalized.EventUUID = ev.UUID
+		if ev.Kind != database.EventKindAlert {
+			slog.Info("listener message is not an alert; stored as event, no investigation",
+				"channel", event.Channel, "kind", ev.Kind, "event_uuid", ev.UUID)
+			return
+		}
+	}
 
 	// Process through AlertHandler if available
 	if h.alertHandler != nil {

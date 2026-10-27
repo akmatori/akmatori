@@ -4,7 +4,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -14,287 +13,141 @@ import (
 	"gorm.io/gorm"
 )
 
-// EventFeedItem is one entry in the unified events feed.
-// Alert rows use event_type="alert" and occurred_at=fired_at.
-// Non-alert incident rows use event_type=source_kind and occurred_at=started_at.
+// EventFeedItem is one row of the Events feed: one events row, joined to the
+// alert it created (correlation state, live firing/resolved status) and the
+// incident or agent run it opened, joined or continued.
 type EventFeedItem struct {
-	EventType             string    `json:"event_type"`
-	EventUUID             string    `json:"event_uuid"`
-	Title                 string    `json:"title"`
-	OccurredAt            time.Time `json:"occurred_at"`
-	Status                string    `json:"status"`
-	IncidentUUID          string    `json:"incident_uuid"`
-	Correlated            bool      `json:"correlated"`
-	CorrelationConfidence *float64  `json:"correlation_confidence,omitempty"`
-	CorrelationReasoning  string    `json:"correlation_reasoning,omitempty"`
-	CorrelationDecision   string    `json:"correlation_decision,omitempty"`
-	TargetHost            string    `json:"target_host,omitempty"`
-	SourceUUID            string    `json:"source_uuid,omitempty"`
-	IncidentTitle         string    `json:"incident_title,omitempty"`
-	IncidentStatus        string    `json:"incident_status,omitempty"`
+	EventUUID                string     `json:"event_uuid"`
+	Kind                     string     `json:"kind"`
+	SourceKind               string     `json:"source_kind"`
+	SourceType               string     `json:"source_type,omitempty"`
+	SourceUUID               string     `json:"source_uuid,omitempty"`
+	Classification           string     `json:"classification"`
+	ClassificationConfidence *float64   `json:"classification_confidence,omitempty"`
+	ClassificationReasoning  string     `json:"classification_reasoning,omitempty"`
+	Title                    string     `json:"title"`
+	OccurredAt               time.Time  `json:"occurred_at"`
+	RepeatCount              int        `json:"repeat_count,omitempty"`
+	LastSeenAt               *time.Time `json:"last_seen_at,omitempty"`
+	// Status is what the event means now: the alert's firing/resolved state
+	// for alert events, the run's status for request events, empty for
+	// change and info events.
+	Status                string   `json:"status"`
+	TargetHost            string   `json:"target_host,omitempty"`
+	AlertUUID             string   `json:"alert_uuid,omitempty"`
+	IncidentUUID          string   `json:"incident_uuid,omitempty"`
+	Correlated            bool     `json:"correlated"`
+	CorrelationConfidence *float64 `json:"correlation_confidence,omitempty"`
+	CorrelationReasoning  string   `json:"correlation_reasoning,omitempty"`
+	CorrelationDecision   string   `json:"correlation_decision,omitempty"`
+	IncidentTitle         string   `json:"incident_title,omitempty"`
+	IncidentStatus        string   `json:"incident_status,omitempty"`
 }
 
-// handleEvents handles GET /api/events — unified paginated feed of alerts and
-// non-alert incidents, merged and ordered by occurred_at DESC.
+// eventsMaxPage bounds page numbers so a huge value cannot overflow the
+// offset computation.
+const eventsMaxPage = 100_000
+
+// legacyEventTypeFilter maps the pre-events ?type= values onto the new
+// filters: "alert" was the alert class, the others were run sources.
+func legacyEventTypeFilter(t string) (kind, source string) {
+	switch t {
+	case "":
+		return "", ""
+	case database.EventKindAlert, database.EventKindChange, database.EventKindInfo, database.EventKindRequest:
+		return t, ""
+	default:
+		return "", t
+	}
+}
+
+// handleEvents handles GET /api/events — the paginated events feed, newest
+// first. Filters: from/to (unix seconds, on occurred_at), kind
+// (alert|change|info|request), source (webhook|slack_listener|slack_mention|
+// manual|cron|proposal), search (UUID prefix of the event, alert or incident;
+// substring of title or host). The legacy ?type= is still accepted.
 func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	db := database.GetDB()
 	params := api.ParsePagination(r)
+	q := r.URL.Query()
 
-	fromParam := r.URL.Query().Get("from")
-	toParam := r.URL.Query().Get("to")
-	typeParam := r.URL.Query().Get("type")
-	searchParam := strings.TrimSpace(r.URL.Query().Get("search"))
-
-	var fromTime, toTime *time.Time
-	if fromParam != "" {
-		if ts, err := strconv.ParseInt(fromParam, 10, 64); err == nil {
-			t := time.Unix(ts, 0)
-			fromTime = &t
-		}
-	}
-	if toParam != "" {
-		if ts, err := strconv.ParseInt(toParam, 10, 64); err == nil {
-			t := time.Unix(ts, 0)
-			toTime = &t
-		}
-	}
-
-	wantAlerts := typeParam == "" || typeParam == "alert"
-	wantNonAlert := typeParam != "alert"
-
-	// Build the merged result using two queries then merge+sort in Go.
-	// This avoids UNION ALL compatibility issues across SQLite (tests) and PostgreSQL (prod).
-	//
-	// Use separate COUNT queries for the total, and limit each data query to
-	// (offset + perPage) rows — sufficient to serve any page without loading the
-	// entire table. Hard-cap the fetch to eventsMaxRowFetch to prevent large
-	// page numbers from pulling unbounded rows into memory.
-	const eventsMaxRowFetch = 10_000
-	// Reject page numbers that exceed the fetch cap before multiplying. Any
-	// page > eventsMaxRowFetch would produce offset >= eventsMaxRowFetch even
-	// at per_page=1, but very large page values can also overflow int and wrap
-	// to a small positive offset, bypassing the guard below.
-	if params.Page > eventsMaxRowFetch {
+	if params.Page > eventsMaxPage {
 		api.RespondError(w, http.StatusBadRequest, "page exceeds the searchable range; use date filters to narrow the result set")
 		return
 	}
-	offset := params.Offset()
-	// Reject pages whose offset exceeds the row-fetch cap. The in-memory merge
-	// can only cover rows 0…eventsMaxRowFetch-1; beyond that the result would
-	// be silently empty while the client's total_pages would still show the full
-	// uncapped count. Instruct the caller to use date filters instead.
-	if offset < 0 || offset >= eventsMaxRowFetch {
-		api.RespondError(w, http.StatusBadRequest, "page exceeds the searchable range; use date filters to narrow the result set")
+
+	kind, source := legacyEventTypeFilter(q.Get("type"))
+	if v := q.Get("kind"); v != "" {
+		kind = v
+	}
+	if v := q.Get("source"); v != "" {
+		source = v
+	}
+
+	base := db.Model(&database.Event{})
+	if ts, err := strconv.ParseInt(q.Get("from"), 10, 64); err == nil {
+		base = base.Where("occurred_at >= ?", time.Unix(ts, 0))
+	}
+	if ts, err := strconv.ParseInt(q.Get("to"), 10, 64); err == nil {
+		base = base.Where("occurred_at <= ?", time.Unix(ts, 0))
+	}
+	if kind != "" {
+		base = base.Where("kind = ?", kind)
+	}
+	if source != "" {
+		base = base.Where("source_kind = ?", source)
+	}
+	if search := strings.TrimSpace(q.Get("search")); search != "" {
+		// UUIDs match by prefix (so a copied short ID finds its event);
+		// title and host match by substring. LOWER(...) LIKE keeps the
+		// query portable across PostgreSQL (prod) and SQLite (tests).
+		prefix := strings.ToLower(search) + "%"
+		like := "%" + strings.ToLower(search) + "%"
+		base = base.Where(
+			"LOWER(uuid) LIKE ? OR LOWER(alert_uuid) LIKE ? OR LOWER(incident_uuid) LIKE ? OR LOWER(title) LIKE ? OR LOWER(host) LIKE ?",
+			prefix, prefix, prefix, like, like)
+	}
+
+	var total int64
+	if err := base.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		slog.Error("events: failed to count", "err", err)
+		api.RespondError(w, http.StatusInternalServerError, "Failed to fetch events")
 		return
 	}
-	rowLimit := offset + params.PerPage
-	if rowLimit > eventsMaxRowFetch {
-		rowLimit = eventsMaxRowFetch
+
+	var rows []database.Event
+	if err := base.Session(&gorm.Session{}).
+		Omit("raw_payload", "labels", "summary").
+		Order("occurred_at DESC, id DESC").
+		Offset(params.Offset()).Limit(params.PerPage).
+		Find(&rows).Error; err != nil {
+		slog.Error("events: failed to fetch", "err", err)
+		api.RespondError(w, http.StatusInternalServerError, "Failed to fetch events")
+		return
 	}
 
-	var alertCount int64
-	var alertItems []EventFeedItem
-	if wantAlerts {
-		alertBaseQ := db.Model(&database.Alert{})
-		if fromTime != nil {
-			alertBaseQ = alertBaseQ.Where("fired_at >= ?", *fromTime)
-		}
-		if toTime != nil {
-			alertBaseQ = alertBaseQ.Where("fired_at <= ?", *toTime)
-		}
-		if searchParam != "" {
-			// UUIDs match by prefix (so a copied short ID finds its event);
-			// title and host match by substring. LOWER(...) LIKE keeps the
-			// query portable across PostgreSQL (prod) and SQLite (tests).
-			prefix := strings.ToLower(searchParam) + "%"
-			like := "%" + strings.ToLower(searchParam) + "%"
-			alertBaseQ = alertBaseQ.Where(
-				"LOWER(uuid) LIKE ? OR LOWER(incident_uuid) LIKE ? OR LOWER(alert_name) LIKE ? OR LOWER(target_host) LIKE ?",
-				prefix, prefix, like, like)
-		}
-
-		if err := alertBaseQ.Session(&gorm.Session{}).Count(&alertCount).Error; err != nil {
-			slog.Error("events: failed to count alert rows", "err", err)
-			api.RespondError(w, http.StatusInternalServerError, "Failed to fetch events")
-			return
-		}
-
-		alertQ := alertBaseQ.
-			Select("uuid, incident_uuid, alert_name, fired_at, status, correlated, correlation_confidence, correlation_reasoning, correlation_decision, target_host, source_uuid").
-			Order("fired_at DESC").
-			Limit(rowLimit)
-
-		type alertRow struct {
-			UUID                  string
-			IncidentUUID          string
-			AlertName             string
-			FiredAt               time.Time
-			Status                string
-			Correlated            bool
-			CorrelationConfidence *float64
-			CorrelationReasoning  string
-			CorrelationDecision   string
-			TargetHost            string
-			SourceUUID            string
-		}
-		var aRows []alertRow
-		if err := alertQ.Scan(&aRows).Error; err != nil {
-			slog.Warn("events: failed to scan alert rows", "err", err)
-		}
-		for _, a := range aRows {
-			alertItems = append(alertItems, EventFeedItem{
-				EventType:             "alert",
-				EventUUID:             a.UUID,
-				Title:                 a.AlertName,
-				OccurredAt:            a.FiredAt,
-				Status:                a.Status,
-				IncidentUUID:          a.IncidentUUID,
-				Correlated:            a.Correlated,
-				CorrelationConfidence: a.CorrelationConfidence,
-				CorrelationReasoning:  a.CorrelationReasoning,
-				CorrelationDecision:   a.CorrelationDecision,
-				TargetHost:            a.TargetHost,
-				SourceUUID:            a.SourceUUID,
-			})
-		}
+	page := make([]EventFeedItem, 0, len(rows))
+	for _, e := range rows {
+		page = append(page, EventFeedItem{
+			EventUUID:                e.UUID,
+			Kind:                     e.Kind,
+			SourceKind:               e.SourceKind,
+			SourceType:               e.SourceType,
+			SourceUUID:               e.SourceUUID,
+			Classification:           e.Classification,
+			ClassificationConfidence: e.ClassificationConfidence,
+			ClassificationReasoning:  e.ClassificationReasoning,
+			Title:                    e.Title,
+			OccurredAt:               e.OccurredAt,
+			RepeatCount:              e.RepeatCount,
+			LastSeenAt:               e.LastSeenAt,
+			Status:                   e.Status,
+			TargetHost:               e.Host,
+			AlertUUID:                e.AlertUUID,
+			IncidentUUID:             e.IncidentUUID,
+		})
 	}
-
-	var incidentCount int64
-	var incidentItems []EventFeedItem
-	if wantNonAlert {
-		// Non-alert incidents (cron, slack_mention, api, etc.)
-		incBaseQ := db.Model(&database.Incident{}).
-			Where("source_kind != ?", database.IncidentSourceKindAlert)
-		if typeParam != "" && typeParam != "alert" {
-			if typeParam == database.IncidentSourceKindManual {
-				// Legacy API-created incidents may have source_kind="" — include them
-				// under the "manual" filter so they don't silently disappear.
-				incBaseQ = incBaseQ.Where("source_kind IN ?", []string{database.IncidentSourceKindManual, ""})
-			} else {
-				incBaseQ = incBaseQ.Where("source_kind = ?", typeParam)
-			}
-		}
-		if fromTime != nil {
-			incBaseQ = incBaseQ.Where("started_at >= ?", *fromTime)
-		}
-		if toTime != nil {
-			incBaseQ = incBaseQ.Where("started_at <= ?", *toTime)
-		}
-		if searchParam != "" {
-			prefix := strings.ToLower(searchParam) + "%"
-			like := "%" + strings.ToLower(searchParam) + "%"
-			incBaseQ = incBaseQ.Where("LOWER(uuid) LIKE ? OR LOWER(title) LIKE ?", prefix, like)
-		}
-
-		if err := incBaseQ.Session(&gorm.Session{}).Count(&incidentCount).Error; err != nil {
-			slog.Error("events: failed to count incident rows", "err", err)
-			api.RespondError(w, http.StatusInternalServerError, "Failed to fetch events")
-			return
-		}
-
-		incQ := incBaseQ.
-			Select("uuid, title, started_at, status, source_kind, source_uuid").
-			Order("started_at DESC").
-			Limit(rowLimit)
-
-		type incRow struct {
-			UUID       string
-			Title      string
-			StartedAt  time.Time
-			Status     string
-			SourceKind string
-			SourceUUID string
-		}
-		var iRows []incRow
-		if err := incQ.Scan(&iRows).Error; err != nil {
-			slog.Warn("events: failed to scan incident rows", "err", err)
-		}
-		for _, inc := range iRows {
-			eventType := inc.SourceKind
-			if eventType == "" {
-				eventType = database.IncidentSourceKindManual
-			}
-			incidentItems = append(incidentItems, EventFeedItem{
-				EventType:    eventType,
-				EventUUID:    inc.UUID,
-				Title:        inc.Title,
-				OccurredAt:   inc.StartedAt,
-				Status:       inc.Status,
-				IncidentUUID: inc.UUID,
-				SourceUUID:   inc.SourceUUID,
-			})
-		}
-	}
-
-	// Merge and sort by OccurredAt DESC.
-	merged := make([]EventFeedItem, 0, len(alertItems)+len(incidentItems))
-	merged = append(merged, alertItems...)
-	merged = append(merged, incidentItems...)
-	sortEventFeedItems(merged)
-	// Trim to the fetch-window cap so that pagination slices stay consistent
-	// with the capped total. Without this, the last page could return more
-	// rows than (total - offset) when both streams each contributed up to
-	// eventsMaxRowFetch rows.
-	if len(merged) > eventsMaxRowFetch {
-		merged = merged[:eventsMaxRowFetch]
-	}
-
-	total := alertCount + incidentCount
-	// Cap the reported total to the fetch-window maximum so pagination
-	// metadata never advertises page counts beyond what can actually be served.
-	if total > int64(eventsMaxRowFetch) {
-		total = int64(eventsMaxRowFetch)
-	}
-
-	// Apply pagination.
-	var page []EventFeedItem
-	if offset < len(merged) {
-		end := offset + params.PerPage
-		if end > len(merged) {
-			end = len(merged)
-		}
-		page = merged[offset:end]
-	} else {
-		page = []EventFeedItem{}
-	}
-
-	// Batch-enrich with incident title+status for alert rows.
-	incidentUUIDs := make(map[string]struct{})
-	for _, item := range page {
-		if item.EventType == "alert" && item.IncidentUUID != "" {
-			incidentUUIDs[item.IncidentUUID] = struct{}{}
-		}
-	}
-	if len(incidentUUIDs) > 0 {
-		uuids := make([]string, 0, len(incidentUUIDs))
-		for u := range incidentUUIDs {
-			uuids = append(uuids, u)
-		}
-		type incSummary struct {
-			UUID   string
-			Title  string
-			Status string
-		}
-		var summaries []incSummary
-		if err := db.Model(&database.Incident{}).
-			Select("uuid, title, status").
-			Where("uuid IN ?", uuids).
-			Scan(&summaries).Error; err != nil {
-			slog.Warn("events: failed to batch-fetch incident summaries", "err", err)
-		}
-		incMap := make(map[string]incSummary, len(summaries))
-		for _, s := range summaries {
-			incMap[s.UUID] = s
-		}
-		for i := range page {
-			if page[i].EventType == "alert" {
-				if s, ok := incMap[page[i].IncidentUUID]; ok {
-					page[i].IncidentTitle = s.Title
-					page[i].IncidentStatus = s.Status
-				}
-			}
-		}
-	}
+	enrichEventFeedItems(db, page)
 
 	api.RespondJSON(w, http.StatusOK, api.PaginatedResponse{
 		Data: page,
@@ -307,68 +160,139 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleEventRaw handles GET /api/events/raw?type=<event_type>&uuid=<event_uuid>.
-// It returns the raw payload / original message for a single feed event on
-// demand, so the events list endpoint can stay lightweight. For alert events
-// the payload comes from the alert row; for non-alert events it comes from the
-// incident's context.
+// enrichEventFeedItems batch-loads the linked alerts and incidents of one
+// page: alert correlation state and live status, incident title and status.
+func enrichEventFeedItems(db *gorm.DB, page []EventFeedItem) {
+	alertUUIDs := map[string]struct{}{}
+	incidentUUIDs := map[string]struct{}{}
+	for _, item := range page {
+		if item.AlertUUID != "" {
+			alertUUIDs[item.AlertUUID] = struct{}{}
+		}
+		if item.IncidentUUID != "" {
+			incidentUUIDs[item.IncidentUUID] = struct{}{}
+		}
+	}
+
+	alertByUUID := map[string]database.Alert{}
+	if len(alertUUIDs) > 0 {
+		var alerts []database.Alert
+		if err := db.Select("uuid, incident_uuid, status, correlated, correlation_confidence, correlation_reasoning, correlation_decision").
+			Where("uuid IN ?", mapKeys(alertUUIDs)).Find(&alerts).Error; err != nil {
+			slog.Warn("events: failed to batch-fetch alerts", "err", err)
+		}
+		for _, a := range alerts {
+			alertByUUID[a.UUID] = a
+			// An alert moved to another incident keeps its event: follow it.
+			if a.IncidentUUID != "" {
+				incidentUUIDs[a.IncidentUUID] = struct{}{}
+			}
+		}
+	}
+
+	type incSummary struct {
+		UUID   string
+		Title  string
+		Status string
+	}
+	incByUUID := map[string]incSummary{}
+	if len(incidentUUIDs) > 0 {
+		var summaries []incSummary
+		if err := db.Model(&database.Incident{}).Select("uuid, title, status").
+			Where("uuid IN ?", mapKeys(incidentUUIDs)).Scan(&summaries).Error; err != nil {
+			slog.Warn("events: failed to batch-fetch incident summaries", "err", err)
+		}
+		for _, s := range summaries {
+			incByUUID[s.UUID] = s
+		}
+	}
+
+	for i := range page {
+		item := &page[i]
+		// A change or info item may come from a monitoring source in firing
+		// state; that state means nothing for an event that is only stored.
+		if item.Kind == database.EventKindChange || item.Kind == database.EventKindInfo {
+			item.Status = ""
+		}
+		if a, ok := alertByUUID[item.AlertUUID]; ok {
+			item.Status = string(a.Status)
+			item.Correlated = a.Correlated
+			item.CorrelationConfidence = a.CorrelationConfidence
+			item.CorrelationReasoning = a.CorrelationReasoning
+			item.CorrelationDecision = a.CorrelationDecision
+			if a.IncidentUUID != "" {
+				item.IncidentUUID = a.IncidentUUID
+			}
+		}
+		if inc, ok := incByUUID[item.IncidentUUID]; ok {
+			item.IncidentTitle = inc.Title
+			item.IncidentStatus = inc.Status
+			if item.Kind == database.EventKindRequest {
+				item.Status = inc.Status
+			}
+		}
+	}
+}
+
+func mapKeys(m map[string]struct{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// handleEventRaw handles GET /api/events/raw?uuid=<event_uuid>. It returns the
+// raw payload / original message of one event on demand, so the list stays
+// light. Backfilled events carry no payload of their own: it then comes from
+// the linked alert row or the run's context. The legacy ?type= is ignored.
 func (h *APIHandler) handleEventRaw(w http.ResponseWriter, r *http.Request) {
 	db := database.GetDB()
-	eventType := r.URL.Query().Get("type")
 	eventUUID := r.URL.Query().Get("uuid")
 	if eventUUID == "" {
 		api.RespondError(w, http.StatusBadRequest, "uuid is required")
 		return
 	}
 
-	resp := map[string]interface{}{}
+	var ev database.Event
+	if err := db.Where("uuid = ?", eventUUID).First(&ev).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			api.RespondError(w, http.StatusNotFound, "Event not found")
+		} else {
+			slog.Error("events raw: failed to load event", "uuid", eventUUID, "err", err)
+			api.RespondError(w, http.StatusInternalServerError, "Failed to load event")
+		}
+		return
+	}
 
-	if eventType == "alert" {
+	resp := map[string]interface{}{}
+	raw := map[string]interface{}(ev.RawPayload)
+	if len(raw) == 0 && ev.AlertUUID != "" {
 		var alert database.Alert
-		if err := db.Select("raw_payload").Where("uuid = ?", eventUUID).First(&alert).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				api.RespondError(w, http.StatusNotFound, "Event not found")
-			} else {
-				slog.Error("events raw: failed to load alert", "uuid", eventUUID, "err", err)
-				api.RespondError(w, http.StatusInternalServerError, "Failed to load event")
-			}
-			return
+		if err := db.Select("raw_payload").Where("uuid = ?", ev.AlertUUID).First(&alert).Error; err == nil {
+			raw = alert.RawPayload
 		}
-		if alert.RawPayload != nil {
-			resp["raw"] = alert.RawPayload
-			if om, ok := alert.RawPayload["original_message"]; ok {
-				resp["original_message"] = om
-			}
-		}
-	} else {
+	}
+	if len(raw) == 0 && ev.AlertUUID == "" && ev.IncidentUUID != "" {
 		var inc database.Incident
-		if err := db.Select("context").Where("uuid = ?", eventUUID).First(&inc).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				api.RespondError(w, http.StatusNotFound, "Event not found")
-			} else {
-				slog.Error("events raw: failed to load incident", "uuid", eventUUID, "err", err)
-				api.RespondError(w, http.StatusInternalServerError, "Failed to load event")
-			}
-			return
-		}
-		if inc.Context != nil {
-			if rp, ok := inc.Context["raw_payload"]; ok {
-				resp["raw"] = rp
-			}
-			if om, ok := inc.Context["original_message"]; ok {
-				resp["original_message"] = om
-			} else if m, ok := inc.Context["message"]; ok {
-				resp["original_message"] = m
+		if err := db.Select("context").Where("uuid = ?", ev.IncidentUUID).First(&inc).Error; err == nil && inc.Context != nil {
+			if rp, ok := inc.Context["raw_payload"].(map[string]interface{}); ok {
+				raw = rp
 			}
 		}
 	}
+	if len(raw) > 0 {
+		resp["raw"] = raw
+		if om, ok := raw["original_message"]; ok {
+			resp["original_message"] = om
+		}
+	}
+	if _, ok := resp["original_message"]; !ok && ev.Summary != "" {
+		resp["original_message"] = ev.Summary
+	}
+	if len(ev.Labels) > 0 {
+		resp["labels"] = ev.Labels
+	}
 
 	api.RespondJSON(w, http.StatusOK, resp)
-}
-
-// sortEventFeedItems sorts items by OccurredAt DESC (most recent first).
-func sortEventFeedItems(items []EventFeedItem) {
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].OccurredAt.After(items[j].OccurredAt)
-	})
 }

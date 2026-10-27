@@ -34,6 +34,12 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
   const [correlationPrompt, setCorrelationPrompt] = useState('');
   const [correlationPromptDefault, setCorrelationPromptDefault] = useState('');
 
+  // Event classification: same "effective text" convention as the
+  // correlation rules.
+  const [classificationEnabled, setClassificationEnabled] = useState(true);
+  const [classificationPrompt, setClassificationPrompt] = useState('');
+  const [classificationPromptDefault, setClassificationPromptDefault] = useState('');
+
   // Stale incident close. Stored in minutes by the API, edited in hours here:
   // the default is three days, and "72" reads better than "4320".
   const [autoCloseEnabled, setAutoCloseEnabled] = useState(true);
@@ -52,6 +58,9 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
       setIncidentMergeEnabled(data.incident_merge_enabled ?? false);
       setCorrelationPromptDefault(data.alert_correlation_prompt_default ?? '');
       setCorrelationPrompt(data.alert_correlation_prompt || data.alert_correlation_prompt_default || '');
+      setClassificationEnabled(data.event_classification_enabled ?? true);
+      setClassificationPromptDefault(data.event_classification_prompt_default ?? '');
+      setClassificationPrompt(data.event_classification_prompt || data.event_classification_prompt_default || '');
       setAutoCloseEnabled(data.incident_auto_close_enabled ?? true);
       setAutoCloseHours(
         Math.round((data.incident_auto_close_minutes ?? DEFAULT_AUTO_CLOSE_HOURS * 60) / 60)
@@ -81,6 +90,8 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
         alert_correlation_enabled: correlationEnabled,
         alert_monitor_window_minutes: monitorWindowMinutes,
         alert_correlation_prompt: correlationPrompt,
+        event_classification_enabled: classificationEnabled,
+        event_classification_prompt: classificationPrompt,
         incident_merge_enabled: incidentMergeEnabled,
         incident_auto_close_enabled: autoCloseEnabled,
         incident_auto_close_minutes: autoCloseHours * 60,
@@ -120,6 +131,65 @@ export default function GeneralSettingsSection({ onStatusChange }: GeneralSettin
         <p className="mt-1 text-xs text-fg-subtle">
           External URL for accessing this Akmatori instance. Used in Slack message links.
         </p>
+      </div>
+
+      {/* Event Classification */}
+      <div className="border-t border-line pt-4">
+        <h3 className="text-sm font-semibold text-fg mb-3">Event Classification</h3>
+        <p className="text-xs text-fg-subtle mb-3">
+          Every inbound event (webhook alert, Slack message or mention, API task) gets one LLM call that
+          sorts it into alert, change, info or request. Only alerts open or join incidents. Changes take
+          effect on the next event without a restart.
+        </p>
+
+        <div className="flex items-center gap-2 mb-4">
+          <input
+            id="classification-enabled"
+            type="checkbox"
+            checked={classificationEnabled}
+            onChange={(e) => setClassificationEnabled(e.target.checked)}
+            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <label htmlFor="classification-enabled" className="text-sm text-fg">
+            Classify inbound events
+          </label>
+        </div>
+        {!classificationEnabled && (
+          <p className="-mt-2 mb-4 text-xs text-fg-subtle">
+            Off: every webhook item and listener message is an alert, and every mention or API task is a
+            request, with no LLM call.
+          </p>
+        )}
+
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-1">
+            <label htmlFor="classification-prompt" className="block text-xs font-medium text-fg-muted">
+              Classification rules
+            </label>
+            <button
+              type="button"
+              onClick={() => setClassificationPrompt(classificationPromptDefault)}
+              disabled={classificationPrompt === classificationPromptDefault}
+              className="btn btn-ghost text-xs disabled:opacity-50"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Reset to default
+            </button>
+          </div>
+          <textarea
+            id="classification-prompt"
+            value={classificationPrompt}
+            onChange={(e) => setClassificationPrompt(e.target.value)}
+            disabled={!classificationEnabled}
+            rows={12}
+            className="input-field font-mono text-xs disabled:opacity-50"
+          />
+          <p className="mt-1 text-xs text-fg-subtle">
+            What each class means. A class other than the safe one needs confidence 0.7 or higher, else the
+            event becomes an alert (webhooks, Slack channels) or a request (mentions, API). The allowed
+            classes and the JSON answer format are added automatically.
+          </p>
+        </div>
       </div>
 
       {/* Alert Correlation */}

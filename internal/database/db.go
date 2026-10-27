@@ -189,6 +189,9 @@ func runMigrations(db *gorm.DB) error {
 		&CronJobTool{},
 		// Alerts (first-class alert rows attached to incidents)
 		&Alert{},
+		// Every inbound item (webhook items, Slack messages, mentions, manual
+		// requests, cron ticks, proposal chat) with its classification
+		&Event{},
 		// Self-improvement proposals + refinement chat transcripts
 		&Proposal{},
 		&ProposalChatMessage{},
@@ -251,6 +254,15 @@ func runMigrations(db *gorm.DB) error {
 	// Backfill alert rows for pre-existing alert-sourced incidents.
 	if err := migrateBackfillAlerts(db); err != nil {
 		return err
+	}
+
+	// Backfill events rows for alerts and agent runs that predate the events
+	// table, so the Events feed keeps its history. Runs after
+	// migrateBackfillAlerts so those alerts get events too. Best-effort: a
+	// failure costs feed history only, so it never blocks startup; the next
+	// start resumes it.
+	if err := migrateBackfillEvents(db); err != nil {
+		slog.Warn("events backfill incomplete; it resumes on the next start", "err", err)
 	}
 
 	// Convert a legacy enabled global FormattingSettings row into a catch-all

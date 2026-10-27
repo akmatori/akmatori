@@ -32,6 +32,11 @@ type NormalizedAlert struct {
 	SourceAlertID     string
 	SourceFingerprint string
 	RawPayload        map[string]interface{}
+
+	// EventUUID is the events row this alert item was recorded as. Set by
+	// the handler after classification; the alert insert paths copy it onto
+	// the alerts row and link the event back to the alert and incident.
+	EventUUID string
 }
 
 // AlertAdapter defines the interface for source-specific alert parsing

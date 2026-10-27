@@ -17,7 +17,7 @@ describe('findNavItem', () => {
     expect(findNavItem('/incidentsfoo')).toBeUndefined();
   });
 
-  it('labels the feed route as Events', () => {
-    expect(findNavItem('/feed')?.name).toBe('Events');
+  it('labels the events route as Events', () => {
+    expect(findNavItem('/events')?.name).toBe('Events');
   });
 });

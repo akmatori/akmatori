@@ -82,6 +82,11 @@ type CreateIncidentResponse struct {
 	Status     string `json:"status"`
 	WorkingDir string `json:"working_dir"`
 	Message    string `json:"message"`
+	// EventUUID and EventKind describe the events row the task was stored
+	// as. EventKind "alert" means the task reported a problem: UUID is then
+	// the incident it opened (Status "pending") or joined (Status "linked").
+	EventUUID string `json:"event_uuid,omitempty"`
+	EventKind string `json:"event_kind,omitempty"`
 }
 
 // ========== Settings Types ==========
@@ -167,10 +172,13 @@ type UpdateGeneralSettingsRequest struct {
 	AlertCorrelationEnabled   *bool   `json:"alert_correlation_enabled"`
 	AlertMonitorWindowMinutes *int    `json:"alert_monitor_window_minutes"`
 	// AlertCorrelationPrompt: "" (or the default text) restores the default.
-	AlertCorrelationPrompt   *string `json:"alert_correlation_prompt"`
-	IncidentMergeEnabled     *bool   `json:"incident_merge_enabled"`
-	IncidentAutoCloseEnabled *bool   `json:"incident_auto_close_enabled"`
-	IncidentAutoCloseMinutes *int    `json:"incident_auto_close_minutes"`
+	AlertCorrelationPrompt     *string `json:"alert_correlation_prompt"`
+	EventClassificationEnabled *bool   `json:"event_classification_enabled"`
+	// EventClassificationPrompt: "" (or the default text) restores the default.
+	EventClassificationPrompt *string `json:"event_classification_prompt"`
+	IncidentMergeEnabled      *bool   `json:"incident_merge_enabled"`
+	IncidentAutoCloseEnabled  *bool   `json:"incident_auto_close_enabled"`
+	IncidentAutoCloseMinutes  *int    `json:"incident_auto_close_minutes"`
 }
 
 // UpdateRetentionSettingsRequest is the request body for PUT /api/settings/retention.

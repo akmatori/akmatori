@@ -99,6 +99,7 @@ type CronRunner struct {
 	scheduler cronScheduler
 	parser    cron.Parser
 	formatter *ResponseFormatter
+	events    *EventService
 
 	mu       sync.Mutex
 	entries  map[uint]cron.EntryID // cronJob.ID -> scheduler entry
@@ -118,6 +119,12 @@ func NewCronRunner(channels ChannelManager, registry ProviderRegistry, skills Sk
 // finalization. Optional: a nil formatter leaves cron output raw.
 func (r *CronRunner) SetResponseFormatter(f *ResponseFormatter) {
 	r.formatter = f
+}
+
+// SetEventService wires event recording: every tick is stored as a request
+// event linked to its run. Optional.
+func (r *CronRunner) SetEventService(e *EventService) {
+	r.events = e
 }
 
 // newCronRunnerWithDeps is the test seam: injects the DB, the scheduler, and
@@ -384,6 +391,18 @@ func (r *CronRunner) execute(job *database.CronJob) {
 			"cron_job_prompt":   job.Prompt,
 		},
 		Message: fmt.Sprintf("Cron: %s", job.Name),
+	}
+	// A cron tick is a request by source: no LLM classification. When the
+	// run finds a problem it reports an alert event of its own.
+	if r.events != nil {
+		ev := r.events.Record(context.Background(), EventInput{
+			SourceKind: database.EventSourceCron,
+			SourceUUID: job.UUID,
+			SourceType: "cron",
+			Title:      incCtx.Message,
+			Summary:    job.Prompt,
+		}, SourceEventVerdict(database.EventKindRequest))
+		incCtx.EventUUID = ev.UUID
 	}
 	incidentUUID, _, err := r.skills.SpawnAgentInvocation(cronAgentSkillName, incCtx)
 	if err != nil {

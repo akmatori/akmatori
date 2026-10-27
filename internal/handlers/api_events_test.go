@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,48 +35,38 @@ func seedEventIncident(t *testing.T, sourceKind string, startedAt time.Time, sta
 	return id
 }
 
-// seedEventAlert creates an Alert row attached to incidentUUID.
-func seedEventAlert(t *testing.T, incidentUUID string, firedAt time.Time, correlated bool) string {
+// seedFeedEvent creates an events row for feed tests.
+func seedFeedEvent(t *testing.T, e database.Event) string {
 	t.Helper()
-	db := database.GetDB()
-	decision := "new_incident"
-	if correlated {
-		decision = "linked"
+	if e.UUID == "" {
+		e.UUID = uuid.New().String()
 	}
-	a := database.Alert{
-		UUID:                uuid.New().String(),
-		IncidentUUID:        incidentUUID,
-		Status:              database.AlertStatusFiring,
-		AlertName:           "TestAlert",
-		TargetHost:          "host-01",
-		FiredAt:             firedAt,
-		Correlated:          correlated,
-		CorrelationDecision: decision,
+	if e.Classification == "" {
+		e.Classification = database.EventClassificationLLM
 	}
-	if err := db.Create(&a).Error; err != nil {
-		t.Fatalf("seed alert: %v", err)
+	if e.SourceKind == "" {
+		e.SourceKind = database.EventSourceWebhook
 	}
-	return a.UUID
+	if e.ReceivedAt.IsZero() {
+		e.ReceivedAt = e.OccurredAt
+	}
+	if err := database.GetDB().Create(&e).Error; err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	return e.UUID
+}
+
+func setupFeedDB(t *testing.T) {
+	t.Helper()
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{}, &database.Event{})
 }
 
 func doEventsRequest(t *testing.T, query string) ([]map[string]any, api.PaginationMeta) {
 	t.Helper()
-	mux := http.NewServeMux()
-	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	h.SetupRoutes(mux)
-
-	url := "/api/events"
-	if query != "" {
-		url += "?" + query
-	}
-	req := httptest.NewRequest(http.MethodGet, url, nil)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
+	rec := doEventsRaw(t, "/api/events", query)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-
 	var resp struct {
 		Data       []map[string]any   `json:"data"`
 		Pagination api.PaginationMeta `json:"pagination"`
@@ -85,172 +77,171 @@ func doEventsRequest(t *testing.T, query string) ([]map[string]any, api.Paginati
 	return resp.Data, resp.Pagination
 }
 
-// TestHandleEvents_MergedOrderedByOccurredAt verifies that alert and cron rows
-// are merged and returned in occurred_at DESC order.
-func TestHandleEvents_MergedOrderedByOccurredAt(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
-
-	now := time.Now().UTC().Truncate(time.Second)
-	older := now.Add(-2 * time.Hour)
-	newer := now.Add(-1 * time.Hour)
-
-	// Alert-sourced incident + one alert fired at `older`.
-	alertIncUUID := seedEventIncident(t, database.IncidentSourceKindAlert, older, database.IncidentStatusCompleted)
-	seedEventAlert(t, alertIncUUID, older, false)
-
-	// Cron incident started at `newer`.
-	seedEventIncident(t, database.IncidentSourceKindCron, newer, database.IncidentStatusCompleted)
-
-	rows, meta := doEventsRequest(t, "")
-	if meta.Total != 2 {
-		t.Fatalf("expected total=2, got %d", meta.Total)
-	}
-	if len(rows) != 2 {
-		t.Fatalf("expected 2 rows, got %d", len(rows))
-	}
-
-	// First row should be the cron (newer occurred_at).
-	if et, _ := rows[0]["event_type"].(string); et != database.IncidentSourceKindCron {
-		t.Errorf("expected first row event_type=%q, got %q", database.IncidentSourceKindCron, et)
-	}
-	// Second row should be the alert (older occurred_at).
-	if et, _ := rows[1]["event_type"].(string); et != "alert" {
-		t.Errorf("expected second row event_type=alert, got %q", et)
-	}
-}
-
-// TestHandleEvents_TypeFilterAlert verifies that ?type=alert returns only alert rows.
-func TestHandleEvents_TypeFilterAlert(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
-
-	now := time.Now().UTC()
-
-	alertIncUUID := seedEventIncident(t, database.IncidentSourceKindAlert, now, database.IncidentStatusRunning)
-	seedEventAlert(t, alertIncUUID, now, false)
-	seedEventIncident(t, database.IncidentSourceKindCron, now, database.IncidentStatusCompleted)
-
-	rows, meta := doEventsRequest(t, "type=alert")
-	if meta.Total != 1 {
-		t.Fatalf("expected total=1, got %d", meta.Total)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 row, got %d", len(rows))
-	}
-	if et, _ := rows[0]["event_type"].(string); et != "alert" {
-		t.Errorf("expected event_type=alert, got %q", et)
-	}
-}
-
-// TestHandleEvents_TypeFilterCron verifies that ?type=cron returns only cron incident rows.
-func TestHandleEvents_TypeFilterCron(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
-
-	now := time.Now().UTC()
-
-	alertIncUUID := seedEventIncident(t, database.IncidentSourceKindAlert, now, database.IncidentStatusCompleted)
-	seedEventAlert(t, alertIncUUID, now, false)
-	cronUUID := seedEventIncident(t, database.IncidentSourceKindCron, now.Add(-10*time.Minute), database.IncidentStatusCompleted)
-
-	rows, meta := doEventsRequest(t, "type=cron")
-	if meta.Total != 1 {
-		t.Fatalf("expected total=1, got %d", meta.Total)
-	}
-	if rows[0]["event_uuid"] != cronUUID {
-		t.Errorf("expected cron incident UUID %s, got %v", cronUUID, rows[0]["event_uuid"])
-	}
-}
-
-// TestHandleEvents_DeepPageReturns400 verifies that requesting a page whose offset
-// exceeds eventsMaxRowFetch (10 000) returns 400 rather than silent empty data.
-func TestHandleEvents_DeepPageReturns400(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
-
+func doEventsRaw(t *testing.T, path, query string) *httptest.ResponseRecorder {
+	t.Helper()
 	mux := http.NewServeMux()
 	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	h.SetupRoutes(mux)
-
-	// per_page=1, page=10001 → offset=10000 which equals eventsMaxRowFetch.
-	req := httptest.NewRequest(http.MethodGet, "/api/events?per_page=1&page=10001", nil)
+	url := path
+	if query != "" {
+		url += "?" + query
+	}
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
-	}
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+	return rec
 }
 
-// TestHandleEvents_Pagination verifies that page/per_page work correctly.
-func TestHandleEvents_Pagination(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
-
-	now := time.Now().UTC()
-
-	// Seed 3 cron incidents.
-	for i := 0; i < 3; i++ {
-		seedEventIncident(t, database.IncidentSourceKindCron, now.Add(time.Duration(-i)*time.Hour), database.IncidentStatusCompleted)
+func uuidsOf(rows []map[string]any) []string {
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r["event_uuid"].(string))
 	}
+	return out
+}
 
-	// Page 1 with per_page=2 should return 2 rows.
-	rows, meta := doEventsRequest(t, "per_page=2&page=1")
+func TestHandleEvents_NewestFirstWithLinks(t *testing.T) {
+	setupFeedDB(t)
+	db := database.GetDB()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	incUUID := seedEventIncident(t, database.IncidentSourceKindAlert, now.Add(-3*time.Hour), database.IncidentStatusMonitor)
+	conf := 0.82
+	alert := database.Alert{
+		UUID: uuid.New().String(), IncidentUUID: incUUID, Status: database.AlertStatusResolved,
+		AlertName: "HostDown", FiredAt: now.Add(-3 * time.Hour), Correlated: true,
+		CorrelationConfidence: &conf, CorrelationReasoning: "same site", CorrelationDecision: "linked",
+	}
+	db.Create(&alert)
+	alertEv := seedFeedEvent(t, database.Event{Kind: database.EventKindAlert, Title: "HostDown", Status: "firing",
+		OccurredAt: now.Add(-3 * time.Hour), AlertUUID: alert.UUID, IncidentUUID: incUUID})
+
+	runUUID := seedEventIncident(t, database.IncidentSourceKindCron, now.Add(-2*time.Hour), database.IncidentStatusRunning)
+	cronEv := seedFeedEvent(t, database.Event{Kind: database.EventKindRequest, SourceKind: database.EventSourceCron,
+		Classification: database.EventClassificationSource, Title: "Cron: nightly", OccurredAt: now.Add(-2 * time.Hour), IncidentUUID: runUUID})
+
+	changeEv := seedFeedEvent(t, database.Event{Kind: database.EventKindChange, Title: "Deploy nginx", Status: "firing",
+		OccurredAt: now.Add(-time.Hour), Host: "wa2"})
+
+	rows, meta := doEventsRequest(t, "")
 	if meta.Total != 3 {
-		t.Fatalf("expected total=3, got %d", meta.Total)
+		t.Fatalf("total = %d, want 3", meta.Total)
 	}
-	if len(rows) != 2 {
-		t.Errorf("expected 2 rows on page 1, got %d", len(rows))
-	}
-	if meta.TotalPages != 2 {
-		t.Errorf("expected 2 total pages, got %d", meta.TotalPages)
+	got := uuidsOf(rows)
+	if got[0] != changeEv || got[1] != cronEv || got[2] != alertEv {
+		t.Fatalf("order = %v, want change, cron, alert", got)
 	}
 
-	// Page 2 should return 1 row.
-	rows2, _ := doEventsRequest(t, "per_page=2&page=2")
-	if len(rows2) != 1 {
-		t.Errorf("expected 1 row on page 2, got %d", len(rows2))
+	if rows[0]["status"] != "" || rows[0]["kind"] != "change" || rows[0]["target_host"] != "wa2" {
+		t.Errorf("change row = %v (stored-only events have no status)", rows[0])
+	}
+	if rows[1]["status"] != "running" || rows[1]["source_kind"] != "cron" || rows[1]["incident_title"] != "evt-inc: cron" {
+		t.Errorf("request row = %v, want the run's status and title", rows[1])
+	}
+	a := rows[2]
+	if a["status"] != "resolved" || a["correlated"] != true || a["correlation_reasoning"] != "same site" ||
+		a["alert_uuid"] != alert.UUID || a["incident_status"] != "monitor" {
+		t.Errorf("alert row = %v, want live alert state + incident", a)
 	}
 }
 
-// TestHandleEvents_SearchByUUIDPrefixAndTitle verifies the search param:
-// UUID prefixes match alert and incident events; title substrings match too;
-// non-matching terms return an empty page.
-func TestHandleEvents_SearchByUUIDPrefixAndTitle(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
-
+func TestHandleEvents_FollowsMovedAlert(t *testing.T) {
+	setupFeedDB(t)
+	db := database.GetDB()
 	now := time.Now().UTC()
-	alertIncUUID := seedEventIncident(t, database.IncidentSourceKindAlert, now, database.IncidentStatusRunning)
-	alertUUID := seedEventAlert(t, alertIncUUID, now, false)
-	cronUUID := seedEventIncident(t, database.IncidentSourceKindCron, now, database.IncidentStatusCompleted)
+	oldInc := seedEventIncident(t, database.IncidentSourceKindAlert, now, database.IncidentStatusRunning)
+	newInc := seedEventIncident(t, database.IncidentSourceKindAlert, now, database.IncidentStatusRunning)
+	alert := database.Alert{UUID: uuid.New().String(), IncidentUUID: newInc, Status: database.AlertStatusFiring, FiredAt: now}
+	db.Create(&alert)
+	seedFeedEvent(t, database.Event{Kind: database.EventKindAlert, OccurredAt: now, AlertUUID: alert.UUID, IncidentUUID: oldInc})
 
-	// Search by the alert event's UUID prefix — only that event comes back.
-	rows, meta := doEventsRequest(t, "search="+alertUUID[:8])
-	if meta.Total != 1 || len(rows) != 1 {
-		t.Fatalf("uuid-prefix search: expected 1 row, got total=%d rows=%d", meta.Total, len(rows))
+	rows, _ := doEventsRequest(t, "")
+	if rows[0]["incident_uuid"] != newInc {
+		t.Fatalf("incident = %v, want the alert's current incident %s", rows[0]["incident_uuid"], newInc)
 	}
-	if rows[0]["event_uuid"] != alertUUID {
-		t.Errorf("expected event %s, got %v", alertUUID, rows[0]["event_uuid"])
-	}
+}
 
-	// Search by the cron incident's UUID prefix.
-	rows, _ = doEventsRequest(t, "search="+cronUUID[:8])
-	if len(rows) != 1 || rows[0]["event_uuid"] != cronUUID {
-		t.Fatalf("cron uuid search: expected %s, got %v", cronUUID, rows)
-	}
+func TestHandleEvents_Filters(t *testing.T) {
+	setupFeedDB(t)
+	now := time.Now().UTC()
+	alertEv := seedFeedEvent(t, database.Event{Kind: database.EventKindAlert, Title: "CPU high", Host: "web-01", OccurredAt: now.Add(-time.Minute)})
+	changeEv := seedFeedEvent(t, database.Event{Kind: database.EventKindChange, Title: "Deploy", OccurredAt: now.Add(-2 * time.Minute)})
+	cronEv := seedFeedEvent(t, database.Event{Kind: database.EventKindRequest, SourceKind: database.EventSourceCron, Title: "Cron", OccurredAt: now.Add(-3 * time.Minute)})
+	oldEv := seedFeedEvent(t, database.Event{Kind: database.EventKindAlert, Title: "Old", OccurredAt: now.Add(-48 * time.Hour)})
 
-	// Title substring matches the alert (name "TestAlert"), case-insensitive.
-	rows, _ = doEventsRequest(t, "search=testalert")
-	if len(rows) != 1 || rows[0]["event_uuid"] != alertUUID {
-		t.Fatalf("title search: expected alert event, got %v", rows)
+	tests := []struct {
+		name  string
+		query string
+		want  []string
+	}{
+		{"kind", "kind=change", []string{changeEv}},
+		{"source", "source=cron", []string{cronEv}},
+		{"legacy type=alert", "type=alert", []string{alertEv, oldEv}},
+		{"legacy type=cron", "type=cron", []string{cronEv}},
+		{"time range", fmt.Sprintf("from=%d", now.Add(-time.Hour).Unix()), []string{alertEv, changeEv, cronEv}},
+		{"search title", "search=deploy", []string{changeEv}},
+		{"search host", "search=WEB-01", []string{alertEv}},
+		{"search uuid prefix", "search=" + cronEv[:8], []string{cronEv}},
 	}
-
-	// Host substring matches the alert row (host-01).
-	rows, _ = doEventsRequest(t, "search=host-01")
-	if len(rows) != 1 || rows[0]["event_uuid"] != alertUUID {
-		t.Fatalf("host search: expected alert event, got %v", rows)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows, meta := doEventsRequest(t, tt.query)
+			got := uuidsOf(rows)
+			if int(meta.Total) != len(tt.want) || strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("got %v (total %d), want %v", got, meta.Total, tt.want)
+			}
+		})
 	}
+}
 
-	// Non-matching term returns nothing.
-	rows, meta = doEventsRequest(t, "search=zzz-no-such-event")
-	if meta.Total != 0 || len(rows) != 0 {
-		t.Errorf("expected empty result, got total=%d rows=%d", meta.Total, len(rows))
+func TestHandleEvents_Pagination(t *testing.T) {
+	setupFeedDB(t)
+	now := time.Now().UTC()
+	for i := 0; i < 5; i++ {
+		seedFeedEvent(t, database.Event{Kind: database.EventKindInfo, OccurredAt: now.Add(-time.Duration(i) * time.Minute)})
+	}
+	rows, meta := doEventsRequest(t, "page=2&per_page=2")
+	if len(rows) != 2 || meta.Total != 5 || meta.TotalPages != 3 {
+		t.Fatalf("rows=%d meta=%+v", len(rows), meta)
+	}
+	if rec := doEventsRaw(t, "/api/events", "page=100001"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("huge page: status %d, want 400", rec.Code)
+	}
+}
+
+func TestHandleEventRaw(t *testing.T) {
+	setupFeedDB(t)
+	db := database.GetDB()
+	now := time.Now().UTC()
+
+	own := seedFeedEvent(t, database.Event{Kind: database.EventKindChange, OccurredAt: now,
+		RawPayload: database.JSONB{"original_message": "deployed nginx"}, Labels: database.JSONB{"team": "cdn"}})
+	alert := database.Alert{UUID: uuid.New().String(), IncidentUUID: "i", Status: database.AlertStatusFiring, FiredAt: now,
+		RawPayload: database.JSONB{"labels": "from alert"}}
+	db.Create(&alert)
+	backfilled := seedFeedEvent(t, database.Event{Kind: database.EventKindAlert, OccurredAt: now, AlertUUID: alert.UUID,
+		Classification: database.EventClassificationBackfill})
+	request := seedFeedEvent(t, database.Event{Kind: database.EventKindRequest, OccurredAt: now, Summary: "what is the disk usage?"})
+
+	decode := func(uuid string) map[string]any {
+		rec := doEventsRaw(t, "/api/events/raw", "uuid="+uuid)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("raw %s: %d %s", uuid, rec.Code, rec.Body.String())
+		}
+		var m map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &m)
+		return m
+	}
+	if m := decode(own); m["original_message"] != "deployed nginx" || m["labels"] == nil {
+		t.Errorf("own payload = %v", m)
+	}
+	if m := decode(backfilled); m["raw"] == nil || m["raw"].(map[string]any)["labels"] != "from alert" {
+		t.Errorf("backfilled payload = %v, want the alert's payload", m)
+	}
+	if m := decode(request); m["original_message"] != "what is the disk usage?" {
+		t.Errorf("request payload = %v, want the summary", m)
+	}
+	if rec := doEventsRaw(t, "/api/events/raw", "uuid=missing"); rec.Code != http.StatusNotFound {
+		t.Errorf("missing event: %d, want 404", rec.Code)
 	}
 }
 

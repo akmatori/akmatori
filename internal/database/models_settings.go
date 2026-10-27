@@ -271,6 +271,19 @@ type GeneralSettings struct {
 	// and restore the built-in rules. Never stored.
 	AlertCorrelationPromptDefault string `gorm:"-" json:"alert_correlation_prompt_default,omitempty"`
 
+	// EventClassificationEnabled gates the one-shot LLM classification of
+	// inbound events (alert, change, info, request). Nil means ENABLED (see
+	// GetEventClassificationEnabled). Off: webhook items and listener
+	// messages are all alerts and mentions/API tasks are all requests, as
+	// before events existed.
+	EventClassificationEnabled *bool `gorm:"default:null" json:"event_classification_enabled"`
+	// EventClassificationPrompt overrides the classification rules text (the
+	// class list and JSON contract are always appended in code). Nil or blank
+	// means the built-in default.
+	EventClassificationPrompt *string `gorm:"type:text;default:null" json:"event_classification_prompt"`
+	// EventClassificationPromptDefault is filled on GET only. Never stored.
+	EventClassificationPromptDefault string `gorm:"-" json:"event_classification_prompt_default,omitempty"`
+
 	// IncidentMergeEnabled gates the post-investigation merge pass: after an
 	// alert-sourced incident completes, an LLM compares its diagnosed root
 	// cause against recent investigated incidents and merges on a confident
@@ -324,6 +337,12 @@ func (s *GeneralSettings) GetIncidentAutoCloseWindow() time.Duration {
 // deduplication that needs no LLM. An explicit false still turns it off.
 func (s *GeneralSettings) GetAlertCorrelationEnabled() bool {
 	return s.AlertCorrelationEnabled == nil || *s.AlertCorrelationEnabled
+}
+
+// GetEventClassificationEnabled returns the effective event classification
+// gate, defaulting to true when unset.
+func (s *GeneralSettings) GetEventClassificationEnabled() bool {
+	return s.EventClassificationEnabled == nil || *s.EventClassificationEnabled
 }
 
 // GetIncidentMergeEnabled returns the effective merge-gate flag, defaulting
