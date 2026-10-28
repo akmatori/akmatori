@@ -290,7 +290,7 @@ func (s *SkillService) GetToolAllowlist() []ToolAllowlistEntry {
 			})
 		}
 	}
-	return entries
+	return withEventsTool(entries)
 }
 
 // GetSkill returns a skill by name

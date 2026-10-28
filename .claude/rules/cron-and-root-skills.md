@@ -28,8 +28,12 @@ Cron jobs run on a per-job schedule and always execute as a full agent investiga
   resolution entirely and records its outcome only on the Incident row
 - crons spawn with ONLY the `cron-agent` root prompt — do NOT wrap the task with
   `executor.PrependGuidance` (incident-triage framed); the task is prefixed only with the current UTC time
-- tool-less crons (e.g. `Dreaming`) MUST send an explicit empty allowlist; `ToolAllowlist` on
-  `WebSocketMessage` is intentionally NOT `omitempty` — `[]` means reject-all, `null` means allow-all
+- tool-less crons (e.g. `Dreaming`) MUST send an explicit allowlist that holds only the built-in
+  `events` entry (`withEventsTool`, every run gets it so a cron can call `events.report_alert`);
+  `ToolAllowlist` on `WebSocketMessage` is intentionally NOT `omitempty` — `[]` means reject-all,
+  `null` means allow-all
+- a cron that finds a problem reports it with `events.report_alert` (see the `events` rule); the
+  stable `cron:<job>:<alert>:<host>` identity makes repeated runs update one firing alert
 - the seeded `Dreaming` cron dedupes `/akmatori/memory/global/` via memory-writer tombstones
 - cron expressions are validated at write time (invalid → 400); `CronRunner` survives tick failures,
   recording `LastRunStatus=error` + `LastRunError`

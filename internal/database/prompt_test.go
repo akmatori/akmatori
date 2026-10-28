@@ -225,3 +225,29 @@ func TestDefaultIncidentManagerPrompt_MemoryWriterGuidance(t *testing.T) {
 		}
 	}
 }
+
+// TestDefaultIncidentManagerPrompt_ChangeCheckAfterMemory pins the recent-
+// changes step: after the memory search, before loading skills, through the
+// built-in events tool.
+func TestDefaultIncidentManagerPrompt_ChangeCheckAfterMemory(t *testing.T) {
+	memoryIdx := strings.Index(DefaultIncidentManagerPrompt, "MANDATORY - Search cross-incident memory next")
+	changeIdx := strings.Index(DefaultIncidentManagerPrompt, "**Check recent changes**")
+	skillsIdx := strings.Index(DefaultIncidentManagerPrompt, "Load relevant skills")
+	if changeIdx == -1 || !(memoryIdx < changeIdx && changeIdx < skillsIdx) {
+		t.Fatalf("change check must sit between memory search and skills (memory=%d change=%d skills=%d)", memoryIdx, changeIdx, skillsIdx)
+	}
+	if !strings.Contains(DefaultIncidentManagerPrompt, `gateway_call("events.search", {"kind": "change"`) {
+		t.Error("change check must show the events.search call")
+	}
+}
+
+func TestDefaultCronAgentPrompt_ReportsProblemsAsAlerts(t *testing.T) {
+	if !strings.Contains(DefaultCronAgentPrompt, `gateway_call("events.report_alert"`) {
+		t.Error("cron prompt must show the events.report_alert call")
+	}
+	reportIdx := strings.Index(DefaultCronAgentPrompt, "**Report problems as alerts**")
+	summaryIdx := strings.Index(DefaultCronAgentPrompt, "**Produce the final summary**")
+	if reportIdx == -1 || reportIdx > summaryIdx {
+		t.Error("alert reporting must come before the final summary")
+	}
+}

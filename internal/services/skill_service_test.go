@@ -901,7 +901,7 @@ func TestGetToolAllowlist_SkillWithTools(t *testing.T) {
 		t.Fatalf("failed to append tools: %v", err)
 	}
 
-	allowlist := svc.GetToolAllowlist()
+	allowlist := withoutEventsTool(t, svc.GetToolAllowlist())
 
 	if len(allowlist) != 2 {
 		t.Fatalf("expected 2 entries in allowlist, got %d", len(allowlist))
@@ -940,7 +940,7 @@ func TestGetToolAllowlist_NoTools(t *testing.T) {
 	// Create skill without any tools
 	db.Create(&database.Skill{Name: "basic-skill", Description: "No tools", Enabled: true, IsSystem: false})
 
-	allowlist := svc.GetToolAllowlist()
+	allowlist := withoutEventsTool(t, svc.GetToolAllowlist())
 
 	if len(allowlist) != 0 {
 		t.Errorf("expected empty allowlist for skill with no tools, got %v", allowlist)
@@ -975,7 +975,7 @@ func TestGetToolAllowlist_MultipleSkillsDeduplication(t *testing.T) {
 		t.Fatalf("failed to append tools: %v", err)
 	}
 
-	allowlist := svc.GetToolAllowlist()
+	allowlist := withoutEventsTool(t, svc.GetToolAllowlist())
 
 	// Should deduplicate — only one entry for shared-ssh
 	if len(allowlist) != 1 {
@@ -1008,7 +1008,7 @@ func TestGetToolAllowlist_ExcludesSystemSkills(t *testing.T) {
 		t.Fatalf("failed to append tools: %v", err)
 	}
 
-	allowlist := svc.GetToolAllowlist()
+	allowlist := withoutEventsTool(t, svc.GetToolAllowlist())
 
 	if len(allowlist) != 0 {
 		t.Errorf("expected empty allowlist (system skills excluded), got %v", allowlist)
@@ -1038,7 +1038,7 @@ func TestGetToolAllowlist_ExcludesDisabledToolInstances(t *testing.T) {
 		t.Fatalf("failed to append tools: %v", err)
 	}
 
-	allowlist := svc.GetToolAllowlist()
+	allowlist := withoutEventsTool(t, svc.GetToolAllowlist())
 
 	if len(allowlist) != 0 {
 		t.Errorf("expected empty allowlist (disabled tools excluded), got %v", allowlist)
@@ -1155,4 +1155,23 @@ func TestSkillScriptRejectsUnsafeFilename(t *testing.T) {
 	if err := svc.DeleteSkillScript("test-skill", "no-extension"); err == nil {
 		t.Fatal("DeleteSkillScript() error = nil, want extension validation error")
 	}
+}
+
+// withoutEventsTool checks that the built-in events tool is in an agent run's
+// allowlist (every run gets it) and returns the other entries.
+func withoutEventsTool(t *testing.T, entries []ToolAllowlistEntry) []ToolAllowlistEntry {
+	t.Helper()
+	out := make([]ToolAllowlistEntry, 0, len(entries))
+	found := false
+	for _, e := range entries {
+		if e.ToolType == EventsToolType && e.InstanceID == 0 && e.LogicalName == "" {
+			found = true
+			continue
+		}
+		out = append(out, e)
+	}
+	if !found {
+		t.Fatalf("allowlist %v lacks the built-in events tool", entries)
+	}
+	return out
 }

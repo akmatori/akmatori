@@ -874,6 +874,7 @@ func TestCronRunner_AgentTick_UsesCronAgentSkillAndPerCronTools(t *testing.T) {
 	if len(call.skills) != 1 || call.skills[0] != "cron-agent" {
 		t.Errorf("StartIncident skills = %v, want [cron-agent]", call.skills)
 	}
+	call.tools = withoutEventsTool(t, call.tools)
 	if len(call.tools) != 1 {
 		t.Fatalf("StartIncident toolAllowlist = %d entries, want 1 (only enabled tool)", len(call.tools))
 	}
@@ -953,13 +954,16 @@ func TestCronRunner_AgentTick_EmptyAllowlistRejectsAllTools(t *testing.T) {
 	if call.tools == nil {
 		t.Fatal("StartIncident toolAllowlist must be a non-nil empty slice; a nil slice JSON-marshals as null and the gateway treats null as 'allow all'")
 	}
-	if len(call.tools) != 0 {
-		t.Fatalf("StartIncident toolAllowlist = %d entries, want 0", len(call.tools))
+	// No assigned tools: only the built-in events tool is allowed, so every
+	// infrastructure tool call is rejected.
+	if len(withoutEventsTool(t, call.tools)) != 0 {
+		t.Fatalf("StartIncident toolAllowlist = %v, want only the events tool", call.tools)
 	}
 
 	// Wire-format defense-in-depth: simulate the JSON marshal the agent_ws
-	// frame goes through and confirm the empty slice rides through as "[]",
-	// not as a missing field. omitempty here would silently re-grant tools.
+	// frame goes through and confirm the allowlist rides through as a list,
+	// not as a missing field or null. omitempty here would silently re-grant
+	// tools.
 	frame := struct {
 		Tools []ToolAllowlistEntry `json:"tool_allowlist"`
 	}{Tools: call.tools}
@@ -967,7 +971,7 @@ func TestCronRunner_AgentTick_EmptyAllowlistRejectsAllTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if got, want := string(encoded), `{"tool_allowlist":[]}`; got != want {
+	if got, want := string(encoded), `{"tool_allowlist":[{"instance_id":0,"logical_name":"","tool_type":"events"}]}`; got != want {
 		t.Errorf("wire format = %s, want %s", got, want)
 	}
 }

@@ -98,6 +98,12 @@ type Event struct {
 	// Request events point at the row that holds their agent run.
 	IncidentUUID string `gorm:"size:36;index" json:"incident_uuid,omitempty"`
 
+	// PendingDispatch marks an alert event written by the MCP gateway
+	// (events.report_alert from a cron run). The API's reported-alert
+	// dispatcher claims it, clears the flag and runs it through the alert
+	// correlation gate.
+	PendingDispatch bool `gorm:"not null;default:false;index" json:"-"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

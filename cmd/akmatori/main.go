@@ -468,6 +468,12 @@ func main() {
 	go staleCloseService.StartBackgroundSweep(ctx)
 	slog.Info("stale incident close service started")
 
+	// Cron runs report problems through the gateway (events.report_alert),
+	// which only writes a queued events row; this loop runs them through the
+	// alert correlation gate.
+	handlers.NewReportedEventDispatcher(database.GetDB(), alertHandler).Start(ctx)
+	slog.Info("reported alert dispatcher started")
+
 	// Start watching for Slack settings reload requests
 	go slackManager.WatchForReloads(ctx)
 

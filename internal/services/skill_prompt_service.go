@@ -762,6 +762,21 @@ gateway_call("proposals.update_draft", {"uuid": "<proposal-uuid>", "proposed_con
 gateway_call("proposals.list_cron_jobs", {}, "%s")
 `+"```"+`
 `, logicalName, logicalName, logicalName, logicalName)
+	case "events":
+		return fmt.Sprintf(`
+**Parameters:**
+- `+"`search`"+`: kind (alert, change, info, request), source (webhook, slack_listener, slack_mention, manual, cron, proposal), host (substring), text (substring of title or summary), since, until (ISO-8601 preferred, or Unix seconds; on occurred_at), limit (default 50, max 200), offset. Newest first, summary fields only.
+- `+"`get`"+`: uuid* (string)
+- `+"`report_alert`"+`: alert_name*, summary* | host, service, severity (critical, high, warning, info). Cron runs only.
+(* = required)
+
+Usage (via gateway_call):
+`+"```"+`
+gateway_call("events.search", {"kind": "change", "since": "2026-10-27T11:00:00Z", "host": "wa2"}, "%s")
+gateway_call("events.get", {"uuid": "<event-uuid>"}, "%s")
+gateway_call("events.report_alert", {"alert_name": "Disk usage above 90%%", "summary": "/var at 94%% on db1", "host": "db1", "severity": "high"}, "%s")
+`+"```"+`
+`, logicalName, logicalName, logicalName)
 	default:
 		return fmt.Sprintf("Use `gateway_call(\"%s.<tool_method>\", {<args>}, \"%s\")` to call this tool's methods.\n", typeName, logicalName)
 	}

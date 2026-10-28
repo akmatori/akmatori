@@ -60,6 +60,13 @@ Only `alert` events open or join incidents; everything else never touches the in
 - migration `migrateBackfillEvents`: one `backfill` event per pre-existing alert (stamping
   `alerts.event_uuid`) and per non-alert run; batched and idempotent
 - retention deletes events past the cutoff unless they still point at an existing incident
+- agents: the gateway `events` tool (`search`, `get`, cron-only `report_alert`) is in every run's
+  allowlist. The incident-manager prompt has a "Check recent changes" step (`events.search
+  kind=change`, 60 min before the first alert); the cron-agent prompt reports problems with
+  `report_alert`, which the `ReportedEventDispatcher` sends through `ProcessReportedAlert`
+- `ProcessReportedAlert` first joins a still-firing alert with the same source + source fingerprint
+  (a cron reporting the same problem every run), before correlation; otherwise the insert would hit
+  `uniq_firing_alert` and fail a fresh incident
 - feed: `GET /api/events` is one SQL query on `events` (filters `kind`, `source`, legacy `type`),
   enriched with the alert's live status/correlation and the incident title/status. Change/info rows
   have no status. The page is `/events` (`/feed` redirects, keeping the query)

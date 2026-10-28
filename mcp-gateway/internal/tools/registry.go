@@ -16,6 +16,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/ratelimit"
 	"github.com/akmatori/mcp-gateway/internal/tools/catchpoint"
 	"github.com/akmatori/mcp-gateway/internal/tools/clickhouse"
+	"github.com/akmatori/mcp-gateway/internal/tools/events"
 	"github.com/akmatori/mcp-gateway/internal/tools/grafana"
 	"github.com/akmatori/mcp-gateway/internal/tools/httpconnector"
 	"github.com/akmatori/mcp-gateway/internal/tools/incidents"
@@ -36,50 +37,51 @@ const (
 	ZabbixBurstCapacity     = 20 // burst capacity
 	VMRatePerSecond         = 10 // requests per second
 	VMBurstCapacity         = 20 // burst capacity
-	CatchpointRatePerSecond  = 10 // requests per second
-	CatchpointBurstCapacity  = 20 // burst capacity
-	PostgreSQLRatePerSecond  = 10 // requests per second
-	PostgreSQLBurstCapacity  = 20 // burst capacity
-	GrafanaRatePerSecond     = 10 // requests per second
-	GrafanaBurstCapacity     = 20 // burst capacity
-	ClickHouseRatePerSecond  = 10 // requests per second
-	ClickHouseBurstCapacity  = 20 // burst capacity
-	PagerDutyRatePerSecond   = 10 // requests per second
-	PagerDutyBurstCapacity   = 20 // burst capacity
-	NetBoxRatePerSecond      = 10 // requests per second
-	NetBoxBurstCapacity      = 20 // burst capacity
-	K8sRatePerSecond         = 10 // requests per second
-	K8sBurstCapacity         = 20 // burst capacity
-	JiraRatePerSecond        = 10 // requests per second
-	JiraBurstCapacity        = 20 // burst capacity
+	CatchpointRatePerSecond = 10 // requests per second
+	CatchpointBurstCapacity = 20 // burst capacity
+	PostgreSQLRatePerSecond = 10 // requests per second
+	PostgreSQLBurstCapacity = 20 // burst capacity
+	GrafanaRatePerSecond    = 10 // requests per second
+	GrafanaBurstCapacity    = 20 // burst capacity
+	ClickHouseRatePerSecond = 10 // requests per second
+	ClickHouseBurstCapacity = 20 // burst capacity
+	PagerDutyRatePerSecond  = 10 // requests per second
+	PagerDutyBurstCapacity  = 20 // burst capacity
+	NetBoxRatePerSecond     = 10 // requests per second
+	NetBoxBurstCapacity     = 20 // burst capacity
+	K8sRatePerSecond        = 10 // requests per second
+	K8sBurstCapacity        = 20 // burst capacity
+	JiraRatePerSecond       = 10 // requests per second
+	JiraBurstCapacity       = 20 // burst capacity
 )
 
 // Registry manages tool registration
 type Registry struct {
-	server      *mcp.Server
-	logger      *log.Logger
-	zabbixTool     *zabbix.ZabbixTool
-	zabbixLimit    *ratelimit.Limiter
-	vmTool         *victoriametrics.VictoriaMetricsTool
-	vmLimit        *ratelimit.Limiter
-	catchpointTool   *catchpoint.CatchpointTool
-	catchpointLimit  *ratelimit.Limiter
-	postgresqlTool   *postgresql.PostgreSQLTool
-	postgresqlLimit  *ratelimit.Limiter
-	grafanaTool      *grafana.GrafanaTool
-	grafanaLimit     *ratelimit.Limiter
-	clickhouseTool   *clickhouse.ClickHouseTool
-	clickhouseLimit  *ratelimit.Limiter
-	pagerdutyTool    *pagerduty.PagerDutyTool
-	pagerdutyLimit   *ratelimit.Limiter
-	netboxTool       *netbox.NetBoxTool
-	netboxLimit      *ratelimit.Limiter
-	k8sTool          *k8s.K8sTool
-	k8sLimit         *ratelimit.Limiter
-	jiraTool         *jira.JiraTool
-	jiraLimit        *ratelimit.Limiter
-	incidentsTool    *incidents.IncidentsTool
-	proposalsTool    *proposals.ProposalsTool
+	server          *mcp.Server
+	logger          *log.Logger
+	zabbixTool      *zabbix.ZabbixTool
+	zabbixLimit     *ratelimit.Limiter
+	vmTool          *victoriametrics.VictoriaMetricsTool
+	vmLimit         *ratelimit.Limiter
+	catchpointTool  *catchpoint.CatchpointTool
+	catchpointLimit *ratelimit.Limiter
+	postgresqlTool  *postgresql.PostgreSQLTool
+	postgresqlLimit *ratelimit.Limiter
+	grafanaTool     *grafana.GrafanaTool
+	grafanaLimit    *ratelimit.Limiter
+	clickhouseTool  *clickhouse.ClickHouseTool
+	clickhouseLimit *ratelimit.Limiter
+	pagerdutyTool   *pagerduty.PagerDutyTool
+	pagerdutyLimit  *ratelimit.Limiter
+	netboxTool      *netbox.NetBoxTool
+	netboxLimit     *ratelimit.Limiter
+	k8sTool         *k8s.K8sTool
+	k8sLimit        *ratelimit.Limiter
+	jiraTool        *jira.JiraTool
+	jiraLimit       *ratelimit.Limiter
+	incidentsTool   *incidents.IncidentsTool
+	eventsTool      *events.EventsTool
+	proposalsTool   *proposals.ProposalsTool
 
 	// HTTP connector state
 	httpExecutor       *httpconnector.HTTPConnectorExecutor
@@ -183,6 +185,9 @@ func (r *Registry) RegisterAllTools() {
 	// Register Proposals tools (no rate limiter — local DB queries)
 	r.registerProposalsTools()
 
+	// Register Events tools (no rate limiter — local DB queries)
+	r.registerEventsTools()
+
 	r.logger.Println("All tools registered")
 }
 
@@ -243,6 +248,7 @@ var builtInToolNamespaces = map[string]bool{
 	"jira":             true,
 	"incidents":        true,
 	"proposals":        true,
+	"events":           true,
 }
 
 // DefaultMCPProxyLoader loads MCP server configs from the database and converts them
@@ -4827,6 +4833,76 @@ func (r *Registry) registerIncidentsTools() {
 	)
 
 	r.logger.Println("Incidents tools registered (2 methods)")
+}
+
+// registerEventsTools registers events.search, events.get and
+// events.report_alert. No rate limiter — these are local DB queries;
+// report_alert has its own per-run cap.
+func (r *Registry) registerEventsTools() {
+	r.eventsTool = events.NewEventsTool(database.DB, r.logger)
+
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "events.search",
+			Description: "Search Akmatori events (every inbound item: monitoring alerts, deploys and config changes, Slack reports, cron runs), newest first. Use kind=change to see what changed before an alert. Returns summary fields only.",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"kind":   {Type: "string", Description: "Event class: alert, change, info or request"},
+					"source": {Type: "string", Description: "Inbound path: webhook, slack_listener, slack_mention, manual, cron or proposal"},
+					"host":   {Type: "string", Description: "Substring of the host name"},
+					"text":   {Type: "string", Description: "Substring of the title or summary"},
+					"since":  {Type: "string", Description: "Start of range on occurred_at: ISO-8601 (preferred) or Unix seconds"},
+					"until":  {Type: "string", Description: "End of range on occurred_at: ISO-8601 (preferred) or Unix seconds"},
+					"limit":  {Type: "integer", Description: "Maximum events to return (default 50, max 200)"},
+					"offset": {Type: "integer", Description: "Events to skip for pagination"},
+				},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.eventsTool.Search(ctx, incidentID, args)
+		},
+	)
+
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "events.get",
+			Description: "Get one Akmatori event by UUID: summary, labels, class reasoning and raw payload (cut to 20,000 bytes).",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"uuid": {Type: "string", Description: "Event UUID (required)"},
+				},
+				Required: []string{"uuid"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.eventsTool.Get(ctx, incidentID, args)
+		},
+	)
+
+	r.server.RegisterTool(
+		mcp.Tool{
+			Name:        "events.report_alert",
+			Description: "Cron runs only: report a problem you found as an alert event. Akmatori runs it through alert correlation, so it joins the open incident it belongs to or opens a new one. Report each distinct problem once per run.",
+			InputSchema: mcp.InputSchema{
+				Type: "object",
+				Properties: map[string]mcp.Property{
+					"alert_name": {Type: "string", Description: "Short, stable name of the problem (required), e.g. \"Disk usage above 90%\""},
+					"summary":    {Type: "string", Description: "What is wrong, with the evidence you saw (required)"},
+					"host":       {Type: "string", Description: "Affected host, when there is one"},
+					"service":    {Type: "string", Description: "Affected service, when there is one"},
+					"severity":   {Type: "string", Description: "critical, high, warning (default) or info"},
+				},
+				Required: []string{"alert_name", "summary"},
+			},
+		},
+		func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
+			return r.eventsTool.ReportAlert(ctx, incidentID, args)
+		},
+	)
+
+	r.logger.Println("Events tools registered (3 methods)")
 }
 
 // registerProposalsTools registers the proposals.* tools used by the
