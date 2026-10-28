@@ -164,7 +164,7 @@ func TestReportAlert_CronRunQueuesAlertEvent(t *testing.T) {
 		ev.Status != "firing" || ev.Severity != "high" || ev.Classification != "source" {
 		t.Fatalf("event = %+v", ev)
 	}
-	if ev.ExternalID != "cron:job-1:disk usage above 90%:db1" {
+	if ev.ExternalID != cronAlertIdentity("job-1", "disk usage above 90%", "db1") || !strings.HasPrefix(ev.ExternalID, "cron:") {
 		t.Fatalf("external id = %q, want a stable job+alert+host identity", ev.ExternalID)
 	}
 	if ev.RawPayload["reported_by_run"] != "run-1" || ev.RawPayload["cron_job_name"] != "disk check" {
@@ -230,5 +230,23 @@ func TestGet_RequestEventIncludesRun(t *testing.T) {
 	}
 	if strings.Contains(out.(string), `"run"`) {
 		t.Fatalf("change event must have no run: %s", out)
+	}
+}
+
+// The identity keeps every part: case does not matter, but a long alert name
+// never hides the host.
+func TestCronAlertIdentity(t *testing.T) {
+	if cronAlertIdentity("job", "Disk Full", "DB1") != cronAlertIdentity("job", "disk full", "db1") {
+		t.Fatal("identity must ignore case")
+	}
+	long := strings.Repeat("x", 300)
+	if cronAlertIdentity("job", long, "db1") == cronAlertIdentity("job", long, "db2") {
+		t.Fatal("a long alert name must not hide the host")
+	}
+	if cronAlertIdentity("job", "a:b", "c") == cronAlertIdentity("job", "a", "b:c") {
+		t.Fatal("parts must not run into each other")
+	}
+	if got := cronAlertIdentity("job", long, "db1"); len(got) > 255 {
+		t.Fatalf("identity length = %d, must fit external_id (255)", len(got))
 	}
 }

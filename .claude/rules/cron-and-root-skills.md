@@ -34,7 +34,8 @@ Cron jobs run on a per-job schedule and always execute as a full agent investiga
   `ToolAllowlist` on `WebSocketMessage` is intentionally NOT `omitempty` — `[]` means reject-all,
   `null` means allow-all
 - a cron that finds a problem reports it with `events.report_alert` (see the `events` rule); the
-  stable `cron:<job>:<alert>:<host>` identity makes repeated runs update one firing alert
+  stable identity (`cron:` + hash of job, alert name, host; `cronAlertIdentity`) makes repeated runs
+  update one firing alert
 - the seeded `Dreaming` cron dedupes `/akmatori/memory/global/` via memory-writer tombstones
 - cron expressions are validated at write time (invalid → 400); `CronRunner` survives tick failures,
   recording `LastRunStatus=error` + `LastRunError`

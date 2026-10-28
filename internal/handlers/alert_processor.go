@@ -97,7 +97,10 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 
 	key := alertSpawnKey(instance.UUID, normalized.AlertName, normalized.TargetHost, normalized.SourceFingerprint)
 
+	// ran is set only by the leader; a follower's event is linked below.
+	var ran bool
 	_, sfErr, _ := h.spawnGroup.Do(key, func() (interface{}, error) {
+		ran = true
 		// Correlation gate: attach to a recent open or monitor incident when confident.
 		verdict, corrErr := h.correlate(context.Background(), instance.UUID, normalized)
 		if corrErr != nil {
@@ -193,9 +196,13 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		slog.Error("failed to process alert", "err", sfErr)
 		return
 	}
-	// Followers (isLeader==false): singleflight collapsed the burst; the leader
-	// owned all work. The partial-unique index on alerts prevents duplicate rows
-	// if the same alert arrives again before the leader's insert commits.
+	// Followers: singleflight collapsed the burst; the leader owned all work.
+	// The partial-unique index on alerts prevents duplicate rows if the same
+	// alert arrives again before the leader's insert commits. The follower's
+	// own event still gets linked to the leader's alert.
+	if !ran {
+		services.LinkFollowerEvent(database.GetDB(), normalized.EventUUID, instance.UUID, normalized)
+	}
 }
 
 // ProcessAlertFromListenerChannel processes an alert that originated from a
@@ -276,7 +283,10 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 
 	key := alertSpawnKey(channel.UUID, normalized.AlertName, normalized.TargetHost, normalized.SourceFingerprint)
 
+	// ran is set only by the leader; a follower's event is linked below.
+	var ran bool
 	_, sfErr, _ := h.spawnGroup.Do(key, func() (interface{}, error) {
+		ran = true
 		// Correlation gate: attach to a recent open or monitor incident when confident.
 		verdict, corrErr := h.correlate(context.Background(), channel.UUID, normalized)
 		if corrErr != nil {
@@ -362,7 +372,11 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 		slog.Error("failed to process listener channel alert", "err", sfErr)
 		return
 	}
-	// Followers (isLeader==false): singleflight collapsed the burst; the leader owned all work.
+	// Followers: singleflight collapsed the burst; the leader owned all work.
+	// The follower's own event still gets linked to the leader's alert.
+	if !ran {
+		services.LinkFollowerEvent(database.GetDB(), normalized.EventUUID, channel.UUID, normalized)
+	}
 }
 
 // processResolvedAlert finds the matching firing alert row in the alerts table

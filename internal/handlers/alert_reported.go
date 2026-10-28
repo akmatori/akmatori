@@ -75,7 +75,10 @@ func (h *AlertHandler) ProcessReportedAlert(r ReportedAlert) (incidentUUID strin
 	}
 
 	key := alertSpawnKey(r.SourceUUID, normalized.AlertName, normalized.TargetHost, normalized.SourceFingerprint)
+	// ran is set only by the leader; a follower's event is linked below.
+	var ran bool
 	_, sfErr, _ := h.spawnGroup.Do(key, func() (interface{}, error) {
+		ran = true
 		// A repeat report of a problem that is still firing (a cron that
 		// finds the same problem every run) joins that alert's incident. The
 		// alert link then records the re-send instead of the insert hitting
@@ -152,6 +155,13 @@ func (h *AlertHandler) ProcessReportedAlert(r ReportedAlert) (incidentUUID strin
 	})
 	if sfErr != nil {
 		return "", false, sfErr
+	}
+	if !ran {
+		// A follower of a concurrent identical report: the leader opened or
+		// joined the incident. Link this report's event to that alert and
+		// report the incident it joined.
+		services.LinkFollowerEvent(database.GetDB(), normalized.EventUUID, r.SourceUUID, normalized)
+		incidentUUID, linked = firingAlertIncident(r.SourceUUID, normalized.SourceFingerprint), true
 	}
 	return incidentUUID, linked, nil
 }

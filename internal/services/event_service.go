@@ -189,16 +189,20 @@ func (s *EventService) SetCaller(caller OneShotLLMCaller) {
 func (s *EventService) RecordClassified(ctx context.Context, in EventInput) *database.Event {
 	ev := s.newEvent(in)
 
-	if prev := s.findClassified(ctx, ev); prev != nil {
-		conf := prev.ClassificationConfidence
-		applyVerdict(ev, EventVerdict{
-			Kind:           prev.Kind,
-			Classification: database.EventClassificationReused,
-			Confidence:     conf,
-			Reasoning:      fmt.Sprintf("same item as event %s: %s", prev.UUID, prev.ClassificationReasoning),
-		})
-		s.insert(ctx, ev)
-		return ev
+	// Reuse only while classification is on: turning it off must send every
+	// item down the alert path at once, not after the 24 h reuse window of
+	// an earlier change/info verdict. When off, Classify gives the fallback.
+	if LoadEventClassificationConfig().Enabled {
+		if prev := s.findClassified(ctx, ev); prev != nil {
+			applyVerdict(ev, EventVerdict{
+				Kind:           prev.Kind,
+				Classification: database.EventClassificationReused,
+				Confidence:     prev.ClassificationConfidence,
+				Reasoning:      fmt.Sprintf("same item as event %s: %s", prev.UUID, prev.ClassificationReasoning),
+			})
+			s.insert(ctx, ev)
+			return ev
+		}
 	}
 
 	var v EventVerdict

@@ -558,8 +558,8 @@ func TestStartIncident_WorkerDisconnectFiresOnError(t *testing.T) {
 }
 
 // TestStartIncident_WorkerDisconnectFailsRunRecord verifies that a worker
-// drop finalizes the agent_runs row. No agent_error frame arrives for an
-// interrupted run, so without this the row stays "running" forever.
+// drop records the error on the agent_runs row. No agent_error frame arrives
+// for an interrupted run; the waiter then ends the run (FinishRun, failed).
 func TestStartIncident_WorkerDisconnectFailsRunRecord(t *testing.T) {
 	handler, conn, cleanup := setupOneshotTest(t)
 	defer cleanup()
@@ -585,9 +585,6 @@ func TestStartIncident_WorkerDisconnectFailsRunRecord(t *testing.T) {
 	var run database.AgentRun
 	if err := database.DB.Where("run_id = ?", runID).First(&run).Error; err != nil {
 		t.Fatalf("fetch run: %v", err)
-	}
-	if run.Status != database.AgentRunStatusFailed {
-		t.Errorf("status = %s, want failed", run.Status)
 	}
 	if run.ErrorMessage != ErrWorkerNotConnected.Error() {
 		t.Errorf("error_message = %q, want %q", run.ErrorMessage, ErrWorkerNotConnected.Error())

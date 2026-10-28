@@ -188,10 +188,11 @@ type AgentRunResult struct {
 	Response  string
 }
 
-// FinishAgentRun stores the run's log, answer and session. A run still in
-// the running state becomes completed or failed: this covers runs that ended
-// with no worker frame (dispatch failed, worker gone). A run the worker
-// frames already finalized keeps its status.
+// FinishAgentRun stores the run's log, answer and session and ends the run:
+// a run still in the running state becomes completed or failed. Called by the
+// run's waiter after the worker frames (which only record metrics), so the
+// terminal status appears together with the answer. A superseded run keeps
+// its status.
 func FinishAgentRun(db *gorm.DB, runID string, result AgentRunResult) error {
 	if db == nil {
 		return gorm.ErrInvalidDB
@@ -255,11 +256,14 @@ func LatestRunResponses(db *gorm.DB, incidentUUIDs []string) (map[string]string,
 	return out, nil
 }
 
-// CompleteAgentRun finalizes the run row with usage metrics and the parsed
-// outcome. A run displaced by a newer one keeps its "superseded" status but
-// still records its numbers — the tokens were spent either way.
+// CompleteAgentRun records the usage metrics and the parsed outcome of an
+// agent_completed frame. It does NOT end the run: the run stays "running"
+// until its waiter has stored the answer (FinishAgentRun), so a reader never
+// sees a finished run with no answer yet (the response formatter can take
+// seconds). A superseded run keeps its status and still records its numbers —
+// the tokens were spent either way.
 func CompleteAgentRun(runID string, metrics AgentRunMetrics, outcome string) error {
-	return finalizeAgentRun(runID, AgentRunStatusCompleted, map[string]any{
+	return recordAgentRunEnd(runID, map[string]any{
 		"tokens_used":        metrics.TokensUsed,
 		"input_tokens":       metrics.InputTokens,
 		"output_tokens":      metrics.OutputTokens,
@@ -271,9 +275,11 @@ func CompleteAgentRun(runID string, metrics AgentRunMetrics, outcome string) err
 	})
 }
 
-// FailAgentRun finalizes the run row after an agent_error frame.
+// FailAgentRun records the error of an agent_error frame (or of a worker
+// disconnect). Like CompleteAgentRun it leaves the status to the waiter,
+// which stores the error answer with FinishAgentRun(Failed: true).
 func FailAgentRun(runID, errorMessage string) error {
-	return finalizeAgentRun(runID, AgentRunStatusFailed, map[string]any{
+	return recordAgentRunEnd(runID, map[string]any{
 		"error_message": errorMessage,
 	})
 }
@@ -308,17 +314,11 @@ func FailInterruptedAgentRuns(reason string) (int64, error) {
 	return res.RowsAffected, res.Error
 }
 
-func finalizeAgentRun(runID string, terminal AgentRunStatus, updates map[string]any) error {
+func recordAgentRunEnd(runID string, updates map[string]any) error {
 	if DB == nil {
 		return gorm.ErrInvalidDB
 	}
 	now := time.Now()
 	updates["completed_at"] = &now
-	// Only a live run transitions to the terminal status; a superseded run
-	// keeps its label so stats can exclude displaced work.
-	updates["status"] = gorm.Expr(
-		"CASE WHEN status = ? THEN ? ELSE status END",
-		string(AgentRunStatusRunning), string(terminal),
-	)
 	return DB.Model(&AgentRun{}).Where("run_id = ?", runID).Updates(updates).Error
 }

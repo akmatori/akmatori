@@ -283,7 +283,22 @@ func (h *APIHandler) handleProposalChatPost(w http.ResponseWriter, r *http.Reque
 	task := buildProposalChatTask(p, messages)
 	taskHeader := fmt.Sprintf("💡 Proposal Chat: %s\n\n--- Execution Log ---\n\n", p.Title)
 
-	go h.runProposalChatTurn(p.UUID, chatScope, eventUUID, taskHeader, task)
+	// The run row exists before the 202, so the next GET .../chat already
+	// reports the turn as running.
+	runID, err := h.skillService.BeginRun(services.RunStart{
+		ScopeUUID:  chatScope,
+		EventUUID:  eventUUID,
+		SourceKind: database.IncidentSourceKindProposal,
+		SourceUUID: p.UUID,
+		RootSkill:  "proposal-editor",
+	})
+	if err != nil {
+		slog.Error("proposal chat: failed to begin run", "proposal", p.UUID, "err", err)
+		api.RespondError(w, http.StatusInternalServerError, "failed to start proposal chat")
+		return
+	}
+
+	go h.runProposalChatTurn(p.UUID, chatScope, runID, taskHeader, task)
 
 	api.RespondJSON(w, http.StatusAccepted, map[string]string{
 		"chat_incident_uuid": chatScope,
@@ -343,26 +358,12 @@ func buildProposalChatTask(p *database.Proposal, messages []database.ProposalCha
 	return sb.String()
 }
 
-// runProposalChatTurn executes one chat turn as a fresh agent run on the
-// proposal's chat scope. Mirrors runAgentInvestigation, with three
+// runProposalChatTurn executes one chat turn as a fresh agent run (created
+// by the caller with BeginRun) on the proposal's chat scope. Mirrors runAgentInvestigation, with three
 // differences: the skill set is pinned to proposal-editor, the tool allowlist
 // is the incidents+proposals pair, and the final response is appended to the
 // proposal's chat transcript instead of being reformatted.
-func (h *APIHandler) runProposalChatTurn(proposalUUID, chatScope, eventUUID, taskHeader, task string) {
-	runID, err := h.skillService.BeginRun(services.RunStart{
-		ScopeUUID:  chatScope,
-		EventUUID:  eventUUID,
-		SourceKind: database.IncidentSourceKindProposal,
-		SourceUUID: proposalUUID,
-		RootSkill:  "proposal-editor",
-	})
-	if err != nil {
-		slog.Error("proposal chat: failed to begin run", "err", err)
-		if appendErr := h.proposalService.AppendChatMessage(proposalUUID, "assistant", "Error: failed to start the agent run"); appendErr != nil {
-			slog.Error("proposal chat: failed to append error message", "err", appendErr)
-		}
-		return
-	}
+func (h *APIHandler) runProposalChatTurn(proposalUUID, chatScope, runID, taskHeader, task string) {
 	if err := h.skillService.UpdateRunLog(runID, taskHeader+"Starting turn..."); err != nil {
 		slog.Warn("proposal chat: failed to write run log", "err", err)
 	}
