@@ -14,7 +14,7 @@ export default function IncidentResponseContent({ state }: { state?: ResponseSta
   if (!state || state.loading) {
     return (
       <div className="flex items-center gap-2 text-fg-subtle text-xs">
-        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading incident response…
+        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading the answer…
       </div>
     );
   }
@@ -31,8 +31,8 @@ export default function IncidentResponseContent({ state }: { state?: ResponseSta
   return (
     <p className="text-fg-subtle text-xs">
       {state.status === 'running' || state.status === 'pending'
-        ? 'Response will be available when the investigation completes…'
-        : 'No response available for this incident'}
+        ? 'The answer shows here when the agent finishes…'
+        : 'There is no answer.'}
     </p>
   );
 }

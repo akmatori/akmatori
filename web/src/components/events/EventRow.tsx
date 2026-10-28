@@ -8,7 +8,7 @@ import { TONE_CLASSES } from '../incidents/incidentStatus';
 import CorrelationChip from './CorrelationChip';
 import RawEventContent, { type RawState } from './RawEventContent';
 import IncidentResponseContent, { type ResponseState } from './IncidentResponseContent';
-import { classificationSummary, eventStatusLabel, eventTone } from './eventHelpers';
+import { classificationSummary, eventStatusLabel, eventTone, eventWork } from './eventHelpers';
 
 interface EventRowProps {
   item: EventFeedItem;
@@ -45,8 +45,9 @@ export default function EventRow({
 }: EventRowProps) {
   const tone = TONE_CLASSES[eventTone(item.status)];
   const detailsOpen = rawExpanded || reasoningExpanded;
-  // Request events point at an agent run, not an incident.
-  const runNoun = item.kind === 'request' ? 'run' : 'incident';
+  // Request events point at request work, not an incident.
+  const work = eventWork(item);
+  const runNoun = work?.kind === 'request' ? 'request' : 'incident';
 
   return (
     <li className="border-t border-line first:border-t-0">
@@ -92,14 +93,14 @@ export default function EventRow({
           )}
         </span>
         <span className="flex items-center justify-end gap-1">
-          {item.incident_uuid && (
+          {work && (
             <>
               <Link
-                to={`/incidents/${item.incident_uuid}`}
+                to={work.path}
                 className="hidden sm:inline font-mono text-xs text-primary-400 hover:underline"
-                title={item.incident_title ? `Open ${runNoun}: ${item.incident_title}` : `Open ${runNoun}`}
+                title={work.kind === 'incident' && item.incident_title ? `Open incident: ${item.incident_title}` : `Open ${runNoun}`}
               >
-                {item.incident_uuid.slice(0, 8)}
+                {work.uuid.slice(0, 8)}
               </Link>
               <button
                 type="button"
@@ -163,10 +164,10 @@ export default function EventRow({
               <RawEventContent state={rawState} />
             </div>
           )}
-          {responseExpanded && item.incident_uuid && (
+          {responseExpanded && work && (
             <div className="rounded-md border border-line px-3 py-2">
               <p className="text-xs font-medium text-fg-muted mb-1">
-                {item.kind === 'request' ? 'Agent answer' : 'Incident response'}{responseState?.title ? `: ${responseState.title}` : ''}
+                {work.kind === 'request' ? 'Agent answer' : 'Incident response'}{responseState?.title ? `: ${responseState.title}` : ''}
               </p>
               <IncidentResponseContent state={responseState} />
             </div>

@@ -12,10 +12,10 @@ import (
 // condition, so an unknown dimension simply narrows the set of rules that
 // can match.
 type FormatFlow struct {
-	SourceKind  string // incident.SourceKind (alert|cron|slack_mention|manual|proposal)
-	TriggerUUID string // incident.SourceUUID (alert source instance, listener channel, cron job)
+	SourceKind  string // agent_runs.source_kind (alert|cron|slack_mention|manual|proposal)
+	TriggerUUID string // agent_runs.source_uuid (alert source instance, listener channel, cron job)
 	ChannelUUID string // destination Channel.UUID; "" = unknown or none
-	LastSkill   string // incident.LastSkillUsed
+	LastSkill   string // agent_runs.last_skill_used
 }
 
 // MatchFormattingRule returns the first enabled rule matching the flow, or
@@ -70,24 +70,24 @@ func conditionMatches(condition, value string) bool {
 	return condition == strings.TrimSpace(value)
 }
 
-// BuildFormatFlow loads the incident row and assembles a FormatFlow for rule
+// BuildFormatFlow loads the run row and assembles a FormatFlow for rule
 // matching. The destination channel UUID is supplied by the caller because
 // resolution differs per path (alert routing, listener thread, cron channel).
 // Best-effort: a load failure returns a flow carrying only ChannelUUID so
 // wildcard/channel rules can still match; it never returns an error.
-func BuildFormatFlow(incidentUUID, channelUUID string) FormatFlow {
+func BuildFormatFlow(runID, channelUUID string) FormatFlow {
 	flow := FormatFlow{ChannelUUID: channelUUID}
-	if incidentUUID == "" {
+	if runID == "" {
 		return flow
 	}
-	var incident database.Incident
-	if err := database.GetDB().Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
-		slog.Warn("format flow: failed to load incident, matching on channel only",
-			"incident", incidentUUID, "err", err)
+	run, err := database.GetAgentRun(runID)
+	if err != nil {
+		slog.Warn("format flow: failed to load run, matching on channel only",
+			"run", runID, "err", err)
 		return flow
 	}
-	flow.SourceKind = incident.SourceKind
-	flow.TriggerUUID = incident.SourceUUID
-	flow.LastSkill = incident.LastSkillUsed
+	flow.SourceKind = run.SourceKind
+	flow.TriggerUUID = run.SourceUUID
+	flow.LastSkill = run.LastSkillUsed
 	return flow
 }

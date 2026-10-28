@@ -19,9 +19,9 @@ import (
 
 func TestSlugFromUUID(t *testing.T) {
 	cases := map[string]string{
-		"abc-123-def-456":                   "abc123de",
-		"":                                  "",
-		"!!!@@@##":                          "",
+		"abc-123-def-456":                      "abc123de",
+		"":                                     "",
+		"!!!@@@##":                             "",
 		"550e8400-e29b-41d4-a716-446655440000": "550e8400",
 	}
 	for in, want := range cases {
@@ -120,72 +120,93 @@ func TestBuildFeedbackMemory_LongMultibyteBodyStaysValidUTF8(t *testing.T) {
 	}
 }
 
-func TestLookupIncidentByThread_DMOriginated(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&database.Incident{}); err != nil {
+// seedMentionThread stores a Slack mention thread as request work: the
+// request event (scope) and one run that answers in the thread.
+func seedMentionThread(t *testing.T, db *gorm.DB, scope, threadTS, title, response string) {
+	t.Helper()
+	if err := db.AutoMigrate(&database.Event{}, &database.AgentRun{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	database.DB = db
-
-	if err := db.Create(&database.Incident{
-		UUID:     "uuid-dm",
-		Source:   "slack",
-		SourceID: "T1",
-	}).Error; err != nil {
-		t.Fatalf("seed: %v", err)
+	if err := db.Create(&database.Event{UUID: scope, SourceKind: database.EventSourceSlackMention,
+		Kind: database.EventKindRequest, Classification: "llm", Title: title}).Error; err != nil {
+		t.Fatalf("seed event: %v", err)
 	}
-
-	incident, err := lookupIncidentByThread("T1")
-	if err != nil {
-		t.Fatalf("lookup: %v", err)
-	}
-	if incident.UUID != "uuid-dm" {
-		t.Errorf("got UUID %q", incident.UUID)
+	if err := db.Create(&database.AgentRun{RunID: "run-" + scope, ScopeUUID: scope, SlackThreadTS: threadTS,
+		Response: response}).Error; err != nil {
+		t.Fatalf("seed run: %v", err)
 	}
 }
 
-func TestLookupIncidentByThread_AlertChannel(t *testing.T) {
+func setupThreadLookupDB(t *testing.T) *gorm.DB {
+	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&database.Incident{}); err != nil {
+	if err := db.AutoMigrate(&database.Incident{}, &database.AgentRun{}, &database.Event{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	prev := database.DB
 	database.DB = db
+	t.Cleanup(func() { database.DB = prev })
+	return db
+}
 
+// A mention thread is request work: it resolves through its runs, with the
+// title of the request event and the newest answer.
+func TestLookupSlackThread_RequestThread(t *testing.T) {
+	db := setupThreadLookupDB(t)
+	if err := db.Create(&database.Event{UUID: "scope-dm", SourceKind: database.EventSourceSlackMention,
+		Kind: database.EventKindRequest, Classification: "llm", Title: "disk on db1?"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []database.AgentRun{
+		{RunID: "r1", ScopeUUID: "scope-dm", SlackThreadTS: "T1", Response: "first answer"},
+		{RunID: "r2", ScopeUUID: "scope-dm", SlackThreadTS: "T1", Response: "second answer"},
+	} {
+		r := r
+		if err := db.Create(&r).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	work, err := lookupSlackThread("T1")
+	if err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if work.ScopeUUID != "scope-dm" || work.IncidentUUID != "" || work.Title != "disk on db1?" || work.Response != "second answer" {
+		t.Errorf("work = %+v", work)
+	}
+}
+
+// An alert or report thread is incident work.
+func TestLookupSlackThread_IncidentThread(t *testing.T) {
+	db := setupThreadLookupDB(t)
 	if err := db.Create(&database.Incident{
 		UUID:           "uuid-alert",
 		Source:         "zabbix",
 		SourceID:       "alert-99",
+		Title:          "DB down",
 		SlackMessageTS: "T2",
 	}).Error; err != nil {
 		t.Fatalf("seed: %v", err)
 	}
+	if err := db.Create(&database.AgentRun{RunID: "ri", ScopeUUID: "uuid-alert", IncidentUUID: "uuid-alert", Response: "diagnosis"}).Error; err != nil {
+		t.Fatal(err)
+	}
 
-	incident, err := lookupIncidentByThread("T2")
+	work, err := lookupSlackThread("T2")
 	if err != nil {
 		t.Fatalf("lookup: %v", err)
 	}
-	if incident.UUID != "uuid-alert" {
-		t.Errorf("got UUID %q", incident.UUID)
+	if work.ScopeUUID != "uuid-alert" || work.IncidentUUID != "uuid-alert" || work.Title != "DB down" || work.Response != "diagnosis" {
+		t.Errorf("work = %+v", work)
 	}
 }
 
-func TestLookupIncidentByThread_NoMatch(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&database.Incident{}); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	database.DB = db
-
-	if _, err := lookupIncidentByThread("does-not-exist"); err == nil {
+func TestLookupSlackThread_NoMatch(t *testing.T) {
+	setupThreadLookupDB(t)
+	if _, err := lookupSlackThread("does-not-exist"); err == nil {
 		t.Fatal("expected error for unknown thread")
 	}
 }
@@ -201,7 +222,7 @@ func TestMaybeCaptureSlackFeedback_PersistsConfidentFeedback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&database.Incident{}, &database.LLMSettings{}); err != nil {
+	if err := db.AutoMigrate(&database.Incident{}, &database.AgentRun{}, &database.LLMSettings{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	database.DB = db
@@ -211,12 +232,7 @@ func TestMaybeCaptureSlackFeedback_PersistsConfidentFeedback(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("seed llm: %v", err)
 	}
-	if err := db.Create(&database.Incident{
-		UUID: "inc-99", Source: "slack", SourceID: "TX", Title: "Postgres outage",
-		Response: "agent investigated postgres",
-	}).Error; err != nil {
-		t.Fatalf("seed incident: %v", err)
-	}
+	seedMentionThread(t, db, "inc-99", "TX", "Postgres outage", "agent investigated postgres")
 
 	classifier := services.NewFeedbackClassifier(caller)
 	h := &SlackHandler{
@@ -245,13 +261,13 @@ func TestMaybeCaptureSlackFeedback_NotConfidentDoesNothing(t *testing.T) {
 	caller := &fakeOneShotLLMCallerH{response: `{"is_feedback": false, "summary": "casual chat", "confidence": 0.95}`}
 
 	db, _ := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	_ = db.AutoMigrate(&database.Incident{}, &database.LLMSettings{})
+	_ = db.AutoMigrate(&database.Incident{}, &database.AgentRun{}, &database.LLMSettings{})
 	database.DB = db
 	_ = db.Create(&database.LLMSettings{
 		Name: "t", Provider: database.LLMProviderAnthropic, APIKey: "k",
 		Model: "x", Active: true, Enabled: true,
 	}).Error
-	_ = db.Create(&database.Incident{UUID: "i", Source: "slack", SourceID: "T"}).Error
+	seedMentionThread(t, db, "i", "T", "", "")
 
 	classifier := services.NewFeedbackClassifier(caller)
 	h := &SlackHandler{
@@ -444,7 +460,7 @@ func newFeedbackAckFixture(t *testing.T, threadTS string, wireAcker bool) *feedb
 	if err != nil {
 		t.Fatalf("sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&database.Incident{}, &database.LLMSettings{}); err != nil {
+	if err := db.AutoMigrate(&database.Incident{}, &database.AgentRun{}, &database.LLMSettings{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	database.DB = db
@@ -455,12 +471,7 @@ func newFeedbackAckFixture(t *testing.T, threadTS string, wireAcker bool) *feedb
 		t.Fatalf("seed llm: %v", err)
 	}
 	if threadTS != "" {
-		if err := db.Create(&database.Incident{
-			UUID: "inc-99", Source: "slack", SourceID: threadTS, Title: "outage",
-			Response: "agent investigated",
-		}).Error; err != nil {
-			t.Fatalf("seed incident: %v", err)
-		}
+		seedMentionThread(t, db, "inc-99", threadTS, "outage", "agent investigated")
 	}
 
 	acker := &fakeFeedbackAcker{}
@@ -672,7 +683,7 @@ func newRouteFixture(t *testing.T, threadTS string) *routeFixture {
 	if err != nil {
 		t.Fatalf("sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&database.Incident{}, &database.LLMSettings{}); err != nil {
+	if err := db.AutoMigrate(&database.Incident{}, &database.AgentRun{}, &database.LLMSettings{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	database.DB = db
@@ -683,15 +694,7 @@ func newRouteFixture(t *testing.T, threadTS string) *routeFixture {
 		t.Fatalf("seed llm: %v", err)
 	}
 	if threadTS != "" {
-		if err := db.Create(&database.Incident{
-			UUID:     "inc-99",
-			Source:   "slack",
-			SourceID: threadTS,
-			Title:    "outage",
-			Response: "agent investigated",
-		}).Error; err != nil {
-			t.Fatalf("seed incident: %v", err)
-		}
+		seedMentionThread(t, db, "inc-99", threadTS, "outage", "agent investigated")
 	}
 
 	var agentCalls int32

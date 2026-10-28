@@ -9,6 +9,7 @@ import { useOverviewData } from '../hooks/useOverviewData';
 import { useSystemStatus } from '../hooks/useSystemStatus';
 import { formatCountdown, formatRelativeAgo, formatRelativeShort } from '../utils/format';
 import type { Incident } from '../types';
+import { taskResultPath } from '../components/runs/runHelpers';
 
 const NEEDS_ROW_LIMIT = 8;
 
@@ -62,7 +63,11 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col gap-6">
       <InvestigateBar
-        onStarted={(uuid) => navigate(`/incidents/${uuid}`)}
+        onStarted={(res) => {
+          const path = taskResultPath(res);
+          if (path) navigate(path);
+          else setStartError(res.message);
+        }}
         onError={setStartError}
       />
 

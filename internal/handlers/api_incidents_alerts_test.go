@@ -17,7 +17,7 @@ import (
 // that correlation fields are present on correlated rows.
 func TestHandleIncidentAlerts_OrderedByFiredAt(t *testing.T) {
 	testhelpers.NewGlobalSQLiteDB(t,
-		&database.Incident{},
+		&database.Incident{}, &database.AgentRun{},
 		&database.Alert{},
 	)
 	db := database.GetDB()
@@ -50,15 +50,15 @@ func TestHandleIncidentAlerts_OrderedByFiredAt(t *testing.T) {
 		Correlated:   false,
 	}
 	correlatedAlert := database.Alert{
-		UUID:                    uuid.New().String(),
-		IncidentUUID:            incUUID,
-		Status:                  database.AlertStatusFiring,
-		AlertName:               "HighCPU",
-		TargetHost:              "web-01",
-		FiredAt:                 secondFired,
-		Correlated:              true,
-		CorrelationConfidence:   &conf,
-		CorrelationReasoning:    "Same alert name and host, same incident.",
+		UUID:                  uuid.New().String(),
+		IncidentUUID:          incUUID,
+		Status:                database.AlertStatusFiring,
+		AlertName:             "HighCPU",
+		TargetHost:            "web-01",
+		FiredAt:               secondFired,
+		Correlated:            true,
+		CorrelationConfidence: &conf,
+		CorrelationReasoning:  "Same alert name and host, same incident.",
 	}
 	for _, a := range []database.Alert{originAlert, correlatedAlert} {
 		if err := db.Create(&a).Error; err != nil {
@@ -112,7 +112,7 @@ func TestHandleIncidentAlerts_OrderedByFiredAt(t *testing.T) {
 // alerts returns 200 with an empty JSON array (not 404 or 500).
 func TestHandleIncidentAlerts_EmptySlice(t *testing.T) {
 	testhelpers.NewGlobalSQLiteDB(t,
-		&database.Incident{},
+		&database.Incident{}, &database.AgentRun{},
 		&database.Alert{},
 	)
 	db := database.GetDB()
@@ -155,7 +155,7 @@ func TestHandleIncidentAlerts_EmptySlice(t *testing.T) {
 // unknown incident UUID.
 func TestHandleIncidentAlerts_NotFound(t *testing.T) {
 	testhelpers.NewGlobalSQLiteDB(t,
-		&database.Incident{},
+		&database.Incident{}, &database.AgentRun{},
 		&database.Alert{},
 	)
 

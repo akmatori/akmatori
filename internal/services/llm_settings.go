@@ -142,6 +142,8 @@ type IncidentCallback struct {
 // without spinning up a real WebSocket).
 type IncidentRunner interface {
 	IsWorkerConnected() bool
-	StartIncident(incidentID, task string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []ToolAllowlistEntry, callback IncidentCallback) (string, error)
-	ReleaseRun(incidentID, runID string) bool
+	// StartIncident dispatches run runID (created with BeginRun) on scope
+	// scopeID — the "incident_id" the worker and the gateway key by.
+	StartIncident(scopeID, runID, task string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []ToolAllowlistEntry, callback IncidentCallback) (string, error)
+	ReleaseRun(scopeID, runID string) bool
 }

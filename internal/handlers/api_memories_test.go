@@ -534,18 +534,17 @@ func (r *recordingSkillService) DeleteSkillScript(string, string) error         
 func (r *recordingSkillService) SpawnIncidentManager(*services.IncidentContext) (string, string, error) {
 	return "", "", nil
 }
-func (r *recordingSkillService) SpawnAgentInvocation(string, *services.IncidentContext) (string, string, error) {
+func (r *recordingSkillService) PrepareRequestScope(string, string) (string, string, error) {
 	return "", "", nil
 }
-func (r *recordingSkillService) UpdateIncidentStatus(string, database.IncidentStatus, string, string) error {
+func (r *recordingSkillService) EnsureScopeDir(string, string) error         { return nil }
+func (r *recordingSkillService) BeginRun(services.RunStart) (string, error)  { return "run-1", nil }
+func (r *recordingSkillService) UpdateRunLog(string, string) error           { return nil }
+func (r *recordingSkillService) FinishRun(string, services.RunOutcome) error { return nil }
+func (r *recordingSkillService) UpdateIncidentStatus(string, database.IncidentStatus) error {
 	return nil
 }
-func (r *recordingSkillService) UpdateIncidentComplete(string, database.IncidentStatus, string, string, string, int, int64) error {
-	return nil
-}
-func (r *recordingSkillService) UpdateIncidentLog(string, string) error         { return nil }
 func (r *recordingSkillService) GetIncident(string) (*database.Incident, error) { return nil, nil }
-func (r *recordingSkillService) AppendSubagentLog(string, string, string) error { return nil }
 func (r *recordingSkillService) InsertFiringAlert(context.Context, string, string, alerts.NormalizedAlert, string, string) error {
 	return nil
 }

@@ -65,7 +65,7 @@ func doIncidentListRequest(t *testing.T, query string) ([]map[string]any, api.Pa
 // TestHandleIncidents_NoStatusFilter verifies that omitting the status param
 // returns all incidents regardless of status.
 func TestHandleIncidents_NoStatusFilter(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{})
 
 	seedStatusFilterIncident(t, database.IncidentStatusRunning)
 	seedStatusFilterIncident(t, database.IncidentStatusMonitor)
@@ -83,7 +83,7 @@ func TestHandleIncidents_NoStatusFilter(t *testing.T) {
 // TestHandleIncidents_SingleStatusFilter verifies that ?status=monitor returns
 // only monitor-status rows.
 func TestHandleIncidents_SingleStatusFilter(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{})
 
 	seedStatusFilterIncident(t, database.IncidentStatusRunning)
 	monitorID := seedStatusFilterIncident(t, database.IncidentStatusMonitor)
@@ -104,7 +104,7 @@ func TestHandleIncidents_SingleStatusFilter(t *testing.T) {
 // TestHandleIncidents_MultiStatusFilter verifies that comma-separated statuses
 // work as OR: ?status=pending,running,diagnosed,monitor returns open incidents.
 func TestHandleIncidents_MultiStatusFilter(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{})
 
 	seedStatusFilterIncident(t, database.IncidentStatusPending)
 	seedStatusFilterIncident(t, database.IncidentStatusRunning)

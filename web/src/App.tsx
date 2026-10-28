@@ -15,6 +15,7 @@ import Runbooks from './pages/Runbooks';
 import Settings from './pages/Settings';
 import CronJobsPage from './pages/CronJobsPage';
 import Events from './pages/Events';
+import RequestDetail from './pages/RequestDetail';
 import Proposals from './pages/Proposals';
 import ProposalDetail from './pages/ProposalDetail';
 
@@ -43,6 +44,7 @@ function App() {
                       <Route path="/" element={<Dashboard />} />
                       <Route path="/incidents/:uuid?" element={<Incidents />} />
                       <Route path="/events" element={<Events />} />
+                      <Route path="/requests/:uuid" element={<RequestDetail />} />
                       <Route path="/feed" element={<FeedRedirect />} />
                       <Route path="/proposals/:uuid" element={<ProposalDetail />} />
                       <Route path="/proposals" element={<Proposals />} />

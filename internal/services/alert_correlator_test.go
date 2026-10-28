@@ -24,6 +24,7 @@ func setupCorrelatorDB(t *testing.T) *gorm.DB {
 	}
 	if err := db.AutoMigrate(
 		&database.Incident{},
+		&database.AgentRun{},
 		&database.Alert{},
 		&database.LLMSettings{},
 		&database.GeneralSettings{},
@@ -69,10 +70,22 @@ func seedIncident(t *testing.T, db *gorm.DB, uuid, title, status string, started
 		Title:      title,
 		Status:     database.IncidentStatus(status),
 		StartedAt:  startedAt,
-		Response:   "some response text",
 	}
 	if err := db.Create(&inc).Error; err != nil {
 		t.Fatalf("seed incident %s: %v", uuid, err)
+	}
+	seedRunResponse(t, db, uuid, "some response text")
+}
+
+// seedRunResponse gives an incident one agent run with the given answer: the
+// agent work lives on agent_runs.
+func seedRunResponse(t *testing.T, db *gorm.DB, incidentUUID, response string) {
+	t.Helper()
+	if err := db.Create(&database.AgentRun{
+		RunID: "run-" + incidentUUID, ScopeUUID: incidentUUID, IncidentUUID: incidentUUID,
+		Status: database.AgentRunStatusCompleted, Response: response,
+	}).Error; err != nil {
+		t.Fatalf("seed run for %s: %v", incidentUUID, err)
 	}
 }
 

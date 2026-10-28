@@ -156,7 +156,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 			} else {
 				slog.Error("failed to insert firing alert, cancelling incident", "incident_uuid", incidentUUID, "err", err)
 			}
-			if uerr := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusFailed, "", ""); uerr != nil {
+			if uerr := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusFailed); uerr != nil {
 				slog.Warn("failed to cancel incident after alert insert failure", "incident_uuid", incidentUUID, "err", uerr)
 			}
 			return nil, nil
@@ -181,7 +181,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		}
 
 		// Update incident status and run investigation
-		if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
+		if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning); err != nil {
 			slog.Warn("failed to update incident status", "err", err)
 		}
 		go h.runInvestigation(incidentUUID, normalized, instance, channelID, threadTS, channelUUID)
@@ -334,7 +334,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 			} else {
 				slog.Error("failed to insert firing alert, cancelling incident", "incident_uuid", incidentUUID, "err", err)
 			}
-			if uerr := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusFailed, "", ""); uerr != nil {
+			if uerr := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusFailed); uerr != nil {
 				slog.Warn("failed to cancel incident after alert insert failure", "incident_uuid", incidentUUID, "err", uerr)
 			}
 			return nil, nil
@@ -348,7 +348,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 		}
 
 		// Update incident status and run investigation
-		if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
+		if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning); err != nil {
 			slog.Warn("failed to update incident status", "err", err)
 		}
 
@@ -599,8 +599,38 @@ Be specific and actionable. Reference any relevant data sources or scripts you u
 	return prompt
 }
 
+// beginIncidentRun creates the run row for an investigation of an incident.
+// On failure the incident is marked failed: without a run row the
+// investigation's log and answer would be stored nowhere.
+func (h *AlertHandler) beginIncidentRun(incidentUUID, eventUUID, sourceUUID string) (string, error) {
+	runID, err := h.skillService.BeginRun(services.RunStart{
+		IncidentUUID: incidentUUID,
+		EventUUID:    eventUUID,
+		SourceKind:   database.IncidentSourceKindAlert,
+		SourceUUID:   sourceUUID,
+		RootSkill:    "incident-manager",
+	})
+	if err != nil {
+		slog.Error("failed to begin investigation run", "incident_id", incidentUUID, "err", err)
+		if uerr := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusFailed); uerr != nil {
+			slog.Warn("failed to mark incident failed", "incident_id", incidentUUID, "err", uerr)
+		}
+	}
+	return runID, err
+}
+
 func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, channelID, threadTS, channelUUID string) {
 	slog.Info("starting investigation for alert", "alert_name", alert.AlertName, "incident_id", incidentUUID)
+
+	sourceUUID := ""
+	if instance != nil {
+		sourceUUID = instance.UUID
+	}
+	runID, beginErr := h.beginIncidentRun(incidentUUID, alert.EventUUID, sourceUUID)
+	if beginErr != nil {
+		h.updateSlackWithResult(channelID, threadTS, fmt.Sprintf("Failed to start investigation: %v", beginErr), true)
+		return
+	}
 
 	// Build investigation prompt
 	investigationPrompt := h.buildInvestigationPrompt(alert, instance)
@@ -663,8 +693,8 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 			OnOutput: func(output string) {
 				lastStreamedLog += output
 				// Update database with streamed log
-				if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog); err != nil {
-					slog.Error("failed to update incident log", "err", err)
+				if err := h.skillService.UpdateRunLog(runID, taskHeader+lastStreamedLog); err != nil {
+					slog.Error("failed to update run log", "err", err)
 				}
 			},
 			OnCompleted: func(sid, output string, tokensUsed int, executionTimeMs int64) {
@@ -695,11 +725,11 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 			},
 		}
 
-		runID, err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback)
+		_, err := h.agentWSHandler.StartIncident(incidentUUID, runID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback)
 		if err != nil {
 			slog.Error("failed to start incident via WebSocket", "err", err)
 			errorMsg := fmt.Sprintf("Failed to start investigation: %v", err)
-			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg, 0, 0); updateErr != nil {
+			if updateErr := h.skillService.FinishRun(runID, services.RunOutcome{Failed: true, Response: errorMsg}); updateErr != nil {
 				slog.Error("failed to update incident status", "err", updateErr)
 			}
 			h.updateSlackWithResult(channelID, threadTS, errorMsg, true)
@@ -719,7 +749,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 		// Slack posting. Passthrough on error/empty or when no rule
 		// matches the incident's flow.
 		formattedResponse := applyResponseFormatter(context.Background(), h.responseFormatter, hasError, response, taskHeader+lastStreamedLog,
-			services.BuildFormatFlow(incidentUUID, channelUUID))
+			services.BuildFormatFlow(runID, channelUUID))
 
 		// Re-attach the metrics footer AFTER formatting so the LLM never
 		// sees it (and therefore cannot strip or rewrite ⏱️ Time / 🎯
@@ -773,14 +803,10 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 			return
 		}
 
-		// Update incident with full results — the formatted response is
-		// what users see in the UI.
-		finalStatus := database.IncidentStatusCompleted
-		if hasError {
-			finalStatus = database.IncidentStatusFailed
-		}
-		if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, formattedWithMetrics, finalTokensUsed, finalExecutionTimeMs); err != nil {
-			slog.Error("failed to update incident complete", "err", err)
+		// Store the run's work and finish the incident — the formatted
+		// response is what users see in the UI.
+		if err := h.skillService.FinishRun(runID, services.RunOutcome{Failed: hasError, SessionID: sessionID, FullLog: fullLog, Response: formattedWithMetrics}); err != nil {
+			slog.Error("failed to store run result", "err", err)
 		}
 
 		h.updateSlackWithResult(channelID, threadTS, formattedResp, hasError)
@@ -792,7 +818,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 	// No WebSocket worker available
 	slog.Error("agent worker not connected", "incident_id", incidentUUID)
 	errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
-	if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg, 0, 0); updateErr != nil {
+	if updateErr := h.skillService.FinishRun(runID, services.RunOutcome{Failed: true, Response: errorMsg}); updateErr != nil {
 		slog.Error("failed to update incident status", "err", updateErr)
 	}
 	h.updateSlackWithResult(channelID, threadTS, errorMsg, true)
@@ -813,6 +839,14 @@ func (h *AlertHandler) runListenerChannelInvestigation(
 	investigationPrompt string,
 ) {
 	slog.Info("starting investigation for listener channel alert", "alert_name", alert.AlertName, "incident_id", incidentUUID)
+
+	runID, beginErr := h.beginIncidentRun(incidentUUID, alert.EventUUID, channel.UUID)
+	if beginErr != nil {
+		if channel.CanPost {
+			h.postSlackThreadReply(slackChannelID, slackMessageTS, fmt.Sprintf("Failed to start investigation: %v", beginErr))
+		}
+		return
+	}
 
 	// can_post=false marks a silent listener: the alert is investigated and
 	// the incident (response + full log) lands in the UI as usual, but
@@ -885,8 +919,8 @@ func (h *AlertHandler) runListenerChannelInvestigation(
 		callback := IncidentCallback{
 			OnOutput: func(outputLog string) {
 				lastStreamedLog += outputLog
-				if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog); err != nil {
-					slog.Error("failed to update incident log", "err", err)
+				if err := h.skillService.UpdateRunLog(runID, taskHeader+lastStreamedLog); err != nil {
+					slog.Error("failed to update run log", "err", err)
 				}
 
 				// Stream condensed progress to Slack (delta only, not full log).
@@ -922,11 +956,11 @@ func (h *AlertHandler) runListenerChannelInvestigation(
 			},
 		}
 
-		runID, err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback)
+		_, err := h.agentWSHandler.StartIncident(incidentUUID, runID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback)
 		if err != nil {
 			slog.Error("failed to start incident via WebSocket", "err", err)
 			errorMsg := fmt.Sprintf("Failed to start investigation: %v", err)
-			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg, 0, 0); updateErr != nil {
+			if updateErr := h.skillService.FinishRun(runID, services.RunOutcome{Failed: true, Response: errorMsg}); updateErr != nil {
 				slog.Error("failed to update incident status", "err", updateErr)
 			}
 			if canPost {
@@ -959,7 +993,7 @@ func (h *AlertHandler) runListenerChannelInvestigation(
 		// matches the incident's flow. The listener channel is also the
 		// reply destination, so it doubles as the flow's channel identity.
 		dbResponse := applyResponseFormatter(context.Background(), h.responseFormatter, hasError, response, taskHeader+lastStreamedLog,
-			services.BuildFormatFlow(incidentUUID, channel.UUID))
+			services.BuildFormatFlow(runID, channel.UUID))
 
 		// Re-attach the metrics footer AFTER formatting so the LLM never
 		// sees it (and therefore cannot strip or rewrite ⏱️ Time / 🎯
@@ -1017,13 +1051,10 @@ func (h *AlertHandler) runListenerChannelInvestigation(
 			return
 		}
 
-		// Update incident
-		finalStatus := database.IncidentStatusCompleted
-		if hasError {
-			finalStatus = database.IncidentStatusFailed
-		}
-		if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, dbResponseWithMetrics, finalTokensUsed, finalExecutionTimeMs); err != nil {
-			slog.Error("failed to update incident complete", "err", err)
+		// Store the run's work and finish the incident — the formatted
+		// response is what users see in the UI.
+		if err := h.skillService.FinishRun(runID, services.RunOutcome{Failed: hasError, SessionID: sessionID, FullLog: fullLog, Response: dbResponseWithMetrics}); err != nil {
+			slog.Error("failed to store run result", "err", err)
 		}
 
 		// Post the full final body as a fresh thread reply. chat.postMessage
@@ -1045,7 +1076,7 @@ func (h *AlertHandler) runListenerChannelInvestigation(
 	// No WebSocket worker available
 	slog.Error("agent worker not connected for Slack channel incident", "incident", incidentUUID)
 	errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
-	if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", "", errorMsg, 0, 0); updateErr != nil {
+	if updateErr := h.skillService.FinishRun(runID, services.RunOutcome{Failed: true, Response: errorMsg}); updateErr != nil {
 		slog.Error("failed to update incident status", "err", updateErr)
 	}
 	if canPost {

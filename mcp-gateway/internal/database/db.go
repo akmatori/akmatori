@@ -92,27 +92,21 @@ func (Skill) TableName() string {
 
 // Incident represents an incident record
 type Incident struct {
-	ID              uint       `gorm:"primaryKey" json:"id"`
-	UUID            string     `gorm:"uniqueIndex;not null" json:"uuid"`
-	Source          string     `gorm:"not null;index" json:"source"`
-	SourceID        string     `gorm:"index" json:"source_id"`
-	SourceKind      string     `gorm:"size:32;index" json:"source_kind"`
-	SourceUUID      string     `gorm:"size:36;index" json:"source_uuid"`
-	Title           string     `gorm:"type:varchar(255)" json:"title"`
-	Status          string     `gorm:"type:varchar(50);not null;default:'pending'" json:"status"`
-	Context         JSONB      `gorm:"type:jsonb" json:"context"`
-	SessionID       string     `gorm:"index" json:"session_id"`
-	WorkingDir      string     `json:"working_dir"`
-	SlackChannelID  string     `gorm:"column:slack_channel_id" json:"slack_channel_id"`
-	SlackMessageTS  string     `gorm:"column:slack_message_ts" json:"slack_message_ts"`
-	FullLog         string     `gorm:"type:text" json:"full_log"`
-	Response        string     `gorm:"type:text" json:"response"`
-	TokensUsed      int        `json:"tokens_used"`
-	ExecutionTimeMs int64      `json:"execution_time_ms"`
-	StartedAt       time.Time  `json:"started_at"`
-	CompletedAt     *time.Time `json:"completed_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	ID             uint       `gorm:"primaryKey" json:"id"`
+	UUID           string     `gorm:"uniqueIndex;not null" json:"uuid"`
+	Source         string     `gorm:"not null;index" json:"source"`
+	SourceID       string     `gorm:"index" json:"source_id"`
+	SourceKind     string     `gorm:"size:32;index" json:"source_kind"`
+	SourceUUID     string     `gorm:"size:36;index" json:"source_uuid"`
+	Title          string     `gorm:"type:varchar(255)" json:"title"`
+	Status         string     `gorm:"type:varchar(50);not null;default:'pending'" json:"status"`
+	Context        JSONB      `gorm:"type:jsonb" json:"context"`
+	SlackChannelID string     `gorm:"column:slack_channel_id" json:"slack_channel_id"`
+	SlackMessageTS string     `gorm:"column:slack_message_ts" json:"slack_message_ts"`
+	StartedAt      time.Time  `json:"started_at"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 func (Incident) TableName() string {

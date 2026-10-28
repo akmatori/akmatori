@@ -294,7 +294,7 @@ type IncidentListItem struct {
 	SourceID        string                  `json:"source_id"`
 	Title           string                  `json:"title"`
 	Status          database.IncidentStatus `json:"status"`
-	TokensUsed      int                     `json:"tokens_used"`
+	TokensUsed      int64                   `json:"tokens_used"`
 	ExecutionTimeMs int64                   `json:"execution_time_ms"`
 	StartedAt       time.Time               `json:"started_at"`
 	CompletedAt     *time.Time              `json:"completed_at,omitempty"`

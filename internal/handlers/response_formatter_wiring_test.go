@@ -36,7 +36,7 @@ func setupFormatterWiringDB(t *testing.T) func() {
 	if err != nil {
 		t.Fatalf("open sqlite db: %v", err)
 	}
-	if err := db.AutoMigrate(&database.LLMSettings{}, &database.FormattingRule{}, &database.Incident{}); err != nil {
+	if err := db.AutoMigrate(&database.LLMSettings{}, &database.FormattingRule{}, &database.Incident{}, &database.AgentRun{}); err != nil {
 		t.Fatalf("migrate sqlite db: %v", err)
 	}
 	database.DB = db

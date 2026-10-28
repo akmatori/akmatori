@@ -135,11 +135,11 @@ func TestCorrelate_EndToEnd(t *testing.T) {
 		Status:           database.IncidentStatusRunning,
 		StartedAt:        time.Now().Add(-5 * time.Minute),
 		AlertFingerprint: otherFP,
-		Response:         "investigating",
 	}
 	if err := db.Create(&match).Error; err != nil {
 		t.Fatalf("seed match: %v", err)
 	}
+	seedRunResponse(t, db, match.UUID, "investigating")
 
 	seedCorrelationSettings(t, db, true)
 

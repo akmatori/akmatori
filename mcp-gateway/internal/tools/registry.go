@@ -4775,7 +4775,7 @@ func (r *Registry) registerIncidentsTools() {
 	r.server.RegisterTool(
 		mcp.Tool{
 			Name:        "incidents.list",
-			Description: "List Akmatori incidents with optional filters. Returns summary fields only (no full log or response).",
+			Description: "List Akmatori incidents with optional filters. Only alerts open incidents; cron runs and other requests are events (events.search source=cron). Returns summary fields only (no full log or response).",
 			InputSchema: mcp.InputSchema{
 				Type: "object",
 				Properties: map[string]mcp.Property{
@@ -4793,7 +4793,7 @@ func (r *Registry) registerIncidentsTools() {
 					},
 					"source_kind": {
 						Type:        "string",
-						Description: "Filter by source kind (e.g. alert, cron, slack)",
+						Description: "Filter by source kind (incidents are alert-sourced)",
 					},
 					"limit": {
 						Type:        "integer",
@@ -4815,7 +4815,7 @@ func (r *Registry) registerIncidentsTools() {
 	r.server.RegisterTool(
 		mcp.Tool{
 			Name:        "incidents.get",
-			Description: "Get full details for a single Akmatori incident by UUID. FullLog is truncated to 50,000 bytes if longer.",
+			Description: "Get full details for a single Akmatori incident by UUID, with the work of its agent runs: the newest response and every run's log (the newest 50,000 bytes).",
 			InputSchema: mcp.InputSchema{
 				Type: "object",
 				Properties: map[string]mcp.Property{
@@ -4867,7 +4867,7 @@ func (r *Registry) registerEventsTools() {
 	r.server.RegisterTool(
 		mcp.Tool{
 			Name:        "events.get",
-			Description: "Get one Akmatori event by UUID: summary, labels, class reasoning and raw payload (cut to 20,000 bytes).",
+			Description: "Get one Akmatori event by UUID: summary, labels, class reasoning and raw payload (cut to 20,000 bytes). A request event (a cron run, a Slack or API request) also returns its run: the answer and the log (the newest 50,000 bytes).",
 			InputSchema: mcp.InputSchema{
 				Type: "object",
 				Properties: map[string]mcp.Property{

@@ -97,30 +97,31 @@ func TestMatchFormattingRule_EmptyList(t *testing.T) {
 	}
 }
 
-func TestBuildFormatFlow_LoadsIncidentIdentity(t *testing.T) {
+func TestBuildFormatFlow_LoadsRunIdentity(t *testing.T) {
 	setupFormatterTestDB(t)
-	incident := database.Incident{
-		UUID:          "inc-1",
-		Source:        "alert",
+	run := database.AgentRun{
+		RunID:         "run-1",
+		ScopeUUID:     "inc-1",
+		IncidentUUID:  "inc-1",
 		SourceKind:    database.IncidentSourceKindAlert,
 		SourceUUID:    "trigger-1",
 		LastSkillUsed: "victoria-metrics",
 	}
-	if err := database.DB.Create(&incident).Error; err != nil {
-		t.Fatalf("seed incident: %v", err)
+	if err := database.DB.Create(&run).Error; err != nil {
+		t.Fatalf("seed run: %v", err)
 	}
 
-	flow := BuildFormatFlow("inc-1", "chan-9")
+	flow := BuildFormatFlow("run-1", "chan-9")
 	if flow.SourceKind != "alert" || flow.TriggerUUID != "trigger-1" || flow.ChannelUUID != "chan-9" || flow.LastSkill != "victoria-metrics" {
 		t.Errorf("unexpected flow: %+v", flow)
 	}
 }
 
-func TestBuildFormatFlow_MissingIncidentKeepsChannel(t *testing.T) {
+func TestBuildFormatFlow_MissingRunKeepsChannel(t *testing.T) {
 	setupFormatterTestDB(t)
-	flow := BuildFormatFlow("no-such-incident", "chan-9")
+	flow := BuildFormatFlow("no-such-run", "chan-9")
 	if flow.ChannelUUID != "chan-9" || flow.SourceKind != "" || flow.TriggerUUID != "" || flow.LastSkill != "" {
-		t.Errorf("unexpected flow for missing incident: %+v", flow)
+		t.Errorf("unexpected flow for missing run: %+v", flow)
 	}
 }
 

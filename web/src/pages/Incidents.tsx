@@ -14,6 +14,7 @@ import { incidentsApi } from '../api/client';
 import type { Incident } from '../types';
 import { useInterval } from '../hooks/useInterval';
 import { getErrorMessage } from '../utils/errors';
+import { taskResultPath } from '../components/runs/runHelpers';
 
 // History defaults to the last 24 hours; the list refreshes every minute.
 const DEFAULT_TIME_RANGE = 24 * 60 * 60;
@@ -223,9 +224,11 @@ export default function Incidents() {
       {showCreate && (
         <CreateIncidentModal
           onClose={() => setShowCreate(false)}
-          onCreated={(incident) => {
+          onCreated={(res) => {
             setShowCreate(false);
-            navigate(`/incidents/${incident.uuid}`);
+            const path = taskResultPath(res);
+            if (path) navigate(path);
+            else setError(res.message);
             void refresh();
           }}
           onError={setError}

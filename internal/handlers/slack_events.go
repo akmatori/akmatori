@@ -24,21 +24,26 @@ func (h *SlackHandler) mentionSourceUUID(channelID string) string {
 	return "slack:" + channelID
 }
 
-// recordMentionFollowUp stores a mention that continues an existing thread.
-// Its class comes from the source: it is a request on that thread's run.
-func (h *SlackHandler) recordMentionFollowUp(channelID, messageTS, text, incidentUUID string) {
+// recordMentionFollowUp stores a mention that continues an existing thread
+// and returns its event UUID. Its class comes from the source: it is a
+// request on that thread's work (incident or request scope).
+func (h *SlackHandler) recordMentionFollowUp(channelID, messageTS, text string, work *slackThreadWork) string {
 	if h.eventService == nil {
-		return
+		return ""
 	}
-	h.eventService.Record(context.Background(), services.EventInput{
+	in := services.EventInput{
 		SourceKind:   database.EventSourceSlackMention,
 		SourceUUID:   h.mentionSourceUUID(channelID),
 		SourceType:   string(database.MessagingProviderSlack),
 		ExternalID:   messageTS,
 		Title:        firstLineTruncated(text, mentionEventTitleMax),
 		Summary:      text,
-		IncidentUUID: incidentUUID,
-	}, services.SourceEventVerdict(database.EventKindRequest))
+		IncidentUUID: work.IncidentUUID,
+	}
+	if work.IncidentUUID == "" {
+		in.ScopeUUID = work.ScopeUUID
+	}
+	return h.eventService.Record(context.Background(), in, services.SourceEventVerdict(database.EventKindRequest)).UUID
 }
 
 // classifyNewMention stores a mention that starts a new thread and classifies

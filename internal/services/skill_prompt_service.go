@@ -733,8 +733,8 @@ gateway_call("jira.create_issue", {"project_key": "OPS", "issue_type": "Incident
 	case "incidents":
 		return fmt.Sprintf(`
 **Parameters:**
-- `+"`list`"+`: from, to (filter by started_at; each accepts either a Unix timestamp OR an ISO-8601 date/datetime string like "2026-07-01T00:00:00Z" — prefer the ISO string, or subtract from the "Unix timestamp" given in the current-time header, rather than hand-computing epoch seconds), status (string), source_kind (string), limit (int, default 50, max 200), offset (int). Omit from/to to return the most recent incidents regardless of time.
-- `+"`get`"+`: uuid* (string)
+- `+"`list`"+`: from, to (filter by started_at; each accepts either a Unix timestamp OR an ISO-8601 date/datetime string like "2026-07-01T00:00:00Z" — prefer the ISO string, or subtract from the "Unix timestamp" given in the current-time header, rather than hand-computing epoch seconds), status (string), source_kind (string), limit (int, default 50, max 200), offset (int). Omit from/to to return the most recent incidents regardless of time. Only alerts open incidents: find cron runs and other requests with events.search.
+- `+"`get`"+`: uuid* (string). Returns the work of every agent run on the incident.
 (* = required)
 
 Usage (via gateway_call):
@@ -766,7 +766,7 @@ gateway_call("proposals.list_cron_jobs", {}, "%s")
 		return fmt.Sprintf(`
 **Parameters:**
 - `+"`search`"+`: kind (alert, change, info, request), source (webhook, slack_listener, slack_mention, manual, cron, proposal), host (substring), text (substring of title or summary), since, until (ISO-8601 preferred, or Unix seconds; on occurred_at), limit (default 50, max 200), offset. Newest first, summary fields only.
-- `+"`get`"+`: uuid* (string)
+- `+"`get`"+`: uuid* (string). A request event (a cron run, a Slack or API request) also returns its run: the answer and the log.
 - `+"`report_alert`"+`: alert_name*, summary* | host, service, severity (critical, high, warning, info). Cron runs only.
 (* = required)
 

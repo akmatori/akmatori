@@ -43,7 +43,7 @@ func TestFeedbackClassifier_ConfidentFeedback(t *testing.T) {
 	}
 	c := NewFeedbackClassifier(caller)
 
-	verdict, err := c.Classify(context.Background(), "the postgres data dir is /mnt/data not /var/lib/postgresql", &database.Incident{Title: "Postgres outage"})
+	verdict, err := c.Classify(context.Background(), "the postgres data dir is /mnt/data not /var/lib/postgresql", &FeedbackTarget{Title: "Postgres outage"})
 	if err != nil {
 		t.Fatalf("classify: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestFeedbackClassifier_SystemPromptExcludesImperativeRequests(t *testing.T)
 	}
 	c := NewFeedbackClassifier(caller)
 
-	if _, err := c.Classify(context.Background(), "check freemembers", &database.Incident{Title: "Credit spend anomaly"}); err != nil {
+	if _, err := c.Classify(context.Background(), "check freemembers", &FeedbackTarget{Title: "Credit spend anomaly"}); err != nil {
 		t.Fatalf("classify: %v", err)
 	}
 	sys := caller.lastSystem
@@ -92,7 +92,7 @@ func TestFeedbackClassifier_BelowThresholdNotConfident(t *testing.T) {
 	}
 	c := NewFeedbackClassifier(caller)
 
-	verdict, err := c.Classify(context.Background(), "thanks for the help", &database.Incident{})
+	verdict, err := c.Classify(context.Background(), "thanks for the help", &FeedbackTarget{})
 	if err != nil {
 		t.Fatalf("classify: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestFeedbackClassifier_NotFeedback(t *testing.T) {
 	}
 	c := NewFeedbackClassifier(caller)
 
-	verdict, err := c.Classify(context.Background(), "any update yet?", &database.Incident{})
+	verdict, err := c.Classify(context.Background(), "any update yet?", &FeedbackTarget{})
 	if err != nil {
 		t.Fatalf("classify: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestFeedbackClassifier_WorkerNotConnected(t *testing.T) {
 	}
 	c := NewFeedbackClassifier(caller)
 
-	_, err := c.Classify(context.Background(), "msg", &database.Incident{})
+	_, err := c.Classify(context.Background(), "msg", &FeedbackTarget{})
 	if err == nil || err != ErrWorkerNotConnected {
 		t.Errorf("expected ErrWorkerNotConnected, got %v", err)
 	}
@@ -132,7 +132,7 @@ func TestFeedbackClassifier_WorkerNotConnected(t *testing.T) {
 
 func TestFeedbackClassifier_NoCallerIsSilent(t *testing.T) {
 	c := NewFeedbackClassifier(nil)
-	_, err := c.Classify(context.Background(), "msg", &database.Incident{})
+	_, err := c.Classify(context.Background(), "msg", &FeedbackTarget{})
 	if err != ErrWorkerNotConnected {
 		t.Errorf("nil caller should report worker disconnected, got %v", err)
 	}
@@ -140,7 +140,7 @@ func TestFeedbackClassifier_NoCallerIsSilent(t *testing.T) {
 
 func TestFeedbackClassifier_NilReceiverIsSilent(t *testing.T) {
 	var c *FeedbackClassifier
-	_, err := c.Classify(context.Background(), "msg", &database.Incident{})
+	_, err := c.Classify(context.Background(), "msg", &FeedbackTarget{})
 	if err != ErrWorkerNotConnected {
 		t.Errorf("nil classifier should report worker disconnected, got %v", err)
 	}
@@ -167,7 +167,7 @@ func TestFeedbackClassifier_LLMErrorIsWrapped(t *testing.T) {
 	}
 	c := NewFeedbackClassifier(caller)
 
-	_, err := c.Classify(context.Background(), "postgres data dir is /mnt/data", &database.Incident{Title: "Postgres outage"})
+	_, err := c.Classify(context.Background(), "postgres data dir is /mnt/data", &FeedbackTarget{Title: "Postgres outage"})
 	if !errors.Is(err, llmErr) {
 		t.Fatalf("expected wrapped provider error, got %v", err)
 	}
@@ -183,7 +183,7 @@ func TestFeedbackClassifier_EmptyMessageIsNotCalled(t *testing.T) {
 	caller := setupClassifierTest(t)
 	c := NewFeedbackClassifier(caller)
 
-	verdict, err := c.Classify(context.Background(), "   ", &database.Incident{})
+	verdict, err := c.Classify(context.Background(), "   ", &FeedbackTarget{})
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestFeedbackClassifier_InvalidJSONIsSilent(t *testing.T) {
 	}
 	c := NewFeedbackClassifier(caller)
 
-	verdict, err := c.Classify(context.Background(), "msg", &database.Incident{})
+	verdict, err := c.Classify(context.Background(), "msg", &FeedbackTarget{})
 	if err != nil {
 		t.Errorf("invalid JSON should return zero verdict + nil error, got %v", err)
 	}
@@ -218,7 +218,7 @@ func TestFeedbackClassifier_NoAPIKeyIsWorkerOffline(t *testing.T) {
 	}
 	c := NewFeedbackClassifier(caller)
 
-	_, err := c.Classify(context.Background(), "msg", &database.Incident{Title: "x"})
+	_, err := c.Classify(context.Background(), "msg", &FeedbackTarget{Title: "x"})
 	if err != ErrWorkerNotConnected {
 		t.Errorf("expected ErrWorkerNotConnected when no api key, got %v", err)
 	}
@@ -272,21 +272,21 @@ func TestParseFeedbackVerdict_ClampsConfidence(t *testing.T) {
 
 func TestBuildFeedbackUserPrompt_TruncatesLongInputs(t *testing.T) {
 	long := strings.Repeat("y", 5000)
-	got := buildFeedbackUserPrompt(long, &database.Incident{Title: "T", Response: long})
+	got := buildFeedbackUserPrompt(long, &FeedbackTarget{Title: "T", Response: long})
 	if len(got) > 5000 { // generous upper bound — both fields capped, plus some scaffolding
 		t.Errorf("prompt too long: %d", len(got))
 	}
 }
 
 func TestBuildFeedbackUserPrompt_HandlesEmptyResponse(t *testing.T) {
-	got := buildFeedbackUserPrompt("hello", &database.Incident{Title: "T"})
+	got := buildFeedbackUserPrompt("hello", &FeedbackTarget{Title: "T"})
 	if !strings.Contains(got, "(no agent response yet)") {
 		t.Errorf("expected placeholder for empty response: %s", got)
 	}
 }
 
 func TestBuildFeedbackUserPrompt_HandlesEmptyTitle(t *testing.T) {
-	got := buildFeedbackUserPrompt("hello", &database.Incident{Response: "agent response"})
+	got := buildFeedbackUserPrompt("hello", &FeedbackTarget{Response: "agent response"})
 	if !strings.Contains(got, "Incident title: (no title)") {
 		t.Errorf("expected placeholder for empty title: %s", got)
 	}

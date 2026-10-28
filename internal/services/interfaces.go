@@ -33,15 +33,17 @@ type SkillManager interface {
 	DeleteSkillScript(skillName, filename string) error
 }
 
-// IncidentManager defines the interface for incident spawn, update, and retrieval.
+// IncidentManager defines the interface for incidents (alert work) and agent
+// runs (incident and request work).
 type IncidentManager interface {
 	SpawnIncidentManager(ctx *IncidentContext) (string, string, error)
-	SpawnAgentInvocation(rootSkillName string, ctx *IncidentContext) (string, string, error)
-	UpdateIncidentStatus(incidentUUID string, status database.IncidentStatus, sessionID string, fullLog string) error
-	UpdateIncidentComplete(incidentUUID string, status database.IncidentStatus, sessionID string, fullLog string, response string, tokensUsed int, executionTimeMs int64) error
-	UpdateIncidentLog(incidentUUID string, fullLog string) error
+	PrepareRequestScope(rootSkillName, eventUUID string) (string, string, error)
+	EnsureScopeDir(rootSkillName, scopeUUID string) error
+	BeginRun(start RunStart) (string, error)
+	UpdateRunLog(runID, fullLog string) error
+	FinishRun(runID string, outcome RunOutcome) error
+	UpdateIncidentStatus(incidentUUID string, status database.IncidentStatus) error
 	GetIncident(incidentUUID string) (*database.Incident, error)
-	AppendSubagentLog(incidentUUID string, skillName string, subagentLog string) error
 	InsertFiringAlert(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert, decision, reasoning string) error
 	LinkAlertToIncident(ctx context.Context, incidentUUID string, sourceUUID string, alert alerts.NormalizedAlert, confidence float64, reasoning string) error
 	UnlinkAlertFromIncident(ctx context.Context, alertUUID string) (string, error)

@@ -214,42 +214,33 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		incidentContext := &services.IncidentContext{
-			Source:     "api",
-			SourceKind: database.IncidentSourceKindManual,
-			SourceID:   fmt.Sprintf("api-%d", time.Now().UnixNano()),
-			Context: database.JSONB{
-				"task":       req.Task,
-				"created_by": "api",
-			},
-			Message:   req.Task,
-			EventUUID: eventUUID,
-		}
-
-		if req.Context != nil {
-			for k, v := range req.Context {
-				incidentContext.Context[k] = v
-			}
-		}
-
-		incidentUUID, workingDir, err := h.skillService.SpawnIncidentManager(incidentContext)
+		// A request is agent work, not an incident: only alerts open
+		// incidents. The returned uuid is the request scope (GET
+		// /api/requests/{uuid}).
+		scopeUUID, workingDir, err := h.skillService.PrepareRequestScope("incident-manager", eventUUID)
 		if err != nil {
-			api.RespondError(w, http.StatusInternalServerError, "Failed to create incident")
+			api.RespondError(w, http.StatusInternalServerError, "Failed to start request")
 			return
 		}
 
-		slog.Info("created incident via API", "incident_id", incidentUUID)
+		slog.Info("started request via API", "scope", scopeUUID)
 
-		taskHeader := fmt.Sprintf("📝 API Incident Task:\n%s\n\n--- Execution Log ---\n\n", req.Task)
-		go h.runAgentInvestigation(incidentUUID, taskHeader, req.Task)
+		taskHeader := fmt.Sprintf("📝 API Task:\n%s\n\n--- Execution Log ---\n\n", req.Task)
+		go h.runAgentInvestigation(services.RunStart{
+			ScopeUUID:  scopeUUID,
+			EventUUID:  eventUUID,
+			SourceKind: database.IncidentSourceKindManual,
+			SourceUUID: manualEventSource,
+			RootSkill:  "incident-manager",
+		}, taskHeader, req.Task)
 
 		api.RespondJSON(w, http.StatusCreated, api.CreateIncidentResponse{
-			UUID:       incidentUUID,
-			Status:     "pending",
+			UUID:       scopeUUID,
+			Status:     "running",
 			WorkingDir: workingDir,
-			Message:    "Incident created and processing started",
+			Message:    "Request started",
 			EventUUID:  eventUUID,
-			EventKind:  eventKindIfRecorded(eventUUID, database.EventKindRequest),
+			EventKind:  database.EventKindRequest,
 		})
 
 	default:
@@ -299,12 +290,24 @@ func (h *APIHandler) handleIncidentByID(w http.ResponseWriter, r *http.Request) 
 	db.Model(&database.Alert{}).Where("incident_uuid = ?", incident.UUID).Count(&cnt)
 	incident.AlertCount = cnt
 
+	runs, err := loadRuns(db, "incident_uuid = ?", incident.UUID)
+	if err != nil {
+		slog.Error("incident detail: failed to load runs", "uuid", incident.UUID, "err", err)
+		api.RespondError(w, http.StatusInternalServerError, "Failed to load incident runs")
+		return
+	}
+	work := summarizeRuns(runs)
+	incident.Response, incident.FullLog = work.Response, work.FullLog
+	incident.TokensUsed, incident.ExecutionTimeMs = work.TokensUsed, work.ExecutionTimeMs
+	incident.Runs = work.Runs
+
 	api.RespondJSON(w, http.StatusOK, incident)
 }
 
 // handleIncidentResponse handles GET /api/incidents/{uuid}/response — a
-// lightweight projection (no full_log) used by the Feed's inline response
-// expansion so it doesn't pull megabytes of agent log per click.
+// lightweight projection (the newest run answer, no log) used by the Events
+// page's inline response expansion so it doesn't pull megabytes of agent log
+// per click.
 func (h *APIHandler) handleIncidentResponse(w http.ResponseWriter, r *http.Request) {
 	incidentUUID := r.PathValue("uuid")
 	db := database.GetDB()
@@ -316,7 +319,7 @@ func (h *APIHandler) handleIncidentResponse(w http.ResponseWriter, r *http.Reque
 		Response string `json:"response"`
 	}
 	err := db.Model(&database.Incident{}).
-		Select("uuid, title, status, response").
+		Select("uuid, title, status").
 		Where("uuid = ?", incidentUUID).
 		First(&row).Error
 	if err != nil {
@@ -328,6 +331,13 @@ func (h *APIHandler) handleIncidentResponse(w http.ResponseWriter, r *http.Reque
 		}
 		return
 	}
+	responses, err := database.LatestRunResponses(db, []string{incidentUUID})
+	if err != nil {
+		slog.Error("incident response: failed to load runs", "uuid", incidentUUID, "err", err)
+		api.RespondError(w, http.StatusInternalServerError, "Failed to load incident")
+		return
+	}
+	row.Response = responses[incidentUUID]
 	api.RespondJSON(w, http.StatusOK, row)
 }
 
@@ -413,13 +423,28 @@ func (h *APIHandler) handleIncidentSweepStale(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// runAgentInvestigation runs a full agent investigation for the given incident.
-// It must be launched as a goroutine by the caller. taskHeader is prepended to
-// all log updates; task is the raw user-facing task text (guidance is added
-// internally via executor.PrependGuidance).
-func (h *APIHandler) runAgentInvestigation(incidentUUID, taskHeader, task string) {
-	if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", taskHeader+"Starting execution..."); err != nil {
-		slog.Error("failed to update incident status", "err", err)
+// runAgentInvestigation runs one agent run: an API request (request scope)
+// or the investigation of an unlinked alert (incident). It must be launched
+// as a goroutine by the caller. taskHeader is prepended to all log updates;
+// task is the raw user-facing task text (guidance is added internally via
+// executor.PrependGuidance).
+func (h *APIHandler) runAgentInvestigation(start services.RunStart, taskHeader, task string) {
+	incidentUUID := start.ScopeUUID // the scope the worker keys the run by
+	if incidentUUID == "" {
+		incidentUUID = start.IncidentUUID
+	}
+	runID, err := h.skillService.BeginRun(start)
+	if err != nil {
+		slog.Error("failed to begin run", "scope", incidentUUID, "err", err)
+		if start.IncidentUUID != "" {
+			if uerr := h.skillService.UpdateIncidentStatus(start.IncidentUUID, database.IncidentStatusFailed); uerr != nil {
+				slog.Warn("failed to mark incident failed", "incident_id", start.IncidentUUID, "err", uerr)
+			}
+		}
+		return
+	}
+	if err := h.skillService.UpdateRunLog(runID, taskHeader+"Starting execution..."); err != nil {
+		slog.Warn("failed to write run log", "err", err)
 	}
 
 	taskWithGuidance := executor.PrependGuidance(task)
@@ -446,8 +471,8 @@ func (h *APIHandler) runAgentInvestigation(incidentUUID, taskHeader, task string
 		callback := IncidentCallback{
 			OnOutput: func(output string) {
 				lastStreamedLog += output
-				if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog); err != nil {
-					slog.Error("failed to update incident log", "err", err)
+				if err := h.skillService.UpdateRunLog(runID, taskHeader+lastStreamedLog); err != nil {
+					slog.Error("failed to update run log", "err", err)
 				}
 			},
 			OnCompleted: func(sid, output string, tokensUsed int, executionTimeMs int64) {
@@ -471,12 +496,12 @@ func (h *APIHandler) runAgentInvestigation(incidentUUID, taskHeader, task string
 			},
 		}
 
-		runID, err := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback)
+		_, err := h.agentWSHandler.StartIncident(incidentUUID, runID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback)
 		if err != nil {
 			slog.Error("failed to start incident via WebSocket", "err", err)
-			errorMsg := fmt.Sprintf("Failed to start incident: %v", err)
-			if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg, 0, 0); updateErr != nil {
-				slog.Error("failed to update incident status", "err", updateErr)
+			errorMsg := fmt.Sprintf("Failed to start run: %v", err)
+			if updateErr := h.skillService.FinishRun(runID, services.RunOutcome{Failed: true, FullLog: taskHeader, Response: "❌ " + errorMsg}); updateErr != nil {
+				slog.Error("failed to record run failure", "err", updateErr)
 			}
 			return
 		}
@@ -493,7 +518,7 @@ func (h *APIHandler) runAgentInvestigation(incidentUUID, taskHeader, task string
 		// Passthrough on error/empty or when no rule matches the
 		// incident's flow. Manual runs have no destination channel.
 		formattedResponse := applyResponseFormatter(context.Background(), h.responseFormatter, hasError, response, taskHeader+lastStreamedLog,
-			services.BuildFormatFlow(incidentUUID, ""))
+			services.BuildFormatFlow(runID, ""))
 
 		// Re-attach the metrics footer AFTER formatting so the LLM
 		// never sees it (and therefore cannot strip or rewrite ⏱️
@@ -520,12 +545,8 @@ func (h *APIHandler) runAgentInvestigation(incidentUUID, taskHeader, task string
 			fullLog += "\n\n--- Final Response ---\n\n" + rawWithMetrics
 		}
 
-		finalStatus := database.IncidentStatusCompleted
-		if hasError {
-			finalStatus = database.IncidentStatusFailed
-		}
-		if err := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLog, formattedWithMetrics, finalTokensUsed, finalExecutionTimeMs); err != nil {
-			slog.Error("failed to update incident complete", "err", err)
+		if err := h.skillService.FinishRun(runID, services.RunOutcome{Failed: hasError, SessionID: sessionID, FullLog: fullLog, Response: formattedWithMetrics}); err != nil {
+			slog.Error("failed to store run result", "err", err)
 		}
 
 		slog.Info("API incident completed via WebSocket", "incident_id", incidentUUID)
@@ -534,8 +555,8 @@ func (h *APIHandler) runAgentInvestigation(incidentUUID, taskHeader, task string
 
 	slog.Error("agent worker not connected for API incident", "incident_id", incidentUUID)
 	errorMsg := "Agent worker not connected. Please check that the agent-worker container is running."
-	if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, database.IncidentStatusFailed, "", taskHeader, "❌ "+errorMsg, 0, 0); updateErr != nil {
-		slog.Error("failed to update incident status", "err", updateErr)
+	if updateErr := h.skillService.FinishRun(runID, services.RunOutcome{Failed: true, FullLog: taskHeader, Response: "❌ " + errorMsg}); updateErr != nil {
+		slog.Error("failed to record run failure", "err", updateErr)
 	}
 }
 
@@ -633,7 +654,13 @@ func (h *APIHandler) moveAlert(w http.ResponseWriter, r *http.Request, alertUUID
 			task += "\n\nOriginal alert text:\n" + original
 		}
 		taskHeader := fmt.Sprintf("🔗 Unlinked Alert Investigation:\n%s\n\n--- Execution Log ---\n\n", task)
-		go h.runAgentInvestigation(resultIncidentUUID, taskHeader, task)
+		go h.runAgentInvestigation(services.RunStart{
+			IncidentUUID: resultIncidentUUID,
+			EventUUID:    alert.EventUUID,
+			SourceKind:   database.IncidentSourceKindAlert,
+			SourceUUID:   alert.SourceUUID,
+			RootSkill:    "incident-manager",
+		}, taskHeader, task)
 	}
 
 	api.RespondJSON(w, http.StatusOK, map[string]string{"incident_uuid": resultIncidentUUID})

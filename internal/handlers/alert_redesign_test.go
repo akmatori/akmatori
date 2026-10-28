@@ -56,7 +56,7 @@ func (s *insertTrackingService) getInsertCount() int {
 func setupResolvedAlertTestDB(t *testing.T) {
 	t.Helper()
 	testhelpers.NewGlobalSQLiteDB(t,
-		&database.Incident{},
+		&database.Incident{}, &database.AgentRun{},
 		&database.Alert{},
 		&database.GeneralSettings{},
 		&database.SlackSettings{},
@@ -115,7 +115,7 @@ func seedResolvedAlertTestData(t *testing.T, incidentStatus database.IncidentSta
 func TestProcessAlert_SpawnsIncidentAndInsertsAlertRow(t *testing.T) {
 	testhelpers.NewGlobalSQLiteDB(t,
 		&database.SlackSettings{},
-		&database.Incident{},
+		&database.Incident{}, &database.AgentRun{},
 		&database.Alert{},
 	)
 

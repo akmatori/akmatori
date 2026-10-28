@@ -23,7 +23,7 @@ Only `alert` events open or join incidents; everything else never touches the in
 | `alert` | reports a problem | alerts row → correlation gate → link or open incident |
 | `change` | deploy, config change, maintenance | stored only (for the agent and the feed) |
 | `info` | no action | stored only |
-| `request` | work asked of the agent | agent run (still an `incidents` row until the runs split) |
+| `request` | work asked of the agent | request work: agent runs keyed by the event's scope, no incident (see `agent-runs`) |
 
 | Source (`source_kind`) | Classes allowed | How classified |
 |---|---|---|
@@ -47,7 +47,8 @@ Only `alert` events open or join incidents; everything else never touches the in
   link transaction commits (a failed statement would abort a PostgreSQL transaction)
 - `NormalizedAlert.EventUUID` carries the event into `InsertFiringAlert`/`LinkAlertToIncident`,
   which stamp `alerts.event_uuid` and link the event back; on a `uniq_firing_alert` conflict the event
-  links to the row that holds the slot. `IncidentContext.EventUUID` links request events to their run
+  links to the row that holds the slot. `BeginRun` links a request event to its scope
+  (`events.scope_uuid`); follow-up events get it at record time
 - reported alerts (`ProcessReportedAlert`) use source key `<channel uuid>` / `slack:<channel id>` /
   `manual`, open incidents with `source_kind=alert`, and run through the listener run loop with a
   synthesized Channel (`CanPost` only when there is a Slack thread)

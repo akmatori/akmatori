@@ -24,8 +24,9 @@ Proposals tab, refine via chat, and approve (auto-apply) or reject.
   live vs snapshot, mismatch → `superseded` + `ErrProposalStale` (409)
 - `skill_prompt_update` targets non-system skills ONLY (enforced at gateway create AND apply —
   `UpdateSkillPrompt` silently no-ops for system skills); `cron_new` applies `Enabled=false`, no channel
-- proposal chat = fresh `StartIncident` per turn on the same chat incident (`source_kind="proposal"`,
-  root skill `proposal-editor`), NEVER `ContinueIncident`; proposal state + transcript rebuilt into
+- proposal chat = fresh `StartIncident` per turn on the same request scope (`chat_incident_uuid`
+  holds the scope; runs have `source_kind="proposal"`, root skill `proposal-editor`; chat status =
+  newest run status), NEVER `ContinueIncident`; proposal state + transcript rebuilt into
   each task; transcript in `proposal_chat_messages` written by the handler; allowlist =
   `ChatToolAllowlist()` (incidents+proposals; non-nil empty on failure); no `executor.PrependGuidance`
 - `SeedImprovementEvaluatorCron()` runs from `main.go` AFTER `EnsureToolTypes()` (attaches the seeded

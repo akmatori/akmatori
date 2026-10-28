@@ -76,6 +76,11 @@ func (m *IncidentMerger) EvaluateAndMerge(ctx context.Context, incidentUUID stri
 	if incident.Status != database.IncidentStatusCompleted && incident.Status != database.IncidentStatusMonitor {
 		return nil
 	}
+	responses, err := database.LatestRunResponses(m.db.WithContext(ctx), []string{incident.UUID})
+	if err != nil {
+		return fmt.Errorf("merge: load diagnosis: %w", err)
+	}
+	incident.Response = responses[incident.UUID]
 	if strings.TrimSpace(incident.Response) == "" {
 		return nil // no diagnosed root cause to compare
 	}
@@ -162,13 +167,17 @@ func (m *IncidentMerger) fetchMergeCandidates(ctx context.Context, incident *dat
 	var rows []candidateRow
 	err := m.db.WithContext(ctx).
 		Model(&database.Incident{}).
-		Select("uuid, title, status, response, context, started_at, alert_fingerprint").
-		Where("source_kind = ? AND uuid <> ? AND status IN ? AND completed_at >= ? AND started_at < ? AND response <> ''",
+		Select("uuid, title, status, context, started_at, alert_fingerprint").
+		Where("source_kind = ? AND uuid <> ? AND status IN ? AND completed_at >= ? AND started_at < ?",
 			database.IncidentSourceKindAlert, incident.UUID, statuses, cutoff, incident.StartedAt).
+		Where("EXISTS (SELECT 1 FROM agent_runs WHERE agent_runs.incident_uuid = incidents.uuid AND agent_runs.response <> '')").
 		Order("started_at DESC").
 		Limit(mergeMaxCandidates).
 		Scan(&rows).Error
 	if err != nil {
+		return nil, err
+	}
+	if err := fillCandidateResponses(m.db.WithContext(ctx), rows); err != nil {
 		return nil, err
 	}
 	return rows, nil

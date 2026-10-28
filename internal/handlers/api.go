@@ -158,6 +158,10 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/incidents/{uuid}", h.handleIncidentByID)
 	mux.HandleFunc("POST /api/incidents/{uuid}/close", h.handleIncidentClose)
 	mux.HandleFunc("POST /api/incidents/sweep-stale", h.handleIncidentSweepStale)
+	// Request work: agent runs that are not incidents (Slack and API
+	// requests, cron ticks, proposal chats), keyed by their scope.
+	mux.HandleFunc("GET /api/requests/{uuid}", h.handleRequestByID)
+	mux.HandleFunc("GET /api/requests/{uuid}/response", h.handleRequestResponse)
 
 	// Alert management: unlink spawns a fresh investigation; move reassigns the
 	// alert to a chosen incident (empty target == unlink); resolve manually
@@ -166,7 +170,7 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/alerts/{uuid}/move", h.handleAlertMove)
 	mux.HandleFunc("POST /api/alerts/{uuid}/resolve", h.handleAlertResolve)
 
-	// Unified events feed (alerts + non-alert incidents merged by occurred_at).
+	// Events feed: every inbound item from the events table.
 	mux.HandleFunc("GET /api/events", h.handleEvents)
 	mux.HandleFunc("GET /api/events/raw", h.handleEventRaw)
 

@@ -84,6 +84,16 @@ func (h *SlackHandler) channelUUIDForExternalID(externalID string) string {
 	return ch.UUID
 }
 
+// postThreadError posts an error reply into a Slack thread. Best-effort.
+func (h *SlackHandler) postThreadError(channel, threadID, text string) {
+	if _, _, err := h.client.PostMessage(channel,
+		slack.MsgOptionText(text, false),
+		slack.MsgOptionTS(threadID),
+	); err != nil {
+		slog.Error("failed to post error message to Slack", "err", err)
+	}
+}
+
 // processMessage is the core message processing logic
 func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user string) {
 	// Check if Slack is still enabled before processing
@@ -100,89 +110,57 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		threadID = threadTS
 	}
 
-	var sessionID string
-	var incidentUUID string
-	var workingDir string
-
-	// Check if this is an existing incident (continuation) by looking up in database.
-	// First try by source="slack" (DM-originated incidents), then fall back to
-	// slack_message_ts (alert channel incidents where users reply with @mention).
-	var incident database.Incident
-	if err := database.GetDB().Where("source = ? AND source_id = ?", "slack", threadID).First(&incident).Error; err == nil {
-		// Existing DM incident found - resume session
-		sessionID = incident.SessionID
-		incidentUUID = incident.UUID
-		// WorkingDir is stored in DB but session already knows its path from creation
-		_ = incident.WorkingDir
-		slog.Info("resuming session for thread", "session_id", sessionID, "thread_id", threadID, "incident_id", incidentUUID)
-	} else if threadTS != "" {
-		// Try to find an alert channel incident by slack_message_ts
-		// (when user replies to an alert thread with @Akmatori)
-		if err := database.GetDB().Where("slack_message_ts = ?", threadID).First(&incident).Error; err == nil {
-			sessionID = incident.SessionID
-			incidentUUID = incident.UUID
-			// WorkingDir is stored in DB but session already knows its path from creation
-			_ = incident.WorkingDir
-			slog.Info("resuming alert channel session for thread", "session_id", sessionID, "thread_id", threadID, "incident_id", incidentUUID)
-		}
-	}
-
-	// Every mention is an event. A follow-up in a known thread is a request
-	// on that thread's run. A new thread is classified first: a report of a
-	// problem goes to the correlation gate (only alerts open incidents) and
-	// this run stops here.
+	// A mention in a known thread continues that thread's work: an incident
+	// (alert or report thread) or request work. A mention that starts a new
+	// thread is classified first: a report of a problem goes to the
+	// correlation gate (only alerts open incidents) and stops here; a
+	// request starts new request work.
 	var eventUUID string
-	if incidentUUID != "" {
-		h.recordMentionFollowUp(channel, messageTS, text, incidentUUID)
+	work, lookupErr := lookupSlackThread(threadID)
+	if lookupErr == nil {
+		slog.Info("continuing thread work", "thread_id", threadID, "scope", work.ScopeUUID, "incident_id", work.IncidentUUID)
+		eventUUID = h.recordMentionFollowUp(channel, messageTS, text, work)
+		if work.IncidentUUID == "" {
+			if err := h.skillService.EnsureScopeDir("incident-manager", work.ScopeUUID); err != nil {
+				slog.Warn("failed to prepare work directory for follow-up", "scope", work.ScopeUUID, "err", err)
+			}
+		}
 	} else {
 		var handled bool
 		eventUUID, handled = h.classifyNewMention(channel, threadID, messageTS, text)
 		if handled {
 			return
 		}
-	}
-
-	if incidentUUID == "" {
-		// New thread - spawn incident manager
-		slog.Info("starting new session for thread", "thread_id", threadID)
-
-		// Spawn incident manager for this event
-		incidentCtx := &services.IncidentContext{
-			Source:     "slack",
-			SourceID:   threadID,
-			SourceKind: database.IncidentSourceKindSlackMention,
-			Context: database.JSONB{
-				"channel": channel,
-				"user":    user,
-				"text":    text,
-			},
-			Message:   text, // Pass message for title generation
-			EventUUID: eventUUID,
-		}
-
-		var err error
-		incidentUUID, workingDir, err = h.skillService.SpawnIncidentManager(incidentCtx)
+		slog.Info("starting new request for thread", "thread_id", threadID)
+		scopeUUID, workingDir, err := h.skillService.PrepareRequestScope("incident-manager", eventUUID)
 		if err != nil {
-			slog.Error("failed to spawn incident manager", "err", err)
-			_, _, postErr := h.client.PostMessage(
-				channel,
-				slack.MsgOptionText(fmt.Sprintf("❌ Failed to spawn incident manager: %v", err), false),
-				slack.MsgOptionTS(threadID),
-			)
-			if postErr != nil {
-				slog.Error("failed to post error message to Slack", "err", postErr)
-			}
+			slog.Error("failed to prepare request", "err", err)
+			h.postThreadError(channel, threadID, fmt.Sprintf("❌ Failed to start the agent: %v", err))
 			return
 		}
-
-		slog.Info("spawned incident manager", "incident_id", incidentUUID, "working_dir", workingDir)
+		slog.Info("prepared request", "scope", scopeUUID, "working_dir", workingDir)
+		work = &slackThreadWork{ScopeUUID: scopeUUID}
 	}
+	// incidentUUID is the scope the worker keys the run by.
+	incidentUUID := work.ScopeUUID
 
-	// Update incident status to "running" before execution
-	if incidentUUID != "" {
-		if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning, "", ""); err != nil {
-			slog.Warn("failed to update incident status to running", "err", err)
-		}
+	start := services.RunStart{
+		ScopeUUID:    work.ScopeUUID,
+		IncidentUUID: work.IncidentUUID,
+		EventUUID:    eventUUID,
+		RootSkill:    "incident-manager",
+	}
+	if work.IncidentUUID == "" {
+		start.SourceKind = database.IncidentSourceKindSlackMention
+		start.SourceUUID = h.mentionSourceUUID(channel)
+		start.SlackChannelID = channel
+		start.SlackThreadTS = threadID
+	}
+	runID, err := h.skillService.BeginRun(start)
+	if err != nil {
+		slog.Error("failed to begin run", "scope", incidentUUID, "err", err)
+		h.postThreadError(channel, threadID, fmt.Sprintf("❌ Failed to start the agent: %v", err))
+		return
 	}
 
 	// Show "is investigating..." in the thread header and add a hourglass
@@ -248,8 +226,8 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			OnOutput: func(outputLog string) {
 				lastStreamedLog += outputLog
 				// Update database with streamed log
-				if err := h.skillService.UpdateIncidentLog(incidentUUID, taskHeader+lastStreamedLog); err != nil {
-					slog.Error("failed to update incident log", "err", err)
+				if err := h.skillService.UpdateRunLog(runID, taskHeader+lastStreamedLog); err != nil {
+					slog.Error("failed to update run log", "err", err)
 				}
 
 				// Stream condensed progress to Slack (delta only, not full log).
@@ -291,12 +269,12 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		// "timeout waiting for child process to exit" errors when the original
 		// agent process is no longer running.
 		slog.Info("starting new agent session for incident", "incident_id", incidentUUID)
-		runID, wsErr := h.agentWSHandler.StartIncident(incidentUUID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback)
+		_, wsErr := h.agentWSHandler.StartIncident(incidentUUID, runID, taskWithGuidance, llmSettings, h.skillService.GetEnabledSkillNames(), h.skillService.GetToolAllowlist(), callback)
 		if wsErr != nil {
 			slog.Error("failed to start/continue incident via WebSocket", "err", wsErr)
 			startErr := fmt.Sprintf("❌ Agent worker error: %v", wsErr)
-			h.finishSlackMessage(channel, threadID, incidentUUID, user, text,
-				startErr, startErr, "", true, "", 0, 0)
+			h.finishSlackMessage(channel, threadID, runID, user, text,
+				startErr, startErr, "", true, "")
 			return
 		}
 
@@ -315,16 +293,11 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			return
 		}
 
-		// Use original sessionID if finalSessionID is empty (for resume cases)
-		if finalSessionID == "" {
-			finalSessionID = sessionID
-		}
-
 		// Apply the first matching formatting rule before persistence and
 		// before the Slack-side compression. Passthrough on error/empty
 		// or when no rule matches the incident's flow.
 		formattedResponse := applyResponseFormatter(context.Background(), h.responseFormatter, hasError, response, taskHeader+lastStreamedLog,
-			services.BuildFormatFlow(incidentUUID, h.channelUUIDForExternalID(channel)))
+			services.BuildFormatFlow(runID, h.channelUUIDForExternalID(channel)))
 
 		// Re-attach the metrics footer AFTER formatting so the LLM never
 		// sees it (and therefore cannot strip or rewrite ⏱️ Time / 🎯
@@ -382,24 +355,24 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 			return
 		}
 
-		h.finishSlackMessage(channel, threadID, incidentUUID, user, text,
-			finalResponse, formattedWithMetrics, fullLog, hasError, finalSessionID, finalTokensUsed, finalExecutionTimeMs)
+		h.finishSlackMessage(channel, threadID, runID, user, text,
+			finalResponse, formattedWithMetrics, fullLog, hasError, finalSessionID)
 		return
 	}
 
 	// No WebSocket worker available
 	slog.Error("agent worker not connected", "incident_id", incidentUUID)
 	errMsg := "❌ Agent worker not connected. Please check that the agent-worker container is running."
-	h.finishSlackMessage(channel, threadID, incidentUUID, user, text,
-		errMsg, errMsg, "", true, "", 0, 0)
+	h.finishSlackMessage(channel, threadID, runID, user, text,
+		errMsg, errMsg, "", true, "")
 }
 
 // finishSlackMessage handles the final steps of Slack message processing.
 // finalResponse is what gets posted to Slack; dbResponse is the response
-// stored in `incident.response` (the formatted output when the formatter
-// ran, otherwise the raw agent output) so the web UI shows the full result,
-// not the Slack-sized summarization.
-func (h *SlackHandler) finishSlackMessage(channel, threadID, incidentUUID, user, text, finalResponse, dbResponse, fullLog string, hasError bool, sessionID string, tokensUsed int, executionTimeMs int64) {
+// stored on the run (the formatted output when the formatter ran, otherwise
+// the raw agent output) so the web UI shows the full result, not the
+// Slack-sized summarization.
+func (h *SlackHandler) finishSlackMessage(channel, threadID, runID, user, text, finalResponse, dbResponse, fullLog string, hasError bool, sessionID string) {
 	// The hourglass reaction is now removed by the TypingController in
 	// processMessage's deferred Stop; here we only add the terminal
 	// success/error reaction.
@@ -421,24 +394,18 @@ func (h *SlackHandler) finishSlackMessage(channel, threadID, incidentUUID, user,
 		}
 	}
 
-	// Update incident with status, log, and response
-	if incidentUUID != "" {
-		finalStatus := database.IncidentStatusCompleted
-		if hasError {
-			finalStatus = database.IncidentStatusFailed
-		}
-
-		// Build full log with context if not already built
+	// Store the run's log and answer (and finish its incident, if any)
+	if runID != "" {
 		fullLogWithContext := fullLog
 		if fullLogWithContext == "" {
 			fullLogWithContext = fmt.Sprintf("📨 Original Message from User <%s>:\n%s\n\n--- Execution Log ---\n\n%s",
 				user, text, "")
 		}
 
-		if updateErr := h.skillService.UpdateIncidentComplete(incidentUUID, finalStatus, sessionID, fullLogWithContext, dbResponse, tokensUsed, executionTimeMs); updateErr != nil {
-			slog.Warn("failed to update incident", "err", updateErr)
+		if updateErr := h.skillService.FinishRun(runID, services.RunOutcome{Failed: hasError, SessionID: sessionID, FullLog: fullLogWithContext, Response: dbResponse}); updateErr != nil {
+			slog.Warn("failed to store run result", "err", updateErr)
 		} else {
-			slog.Info("updated incident", "incident_id", incidentUUID, "status", finalStatus, "session_id", sessionID)
+			slog.Info("stored run result", "run", runID, "failed", hasError)
 		}
 	}
 

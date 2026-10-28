@@ -43,7 +43,7 @@ Backend flow:
    alerts reach the correlation gate and open or join incidents.
 2. Handlers call services through interfaces from `internal/services/interfaces.go`.
 3. Agent runs happen through the worker WebSocket.
-4. Tool execution goes through MCP Gateway with incident-scoped auth.
+4. Tool execution goes through MCP Gateway with run-scoped auth (scope = incident or request).
 5. Final output is parsed, optionally reformatted, stored, and sent back to UI/Slack.
 
 Entry points: `internal/handlers/agent_ws.go` (worker transport and message types),
@@ -51,7 +51,7 @@ Entry points: `internal/handlers/agent_ws.go` (worker transport and message type
 dependencies), `internal/services/incident_service.go` (agent spawning, AGENTS.md, root-skill prompts).
 
 Detailed subsystem rules live in `.claude/rules/` and load automatically when you touch the matching
-files: `alerts-correlation-and-monitor`, `cron-and-root-skills`, `events`, `formatting-rules`,
+files: `agent-runs`, `alerts-correlation-and-monitor`, `cron-and-root-skills`, `events`, `formatting-rules`,
 `memory-and-runbooks`, `messaging-channels-slack`, `mcp-gateway-tools`, `oneshot-llm`, `proposals`,
 `agent-worker-pi-sdk`.
 

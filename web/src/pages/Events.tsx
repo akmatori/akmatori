@@ -8,7 +8,7 @@ import MoveIncidentModal from '../components/MoveIncidentModal';
 import EmptyState from '../components/shared/EmptyState';
 import Pagination from '../components/shared/Pagination';
 import SegmentedControl from '../components/shared/SegmentedControl';
-import { bucketSize, groupEvents } from '../components/events/eventHelpers';
+import { bucketSize, eventWork, groupEvents } from '../components/events/eventHelpers';
 import EventRow from '../components/events/EventRow';
 import type { RawState } from '../components/events/RawEventContent';
 import type { ResponseState } from '../components/events/IncidentResponseContent';
@@ -62,7 +62,7 @@ export default function Events() {
   // Raw-message expansion + per-event fetch cache.
   const [rawExpanded, setRawExpanded] = useState<Set<string>>(new Set());
   const [rawData, setRawData] = useState<Record<string, RawState>>({});
-  // Incident-response expansion (by event UUID) + per-incident fetch cache.
+  // Answer expansion (by event UUID) + per-incident/request fetch cache.
   const [responseExpanded, setResponseExpanded] = useState<Set<string>>(new Set());
   const [responseData, setResponseData] = useState<Record<string, ResponseState>>({});
   // Search: `search` mirrors the input; `activeSearch` is what the API sees.
@@ -204,20 +204,22 @@ export default function Events() {
     }
   }, [rawExpanded, reasoningExpanded, fetchRaw]);
 
-  // toggleResponse expands an inline panel with the linked incident's final
-  // response, fetched on demand through the lightweight /response endpoint.
+  // toggleResponse expands an inline panel with the linked incident's or
+  // request's newest answer, fetched on demand through the lightweight
+  // /response endpoints.
   const toggleResponse = useCallback((item: EventFeedItem) => {
-    const incidentUUID = item.incident_uuid;
-    if (!incidentUUID) return;
+    const work = eventWork(item);
+    if (!work) return;
     const uuid = item.event_uuid;
     setResponseExpanded(prev => {
       if (prev.has(uuid)) return withoutKey(prev, uuid);
       setResponseData(prevData => {
-        if (prevData[incidentUUID] && !prevData[incidentUUID].error) return prevData;
-        eventsApi.incidentResponse(incidentUUID)
-          .then(res => setResponseData(d => ({ ...d, [incidentUUID]: { loading: false, title: res.title, status: res.status, response: res.response } })))
-          .catch(err => setResponseData(d => ({ ...d, [incidentUUID]: { loading: false, error: getErrorMessage(err, 'Failed to load incident response') } })));
-        return { ...prevData, [incidentUUID]: { loading: true } };
+        if (prevData[work.key] && !prevData[work.key].error) return prevData;
+        const load = work.kind === 'request' ? eventsApi.requestResponse(work.uuid) : eventsApi.incidentResponse(work.uuid);
+        load
+          .then(res => setResponseData(d => ({ ...d, [work.key]: { loading: false, title: res.title, status: res.status, response: res.response } })))
+          .catch(err => setResponseData(d => ({ ...d, [work.key]: { loading: false, error: getErrorMessage(err, 'Failed to load the answer') } })));
+        return { ...prevData, [work.key]: { loading: true } };
       });
       return new Set(prev).add(uuid);
     });
@@ -347,7 +349,7 @@ export default function Events() {
                     rawExpanded={rawExpanded.has(item.event_uuid)}
                     responseExpanded={responseExpanded.has(item.event_uuid)}
                     rawState={rawData[item.event_uuid]}
-                    responseState={item.incident_uuid ? responseData[item.incident_uuid] : undefined}
+                    responseState={responseData[eventWork(item)?.key ?? '']}
                     onToggleDetails={() => toggleRowDetails(item)}
                     onFilterByEventId={() => filterByEventId(item.event_uuid)}
                     onToggleResponse={() => toggleResponse(item)}

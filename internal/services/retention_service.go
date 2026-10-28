@@ -34,6 +34,7 @@ type CleanupResult struct {
 	ExpiredIncidentsDeleted int
 	ExpiredAlertsDeleted    int
 	ExpiredEventsDeleted    int
+	ExpiredRequestsCleared  int
 	ExpiredDirsDeleted      int
 	ExpiredBytesFreed       int64
 	OrphanedDirsDeleted     int
@@ -58,6 +59,10 @@ func (s *RetentionService) RunCleanup() (*CleanupResult, error) {
 	// Phase 1: Delete expired incidents
 	s.cleanupExpiredIncidents(settings.RetentionDays, result)
 
+	// Phase 1a: Clear the work of expired request runs (cron ticks, Slack
+	// and API requests, proposal chats). Run rows stay for statistics.
+	s.cleanupExpiredRequests(settings.RetentionDays, result)
+
 	// Phase 1b: Delete expired events (after incidents, so events of
 	// incidents deleted above are no longer protected)
 	s.cleanupExpiredEvents(settings.RetentionDays, result)
@@ -69,6 +74,7 @@ func (s *RetentionService) RunCleanup() (*CleanupResult, error) {
 		"expired_incidents_deleted", result.ExpiredIncidentsDeleted,
 		"expired_alerts_deleted", result.ExpiredAlertsDeleted,
 		"expired_events_deleted", result.ExpiredEventsDeleted,
+		"expired_requests_cleared", result.ExpiredRequestsCleared,
 		"expired_dirs_deleted", result.ExpiredDirsDeleted,
 		"expired_bytes_freed", result.ExpiredBytesFreed,
 		"orphaned_dirs_deleted", result.OrphanedDirsDeleted,
@@ -89,7 +95,7 @@ func (s *RetentionService) cleanupExpiredIncidents(retentionDays int, result *Cl
 	cutoff := time.Now().AddDate(0, 0, -retentionDays)
 
 	var incidents []database.Incident
-	err := s.db.Select("id, uuid, working_dir, status, completed_at").
+	err := s.db.Select("id, uuid, status, completed_at").
 		Where("status IN ? AND completed_at < ?",
 			[]database.IncidentStatus{database.IncidentStatusCompleted, database.IncidentStatusFailed, database.IncidentStatusDiagnosed},
 			cutoff,
@@ -113,7 +119,7 @@ func (s *RetentionService) cleanupExpiredIncidents(retentionDays int, result *Cl
 	}
 
 	for _, incident := range incidents {
-		dirRemoved := s.removeIncidentDir(incident, absDataDir, result)
+		dirRemoved := s.removeScopeDir(incident.UUID, absDataDir, result)
 
 		// Only delete the DB record if the directory was successfully removed (or didn't exist)
 		if !dirRemoved {
@@ -130,6 +136,9 @@ func (s *RetentionService) cleanupExpiredIncidents(retentionDays int, result *Cl
 				return fmt.Errorf("delete linked alerts: %w", del.Error)
 			}
 			alertsDeleted = del.RowsAffected
+			if err := clearRunWork(tx.Where("incident_uuid = ?", incident.UUID)); err != nil {
+				return fmt.Errorf("clear run work: %w", err)
+			}
 			return tx.Delete(&incident).Error
 		}); err != nil {
 			slog.Error("failed to delete incident record", "uuid", incident.UUID, "error", err)
@@ -160,24 +169,77 @@ func (s *RetentionService) cleanupExpiredEvents(retentionDays int, result *Clean
 	result.ExpiredEventsDeleted = int(del.RowsAffected)
 }
 
-// removeIncidentDir removes an incident's working directory from disk.
-// Returns true if the directory was successfully removed or didn't exist.
-func (s *RetentionService) removeIncidentDir(incident database.Incident, absDataDir string, result *CleanupResult) bool {
-	if incident.WorkingDir == "" {
+// clearRunWork empties the payload columns of the runs selected by q. The
+// rows and their metric columns stay: they feed per-model statistics.
+func clearRunWork(q *gorm.DB) error {
+	return q.Model(&database.AgentRun{}).Updates(map[string]interface{}{
+		"full_log":   "",
+		"response":   "",
+		"session_id": "",
+	}).Error
+}
+
+// cleanupExpiredRequests clears the work of request scopes (agent work that
+// is not an incident) whose newest run finished before the cutoff, and
+// removes their work directories. A scope with a run still in flight is
+// skipped. Scopes whose work is already cleared are not selected again.
+func (s *RetentionService) cleanupExpiredRequests(retentionDays int, result *CleanupResult) {
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+	var scopes []string
+	err := s.db.Model(&database.AgentRun{}).
+		Select("scope_uuid").
+		Where("(incident_uuid IS NULL OR incident_uuid = '') AND scope_uuid <> ''").
+		Group("scope_uuid").
+		Having("MAX(COALESCE(completed_at, started_at)) < ? AND SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) = 0 AND MAX(CASE WHEN full_log <> '' OR response <> '' THEN 1 ELSE 0 END) = 1",
+			cutoff, string(database.AgentRunStatusRunning)).
+		Pluck("scope_uuid", &scopes).Error
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Errorf("query expired requests: %w", err))
+		return
+	}
+	if len(scopes) == 0 {
+		return
+	}
+	absDataDir, err := filepath.EvalSymlinks(s.dataDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			result.Errors = append(result.Errors, fmt.Errorf("resolve data dir: %w", err))
+			return
+		}
+		absDataDir = s.dataDir
+	}
+	for _, scope := range scopes {
+		if !s.removeScopeDir(scope, absDataDir, result) {
+			continue
+		}
+		if err := clearRunWork(s.db.Where("scope_uuid = ?", scope)); err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("clear request %s: %w", scope, err))
+			continue
+		}
+		result.ExpiredRequestsCleared++
+	}
+}
+
+// removeScopeDir removes the work directory of an incident or request scope
+// (<dataDir>/<uuid>). Returns true if the directory was successfully removed
+// or didn't exist.
+func (s *RetentionService) removeScopeDir(scopeUUID, absDataDir string, result *CleanupResult) bool {
+	if scopeUUID == "" {
 		return true
 	}
+	workDir := filepath.Join(s.dataDir, scopeUUID)
 
-	// Resolve symlinks to prevent path traversal via symlinked WorkingDir
-	absWorkDir, err := filepath.EvalSymlinks(incident.WorkingDir)
+	// Resolve symlinks to prevent path traversal via a symlinked directory
+	absWorkDir, err := filepath.EvalSymlinks(workDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return true // Directory already gone
 		}
-		result.Errors = append(result.Errors, fmt.Errorf("resolve dir %s: %w", incident.UUID, err))
+		result.Errors = append(result.Errors, fmt.Errorf("resolve dir %s: %w", scopeUUID, err))
 		return false
 	}
 	if !strings.HasPrefix(absWorkDir, absDataDir+string(os.PathSeparator)) {
-		result.Errors = append(result.Errors, fmt.Errorf("working dir %q for %s is outside data dir, skipping", incident.WorkingDir, incident.UUID))
+		result.Errors = append(result.Errors, fmt.Errorf("working dir %q for %s is outside data dir, skipping", workDir, scopeUUID))
 		return false
 	}
 
@@ -186,13 +248,13 @@ func (s *RetentionService) removeIncidentDir(incident database.Incident, absData
 		if os.IsNotExist(sizeErr) {
 			return true // Directory already gone
 		}
-		slog.Warn("failed to calculate dir size, proceeding with removal", "uuid", incident.UUID, "error", sizeErr)
+		slog.Warn("failed to calculate dir size, proceeding with removal", "uuid", scopeUUID, "error", sizeErr)
 		bytesFreed = 0
 	}
 
 	if err := os.RemoveAll(absWorkDir); err != nil {
-		slog.Error("failed to remove incident directory", "uuid", incident.UUID, "dir", absWorkDir, "error", err)
-		result.Errors = append(result.Errors, fmt.Errorf("remove dir %s: %w", incident.UUID, err))
+		slog.Error("failed to remove work directory", "uuid", scopeUUID, "dir", absWorkDir, "error", err)
+		result.Errors = append(result.Errors, fmt.Errorf("remove dir %s: %w", scopeUUID, err))
 		return false
 	}
 
@@ -201,7 +263,8 @@ func (s *RetentionService) removeIncidentDir(incident database.Incident, absData
 	return true
 }
 
-// cleanupOrphanedDirectories removes directories in dataDir with no matching incident record.
+// cleanupOrphanedDirectories removes directories in dataDir that belong to no
+// incident and to no request scope that still holds work.
 func (s *RetentionService) cleanupOrphanedDirectories(result *CleanupResult) {
 	entries, err := os.ReadDir(s.dataDir)
 	if err != nil {
@@ -261,13 +324,22 @@ func (s *RetentionService) cleanupOrphanedDirectories(result *CleanupResult) {
 		}
 		batch := candidateUUIDs[i:end]
 
-		var found []struct{ UUID string }
-		if err := s.db.Model(&database.Incident{}).Select("uuid").Where("uuid IN ?", batch).Find(&found).Error; err != nil {
+		var found []string
+		if err := s.db.Model(&database.Incident{}).Where("uuid IN ?", batch).Pluck("uuid", &found).Error; err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("batch check orphans: %w", err))
 			return
 		}
-		for _, f := range found {
-			existingUUIDs[f.UUID] = true
+		// Request scopes own their directory while a run holds work or is
+		// still running.
+		var scopes []string
+		if err := s.db.Model(&database.AgentRun{}).
+			Where("scope_uuid IN ? AND (full_log <> '' OR response <> '' OR status = ?)", batch, string(database.AgentRunStatusRunning)).
+			Distinct().Pluck("scope_uuid", &scopes).Error; err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("batch check orphan scopes: %w", err))
+			return
+		}
+		for _, u := range append(found, scopes...) {
+			existingUUIDs[u] = true
 		}
 	}
 

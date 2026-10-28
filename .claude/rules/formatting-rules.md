@@ -24,10 +24,11 @@ formatting mechanism; no match → raw response. `/api/settings/formatting` is 4
   invalid stored expr → rule skipped; Go parser + TS mirror `matchExpression.ts` must stay in sync)
 - `FormatForFlow(ctx, raw, fullLog, FormatFlow)` never errors — failures collapse to passthrough;
   skips error responses; cron formats only on match (`full_log` keeps raw); proposal chat never formats
-- flow identity via `BuildFormatFlow(incidentUUID, channelUUID)`; Slack chat channel via `FindByExternalID`
-- `Incident.LastSkillUsed`: worker latches the last `<skillsDir>/<name>/SKILL.md` read, sends
-  `last_skill` on `agent_completed`; `agent_ws.go` persists it BEFORE `dispatchOnCompleted`
-  (guard: `isCurrentRun`)
+- flow identity via `BuildFormatFlow(runID, channelUUID)` (reads the `agent_runs` row); Slack chat
+  channel via `FindByExternalID`
+- `AgentRun.LastSkillUsed`: worker latches the last `<skillsDir>/<name>/SKILL.md` read, sends
+  `last_skill` on `agent_completed`; `agent_ws.go` persists it on the run (by `run_id`) BEFORE
+  `dispatchOnCompleted`
 - blank rule fields fall back: prompt → `DefaultFormattingPrompt`, schema → four-key default
   (`status`/`summary`/`actions_taken`/`recommendations`), `MaxTokens<=0` → 1500; NO gorm default
   tags (explicit false/0 must persist)

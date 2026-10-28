@@ -121,7 +121,7 @@ func (h *AlertHandler) ProcessReportedAlert(r ReportedAlert) (incidentUUID strin
 			return nil, fmt.Errorf("spawn incident for reported alert: %w", err)
 		}
 		if err := h.skillService.InsertFiringAlert(context.Background(), newUUID, r.SourceUUID, normalized, alertDecision, alertReasoning); err != nil {
-			if uerr := h.skillService.UpdateIncidentStatus(newUUID, database.IncidentStatusFailed, "", ""); uerr != nil {
+			if uerr := h.skillService.UpdateIncidentStatus(newUUID, database.IncidentStatusFailed); uerr != nil {
 				slog.Warn("failed to cancel reported-alert incident after alert insert failure", "incident_uuid", newUUID, "err", uerr)
 			}
 			return nil, fmt.Errorf("insert reported alert: %w", err)
@@ -131,7 +131,7 @@ func (h *AlertHandler) ProcessReportedAlert(r ReportedAlert) (incidentUUID strin
 				slog.Warn("failed to update incident Slack context", "err", err)
 			}
 		}
-		if err := h.skillService.UpdateIncidentStatus(newUUID, database.IncidentStatusRunning, "", ""); err != nil {
+		if err := h.skillService.UpdateIncidentStatus(newUUID, database.IncidentStatusRunning); err != nil {
 			slog.Warn("failed to update incident status", "err", err)
 		}
 		incidentUUID = newUUID

@@ -40,7 +40,6 @@ func TestIncidentToListItem(t *testing.T) {
 		Status:          database.IncidentStatusCompleted,
 		FullLog:         "very long log output that should be omitted...",
 		Response:        "final response also omitted",
-		WorkingDir:      "/akmatori/incidents/test",
 		TokensUsed:      1500,
 		ExecutionTimeMs: 30000,
 		StartedAt:       now,

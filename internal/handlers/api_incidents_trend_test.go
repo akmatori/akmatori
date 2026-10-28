@@ -18,7 +18,7 @@ import (
 // that have associated alert rows.
 func TestHandleIncidents_TrendEnrichment(t *testing.T) {
 	testhelpers.NewGlobalSQLiteDB(t,
-		&database.Incident{},
+		&database.Incident{}, &database.AgentRun{},
 		&database.Alert{},
 	)
 	db := database.GetDB()
@@ -128,7 +128,7 @@ func TestHandleIncidents_TrendEnrichment(t *testing.T) {
 // rows get a zero-filled 12-element trend slice.
 func TestHandleIncidents_NoAlerts_ZeroTrend(t *testing.T) {
 	testhelpers.NewGlobalSQLiteDB(t,
-		&database.Incident{},
+		&database.Incident{}, &database.AgentRun{},
 		&database.Alert{},
 	)
 	db := database.GetDB()
@@ -189,7 +189,7 @@ func TestHandleIncidents_NoAlerts_ZeroTrend(t *testing.T) {
 // appears in the trend when ?trend_window=3h but not with ?trend_window=1h.
 func TestHandleIncidents_TrendWindow_3h(t *testing.T) {
 	testhelpers.NewGlobalSQLiteDB(t,
-		&database.Incident{},
+		&database.Incident{}, &database.AgentRun{},
 		&database.Alert{},
 	)
 	db := database.GetDB()

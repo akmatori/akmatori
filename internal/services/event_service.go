@@ -99,9 +99,11 @@ type EventInput struct {
 	RawPayload  map[string]interface{}
 	OccurredAt  *time.Time
 
-	// IncidentUUID links the event to the incident or agent-run row it
-	// continues or starts, when that is known at record time.
+	// IncidentUUID links the event to the incident it continues, and
+	// ScopeUUID to the request work it continues, when that is known at
+	// record time. BeginRun links a request event that starts new work.
 	IncidentUUID string
+	ScopeUUID    string
 }
 
 // DefaultEventClassificationRules is the operator-editable part of the event
@@ -400,6 +402,7 @@ func (s *EventService) newEvent(in EventInput) *database.Event {
 		Labels:       labels,
 		RawPayload:   raw,
 		IncidentUUID: in.IncidentUUID,
+		ScopeUUID:    in.ScopeUUID,
 	}
 }
 

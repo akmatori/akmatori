@@ -1,18 +1,21 @@
 import { useState } from 'react';
 import { X, Plus, RefreshCw } from 'lucide-react';
-import type { Incident } from '../../types';
+import type { CreateIncidentResponse } from '../../types';
 import { incidentsApi } from '../../api/client';
 import { getErrorMessage } from '../../utils/errors';
 
 interface CreateIncidentModalProps {
   onClose: () => void;
-  // Called with the fully loaded incident once the API has created it.
-  onCreated: (incident: Incident) => void;
+  // Called with the API result: an incident (a reported problem), request
+  // work (a request) or a stored change/info event.
+  onCreated: (result: CreateIncidentResponse) => void;
   // Called with a message to show on the page when creation fails.
   onError: (message: string) => void;
 }
 
-// CreateIncidentModal collects a free-text task and starts an investigation.
+// CreateIncidentModal collects a free-text task. The API classifies it: a
+// reported problem opens or joins an incident, a request starts an agent
+// run that is not an incident, a change or info is only stored.
 export default function CreateIncidentModal({ onClose, onCreated, onError }: CreateIncidentModalProps) {
   const [task, setTask] = useState('');
   const [creating, setCreating] = useState(false);
@@ -23,12 +26,9 @@ export default function CreateIncidentModal({ onClose, onCreated, onError }: Cre
 
     try {
       setCreating(true);
-      const response = await incidentsApi.create({ task: trimmed });
-      // Fetch the full incident so the list can show it immediately.
-      const incident = await incidentsApi.get(response.uuid);
-      onCreated(incident);
+      onCreated(await incidentsApi.create({ task: trimmed }));
     } catch (err) {
-      onError(getErrorMessage(err, 'Failed to create incident'));
+      onError(getErrorMessage(err, 'Failed to start the task'));
     } finally {
       setCreating(false);
     }
@@ -40,9 +40,9 @@ export default function CreateIncidentModal({ onClose, onCreated, onError }: Cre
         {/* Modal Header */}
         <div className="flex items-center justify-between p-6 border-b border-line">
           <div>
-            <h2 className="text-xl font-semibold text-fg">Create incident</h2>
+            <h2 className="text-xl font-semibold text-fg">Report a problem or ask the agent</h2>
             <p className="mt-1 text-sm text-fg-subtle">
-              Start an incident investigation by providing a task description
+              A reported problem opens an incident or joins the open one. A question starts an agent run.
             </p>
           </div>
           <button onClick={onClose} className="btn btn-ghost p-2" title="Close">
@@ -63,7 +63,7 @@ export default function CreateIncidentModal({ onClose, onCreated, onError }: Cre
             autoFocus
           />
           <p className="mt-2 text-xs text-fg-subtle">
-            The incident manager will analyze this task and coordinate with skills to resolve it.
+            Akmatori classifies the text first. A deploy or change notice is only stored as an event.
           </p>
         </div>
 
@@ -80,12 +80,12 @@ export default function CreateIncidentModal({ onClose, onCreated, onError }: Cre
             {creating ? (
               <>
                 <RefreshCw className="w-4 h-4 animate-spin" />
-                Creating...
+                Starting...
               </>
             ) : (
               <>
                 <Plus className="w-4 h-4" />
-                Create
+                Start
               </>
             )}
           </button>

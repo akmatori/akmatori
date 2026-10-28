@@ -30,6 +30,7 @@ type Event struct {
 	RawPayload               JSONB     `gorm:"type:jsonb" json:"raw_payload,omitempty"`
 	AlertUUID                string    `gorm:"size:36" json:"alert_uuid,omitempty"`
 	IncidentUUID             string    `gorm:"size:36" json:"incident_uuid,omitempty"`
+	ScopeUUID                string    `gorm:"size:36" json:"scope_uuid,omitempty"`
 	PendingDispatch          bool      `gorm:"not null;default:false" json:"-"`
 	CreatedAt                time.Time `json:"created_at"`
 	UpdatedAt                time.Time `json:"updated_at"`

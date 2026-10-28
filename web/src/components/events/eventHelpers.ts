@@ -123,3 +123,24 @@ export function classificationSummary(item: EventFeedItem): string {
       return kind;
   }
 }
+
+// EventWork is the agent work an event row links to: the request work a
+// request event started or continued, or the incident an event opened,
+// joined or continued.
+export interface EventWork {
+  kind: 'incident' | 'request';
+  uuid: string;
+  path: string;
+  // key caches the fetched answer per work item.
+  key: string;
+}
+
+export function eventWork(item: Pick<EventFeedItem, 'scope_uuid' | 'incident_uuid'>): EventWork | null {
+  if (item.scope_uuid) {
+    return { kind: 'request', uuid: item.scope_uuid, path: `/requests/${item.scope_uuid}`, key: `request:${item.scope_uuid}` };
+  }
+  if (item.incident_uuid) {
+    return { kind: 'incident', uuid: item.incident_uuid, path: `/incidents/${item.incident_uuid}`, key: `incident:${item.incident_uuid}` };
+  }
+  return null;
+}

@@ -58,7 +58,7 @@ func seedFeedEvent(t *testing.T, e database.Event) string {
 
 func setupFeedDB(t *testing.T) {
 	t.Helper()
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{}, &database.Event{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{}, &database.Event{})
 }
 
 func doEventsRequest(t *testing.T, query string) ([]map[string]any, api.PaginationMeta) {
@@ -249,13 +249,13 @@ func TestHandleEventRaw(t *testing.T) {
 // endpoint returns title/status/response without the heavy fields, and 404s
 // for unknown incidents.
 func TestHandleIncidentResponse_LightweightProjection(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{})
 
 	db := database.GetDB()
 	incUUID := seedEventIncident(t, database.IncidentSourceKindAlert, time.Now().UTC(), database.IncidentStatusCompleted)
-	if err := db.Model(&database.Incident{}).Where("uuid = ?", incUUID).
-		Updates(map[string]interface{}{"response": "root cause: bad deploy", "full_log": "huge log"}).Error; err != nil {
-		t.Fatalf("set response: %v", err)
+	if err := db.Create(&database.AgentRun{RunID: "r-" + incUUID, ScopeUUID: incUUID, IncidentUUID: incUUID,
+		Response: "root cause: bad deploy", FullLog: "huge log"}).Error; err != nil {
+		t.Fatalf("seed run: %v", err)
 	}
 
 	mux := http.NewServeMux()

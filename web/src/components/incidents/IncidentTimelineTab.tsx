@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
-import type { Incident } from '../../types';
+import type { AgentWork } from '../../types';
 import { formatExecutionTime, formatTokens } from '../../utils/format';
 import { parseTimeline, summarizeTools, type TimelineStep } from './incidentLogHelpers';
 
 interface IncidentTimelineTabProps {
-  incident: Incident;
+  // An incident or request work.
+  incident: AgentWork;
   // True while the panel polls an in-flight run.
   live: boolean;
 }
@@ -74,7 +75,7 @@ export default function IncidentTimelineTab({ incident, live }: IncidentTimeline
   if (steps.length === 0) {
     return (
       <p className="py-8 text-center text-fg-subtle">
-        {incident.status === 'pending' ? 'The investigation has not started yet.' : 'The log is empty.'}
+        {incident.status === 'pending' ? 'The agent has not started yet.' : 'The log is empty.'}
       </p>
     );
   }

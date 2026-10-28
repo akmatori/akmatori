@@ -19,7 +19,7 @@ func newTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&database.Event{}, &database.Incident{}); err != nil {
+	if err := db.AutoMigrate(&database.Event{}, &database.AgentRun{}, &database.CronJob{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
@@ -126,11 +126,19 @@ func TestGet_TruncatesPayload(t *testing.T) {
 	}
 }
 
+// seedRun creates an agent run on scope uuid (the X-Incident-ID the worker
+// sends) and the cron job it may belong to.
 func seedRun(t *testing.T, db *gorm.DB, uuid, kind string) {
 	t.Helper()
-	if err := db.Create(&database.Incident{UUID: uuid, Source: "cron", SourceKind: kind, SourceUUID: "job-1",
-		Context: database.JSONB{"cron_job_name": "disk check"}}).Error; err != nil {
+	if err := db.Create(&database.AgentRun{RunID: "run-of-" + uuid, ScopeUUID: uuid, SourceKind: kind, SourceUUID: "job-1"}).Error; err != nil {
 		t.Fatal(err)
+	}
+	var n int64
+	db.Model(&database.CronJob{}).Where("uuid = ?", "job-1").Count(&n)
+	if n == 0 {
+		if err := db.Create(&database.CronJob{UUID: "job-1", Name: "disk check"}).Error; err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -190,5 +198,37 @@ func TestReportAlert_Guards(t *testing.T) {
 	}
 	if _, err := tool.ReportAlert(context.Background(), "run-cron", ok); err == nil || !strings.Contains(err.Error(), "limit") {
 		t.Fatalf("over the cap: err = %v", err)
+	}
+}
+
+// A request event returns the work of its runs: a cron run's answer and log.
+func TestGet_RequestEventIncludesRun(t *testing.T) {
+	db := newTestDB(t)
+	tool := NewEventsTool(db, log.Default())
+	seed(t, db, database.Event{UUID: "tick", Kind: "request", SourceKind: "cron", Title: "Cron: nightly", OccurredAt: base, ScopeUUID: "tick"})
+	if err := db.Create(&database.AgentRun{RunID: "r1", ScopeUUID: "tick", SourceKind: "cron", Status: "completed",
+		FullLog: "checked disks", Response: "all disks below 80%", TokensUsed: 12}).Error; err != nil {
+		t.Fatal(err)
+	}
+	seed(t, db, database.Event{UUID: "plain", Kind: "change", Title: "deploy", OccurredAt: base})
+
+	out, err := tool.Get(context.Background(), "", map[string]interface{}{"uuid": "tick"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d struct {
+		Run *database.RunsWork `json:"run"`
+	}
+	_ = json.Unmarshal([]byte(out.(string)), &d)
+	if d.Run == nil || d.Run.Response != "all disks below 80%" || d.Run.FullLog != "checked disks" || d.Run.Status != "completed" {
+		t.Fatalf("run = %+v", d.Run)
+	}
+
+	out, err = tool.Get(context.Background(), "", map[string]interface{}{"uuid": "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.(string), `"run"`) {
+		t.Fatalf("change event must have no run: %s", out)
 	}
 }

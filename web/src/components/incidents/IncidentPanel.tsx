@@ -13,12 +13,13 @@ import SourceKindChip from '../shared/SourceKindChip';
 import IncidentSummaryTab from './IncidentSummaryTab';
 import IncidentTimelineTab from './IncidentTimelineTab';
 import IncidentAlertsTab from './IncidentAlertsTab';
+import RunsTab from '../runs/RunsTab';
 import { getIncidentState, isStalled, TONE_CLASSES } from './incidentStatus';
 
 // Poll an in-flight incident this often.
 const LIVE_POLL_INTERVAL = 2000;
 
-type TabId = 'summary' | 'timeline' | 'alerts';
+type TabId = 'summary' | 'timeline' | 'alerts' | 'runs';
 
 interface IncidentPanelProps {
   uuid: string;
@@ -27,7 +28,9 @@ interface IncidentPanelProps {
 }
 
 // IncidentPanel is the incident detail: header, state line and the
-// Summary / Timeline / Alerts tabs. The Incidents page mounts it with
+// Summary / Timeline / Alerts / Runs tabs. The timeline holds the log of
+// every agent run on the incident (the first investigation and each Slack
+// follow-up), oldest first. The Incidents page mounts it with
 // key={uuid}, so every incident starts from clean state.
 export default function IncidentPanel({ uuid, onUpdate }: IncidentPanelProps) {
   const [incident, setIncident] = useState<Incident | null>(null);
@@ -83,6 +86,7 @@ export default function IncidentPanel({ uuid, onUpdate }: IncidentPanelProps) {
     { id: 'summary', label: 'Summary' },
     { id: 'timeline', label: 'Timeline' },
     ...(hasAlerts ? [{ id: 'alerts' as const, label: incident.alert_count ? `Alerts ${incident.alert_count}` : 'Alerts' }] : []),
+    { id: 'runs', label: (incident.runs?.length ?? 0) > 1 ? `Runs ${incident.runs?.length}` : 'Runs' },
   ];
   const canClose = incident.status !== 'closed' && incident.status !== 'merged';
 
@@ -152,6 +156,7 @@ export default function IncidentPanel({ uuid, onUpdate }: IncidentPanelProps) {
         {activeTab === 'summary' && <IncidentSummaryTab incident={incident} />}
         {activeTab === 'timeline' && <IncidentTimelineTab incident={incident} live={live} />}
         {activeTab === 'alerts' && <IncidentAlertsTab incidentUUID={incident.uuid} />}
+        {activeTab === 'runs' && <RunsTab runs={incident.runs ?? []} />}
       </div>
 
       {close.confirmClose && (

@@ -167,12 +167,7 @@ func (h *APIHandler) handleProposalChatGet(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	chatStatus := ""
-	if p.ChatIncidentUUID != "" {
-		if inc, err := h.skillService.GetIncident(p.ChatIncidentUUID); err == nil {
-			chatStatus = string(inc.Status)
-		}
-	}
+	chatStatus := proposalChatStatus(p.ChatIncidentUUID)
 
 	api.RespondJSON(w, http.StatusOK, proposalChatResponse{
 		Messages:         messages,
@@ -234,12 +229,9 @@ func (h *APIHandler) handleProposalChatPost(w http.ResponseWriter, r *http.Reque
 
 	// Reject a new turn while the previous one is still running so a rapid
 	// second message cannot displace an in-flight reply mid-generation.
-	if p.ChatIncidentUUID != "" {
-		if inc, err := h.skillService.GetIncident(p.ChatIncidentUUID); err == nil &&
-			(inc.Status == database.IncidentStatusRunning || inc.Status == database.IncidentStatusPending) {
-			api.RespondError(w, http.StatusConflict, "assistant is still responding; wait for the current turn to finish")
-			return
-		}
+	if proposalChatStatus(p.ChatIncidentUUID) == string(database.AgentRunStatusRunning) {
+		api.RespondError(w, http.StatusConflict, "assistant is still responding; wait for the current turn to finish")
+		return
 	}
 
 	// Persist the operator message FIRST so the transcript survives any agent
@@ -253,41 +245,33 @@ func (h *APIHandler) handleProposalChatPost(w http.ResponseWriter, r *http.Reque
 	var eventUUID string
 	if h.eventService != nil {
 		eventUUID = h.eventService.Record(r.Context(), services.EventInput{
-			SourceKind:   database.EventSourceProposal,
-			SourceUUID:   p.UUID,
-			SourceType:   "proposal",
-			Title:        fmt.Sprintf("Proposal chat: %s", p.Title),
-			Summary:      message,
-			IncidentUUID: p.ChatIncidentUUID,
+			SourceKind: database.EventSourceProposal,
+			SourceUUID: p.UUID,
+			SourceType: "proposal",
+			Title:      fmt.Sprintf("Proposal chat: %s", p.Title),
+			Summary:    message,
+			ScopeUUID:  p.ChatIncidentUUID,
 		}, services.SourceEventVerdict(database.EventKindRequest)).UUID
 	}
 
-	// First turn: spawn the backing incident for this proposal's chat.
-	chatIncidentUUID := p.ChatIncidentUUID
-	if chatIncidentUUID == "" {
-		incidentCtx := &services.IncidentContext{
-			Source:     "proposal",
-			SourceID:   p.UUID,
-			SourceKind: database.IncidentSourceKindProposal,
-			SourceUUID: p.UUID,
-			Context: database.JSONB{
-				"proposal_uuid":  p.UUID,
-				"proposal_kind":  p.Kind,
-				"proposal_title": p.Title,
-			},
-			Message:   fmt.Sprintf("Proposal chat: %s", p.Title),
-			EventUUID: eventUUID,
-		}
+	// First turn: prepare the request scope that backs this proposal's
+	// chat; later turns reuse it. A chat is request work, never an incident.
+	chatScope := p.ChatIncidentUUID
+	if chatScope == "" {
 		var err error
-		chatIncidentUUID, _, err = h.skillService.SpawnAgentInvocation("proposal-editor", incidentCtx)
+		chatScope, _, err = h.skillService.PrepareRequestScope("proposal-editor", eventUUID)
 		if err != nil {
-			slog.Error("failed to spawn proposal chat incident", "proposal", p.UUID, "err", err)
+			slog.Error("failed to prepare proposal chat", "proposal", p.UUID, "err", err)
 			api.RespondError(w, http.StatusInternalServerError, "failed to start proposal chat")
 			return
 		}
-		if err := h.proposalService.SetChatIncident(p.UUID, chatIncidentUUID); err != nil {
-			slog.Error("failed to link chat incident to proposal", "proposal", p.UUID, "err", err)
+		if err := h.proposalService.SetChatIncident(p.UUID, chatScope); err != nil {
+			slog.Error("failed to link chat scope to proposal", "proposal", p.UUID, "err", err)
 		}
+	} else if err := h.skillService.EnsureScopeDir("proposal-editor", chatScope); err != nil {
+		slog.Error("failed to prepare proposal chat directory", "proposal", p.UUID, "err", err)
+		api.RespondError(w, http.StatusInternalServerError, "failed to start proposal chat")
+		return
 	}
 
 	messages, err := h.proposalService.ListChatMessages(p.UUID)
@@ -299,10 +283,10 @@ func (h *APIHandler) handleProposalChatPost(w http.ResponseWriter, r *http.Reque
 	task := buildProposalChatTask(p, messages)
 	taskHeader := fmt.Sprintf("💡 Proposal Chat: %s\n\n--- Execution Log ---\n\n", p.Title)
 
-	go h.runProposalChatTurn(p.UUID, chatIncidentUUID, taskHeader, task)
+	go h.runProposalChatTurn(p.UUID, chatScope, eventUUID, taskHeader, task)
 
 	api.RespondJSON(w, http.StatusAccepted, map[string]string{
-		"chat_incident_uuid": chatIncidentUUID,
+		"chat_incident_uuid": chatScope,
 		"status":             "running",
 	})
 }
@@ -359,14 +343,28 @@ func buildProposalChatTask(p *database.Proposal, messages []database.ProposalCha
 	return sb.String()
 }
 
-// runProposalChatTurn executes one chat turn as a fresh agent session on the
-// proposal's chat incident. Mirrors runAgentInvestigation, with three
+// runProposalChatTurn executes one chat turn as a fresh agent run on the
+// proposal's chat scope. Mirrors runAgentInvestigation, with three
 // differences: the skill set is pinned to proposal-editor, the tool allowlist
 // is the incidents+proposals pair, and the final response is appended to the
 // proposal's chat transcript instead of being reformatted.
-func (h *APIHandler) runProposalChatTurn(proposalUUID, chatIncidentUUID, taskHeader, task string) {
-	if err := h.skillService.UpdateIncidentStatus(chatIncidentUUID, database.IncidentStatusRunning, "", taskHeader+"Starting turn..."); err != nil {
-		slog.Error("proposal chat: failed to update incident status", "err", err)
+func (h *APIHandler) runProposalChatTurn(proposalUUID, chatScope, eventUUID, taskHeader, task string) {
+	runID, err := h.skillService.BeginRun(services.RunStart{
+		ScopeUUID:  chatScope,
+		EventUUID:  eventUUID,
+		SourceKind: database.IncidentSourceKindProposal,
+		SourceUUID: proposalUUID,
+		RootSkill:  "proposal-editor",
+	})
+	if err != nil {
+		slog.Error("proposal chat: failed to begin run", "err", err)
+		if appendErr := h.proposalService.AppendChatMessage(proposalUUID, "assistant", "Error: failed to start the agent run"); appendErr != nil {
+			slog.Error("proposal chat: failed to append error message", "err", appendErr)
+		}
+		return
+	}
+	if err := h.skillService.UpdateRunLog(runID, taskHeader+"Starting turn..."); err != nil {
+		slog.Warn("proposal chat: failed to write run log", "err", err)
 	}
 
 	var llmSettings *LLMSettingsForWorker
@@ -381,21 +379,17 @@ func (h *APIHandler) runProposalChatTurn(proposalUUID, chatIncidentUUID, taskHea
 	var hasError bool
 	var superseded atomic.Bool
 	var lastStreamedLog string
-	var finalTokensUsed int
-	var finalExecutionTimeMs int64
 
 	callback := IncidentCallback{
 		OnOutput: func(output string) {
 			lastStreamedLog += output
-			if err := h.skillService.UpdateIncidentLog(chatIncidentUUID, taskHeader+lastStreamedLog); err != nil {
-				slog.Error("proposal chat: failed to update incident log", "err", err)
+			if err := h.skillService.UpdateRunLog(runID, taskHeader+lastStreamedLog); err != nil {
+				slog.Error("proposal chat: failed to update run log", "err", err)
 			}
 		},
-		OnCompleted: func(sid, output string, tokensUsed int, executionTimeMs int64) {
+		OnCompleted: func(sid, output string, _ int, _ int64) {
 			sessionID = sid
 			response = output
-			finalTokensUsed = tokensUsed
-			finalExecutionTimeMs = executionTimeMs
 			closeOnce.Do(func() { close(done) })
 		},
 		OnError: func(errorMsg string) {
@@ -414,13 +408,12 @@ func (h *APIHandler) runProposalChatTurn(proposalUUID, chatIncidentUUID, taskHea
 	// prompt (same reasoning as the cron path).
 	// The tool allowlist is always non-nil (empty slice on lookup failure =
 	// reject all), never nil (= allow all).
-	runID, err := h.agentWSHandler.StartIncident(chatIncidentUUID, task, llmSettings,
-		[]string{"proposal-editor"}, h.proposalService.ChatToolAllowlist(), callback)
-	if err != nil {
+	if _, err := h.agentWSHandler.StartIncident(chatScope, runID, task, llmSettings,
+		[]string{"proposal-editor"}, h.proposalService.ChatToolAllowlist(), callback); err != nil {
 		slog.Error("proposal chat: failed to start agent turn", "err", err)
 		errMsg := fmt.Sprintf("Error: agent worker failed to start: %v", err)
-		if updateErr := h.skillService.UpdateIncidentComplete(chatIncidentUUID, database.IncidentStatusFailed, "", taskHeader, errMsg, 0, 0); updateErr != nil {
-			slog.Error("proposal chat: failed to finalize incident", "err", updateErr)
+		if updateErr := h.skillService.FinishRun(runID, services.RunOutcome{Failed: true, FullLog: taskHeader, Response: errMsg}); updateErr != nil {
+			slog.Error("proposal chat: failed to record run failure", "err", updateErr)
 		}
 		if appendErr := h.proposalService.AppendChatMessage(proposalUUID, "assistant", errMsg); appendErr != nil {
 			slog.Error("proposal chat: failed to append error message", "err", appendErr)
@@ -436,7 +429,7 @@ func (h *APIHandler) runProposalChatTurn(proposalUUID, chatIncidentUUID, taskHea
 		return
 	}
 
-	if !h.agentWSHandler.ReleaseRun(chatIncidentUUID, runID) {
+	if !h.agentWSHandler.ReleaseRun(chatScope, runID) {
 		slog.Info("proposal chat turn displaced during finalization", "proposal", proposalUUID)
 		return
 	}
@@ -446,12 +439,8 @@ func (h *APIHandler) runProposalChatTurn(proposalUUID, chatIncidentUUID, taskHea
 		fullLog += "\n\n--- Final Response ---\n\n" + response
 	}
 
-	finalStatus := database.IncidentStatusCompleted
-	if hasError {
-		finalStatus = database.IncidentStatusFailed
-	}
-	if err := h.skillService.UpdateIncidentComplete(chatIncidentUUID, finalStatus, sessionID, fullLog, response, finalTokensUsed, finalExecutionTimeMs); err != nil {
-		slog.Error("proposal chat: failed to finalize incident", "err", err)
+	if err := h.skillService.FinishRun(runID, services.RunOutcome{Failed: hasError, SessionID: sessionID, FullLog: fullLog, Response: response}); err != nil {
+		slog.Error("proposal chat: failed to store run result", "err", err)
 	}
 
 	if response == "" {
@@ -460,4 +449,17 @@ func (h *APIHandler) runProposalChatTurn(proposalUUID, chatIncidentUUID, taskHea
 	if err := h.proposalService.AppendChatMessage(proposalUUID, "assistant", response); err != nil {
 		slog.Error("proposal chat: failed to append assistant message", "err", err)
 	}
+}
+
+// proposalChatStatus is the status of the newest run of a proposal's chat
+// ("running", "completed", "failed"), or "" when the chat has no run.
+func proposalChatStatus(chatScope string) string {
+	if chatScope == "" || database.GetDB() == nil {
+		return ""
+	}
+	run, err := database.LatestScopeRun(database.GetDB(), chatScope)
+	if err != nil || run == nil {
+		return ""
+	}
+	return string(run.Status)
 }

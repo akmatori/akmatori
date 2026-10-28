@@ -30,6 +30,8 @@ func setupIncidentTestDB(t *testing.T) *gorm.DB {
 		&database.ToolInstance{},
 		&database.SkillTool{},
 		&database.Incident{},
+		&database.AgentRun{},
+		&database.Event{},
 		&database.Alert{},
 		&database.LLMSettings{},
 		&database.GeneralSettings{},
@@ -707,9 +709,23 @@ func TestLinkAlertToIncident_PersistsCorrelationFields(t *testing.T) {
 	}
 }
 
-// --- UpdateIncidentComplete Monitor Transition Tests ---
+// --- Run completion and monitor transition tests ---
 
-func TestUpdateIncidentComplete_AlertSourced_SetsMonitorStatus(t *testing.T) {
+// finishIncidentRun runs one complete agent run on an incident: BeginRun
+// then FinishRun.
+func finishIncidentRun(t *testing.T, svc *SkillService, incidentUUID string, failed bool) string {
+	t.Helper()
+	runID, err := svc.BeginRun(RunStart{IncidentUUID: incidentUUID, RootSkill: "incident-manager"})
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := svc.FinishRun(runID, RunOutcome{Failed: failed, SessionID: "sid", FullLog: "log", Response: "response"}); err != nil {
+		t.Fatalf("FinishRun: %v", err)
+	}
+	return runID
+}
+
+func TestFinishRun_AlertSourced_SetsMonitorStatus(t *testing.T) {
 	db := setupIncidentTestDB(t)
 	svc := newIncidentTestService(t, db)
 
@@ -725,9 +741,7 @@ func TestUpdateIncidentComplete_AlertSourced_SetsMonitorStatus(t *testing.T) {
 		t.Fatalf("SpawnIncidentManager failed: %v", err)
 	}
 
-	if err := svc.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, "sid-1", "log", "response", 100, 500); err != nil {
-		t.Fatalf("UpdateIncidentComplete failed: %v", err)
-	}
+	finishIncidentRun(t, svc, incidentUUID, false)
 
 	var incident database.Incident
 	if err := db.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
@@ -745,48 +759,78 @@ func TestUpdateIncidentComplete_AlertSourced_SetsMonitorStatus(t *testing.T) {
 	}
 }
 
-func TestUpdateIncidentComplete_CronSourced_DoesNotSetMonitor(t *testing.T) {
+// A request run (a cron tick, a Slack or API request) has no incident: its
+// work lands on the run row, and the event is linked to its scope.
+func TestFinishRun_RequestRun_StoresWorkWithoutIncident(t *testing.T) {
 	db := setupIncidentTestDB(t)
 	svc := newIncidentTestService(t, db)
-
-	ctx := &IncidentContext{
-		Source:     "cron",
-		SourceID:   "cron-job-1",
-		SourceKind: database.IncidentSourceKindCron,
-		SourceUUID: "cron-uuid-333",
-		Message:    "cron incident",
+	if err := db.Create(&database.Event{UUID: "ev-tick", SourceKind: database.EventSourceCron, Kind: database.EventKindRequest,
+		Classification: database.EventClassificationSource}).Error; err != nil {
+		t.Fatal(err)
 	}
-	incidentUUID, _, err := svc.SpawnIncidentManager(ctx)
+
+	scope, dir, err := svc.PrepareRequestScope("cron-agent", "ev-tick")
 	if err != nil {
-		t.Fatalf("SpawnIncidentManager failed: %v", err)
+		t.Fatalf("PrepareRequestScope: %v", err)
+	}
+	if scope != "ev-tick" {
+		t.Errorf("scope = %q, want the request event's UUID", scope)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")); err != nil || !strings.Contains(string(b), "Cron Agent") {
+		t.Errorf("AGENTS.md = %q, %v; want the cron-agent root", b, err)
 	}
 
-	if err := svc.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, "sid-2", "log", "response", 100, 500); err != nil {
-		t.Fatalf("UpdateIncidentComplete failed: %v", err)
+	runID, err := svc.BeginRun(RunStart{ScopeUUID: scope, EventUUID: "ev-tick", SourceKind: database.IncidentSourceKindCron,
+		SourceUUID: "job-1", RootSkill: "cron-agent"})
+	if err != nil {
+		t.Fatalf("BeginRun: %v", err)
+	}
+	if err := svc.UpdateRunLog(runID, "streaming"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.FinishRun(runID, RunOutcome{SessionID: "s", FullLog: "full", Response: "all good"}); err != nil {
+		t.Fatalf("FinishRun: %v", err)
 	}
 
-	var incident database.Incident
-	if err := db.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
-		t.Fatalf("load incident: %v", err)
+	var run database.AgentRun
+	db.Where("run_id = ?", runID).First(&run)
+	if run.Status != database.AgentRunStatusCompleted || run.Response != "all good" || run.FullLog != "full" ||
+		run.IncidentUUID != "" || run.ScopeUUID != scope || run.WorkingDir != dir {
+		t.Errorf("run = %+v", run)
 	}
-
-	if incident.Status != database.IncidentStatusCompleted {
-		t.Errorf("Status = %q, want completed for non-alert incident", incident.Status)
+	var n int64
+	db.Model(&database.Incident{}).Where("uuid = ?", scope).Count(&n)
+	if n != 0 {
+		t.Errorf("found an incident for the request scope: request work never opens an incident")
 	}
-	if incident.MonitorUntil != nil {
-		t.Errorf("MonitorUntil should be nil for cron-sourced incident, got %v", incident.MonitorUntil)
+	var ev database.Event
+	db.Where("uuid = ?", "ev-tick").First(&ev)
+	if ev.ScopeUUID != scope {
+		t.Errorf("event scope = %q, want %q", ev.ScopeUUID, scope)
 	}
 }
 
-func TestUpdateIncidentComplete_AlertSourced_FiringAlert_StaysCompleted(t *testing.T) {
+// A failed incident run fails the incident.
+func TestFinishRun_FailedIncidentRun_FailsIncident(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	svc := newIncidentTestService(t, db)
+	incidentUUID := spawnAlertIncident(t, svc)
+	finishIncidentRun(t, svc, incidentUUID, true)
+
+	var incident database.Incident
+	db.Where("uuid = ?", incidentUUID).First(&incident)
+	if incident.Status != database.IncidentStatusFailed || incident.CompletedAt == nil {
+		t.Errorf("incident = %+v, want failed with completed_at", incident)
+	}
+}
+
+func TestFinishRun_AlertSourced_FiringAlert_StaysCompleted(t *testing.T) {
 	db := setupIncidentTestDB(t)
 	svc := newIncidentTestService(t, db)
 	incidentUUID := spawnAlertIncident(t, svc)
 	seedCorrelatedAlert(t, db, incidentUUID) // firing alert still linked
 
-	if err := svc.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, "sid-3", "log", "response", 100, 500); err != nil {
-		t.Fatalf("UpdateIncidentComplete failed: %v", err)
-	}
+	finishIncidentRun(t, svc, incidentUUID, false)
 
 	var incident database.Incident
 	if err := db.Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
@@ -806,9 +850,7 @@ func TestResolveAlert_LastFiringAlert_PromotesCompletedIncidentToMonitor(t *test
 	incidentUUID := spawnAlertIncident(t, svc)
 	alertUUID := seedCorrelatedAlert(t, db, incidentUUID)
 
-	if err := svc.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, "sid-4", "log", "response", 100, 500); err != nil {
-		t.Fatalf("UpdateIncidentComplete failed: %v", err)
-	}
+	finishIncidentRun(t, svc, incidentUUID, false)
 
 	if err := svc.ResolveAlert(context.Background(), alertUUID); err != nil {
 		t.Fatalf("ResolveAlert failed: %v", err)
@@ -903,9 +945,7 @@ func TestCloseIncident_NoFiringAlerts_ClosesImmediately(t *testing.T) {
 	db := setupIncidentTestDB(t)
 	svc := newIncidentTestService(t, db)
 	incidentUUID := spawnAlertIncident(t, svc)
-	if err := svc.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, "sid-5", "log", "response", 100, 500); err != nil {
-		t.Fatalf("UpdateIncidentComplete failed: %v", err)
-	}
+	finishIncidentRun(t, svc, incidentUUID, false)
 
 	if err := svc.CloseIncident(context.Background(), incidentUUID, false); err != nil {
 		t.Fatalf("CloseIncident failed: %v", err)
@@ -925,9 +965,7 @@ func TestCloseIncident_FiringAlerts_RequiresConfirmation(t *testing.T) {
 	svc := newIncidentTestService(t, db)
 	incidentUUID := spawnAlertIncident(t, svc)
 	alertUUID := seedCorrelatedAlert(t, db, incidentUUID)
-	if err := svc.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, "sid-6", "log", "response", 100, 500); err != nil {
-		t.Fatalf("UpdateIncidentComplete failed: %v", err)
-	}
+	finishIncidentRun(t, svc, incidentUUID, false)
 
 	err := svc.CloseIncident(context.Background(), incidentUUID, false)
 	var confirmErr *ErrConfirmationRequired
@@ -965,9 +1003,7 @@ func TestCloseIncident_AlreadyClosed_ReturnsError(t *testing.T) {
 	db := setupIncidentTestDB(t)
 	svc := newIncidentTestService(t, db)
 	incidentUUID := spawnAlertIncident(t, svc)
-	if err := svc.UpdateIncidentComplete(incidentUUID, database.IncidentStatusCompleted, "sid-7", "log", "response", 100, 500); err != nil {
-		t.Fatalf("UpdateIncidentComplete failed: %v", err)
-	}
+	finishIncidentRun(t, svc, incidentUUID, false)
 	if err := svc.CloseIncident(context.Background(), incidentUUID, false); err != nil {
 		t.Fatalf("first CloseIncident failed: %v", err)
 	}
