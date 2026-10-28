@@ -41,13 +41,14 @@ Only `alert` events open or join incidents; everything else never touches the in
   the class of the newest `llm`/`source` event with the same source + identity (`external_id`, else
   the title+host fingerprint) + status from the last 24 h: `classification=reused`, no LLM call.
   Reused and fallback rows are never a reuse source, so the class is re-checked at least daily and a
-  failed call is retried on the next re-send
+  failed call is retried on the next re-send. No reuse while the gate is off
 - recording is best-effort: an insert failure is logged and the verdict still drives the path, so
   the alert path works with no events table. The event→alert/incident link is written AFTER the
   link transaction commits (a failed statement would abort a PostgreSQL transaction)
 - `NormalizedAlert.EventUUID` carries the event into `InsertFiringAlert`/`LinkAlertToIncident`,
   which stamp `alerts.event_uuid` and link the event back; on a `uniq_firing_alert` conflict the event
-  links to the row that holds the slot. `BeginRun` links a request event to its scope
+  links to the row that holds the slot. Singleflight followers (concurrent copies) record their own
+  event and link it after the leader finishes (`LinkFollowerEvent`). `BeginRun` links a request event to its scope
   (`events.scope_uuid`); follow-up events get it at record time
 - reported alerts (`ProcessReportedAlert`) use source key `<channel uuid>` / `slack:<channel id>` /
   `manual`, open incidents with `source_kind=alert`, and run through the listener run loop with a

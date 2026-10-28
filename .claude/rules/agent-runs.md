@@ -33,10 +33,14 @@ An `incidents` row is a production problem and nothing else: only alerts open in
 - `BeginRun` on incident work sets the incident `running`; a follow-up run with no `SourceKind`
   copies the incident's source kind/uuid so formatting rules match it as the incident's trigger.
   `BuildFormatFlow(runID, channel)` reads the run row
-- worker frames: `CompleteAgentRun`/`FailAgentRun` record metrics; `last_skill_used` is written on
-  the run by `run_id` before `OnCompleted`; `result_status` stays on the incident (guarded by
+- worker frames: `CompleteAgentRun`/`FailAgentRun` record metrics and the error ONLY; the run stays
+  `running` until its waiter's `FinishRun` stores the answer, so a reader (request page, chat
+  status) never sees a finished run with no answer while the formatter runs. `last_skill_used` is
+  written on the run by `run_id` before `OnCompleted`; `result_status` stays on the incident (guarded by
   `isCurrentRun`). Frames with no live callback are dropped — there is no legacy DB fallback
 - `RecordAgentRunDispatch` stamps the model at dispatch and creates the row when a caller made none
+- callers that return the scope to a client (API task, proposal chat) call `BeginRun` BEFORE they
+  respond, so the next GET finds the run
 - Slack thread → work: `lookupSlackThread` checks `agent_runs.slack_thread_ts` (request work) first,
   then `incidents.slack_message_ts`. Used by the mention flow and the feedback classifier
 - API: `GET /api/incidents/{uuid}` fills transient `response` (newest answer), `full_log` (all runs,

@@ -69,9 +69,11 @@ func TestAgentRunLifecycle_Completed(t *testing.T) {
 		t.Fatalf("CompleteAgentRun: %v", err)
 	}
 
+	// The frame records numbers only: the run ends when its waiter stores
+	// the answer, so no reader sees a finished run with no answer.
 	run = mustGetRun(t, runID)
-	if run.Status != AgentRunStatusCompleted {
-		t.Fatalf("status = %s, want completed", run.Status)
+	if run.Status != AgentRunStatusRunning {
+		t.Fatalf("status = %s, want running until the answer is stored", run.Status)
 	}
 	if run.Outcome != AgentRunOutcomeResolved {
 		t.Fatalf("outcome = %q, want resolved", run.Outcome)
@@ -85,6 +87,13 @@ func TestAgentRunLifecycle_Completed(t *testing.T) {
 	}
 	if run.CompletedAt == nil {
 		t.Fatal("completed_at not set")
+	}
+
+	if err := FinishAgentRun(DB, runID, AgentRunResult{Response: "root cause"}); err != nil {
+		t.Fatalf("FinishAgentRun: %v", err)
+	}
+	if run = mustGetRun(t, runID); run.Status != AgentRunStatusCompleted || run.Response != "root cause" {
+		t.Fatalf("after FinishAgentRun = %+v, want completed with the answer", run)
 	}
 }
 
@@ -100,11 +109,14 @@ func TestAgentRunLifecycle_Failed(t *testing.T) {
 	}
 
 	run := mustGetRun(t, runID)
-	if run.Status != AgentRunStatusFailed {
-		t.Fatalf("status = %s, want failed", run.Status)
+	if run.Status != AgentRunStatusRunning || run.ErrorMessage != "quota exceeded" {
+		t.Fatalf("after the frame = {status %s, error %q}, want running with the error recorded", run.Status, run.ErrorMessage)
 	}
-	if run.ErrorMessage != "quota exceeded" {
-		t.Fatalf("error_message = %q", run.ErrorMessage)
+	if err := FinishAgentRun(DB, runID, AgentRunResult{Failed: true, Response: "Error: quota exceeded"}); err != nil {
+		t.Fatalf("FinishAgentRun: %v", err)
+	}
+	if run = mustGetRun(t, runID); run.Status != AgentRunStatusFailed {
+		t.Fatalf("status = %s, want failed", run.Status)
 	}
 }
 
@@ -142,8 +154,8 @@ func TestSupersedeAgentRun_TerminalRunUntouched(t *testing.T) {
 	if err := RecordAgentRunDispatch(runID, uuid.NewString(), "anthropic", "claude-haiku-4-5", "low"); err != nil {
 		t.Fatalf("RecordAgentRunDispatch: %v", err)
 	}
-	if err := CompleteAgentRun(runID, AgentRunMetrics{TokensUsed: 10}, AgentRunOutcomeUnresolved); err != nil {
-		t.Fatalf("CompleteAgentRun: %v", err)
+	if err := FinishAgentRun(DB, runID, AgentRunResult{Response: "done"}); err != nil {
+		t.Fatalf("FinishAgentRun: %v", err)
 	}
 	if err := SupersedeAgentRun(runID); err != nil {
 		t.Fatalf("SupersedeAgentRun: %v", err)
@@ -182,8 +194,8 @@ func TestFailInterruptedAgentRuns(t *testing.T) {
 			t.Fatalf("RecordAgentRunDispatch: %v", err)
 		}
 	}
-	if err := CompleteAgentRun(completed, AgentRunMetrics{TokensUsed: 10}, AgentRunOutcomeResolved); err != nil {
-		t.Fatalf("CompleteAgentRun: %v", err)
+	if err := FinishAgentRun(DB, completed, AgentRunResult{Response: "done"}); err != nil {
+		t.Fatalf("FinishAgentRun: %v", err)
 	}
 	if err := SupersedeAgentRun(superseded); err != nil {
 		t.Fatalf("SupersedeAgentRun: %v", err)
@@ -259,21 +271,22 @@ func TestBeginAgentRun_DispatchAndFinish(t *testing.T) {
 	}
 }
 
-// FinishAgentRun must not relabel a run the worker frames already ended.
-func TestFinishAgentRun_KeepsTerminalStatus(t *testing.T) {
+// FinishAgentRun must not relabel a superseded run: the replacement owns
+// the scope, and stats exclude displaced work.
+func TestFinishAgentRun_KeepsSupersededStatus(t *testing.T) {
 	setupAgentRunsDB(t)
 	run := &AgentRun{ScopeUUID: "s"}
 	if err := BeginAgentRun(DB, run); err != nil {
 		t.Fatal(err)
 	}
-	if err := FailAgentRun(run.RunID, "boom"); err != nil {
+	if err := SupersedeAgentRun(run.RunID); err != nil {
 		t.Fatal(err)
 	}
 	if err := FinishAgentRun(DB, run.RunID, AgentRunResult{Response: "late"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := mustGetRun(t, run.RunID); got.Status != AgentRunStatusFailed || got.Response != "late" {
-		t.Fatalf("got %+v, want failed status kept and response stored", got)
+	if got := mustGetRun(t, run.RunID); got.Status != AgentRunStatusSuperseded || got.Response != "late" {
+		t.Fatalf("got %+v, want superseded status kept and response stored", got)
 	}
 }
 

@@ -100,6 +100,29 @@ func linkEventToFiringAlert(db *gorm.DB, eventUUID, sourceUUID, sourceFingerprin
 	linkEventToAlert(db, eventUUID, existing.UUID, existing.IncidentUUID)
 }
 
+// LinkFollowerEvent links the event of a singleflight follower: concurrent
+// copies of one alert record one event each, but only the leader runs the
+// alert path (insert or link). After the leader finished, the follower's
+// event points at the firing alert of the same source and identity (the
+// source fingerprint, else the name+host fingerprint). Best-effort.
+func LinkFollowerEvent(db *gorm.DB, eventUUID, sourceUUID string, alert alerts.NormalizedAlert) {
+	if db == nil || eventUUID == "" {
+		return
+	}
+	q := db.Select("uuid, incident_uuid").
+		Where("source_uuid = ? AND status = ? AND resolved_at IS NULL", sourceUUID, string(database.AlertStatusFiring))
+	if alert.SourceFingerprint != "" {
+		q = q.Where("source_fingerprint = ?", alert.SourceFingerprint)
+	} else {
+		q = q.Where("fingerprint = ?", ComputeAlertFingerprint(sourceUUID, alert.AlertName, alert.TargetHost))
+	}
+	var existing database.Alert
+	if err := q.Order("fired_at DESC").Limit(1).Find(&existing).Error; err != nil || existing.UUID == "" {
+		return
+	}
+	linkEventToAlert(db, eventUUID, existing.UUID, existing.IncidentUUID)
+}
+
 // bumpAlertLastSeen records a re-send of an already-firing alert on the row
 // that owns the uniq_firing_alert index slot for (sourceUUID,
 // sourceFingerprint). Sources that keep a stable fingerprint across re-sends

@@ -223,16 +223,26 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		slog.Info("started request via API", "scope", scopeUUID)
-
-		taskHeader := fmt.Sprintf("📝 API Task:\n%s\n\n--- Execution Log ---\n\n", req.Task)
-		go h.runAgentInvestigation(services.RunStart{
+		// The run row exists before the response, so the request page the
+		// caller opens next finds the request.
+		start := services.RunStart{
 			ScopeUUID:  scopeUUID,
 			EventUUID:  eventUUID,
 			SourceKind: database.IncidentSourceKindManual,
 			SourceUUID: manualEventSource,
 			RootSkill:  "incident-manager",
-		}, taskHeader, req.Task)
+		}
+		runID, err := h.skillService.BeginRun(start)
+		if err != nil {
+			slog.Error("failed to begin API request run", "scope", scopeUUID, "err", err)
+			api.RespondError(w, http.StatusInternalServerError, "Failed to start request")
+			return
+		}
+
+		slog.Info("started request via API", "scope", scopeUUID, "run", runID)
+
+		taskHeader := fmt.Sprintf("📝 API Task:\n%s\n\n--- Execution Log ---\n\n", req.Task)
+		go h.runAgentInvestigation(start, runID, taskHeader, req.Task)
 
 		api.RespondJSON(w, http.StatusCreated, api.CreateIncidentResponse{
 			UUID:       scopeUUID,
@@ -424,24 +434,14 @@ func (h *APIHandler) handleIncidentSweepStale(w http.ResponseWriter, r *http.Req
 }
 
 // runAgentInvestigation runs one agent run: an API request (request scope)
-// or the investigation of an unlinked alert (incident). It must be launched
-// as a goroutine by the caller. taskHeader is prepended to all log updates;
-// task is the raw user-facing task text (guidance is added internally via
-// executor.PrependGuidance).
-func (h *APIHandler) runAgentInvestigation(start services.RunStart, taskHeader, task string) {
+// or the investigation of an unlinked alert (incident). The caller creates
+// the run row (BeginRun) and launches this as a goroutine. taskHeader is
+// prepended to all log updates; task is the raw user-facing task text
+// (guidance is added internally via executor.PrependGuidance).
+func (h *APIHandler) runAgentInvestigation(start services.RunStart, runID, taskHeader, task string) {
 	incidentUUID := start.ScopeUUID // the scope the worker keys the run by
 	if incidentUUID == "" {
 		incidentUUID = start.IncidentUUID
-	}
-	runID, err := h.skillService.BeginRun(start)
-	if err != nil {
-		slog.Error("failed to begin run", "scope", incidentUUID, "err", err)
-		if start.IncidentUUID != "" {
-			if uerr := h.skillService.UpdateIncidentStatus(start.IncidentUUID, database.IncidentStatusFailed); uerr != nil {
-				slog.Warn("failed to mark incident failed", "incident_id", start.IncidentUUID, "err", uerr)
-			}
-		}
-		return
 	}
 	if err := h.skillService.UpdateRunLog(runID, taskHeader+"Starting execution..."); err != nil {
 		slog.Warn("failed to write run log", "err", err)
@@ -654,13 +654,22 @@ func (h *APIHandler) moveAlert(w http.ResponseWriter, r *http.Request, alertUUID
 			task += "\n\nOriginal alert text:\n" + original
 		}
 		taskHeader := fmt.Sprintf("🔗 Unlinked Alert Investigation:\n%s\n\n--- Execution Log ---\n\n", task)
-		go h.runAgentInvestigation(services.RunStart{
+		start := services.RunStart{
 			IncidentUUID: resultIncidentUUID,
 			EventUUID:    alert.EventUUID,
 			SourceKind:   database.IncidentSourceKindAlert,
 			SourceUUID:   alert.SourceUUID,
 			RootSkill:    "incident-manager",
-		}, taskHeader, task)
+		}
+		runID, err := h.skillService.BeginRun(start)
+		if err != nil {
+			slog.Error("failed to begin run for unlinked alert", "incident_id", resultIncidentUUID, "err", err)
+			if uerr := h.skillService.UpdateIncidentStatus(resultIncidentUUID, database.IncidentStatusFailed); uerr != nil {
+				slog.Warn("failed to mark incident failed", "incident_id", resultIncidentUUID, "err", uerr)
+			}
+		} else {
+			go h.runAgentInvestigation(start, runID, taskHeader, task)
+		}
 	}
 
 	api.RespondJSON(w, http.StatusOK, map[string]string{"incident_uuid": resultIncidentUUID})

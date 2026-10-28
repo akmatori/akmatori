@@ -288,3 +288,52 @@ func TestMentionAckText(t *testing.T) {
 		t.Fatal("ack text must name the class")
 	}
 }
+
+// requestRunSkillService records the request scope and run a POST starts.
+type requestRunSkillService struct {
+	corrGateSkillService
+	runMu  sync.Mutex
+	starts []services.RunStart
+}
+
+func (s *requestRunSkillService) PrepareRequestScope(_ string, eventUUID string) (string, string, error) {
+	return eventUUID, "/tmp/" + eventUUID, nil
+}
+
+func (s *requestRunSkillService) BeginRun(start services.RunStart) (string, error) {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	s.starts = append(s.starts, start)
+	return "run-1", nil
+}
+
+// A request's run row exists when POST /api/incidents returns, so the
+// request page the UI opens next never gets a 404.
+func TestHandleIncidentsPost_RequestRunExistsBeforeResponse(t *testing.T) {
+	db := setupEventsHandlerDB(t)
+	caller := &corrOneShotLLMCaller{respond: func(context.Context) (string, error) {
+		return `{"alert_name":"disk usage question","event_kind":"request","event_confidence":0.95,"event_reasoning":"question"}`, nil
+	}}
+	svc := &requestRunSkillService{}
+	h := &APIHandler{skillService: svc}
+	h.SetEventIntake(services.NewEventService(db, caller), extraction.NewAlertExtractor(caller), &fakeReportedProcessor{})
+
+	body, _ := json.Marshal(api.CreateIncidentRequest{Task: "what is the disk usage on db1?"})
+	rec := httptest.NewRecorder()
+	h.handleIncidents(rec, httptest.NewRequest(http.MethodPost, "/api/incidents", bytes.NewReader(body)))
+
+	svc.runMu.Lock()
+	starts := append([]services.RunStart(nil), svc.starts...)
+	svc.runMu.Unlock()
+	if rec.Code != http.StatusCreated || len(starts) != 1 {
+		t.Fatalf("status = %d, runs begun before the response = %d; want 201 and 1", rec.Code, len(starts))
+	}
+	var resp api.CreateIncidentResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.UUID == "" || resp.UUID != starts[0].ScopeUUID || resp.EventKind != database.EventKindRequest ||
+		starts[0].IncidentUUID != "" || starts[0].SourceKind != database.IncidentSourceKindManual {
+		t.Fatalf("resp = %+v, run start = %+v", resp, starts[0])
+	}
+}

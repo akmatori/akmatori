@@ -1258,3 +1258,38 @@ func TestLinkAlertToIncident_MergedWithoutPointer_AttachesInPlace(t *testing.T) 
 		t.Errorf("expected alert attached in place, got %d rows", count)
 	}
 }
+
+// A singleflight follower's event is linked to the leader's firing alert, by
+// source fingerprint or, without one, by the name+host fingerprint.
+func TestLinkFollowerEvent(t *testing.T) {
+	db := setupIncidentTestDB(t)
+	fp := ComputeAlertFingerprint("src-f", "DiskFull", "db1")
+	for _, a := range []database.Alert{
+		{UUID: "al-sfp", IncidentUUID: "inc-a", Status: database.AlertStatusFiring, SourceUUID: "src-f", SourceFingerprint: "am-1", FiredAt: time.Now()},
+		{UUID: "al-fp", IncidentUUID: "inc-b", Status: database.AlertStatusFiring, SourceUUID: "src-f", Fingerprint: fp, FiredAt: time.Now()},
+	} {
+		a := a
+		if err := db.Create(&a).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []string{"ev-1", "ev-2", "ev-3"} {
+		if err := db.Create(&database.Event{UUID: id, SourceKind: database.EventSourceWebhook, Kind: database.EventKindAlert,
+			Classification: database.EventClassificationLLM}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	LinkFollowerEvent(db, "ev-1", "src-f", alerts.NormalizedAlert{SourceFingerprint: "am-1"})
+	LinkFollowerEvent(db, "ev-2", "src-f", alerts.NormalizedAlert{AlertName: "DiskFull", TargetHost: "db1"})
+	LinkFollowerEvent(db, "ev-3", "src-f", alerts.NormalizedAlert{SourceFingerprint: "unknown"})
+
+	want := map[string][2]string{"ev-1": {"al-sfp", "inc-a"}, "ev-2": {"al-fp", "inc-b"}, "ev-3": {"", ""}}
+	for id, w := range want {
+		var ev database.Event
+		db.Where("uuid = ?", id).First(&ev)
+		if ev.AlertUUID != w[0] || ev.IncidentUUID != w[1] {
+			t.Errorf("%s linked to alert %q incident %q, want %q %q", id, ev.AlertUUID, ev.IncidentUUID, w[0], w[1])
+		}
+	}
+}

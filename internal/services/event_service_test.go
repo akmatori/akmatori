@@ -154,6 +154,37 @@ func TestEventService_RecordClassified_ResendGetsOwnRowWithoutLLMCall(t *testing
 	}
 }
 
+// Turning classification off sends a re-send of an item classified as info
+// down the alert path at once: the reuse window must not keep the old class.
+func TestEventService_RecordClassified_GateOffSkipsReuse(t *testing.T) {
+	db := setupEventDB(t)
+	caller := &fakeOneShotLLMCaller{respond: answer(`{"kind":"info","confidence":0.9,"reasoning":"heartbeat"}`)}
+	s := NewEventService(db, caller)
+	in := EventInput{SourceKind: database.EventSourceWebhook, SourceUUID: "src-1", ExternalID: "fp-1", Title: "Watchdog", Status: "firing"}
+	if first := s.RecordClassified(context.Background(), in); first.Kind != database.EventKindInfo {
+		t.Fatalf("first = %+v, want info", first)
+	}
+
+	// The first call created the settings row; turn the gate off on it.
+	if err := db.Session(&gorm.Session{AllowGlobalUpdate: true}).Model(&database.GeneralSettings{}).
+		Update("event_classification_enabled", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	var n int64
+	db.Model(&database.GeneralSettings{}).Count(&n)
+	if n == 0 {
+		off := false
+		db.Create(&database.GeneralSettings{EventClassificationEnabled: &off})
+	}
+	again := s.RecordClassified(context.Background(), in)
+	if again.Kind != database.EventKindAlert || again.Classification == database.EventClassificationReused {
+		t.Fatalf("re-send with the gate off = %+v, want the alert fallback, not a reused info", again)
+	}
+	if caller.callCount() != 1 {
+		t.Fatalf("LLM calls = %d, want 1 (no call while off)", caller.callCount())
+	}
+}
+
 func TestEventService_RecordClassified_StatusChangeIsNotReused(t *testing.T) {
 	db := setupEventDB(t)
 	caller := &fakeOneShotLLMCaller{respond: answer(`{"kind":"alert","confidence":0.9,"reasoning":"down"}`)}

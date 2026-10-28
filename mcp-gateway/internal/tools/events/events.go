@@ -2,6 +2,8 @@ package events
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -271,7 +273,7 @@ func (t *EventsTool) ReportAlert(ctx context.Context, incidentID string, args ma
 		// A stable identity per job, alert and host: a later run that reports
 		// the same problem updates the same firing alert instead of opening a
 		// second incident.
-		ExternalID:              cut("cron:"+run.SourceUUID+":"+strings.ToLower(name)+":"+strings.ToLower(host), 255),
+		ExternalID:              cronAlertIdentity(run.SourceUUID, name, host),
 		ReceivedAt:              now,
 		OccurredAt:              now,
 		Kind:                    kindAlert,
@@ -299,6 +301,16 @@ func (t *EventsTool) ReportAlert(ctx context.Context, incidentID string, args ma
 		Status:    "queued",
 		Note:      "Akmatori runs this alert through correlation within seconds: it joins the open incident it belongs to, or opens a new one. Mention the reported problem in your final summary.",
 	})
+}
+
+// cronAlertIdentity is the stable identity of a cron-reported problem:
+// "cron:" + a hash of the job, the alert name and the host (case-folded). A
+// hash of the JSON-encoded tuple keeps every part, so a long alert name can
+// never cut the host off and make two hosts look like one problem.
+func cronAlertIdentity(jobUUID, name, host string) string {
+	tuple, _ := json.Marshal([]string{jobUUID, strings.ToLower(name), strings.ToLower(host)})
+	sum := sha256.Sum256(tuple)
+	return "cron:" + hex.EncodeToString(sum[:16])
 }
 
 func marshal(v interface{}) (interface{}, error) {
