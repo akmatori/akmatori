@@ -265,6 +265,16 @@ func runMigrations(db *gorm.DB) error {
 		slog.Warn("events backfill incomplete; it resumes on the next start", "err", err)
 	}
 
+	// Move the agent work from incidents onto agent_runs and turn non-alert
+	// incidents into request work (only alerts open incidents). Runs after
+	// migrateBackfillEvents so request events exist to point at their
+	// scope. Best-effort: the old columns are dropped only after every
+	// incident moved, so a failure loses nothing and resumes on the next
+	// start.
+	if err := migrateSplitAgentRuns(db); err != nil {
+		slog.Warn("agent runs split incomplete; it resumes on the next start", "err", err)
+	}
+
 	// Convert a legacy enabled global FormattingSettings row into a catch-all
 	// FormattingRule so upgraded installs keep formatting responses.
 	if err := migrateGlobalFormattingToRule(db); err != nil {
@@ -1120,7 +1130,7 @@ const improvementEvaluatorCronSchedule = "0 5 * * *"
 // feedback, and emits improvement proposals for operator review in the UI.
 const improvementEvaluatorCronPrompt = `You are running the periodic self-improvement review. Goal: propose concrete changes that improve root-cause correctness and reduce analysis time for future investigations.
 
-1. Gather recent history. List incidents started in the last 24 hours via gateway_call("incidents.list", {...}) — query status "monitor", "completed", and "failed" separately (source_kind "alert" and "cron"), using the "from" filter derived from the current-time header. Pick up to 10 incidents for deep review, prioritizing: failed runs, the slowest execution_time_ms, and repeated titles. Fetch each with gateway_call("incidents.get", {"uuid": ...}) and study the full_log for wasted investigation steps, missing runbook coverage, wrong initial hypotheses, and tool errors.
+1. Gather recent history. List incidents started in the last 24 hours via gateway_call("incidents.list", {...}) — query status "monitor", "completed", and "failed" separately, using the "from" filter derived from the current-time header. List the cron runs of the same window via gateway_call("events.search", {"source": "cron", "since": ...}, "events"). Pick up to 10 incidents and cron runs for deep review, prioritizing: failed runs, the slowest execution_time_ms, and repeated titles. Fetch each incident with gateway_call("incidents.get", {"uuid": ...}) and each cron run with gateway_call("events.get", {"uuid": "<event uuid>"}, "events"), and study the full_log for wasted investigation steps, missing runbook coverage, wrong initial hypotheses, and tool errors.
 
 2. Gather operator feedback. Ask the memory-searcher subagent for recent operator feedback (type: feedback) and recurring incident patterns relevant to what you saw in step 1.
 

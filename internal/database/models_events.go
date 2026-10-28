@@ -94,9 +94,12 @@ type Event struct {
 
 	// AlertUUID is set when the event created or updated an alerts row.
 	AlertUUID string `gorm:"size:36;index" json:"alert_uuid,omitempty"`
-	// IncidentUUID is the incident row the event opened, joined or continued.
-	// Request events point at the row that holds their agent run.
+	// IncidentUUID is the incident the event opened, joined or continued
+	// (alert events, and Slack follow-ups in an incident thread).
 	IncidentUUID string `gorm:"size:36;index" json:"incident_uuid,omitempty"`
+	// ScopeUUID is the request work a request event started or continued
+	// (agent_runs.scope_uuid). Empty for events that started no agent work.
+	ScopeUUID string `gorm:"size:36;index" json:"scope_uuid,omitempty"`
 
 	// PendingDispatch marks an alert event written by the MCP gateway
 	// (events.report_alert from a cron run). The API's reported-alert

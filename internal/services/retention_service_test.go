@@ -21,6 +21,7 @@ func setupRetentionTestDB(t *testing.T) *gorm.DB {
 
 	err = db.AutoMigrate(
 		&database.Incident{},
+		&database.AgentRun{},
 		&database.Alert{},
 		&database.Event{},
 		&database.RetentionSettings{},
@@ -31,6 +32,7 @@ func setupRetentionTestDB(t *testing.T) *gorm.DB {
 
 	// Clean tables to prevent data leaking between tests
 	db.Exec("DELETE FROM incidents")
+	db.Exec("DELETE FROM agent_runs")
 	db.Exec("DELETE FROM alerts")
 	db.Exec("DELETE FROM events")
 	db.Exec("DELETE FROM retention_settings")
@@ -57,7 +59,6 @@ func createExpiredIncident(t *testing.T, db *gorm.DB, uuid string, dataDir strin
 		UUID:        uuid,
 		Source:      "test",
 		Status:      database.IncidentStatusCompleted,
-		WorkingDir:  workDir,
 		CompletedAt: &completedAt,
 	}
 	if err := db.Create(incident).Error; err != nil {
@@ -178,7 +179,6 @@ func TestRunCleanup_FailedIncidentsAlsoCleanedUp(t *testing.T) {
 		UUID:        "failed-uuid-1",
 		Source:      "test",
 		Status:      database.IncidentStatusFailed,
-		WorkingDir:  workDir,
 		CompletedAt: &completedAt,
 	})
 
@@ -205,10 +205,9 @@ func TestRunCleanup_RunningIncidentsNotDeleted(t *testing.T) {
 		t.Fatalf("MkdirAll failed: %v", err)
 	}
 	db.Create(&database.Incident{
-		UUID:       "running-uuid-1",
-		Source:     "test",
-		Status:     database.IncidentStatusRunning,
-		WorkingDir: workDir,
+		UUID:   "running-uuid-1",
+		Source: "test",
+		Status: database.IncidentStatusRunning,
 	})
 
 	svc := NewRetentionService(dataDir, db)
@@ -258,10 +257,9 @@ func TestRunCleanup_OrphanedDirectories(t *testing.T) {
 		t.Fatalf("Chtimes matchedDir failed: %v", err)
 	}
 	db.Create(&database.Incident{
-		UUID:       matchedUUID,
-		Source:     "test",
-		Status:     database.IncidentStatusRunning,
-		WorkingDir: matchedDir,
+		UUID:   matchedUUID,
+		Source: "test",
+		Status: database.IncidentStatusRunning,
 	})
 
 	svc := NewRetentionService(dataDir, db)
@@ -403,7 +401,6 @@ func TestRunCleanup_MissingWorkingDir(t *testing.T) {
 		UUID:        "no-dir-uuid",
 		Source:      "test",
 		Status:      database.IncidentStatusCompleted,
-		WorkingDir:  filepath.Join(dataDir, "nonexistent"),
 		CompletedAt: &completedAt,
 	})
 
@@ -591,7 +588,6 @@ func TestRunCleanup_EmptyWorkingDir(t *testing.T) {
 		UUID:        "empty-dir-uuid",
 		Source:      "test",
 		Status:      database.IncidentStatusCompleted,
-		WorkingDir:  "",
 		CompletedAt: &completedAt,
 	})
 
@@ -667,5 +663,82 @@ func TestRunCleanup_ExpiredEvents(t *testing.T) {
 	db.Model(&database.Event{}).Order("uuid").Pluck("uuid", &left)
 	if len(left) != 2 || left[0] != "ev-old-kept" || left[1] != "ev-recent-change" {
 		t.Errorf("events left = %v, want [ev-old-kept ev-recent-change]", left)
+	}
+}
+
+// An expired incident keeps its run rows (per-model stats) but loses their
+// payload.
+func TestRunCleanup_ExpiredIncident_ClearsRunWork(t *testing.T) {
+	db := setupRetentionTestDB(t)
+	dataDir := t.TempDir()
+	db.Create(&database.RetentionSettings{Enabled: true, RetentionDays: 30, CleanupIntervalHours: 6})
+	createExpiredIncident(t, db, "old-inc", dataDir, 60)
+	if err := db.Create(&database.AgentRun{RunID: "r-old", ScopeUUID: "old-inc", IncidentUUID: "old-inc",
+		Model: "m", TokensUsed: 900, FullLog: "log", Response: "answer", SessionID: "s"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := NewRetentionService(dataDir, db).RunCleanup(); err != nil {
+		t.Fatal(err)
+	}
+	var run database.AgentRun
+	if err := db.Where("run_id = ?", "r-old").First(&run).Error; err != nil {
+		t.Fatalf("run row must survive retention: %v", err)
+	}
+	if run.FullLog != "" || run.Response != "" || run.SessionID != "" || run.TokensUsed != 900 || run.Model != "m" {
+		t.Errorf("run = %+v, want payload cleared and metrics kept", run)
+	}
+}
+
+// Expired request work (a cron run, a Slack request) loses its payload and
+// its work directory; recent and running request work is left alone.
+func TestRunCleanup_ExpiredRequests(t *testing.T) {
+	db := setupRetentionTestDB(t)
+	dataDir := t.TempDir()
+	db.Create(&database.RetentionSettings{Enabled: true, RetentionDays: 30, CleanupIntervalHours: 6})
+	old := time.Now().AddDate(0, 0, -60)
+	recent := time.Now().AddDate(0, 0, -2)
+	for _, scope := range []string{"old-req", "new-req", "busy-req"} {
+		if err := os.MkdirAll(filepath.Join(dataDir, scope), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runs := []database.AgentRun{
+		{RunID: "a", ScopeUUID: "old-req", Status: database.AgentRunStatusCompleted, StartedAt: old, CompletedAt: &old, FullLog: "l", Response: "r", TokensUsed: 5},
+		{RunID: "b", ScopeUUID: "new-req", Status: database.AgentRunStatusCompleted, StartedAt: old, CompletedAt: &recent, Response: "r"},
+		{RunID: "c", ScopeUUID: "busy-req", Status: database.AgentRunStatusCompleted, StartedAt: old, CompletedAt: &old, Response: "r"},
+		{RunID: "d", ScopeUUID: "busy-req", Status: database.AgentRunStatusRunning, StartedAt: old},
+	}
+	for i := range runs {
+		if err := db.Create(&runs[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := NewRetentionService(dataDir, db).RunCleanup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExpiredRequestsCleared != 1 {
+		t.Errorf("ExpiredRequestsCleared = %d, want 1 (errors: %v)", result.ExpiredRequestsCleared, result.Errors)
+	}
+	var a database.AgentRun
+	db.Where("run_id = ?", "a").First(&a)
+	if a.Response != "" || a.FullLog != "" || a.TokensUsed != 5 {
+		t.Errorf("old request run = %+v, want payload cleared, metrics kept", a)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "old-req")); !os.IsNotExist(err) {
+		t.Error("old request work directory must be removed")
+	}
+	for _, keep := range []string{"new-req", "busy-req"} {
+		if _, err := os.Stat(filepath.Join(dataDir, keep)); err != nil {
+			t.Errorf("%s directory must stay: %v", keep, err)
+		}
+	}
+
+	// A second pass finds nothing left to clear.
+	result, _ = NewRetentionService(dataDir, db).RunCleanup()
+	if result.ExpiredRequestsCleared != 0 {
+		t.Errorf("second pass cleared %d, want 0", result.ExpiredRequestsCleared)
 	}
 }

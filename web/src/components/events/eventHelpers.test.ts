@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { EventFeedItem } from '../../types';
-import { bucketSize, classificationSummary, eventTone, groupEvents } from './eventHelpers';
+import { bucketSize, classificationSummary, eventTone, eventWork, groupEvents } from './eventHelpers';
 
 const at = (iso: string): EventFeedItem => ({
   event_uuid: iso, kind: 'alert', source_kind: 'webhook', classification: 'llm',
@@ -59,5 +59,15 @@ describe('classificationSummary', () => {
       .toBe('Info: same item as an event classified in the last 24 hours, no new LLM call');
     expect(classificationSummary({ ...base, classification: 'backfill' }))
       .toBe('Alert: recorded before event classification existed');
+  });
+});
+
+describe('eventWork', () => {
+  it('links a request event to its request work, else to its incident', () => {
+    expect(eventWork({ scope_uuid: 's1', incident_uuid: undefined })).toEqual({
+      kind: 'request', uuid: 's1', path: '/requests/s1', key: 'request:s1',
+    });
+    expect(eventWork({ incident_uuid: 'i1' })?.path).toBe('/incidents/i1');
+    expect(eventWork({})).toBeNull();
   });
 });

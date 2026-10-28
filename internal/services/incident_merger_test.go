@@ -35,10 +35,12 @@ func seedCompletedIncident(t *testing.T, db *gorm.DB, uuid, title, response stri
 		Status:      status,
 		StartedAt:   startedAt,
 		CompletedAt: &completedAt,
-		Response:    response,
 	}
 	if err := db.Create(&inc).Error; err != nil {
 		t.Fatalf("seed incident %s: %v", uuid, err)
+	}
+	if response != "" {
+		seedRunResponse(t, db, uuid, response)
 	}
 }
 
@@ -183,11 +185,12 @@ func TestIncidentMerger_NonAlertIncident_NoLLMCall(t *testing.T) {
 	inc := database.Incident{
 		UUID: "inc-cron", Source: "test", SourceKind: database.IncidentSourceKindCron,
 		Status: database.IncidentStatusCompleted, StartedAt: time.Now().Add(-10 * time.Minute),
-		CompletedAt: &completedAt, Response: "cron output",
+		CompletedAt: &completedAt,
 	}
 	if err := db.Create(&inc).Error; err != nil {
 		t.Fatalf("seed: %v", err)
 	}
+	seedRunResponse(t, db, inc.UUID, "cron output")
 
 	caller := &fakeOneShotLLMCaller{}
 	m := NewIncidentMerger(caller, db, nil)

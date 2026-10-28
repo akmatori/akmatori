@@ -4,6 +4,7 @@ import type {
   ToolType,
   ToolInstance,
   Incident,
+  RequestDetail,
   Alert,
   EventFeedItem,
   Integration,
@@ -303,6 +304,11 @@ export const incidentsApi = {
       method: 'POST',
       body: JSON.stringify({ confirm }),
     }),
+};
+
+// Request work: agent runs that are not incidents, keyed by their scope.
+export const requestsApi = {
+  get: (uuid: string) => fetchApi<RequestDetail>(`/api/requests/${encodeURIComponent(uuid)}`),
 };
 
 // Self-improvement proposals API
@@ -697,6 +703,12 @@ export const eventsApi = {
   incidentResponse: (uuid: string) =>
     fetchApi<{ uuid: string; title: string; status: string; response: string }>(
       `/api/incidents/${encodeURIComponent(uuid)}/response`,
+    ),
+
+  // The same projection for request work (request events).
+  requestResponse: (uuid: string) =>
+    fetchApi<{ uuid: string; title: string; status: string; response: string }>(
+      `/api/requests/${encodeURIComponent(uuid)}/response`,
     ),
 
   // Fetch the raw payload / original message for a single event on demand.

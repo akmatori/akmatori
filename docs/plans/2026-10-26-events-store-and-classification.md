@@ -1,8 +1,8 @@
 # Events store and event classification
 
-Status: phases 1, 2, 4 (2026-10-27) and 3 (2026-10-28) implemented on branch `feat/events-store`.
-Phase 5 open. Phase 4 was pulled forward: its on/off switch is the safe way to stop classification on an
-install without a release.
+Status: all five phases implemented on branch `feat/events-store` (PR #42): 1, 2, 4 on 2026-10-27,
+3 and 5 on 2026-10-28. Phase 4 was pulled forward: its on/off switch is the safe way to stop
+classification on an install without a release. The phases share one PR, not one PR each.
 Decided: backfill yes, re-send reuse yes, all inbound items are events, cron may report alert events,
 DB layout redesign yes (phase 5), page renamed to Events at `/events`.
 
@@ -88,6 +88,37 @@ incident rows. Split the two:
 Existing non-alert incident rows (cron, manual, slack_mention, proposal) migrate to an `events` row
 (`kind=request`) plus their `agent_runs` row, and then leave `incidents`.
 
+### Phase 5 design (decided 2026-10-28)
+
+- **Work scope.** The worker, the gateway and the work directory key a run by an opaque scope id
+  (`agent_runs.scope_uuid`; the wire field is still `incident_id`). Incident work: the incident UUID.
+  Request work: the UUID of the request event that started it (a Slack thread, an API task, a cron
+  tick, a proposal chat). Follow-up turns (Slack replies, proposal chat turns) reuse the scope, so
+  they share one work directory and one gateway allowlist key. This replaces "allowlist key = run
+  id" from the draft: a scope id needs no worker or gateway wire change.
+- **Runs are created before dispatch.** The caller creates the `agent_runs` row (`BeginRun`) and
+  passes its `run_id` to `StartIncident`, so every log/response write targets one known run. The
+  worker frames finalize the metrics as before.
+- **`agent_runs` gets** `scope_uuid`, `event_uuid` (trigger event), `source_uuid`, `root_skill`,
+  `session_id`, `working_dir`, `full_log`, `response`, `last_skill_used`, `slack_channel_id`,
+  `slack_thread_ts`; `incident_uuid` is empty for request runs.
+- **`incidents` loses** `session_id`, `working_dir`, `full_log`, `response`, `tokens_used`,
+  `execution_time_ms`, `last_skill_used`. The incident API fills `response` (newest run with one),
+  `full_log` (all runs, oldest first, with a header per run), the token/time sums and `runs` from
+  `agent_runs`, so the incident page shows every run.
+- **Request work** has no row of its own: its status is the newest run's status, its title is the
+  scope event's title. `events.scope_uuid` links each request event to its scope. API:
+  `GET /api/requests/{scope}` (+ `/response`); web page `/requests/:uuid`.
+- **Slack threads.** A mention thread resolves through `agent_runs.slack_thread_ts` (request work)
+  or `incidents.slack_message_ts` (incident work).
+- **Agents.** `events.get` on a request event returns its run (response + log), so the improvement
+  evaluator reviews cron runs with `events.search source=cron` instead of `incidents.list`.
+- **Migration** (`migrateSplitAgentRuns`, idempotent, non-fatal, runs while `incidents.full_log`
+  exists): copy the agent-work columns onto each incident's newest run (a synthetic run when the
+  incident has none), set `scope_uuid`; non-alert incidents keep their UUID as the scope, their runs
+  drop `incident_uuid`, their events get `scope_uuid`, then the incident rows are deleted; then the
+  columns are dropped.
+
 ## Data model
 
 `events`:
@@ -154,7 +185,7 @@ so an investigation starts that much later.
 - Backfill: one `events` row per existing `alerts` row (`kind=alert`, `classification=fallback`), so
   the Events feed keeps its history.
 
-## Phases (one PR each)
+## Phases
 
 1. Schema, write path, classifier with fallback and re-send reuse, alert link. Tests for each path.
 2. `GET /api/events` from the new table, Events page (class, reasoning, "Investigate as alert").

@@ -295,7 +295,7 @@ func setupWebhookHandlerIntegrationDB(t *testing.T) (*services.AlertService, fun
 	if err := db.AutoMigrate(
 		&database.AlertSourceType{},
 		&database.AlertSourceInstance{},
-		&database.Incident{},
+		&database.Incident{}, &database.AgentRun{},
 		&database.Alert{},
 		&database.SlackSettings{},
 	); err != nil {

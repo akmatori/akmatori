@@ -101,15 +101,32 @@ func (c *AlertCorrelator) Threshold() float64 {
 }
 
 // candidateRow is a minimal projection of the Incident table used for
-// candidate ranking so we don't load full_log into memory.
+// candidate ranking. Response is the newest run answer (agent_runs).
 type candidateRow struct {
 	UUID             string
 	Title            string
 	Status           string
-	Response         string
+	Response         string         `gorm:"-"`
 	Context          database.JSONB `gorm:"type:jsonb"`
 	StartedAt        time.Time
 	AlertFingerprint string
+}
+
+// fillCandidateResponses sets each candidate's Response to the newest answer
+// of the incident's runs: the agent work lives on agent_runs.
+func fillCandidateResponses(db *gorm.DB, rows []candidateRow) error {
+	uuids := make([]string, len(rows))
+	for i := range rows {
+		uuids[i] = rows[i].UUID
+	}
+	responses, err := database.LatestRunResponses(db, uuids)
+	if err != nil {
+		return err
+	}
+	for i := range rows {
+		rows[i].Response = responses[rows[i].UUID]
+	}
+	return nil
 }
 
 // Correlate asks the LLM whether the incoming alert matches a recent incident.
@@ -241,12 +258,15 @@ func (c *AlertCorrelator) fetchCandidates(ctx context.Context) ([]candidateRow, 
 	var rows []candidateRow
 	err := c.db.WithContext(ctx).
 		Model(&database.Incident{}).
-		Select("uuid, title, status, response, context, started_at, alert_fingerprint").
+		Select("uuid, title, status, context, started_at, alert_fingerprint").
 		Where(cond, args...).
 		Order("started_at DESC").
 		Limit(correlationMaxCandidates).
 		Scan(&rows).Error
 	if err != nil {
+		return nil, err
+	}
+	if err := fillCandidateResponses(c.db.WithContext(ctx), rows); err != nil {
 		return nil, err
 	}
 	return rows, nil

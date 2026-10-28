@@ -26,6 +26,8 @@ const (
 	maxReportsPerRun = 20
 	maxTitleRunes    = 255
 	maxSummaryRunes  = 4000
+	// maxRunLog caps the run log Get returns for a request event, in bytes.
+	maxRunLog = 50_000
 )
 
 // Values mirrored from the main API (internal/database/models_events.go).
@@ -34,7 +36,7 @@ const (
 	sourceCron           = "cron"
 	classificationSource = "source"
 	statusFiring         = "firing"
-	incidentKindCron     = "cron"
+	runKindCron          = "cron"
 )
 
 var validKinds = map[string]bool{"alert": true, "change": true, "info": true, "request": true}
@@ -50,7 +52,7 @@ type EventsTool struct {
 	now    func() time.Time
 
 	mu      sync.Mutex
-	reports map[string]int // agent run (incident) UUID -> report_alert calls
+	reports map[string]int // run scope (X-Incident-ID) -> report_alert calls
 }
 
 // NewEventsTool creates a new EventsTool.
@@ -73,6 +75,7 @@ type eventSummary struct {
 	Classification string    `json:"classification"`
 	AlertUUID      string    `json:"alert_uuid,omitempty"`
 	IncidentUUID   string    `json:"incident_uuid,omitempty"`
+	ScopeUUID      string    `json:"scope_uuid,omitempty"`
 }
 
 type searchResponse struct {
@@ -125,7 +128,7 @@ func (t *EventsTool) Search(ctx context.Context, _ string, args map[string]inter
 
 	var rows []database.Event
 	if err := q.Order("occurred_at DESC, id DESC").Limit(limit).Offset(offset).
-		Select("uuid, kind, source_kind, source_type, title, host, service, severity, status, occurred_at, classification, alert_uuid, incident_uuid").
+		Select("uuid, kind, source_kind, source_type, title, host, service, severity, status, occurred_at, classification, alert_uuid, incident_uuid, scope_uuid").
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -136,7 +139,7 @@ func (t *EventsTool) Search(ctx context.Context, _ string, args map[string]inter
 			UUID: r.UUID, Kind: r.Kind, SourceKind: r.SourceKind, SourceType: r.SourceType,
 			Title: r.Title, Host: r.Host, Service: r.Service, Severity: r.Severity, Status: r.Status,
 			OccurredAt: r.OccurredAt, Classification: r.Classification,
-			AlertUUID: r.AlertUUID, IncidentUUID: r.IncidentUUID,
+			AlertUUID: r.AlertUUID, IncidentUUID: r.IncidentUUID, ScopeUUID: r.ScopeUUID,
 		})
 	}
 	return marshal(searchResponse{Events: out, Count: len(out), Limit: limit, Offset: offset})
@@ -147,10 +150,15 @@ type eventDetail struct {
 	database.Event
 	RawPayload          json.RawMessage `json:"raw_payload,omitempty"`
 	RawPayloadTruncated bool            `json:"raw_payload_truncated,omitempty"`
+	// Run is the agent work of a request event (a cron run, a Slack or API
+	// request): its newest answer and its log.
+	Run *database.RunsWork `json:"run,omitempty"`
 }
 
 // Get returns one event with its summary, labels, class reasoning and the raw
-// payload (cut to maxRawPayload bytes of JSON).
+// payload (cut to maxRawPayload bytes of JSON). A request event also returns
+// the work of its runs (answer and log, the log cut to its newest maxRunLog
+// bytes).
 func (t *EventsTool) Get(ctx context.Context, _ string, args map[string]interface{}) (interface{}, error) {
 	id := stringArg(args, "uuid")
 	if id == "" {
@@ -178,6 +186,15 @@ func (t *EventsTool) Get(ctx context.Context, _ string, args map[string]interfac
 		detail.RawPayload = raw
 	}
 	detail.Event.RawPayload = nil
+	if ev.ScopeUUID != "" {
+		work, err := database.LoadRunsWork(ctx, t.db, "scope_uuid", ev.ScopeUUID, maxRunLog)
+		if err != nil {
+			return nil, err
+		}
+		if work.Runs > 0 {
+			detail.Run = &work
+		}
+	}
 	return marshal(detail)
 }
 
@@ -213,15 +230,17 @@ func (t *EventsTool) ReportAlert(ctx context.Context, incidentID string, args ma
 	if incidentID == "" {
 		return nil, errors.New("report_alert needs the calling agent run")
 	}
-	var run database.Incident
-	if err := t.db.WithContext(ctx).Select("uuid, source_kind, source_uuid, context").
-		Where("uuid = ?", incidentID).First(&run).Error; err != nil {
+	// X-Incident-ID is the run's scope; the newest run of the scope is the
+	// caller.
+	var run database.AgentRun
+	if err := t.db.WithContext(ctx).Select("scope_uuid, source_kind, source_uuid").
+		Where("scope_uuid = ?", incidentID).Order("id DESC").First(&run).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("calling agent run not found")
 		}
 		return nil, err
 	}
-	if run.SourceKind != incidentKindCron {
+	if run.SourceKind != runKindCron {
 		return nil, errors.New("report_alert is only for cron runs; an incident investigation is already the response to an alert")
 	}
 
@@ -238,7 +257,11 @@ func (t *EventsTool) ReportAlert(ctx context.Context, incidentID string, args ma
 	t.reports[incidentID]++
 	t.mu.Unlock()
 
-	jobName, _ := run.Context["cron_job_name"].(string)
+	var jobName string
+	var job database.CronJob
+	if err := t.db.WithContext(ctx).Select("name").Where("uuid = ?", run.SourceUUID).Limit(1).Find(&job).Error; err == nil {
+		jobName = job.Name
+	}
 	now := t.now()
 	ev := database.Event{
 		UUID:       uuid.New().String(),

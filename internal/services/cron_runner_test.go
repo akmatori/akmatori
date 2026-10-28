@@ -188,12 +188,14 @@ func (f *fakeProviderRegistry) List() []database.MessagingProvider {
 
 // fakeSkillIncidentManager is the test double for SkillIncidentManager.
 // Only the methods exercised by the cron agent path are implemented; the rest
-// panic so a stray call from new code fails the test loudly. The handler
-// surface records SpawnAgentInvocation calls so tests can assert the cron
-// path stamps source_kind=cron/source_uuid=<job.uuid> on the Incident row
-// AND that it spawns the cron-agent root skill rather than incident-manager.
+// panic so a stray call from new code fails the test loudly. It records the
+// request scopes the tick prepares and the runs it begins, so tests can
+// assert the cron path stamps source_kind=cron/source_uuid=<job.uuid> on the
+// run AND that it starts the cron-agent root skill rather than
+// incident-manager.
 type fakeSkillIncidentManager struct {
 	spawnCalls        []fakeSpawnCall
+	runStarts         []RunStart
 	spawnIncidentID   string
 	spawnErr          error
 	updateStatusErr   error
@@ -205,13 +207,11 @@ type fakeSkillIncidentManager struct {
 	toolAllowlist []ToolAllowlistEntry
 }
 
-// fakeSpawnCall captures the rootSkillName + IncidentContext pair a tick
-// sent into the spawn surface. Recording both is what lets tests pin the
-// "cron-agent" framing — without the rootSkillName a regression that
-// fell back to incident-manager would still satisfy provenance assertions.
+// fakeSpawnCall captures the rootSkillName a tick prepared its request scope
+// with. Recording it is what lets tests pin the "cron-agent" framing.
 type fakeSpawnCall struct {
 	rootSkillName string
-	ctx           IncidentContext
+	eventUUID     string
 }
 
 type fakeIncidentUpdate struct {
@@ -222,38 +222,52 @@ type fakeIncidentUpdate struct {
 }
 
 func (f *fakeSkillIncidentManager) SpawnIncidentManager(ctx *IncidentContext) (string, string, error) {
-	panic("SpawnIncidentManager must not be called by cron runner — use SpawnAgentInvocation")
+	panic("SpawnIncidentManager must not be called by cron runner — a cron tick is request work")
 }
 
-func (f *fakeSkillIncidentManager) SpawnAgentInvocation(rootSkillName string, ctx *IncidentContext) (string, string, error) {
+func (f *fakeSkillIncidentManager) PrepareRequestScope(rootSkillName, eventUUID string) (string, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.spawnErr != nil {
 		return "", "", f.spawnErr
 	}
-	if ctx != nil {
-		f.spawnCalls = append(f.spawnCalls, fakeSpawnCall{rootSkillName: rootSkillName, ctx: *ctx})
-	}
+	f.spawnCalls = append(f.spawnCalls, fakeSpawnCall{rootSkillName: rootSkillName, eventUUID: eventUUID})
 	if f.spawnIncidentID == "" {
 		f.spawnIncidentID = "test-incident-uuid"
 	}
 	return f.spawnIncidentID, "/tmp/" + f.spawnIncidentID, nil
 }
-func (f *fakeSkillIncidentManager) UpdateIncidentStatus(uuid string, status database.IncidentStatus, _ string, _ string) error {
+func (f *fakeSkillIncidentManager) EnsureScopeDir(string, string) error { return nil }
+
+// BeginRun records the run; its run_id is "run-of-<scope>".
+func (f *fakeSkillIncidentManager) BeginRun(start RunStart) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.runStarts = append(f.runStarts, start)
+	return "run-of-" + start.ScopeUUID, f.updateStatusErr
+}
+func (f *fakeSkillIncidentManager) UpdateRunLog(string, string) error { return nil }
+
+// FinishRun records the outcome under the scope UUID (the run_id minus its
+// "run-of-" prefix), so assertions read like the incident-era ones.
+func (f *fakeSkillIncidentManager) FinishRun(runID string, outcome RunOutcome) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	status := database.IncidentStatusCompleted
+	if outcome.Failed {
+		status = database.IncidentStatusFailed
+	}
+	f.updates = append(f.updates, fakeIncidentUpdate{uuid: strings.TrimPrefix(runID, "run-of-"), status: status,
+		response: outcome.Response, fullLog: outcome.FullLog})
+	return f.updateCompleteErr
+}
+func (f *fakeSkillIncidentManager) UpdateIncidentStatus(uuid string, status database.IncidentStatus) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updates = append(f.updates, fakeIncidentUpdate{uuid: uuid, status: status})
 	return f.updateStatusErr
 }
-func (f *fakeSkillIncidentManager) UpdateIncidentComplete(uuid string, status database.IncidentStatus, _ string, fullLog string, response string, _ int, _ int64) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.updates = append(f.updates, fakeIncidentUpdate{uuid: uuid, status: status, response: response, fullLog: fullLog})
-	return f.updateCompleteErr
-}
-func (f *fakeSkillIncidentManager) UpdateIncidentLog(string, string) error         { return nil }
 func (f *fakeSkillIncidentManager) GetIncident(string) (*database.Incident, error) { return nil, nil }
-func (f *fakeSkillIncidentManager) AppendSubagentLog(string, string, string) error { return nil }
 func (f *fakeSkillIncidentManager) InsertFiringAlert(context.Context, string, string, alerts.NormalizedAlert, string, string) error {
 	return nil
 }
@@ -350,14 +364,16 @@ func (f *fakeIncidentRunner) IsWorkerConnected() bool {
 	return f.connected
 }
 
-func (f *fakeIncidentRunner) StartIncident(incidentID, task string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []ToolAllowlistEntry, callback IncidentCallback) (string, error) {
+func (f *fakeIncidentRunner) StartIncident(incidentID, runID, task string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []ToolAllowlistEntry, callback IncidentCallback) (string, error) {
 	f.mu.Lock()
 	if f.startErr != nil {
 		err := f.startErr
 		f.mu.Unlock()
 		return "", err
 	}
-	runID := fmt.Sprintf("run-%d", len(f.startCalls)+1)
+	if runID == "" {
+		runID = fmt.Sprintf("run-%d", len(f.startCalls)+1)
+	}
 	f.startCalls = append(f.startCalls, fakeStartCall{
 		incidentID: incidentID,
 		task:       task,
@@ -397,6 +413,7 @@ func setupCronRunnerTest(t *testing.T) (*CronRunner, *gorm.DB, *fakeScheduler, *
 		&database.ToolInstance{},
 		&database.LLMSettings{},
 		&database.Incident{},
+		&database.AgentRun{},
 		&database.FormattingRule{},
 	); err != nil {
 		t.Fatalf("automigrate: %v", err)
@@ -598,11 +615,11 @@ func TestCronRunner_Tick_RecordsProviderError(t *testing.T) {
 
 // ===== agent tick =====
 
-// TestCronRunner_AgentTick_SpawnsIncidentWithCronProvenance verifies the cron
-// agent path stamps source_kind="cron" + source_uuid=<job.uuid> on the
-// Incident row so the UI can link an investigation back to the scheduled job
-// that triggered it.
-func TestCronRunner_AgentTick_SpawnsIncidentWithCronProvenance(t *testing.T) {
+// TestCronRunner_AgentTick_StartsRequestRunWithCronProvenance verifies the
+// cron agent path stamps source_kind="cron" + source_uuid=<job.uuid> on the
+// run so the UI can link a run back to the scheduled job that triggered it,
+// and that it opens no incident.
+func TestCronRunner_AgentTick_StartsRequestRunWithCronProvenance(t *testing.T) {
 	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
 	skills := runner.skills.(*fakeSkillIncidentManager)
@@ -617,20 +634,27 @@ func TestCronRunner_AgentTick_SpawnsIncidentWithCronProvenance(t *testing.T) {
 	runner.WaitForInflight()
 
 	if len(skills.spawnCalls) != 1 {
-		t.Fatalf("expected one SpawnAgentInvocation call, got %d", len(skills.spawnCalls))
+		t.Fatalf("expected one PrepareRequestScope call, got %d", len(skills.spawnCalls))
 	}
 	spawn := skills.spawnCalls[0]
 	if spawn.rootSkillName != "cron-agent" {
 		t.Errorf("rootSkillName = %q, want cron-agent", spawn.rootSkillName)
 	}
-	if spawn.ctx.SourceKind != database.IncidentSourceKindCron {
-		t.Errorf("source_kind = %q, want %q", spawn.ctx.SourceKind, database.IncidentSourceKindCron)
+	if len(skills.runStarts) != 1 {
+		t.Fatalf("expected one BeginRun call, got %d", len(skills.runStarts))
 	}
-	if spawn.ctx.SourceUUID != job.UUID {
-		t.Errorf("source_uuid = %q, want %q", spawn.ctx.SourceUUID, job.UUID)
+	start := skills.runStarts[0]
+	if start.SourceKind != database.IncidentSourceKindCron {
+		t.Errorf("source_kind = %q, want %q", start.SourceKind, database.IncidentSourceKindCron)
 	}
-	if spawn.ctx.Source != "cron" {
-		t.Errorf("source = %q, want cron", spawn.ctx.Source)
+	if start.SourceUUID != job.UUID {
+		t.Errorf("source_uuid = %q, want %q", start.SourceUUID, job.UUID)
+	}
+	if start.IncidentUUID != "" {
+		t.Errorf("incident_uuid = %q, want none: a cron tick is never an incident", start.IncidentUUID)
+	}
+	if start.RootSkill != "cron-agent" || start.ScopeUUID != "test-incident-uuid" {
+		t.Errorf("run start = %+v", start)
 	}
 }
 
@@ -1767,15 +1791,15 @@ func TestCronRunner_AgentTick_FormatsOnMatchingRule(t *testing.T) {
 	runner, db, _, chMgr, prov := setupCronRunnerTest(t)
 	chUUID := chMgr.channels[0].UUID
 
-	// The fake spawn returns "test-incident-uuid"; seed the matching incident
-	// row so BuildFormatFlow resolves source_kind=cron.
-	if err := db.Create(&database.Incident{
-		UUID:       "test-incident-uuid",
-		Source:     "cron",
+	// The fake BeginRun returns "run-of-test-incident-uuid"; seed the
+	// matching run row so BuildFormatFlow resolves source_kind=cron.
+	if err := db.Create(&database.AgentRun{
+		RunID:      "run-of-test-incident-uuid",
+		ScopeUUID:  "test-incident-uuid",
 		SourceKind: database.IncidentSourceKindCron,
 		SourceUUID: "some-cron-uuid",
 	}).Error; err != nil {
-		t.Fatalf("seed incident: %v", err)
+		t.Fatalf("seed run: %v", err)
 	}
 	if err := db.Create(&database.FormattingRule{
 		UUID:                uuid.New().String(),
@@ -1825,7 +1849,7 @@ func TestCronRunner_AgentTick_FormatsOnMatchingRule(t *testing.T) {
 		}
 	}
 	if completed == nil {
-		t.Fatal("expected an UpdateIncidentComplete call with a response")
+		t.Fatal("expected a FinishRun call with a response")
 	}
 	if !contains(completed.response, "FORMATTED CRON REPORT") {
 		t.Errorf("persisted response not formatted: %q", completed.response)

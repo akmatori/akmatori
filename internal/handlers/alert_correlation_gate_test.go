@@ -80,18 +80,17 @@ func (s *corrGateSkillService) getLinkCount() int {
 }
 
 // SkillManager stubs (not used in these tests).
-func (s *corrGateSkillService) SpawnAgentInvocation(string, *services.IncidentContext) (string, string, error) {
+func (s *corrGateSkillService) PrepareRequestScope(string, string) (string, string, error) {
 	return "", "", nil
 }
-func (s *corrGateSkillService) UpdateIncidentStatus(string, database.IncidentStatus, string, string) error {
+func (s *corrGateSkillService) EnsureScopeDir(string, string) error         { return nil }
+func (s *corrGateSkillService) BeginRun(services.RunStart) (string, error)  { return "run-1", nil }
+func (s *corrGateSkillService) UpdateRunLog(string, string) error           { return nil }
+func (s *corrGateSkillService) FinishRun(string, services.RunOutcome) error { return nil }
+func (s *corrGateSkillService) UpdateIncidentStatus(string, database.IncidentStatus) error {
 	return nil
 }
-func (s *corrGateSkillService) UpdateIncidentComplete(string, database.IncidentStatus, string, string, string, int, int64) error {
-	return nil
-}
-func (s *corrGateSkillService) UpdateIncidentLog(string, string) error         { return nil }
 func (s *corrGateSkillService) GetIncident(string) (*database.Incident, error) { return nil, nil }
-func (s *corrGateSkillService) AppendSubagentLog(string, string, string) error { return nil }
 func (s *corrGateSkillService) CreateSkill(string, string, string, string) (*database.Skill, error) {
 	return nil, nil
 }
@@ -148,7 +147,7 @@ func (c *corrOneShotLLMCaller) OneShotLLM(ctx context.Context, _ *services.LLMSe
 func setupCorrelatorHandlerDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db := testhelpers.NewGlobalSQLiteDB(t,
-		&database.Incident{},
+		&database.Incident{}, &database.AgentRun{},
 		&database.Alert{},
 		&database.LLMSettings{},
 		&database.SlackSettings{},
@@ -219,7 +218,7 @@ func newCorrTestAlert() alerts.NormalizedAlert {
 func TestAlertHandler_Singleflight_15ConcurrentAlerts(t *testing.T) {
 	testhelpers.NewGlobalSQLiteDB(t,
 		&database.SlackSettings{},
-		&database.Incident{},
+		&database.Incident{}, &database.AgentRun{},
 		&database.Alert{},
 	)
 
@@ -408,7 +407,7 @@ func TestAlertHandler_WorkerNotConnected_Spawns(t *testing.T) {
 func TestAlertHandler_NilCorrelator_AlwaysSpawns(t *testing.T) {
 	testhelpers.NewGlobalSQLiteDB(t,
 		&database.SlackSettings{},
-		&database.Incident{},
+		&database.Incident{}, &database.AgentRun{},
 		&database.Alert{},
 	)
 

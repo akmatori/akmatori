@@ -25,7 +25,7 @@ type FormattingRule struct {
 	MatchSourceKind  string `gorm:"size:32" json:"match_source_kind"`  // alert|cron|slack_mention|manual|proposal
 	MatchSourceUUID  string `gorm:"size:36" json:"match_source_uuid"`  // trigger: incident.source_uuid (alert source, listener channel, cron job)
 	MatchChannelUUID string `gorm:"size:36" json:"match_channel_uuid"` // destination Channel.UUID
-	MatchLastSkill   string `gorm:"size:64" json:"match_last_skill"`   // Incident.LastSkillUsed skill name
+	MatchLastSkill   string `gorm:"size:64" json:"match_last_skill"`   // agent_runs.last_skill_used skill name
 
 	// MatchExpression is the advanced alternative to the simple match_*
 	// fields: a boolean expression over source_kind/trigger/channel/skill

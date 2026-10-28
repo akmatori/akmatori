@@ -511,7 +511,7 @@ func TestStartIncident_WorkerDisconnectFiresOnError(t *testing.T) {
 		},
 	}
 
-	runID, err := handler.StartIncident("incident-disconnect", "task", nil, nil, nil, cb)
+	runID, err := handler.StartIncident("incident-disconnect", "", "task", nil, nil, nil, cb)
 	if err != nil {
 		t.Fatalf("StartIncident: %v", err)
 	}
@@ -569,7 +569,7 @@ func TestStartIncident_WorkerDisconnectFailsRunRecord(t *testing.T) {
 
 	done := make(chan struct{})
 	cb := IncidentCallback{OnError: func(string) { close(done) }}
-	runID, err := handler.StartIncident("incident-disconnect-run", "task", nil, nil, nil, cb)
+	runID, err := handler.StartIncident("incident-disconnect-run", "", "task", nil, nil, nil, cb)
 	if err != nil {
 		t.Fatalf("StartIncident: %v", err)
 	}
@@ -615,7 +615,7 @@ func TestStartIncident_NoWorkerReturnsError(t *testing.T) {
 
 	handler := NewAgentWSHandler()
 	cb := IncidentCallback{}
-	runID, err := handler.StartIncident("incident-no-worker", "task", nil, nil, nil, cb)
+	runID, err := handler.StartIncident("incident-no-worker", "", "task", nil, nil, nil, cb)
 	if !errors.Is(err, ErrWorkerNotConnected) {
 		t.Fatalf("expected ErrWorkerNotConnected, got %v", err)
 	}
@@ -652,7 +652,7 @@ func TestStartIncident_SupersedingCallbackUnblocksPrevious(t *testing.T) {
 		OnError: func(msg string) { prevDone <- msg },
 	}
 
-	if _, err := handler.StartIncident("incident-supersede", "task-1", nil, nil, nil, prevCb); err != nil {
+	if _, err := handler.StartIncident("incident-supersede", "", "task-1", nil, nil, nil, prevCb); err != nil {
 		t.Fatalf("first StartIncident: %v", err)
 	}
 	firstReq := readNewIncidentRequest(t, conn)
@@ -669,7 +669,7 @@ func TestStartIncident_SupersedingCallbackUnblocksPrevious(t *testing.T) {
 		OnError:     func(msg string) { t.Errorf("new callback should not receive OnError: %q", msg) },
 	}
 
-	if _, err := handler.StartIncident("incident-supersede", "task-2", nil, nil, nil, newCb); err != nil {
+	if _, err := handler.StartIncident("incident-supersede", "", "task-2", nil, nil, nil, newCb); err != nil {
 		t.Fatalf("second StartIncident: %v", err)
 	}
 	secondReq := readNewIncidentRequest(t, conn)
@@ -805,7 +805,7 @@ func TestHandleAgentOutput_SupersedeWaitsForInFlightCallback(t *testing.T) {
 		},
 	}
 
-	if _, err := handler.StartIncident("incident-toctou", "task-1", nil, nil, nil, prevCb); err != nil {
+	if _, err := handler.StartIncident("incident-toctou", "", "task-1", nil, nil, nil, prevCb); err != nil {
 		t.Fatalf("first StartIncident: %v", err)
 	}
 	firstReq := readNewIncidentRequest(t, conn)
@@ -836,7 +836,7 @@ func TestHandleAgentOutput_SupersedeWaitsForInFlightCallback(t *testing.T) {
 	// (line below readNewIncidentRequest) once StartIncident returns.
 	secondStarted := make(chan error, 1)
 	go func() {
-		_, err := handler.StartIncident("incident-toctou", "task-2", nil, nil, nil, IncidentCallback{})
+		_, err := handler.StartIncident("incident-toctou", "", "task-2", nil, nil, nil, IncidentCallback{})
 		secondStarted <- err
 	}()
 
@@ -895,13 +895,13 @@ func TestStartIncident_SupersedingPrefersOnSuperseded(t *testing.T) {
 		OnSuperseded: func() { supersededFired <- struct{}{} },
 	}
 
-	if _, err := handler.StartIncident("incident-prefer-supersede", "task-1", nil, nil, nil, prevCb); err != nil {
+	if _, err := handler.StartIncident("incident-prefer-supersede", "", "task-1", nil, nil, nil, prevCb); err != nil {
 		t.Fatalf("first StartIncident: %v", err)
 	}
 	_ = readNewIncidentRequest(t, conn)
 
 	newCb := IncidentCallback{}
-	if _, err := handler.StartIncident("incident-prefer-supersede", "task-2", nil, nil, nil, newCb); err != nil {
+	if _, err := handler.StartIncident("incident-prefer-supersede", "", "task-2", nil, nil, nil, newCb); err != nil {
 		t.Fatalf("second StartIncident: %v", err)
 	}
 	_ = readNewIncidentRequest(t, conn)
@@ -913,193 +913,49 @@ func TestStartIncident_SupersedingPrefersOnSuperseded(t *testing.T) {
 	}
 }
 
-// TestHandleAgentOutput_NoCallbackWithRunIDDrops verifies that a late frame
-// carrying a run_id but with no live callback is dropped instead of falling
-// through to the blind full_log append. Without this filter, a stale frame
-// from a superseded run that arrives after the replacement run's callback
-// has been deleted would corrupt the incident's full_log.
-func TestHandleAgentOutput_NoCallbackWithRunIDDrops(t *testing.T) {
-	// In-memory sqlite so the fallback's UPDATE would succeed if it ran. We
-	// then confirm it did NOT run by reading the row back — full_log must
-	// remain empty.
+// TestHandleFrames_NoCallbackDropsAndOnlyRecordsMetrics verifies that frames
+// with no live callback (a superseded run finishing late, a run whose waiter
+// is gone) never touch the incident row: the run's waiter owns its log and
+// answer. Only the run's own metrics are recorded, keyed by run_id.
+func TestHandleFrames_NoCallbackDropsAndOnlyRecordsMetrics(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&database.Incident{}); err != nil {
-		t.Fatalf("migrate incident: %v", err)
+	if err := db.AutoMigrate(&database.Incident{}, &database.AgentRun{}); err != nil {
+		t.Fatalf("migrate: %v", err)
 	}
 	prevDB := database.DB
 	database.DB = db
 	t.Cleanup(func() { database.DB = prevDB })
 
-	if err := db.Create(&database.Incident{UUID: "incident-late-output", FullLog: ""}).Error; err != nil {
-		t.Fatalf("seed incident: %v", err)
+	if err := db.Create(&database.Incident{UUID: "inc-late", Status: database.IncidentStatusCompleted}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&database.AgentRun{RunID: "late-run", ScopeUUID: "inc-late", IncidentUUID: "inc-late",
+		Status: database.AgentRunStatusSuperseded, Response: "real answer"}).Error; err != nil {
+		t.Fatal(err)
 	}
 
 	handler := NewAgentWSHandler()
-	handler.handleAgentOutput(AgentMessage{
-		Type:       AgentMessageTypeAgentOutput,
-		IncidentID: "incident-late-output",
-		Output:     "stale output",
-		RunID:      "stale-run",
-	})
+	handler.handleAgentOutput(AgentMessage{Type: AgentMessageTypeAgentOutput, IncidentID: "inc-late", RunID: "late-run", Output: "late output"})
+	handler.handleAgentOutput(AgentMessage{Type: AgentMessageTypeAgentOutput, IncidentID: "inc-late", Output: "no run id"})
+	handler.handleAgentCompleted(AgentMessage{Type: AgentMessageTypeAgentCompleted, IncidentID: "inc-late", RunID: "late-run",
+		Output: "stale answer", TokensUsed: 77, LastSkill: "zabbix"})
+	handler.handleAgentError(AgentMessage{Type: AgentMessageTypeAgentError, IncidentID: "inc-late", RunID: "other-run", Error: "boom"})
 
-	var got database.Incident
-	if err := db.Where("uuid = ?", "incident-late-output").First(&got).Error; err != nil {
-		t.Fatalf("re-read incident: %v", err)
+	var inc database.Incident
+	db.Where("uuid = ?", "inc-late").First(&inc)
+	if inc.Status != database.IncidentStatusCompleted {
+		t.Errorf("incident status = %q, want completed (frames with no callback must not touch it)", inc.Status)
 	}
-	if got.FullLog != "" {
-		t.Errorf("full_log should remain empty when frame has run_id and no callback, got %q", got.FullLog)
+	var run database.AgentRun
+	db.Where("run_id = ?", "late-run").First(&run)
+	if run.TokensUsed != 77 || run.LastSkillUsed != "zabbix" {
+		t.Errorf("run = %+v, want its metrics and last skill recorded", run)
 	}
-
-	// Sanity check: a frame WITHOUT run_id still falls through to the
-	// fallback path (legacy worker / synthetic events) so the path itself
-	// is intact.
-	handler.handleAgentOutput(AgentMessage{
-		Type:       AgentMessageTypeAgentOutput,
-		IncidentID: "incident-late-output",
-		Output:     "legacy output",
-	})
-	if err := db.Where("uuid = ?", "incident-late-output").First(&got).Error; err != nil {
-		t.Fatalf("re-read incident: %v", err)
-	}
-	if got.FullLog != "legacy output" {
-		t.Errorf("legacy fallback should still write full_log, got %q", got.FullLog)
-	}
-}
-
-// TestHandleAgentCompleted_NoCallbackWithRunIDDrops verifies the parallel
-// drop-on-late-frame logic for completion frames: a late frame from a
-// superseded run must not overwrite the replacement run's status / response /
-// session_id after the replacement has already finalized.
-func TestHandleAgentCompleted_NoCallbackWithRunIDDrops(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&database.Incident{}); err != nil {
-		t.Fatalf("migrate incident: %v", err)
-	}
-	prevDB := database.DB
-	database.DB = db
-	t.Cleanup(func() { database.DB = prevDB })
-
-	if err := db.Create(&database.Incident{
-		UUID:      "incident-late-completed",
-		Status:    database.IncidentStatusCompleted,
-		Response:  "real response",
-		SessionID: "real-session",
-	}).Error; err != nil {
-		t.Fatalf("seed incident: %v", err)
-	}
-
-	handler := NewAgentWSHandler()
-	handler.handleAgentCompleted(AgentMessage{
-		Type:       AgentMessageTypeAgentCompleted,
-		IncidentID: "incident-late-completed",
-		Output:     "stale response",
-		SessionID:  "stale-session",
-		RunID:      "stale-run",
-	})
-
-	var got database.Incident
-	if err := db.Where("uuid = ?", "incident-late-completed").First(&got).Error; err != nil {
-		t.Fatalf("re-read incident: %v", err)
-	}
-	if got.Response != "real response" {
-		t.Errorf("response was overwritten by stale completion: got %q", got.Response)
-	}
-	if got.SessionID != "real-session" {
-		t.Errorf("session_id was overwritten by stale completion: got %q", got.SessionID)
-	}
-}
-
-// TestHandleAgentCompleted_LegacyFallback_EmptyOutputSkipsMetrics verifies
-// that when the legacy no-callback fallback persists an empty msg.Output,
-// it does NOT append the deterministic metrics footer to the DB row. The
-// callback-based finalize path drops metrics on empty success too
-// (appendFinalizeMetrics short-circuits on `response == ""`); the two paths
-// must stay in sync so a query against `incident.response` returns the
-// same shape regardless of which finalize path executed.
-func TestHandleAgentCompleted_LegacyFallback_EmptyOutputSkipsMetrics(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&database.Incident{}); err != nil {
-		t.Fatalf("migrate incident: %v", err)
-	}
-	prevDB := database.DB
-	database.DB = db
-	t.Cleanup(func() { database.DB = prevDB })
-
-	if err := db.Create(&database.Incident{
-		UUID:   "incident-legacy-empty",
-		Status: database.IncidentStatusRunning,
-	}).Error; err != nil {
-		t.Fatalf("seed incident: %v", err)
-	}
-
-	handler := NewAgentWSHandler()
-	handler.handleAgentCompleted(AgentMessage{
-		Type:            AgentMessageTypeAgentCompleted,
-		IncidentID:      "incident-legacy-empty",
-		Output:          "",
-		SessionID:       "session-legacy",
-		TokensUsed:      100,
-		ExecutionTimeMs: 5_000,
-	})
-
-	var got database.Incident
-	if err := db.Where("uuid = ?", "incident-legacy-empty").First(&got).Error; err != nil {
-		t.Fatalf("re-read incident: %v", err)
-	}
-	if got.Response != "" {
-		t.Errorf("legacy fallback must not append metrics to empty response (matching callback path): got %q", got.Response)
-	}
-}
-
-// TestHandleAgentError_NoCallbackWithRunIDDrops verifies the same drop-on-
-// late-frame contract for error frames: a late error from a superseded run
-// must not flip the incident to FAILED after the replacement run completed.
-func TestHandleAgentError_NoCallbackWithRunIDDrops(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&database.Incident{}); err != nil {
-		t.Fatalf("migrate incident: %v", err)
-	}
-	prevDB := database.DB
-	database.DB = db
-	t.Cleanup(func() { database.DB = prevDB })
-
-	if err := db.Create(&database.Incident{
-		UUID:     "incident-late-error",
-		Status:   database.IncidentStatusCompleted,
-		Response: "real response",
-	}).Error; err != nil {
-		t.Fatalf("seed incident: %v", err)
-	}
-
-	handler := NewAgentWSHandler()
-	handler.handleAgentError(AgentMessage{
-		Type:       AgentMessageTypeAgentError,
-		IncidentID: "incident-late-error",
-		Error:      "stale error",
-		RunID:      "stale-run",
-	})
-
-	var got database.Incident
-	if err := db.Where("uuid = ?", "incident-late-error").First(&got).Error; err != nil {
-		t.Fatalf("re-read incident: %v", err)
-	}
-	if got.Status != database.IncidentStatusCompleted {
-		t.Errorf("status flipped by stale error frame: got %q want %q", got.Status, database.IncidentStatusCompleted)
-	}
-	if got.Response != "real response" {
-		t.Errorf("response overwritten by stale error: got %q", got.Response)
+	if run.Response != "real answer" || run.FullLog != "" || run.Status != database.AgentRunStatusSuperseded {
+		t.Errorf("run = %+v, want answer, log and superseded status untouched", run)
 	}
 }
 
@@ -1120,7 +976,7 @@ func TestReleaseRun_DisplacedDuringFinalizationReturnsFalse(t *testing.T) {
 		OnSuperseded: func() { prevDone <- struct{}{} },
 	}
 
-	prevRunID, err := handler.StartIncident("incident-finalize-race", "task-1", nil, nil, nil, prevCb)
+	prevRunID, err := handler.StartIncident("incident-finalize-race", "", "task-1", nil, nil, nil, prevCb)
 	if err != nil {
 		t.Fatalf("first StartIncident: %v", err)
 	}
@@ -1160,7 +1016,7 @@ func TestReleaseRun_DisplacedDuringFinalizationReturnsFalse(t *testing.T) {
 	// OnSuperseded on the displaced callback, even though that callback has
 	// already received OnCompleted.
 	newCb := IncidentCallback{}
-	if _, err := handler.StartIncident("incident-finalize-race", "task-2", nil, nil, nil, newCb); err != nil {
+	if _, err := handler.StartIncident("incident-finalize-race", "", "task-2", nil, nil, nil, newCb); err != nil {
 		t.Fatalf("second StartIncident: %v", err)
 	}
 	_ = readNewIncidentRequest(t, conn)
@@ -1190,7 +1046,7 @@ func TestReleaseRun_OwningRunSucceeds(t *testing.T) {
 		OnCompleted: func(string, string, int, int64) { completed <- struct{}{} },
 	}
 
-	runID, err := handler.StartIncident("incident-finalize-ok", "task", nil, nil, nil, cb)
+	runID, err := handler.StartIncident("incident-finalize-ok", "", "task", nil, nil, nil, cb)
 	if err != nil {
 		t.Fatalf("StartIncident: %v", err)
 	}

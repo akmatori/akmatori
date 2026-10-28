@@ -745,7 +745,6 @@ func TestCronJobResponse_ExposesIsSystemAndTools(t *testing.T) {
 	}
 }
 
-
 // TestHandleCronJobs_ListMasksIntegrationCredentials asserts that
 // /api/cron-jobs does not echo plaintext Slack tokens back to the client.
 // The model layer eagerly preloads Channel.Integration via the runner, and

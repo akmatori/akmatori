@@ -47,7 +47,15 @@ func NewFeedbackClassifier(caller OneShotLLMCaller) *FeedbackClassifier {
 // ErrWorkerNotConnected when the worker is offline so callers can drop the
 // message silently. All other errors are wrapped — callers should
 // log-and-continue rather than retry.
-func (c *FeedbackClassifier) Classify(ctx context.Context, message string, incident *database.Incident) (FeedbackVerdict, error) {
+// FeedbackTarget is the agent work a thread reply is about: an incident or a
+// request. Response is the newest agent answer.
+type FeedbackTarget struct {
+	UUID     string
+	Title    string
+	Response string
+}
+
+func (c *FeedbackClassifier) Classify(ctx context.Context, message string, incident *FeedbackTarget) (FeedbackVerdict, error) {
 	if c == nil || c.caller == nil {
 		return FeedbackVerdict{}, ErrWorkerNotConnected
 	}
@@ -127,7 +135,7 @@ Confidence:
 
 Output JSON only. No code fences.`
 
-func buildFeedbackUserPrompt(message string, incident *database.Incident) string {
+func buildFeedbackUserPrompt(message string, incident *FeedbackTarget) string {
 	const messageCap = 2000
 	const responseCap = 1500
 	msg := truncateForPrompt(strings.TrimSpace(message), messageCap)

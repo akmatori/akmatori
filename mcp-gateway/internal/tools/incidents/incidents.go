@@ -39,7 +39,7 @@ type incidentSummary struct {
 	SourceUUID  string     `json:"source_uuid"`
 	StartedAt   time.Time  `json:"started_at"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
-	TokensUsed  int        `json:"tokens_used"`
+	TokensUsed  int64      `json:"tokens_used"`
 }
 
 // listResponse is the JSON envelope returned by List.
@@ -51,6 +51,8 @@ type listResponse struct {
 }
 
 // List returns a paginated, filtered list of incidents (summary fields only).
+// Only alerts open incidents; cron runs and other request work are events
+// (events.search source=cron, events.get).
 // Supported args: from (unix int), to (unix int), status (string), source_kind (string),
 // limit (int, default 50, max 200), offset (int).
 // incidentID is ignored — this tool queries globally.
@@ -101,9 +103,30 @@ func (t *IncidentsTool) List(ctx context.Context, _ string, args map[string]inte
 	if err := q.Order("started_at DESC").
 		Limit(limit).
 		Offset(offset).
-		Select("uuid, title, status, source_kind, source_uuid, started_at, completed_at, tokens_used").
+		Select("uuid, title, status, source_kind, source_uuid, started_at, completed_at").
 		Find(&rows).Error; err != nil {
 		return nil, err
+	}
+
+	// Tokens are spent by the incident's agent runs.
+	tokens := map[string]int64{}
+	if len(rows) > 0 {
+		uuids := make([]string, len(rows))
+		for i, r := range rows {
+			uuids[i] = r.UUID
+		}
+		var sums []struct {
+			IncidentUUID string
+			Tokens       int64
+		}
+		if err := t.db.WithContext(ctx).Model(&database.AgentRun{}).
+			Select("incident_uuid, SUM(tokens_used) AS tokens").
+			Where("incident_uuid IN ?", uuids).Group("incident_uuid").Scan(&sums).Error; err != nil {
+			return nil, err
+		}
+		for _, s := range sums {
+			tokens[s.IncidentUUID] = s.Tokens
+		}
 	}
 
 	summaries := make([]incidentSummary, 0, len(rows))
@@ -116,7 +139,7 @@ func (t *IncidentsTool) List(ctx context.Context, _ string, args map[string]inte
 			SourceUUID:  r.SourceUUID,
 			StartedAt:   r.StartedAt,
 			CompletedAt: r.CompletedAt,
-			TokensUsed:  r.TokensUsed,
+			TokensUsed:  tokens[r.UUID],
 		})
 	}
 
@@ -134,7 +157,9 @@ func (t *IncidentsTool) List(ctx context.Context, _ string, args map[string]inte
 	return string(b), nil
 }
 
-// incidentDetail is the get-view projection (excludes internal fields like WorkingDir, Context, SlackChannelID, etc.).
+// incidentDetail is the get-view projection (excludes internal fields like Context, SlackChannelID, etc.).
+// The agent work comes from the incident's runs: the newest answer, every
+// run's log and the sums.
 type incidentDetail struct {
 	UUID            string     `json:"uuid"`
 	Source          string     `json:"source"`
@@ -143,10 +168,10 @@ type incidentDetail struct {
 	SourceUUID      string     `json:"source_uuid"`
 	Title           string     `json:"title"`
 	Status          string     `json:"status"`
-	SessionID       string     `json:"session_id"`
+	Runs            int        `json:"runs"`
 	FullLog         string     `json:"full_log"`
 	Response        string     `json:"response"`
-	TokensUsed      int        `json:"tokens_used"`
+	TokensUsed      int64      `json:"tokens_used"`
 	ExecutionTimeMs int64      `json:"execution_time_ms"`
 	StartedAt       time.Time  `json:"started_at"`
 	CompletedAt     *time.Time `json:"completed_at,omitempty"`
@@ -154,9 +179,9 @@ type incidentDetail struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
-// Get returns the full incident record for the given uuid.
-// FullLog is truncated to 50,000 bytes if longer.
-// Internal fields (WorkingDir, Context, SlackChannelID, SlackMessageTS) are omitted.
+// Get returns the full incident record for the given uuid, with the work of
+// its agent runs. FullLog keeps its newest 50,000 bytes.
+// Internal fields (Context, SlackChannelID, SlackMessageTS) are omitted.
 // incidentID is ignored — this tool queries by the uuid arg.
 func (t *IncidentsTool) Get(ctx context.Context, _ string, args map[string]interface{}) (interface{}, error) {
 	uuidVal, ok := args["uuid"]
@@ -176,14 +201,9 @@ func (t *IncidentsTool) Get(ctx context.Context, _ string, args map[string]inter
 		return nil, err
 	}
 
-	fullLog := inc.FullLog
-	if len(fullLog) > maxFullLog {
-		// Drop any incomplete multi-byte sequence at the boundary; empty
-		// replacement keeps the result within maxFullLog bytes.
-		fullLog = strings.ToValidUTF8(fullLog[:maxFullLog], "")
-		if len(fullLog) > maxFullLog {
-			fullLog = fullLog[:maxFullLog]
-		}
+	work, err := database.LoadRunsWork(ctx, t.db, "incident_uuid", inc.UUID, maxFullLog)
+	if err != nil {
+		return nil, err
 	}
 
 	detail := incidentDetail{
@@ -194,11 +214,11 @@ func (t *IncidentsTool) Get(ctx context.Context, _ string, args map[string]inter
 		SourceUUID:      inc.SourceUUID,
 		Title:           inc.Title,
 		Status:          inc.Status,
-		SessionID:       inc.SessionID,
-		FullLog:         fullLog,
-		Response:        inc.Response,
-		TokensUsed:      inc.TokensUsed,
-		ExecutionTimeMs: inc.ExecutionTimeMs,
+		Runs:            work.Runs,
+		FullLog:         work.FullLog,
+		Response:        work.Response,
+		TokensUsed:      work.TokensUsed,
+		ExecutionTimeMs: work.ExecutionTimeMs,
 		StartedAt:       inc.StartedAt,
 		CompletedAt:     inc.CompletedAt,
 		CreatedAt:       inc.CreatedAt,

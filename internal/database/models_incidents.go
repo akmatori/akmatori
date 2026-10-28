@@ -24,7 +24,8 @@ const (
 	IncidentStatusMerged IncidentStatus = "merged"
 )
 
-// IncidentSourceKind enumerates the trigger kinds that can spawn an incident.
+// Trigger kinds. Incidents are always "alert" (only alerts open incidents);
+// the other kinds are the source_kind of request runs on agent_runs.
 const (
 	IncidentSourceKindAlert        = "alert"
 	IncidentSourceKindCron         = "cron"
@@ -46,29 +47,25 @@ const (
 	CloseReasonAutoStale = "auto_stale"
 )
 
-// Incident represents a spawned incident manager session
+// Incident is a production problem opened from an alert through the
+// correlation gate. Only alerts open incidents (see the events rule); the
+// agent work done on an incident lives on its agent_runs rows.
 type Incident struct {
-	ID              uint           `gorm:"primaryKey" json:"id"`
-	UUID            string         `gorm:"uniqueIndex;not null" json:"uuid"` // Unique UUID for this incident
-	Source          string         `gorm:"not null;index" json:"source"`     // e.g., "slack", "zabbix"
-	SourceID        string         `gorm:"index" json:"source_id"`           // e.g., thread_ts, alert_id
-	SourceKind      string         `gorm:"size:32;index" json:"source_kind"` // Trigger kind: "alert" | "cron" | "slack_mention"
-	SourceUUID      string         `gorm:"size:36;index" json:"source_uuid"` // UUID of the triggering entity (alert source instance, cron job, ...)
-	Title           string         `gorm:"type:varchar(255)" json:"title"`   // LLM-generated title summarizing the incident
-	Status          IncidentStatus `gorm:"type:varchar(50);not null;default:'pending'" json:"status"`
-	Context         JSONB          `gorm:"type:jsonb" json:"context"` // Event context (message, alert details, etc.)
-	SessionID       string         `gorm:"index" json:"session_id"`   // Agent session ID
-	WorkingDir      string         `json:"working_dir"`               // Path to incident working directory
-	FullLog         string         `gorm:"type:text" json:"full_log"` // Complete agent output log (reasoning, tool calls, etc.)
-	Response        string         `gorm:"type:text" json:"response"` // Final response/output to user
-	TokensUsed      int            `json:"tokens_used"`               // Total tokens used (input + output)
-	ExecutionTimeMs int64          `json:"execution_time_ms"`         // Execution time in milliseconds
-	StartedAt       time.Time      `json:"started_at"`
-	CompletedAt     *time.Time     `json:"completed_at,omitempty"`
-	ResolvedAt      *time.Time     `json:"resolved_at,omitempty"`
-	MonitorUntil    *time.Time     `json:"monitor_until,omitempty"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	ID           uint           `gorm:"primaryKey" json:"id"`
+	UUID         string         `gorm:"uniqueIndex;not null" json:"uuid"` // Unique UUID for this incident
+	Source       string         `gorm:"not null;index" json:"source"`     // e.g., "slack", "zabbix"
+	SourceID     string         `gorm:"index" json:"source_id"`           // e.g., thread_ts, alert_id
+	SourceKind   string         `gorm:"size:32;index" json:"source_kind"` // Trigger kind: "alert" | "cron" | "slack_mention"
+	SourceUUID   string         `gorm:"size:36;index" json:"source_uuid"` // UUID of the triggering entity (alert source instance, cron job, ...)
+	Title        string         `gorm:"type:varchar(255)" json:"title"`   // LLM-generated title summarizing the incident
+	Status       IncidentStatus `gorm:"type:varchar(50);not null;default:'pending'" json:"status"`
+	Context      JSONB          `gorm:"type:jsonb" json:"context"` // Event context (message, alert details, etc.)
+	StartedAt    time.Time      `json:"started_at"`
+	CompletedAt  *time.Time     `json:"completed_at,omitempty"`
+	ResolvedAt   *time.Time     `json:"resolved_at,omitempty"`
+	MonitorUntil *time.Time     `json:"monitor_until,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
 
 	// Slack context fields (for thread replies to source messages)
 	SlackChannelID string `gorm:"column:slack_channel_id" json:"slack_channel_id"` // Slack channel ID where alert originated
@@ -91,12 +88,6 @@ type Incident struct {
 	// "merged" (post-investigation root-cause merge). Empty otherwise.
 	MergedIntoUUID string `gorm:"size:36;index" json:"merged_into_uuid,omitempty"`
 
-	// LastSkillUsed is the name of the last skill whose SKILL.md the agent
-	// read during the investigation, reported by the worker on the
-	// agent_completed frame. Empty for runs that touched no skill. Used as a
-	// formatting-rule match dimension.
-	LastSkillUsed string `gorm:"size:64" json:"last_skill_used,omitempty"`
-
 	// ResultStatus is the agent's self-reported [FINAL_RESULT] status from
 	// the most recent completed run: "resolved" | "unresolved" | "escalate".
 	// Empty when the run produced no FINAL_RESULT block. Persisted from the
@@ -107,6 +98,17 @@ type Incident struct {
 
 	// AlertCount is not stored; populated by API handlers via COUNT query.
 	AlertCount int64 `gorm:"-" json:"alert_count"`
+
+	// The agent work lives on agent_runs. The detail endpoint fills these
+	// transient fields from the incident's runs: Response is the newest
+	// answer, FullLog is every run's log (oldest first, one header per run),
+	// TokensUsed and ExecutionTimeMs are the sums, Runs lists the runs
+	// without their payload.
+	Response        string     `gorm:"-" json:"response,omitempty"`
+	FullLog         string     `gorm:"-" json:"full_log,omitempty"`
+	TokensUsed      int64      `gorm:"-" json:"tokens_used"`
+	ExecutionTimeMs int64      `gorm:"-" json:"execution_time_ms"`
+	Runs            []AgentRun `gorm:"-" json:"runs,omitempty"`
 
 	// FirstSeen, LastSeen, and Trend are transient; populated by the list endpoint.
 	FirstSeen *time.Time `gorm:"-" json:"first_seen,omitempty"`

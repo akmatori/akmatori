@@ -37,7 +37,7 @@ func (s *statusSkillService) CloseIncident(ctx context.Context, incidentUUID str
 }
 
 func TestHandleAlertResolve_200_HappyPath(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{})
 
 	var capturedUUID string
 	svc := &statusSkillService{
@@ -63,7 +63,7 @@ func TestHandleAlertResolve_200_HappyPath(t *testing.T) {
 }
 
 func TestHandleAlertResolve_404_NotFound(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{})
 
 	svc := &statusSkillService{
 		resolveFn: func(context.Context, string) error { return gorm.ErrRecordNotFound },
@@ -82,7 +82,7 @@ func TestHandleAlertResolve_404_NotFound(t *testing.T) {
 }
 
 func TestHandleAlertResolve_409_AlreadyResolved(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{})
 
 	svc := &statusSkillService{
 		resolveFn: func(context.Context, string) error { return services.ErrAlertAlreadyResolved },
@@ -101,7 +101,7 @@ func TestHandleAlertResolve_409_AlreadyResolved(t *testing.T) {
 }
 
 func TestHandleIncidentClose_200_HappyPath(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{})
 
 	var capturedUUID string
 	var capturedConfirm bool
@@ -132,7 +132,7 @@ func TestHandleIncidentClose_200_HappyPath(t *testing.T) {
 }
 
 func TestHandleIncidentClose_409_InProgressRequiresConfirmation(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{})
 
 	svc := &statusSkillService{
 		closeFn: func(_ context.Context, _ string, confirm bool) error {
@@ -172,7 +172,7 @@ func TestHandleIncidentClose_409_InProgressRequiresConfirmation(t *testing.T) {
 }
 
 func TestHandleIncidentClose_409_RequiresConfirmation(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{})
 
 	svc := &statusSkillService{
 		closeFn: func(_ context.Context, _ string, confirm bool) error {

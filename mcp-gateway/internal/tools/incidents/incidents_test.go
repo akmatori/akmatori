@@ -19,7 +19,7 @@ func newTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&database.Incident{}); err != nil {
+	if err := db.AutoMigrate(&database.Incident{}, &database.AgentRun{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
@@ -41,12 +41,16 @@ func insertIncident(t *testing.T, db *gorm.DB, uuid, title, status, sourceKind, 
 		SourceKind: sourceKind,
 		SourceUUID: sourceUUID,
 		StartedAt:  startedAt,
-		FullLog:    fullLog,
-		Response:   "some response",
-		TokensUsed: 100,
 	}
 	if err := db.Create(&inc).Error; err != nil {
 		t.Fatalf("insert: %v", err)
+	}
+	// The agent work lives on the incident's run.
+	if err := db.Create(&database.AgentRun{
+		RunID: "run-" + uuid, ScopeUUID: uuid, IncidentUUID: uuid, StartedAt: startedAt,
+		FullLog: fullLog, Response: "some response", TokensUsed: 100,
+	}).Error; err != nil {
+		t.Fatalf("insert run: %v", err)
 	}
 }
 
@@ -414,5 +418,45 @@ func TestGet_IgnoresIncidentID(t *testing.T) {
 	}
 	if inc.UUID != "uuid-x" {
 		t.Errorf("expected uuid-x, got %s", inc.UUID)
+	}
+}
+
+// An incident with a Slack follow-up has two runs: Get returns the newest
+// answer, both logs in order and the sums.
+func TestGet_FoldsRuns(t *testing.T) {
+	db := newTestDB(t)
+	tool := newTool(db)
+	insertIncident(t, db, "multi", "Disk full", "monitor", "alert", "src", baseTime, "first log")
+	if err := db.Create(&database.AgentRun{
+		RunID: "run-multi-2", ScopeUUID: "multi", IncidentUUID: "multi", StartedAt: baseTime.Add(time.Hour),
+		FullLog: "second log", Response: "follow-up answer", TokensUsed: 50, ExecutionTimeMs: 7,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := tool.Get(context.Background(), "", map[string]interface{}{"uuid": "multi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d incidentDetail
+	if err := json.Unmarshal([]byte(out.(string)), &d); err != nil {
+		t.Fatal(err)
+	}
+	if d.Runs != 2 || d.Response != "follow-up answer" || d.TokensUsed != 150 || d.ExecutionTimeMs != 7 {
+		t.Fatalf("detail = %+v", d)
+	}
+	first, second := strings.Index(d.FullLog, "first log"), strings.Index(d.FullLog, "second log")
+	if first < 0 || second < first || !strings.Contains(d.FullLog, "=== Run 2 of 2") {
+		t.Fatalf("full_log = %q, want both runs in order with headers", d.FullLog)
+	}
+
+	list, err := tool.List(context.Background(), "", map[string]interface{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resp listResponse
+	_ = json.Unmarshal([]byte(list.(string)), &resp)
+	if len(resp.Incidents) != 1 || resp.Incidents[0].TokensUsed != 150 {
+		t.Fatalf("list = %+v, want tokens summed over runs", resp.Incidents)
 	}
 }

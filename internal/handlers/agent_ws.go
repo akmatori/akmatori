@@ -13,10 +13,8 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/output"
 	"github.com/akmatori/akmatori/internal/services"
-	"github.com/akmatori/akmatori/internal/utils"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"gorm.io/gorm"
 )
 
 // AgentMessageType represents the type of WebSocket message
@@ -451,25 +449,12 @@ func (h *AgentWSHandler) handleAgentOutput(msg AgentMessage) {
 		return
 	}
 
-	// No callback registered. If the frame carries a run_id, the run that
-	// produced it has already completed (its callback was deleted) or was
-	// superseded; appending late output to full_log would either re-append
-	// content the new run already wrote or stamp stale text from a stale
-	// run. Drop instead. The legacy fallback below only runs for frames
-	// with no run_id (older workers, synthetic test events) so the API can
-	// still recover data when the message has no run identity.
-	if msg.RunID != "" {
-		slog.Debug("dropping agent_output with no live callback",
-			"incident_id", msg.IncidentID,
-			"msg_run_id", msg.RunID)
-		return
-	}
-
-	if err := database.GetDB().Model(&database.Incident{}).
-		Where("uuid = ?", msg.IncidentID).
-		Update("full_log", gorm.Expr("COALESCE(full_log, '') || ?", msg.Output)).Error; err != nil {
-		slog.Error("failed to update incident log", "err", err)
-	}
+	// No callback registered: the run that produced the frame already
+	// completed (its callback was deleted) or was superseded. The run's log
+	// is written by its waiter (UpdateRunLog), so a late frame is dropped.
+	slog.Debug("dropping agent_output with no live callback",
+		"incident_id", msg.IncidentID,
+		"msg_run_id", msg.RunID)
 }
 
 // dispatchOnOutput delivers the frame to the registered callback under the
@@ -545,8 +530,8 @@ func (h *AgentWSHandler) handleAgentCompleted(msg AgentMessage) {
 	}
 
 	// Persist the agent's self-reported outcome BEFORE the completion
-	// callback fires, mirroring the last_skill contract below, so the
-	// finalizer goroutine sees it on the incident row. Guarded so a
+	// callback fires so the finalizer goroutine sees it on the incident row
+	// (request scopes have no incident row; the update is a no-op). Guarded so a
 	// superseded run's late frame cannot overwrite the current run's verdict.
 	if outcome != "" && h.isCurrentRun(msg.IncidentID, msg.RunID) {
 		if err := database.GetDB().Model(&database.Incident{}).
@@ -557,15 +542,15 @@ func (h *AgentWSHandler) handleAgentCompleted(msg AgentMessage) {
 	}
 
 	// Persist the last skill BEFORE the completion callback fires: the
-	// finalizer goroutine unblocked by OnCompleted reads the incident row
+	// finalizer goroutine unblocked by OnCompleted reads the run row
 	// (BuildFormatFlow) to match formatting rules, so the column must be
-	// visible by then. Guarded so a superseded run's late frame cannot
-	// overwrite the current run's observation.
-	if msg.LastSkill != "" && h.isCurrentRun(msg.IncidentID, msg.RunID) {
-		if err := database.GetDB().Model(&database.Incident{}).
-			Where("uuid = ?", msg.IncidentID).
+	// visible by then. Keyed by run_id, so a superseded run's late frame
+	// only writes its own row.
+	if msg.LastSkill != "" && msg.RunID != "" {
+		if err := database.GetDB().Model(&database.AgentRun{}).
+			Where("run_id = ?", msg.RunID).
 			Update("last_skill_used", msg.LastSkill).Error; err != nil {
-			slog.Warn("failed to persist last skill used", "incident_id", msg.IncidentID, "err", err)
+			slog.Warn("failed to persist last skill used", "run_id", msg.RunID, "err", err)
 		}
 	}
 
@@ -573,48 +558,13 @@ func (h *AgentWSHandler) handleAgentCompleted(msg AgentMessage) {
 		return
 	}
 
-	if msg.RunID != "" {
-		// No live callback and the frame carries a run_id. The current run
-		// already completed (its callback was deleted in the matching final
-		// dispatch) so this completion is from a superseded run finishing
-		// after the swap. Falling through to the DB fallback would overwrite
-		// the replacement run's status / response / session_id with stale
-		// values; drop instead.
-		slog.Debug("dropping agent_completed with no live callback",
-			"incident_id", msg.IncidentID,
-			"msg_run_id", msg.RunID)
-		return
-	}
-
-	// No callback registered and no run_id (legacy worker / synthetic
-	// test event): update database directly as fallback. Append metrics
-	// here because this path does not run the response formatter. Skip
-	// the metrics line when msg.Output is empty so this fallback path
-	// matches the callback path's appendFinalizeMetrics contract — empty
-	// success keeps an empty incident.response in both paths.
-	var responseWithMetrics string
-	if msg.Output != "" {
-		executionTime := time.Duration(msg.ExecutionTimeMs) * time.Millisecond
-		responseWithMetrics = utils.AppendMetrics(msg.Output, executionTime, msg.TokensUsed)
-	}
-	now := time.Now()
-	if err := database.GetDB().Model(&database.Incident{}).
-		Where("uuid = ?", msg.IncidentID).
-		Updates(map[string]interface{}{
-			"status":     database.IncidentStatusCompleted,
-			"session_id": msg.SessionID,
-			"response":   responseWithMetrics,
-			// Accumulate across runs: multi-turn incidents (Slack chat)
-			// complete once per turn, and the incident-level numbers are the
-			// total spend, not the last run's. Per-run numbers live on
-			// agent_runs.
-			"tokens_used":       gorm.Expr("tokens_used + ?", msg.TokensUsed),
-			"execution_time_ms": gorm.Expr("execution_time_ms + ?", msg.ExecutionTimeMs),
-			"last_skill_used":   msg.LastSkill,
-			"completed_at":      &now,
-		}).Error; err != nil {
-		slog.Error("failed to update incident completion", "err", err)
-	}
+	// No live callback: the current run already completed (its callback was
+	// deleted in the matching final dispatch), so this completion is from a
+	// superseded run finishing after the swap, or from a run whose waiter is
+	// gone. The run's metrics are recorded above; its waiter owns the rest.
+	slog.Debug("dropping agent_completed with no live callback",
+		"incident_id", msg.IncidentID,
+		"msg_run_id", msg.RunID)
 }
 
 // parseRunOutcome extracts the agent's self-reported [FINAL_RESULT] status
@@ -639,7 +589,7 @@ func parseRunOutcome(rawOutput string) string {
 
 // isCurrentRun reports whether a frame carrying runID belongs to the
 // incident's current (non-finalized) run. Used to gate side-effect writes
-// (e.g. last_skill_used) that must not be overwritten by a superseded run's
+// (e.g. result_status) that must not be overwritten by a superseded run's
 // late frames. Frames without a run_id are accepted when a live entry exists
 // or when no callback is registered at all (legacy worker / synthetic test
 // events, mirroring the DB-fallback trust level).
@@ -728,30 +678,12 @@ func (h *AgentWSHandler) handleAgentError(msg AgentMessage) {
 		return
 	}
 
-	if msg.RunID != "" {
-		// No live callback and the frame carries a run_id. Drop instead of
-		// overwriting incident status with a late error from a superseded
-		// (or already-finalized) run — the replacement run, if any, owns
-		// finalization.
-		slog.Debug("dropping agent_error with no live callback",
-			"incident_id", msg.IncidentID,
-			"msg_run_id", msg.RunID,
-			"err", msg.Error)
-		return
-	}
-
-	// No callback registered and no run_id (legacy worker / synthetic
-	// test event): update database directly as fallback.
-	now := time.Now()
-	if err := database.GetDB().Model(&database.Incident{}).
-		Where("uuid = ?", msg.IncidentID).
-		Updates(map[string]interface{}{
-			"status":       database.IncidentStatusFailed,
-			"response":     msg.Error,
-			"completed_at": &now,
-		}).Error; err != nil {
-		slog.Error("failed to update incident error", "err", err)
-	}
+	// No live callback: a late error from a superseded (or already
+	// finalized) run. The replacement run, if any, owns finalization.
+	slog.Debug("dropping agent_error with no live callback",
+		"incident_id", msg.IncidentID,
+		"msg_run_id", msg.RunID,
+		"err", msg.Error)
 }
 
 // dispatchOnError mirrors dispatchOnCompleted for error frames: deliver the
@@ -845,11 +777,12 @@ func (h *AgentWSHandler) SendToWorker(msg AgentMessage) error {
 	return h.workerConn.WriteMessage(websocket.TextMessage, data)
 }
 
-// StartIncident sends a new incident to the agent worker. Returns the
-// generated run_id alongside any error so the caller can later identify its
-// own run (e.g. via ReleaseRun) without racing concurrent registrations on
-// the same incident_id.
-func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []services.ToolAllowlistEntry, callback IncidentCallback) (string, error) {
+// StartIncident sends a new run to the agent worker. incidentID is the work
+// scope (incident UUID or request scope); runID is the run created with
+// BeginRun ("" generates one). Returns the run_id alongside any error so the
+// caller can later identify its own run (e.g. via ReleaseRun) without racing
+// concurrent registrations on the same scope.
+func (h *AgentWSHandler) StartIncident(incidentID, runID, task string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []services.ToolAllowlistEntry, callback IncidentCallback) (string, error) {
 	msg := AgentMessage{
 		Type:          AgentMessageTypeNewIncident,
 		IncidentID:    incidentID,
@@ -881,12 +814,12 @@ func (h *AgentWSHandler) StartIncident(incidentID, task string, llm *LLMSettings
 		}
 	}
 
-	return h.sendIncidentMessage(incidentID, callback, msg)
+	return h.sendIncidentMessage(incidentID, runID, callback, msg)
 }
 
 // ContinueIncident sends a follow-up message to an existing incident. See
 // StartIncident for the run_id return contract.
-func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []services.ToolAllowlistEntry, callback IncidentCallback) (string, error) {
+func (h *AgentWSHandler) ContinueIncident(incidentID, runID, sessionID, message string, llm *LLMSettingsForWorker, enabledSkills []string, toolAllowlist []services.ToolAllowlistEntry, callback IncidentCallback) (string, error) {
 	msg := AgentMessage{
 		Type:          AgentMessageTypeContinueIncident,
 		IncidentID:    incidentID,
@@ -919,7 +852,7 @@ func (h *AgentWSHandler) ContinueIncident(incidentID, sessionID, message string,
 		}
 	}
 
-	return h.sendIncidentMessage(incidentID, callback, msg)
+	return h.sendIncidentMessage(incidentID, runID, callback, msg)
 }
 
 // ReleaseRun atomically removes the callback entry for incidentID iff it is
@@ -951,7 +884,7 @@ func (h *AgentWSHandler) ReleaseRun(incidentID, runID string) bool {
 // promptly when A drops mid-investigation. Without this, callers blocking on
 // <-done would wait forever after the worker disappears.
 //
-// Each call generates a fresh run_id (UUID) and stamps it on both the
+// Each call stamps the caller's run_id (a fresh UUID when empty) on both the
 // outgoing message and the registered callback entry. The worker echoes the
 // run_id on every agent_output / agent_completed / agent_error frame; the
 // dispatch path filters by run_id so a superseded run cannot leak late frames
@@ -965,8 +898,10 @@ func (h *AgentWSHandler) ReleaseRun(incidentID, runID string) bool {
 // for incident_id route to the new callback only — without this signal the
 // displaced goroutine would block on its done channel forever and disconnect
 // cleanup could not reach it (the entry was overwritten in place).
-func (h *AgentWSHandler) sendIncidentMessage(incidentID string, callback IncidentCallback, msg AgentMessage) (string, error) {
-	runID := uuid.NewString()
+func (h *AgentWSHandler) sendIncidentMessage(incidentID, runID string, callback IncidentCallback, msg AgentMessage) (string, error) {
+	if runID == "" {
+		runID = uuid.NewString()
+	}
 	msg.RunID = runID
 
 	data, err := json.Marshal(msg)
@@ -1023,9 +958,10 @@ func (h *AgentWSHandler) sendIncidentMessage(incidentID string, callback Inciden
 	h.callbackMu.Unlock()
 	h.mu.Unlock()
 
-	// Record the run for model performance telemetry. Best-effort: a failed
-	// insert (e.g. schema-less test DB) must never block the investigation.
-	if err := database.CreateAgentRun(runID, incidentID, msg.Provider, msg.Model, msg.ThinkingLevel); err != nil {
+	// Record the model on the run row (created by BeginRun; created here
+	// when the caller made none). Best-effort: a failed write (e.g.
+	// schema-less test DB) must never block the investigation.
+	if err := database.RecordAgentRunDispatch(runID, incidentID, msg.Provider, msg.Model, msg.ThinkingLevel); err != nil {
 		slog.Warn("failed to record agent run start", "incident_id", incidentID, "run_id", runID, "err", err)
 	}
 	// The displaced run's row stays queryable but is labeled so stats can

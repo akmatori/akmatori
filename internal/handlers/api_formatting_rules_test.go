@@ -241,10 +241,10 @@ func TestFormattingRules_Reorder(t *testing.T) {
 
 	// Set mismatch → 400 and order unchanged.
 	for _, bad := range []string{
-		fmt.Sprintf(`{"uuids":[%q,%q]}`, a.UUID, b.UUID),                            // missing one
-		fmt.Sprintf(`{"uuids":[%q,%q,%q]}`, a.UUID, b.UUID, "not-a-known-uuid"),     // unknown
-		fmt.Sprintf(`{"uuids":[%q,%q,%q,%q]}`, a.UUID, b.UUID, c.UUID, c.UUID),      // duplicate
-		fmt.Sprintf(`{"uuids":[%q,%q,%q]}`, a.UUID, a.UUID, b.UUID),                 // duplicate replacing one
+		fmt.Sprintf(`{"uuids":[%q,%q]}`, a.UUID, b.UUID),                        // missing one
+		fmt.Sprintf(`{"uuids":[%q,%q,%q]}`, a.UUID, b.UUID, "not-a-known-uuid"), // unknown
+		fmt.Sprintf(`{"uuids":[%q,%q,%q,%q]}`, a.UUID, b.UUID, c.UUID, c.UUID),  // duplicate
+		fmt.Sprintf(`{"uuids":[%q,%q,%q]}`, a.UUID, a.UUID, b.UUID),             // duplicate replacing one
 	} {
 		req = httptest.NewRequest(http.MethodPut, "/api/formatting-rules/reorder", strings.NewReader(bad))
 		w = httptest.NewRecorder()

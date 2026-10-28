@@ -8,7 +8,8 @@ paths:
 
 Flow: agent reads generated `SKILL.md` guidance → agent calls
 `gateway_call(toolName, args, instanceHint?)` → worker sends JSON-RPC to MCP Gateway with
-`X-Incident-ID` → gateway resolves routing, enforces allowlists, executes, returns output.
+`X-Incident-ID` (the run's scope: incident UUID or request scope, see the `agent-runs` rule) →
+gateway resolves routing, enforces allowlists, executes, returns output.
 
 - do not teach agents to call tool implementations directly; routing is handled by logical instance
   names or instance hints
@@ -28,8 +29,9 @@ own incident records. It is the only built-in tool that queries the gateway's ow
 - registered in `registry.go` via `registerIncidentsTools()` with no rate limiter
 - `incidents` is in `builtInToolNamespaces`; the auth allowlist entry shape is
   `{ToolType: "incidents"}` (no InstanceID/LogicalName)
-- `List` returns summary fields only (no `full_log`/`response`); `Get` returns the full record with
-  `full_log` truncated to 50,000 bytes
+- `List` returns summary fields only (tokens summed over the runs); `Get` folds the incident's
+  `agent_runs` (mirror model `AgentRun`, `database.LoadRunsWork`): newest `response`, every run's log
+  keeping the newest 50,000 bytes
 - when adding another credential-less built-in tool, follow the same seed pattern in
   `EnsureToolTypes()` and the same `registerXxxTools()` pattern in `registry.go`
 
@@ -44,7 +46,9 @@ report a problem. Same seed and registration pattern as `incidents`; `events` is
 
 - every agent run is allowed it: the API adds a type-only `{ToolType: "events"}` entry to every
   allowlist (`withEventsTool` in `GetToolAllowlist` and `buildCronToolAllowlist`)
-- `report_alert` refuses non-cron runs (it looks up the calling run by `X-Incident-ID`), caps reports
+- `get` on a request event adds `run` (the scope's answer and log)
+- `report_alert` refuses non-cron runs (it looks up the newest run of the `X-Incident-ID` scope and
+  takes the job name from `cron_jobs`), caps reports
   at 20 per run, and only INSERTS an event with `pending_dispatch=true`: the gateway cannot reach the
   API, so the API's `ReportedEventDispatcher` (5 s poll, conditional-update claim) runs it through
   `ProcessReportedAlert`

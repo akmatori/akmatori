@@ -71,15 +71,15 @@ func linkEventToAlert(db *gorm.DB, eventUUID, alertUUID, incidentUUID string) {
 	}
 }
 
-// linkEventToIncident stamps the incident (agent-run row) a request event
-// started. Best-effort, like linkEventToAlert.
-func linkEventToIncident(db *gorm.DB, eventUUID, incidentUUID string) {
+// linkEventToScope stamps the request work a request event started or
+// continued. Best-effort, like linkEventToAlert.
+func linkEventToScope(db *gorm.DB, eventUUID, scopeUUID string) {
 	if eventUUID == "" {
 		return
 	}
 	if err := db.Model(&database.Event{}).Where("uuid = ?", eventUUID).
-		Update("incident_uuid", incidentUUID).Error; err != nil {
-		slog.Warn("link event to incident failed", "event_uuid", eventUUID, "incident_uuid", incidentUUID, "err", err)
+		Update("scope_uuid", scopeUUID).Error; err != nil {
+		slog.Warn("link event to request scope failed", "event_uuid", eventUUID, "scope_uuid", scopeUUID, "err", err)
 	}
 }
 
@@ -564,56 +564,25 @@ func (s *SkillService) MoveAlertToIncident(ctx context.Context, alertUUID, targe
 
 // IncidentContext contains context for spawning an incident manager
 type IncidentContext struct {
-	Source     string         // e.g., "slack", "zabbix"
-	SourceID   string         // e.g., thread_ts, alert_id
-	SourceKind string         // Trigger kind: "alert" | "cron" | "slack_mention"
-	SourceUUID string         // UUID of the triggering entity (alert source instance, cron job, ...)
+	Source     string         // e.g., "zabbix", "slack_mention", "api"
+	SourceID   string         // e.g., alert_id, thread_ts
+	SourceKind string         // Always "alert": only alerts open incidents
+	SourceUUID string         // UUID of the alert source instance / reporter channel
 	Context    database.JSONB // Event details
 	Message    string         // Original message/alert text for title generation
-	// EventUUID is the events row that started this run (request events).
-	// When set, the new incident row is linked back onto the event.
-	EventUUID string
 }
 
-// SpawnIncidentManager creates a new incident-manager-rooted agent invocation.
-// Kept as a named entrypoint so existing handler call sites (alerts, Slack
-// mentions, manual incidents) stay unchanged; cron runs go through
-// SpawnAgentInvocation directly with a different rootSkillName.
+// SpawnIncidentManager opens an incident: the work directory (AGENTS.md
+// under the incident-manager root) and the incidents row. Only alerts open
+// incidents; request work uses PrepareRequestScope. The agent runs that
+// work on the incident are created with BeginRun.
+//
+// Returns the new incident UUID + working directory.
 func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, string, error) {
-	return s.SpawnAgentInvocation("incident-manager", ctx)
-}
-
-// SpawnAgentInvocation creates a new agent run rooted in the named system
-// skill. The root skill's prompt becomes the AGENTS.md root (the file pi-mono
-// reads when starting a session); cross-incident memory recall is appended
-// below the prompt so the agent has an always-up-to-date global manifest
-// regardless of which root prompt it ran under.
-//
-// rootSkillName is one of:
-//   - "incident-manager" — alert/Slack/manual investigations (default path)
-//   - "cron-agent"       — scheduled cron-driven runs (post-redesign)
-//   - "proposal-editor"  — proposal refinement chat turns
-//
-// Returns the new incident UUID + working directory so the caller can stream
-// updates back through it.
-func (s *SkillService) SpawnAgentInvocation(rootSkillName string, ctx *IncidentContext) (string, string, error) {
-	// Generate UUID for this incident
 	incidentUUID := uuid.New().String()
-
-	// Create incident directory with 0777 permissions so agent worker (UID 1001) can create files
-	incidentDir := filepath.Join(s.incidentsDir, incidentUUID)
-	if err := os.MkdirAll(incidentDir, 0777); err != nil {
-		return "", "", fmt.Errorf("failed to create incident directory: %w", err)
-	}
-	// Ensure directory has correct permissions even if parent existed
-	if err := os.Chmod(incidentDir, 0777); err != nil {
-		slog.Error("failed to chmod incident directory", "dir", incidentDir, "err", err)
-	}
-
-	// Generate AGENTS.md at workspace root (pi-mono reads agentDir from cwd)
-	agentsMdPath := filepath.Join(incidentDir, "AGENTS.md")
-	if err := s.generateAgentsMd(agentsMdPath, rootSkillName, incidentUUID); err != nil {
-		return "", "", fmt.Errorf("failed to generate AGENTS.md: %w", err)
+	incidentDir, err := s.prepareScopeDir("incident-manager", incidentUUID)
+	if err != nil {
+		return "", "", err
 	}
 
 	// NOTE: Tool credentials are NOT written to incident directory
@@ -627,24 +596,25 @@ func (s *SkillService) SpawnAgentInvocation(rootSkillName string, ctx *IncidentC
 	// Read alert fingerprint from context if set (alert-sourced incidents only).
 	alertFingerprint, _ := ctx.Context["alert_fingerprint"].(string)
 
-	// Create incident record in database with fallback title
+	sourceKind := ctx.SourceKind
+	if sourceKind == "" {
+		sourceKind = database.IncidentSourceKindAlert
+	}
 	incident := &database.Incident{
 		UUID:             incidentUUID,
 		Source:           ctx.Source,
 		SourceID:         ctx.SourceID,
-		SourceKind:       ctx.SourceKind,
+		SourceKind:       sourceKind,
 		SourceUUID:       ctx.SourceUUID,
 		Title:            title,
 		Status:           database.IncidentStatusPending,
 		Context:          ctx.Context,
-		WorkingDir:       incidentDir, // Working dir is incident root
 		AlertFingerprint: alertFingerprint,
 	}
 
 	if err := s.db.Create(incident).Error; err != nil {
 		return "", "", fmt.Errorf("failed to create incident record: %w", err)
 	}
-	linkEventToIncident(s.db, ctx.EventUUID, incidentUUID)
 
 	// Generate LLM title in background and update DB when ready
 	if ctx.Message != "" && len(ctx.Message) >= 10 {
@@ -666,6 +636,168 @@ func (s *SkillService) SpawnAgentInvocation(rootSkillName string, ctx *IncidentC
 	}
 
 	return incidentUUID, incidentDir, nil
+}
+
+// PrepareRequestScope creates the work directory for new request work (a
+// Slack thread, an API task, a cron tick, a proposal chat). The scope is the
+// request event's UUID, so the event and its runs share one id; a request
+// whose event was not recorded gets a fresh UUID. No row is written: the
+// runs (BeginRun) and the event are the request's records.
+//
+// rootSkillName is one of "incident-manager" (Slack/API requests),
+// "cron-agent" or "proposal-editor".
+func (s *SkillService) PrepareRequestScope(rootSkillName, eventUUID string) (string, string, error) {
+	scopeUUID := eventUUID
+	if scopeUUID == "" {
+		scopeUUID = uuid.New().String()
+	}
+	dir, err := s.prepareScopeDir(rootSkillName, scopeUUID)
+	if err != nil {
+		return "", "", err
+	}
+	return scopeUUID, dir, nil
+}
+
+// EnsureScopeDir makes sure a follow-up turn of existing work has its work
+// directory. Retention may have removed the directory of old request work;
+// the follow-up then gets a fresh AGENTS.md. Existing directories are left
+// alone.
+func (s *SkillService) EnsureScopeDir(rootSkillName, scopeUUID string) error {
+	dir := filepath.Join(s.incidentsDir, scopeUUID)
+	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); err == nil {
+		return nil
+	}
+	_, err := s.prepareScopeDir(rootSkillName, scopeUUID)
+	return err
+}
+
+// prepareScopeDir creates the work directory of a scope and writes its
+// AGENTS.md. The root skill's prompt becomes the AGENTS.md root (the file
+// pi-mono reads when starting a session); cross-incident memory recall is
+// appended below the prompt.
+func (s *SkillService) prepareScopeDir(rootSkillName, scopeUUID string) (string, error) {
+	// 0777 so the agent worker (UID 1001) can create files
+	dir := filepath.Join(s.incidentsDir, scopeUUID)
+	if err := os.MkdirAll(dir, 0777); err != nil {
+		return "", fmt.Errorf("failed to create work directory: %w", err)
+	}
+	// Ensure directory has correct permissions even if parent existed
+	if err := os.Chmod(dir, 0777); err != nil {
+		slog.Error("failed to chmod work directory", "dir", dir, "err", err)
+	}
+	if err := s.generateAgentsMd(filepath.Join(dir, "AGENTS.md"), rootSkillName, scopeUUID); err != nil {
+		return "", fmt.Errorf("failed to generate AGENTS.md: %w", err)
+	}
+	return dir, nil
+}
+
+// RunStart describes one agent run before it is dispatched.
+type RunStart struct {
+	// ScopeUUID is the work scope: the incident UUID for incident work, the
+	// request scope for request work.
+	ScopeUUID string
+	// IncidentUUID is set for incident work; it is also the scope.
+	IncidentUUID string
+	// EventUUID is the event that triggered the run.
+	EventUUID  string
+	SourceKind string
+	SourceUUID string
+	RootSkill  string
+	// SlackChannelID/SlackThreadTS: the thread a request run answers in.
+	SlackChannelID string
+	SlackThreadTS  string
+}
+
+// BeginRun creates the agent_runs row of a run before it is dispatched and
+// returns its run_id; pass it to IncidentRunner.StartIncident. Incident work
+// moves the incident to running. A request event is linked to its scope.
+func (s *SkillService) BeginRun(start RunStart) (string, error) {
+	scope := start.ScopeUUID
+	if scope == "" {
+		scope = start.IncidentUUID
+	}
+	if start.IncidentUUID != "" && start.SourceKind == "" {
+		// A follow-up turn on an incident (a Slack reply in its thread)
+		// matches formatting rules as the incident's own trigger.
+		var inc database.Incident
+		if err := s.db.Select("source_kind, source_uuid").Where("uuid = ?", start.IncidentUUID).
+			Limit(1).Find(&inc).Error; err == nil {
+			start.SourceKind, start.SourceUUID = inc.SourceKind, inc.SourceUUID
+		}
+	}
+	run := &database.AgentRun{
+		ScopeUUID:      scope,
+		IncidentUUID:   start.IncidentUUID,
+		EventUUID:      start.EventUUID,
+		SourceKind:     start.SourceKind,
+		SourceUUID:     start.SourceUUID,
+		RootSkill:      start.RootSkill,
+		WorkingDir:     filepath.Join(s.incidentsDir, scope),
+		SlackChannelID: start.SlackChannelID,
+		SlackThreadTS:  start.SlackThreadTS,
+	}
+	if err := database.BeginAgentRun(s.db, run); err != nil {
+		return "", fmt.Errorf("failed to create agent run: %w", err)
+	}
+	if start.IncidentUUID != "" {
+		if err := s.UpdateIncidentStatus(start.IncidentUUID, database.IncidentStatusRunning); err != nil {
+			slog.Warn("failed to set incident running", "incident", start.IncidentUUID, "err", err)
+		}
+	} else {
+		linkEventToScope(s.db, start.EventUUID, scope)
+	}
+	return run.RunID, nil
+}
+
+// UpdateRunLog replaces a run's streamed log (progress while it runs).
+func (s *SkillService) UpdateRunLog(runID, fullLog string) error {
+	if err := s.db.Model(&database.AgentRun{}).Where("run_id = ?", runID).Update("full_log", fullLog).Error; err != nil {
+		return fmt.Errorf("failed to update run log: %w", err)
+	}
+	return nil
+}
+
+// RunOutcome is what a finished run stores.
+type RunOutcome = database.AgentRunResult
+
+// FinishRun stores a finished run's log, answer and session, and finishes
+// the incident it worked on (see completeIncident). After every run the
+// on-disk memory directory is re-ingested into Postgres in a detached
+// goroutine: the agent's memory-writer subagent has already produced the
+// files; ingest reconciles them with the DB so the REST API and Slack/UI
+// surfaces see fresh entries without restarting the API.
+func (s *SkillService) FinishRun(runID string, outcome RunOutcome) error {
+	var run database.AgentRun
+	if err := s.db.Select("run_id, incident_uuid").Where("run_id = ?", runID).First(&run).Error; err != nil {
+		return fmt.Errorf("failed to load run %s: %w", runID, err)
+	}
+	if err := database.FinishAgentRun(s.db, runID, outcome); err != nil {
+		return fmt.Errorf("failed to store run %s: %w", runID, err)
+	}
+	now := time.Now()
+
+	if run.IncidentUUID != "" {
+		status := database.IncidentStatusCompleted
+		if outcome.Failed {
+			status = database.IncidentStatusFailed
+		}
+		if err := s.completeIncident(run.IncidentUUID, status, now); err != nil {
+			return err
+		}
+	}
+
+	if s.memoryIngester != nil {
+		// Detached: the request context may already be cancelled by the time
+		// this runs, so a fresh background context is used. Failures are
+		// logged-only — ingest is best-effort and must not affect the caller.
+		ingester := s.memoryIngester
+		go func() {
+			if err := ingester.IngestFromDisk(context.Background()); err != nil {
+				slog.Warn("memory ingest from disk failed", "run", runID, "err", err)
+			}
+		}()
+	}
+	return nil
 }
 
 // generateAgentsMd renders the AGENTS.md file for a fresh agent invocation.
@@ -729,55 +861,35 @@ func rootSkillHeader(rootSkillName string) string {
 }
 
 // UpdateIncidentStatus updates the status of an incident.
-// Only sets session_id and full_log when non-empty to avoid overwriting existing values.
-func (s *SkillService) UpdateIncidentStatus(incidentUUID string, status database.IncidentStatus, sessionID string, fullLog string) error {
+func (s *SkillService) UpdateIncidentStatus(incidentUUID string, status database.IncidentStatus) error {
 	updates := map[string]interface{}{
 		"status": status,
 	}
-	if sessionID != "" {
-		updates["session_id"] = sessionID
-	}
-	if fullLog != "" {
-		updates["full_log"] = fullLog
-	}
-
 	// Set completed_at timestamp when incident is completed or failed
 	if status == database.IncidentStatusCompleted || status == database.IncidentStatusFailed {
 		now := time.Now()
 		updates["completed_at"] = &now
 	}
-
 	if err := s.db.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).Updates(updates).Error; err != nil {
 		return fmt.Errorf("failed to update incident status: %w", err)
 	}
-
 	return nil
 }
 
-// UpdateIncidentComplete updates the incident with final status, log, and response.
-// When the incident transitions to "completed" and a memory ingester is wired,
-// the on-disk memory directory is re-ingested into Postgres in a detached
-// goroutine. The agent's memory-writer subagent has already produced the
-// files; ingest reconciles them with the DB so the REST API and Slack/UI
-// surfaces see fresh entries without restarting the API.
-func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status database.IncidentStatus, sessionID string, fullLog string, response string, tokensUsed int, executionTimeMs int64) error {
-	now := time.Now()
+// completeIncident moves an incident to its post-run status. Alert-sourced
+// incidents transition to monitor status on completion, but only once every
+// linked alert has resolved — otherwise the incident would falsely read as
+// "being monitored" while an alert is still firing. Incidents held back here
+// get promoted to monitor later by ResolveAlertTx when their last firing
+// alert resolves. Failed investigations are never promoted — they should not
+// enter the correlation candidate pool.
+func (s *SkillService) completeIncident(incidentUUID string, status database.IncidentStatus, now time.Time) error {
 	updates := map[string]interface{}{
-		"status":     status,
-		"session_id": sessionID,
-		"full_log":   fullLog,
-		"response":   response,
-		// Accumulate across runs: multi-turn incidents (Slack chat, proposal
-		// refinement) complete once per turn and the incident-level numbers
-		// are the total spend. Per-run numbers live on agent_runs.
-		"tokens_used":       gorm.Expr("tokens_used + ?", tokensUsed),
-		"execution_time_ms": gorm.Expr("execution_time_ms + ?", executionTimeMs),
-		"completed_at":      &now,
+		"status":       status,
+		"completed_at": &now,
 	}
-
-	// effectiveStatus tracks what actually gets written to "status" (which
-	// may differ from the requested status below) so the memory-ingest check
-	// after the transaction reflects the real outcome.
+	// effectiveStatus tracks what actually gets written to "status" so the
+	// merge check after the transaction reflects the real outcome.
 	effectiveStatus := status
 	sourceKind := ""
 
@@ -789,13 +901,6 @@ func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status databa
 		}
 		sourceKind = incident.SourceKind
 
-		// Alert-sourced incidents transition to monitor status on completion,
-		// but only once every linked alert has resolved — otherwise the
-		// incident would falsely read as "being monitored" while an alert is
-		// still firing. Incidents held back here get promoted to monitor
-		// later by ResolveAlertTx when their last firing alert resolves.
-		// Failed investigations are never promoted — they should not enter
-		// the correlation candidate pool.
 		if status == database.IncidentStatusCompleted && incident.SourceKind == database.IncidentSourceKindAlert {
 			firingCount, err := countFiringAlerts(tx, incidentUUID)
 			if err != nil {
@@ -804,7 +909,7 @@ func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status databa
 			if firingCount == 0 {
 				settings, settingsErr := database.GetOrCreateGeneralSettings()
 				if settingsErr != nil || settings == nil {
-					slog.Warn("UpdateIncidentComplete: could not load settings, using default window", "err", settingsErr)
+					slog.Warn("completeIncident: could not load settings, using default window", "err", settingsErr)
 					settings = &database.GeneralSettings{}
 				}
 				window := settings.GetAlertMonitorWindow()
@@ -821,25 +926,6 @@ func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status databa
 		return fmt.Errorf("failed to update incident: %w", txErr)
 	}
 
-	// Fire memory ingest for all terminal states: completed (including alert
-	// incidents that are promoted to monitor below), failed, and monitor if a
-	// caller ever passes that status directly.
-	if (effectiveStatus == database.IncidentStatusCompleted ||
-		effectiveStatus == database.IncidentStatusMonitor ||
-		effectiveStatus == database.IncidentStatusFailed) && s.memoryIngester != nil {
-		// Detached: the request context may already be cancelled by the time
-		// this runs, so a fresh background context is used. Failures are
-		// logged-only — ingest is best-effort and must not affect the caller.
-		ingester := s.memoryIngester
-		uuid := incidentUUID
-		go func() {
-			ctx := context.Background()
-			if err := ingester.IngestFromDisk(ctx); err != nil {
-				slog.Warn("memory ingest from disk failed", "incident", uuid, "err", err)
-			}
-		}()
-	}
-
 	// Post-investigation merge pass: for alert-sourced incidents that
 	// finished successfully, ask the merger whether this investigation's
 	// root cause matches an earlier investigated incident. Detached and
@@ -848,22 +934,13 @@ func (s *SkillService) UpdateIncidentComplete(incidentUUID string, status databa
 		(effectiveStatus == database.IncidentStatusCompleted ||
 			effectiveStatus == database.IncidentStatusMonitor) && s.incidentMerger != nil {
 		merger := s.incidentMerger
-		uuid := incidentUUID
 		go func() {
-			if err := merger.EvaluateAndMerge(context.Background(), uuid); err != nil {
-				slog.Warn("post-investigation merge pass failed", "incident", uuid, "err", err)
+			if err := merger.EvaluateAndMerge(context.Background(), incidentUUID); err != nil {
+				slog.Warn("post-investigation merge pass failed", "incident", incidentUUID, "err", err)
 			}
 		}()
 	}
 
-	return nil
-}
-
-// UpdateIncidentLog updates only the full_log field of an incident (for progress tracking)
-func (s *SkillService) UpdateIncidentLog(incidentUUID string, fullLog string) error {
-	if err := s.db.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).Update("full_log", fullLog).Error; err != nil {
-		return fmt.Errorf("failed to update incident log: %w", err)
-	}
 	return nil
 }
 
@@ -920,21 +997,4 @@ Note: The full reasoning log is stored but not shown here to keep context clean.
       Consider trying a different approach or skill.
 === End [%s] ===
 `, result.SkillName, errorSummary, result.SkillName)
-}
-
-// AppendSubagentLog appends a subagent's reasoning log to the incident's full_log
-// This stores the FULL log in the database for debugging/review purposes
-// Uses SQL concatenation to avoid race conditions when multiple subagents complete concurrently
-func (s *SkillService) AppendSubagentLog(incidentUUID string, skillName string, subagentLog string) error {
-	// Format subagent log with markers
-	formattedLog := fmt.Sprintf("\n\n--- Subagent [%s] Reasoning Log ---\n%s\n--- End Subagent [%s] Reasoning Log ---\n",
-		skillName, subagentLog, skillName)
-
-	// Use SQL concatenation to atomically append without read-modify-write race
-	if err := s.db.Model(&database.Incident{}).Where("uuid = ?", incidentUUID).
-		Update("full_log", gorm.Expr("COALESCE(full_log, '') || ?", formattedLog)).Error; err != nil {
-		return fmt.Errorf("failed to append subagent log: %w", err)
-	}
-
-	return nil
 }

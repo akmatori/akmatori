@@ -2,14 +2,17 @@ import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { incidentsApi } from '../../api/client';
 import { getErrorMessage } from '../../utils/errors';
+import type { CreateIncidentResponse } from '../../types';
 
 interface InvestigateBarProps {
-  onStarted: (uuid: string) => void;
+  // Called with the API result (incident, request or stored event).
+  onStarted: (result: CreateIncidentResponse) => void;
   onError: (message: string) => void;
 }
 
-// InvestigateBar starts a manual investigation from a free-text problem
-// description.
+// InvestigateBar sends a free-text problem or question to the agent. The API
+// classifies it: a problem opens or joins an incident, a question starts a
+// request run.
 export default function InvestigateBar({ onStarted, onError }: InvestigateBarProps) {
   const [task, setTask] = useState('');
   const [creating, setCreating] = useState(false);
@@ -21,7 +24,7 @@ export default function InvestigateBar({ onStarted, onError }: InvestigateBarPro
       setCreating(true);
       const response = await incidentsApi.create({ task: task.trim() });
       setTask('');
-      onStarted(response.uuid);
+      onStarted(response);
     } catch (err) {
       onError(getErrorMessage(err, 'Failed to start the investigation'));
     } finally {

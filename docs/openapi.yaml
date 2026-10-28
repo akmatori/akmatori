@@ -325,31 +325,36 @@ components:
           type: string
         source_kind:
           type: string
-          enum: [alert, cron, slack_mention]
-          description: Trigger kind that spawned this incident.
+          enum: [alert]
+          description: Only alerts open incidents. Agent work that is not an incident is a request (see /requests/{uuid}).
         source_uuid:
           type: string
-          description: UUID of the triggering entity (AlertSourceInstance, CronJob, or originating Slack mention).
+          description: UUID of the alert source instance or reporter channel.
         title:
           type: string
         status:
           type: string
-          enum: [pending, running, diagnosed, completed, failed]
+          enum: [pending, running, diagnosed, completed, failed, monitor, closed, merged]
         context:
           type: object
-        session_id:
-          type: string
-        working_dir:
-          type: string
         full_log:
           type: string
+          description: Detail endpoint only. Every agent run's log, oldest first, with a header per run.
         response:
           type: string
+          description: Detail endpoint only. The newest agent answer.
         tokens_used:
           type: integer
+          description: Sum over the incident's runs (detail endpoint).
         execution_time_ms:
           type: integer
           format: int64
+          description: Sum over the incident's runs (detail endpoint).
+        runs:
+          type: array
+          description: Detail endpoint only. The incident's agent runs, oldest first, without log or answer.
+          items:
+            $ref: '#/components/schemas/AgentRun'
         started_at:
           type: string
           format: date-time
@@ -363,6 +368,91 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    AgentRun:
+      type: object
+      description: One agent invocation. scope_uuid is the incident UUID for incident work, else the request scope.
+      properties:
+        run_id:
+          type: string
+        scope_uuid:
+          type: string
+        incident_uuid:
+          type: string
+        event_uuid:
+          type: string
+        source_kind:
+          type: string
+          enum: [alert, cron, slack_mention, manual, proposal]
+        source_uuid:
+          type: string
+        root_skill:
+          type: string
+        provider:
+          type: string
+        model:
+          type: string
+        status:
+          type: string
+          enum: [running, completed, failed, superseded]
+        outcome:
+          type: string
+        tokens_used:
+          type: integer
+        execution_time_ms:
+          type: integer
+          format: int64
+        cost_usd:
+          type: number
+        error_message:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    RequestDetail:
+      type: object
+      description: Request work (a Slack or API request, a cron run, a proposal chat). uuid is the request scope.
+      properties:
+        uuid:
+          type: string
+        title:
+          type: string
+        source_kind:
+          type: string
+          enum: [cron, slack_mention, manual, proposal]
+        source_uuid:
+          type: string
+        status:
+          type: string
+          enum: [running, completed, failed]
+          description: Status of the newest run.
+        event_uuid:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        response:
+          type: string
+        full_log:
+          type: string
+        tokens_used:
+          type: integer
+        execution_time_ms:
+          type: integer
+          format: int64
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentRun'
 
     ContextFile:
       type: object
@@ -1006,7 +1096,8 @@ paths:
                   type: object
       description: |
         The task is stored as an event and classified first. A request starts an
-        agent run (event_kind "request"). A reported problem goes through the
+        agent run that is not an incident (event_kind "request", status "running",
+        uuid = request scope, see /requests/{uuid}). A reported problem goes through the
         alert correlation gate (event_kind "alert"): uuid is then the incident it
         joined (status "linked") or opened (status "pending"). A change or info
         report is stored only (status "recorded", empty uuid).
@@ -1022,7 +1113,7 @@ paths:
                     type: string
                   status:
                     type: string
-                    enum: [pending, linked, recorded]
+                    enum: [pending, running, linked, recorded]
                   working_dir:
                     type: string
                   message:
@@ -1051,6 +1142,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Incident'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /requests/{uuid}:
+    parameters:
+      - name: uuid
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Get request work
+      description: Agent work that is not an incident, with its runs, newest answer and log.
+      operationId: getRequest
+      tags: [Incidents]
+      responses:
+        '200':
+          description: Request details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /requests/{uuid}/response:
+    parameters:
+      - name: uuid
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Get the newest answer of request work
+      operationId: getRequestResponse
+      tags: [Incidents]
+      responses:
+        '200':
+          description: Title, status and newest answer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uuid:
+                    type: string
+                  title:
+                    type: string
+                  status:
+                    type: string
+                  response:
+                    type: string
         '404':
           $ref: '#/components/responses/NotFound'
 

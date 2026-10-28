@@ -15,7 +15,7 @@ func setupFormatterTestDB(t *testing.T) {
 	// Reuse the title-generator helper: it migrates LLMSettings into an
 	// in-memory sqlite db and rebinds database.DB.
 	setupTitleGeneratorTestDB(t)
-	if err := database.DB.AutoMigrate(&database.FormattingRule{}, &database.Incident{}); err != nil {
+	if err := database.DB.AutoMigrate(&database.FormattingRule{}, &database.Incident{}, &database.AgentRun{}); err != nil {
 		t.Fatalf("migrate formatting rules: %v", err)
 	}
 }

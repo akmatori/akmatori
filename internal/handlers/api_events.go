@@ -14,8 +14,9 @@ import (
 )
 
 // EventFeedItem is one row of the Events feed: one events row, joined to the
-// alert it created (correlation state, live firing/resolved status) and the
-// incident or agent run it opened, joined or continued.
+// alert it created (correlation state, live firing/resolved status), the
+// incident it opened, joined or continued, and the request work it started
+// or continued.
 type EventFeedItem struct {
 	EventUUID                string    `json:"event_uuid"`
 	Kind                     string    `json:"kind"`
@@ -34,6 +35,7 @@ type EventFeedItem struct {
 	TargetHost            string   `json:"target_host,omitempty"`
 	AlertUUID             string   `json:"alert_uuid,omitempty"`
 	IncidentUUID          string   `json:"incident_uuid,omitempty"`
+	ScopeUUID             string   `json:"scope_uuid,omitempty"`
 	Correlated            bool     `json:"correlated"`
 	CorrelationConfidence *float64 `json:"correlation_confidence,omitempty"`
 	CorrelationReasoning  string   `json:"correlation_reasoning,omitempty"`
@@ -102,8 +104,8 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 		prefix := strings.ToLower(search) + "%"
 		like := "%" + strings.ToLower(search) + "%"
 		base = base.Where(
-			"LOWER(uuid) LIKE ? OR LOWER(alert_uuid) LIKE ? OR LOWER(incident_uuid) LIKE ? OR LOWER(title) LIKE ? OR LOWER(host) LIKE ?",
-			prefix, prefix, prefix, like, like)
+			"LOWER(uuid) LIKE ? OR LOWER(alert_uuid) LIKE ? OR LOWER(incident_uuid) LIKE ? OR LOWER(scope_uuid) LIKE ? OR LOWER(title) LIKE ? OR LOWER(host) LIKE ?",
+			prefix, prefix, prefix, prefix, like, like)
 	}
 
 	var total int64
@@ -141,6 +143,7 @@ func (h *APIHandler) handleEvents(w http.ResponseWriter, r *http.Request) {
 			TargetHost:               e.Host,
 			AlertUUID:                e.AlertUUID,
 			IncidentUUID:             e.IncidentUUID,
+			ScopeUUID:                e.ScopeUUID,
 		})
 	}
 	enrichEventFeedItems(db, page)
@@ -203,8 +206,30 @@ func enrichEventFeedItems(db *gorm.DB, page []EventFeedItem) {
 		}
 	}
 
+	// Request events show the status of their work's newest run.
+	scopeUUIDs := map[string]struct{}{}
+	for _, item := range page {
+		if item.ScopeUUID != "" {
+			scopeUUIDs[item.ScopeUUID] = struct{}{}
+		}
+	}
+	scopeStatus := map[string]string{}
+	if len(scopeUUIDs) > 0 {
+		var runs []database.AgentRun
+		if err := db.Select("id, scope_uuid, status").Where("scope_uuid IN ?", mapKeys(scopeUUIDs)).
+			Order("id ASC").Find(&runs).Error; err != nil {
+			slog.Warn("events: failed to batch-fetch request runs", "err", err)
+		}
+		for _, r := range runs {
+			scopeStatus[r.ScopeUUID] = requestStatus(r) // ascending: the newest wins
+		}
+	}
+
 	for i := range page {
 		item := &page[i]
+		if st, ok := scopeStatus[item.ScopeUUID]; ok && item.Kind == database.EventKindRequest {
+			item.Status = st
+		}
 		// A change or info item may come from a monitoring source in firing
 		// state; that state means nothing for an event that is only stored.
 		if item.Kind == database.EventKindChange || item.Kind == database.EventKindInfo {
@@ -241,7 +266,7 @@ func mapKeys(m map[string]struct{}) []string {
 // handleEventRaw handles GET /api/events/raw?uuid=<event_uuid>. It returns the
 // raw payload / original message of one event on demand, so the list stays
 // light. Backfilled events carry no payload of their own: it then comes from
-// the linked alert row or the run's context. The legacy ?type= is ignored.
+// the linked alert row or the incident's context. The legacy ?type= is ignored.
 func (h *APIHandler) handleEventRaw(w http.ResponseWriter, r *http.Request) {
 	db := database.GetDB()
 	eventUUID := r.URL.Query().Get("uuid")
@@ -271,7 +296,7 @@ func (h *APIHandler) handleEventRaw(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(raw) == 0 && ev.AlertUUID == "" && ev.IncidentUUID != "" {
 		var inc database.Incident
-		if err := db.Select("context").Where("uuid = ?", ev.IncidentUUID).First(&inc).Error; err == nil && inc.Context != nil {
+		if err := db.Select("context").Where("uuid = ?", ev.IncidentUUID).Limit(1).Find(&inc).Error; err == nil && inc.Context != nil {
 			if rp, ok := inc.Context["raw_payload"].(map[string]interface{}); ok {
 				raw = rp
 			}

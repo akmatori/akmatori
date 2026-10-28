@@ -85,9 +85,8 @@ called instead of `SpawnIncidentManager`.
 After an alert-sourced incident completes, it enters `monitor` status for a configurable window so
 that recurrences are correlated rather than spawning duplicate investigations.
 
-- `UpdateIncidentComplete` sets `status=monitor` and `monitor_until = completedAt +
-  GetAlertMonitorWindow()` for all `source_kind='alert'` incidents; non-alert incidents (cron, etc.)
-  are unaffected
+- `FinishRun` → `completeIncident` sets `status=monitor` and `monitor_until = completedAt +
+  GetAlertMonitorWindow()` for `source_kind='alert'` incidents with no firing alert left
 - `AlertMonitorWindowMinutes` is configured in `GeneralSettings` (default 60, valid 1–10080); read
   via `gs.GetAlertMonitorWindow()`; exposed in `PUT /api/settings/general`
 - `processResolvedAlert` (tx + row lock): finds the `alerts` row by `source_fingerprint` (then
@@ -136,9 +135,9 @@ completes, a one-shot LLM compares its diagnosed root cause against earlier inve
 and merges the newer incident into the earlier survivor on a confident match.
 
 - flag-gated (`IncidentMergeEnabled` in `GeneralSettings`, default false, read live); fail-open
-  everywhere; fired as a detached goroutine from `UpdateIncidentComplete` via
+  everywhere; fired as a detached goroutine from `completeIncident` via
   `SkillService.SetIncidentMerger`
-- candidates: alert-sourced `completed`/`monitor`, non-empty `response`, `completed_at` within 24h,
+- candidates: alert-sourced `completed`/`monitor`, a run with a non-empty `response`, `completed_at` within 24h,
   `started_at` earlier than the completing incident (newer→older only), LIMIT 25; `mergeThreshold=0.8`
   + hallucination guard
 - merge tx: lock both rows in UUID order, revalidate statuses, re-point `alerts` rows (safe:

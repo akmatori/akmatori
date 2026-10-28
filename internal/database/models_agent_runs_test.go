@@ -44,8 +44,8 @@ func TestAgentRunLifecycle_Completed(t *testing.T) {
 	}
 
 	runID := uuid.NewString()
-	if err := CreateAgentRun(runID, incidentUUID, "anthropic", "claude-sonnet-5", "high"); err != nil {
-		t.Fatalf("CreateAgentRun: %v", err)
+	if err := RecordAgentRunDispatch(runID, incidentUUID, "anthropic", "claude-sonnet-5", "high"); err != nil {
+		t.Fatalf("RecordAgentRunDispatch: %v", err)
 	}
 
 	run := mustGetRun(t, runID)
@@ -92,8 +92,8 @@ func TestAgentRunLifecycle_Failed(t *testing.T) {
 	setupAgentRunsDB(t)
 
 	runID := uuid.NewString()
-	if err := CreateAgentRun(runID, uuid.NewString(), "openai", "gpt-5.6", "medium"); err != nil {
-		t.Fatalf("CreateAgentRun: %v", err)
+	if err := RecordAgentRunDispatch(runID, uuid.NewString(), "openai", "gpt-5.6", "medium"); err != nil {
+		t.Fatalf("RecordAgentRunDispatch: %v", err)
 	}
 	if err := FailAgentRun(runID, "quota exceeded"); err != nil {
 		t.Fatalf("FailAgentRun: %v", err)
@@ -114,8 +114,8 @@ func TestAgentRunLifecycle_SupersededKeepsLabelRecordsMetrics(t *testing.T) {
 	setupAgentRunsDB(t)
 
 	runID := uuid.NewString()
-	if err := CreateAgentRun(runID, uuid.NewString(), "google", "gemini-4", "off"); err != nil {
-		t.Fatalf("CreateAgentRun: %v", err)
+	if err := RecordAgentRunDispatch(runID, uuid.NewString(), "google", "gemini-4", "off"); err != nil {
+		t.Fatalf("RecordAgentRunDispatch: %v", err)
 	}
 	if err := SupersedeAgentRun(runID); err != nil {
 		t.Fatalf("SupersedeAgentRun: %v", err)
@@ -139,8 +139,8 @@ func TestSupersedeAgentRun_TerminalRunUntouched(t *testing.T) {
 	setupAgentRunsDB(t)
 
 	runID := uuid.NewString()
-	if err := CreateAgentRun(runID, uuid.NewString(), "anthropic", "claude-haiku-4-5", "low"); err != nil {
-		t.Fatalf("CreateAgentRun: %v", err)
+	if err := RecordAgentRunDispatch(runID, uuid.NewString(), "anthropic", "claude-haiku-4-5", "low"); err != nil {
+		t.Fatalf("RecordAgentRunDispatch: %v", err)
 	}
 	if err := CompleteAgentRun(runID, AgentRunMetrics{TokensUsed: 10}, AgentRunOutcomeUnresolved); err != nil {
 		t.Fatalf("CompleteAgentRun: %v", err)
@@ -159,8 +159,8 @@ func TestAgentRunHelpers_NilDB(t *testing.T) {
 	DB = nil
 	t.Cleanup(func() { DB = prev })
 
-	if err := CreateAgentRun("r", "i", "p", "m", "t"); err == nil {
-		t.Fatal("CreateAgentRun with nil DB: want error")
+	if err := RecordAgentRunDispatch("r", "i", "p", "m", "t"); err == nil {
+		t.Fatal("RecordAgentRunDispatch with nil DB: want error")
 	}
 	if err := CompleteAgentRun("r", AgentRunMetrics{}, ""); err == nil {
 		t.Fatal("CompleteAgentRun with nil DB: want error")
@@ -178,8 +178,8 @@ func TestFailInterruptedAgentRuns(t *testing.T) {
 
 	running, completed, superseded := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	for _, id := range []string{running, completed, superseded} {
-		if err := CreateAgentRun(id, uuid.NewString(), "anthropic", "claude-sonnet-5", ""); err != nil {
-			t.Fatalf("CreateAgentRun: %v", err)
+		if err := RecordAgentRunDispatch(id, uuid.NewString(), "anthropic", "claude-sonnet-5", ""); err != nil {
+			t.Fatalf("RecordAgentRunDispatch: %v", err)
 		}
 	}
 	if err := CompleteAgentRun(completed, AgentRunMetrics{TokensUsed: 10}, AgentRunOutcomeResolved); err != nil {
@@ -211,5 +211,90 @@ func TestFailInterruptedAgentRuns(t *testing.T) {
 	// A second sweep finds nothing.
 	if n, _ := FailInterruptedAgentRuns("interrupted"); n != 0 {
 		t.Errorf("second sweep changed %d rows, want 0", n)
+	}
+}
+
+// A run created before dispatch keeps its scope fields; the dispatch only
+// stamps the model, and FinishAgentRun stores the work.
+func TestBeginAgentRun_DispatchAndFinish(t *testing.T) {
+	setupAgentRunsDB(t)
+
+	run := &AgentRun{ScopeUUID: "scope-1", EventUUID: "ev-1", SourceKind: IncidentSourceKindCron, SourceUUID: "job-1"}
+	if err := BeginAgentRun(DB, run); err != nil {
+		t.Fatalf("BeginAgentRun: %v", err)
+	}
+	if run.RunID == "" || run.Status != AgentRunStatusRunning {
+		t.Fatalf("run = %+v, want generated run_id and running status", run)
+	}
+	if err := RecordAgentRunDispatch(run.RunID, "scope-1", "anthropic", "claude-sonnet-5", "high"); err != nil {
+		t.Fatalf("RecordAgentRunDispatch: %v", err)
+	}
+	if err := UpdateAgentRunLog(run.RunID, "step 1"); err != nil {
+		t.Fatalf("UpdateAgentRunLog: %v", err)
+	}
+	got := mustGetRun(t, run.RunID)
+	if got.Model != "claude-sonnet-5" || got.SourceUUID != "job-1" || got.FullLog != "step 1" {
+		t.Fatalf("after dispatch = %+v", got)
+	}
+	var n int64
+	DB.Model(&AgentRun{}).Count(&n)
+	if n != 1 {
+		t.Fatalf("rows = %d, want 1 (dispatch must update, not insert)", n)
+	}
+
+	if err := FinishAgentRun(DB, run.RunID, AgentRunResult{SessionID: "s", FullLog: "full", Response: "answer"}); err != nil {
+		t.Fatalf("FinishAgentRun: %v", err)
+	}
+	got = mustGetRun(t, run.RunID)
+	if got.Status != AgentRunStatusCompleted || got.Response != "answer" || got.FullLog != "full" || got.CompletedAt == nil {
+		t.Fatalf("after finish = %+v", got)
+	}
+
+	latest, err := LatestScopeRun(DB, "scope-1")
+	if err != nil || latest == nil || latest.RunID != run.RunID {
+		t.Fatalf("LatestScopeRun = %+v, %v", latest, err)
+	}
+	if none, _ := LatestScopeRun(DB, "other"); none != nil {
+		t.Fatalf("LatestScopeRun(other) = %+v, want nil", none)
+	}
+}
+
+// FinishAgentRun must not relabel a run the worker frames already ended.
+func TestFinishAgentRun_KeepsTerminalStatus(t *testing.T) {
+	setupAgentRunsDB(t)
+	run := &AgentRun{ScopeUUID: "s"}
+	if err := BeginAgentRun(DB, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := FailAgentRun(run.RunID, "boom"); err != nil {
+		t.Fatal(err)
+	}
+	if err := FinishAgentRun(DB, run.RunID, AgentRunResult{Response: "late"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustGetRun(t, run.RunID); got.Status != AgentRunStatusFailed || got.Response != "late" {
+		t.Fatalf("got %+v, want failed status kept and response stored", got)
+	}
+}
+
+func TestLatestRunResponses(t *testing.T) {
+	setupAgentRunsDB(t)
+	for _, r := range []AgentRun{
+		{IncidentUUID: "a", Response: "first"},
+		{IncidentUUID: "a", Response: "second"},
+		{IncidentUUID: "a"}, // newest run has no answer yet
+		{IncidentUUID: "b"},
+	} {
+		r := r
+		if err := BeginAgentRun(DB, &r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := LatestRunResponses(DB, []string{"a", "b", "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["a"] != "second" || len(got) != 1 {
+		t.Fatalf("got %v, want only a=second", got)
 	}
 }

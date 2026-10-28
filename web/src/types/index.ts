@@ -42,12 +42,13 @@ export interface Incident {
   title: string;  // LLM-generated title summarizing the incident
   status: IncidentStatus;
   context: Record<string, unknown>;
-  session_id: string;
-  working_dir: string;
-  full_log: string;
-  response: string;  // Final response/output to user
-  tokens_used: number;  // Total tokens used (input + output)
-  execution_time_ms: number;  // Execution time in milliseconds
+  // The agent work comes from the incident's runs (detail endpoint only):
+  // the newest answer, every run's log, and the token/time sums.
+  full_log?: string;
+  response?: string;
+  tokens_used: number;
+  execution_time_ms: number;
+  runs?: AgentRun[];
   started_at: string;
   completed_at?: string;
   monitor_until?: string;
@@ -61,6 +62,51 @@ export interface Incident {
   trend?: number[];
   created_at: string;
   updated_at: string;
+}
+
+// AgentRun is one agent invocation (listed without its log and answer).
+export interface AgentRun {
+  run_id: string;
+  scope_uuid: string;
+  incident_uuid?: string;
+  event_uuid?: string;
+  source_kind: string;
+  source_uuid?: string;
+  root_skill?: string;
+  provider: string;
+  model: string;
+  status: 'running' | 'completed' | 'failed' | 'superseded';
+  outcome?: string;
+  tokens_used: number;
+  execution_time_ms: number;
+  cost_usd: number;
+  error_message?: string;
+  started_at: string;
+  completed_at?: string;
+}
+
+// AgentWork is what the summary and timeline tabs show: an incident's or a
+// request's newest answer and its log.
+export interface AgentWork {
+  uuid: string;
+  status: string;
+  response?: string;
+  full_log?: string;
+  tokens_used: number;
+  execution_time_ms: number;
+}
+
+// RequestDetail is request work: agent work that is not an incident (a Slack
+// or API request, a cron run, a proposal chat). Its uuid is the scope id.
+export interface RequestDetail extends AgentWork {
+  title: string;
+  source_kind: string;
+  source_uuid?: string;
+  status: 'running' | 'completed' | 'failed';
+  event_uuid?: string;
+  started_at: string;
+  completed_at?: string;
+  runs: AgentRun[];
 }
 
 export interface Alert {
@@ -97,11 +143,18 @@ export interface CreateIncidentRequest {
   context?: Record<string, unknown>;
 }
 
+// CreateIncidentResponse is the result of POST /api/incidents. The task is
+// classified first: a reported problem opens or joins an incident
+// (event_kind "alert", uuid = incident), a request starts request work
+// (event_kind "request", uuid = request scope), a change or info is only
+// stored (status "recorded", no uuid).
 export interface CreateIncidentResponse {
   uuid: string;
   status: string;
-  working_dir: string;
+  working_dir?: string;
   message: string;
+  event_uuid?: string;
+  event_kind?: EventKind;
 }
 
 export type LLMProvider = 'openai' | 'anthropic' | 'google' | 'openrouter' | 'custom' | 'nvidia' | 'minimax' | 'ant-ling';
@@ -707,6 +760,8 @@ export interface EventFeedItem {
   target_host?: string;
   alert_uuid?: string;
   incident_uuid?: string;
+  // Request events: the request work they started or continued.
+  scope_uuid?: string;
   correlated: boolean;
   correlation_confidence?: number;
   correlation_reasoning?: string;

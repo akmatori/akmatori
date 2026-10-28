@@ -46,7 +46,7 @@ func (s *eventsSkillService) SpawnIncidentManager(ctx *services.IncidentContext)
 func setupEventsHandlerDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db := testhelpers.NewGlobalSQLiteDB(t,
-		&database.Incident{},
+		&database.Incident{}, &database.AgentRun{},
 		&database.Alert{},
 		&database.Event{},
 		&database.LLMSettings{},

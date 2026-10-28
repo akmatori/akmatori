@@ -76,7 +76,7 @@ func (h *SlackHandler) maybeCaptureSlackFeedback(channel, threadTS, messageTS, t
 // Returns a non-nil error for every fall-through case (nil deps, empty text,
 // no incident match, classifier failure) so callers can `if err != nil` and
 // route to the agent path. ErrWorkerNotConnected is surfaced verbatim.
-func (h *SlackHandler) classifyThreadReplyForFeedback(threadTS, text string) (services.FeedbackVerdict, *database.Incident, error) {
+func (h *SlackHandler) classifyThreadReplyForFeedback(threadTS, text string) (services.FeedbackVerdict, *slackThreadWork, error) {
 	if h.feedbackClassifier == nil || h.memoryManager == nil {
 		return services.FeedbackVerdict{}, nil, fmt.Errorf("feedback classifier or memory manager unavailable")
 	}
@@ -91,16 +91,17 @@ func (h *SlackHandler) classifyThreadReplyForFeedback(threadTS, text string) (se
 		return services.FeedbackVerdict{}, nil, fmt.Errorf("text empty after mention strip")
 	}
 
-	// Resolve the thread to an incident. Two routes — DM-originated incidents
-	// keyed by source_id, and alert-channel incidents keyed by slack_message_ts.
-	// Mirrors slack_processor.go::94-115.
-	incident, err := lookupIncidentByThread(threadTS)
+	// Resolve the thread to its work (request scope or incident), the same
+	// lookup the mention flow uses.
+	incident, err := lookupSlackThread(threadTS)
 	if err != nil {
-		// No incident → not a thread the classifier should fire on.
+		// No work → not a thread the classifier should fire on.
 		return services.FeedbackVerdict{}, nil, err
 	}
 
-	verdict, err := h.feedbackClassifier.Classify(context.Background(), clean, incident)
+	verdict, err := h.feedbackClassifier.Classify(context.Background(), clean, &services.FeedbackTarget{
+		UUID: incident.ScopeUUID, Title: incident.Title, Response: incident.Response,
+	})
 	if err != nil {
 		if errors.Is(err, services.ErrWorkerNotConnected) {
 			slog.Debug("feedback classifier skipped: worker offline", "thread", threadTS)
@@ -116,13 +117,13 @@ func (h *SlackHandler) classifyThreadReplyForFeedback(threadTS, text string) (se
 // (nil on failure). The `originalText` argument carries the message body
 // verbatim (un-mention-stripped) so the persisted memory reflects what the
 // operator typed. Persisting never depends on Slack ack succeeding.
-func (h *SlackHandler) persistFeedback(threadTS, originalText string, verdict services.FeedbackVerdict, incident *database.Incident) *database.Memory {
-	mem := buildFeedbackMemory(originalText, verdict, incident.UUID)
+func (h *SlackHandler) persistFeedback(threadTS, originalText string, verdict services.FeedbackVerdict, incident *slackThreadWork) *database.Memory {
+	mem := buildFeedbackMemory(originalText, verdict, incident.ScopeUUID)
 	if _, err := h.memoryManager.UpsertByName(mem); err != nil {
-		slog.Warn("feedback persist failed", "thread", threadTS, "incident", incident.UUID, "err", err)
+		slog.Warn("feedback persist failed", "thread", threadTS, "scope", incident.ScopeUUID, "err", err)
 		return nil
 	}
-	slog.Info("captured slack feedback as memory", "incident", incident.UUID, "name", mem.Name, "confidence", verdict.Confidence)
+	slog.Info("captured slack feedback as memory", "scope", incident.ScopeUUID, "name", mem.Name, "confidence", verdict.Confidence)
 	return mem
 }
 
@@ -150,28 +151,6 @@ func (h *SlackHandler) postFeedbackTextAck(channel, threadTS, memName string) {
 	if err := h.feedbackAcker.PostThreadText(channel, threadTS, ack); err != nil {
 		slog.Debug("feedback ack post failed", "err", err)
 	}
-}
-
-// lookupIncidentByThread mirrors the resolution logic in slack_processor.go:
-// first try source=slack/source_id (DM-originated), then slack_message_ts
-// (alert-channel incidents). Returns the incident or an error so callers can
-// distinguish "no thread match" from a database error.
-func lookupIncidentByThread(threadTS string) (*database.Incident, error) {
-	if threadTS == "" {
-		return nil, fmt.Errorf("empty thread")
-	}
-	db := database.GetDB()
-	if db == nil {
-		return nil, fmt.Errorf("db unavailable")
-	}
-	var incident database.Incident
-	if err := db.Where("source = ? AND source_id = ?", "slack", threadTS).First(&incident).Error; err == nil {
-		return &incident, nil
-	}
-	if err := db.Where("slack_message_ts = ?", threadTS).First(&incident).Error; err == nil {
-		return &incident, nil
-	}
-	return nil, fmt.Errorf("no incident for thread %s", threadTS)
 }
 
 // buildFeedbackMemory derives the Memory record we write for a confident

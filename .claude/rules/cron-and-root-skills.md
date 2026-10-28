@@ -14,8 +14,9 @@ paths:
 Cron jobs run on a per-job schedule and always execute as a full agent investigation under the
 `cron-agent` system skill. The legacy `oneshot` mode and `description` field are gone.
 
-- every cron tick spawns the `cron-agent` skill via `SpawnAgentInvocation`, creating an `Incident`
-  with `source_kind="cron"` and `source_uuid=<cron_job.uuid>`
+- every cron tick is request work, never an incident: a `cron` request event, `PrepareRequestScope`
+  under `cron-agent`, and a run with `source_kind="cron"` and `source_uuid=<cron_job.uuid>` (see the
+  `agent-runs` rule)
 - each cron carries its own `Tools []ToolInstance` allowlist (m2m via `cron_job_tools`) mapped to
   `ToolAllowlistEntry` — global skill/tool settings are NOT inherited
 - `cron-agent` is a system skill (`IsSystem=true`), exempt from SKILL.md generation; prompt surfaces
@@ -25,7 +26,7 @@ Cron jobs run on a per-job schedule and always execute as a full agent investiga
   restarts); legacy `memory-curator` rows rename to `Dreaming` in place; `DeleteJob` on a system row
   returns `ErrSystemCronImmutable` (409) — editable, not deletable
 - `post_results` (default true) gates channel posting; when false the tick skips channel/provider
-  resolution entirely and records its outcome only on the Incident row
+  resolution entirely and records its outcome only on the run row
 - crons spawn with ONLY the `cron-agent` root prompt — do NOT wrap the task with
   `executor.PrependGuidance` (incident-triage framed); the task is prefixed only with the current UTC time
 - tool-less crons (e.g. `Dreaming`) MUST send an explicit allowlist that holds only the built-in
@@ -43,8 +44,8 @@ Cron jobs run on a per-job schedule and always execute as a full agent investiga
 
 # Root-skill agent runs
 
-`SpawnAgentInvocation(rootSkillName, ctx)` in `incident_service.go` is the shared entrypoint for
-root-skill agent runs. New system root skill = seed the skill row in `db.go`, add its prompt constant
+`prepareScopeDir(rootSkillName, scope)` in `incident_service.go` writes the AGENTS.md of every
+root-skill run (via `SpawnIncidentManager` or `PrepareRequestScope`). New system root skill = seed the skill row in `db.go`, add its prompt constant
 alongside `DefaultCronAgentPrompt`, add the `rootSkillName` case to `GetSkillPrompt` /
 `UpdateSkillPrompt` / `RegenerateSkillMd` / `RegenerateAllSkillMds` / `rootSkillHeader`.
 Current root skills: `incident-manager`, `cron-agent`, `proposal-editor`.

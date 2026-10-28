@@ -57,7 +57,7 @@ func seedUnlinkTestAlert(t *testing.T, incidentUUID string, correlated bool) str
 }
 
 func TestHandleAlertUnlink_200_HappyPath(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{})
 
 	incUUID := "inc-" + uuid.New().String()
 	alertUUID := seedUnlinkTestAlert(t, incUUID, true)
@@ -102,7 +102,7 @@ func TestHandleAlertUnlink_200_HappyPath(t *testing.T) {
 // Origin (non-correlated) alerts can now be unlinked too — the old
 // "409 not correlated" restriction was removed.
 func TestHandleAlertUnlink_200_OriginAlert(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{})
 
 	incUUID := "inc-" + uuid.New().String()
 	alertUUID := seedUnlinkTestAlert(t, incUUID, false)
@@ -127,7 +127,7 @@ func TestHandleAlertUnlink_200_OriginAlert(t *testing.T) {
 }
 
 func TestHandleAlertUnlink_409_ConcurrentMove(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{})
 
 	incUUID := "inc-" + uuid.New().String()
 	alertUUID := seedUnlinkTestAlert(t, incUUID, true)
@@ -152,7 +152,7 @@ func TestHandleAlertUnlink_409_ConcurrentMove(t *testing.T) {
 }
 
 func TestHandleAlertUnlink_404_NotFound(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{})
 
 	svc := &unlinkSkillService{}
 
@@ -172,7 +172,7 @@ func TestHandleAlertUnlink_404_NotFound(t *testing.T) {
 // The /move endpoint links an alert to an existing incident when a target is
 // supplied — no new investigation is spawned and the target is forwarded.
 func TestHandleAlertMove_200_LinkToExisting(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{})
 
 	incUUID := "inc-" + uuid.New().String()
 	alertUUID := seedUnlinkTestAlert(t, incUUID, true)
@@ -211,7 +211,7 @@ func TestHandleAlertMove_200_LinkToExisting(t *testing.T) {
 }
 
 func TestHandleAlertMove_400_InvalidTarget(t *testing.T) {
-	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.Alert{})
+	testhelpers.NewGlobalSQLiteDB(t, &database.Incident{}, &database.AgentRun{}, &database.Alert{})
 
 	incUUID := "inc-" + uuid.New().String()
 	alertUUID := seedUnlinkTestAlert(t, incUUID, true)
