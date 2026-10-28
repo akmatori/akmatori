@@ -76,6 +76,20 @@ func (h *AlertHandler) ProcessReportedAlert(r ReportedAlert) (incidentUUID strin
 
 	key := alertSpawnKey(r.SourceUUID, normalized.AlertName, normalized.TargetHost, normalized.SourceFingerprint)
 	_, sfErr, _ := h.spawnGroup.Do(key, func() (interface{}, error) {
+		// A repeat report of a problem that is still firing (a cron that
+		// finds the same problem every run) joins that alert's incident. The
+		// alert link then records the re-send instead of the insert hitting
+		// uniq_firing_alert and failing a fresh incident.
+		if openIncident := firingAlertIncident(r.SourceUUID, normalized.SourceFingerprint); openIncident != "" {
+			err := h.skillService.LinkAlertToIncident(context.Background(), openIncident, r.SourceUUID, normalized, 1.0,
+				"same report as an alert that is still firing")
+			if err == nil {
+				incidentUUID, linked = openIncident, true
+				return nil, nil
+			}
+			slog.Warn("failed to link repeat report, using correlation", "incident_uuid", openIncident, "err", err)
+		}
+
 		verdict, corrErr := h.correlate(context.Background(), r.SourceUUID, normalized)
 		if corrErr != nil && !errors.Is(corrErr, services.ErrWorkerNotConnected) {
 			slog.Warn("alert correlator error on reported alert, opening new incident", "err", corrErr)
@@ -140,4 +154,22 @@ func (h *AlertHandler) ProcessReportedAlert(r ReportedAlert) (incidentUUID strin
 		return "", false, sfErr
 	}
 	return incidentUUID, linked, nil
+}
+
+// firingAlertIncident returns the incident of the firing alert with this
+// source and source fingerprint, or "" when there is none.
+func firingAlertIncident(sourceUUID, sourceFingerprint string) string {
+	db := database.GetDB()
+	if db == nil || sourceFingerprint == "" {
+		return ""
+	}
+	var a database.Alert
+	if err := db.Select("incident_uuid").
+		Where("source_uuid = ? AND source_fingerprint = ? AND status = ? AND resolved_at IS NULL",
+			sourceUUID, sourceFingerprint, string(database.AlertStatusFiring)).
+		Limit(1).Find(&a).Error; err != nil {
+		slog.Warn("firing alert lookup failed", "err", err)
+		return ""
+	}
+	return a.IncidentUUID
 }

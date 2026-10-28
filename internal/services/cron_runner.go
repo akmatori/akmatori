@@ -673,10 +673,11 @@ const cronAgentSkillName = "cron-agent"
 // by a cron run; the ToolType name is taken from the preloaded relation,
 // matching SkillService.GetToolAllowlist's behavior.
 //
-// Returns a non-nil empty slice when no tools are assigned so the gateway
-// receives an explicit empty allowlist and rejects all infrastructure tool
-// calls (memory-only / runbook-only cron runs are an intended deployment
-// mode for dreaming-style maintenance jobs).
+// The built-in events tool is always added (see withEventsTool): it is how a
+// cron run reports a problem it found. With no tools assigned the gateway
+// therefore rejects every infrastructure tool call but events.* (memory-only /
+// runbook-only cron runs are an intended deployment mode for dreaming-style
+// maintenance jobs).
 func buildCronToolAllowlist(tools []database.ToolInstance) []ToolAllowlistEntry {
 	entries := make([]ToolAllowlistEntry, 0, len(tools))
 	for i := range tools {
@@ -690,7 +691,7 @@ func buildCronToolAllowlist(tools []database.ToolInstance) []ToolAllowlistEntry 
 			ToolType:    t.ToolType.Name,
 		})
 	}
-	return entries
+	return withEventsTool(entries)
 }
 
 // cronChannelMaxMessageBytes caps the byte size of an outbound cron message.

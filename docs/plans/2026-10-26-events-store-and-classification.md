@@ -1,7 +1,7 @@
 # Events store and event classification
 
-Status: phases 1, 2 and 4 implemented on branch `feat/events-store` (2026-10-27). Phases 3 and 5
-open. Phase 4 was pulled forward: its on/off switch is the safe way to stop classification on an
+Status: phases 1, 2, 4 (2026-10-27) and 3 (2026-10-28) implemented on branch `feat/events-store`.
+Phase 5 open. Phase 4 was pulled forward: its on/off switch is the safe way to stop classification on an
 install without a release.
 Decided: backfill yes, re-send reuse yes, all inbound items are events, cron may report alert events,
 DB layout redesign yes (phase 5), page renamed to Events at `/events`.
@@ -158,7 +158,7 @@ so an investigation starts that much later.
 
 1. Schema, write path, classifier with fallback and re-send reuse, alert link. Tests for each path.
 2. `GET /api/events` from the new table, Events page (class, reasoning, "Investigate as alert").
-3. Gateway `events` tool and incident-manager prompt guidance.
+3. Gateway `events` tool (`search`, `get`, cron-only `report_alert` + API dispatcher) and prompt guidance (incident manager: check recent changes; cron agent: report problems).
 4. Editable classification rules in Settings (API and UI), like the correlation rules.
 5. DB layout redesign: agent-work columns move to `agent_runs`; `request` events run without an
    incident row; migrate the existing non-alert incidents; incident page shows runs.

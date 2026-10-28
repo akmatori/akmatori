@@ -35,3 +35,18 @@ own incident records. It is the only built-in tool that queries the gateway's ow
 
 `docs/TOOL_ARCHITECTURE.md` still describes the retired Python tool path; live routing is
 gateway-first via `gateway_call`.
+
+## Events tool (built-in, credential-less)
+
+`events.search` / `events.get` read the `events` table; `events.report_alert` lets a CRON run
+report a problem. Same seed and registration pattern as `incidents`; `events` is in
+`builtInToolNamespaces` and `credentiallessNamespaces`.
+
+- every agent run is allowed it: the API adds a type-only `{ToolType: "events"}` entry to every
+  allowlist (`withEventsTool` in `GetToolAllowlist` and `buildCronToolAllowlist`)
+- `report_alert` refuses non-cron runs (it looks up the calling run by `X-Incident-ID`), caps reports
+  at 20 per run, and only INSERTS an event with `pending_dispatch=true`: the gateway cannot reach the
+  API, so the API's `ReportedEventDispatcher` (5 s poll, conditional-update claim) runs it through
+  `ProcessReportedAlert`
+- `get` cuts the raw payload to 20,000 bytes of JSON (returned as a string with
+  `raw_payload_truncated: true`)

@@ -450,3 +450,19 @@ func (s *EventService) insert(ctx context.Context, ev *database.Event) {
 func ClassificationOffVerdict(fallback string) EventVerdict {
 	return FallbackEventVerdict(fallback, eventClassificationOffReason)
 }
+
+// EventsToolType is the gateway tool type of the built-in events tool.
+const EventsToolType = "events"
+
+// withEventsTool adds the built-in events tool to an agent run's allowlist.
+// It is credential-less and every run may use it: investigations search
+// recent changes, cron runs report problems. A type-only entry is a wildcard
+// for credential-less namespaces in the gateway authorizer.
+func withEventsTool(entries []ToolAllowlistEntry) []ToolAllowlistEntry {
+	for _, e := range entries {
+		if e.ToolType == EventsToolType {
+			return entries
+		}
+	}
+	return append(entries, ToolAllowlistEntry{ToolType: EventsToolType})
+}

@@ -288,3 +288,18 @@ func TestUpdateToolInstance_HonorsProvidedLogicalName(t *testing.T) {
 		t.Errorf("expected logical_name 'custom-logical', got %q", updated.LogicalName)
 	}
 }
+
+func TestEnsureToolTypes_SeedsEventsInstance(t *testing.T) {
+	db := setupToolTestDB(t)
+	svc := &ToolService{db: db}
+	for i := 0; i < 2; i++ {
+		if err := svc.EnsureToolTypes(); err != nil {
+			t.Fatalf("EnsureToolTypes #%d: %v", i, err)
+		}
+	}
+	var instances []database.ToolInstance
+	db.Preload("ToolType").Where("logical_name = ?", "events").Find(&instances)
+	if len(instances) != 1 || instances[0].ToolType.Name != EventsToolType || !instances[0].Enabled {
+		t.Fatalf("events instances = %+v, want one enabled instance of the events type", instances)
+	}
+}

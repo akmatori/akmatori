@@ -177,6 +177,7 @@ func (s *ToolService) EnsureToolTypes() error {
 		{Name: "jira", Description: "Jira issue tracking integration (Cloud and Server/Data Center) for searching, viewing, commenting, and transitioning issues"},
 		{Name: "incidents", Description: "Read-only access to Akmatori's own incidents (list and get) for digests and reporting"},
 		{Name: "proposals", Description: "Create, inspect, and revise self-improvement proposals reviewed by operators in the Proposals tab"},
+		{Name: "events", Description: "Search Akmatori's inbound events (alerts, changes, info, requests); cron runs report problems as alert events"},
 	}
 
 	for _, tt := range toolTypes {
@@ -230,6 +231,24 @@ func (s *ToolService) EnsureToolTypes() error {
 	}
 	if err := s.db.Where("logical_name = ?", "proposals").First(&proposalsInstance).Error; err != nil {
 		return fmt.Errorf("failed to read proposals tool instance: %w", err)
+	}
+
+	// Seed a credential-less ToolInstance for "events" the same way. Every
+	// agent run is allowed it (see withEventsTool); the instance makes it
+	// visible in the tool pickers and its logical name is the routing hint.
+	var eventsType database.ToolType
+	if err := s.db.Where("name = ?", "events").First(&eventsType).Error; err != nil {
+		return fmt.Errorf("failed to find events tool type: %w", err)
+	}
+	eventsInstance := database.ToolInstance{
+		ToolTypeID:  eventsType.ID,
+		LogicalName: "events",
+		Name:        "Events",
+		Settings:    database.JSONB{},
+		Enabled:     true,
+	}
+	if err := s.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&eventsInstance).Error; err != nil {
+		return fmt.Errorf("failed to seed events tool instance: %w", err)
 	}
 
 	return nil
