@@ -596,6 +596,23 @@ func (r *CronRunner) resolveChannel(job *database.CronJob) (*database.Channel, e
 	return ch, nil
 }
 
+// ReportChannel returns the channel where an alert that a run of this cron
+// job reported (events.report_alert) is posted: the same channel the job
+// posts its results to. Nil when the job does not post results, is gone, or
+// has no usable channel; the incident then shows in the UI only.
+func (r *CronRunner) ReportChannel(jobUUID string) *database.Channel {
+	job, err := r.GetJobByUUID(jobUUID)
+	if err != nil || !job.PostResults || r.channels == nil {
+		return nil
+	}
+	ch, err := r.resolveChannel(job)
+	if err != nil {
+		slog.Info("cron report: no channel to post the alert", "cron_job_uuid", jobUUID, "err", err)
+		return nil
+	}
+	return ch
+}
+
 // loadExplicitChannelAny returns the cron's explicit Channel regardless of
 // whether it is currently usable for posting. Used by resolveChannel to learn
 // the operator's intended provider when falling back to that provider's

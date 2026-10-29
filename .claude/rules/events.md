@@ -65,7 +65,10 @@ Only `alert` events open or join incidents; everything else never touches the in
 - agents: the gateway `events` tool (`search`, `get`, cron-only `report_alert`) is in every run's
   allowlist. The incident-manager prompt has a "Check recent changes" step (`events.search
   kind=change`, 60 min before the first alert); the cron-agent prompt reports problems with
-  `report_alert`, which the `ReportedEventDispatcher` sends through `ProcessReportedAlert`
+  `report_alert`, which the `ReportedEventDispatcher` sends through `ProcessReportedAlert`. A new
+  incident from a cron report is posted to the job's result channel (`CronRunner.ReportChannel`:
+  nil when `post_results` is off) and investigated in that thread; a correlated one gets a
+  "Recurring alert" note in the incident's thread. No channel = UI only
 - `ProcessReportedAlert` first joins a still-firing alert with the same source + source fingerprint
   (a cron reporting the same problem every run), before correlation; otherwise the insert would hit
   `uniq_firing_alert` and fail a fresh incident
