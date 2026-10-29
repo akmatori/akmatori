@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // splitRunsBatch bounds one step of migrateSplitAgentRuns. Each batch runs in
@@ -69,7 +70,9 @@ type legacyIncidentRow struct {
 // and continues; the columns are dropped only after every incident moved, so
 // a failed run loses nothing and resumes on the next start.
 func migrateSplitAgentRuns(db *gorm.DB) error {
-	db = db.Session(&gorm.Session{NewDB: true})
+	// Silent: a slow UPDATE would otherwise print its SQL, full log included
+	// (27 MB of startup log on a copy of gcore). Errors are returned.
+	db = db.Session(&gorm.Session{NewDB: true, Logger: db.Logger.LogMode(logger.Silent)})
 	m := db.Migrator()
 	if !m.HasTable("incidents") || !m.HasTable("agent_runs") || !m.HasColumn("incidents", "full_log") {
 		return nil
@@ -164,6 +167,7 @@ func splitIncidentRuns(tx *gorm.DB, inc *legacyIncidentRow) (bool, error) {
 			ExecutionTimeMs: inc.ExecutionTimeMs,
 			StartedAt:       inc.StartedAt,
 			CompletedAt:     inc.CompletedAt,
+			CreatedAt:       inc.StartedAt,
 		}
 		if err := tx.Create(&run).Error; err != nil {
 			return false, err

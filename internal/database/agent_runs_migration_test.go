@@ -113,7 +113,7 @@ func TestMigrateSplitAgentRuns(t *testing.T) {
 		t.Fatalf("synthetic run for inc-old: %v", err)
 	}
 	if old.ScopeUUID != "inc-old" || old.Response != "old answer" || old.TokensUsed != 70 ||
-		old.Status != AgentRunStatusCompleted || old.Model != "" {
+		old.Status != AgentRunStatusCompleted || old.Model != "" || !old.CreatedAt.Equal(start) {
 		t.Fatalf("synthetic run = %+v", old)
 	}
 	var cron AgentRun
