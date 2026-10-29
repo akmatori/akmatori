@@ -33,6 +33,12 @@ type ReportedAlert struct {
 	// Empty for API reports: the result then lands in the UI only.
 	SlackChannelID string
 	SlackThreadTS  string
+
+	// PostChannel is where a report with no thread is posted: the channel of
+	// the cron job that reported it. A new incident then gets a thread there
+	// for its investigation, and a correlated report a note in the
+	// incident's thread. Nil keeps the result in the UI only.
+	PostChannel *database.Channel
 }
 
 // ProcessReportedAlert runs a reported alert through the correlation gate.
@@ -104,6 +110,8 @@ func (h *AlertHandler) ProcessReportedAlert(r ReportedAlert) (incidentUUID strin
 				incidentUUID, linked = verdict.IncidentUUID, true
 				if inThread {
 					h.postSlackThreadReply(r.SlackChannelID, r.SlackThreadTS, h.buildAlertMergedMessage(verdict.IncidentUUID))
+				} else if r.PostChannel != nil {
+					h.postRecurringAlertNote(verdict.IncidentUUID, normalized.AlertName)
 				}
 				return nil, nil
 			}
@@ -129,8 +137,15 @@ func (h *AlertHandler) ProcessReportedAlert(r ReportedAlert) (incidentUUID strin
 			}
 			return nil, fmt.Errorf("insert reported alert: %w", err)
 		}
-		if inThread {
-			if err := h.updateIncidentSlackContext(newUUID, r.SlackChannelID, r.SlackThreadTS); err != nil {
+		// A report with no thread of its own (a cron run) is posted to the
+		// cron job's channel, and the investigation runs in that thread.
+		slackChannelID, threadTS := r.SlackChannelID, r.SlackThreadTS
+		if !inThread && r.PostChannel != nil {
+			slackChannelID, threadTS = h.postReportedAlertToSlack(normalized, r)
+		}
+		canPost := slackChannelID != "" && threadTS != ""
+		if canPost {
+			if err := h.updateIncidentSlackContext(newUUID, slackChannelID, threadTS); err != nil {
 				slog.Warn("failed to update incident Slack context", "err", err)
 			}
 		}
@@ -140,17 +155,17 @@ func (h *AlertHandler) ProcessReportedAlert(r ReportedAlert) (incidentUUID strin
 		incidentUUID = newUUID
 
 		// The listener-channel run loop covers both cases: in a Slack thread
-		// it streams progress and replies there; without one (API) it writes
-		// the result to the incident only.
+		// it streams progress and replies there; without one (API, a cron
+		// that does not post) it writes the result to the incident only.
 		channel := &database.Channel{
 			UUID:        r.SourceUUID,
-			ExternalID:  r.SlackChannelID,
+			ExternalID:  slackChannelID,
 			DisplayName: r.SourceName,
-			CanPost:     inThread,
+			CanPost:     canPost,
 			Integration: database.Integration{Provider: database.MessagingProviderSlack},
 		}
 		prompt := h.buildInvestigationPromptWithSource(normalized, r.SourceDisplay, r.SourceLabel, r.SourceName)
-		go h.runListenerChannelInvestigation(newUUID, normalized, channel, r.SlackChannelID, r.SlackThreadTS, prompt)
+		go h.runListenerChannelInvestigation(newUUID, normalized, channel, slackChannelID, threadTS, prompt)
 		return nil, nil
 	})
 	if sfErr != nil {
@@ -164,6 +179,18 @@ func (h *AlertHandler) ProcessReportedAlert(r ReportedAlert) (incidentUUID strin
 		incidentUUID, linked = firingAlertIncident(r.SourceUUID, normalized.SourceFingerprint), true
 	}
 	return incidentUUID, linked, nil
+}
+
+// postRecurringAlertNote notes a correlated recurrence in the incident's
+// Slack thread, as the webhook path does. Skipped when the incident has no
+// thread or the thread belongs to a silent listener channel.
+func (h *AlertHandler) postRecurringAlertNote(incidentUUID, alertName string) {
+	incident, err := h.skillService.GetIncident(incidentUUID)
+	if err != nil || incident == nil || incident.SlackChannelID == "" || incident.SlackMessageTS == "" ||
+		!h.incidentThreadPostable(incident) {
+		return
+	}
+	h.postSlackThreadReply(incident.SlackChannelID, incident.SlackMessageTS, fmt.Sprintf("Recurring alert: %s", alertName))
 }
 
 // firingAlertIncident returns the incident of the firing alert with this

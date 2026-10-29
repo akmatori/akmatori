@@ -81,8 +81,7 @@ func (h *AlertHandler) resolveSlackExternalID(externalID string) string {
 // channel ID, the message timestamp, and the resolved Channel row UUID (used
 // for formatting-rule matching; "" when posting was skipped).
 func (h *AlertHandler) postAlertToSlack(alert alerts.NormalizedAlert, instance *database.AlertSourceInstance) (string, string, string, error) {
-	slackClient := h.slackManager.GetClient()
-	if slackClient == nil {
+	if h.slackManager.GetClient() == nil {
 		return "", "", "", nil
 	}
 
@@ -91,19 +90,58 @@ func (h *AlertHandler) postAlertToSlack(alert alerts.NormalizedAlert, instance *
 		return "", "", "", nil
 	}
 
+	source := fmt.Sprintf("%s (%s)", instance.AlertSourceType.DisplayName, instance.Name)
+	ts, err := h.postAlertMessage(channel, channelID, alert, source)
+	if err != nil || ts == "" {
+		return "", "", "", err
+	}
+	return channelID, ts, channel.UUID, nil
+}
+
+// postReportedAlertToSlack posts an alert that a cron run reported to the
+// cron job's channel, so its investigation runs in that thread like a
+// webhook alert. Returns the Slack channel ID and thread ts, or "" when there
+// is nothing to post to.
+func (h *AlertHandler) postReportedAlertToSlack(alert alerts.NormalizedAlert, r ReportedAlert) (string, string) {
+	ch := r.PostChannel
+	if ch == nil || ch.Integration.Provider != database.MessagingProviderSlack || !h.isSlackEnabled() {
+		return "", ""
+	}
+	channelID := h.resolveSlackExternalID(ch.ExternalID)
+	if channelID == "" {
+		return "", ""
+	}
+	ts, err := h.postAlertMessage(ch, channelID, alert, fmt.Sprintf("%s (%s)", r.SourceDisplay, r.SourceName))
+	if err != nil {
+		slog.Warn("failed to post reported alert to Slack", "channel_uuid", ch.UUID, "err", err)
+		return "", ""
+	}
+	if ts == "" {
+		return "", ""
+	}
+	return channelID, ts
+}
+
+// postAlertMessage posts the alert summary to a Slack channel and marks it
+// with a reaction. Returns the message ts.
+func (h *AlertHandler) postAlertMessage(channel *database.Channel, channelID string, alert alerts.NormalizedAlert, source string) (string, error) {
+	slackClient := h.slackManager.GetClient()
+	if slackClient == nil {
+		return "", nil
+	}
+
 	// Format alert message
 	emoji := database.GetSeverityEmoji(alert.Severity)
 	message := fmt.Sprintf(`%s *Alert: %s*
 
-:label: *Source:* %s (%s)
+:label: *Source:* %s
 :computer: *Host:* %s
 :gear: *Service:* %s
 :warning: *Severity:* %s
 :memo: *Summary:* %s`,
 		emoji,
 		alert.AlertName,
-		instance.AlertSourceType.DisplayName,
-		instance.Name,
+		source,
 		alert.TargetHost,
 		alert.TargetService,
 		alert.Severity,
@@ -119,12 +157,12 @@ func (h *AlertHandler) postAlertToSlack(alert alerts.NormalizedAlert, instance *
 	// channel's provider name (keeps tests + legacy boot paths working).
 	ts, err := h.postViaProvider(context.Background(), channel, channelID, message)
 	if err != nil {
-		return "", "", "", err
+		return "", err
 	}
 	if ts == "" {
 		_, t, err := slackClient.PostMessage(channelID, slack.MsgOptionText(message, false))
 		if err != nil {
-			return "", "", "", err
+			return "", err
 		}
 		ts = t
 	}
@@ -137,7 +175,7 @@ func (h *AlertHandler) postAlertToSlack(alert alerts.NormalizedAlert, instance *
 		slog.Warn("failed to add reaction", "err", err)
 	}
 
-	return channelID, ts, channel.UUID, nil
+	return ts, nil
 }
 
 // postViaProvider posts text to the destination using the registered messaging

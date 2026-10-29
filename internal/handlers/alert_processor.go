@@ -117,13 +117,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 				slog.Warn("failed to link alert to incident, spawning new incident", "incident_uuid", verdict.IncidentUUID, "err", err)
 			} else {
 				// Best-effort Slack thread note on the matched incident's thread.
-				// Skipped when that thread belongs to a silent listener channel.
-				if incident, err := h.skillService.GetIncident(verdict.IncidentUUID); err == nil && incident != nil &&
-					incident.SlackChannelID != "" && incident.SlackMessageTS != "" &&
-					h.incidentThreadPostable(incident) {
-					h.postSlackThreadReply(incident.SlackChannelID, incident.SlackMessageTS,
-						fmt.Sprintf("Recurring alert: %s", normalized.AlertName))
-				}
+				h.postRecurringAlertNote(verdict.IncidentUUID, normalized.AlertName)
 				return nil, nil
 			}
 		}

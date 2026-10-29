@@ -25,11 +25,20 @@ type ReportedEventDispatcher struct {
 	db        *gorm.DB
 	processor reportedAlertProcessor
 	interval  time.Duration
+	// reportChannel returns the channel to post a cron job's reported
+	// alerts to (nil = UI only). Optional.
+	reportChannel func(cronJobUUID string) *database.Channel
 }
 
 // NewReportedEventDispatcher constructs the dispatcher.
 func NewReportedEventDispatcher(db *gorm.DB, processor reportedAlertProcessor) *ReportedEventDispatcher {
 	return &ReportedEventDispatcher{db: db, processor: processor, interval: reportedDispatchInterval}
+}
+
+// SetReportChannel sets how the dispatcher finds the channel that a cron
+// job's reported alert is posted to (CronRunner.ReportChannel).
+func (d *ReportedEventDispatcher) SetReportChannel(f func(cronJobUUID string) *database.Channel) {
+	d.reportChannel = f
 }
 
 // Start runs the loop until ctx is done.
@@ -89,6 +98,10 @@ func (d *ReportedEventDispatcher) dispatch(ctx context.Context, ev *database.Eve
 		jobName = "cron"
 	}
 	firedAt := ev.OccurredAt
+	var postChannel *database.Channel
+	if d.reportChannel != nil {
+		postChannel = d.reportChannel(ev.SourceUUID)
+	}
 
 	incidentUUID, linked, err := d.processor.ProcessReportedAlert(ReportedAlert{
 		SourceUUID:    ev.SourceUUID,
@@ -109,6 +122,7 @@ func (d *ReportedEventDispatcher) dispatch(ctx context.Context, ev *database.Eve
 			RawPayload:        raw,
 			EventUUID:         ev.UUID,
 		},
+		PostChannel: postChannel,
 	})
 	if err != nil {
 		slog.Error("reported events: correlation failed", "event_uuid", ev.UUID, "err", err)

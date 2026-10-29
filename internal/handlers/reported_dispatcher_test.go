@@ -59,6 +59,24 @@ func TestReportedEventDispatcher_DispatchesOnce(t *testing.T) {
 	}
 }
 
+func TestReportedEventDispatcher_PassesJobChannel(t *testing.T) {
+	db := setupEventsHandlerDB(t)
+	seedQueuedReport(t, "ev-1")
+	proc := &recordingReportedProcessor{}
+	d := NewReportedEventDispatcher(db, proc)
+	var asked string
+	d.SetReportChannel(func(jobUUID string) *database.Channel {
+		asked = jobUUID
+		return &database.Channel{UUID: "ch-ops"}
+	})
+
+	d.DispatchPending(context.Background())
+
+	if asked != "job-1" || len(proc.got) != 1 || proc.got[0].PostChannel == nil || proc.got[0].PostChannel.UUID != "ch-ops" {
+		t.Fatalf("asked=%q reports=%+v, want the job's channel passed on", asked, proc.got)
+	}
+}
+
 func TestReportedEventDispatcher_RecordsFailure(t *testing.T) {
 	db := setupEventsHandlerDB(t)
 	seedQueuedReport(t, "ev-1")

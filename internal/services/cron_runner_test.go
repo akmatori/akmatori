@@ -1912,3 +1912,29 @@ func TestCronRunner_AgentTick_NoRuleMatchKeepsRawOutput(t *testing.T) {
 		t.Errorf("expected 0 LLM calls, got %d", caller.callCount())
 	}
 }
+
+// TestCronRunner_ReportChannel asserts a cron job's reported alerts go to the
+// channel its results go to, and nowhere when it does not post results.
+func TestCronRunner_ReportChannel(t *testing.T) {
+	runner, _, _, chMgr, _ := setupCronRunnerTest(t)
+	defaultCh := chMgr.channels[0]
+
+	posting, err := runner.CreateJob("posting", "*/2 * * * *", "Check disks", "", true, true, nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if ch := runner.ReportChannel(posting.UUID); ch == nil || ch.UUID != defaultCh.UUID {
+		t.Fatalf("ReportChannel = %+v, want the default channel %s", ch, defaultCh.UUID)
+	}
+
+	silent, err := runner.CreateJob("silent", "*/2 * * * *", "Check disks", "", true, false, nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if ch := runner.ReportChannel(silent.UUID); ch != nil {
+		t.Fatalf("ReportChannel = %+v, want nil for a job that does not post results", ch)
+	}
+	if ch := runner.ReportChannel("no-such-job"); ch != nil {
+		t.Fatalf("ReportChannel = %+v, want nil for a missing job", ch)
+	}
+}

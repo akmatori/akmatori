@@ -35,7 +35,8 @@ Cron jobs run on a per-job schedule and always execute as a full agent investiga
   `null` means allow-all
 - a cron that finds a problem reports it with `events.report_alert` (see the `events` rule); the
   stable identity (`cron:` + hash of job, alert name, host; `cronAlertIdentity`) makes repeated runs
-  update one firing alert
+  update one firing alert; the incident it opens is posted to the job's result channel
+  (`ReportChannel`, same resolution as the tick, nothing when `post_results` is off)
 - the seeded `Dreaming` cron dedupes `/akmatori/memory/global/` via memory-writer tombstones
 - cron expressions are validated at write time (invalid → 400); `CronRunner` survives tick failures,
   recording `LastRunStatus=error` + `LastRunError`

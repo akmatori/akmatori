@@ -50,6 +50,14 @@ func (m *Manager) GetClient() *slack.Client {
 	return m.client
 }
 
+// SetClientForTest installs a Slack client without starting Socket Mode, so
+// other packages' tests can point the manager at a fake Slack server.
+func (m *Manager) SetClientForTest(c *slack.Client) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.client = c
+}
+
 // GetSocketClient returns the current Socket Mode client (may be nil if not configured)
 func (m *Manager) GetSocketClient() *socketmode.Client {
 	m.mu.RLock()
