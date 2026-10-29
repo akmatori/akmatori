@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Plus, RefreshCw, Search, Activity } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
-import ErrorMessage from '../components/ErrorMessage';
+import ErrorMessage, { SuccessMessage } from '../components/ErrorMessage';
 import TimeRangePicker from '../components/TimeRangePicker';
 import EmptyState from '../components/shared/EmptyState';
 import Pagination from '../components/shared/Pagination';
@@ -73,6 +73,9 @@ export default function Incidents() {
   });
   const [result, setResult] = useState<ListResult | null>(null);
   const [error, setError] = useState('');
+  // A task stored as a change or info event. Kept apart from error, which
+  // every refresh clears.
+  const [notice, setNotice] = useState('');
   const [filter, setFilter] = useState('');
   const [refreshInterval, setRefreshInterval] = useState(DEFAULT_REFRESH_INTERVAL);
   const [refreshing, setRefreshing] = useState(false);
@@ -208,6 +211,7 @@ export default function Incidents() {
         </button>
       </div>
 
+      {notice && <SuccessMessage key={notice} message={notice} onDismiss={() => setNotice('')} />}
       {error && <ErrorMessage message={error} />}
 
       <div className="flex-1 min-h-0 grid lg:grid-cols-[minmax(320px,420px)_1fr] rounded-xl border border-line bg-surface overflow-hidden">
@@ -228,7 +232,7 @@ export default function Incidents() {
             setShowCreate(false);
             const path = taskResultPath(res);
             if (path) navigate(path);
-            else setError(res.message);
+            else setNotice(res.message);
             void refresh();
           }}
           onError={setError}
