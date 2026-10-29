@@ -4,7 +4,7 @@ import { AlertTriangle } from 'lucide-react';
 import InvestigateBar from '../components/overview/InvestigateBar';
 import { OverviewColumn, OverviewRow } from '../components/overview/OverviewColumn';
 import LoadingSpinner from '../components/LoadingSpinner';
-import ErrorMessage from '../components/ErrorMessage';
+import ErrorMessage, { SuccessMessage } from '../components/ErrorMessage';
 import { useOverviewData } from '../hooks/useOverviewData';
 import { useSystemStatus } from '../hooks/useSystemStatus';
 import { formatCountdown, formatRelativeAgo, formatRelativeShort } from '../utils/format';
@@ -42,6 +42,8 @@ export default function Dashboard() {
   const { data, error } = useOverviewData();
   const { apiAvailable, llm, worker } = useSystemStatus();
   const [startError, setStartError] = useState('');
+  // A task stored as a change or info event: not an error, there is no page.
+  const [startNotice, setStartNotice] = useState('');
 
   if (!data && !error) return <LoadingSpinner />;
 
@@ -64,13 +66,18 @@ export default function Dashboard() {
     <div className="flex flex-col gap-6">
       <InvestigateBar
         onStarted={(res) => {
+          setStartError('');
           const path = taskResultPath(res);
           if (path) navigate(path);
-          else setStartError(res.message);
+          else setStartNotice(res.message);
         }}
-        onError={setStartError}
+        onError={(message) => {
+          setStartNotice('');
+          setStartError(message);
+        }}
       />
 
+      {startNotice && <SuccessMessage key={startNotice} message={startNotice} onDismiss={() => setStartNotice('')} />}
       {startError && <ErrorMessage message={startError} />}
       {error && <ErrorMessage message={error} />}
 

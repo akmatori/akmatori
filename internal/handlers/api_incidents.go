@@ -189,7 +189,7 @@ func (h *APIHandler) handleIncidents(w http.ResponseWriter, r *http.Request) {
 		if handled && reported.storedKind != "" {
 			api.RespondJSON(w, http.StatusCreated, api.CreateIncidentResponse{
 				Status:    "recorded",
-				Message:   fmt.Sprintf("Task stored as a %s event; no agent run started", reported.storedKind),
+				Message:   fmt.Sprintf("Akmatori classified this text as a %s event and stored it on the Events page. It did not start an agent run.", reported.storedKind),
 				EventUUID: eventUUID,
 				EventKind: reported.storedKind,
 			})
