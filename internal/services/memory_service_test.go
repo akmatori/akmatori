@@ -37,7 +37,7 @@ func setupMemoryServiceTest(t *testing.T) *MemoryService {
 func validMemory(name string) *database.Memory {
 	return &database.Memory{
 		Scope:       MemoryScopeGlobal,
-		Type:        MemoryTypeHost,
+		Type:        MemoryTypeFact,
 		Name:        name,
 		Description: "host fact",
 		Body:        "host body",
@@ -437,9 +437,9 @@ func TestMemoryService_ListMemories_Filters(t *testing.T) {
 	svc := setupMemoryServiceTest(t)
 
 	host := validMemory("host-a")
-	host.Type = MemoryTypeHost
+	host.Type = MemoryTypeFact
 	pat := validMemory("pat-a")
-	pat.Type = MemoryTypeIncidentPattern
+	pat.Type = "incident_pattern" // legacy type, stored as fact
 	feedback := validMemory("fb-a")
 	feedback.Type = MemoryTypeFeedback
 	feedback.Scope = "redis"
@@ -450,9 +450,9 @@ func TestMemoryService_ListMemories_Filters(t *testing.T) {
 		}
 	}
 
-	hosts, _ := svc.ListMemories(MemoryFilter{Type: MemoryTypeHost})
-	if len(hosts) != 1 || hosts[0].Name != "host-a" {
-		t.Fatalf("host filter = %+v", hosts)
+	facts, _ := svc.ListMemories(MemoryFilter{Type: MemoryTypeFact})
+	if len(facts) != 2 {
+		t.Fatalf("fact filter = %+v", facts)
 	}
 
 	redisOnly, _ := svc.ListMemories(MemoryFilter{Scope: "redis"})
@@ -460,7 +460,7 @@ func TestMemoryService_ListMemories_Filters(t *testing.T) {
 		t.Fatalf("scope filter = %+v", redisOnly)
 	}
 
-	combo, _ := svc.ListMemories(MemoryFilter{Scope: "redis", Type: MemoryTypeHost})
+	combo, _ := svc.ListMemories(MemoryFilter{Scope: "redis", Type: MemoryTypeFact})
 	if len(combo) != 0 {
 		t.Fatalf("scope+type combo should be empty, got %+v", combo)
 	}

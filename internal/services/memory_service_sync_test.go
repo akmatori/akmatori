@@ -24,7 +24,7 @@ func TestMemoryService_Sync_WritesFilesAndManifest(t *testing.T) {
 	}
 
 	second := validMemory("redis-port")
-	second.Type = MemoryTypeToolQuirk
+	second.Type = MemoryTypeFact
 	second.Description = "redis runs on 16379"
 	second.Body = "Redis prod cluster listens on 16379, not 6379."
 	if _, err := svc.CreateMemory(second); err != nil {
@@ -56,7 +56,7 @@ func TestMemoryService_Sync_WritesFilesAndManifest(t *testing.T) {
 	if !strings.Contains(manifest, "scope: global") {
 		t.Errorf("manifest missing scope header: %s", manifest)
 	}
-	for _, want := range []string{"`postgres-data-dir`", "`redis-port`", MemoryTypeHost, MemoryTypeToolQuirk} {
+	for _, want := range []string{"`postgres-data-dir`", "`redis-port`", MemoryTypeFact, MemoryTypeFact} {
 		if !strings.Contains(manifest, want) {
 			t.Errorf("manifest missing %q\n%s", want, manifest)
 		}
@@ -65,7 +65,7 @@ func TestMemoryService_Sync_WritesFilesAndManifest(t *testing.T) {
 	body := readFile(t, filepath.Join(scopeDir, "postgres-data-dir.md"))
 	for _, want := range []string{
 		"name: postgres-data-dir",
-		"type: " + MemoryTypeHost,
+		"type: " + MemoryTypeFact,
 		"scope: " + MemoryScopeGlobal,
 		"# postgres-data-dir",
 		"Postgres on prod-db-01",
@@ -116,7 +116,7 @@ func TestMemoryService_Sync_ScopeRenamePurgesOldDir(t *testing.T) {
 	// Move to a new scope.
 	updated, err := svc.UpdateMemory(m.ID, &database.Memory{
 		Scope:       "redis",
-		Type:        MemoryTypeHost,
+		Type:        MemoryTypeFact,
 		Description: "moved",
 		Body:        "moved",
 	}, false)
@@ -143,7 +143,7 @@ func TestRenderManifest_TruncatesAtLineCap(t *testing.T) {
 		entries[i] = database.Memory{
 			ID:          uint(i + 1),
 			Scope:       MemoryScopeGlobal,
-			Type:        MemoryTypeHost,
+			Type:        MemoryTypeFact,
 			Name:        "memory-" + strings.Repeat("x", 5),
 			Description: "row",
 		}
@@ -165,7 +165,7 @@ func TestRenderManifest_TruncatesAtByteCap(t *testing.T) {
 		entries[i] = database.Memory{
 			ID:          uint(i + 1),
 			Scope:       MemoryScopeGlobal,
-			Type:        MemoryTypeIncidentPattern,
+			Type:        MemoryTypeFact,
 			Name:        "n" + strings.Repeat("x", 50),
 			Description: strings.Repeat("y", 600),
 		}
@@ -206,7 +206,7 @@ func TestRenderMemoryFile_FrontmatterIsValidYAML(t *testing.T) {
 			m := database.Memory{
 				ID:          1,
 				Scope:       "global",
-				Type:        MemoryTypeHost,
+				Type:        MemoryTypeFact,
 				Name:        "test-mem",
 				Description: tc.description,
 				Body:        "body",
@@ -230,7 +230,7 @@ func TestRenderMemoryFile_FrontmatterIsValidYAML(t *testing.T) {
 			if got, _ := fm["name"].(string); got != "test-mem" {
 				t.Errorf("name round-trip failed: %q", got)
 			}
-			if got, _ := fm["type"].(string); got != MemoryTypeHost {
+			if got, _ := fm["type"].(string); got != MemoryTypeFact {
 				t.Errorf("type round-trip failed: %q", got)
 			}
 		})
@@ -384,6 +384,79 @@ func TestLimitManifestEntries(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestLimitManifestEntries_FeedbackBudget(t *testing.T) {
+	now := time.Now()
+	entries := func(prefix, memType string, n int, offset time.Duration) []database.Memory {
+		var out []database.Memory
+		for i := 0; i < n; i++ {
+			out = append(out, database.Memory{
+				Name:      fmt.Sprintf("%s-%03d", prefix, i),
+				Type:      memType,
+				UpdatedAt: now.Add(-offset - time.Duration(i)*time.Minute),
+			})
+		}
+		return out
+	}
+	count := func(list []database.Memory, memType string) int {
+		n := 0
+		for _, m := range list {
+			if m.Type == memType {
+				n++
+			}
+		}
+		return n
+	}
+
+	t.Run("feedback first even when facts are newer", func(t *testing.T) {
+		all := append(entries("fact", MemoryTypeFact, 3, 0), entries("fb", MemoryTypeFeedback, 2, time.Hour)...)
+		limited, truncated := limitManifestEntries(all, 10)
+		if truncated != 0 || len(limited) != 5 {
+			t.Fatalf("len=%d truncated=%d", len(limited), truncated)
+		}
+		if limited[0].Type != MemoryTypeFeedback || limited[1].Type != MemoryTypeFeedback || limited[2].Name != "fact-000" {
+			t.Errorf("order = %v", names(limited))
+		}
+	})
+
+	t.Run("new facts cannot push out feedback", func(t *testing.T) {
+		all := append(entries("fact", MemoryTypeFact, 200, 0), entries("fb", MemoryTypeFeedback, 10, time.Hour)...)
+		limited, truncated := limitManifestEntries(all, manifestMaxEntriesPerScope)
+		if got := count(limited, MemoryTypeFeedback); got != 10 {
+			t.Errorf("feedback kept = %d, want 10", got)
+		}
+		if len(limited) != manifestMaxEntriesPerScope || truncated != 60 {
+			t.Errorf("len=%d truncated=%d", len(limited), truncated)
+		}
+	})
+
+	t.Run("feedback is capped while facts need slots", func(t *testing.T) {
+		all := append(entries("fact", MemoryTypeFact, 200, 0), entries("fb", MemoryTypeFeedback, 80, 0)...)
+		limited, _ := limitManifestEntries(all, manifestMaxEntriesPerScope)
+		if got := count(limited, MemoryTypeFeedback); got != manifestMaxFeedbackEntries {
+			t.Errorf("feedback kept = %d, want %d", got, manifestMaxFeedbackEntries)
+		}
+		if got := count(limited, MemoryTypeFact); got != manifestMaxEntriesPerScope-manifestMaxFeedbackEntries {
+			t.Errorf("facts kept = %d", got)
+		}
+	})
+
+	t.Run("unused fact slots go to feedback", func(t *testing.T) {
+		all := append(entries("fact", MemoryTypeFact, 5, 0), entries("fb", MemoryTypeFeedback, 80, 0)...)
+		limited, truncated := limitManifestEntries(all, manifestMaxEntriesPerScope)
+		if count(limited, MemoryTypeFeedback) != 80 || count(limited, MemoryTypeFact) != 5 || truncated != 0 {
+			t.Errorf("feedback=%d facts=%d truncated=%d", count(limited, MemoryTypeFeedback), count(limited, MemoryTypeFact), truncated)
+		}
+	})
+}
+
+func names(list []database.Memory) []string {
+	out := make([]string, len(list))
+	for i, m := range list {
+		out[i] = m.Name
+	}
+	return out
 }
 
 func TestMemoryService_Sync_FilesWritableByOtherDespiteUmask(t *testing.T) {

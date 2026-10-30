@@ -288,7 +288,7 @@ func newMemoryAPIHandler(mem services.MemoryManager) *APIHandler {
 func validMemoryRequest(name string) MemoryRequest {
 	return MemoryRequest{
 		Scope:       services.MemoryScopeGlobal,
-		Type:        services.MemoryTypeHost,
+		Type:        services.MemoryTypeFact,
 		Name:        name,
 		Description: "host description",
 		Body:        "body content",
@@ -316,7 +316,7 @@ func doJSON(t *testing.T, h *APIHandler, method, path string, body interface{}) 
 func TestHandleMemories_List_NoFilter(t *testing.T) {
 	mock := newMockMemoryService()
 	h := newMemoryAPIHandler(mock)
-	if _, err := mock.CreateMemory(&database.Memory{Scope: "global", Type: services.MemoryTypeHost, Name: "a", Description: "d", Body: "b"}); err != nil {
+	if _, err := mock.CreateMemory(&database.Memory{Scope: "global", Type: services.MemoryTypeFact, Name: "a", Description: "d", Body: "b"}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
@@ -337,9 +337,9 @@ func TestHandleMemories_List_WithFilters(t *testing.T) {
 	mock := newMockMemoryService()
 	h := newMemoryAPIHandler(mock)
 	for _, m := range []*database.Memory{
-		{Scope: "global", Type: services.MemoryTypeHost, Name: "h1", Description: "d", Body: "b"},
+		{Scope: "global", Type: services.MemoryTypeFact, Name: "h1", Description: "d", Body: "b"},
 		{Scope: "global", Type: services.MemoryTypeFeedback, Name: "f1", Description: "d", Body: "b"},
-		{Scope: "redis", Type: services.MemoryTypeHost, Name: "h2", Description: "d", Body: "b"},
+		{Scope: "redis", Type: services.MemoryTypeFact, Name: "h2", Description: "d", Body: "b"},
 	} {
 		if _, err := mock.CreateMemory(m); err != nil {
 			t.Fatalf("seed: %v", err)
@@ -413,7 +413,7 @@ func TestHandleMemories_Create_FileSyncErrorIs500(t *testing.T) {
 func TestHandleMemoryByID_GetUpdateDelete(t *testing.T) {
 	mock := newMockMemoryService()
 	h := newMemoryAPIHandler(mock)
-	created, _ := mock.CreateMemory(&database.Memory{Scope: "global", Type: services.MemoryTypeHost, Name: "to-mutate", Description: "d", Body: "b"})
+	created, _ := mock.CreateMemory(&database.Memory{Scope: "global", Type: services.MemoryTypeFact, Name: "to-mutate", Description: "d", Body: "b"})
 
 	// GET
 	w := doJSON(t, h, http.MethodGet, fmt.Sprintf("/api/memories/%d", created.ID), nil)
@@ -445,8 +445,8 @@ func TestHandleMemoryByID_GetUpdateDelete(t *testing.T) {
 func TestHandleMemoryByID_GetIncludesReferences(t *testing.T) {
 	mock := newMockMemoryService()
 	h := newMemoryAPIHandler(mock)
-	linked, _ := mock.CreateMemory(&database.Memory{Scope: "global", Type: services.MemoryTypeHost, Name: "linked", Description: "d", Body: "See [[other-fact]] and [[topology.pdf]]."})
-	plain, _ := mock.CreateMemory(&database.Memory{Scope: "global", Type: services.MemoryTypeHost, Name: "plain", Description: "d", Body: "no links"})
+	linked, _ := mock.CreateMemory(&database.Memory{Scope: "global", Type: services.MemoryTypeFact, Name: "linked", Description: "d", Body: "See [[other-fact]] and [[topology.pdf]]."})
+	plain, _ := mock.CreateMemory(&database.Memory{Scope: "global", Type: services.MemoryTypeFact, Name: "plain", Description: "d", Body: "no links"})
 
 	w := doJSON(t, h, http.MethodGet, fmt.Sprintf("/api/memories/%d", linked.ID), nil)
 	if w.Code != http.StatusOK {
@@ -484,8 +484,8 @@ func TestHandleMemoryScopes(t *testing.T) {
 	mock := newMockMemoryService()
 	h := newMemoryAPIHandler(mock)
 	for _, m := range []*database.Memory{
-		{Scope: "global", Type: services.MemoryTypeHost, Name: "g", Description: "d", Body: "b"},
-		{Scope: "redis", Type: services.MemoryTypeHost, Name: "r", Description: "d", Body: "b"},
+		{Scope: "global", Type: services.MemoryTypeFact, Name: "g", Description: "d", Body: "b"},
+		{Scope: "redis", Type: services.MemoryTypeFact, Name: "r", Description: "d", Body: "b"},
 	} {
 		if _, err := mock.CreateMemory(m); err != nil {
 			t.Fatalf("seed: %v", err)
@@ -696,7 +696,7 @@ func TestHandleMemoryByID_Update_CrossScopeMoveRegeneratesBoth(t *testing.T) {
 	h := newMemoryAPIHandlerWithSkill(mem, skill)
 
 	created, _ := mem.CreateMemory(&database.Memory{
-		Scope: "redis-skill", Type: services.MemoryTypeHost, Name: "movable",
+		Scope: "redis-skill", Type: services.MemoryTypeFact, Name: "movable",
 		Description: "d", Body: "b",
 	})
 
@@ -727,7 +727,7 @@ func TestHandleMemoryByID_Delete_RegeneratesPriorSkillScope(t *testing.T) {
 	h := newMemoryAPIHandlerWithSkill(mem, skill)
 
 	created, _ := mem.CreateMemory(&database.Memory{
-		Scope: "redis-skill", Type: services.MemoryTypeHost, Name: "doomed",
+		Scope: "redis-skill", Type: services.MemoryTypeFact, Name: "doomed",
 		Description: "d", Body: "b",
 	})
 	// Reset recorder so we don't see the create's regen.

@@ -281,7 +281,32 @@ func runMigrations(db *gorm.DB) error {
 		return err
 	}
 
+	// Collapse the legacy memory types into fact. Best-effort: services
+	// normalize the old types on every write and read, so a failure only
+	// leaves old labels until the next start.
+	if err := migrateLegacyMemoryTypes(db); err != nil {
+		slog.Warn("legacy memory type migration failed; it retries on the next start", "err", err)
+	}
+
 	slog.Info("database migrations completed successfully")
+	return nil
+}
+
+// migrateLegacyMemoryTypes rewrites memories of the legacy types host,
+// incident_pattern and tool_quirk to fact (services.NormalizeMemoryType has
+// the same mapping). A raw UPDATE leaves updated_at alone, so the manifest's
+// newest-first order does not change. Idempotent.
+func migrateLegacyMemoryTypes(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&Memory{}) {
+		return nil
+	}
+	res := db.Exec("UPDATE memories SET type = 'fact' WHERE type IN ('host', 'incident_pattern', 'tool_quirk')")
+	if res.Error != nil {
+		return fmt.Errorf("update memory types: %w", res.Error)
+	}
+	if res.RowsAffected > 0 {
+		slog.Info("migrated legacy memory types to fact", "rows", res.RowsAffected)
+	}
 	return nil
 }
 
