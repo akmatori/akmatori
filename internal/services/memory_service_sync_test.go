@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -37,9 +38,9 @@ func TestMemoryService_Sync_WritesFilesAndManifest(t *testing.T) {
 	}
 
 	wantFiles := map[string]bool{
-		manifestFile:        true,
-		"1-postgres-data-dir.md": true,
-		"2-redis-port.md":   true,
+		manifestFile:           true,
+		"postgres-data-dir.md": true,
+		"redis-port.md":        true,
 	}
 	for _, f := range files {
 		if !wantFiles[f.Name()] {
@@ -61,7 +62,7 @@ func TestMemoryService_Sync_WritesFilesAndManifest(t *testing.T) {
 		}
 	}
 
-	body := readFile(t, filepath.Join(scopeDir, "1-postgres-data-dir.md"))
+	body := readFile(t, filepath.Join(scopeDir, "postgres-data-dir.md"))
 	for _, want := range []string{
 		"name: postgres-data-dir",
 		"type: " + MemoryTypeHost,
@@ -383,4 +384,54 @@ func TestLimitManifestEntries(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestMemoryService_Sync_FilesWritableByOtherDespiteUmask(t *testing.T) {
+	// The agent worker runs as a different UID and overwrites API-written
+	// memory files in place, so every synced file must be 0666 even when the
+	// API process runs under the common 022 umask.
+	old := syscall.Umask(0o022)
+	t.Cleanup(func() { syscall.Umask(old) })
+
+	svc := setupMemoryServiceTest(t)
+	if _, err := svc.CreateMemory(validMemory("shared-file")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	scopeDir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
+	for _, name := range []string{"shared-file.md", manifestFile} {
+		info, err := os.Stat(filepath.Join(scopeDir, name))
+		if err != nil {
+			t.Fatalf("stat %s: %v", name, err)
+		}
+		if got := info.Mode().Perm(); got != 0o666 {
+			t.Errorf("%s mode = %o, want 666", name, got)
+		}
+	}
+}
+
+func TestMemoryService_Sync_ReplacesLegacyIDPrefixedFiles(t *testing.T) {
+	// Directories synced by older releases hold `<id>-<name>.md`. The next
+	// sync must write `<name>.md` and remove the legacy file.
+	svc := setupMemoryServiceTest(t)
+	m, err := svc.CreateMemory(validMemory("migrated"))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	scopeDir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
+	plain := filepath.Join(scopeDir, "migrated.md")
+	legacy := filepath.Join(scopeDir, fmt.Sprintf("%d-migrated.md", m.ID))
+	if err := os.Rename(plain, legacy); err != nil {
+		t.Fatalf("seed legacy file: %v", err)
+	}
+
+	if err := svc.SyncMemoryFiles(); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if _, err := os.Stat(plain); err != nil {
+		t.Errorf("expected %s after sync: %v", plain, err)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Errorf("legacy file should be removed; stat err=%v", err)
+	}
 }

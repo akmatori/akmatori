@@ -20,7 +20,7 @@ Hard scope rules:
 
 Directory shape:
 - `/akmatori/memory/<scope>/MEMORY.md` — per-scope manifest (small, summary).
-- `/akmatori/memory/<scope>/<id>-<name>.md` — one file per memory with YAML
+- `/akmatori/memory/<scope>/<name>.md` — one file per memory with YAML
   frontmatter (`name`, `description`, `type`, `scope`, `incident_uuid`,
   `created_by`) followed by `# <name>`, the description, and an optional body.
 - The reserved scope `global` holds cross-incident learnings; other scopes

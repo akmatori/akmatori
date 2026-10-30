@@ -27,12 +27,14 @@ memory lives under `akmatori_data/memory/` (read-write). Agents reach both via p
 - memory syncing is scope-aware and manifest-driven; upserts idempotent by `name:` slug + scope
 - manifest capped at `manifestMaxEntriesPerScope` (150) entries per scope by `UpdatedAt` descending
 - the upsert's conflict update fires ONLY when type/description/body/incident_uuid differ: ingest
-  re-reads every unchanged `<id>-<slug>.md` snapshot, and an unconditional update restamped the
+  re-reads every unchanged `<slug>.md` file, and an unconditional update restamped the
   whole table after every incident, which made the manifest cap pick entries at random
 - memory deletions: `memory-writer` accepts `Action: delete <slug>` and writes a tombstone
   (`name:` + `deleted: true` frontmatter only); `IngestFromDisk` deletes the matching row and the
-  post-batch sync purges the tombstone and prior `<id>-<slug>.md` snapshot; unknown-slug tombstones
-  are a no-op but still trigger sync
+  post-batch sync purges the tombstone; unknown-slug tombstones are a no-op but still trigger sync
+- memory files are `<scope>/<slug>.md` — the same path the API syncs and the agent writes. Sync
+  fchmods every file to 0666 so the agent (UID 1001) can overwrite API-written files (UID 1000).
+  Ingest still accepts legacy `<id>-<slug>.md` files and prefers `<slug>.md` when both exist
 
 Key files: `internal/services/memory_service.go`, `internal/services/runbook_service.go`,
 `akmatori_data/agents/` (`runbook-searcher`, `memory-searcher`, `memory-writer` definitions)

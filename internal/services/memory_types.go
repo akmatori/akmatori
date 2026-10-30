@@ -24,12 +24,12 @@ const (
 // Body / description / name caps. These are enforced by the service layer.
 //
 // MemoryNameMaxLen is bounded BELOW the typical filesystem NAME_MAX of 255
-// bytes. The on-disk memory file is named `<id>-<name>.md`, so a 255-char
-// name combined with a multi-digit ID and the ".md" suffix would push the
-// final filename past NAME_MAX and make os.WriteFile fail with ENAMETOOLONG
-// — leaving the DB row in place while every subsequent SyncMemoryFiles
-// call kept failing on the same path. 200 reserves >40 bytes of headroom
-// for the longest realistic ID + ".md" + safety margin.
+// bytes. The on-disk memory file is `<name>.md`, and SyncMemoryFiles first
+// writes it as `<name>.md.tmp.<pid>.<nanos>.<counter>`. A 255-char name
+// would push that temp name past NAME_MAX and make the write fail with
+// ENAMETOOLONG — leaving the DB row in place while every subsequent
+// SyncMemoryFiles call kept failing on the same path. 200 reserves >50
+// bytes of headroom for the temp suffix.
 const (
 	MemoryNameMaxLen        = 200
 	MemoryDescriptionMaxLen = 500

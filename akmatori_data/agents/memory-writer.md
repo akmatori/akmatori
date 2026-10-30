@@ -57,11 +57,10 @@ What to write:
    Use the `grep` tool (e.g. `pattern: "^name: <slug>$"` with
    `path: "/akmatori/memory/<scope>/"`) and the `ls` tool with
    `path: "/akmatori/memory/<scope>/"`. Always pass absolute paths via the
-   `path` argument. Always (re)write the fresh content to
-   `/akmatori/memory/<scope>/<name>.md` via the `write` tool — DO NOT edit
-   the canonical `<id>-<name>.md` file in place. That canonical form is
-   owned by the API process and the ingester treats the bare `<name>.md` as
-   the authoritative new write, regenerating the canonical on the next sync.
+   `path` argument. Always (re)write the full fresh content to
+   `/akmatori/memory/<scope>/<name>.md` via the `write` tool. If that file
+   already exists, overwrite it — it is the same memory. Do not create a
+   second file for the same name.
    If the existing entry has a meaningful `incident_uuid` already and the
    current incident does not clearly supersede it, copy that earlier
    `incident_uuid` forward into the new file's frontmatter.
@@ -104,9 +103,10 @@ Deletion (when the task carries `Action: delete <slug>` lines):
    ```
 
    No body, no `# <slug>` heading — just the three-line frontmatter and a
-   trailing newline. Use the `write` tool. If a canonical `<id>-<slug>.md`
-   exists alongside, leave it alone; the API's ingester removes both files
-   after the row is deleted from Postgres.
+   trailing newline. Use the `write` tool and overwrite the existing
+   `<slug>.md`. If an older `<id>-<slug>.md` file exists alongside, leave it
+   alone; the API's ingester removes both files after the row is deleted
+   from Postgres.
 2. Resolve every tombstone path before writing and refuse anything that
    escapes `/akmatori/memory/<scope>/` (same scope-safety rules as for
    creates).
