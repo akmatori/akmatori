@@ -24,6 +24,13 @@ type MemoryRequest struct {
 	CreatedBy    string `json:"created_by,omitempty"`
 }
 
+// MemoryDetailResponse is the GET /api/memories/{id} body: the memory plus
+// its resolved [[...]] references, so a view can link them.
+type MemoryDetailResponse struct {
+	database.Memory
+	References []services.MemoryRef `json:"references"`
+}
+
 // IncidentFeedbackRequest is the body for POST /api/incidents/{uuid}/feedback.
 // Operators send free-form feedback text; the handler persists it as a
 // scope=global memory of type=feedback tagged with the incident UUID.
@@ -110,7 +117,11 @@ func (h *APIHandler) handleMemoryByID(w http.ResponseWriter, r *http.Request) {
 			api.RespondError(w, http.StatusNotFound, "memory not found")
 			return
 		}
-		api.RespondJSON(w, http.StatusOK, m)
+		refs := h.memoryService.ResolveRefs(m)
+		if refs == nil {
+			refs = []services.MemoryRef{}
+		}
+		api.RespondJSON(w, http.StatusOK, MemoryDetailResponse{Memory: *m, References: refs})
 
 	case http.MethodPut:
 		var req MemoryRequest

@@ -209,6 +209,9 @@ const memoryRecallInstruction = "Before answering questions about prior incident
 	"`subagent({\"agent\": \"memory-searcher\", \"task\": \"<full Original alert text when present, otherwise the topic you want to recall — host name, error pattern, tool quirk, feedback topic>\"})`\n\n" +
 	"When the prompt contains an \"Original alert text:\" block, pass that block verbatim as the task — the " +
 	"memory-searcher subagent will extract distinctive keywords on its own.\n\n" +
+	"Memory bodies link with `[[...]]`: `[[slug]]` is `/akmatori/memory/<same scope or global>/slug.md`, " +
+	"`[[scope/slug]]` is `/akmatori/memory/scope/slug.md`, and `[[file.ext]]` is `/akmatori/context/file.ext`. " +
+	"Follow a link with the read tool when it is relevant.\n\n" +
 	"Cite `Source: <name>` when it helps."
 
 // agentContextDir is where the agent worker mounts the context directory

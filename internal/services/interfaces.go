@@ -118,6 +118,7 @@ type MemoryManager interface {
 	ListAllScopes() ([]string, error)
 	CountByIncidentUUID(incidentUUID string, createdBy string) (int64, error)
 	SyncMemoryFiles() error
+	ResolveRefs(m *database.Memory) []MemoryRef
 }
 
 // ContextManager defines the interface for context file management.

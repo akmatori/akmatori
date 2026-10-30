@@ -39,6 +39,11 @@ memory lives under `akmatori_data/memory/` (read-write). Agents reach both via p
   (`renderContextFilesSection`: agent path `/akmatori/context/<file>`, size, operator description;
   capped at 100 files / 8 KiB). The worker mounts that dir read-only; `memory-searcher` stays
   scoped to `/akmatori/memory/`, so the main agent reads reference files itself
+- memory bodies link with `[[slug]]` (same scope, else global), `[[scope/slug]]` and
+  `[[file.ext]]` (context file). The raw `[[...]]` is what DB and disk store — never rewrite it
+  into a path, ingest would save the path back. `MemoryService.ResolveRefs` resolves refs
+  against the DB for views (`GET /api/memories/{id}` → `references`); anything that is not a
+  slug, `scope/slug` or a valid context filename is `invalid` and never becomes a path
 
-Key files: `internal/services/memory_service.go`, `internal/services/runbook_service.go`,
+Key files: `internal/services/memory_service.go`, `internal/services/memory_refs.go`, `internal/services/runbook_service.go`,
 `akmatori_data/agents/` (`runbook-searcher`, `memory-searcher`, `memory-writer` definitions)
