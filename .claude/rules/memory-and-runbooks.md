@@ -33,6 +33,10 @@ memory lives under `akmatori_data/memory/` (read-write). Agents reach both via p
   (`name:` + `deleted: true` frontmatter only); `IngestFromDisk` deletes the matching row and the
   post-batch sync purges the tombstone and prior `<id>-<slug>.md` snapshot; unknown-slug tombstones
   are a no-op but still trigger sync
+- every root-skill AGENTS.md ends with a "Reference files" list of the uploaded context files
+  (`renderContextFilesSection`: agent path `/akmatori/context/<file>`, size, operator description;
+  capped at 100 files / 8 KiB). The worker mounts that dir read-only; `memory-searcher` stays
+  scoped to `/akmatori/memory/`, so the main agent reads reference files itself
 
 Key files: `internal/services/memory_service.go`, `internal/services/runbook_service.go`,
 `akmatori_data/agents/` (`runbook-searcher`, `memory-searcher`, `memory-writer` definitions)
