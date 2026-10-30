@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // eventsBackfillBatch bounds one backfill step. Each step reads a batch,
@@ -27,8 +28,10 @@ const eventsBackfillSummaryMax = 1000
 // history of the Events page, so it must never stop the API from starting.
 func migrateBackfillEvents(db *gorm.DB) error {
 	// See migrateBackfillAlerts: reset to a fresh-statement session on the
-	// pinned migration connection.
-	db = db.Session(&gorm.Session{NewDB: true})
+	// pinned migration connection. Silent: a slow batch INSERT would otherwise
+	// print its SQL, all 500 rows included (1 MB of startup log on gcore).
+	// Errors are returned.
+	db = db.Session(&gorm.Session{NewDB: true, Logger: db.Logger.LogMode(logger.Silent)})
 	if !db.Migrator().HasTable("events") || !db.Migrator().HasTable("alerts") {
 		return nil
 	}
