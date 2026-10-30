@@ -118,15 +118,13 @@ func TestIngestFromDisk_ModifiedFilesUpdateByScopeAndName(t *testing.T) {
 	}
 	originalID := first[0].ID
 
-	// SyncMemoryFiles renamed the file to <id>-<name>.md and our test file
-	// was kept by removeStaleFiles since SyncMemoryFiles only purges
-	// unexpected paths within scopeDir. Rewrite the canonical filename so
-	// the file format matches what the writer subagent would produce next time.
-	canonical := filepath.Join(dir, fmt.Sprintf("%d-updatable.md", originalID))
-	if _, err := os.Stat(canonical); err != nil {
-		t.Fatalf("expected canonical file %s after sync: %v", canonical, err)
+	// SyncMemoryFiles rewrote the agent's file in place under the same
+	// <name>.md path the writer subagent uses.
+	synced := filepath.Join(dir, "updatable.md")
+	if _, err := os.Stat(synced); err != nil {
+		t.Fatalf("expected synced file %s after sync: %v", synced, err)
 	}
-	// Now rewrite the file with new description + body but the same name.
+	// Now overwrite the file with new description + body but the same name.
 	writeMemoryFile(t, dir, "updatable", "updated description", MemoryTypeHost, MemoryScopeGlobal, "inc-1", "v2 body")
 
 	if err := svc.IngestFromDisk(context.Background()); err != nil {
@@ -505,25 +503,26 @@ func TestIngestFromDisk_AgentRewriteDoesNotOverwriteOperatorAuthorship(t *testin
 	}
 }
 
-// TestIngestFromDisk_PrefersAgentFilenameOverCanonical asserts that when both
-// `<name>.md` (agent's fresh write) and `<id>-<name>.md` (prior canonical
-// snapshot) exist in the same scope dir, the agent's newer content wins —
-// regardless of lex-sort order between the two filenames.
-func TestIngestFromDisk_PrefersAgentFilenameOverCanonical(t *testing.T) {
+// TestIngestFromDisk_PrefersPlainFilenameOverLegacy asserts that when both
+// `<name>.md` (agent's write) and a legacy `<id>-<name>.md` snapshot (from an
+// older release) exist in the same scope dir, the `<name>.md` content wins —
+// regardless of lex-sort order between the two filenames — and the next sync
+// removes the legacy file.
+func TestIngestFromDisk_PrefersPlainFilenameOverLegacy(t *testing.T) {
 	svc := setupMemoryServiceTest(t)
 	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	// Drop the canonical snapshot first (older body).
-	canonical := "---\nname: edge-case\ndescription: old summary\ntype: host\nscope: global\nincident_uuid: inc-1\ncreated_by: agent\n---\n\n# edge-case\n\nold summary\n\nold body content\n"
-	if err := os.WriteFile(filepath.Join(dir, "99-edge-case.md"), []byte(canonical), 0644); err != nil {
-		t.Fatalf("seed canonical: %v", err)
+	// Drop the legacy snapshot first (older body).
+	legacy := "---\nname: edge-case\ndescription: old summary\ntype: host\nscope: global\nincident_uuid: inc-1\ncreated_by: agent\n---\n\n# edge-case\n\nold summary\n\nold body content\n"
+	if err := os.WriteFile(filepath.Join(dir, "99-edge-case.md"), []byte(legacy), 0644); err != nil {
+		t.Fatalf("seed legacy: %v", err)
 	}
 	// Drop the agent's freshly-written file with the same memory name and
 	// newer body. Lex-sort puts "99-..." first, but the dedup rule must
-	// still pick the non-canonical version.
+	// still pick the plain version.
 	agentFresh := "---\nname: edge-case\ndescription: NEW summary\ntype: host\nscope: global\nincident_uuid: inc-1\ncreated_by: agent\n---\n\n# edge-case\n\nNEW summary\n\nNEW body content\n"
 	if err := os.WriteFile(filepath.Join(dir, "edge-case.md"), []byte(agentFresh), 0644); err != nil {
 		t.Fatalf("seed agent fresh: %v", err)
@@ -542,9 +541,12 @@ func TestIngestFromDisk_PrefersAgentFilenameOverCanonical(t *testing.T) {
 	if !strings.Contains(mems[0].Description, "NEW summary") {
 		t.Errorf("dedup picked the wrong file: description=%q", mems[0].Description)
 	}
+	if _, err := os.Stat(filepath.Join(dir, "99-edge-case.md")); !os.IsNotExist(err) {
+		t.Errorf("legacy file should be purged by the post-ingest sync; stat err=%v", err)
+	}
 }
 
-func TestCanonicalIngestName(t *testing.T) {
+func TestLegacyIngestName(t *testing.T) {
 	cases := []struct {
 		filename string
 		name     string
@@ -560,8 +562,8 @@ func TestCanonicalIngestName(t *testing.T) {
 		{"5foo.md", "foo", false},        // no hyphen separator
 	}
 	for _, c := range cases {
-		if got := canonicalIngestName(c.filename, c.name); got != c.want {
-			t.Errorf("canonicalIngestName(%q, %q) = %v, want %v", c.filename, c.name, got, c.want)
+		if got := legacyIngestName(c.filename, c.name); got != c.want {
+			t.Errorf("legacyIngestName(%q, %q) = %v, want %v", c.filename, c.name, got, c.want)
 		}
 	}
 }
@@ -751,7 +753,7 @@ func TestSyncMemoryFiles_DoesNotFollowSymlinkAtFilePath(t *testing.T) {
 	}
 
 	scopeDir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
-	canonicalFile := filepath.Join(scopeDir, fmt.Sprintf("%d-real-memory.md", mem.ID))
+	canonicalFile := filepath.Join(scopeDir, "real-memory.md")
 	if err := os.Remove(canonicalFile); err != nil {
 		t.Fatalf("remove canonical: %v", err)
 	}
@@ -816,7 +818,7 @@ func TestSyncMemoryFiles_DoesNotHangOnFifoAtFilePath(t *testing.T) {
 	}
 
 	scopeDir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
-	canonicalFile := filepath.Join(scopeDir, fmt.Sprintf("%d-fifo-target.md", mem.ID))
+	canonicalFile := filepath.Join(scopeDir, "fifo-target.md")
 	if err := os.Remove(canonicalFile); err != nil {
 		t.Fatalf("remove canonical: %v", err)
 	}
@@ -936,9 +938,8 @@ func writeTombstoneFile(t *testing.T, dir, name string) string {
 
 // TestIngestFromDisk_TombstoneDeletesRowAndFiles asserts the round-trip the
 // memory-writer subagent relies on for `Action: delete <slug>`: after the
-// agent overwrites the canonical file with a tombstone, IngestFromDisk must
-// remove the DB row and the post-batch SyncMemoryFiles must purge both the
-// bare `<slug>.md` tombstone and the prior `<id>-<slug>.md` snapshot.
+// agent overwrites `<slug>.md` with a tombstone, IngestFromDisk must remove
+// the DB row and the post-batch SyncMemoryFiles must purge the tombstone.
 func TestIngestFromDisk_TombstoneDeletesRowAndFiles(t *testing.T) {
 	svc := setupMemoryServiceTest(t)
 	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
@@ -952,38 +953,34 @@ func TestIngestFromDisk_TombstoneDeletesRowAndFiles(t *testing.T) {
 	if len(mems) != 1 {
 		t.Fatalf("expected 1 row after seed, got %d: %+v", len(mems), mems)
 	}
-	canonical := filepath.Join(dir, fmt.Sprintf("%d-stale-fact.md", mems[0].ID))
-	if _, err := os.Stat(canonical); err != nil {
-		t.Fatalf("canonical file missing after seed sync: %v", err)
+	synced := filepath.Join(dir, "stale-fact.md")
+	if _, err := os.Stat(synced); err != nil {
+		t.Fatalf("memory file missing after seed sync: %v", err)
 	}
 
-	// Step 2: agent writes a tombstone at <slug>.md (mirrors the subagent's
-	// edit-to-empty-frontmatter behavior). The canonical snapshot still
-	// exists alongside it.
+	// Step 2: agent overwrites <slug>.md with a tombstone (mirrors the
+	// subagent's edit-to-empty-frontmatter behavior).
 	writeTombstoneFile(t, dir, "stale-fact")
 
 	// Step 3: ingest picks up the tombstone, deletes the DB row, and the
-	// post-batch sync purges both the tombstone and the canonical file.
+	// post-batch sync purges the tombstone.
 	if err := svc.IngestFromDisk(context.Background()); err != nil {
 		t.Fatalf("tombstone ingest: %v", err)
 	}
 	if mems, _ := svc.ListMemoriesByScope(MemoryScopeGlobal); len(mems) != 0 {
 		t.Fatalf("expected 0 rows after tombstone, got %d: %+v", len(mems), mems)
 	}
-	if _, err := os.Stat(canonical); !os.IsNotExist(err) {
-		t.Errorf("canonical file should be purged after tombstone ingest; stat err=%v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "stale-fact.md")); !os.IsNotExist(err) {
-		t.Errorf("bare tombstone file should be purged after ingest; stat err=%v", err)
+	if _, err := os.Stat(synced); !os.IsNotExist(err) {
+		t.Errorf("tombstone file should be purged after ingest; stat err=%v", err)
 	}
 }
 
-// TestIngestFromDisk_TombstoneAndCanonicalSameScope ensures the dedup pass
-// inside IngestFromDisk lets the tombstone win even when the canonical
-// snapshot is read first (lex-sort: `99-foo.md` < `foo.md`). Without the
+// TestIngestFromDisk_TombstoneAndLegacySameScope ensures the dedup pass
+// inside IngestFromDisk lets the tombstone win even when a legacy
+// `<id>-<name>.md` snapshot is read first (lex-sort: `99-foo.md` < `foo.md`). Without the
 // tombstone-wins-always rule, the parser could end up upserting the snapshot
 // instead of deleting the row.
-func TestIngestFromDisk_TombstoneAndCanonicalSameScope(t *testing.T) {
+func TestIngestFromDisk_TombstoneAndLegacySameScope(t *testing.T) {
 	svc := setupMemoryServiceTest(t)
 	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
 	if err := os.MkdirAll(dir, 0755); err != nil {

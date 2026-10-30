@@ -24,7 +24,7 @@ import (
 
 // MemoryService manages cross-incident memory CRUD and on-disk synchronization.
 // PostgreSQL is the source of truth; files mirror to
-// /akmatori/memory/<scope>/<id>-<slug>.md plus a per-scope MEMORY.md manifest.
+// /akmatori/memory/<scope>/<name>.md plus a per-scope MEMORY.md manifest.
 type MemoryService struct {
 	db        *gorm.DB
 	memoryDir string
@@ -337,8 +337,12 @@ const (
 // SyncMemoryFiles writes one directory per scope under memoryDir:
 //
 //	<memoryDir>/<scope>/MEMORY.md           — manifest (≤ manifestMax* caps)
-//	<memoryDir>/<scope>/<id>-<name>.md      — one file per memory, with
+//	<memoryDir>/<scope>/<name>.md           — one file per memory, with
 //	                                          YAML frontmatter and body.
+//
+// The file name is the memory name, the same name the memory-writer agent
+// writes, so the agent updates a memory by rewriting the file the API wrote.
+// (scope, name) is unique, so names cannot collide inside a scope dir.
 //
 // Stale scope directories and files are removed.
 //
@@ -422,7 +426,7 @@ func (s *MemoryService) SyncMemoryFiles() error {
 		expectedFiles := map[string]bool{manifestFile: true}
 		var writeErr error
 		for _, m := range entries {
-			fileName := fmt.Sprintf("%d-%s.md", m.ID, m.Name)
+			fileName := m.Name + ".md"
 			expectedFiles[fileName] = true
 			body := renderMemoryFile(m)
 			if err := writeMemoryFileInRoot(scopeRoot, fileName, []byte(body)); err != nil {
@@ -493,6 +497,14 @@ func writeMemoryFileInRoot(root *os.Root, name string, data []byte) error {
 	if err != nil {
 		return fmt.Errorf("open tmp %s: %w", tmpName, err)
 	}
+	// The agent worker (UID 1001) rewrites these files in place through its
+	// write tool, so they must stay writable by "other". OpenFile honors the
+	// umask (0666 becomes 0644 under umask 022); fchmod does not.
+	if err := f.Chmod(0666); err != nil {
+		_ = f.Close()
+		_ = root.Remove(tmpName)
+		return fmt.Errorf("chmod tmp %s: %w", tmpName, err)
+	}
 	_, writeErr := f.Write(data)
 	closeErr := f.Close()
 	if writeErr != nil {
@@ -528,12 +540,11 @@ func writeMemoryFileInRoot(root *os.Root, name string, data []byte) error {
 // is still preserved at the DB level because upsertByNameNoSync's DoUpdates
 // excludes created_by, so an operator-authored row that already exists in DB
 // (created via the API's authenticated CreateMemory / UpsertByName paths) is
-// never flipped to agent on re-ingest of its SyncMemoryFiles-written canonical
-// file.
+// never flipped to agent on re-ingest of its SyncMemoryFiles-written file.
 //
 // All files are read and parsed first, then upserted in a single batch. The
-// per-row UpsertByName path otherwise triggers SyncMemoryFiles, which renames
-// new files into the canonical <id>-<name>.md form and purges "stale" files
+// per-row UpsertByName path otherwise triggers SyncMemoryFiles, which rewrites
+// every file from the database and purges "stale" files
 // from the scope dir — including any file the read pass hasn't gotten to yet.
 // Collecting all parsed memories first decouples reading from rewriting and
 // keeps the cost linear instead of O(N²) full re-syncs.
@@ -573,7 +584,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 	// Two-pass walk: collect first, upsert second. See doc comment above.
 	type parsedEntry struct {
 		mem       *database.Memory
-		canonical bool // true if filename matches `<id>-<name>.md`
+		legacy    bool // true if filename matches the legacy `<id>-<name>.md`
 		tombstone bool // true if frontmatter carried `deleted: true`
 	}
 	var parsed []*parsedEntry
@@ -595,14 +606,13 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 			slog.Warn("memory ingest: read scope dir", "scope", scope, "err", err)
 			continue
 		}
-		// Deduplicate by (scope, name): the same memory may exist on disk as
-		// both `<name>.md` (the agent's freshly written file) and
-		// `<id>-<name>.md` (the canonical form from a prior sync). Prefer the
-		// non-canonical entry — that's the agent's newer write. Falling back
-		// to lex-sort order is unreliable: a short numeric id can be smaller
-		// than the first character of the name (e.g. id 5, name "3foo"
-		// produces "5-3foo.md" > "3foo.md") and the canonical form would
-		// wrongly win.
+		// Deduplicate by (scope, name): a directory synced by an older
+		// release can hold both `<name>.md` (the agent's write) and the
+		// legacy `<id>-<name>.md` snapshot. Prefer the `<name>.md` entry —
+		// the legacy file is a stale copy that the post-batch sync purges.
+		// Falling back to lex-sort order is unreliable: a short numeric id
+		// can sort before the name (e.g. id 5, name "3foo" produces
+		// "5-3foo.md" > "3foo.md") and the legacy form would wrongly win.
 		seenInScope := map[string]int{}
 		for _, f := range files {
 			if f.IsDir() || f.Name() == manifestFile {
@@ -646,22 +656,22 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 				mem.CreatedBy = MemoryCreatedByAgent
 			}
 
-			entry := &parsedEntry{mem: mem, canonical: canonicalIngestName(f.Name(), mem.Name), tombstone: tombstone}
+			entry := &parsedEntry{mem: mem, legacy: legacyIngestName(f.Name(), mem.Name), tombstone: tombstone}
 			if idx, ok := seenInScope[mem.Name]; ok {
 				prior := parsed[idx]
 				switch {
 				case entry.tombstone:
 					// Agent's deletion intent always wins, regardless of
-					// which file (canonical or bare) the tombstone landed on.
+					// which file (legacy or plain) the tombstone landed on.
 					parsed[idx] = entry
 				case prior.tombstone:
 					// Existing tombstone wins; a sibling non-tombstone file
 					// is a stale snapshot that the post-batch sync will purge.
-				case prior.canonical && !entry.canonical:
-					// Prefer the agent's freshly written `<name>.md` over a
-					// prior canonical `<id>-<name>.md` snapshot.
+				case prior.legacy && !entry.legacy:
+					// Prefer `<name>.md` over a legacy `<id>-<name>.md`
+					// snapshot.
 					parsed[idx] = entry
-				case prior.canonical == entry.canonical:
+				case prior.legacy == entry.legacy:
 					// Same form, later wins (stable for re-ingest determinism).
 					parsed[idx] = entry
 				}
@@ -704,15 +714,15 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 	// Single sync after the batch instead of one per row: SyncMemoryFiles
 	// reads the full memories table and rewrites every file, so calling it
 	// inside the loop turned ingest into O(N²) disk churn. A sync after
-	// deletions cleans up both the bare `<name>.md` tombstone the agent
-	// wrote and the prior canonical `<id>-<name>.md` snapshot, since
-	// neither matches an existing row in expectedFiles. len(parsed) > 0
+	// deletions cleans up the `<name>.md` tombstone the agent wrote (and
+	// any legacy `<id>-<name>.md` snapshot), since neither matches an
+	// existing row in expectedFiles. len(parsed) > 0
 	// subsumes the ingested/deleted cases (an upsert error or a tombstone
 	// for an unknown slug both leave the file in parsed without bumping
 	// the counters) and ensures the orphaned file gets purged regardless.
 	// Skip the sync if any tombstone DB delete failed: SyncMemoryFiles
-	// would regenerate the canonical file and purge the tombstone from
-	// disk, making the failed deletion unretryable on the next ingest.
+	// would rewrite the memory file over the tombstone, making the failed
+	// deletion unretryable on the next ingest.
 	if len(parsed) > 0 && !tombstoneFailure {
 		if err := s.SyncMemoryFiles(); err != nil {
 			slog.Warn("memory ingest: post-batch sync failed", "err", err)
@@ -810,12 +820,11 @@ func readMemoryFileFromRoot(root *os.Root, rel string) ([]byte, bool) {
 	return data, true
 }
 
-// canonicalIngestName reports whether the on-disk filename matches the
-// `<id>-<name>.md` shape produced by SyncMemoryFiles. The agent's freshly
-// written files are just `<name>.md`; when both forms exist for the same
-// memory we prefer the latter (agent's newer write) over the former (prior
-// canonical snapshot).
-func canonicalIngestName(filename, name string) bool {
+// legacyIngestName reports whether the on-disk filename matches the
+// `<id>-<name>.md` shape that SyncMemoryFiles wrote before files were named
+// `<name>.md`. When both forms exist for the same memory, ingest prefers
+// `<name>.md`; the next sync removes the legacy file.
+func legacyIngestName(filename, name string) bool {
 	plain := name + ".md"
 	if filename == plain {
 		return false
@@ -849,7 +858,7 @@ func canonicalIngestName(filename, name string) bool {
 // the ingest/upsert collision case.
 //
 // The conflict update only fires when the content differs. IngestFromDisk
-// re-reads every file on disk, including the unchanged `<id>-<name>.md`
+// re-reads every file on disk, including the unchanged `<name>.md`
 // snapshots that SyncMemoryFiles wrote, so an unconditional update stamped
 // the whole table with one ingest time after every incident. The manifest
 // keeps the newest-by-UpdatedAt entries, so that made its selection
@@ -994,7 +1003,7 @@ func stripBodyHeader(body, name, description string) string {
 // The Deleted field is set to true by the memory-writer subagent when it is
 // asked to remove a memory (Action: delete <slug>). IngestFromDisk uses that
 // marker to delete the corresponding DB row and clean up both the bare
-// `<name>.md` tombstone and the canonical `<id>-<name>.md` snapshot.
+// `<name>.md` tombstone and any legacy `<id>-<name>.md` snapshot.
 type memoryFrontmatter struct {
 	Name         string `yaml:"name"`
 	Description  string `yaml:"description,omitempty"`
