@@ -106,7 +106,7 @@ func TestIngestFromDisk_KeepsRawRefs(t *testing.T) {
 	svc := setupMemoryServiceTest(t)
 	dir := svc.MemoryDir() + "/" + MemoryScopeGlobal
 	body := "See [[dns-resolvers]] and [[edge-topology.pdf]]."
-	writeMemoryFile(t, dir, "linked", "has links", MemoryTypeHost, MemoryScopeGlobal, "inc-1", body)
+	writeMemoryFile(t, dir, "linked", "has links", MemoryTypeFact, MemoryScopeGlobal, "inc-1", body)
 
 	for i := 0; i < 2; i++ {
 		if err := svc.IngestFromDisk(t.Context()); err != nil {

@@ -305,8 +305,10 @@ func IsMemoryNotFoundErr(err error) bool {
 	return errors.Is(err, errMemoryNotFound)
 }
 
-// validate enforces field caps and type membership.
+// validate enforces field caps and type membership. It also normalizes a
+// legacy type to fact in place, so every write path stores fact/feedback.
 func (s *MemoryService) validate(m *database.Memory) error {
+	m.Type = NormalizeMemoryType(m.Type)
 	scope := strings.TrimSpace(m.Scope)
 	if scope == "" {
 		return fmt.Errorf("scope cannot be empty")
@@ -379,6 +381,11 @@ const (
 	// slots; older entries are excluded from the manifest but their files remain
 	// on disk.
 	manifestMaxEntriesPerScope = 150
+
+	// manifestMaxFeedbackEntries reserves part of the manifest for feedback,
+	// so a burst of new facts cannot push operator instructions out of the
+	// prompt, and a pile of feedback cannot push out every fact.
+	manifestMaxFeedbackEntries = 50
 
 	// maxMemoryFileBytes caps the per-file size IngestFromDisk will read.
 	// The agent worker has rw access to the shared memory mount, so a
@@ -1003,8 +1010,12 @@ func parseMemoryFile(data []byte, scope string) (*database.Memory, bool, error) 
 	if strings.TrimSpace(fm.Description) == "" {
 		return nil, false, fmt.Errorf("frontmatter missing description")
 	}
-	if !ValidMemoryType(fm.Type) {
-		return nil, false, fmt.Errorf("invalid memory type %q", fm.Type)
+	// A legacy type maps to fact; anything else unknown becomes fact too,
+	// so a typo in an agent-written file does not drop the memory.
+	memType := NormalizeMemoryType(fm.Type)
+	if !ValidMemoryType(memType) {
+		slog.Info("memory ingest: unknown type, storing as fact", "scope", scope, "name", fm.Name, "type", fm.Type)
+		memType = MemoryTypeFact
 	}
 
 	// Strip the `# <name>` header and the description echo so the persisted
@@ -1013,7 +1024,7 @@ func parseMemoryFile(data []byte, scope string) (*database.Memory, bool, error) 
 
 	return &database.Memory{
 		Scope:        scope,
-		Type:         fm.Type,
+		Type:         memType,
 		Name:         strings.TrimSpace(fm.Name),
 		Description:  strings.ReplaceAll(strings.TrimSpace(fm.Description), "\n", " "),
 		Body:         body,
@@ -1113,21 +1124,34 @@ func renderMemoryFile(m database.Memory) string {
 	return b.String()
 }
 
-// limitManifestEntries caps the entry list for a scope's manifest. The
-// most-recently-updated entries fill up to max slots; any beyond that are
-// excluded and counted in the returned truncatedCount. Files for excluded
-// entries remain on disk — only the manifest is trimmed.
+// limitManifestEntries picks the entries for a scope's manifest, newest
+// first inside each type: feedback first (operator instructions about how the
+// agent must work), at most manifestMaxFeedbackEntries of it, then facts up to
+// max. Fact slots that no fact needs go back to feedback. Feedback also comes
+// first in the result, so renderManifest's line and byte caps cut facts
+// before feedback. Excluded entries are counted in truncated; their files
+// remain on disk — only the manifest is trimmed.
 func limitManifestEntries(entries []database.Memory, max int) (limited []database.Memory, truncated int) {
-	if len(entries) <= max {
-		return entries, 0
-	}
-	// Sort by most-recently-updated so the cap retains the freshest facts.
 	sorted := make([]database.Memory, len(entries))
 	copy(sorted, entries)
-	sort.Slice(sorted, func(i, j int) bool {
+	sort.SliceStable(sorted, func(i, j int) bool {
 		return sorted[i].UpdatedAt.After(sorted[j].UpdatedAt)
 	})
-	return sorted[:max], len(sorted) - max
+	var feedback, facts []database.Memory
+	for _, m := range sorted {
+		if m.Type == MemoryTypeFeedback {
+			feedback = append(feedback, m)
+		} else {
+			facts = append(facts, m)
+		}
+	}
+
+	nFeedback := min(len(feedback), manifestMaxFeedbackEntries, max)
+	nFacts := min(len(facts), max-nFeedback)
+	nFeedback = min(len(feedback), max-nFacts)
+
+	limited = append(feedback[:nFeedback:nFeedback], facts[:nFacts]...)
+	return limited, len(entries) - len(limited)
 }
 
 // renderManifest builds the per-scope MEMORY.md table. Hard-capped at

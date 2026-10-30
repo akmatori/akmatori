@@ -1,13 +1,24 @@
 package services
 
 // Memory type constants — single source of truth used by validation,
-// prompt rendering, and the extractor's JSON schema.
+// prompt rendering, and the extractor's JSON schema. A fact is knowledge about
+// the environment (hosts, services, tools, incident patterns, file
+// summaries); feedback is an operator instruction about how the agent must
+// work, which the manifest lists first.
 const (
-	MemoryTypeHost            = "host"
-	MemoryTypeIncidentPattern = "incident_pattern"
-	MemoryTypeToolQuirk       = "tool_quirk"
-	MemoryTypeFeedback        = "feedback"
+	MemoryTypeFact     = "fact"
+	MemoryTypeFeedback = "feedback"
 )
+
+// legacyFactTypes are the types used before fact/feedback. They are still
+// accepted from older clients, prompts and pending proposals, and
+// NormalizeMemoryType maps them to fact; the startup migration rewrites
+// stored rows.
+var legacyFactTypes = map[string]bool{
+	"host":             true,
+	"incident_pattern": true,
+	"tool_quirk":       true,
+}
 
 // MemoryScopeGlobal is the reserved scope name for memories visible to every
 // incident (injected into the incident-manager AGENTS.md). Any other scope
@@ -39,19 +50,19 @@ const (
 // AllMemoryTypes returns all valid memory type values in canonical order.
 // Used for prompt rendering and validation.
 func AllMemoryTypes() []string {
-	return []string{
-		MemoryTypeHost,
-		MemoryTypeIncidentPattern,
-		MemoryTypeToolQuirk,
-		MemoryTypeFeedback,
-	}
+	return []string{MemoryTypeFact, MemoryTypeFeedback}
 }
 
-// ValidMemoryType reports whether s is one of the four canonical memory types.
+// ValidMemoryType reports whether s is fact or feedback.
 func ValidMemoryType(s string) bool {
-	switch s {
-	case MemoryTypeHost, MemoryTypeIncidentPattern, MemoryTypeToolQuirk, MemoryTypeFeedback:
-		return true
+	return s == MemoryTypeFact || s == MemoryTypeFeedback
+}
+
+// NormalizeMemoryType maps a legacy type to fact and returns any other value
+// unchanged, so validation still rejects real typos.
+func NormalizeMemoryType(s string) string {
+	if legacyFactTypes[s] {
+		return MemoryTypeFact
 	}
-	return false
+	return s
 }

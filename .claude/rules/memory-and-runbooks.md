@@ -58,6 +58,13 @@ memory lives under `akmatori_data/memory/` (read-write). Agents reach both via p
   agent, so the prompt alone is not enough). Operator writes (UI, API, from-text, Slack feedback)
   still work. A change regenerates every SKILL.md; AGENTS.md is rendered per run. The gate fails
   open when the setting cannot be read
+- memory types are `fact` (knowledge about hosts, services, tools, incidents, file summaries) and
+  `feedback` (operator instructions about how the agent must work). The legacy `host`,
+  `incident_pattern`, `tool_quirk` are accepted everywhere and stored as fact
+  (`NormalizeMemoryType` in `validate`; `migrateLegacyMemoryTypes` rewrites old rows at startup);
+  ingest stores an unknown type as fact instead of dropping the file. The manifest lists
+  feedback first, newest first, at most `manifestMaxFeedbackEntries` (50) of the 150 slots;
+  unused fact slots go back to feedback
 
 Key files: `internal/services/memory_service.go`, `internal/services/memory_refs.go`,
 `internal/services/memory_drafter.go`, `internal/services/runbook_service.go`,

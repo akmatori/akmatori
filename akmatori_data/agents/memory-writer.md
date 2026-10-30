@@ -52,7 +52,9 @@ What to write:
    hyphens, ≤200 chars) that uniquely identifies the fact across incidents
    (e.g. `dc3-hw-edge-gc4-nginx-cache-lua-ipairs-error`,
    `zabbix-host-rename-tool-quirk`).
-3. Pick a `type` from: `host`, `incident_pattern`, `tool_quirk`, `feedback`.
+3. Pick a `type`: `fact` for knowledge about hosts, services, tools,
+   environments or recurring incidents; `feedback` only for an operator's
+   instruction about how the agent must work.
 4. Search `/akmatori/memory/<scope>/` for an existing file with that name.
    Use the `grep` tool (e.g. `pattern: "^name: <slug>$"` with
    `path: "/akmatori/memory/<scope>/"`) and the `ls` tool with
@@ -76,7 +78,7 @@ File format (must match exactly so the ingester parses it):
 ---
 name: <slug>
 description: <single-line summary, ≤500 chars, no embedded newlines>
-type: <host|incident_pattern|tool_quirk|feedback>
+type: <fact|feedback>
 scope: <scope slug>
 incident_uuid: <uuid from input>
 created_by: agent

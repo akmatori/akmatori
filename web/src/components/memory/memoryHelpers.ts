@@ -2,13 +2,13 @@ import type { Memory, MemoryRef } from '../../types';
 
 export const GLOBAL_SCOPE = 'global';
 
-// The memory types the API accepts (services.AllMemoryTypes), in display order.
-export const MEMORY_TYPES = ['host', 'incident_pattern', 'tool_quirk', 'feedback'] as const;
+// The memory types the API accepts (services.AllMemoryTypes), in display
+// order. A fact is knowledge about the environment; feedback is an operator
+// instruction about how the agent must work.
+export const MEMORY_TYPES = ['fact', 'feedback'] as const;
 
 export const MEMORY_TYPE_LABELS: Record<string, string> = {
-  host: 'Host',
-  incident_pattern: 'Incident pattern',
-  tool_quirk: 'Tool quirk',
+  fact: 'Fact',
   feedback: 'Feedback',
 };
 

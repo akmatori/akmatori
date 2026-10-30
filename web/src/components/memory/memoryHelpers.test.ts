@@ -6,7 +6,7 @@ function mem(id: number, scope: string, name: string, updated: string, extra: Pa
   return {
     id,
     scope,
-    type: 'host',
+    type: 'fact',
     name,
     description: `${name} description`,
     body: '',

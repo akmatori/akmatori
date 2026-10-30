@@ -143,7 +143,7 @@ func TestMemoryDrafter_UsesLLMDraft(t *testing.T) {
 	}
 	draft := NewMemoryDrafter(caller).Draft(context.Background(), "redis prod is on 16379 not 6379")
 
-	want := MemoryDraft{Name: "redis-prod-port", Description: "Redis prod listens on 16379, not 6379", Body: "Redis prod cluster uses port **16379**.", Type: MemoryTypeHost, FromLLM: true}
+	want := MemoryDraft{Name: "redis-prod-port", Description: "Redis prod listens on 16379, not 6379", Body: "Redis prod cluster uses port **16379**.", Type: MemoryTypeFact, FromLLM: true}
 	if draft != want {
 		t.Errorf("draft = %+v, want %+v", draft, want)
 	}
@@ -189,13 +189,15 @@ func TestMemoryDrafter_FallsBack(t *testing.T) {
 	})
 }
 
-func TestMemoryDrafter_UnknownTypeBecomesFeedback(t *testing.T) {
-	draft, err := parseMemoryDraft(`{"name":"n","description":"d","body":"b","type":"opinion"}`)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if draft.Type != MemoryTypeFeedback {
-		t.Errorf("type = %q, want feedback", draft.Type)
+func TestMemoryDrafter_UnknownTypeBecomesFact(t *testing.T) {
+	for llmType, want := range map[string]string{"opinion": MemoryTypeFact, "tool_quirk": MemoryTypeFact, "feedback": MemoryTypeFeedback} {
+		draft, err := parseMemoryDraft(`{"name":"n","description":"d","body":"b","type":"` + llmType + `"}`)
+		if err != nil {
+			t.Fatalf("parse %q: %v", llmType, err)
+		}
+		if draft.Type != want {
+			t.Errorf("type %q drafted as %q, want %q", llmType, draft.Type, want)
+		}
 	}
 }
 
