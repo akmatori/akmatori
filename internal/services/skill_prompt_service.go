@@ -306,6 +306,14 @@ const memoryWriteInstructionTemplate = "When the investigation surfaces durable 
 	"memory-writer is idempotent — if a memory with the same semantic name already exists, it updates in place. " +
 	"Skip the call when nothing durable was learned."
 
+// memoryGenerationOffInstruction replaces the record-findings guidance when
+// an operator turned agent memory off. It overrides the root prompts, which
+// still mention memory-writer; IngestFromDisk discards agent writes anyway.
+const memoryGenerationOffInstruction = "An operator turned off memory generation. Do NOT call the memory-writer " +
+	"subagent and do not write under /akmatori/memory/, even where other instructions or a task ask you to record " +
+	"findings or to update or delete memories: anything written there is discarded. Recall with memory-searcher " +
+	"still works."
+
 // incidentUUIDFromCwdPlaceholder is substituted for the incident UUID in
 // scopes where the UUID is unknown at render time (SKILL.md is shared across
 // incidents). The agent derives the UUID from its workspace directory.
@@ -345,6 +353,12 @@ func (s *SkillService) renderMemoryRecallSection(scope string, incidentUUID stri
 		b.WriteString("\n_No memories indexed for this scope yet._\n")
 	}
 
+	if !MemoryGenerationEnabled() {
+		b.WriteString("\n### Recording findings is off\n\n")
+		b.WriteString(memoryGenerationOffInstruction)
+		b.WriteString("\n")
+		return b.String()
+	}
 	uuidArg := incidentUUID
 	if uuidArg == "" {
 		uuidArg = incidentUUIDFromCwdPlaceholder

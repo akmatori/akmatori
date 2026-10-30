@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -71,6 +72,10 @@ func applyGeneralSettingsDefaults(s *database.GeneralSettings) {
 	if s.IncidentAutoCloseMinutes == nil {
 		v := database.DefaultIncidentAutoCloseMinutes
 		s.IncidentAutoCloseMinutes = &v
+	}
+	if s.MemoryGenerationEnabled == nil {
+		v := true
+		s.MemoryGenerationEnabled = &v
 	}
 }
 
@@ -165,10 +170,24 @@ func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Reques
 			}
 			settings.IncidentAutoCloseMinutes = req.IncidentAutoCloseMinutes
 		}
+		memoryGenerationChanged := false
+		if req.MemoryGenerationEnabled != nil {
+			memoryGenerationChanged = *req.MemoryGenerationEnabled != settings.GetMemoryGenerationEnabled()
+			settings.MemoryGenerationEnabled = req.MemoryGenerationEnabled
+		}
 
 		if err := database.UpdateGeneralSettings(settings); err != nil {
 			api.RespondError(w, http.StatusInternalServerError, "Failed to update general settings")
 			return
+		}
+		if memoryGenerationChanged && h.skillService != nil {
+			// SKILL.md embeds the memory-writer instructions; AGENTS.md is
+			// rendered per run and picks up the change by itself.
+			go func() {
+				if err := h.skillService.RegenerateAllSkillMds(); err != nil {
+					slog.Warn("regenerate SKILL.md after memory generation change", "err", err)
+				}
+			}()
 		}
 
 		applyGeneralSettingsDefaults(settings)

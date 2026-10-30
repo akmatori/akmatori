@@ -8,6 +8,7 @@ import ErrorMessage from '../ErrorMessage';
 import EmptyState from '../shared/EmptyState';
 import { getErrorMessage } from '../../utils/errors';
 import { formatRelativeAgo } from '../../utils/format';
+import MemoryGenerationSwitch from './MemoryGenerationSwitch';
 import { GLOBAL_SCOPE, MEMORY_TYPE_LABELS, compareScopes, filterMemories, groupByScope, memoryHref } from './memoryHelpers';
 
 interface MemoryListProps {
@@ -71,6 +72,8 @@ export default function MemoryList({ incidentUuid }: MemoryListProps) {
   return (
     <div className="space-y-6">
       {error && <ErrorMessage message={error} />}
+
+      {!incidentUuid && <MemoryGenerationSwitch />}
 
       {!incidentUuid && <TellAkmatori scopes={scopes} onCreated={load} />}
 

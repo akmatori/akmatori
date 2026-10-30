@@ -181,6 +181,7 @@ type UpdateGeneralSettingsRequest struct {
 	IncidentMergeEnabled      *bool   `json:"incident_merge_enabled"`
 	IncidentAutoCloseEnabled  *bool   `json:"incident_auto_close_enabled"`
 	IncidentAutoCloseMinutes  *int    `json:"incident_auto_close_minutes"`
+	MemoryGenerationEnabled   *bool   `json:"memory_generation_enabled"`
 }
 
 // UpdateRetentionSettingsRequest is the request body for PUT /api/settings/retention.

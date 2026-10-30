@@ -111,6 +111,7 @@ func (s *corrGateSkillService) GetSkillScriptsDir(string) string                
 func (s *corrGateSkillService) GetSkillPrompt(string) (string, error)           { return "", nil }
 func (s *corrGateSkillService) UpdateSkillPrompt(string, string) error          { return nil }
 func (s *corrGateSkillService) RegenerateSkillMd(string) error                  { return nil }
+func (s *corrGateSkillService) RegenerateAllSkillMds() error                    { return nil }
 func (s *corrGateSkillService) SyncSkillsFromFilesystem() error                 { return nil }
 func (s *corrGateSkillService) ListSkillScripts(string) ([]string, error)       { return nil, nil }
 func (s *corrGateSkillService) ClearSkillScripts(string) error                  { return nil }

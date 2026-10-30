@@ -307,6 +307,13 @@ type GeneralSettings struct {
 	// IncidentAutoCloseMinutes is the inactivity window before the stale-close
 	// sweep closes an incident. Nil means the 3-day default.
 	IncidentAutoCloseMinutes *int `gorm:"default:null" json:"incident_auto_close_minutes"`
+
+	// MemoryGenerationEnabled gates agent-written memory: off, the agent
+	// prompts drop the memory-writer instructions and IngestFromDisk discards
+	// whatever agents wrote to the memory directory. Operator writes (UI, API,
+	// Slack feedback) are not affected. Nil means ENABLED, the behavior
+	// before this setting existed.
+	MemoryGenerationEnabled *bool `gorm:"default:null" json:"memory_generation_enabled"`
 }
 
 // DefaultIncidentAutoCloseMinutes is the inactivity window applied when
@@ -343,6 +350,12 @@ func (s *GeneralSettings) GetAlertCorrelationEnabled() bool {
 // gate, defaulting to true when unset.
 func (s *GeneralSettings) GetEventClassificationEnabled() bool {
 	return s.EventClassificationEnabled == nil || *s.EventClassificationEnabled
+}
+
+// GetMemoryGenerationEnabled returns the effective agent-memory gate,
+// defaulting to true when unset.
+func (s *GeneralSettings) GetMemoryGenerationEnabled() bool {
+	return s.MemoryGenerationEnabled == nil || *s.MemoryGenerationEnabled
 }
 
 // GetIncidentMergeEnabled returns the effective merge-gate flag, defaulting

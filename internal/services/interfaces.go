@@ -25,6 +25,7 @@ type SkillManager interface {
 	GetSkillPrompt(skillName string) (string, error)
 	UpdateSkillPrompt(skillName string, prompt string) error
 	RegenerateSkillMd(skillName string) error
+	RegenerateAllSkillMds() error
 	SyncSkillsFromFilesystem() error
 	ListSkillScripts(skillName string) ([]string, error)
 	ClearSkillScripts(skillName string) error

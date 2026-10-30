@@ -284,6 +284,18 @@ func TruncateMemoryBody(s string) string {
 	return s[:cut]
 }
 
+// MemoryGenerationEnabled reports the operator's agent-memory gate
+// (GeneralSettings.MemoryGenerationEnabled). It fails open: when the setting
+// cannot be read, agents keep writing memory as they did before the gate.
+func MemoryGenerationEnabled() bool {
+	gs, err := database.GetOrCreateGeneralSettings()
+	if err != nil {
+		slog.Debug("memory generation gate: read general settings", "err", err)
+		return true
+	}
+	return gs.GetMemoryGenerationEnabled()
+}
+
 // errMemoryNotFound is the canonical "not found" error returned to handlers.
 // Use errors.Is(err, errMemoryNotFound) to detect.
 var errMemoryNotFound = errors.New("memory not found")
@@ -593,6 +605,14 @@ func writeMemoryFileInRoot(root *os.Root, name string, data []byte) error {
 func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 	if s.memoryDir == "" {
 		return fmt.Errorf("memory directory not configured")
+	}
+	if !MemoryGenerationEnabled() {
+		// The operator turned agent memory off. The prompt tells the agent
+		// not to write, but the memory dir is rw-mounted, so enforce it here:
+		// a sync rewrites every file from the database and removes files with
+		// no row, which discards agent creates, edits and tombstones.
+		slog.Info("memory ingest skipped: memory generation is off; discarding agent writes")
+		return s.SyncMemoryFiles()
 	}
 
 	rootAbs, err := filepath.Abs(s.memoryDir)
