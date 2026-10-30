@@ -373,6 +373,14 @@ describe("resolveModel", () => {
     expect((model as { compat?: { supportsLongCacheRetention?: boolean } }).compat?.supportsLongCacheRetention).toBe(false);
   });
 
+  it("should send instructions as role system for custom endpoints", () => {
+    // pi-ai sends role "developer" for a reasoning model on an unrecognized
+    // URL; gcore's DeepSeek gateway dropped it, so one-shot calls had no
+    // system prompt at all.
+    const model = resolveModel("custom", "my-model", "https://my-api.example.com");
+    expect((model as { compat?: { supportsDeveloperRole?: boolean } }).compat?.supportsDeveloperRole).toBe(false);
+  });
+
   it("should not force-disable long cache retention for openrouter", () => {
     const model = resolveModel("openrouter", "anthropic/claude-3.5-sonnet");
     expect((model as { compat?: { supportsLongCacheRetention?: boolean } }).compat?.supportsLongCacheRetention).toBeUndefined();
@@ -1033,6 +1041,7 @@ describe("AgentRunner", () => {
               apiKey: string;
               models: Array<{ id: string }>;
               _akmatoriManaged?: boolean;
+              compat?: { supportsDeveloperRole?: boolean };
             };
             custom?: unknown;
           };
@@ -1051,6 +1060,7 @@ describe("AgentRunner", () => {
         // Marker lets future runs distinguish akmatori-managed entries from
         // operator-maintained ones.
         expect(config.providers["akmatori-custom"]._akmatoriManaged).toBe(true);
+        expect(config.providers["akmatori-custom"].compat?.supportsDeveloperRole).toBe(false);
         // No collision with operator's `custom` slot.
         expect(config.providers.custom).toBeUndefined();
       });
