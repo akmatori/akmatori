@@ -25,6 +25,12 @@ Directory shape:
   `created_by`) followed by `# <name>`, the description, and an optional body.
 - The reserved scope `global` holds cross-incident learnings; other scopes
   match skill names.
+- Bodies can link with `[[...]]`: `[[slug]]` is another memory in the same
+  scope (else in `global`), `[[scope/slug]]` is a memory in that scope, and
+  `[[file.ext]]` is an operator-uploaded file at `/akmatori/context/file.ext`.
+  You may read a linked memory when it helps relevance. Do NOT read a linked
+  file — list its `/akmatori/context/` path under the match so the caller can
+  read it.
 
 Input you will receive:
 - Either the full original alert text (a verbatim alert payload — may contain

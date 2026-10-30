@@ -160,6 +160,16 @@ func (m *mockMemoryService) GetMemory(id uint) (*database.Memory, error) {
 	return nil, fmt.Errorf("memory not found: %w", errFakeNotFound)
 }
 
+// ResolveRefs classifies references without a database: every memory or file
+// target is reported as existing.
+func (m *mockMemoryService) ResolveRefs(mem *database.Memory) []services.MemoryRef {
+	refs := services.ParseMemoryRefs(mem.Body, mem.Scope)
+	for i := range refs {
+		refs[i].Exists = refs[i].Kind != services.MemoryRefKindInvalid
+	}
+	return refs
+}
+
 func (m *mockMemoryService) ListMemories(scope, memType string) ([]database.Memory, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -386,6 +396,34 @@ func TestHandleMemoryByID_GetUpdateDelete(t *testing.T) {
 	w = doJSON(t, h, http.MethodGet, fmt.Sprintf("/api/memories/%d", created.ID), nil)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("post-delete get status = %d", w.Code)
+	}
+}
+
+func TestHandleMemoryByID_GetIncludesReferences(t *testing.T) {
+	mock := newMockMemoryService()
+	h := newMemoryAPIHandler(mock)
+	linked, _ := mock.CreateMemory(&database.Memory{Scope: "global", Type: services.MemoryTypeHost, Name: "linked", Description: "d", Body: "See [[other-fact]] and [[topology.pdf]]."})
+	plain, _ := mock.CreateMemory(&database.Memory{Scope: "global", Type: services.MemoryTypeHost, Name: "plain", Description: "d", Body: "no links"})
+
+	w := doJSON(t, h, http.MethodGet, fmt.Sprintf("/api/memories/%d", linked.ID), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get status = %d", w.Code)
+	}
+	var got MemoryDetailResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Name != "linked" || got.Body != linked.Body {
+		t.Errorf("memory fields not inlined: %+v", got.Memory)
+	}
+	if len(got.References) != 2 || got.References[0].Kind != services.MemoryRefKindMemory || got.References[1].Kind != services.MemoryRefKindFile {
+		t.Errorf("references = %+v", got.References)
+	}
+
+	// A body without links returns an empty array, not null.
+	w = doJSON(t, h, http.MethodGet, fmt.Sprintf("/api/memories/%d", plain.ID), nil)
+	if !strings.Contains(w.Body.String(), `"references":[]`) {
+		t.Errorf("want empty references array, body = %s", w.Body.String())
 	}
 }
 

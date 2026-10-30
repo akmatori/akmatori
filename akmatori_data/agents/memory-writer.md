@@ -61,6 +61,11 @@ What to write:
    `/akmatori/memory/<scope>/<name>.md` via the `write` tool. If that file
    already exists, overwrite it — it is the same memory. Do not create a
    second file for the same name.
+   In the body, link related knowledge instead of copying it: `[[slug]]` for
+   another memory in the same scope (or in `global`), `[[scope/slug]]` for a
+   memory in another scope, and `[[file.ext]]` for an operator-uploaded file
+   in `/akmatori/context/`. Link only memories you saw exist and files the
+   task names. Never write a path, `..`, or a URL inside `[[...]]`.
    If the existing entry has a meaningful `incident_uuid` already and the
    current incident does not clearly supersede it, copy that earlier
    `incident_uuid` forward into the new file's frontmatter.

@@ -289,6 +289,22 @@ export interface Memory {
   updated_at: string;
 }
 
+// A resolved [[...]] link in a memory body. GET /api/memories/{id} returns
+// these as `references`; the list endpoint does not.
+export interface MemoryRef {
+  raw: string;
+  kind: 'memory' | 'file' | 'invalid';
+  scope?: string;
+  name?: string;
+  memory_id?: number;
+  path?: string;
+  exists: boolean;
+}
+
+export interface MemoryDetail extends Memory {
+  references: MemoryRef[];
+}
+
 // Runbooks
 export interface Runbook {
   id: number;

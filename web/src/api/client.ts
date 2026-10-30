@@ -43,6 +43,7 @@ import type {
   SSHKeyUpdateRequest,
   Runbook,
   Memory,
+  MemoryDetail,
   CronJob,
   CreateCronJobRequest,
   UpdateCronJobRequest,
@@ -682,7 +683,7 @@ export const memoriesApi = {
     return fetchApi<Memory[]>(`/api/memories${query ? '?' + query : ''}`);
   },
 
-  get: (id: number) => fetchApi<Memory>(`/api/memories/${id}`),
+  get: (id: number) => fetchApi<MemoryDetail>(`/api/memories/${id}`),
 };
 
 // Events feed API
