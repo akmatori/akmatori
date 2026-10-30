@@ -93,10 +93,8 @@ Fields:
   - description: one line, at most 200 characters, that says the fact itself, not "a note about X"
   - body: the operator's note, cleaned up as short Markdown. Keep every host, path, number, command and name exactly as written. Do not add facts. Keep any [[...]] links unchanged
   - type: one of
-      host             — a fact about a host, service or environment
-      incident_pattern — how a recurring incident looks or is resolved
-      tool_quirk       — how a monitoring or infrastructure tool behaves
-      feedback         — an instruction about how the agent must work
+      fact     — knowledge about a host, service, tool, environment or recurring incident
+      feedback — an instruction about how the agent must work
 
 Return STRICT JSON:
   {"name": "...", "description": "...", "body": "...", "type": "..."}
@@ -121,14 +119,14 @@ func parseMemoryDraft(raw string) (MemoryDraft, error) {
 		Name:        SlugifyMemoryName(out.Name),
 		Description: draftDescription(out.Description),
 		Body:        TruncateMemoryBody(strings.TrimSpace(out.Body)),
-		Type:        out.Type,
+		Type:        NormalizeMemoryType(strings.TrimSpace(out.Type)),
 		FromLLM:     true,
 	}
 	if draft.Description == "" {
 		return MemoryDraft{}, fmt.Errorf("empty description")
 	}
 	if !ValidMemoryType(draft.Type) {
-		draft.Type = MemoryTypeFeedback
+		draft.Type = MemoryTypeFact
 	}
 	return draft, nil
 }

@@ -48,8 +48,8 @@ func writeMemoryFile(t *testing.T, dir, name, description, memType, scope, incid
 func TestIngestFromDisk_NewFilesCreateRows(t *testing.T) {
 	svc := setupMemoryServiceTest(t)
 	globalDir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
-	writeMemoryFile(t, globalDir, "prod-db-data-dir", "data dir lives on /mnt/data", MemoryTypeHost, MemoryScopeGlobal, "inc-1", "Postgres on prod-db-01 has its data dir on /mnt/data.")
-	writeMemoryFile(t, globalDir, "redis-port", "redis runs on 16379", MemoryTypeToolQuirk, MemoryScopeGlobal, "inc-1", "Redis prod cluster listens on 16379, not 6379.")
+	writeMemoryFile(t, globalDir, "prod-db-data-dir", "data dir lives on /mnt/data", MemoryTypeFact, MemoryScopeGlobal, "inc-1", "Postgres on prod-db-01 has its data dir on /mnt/data.")
+	writeMemoryFile(t, globalDir, "redis-port", "redis runs on 16379", MemoryTypeFact, MemoryScopeGlobal, "inc-1", "Redis prod cluster listens on 16379, not 6379.")
 
 	if err := svc.IngestFromDisk(context.Background()); err != nil {
 		t.Fatalf("IngestFromDisk: %v", err)
@@ -66,7 +66,7 @@ func TestIngestFromDisk_NewFilesCreateRows(t *testing.T) {
 	for _, m := range mems {
 		byName[m.Name] = m
 	}
-	if got := byName["prod-db-data-dir"]; got.Type != MemoryTypeHost || got.CreatedBy != MemoryCreatedByAgent {
+	if got := byName["prod-db-data-dir"]; got.Type != MemoryTypeFact || got.CreatedBy != MemoryCreatedByAgent {
 		t.Errorf("prod-db-data-dir: %+v", got)
 	}
 	if got := byName["prod-db-data-dir"]; !strings.Contains(got.Body, "prod-db-01") {
@@ -84,7 +84,7 @@ func TestIngestFromDisk_RoundTripWithoutBodyDuplication(t *testing.T) {
 	// duplicate description in Body.
 	svc := setupMemoryServiceTest(t)
 	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
-	writeMemoryFile(t, dir, "round-trip", "a single line description", MemoryTypeHost, MemoryScopeGlobal, "", "real body content")
+	writeMemoryFile(t, dir, "round-trip", "a single line description", MemoryTypeFact, MemoryScopeGlobal, "", "real body content")
 
 	if err := svc.IngestFromDisk(context.Background()); err != nil {
 		t.Fatalf("ingest: %v", err)
@@ -107,7 +107,7 @@ func TestIngestFromDisk_RoundTripWithoutBodyDuplication(t *testing.T) {
 func TestIngestFromDisk_ModifiedFilesUpdateByScopeAndName(t *testing.T) {
 	svc := setupMemoryServiceTest(t)
 	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
-	writeMemoryFile(t, dir, "updatable", "first description", MemoryTypeHost, MemoryScopeGlobal, "inc-1", "v1 body")
+	writeMemoryFile(t, dir, "updatable", "first description", MemoryTypeFact, MemoryScopeGlobal, "inc-1", "v1 body")
 
 	if err := svc.IngestFromDisk(context.Background()); err != nil {
 		t.Fatalf("first ingest: %v", err)
@@ -125,7 +125,7 @@ func TestIngestFromDisk_ModifiedFilesUpdateByScopeAndName(t *testing.T) {
 		t.Fatalf("expected synced file %s after sync: %v", synced, err)
 	}
 	// Now overwrite the file with new description + body but the same name.
-	writeMemoryFile(t, dir, "updatable", "updated description", MemoryTypeHost, MemoryScopeGlobal, "inc-1", "v2 body")
+	writeMemoryFile(t, dir, "updatable", "updated description", MemoryTypeFact, MemoryScopeGlobal, "inc-1", "v2 body")
 
 	if err := svc.IngestFromDisk(context.Background()); err != nil {
 		t.Fatalf("second ingest: %v", err)
@@ -177,8 +177,8 @@ func TestIngestFromDisk_IsIdempotent(t *testing.T) {
 func TestIngestFromDisk_UnchangedFilesKeepUpdatedAt(t *testing.T) {
 	svc := setupMemoryServiceTest(t)
 	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
-	writeMemoryFile(t, dir, "old-fact", "old description", MemoryTypeHost, MemoryScopeGlobal, "inc-1", "old body")
-	writeMemoryFile(t, dir, "edited-fact", "edited description", MemoryTypeHost, MemoryScopeGlobal, "inc-1", "v1 body")
+	writeMemoryFile(t, dir, "old-fact", "old description", MemoryTypeFact, MemoryScopeGlobal, "inc-1", "old body")
+	writeMemoryFile(t, dir, "edited-fact", "edited description", MemoryTypeFact, MemoryScopeGlobal, "inc-1", "v1 body")
 	if err := svc.IngestFromDisk(context.Background()); err != nil {
 		t.Fatalf("first ingest: %v", err)
 	}
@@ -191,8 +191,8 @@ func TestIngestFromDisk_UnchangedFilesKeepUpdatedAt(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	// A later incident writes one new memory and edits another; the
 	// canonical snapshot of old-fact is ingested again unchanged.
-	writeMemoryFile(t, dir, "new-fact", "new description", MemoryTypeHost, MemoryScopeGlobal, "inc-2", "new body")
-	writeMemoryFile(t, dir, "edited-fact", "edited description", MemoryTypeHost, MemoryScopeGlobal, "inc-2", "v2 body")
+	writeMemoryFile(t, dir, "new-fact", "new description", MemoryTypeFact, MemoryScopeGlobal, "inc-2", "new body")
+	writeMemoryFile(t, dir, "edited-fact", "edited description", MemoryTypeFact, MemoryScopeGlobal, "inc-2", "v2 body")
 	if err := svc.IngestFromDisk(context.Background()); err != nil {
 		t.Fatalf("second ingest: %v", err)
 	}
@@ -231,10 +231,10 @@ func TestIngestFromDisk_SkipsManifestAndInvalidFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "no-frontmatter.md"), []byte("just markdown no frontmatter"), 0644); err != nil {
 		t.Fatalf("seed bad file: %v", err)
 	}
-	// Files with invalid memory type must be skipped.
-	bad := "---\nname: bad\ndescription: x\ntype: nope\nscope: global\n---\n\n# bad\n\nbody\n"
-	if err := os.WriteFile(filepath.Join(dir, "bad-type.md"), []byte(bad), 0644); err != nil {
-		t.Fatalf("seed bad-type: %v", err)
+	// Files without a description must be skipped.
+	bad := "---\nname: bad\ntype: fact\nscope: global\n---\n\n# bad\n\nbody\n"
+	if err := os.WriteFile(filepath.Join(dir, "no-description.md"), []byte(bad), 0644); err != nil {
+		t.Fatalf("seed no-description: %v", err)
 	}
 	// Files with non-.md suffix must be skipped.
 	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("ignored"), 0644); err != nil {
@@ -242,7 +242,7 @@ func TestIngestFromDisk_SkipsManifestAndInvalidFiles(t *testing.T) {
 	}
 
 	// One good file mixed in to prove the loop doesn't bail on the first error.
-	writeMemoryFile(t, dir, "keeper", "good description", MemoryTypeHost, MemoryScopeGlobal, "inc-1", "keep me")
+	writeMemoryFile(t, dir, "keeper", "good description", MemoryTypeFact, MemoryScopeGlobal, "inc-1", "keep me")
 
 	if err := svc.IngestFromDisk(context.Background()); err != nil {
 		t.Fatalf("ingest: %v", err)
@@ -259,11 +259,11 @@ func TestIngestFromDisk_SkipsNonSlugScopeDirs(t *testing.T) {
 	// operator hand-creating a scope dir that wouldn't pass validation.
 	svc := setupMemoryServiceTest(t)
 	badScopeDir := filepath.Join(svc.MemoryDir(), "Bad Scope!")
-	writeMemoryFile(t, badScopeDir, "should-not-land", "x", MemoryTypeHost, "Bad Scope!", "", "body")
+	writeMemoryFile(t, badScopeDir, "should-not-land", "x", MemoryTypeFact, "Bad Scope!", "", "body")
 
 	// And a sibling good scope dir to prove the good path still works.
 	goodDir := filepath.Join(svc.MemoryDir(), "redis")
-	writeMemoryFile(t, goodDir, "good", "good description", MemoryTypeHost, "redis", "", "good body")
+	writeMemoryFile(t, goodDir, "good", "good description", MemoryTypeFact, "redis", "", "good body")
 
 	if err := svc.IngestFromDisk(context.Background()); err != nil {
 		t.Fatalf("ingest: %v", err)
@@ -353,10 +353,25 @@ func TestParseMemoryFile_RejectsMissingFrontmatter(t *testing.T) {
 	}
 }
 
-func TestParseMemoryFile_RejectsInvalidType(t *testing.T) {
-	raw := "---\nname: bad\ndescription: x\ntype: invalid\nscope: global\n---\n\nbody\n"
-	if _, _, err := parseMemoryFile([]byte(raw), MemoryScopeGlobal); err == nil {
-		t.Fatal("expected error on invalid type")
+func TestParseMemoryFile_TypeNormalization(t *testing.T) {
+	// Legacy types and unknown types are stored as fact instead of dropping
+	// the memory; feedback is kept.
+	for fileType, want := range map[string]string{
+		"fact":             MemoryTypeFact,
+		"feedback":         MemoryTypeFeedback,
+		"host":             MemoryTypeFact,
+		"incident_pattern": MemoryTypeFact,
+		"tool_quirk":       MemoryTypeFact,
+		"invalid":          MemoryTypeFact,
+	} {
+		raw := "---\nname: m\ndescription: x\ntype: " + fileType + "\nscope: global\n---\n\nbody\n"
+		mem, _, err := parseMemoryFile([]byte(raw), MemoryScopeGlobal)
+		if err != nil {
+			t.Fatalf("type %q: %v", fileType, err)
+		}
+		if mem.Type != want {
+			t.Errorf("type %q stored as %q, want %q", fileType, mem.Type, want)
+		}
 	}
 }
 
@@ -576,7 +591,7 @@ func TestIngestFromDisk_SkipsSymlinks(t *testing.T) {
 	// other readable path under the API container's mount namespace.
 	svc := setupMemoryServiceTest(t)
 	globalDir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
-	writeMemoryFile(t, globalDir, "real", "real memory", MemoryTypeHost, MemoryScopeGlobal, "inc-1", "real body")
+	writeMemoryFile(t, globalDir, "real", "real memory", MemoryTypeFact, MemoryScopeGlobal, "inc-1", "real body")
 
 	// Drop a sensitive target outside the memory root and symlink to it
 	// from inside the scope. If symlink-following ever returns, this would
@@ -702,7 +717,7 @@ func TestIngestFromDisk_SkipsOversizedFiles(t *testing.T) {
 	// reading.
 	svc := setupMemoryServiceTest(t)
 	globalDir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
-	writeMemoryFile(t, globalDir, "small", "small memory", MemoryTypeHost, MemoryScopeGlobal, "inc-1", "small body")
+	writeMemoryFile(t, globalDir, "small", "small memory", MemoryTypeFact, MemoryScopeGlobal, "inc-1", "small body")
 
 	huge := make([]byte, maxMemoryFileBytes+1)
 	for i := range huge {
@@ -732,7 +747,7 @@ func TestSyncMemoryFiles_DoesNotFollowSymlinkAtFilePath(t *testing.T) {
 	svc := setupMemoryServiceTest(t)
 	mem := &database.Memory{
 		Scope:       MemoryScopeGlobal,
-		Type:        MemoryTypeHost,
+		Type:        MemoryTypeFact,
 		Name:        "real-memory",
 		Description: "real description",
 		Body:        "real body",
@@ -764,7 +779,7 @@ func TestSyncMemoryFiles_DoesNotFollowSymlinkAtFilePath(t *testing.T) {
 	// Trigger a sync (Update touches mtime; UpsertByName re-runs SyncMemoryFiles).
 	if _, err := svc.UpsertByName(&database.Memory{
 		Scope:       MemoryScopeGlobal,
-		Type:        MemoryTypeHost,
+		Type:        MemoryTypeFact,
 		Name:        "real-memory",
 		Description: "updated description",
 		Body:        "updated body",
@@ -807,7 +822,7 @@ func TestSyncMemoryFiles_DoesNotHangOnFifoAtFilePath(t *testing.T) {
 	svc := setupMemoryServiceTest(t)
 	mem := &database.Memory{
 		Scope:       MemoryScopeGlobal,
-		Type:        MemoryTypeHost,
+		Type:        MemoryTypeFact,
 		Name:        "fifo-target",
 		Description: "real description",
 		Body:        "real body",
@@ -833,7 +848,7 @@ func TestSyncMemoryFiles_DoesNotHangOnFifoAtFilePath(t *testing.T) {
 	go func() {
 		_, err := svc.UpsertByName(&database.Memory{
 			Scope:       MemoryScopeGlobal,
-			Type:        MemoryTypeHost,
+			Type:        MemoryTypeFact,
 			Name:        "fifo-target",
 			Description: "updated description",
 			Body:        "updated body",
@@ -875,7 +890,7 @@ func TestSyncMemoryFiles_SkipsScopeDirReplacedWithSymlink(t *testing.T) {
 	// Seed a real memory so the sync has something to write.
 	mem := &database.Memory{
 		Scope:       "redis",
-		Type:        MemoryTypeHost,
+		Type:        MemoryTypeFact,
 		Name:        "redis-port",
 		Description: "redis runs on 16379",
 		Body:        "redis prod cluster",
@@ -945,7 +960,7 @@ func TestIngestFromDisk_TombstoneDeletesRowAndFiles(t *testing.T) {
 	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
 
 	// Step 1: agent writes a memory the normal way and ingest persists it.
-	writeMemoryFile(t, dir, "stale-fact", "fact to be retracted", MemoryTypeHost, MemoryScopeGlobal, "inc-1", "body to remove")
+	writeMemoryFile(t, dir, "stale-fact", "fact to be retracted", MemoryTypeFact, MemoryScopeGlobal, "inc-1", "body to remove")
 	if err := svc.IngestFromDisk(context.Background()); err != nil {
 		t.Fatalf("seed ingest: %v", err)
 	}

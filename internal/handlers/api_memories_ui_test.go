@@ -16,7 +16,7 @@ import (
 func TestHandleMemoryByID_UpdateBodyKeyPresence(t *testing.T) {
 	mock := newMockMemoryService()
 	h := newMemoryAPIHandler(mock)
-	created, _ := mock.CreateMemory(&database.Memory{Scope: "global", Type: services.MemoryTypeHost, Name: "m", Description: "d", Body: "old body"})
+	created, _ := mock.CreateMemory(&database.Memory{Scope: "global", Type: services.MemoryTypeFact, Name: "m", Description: "d", Body: "old body"})
 	path := fmt.Sprintf("/api/memories/%d", created.ID)
 
 	// No "body" key: the body stays.
@@ -42,9 +42,9 @@ func TestHandleMemories_List_IncidentFilter(t *testing.T) {
 	mock := newMockMemoryService()
 	h := newMemoryAPIHandler(mock)
 	for _, m := range []*database.Memory{
-		{Scope: "global", Type: services.MemoryTypeHost, Name: "a1", Description: "d", IncidentUUID: "inc-a"},
-		{Scope: "redis", Type: services.MemoryTypeHost, Name: "a2", Description: "d", IncidentUUID: "inc-a"},
-		{Scope: "global", Type: services.MemoryTypeHost, Name: "b1", Description: "d", IncidentUUID: "inc-b"},
+		{Scope: "global", Type: services.MemoryTypeFact, Name: "a1", Description: "d", IncidentUUID: "inc-a"},
+		{Scope: "redis", Type: services.MemoryTypeFact, Name: "a2", Description: "d", IncidentUUID: "inc-a"},
+		{Scope: "global", Type: services.MemoryTypeFact, Name: "b1", Description: "d", IncidentUUID: "inc-b"},
 	} {
 		if _, err := mock.CreateMemory(m); err != nil {
 			t.Fatalf("seed: %v", err)
@@ -64,7 +64,7 @@ func TestHandleMemories_List_IncidentFilter(t *testing.T) {
 func TestHandleMemoryExport(t *testing.T) {
 	mock := newMockMemoryService()
 	h := newMemoryAPIHandler(mock)
-	if _, err := mock.CreateMemory(&database.Memory{Scope: "global", Type: services.MemoryTypeHost, Name: "fact", Description: "d", Body: "b"}); err != nil {
+	if _, err := mock.CreateMemory(&database.Memory{Scope: "global", Type: services.MemoryTypeFact, Name: "fact", Description: "d", Body: "b"}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 

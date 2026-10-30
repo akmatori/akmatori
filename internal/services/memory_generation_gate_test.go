@@ -38,8 +38,8 @@ func TestIngestFromDisk_GenerationOffDiscardsAgentWrites(t *testing.T) {
 
 	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
 	// The agent creates a memory, rewrites one, and tombstones another.
-	writeMemoryFile(t, dir, "agent-new", "new fact", MemoryTypeHost, MemoryScopeGlobal, "inc-1", "new body")
-	writeMemoryFile(t, dir, "kept-fact", "agent rewrite", MemoryTypeHost, MemoryScopeGlobal, "inc-1", "agent body")
+	writeMemoryFile(t, dir, "agent-new", "new fact", MemoryTypeFact, MemoryScopeGlobal, "inc-1", "new body")
+	writeMemoryFile(t, dir, "kept-fact", "agent rewrite", MemoryTypeFact, MemoryScopeGlobal, "inc-1", "agent body")
 	writeTombstoneFile(t, dir, "not-deleted")
 
 	if err := svc.IngestFromDisk(context.Background()); err != nil {
@@ -69,7 +69,7 @@ func TestIngestFromDisk_GenerationOffDiscardsAgentWrites(t *testing.T) {
 func TestIngestFromDisk_GenerationOnIngests(t *testing.T) {
 	svc := setupMemoryServiceTest(t)
 	setMemoryGeneration(t, svc, true)
-	writeMemoryFile(t, filepath.Join(svc.MemoryDir(), MemoryScopeGlobal), "agent-new", "new fact", MemoryTypeHost, MemoryScopeGlobal, "inc-1", "new body")
+	writeMemoryFile(t, filepath.Join(svc.MemoryDir(), MemoryScopeGlobal), "agent-new", "new fact", MemoryTypeFact, MemoryScopeGlobal, "inc-1", "new body")
 
 	if err := svc.IngestFromDisk(context.Background()); err != nil {
 		t.Fatalf("ingest: %v", err)

@@ -66,7 +66,7 @@ func (h *APIHandler) handleMemories(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		scope := r.URL.Query().Get("scope")
-		memType := r.URL.Query().Get("type")
+		memType := services.NormalizeMemoryType(r.URL.Query().Get("type"))
 		if memType != "" && !services.ValidMemoryType(memType) {
 			api.RespondError(w, http.StatusBadRequest, "invalid type filter")
 			return

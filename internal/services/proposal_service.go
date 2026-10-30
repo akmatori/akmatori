@@ -268,7 +268,9 @@ func (s *ProposalService) checkStale(p *database.Proposal) (bool, string) {
 		if json.Unmarshal([]byte(p.CurrentSnapshot), &snap) != nil {
 			return false, ""
 		}
-		if mem.Body != snap.Body || mem.Description != snap.Description || mem.Type != snap.Type {
+		// The snapshot may predate the fact/feedback types; compare the
+		// normalized type so the migration alone does not mark it stale.
+		if mem.Body != snap.Body || mem.Description != snap.Description || NormalizeMemoryType(mem.Type) != NormalizeMemoryType(snap.Type) {
 			return true, "memory content changed since the proposal was created"
 		}
 	case database.ProposalKindCronUpdate:

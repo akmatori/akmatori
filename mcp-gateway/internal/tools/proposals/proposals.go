@@ -43,11 +43,15 @@ var validKinds = map[string]bool{
 	kindSkillPromptUpdate: true,
 }
 
+// validMemoryTypes accepts fact and feedback, plus the legacy fact types
+// (host, incident_pattern, tool_quirk) from agents on older prompts; the API
+// stores those as fact when the proposal is applied.
 var validMemoryTypes = map[string]bool{
+	"fact":             true,
+	"feedback":         true,
 	"host":             true,
 	"incident_pattern": true,
 	"tool_quirk":       true,
-	"feedback":         true,
 }
 
 // ProposalsTool lets agents create, inspect, and revise self-improvement
@@ -106,7 +110,7 @@ func validateContent(kind string, m map[string]interface{}) error {
 			return err
 		}
 		if !validMemoryTypes[memType] {
-			return fmt.Errorf("proposed_content.type must be one of host, incident_pattern, tool_quirk, feedback")
+			return fmt.Errorf("proposed_content.type must be fact or feedback")
 		}
 	case kindCronNew, kindCronUpdate:
 		for _, k := range []string{"name", "prompt"} {
