@@ -305,6 +305,17 @@ export interface MemoryDetail extends Memory {
   references: MemoryRef[];
 }
 
+// Fields an operator sets on create/update. On update, an omitted field is
+// left unchanged; `body: ''` clears the body.
+export interface MemoryInput {
+  scope: string;
+  type: string;
+  name: string;
+  description: string;
+  body?: string;
+  incident_uuid?: string;
+}
+
 // Runbooks
 export interface Runbook {
   id: number;

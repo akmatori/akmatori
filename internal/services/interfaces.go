@@ -109,16 +109,18 @@ type RunbookManager interface {
 // and the Slack feedback classifier.
 type MemoryManager interface {
 	CreateMemory(m *database.Memory) (*database.Memory, error)
-	UpdateMemory(id uint, m *database.Memory) (*database.Memory, error)
+	CreateWithUniqueName(m *database.Memory) (*database.Memory, error)
+	UpdateMemory(id uint, m *database.Memory, setBody bool) (*database.Memory, error)
 	UpsertByName(m *database.Memory) (*database.Memory, error)
 	DeleteMemory(id uint) error
 	GetMemory(id uint) (*database.Memory, error)
-	ListMemories(scope, memType string) ([]database.Memory, error)
+	ListMemories(f MemoryFilter) ([]database.Memory, error)
 	ListMemoriesByScope(scope string) ([]database.Memory, error)
 	ListAllScopes() ([]string, error)
 	CountByIncidentUUID(incidentUUID string, createdBy string) (int64, error)
 	SyncMemoryFiles() error
 	ResolveRefs(m *database.Memory) []MemoryRef
+	ExportZip(w io.Writer) error
 }
 
 // ContextManager defines the interface for context file management.

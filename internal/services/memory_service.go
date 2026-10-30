@@ -65,12 +65,44 @@ func (s *MemoryService) CreateMemory(m *database.Memory) (*database.Memory, erro
 	return m, nil
 }
 
+// memoryUniqueNameTries bounds the -2, -3, … suffixes CreateWithUniqueName
+// tries before it gives up.
+const memoryUniqueNameTries = 20
+
+// CreateWithUniqueName creates m like CreateMemory, but when (scope, name) is
+// taken it appends -2, -3, … instead of overwriting the existing memory. Used
+// for operator text, where a generated name can match an unrelated memory.
+func (s *MemoryService) CreateWithUniqueName(m *database.Memory) (*database.Memory, error) {
+	base := strings.TrimSpace(m.Name)
+	for i := 1; i <= memoryUniqueNameTries; i++ {
+		name := base
+		if i > 1 {
+			suffix := fmt.Sprintf("-%d", i)
+			if len(name)+len(suffix) > MemoryNameMaxLen {
+				name = strings.TrimRight(name[:MemoryNameMaxLen-len(suffix)], "-")
+			}
+			name += suffix
+		}
+		var count int64
+		if err := s.db.Model(&database.Memory{}).Where("scope = ? AND name = ?", strings.TrimSpace(m.Scope), name).Count(&count).Error; err != nil {
+			return nil, fmt.Errorf("failed to check memory name: %w", err)
+		}
+		if count == 0 {
+			m.Name = name
+			return s.CreateMemory(m)
+		}
+	}
+	return nil, fmt.Errorf("no free memory name for %q after %d tries", base, memoryUniqueNameTries)
+}
+
 // UpdateMemory mutates an existing memory by ID. All fields use the same
 // "empty = leave unchanged" convention so that PUT /api/memories/{id} can
 // supply only the fields the caller actually wants to change. Without this
 // guard a partial PUT (e.g. just {"type":"feedback"}) would clobber the
-// existing Description with "" and fail validation.
-func (s *MemoryService) UpdateMemory(id uint, m *database.Memory) (*database.Memory, error) {
+// existing Description with "" and fail validation. The body is the one
+// field that may legitimately be empty, so setBody=true replaces it even
+// with "" (the API sets it when the request carries a "body" key).
+func (s *MemoryService) UpdateMemory(id uint, m *database.Memory, setBody bool) (*database.Memory, error) {
 	var existing database.Memory
 	if err := s.db.First(&existing, id).Error; err != nil {
 		return nil, errMemoryNotFound
@@ -88,7 +120,7 @@ func (s *MemoryService) UpdateMemory(id uint, m *database.Memory) (*database.Mem
 	if m.Description != "" {
 		merged.Description = m.Description
 	}
-	if m.Body != "" {
+	if setBody || m.Body != "" {
 		merged.Body = m.Body
 	}
 	if m.IncidentUUID != "" {
@@ -178,16 +210,26 @@ func (s *MemoryService) ListMemoriesByScope(scope string) ([]database.Memory, er
 	return memories, nil
 }
 
-// ListMemories applies optional scope and type filters. Empty filters mean
-// "no filter on that field". Used by the REST API filter endpoint.
-func (s *MemoryService) ListMemories(scope, memType string) ([]database.Memory, error) {
+// MemoryFilter narrows ListMemories. Empty fields do not filter.
+type MemoryFilter struct {
+	Scope        string
+	Type         string
+	IncidentUUID string
+}
+
+// ListMemories applies optional scope, type and incident filters. Empty
+// filters mean "no filter on that field". Used by the REST API filter endpoint.
+func (s *MemoryService) ListMemories(f MemoryFilter) ([]database.Memory, error) {
 	var memories []database.Memory
 	q := s.db.Order("created_at desc")
-	if scope != "" {
-		q = q.Where("scope = ?", scope)
+	if f.Scope != "" {
+		q = q.Where("scope = ?", f.Scope)
 	}
-	if memType != "" {
-		q = q.Where("type = ?", memType)
+	if f.Type != "" {
+		q = q.Where("type = ?", f.Type)
+	}
+	if f.IncidentUUID != "" {
+		q = q.Where("incident_uuid = ?", f.IncidentUUID)
 	}
 	if err := q.Find(&memories).Error; err != nil {
 		return nil, fmt.Errorf("failed to list memories: %w", err)

@@ -44,6 +44,14 @@ memory lives under `akmatori_data/memory/` (read-write). Agents reach both via p
   into a path, ingest would save the path back. `MemoryService.ResolveRefs` resolves refs
   against the DB for views (`GET /api/memories/{id}` → `references`); anything that is not a
   slug, `scope/slug` or a valid context filename is `invalid` and never becomes a path
+- memory API for the UI: `PUT /api/memories/{id}` clears the body only when the request has a
+  `body` key (`UpdateMemory(id, m, setBody)`; other empty fields mean "unchanged");
+  `GET /api/memories?incident_uuid=` lists memories that originated from an incident;
+  `GET /api/memories/export` is a zip of `<scope>/<name>.md` in the on-disk format;
+  `POST /api/memories/from-text` drafts an operator memory with `MemoryDrafter` (one-shot LLM,
+  deterministic fallback: first line = description, text = body, type feedback) and creates it
+  with `CreateWithUniqueName` (`-2`, `-3`… — never overwrites another memory)
 
-Key files: `internal/services/memory_service.go`, `internal/services/memory_refs.go`, `internal/services/runbook_service.go`,
+Key files: `internal/services/memory_service.go`, `internal/services/memory_refs.go`,
+`internal/services/memory_drafter.go`, `internal/services/runbook_service.go`,
 `akmatori_data/agents/` (`runbook-searcher`, `memory-searcher`, `memory-writer` definitions)

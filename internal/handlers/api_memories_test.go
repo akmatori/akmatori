@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -74,7 +76,27 @@ func (m *mockMemoryService) CreateMemory(mem *database.Memory) (*database.Memory
 	return mem, nil
 }
 
-func (m *mockMemoryService) UpdateMemory(id uint, mem *database.Memory) (*database.Memory, error) {
+func (m *mockMemoryService) CreateWithUniqueName(mem *database.Memory) (*database.Memory, error) {
+	m.mu.Lock()
+	base := mem.Name
+	for i := 2; ; i++ {
+		taken := false
+		for _, existing := range m.memories {
+			if existing.Scope == mem.Scope && existing.Name == mem.Name {
+				taken = true
+				break
+			}
+		}
+		if !taken {
+			break
+		}
+		mem.Name = fmt.Sprintf("%s-%d", base, i)
+	}
+	m.mu.Unlock()
+	return m.CreateMemory(mem)
+}
+
+func (m *mockMemoryService) UpdateMemory(id uint, mem *database.Memory, setBody bool) (*database.Memory, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.updateErr != nil {
@@ -91,7 +113,7 @@ func (m *mockMemoryService) UpdateMemory(id uint, mem *database.Memory) (*databa
 			if mem.Description != "" {
 				m.memories[i].Description = mem.Description
 			}
-			if mem.Body != "" {
+			if setBody || mem.Body != "" {
 				m.memories[i].Body = mem.Body
 			}
 			cp := m.memories[i]
@@ -170,7 +192,7 @@ func (m *mockMemoryService) ResolveRefs(mem *database.Memory) []services.MemoryR
 	return refs
 }
 
-func (m *mockMemoryService) ListMemories(scope, memType string) ([]database.Memory, error) {
+func (m *mockMemoryService) ListMemories(f services.MemoryFilter) ([]database.Memory, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.listErr != nil {
@@ -178,10 +200,13 @@ func (m *mockMemoryService) ListMemories(scope, memType string) ([]database.Memo
 	}
 	var out []database.Memory
 	for _, mem := range m.memories {
-		if scope != "" && mem.Scope != scope {
+		if f.Scope != "" && mem.Scope != f.Scope {
 			continue
 		}
-		if memType != "" && mem.Type != memType {
+		if f.Type != "" && mem.Type != f.Type {
+			continue
+		}
+		if f.IncidentUUID != "" && mem.IncidentUUID != f.IncidentUUID {
 			continue
 		}
 		out = append(out, mem)
@@ -190,7 +215,25 @@ func (m *mockMemoryService) ListMemories(scope, memType string) ([]database.Memo
 }
 
 func (m *mockMemoryService) ListMemoriesByScope(scope string) ([]database.Memory, error) {
-	return m.ListMemories(scope, "")
+	return m.ListMemories(services.MemoryFilter{Scope: scope})
+}
+
+// ExportZip writes one entry per memory; the real format is tested in the
+// services package.
+func (m *mockMemoryService) ExportZip(w io.Writer) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	zw := zip.NewWriter(w)
+	for _, mem := range m.memories {
+		f, err := zw.Create(mem.Scope + "/" + mem.Name + ".md")
+		if err != nil {
+			return err
+		}
+		if _, err := io.WriteString(f, mem.Body); err != nil {
+			return err
+		}
+	}
+	return zw.Close()
 }
 
 func (m *mockMemoryService) ListAllScopes() ([]string, error) {

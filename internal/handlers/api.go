@@ -21,6 +21,7 @@ type APIHandler struct {
 	slackManager         *slackutil.Manager
 	runbookService       services.RunbookManager
 	memoryService        services.MemoryManager
+	memoryDrafter        *services.MemoryDrafter // nil-safe: Draft falls back without an LLM
 	httpConnectorService services.HTTPConnectorManager
 	mcpServerService     services.MCPServerManager
 	channelService       services.ChannelManager
@@ -130,6 +131,12 @@ func (h *APIHandler) SetEventIntake(eventService *services.EventService, extract
 // the API surface is a convenience, not a requirement.
 func (h *APIHandler) SetStaleIncidentCloser(svc services.StaleIncidentCloser) {
 	h.staleIncidentCloser = svc
+}
+
+// SetMemoryDrafter wires the drafter behind POST /api/memories/from-text.
+// Unset, the endpoint still works with the deterministic draft.
+func (h *APIHandler) SetMemoryDrafter(d *services.MemoryDrafter) {
+	h.memoryDrafter = d
 }
 
 // reloadAlertChannels triggers the alert channel reload callback if set
