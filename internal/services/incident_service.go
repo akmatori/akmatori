@@ -834,7 +834,9 @@ func (s *SkillService) FinishRun(runID string, outcome RunOutcome) error {
 // The cross-incident "global" memory manifest is appended below the prompt
 // regardless of root skill so the agent sees a small, always-up-to-date
 // summary of long-lived facts and operator feedback before any tool call.
-// Full bodies are fetched on demand via the memory-searcher subagent.
+// Full bodies are fetched on demand via the memory-searcher subagent. The
+// uploaded context files follow as a "Reference files" list, so the agent
+// knows what is mounted at /akmatori/context/ without a skill [[reference]].
 //
 // incidentUUID is substituted into the memory-writer call example so the
 // model can quote it verbatim instead of having to derive it from CWD.
@@ -861,6 +863,7 @@ func (s *SkillService) generateAgentsMd(path string, rootSkillName string, incid
 	sb.WriteString(prompt)
 	sb.WriteString("\n")
 	sb.WriteString(s.renderMemoryRecallSection(MemoryScopeGlobal, incidentUUID))
+	sb.WriteString(s.renderContextFilesSection())
 
 	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
 		return fmt.Errorf("failed to write AGENTS.md: %w", err)
