@@ -44,6 +44,7 @@ import type {
   Runbook,
   Memory,
   MemoryDetail,
+  MemoryInput,
   CronJob,
   CreateCronJobRequest,
   UpdateCronJobRequest,
@@ -675,15 +676,54 @@ export const cronJobsApi = {
 
 // Memories API
 export const memoriesApi = {
-  list: (params?: { scope?: string; type?: string }) => {
+  list: (params?: { scope?: string; type?: string; incidentUuid?: string }) => {
     const qs = new URLSearchParams();
     if (params?.scope) qs.set('scope', params.scope);
     if (params?.type) qs.set('type', params.type);
+    if (params?.incidentUuid) qs.set('incident_uuid', params.incidentUuid);
     const query = qs.toString();
     return fetchApi<Memory[]>(`/api/memories${query ? '?' + query : ''}`);
   },
 
   get: (id: number) => fetchApi<MemoryDetail>(`/api/memories/${id}`),
+
+  scopes: () => fetchApi<string[]>('/api/memories/scopes'),
+
+  create: (memory: MemoryInput) =>
+    fetchApi<Memory>('/api/memories', {
+      method: 'POST',
+      body: JSON.stringify({ ...memory, created_by: 'operator' }),
+    }),
+
+  update: (id: number, changes: Partial<MemoryInput>) =>
+    fetchApi<Memory>(`/api/memories/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(changes),
+    }),
+
+  delete: (id: number) =>
+    fetchApi<void>(`/api/memories/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Free operator text → an operator memory; the server drafts the fields.
+  fromText: (text: string, scope?: string) =>
+    fetchApi<Memory>('/api/memories/from-text', {
+      method: 'POST',
+      body: JSON.stringify({ text, scope }),
+    }),
+
+  // The zip comes back as a Blob fetched with the auth header, so no token
+  // goes into a URL.
+  exportZip: async (): Promise<Blob> => {
+    const response = await fetch(`${API_BASE_URL}/api/memories/export`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      throw new ApiError(response.status, (await response.text()) || response.statusText);
+    }
+    return response.blob();
+  },
 };
 
 // Events feed API

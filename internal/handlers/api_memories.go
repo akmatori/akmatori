@@ -1,10 +1,13 @@
 package handlers
 
 import (
+	"bytes"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/akmatori/akmatori/internal/api"
 	"github.com/akmatori/akmatori/internal/database"
@@ -24,6 +27,21 @@ type MemoryRequest struct {
 	CreatedBy    string `json:"created_by,omitempty"`
 }
 
+// memoryUpdateRequest is the PUT body. Body shadows MemoryRequest.Body so
+// the handler can tell an absent "body" key (leave unchanged) from "body": ""
+// (clear the body).
+type memoryUpdateRequest struct {
+	MemoryRequest
+	Body *string `json:"body"`
+}
+
+// MemoryFromTextRequest is the body for POST /api/memories/from-text: free
+// operator text that the drafter turns into a memory.
+type MemoryFromTextRequest struct {
+	Text  string `json:"text"`
+	Scope string `json:"scope,omitempty"`
+}
+
 // MemoryDetailResponse is the GET /api/memories/{id} body: the memory plus
 // its resolved [[...]] references, so a view can link them.
 type MemoryDetailResponse struct {
@@ -38,7 +56,8 @@ type IncidentFeedbackRequest struct {
 	Text string `json:"text"`
 }
 
-// handleMemories handles GET (list, with ?scope= and ?type= filters) and POST.
+// handleMemories handles GET (list, with ?scope=, ?type= and ?incident_uuid=
+// filters) and POST.
 func (h *APIHandler) handleMemories(w http.ResponseWriter, r *http.Request) {
 	if h.memoryService == nil {
 		api.RespondError(w, http.StatusInternalServerError, "memory service not available")
@@ -52,7 +71,11 @@ func (h *APIHandler) handleMemories(w http.ResponseWriter, r *http.Request) {
 			api.RespondError(w, http.StatusBadRequest, "invalid type filter")
 			return
 		}
-		memories, err := h.memoryService.ListMemories(scope, memType)
+		memories, err := h.memoryService.ListMemories(services.MemoryFilter{
+			Scope:        scope,
+			Type:         memType,
+			IncidentUUID: r.URL.Query().Get("incident_uuid"),
+		})
 		if err != nil {
 			api.RespondError(w, http.StatusInternalServerError, "failed to list memories")
 			return
@@ -99,8 +122,15 @@ func (h *APIHandler) handleMemoryByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tail := strings.TrimPrefix(r.URL.Path, "/api/memories/")
-	if tail == "scopes" {
+	switch tail {
+	case "scopes":
 		h.handleMemoryScopes(w, r)
+		return
+	case "export":
+		h.handleMemoryExport(w, r)
+		return
+	case "from-text":
+		h.handleMemoryFromText(w, r)
 		return
 	}
 
@@ -124,7 +154,7 @@ func (h *APIHandler) handleMemoryByID(w http.ResponseWriter, r *http.Request) {
 		api.RespondJSON(w, http.StatusOK, MemoryDetailResponse{Memory: *m, References: refs})
 
 	case http.MethodPut:
-		var req MemoryRequest
+		var req memoryUpdateRequest
 		if err := api.DecodeJSON(r, &req); err != nil {
 			api.RespondError(w, http.StatusBadRequest, "invalid request body")
 			return
@@ -140,11 +170,13 @@ func (h *APIHandler) handleMemoryByID(w http.ResponseWriter, r *http.Request) {
 			Type:         req.Type,
 			Name:         req.Name,
 			Description:  req.Description,
-			Body:         req.Body,
 			IncidentUUID: req.IncidentUUID,
 			CreatedBy:    req.CreatedBy,
 		}
-		updated, err := h.memoryService.UpdateMemory(uint(id), m)
+		if req.Body != nil {
+			m.Body = *req.Body
+		}
+		updated, err := h.memoryService.UpdateMemory(uint(id), m, req.Body != nil)
 		if err != nil {
 			respondMemoryWriteError(w, err)
 			return
@@ -172,6 +204,72 @@ func (h *APIHandler) handleMemoryByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		api.RespondError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+// handleMemoryExport streams every memory as a zip of <scope>/<name>.md files.
+// It is a normal authenticated GET; the UI fetches it with its auth header
+// and saves the blob, so no token goes into a URL.
+func (h *APIHandler) handleMemoryExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		api.RespondError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var buf bytes.Buffer
+	if err := h.memoryService.ExportZip(&buf); err != nil {
+		slog.Error("memory export failed", "err", err)
+		api.RespondError(w, http.StatusInternalServerError, "failed to export memories")
+		return
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="akmatori-memory-`+time.Now().UTC().Format("2006-01-02")+`.zip"`)
+	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(buf.Bytes())
+}
+
+// handleMemoryFromText turns operator free text into an operator-authored
+// memory. The drafter proposes name/description/body/type with a one-shot LLM
+// call and falls back to a deterministic draft, so the text is never lost.
+// A taken name gets a numeric suffix instead of overwriting another memory.
+func (h *APIHandler) handleMemoryFromText(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		api.RespondError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req MemoryFromTextRequest
+	if err := api.DecodeJSON(r, &req); err != nil {
+		api.RespondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		api.RespondError(w, http.StatusBadRequest, "text cannot be empty")
+		return
+	}
+	if len(text) > services.MemoryTextMaxBytes {
+		api.RespondError(w, http.StatusBadRequest, fmt.Sprintf("text exceeds %d bytes", services.MemoryTextMaxBytes))
+		return
+	}
+	scope := strings.TrimSpace(req.Scope)
+	if scope == "" {
+		scope = services.MemoryScopeGlobal
+	}
+
+	draft := h.memoryDrafter.Draft(r.Context(), text)
+	created, err := h.memoryService.CreateWithUniqueName(&database.Memory{
+		Scope:       scope,
+		Type:        draft.Type,
+		Name:        draft.Name,
+		Description: draft.Description,
+		Body:        draft.Body,
+		CreatedBy:   services.MemoryCreatedByOperator,
+	})
+	if err != nil {
+		respondMemoryWriteError(w, err)
+		return
+	}
+	h.regenerateSkillForMemoryScope(created.Scope)
+	api.RespondJSON(w, http.StatusCreated, created)
 }
 
 // handleMemoryScopes returns the distinct scope strings present in the table.

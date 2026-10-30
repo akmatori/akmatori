@@ -196,7 +196,7 @@ func TestMemoryService_UpsertByName_Idempotent(t *testing.T) {
 		t.Fatalf("upsert overwrote operator authorship on conflict: %+v", updated)
 	}
 
-	all, err := svc.ListMemories("", "")
+	all, err := svc.ListMemories(MemoryFilter{})
 	if err != nil {
 		t.Fatalf("ListMemories: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestMemoryService_Update(t *testing.T) {
 		Description: "updated desc",
 		Body:        "updated body",
 		CreatedBy:   MemoryCreatedByAgent,
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestMemoryService_Update(t *testing.T) {
 		t.Fatalf("update changed name: got %q", updated.Name)
 	}
 
-	_, err = svc.UpdateMemory(99999, &database.Memory{Description: "x", Body: "y"})
+	_, err = svc.UpdateMemory(99999, &database.Memory{Description: "x", Body: "y"}, false)
 	if !IsMemoryNotFoundErr(err) {
 		t.Fatalf("expected not-found, got %v", err)
 	}
@@ -360,7 +360,7 @@ func TestMemoryService_Update_PartialPreservesOmittedFields(t *testing.T) {
 	// Send only Type — the rest of the request is empty.
 	updated, err := svc.UpdateMemory(created.ID, &database.Memory{
 		Type: MemoryTypeFeedback,
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("partial update should succeed, got: %v", err)
 	}
@@ -450,17 +450,17 @@ func TestMemoryService_ListMemories_Filters(t *testing.T) {
 		}
 	}
 
-	hosts, _ := svc.ListMemories("", MemoryTypeHost)
+	hosts, _ := svc.ListMemories(MemoryFilter{Type: MemoryTypeHost})
 	if len(hosts) != 1 || hosts[0].Name != "host-a" {
 		t.Fatalf("host filter = %+v", hosts)
 	}
 
-	redisOnly, _ := svc.ListMemories("redis", "")
+	redisOnly, _ := svc.ListMemories(MemoryFilter{Scope: "redis"})
 	if len(redisOnly) != 1 || redisOnly[0].Name != "fb-a" {
 		t.Fatalf("scope filter = %+v", redisOnly)
 	}
 
-	combo, _ := svc.ListMemories("redis", MemoryTypeHost)
+	combo, _ := svc.ListMemories(MemoryFilter{Scope: "redis", Type: MemoryTypeHost})
 	if len(combo) != 0 {
 		t.Fatalf("scope+type combo should be empty, got %+v", combo)
 	}

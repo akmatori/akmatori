@@ -119,7 +119,7 @@ func TestMemoryService_Sync_ScopeRenamePurgesOldDir(t *testing.T) {
 		Type:        MemoryTypeHost,
 		Description: "moved",
 		Body:        "moved",
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}

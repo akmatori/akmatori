@@ -344,6 +344,7 @@ func main() {
 	mcpServerService := services.NewMCPServerService()
 	apiHandler := handlers.NewAPIHandler(skillService, toolService, contextService, alertService, agentExecutor, agentWSHandler, slackManager, runbookService, memoryService, httpConnectorService, mcpServerService)
 	apiHandler.SetResponseFormatter(responseFormatter)
+	apiHandler.SetMemoryDrafter(services.NewMemoryDrafter(agentWSHandler))
 	apiHandler.SetEventIntake(eventService, extraction.NewAlertExtractor(agentWSHandler), alertHandler)
 	// Wire the Integrations + Channels CRUD surface. /api/settings/slack is
 	// retired (returns 410 Gone) — operators configure Slack via

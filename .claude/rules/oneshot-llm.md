@@ -9,8 +9,9 @@ paths:
 
 Use the one-shot path for short non-agent calls such as: incident title generation,
 free-form alert extraction, Slack final-message summarization, response formatting,
-feedback classification, alert correlation, event classification (webhook items get their own
-call; free-text sources get the class fields inside the extraction call).
+feedback classification, operator text → memory draft, alert correlation, event
+classification (webhook items get their own call; free-text sources get the class fields
+inside the extraction call).
 
 - API frame type is `oneshot_llm_request`; worker replies with `oneshot_llm_response`
 - Go callers depend on `services.OneShotLLMCaller`, not concrete worker code

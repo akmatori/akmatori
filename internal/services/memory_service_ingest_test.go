@@ -268,7 +268,7 @@ func TestIngestFromDisk_SkipsNonSlugScopeDirs(t *testing.T) {
 	if err := svc.IngestFromDisk(context.Background()); err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
-	mems, _ := svc.ListMemories("", "")
+	mems, _ := svc.ListMemories(MemoryFilter{})
 	if len(mems) != 1 || mems[0].Name != "good" {
 		t.Fatalf("expected only good scope to be ingested, got %+v", mems)
 	}
@@ -279,7 +279,7 @@ func TestIngestFromDisk_EmptyDirIsNoOp(t *testing.T) {
 	if err := svc.IngestFromDisk(context.Background()); err != nil {
 		t.Fatalf("ingest on empty dir: %v", err)
 	}
-	mems, _ := svc.ListMemories("", "")
+	mems, _ := svc.ListMemories(MemoryFilter{})
 	if len(mems) != 0 {
 		t.Errorf("expected no rows on empty ingest, got %+v", mems)
 	}
