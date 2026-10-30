@@ -414,9 +414,15 @@ export function resolveModel(
   // - Mirror ant-ling's built-in compat for unknown models: the endpoint uses
   //   reasoning: { effort } (not flat reasoning_effort) and rejects OpenAI-specific
   //   fields like store, developer role, and prompt_cache_retention.
+  // - Send instructions as role "system" on custom endpoints. pi-ai sends
+  //   "developer" for a reasoning model on any URL it does not recognize, and
+  //   OpenAI-compatible gateways (vLLM/SGLang chat templates) can drop that
+  //   role without an error: on gcore's DeepSeek endpoint every one-shot call
+  //   ran with no system prompt, so correlation got prose instead of JSON.
   const compatFlags: Record<string, unknown> = {};
   if (provider === "custom") {
     compatFlags.supportsLongCacheRetention = false;
+    compatFlags.supportsDeveloperRole = false;
   }
   if (provider === "ant-ling") {
     compatFlags.supportsStore = false;
@@ -875,7 +881,8 @@ function writeCustomProviderModelsJson(
         baseUrl,
         api: "openai-completions",
         apiKey: `$${AKMATORI_CUSTOM_API_KEY_ENV}`,
-        compat: { supportsLongCacheRetention: false },
+        // Same flags as the parent's synthesized spec (see resolveModel).
+        compat: { supportsLongCacheRetention: false, supportsDeveloperRole: false },
         models: [model, ...extraModels.filter((m) => m !== model)].map((id) => ({
           id,
           name: id,

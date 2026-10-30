@@ -89,8 +89,8 @@ describe("runOneshotLLM", () => {
     // answer budget gets the reasoning headroom on top.
     expect(opts.maxTokens).toBe(64 + REASONING_HEADROOM_TOKENS);
     expect(opts.apiKey).toBe("sk-test");
-    // Default 30s timeout when unset
-    expect(opts.timeoutMs).toBe(30_000);
+    // Default 60s timeout when unset (above every Go caller's deadline)
+    expect(opts.timeoutMs).toBe(60_000);
   });
 
   it("forwards systemPrompt when provided", async () => {

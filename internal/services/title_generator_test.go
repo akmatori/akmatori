@@ -254,6 +254,23 @@ func TestTitleGenerator_GenerateTitle(t *testing.T) {
 			wantCallerCalled: true,
 		},
 		{
+			name:    "multi-line answer is not a title and falls back",
+			message: "Nginx-front has very high accept queue (318244) on tsc-hw-edge-gc4.fe.gc.onl",
+			source:  "Slack",
+			settings: database.LLMSettings{
+				Name:     "openai",
+				Provider: database.LLMProviderOpenAI,
+				APIKey:   "test-key",
+				Enabled:  true,
+				Active:   true,
+			},
+			caller: &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
+				return "Ack — investigating.\n\nQuick checks:\n- ss -lntp", nil
+			}},
+			want:             "Nginx-front has very high accept queue (318244) on tsc-hw-edge-gc4.fe.gc.onl",
+			wantCallerCalled: true,
+		},
+		{
 			name:    "ErrWorkerNotConnected falls back",
 			message: "The agent worker disconnected mid-incident which left the dispatcher unable to react.",
 			source:  "API",
@@ -305,7 +322,7 @@ func TestTitleGenerator_GenerateTitle(t *testing.T) {
 			wantCallerCalled: true,
 		},
 		{
-			name:    "successful response truncates long title",
+			name:    "over-long answer is not a title and falls back",
 			message: "The monitoring pipeline kept duplicating the same alert payload as retries piled up across regions.",
 			source:  "Grafana",
 			settings: database.LLMSettings{
@@ -318,11 +335,11 @@ func TestTitleGenerator_GenerateTitle(t *testing.T) {
 			caller: &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
 				return strings.Repeat("x", 260), nil
 			}},
-			want:             strings.Repeat("x", 252) + "...",
+			want:             "The monitoring pipeline kept duplicating the same alert payload as retries piled up across regions.",
 			wantCallerCalled: true,
 		},
 		{
-			name:    "successful unicode response truncates on rune boundary",
+			name:    "unicode title at the rune limit is kept",
 			message: "The LLM returned a long unicode title that still needs to be safe for storage and UI rendering.",
 			source:  "Slack",
 			settings: database.LLMSettings{
@@ -333,9 +350,10 @@ func TestTitleGenerator_GenerateTitle(t *testing.T) {
 				Active:   true,
 			},
 			caller: &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
-				return strings.Repeat("日", 260), nil
+				// 120 runes but 360 bytes: the limit counts runes, not bytes.
+				return strings.Repeat("日", 120), nil
 			}},
-			want:             strings.Repeat("日", 252) + "...",
+			want:             strings.Repeat("日", 120),
 			wantCallerCalled: true,
 		},
 	}

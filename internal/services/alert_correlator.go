@@ -15,7 +15,9 @@ import (
 )
 
 const (
-	correlationTimeout       = 15 * time.Second
+	// A reasoning model thinks for 1000-1900 tokens over a 25-candidate prompt:
+	// 13-20 s on gcore's DeepSeek-V4.1-Flash, so 15 s timed out most calls.
+	correlationTimeout       = 45 * time.Second
 	correlationMaxCandidates = 25
 	correlationThreshold     = 0.7
 

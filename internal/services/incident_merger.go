@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	mergeTimeout       = 20 * time.Second
+	mergeTimeout       = 45 * time.Second // same budget as correlationTimeout
 	mergeMaxCandidates = 25
 	// mergeThreshold is higher than correlationThreshold because a merge is
 	// harder to undo than a skipped investigation.

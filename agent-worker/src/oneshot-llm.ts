@@ -20,7 +20,9 @@ import { applyProxyConfig } from "./proxy.js";
 import { resolveModel } from "./agent-runner.js";
 import { createSamplingPayloadHook } from "./sampling.js";
 
-const DEFAULT_TIMEOUT_MS = 30_000;
+// Above every Go caller's own deadline (45 s at most), so the API side decides
+// when a call has taken too long and the worker never cuts it off first.
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 /**
  * Output tokens added on top of the caller's maxTokens for reasoning models.
@@ -56,7 +58,7 @@ export interface OneshotLLMParams {
   llmSettings: LLMSettings;
   proxyConfig?: ProxyConfig;
   signal?: AbortSignal;
-  /** Override the per-call HTTP timeout (ms). Defaults to 30s. */
+  /** Override the per-call HTTP timeout (ms). Defaults to 60s. */
   timeoutMs?: number;
 }
 

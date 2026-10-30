@@ -17,6 +17,12 @@ import (
 // when the caller does not provide its own deadline.
 const titleGenerationTimeout = 30 * time.Second
 
+// maxGeneratedTitleRunes rejects an answer that is not a title. The prompt asks
+// for at most 80 characters; a model that missed its instructions answers the
+// alert instead (gcore stored "Ack — investigating. High accept queue means…"
+// as a title), so anything longer, or on more than one line, uses the fallback.
+const maxGeneratedTitleRunes = 120
+
 // TitleGenerator generates concise titles for incidents using a provider-agnostic
 // one-shot LLM call routed through the agent worker.
 type TitleGenerator struct {
@@ -91,9 +97,9 @@ Respond with ONLY the title, nothing else.`
 	if title == "" {
 		return t.GenerateFallbackTitle(messageOrAlert, source), nil
 	}
-
-	if utf8.RuneCountInString(title) > 255 {
-		title = truncateRunesWithEllipsis(title, 255)
+	if strings.ContainsAny(title, "\r\n") || utf8.RuneCountInString(title) > maxGeneratedTitleRunes {
+		slog.Warn("generated title is not a title, using fallback", "runes", utf8.RuneCountInString(title))
+		return t.GenerateFallbackTitle(messageOrAlert, source), nil
 	}
 	return title, nil
 }
