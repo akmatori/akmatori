@@ -2,6 +2,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AgentWork } from '../../types';
 import IncidentFeedbackStrip from '../IncidentFeedbackStrip';
+import IncidentMemoriesLine from './IncidentMemoriesLine';
 import { cleanResponse } from './incidentLogHelpers';
 import { isFinishedStatus } from './incidentStatus';
 
@@ -13,7 +14,8 @@ interface IncidentSummaryTabProps {
 }
 
 // IncidentSummaryTab renders the agent's final response as Markdown, with
-// the feedback strip once the investigation has finished.
+// the memories line and the feedback strip once the investigation has
+// finished.
 export default function IncidentSummaryTab({ incident, feedback = true }: IncidentSummaryTabProps) {
   if (!incident.response) {
     return (
@@ -43,7 +45,12 @@ export default function IncidentSummaryTab({ incident, feedback = true }: Incide
       <div className="md">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{cleanResponse(incident.response)}</ReactMarkdown>
       </div>
-      {feedback && isFinishedStatus(incident.status) && <IncidentFeedbackStrip incidentUUID={incident.uuid} />}
+      {feedback && isFinishedStatus(incident.status) && (
+        <>
+          <IncidentMemoriesLine incidentUUID={incident.uuid} />
+          <IncidentFeedbackStrip incidentUUID={incident.uuid} />
+        </>
+      )}
     </div>
   );
 }

@@ -8,6 +8,7 @@ import {
   Trash2,
   Sparkles,
   Hash,
+  Brain,
   type LucideIcon,
 } from 'lucide-react';
 import AlertSourcesManager from '../components/AlertSourcesManager';
@@ -18,6 +19,7 @@ import RetentionSettingsSection from '../components/settings/RetentionSettingsSe
 import FormattingRulesSection from '../components/settings/FormattingRulesSection';
 import IntegrationsManager from '../components/settings/IntegrationsManager';
 import ChannelsManager from '../components/channels/ChannelsManager';
+import MemorySettingsSection from '../components/memory/MemorySettingsSection';
 
 interface SettingsSectionDef {
   id: string;
@@ -64,6 +66,13 @@ const SECTIONS: SettingsSectionDef[] = [
     description: 'Webhooks that receive alerts from your monitoring systems.',
     icon: Bell,
     render: () => <AlertSourcesManager />,
+  },
+  {
+    id: 'memory',
+    title: 'Memory',
+    description: 'What the agent remembers across incidents. Edit or delete it, or tell it something new.',
+    icon: Brain,
+    render: () => <MemorySettingsSection />,
   },
   {
     id: 'formatting',
