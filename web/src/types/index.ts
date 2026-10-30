@@ -715,6 +715,9 @@ export interface GeneralSettings {
   // Stale-close sweep. Defaults ON, unlike the correlation and merge gates.
   incident_auto_close_enabled: boolean;
   incident_auto_close_minutes: number;
+  // Agent-written memory. Defaults ON; off, agents stop writing memory and
+  // their memory files are discarded. Operator memory edits still work.
+  memory_generation_enabled: boolean;
 }
 
 export interface GeneralSettingsUpdate {
@@ -729,6 +732,7 @@ export interface GeneralSettingsUpdate {
   incident_merge_enabled?: boolean;
   incident_auto_close_enabled?: boolean;
   incident_auto_close_minutes?: number;
+  memory_generation_enabled?: boolean;
 }
 
 // Pagination

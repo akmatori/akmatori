@@ -307,6 +307,7 @@ func (f *fakeSkillIncidentManager) GetSkillScriptsDir(string) string       { pan
 func (f *fakeSkillIncidentManager) GetSkillPrompt(string) (string, error)  { panic("not implemented") }
 func (f *fakeSkillIncidentManager) UpdateSkillPrompt(string, string) error { panic("not implemented") }
 func (f *fakeSkillIncidentManager) RegenerateSkillMd(string) error         { panic("not implemented") }
+func (f *fakeSkillIncidentManager) RegenerateAllSkillMds() error           { panic("not implemented") }
 func (f *fakeSkillIncidentManager) SyncSkillsFromFilesystem() error        { panic("not implemented") }
 func (f *fakeSkillIncidentManager) ListSkillScripts(string) ([]string, error) {
 	panic("not implemented")

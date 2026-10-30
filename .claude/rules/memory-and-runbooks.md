@@ -51,6 +51,13 @@ memory lives under `akmatori_data/memory/` (read-write). Agents reach both via p
   `POST /api/memories/from-text` drafts an operator memory with `MemoryDrafter` (one-shot LLM,
   deterministic fallback: first line = description, text = body, type feedback) and creates it
   with `CreateWithUniqueName` (`-2`, `-3`… — never overwrites another memory)
+- `GeneralSettings.MemoryGenerationEnabled` (nil = on) gates AGENT memory only. Off:
+  `renderMemoryRecallSection` swaps "Record durable findings" for a do-not-write note (it
+  overrides the root prompts, which still name memory-writer), and `IngestFromDisk` only runs
+  `SyncMemoryFiles`, which discards agent creates, edits and tombstones (the dir is rw for the
+  agent, so the prompt alone is not enough). Operator writes (UI, API, from-text, Slack feedback)
+  still work. A change regenerates every SKILL.md; AGENTS.md is rendered per run. The gate fails
+  open when the setting cannot be read
 
 Key files: `internal/services/memory_service.go`, `internal/services/memory_refs.go`,
 `internal/services/memory_drafter.go`, `internal/services/runbook_service.go`,

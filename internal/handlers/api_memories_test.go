@@ -580,6 +580,11 @@ func (r *recordingSkillService) RegenerateSkillMd(name string) error {
 	return r.regenErr
 }
 
+func (r *recordingSkillService) RegenerateAllSkillMds() error {
+	r.regenerated = append(r.regenerated, "*")
+	return r.regenErr
+}
+
 // --- SkillManager no-ops ---
 func (r *recordingSkillService) CreateSkill(string, string, string, string) (*database.Skill, error) {
 	return nil, nil
