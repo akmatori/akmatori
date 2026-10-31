@@ -77,6 +77,42 @@ func TestIngestFromDisk_NewFilesCreateRows(t *testing.T) {
 	}
 }
 
+func TestIngestFromDisk_CutsOverLongDescription(t *testing.T) {
+	svc := setupMemoryServiceTest(t)
+	globalDir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
+	long := strings.Repeat("edge cache stall ", 40) // 680 bytes
+	writeMemoryFile(t, globalDir, "edge-cache-stall", long, MemoryTypeFact, MemoryScopeGlobal, "inc-1", "Restart the cache worker.")
+
+	if err := svc.IngestFromDisk(context.Background()); err != nil {
+		t.Fatalf("IngestFromDisk: %v", err)
+	}
+
+	mems, err := svc.ListMemoriesByScope(MemoryScopeGlobal)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(mems) != 1 {
+		t.Fatalf("over-long description must not drop the memory, got %d rows", len(mems))
+	}
+	got := mems[0]
+	if len(got.Description) > MemoryDescriptionMaxLen || !strings.HasSuffix(got.Description, "…") {
+		t.Errorf("description not cut to the limit: %d bytes %q", len(got.Description), got.Description)
+	}
+	if !strings.Contains(got.Body, "Restart the cache worker.") {
+		t.Errorf("body lost its content: %q", got.Body)
+	}
+
+	// The synced file now carries the cut description, so a second ingest
+	// changes nothing.
+	if err := svc.IngestFromDisk(context.Background()); err != nil {
+		t.Fatalf("second IngestFromDisk: %v", err)
+	}
+	again, _ := svc.ListMemoriesByScope(MemoryScopeGlobal)
+	if len(again) != 1 || again[0].Description != got.Description {
+		t.Errorf("second ingest changed the memory: %+v", again)
+	}
+}
+
 func TestIngestFromDisk_RoundTripWithoutBodyDuplication(t *testing.T) {
 	// Regression: parseMemoryFile must strip the `# <name>` header and the
 	// description echo from the file body, otherwise every ingest cycle
