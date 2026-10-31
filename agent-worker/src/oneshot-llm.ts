@@ -25,6 +25,23 @@ import { createSamplingPayloadHook } from "./sampling.js";
 const DEFAULT_TIMEOUT_MS = 60_000;
 
 /**
+ * Retries after the connection to the provider broke mid-request. The gcore
+ * DeepSeek gateway sometimes closes the stream ("terminated" from undici);
+ * the next request usually works, while a failure sends the Go caller to its
+ * fallback (no merge, no extraction). Provider errors with a real answer
+ * (4xx, "overloaded") are not retried.
+ */
+const TRANSIENT_RETRIES = 2;
+const TRANSIENT_RETRY_DELAY_MS = 500;
+const TRANSIENT_ERROR_RE = /\bterminated\b|ECONNRESET|socket hang up|other side closed|fetch failed|UND_ERR_SOCKET/i;
+
+/**
+ * A retry starts only this soon after the first attempt. The Go callers wait
+ * at most 45 s, so a later retry would answer a request nobody waits for.
+ */
+const TRANSIENT_RETRY_WINDOW_MS = 30_000;
+
+/**
  * Output tokens added on top of the caller's maxTokens for reasoning models.
  * Callers size maxTokens for the ANSWER (a 50-token title, a 250-token JSON
  * verdict), but providers count reasoning tokens against the same limit. A
@@ -122,11 +139,31 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
   const sendTemperature =
     params.temperature !== undefined && !temperatureRejectedModels.has(modelKey);
 
+  const startedAt = Date.now();
   let result: AssistantMessage = await complete(
     model,
     context,
     sendTemperature ? { ...baseOptions, temperature: params.temperature } : baseOptions,
   );
+  for (
+    let retry = 1;
+    retry <= TRANSIENT_RETRIES &&
+    result.stopReason === "error" &&
+    TRANSIENT_ERROR_RE.test(result.errorMessage ?? "") &&
+    Date.now() - startedAt < TRANSIENT_RETRY_WINDOW_MS &&
+    !params.signal?.aborted;
+    retry++
+  ) {
+    console.warn(
+      `oneshot_llm ${params.requestId}: connection failed (${result.errorMessage}); retry ${retry}/${TRANSIENT_RETRIES}`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, TRANSIENT_RETRY_DELAY_MS * retry));
+    result = await complete(
+      model,
+      context,
+      sendTemperature ? { ...baseOptions, temperature: params.temperature } : baseOptions,
+    );
+  }
 
   // Newer models reject the temperature parameter outright (e.g. Anthropic
   // claude-sonnet-5: 400 "`temperature` is deprecated for this model"), and
