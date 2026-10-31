@@ -79,7 +79,7 @@ func (d *MemoryDrafter) draftWithLLM(ctx context.Context, text string) (MemoryDr
 
 	callCtx, cancel := context.WithTimeout(ctx, memoryDraftTimeout)
 	defer cancel()
-	raw, err := d.caller.OneShotLLM(callCtx, worker, memoryDrafterSystemPrompt, text, memoryDraftMaxTokens, 0.0)
+	raw, err := d.caller.OneShotLLM(callCtx, worker, memoryDrafterSystem(time.Now()), text, memoryDraftMaxTokens, 0.0)
 	if err != nil {
 		return MemoryDraft{}, fmt.Errorf("llm call: %w", err)
 	}
@@ -91,15 +91,23 @@ const memoryDrafterSystemPrompt = `An SRE operator typed a note for an incident-
 Fields:
   - name: slug that identifies the fact, lowercase a-z, 0-9 and single hyphens, at most 80 characters (e.g. "redis-prod-port-16379")
   - description: one line, at most 200 characters, that says the fact itself, not "a note about X"
-  - body: the operator's note, cleaned up as short Markdown. Keep every host, path, number, command and name exactly as written. Do not add facts. Keep any [[...]] links unchanged
+  - body: the operator's note, cleaned up as short Markdown. Keep every host, path, number, command and name exactly as written. Do not add facts. Keep any [[...]] links unchanged. Write a relative date ("today", "last week") as an absolute date (YYYY-MM-DD) from the date given below
   - type: one of
       fact     — knowledge about a host, service, tool, environment or recurring incident
       feedback — an instruction about how the agent must work
+
+For feedback, write the body as the rule, then a "**Why:**" line with the reason the note gives and a "**How to apply:**" line with when the rule applies. Leave out a line the note gives nothing for; never invent a reason.
 
 Return STRICT JSON:
   {"name": "...", "description": "...", "body": "...", "type": "..."}
 
 Output JSON only. No code fences.`
+
+// memoryDrafterSystem adds today's date, so the draft can turn "yesterday"
+// into a date that stays correct.
+func memoryDrafterSystem(now time.Time) string {
+	return memoryDrafterSystemPrompt + "\n\nToday is " + now.UTC().Format("2006-01-02") + " (UTC)."
+}
 
 func parseMemoryDraft(raw string) (MemoryDraft, error) {
 	raw = strings.TrimSpace(raw)

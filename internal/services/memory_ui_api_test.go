@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
 )
@@ -212,5 +213,21 @@ func TestDraftDescription_CapsBytesOnRuneBoundary(t *testing.T) {
 	}
 	if strings.ContainsRune(got, '�') {
 		t.Errorf("split a rune: %q", got)
+	}
+}
+
+func TestMemoryDrafter_PromptGivesDateAndFeedbackShape(t *testing.T) {
+	caller := setupClassifierTest(t)
+	caller.respond = func(context.Context) (string, error) {
+		return `{"name": "x", "description": "x", "body": "x", "type": "fact"}`, nil
+	}
+	NewMemoryDrafter(caller).Draft(context.Background(), "redis moved to 16379 yesterday")
+	if !strings.Contains(caller.lastSystem, "Today is "+time.Now().UTC().Format("2006-01-02")) {
+		t.Errorf("system prompt has no date:\n%s", caller.lastSystem)
+	}
+	for _, want := range []string{"**Why:**", "**How to apply:**", "never invent a reason"} {
+		if !strings.Contains(caller.lastSystem, want) {
+			t.Errorf("system prompt misses %q", want)
+		}
 	}
 }

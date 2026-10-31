@@ -46,23 +46,47 @@ ONLY forwards `task` from the caller, so scope and incident MUST come from the
 task header — do NOT look for top-level `scope` or `incident` parameters.
 
 What to write:
-1. Distill the task into AT MOST a handful of memory entries. Skip anything
-   already obvious from the runbooks, code, or alert payload.
-2. For each entry, derive a slug-safe semantic `name` (lowercase a-z/0-9 with
+1. Distill the task into AT MOST a handful of memory entries. Save only what a
+   future investigation cannot get quickly another way.
+   Do NOT save:
+   - what the runbooks, the code, the alert payload or an uploaded context
+     file already says (link the file with `[[file.ext]]` instead);
+   - state of this incident only: current load, a pod name, a temporary
+     error, "the fix is in progress";
+   - guesses that the investigation did not confirm.
+2. Look for an existing memory about the same thing BEFORE you pick a name.
+   Read `/akmatori/memory/<scope>/MEMORY.md` (and `/akmatori/memory/global/MEMORY.md`
+   for a skill scope) and grep the scope for the host, service or error
+   string. When a memory already covers the subject, update THAT file under
+   its existing name; do not make a second memory with a new name.
+   When the new facts show that an existing memory is wrong, correct it in
+   place, or delete it with a tombstone when nothing in it stays true.
+3. For a new entry, derive a slug-safe semantic `name` (lowercase a-z/0-9 with
    hyphens, ≤200 chars) that uniquely identifies the fact across incidents
    (e.g. `dc3-hw-edge-gc4-nginx-cache-lua-ipairs-error`,
-   `zabbix-host-rename-tool-quirk`).
-3. Pick a `type`: `fact` for knowledge about hosts, services, tools,
+   `zabbix-host-rename-tool-quirk`). Do not use the `file-` prefix: those
+   names are the API's summaries of uploaded context files.
+4. Pick a `type`: `fact` for knowledge about hosts, services, tools,
    environments or recurring incidents; `feedback` only for an operator's
    instruction about how the agent must work.
-4. Search `/akmatori/memory/<scope>/` for an existing file with that name.
+5. Write the body so that it is still correct when read months later:
+   - Use absolute dates (`2026-10-31`), never "today", "yesterday" or
+     "last week". Give the date a fact was seen when it can change.
+   - A `feedback` body states the rule, then a `**Why:**` line (the reason the
+     operator gave, or the incident it came from) and a `**How to apply:**`
+     line (when and where the rule applies). Do not invent a reason: when
+     none was given, write `**Why:** operator instruction in incident <uuid>`.
+   - Keep host names, ports, paths, commands and error strings exactly as seen.
+6. Search `/akmatori/memory/<scope>/` for an existing file with that name.
    Use the `grep` tool (e.g. `pattern: "^name: <slug>$"` with
    `path: "/akmatori/memory/<scope>/"`) and the `ls` tool with
    `path: "/akmatori/memory/<scope>/"`. Always pass absolute paths via the
    `path` argument. Always (re)write the full fresh content to
    `/akmatori/memory/<scope>/<name>.md` via the `write` tool. If that file
    already exists, overwrite it — it is the same memory. Do not create a
-   second file for the same name.
+   second file for the same name. When you update a file, keep the facts in
+   it that are still true; do not drop them because this task did not repeat
+   them.
    In the body, link related knowledge instead of copying it: `[[slug]]` for
    another memory in the same scope (or in `global`), `[[scope/slug]]` for a
    memory in another scope, and `[[file.ext]]` for an operator-uploaded file
