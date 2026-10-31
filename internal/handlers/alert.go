@@ -55,6 +55,9 @@ type AlertHandler struct {
 	// spawnGroup deduplicates concurrent alerts with the same
 	// (sourceUUID, alertName, targetHost) key so only one incident is created.
 	spawnGroup singleflight.Group
+	// correlationGate serializes correlation and incident creation across
+	// all alerts (see correlation_gate.go).
+	correlationGate correlationGate
 
 	// Workspace team ID (required for Streaming API)
 	teamID string

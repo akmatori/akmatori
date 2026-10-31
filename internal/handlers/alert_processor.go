@@ -101,6 +101,10 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 	var ran bool
 	_, sfErr, _ := h.spawnGroup.Do(key, func() (interface{}, error) {
 		ran = true
+		// One alert at a time from correlation to a stored alert row, so the
+		// next alert sees this one's incident as a candidate.
+		release := h.correlationGate.enter(normalized.AlertName)
+		defer release()
 		// Correlation gate: attach to a recent open or monitor incident when confident.
 		verdict, corrErr := h.correlate(context.Background(), instance.UUID, normalized)
 		if corrErr != nil {
@@ -116,6 +120,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 				// Fail-open: link failed (incident deleted, DB error, etc.) — spawn new investigation.
 				slog.Warn("failed to link alert to incident, spawning new incident", "incident_uuid", verdict.IncidentUUID, "err", err)
 			} else {
+				release()
 				// Best-effort Slack thread note on the matched incident's thread.
 				h.postRecurringAlertNote(verdict.IncidentUUID, normalized.AlertName)
 				return nil, nil
@@ -159,6 +164,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 			return nil, nil
 		}
 
+		release()
 		slog.Info("created incident for alert", "incident_id", incidentUUID)
 
 		// Post to Slack
@@ -281,6 +287,10 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 	var ran bool
 	_, sfErr, _ := h.spawnGroup.Do(key, func() (interface{}, error) {
 		ran = true
+		// One alert at a time from correlation to a stored alert row, so the
+		// next alert sees this one's incident as a candidate.
+		release := h.correlationGate.enter(normalized.AlertName)
+		defer release()
 		// Correlation gate: attach to a recent open or monitor incident when confident.
 		verdict, corrErr := h.correlate(context.Background(), channel.UUID, normalized)
 		if corrErr != nil {
@@ -296,6 +306,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 				// Fail-open: link failed — spawn new investigation instead.
 				slog.Warn("failed to link alert to incident, spawning new incident", "incident_uuid", verdict.IncidentUUID, "err", err)
 			} else {
+				release()
 				if channel.CanPost {
 					h.updateSlackChannelReactions(slackChannelID, slackMessageTS, false)
 					h.postSlackThreadReply(slackChannelID, slackMessageTS,
@@ -344,6 +355,7 @@ func (h *AlertHandler) ProcessAlertFromListenerChannel(
 			return nil, nil
 		}
 
+		release()
 		slog.Info("created incident for listener channel alert", "incident_id", incidentUUID)
 
 		// Update incident with Slack context for thread replies

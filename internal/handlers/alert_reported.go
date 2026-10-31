@@ -85,6 +85,10 @@ func (h *AlertHandler) ProcessReportedAlert(r ReportedAlert) (incidentUUID strin
 	var ran bool
 	_, sfErr, _ := h.spawnGroup.Do(key, func() (interface{}, error) {
 		ran = true
+		// One alert at a time from correlation to a stored alert row, so the
+		// next alert sees this one's incident as a candidate.
+		release := h.correlationGate.enter(normalized.AlertName)
+		defer release()
 		// A repeat report of a problem that is still firing (a cron that
 		// finds the same problem every run) joins that alert's incident. The
 		// alert link then records the re-send instead of the insert hitting
@@ -93,6 +97,7 @@ func (h *AlertHandler) ProcessReportedAlert(r ReportedAlert) (incidentUUID strin
 			err := h.skillService.LinkAlertToIncident(context.Background(), openIncident, r.SourceUUID, normalized, 1.0,
 				"same report as an alert that is still firing")
 			if err == nil {
+				release()
 				incidentUUID, linked = openIncident, true
 				return nil, nil
 			}
@@ -107,6 +112,7 @@ func (h *AlertHandler) ProcessReportedAlert(r ReportedAlert) (incidentUUID strin
 			if err := h.skillService.LinkAlertToIncident(context.Background(), verdict.IncidentUUID, r.SourceUUID, normalized, verdict.Confidence, verdict.Reasoning); err != nil {
 				slog.Warn("failed to link reported alert, opening new incident", "incident_uuid", verdict.IncidentUUID, "err", err)
 			} else {
+				release()
 				incidentUUID, linked = verdict.IncidentUUID, true
 				if inThread {
 					h.postSlackThreadReply(r.SlackChannelID, r.SlackThreadTS, h.buildAlertMergedMessage(verdict.IncidentUUID))
@@ -137,6 +143,7 @@ func (h *AlertHandler) ProcessReportedAlert(r ReportedAlert) (incidentUUID strin
 			}
 			return nil, fmt.Errorf("insert reported alert: %w", err)
 		}
+		release()
 		// A report with no thread of its own (a cron run) is posted to the
 		// cron job's channel, and the investigation runs in that thread.
 		slackChannelID, threadTS := r.SlackChannelID, r.SlackThreadTS

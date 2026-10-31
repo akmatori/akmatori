@@ -56,6 +56,13 @@ called instead of `SpawnIncidentManager`.
 - both `processAlert` and `ProcessAlertFromListenerChannel` wrap evaluate-and-spawn in
   `h.spawnGroup.Do(key, ...)`; singleflight followers are no-ops — the partial-unique index on
   `alerts` handles burst dedup
+- **one global `correlationGate`** (`correlation_gate.go`) around correlate → link or spawn +
+  `InsertFiringAlert`, on all three paths (webhook, listener, reported). singleflight only joins
+  the SAME key; two different alerts correlated in parallel never see each other's incident (gcore
+  RX-drops pair, 3 s apart, two investigations). Release the gate right after the alert row is
+  stored — Slack posts and the investigation start stay outside. An alert waits at most
+  `correlationGateMaxWait` (90 s), then correlates without the gate (storm valve; the merge pass
+  repairs duplicates). Waits ≥ 1 s log "correlation gate entered after wait" with `queue`
 - confident match → `LinkAlertToIncident(ctx, incidentUUID, sourceUUID, alert, confidence, reasoning)`
   attaches the alert row (persisting `Correlated`, `CorrelationConfidence`, `CorrelationReasoning`),
   extends `monitor_until` for monitor incidents, spawns nothing
