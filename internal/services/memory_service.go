@@ -723,6 +723,15 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 				// level via upsertByNameNoSync's DoUpdates exclusion of
 				// created_by — see this function's doc comment.
 				mem.CreatedBy = MemoryCreatedByAgent
+				// The writer is told ≤500 chars but miscounts; validate()
+				// would then refuse the whole file and the update is lost.
+				// Cut the summary instead: parseMemoryFile has already
+				// removed the repeated description from the body against
+				// the full text, so a long one stays readable in the body.
+				if len(mem.Description) > MemoryDescriptionMaxLen {
+					slog.Info("memory ingest: description cut to the limit", "scope", scope, "name", mem.Name, "bytes", len(mem.Description))
+					mem.Description = draftDescription(mem.Description)
+				}
 			}
 
 			entry := &parsedEntry{mem: mem, legacy: legacyIngestName(f.Name(), mem.Name), tombstone: tombstone}

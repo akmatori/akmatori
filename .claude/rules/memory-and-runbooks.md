@@ -24,6 +24,10 @@ memory lives under `akmatori_data/memory/` (read-write). Agents reach both via p
 - on incident completion the API runs `MemoryService.IngestFromDisk` to materialize new memory files
   into Postgres (idempotent by scope + `name:` slug); operator-authored rows carry
   `created_by: operator` in their frontmatter and ingest preserves that
+- ingest CUTS an agent file's `description` over `MemoryDescriptionMaxLen` (500 bytes) with
+  `draftDescription` instead of letting `validate` refuse the file: the writer is told ≤500 chars
+  but miscounts, and a refused file loses the whole update (seen on gcore). The cut runs after
+  `parseMemoryFile`, so the full text stays in the body
 - memory syncing is scope-aware and manifest-driven; upserts idempotent by `name:` slug + scope
 - manifest capped at `manifestMaxEntriesPerScope` (150) entries per scope by `UpdatedAt` descending
 - the upsert's conflict update fires ONLY when type/description/body/incident_uuid differ: ingest
