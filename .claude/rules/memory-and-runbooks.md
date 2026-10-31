@@ -29,6 +29,13 @@ memory lives under `akmatori_data/memory/` (read-write). Agents reach both via p
 - the upsert's conflict update fires ONLY when type/description/body/incident_uuid differ: ingest
   re-reads every unchanged `<slug>.md` file, and an unconditional update restamped the
   whole table after every incident, which made the manifest cap pick entries at random
+- memory-writer writing rules (`akmatori_data/agents/memory-writer.md`, pinned by
+  `TestSubagentDefinitionFiles`): read the scope and global `MEMORY.md` and update the memory that
+  already covers a subject instead of adding a new name; correct or tombstone a memory the new
+  facts prove wrong; absolute dates only; feedback bodies are rule + `**Why:**` + `**How to
+  apply:**` (no invented reason); never use the `file-` prefix (API file summaries); do not save
+  what runbooks, alerts or context files already say. `MemoryDrafter` gets today's date in its
+  system prompt for the same reasons
 - memory deletions: `memory-writer` accepts `Action: delete <slug>` and writes a tombstone
   (`name:` + `deleted: true` frontmatter only); `IngestFromDisk` deletes the matching row and the
   post-batch sync purges the tombstone; unknown-slug tombstones are a no-op but still trigger sync

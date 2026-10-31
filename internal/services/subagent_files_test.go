@@ -69,6 +69,13 @@ func TestSubagentDefinitionFiles(t *testing.T) {
 				// tombstone via "Action: delete <slug>".
 				"Action: delete",
 				"deleted: true",
+				// Writing rules: one memory per subject, dates that stay
+				// true, and the feedback shape the manifest readers expect.
+				"MEMORY.md",
+				"absolute dates",
+				"**Why:**",
+				"**How to apply:**",
+				"file-",
 			},
 		},
 	}
