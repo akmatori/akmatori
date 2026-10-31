@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/akmatori/akmatori/internal/api"
+	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/services"
 )
 
@@ -20,10 +22,19 @@ func (h *APIHandler) handleContext(w http.ResponseWriter, r *http.Request) {
 			api.RespondError(w, http.StatusInternalServerError, "Failed to list files")
 			return
 		}
+		h.attachSummaryMemoryIDs(files)
 		api.RespondJSON(w, http.StatusOK, files)
 
 	case http.MethodPost:
+		// ParseMultipartForm's argument is only the in-memory part; the
+		// rest spills to temp files. MaxBytesReader is the real body cap.
+		r.Body = http.MaxBytesReader(w, r.Body, services.MaxFileSize+contextUploadFormOverhead)
 		if err := r.ParseMultipartForm(services.MaxFileSize); err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				api.RespondError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("File too large (max %d MB)", services.MaxFileSize>>20))
+				return
+			}
 			api.RespondError(w, http.StatusBadRequest, "Failed to parse form")
 			return
 		}
@@ -58,6 +69,10 @@ func (h *APIHandler) handleContext(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if h.contextSummaries != nil {
+			h.contextSummaries.Enqueue(contextFile.ID)
+			contextFile.SummaryStatus = database.ContextSummaryPending
+		}
 		api.RespondJSON(w, http.StatusCreated, contextFile)
 
 	default:
@@ -65,9 +80,45 @@ func (h *APIHandler) handleContext(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleContextByID handles GET /api/context/:id, GET /api/context/:id/download, DELETE /api/context/:id
+// contextUploadFormOverhead is the room above MaxFileSize for the multipart
+// boundaries and the filename and description fields.
+const contextUploadFormOverhead = 1 << 20
+
+// attachSummaryMemoryIDs fills SummaryMemoryID for the file list. A failure
+// only hides the links.
+func (h *APIHandler) attachSummaryMemoryIDs(files []database.ContextFile) {
+	if h.contextSummaries == nil || len(files) == 0 {
+		return
+	}
+	ids := make([]uint, len(files))
+	for i := range files {
+		ids[i] = files[i].ID
+	}
+	byFile, err := h.contextSummaries.SummaryMemoryIDs(ids)
+	if err != nil {
+		slog.Warn("failed to look up context file summaries", "err", err)
+		return
+	}
+	for i := range files {
+		if id, ok := byFile[files[i].ID]; ok {
+			files[i].SummaryMemoryID = &id
+		}
+	}
+}
+
+// handleContextByID handles GET /api/context/:id, GET /api/context/:id/download,
+// POST /api/context/:id/summarize and DELETE /api/context/:id
 func (h *APIHandler) handleContextByID(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path[len("/api/context/"):]
+	if strings.HasSuffix(path, "/summarize") {
+		id, err := strconv.ParseUint(strings.TrimSuffix(path, "/summarize"), 10, 32)
+		if err != nil {
+			api.RespondError(w, http.StatusBadRequest, "Invalid file ID")
+			return
+		}
+		h.handleContextSummarize(w, r, uint(id))
+		return
+	}
 	if strings.HasSuffix(path, "/download") {
 		idStr := strings.TrimSuffix(path, "/download")
 		id, err := strconv.ParseUint(idStr, 10, 32)
@@ -92,18 +143,48 @@ func (h *APIHandler) handleContextByID(w http.ResponseWriter, r *http.Request) {
 			api.RespondError(w, http.StatusNotFound, "File not found")
 			return
 		}
-		api.RespondJSON(w, http.StatusOK, file)
+		files := []database.ContextFile{*file}
+		h.attachSummaryMemoryIDs(files)
+		api.RespondJSON(w, http.StatusOK, files[0])
 
 	case http.MethodDelete:
 		if err := h.contextService.DeleteFile(uint(id)); err != nil {
 			api.RespondError(w, http.StatusInternalServerError, "Failed to delete file")
 			return
 		}
+		if h.contextSummaries != nil {
+			if err := h.contextSummaries.Forget(uint(id)); err != nil {
+				slog.Warn("failed to delete context file memories", "file_id", id, "err", err)
+			}
+		}
 		api.RespondNoContent(w)
 
 	default:
 		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
+}
+
+// handleContextSummarize handles POST /api/context/:id/summarize: it runs
+// the summary again (after a failure, or for a file uploaded before
+// summaries existed).
+func (h *APIHandler) handleContextSummarize(w http.ResponseWriter, r *http.Request, id uint) {
+	if r.Method != http.MethodPost {
+		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	if h.contextSummaries == nil {
+		api.RespondError(w, http.StatusServiceUnavailable, "File summaries are not available")
+		return
+	}
+	file, err := h.contextService.GetFile(id)
+	if err != nil {
+		api.RespondError(w, http.StatusNotFound, "File not found")
+		return
+	}
+	h.contextSummaries.Enqueue(file.ID)
+	file.SummaryStatus = database.ContextSummaryPending
+	file.SummaryError = ""
+	api.RespondJSON(w, http.StatusAccepted, file)
 }
 
 // handleContextDownload handles GET /api/context/:id/download

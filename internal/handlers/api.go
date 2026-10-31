@@ -22,6 +22,7 @@ type APIHandler struct {
 	runbookService       services.RunbookManager
 	memoryService        services.MemoryManager
 	memoryDrafter        *services.MemoryDrafter // nil-safe: Draft falls back without an LLM
+	contextSummaries     services.ContextSummaryManager
 	httpConnectorService services.HTTPConnectorManager
 	mcpServerService     services.MCPServerManager
 	channelService       services.ChannelManager
@@ -137,6 +138,12 @@ func (h *APIHandler) SetStaleIncidentCloser(svc services.StaleIncidentCloser) {
 // Unset, the endpoint still works with the deterministic draft.
 func (h *APIHandler) SetMemoryDrafter(d *services.MemoryDrafter) {
 	h.memoryDrafter = d
+}
+
+// SetContextSummaries wires the summary memories of context files. Unset,
+// uploads get no summary.
+func (h *APIHandler) SetContextSummaries(m services.ContextSummaryManager) {
+	h.contextSummaries = m
 }
 
 // reloadAlertChannels triggers the alert channel reload callback if set

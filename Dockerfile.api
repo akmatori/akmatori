@@ -22,9 +22,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-s -w" -o akmatori ./cmd/akma
 # Runtime stage - minimal image
 FROM alpine:3.19
 
-# Install runtime dependencies
+# Install runtime dependencies (poppler-utils: pdftotext for the summaries
+# of uploaded PDF context files)
 RUN apk add --no-cache \
     ca-certificates \
+    poppler-utils \
     tzdata
 
 # Create non-root user

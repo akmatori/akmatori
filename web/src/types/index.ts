@@ -271,9 +271,15 @@ export interface ContextFile {
   mime_type: string;
   size: number;
   description?: string;
+  // Summary memory state: '' (never run), pending, done, failed, skipped.
+  summary_status?: ContextSummaryStatus;
+  summary_error?: string;
+  summary_memory_id?: number;
   created_at: string;
   updated_at: string;
 }
+
+export type ContextSummaryStatus = '' | 'pending' | 'done' | 'failed' | 'skipped';
 
 // Cross-incident memory
 export interface Memory {
@@ -285,6 +291,8 @@ export interface Memory {
   body: string;
   incident_uuid?: string;
   created_by?: string;
+  // The context file this memory summarizes.
+  source_file_id?: number;
   created_at: string;
   updated_at: string;
 }
