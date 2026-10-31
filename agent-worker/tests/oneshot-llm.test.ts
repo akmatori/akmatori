@@ -257,6 +257,67 @@ describe("runOneshotLLM", () => {
     expect(completeMock).toHaveBeenCalledTimes(1);
   });
 
+  it("retries a dropped connection up to two times", async () => {
+    const dropped = {
+      ...assistantText(""),
+      stopReason: "error" as const,
+      errorMessage: "terminated",
+    };
+    completeMock
+      .mockResolvedValueOnce(dropped)
+      .mockResolvedValueOnce(dropped)
+      .mockResolvedValueOnce(assistantText("third time"));
+
+    const out = await runOneshotLLM({
+      requestId: "req-terminated",
+      user: "ping",
+      temperature: 0.3,
+      llmSettings: validSettings,
+    });
+
+    expect(out).toBe("third time");
+    expect(completeMock).toHaveBeenCalledTimes(3);
+    // The retry is the same request.
+    expect(completeMock.mock.calls[2][2].temperature).toBe(0.3);
+  });
+
+  it("gives up after two retries of a dropped connection", async () => {
+    completeMock.mockResolvedValue({
+      ...assistantText(""),
+      stopReason: "error" as const,
+      errorMessage: "terminated",
+    });
+
+    await expect(
+      runOneshotLLM({
+        requestId: "req-terminated-3",
+        user: "ping",
+        llmSettings: validSettings,
+      }),
+    ).rejects.toThrow(/terminated/);
+    expect(completeMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry a dropped connection after the caller aborted", async () => {
+    completeMock.mockResolvedValue({
+      ...assistantText(""),
+      stopReason: "error" as const,
+      errorMessage: "terminated",
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      runOneshotLLM({
+        requestId: "req-terminated-aborted",
+        user: "ping",
+        llmSettings: validSettings,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow(/terminated/);
+    expect(completeMock).toHaveBeenCalledTimes(1);
+  });
+
   it("throws when assistant message stopReason is aborted", async () => {
     completeMock.mockResolvedValue({
       ...assistantText(""),

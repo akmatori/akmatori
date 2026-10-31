@@ -18,6 +18,10 @@ inside the extraction call).
 - If the worker is disconnected, callers must fail gracefully and use deterministic fallbacks
 - `oneshot-llm.ts` retries once without `temperature` when a provider rejects it, then caches
   that model key for the worker lifetime
+- a broken connection (`terminated`, `ECONNRESET`, `fetch failed`, ...) is retried at most 2 times
+  (0.5 s, 1 s delays), and only within 30 s of the first attempt, because the Go caller stops
+  waiting at 45 s. The gcore DeepSeek gateway sometimes closes the stream: before this, about 1 call
+  in 9 fell back (no merge pass, fallback extraction). Provider errors with an answer are not retried
 - `maxTokens` from Go callers is the ANSWER budget. For a model with `reasoning: true` (all
   synthesized custom specs) the worker adds `REASONING_HEADROOM_TOKENS` (4096), because providers
   count reasoning against the same limit; an empty answer with `stopReason: "length"` throws, so the
