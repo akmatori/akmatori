@@ -7,6 +7,11 @@ import ErrorMessage from './ErrorMessage';
 import { SuccessMessage } from './ErrorMessage';
 import { getErrorMessage } from '../utils/errors';
 import { formatFileSize } from '../utils/format';
+import { useInterval } from '../hooks/useInterval';
+import ContextFileSummary from './ContextFileSummary';
+
+// SUMMARY_POLL_MS is how often the list reloads while a summary runs.
+const SUMMARY_POLL_MS = 3000;
 
 const ALLOWED_EXTENSIONS = ['.md', '.txt', '.json', '.yaml', '.yml', '.xml', '.csv', '.log', '.conf', '.cfg', '.ini', '.sh', '.py', '.pdf'];
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -35,9 +40,9 @@ export default function ContextFilesManager({ onFilesChange }: ContextFilesManag
     loadFiles();
   }, []);
 
-  const loadFiles = async () => {
+  const loadFiles = async (quiet = false) => {
     try {
-      setLoading(true);
+      if (!quiet) setLoading(true);
       const data = await contextApi.list();
       setFiles(data);
       setError(null);
@@ -45,7 +50,19 @@ export default function ContextFilesManager({ onFilesChange }: ContextFilesManag
       setError('Failed to load context files');
       console.error(err);
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
+    }
+  };
+
+  const summaryRunning = files.some((f) => f.summary_status === 'pending');
+  useInterval(() => void loadFiles(true), summaryRunning ? SUMMARY_POLL_MS : null);
+
+  const handleSummarize = async (file: ContextFile) => {
+    try {
+      const updated = await contextApi.summarize(file.id);
+      setFiles((prev) => prev.map((f) => (f.id === updated.id ? { ...f, ...updated, summary_memory_id: f.summary_memory_id } : f)));
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to start the summary'));
     }
   };
 
@@ -277,6 +294,9 @@ export default function ContextFilesManager({ onFilesChange }: ContextFilesManag
                         <span className="ml-2">(from {file.original_name})</span>
                       )}
                     </div>
+                    <div className="text-xs mt-1">
+                      <ContextFileSummary file={file} onSummarize={(f) => void handleSummarize(f)} />
+                    </div>
                   </div>
                 </div>
 
@@ -309,6 +329,10 @@ export default function ContextFilesManager({ onFilesChange }: ContextFilesManag
           <code className="px-1.5 py-0.5 bg-surface rounded text-primary-600 dark:text-primary-400">[[filename]]</code>{' '}
           syntax. Example:{' '}
           <code className="px-1.5 py-0.5 bg-surface rounded text-primary-600 dark:text-primary-400">Read [[runbook.md]] for guidance.</code>
+        </p>
+        <p className="mt-2 text-sm text-primary-800 dark:text-primary-200">
+          Each upload is also summarized into a memory, so the agent finds the file when it searches memory.
+          Deleting the file deletes its summary.
         </p>
       </div>
     </div>

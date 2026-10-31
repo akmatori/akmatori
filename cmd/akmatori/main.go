@@ -345,6 +345,11 @@ func main() {
 	apiHandler := handlers.NewAPIHandler(skillService, toolService, contextService, alertService, agentExecutor, agentWSHandler, slackManager, runbookService, memoryService, httpConnectorService, mcpServerService)
 	apiHandler.SetResponseFormatter(responseFormatter)
 	apiHandler.SetMemoryDrafter(services.NewMemoryDrafter(agentWSHandler))
+	contextSummarizer := services.NewContextFileSummarizer(agentWSHandler, contextService, memoryService)
+	if err := contextSummarizer.ResetInterrupted(); err != nil {
+		slog.Warn("failed to reset interrupted context file summaries", "err", err)
+	}
+	apiHandler.SetContextSummaries(contextSummarizer)
 	apiHandler.SetEventIntake(eventService, extraction.NewAlertExtractor(agentWSHandler), alertHandler)
 	// Wire the Integrations + Channels CRUD surface. /api/settings/slack is
 	// retired (returns 410 Gone) — operators configure Slack via

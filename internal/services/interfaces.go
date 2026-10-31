@@ -124,6 +124,14 @@ type MemoryManager interface {
 	ExportZip(w io.Writer) error
 }
 
+// ContextSummaryManager writes and removes the summary memories of context
+// files (ContextFileSummarizer).
+type ContextSummaryManager interface {
+	Enqueue(fileID uint)
+	Forget(fileID uint) error
+	SummaryMemoryIDs(fileIDs []uint) (map[uint]uint, error)
+}
+
 // ContextManager defines the interface for context file management.
 type ContextManager interface {
 	GetContextDir() string

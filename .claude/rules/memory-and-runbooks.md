@@ -65,7 +65,25 @@ memory lives under `akmatori_data/memory/` (read-write). Agents reach both via p
   ingest stores an unknown type as fact instead of dropping the file. The manifest lists
   feedback first, newest first, at most `manifestMaxFeedbackEntries` (50) of the 150 slots;
   unused fact slots go back to feedback
+- every uploaded context file gets a summary memory (`ContextFileSummarizer`, one job at a
+  time in the background): text files are read directly (NUL byte = not text), PDFs go
+  through `pdftotext` (poppler-utils in `Dockerfile.api`, 100 pages / 30 s / 1 MiB); the
+  one-shot prompt gets at most 48 KiB, marked as data. Result: a global fact named
+  `file-<filename slug>` (`-2`… when an unrelated memory has the name), `created_by: agent`,
+  body starts with `Source: [[file]]`, linked by `memories.source_file_id`. That column is
+  server managed: ingest's conflict update and `UpdateMemory` never touch it, the API
+  request structs do not carry it. A rerun updates the linked memory in place (keeps an
+  operator rename). No LLM = status `failed`, no memory (the file is still in AGENTS.md);
+  under 200 bytes of text = `skipped`. The job re-checks the file row and sha256 before it
+  writes, and deletes its memory when the file went away during the save. Deleting the file
+  deletes its memories (`Forget`). Status lives on `context_files.summary_status`/`summary_error`;
+  `POST /api/context/{id}/summarize` runs it again (also the backfill for old uploads);
+  startup turns `pending` rows into `failed` (`ResetInterrupted`). Not
+  gated by `MemoryGenerationEnabled`: an upload is an operator action
+- `POST /api/context` caps the body with `http.MaxBytesReader` (10 MiB + 1 MiB form room, 413
+  above it); `ParseMultipartForm`'s argument is only the in-memory threshold
 
 Key files: `internal/services/memory_service.go`, `internal/services/memory_refs.go`,
-`internal/services/memory_drafter.go`, `internal/services/runbook_service.go`,
+`internal/services/memory_drafter.go`, `internal/services/context_summarizer.go`,
+`internal/services/memory_source_files.go`, `internal/services/runbook_service.go`,
 `akmatori_data/agents/` (`runbook-searcher`, `memory-searcher`, `memory-writer` definitions)

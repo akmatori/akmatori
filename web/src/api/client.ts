@@ -489,6 +489,12 @@ export const contextApi = {
       method: 'DELETE',
     }),
 
+  // Runs the summary memory job again for one file.
+  summarize: (id: number) =>
+    fetchApi<ContextFile>(`/api/context/${id}/summarize`, {
+      method: 'POST',
+    }),
+
   getDownloadUrl: (id: number) => {
     const token = localStorage.getItem(TOKEN_KEY);
     const base = `${API_BASE_URL}/api/context/${id}/download`;

@@ -3,6 +3,8 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -103,5 +105,109 @@ func TestAPIHandler_HandleContextDownload_ServesStoredFile(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(ctxSvc.GetContextDir(), "guide.md")); err != nil {
 		t.Fatalf("saved file missing on disk: %v", err)
+	}
+}
+
+// fakeContextSummaries records calls from the context handlers.
+type fakeContextSummaries struct {
+	enqueued  []uint
+	forgotten []uint
+	ids       map[uint]uint
+}
+
+func (f *fakeContextSummaries) Enqueue(id uint) { f.enqueued = append(f.enqueued, id) }
+func (f *fakeContextSummaries) Forget(id uint) error {
+	f.forgotten = append(f.forgotten, id)
+	return nil
+}
+func (f *fakeContextSummaries) SummaryMemoryIDs([]uint) (map[uint]uint, error) {
+	return f.ids, nil
+}
+
+func multipartUpload(t *testing.T, filename string, content []byte) *http.Request {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	part, err := mw.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatalf("form file: %v", err)
+	}
+	if _, err := part.Write(content); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := mw.WriteField("filename", filename); err != nil {
+		t.Fatalf("field: %v", err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/context", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	return req
+}
+
+func TestAPIHandler_ContextSummaries(t *testing.T) {
+	h, ctxSvc := setupContextHandlerTest(t)
+	sums := &fakeContextSummaries{}
+	h.SetContextSummaries(sums)
+
+	// Upload enqueues a summary and answers with status pending.
+	w := httptest.NewRecorder()
+	h.handleContext(w, multipartUpload(t, "notes.md", []byte("# notes")))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("upload status = %d: %s", w.Code, w.Body.String())
+	}
+	var created database.ContextFile
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(sums.enqueued) != 1 || sums.enqueued[0] != created.ID || created.SummaryStatus != database.ContextSummaryPending {
+		t.Fatalf("enqueued = %v, file = %+v", sums.enqueued, created)
+	}
+
+	// The list shows the summary memory link.
+	sums.ids = map[uint]uint{created.ID: 42}
+	w = httptest.NewRecorder()
+	h.handleContext(w, httptest.NewRequest(http.MethodGet, "/api/context", nil))
+	var list []database.ContextFile
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(list) != 1 || list[0].SummaryMemoryID == nil || *list[0].SummaryMemoryID != 42 {
+		t.Fatalf("list = %+v", list)
+	}
+
+	// Summarize runs the job again; an unknown file is 404.
+	w = httptest.NewRecorder()
+	h.handleContextByID(w, httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/context/%d/summarize", created.ID), nil))
+	if w.Code != http.StatusAccepted || len(sums.enqueued) != 2 {
+		t.Fatalf("summarize status = %d, enqueued = %v", w.Code, sums.enqueued)
+	}
+	w = httptest.NewRecorder()
+	h.handleContextByID(w, httptest.NewRequest(http.MethodPost, "/api/context/999/summarize", nil))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("summarize unknown status = %d", w.Code)
+	}
+
+	// Delete removes the file's memories.
+	w = httptest.NewRecorder()
+	h.handleContextByID(w, httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/context/%d", created.ID), nil))
+	if w.Code != http.StatusNoContent || len(sums.forgotten) != 1 || sums.forgotten[0] != created.ID {
+		t.Fatalf("delete status = %d, forgotten = %v", w.Code, sums.forgotten)
+	}
+	if ctxSvc.FileExists("notes.md") {
+		t.Error("file still exists")
+	}
+}
+
+func TestAPIHandler_ContextUploadTooLarge(t *testing.T) {
+	h, ctxSvc := setupContextHandlerTest(t)
+	w := httptest.NewRecorder()
+	h.handleContext(w, multipartUpload(t, "big.txt", bytes.Repeat([]byte("a"), services.MaxFileSize+contextUploadFormOverhead+1)))
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	if ctxSvc.FileExists("big.txt") {
+		t.Error("oversized file was stored")
 	}
 }
