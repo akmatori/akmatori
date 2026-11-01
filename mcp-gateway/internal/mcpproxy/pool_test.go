@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,9 +16,12 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/mcp"
 )
 
+// testPolicy allows loopback so httptest servers (127.0.0.1) are reachable.
+var testPolicy = NetPolicy{AllowLoopback: true}
+
 // newTestPool creates a pool with short timeouts for testing.
 func newTestPool(connectFunc func(ctx context.Context, conn *MCPConnection) error) *MCPConnectionPool {
-	return NewPool(
+	return NewPool(WithNetPolicy(testPolicy),
 		WithIdleTimeout(100*time.Millisecond),
 		WithConnectFunc(connectFunc),
 	)
@@ -184,7 +188,7 @@ func TestGetOrConnect_ConnectError(t *testing.T) {
 }
 
 func TestIdleCleanup(t *testing.T) {
-	pool := NewPool(
+	pool := NewPool(WithNetPolicy(testPolicy),
 		WithIdleTimeout(50*time.Millisecond),
 		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
 			return nil
@@ -609,37 +613,25 @@ func TestFetchToolSchemas_Error(t *testing.T) {
 
 func TestMCPServerConfig_Fields(t *testing.T) {
 	config := MCPServerConfig{
-		Transport:       TransportStdio,
-		Command:         "/usr/bin/my-mcp-server",
-		Args:            []string{"--port", "8080"},
-		EnvVars:         map[string]string{"API_KEY": "secret"},
+		Transport:       TransportHTTP,
+		URL:             "https://mcp.example.com/mcp",
 		NamespacePrefix: "ext.myservice",
+		AuthConfig:      json.RawMessage(`{"type":"bearer","token":"x"}`),
 	}
 
 	data, err := json.Marshal(config)
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
 	}
-
 	var decoded MCPServerConfig
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}
-
-	if decoded.Transport != TransportStdio {
-		t.Errorf("expected stdio, got %s", decoded.Transport)
+	if decoded.Transport != TransportHTTP || decoded.URL != config.URL || decoded.NamespacePrefix != "ext.myservice" {
+		t.Errorf("unexpected round trip: %+v", decoded)
 	}
-	if decoded.Command != "/usr/bin/my-mcp-server" {
-		t.Errorf("unexpected command: %s", decoded.Command)
-	}
-	if len(decoded.Args) != 2 {
-		t.Errorf("expected 2 args, got %d", len(decoded.Args))
-	}
-	if decoded.NamespacePrefix != "ext.myservice" {
-		t.Errorf("unexpected prefix: %s", decoded.NamespacePrefix)
-	}
-	if decoded.EnvVars["API_KEY"] != "secret" {
-		t.Error("unexpected env var value")
+	if strings.Contains(string(data), "command") || strings.Contains(string(data), "env_vars") {
+		t.Errorf("stdio fields must be gone: %s", data)
 	}
 }
 
@@ -651,7 +643,7 @@ func TestMCPConnection_Close_Idempotent(t *testing.T) {
 
 func TestWithLogger(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pool := NewPool(
+	pool := NewPool(WithNetPolicy(testPolicy),
 		WithIdleTimeout(100*time.Millisecond),
 		WithLogger(logger),
 		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
@@ -682,7 +674,7 @@ func TestCallTool_ClosedConnection_Reconnects(t *testing.T) {
 	})
 	defer srv.Close()
 
-	pool := NewPool(
+	pool := NewPool(WithNetPolicy(testPolicy),
 		WithIdleTimeout(100*time.Millisecond),
 		WithMaxReconnectAttempts(2),
 		WithBackoff(10*time.Millisecond, 50*time.Millisecond),
@@ -713,8 +705,8 @@ func TestCallTool_ClosedConnection_Reconnects(t *testing.T) {
 }
 
 func TestPoolOptions(t *testing.T) {
-	pool := NewPool(
-		WithIdleTimeout(10 * time.Minute),
+	pool := NewPool(WithNetPolicy(testPolicy),
+		WithIdleTimeout(10*time.Minute),
 	)
 	defer pool.CloseAll()
 
@@ -743,7 +735,7 @@ func TestCallTool_ReconnectsOnTransientError(t *testing.T) {
 	defer srv.Close()
 
 	connectCalls := 0
-	pool := NewPool(
+	pool := NewPool(WithNetPolicy(testPolicy),
 		WithIdleTimeout(100*time.Millisecond),
 		WithMaxReconnectAttempts(2),
 		WithBackoff(10*time.Millisecond, 50*time.Millisecond),
@@ -782,7 +774,7 @@ func TestCallTool_ReconnectsOnTransientError(t *testing.T) {
 }
 
 func TestCallTool_FailsAfterMaxReconnectAttempts(t *testing.T) {
-	pool := NewPool(
+	pool := NewPool(WithNetPolicy(testPolicy),
 		WithIdleTimeout(100*time.Millisecond),
 		WithMaxReconnectAttempts(2),
 		WithBackoff(5*time.Millisecond, 10*time.Millisecond),
@@ -829,7 +821,7 @@ func TestCallTool_ConnectionTimeout(t *testing.T) {
 	})
 	defer srv.Close()
 
-	pool := NewPool(
+	pool := NewPool(WithNetPolicy(testPolicy),
 		WithIdleTimeout(time.Minute),
 		WithMaxReconnectAttempts(1),
 		WithBackoff(5*time.Millisecond, 10*time.Millisecond),
@@ -922,7 +914,7 @@ func TestSchemaRefresh(t *testing.T) {
 	var refreshedIDs []uint
 	var refreshMu sync.Mutex
 
-	pool := NewPool(
+	pool := NewPool(WithNetPolicy(testPolicy),
 		WithIdleTimeout(time.Minute),
 		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
 			return nil
@@ -977,7 +969,7 @@ func TestHealthStatus(t *testing.T) {
 	})
 	defer srv.Close()
 
-	pool := NewPool(
+	pool := NewPool(WithNetPolicy(testPolicy),
 		WithIdleTimeout(time.Minute),
 		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
 			return nil
@@ -1026,7 +1018,7 @@ func TestHealthStatus_UnhealthyConnection(t *testing.T) {
 	})
 	defer srv.Close()
 
-	pool := NewPool(
+	pool := NewPool(WithNetPolicy(testPolicy),
 		WithIdleTimeout(time.Minute),
 		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
 			return nil
@@ -1104,7 +1096,7 @@ func TestGracefulShutdown(t *testing.T) {
 	})
 	defer srv.Close()
 
-	pool := NewPool(
+	pool := NewPool(WithNetPolicy(testPolicy),
 		WithIdleTimeout(time.Minute),
 		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
 			return nil
@@ -1151,7 +1143,7 @@ func TestStartSchemaRefreshLoop(t *testing.T) {
 	})
 	defer srv.Close()
 
-	pool := NewPool(
+	pool := NewPool(WithNetPolicy(testPolicy),
 		WithIdleTimeout(time.Minute),
 		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
 			return nil
