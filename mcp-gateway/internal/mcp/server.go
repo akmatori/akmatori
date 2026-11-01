@@ -30,16 +30,15 @@ type InstanceLookup func(toolType string) []ToolDetailInstance
 
 // Server represents an MCP server
 type Server struct {
-	name            string
-	version         string
-	tools           map[string]Tool
-	handlers        map[string]ToolHandler
-	mu              sync.RWMutex
-	logger          *log.Logger
-	discoverer      ToolDiscoverer
-	instanceLookup  InstanceLookup
-	authorizer      *auth.Authorizer
-	proxyNamespaces map[string]bool
+	name           string
+	version        string
+	tools          map[string]Tool
+	handlers       map[string]ToolHandler
+	mu             sync.RWMutex
+	logger         *log.Logger
+	discoverer     ToolDiscoverer
+	instanceLookup InstanceLookup
+	authorizer     *auth.Authorizer
 }
 
 // NewServer creates a new MCP server
@@ -48,12 +47,11 @@ func NewServer(name, version string, logger *log.Logger) *Server {
 		logger = log.Default()
 	}
 	return &Server{
-		name:            name,
-		version:         version,
-		tools:           make(map[string]Tool),
-		handlers:        make(map[string]ToolHandler),
-		logger:          logger,
-		proxyNamespaces: make(map[string]bool),
+		name:     name,
+		version:  version,
+		tools:    make(map[string]Tool),
+		handlers: make(map[string]ToolHandler),
+		logger:   logger,
 	}
 }
 
@@ -70,22 +68,6 @@ func (s *Server) SetInstanceLookup(fn InstanceLookup) {
 // SetAuthorizer sets the authorizer used to enforce per-incident tool allowlists.
 func (s *Server) SetAuthorizer(a *auth.Authorizer) {
 	s.authorizer = a
-}
-
-// AddProxyNamespace registers a namespace as belonging to an MCP proxy server.
-// Proxy namespaces bypass per-incident allowlist checks because they are
-// system-level tools not managed by the skill-based assignment system.
-func (s *Server) AddProxyNamespace(namespace string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.proxyNamespaces[namespace] = true
-}
-
-// isProxyNamespace checks if a namespace belongs to an MCP proxy server.
-func (s *Server) isProxyNamespace(namespace string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.proxyNamespaces[namespace]
 }
 
 // Tools returns the tools map for external read access.
@@ -231,7 +213,7 @@ func (s *Server) handleRequest(ctx context.Context, req *Request, incidentID str
 		// Notification, no response needed
 		return Response{}
 	case "tools/list":
-		return s.handleListTools(req)
+		return s.handleListTools(req, incidentID)
 	case "tools/call":
 		return s.handleCallTool(ctx, req, incidentID)
 	case "tools/list_by_type":
@@ -264,13 +246,27 @@ func (s *Server) handleInitialize(req *Request) Response {
 	return NewResponse(req.ID, result)
 }
 
-// handleListTools handles the tools/list request
-func (s *Server) handleListTools(req *Request) Response {
+// handleListTools handles the tools/list request. When an allowlist is active
+// for the incident, only tools whose type (namespace) appears in it are listed.
+func (s *Server) handleListTools(req *Request, incidentID string) Response {
+	var authorizedTypes map[string]bool
+	if s.authorizer != nil && incidentID != "" {
+		if allowlist := s.authorizer.GetAllowlist(incidentID); allowlist != nil {
+			authorizedTypes = allowlistTypes(allowlist)
+		}
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	tools := make([]Tool, 0, len(s.tools))
 	for _, tool := range s.tools {
+		if authorizedTypes != nil {
+			toolType, _ := ParseToolName(tool.Name)
+			if !authorizedTypes[toolType] {
+				continue
+			}
+		}
 		tools = append(tools, tool)
 	}
 
@@ -302,63 +298,59 @@ func (s *Server) handleCallTool(ctx context.Context, req *Request, incidentID st
 		}
 	}
 
-	// Enforce tool allowlist authorization.
-	// MCP proxy tools bypass the per-incident allowlist because they are system-level
-	// tools not managed by the skill-based assignment system. Proxy tools are identified by:
-	// 1. Multi-segment namespaces containing dots (e.g., "ext.github")
-	// 2. Explicitly registered proxy namespaces (single-segment proxies)
+	// Enforce tool allowlist authorization. Every tool type is checked,
+	// including MCP proxy tools: their tool type is the server's namespace
+	// prefix, which the API binds to skills through a shadow tool instance.
 	if s.authorizer != nil && incidentID != "" {
 		toolType, _ := ParseToolName(params.Name)
-		if !strings.Contains(toolType, ".") && !s.isProxyNamespace(toolType) {
-			instanceID := extractInstanceIDFromArgs(params.Arguments)
-			logicalName := extractLogicalNameFromArgs(params.Arguments)
+		instanceID := extractInstanceIDFromArgs(params.Arguments)
+		logicalName := extractLogicalNameFromArgs(params.Arguments)
 
-			// Snapshot the allowlist once to avoid TOCTOU races: another
-			// request for the same incident could replace the allowlist
-			// between authorization and the logical_name injection below.
-			entries := s.authorizer.GetAllowlist(incidentID)
+		// Snapshot the allowlist once to avoid TOCTOU races: another
+		// request for the same incident could replace the allowlist
+		// between authorization and the logical_name injection below.
+		entries := s.authorizer.GetAllowlist(incidentID)
 
-			if !auth.IsAuthorizedFromEntries(entries, toolType, instanceID, logicalName) {
-				return NewErrorResponse(req.ID, InvalidRequest,
-					fmt.Sprintf("Unauthorized: incident %s is not authorized to use tool %s", incidentID, params.Name),
-					nil)
+		if !auth.IsAuthorizedFromEntries(entries, toolType, instanceID, logicalName) {
+			return NewErrorResponse(req.ID, InvalidRequest,
+				fmt.Sprintf("Unauthorized: incident %s is not authorized to use tool %s", incidentID, params.Name),
+				nil)
+		}
+
+		// When an allowlist is active, remove tool_instance_id from args
+		// after authorization to prevent auth/execution mismatch, and
+		// inject the matching logical_name so downstream handlers resolve
+		// credentials for the exact authorized instance. When no allowlist
+		// is set (direct API / debugging path), preserve args as-is so
+		// that tool_instance_id is not silently dropped.
+		if entries != nil {
+			if params.Arguments == nil {
+				params.Arguments = make(map[string]interface{})
 			}
-
-			// When an allowlist is active, remove tool_instance_id from args
-			// after authorization to prevent auth/execution mismatch, and
-			// inject the matching logical_name so downstream handlers resolve
-			// credentials for the exact authorized instance. When no allowlist
-			// is set (direct API / debugging path), preserve args as-is so
-			// that tool_instance_id is not silently dropped.
-			if entries != nil {
-				if params.Arguments == nil {
-					params.Arguments = make(map[string]interface{})
-				}
-				if instanceID > 0 && logicalName == "" {
-					// Instance ID provided without logical name — inject the
-					// logical name from the matching allowlist entry.
-					for _, e := range entries {
-						if e.InstanceID == instanceID && e.ToolType == toolType && e.LogicalName != "" {
-							params.Arguments["logical_name"] = e.LogicalName
-							break
-						}
-					}
-				} else if instanceID == 0 && logicalName == "" && !auth.IsCredentiallessNamespace(toolType) {
-					// Neither instance ID nor logical name provided — inject the
-					// first authorized instance's logical name to prevent fallback
-					// to an arbitrary enabled instance that may not be in the allowlist.
-					// Skip this for credentialless namespaces (e.g. "incidents"): their
-					// type-only allowlist entry is intentionally without credentials,
-					// and the handler queries the DB directly without instance routing.
-					for _, e := range entries {
-						if e.ToolType == toolType && e.LogicalName != "" {
-							params.Arguments["logical_name"] = e.LogicalName
-							break
-						}
+			if instanceID > 0 && logicalName == "" {
+				// Instance ID provided without logical name — inject the
+				// logical name from the matching allowlist entry.
+				for _, e := range entries {
+					if e.InstanceID == instanceID && e.ToolType == toolType && e.LogicalName != "" {
+						params.Arguments["logical_name"] = e.LogicalName
+						break
 					}
 				}
-				delete(params.Arguments, "tool_instance_id")
+			} else if instanceID == 0 && logicalName == "" && !auth.IsCredentiallessNamespace(toolType) {
+				// Neither instance ID nor logical name provided — inject the
+				// first authorized instance's logical name to prevent fallback
+				// to an arbitrary enabled instance that may not be in the allowlist.
+				// Skip this for credentialless namespaces (e.g. "incidents"): their
+				// type-only allowlist entry is intentionally without credentials,
+				// and the handler queries the DB directly without instance routing.
+				for _, e := range entries {
+					if e.ToolType == toolType && e.LogicalName != "" {
+						params.Arguments["logical_name"] = e.LogicalName
+						break
+					}
+				}
 			}
+			delete(params.Arguments, "tool_instance_id")
 		}
 	}
 
@@ -435,14 +427,7 @@ func (s *Server) handleListToolsByType(req *Request, incidentID string) Response
 	if s.authorizer != nil && incidentID != "" {
 		allowlist := s.authorizer.GetAllowlist(incidentID)
 		if allowlist != nil {
-			// Snapshot proxyNamespaces under lock to avoid data race with AddProxyNamespace
-			s.mu.RLock()
-			pns := make(map[string]bool, len(s.proxyNamespaces))
-			for k, v := range s.proxyNamespaces {
-				pns[k] = v
-			}
-			s.mu.RUnlock()
-			results = filterToolsByAllowlist(results, allowlist, pns)
+			results = filterToolsByAllowlist(results, allowlist)
 		}
 	}
 
@@ -458,17 +443,7 @@ func (s *Server) handleListToolsByType(req *Request, incidentID string) Response
 		if s.authorizer != nil && incidentID != "" {
 			allowlist := s.authorizer.GetAllowlist(incidentID)
 			if allowlist != nil {
-				authorizedTypes := make(map[string]bool)
-				for _, e := range allowlist {
-					authorizedTypes[e.ToolType] = true
-				}
-				var filtered []string
-				for _, t := range availableTypes {
-					if authorizedTypes[t] || s.isProxyNamespace(t) || strings.Contains(t, ".") {
-						filtered = append(filtered, t)
-					}
-				}
-				availableTypes = filtered
+				availableTypes = filterTypesByAllowlist(availableTypes, allowlist)
 			}
 		}
 		if len(availableTypes) > 0 {
@@ -530,17 +505,7 @@ func (s *Server) handleListToolTypes(req *Request, incidentID string) Response {
 	if s.authorizer != nil && incidentID != "" {
 		allowlist := s.authorizer.GetAllowlist(incidentID)
 		if allowlist != nil {
-			authorizedTypes := make(map[string]bool)
-			for _, e := range allowlist {
-				authorizedTypes[e.ToolType] = true
-			}
-			var filtered []string
-			for _, t := range types {
-				if authorizedTypes[t] || s.isProxyNamespace(t) || strings.Contains(t, ".") {
-					filtered = append(filtered, t)
-				}
-			}
-			types = filtered
+			types = filterTypesByAllowlist(types, allowlist)
 		}
 	}
 
@@ -616,20 +581,36 @@ func extractLogicalNameFromArgs(args map[string]interface{}) string {
 	return ""
 }
 
-// filterToolsByAllowlist removes tools that have no authorized instances.
-// A tool is kept if any allowlist entry matches its tool type, or if the tool
-// belongs to a registered proxy namespace (proxy tools bypass the allowlist).
-func filterToolsByAllowlist(results []ToolListItem, allowlist []auth.AllowlistEntry, proxyNamespaces map[string]bool) []ToolListItem {
-	// Build set of authorized tool types
-	authorizedTypes := make(map[string]bool)
+// allowlistTypes returns the set of tool types named by any allowlist entry
+// (type-only entries included).
+func allowlistTypes(allowlist []auth.AllowlistEntry) map[string]bool {
+	types := make(map[string]bool, len(allowlist))
 	for _, e := range allowlist {
-		authorizedTypes[e.ToolType] = true
+		types[e.ToolType] = true
 	}
+	return types
+}
+
+// filterTypesByAllowlist keeps only the tool types named in the allowlist.
+func filterTypesByAllowlist(types []string, allowlist []auth.AllowlistEntry) []string {
+	authorizedTypes := allowlistTypes(allowlist)
+	var filtered []string
+	for _, t := range types {
+		if authorizedTypes[t] {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
+}
+
+// filterToolsByAllowlist removes tools that have no authorized instances.
+// A tool is kept only if an allowlist entry matches its tool type.
+func filterToolsByAllowlist(results []ToolListItem, allowlist []auth.AllowlistEntry) []ToolListItem {
+	authorizedTypes := allowlistTypes(allowlist)
 
 	filtered := make([]ToolListItem, 0, len(results))
 	for _, item := range results {
-		// Proxy namespaces and multi-segment namespaces bypass the allowlist
-		if !authorizedTypes[item.ToolType] && !proxyNamespaces[item.ToolType] && !strings.Contains(item.ToolType, ".") {
+		if !authorizedTypes[item.ToolType] {
 			continue
 		}
 		// Also filter the instance names to only authorized ones
