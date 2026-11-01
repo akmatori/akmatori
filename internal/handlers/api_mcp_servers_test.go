@@ -532,3 +532,15 @@ func TestTriggerGatewayMCPReload_NilReloader(t *testing.T) {
 	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	h.triggerGatewayMCPReload()
 }
+
+func TestHandleMCPServers_CreateRefusesSecondServerInConnector(t *testing.T) {
+	mock := &mockMCPServerService{}
+	h := newMCPHandler(mock)
+	h.SetConnectorService(&fakeConnectorManager{detail: &services.ConnectorDetail{
+		Parts: services.ConnectorParts{MCPServer: &services.ConnectorMCPPart{ID: 9}},
+	}})
+	w := doMCP(t, h, http.MethodPost, "/api/mcp-servers", `{"name":"b","url":"https://b.example.com/mcp","connector_uuid":"has-one"}`)
+	if w.Code != http.StatusBadRequest || mock.lastCreate != nil {
+		t.Fatalf("status = %d, created = %v", w.Code, mock.lastCreate)
+	}
+}

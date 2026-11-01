@@ -148,6 +148,8 @@ func mcpErrStatus(err error) int {
 	switch {
 	case errors.Is(err, services.ErrMCPServerNotFound):
 		return http.StatusNotFound
+	case errors.Is(err, services.ErrMCPAuthStale):
+		return http.StatusConflict
 	case errors.Is(err, services.ErrConnectorNotFound):
 		return http.StatusNotFound
 	case errors.Is(err, services.ErrConnectorPartIncompatible):
@@ -209,8 +211,13 @@ func (h *APIHandler) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.ConnectorUUID != "" && h.connectorService != nil {
 			// Check the target before creating anything.
-			if _, err := h.connectorService.Get(r.Context(), req.ConnectorUUID); err != nil {
+			target, err := h.connectorService.Get(r.Context(), req.ConnectorUUID)
+			if err != nil {
 				respondMCPError(w, err, "Failed to create MCP server")
+				return
+			}
+			if target.Parts.MCPServer != nil {
+				api.RespondError(w, http.StatusBadRequest, services.ErrConnectorHasMCPServer.Error())
 				return
 			}
 		}

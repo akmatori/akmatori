@@ -210,6 +210,11 @@ func (h *ProxyHandler) LoadAndRegister(ctx context.Context, loader MCPServerConf
 	for _, id := range stale {
 		h.pool.Remove(id)
 	}
+	// Record what this reload wants before connecting, so a connect still
+	// running with an older config cannot replace it.
+	for _, reg := range registrations {
+		h.pool.Expect(reg.InstanceID, reg.Config)
+	}
 
 	for _, reg := range registrations {
 		if err := h.registerServer(ctx, reg); err != nil {

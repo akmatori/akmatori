@@ -266,7 +266,10 @@ func (s *MCPServerService) UpdateMCPServer(id uint, patch MCPServerPatch) (*data
 			config.Transport = database.MCPServerTransport(*patch.Transport)
 		}
 		if patch.URL != nil {
-			config.URL = strings.TrimSpace(*patch.URL)
+			if u := strings.TrimSpace(*patch.URL); u != config.URL {
+				config.URL = u
+				config.AuthVersion++
+			}
 		}
 		if patch.NamespacePrefix != nil && *patch.NamespacePrefix != config.NamespacePrefix {
 			if err := s.checkNamespace(tx, *patch.NamespacePrefix, id); err != nil {
@@ -276,6 +279,7 @@ func (s *MCPServerService) UpdateMCPServer(id uint, patch MCPServerPatch) (*data
 		}
 		if patch.Auth != nil {
 			config.AuthConfig = mergeAuth(config.AuthConfig, patch.Auth)
+			config.AuthVersion++
 		}
 		if patch.DisabledTools != nil {
 			config.DisabledTools = database.StringList(dedupe(*patch.DisabledTools))
@@ -309,10 +313,16 @@ func (s *MCPServerService) UpdateMCPServer(id uint, patch MCPServerPatch) (*data
 	return &config, nil
 }
 
+// ErrMCPAuthStale is returned when an OAuth write lost the race with a
+// change of the server's URL or auth (its AuthVersion moved on).
+var ErrMCPAuthStale = errors.New("the server's sign-in settings changed meanwhile; start the sign-in again")
+
 // StoreOAuthTokens replaces the auth_config of a server with the given
-// OAuth state (no merge: the OAuth flow owns the whole object).
+// OAuth state (no merge: the OAuth flow owns the whole object), without a
+// version check. It still bumps AuthVersion. Prefer StoreAuthIfVersion.
 func (s *MCPServerService) StoreOAuthTokens(id uint, cfg database.JSONB) error {
-	res := s.db.Model(&database.MCPServerConfig{}).Where("id = ?", id).Update("auth_config", cfg)
+	res := s.db.Model(&database.MCPServerConfig{}).Where("id = ?", id).
+		Updates(map[string]interface{}{"auth_config": cfg, "auth_version": gorm.Expr("auth_version + 1")})
 	if res.Error != nil {
 		return res.Error
 	}
@@ -320,6 +330,23 @@ func (s *MCPServerService) StoreOAuthTokens(id uint, cfg database.JSONB) error {
 		return ErrMCPServerNotFound
 	}
 	return nil
+}
+
+// StoreAuthIfVersion replaces auth_config only when AuthVersion still equals
+// expected, and returns the new version. ErrMCPAuthStale when it moved on.
+func (s *MCPServerService) StoreAuthIfVersion(id uint, expected int, cfg database.JSONB) (int, error) {
+	res := s.db.Model(&database.MCPServerConfig{}).Where("id = ? AND auth_version = ?", id, expected).
+		Updates(map[string]interface{}{"auth_config": cfg, "auth_version": gorm.Expr("auth_version + 1")})
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	if res.RowsAffected == 0 {
+		if _, err := s.GetMCPServer(id); err != nil {
+			return 0, err
+		}
+		return 0, ErrMCPAuthStale
+	}
+	return expected + 1, nil
 }
 
 func dedupe(in []string) []string {

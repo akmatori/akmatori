@@ -70,6 +70,9 @@ type oauthFlow struct {
 	issuer        string
 	scope         string
 	created       time.Time
+	// version is the server's AuthVersion after Start stored the client;
+	// the callback only writes tokens while it is unchanged.
+	version int
 }
 
 // MCPOAuthService runs the OAuth flow and token refresh for MCP servers.
@@ -109,7 +112,7 @@ func NewMCPOAuthService(db *gorm.DB, mcp *MCPServerService, reload func() error)
 
 // newOutboundHTTPClient returns a client that refuses loopback, link-local
 // (incl. cloud metadata), unspecified and multicast addresses at connect
-// time (after DNS), and follows no redirects. MCP_ALLOW_LOOPBACK=true
+// time (after DNS), follows no redirects and ignores HTTP_PROXY. MCP_ALLOW_LOOPBACK=true
 // allows loopback for local development.
 func newOutboundHTTPClient(timeout time.Duration) *http.Client {
 	allowLoopback := strings.EqualFold(os.Getenv("MCP_ALLOW_LOOPBACK"), "true")
@@ -131,7 +134,9 @@ func newOutboundHTTPClient(timeout time.Duration) *http.Client {
 		},
 	}
 	transport := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
+		// No env proxy: through a proxy the dial check would see the
+		// proxy's address, not the destination (same rule as the gateway).
+		Proxy:                 nil,
 		DialContext:           dialer.DialContext,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: timeout,
@@ -221,6 +226,10 @@ func (s *MCPOAuthService) discoverResource(ctx context.Context, serverURL *url.U
 		if len(md.AuthorizationServers) > 0 {
 			return &md, nil
 		}
+		lastErr = fmt.Errorf("%s lists no authorization_servers", c)
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no protected resource metadata")
 	}
 	return nil, lastErr
 }
@@ -330,7 +339,7 @@ func (s *MCPOAuthService) Start(ctx context.Context, id uint, wwwAuthenticate st
 	resource := strings.TrimRight(cfg.URL, "/")
 	issuer := serverURL.Scheme + "://" + serverURL.Host
 	var scopes []string
-	if md, err := s.discoverResource(ctx, serverURL, resourceMetadataHint(wwwAuthenticate)); err == nil {
+	if md, err := s.discoverResource(ctx, serverURL, resourceMetadataHint(wwwAuthenticate)); err == nil && md != nil && len(md.AuthorizationServers) > 0 {
 		issuer = md.AuthorizationServers[0]
 		if md.Resource != "" {
 			resource = md.Resource
@@ -400,7 +409,8 @@ func (s *MCPOAuthService) Start(ctx context.Context, id uint, wwwAuthenticate st
 	next["issuer"] = as.Issuer
 	next["token_endpoint"] = as.TokenEndpoint
 	next["resource"] = resource
-	if err := s.mcp.StoreOAuthTokens(id, next); err != nil {
+	version, err := s.mcp.StoreAuthIfVersion(id, cfg.AuthVersion, next)
+	if err != nil {
 		return "", err
 	}
 
@@ -412,7 +422,7 @@ func (s *MCPOAuthService) Start(ctx context.Context, id uint, wwwAuthenticate st
 	s.flows[state] = &oauthFlow{
 		serverID: id, verifier: verifier, redirectURI: redirectURI, tokenEndpoint: as.TokenEndpoint,
 		clientID: clientID, clientSecret: clientSecret, authMethod: authMethod, resource: resource,
-		issuer: as.Issuer, scope: scope, created: s.now(),
+		issuer: as.Issuer, scope: scope, created: s.now(), version: version,
 	}
 	s.mu.Unlock()
 
@@ -580,7 +590,12 @@ func (s *MCPOAuthService) Callback(ctx context.Context, state, code string) (uin
 	if err != nil {
 		return flow.serverID, err
 	}
-	if err := s.mcp.StoreOAuthTokens(flow.serverID, s.applyTokens(cfg.AuthConfig, tr)); err != nil {
+	// The URL or auth changed (or the operator signed out) after this
+	// sign-in started: its tokens belong to the old settings.
+	if cfg.AuthVersion != flow.version {
+		return flow.serverID, ErrMCPAuthStale
+	}
+	if _, err := s.mcp.StoreAuthIfVersion(flow.serverID, flow.version, s.applyTokens(cfg.AuthConfig, tr)); err != nil {
 		return flow.serverID, err
 	}
 	s.reloadGateway()
@@ -602,23 +617,33 @@ func (s *MCPOAuthService) Cancel(state string) uint {
 // Disconnect forgets the tokens of server id. The client registration is
 // kept so signing in again does not register a new client.
 func (s *MCPOAuthService) Disconnect(id uint) error {
-	cfg, err := s.mcp.GetMCPServer(id)
-	if err != nil {
-		return err
+	// Retry once: a refresh may bump the version between read and write.
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		var cfg *database.MCPServerConfig
+		cfg, err = s.mcp.GetMCPServer(id)
+		if err != nil {
+			return err
+		}
+		next := database.JSONB{}
+		for k, v := range cfg.AuthConfig {
+			next[k] = v
+		}
+		for _, k := range []string{"access_token", "refresh_token", "expires_at", "oauth_error"} {
+			delete(next, k)
+		}
+		next["type"] = "oauth"
+		// The version bump also invalidates every pending sign-in and any
+		// refresh in flight for this server.
+		if _, err = s.mcp.StoreAuthIfVersion(id, cfg.AuthVersion, next); err == nil {
+			s.reloadGateway()
+			return nil
+		}
+		if !errors.Is(err, ErrMCPAuthStale) {
+			return err
+		}
 	}
-	next := database.JSONB{}
-	for k, v := range cfg.AuthConfig {
-		next[k] = v
-	}
-	for _, k := range []string{"access_token", "refresh_token", "expires_at", "oauth_error"} {
-		delete(next, k)
-	}
-	next["type"] = "oauth"
-	if err := s.mcp.StoreOAuthTokens(id, next); err != nil {
-		return err
-	}
-	s.reloadGateway()
-	return nil
+	return err
 }
 
 func (s *MCPOAuthService) reloadGateway() {
@@ -673,14 +698,16 @@ func (s *MCPOAuthService) RefreshDue(ctx context.Context) {
 				delete(next, "access_token")
 				delete(next, "refresh_token")
 				next["oauth_error"] = "Sign-in expired. Connect again."
-				if err := s.mcp.StoreOAuthTokens(cfg.ID, next); err == nil {
+				if _, err := s.mcp.StoreAuthIfVersion(cfg.ID, cfg.AuthVersion, next); err == nil {
 					changed = true
 				}
 			}
 			continue
 		}
-		if err := s.mcp.StoreOAuthTokens(cfg.ID, s.applyTokens(a, tr)); err != nil {
-			slog.Warn("MCP OAuth refresh: store failed", "server", cfg.Name, "err", err)
+		// Conditional: a sign-out or settings change while the token request
+		// ran wins; the refreshed tokens are dropped.
+		if _, err := s.mcp.StoreAuthIfVersion(cfg.ID, cfg.AuthVersion, s.applyTokens(a, tr)); err != nil {
+			slog.Warn("MCP OAuth refresh: store skipped", "server", cfg.Name, "err", err)
 			continue
 		}
 		changed = true

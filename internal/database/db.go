@@ -291,6 +291,15 @@ func runMigrations(db *gorm.DB) error {
 		slog.Warn("legacy memory type migration failed; it retries on the next start", "err", err)
 	}
 
+	// A connector shows and deletes exactly one MCP server. Best-effort: an
+	// install that already has two in one connector keeps working; the
+	// service-level check still refuses new ones.
+	if err := db.Session(&gorm.Session{NewDB: true}).Exec(
+		"CREATE UNIQUE INDEX IF NOT EXISTS uniq_mcp_server_connector ON mcp_server_configs (connector_id) WHERE connector_id IS NOT NULL",
+	).Error; err != nil {
+		slog.Warn("could not create uniq_mcp_server_connector index", "err", err)
+	}
+
 	// Only remote MCP servers are supported now. Disable stored stdio
 	// servers instead of deleting them, so the operator sees what stopped
 	// and can replace it with a remote URL.

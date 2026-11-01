@@ -760,6 +760,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 				slog.Error("failed to update incident status", "err", updateErr)
 			}
 			h.updateSlackWithResult(channelID, threadTS, errorMsg, true)
+			h.postResultExternal(ext, errorMsg, true)
 			return
 		}
 

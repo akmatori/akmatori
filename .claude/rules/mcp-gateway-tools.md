@@ -27,7 +27,11 @@ gateway resolves routing, enforces allowlists, executes, returns output.
   `MCP_ALLOW_LOOPBACK=true` for dev/tests; no redirects; no env proxy (it would hide the
   destination); 10 MiB response cap. Streamable HTTP responses may be JSON or `text/event-stream`
 - reload closes and re-initializes only servers whose url/transport/auth/namespace/disabled_tools
-  changed, and closes removed ones
+  changed, and closes removed ones. Reload records the wanted config per server (`pool.Expect`);
+  a connect that finishes with another config, or for a removed server, is dropped with
+  `ErrStaleConfig` instead of replacing the current connection
+- a stored-server test (`/mcp-servers/test` with `id`) starts from the stored config and applies
+  each given field (url, auth_config, transport) on its own
 - admin endpoints (`/reload/*`, `/mcp-servers/test`, `/mcp-servers/status`) are `internalOnly`:
   requests with forwarding headers are refused. The edge proxy (`proxy/nginx.conf`) exposes only
   `/mcp/tools*` (schemas for the UI); `/mcp/mcp` and the admin paths are internal

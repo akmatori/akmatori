@@ -132,7 +132,6 @@ export default function ConnectorDetail() {
 
   const partCount =
     detail.counts.tool_instances + detail.counts.alert_sources + detail.counts.integrations + (detail.parts.mcp_server ? 1 : 0);
-  const integration = detail.parts.integrations[0];
 
   return (
     <div className="space-y-5">
@@ -204,14 +203,19 @@ export default function ConnectorDetail() {
           ))}
         {active === 'alerts' && <AlertSourcesManager scope={scope} />}
         {active === 'messaging' &&
-          (integration ? (
-            <div className="space-y-6">
-              <IntegrationPanel integrationUUID={integration.uuid} onChange={() => void load()} />
-              <ChannelsManager
-                integrationUUID={integration.uuid}
-                listenSupported={detail.catalog?.listen_supported ?? false}
-                onChange={() => void load()}
-              />
+          (detail.parts.integrations.length > 0 ? (
+            <div className="space-y-10">
+              {/* A merged connector can hold several integrations: show each. */}
+              {detail.parts.integrations.map((integ) => (
+                <div key={integ.uuid} className="space-y-6">
+                  <IntegrationPanel integrationUUID={integ.uuid} onChange={() => void load()} />
+                  <ChannelsManager
+                    integrationUUID={integ.uuid}
+                    listenSupported={detail.catalog?.listen_supported ?? false}
+                    onChange={() => void load()}
+                  />
+                </div>
+              ))}
             </div>
           ) : (
             <p className="text-sm text-fg-muted">This connector has no messaging integration.</p>
