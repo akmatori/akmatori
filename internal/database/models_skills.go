@@ -337,6 +337,11 @@ type MCPServerConfig struct {
 	NamespacePrefix string             `gorm:"size:128;not null" json:"namespace_prefix"`  // e.g., "ext.github"
 	AuthConfig      JSONB              `gorm:"type:jsonb" json:"auth_config,omitempty"`    // Auth to inject into connections
 	DisabledTools   StringList         `gorm:"type:jsonb" json:"disabled_tools"`           // upstream tool names the gateway does not register
+	// AuthVersion increases on every change of URL or auth_config. OAuth
+	// writes (callback, refresh, sign-out) only apply when it still equals
+	// the version they started from, so a slow refresh or an old sign-in
+	// cannot undo a sign-out or put tokens on a changed server.
+	AuthVersion int `gorm:"not null;default:0" json:"-"`
 	ConnectorID     *uint              `gorm:"index" json:"connector_id,omitempty"`
 	Enabled         bool               `gorm:"default:true" json:"enabled"`
 	CreatedAt       time.Time          `json:"created_at"`

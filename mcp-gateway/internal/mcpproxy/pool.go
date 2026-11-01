@@ -148,6 +148,12 @@ type MCPConnectionPool struct {
 	mu          sync.RWMutex
 	connections map[uint]*MCPConnection
 	configs     map[uint]MCPServerConfig // stored configs for reconnection
+	// desired is the config key the last reload wants per DB instance
+	// (removedConfigKey after removal). A connect that finishes with any
+	// other config is stale (it started before the reload) and is dropped
+	// instead of replacing the current connection. Instances never set
+	// here (system servers, tests) are not checked.
+	desired     map[uint]string
 	schemaCache *cache.Cache
 	idleTimeout time.Duration
 	stopCleanup chan struct{}
@@ -248,6 +254,7 @@ func NewPool(opts ...PoolOption) *MCPConnectionPool {
 	p := &MCPConnectionPool{
 		connections:          make(map[uint]*MCPConnection),
 		configs:              make(map[uint]MCPServerConfig),
+		desired:              make(map[uint]string),
 		schemaCache:          cache.New(DefaultSchemaCacheTTL, DefaultCleanupInterval),
 		idleTimeout:          DefaultIdleTimeout,
 		stopCleanup:          make(chan struct{}),
@@ -285,6 +292,11 @@ func (p *MCPConnectionPool) GetOrConnect(ctx context.Context, instanceID uint, c
 	if p.stopped {
 		p.mu.Unlock()
 		return nil, fmt.Errorf("connection pool is stopped")
+	}
+
+	if p.isStaleLocked(instanceID, config) {
+		p.mu.Unlock()
+		return nil, fmt.Errorf("%w (instance %d)", ErrStaleConfig, instanceID)
 	}
 
 	conn, exists := p.connections[instanceID]
@@ -350,6 +362,12 @@ func (p *MCPConnectionPool) GetOrConnect(ctx context.Context, instanceID uint, c
 		p.mu.Unlock()
 		conn.close()
 		return nil, fmt.Errorf("connection pool is stopped")
+	}
+	if p.isStaleLocked(instanceID, config) {
+		// A reload changed or removed this server while we were connecting.
+		p.mu.Unlock()
+		conn.close()
+		return nil, fmt.Errorf("%w (instance %d)", ErrStaleConfig, instanceID)
 	}
 	if existing, ok := p.connections[instanceID]; ok && existing.config.configKey() == config.configKey() {
 		p.mu.Unlock()
@@ -686,6 +704,28 @@ func (p *MCPConnectionPool) HealthStatus(ctx context.Context) []ConnectionStatus
 	return statuses
 }
 
+// ErrStaleConfig is returned when a connect used a config that a reload has
+// since replaced or removed.
+var ErrStaleConfig = errors.New("MCP server configuration changed during connect")
+
+// removedConfigKey marks an instance that the last reload removed.
+const removedConfigKey = "\x00removed"
+
+// Expect records the config the current reload wants for an instance.
+// Connects with any other config are dropped as stale.
+func (p *MCPConnectionPool) Expect(instanceID uint, config MCPServerConfig) {
+	p.mu.Lock()
+	p.desired[instanceID] = config.configKey()
+	p.mu.Unlock()
+}
+
+// isStaleLocked reports whether config is not the one the last reload wants.
+// Caller holds p.mu.
+func (p *MCPConnectionPool) isStaleLocked(instanceID uint, config MCPServerConfig) bool {
+	want, ok := p.desired[instanceID]
+	return ok && want != config.configKey()
+}
+
 // Remove closes a connection and forgets its stored config and cached tools,
 // so the next GetOrConnect uses the config it is given. Reload calls it for
 // deleted, disabled and changed servers.
@@ -694,6 +734,9 @@ func (p *MCPConnectionPool) Remove(instanceID uint) {
 	conn, exists := p.connections[instanceID]
 	delete(p.connections, instanceID)
 	delete(p.configs, instanceID)
+	// Until a reload expects a config again, connects for this instance
+	// (e.g. a retry that started before the removal) are stale.
+	p.desired[instanceID] = removedConfigKey
 	p.mu.Unlock()
 
 	p.schemaCache.Delete(fmt.Sprintf("tools:%d", instanceID))

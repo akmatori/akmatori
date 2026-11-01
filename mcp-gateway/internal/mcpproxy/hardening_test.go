@@ -718,6 +718,12 @@ func TestTestServer_StoredConfigFallback(t *testing.T) {
 		AuthConfig: json.RawMessage(`{"type":"bearer","token":"new"}`)}, lookup); !res.OK {
 		t.Fatalf("expected ok, got %+v", res)
 	}
+	// id + auth, no url: the stored URL with the NEW auth (an override must
+	// not be dropped just because the URL was omitted).
+	if res := h.TestServer(context.Background(), TestServerRequest{ID: &id,
+		AuthConfig: json.RawMessage(`{"type":"bearer","token":"replacement"}`)}, lookup); !res.OK {
+		t.Fatalf("expected ok, got %+v", res)
+	}
 	f.mu.Lock()
 	var tokens []string
 	for _, r := range f.requests {
@@ -726,7 +732,7 @@ func TestTestServer_StoredConfigFallback(t *testing.T) {
 		}
 	}
 	f.mu.Unlock()
-	want := []string{"Bearer stored", "Bearer stored", "Bearer new"}
+	want := []string{"Bearer stored", "Bearer stored", "Bearer new", "Bearer replacement"}
 	if strings.Join(tokens, ",") != strings.Join(want, ",") {
 		t.Errorf("auth per test = %v, want %v", tokens, want)
 	}
@@ -813,5 +819,45 @@ func TestStatus_CoversFailedRegistrations(t *testing.T) {
 	}
 	if bad.Connected || bad.Error == "" || bad.ToolCount != 0 || bad.Tools == nil {
 		t.Errorf("unexpected bad status %+v", bad)
+	}
+}
+
+// A connect that started before a reload changed (or removed) the server must
+// not replace the connection the reload installed.
+func TestStaleConnectAfterReloadIsDropped(t *testing.T) {
+	oldSrv := newFakeServer(t, &fakeMCP{tools: []mcp.Tool{{Name: "old"}}})
+	newSrv := newFakeServer(t, &fakeMCP{tools: []mcp.Tool{{Name: "new"}}})
+	p := realPool(t)
+	oldCfg := MCPServerConfig{Transport: TransportHTTP, URL: oldSrv.URL}
+	newCfg := MCPServerConfig{Transport: TransportHTTP, URL: newSrv.URL}
+
+	// Reload installs the new config.
+	p.Expect(7, newCfg)
+	if _, err := p.GetOrConnect(context.Background(), 7, newCfg); err != nil {
+		t.Fatalf("connect new: %v", err)
+	}
+	// A late connect with the old config (e.g. a retry started before the
+	// reload) must be refused and must not replace the new connection.
+	if _, err := p.GetOrConnect(context.Background(), 7, oldCfg); !errors.Is(err, ErrStaleConfig) {
+		t.Fatalf("expected ErrStaleConfig, got %v", err)
+	}
+	tools, ok := p.GetTools(7)
+	if !ok || len(tools) != 1 || tools[0].Name != "new" {
+		t.Fatalf("connection replaced by stale config: %+v", tools)
+	}
+
+	// After removal, no config may reconnect until a reload expects one.
+	p.Remove(7)
+	if _, err := p.GetOrConnect(context.Background(), 7, newCfg); !errors.Is(err, ErrStaleConfig) {
+		t.Fatalf("expected ErrStaleConfig after removal, got %v", err)
+	}
+	p.Expect(7, newCfg)
+	if _, err := p.GetOrConnect(context.Background(), 7, newCfg); err != nil {
+		t.Fatalf("connect after re-expect: %v", err)
+	}
+
+	// Instances never expected (system servers) are not checked.
+	if _, err := p.GetOrConnect(context.Background(), 900001, oldCfg); err != nil {
+		t.Fatalf("unexpected error for unchecked instance: %v", err)
 	}
 }

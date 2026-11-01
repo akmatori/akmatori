@@ -234,7 +234,15 @@ export default function Connectors() {
             closeMCP();
             void load();
           }}
-          onCreated={(connectorUUID) => navigate(connectorUUID ? `/connectors/${connectorUUID}` : '/connectors', { replace: true })}
+          onCreated={(connectorUUID, oauthError) => {
+            if (!connectorUUID) {
+              closeMCP();
+              void load();
+              return;
+            }
+            const q = oauthError ? `?${new URLSearchParams({ oauth_error: oauthError })}` : '';
+            navigate(`/connectors/${connectorUUID}${q}`, { replace: true });
+          }}
         />
       )}
     </div>

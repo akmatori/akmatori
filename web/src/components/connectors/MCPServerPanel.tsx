@@ -39,6 +39,7 @@ export default function MCPServerPanel({ part, onChange }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [toggling, setToggling] = useState<string | null>(null);
 
   const runTest = useCallback(async () => {
     setTesting(true);
@@ -102,16 +103,22 @@ export default function MCPServerPanel({ part, onChange }: Props) {
     }
   };
 
+  // One toggle at a time: each save sends the whole list, so a second click
+  // before the first answer would overwrite it.
   const toggleTool = async (name: string) => {
+    if (toggling) return;
     const next = new Set(disabled);
     if (next.has(name)) next.delete(name);
     else next.add(name);
+    setToggling(name);
     try {
       const s = await mcpServersApi.update(server.id, { disabled_tools: [...next].sort() });
       setServer(s);
       onChange();
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to update the tool'));
+    } finally {
+      setToggling(null);
     }
   };
 
@@ -241,7 +248,13 @@ export default function MCPServerPanel({ part, onChange }: Props) {
                   {t.description && <p className="text-xs text-fg-subtle mt-0.5 line-clamp-2">{t.description}</p>}
                 </div>
                 <label className="flex items-center gap-2 text-xs text-fg-muted cursor-pointer flex-shrink-0">
-                  <input type="checkbox" checked={!disabled.has(t.name)} onChange={() => toggleTool(t.name)} aria-label={`Allow ${t.name}`} />
+                  <input
+                    type="checkbox"
+                    checked={toggling === t.name ? disabled.has(t.name) : !disabled.has(t.name)}
+                    disabled={toggling !== null}
+                    onChange={() => toggleTool(t.name)}
+                    aria-label={`Allow ${t.name}`}
+                  />
                   {disabled.has(t.name) ? 'Off' : 'On'}
                 </label>
               </li>

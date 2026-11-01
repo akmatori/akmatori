@@ -24,6 +24,7 @@ type fakeAuthServer struct {
 	srv           *httptest.Server
 	mu            sync.Mutex
 	noPRM         bool
+	emptyPRM      bool // 200 with {} (no authorization_servers)
 	noDCR         bool
 	challenge     string // set by the test from the authorize URL
 	tokenForms    []url.Values
@@ -38,6 +39,10 @@ func newFakeAuthServer(t *testing.T) *fakeAuthServer {
 	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp", func(w http.ResponseWriter, r *http.Request) {
 		if f.noPRM {
 			http.NotFound(w, r)
+			return
+		}
+		if f.emptyPRM {
+			_, _ = w.Write([]byte(`{}`))
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{

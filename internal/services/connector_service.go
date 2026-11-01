@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -52,6 +53,11 @@ type ConnectorDeps struct {
 // ConnectorService groups tool instances, alert sources, messaging
 // integrations and MCP servers into connectors (see database.Connector).
 type ConnectorService struct {
+	// mu serializes every mutation of connector ownership (link, move,
+	// delete, prune, reconcile). Without it a move could land between a
+	// delete's snapshot and its part deletes, or a prune could delete the
+	// target of a move in flight. The API runs as one process.
+	mu sync.Mutex
 	db        *gorm.DB
 	deps      ConnectorDeps
 	mcpStatus MCPStatusFetcher
@@ -523,9 +529,17 @@ func (s *ConnectorService) Rename(connectorUUID, name string) (*database.Connect
 // parts deleted before it stay deleted and the connector row stays, so the
 // operator sees what is left.
 func (s *ConnectorService) Delete(ctx context.Context, connectorUUID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	d, err := s.Get(ctx, connectorUUID)
 	if err != nil {
 		return err
+	}
+	// owned re-checks, right before each delete, that the part still
+	// belongs to this connector (defense in depth on top of s.mu).
+	owned := func(kind string, id uint) bool {
+		p, err := s.loadPart(s.db, kind, id)
+		return err == nil && p.connectorID != nil && *p.connectorID == d.ID
 	}
 	changed := false
 	defer func() {
@@ -534,14 +548,14 @@ func (s *ConnectorService) Delete(ctx context.Context, connectorUUID string) err
 		}
 	}()
 	// The MCP server first: its delete also removes its managed tool instance.
-	if m := d.Parts.MCPServer; m != nil && s.deps.DeleteMCPServer != nil {
+	if m := d.Parts.MCPServer; m != nil && s.deps.DeleteMCPServer != nil && owned(PartMCPServer, m.ID) {
 		if err := s.deps.DeleteMCPServer(m.ID); err != nil {
 			return fmt.Errorf("delete MCP server: %w", err)
 		}
 		changed = true
 	}
 	for _, t := range d.Parts.ToolInstances {
-		if t.Managed || s.deps.DeleteToolInstance == nil {
+		if t.Managed || s.deps.DeleteToolInstance == nil || !owned(PartToolInstance, t.ID) {
 			continue
 		}
 		if err := s.deps.DeleteToolInstance(t.ID); err != nil {
@@ -550,7 +564,7 @@ func (s *ConnectorService) Delete(ctx context.Context, connectorUUID string) err
 		changed = true
 	}
 	for _, a := range d.Parts.AlertSources {
-		if s.deps.DeleteAlertSource == nil {
+		if s.deps.DeleteAlertSource == nil || !owned(PartAlertSource, a.ID) {
 			continue
 		}
 		if err := s.deps.DeleteAlertSource(a.ID); err != nil {
@@ -559,7 +573,7 @@ func (s *ConnectorService) Delete(ctx context.Context, connectorUUID string) err
 		changed = true
 	}
 	for _, in := range d.Parts.Integrations {
-		if s.deps.DeleteIntegration == nil {
+		if s.deps.DeleteIntegration == nil || !owned(PartIntegration, in.ID) {
 			continue
 		}
 		if err := s.deps.DeleteIntegration(in.UUID); err != nil {
@@ -638,6 +652,13 @@ func (s *ConnectorService) catalogIDForPart(cat *connectorCatalog, kind string, 
 // connector is created for it, named after the part. Errors leave the part
 // unlinked; Reconcile links it on the next start.
 func (s *ConnectorService) LinkNew(kind string, id uint, connectorUUID string) (*database.Connector, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.linkNewLocked(kind, id, connectorUUID)
+}
+
+// linkNewLocked is LinkNew for callers that hold s.mu.
+func (s *ConnectorService) linkNewLocked(kind string, id uint, connectorUUID string) (*database.Connector, error) {
 	cat, err := s.loadCatalog()
 	if err != nil {
 		return nil, err
@@ -655,6 +676,11 @@ func (s *ConnectorService) LinkNew(kind string, id uint, connectorUUID string) (
 			}
 			if !cat.accepts(c.CatalogID, kind, p.typeName, p.toolTypeKind) {
 				return ErrConnectorPartIncompatible
+			}
+			if kind == PartMCPServer {
+				if err := oneMCPServerPerConnector(tx, c.ID, p.id); err != nil {
+					return err
+				}
 			}
 			linked = c
 		} else {
@@ -685,6 +711,8 @@ func (s *ConnectorService) LinkNew(kind string, id uint, connectorUUID string) (
 // Attach moves an existing part into this connector. The connector it
 // leaves is deleted when it has nothing left.
 func (s *ConnectorService) Attach(connectorUUID, kind string, id uint) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	cat, err := s.loadCatalog()
 	if err != nil {
 		return err
@@ -702,12 +730,8 @@ func (s *ConnectorService) Attach(connectorUUID, kind string, id uint) error {
 			return ErrConnectorPartIncompatible
 		}
 		if kind == PartMCPServer {
-			var n int64
-			if err := tx.Model(&database.MCPServerConfig{}).Where("connector_id = ? AND id <> ?", c.ID, id).Count(&n).Error; err != nil {
+			if err := oneMCPServerPerConnector(tx, c.ID, id); err != nil {
 				return err
-			}
-			if n > 0 {
-				return fmt.Errorf("validation failed: a connector has at most one MCP server")
 			}
 		}
 		if err := tx.Table(p.table).Where("id = ?", p.id).Update("connector_id", c.ID).Error; err != nil {
@@ -728,6 +752,8 @@ func (s *ConnectorService) Attach(connectorUUID, kind string, id uint) error {
 
 // Detach moves a part out of this connector into a new connector of its own.
 func (s *ConnectorService) Detach(connectorUUID, kind string, id uint) (*database.Connector, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if kind == PartMCPServer {
 		return nil, fmt.Errorf("validation failed: the MCP server is the connector; delete the connector instead")
 	}
@@ -745,7 +771,7 @@ func (s *ConnectorService) Detach(connectorUUID, kind string, id uint) (*databas
 	if p.toolTypeKind == database.ToolTypeKindMCP {
 		return nil, fmt.Errorf("validation failed: this tool belongs to the MCP server")
 	}
-	nc, err := s.LinkNew(kind, id, "")
+	nc, err := s.linkNewLocked(kind, id, "")
 	if err != nil {
 		return nil, err
 	}
@@ -753,6 +779,22 @@ func (s *ConnectorService) Detach(connectorUUID, kind string, id uint) (*databas
 		slog.Warn("connector prune after detach failed", "connector", connectorUUID, "err", err)
 	}
 	return nc, nil
+}
+
+// ErrConnectorHasMCPServer is returned when a connector already has an MCP
+// server: a connector shows and deletes exactly one.
+var ErrConnectorHasMCPServer = errors.New("validation failed: a connector has at most one MCP server")
+
+// oneMCPServerPerConnector refuses a second MCP server in a connector.
+func oneMCPServerPerConnector(tx *gorm.DB, connectorID, mcpID uint) error {
+	var n int64
+	if err := tx.Model(&database.MCPServerConfig{}).Where("connector_id = ? AND id <> ?", connectorID, mcpID).Count(&n).Error; err != nil {
+		return err
+	}
+	if n > 0 {
+		return ErrConnectorHasMCPServer
+	}
+	return nil
 }
 
 // linkManagedTool points the managed tool instance of MCP server mcpID at
@@ -810,6 +852,19 @@ func pruneConnector(tx *gorm.DB, id uint) error {
 // MCP-managed tool instances at their MCP server's connector, and deletes
 // connectors with nothing left. Idempotent; safe on every start.
 func (s *ConnectorService) Reconcile() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Links to a connector row that no longer exists are cleared first, so
+	// the parts are relinked below instead of staying invisible.
+	for _, table := range []string{"tool_instances", "alert_source_instances", "integrations", "mcp_server_configs"} {
+		res := s.db.Exec("UPDATE " + table + " SET connector_id = NULL WHERE connector_id IS NOT NULL AND connector_id NOT IN (SELECT id FROM connectors)")
+		if res.Error != nil {
+			return fmt.Errorf("clear dangling connector links in %s: %w", table, res.Error)
+		}
+		if res.RowsAffected > 0 {
+			slog.Warn("cleared dangling connector links", "table", table, "count", res.RowsAffected)
+		}
+	}
 	cat, err := s.loadCatalog()
 	if err != nil {
 		return err
@@ -817,7 +872,7 @@ func (s *ConnectorService) Reconcile() error {
 	created := 0
 	link := func(kind string, ids []uint) error {
 		for _, id := range ids {
-			if _, err := s.LinkNew(kind, id, ""); err != nil {
+			if _, err := s.linkNewLocked(kind, id, ""); err != nil {
 				return fmt.Errorf("link %s %d: %w", kind, id, err)
 			}
 			created++
@@ -909,6 +964,8 @@ func (s *ConnectorService) Reconcile() error {
 // PruneEmpty deletes every connector with no parts. Call after a part was
 // deleted through its own endpoint.
 func (s *ConnectorService) PruneEmpty() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var ids []uint
 	if err := s.db.Model(&database.Connector{}).Pluck("id", &ids).Error; err != nil {
 		slog.Warn("connector prune: list failed", "err", err)

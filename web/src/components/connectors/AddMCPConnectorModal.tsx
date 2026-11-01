@@ -10,8 +10,9 @@ import MCPTestResultView from './MCPTestResultView';
 
 interface Props {
   onClose: () => void;
-  // Called with the new connector's UUID; the page navigates to it.
-  onCreated: (connectorUUID: string) => void;
+  // Called with the new connector's UUID (and an OAuth start error, if the
+  // server was created but sign-in could not start); the page navigates.
+  onCreated: (connectorUUID: string, oauthError?: string) => void;
 }
 
 // AddMCPConnectorModal adds a remote MCP server as a custom connector. Only
@@ -62,8 +63,15 @@ export default function AddMCPConnectorModal({ onClose, onCreated }: Props) {
         auth_config: authInput,
       });
       if (auth.type === 'oauth') {
-        const { authorize_url } = await mcpServersApi.oauthStart(created.id, test?.www_authenticate);
-        window.location.assign(authorize_url);
+        try {
+          const { authorize_url } = await mcpServersApi.oauthStart(created.id, test?.www_authenticate);
+          window.location.assign(authorize_url);
+        } catch (err) {
+          // The server exists now: open it, with the reason, so the operator
+          // can fix the cause and press "Sign in" there (a retry here would
+          // try to create it again).
+          onCreated(created.connector_uuid ?? '', getErrorMessage(err, 'Could not start the sign-in'));
+        }
         return;
       }
       onCreated(created.connector_uuid ?? '');

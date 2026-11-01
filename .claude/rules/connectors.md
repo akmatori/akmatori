@@ -26,8 +26,14 @@ point at it through a nullable `connector_id`: `tool_instances`, `alert_source_i
   `incidents`/`proposals`/`events` are never connectors
 - create endpoints (`/api/tools`, `/api/alert-sources`, `/api/integrations`, `/api/mcp-servers`)
   accept an optional `connector_uuid`; without it the handler creates a connector for the new part
-  (`linkNewPart`). Part deletes call `PruneEmpty`. All old `/api/*` paths and payloads are
-  unchanged (akm does not follow redirects)
+  (`linkNewPart`). Part deletes call `PruneEmpty`. Old `/api/*` paths are unchanged (akm does not
+  follow redirects); the exceptions are `/api/mcp-servers`: secrets are masked in responses,
+  command/args/env_vars and stdio are refused
+- every ownership change (`LinkNew`, `Attach`, `Detach`, `Delete`, `PruneEmpty`, `Reconcile`) runs
+  under `ConnectorService.mu`; `Delete` re-checks that each part still belongs to the connector
+  before deleting it; `Reconcile` first clears `connector_id` values that point at a missing row.
+  A connector holds at most one MCP server (`oneMCPServerPerConnector` + the partial unique index
+  `uniq_mcp_server_connector`); the UI shows every integration of a merged messaging connector
 - list/detail DTOs carry no credentials. Status: `ok`, `connected`/`error` (MCP, from the gateway's
   `/mcp-servers/status`), `disabled`, `needs_setup` (no parts, or a messaging integration without
   channels), `unknown`. Webhook silence is not an error; `last_alert_at` is shown instead
@@ -51,6 +57,11 @@ point at it through a nullable `connector_id`: `tool_instances`, `alert_source_i
   public callback `/api/mcp-servers/oauth/callback` (in the JWT skip list; one-time state, 15 min,
   in memory) → tokens in auth_config, gateway reload. `RefreshDue` runs every minute (5 min lead);
   `invalid_grant` clears tokens and sets `oauth_error`. The redirect URL needs
-  `GeneralSettings.BaseURL`. Outbound OAuth HTTP refuses loopback/link-local/metadata and redirects
+  `GeneralSettings.BaseURL`. Outbound OAuth HTTP refuses loopback/link-local/metadata and
+  redirects, and ignores `HTTP_PROXY` (through a proxy the dial check would see the proxy)
+- `mcp_server_configs.auth_version` increases on every URL or auth change. OAuth writes go through
+  `StoreAuthIfVersion`: a callback only stores tokens if the version is still the one `Start`
+  wrote, and refresh and sign-out only write if it did not move, so a slow refresh cannot undo a
+  sign-out and an old sign-in cannot put tokens on a changed server
 - connection tests and status go through the gateway (`MCPGatewayClient`), never from the API, so
   the same network policy applies

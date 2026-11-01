@@ -61,14 +61,17 @@ func (h *ProxyHandler) TestServer(ctx context.Context, req TestServerRequest, lo
 		if err != nil {
 			return TestServerResult{Error: fmt.Sprintf("load MCP server config %d: %v", *req.ID, err)}
 		}
-		if req.URL == "" {
-			cfg = stored
-		} else if len(req.AuthConfig) == 0 {
-			// URL given but auth_config absent: keep the stored credentials.
-			cfg.AuthConfig = stored.AuthConfig
+		// Start from the stored server and apply each override on its own:
+		// a new token with no URL tests the new token against the stored URL.
+		cfg = stored
+		if req.URL != "" {
+			cfg.URL = req.URL
 		}
-		if cfg.Transport == "" {
-			cfg.Transport = stored.Transport
+		if len(req.AuthConfig) != 0 {
+			cfg.AuthConfig = req.AuthConfig
+		}
+		if req.Transport != "" {
+			cfg.Transport = req.Transport
 		}
 	}
 	if cfg.Transport == "" {
