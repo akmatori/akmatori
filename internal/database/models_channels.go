@@ -44,6 +44,7 @@ type Integration struct {
 	Name        string            `gorm:"size:128;not null" json:"name"`
 	Credentials JSONB             `gorm:"type:jsonb" json:"credentials"`
 	Enabled     bool              `gorm:"default:true" json:"enabled"`
+	ConnectorID *uint             `gorm:"index" json:"connector_id,omitempty"` // owning Connector; nil until reconciled
 	CreatedAt   time.Time         `json:"created_at"`
 	UpdatedAt   time.Time         `json:"updated_at"`
 

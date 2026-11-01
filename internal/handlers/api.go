@@ -25,6 +25,9 @@ type APIHandler struct {
 	contextSummaries     services.ContextSummaryManager
 	httpConnectorService services.HTTPConnectorManager
 	mcpServerService     services.MCPServerManager
+	connectorService     services.ConnectorManager
+	mcpGateway           services.MCPGateway
+	mcpOAuth             *services.MCPOAuthService
 	channelService       services.ChannelManager
 	providerRegistry     services.ProviderRegistry
 	cronService          services.CronJobManager
@@ -80,6 +83,24 @@ func (h *APIHandler) SetGatewayReloader(fn func() error) {
 // to reload MCP Gateway proxy tool registrations.
 func (h *APIHandler) SetMCPServerReloader(fn func() error) {
 	h.mcpServerReloader = fn
+}
+
+// SetConnectorService wires /api/connectors and the connector linking of
+// newly created tools, alert sources, integrations and MCP servers.
+// Optional: without it the per-part endpoints work as before.
+func (h *APIHandler) SetConnectorService(svc services.ConnectorManager) {
+	h.connectorService = svc
+}
+
+// SetMCPGateway wires the gateway client used for MCP connection tests and
+// status. Optional; the test and status endpoints return 503 without it.
+func (h *APIHandler) SetMCPGateway(gw services.MCPGateway) {
+	h.mcpGateway = gw
+}
+
+// SetMCPOAuthService wires the OAuth flow for remote MCP servers.
+func (h *APIHandler) SetMCPOAuthService(svc *services.MCPOAuthService) {
+	h.mcpOAuth = svc
 }
 
 // SetChannelManager wires the ChannelManager used by /api/integrations and
@@ -227,6 +248,11 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/formatting-rules/reorder", h.handleFormattingRulesReorder)
 	mux.HandleFunc("PUT /api/formatting-rules/{uuid}", h.handleFormattingRuleByUUID)
 	mux.HandleFunc("DELETE /api/formatting-rules/{uuid}", h.handleFormattingRuleByUUID)
+
+	// Connectors: the grouping of tools, alert sources, messaging
+	// integrations and MCP servers shown on the Connectors page
+	mux.HandleFunc("/api/connectors", h.handleConnectors)
+	mux.HandleFunc("/api/connectors/", h.handleConnectorByUUID)
 
 	// Context files
 	mux.HandleFunc("/api/context", h.handleContext)

@@ -45,6 +45,8 @@ type CreateToolInstanceRequest struct {
 	Name        string         `json:"name" validate:"required,min=1"`
 	LogicalName string         `json:"logical_name"` // Optional; auto-derived from Name if empty
 	Settings    database.JSONB `json:"settings"`
+	// ConnectorUUID joins an existing connector; empty creates a new one.
+	ConnectorUUID string `json:"connector_uuid,omitempty"`
 }
 
 // UpdateToolInstanceRequest is the request body for PUT /api/tools/:id.
@@ -245,6 +247,8 @@ type CreateAlertSourceRequest struct {
 	FieldMappings           database.JSONB `json:"field_mappings"`
 	Settings                database.JSONB `json:"settings"`
 	NotificationChannelUUID *string        `json:"notification_channel_uuid"`
+	// ConnectorUUID joins an existing connector; empty creates a new one.
+	ConnectorUUID string `json:"connector_uuid,omitempty"`
 }
 
 // UpdateAlertSourceRequest is the request body for PUT /api/alert-sources/:uuid.

@@ -114,6 +114,8 @@ type CreateIntegrationRequest struct {
 	Name        string         `json:"name"`
 	Credentials database.JSONB `json:"credentials,omitempty"`
 	Enabled     *bool          `json:"enabled,omitempty"`
+	// ConnectorUUID joins an existing connector; empty creates a new one.
+	ConnectorUUID string `json:"connector_uuid,omitempty"`
 }
 
 // UpdateIntegrationRequest is the request body for PUT /api/integrations/{uuid}.
@@ -166,6 +168,10 @@ func (h *APIHandler) handleIntegrations(w http.ResponseWriter, r *http.Request) 
 			enabled = *req.Enabled
 		}
 
+		if !h.checkConnectorTarget(w, r, req.ConnectorUUID) {
+			return
+		}
+
 		row, err := h.channelService.CreateIntegration(database.MessagingProvider(provider), req.Name, req.Credentials, enabled)
 		if err != nil {
 			api.RespondError(w, integrationErrStatus(err), err.Error())
@@ -176,6 +182,7 @@ func (h *APIHandler) handleIntegrations(w http.ResponseWriter, r *http.Request) 
 		// both reload paths so a freshly-added Slack integration takes effect
 		// without restarting the API.
 		h.afterIntegrationMutation(row.Provider)
+		h.linkNewPart(services.PartIntegration, row.ID, req.ConnectorUUID)
 		api.RespondJSON(w, http.StatusCreated, toIntegrationResponse(row))
 
 	default:
@@ -238,6 +245,7 @@ func (h *APIHandler) handleIntegrationByUUID(w http.ResponseWriter, r *http.Requ
 		if lookupErr == nil && row != nil {
 			provider = row.Provider
 		}
+		h.afterPartDeleted()
 		h.afterIntegrationMutation(provider)
 		api.RespondNoContent(w)
 

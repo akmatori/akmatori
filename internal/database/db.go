@@ -195,6 +195,9 @@ func runMigrations(db *gorm.DB) error {
 		// Self-improvement proposals + refinement chat transcripts
 		&Proposal{},
 		&ProposalChatMessage{},
+		// Connectors page grouping (tool instances, alert sources,
+		// integrations and MCP servers point here via connector_id)
+		&Connector{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to run migrations: %w", err)
@@ -288,7 +291,29 @@ func runMigrations(db *gorm.DB) error {
 		slog.Warn("legacy memory type migration failed; it retries on the next start", "err", err)
 	}
 
+	// Only remote MCP servers are supported now. Disable stored stdio
+	// servers instead of deleting them, so the operator sees what stopped
+	// and can replace it with a remote URL.
+	if err := migrateDisableStdioMCPServers(db); err != nil {
+		return err
+	}
+
 	slog.Info("database migrations completed successfully")
+	return nil
+}
+
+// migrateDisableStdioMCPServers disables every enabled stdio MCP server
+// config. The gateway no longer runs local commands. Idempotent.
+func migrateDisableStdioMCPServers(db *gorm.DB) error {
+	res := db.Model(&MCPServerConfig{}).
+		Where("transport = ? AND enabled = ?", MCPServerTransportStdio, true).
+		Update("enabled", false)
+	if res.Error != nil {
+		return fmt.Errorf("disable stdio MCP servers: %w", res.Error)
+	}
+	if res.RowsAffected > 0 {
+		slog.Warn("disabled stdio MCP servers: only remote MCP servers are supported", "count", res.RowsAffected)
+	}
 	return nil
 }
 

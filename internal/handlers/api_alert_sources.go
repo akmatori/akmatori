@@ -130,6 +130,10 @@ func (h *APIHandler) handleAlertSources(w http.ResponseWriter, r *http.Request) 
 			notifChannelID = id
 		}
 
+		if !h.checkConnectorTarget(w, r, req.ConnectorUUID) {
+			return
+		}
+
 		instance, err := h.alertService.CreateInstance(req.SourceTypeName, req.Name, req.Description, req.WebhookSecret, req.FieldMappings, req.Settings)
 		if err != nil {
 			if isDuplicateNameErr(err) {
@@ -152,6 +156,10 @@ func (h *APIHandler) handleAlertSources(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 
+		h.linkNewPart(services.PartAlertSource, instance.ID, req.ConnectorUUID)
+		if refreshed, gerr := h.alertService.GetInstanceByUUID(instance.UUID); gerr == nil && refreshed != nil {
+			instance = refreshed
+		}
 		api.RespondJSON(w, http.StatusCreated, instance)
 		h.reloadAlertChannels()
 
@@ -255,6 +263,7 @@ func (h *APIHandler) handleAlertSourceByUUID(w http.ResponseWriter, r *http.Requ
 			api.RespondError(w, http.StatusInternalServerError, "Failed to delete alert source")
 			return
 		}
+		h.afterPartDeleted()
 		api.RespondNoContent(w)
 		h.reloadAlertChannels()
 

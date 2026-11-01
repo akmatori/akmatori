@@ -9,10 +9,12 @@ import (
 
 // reservedToolNamespaces contains built-in tool namespaces that cannot be used
 // by user-defined HTTP connectors or MCP servers.
+// Keep it equal to builtInToolNamespaces in mcp-gateway/internal/tools/registry.go.
 var reservedToolNamespaces = []string{
 	"ssh", "zabbix", "victoria_metrics", "catchpoint",
 	"postgresql", "grafana", "pagerduty", "clickhouse",
-	"netbox", "kubernetes",
+	"netbox", "kubernetes", "jira",
+	"incidents", "proposals", "events",
 }
 
 // isReservedToolNamespace checks if a name conflicts with a built-in tool namespace.

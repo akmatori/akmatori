@@ -103,6 +103,10 @@ func main() {
 			"/ws/agent",         // WebSocket endpoint for Agent worker (internal)
 			"/api/docs",         // Swagger UI (public)
 			"/api/openapi.yaml", // OpenAPI spec (public)
+			// OAuth redirect back from a remote MCP server's authorization
+			// server; protected by the one-time state of a flow an operator
+			// started while logged in.
+			services.OAuthCallbackPath,
 		},
 	})
 	slog.Info("JWT authentication enabled", "user", cfg.AdminUsername)
@@ -397,6 +401,39 @@ func main() {
 	}
 	apiHandler.SetGatewayReloader(handlers.GatewayReloadFunc(mcpGatewayURL))
 	apiHandler.SetMCPServerReloader(handlers.GatewayMCPReloadFunc(mcpGatewayURL))
+	mcpGateway := services.NewMCPGatewayClient(mcpGatewayURL)
+	apiHandler.SetMCPGateway(mcpGateway)
+
+	// Connectors: group tool instances, alert sources, messaging
+	// integrations and MCP servers for the Connectors page. MCP servers get
+	// their managed tool instance first (upgrade path), then every unlinked
+	// part gets a connector of its own.
+	if err := mcpServerService.SyncAllManagedTools(); err != nil {
+		slog.Warn("failed to sync MCP server tool instances", "err", err)
+	}
+	connectorService := services.NewConnectorService(database.GetDB(), services.ConnectorDeps{
+		DeleteToolInstance: toolService.DeleteToolInstance,
+		DeleteAlertSource:  alertService.DeleteInstanceByID,
+		DeleteIntegration:  channelService.DeleteIntegration,
+		DeleteMCPServer:    mcpServerService.DeleteMCPServer,
+		AfterMutation: func() {
+			if err := mcpGateway.Reload(context.Background()); err != nil {
+				slog.Warn("gateway MCP reload after connector delete failed", "err", err)
+			}
+			if handler := slackHandler.Load(); handler != nil {
+				handler.ReloadListenerChannels()
+			}
+		},
+	})
+	connectorService.SetMCPStatusFetcher(mcpGateway.Status)
+	if err := connectorService.Reconcile(); err != nil {
+		slog.Warn("failed to reconcile connectors", "err", err)
+	}
+	apiHandler.SetConnectorService(connectorService)
+	mcpOAuth := services.NewMCPOAuthService(database.GetDB(), mcpServerService, func() error {
+		return mcpGateway.Reload(context.Background())
+	})
+	apiHandler.SetMCPOAuthService(mcpOAuth)
 
 	// Initialize auth handler
 	authHandler := handlers.NewAuthHandler(jwtAuthMiddleware)
@@ -472,6 +509,9 @@ func main() {
 	// never resolved. The service itself was constructed above, with the API
 	// handler wiring.
 	go staleCloseService.StartBackgroundSweep(ctx)
+
+	// Refresh OAuth tokens of remote MCP servers before they expire.
+	mcpOAuth.StartRefresher(ctx)
 	slog.Info("stale incident close service started")
 
 	// Cron runs report problems through the gateway (events.report_alert),

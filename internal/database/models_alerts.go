@@ -79,6 +79,7 @@ type AlertSourceInstance struct {
 	Settings              JSONB     `gorm:"type:jsonb" json:"settings"`                // Additional instance settings
 	NotificationChannelID *uint     `gorm:"index" json:"notification_channel_id"`      // Optional FK to channels.id; nil falls back to provider default
 	Enabled               bool      `gorm:"default:true" json:"enabled"`
+	ConnectorID           *uint     `gorm:"index" json:"connector_id,omitempty"` // owning Connector; nil until reconciled
 	CreatedAt             time.Time `json:"created_at"`
 	UpdatedAt             time.Time `json:"updated_at"`
 

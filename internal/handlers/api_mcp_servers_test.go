@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/services"
 )
 
 // mockMCPServerService implements services.MCPServerManager for testing
@@ -19,6 +20,7 @@ type mockMCPServerService struct {
 	updateErr  error
 	deleteErr  error
 	listErr    error
+	lastPatch  *services.MCPServerPatch
 }
 
 func (m *mockMCPServerService) CreateMCPServer(config *database.MCPServerConfig) (*database.MCPServerConfig, error) {
@@ -42,7 +44,8 @@ func (m *mockMCPServerService) GetMCPServer(id uint) (*database.MCPServerConfig,
 	return nil, m.getErr
 }
 
-func (m *mockMCPServerService) UpdateMCPServer(id uint, updates map[string]interface{}) (*database.MCPServerConfig, error) {
+func (m *mockMCPServerService) UpdateMCPServer(id uint, patch services.MCPServerPatch) (*database.MCPServerConfig, error) {
+	m.lastPatch = &patch
 	if m.updateErr != nil {
 		return nil, m.updateErr
 	}
