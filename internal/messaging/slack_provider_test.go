@@ -302,3 +302,24 @@ func TestSlackProvider_EnforcesByteBudget(t *testing.T) {
 		t.Errorf("update text = %q, want *done*", got)
 	}
 }
+
+func TestSlackProvider_TestCredentials(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"user":"akmatori","team":"Acme","user_id":"U1"}`))
+	}))
+	defer srv.Close()
+	p := &SlackProvider{apiURL: srv.URL + "/"}
+	got, err := p.TestCredentials(context.Background(), &database.Integration{Credentials: database.JSONB{"bot_token": "xoxb-1"}})
+	if err != nil || got != "akmatori @ Acme" {
+		t.Fatalf("TestCredentials = %q, %v", got, err)
+	}
+	if gotPath != "/auth.test" {
+		t.Errorf("path = %q, want /auth.test", gotPath)
+	}
+	if _, err := p.TestCredentials(context.Background(), &database.Integration{}); err == nil {
+		t.Error("expected error without bot_token")
+	}
+}

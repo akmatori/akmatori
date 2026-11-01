@@ -45,6 +45,9 @@ type SlackClientProvider interface {
 // just the transport responsibility.
 type SlackProvider struct {
 	clientFn func() SlackClient
+	// apiURL overrides the Slack Web API base URL for TestCredentials
+	// (tests only; empty = slack-go default).
+	apiURL string
 }
 
 // NewSlackProvider builds a slack provider that resolves its underlying
@@ -180,4 +183,25 @@ func (p *SlackProvider) UpdateMessage(ctx context.Context, channel *database.Cha
 		return fmt.Errorf("slack update message: %w", err)
 	}
 	return nil
+}
+
+// TestCredentials calls auth.test with the integration's bot_token and
+// returns "<bot user> @ <workspace>".
+func (p *SlackProvider) TestCredentials(ctx context.Context, integration *database.Integration) (string, error) {
+	token, err := botTokenOf(integration)
+	if err != nil {
+		return "", err
+	}
+	opts := []slack.Option{slack.OptionHTTPClient(defaultBotHTTPClient())}
+	if p.apiURL != "" {
+		opts = append(opts, slack.OptionAPIURL(p.apiURL))
+	}
+	resp, err := slack.New(token, opts...).AuthTestContext(ctx)
+	if err != nil {
+		return "", fmt.Errorf("slack auth.test: %w", err)
+	}
+	if resp.Team != "" {
+		return resp.User + " @ " + resp.Team, nil
+	}
+	return resp.User, nil
 }

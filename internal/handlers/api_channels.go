@@ -167,6 +167,10 @@ func (h *APIHandler) handleChannels(w http.ResponseWriter, r *http.Request) {
 			api.RespondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if err := validateCanListen(integration.Provider, req.CanListen); err != nil {
+			api.RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		enabled := true
 		if req.Enabled != nil {
@@ -241,15 +245,23 @@ func (h *APIHandler) handleChannelByUUID(w http.ResponseWriter, r *http.Request)
 		// parsing. Look up the existing channel for its Integration.Provider —
 		// PUT does not re-parent the channel, so the resolved provider is
 		// stable.
-		if req.ExternalID != nil {
+		if req.ExternalID != nil || (req.CanListen != nil && *req.CanListen) {
 			existing, err := h.channelService.GetChannelByUUID(uuid)
 			if err != nil {
 				api.RespondError(w, integrationErrStatus(err), err.Error())
 				return
 			}
-			if err := validateProviderExternalID(existing.Integration.Provider, *req.ExternalID); err != nil {
-				api.RespondError(w, http.StatusBadRequest, err.Error())
-				return
+			if req.ExternalID != nil {
+				if err := validateProviderExternalID(existing.Integration.Provider, *req.ExternalID); err != nil {
+					api.RespondError(w, http.StatusBadRequest, err.Error())
+					return
+				}
+			}
+			if req.CanListen != nil {
+				if err := validateCanListen(existing.Integration.Provider, *req.CanListen); err != nil {
+					api.RespondError(w, http.StatusBadRequest, err.Error())
+					return
+				}
 			}
 		}
 		patch := services.ChannelUpdate{

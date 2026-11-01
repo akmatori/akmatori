@@ -85,14 +85,16 @@ components:
     Integration:
       type: object
       description: |
-        A configured connection to a messaging provider (Slack, Telegram, ...).
-        Credentials are stored as a JSON blob whose shape is provider-specific.
+        A configured connection to a messaging provider (Slack, Telegram, Discord).
+        Credentials are stored as a JSON blob whose shape is provider-specific;
+        Telegram and Discord use {"bot_token": "..."}. Secret values are masked
+        in responses.
       properties:
         id: {type: integer}
         uuid: {type: string, format: uuid}
         provider:
           type: string
-          enum: [slack, telegram]
+          enum: [slack, telegram, discord]
         name: {type: string}
         credentials:
           type: object
@@ -103,11 +105,12 @@ components:
 
     IntegrationCreateRequest:
       type: object
+      description: Telegram and Discord integrations require credentials.bot_token.
       required: [provider, name]
       properties:
         provider:
           type: string
-          enum: [slack, telegram]
+          enum: [slack, telegram, discord]
         name: {type: string}
         credentials:
           type: object
@@ -116,7 +119,9 @@ components:
 
     IntegrationUpdateRequest:
       type: object
-      description: Provider is immutable on update.
+      description: |
+        Provider is immutable on update. Credential keys are merged into the
+        stored blob; an omitted or empty secret keeps the existing value.
       properties:
         name: {type: string}
         credentials:
@@ -160,7 +165,7 @@ components:
         external_id: {type: string}
         display_name: {type: string}
         can_post: {type: boolean}
-        can_listen: {type: boolean}
+        can_listen: {type: boolean, description: "Slack only; true is rejected (400) for outbound-only Telegram and Discord integrations"}
         is_default_post: {type: boolean}
         extraction_prompt: {type: string}
         process_human_messages: {type: boolean}
@@ -1637,6 +1642,34 @@ paths:
       responses:
         '204':
           description: Integration deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /integrations/{uuid}/test:
+    parameters:
+      - name: uuid
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    post:
+      summary: Verify the integration's stored credentials
+      description: |
+        Calls the platform with the stored bot token (Telegram getMe, Discord
+        GET /users/@me, Slack auth.test). Platform failures return 200 with
+        ok=false and an error message.
+      operationId: testIntegration
+      tags: [Integrations]
+      responses:
+        '200':
+          description: Test result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: {type: boolean}
+                  account: {type: string, description: Bot account name}
+                  error: {type: string}
         '404':
           $ref: '#/components/responses/NotFound'
 
