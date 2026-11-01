@@ -13,11 +13,17 @@ describe('PROVIDER_CONFIGS', () => {
     expect(slack!.available).toBe(true);
   });
 
-  it('marks Telegram as unavailable so the Add button is disabled with a coming-soon hint', () => {
-    const tg = getProviderConfig('telegram');
-    expect(tg).not.toBeNull();
-    expect(tg!.available).toBe(false);
-    expect(tg!.description.toLowerCase()).toContain('not yet available');
+  it.each(['telegram', 'discord'] as const)('offers %s as an available outbound-only provider', (provider) => {
+    const cfg = getProviderConfig(provider);
+    expect(cfg).not.toBeNull();
+    expect(cfg!.available).toBe(true);
+    expect(cfg!.description.toLowerCase()).toContain('outbound only');
+  });
+
+  it.each(['telegram', 'discord'] as const)('asks %s for exactly one secret bot_token field', (provider) => {
+    const cfg = getProviderConfig(provider)!;
+    expect(cfg.credentialFields).toHaveLength(1);
+    expect(cfg.credentialFields[0]).toMatchObject({ name: 'bot_token', label: 'Bot Token', secret: true });
   });
 
   it('lists all three Slack credentials so the IntegrationsManager renders the right form', () => {
@@ -33,7 +39,7 @@ describe('PROVIDER_CONFIGS', () => {
   });
 
   it('returns null for unknown providers', () => {
-    expect(getProviderConfig('discord')).toBeNull();
+    expect(getProviderConfig('matrix')).toBeNull();
   });
 });
 
@@ -90,5 +96,20 @@ describe('areCredentialsValidForCreate', () => {
         app_token: 'xapp-1',
       }),
     ).toBe(false);
+  });
+});
+
+describe('bot-token providers', () => {
+  it.each(['telegram', 'discord'] as const)('%s requires the bot token on create', (provider) => {
+    const cfg = getProviderConfig(provider)!;
+    expect(areCredentialsValidForCreate(cfg, {})).toBe(false);
+    expect(areCredentialsValidForCreate(cfg, { bot_token: '  ' })).toBe(false);
+    expect(areCredentialsValidForCreate(cfg, { bot_token: 'tok' })).toBe(true);
+  });
+
+  it.each(['telegram', 'discord'] as const)('%s sends only the bot_token credential', (provider) => {
+    const cfg = getProviderConfig(provider)!;
+    expect(extractCredentialsForCreate(cfg, { bot_token: ' tok ', app_token: 'ignored' })).toEqual({ bot_token: 'tok' });
+    expect(extractCredentialsForCreate(cfg, { bot_token: '' })).toEqual({});
   });
 });
