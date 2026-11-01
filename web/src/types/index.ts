@@ -16,6 +16,8 @@ export interface ToolType {
   name: string;
   description: string;
   schema: Record<string, unknown>;
+  // 'mcp' for the type the API manages for a custom MCP server
+  kind?: string;
   created_at: string;
   updated_at: string;
 }
@@ -27,6 +29,7 @@ export interface ToolInstance {
   logical_name: string;
   settings: Record<string, unknown>;
   enabled: boolean;
+  connector_id?: number | null;
   created_at: string;
   updated_at: string;
   tool_type?: ToolType;
@@ -537,6 +540,7 @@ export interface AlertSourceInstance {
   settings: Record<string, unknown>;
   notification_channel_id?: number | null;
   enabled: boolean;
+  connector_id?: number | null;
   created_at: string;
   updated_at: string;
   alert_source_type?: AlertSourceType;
@@ -551,6 +555,7 @@ export interface CreateAlertSourceRequest {
   field_mappings?: Record<string, string>;
   settings?: Record<string, unknown>;
   notification_channel_uuid?: string | null;
+  connector_uuid?: string;
 }
 
 export interface UpdateAlertSourceRequest {

@@ -74,6 +74,21 @@ func (h *APIHandler) handleConnectorByUUID(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/connectors/"), "/")
+	if rest == "lookup" {
+		// GET /api/connectors/lookup?kind=tool_instance&id=5 -> {"connector_uuid": "..."}
+		id, err := strconv.ParseUint(r.URL.Query().Get("id"), 10, 32)
+		if err != nil {
+			api.RespondError(w, http.StatusBadRequest, "Invalid part ID")
+			return
+		}
+		u, err := h.connectorService.LookupByPart(r.URL.Query().Get("kind"), uint(id))
+		if err != nil {
+			respondConnectorError(w, err, "Failed to look up connector")
+			return
+		}
+		api.RespondJSON(w, http.StatusOK, map[string]string{"connector_uuid": u})
+		return
+	}
 	if rest == "catalog" {
 		if r.Method != http.MethodGet {
 			api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")

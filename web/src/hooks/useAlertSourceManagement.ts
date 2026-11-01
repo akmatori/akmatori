@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { alertSourceTypesApi, alertSourcesApi, channelsApi } from '../api/client';
 import type { AlertSourceType, AlertSourceInstance, Channel } from '../types';
 import { visibleAlertSourceTypes } from '../components/alerts/alertSourceHelpers';
+import { creatableAlertTypes, scopedAlertSources, type PartScope } from '../components/connectors/partScope';
 
 export interface AlertSourceFormData {
   source_type_name: string;
@@ -25,17 +26,22 @@ const EMPTY_FORM: AlertSourceFormData = {
   enabled: true,
 };
 
-export function useAlertSourceManagement() {
+export function useAlertSourceManagement(scope?: PartScope) {
   const [sources, setSources] = useState<AlertSourceInstance[]>([]);
   const [sourceTypes, setSourceTypes] = useState<AlertSourceType[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [editingSource, setEditingSource] = useState<AlertSourceInstance | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
+  const [isCreating, setIsCreating] = useState(!!scope?.startCreating);
   const [expandedSource, setExpandedSource] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
-  const [formData, setFormData] = useState<AlertSourceFormData>(EMPTY_FORM);
+  const [rawFormData, setFormData] = useState<AlertSourceFormData>(EMPTY_FORM);
+  const firstCreatable = creatableAlertTypes(visibleAlertSourceTypes(sourceTypes), scope)[0]?.name ?? '';
+  const formData: AlertSourceFormData =
+    isCreating && !rawFormData.source_type_name && firstCreatable
+      ? { ...rawFormData, source_type_name: firstCreatable }
+      : rawFormData;
 
   const loadData = useCallback(async () => {
     try {
@@ -68,12 +74,15 @@ export function useAlertSourceManagement() {
     [channels],
   );
 
+  const onChange = scope?.onChange;
+  const onCreated = scope?.onCreated;
+
   const handleCreate = useCallback(() => {
     setIsCreating(true);
-    const firstType = visibleAlertSourceTypes(sourceTypes)[0]?.name ?? '';
+    const firstType = creatableAlertTypes(visibleAlertSourceTypes(sourceTypes), scope)[0]?.name ?? '';
     setFormData({ ...EMPTY_FORM, source_type_name: firstType });
     setEditingSource(null);
-  }, [sourceTypes]);
+  }, [sourceTypes, scope]);
 
   const handleEdit = useCallback(
     (source: AlertSourceInstance) => {
@@ -103,7 +112,7 @@ export function useAlertSourceManagement() {
       }
 
       if (isCreating) {
-        await alertSourcesApi.create({
+        const created = await alertSourcesApi.create({
           source_type_name: formData.source_type_name,
           name: formData.name,
           description: formData.description,
@@ -111,7 +120,9 @@ export function useAlertSourceManagement() {
           field_mappings: formData.field_mappings,
           settings: formData.settings,
           notification_channel_uuid: formData.notification_channel_uuid,
+          connector_uuid: scope?.connectorUUID || undefined,
         });
+        onCreated?.(created.id);
       } else if (editingSource) {
         await alertSourcesApi.update(editingSource.uuid, {
           name: formData.name,
@@ -128,10 +139,11 @@ export function useAlertSourceManagement() {
       setEditingSource(null);
       setFormData(EMPTY_FORM);
       loadData();
+      onChange?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save alert source');
     }
-  }, [formData, isCreating, editingSource, loadData]);
+  }, [formData, isCreating, editingSource, loadData, scope?.connectorUUID, onChange, onCreated]);
 
   const handleDelete = useCallback(
     async (uuid: string) => {
@@ -141,11 +153,12 @@ export function useAlertSourceManagement() {
         setError('');
         await alertSourcesApi.delete(uuid);
         loadData();
+        onChange?.();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to delete alert source');
       }
     },
-    [loadData],
+    [loadData, onChange],
   );
 
   const handleCancel = useCallback(() => {
@@ -172,8 +185,8 @@ export function useAlertSourceManagement() {
   const selectedType = sourceTypes.find((t) => t.name === formData.source_type_name);
 
   return {
-    sources,
-    sourceTypes,
+    sources: scopedAlertSources(sources, scope),
+    sourceTypes: creatableAlertTypes(sourceTypes, scope),
     channels,
     loading,
     error,

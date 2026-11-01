@@ -6,8 +6,14 @@ import { useToolManagement } from '../../hooks/useToolManagement';
 import { useSSHKeyManagement } from '../../hooks/useSSHKeyManagement';
 import EmptyState from '../shared/EmptyState';
 import type { ToolInstance } from '../../types';
+import type { PartScope } from './partScope';
 
-export default function ToolsSection() {
+interface ToolsSectionProps {
+  // Limit the list and the "new" form to one connector.
+  scope?: PartScope;
+}
+
+export default function ToolsSection({ scope }: ToolsSectionProps = {}) {
   const {
     tools,
     toolTypes,
@@ -26,7 +32,7 @@ export default function ToolsSection() {
     handleDelete,
     handleCancel: baseHandleCancel,
     updateSetting,
-  } = useToolManagement();
+  } = useToolManagement(scope);
 
   const ssh = useSSHKeyManagement(setError);
 
@@ -45,7 +51,7 @@ export default function ToolsSection() {
 
   return (
     <div>
-      {!isCreating && !editingTool && (
+      {!isCreating && !editingTool && toolTypes.length > 0 && (
         <div className="mb-4 flex justify-end">
           <button onClick={handleCreate} className="btn btn-primary">
             <Plus className="w-4 h-4" />

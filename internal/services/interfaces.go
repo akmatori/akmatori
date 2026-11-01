@@ -243,6 +243,7 @@ type ConnectorManager interface {
 	Attach(connectorUUID, kind string, id uint) error
 	Detach(connectorUUID, kind string, id uint) (*database.Connector, error)
 	PruneEmpty()
+	LookupByPart(kind string, id uint) (string, error)
 }
 
 // MCPGateway is the handler-facing surface of MCPGatewayClient.

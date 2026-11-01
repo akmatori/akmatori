@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ArrowDown, ArrowUp, Info, Pencil, Plus, Trash2 } from 'lucide-react';
 import LoadingSpinner from '../LoadingSpinner';
 import ErrorMessage from '../ErrorMessage';
@@ -34,6 +35,17 @@ interface FormattingRulesSectionProps {
   onStatusChange?: (status: 'configured' | 'disabled' | undefined) => void;
 }
 
+// prefillFromParams builds the new-rule form for ?new=1 links.
+function prefillFromParams(params: URLSearchParams): FormattingRuleFormState | null {
+  if (params.get('new') !== '1') return null;
+  const state = emptyRuleFormState();
+  state.matchChannelUUID = params.get('channel') ?? '';
+  state.matchSourceUUID = params.get('source') ?? '';
+  if (state.matchSourceUUID) state.matchSourceKind = params.get('kind') ?? 'alert';
+  state.name = params.get('name') ?? '';
+  return state;
+}
+
 export default function FormattingRulesSection({ onStatusChange }: FormattingRulesSectionProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -47,9 +59,15 @@ export default function FormattingRulesSection({ onStatusChange }: FormattingRul
   const [skills, setSkills] = useState<Skill[]>([]);
   const [postChannels, setPostChannels] = useState<Channel[]>([]);
 
+  // A connector page links here with ?new=1&channel=<uuid> or
+  // &source=<uuid>&name=...: open the "new rule" editor already scoped to
+  // that destination or trigger. Read once at mount.
+  const [searchParams] = useSearchParams();
+  const [prefill] = useState(() => prefillFromParams(searchParams));
+
   // Editor state: null = closed, '' = creating, uuid = editing that rule.
-  const [editingUUID, setEditingUUID] = useState<string | null>(null);
-  const [form, setForm] = useState<FormattingRuleFormState>(emptyRuleFormState());
+  const [editingUUID, setEditingUUID] = useState<string | null>(prefill ? '' : null);
+  const [form, setForm] = useState<FormattingRuleFormState>(prefill ?? emptyRuleFormState());
   const [schemaJsonError, setSchemaJsonError] = useState<string | null>(null);
   const [exprError, setExprError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);

@@ -109,6 +109,15 @@ func (f *FlexTime) Scan(value interface{}) error {
 	return errors.New("FlexTime: unsupported scan type")
 }
 
+// Value implements the driver.Valuer interface. GORM requires it before it
+// accepts the type as a scan target in a struct.
+func (f FlexTime) Value() (driver.Value, error) {
+	if f.Time.IsZero() {
+		return nil, nil
+	}
+	return f.Time, nil
+}
+
 func (f *FlexTime) parse(s string) error {
 	for _, layout := range flexTimeLayouts {
 		if t, err := time.Parse(layout, s); err == nil {

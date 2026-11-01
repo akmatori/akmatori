@@ -90,6 +90,7 @@ type ConnectorCounts struct {
 // ConnectorSummary is one row of the Connectors list. It carries no
 // credentials.
 type ConnectorSummary struct {
+	ID           uint            `json:"id"`
 	UUID         string          `json:"uuid"`
 	Name         string          `json:"name"`
 	CatalogID    string          `json:"catalog_id"`
@@ -291,7 +292,7 @@ func (s *ConnectorService) build(ctx context.Context, rows *connectorRows, cat *
 	out := make([]ConnectorDetail, len(rows.connectors))
 	for i, c := range rows.connectors {
 		d := &out[i]
-		d.UUID, d.Name, d.CatalogID, d.CreatedAt = c.UUID, c.Name, c.CatalogID, c.CreatedAt
+		d.ID, d.UUID, d.Name, d.CatalogID, d.CreatedAt = c.ID, c.UUID, c.Name, c.CatalogID, c.CreatedAt
 		d.Parts = ConnectorParts{
 			ToolInstances: []ConnectorToolPart{},
 			AlertSources:  []ConnectorAlertPart{},
@@ -769,6 +770,25 @@ func linkManagedTool(tx *gorm.DB, mcpID, connectorID uint) error {
 		return nil
 	}
 	return tx.Model(&database.ToolInstance{}).Where("tool_type_id IN ?", typeIDs).Update("connector_id", connectorID).Error
+}
+
+// LookupByPart returns the UUID of the connector a part belongs to.
+func (s *ConnectorService) LookupByPart(kind string, id uint) (string, error) {
+	p, err := s.loadPart(s.db, kind, id)
+	if err != nil {
+		return "", err
+	}
+	if p.connectorID == nil {
+		return "", ErrConnectorNotFound
+	}
+	var c database.Connector
+	if err := s.db.First(&c, *p.connectorID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", ErrConnectorNotFound
+		}
+		return "", err
+	}
+	return c.UUID, nil
 }
 
 // pruneConnector deletes a connector that has no parts left.

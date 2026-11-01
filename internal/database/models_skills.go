@@ -26,15 +26,15 @@ type Skill struct {
 
 // ToolType represents a predefined tool type (e.g., zabbix, grafana)
 type ToolType struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	Name        string    `gorm:"uniqueIndex;not null" json:"name"` // Snake_case tool name matching directory (e.g., "aws_cloudwatch")
-	Description string    `gorm:"type:text" json:"description"`
-	Schema      JSONB     `gorm:"type:jsonb" json:"schema"` // JSON schema for settings validation
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	Name        string `gorm:"uniqueIndex;not null" json:"name"` // Snake_case tool name matching directory (e.g., "aws_cloudwatch")
+	Description string `gorm:"type:text" json:"description"`
+	Schema      JSONB  `gorm:"type:jsonb" json:"schema"` // JSON schema for settings validation
 	// Kind is empty for built-in and HTTP-connector types, ToolTypeKindMCP for
 	// the type the API manages for a custom MCP server.
 	Kind      string    `gorm:"size:16;not null;default:''" json:"kind"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 
 	// Relationships
 	Instances []ToolInstance `gorm:"foreignKey:ToolTypeID" json:"instances,omitempty"`
