@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1131,12 +1132,12 @@ func TestGracefulShutdown(t *testing.T) {
 }
 
 func TestStartSchemaRefreshLoop(t *testing.T) {
-	callCount := 0
+	var callCount atomic.Int32
 	srv := mockSSEServer(t, func(req mcp.Request) mcp.Response {
 		if req.Method == "tools/list" {
-			callCount++
+			n := callCount.Add(1)
 			return mcp.NewResponse(req.ID, mcp.ListToolsResult{
-				Tools: []mcp.Tool{{Name: fmt.Sprintf("t_%d", callCount)}},
+				Tools: []mcp.Tool{{Name: fmt.Sprintf("t_%d", n)}},
 			})
 		}
 		return mcp.NewResponse(req.ID, nil)
@@ -1157,7 +1158,7 @@ func TestStartSchemaRefreshLoop(t *testing.T) {
 		t.Fatalf("connect failed: %v", err)
 	}
 
-	initialCount := callCount
+	initialCount := callCount.Load()
 
 	// Start refresh loop with very short interval
 	pool.StartSchemaRefreshLoop(50 * time.Millisecond)
@@ -1165,8 +1166,8 @@ func TestStartSchemaRefreshLoop(t *testing.T) {
 	// Wait for at least one refresh
 	time.Sleep(200 * time.Millisecond)
 
-	if callCount <= initialCount {
+	if callCount.Load() <= initialCount {
 		t.Errorf("expected schema refresh to have run, initial calls=%d, current=%d",
-			initialCount, callCount)
+			initialCount, callCount.Load())
 	}
 }
