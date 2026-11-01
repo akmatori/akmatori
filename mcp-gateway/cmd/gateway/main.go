@@ -143,6 +143,12 @@ func main() {
 		w.Write([]byte(`{"status":"reloaded"}`))
 	})
 
+	// Test an MCP server config with a throwaway connection (called by the API)
+	mux.HandleFunc("/mcp-servers/test", proxyHandler.TestHTTPHandler(tools.LoadStoredMCPServerConfig))
+
+	// Per-server connection status for every loaded MCP server config
+	mux.HandleFunc("/mcp-servers/status", proxyHandler.StatusHTTPHandler())
+
 	// Tool schemas endpoint
 	mux.HandleFunc("/tools", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -41,6 +41,39 @@ func (j JSONB) Value() (driver.Value, error) {
 	return json.Marshal(j)
 }
 
+// JSONStringList is a JSONB column holding a JSON array of strings (or null).
+type JSONStringList []string
+
+// Scan implements the sql.Scanner interface
+func (l *JSONStringList) Scan(value interface{}) error {
+	var raw []byte
+	switch v := value.(type) {
+	case nil:
+		*l = nil
+		return nil
+	case []byte:
+		raw = v
+	case string:
+		raw = []byte(v)
+	default:
+		return errors.New("JSONStringList: unsupported column type")
+	}
+	var list []string
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return err
+	}
+	*l = list
+	return nil
+}
+
+// Value implements the driver.Valuer interface
+func (l JSONStringList) Value() (driver.Value, error) {
+	if l == nil {
+		return nil, nil
+	}
+	return json.Marshal([]string(l))
+}
+
 // ToolType represents a tool type definition
 type ToolType struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
@@ -331,19 +364,21 @@ func GetProxySettings(ctx context.Context) (*ProxySettings, error) {
 }
 
 // MCPServerConfig represents a registered external MCP server for proxying.
+// Command/Args/EnvVars are legacy stdio columns: the gateway no longer reads them.
 type MCPServerConfig struct {
-	ID              uint      `gorm:"primaryKey" json:"id"`
-	Name            string    `gorm:"uniqueIndex;size:128;not null" json:"name"`
-	Transport       string    `gorm:"type:varchar(16);not null" json:"transport"`
-	URL             string    `gorm:"size:512" json:"url,omitempty"`
-	Command         string    `gorm:"size:512" json:"command,omitempty"`
-	Args            JSONB     `gorm:"type:jsonb" json:"args,omitempty"`
-	EnvVars         JSONB     `gorm:"type:jsonb" json:"env_vars,omitempty"`
-	NamespacePrefix string    `gorm:"size:128;not null" json:"namespace_prefix"`
-	AuthConfig      JSONB     `gorm:"type:jsonb" json:"auth_config,omitempty"`
-	Enabled         bool      `gorm:"default:true" json:"enabled"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID              uint           `gorm:"primaryKey" json:"id"`
+	Name            string         `gorm:"uniqueIndex;size:128;not null" json:"name"`
+	Transport       string         `gorm:"type:varchar(16);not null" json:"transport"`
+	URL             string         `gorm:"size:512" json:"url,omitempty"`
+	Command         string         `gorm:"size:512" json:"command,omitempty"`
+	Args            JSONB          `gorm:"type:jsonb" json:"args,omitempty"`
+	EnvVars         JSONB          `gorm:"type:jsonb" json:"env_vars,omitempty"`
+	NamespacePrefix string         `gorm:"size:128;not null" json:"namespace_prefix"`
+	AuthConfig      JSONB          `gorm:"type:jsonb" json:"auth_config,omitempty"`
+	DisabledTools   JSONStringList `gorm:"type:jsonb" json:"disabled_tools,omitempty"`
+	Enabled         bool           `gorm:"default:true" json:"enabled"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 func (MCPServerConfig) TableName() string {

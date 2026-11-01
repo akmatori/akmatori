@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"sort"
 	"sync"
 	"time"
 
@@ -29,6 +31,29 @@ type ServerRegistration struct {
 	Config          MCPServerConfig
 	NamespacePrefix string
 	AuthConfig      json.RawMessage
+	// DisabledTools lists original upstream tool names that must not be
+	// registered or callable.
+	DisabledTools []string
+}
+
+// key is a canonical serialization of everything that affects the connection
+// or the registered tool set. Reload compares keys to find changed servers.
+func (r ServerRegistration) key() string {
+	disabled := append([]string(nil), r.DisabledTools...)
+	sort.Strings(disabled)
+	b, _ := json.Marshal(struct {
+		C string   `json:"c"`
+		N string   `json:"n"`
+		A string   `json:"a"`
+		D []string `json:"d"`
+	}{r.Config.configKey(), r.NamespacePrefix, canonicalJSON(r.AuthConfig), disabled})
+	return string(b)
+}
+
+// registrationStatus is the outcome of the last connect/registration attempt.
+type registrationStatus struct {
+	err       string
+	checkedAt time.Time
 }
 
 // SystemInstanceIDBase is the starting ID for system-level MCP servers (not from DB).
@@ -43,6 +68,7 @@ type ProxyHandler struct {
 	registrations       []ServerRegistration
 	systemRegistrations []ServerRegistration      // system-level servers that survive reloads
 	toolMap             map[string]proxyToolEntry // namespaced tool name -> entry
+	status              map[uint]registrationStatus
 	logger              *slog.Logger
 	onToolsChanged      func() // called when schema refresh updates the tool map
 	stopRetry           chan struct{}
@@ -54,6 +80,71 @@ type proxyToolEntry struct {
 	instanceID   uint
 	originalName string
 	config       MCPServerConfig
+	tool         mcp.Tool // upstream schema (original name)
+}
+
+// unsafeToolNameChars matches characters that may not appear in the tool part
+// of a namespaced name. Dots are replaced too, so mcp.ParseToolName (which
+// splits on the last dot) always yields the namespace prefix as the tool type.
+var unsafeToolNameChars = regexp.MustCompile(`[^A-Za-z0-9_-]`)
+
+// sanitizeToolName maps an upstream tool name to the tool part of a
+// namespaced gateway name.
+func sanitizeToolName(name string) string {
+	return unsafeToolNameChars.ReplaceAllString(name, "_")
+}
+
+// buildToolEntries maps the upstream tools of one registration to namespaced
+// entries. Disabled tools are skipped; on a name collision after sanitizing,
+// the later tool is skipped with a warning.
+func buildToolEntries(reg ServerRegistration, tools []mcp.Tool, logger *slog.Logger) map[string]proxyToolEntry {
+	disabled := make(map[string]bool, len(reg.DisabledTools))
+	for _, name := range reg.DisabledTools {
+		disabled[name] = true
+	}
+	entries := make(map[string]proxyToolEntry, len(tools))
+	for _, tool := range tools {
+		if tool.Name == "" || disabled[tool.Name] {
+			continue
+		}
+		namespacedName := reg.NamespacePrefix + "." + sanitizeToolName(tool.Name)
+		if existing, dup := entries[namespacedName]; dup {
+			logger.Warn("skipping MCP tool whose sanitized name collides with another tool",
+				"instance_id", reg.InstanceID,
+				"namespace", reg.NamespacePrefix,
+				"tool", tool.Name,
+				"collides_with", existing.originalName,
+				"namespaced_name", namespacedName,
+			)
+			continue
+		}
+		entries[namespacedName] = proxyToolEntry{
+			instanceID:   reg.InstanceID,
+			originalName: tool.Name,
+			config:       reg.Config,
+			tool:         tool,
+		}
+	}
+	return entries
+}
+
+// routingArgs are injected by the gateway for instance routing and must not
+// reach the external server.
+var routingArgs = []string{"logical_name", "tool_instance_id"}
+
+// stripRoutingArgs returns a copy of args without the gateway routing keys.
+func stripRoutingArgs(args map[string]interface{}) map[string]interface{} {
+	if args == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(args))
+	for k, v := range args {
+		out[k] = v
+	}
+	for _, k := range routingArgs {
+		delete(out, k)
+	}
+	return out
 }
 
 // NewProxyHandler creates a new MCP proxy handler.
@@ -65,6 +156,7 @@ func NewProxyHandler(pool *MCPConnectionPool, logger *slog.Logger) *ProxyHandler
 		pool:                pool,
 		limiters:            make(map[uint]*ratelimit.Limiter),
 		toolMap:             make(map[string]proxyToolEntry),
+		status:              make(map[uint]registrationStatus),
 		logger:              logger,
 		stopRetry:           make(chan struct{}),
 		systemRetryInterval: DefaultSystemRetryInterval,
@@ -91,10 +183,33 @@ func (h *ProxyHandler) LoadAndRegister(ctx context.Context, loader MCPServerConf
 		return fmt.Errorf("load MCP server configs: %w", err)
 	}
 
+	newKeys := make(map[uint]string, len(registrations))
+	for _, reg := range registrations {
+		newKeys[reg.InstanceID] = reg.key()
+	}
+
 	h.mu.Lock()
+	// Reconcile: drop pool state for servers that were deleted, disabled or
+	// changed, so the next connect uses the new URL/auth.
+	var stale []uint
+	for _, old := range h.registrations {
+		if newKey, ok := newKeys[old.InstanceID]; !ok || newKey != old.key() {
+			stale = append(stale, old.InstanceID)
+			delete(h.limiters, old.InstanceID)
+		}
+	}
+	for id := range h.status {
+		if _, ok := newKeys[id]; !ok {
+			delete(h.status, id)
+		}
+	}
 	h.registrations = registrations
 	h.toolMap = make(map[string]proxyToolEntry)
 	h.mu.Unlock()
+
+	for _, id := range stale {
+		h.pool.Remove(id)
+	}
 
 	for _, reg := range registrations {
 		if err := h.registerServer(ctx, reg); err != nil {
@@ -163,6 +278,7 @@ func (h *ProxyHandler) RegisterSystemServer(ctx context.Context, reg ServerRegis
 func (h *ProxyHandler) registerServer(ctx context.Context, reg ServerRegistration) error {
 	conn, err := h.pool.GetOrConnect(ctx, reg.InstanceID, reg.Config)
 	if err != nil {
+		h.recordStatus(reg.InstanceID, err)
 		return fmt.Errorf("connect: %w", err)
 	}
 
@@ -170,28 +286,40 @@ func (h *ProxyHandler) registerServer(ctx context.Context, reg ServerRegistratio
 	tools := conn.tools
 	conn.mu.RUnlock()
 
+	entries := buildToolEntries(reg, tools, h.logger)
+
 	// Create rate limiter for this server if not exists
 	h.mu.Lock()
 	if _, exists := h.limiters[reg.InstanceID]; !exists {
 		h.limiters[reg.InstanceID] = ratelimit.New(DefaultProxyRatePerSecond, DefaultProxyBurstCapacity)
 	}
-
-	for _, tool := range tools {
-		namespacedName := reg.NamespacePrefix + "." + tool.Name
-		h.toolMap[namespacedName] = proxyToolEntry{
-			instanceID:   reg.InstanceID,
-			originalName: tool.Name,
-			config:       reg.Config,
+	for name, entry := range h.toolMap {
+		if entry.instanceID == reg.InstanceID {
+			delete(h.toolMap, name)
 		}
 	}
+	for name, entry := range entries {
+		h.toolMap[name] = entry
+	}
+	h.status[reg.InstanceID] = registrationStatus{checkedAt: time.Now().UTC()}
 	h.mu.Unlock()
 
 	h.logger.Info("registered MCP proxy server",
 		"instance_id", reg.InstanceID,
 		"namespace", reg.NamespacePrefix,
-		"tools", len(tools),
+		"tools", len(entries),
 	)
 	return nil
+}
+
+func (h *ProxyHandler) recordStatus(instanceID uint, err error) {
+	st := registrationStatus{checkedAt: time.Now().UTC()}
+	if err != nil {
+		st.err = err.Error()
+	}
+	h.mu.Lock()
+	h.status[instanceID] = st
+	h.mu.Unlock()
 }
 
 // CallTool proxies a tool call to the appropriate external MCP server.
@@ -212,12 +340,15 @@ func (h *ProxyHandler) CallTool(ctx context.Context, toolName string, args map[s
 		// Tool not in the map — check if it belongs to a system registration
 		// that failed to connect. If so, try re-registering on demand.
 		if reg, ok := h.findSystemRegistrationByTool(toolName); ok {
-			if result, err := h.retrySystemCallOnce(ctx, reg, toolName, args); err == nil {
+			if result, err := h.retrySystemCallOnce(ctx, reg, toolName, stripRoutingArgs(args)); err == nil {
 				return result, nil
 			}
 		}
 		return nil, fmt.Errorf("proxy tool not found: %s", toolName)
 	}
+
+	// Never forward the gateway's routing keys to the external server.
+	args = stripRoutingArgs(args)
 
 	// Apply rate limiting
 	if limiter != nil {
@@ -321,43 +452,22 @@ func (h *ProxyHandler) retrySystemCallOnce(ctx context.Context, reg ServerRegist
 }
 
 // GetTools returns the MCP tool definitions for all registered proxy tools,
-// with namespaced names. These are suitable for registration in the gateway's MCP server.
+// with namespaced (sanitized) names, sorted by name. These are suitable for
+// registration in the gateway's MCP server. Schemas come from the tool map,
+// so a connection closed for idleness does not hide its tools.
 func (h *ProxyHandler) GetTools() []mcp.Tool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	// Collect unique instance IDs to batch-fetch tools
-	instanceTools := make(map[uint][]mcp.Tool)
-	instancePrefix := make(map[uint]string)
-
+	result := make([]mcp.Tool, 0, len(h.toolMap))
 	for namespacedName, entry := range h.toolMap {
-		// We need the original tool schemas from the pool
-		if _, seen := instanceTools[entry.instanceID]; !seen {
-			tools, ok := h.pool.GetTools(entry.instanceID)
-			if ok {
-				instanceTools[entry.instanceID] = tools
-			}
-			// Extract prefix from the namespaced name
-			prefix := namespacedName[:len(namespacedName)-len(entry.originalName)-1]
-			instancePrefix[entry.instanceID] = prefix
-		}
+		result = append(result, mcp.Tool{
+			Name:        namespacedName,
+			Description: entry.tool.Description,
+			InputSchema: entry.tool.InputSchema,
+		})
 	}
-
-	var result []mcp.Tool
-	for instID, tools := range instanceTools {
-		prefix := instancePrefix[instID]
-		for _, tool := range tools {
-			namespacedName := prefix + "." + tool.Name
-			if _, mapped := h.toolMap[namespacedName]; mapped {
-				result = append(result, mcp.Tool{
-					Name:        namespacedName,
-					Description: tool.Description,
-					InputSchema: tool.InputSchema,
-				})
-			}
-		}
-	}
-
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result
 }
 
@@ -390,31 +500,21 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 	h.pool.SetSchemaRefreshCallback(func(instanceID uint, tools []mcp.Tool) {
 		h.mu.Lock()
 
-		// Find the namespace prefix and config from registrations (not toolMap),
-		// so servers that initially had zero tools can still be updated.
-		var prefix string
-		var config MCPServerConfig
-		for _, reg := range h.registrations {
-			if reg.InstanceID == instanceID {
-				prefix = reg.NamespacePrefix
-				config = reg.Config
+		// Find the registration (not toolMap), so servers that initially had
+		// zero tools can still be updated.
+		var reg ServerRegistration
+		found := false
+		for _, r := range append(append([]ServerRegistration(nil), h.registrations...), h.systemRegistrations...) {
+			if r.InstanceID == instanceID {
+				reg, found = r, true
 				break
 			}
 		}
-		// Also check system registrations
-		if prefix == "" {
-			for _, reg := range h.systemRegistrations {
-				if reg.InstanceID == instanceID {
-					prefix = reg.NamespacePrefix
-					config = reg.Config
-					break
-				}
-			}
-		}
-		if prefix == "" {
+		if !found {
 			h.mu.Unlock()
 			return
 		}
+		prefix := reg.NamespacePrefix
 
 		// Remove old tools for this instance
 		for name, entry := range h.toolMap {
@@ -423,14 +523,9 @@ func (h *ProxyHandler) StartSchemaRefreshLoop(interval time.Duration) {
 			}
 		}
 
-		// Re-add with updated tool list, preserving config
-		for _, tool := range tools {
-			namespacedName := prefix + "." + tool.Name
-			h.toolMap[namespacedName] = proxyToolEntry{
-				instanceID:   instanceID,
-				originalName: tool.Name,
-				config:       config,
-			}
+		// Re-add with updated tool list (same sanitizing and disabled_tools rules)
+		for name, entry := range buildToolEntries(reg, tools, h.logger) {
+			h.toolMap[name] = entry
 		}
 
 		h.logger.Info("updated proxy tools after schema refresh",

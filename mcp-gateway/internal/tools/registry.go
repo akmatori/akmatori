@@ -7,6 +7,7 @@ import (
 	"log"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -253,8 +254,9 @@ var builtInToolNamespaces = map[string]bool{
 
 // DefaultMCPProxyLoader loads MCP server configs from the database and converts them
 // to proxy handler registrations. Configs whose namespace_prefix matches a built-in
-// tool namespace are skipped to avoid overriding built-in tools with proxy namespaces
-// that bypass the per-incident allowlist.
+// tool namespace are skipped to avoid overriding built-in tools. Only remote HTTP
+// servers are supported: rows with another transport (e.g. legacy "stdio") are
+// skipped with a warning.
 func DefaultMCPProxyLoader(ctx context.Context) ([]mcpproxy.ServerRegistration, error) {
 	configs, err := database.GetAllEnabledMCPServerConfigs(ctx)
 	if err != nil {
@@ -268,48 +270,50 @@ func DefaultMCPProxyLoader(ctx context.Context) ([]mcpproxy.ServerRegistration, 
 				"config_id", cfg.ID, "namespace_prefix", cfg.NamespacePrefix)
 			continue
 		}
-		// Convert database Args JSONB to string slice
-		var args []string
-		if cfg.Args != nil {
-			if argsRaw, ok := cfg.Args["args"]; ok {
-				if argsJSON, err := json.Marshal(argsRaw); err == nil {
-					if err := json.Unmarshal(argsJSON, &args); err != nil {
-						slog.Warn("failed to parse MCP server args", "config_id", cfg.ID, "error", err)
-					}
-				}
-			}
+		if strings.TrimSpace(cfg.NamespacePrefix) == "" {
+			slog.Warn("skipping MCP proxy config with empty namespace_prefix", "config_id", cfg.ID)
+			continue
 		}
-
-		// Convert database EnvVars JSONB to string map
-		envVars := make(map[string]string)
-		for k, v := range cfg.EnvVars {
-			if s, ok := v.(string); ok {
-				envVars[k] = s
-			}
+		if !mcpproxy.IsSupportedTransport(mcpproxy.TransportType(cfg.Transport)) {
+			slog.Warn("skipping MCP proxy config with unsupported transport (only http is supported)",
+				"config_id", cfg.ID, "namespace_prefix", cfg.NamespacePrefix, "transport", cfg.Transport)
+			continue
 		}
-
-		var authConfig json.RawMessage
-		if cfg.AuthConfig != nil {
-			authConfig, _ = json.Marshal(cfg.AuthConfig)
-		}
-
-		regs = append(regs, mcpproxy.ServerRegistration{
-			InstanceID:      cfg.ID,
-			NamespacePrefix: cfg.NamespacePrefix,
-			AuthConfig:      authConfig,
-			Config: mcpproxy.MCPServerConfig{
-				Transport:       mcpproxy.TransportType(cfg.Transport),
-				URL:             cfg.URL,
-				Command:         cfg.Command,
-				Args:            args,
-				EnvVars:         envVars,
-				NamespacePrefix: cfg.NamespacePrefix,
-				AuthConfig:      authConfig,
-			},
-		})
+		regs = append(regs, MCPServerRegistrationFromDB(cfg))
 	}
 
 	return regs, nil
+}
+
+// MCPServerRegistrationFromDB converts a database row to a proxy registration.
+// The legacy stdio columns (command, args, env_vars) are ignored.
+func MCPServerRegistrationFromDB(cfg database.MCPServerConfig) mcpproxy.ServerRegistration {
+	var authConfig json.RawMessage
+	if len(cfg.AuthConfig) > 0 {
+		authConfig, _ = json.Marshal(cfg.AuthConfig)
+	}
+	return mcpproxy.ServerRegistration{
+		InstanceID:      cfg.ID,
+		NamespacePrefix: cfg.NamespacePrefix,
+		AuthConfig:      authConfig,
+		DisabledTools:   []string(cfg.DisabledTools),
+		Config: mcpproxy.MCPServerConfig{
+			Transport:       mcpproxy.TransportType(cfg.Transport),
+			URL:             cfg.URL,
+			NamespacePrefix: cfg.NamespacePrefix,
+			AuthConfig:      authConfig,
+		},
+	}
+}
+
+// LoadStoredMCPServerConfig loads one MCP server config by ID for the
+// /mcp-servers/test endpoint (enabled or not).
+func LoadStoredMCPServerConfig(ctx context.Context, id uint) (mcpproxy.MCPServerConfig, error) {
+	cfg, err := database.GetMCPServerConfigByID(ctx, id)
+	if err != nil {
+		return mcpproxy.MCPServerConfig{}, err
+	}
+	return MCPServerRegistrationFromDB(*cfg).Config, nil
 }
 
 // HTTPConnectorLoader is a function that loads enabled HTTP connectors from the database.
@@ -462,7 +466,6 @@ func (r *Registry) ReloadMCPProxyTools(loader mcpproxy.MCPServerConfigLoader) {
 func (r *Registry) registerProxyToolsFromHandler() {
 	tools := r.proxyHandler.GetTools()
 	handler := r.proxyHandler
-	seenNamespaces := make(map[string]bool)
 
 	for _, tool := range tools {
 		toolName := tool.Name
@@ -478,15 +481,6 @@ func (r *Registry) registerProxyToolsFromHandler() {
 			return result, nil
 		})
 		r.proxyToolNames = append(r.proxyToolNames, tool.Name)
-
-		// Register the namespace as a proxy namespace so it bypasses per-incident
-		// allowlist checks. This is needed for single-segment namespaces that
-		// don't contain dots.
-		namespace, _ := mcp.ParseToolName(toolName)
-		if !seenNamespaces[namespace] {
-			r.server.AddProxyNamespace(namespace)
-			seenNamespaces[namespace] = true
-		}
 	}
 
 	r.logger.Printf("Registered %d MCP proxy tools", len(tools))
