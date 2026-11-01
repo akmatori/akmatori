@@ -55,7 +55,7 @@ func seedSlackIntegration(t *testing.T, db *gorm.DB) *database.Integration {
 func TestChannelService_CreateIntegration_RejectsUnknownProvider(t *testing.T) {
 	svc, _ := setupChannelServiceTest(t)
 
-	_, err := svc.CreateIntegration(database.MessagingProvider("discord"), "Discord", nil, true)
+	_, err := svc.CreateIntegration(database.MessagingProvider("matrix"), "Matrix", nil, true)
 	if err == nil {
 		t.Fatal("CreateIntegration with unknown provider error = nil, want error")
 	}

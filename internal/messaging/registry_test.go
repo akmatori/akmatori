@@ -88,20 +88,3 @@ func TestRegistry_List_IsSorted(t *testing.T) {
 		t.Errorf("List = %v, want [slack telegram] (sorted)", got)
 	}
 }
-
-func TestTelegramProvider_AllMethodsReturnNotImplemented(t *testing.T) {
-	p := NewTelegramProvider()
-
-	if got := p.Name(); got != database.MessagingProviderTelegram {
-		t.Errorf("Name = %q, want %q", got, database.MessagingProviderTelegram)
-	}
-	if _, err := p.PostMessage(context.Background(), &database.Channel{}, "hello"); !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("PostMessage error = %v, want ErrNotImplemented", err)
-	}
-	if _, err := p.PostThreadReply(context.Background(), &database.Channel{}, "1", "hello"); !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("PostThreadReply error = %v, want ErrNotImplemented", err)
-	}
-	if err := p.UpdateMessage(context.Background(), &database.Channel{}, "1", "hello"); !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("UpdateMessage error = %v, want ErrNotImplemented", err)
-	}
-}

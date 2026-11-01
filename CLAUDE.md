@@ -21,7 +21,7 @@ internal/api/               API request/response helpers
 internal/database/          GORM models and DB logic
 internal/handlers/          HTTP, WebSocket, Slack handlers
 internal/logging/           slog setup
-internal/messaging/         provider abstraction (Slack, Telegram stub)
+internal/messaging/         provider abstraction (Slack, Telegram, Discord)
 internal/output/            structured agent output parsing
 internal/services/          business logic and interfaces
 internal/setup/             first-run bootstrap

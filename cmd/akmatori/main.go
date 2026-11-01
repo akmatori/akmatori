@@ -241,11 +241,11 @@ func main() {
 	channelService := services.NewChannelService()
 	providerRegistry := messaging.NewRegistry()
 	providerRegistry.Register(messaging.NewSlackProvider(slackManager))
-	// Telegram is registered as a stub so the registry distinguishes
-	// "known provider, not yet implemented" (ErrNotImplemented) from
-	// "unknown provider" (ErrProviderNotRegistered). Without this, a
-	// Telegram-configured Channel would silently no-op at post time.
+	// Telegram and Discord are outbound-only Bot API providers; they read
+	// the bot token from the channel's Integration at call time, so
+	// credential edits take effect without a reload.
 	providerRegistry.Register(messaging.NewTelegramProvider())
+	providerRegistry.Register(messaging.NewDiscordProvider())
 	alertHandler.SetChannelService(channelService)
 	alertHandler.SetProviderRegistry(providerRegistry)
 
