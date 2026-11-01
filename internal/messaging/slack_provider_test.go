@@ -243,3 +243,62 @@ func TestSlackProvider_NewSlackProvider_LiveClient(t *testing.T) {
 		t.Errorf("expected slack.New client to hit /chat.update, got %q", lastPath)
 	}
 }
+
+func slackOptionText(t *testing.T, opts []slack.MsgOption) string {
+	t.Helper()
+	_, values, err := slack.UnsafeApplyMsgOptions("xoxb-test", "C123", "https://slack.example/api/", opts...)
+	if err != nil {
+		t.Fatalf("apply msg options: %v", err)
+	}
+	return values.Get("text")
+}
+
+// TestSlackProvider_RendersMarkdownToMrkdwn proves the Slack boundary converts
+// provider-neutral Markdown exactly once and caps the byte budget.
+func TestSlackProvider_RendersMarkdownToMrkdwn(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"bold", "**Alert: disk full**", "*Alert: disk full*"},
+		{"heading", "## Summary", "*Summary*"},
+		{"link", "see [run](https://x.example/r/1)", "see <https://x.example/r/1|run>"},
+		{"hard break stripped", "**Status:** ok  \n**Summary:** fine  \n", "*Status:* ok\n*Summary:* fine\n"},
+		{"mrkdwn unchanged", "*Alert: disk full*\n• item", "*Alert: disk full*\n• item"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := &fakeSlackClient{}
+			p := newSlackProviderFromClient(fake)
+			if _, err := p.PostMessage(context.Background(), &database.Channel{ExternalID: "C123"}, tt.in); err != nil {
+				t.Fatalf("PostMessage: %v", err)
+			}
+			if got := slackOptionText(t, fake.postOptions); got != tt.want {
+				t.Errorf("text = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSlackProvider_EnforcesByteBudget(t *testing.T) {
+	fake := &fakeSlackClient{}
+	p := newSlackProviderFromClient(fake)
+	long := strings.Repeat("line of text\n", 2000)
+	if _, err := p.PostThreadReply(context.Background(), &database.Channel{ExternalID: "C123"}, "1.2", long); err != nil {
+		t.Fatalf("PostThreadReply: %v", err)
+	}
+	got := slackOptionText(t, fake.postOptions)
+	if len(got) > SlackMaxTextBytes {
+		t.Errorf("len = %d, want <= %d", len(got), SlackMaxTextBytes)
+	}
+	if !strings.Contains(got, "truncated") {
+		t.Errorf("expected truncation notice, got tail %q", got[len(got)-80:])
+	}
+	if err := p.UpdateMessage(context.Background(), &database.Channel{ExternalID: "C123"}, "1.2", "**done**"); err != nil {
+		t.Fatalf("UpdateMessage: %v", err)
+	}
+	if got := slackOptionText(t, fake.updateOptions); got != "*done*" {
+		t.Errorf("update text = %q, want *done*", got)
+	}
+}

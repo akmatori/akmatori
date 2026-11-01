@@ -24,6 +24,10 @@ var (
 	mdTableRowPattern = regexp.MustCompile(`(?m)^\|(.+)\|\s*$`)
 	// Markdown horizontal rule: --- or *** or ___
 	mdHRPattern = regexp.MustCompile(`(?m)^[\s]*([-*_]){3,}\s*$`)
+	// Markdown hard line break: two or more trailing spaces before a newline.
+	// Slack has no use for them; strip so the bytes do not count against the
+	// message budget.
+	mdHardBreakPattern = regexp.MustCompile(` {2,}\n`)
 	// Fenced code blocks must pass through untouched.
 	mdFencedCodeBlockPattern = regexp.MustCompile("(?s)```.*?```")
 )
@@ -212,6 +216,9 @@ func MarkdownToSlack(text string) string {
 
 	// Convert horizontal rules: --- -> ———
 	text = mdHRPattern.ReplaceAllString(text, "———")
+
+	// Drop Markdown hard-break trailing spaces (see RenderMarkdown).
+	text = mdHardBreakPattern.ReplaceAllString(text, "\n")
 
 	return restoreFencedCodeBlocks(text, codeBlocks)
 }
