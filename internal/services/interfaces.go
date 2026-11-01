@@ -227,9 +227,29 @@ type ProposalManager interface {
 type MCPServerManager interface {
 	CreateMCPServer(config *database.MCPServerConfig) (*database.MCPServerConfig, error)
 	GetMCPServer(id uint) (*database.MCPServerConfig, error)
-	UpdateMCPServer(id uint, updates map[string]interface{}) (*database.MCPServerConfig, error)
+	UpdateMCPServer(id uint, patch MCPServerPatch) (*database.MCPServerConfig, error)
 	DeleteMCPServer(id uint) error
 	ListMCPServers() ([]database.MCPServerConfig, error)
+}
+
+// ConnectorManager is the handler-facing surface of ConnectorService.
+type ConnectorManager interface {
+	Catalog() ([]ConnectorCatalogEntry, error)
+	List(ctx context.Context) ([]ConnectorSummary, error)
+	Get(ctx context.Context, connectorUUID string) (*ConnectorDetail, error)
+	Rename(connectorUUID, name string) (*database.Connector, error)
+	Delete(ctx context.Context, connectorUUID string) error
+	LinkNew(kind string, id uint, connectorUUID string) (*database.Connector, error)
+	Attach(connectorUUID, kind string, id uint) error
+	Detach(connectorUUID, kind string, id uint) (*database.Connector, error)
+	PruneEmpty()
+	LookupByPart(kind string, id uint) (string, error)
+}
+
+// MCPGateway is the handler-facing surface of MCPGatewayClient.
+type MCPGateway interface {
+	Test(ctx context.Context, req MCPTestRequest) (*MCPTestResult, error)
+	Status(ctx context.Context) (map[uint]MCPServerRuntimeStatus, error)
 }
 
 // StaleIncidentCloser is the handler-facing surface of the stale-close sweep.

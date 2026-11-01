@@ -10,6 +10,7 @@ import (
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/messaging"
 	"github.com/akmatori/akmatori/internal/services"
 	"github.com/slack-go/slack"
 )
@@ -130,15 +131,17 @@ func (h *AlertHandler) postAlertMessage(channel *database.Channel, channelID str
 		return "", nil
 	}
 
-	// Format alert message
+	// Format the alert banner as provider-neutral Markdown; the messaging
+	// provider renders it for its platform (Slack: mrkdwn). Each field line
+	// ends in a Markdown hard break so the lines stay separate everywhere.
 	emoji := database.GetSeverityEmoji(alert.Severity)
-	message := fmt.Sprintf(`%s *Alert: %s*
+	message := fmt.Sprintf(`%s **Alert: %s**
 
-:label: *Source:* %s
-:computer: *Host:* %s
-:gear: *Service:* %s
-:warning: *Severity:* %s
-:memo: *Summary:* %s`,
+:label: **Source:** %s  
+:computer: **Host:** %s  
+:gear: **Service:** %s  
+:warning: **Severity:** %s  
+:memo: **Summary:** %s`,
 		emoji,
 		alert.AlertName,
 		source,
@@ -149,7 +152,7 @@ func (h *AlertHandler) postAlertMessage(channel *database.Channel, channelID str
 	)
 
 	if alert.RunbookURL != "" {
-		message += fmt.Sprintf("\n:book: *Runbook:* %s", alert.RunbookURL)
+		message += fmt.Sprintf("  \n:book: **Runbook:** %s", alert.RunbookURL)
 	}
 
 	// Post message via the messaging provider when available; fall back to
@@ -160,7 +163,7 @@ func (h *AlertHandler) postAlertMessage(channel *database.Channel, channelID str
 		return "", err
 	}
 	if ts == "" {
-		_, t, err := slackClient.PostMessage(channelID, slack.MsgOptionText(message, false))
+		_, t, err := slackClient.PostMessage(channelID, slack.MsgOptionText(messaging.RenderSlack(message), false))
 		if err != nil {
 			return "", err
 		}

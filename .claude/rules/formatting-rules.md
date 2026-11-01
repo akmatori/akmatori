@@ -34,7 +34,9 @@ formatting mechanism; no match → raw response. `/api/settings/formatting` is 4
   tags (explicit false/0 must persist)
 - `inferSchema` derives specs from the example; schema instruction appended automatically (never
   repeat it in the prompt); `validateAgainstSpecs` + one retry, then raw; renders via
-  `output.RenderForSlack` (empty → raw)
+  `output.RenderMarkdown` (empty → raw) — the stored response is neutral Markdown; Slack mrkdwn
+  conversion happens only at the Slack boundary (`MarkdownToSlack` in the Slack provider /
+  `finalizeSlackMessageBody`), never before storage
 - rule editor `hydrateField`/`dehydrateField` keep backend fallbacks authoritative;
   `output.FormatForSlack` unchanged — keep it
 
@@ -42,7 +44,8 @@ Key files:
 - `internal/services/response_formatter.go` — rule-driven rewrite stage (`FormatForFlow`)
 - `internal/services/formatting_rule_matcher.go` — `FormatFlow`, `MatchFormattingRule`, `BuildFormatFlow`
 - `internal/services/formatter_schema.go` — `inferSchema`, `buildSchemaInstruction`, `validateAgainstSpecs`
-- `internal/output/schema_render.go` — schema-driven Slack mrkdwn rendering
+- `internal/output/schema_render.go` — schema-driven Markdown rendering (`RenderMarkdown`;
+  `RenderForSlack` = `MarkdownToSlack(RenderMarkdown(...))`)
 - `internal/handlers/api_formatting_rules.go` — CRUD + reorder
 - `web/src/components/settings/FormattingRulesSection.tsx` (shared fields in `FormattingConfigFields.tsx`)
 - `web/src/components/settings/formattingSettingsHelpers.ts` — keep constants aligned with Go defaults

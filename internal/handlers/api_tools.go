@@ -7,6 +7,7 @@ import (
 
 	"github.com/akmatori/akmatori/internal/api"
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/services"
 )
 
 // handleToolTypes handles GET /api/tool-types
@@ -43,6 +44,14 @@ func (h *APIHandler) handleTools(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if !h.checkConnectorTarget(w, r, req.ConnectorUUID) {
+			return
+		}
+		if managed, err := h.isManagedToolType(req.ToolTypeID); err == nil && managed {
+			api.RespondError(w, http.StatusBadRequest, "this tool type belongs to an MCP server; add the MCP server as a connector instead")
+			return
+		}
+
 		instance, err := h.toolService.CreateToolInstance(req.ToolTypeID, req.Name, req.LogicalName, req.Settings)
 		if err != nil {
 			if containsString(err.Error(), "validation failed") {
@@ -55,6 +64,10 @@ func (h *APIHandler) handleTools(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		h.linkNewPart(services.PartToolInstance, instance.ID, req.ConnectorUUID)
+		if fresh, err := h.toolService.GetToolInstance(instance.ID); err == nil && fresh != nil {
+			instance = fresh
+		}
 		api.RespondJSON(w, http.StatusCreated, instance)
 
 	default:
@@ -95,6 +108,9 @@ func (h *APIHandler) handleToolByID(w http.ResponseWriter, r *http.Request) {
 		api.RespondJSON(w, http.StatusOK, instance)
 
 	case http.MethodPut:
+		if h.rejectManagedTool(w, uint(id)) {
+			return
+		}
 		var req api.UpdateToolInstanceRequest
 		if err := api.DecodeJSON(r, &req); err != nil {
 			api.RespondError(w, http.StatusBadRequest, err.Error())
@@ -119,15 +135,44 @@ func (h *APIHandler) handleToolByID(w http.ResponseWriter, r *http.Request) {
 		api.RespondJSON(w, http.StatusOK, instance)
 
 	case http.MethodDelete:
+		if h.rejectManagedTool(w, uint(id)) {
+			return
+		}
 		if err := h.toolService.DeleteToolInstance(uint(id)); err != nil {
 			api.RespondError(w, http.StatusInternalServerError, "Failed to delete tool")
 			return
 		}
+		h.afterPartDeleted()
 		api.RespondNoContent(w)
 
 	default:
 		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
+}
+
+// isManagedToolType reports whether a tool type is the managed type of an
+// MCP server.
+func (h *APIHandler) isManagedToolType(toolTypeID uint) (bool, error) {
+	db := database.GetDB()
+	if db == nil {
+		return false, nil
+	}
+	var tt database.ToolType
+	if err := db.Select("kind").First(&tt, toolTypeID).Error; err != nil {
+		return false, err
+	}
+	return tt.Kind == database.ToolTypeKindMCP, nil
+}
+
+// rejectManagedTool answers 409 for the tool instance an MCP server owns:
+// it changes only through /api/mcp-servers. Returns true when it answered.
+func (h *APIHandler) rejectManagedTool(w http.ResponseWriter, id uint) bool {
+	instance, err := h.toolService.GetToolInstance(id)
+	if err != nil || instance == nil || instance.ToolType.Kind != database.ToolTypeKindMCP {
+		return false
+	}
+	api.RespondError(w, http.StatusConflict, "this tool belongs to an MCP server; change or delete it on its connector")
+	return true
 }
 
 // maskSSHKeys removes private_key from SSH keys in the response

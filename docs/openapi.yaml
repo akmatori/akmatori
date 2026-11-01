@@ -85,14 +85,16 @@ components:
     Integration:
       type: object
       description: |
-        A configured connection to a messaging provider (Slack, Telegram, ...).
-        Credentials are stored as a JSON blob whose shape is provider-specific.
+        A configured connection to a messaging provider (Slack, Telegram, Discord).
+        Credentials are stored as a JSON blob whose shape is provider-specific;
+        Telegram and Discord use {"bot_token": "..."}. Secret values are masked
+        in responses.
       properties:
         id: {type: integer}
         uuid: {type: string, format: uuid}
         provider:
           type: string
-          enum: [slack, telegram]
+          enum: [slack, telegram, discord]
         name: {type: string}
         credentials:
           type: object
@@ -103,11 +105,12 @@ components:
 
     IntegrationCreateRequest:
       type: object
+      description: Telegram and Discord integrations require credentials.bot_token.
       required: [provider, name]
       properties:
         provider:
           type: string
-          enum: [slack, telegram]
+          enum: [slack, telegram, discord]
         name: {type: string}
         credentials:
           type: object
@@ -116,7 +119,9 @@ components:
 
     IntegrationUpdateRequest:
       type: object
-      description: Provider is immutable on update.
+      description: |
+        Provider is immutable on update. Credential keys are merged into the
+        stored blob; an omitted or empty secret keeps the existing value.
       properties:
         name: {type: string}
         credentials:
@@ -160,7 +165,7 @@ components:
         external_id: {type: string}
         display_name: {type: string}
         can_post: {type: boolean}
-        can_listen: {type: boolean}
+        can_listen: {type: boolean, description: "Slack only; true is rejected (400) for outbound-only Telegram and Discord integrations"}
         is_default_post: {type: boolean}
         extraction_prompt: {type: string}
         process_human_messages: {type: boolean}
@@ -1640,6 +1645,34 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /integrations/{uuid}/test:
+    parameters:
+      - name: uuid
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    post:
+      summary: Verify the integration's stored credentials
+      description: |
+        Calls the platform with the stored bot token (Telegram getMe, Discord
+        GET /users/@me, Slack auth.test). Platform failures return 200 with
+        ok=false and an error message.
+      operationId: testIntegration
+      tags: [Integrations]
+      responses:
+        '200':
+          description: Test result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: {type: boolean}
+                  account: {type: string, description: Bot account name}
+                  error: {type: string}
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /channels:
     get:
       summary: List channels (optionally filtered)
@@ -2179,3 +2212,263 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Memory'}
+
+  # ===== Connectors =====
+  /connectors:
+    get:
+      summary: List connectors
+      description: |
+        A connector groups the parts that talk to one system: tool instances,
+        alert webhooks, a messaging integration, or a remote MCP server. No
+        credentials are returned. Status is coarse: ok, connected, disabled,
+        needs_setup, error or unknown.
+      operationId: listConnectors
+      tags: [Connectors]
+      responses:
+        '200':
+          description: Connectors
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object }
+  /connectors/catalog:
+    get:
+      summary: Connector catalog
+      description: Every kind of connector that can be added, with its capabilities and accepted part types.
+      operationId: getConnectorCatalog
+      tags: [Connectors]
+      responses:
+        '200':
+          description: Catalog entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object }
+  /connectors/lookup:
+    get:
+      summary: Find the connector of a part
+      operationId: lookupConnector
+      tags: [Connectors]
+      parameters:
+        - { name: kind, in: query, required: true, schema: { type: string, enum: [tool_instance, alert_source, integration, mcp_server] } }
+        - { name: id, in: query, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Connector UUID
+          content:
+            application/json:
+              schema: { type: object, properties: { connector_uuid: { type: string } } }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /connectors/{uuid}:
+    parameters:
+      - { name: uuid, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Get a connector with its parts
+      operationId: getConnector
+      tags: [Connectors]
+      responses:
+        '200': { description: Connector detail, content: { application/json: { schema: { type: object } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      summary: Rename a connector
+      operationId: renameConnector
+      tags: [Connectors]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [name], properties: { name: { type: string } } }
+      responses:
+        '200': { description: Connector detail, content: { application/json: { schema: { type: object } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Delete a connector and every part it groups
+      description: Deletes tools (with skill and cron assignments), alert webhooks (their URLs stop working), the messaging integration with its channels, and the MCP server.
+      operationId: deleteConnector
+      tags: [Connectors]
+      responses:
+        '204': { description: Deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /connectors/{uuid}/parts:
+    post:
+      summary: Move a part into this connector
+      description: The part must match the connector's catalog entry. Its old connector is deleted when it is left empty. Webhook URLs and tool names do not change.
+      operationId: attachConnectorPart
+      tags: [Connectors]
+      parameters:
+        - { name: uuid, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, id]
+              properties:
+                kind: { type: string, enum: [tool_instance, alert_source, integration, mcp_server] }
+                id: { type: integer }
+      responses:
+        '200': { description: Connector detail, content: { application/json: { schema: { type: object } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /connectors/{uuid}/parts/{kind}/{id}:
+    delete:
+      summary: Move a part out into a connector of its own
+      operationId: detachConnectorPart
+      tags: [Connectors]
+      parameters:
+        - { name: uuid, in: path, required: true, schema: { type: string } }
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [tool_instance, alert_source, integration] } }
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: The new connector
+          content:
+            application/json:
+              schema: { type: object, properties: { connector_uuid: { type: string } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ===== Remote MCP servers (custom connectors) =====
+  /mcp-servers:
+    get:
+      summary: List remote MCP servers
+      description: Secrets in auth_config are replaced by "********"; the auth summary tells whether one is stored.
+      operationId: listMCPServers
+      tags: [MCP Servers]
+      responses:
+        '200': { description: MCP servers, content: { application/json: { schema: { type: array, items: { type: object } } } } }
+    post:
+      summary: Add a remote MCP server
+      description: |
+        Only remote servers (MCP Streamable HTTP at an http(s) URL) are supported;
+        command, args and env_vars are rejected. namespace_prefix defaults to
+        ext.<name slug>. A managed tool instance is created so the server can be
+        assigned to skills and cron jobs like any tool. connector_uuid is optional.
+      operationId: createMCPServer
+      tags: [MCP Servers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, url]
+              properties:
+                name: { type: string }
+                url: { type: string, example: 'https://mcp.example.com/mcp' }
+                transport: { type: string, enum: [http] }
+                namespace_prefix: { type: string, example: ext.github }
+                auth_config:
+                  type: object
+                  description: '{"type":"bearer","token":...} | {"type":"header","header_name":...,"value":...} | {"type":"oauth", optional client_id/client_secret/scope}'
+                disabled_tools: { type: array, items: { type: string } }
+                connector_uuid: { type: string }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { type: object } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { description: Name, namespace or tool name already in use }
+  /mcp-servers/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+    get:
+      summary: Get a remote MCP server
+      operationId: getMCPServer
+      tags: [MCP Servers]
+      responses:
+        '200': { description: MCP server, content: { application/json: { schema: { type: object } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Update a remote MCP server
+      description: 'auth_config: absent = unchanged, null = remove, object = replace; a missing, empty or "********" secret keeps the stored one when the type does not change.'
+      operationId: updateMCPServer
+      tags: [MCP Servers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { type: object } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Delete a remote MCP server and its managed tool instance
+      operationId: deleteMCPServer
+      tags: [MCP Servers]
+      responses:
+        '204': { description: Deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /mcp-servers/test:
+    post:
+      summary: Test unsaved MCP server settings
+      description: The gateway opens a throwaway connection (same network policy as real calls) and lists the tools. A 401 from the server sets auth_required and returns its WWW-Authenticate header.
+      operationId: testMCPServer
+      tags: [MCP Servers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [url], properties: { url: { type: string }, auth_config: { type: object } } }
+      responses:
+        '200': { description: Result (ok or error), content: { application/json: { schema: { type: object } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '502': { description: Gateway unreachable }
+  /mcp-servers/{id}/test:
+    post:
+      summary: Test a stored MCP server
+      description: Optional url and auth_config override the stored values; masked secrets use the stored ones.
+      operationId: testStoredMCPServer
+      tags: [MCP Servers]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Result, content: { application/json: { schema: { type: object } } } }
+  /mcp-servers/status:
+    get:
+      summary: Gateway connection status of every MCP server
+      operationId: getMCPServerStatus
+      tags: [MCP Servers]
+      responses:
+        '200': { description: Status, content: { application/json: { schema: { type: object } } } }
+  /mcp-servers/{id}/oauth/start:
+    post:
+      summary: Start OAuth sign-in for an MCP server
+      description: Discovers the authorization server (RFC 9728 / RFC 8414), registers a client when needed (RFC 7591) and returns the URL to open in the browser (PKCE S256, resource indicator). The redirect URL is <General settings base URL>/api/mcp-servers/oauth/callback.
+      operationId: startMCPOAuth
+      tags: [MCP Servers]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Authorization URL
+          content:
+            application/json:
+              schema: { type: object, properties: { authorize_url: { type: string } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /mcp-servers/{id}/oauth/disconnect:
+    post:
+      summary: Forget the OAuth tokens of an MCP server
+      operationId: disconnectMCPOAuth
+      tags: [MCP Servers]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '204': { description: Signed out }
+  /mcp-servers/oauth/callback:
+    get:
+      summary: OAuth redirect target (public)
+      description: The authorization server redirects the browser here. The one-time state ties it to a flow started by a logged-in operator. Redirects to the connector page with ?oauth=connected or ?oauth_error=.
+      operationId: mcpOAuthCallback
+      security: []
+      tags: [MCP Servers]
+      parameters:
+        - { name: state, in: query, schema: { type: string } }
+        - { name: code, in: query, schema: { type: string } }
+        - { name: error, in: query, schema: { type: string } }
+      responses:
+        '200': { description: HTML page that returns to the UI }

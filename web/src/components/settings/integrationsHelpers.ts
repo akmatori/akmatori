@@ -1,6 +1,6 @@
 import type { MessagingProvider } from '../../types';
 
-// ProviderUIConfig captures everything the IntegrationsManager UI needs to
+// ProviderUIConfig captures everything the integration panel needs to
 // know to render a provider's row: display label, whether the "Add" button
 // is enabled (the data model already supports a provider even when the
 // runtime is a stub), and the description string used in tooltips.
@@ -23,9 +23,8 @@ export interface ProviderUIConfig {
 }
 
 // PROVIDER_CONFIGS is the single source of truth for which providers the UI
-// supports and which are "coming soon". Telegram is intentionally present but
-// disabled — the data model accepts a Telegram integration so operators can
-// pre-configure one, but the IntegrationsManager UI marks it as not yet ready.
+// supports. Telegram and Discord are outbound-only: their channels can post
+// alerts and cron results but cannot listen (the API rejects can_listen).
 export const PROVIDER_CONFIGS: ProviderUIConfig[] = [
   {
     provider: 'slack',
@@ -60,14 +59,31 @@ export const PROVIDER_CONFIGS: ProviderUIConfig[] = [
     provider: 'telegram',
     label: 'Telegram',
     iconText: 'TG',
-    available: false,
-    description: 'Telegram integration is not yet available. The data model is ready for when the provider lands.',
+    available: true,
+    description: 'Post alerts and cron results to Telegram chats through a bot (outbound only).',
     credentialFields: [
       {
         name: 'bot_token',
         label: 'Bot Token',
         secret: true,
-        placeholder: 'Available in a future release',
+        placeholder: '123456789:AA...',
+        hint: 'From @BotFather. Add the bot to each chat; channel ID = chat ID (e.g. -1001234567890 or @channel, optional :topic).',
+      },
+    ],
+  },
+  {
+    provider: 'discord',
+    label: 'Discord',
+    iconText: 'DC',
+    available: true,
+    description: 'Post alerts and cron results to Discord channels through a bot (outbound only).',
+    credentialFields: [
+      {
+        name: 'bot_token',
+        label: 'Bot Token',
+        secret: true,
+        placeholder: 'Bot token from the Discord developer portal',
+        hint: 'The bot needs Send Messages and Read Message History in each channel; channel ID = Discord channel ID.',
       },
     ],
   },

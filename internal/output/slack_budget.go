@@ -178,3 +178,11 @@ func safeUTF8Slice(s string, n int) string {
 	}
 	return s[:n]
 }
+
+// TruncateSlackBytes truncates text to at most maxBytes (valid UTF-8, cut on
+// a line boundary when one is close) and appends the "...truncated" notice
+// when it had to cut. Used by the Slack messaging provider to enforce its
+// byte budget at send time.
+func TruncateSlackBytes(text string, maxBytes int) string {
+	return truncateBytes(text, maxBytes)
+}

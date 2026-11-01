@@ -1,147 +1,132 @@
 package database
 
 import (
+	"strings"
 	"testing"
 )
 
-func TestMCPServerConfig_Validate_ValidSSE(t *testing.T) {
-	config := &MCPServerConfig{
+func validRemoteMCPConfig() *MCPServerConfig {
+	return &MCPServerConfig{
 		Name:            "github-mcp",
-		Transport:       MCPServerTransportSSE,
-		URL:             "http://localhost:8080/mcp",
+		Transport:       MCPServerTransportHTTP,
+		URL:             "https://mcp.example.com/mcp",
 		NamespacePrefix: "ext.github",
 	}
+}
 
-	if err := config.Validate(); err != nil {
-		t.Errorf("expected no error, got %v", err)
+func TestMCPServerConfig_Validate_RemoteTransports(t *testing.T) {
+	for _, tr := range []MCPServerTransport{MCPServerTransportHTTP, MCPServerTransportSSE} {
+		c := validRemoteMCPConfig()
+		c.Transport = tr
+		if err := c.Validate(); err != nil {
+			t.Errorf("transport %q: expected no error, got %v", tr, err)
+		}
+	}
+	c := validRemoteMCPConfig()
+	c.URL = "http://10.0.0.5:8080/mcp"
+	if err := c.Validate(); err != nil {
+		t.Errorf("plain http URL should be valid, got %v", err)
 	}
 }
 
-func TestMCPServerConfig_Validate_ValidStdio(t *testing.T) {
-	config := &MCPServerConfig{
-		Name:            "local-tool",
-		Transport:       MCPServerTransportStdio,
-		Command:         "/usr/local/bin/my-mcp-server",
-		NamespacePrefix: "ext.local",
-	}
-
-	if err := config.Validate(); err != nil {
-		t.Errorf("expected no error, got %v", err)
-	}
-}
-
-func TestMCPServerConfig_Validate_MissingName(t *testing.T) {
-	config := &MCPServerConfig{
-		Transport:       MCPServerTransportSSE,
-		URL:             "http://localhost/mcp",
-		NamespacePrefix: "ext.test",
-	}
-
-	err := config.Validate()
-	if err == nil {
-		t.Error("expected error for missing name")
-	}
-	if err.Error() != "name is required" {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestMCPServerConfig_Validate_MissingNamespacePrefix(t *testing.T) {
-	config := &MCPServerConfig{
-		Name:      "test",
-		Transport: MCPServerTransportSSE,
-		URL:       "http://localhost/mcp",
-	}
-
-	err := config.Validate()
-	if err == nil {
-		t.Error("expected error for missing namespace_prefix")
-	}
-	if err.Error() != "namespace_prefix is required" {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestMCPServerConfig_Validate_InvalidTransport(t *testing.T) {
-	config := &MCPServerConfig{
-		Name:            "test",
-		Transport:       MCPServerTransport("invalid"),
-		NamespacePrefix: "ext.test",
-	}
-
-	err := config.Validate()
-	if err == nil {
-		t.Error("expected error for invalid transport")
-	}
-	if err.Error() != "transport must be 'sse' or 'stdio'" {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestMCPServerConfig_Validate_SSE_MissingURL(t *testing.T) {
-	config := &MCPServerConfig{
-		Name:            "test",
-		Transport:       MCPServerTransportSSE,
-		NamespacePrefix: "ext.test",
-	}
-
-	err := config.Validate()
-	if err == nil {
-		t.Error("expected error for missing URL with SSE transport")
-	}
-	if err.Error() != "url is required for SSE transport" {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestMCPServerConfig_Validate_Stdio_MissingCommand(t *testing.T) {
-	config := &MCPServerConfig{
-		Name:            "test",
-		Transport:       MCPServerTransportStdio,
-		NamespacePrefix: "ext.test",
-	}
-
-	err := config.Validate()
-	if err == nil {
-		t.Error("expected error for missing command with stdio transport")
-	}
-	if err.Error() != "command is required for stdio transport" {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestMCPServerConfig_TableName(t *testing.T) {
-	config := MCPServerConfig{}
-	if config.TableName() != "mcp_server_configs" {
-		t.Errorf("expected table name 'mcp_server_configs', got %q", config.TableName())
-	}
-}
-
-func TestMCPServerConfig_Validate_AllTransportTypes(t *testing.T) {
+func TestMCPServerConfig_Validate_Errors(t *testing.T) {
 	tests := []struct {
-		name      string
-		transport MCPServerTransport
-		wantErr   bool
+		name   string
+		mutate func(*MCPServerConfig)
+		want   string
 	}{
-		{"sse", MCPServerTransportSSE, false},
-		{"stdio", MCPServerTransportStdio, false},
-		{"empty", MCPServerTransport(""), true},
-		{"unknown", MCPServerTransport("grpc"), true},
+		{"missing name", func(c *MCPServerConfig) { c.Name = "  " }, "name is required"},
+		{"missing namespace", func(c *MCPServerConfig) { c.NamespacePrefix = "" }, "namespace_prefix"},
+		{"upper-case namespace", func(c *MCPServerConfig) { c.NamespacePrefix = "Ext.GitHub" }, "namespace_prefix"},
+		{"namespace with dash", func(c *MCPServerConfig) { c.NamespacePrefix = "ext.git-hub" }, "namespace_prefix"},
+		{"namespace trailing dot", func(c *MCPServerConfig) { c.NamespacePrefix = "ext." }, "namespace_prefix"},
+		{"stdio", func(c *MCPServerConfig) { c.Transport = MCPServerTransportStdio; c.URL = ""; c.Command = "/bin/mcp" }, "stdio MCP servers are not supported"},
+		{"unknown transport", func(c *MCPServerConfig) { c.Transport = "grpc" }, "transport must be 'http'"},
+		{"empty transport", func(c *MCPServerConfig) { c.Transport = "" }, "transport must be 'http'"},
+		{"command on http", func(c *MCPServerConfig) { c.Command = "/bin/sh" }, "command, args and env_vars are not supported"},
+		{"args on http", func(c *MCPServerConfig) { c.Args = JSONB{"args": []interface{}{"x"}} }, "command, args and env_vars are not supported"},
+		{"env on http", func(c *MCPServerConfig) { c.EnvVars = JSONB{"K": "v"} }, "command, args and env_vars are not supported"},
+		{"missing url", func(c *MCPServerConfig) { c.URL = "" }, "absolute http"},
+		{"relative url", func(c *MCPServerConfig) { c.URL = "/mcp" }, "absolute http"},
+		{"ftp url", func(c *MCPServerConfig) { c.URL = "ftp://example.com/mcp" }, "absolute http"},
+		{"no host", func(c *MCPServerConfig) { c.URL = "https:///mcp" }, "absolute http"},
+		{"credentials in url", func(c *MCPServerConfig) { c.URL = "https://user:pass@example.com/mcp" }, "must not contain credentials"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config := &MCPServerConfig{
-				Name:            "test",
-				Transport:       tt.transport,
-				URL:             "http://localhost/mcp",
-				Command:         "/usr/bin/test",
-				NamespacePrefix: "ext.test",
+			c := validRemoteMCPConfig()
+			tt.mutate(c)
+			err := c.Validate()
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.want)
 			}
-			err := config.Validate()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want containing %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestMCPServerConfig_Validate_NamespaceShapes(t *testing.T) {
+	for _, ns := range []string{"github", "ext.github", "ext.github_issues", "a.b.c", "x1_2"} {
+		c := validRemoteMCPConfig()
+		c.NamespacePrefix = ns
+		if err := c.Validate(); err != nil {
+			t.Errorf("namespace %q: unexpected error %v", ns, err)
+		}
+	}
+}
+
+func TestStringList_ScanValue(t *testing.T) {
+	var l StringList
+	if err := l.Scan([]byte(`["a","b"]`)); err != nil || len(l) != 2 || l[1] != "b" {
+		t.Fatalf("Scan bytes: %v %v", l, err)
+	}
+	if err := l.Scan(`["c"]`); err != nil || len(l) != 1 || l[0] != "c" {
+		t.Fatalf("Scan string: %v %v", l, err)
+	}
+	for _, v := range []interface{}{nil, []byte("null"), []byte("")} {
+		if err := l.Scan(v); err != nil || l != nil {
+			t.Fatalf("Scan %v: want nil list, got %v %v", v, l, err)
+		}
+	}
+	if err := l.Scan(42); err == nil {
+		t.Fatal("Scan int: want error")
+	}
+	if v, err := StringList(nil).Value(); err != nil || v != nil {
+		t.Fatalf("nil Value = %v %v", v, err)
+	}
+	v, err := StringList{"x"}.Value()
+	if err != nil || string(v.([]byte)) != `["x"]` {
+		t.Fatalf("Value = %v %v", v, err)
+	}
+}
+
+func TestFlexTime_Scan(t *testing.T) {
+	cases := []interface{}{
+		"2026-11-01T10:00:00Z",
+		"2026-11-01 10:00:00.123456789+00:00",
+		"2026-11-01 10:00:00",
+		[]byte("2026-11-01 10:00:00.5"),
+	}
+	for _, c := range cases {
+		var f FlexTime
+		if err := f.Scan(c); err != nil {
+			t.Errorf("Scan(%v): %v", c, err)
+			continue
+		}
+		if f.Time.Year() != 2026 || f.Time.Hour() != 10 {
+			t.Errorf("Scan(%v) = %v", c, f.Time)
+		}
+	}
+	var f FlexTime
+	if err := f.Scan(nil); err != nil || !f.Time.IsZero() {
+		t.Errorf("Scan(nil) = %v %v", f.Time, err)
+	}
+	if err := f.Scan("yesterday"); err == nil {
+		t.Error("Scan(garbage): want error")
+	}
+	if err := f.Scan(3.5); err == nil {
+		t.Error("Scan(float): want error")
 	}
 }

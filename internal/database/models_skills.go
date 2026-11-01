@@ -2,6 +2,9 @@ package database
 
 import (
 	"fmt"
+	"net/url"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -23,12 +26,15 @@ type Skill struct {
 
 // ToolType represents a predefined tool type (e.g., zabbix, grafana)
 type ToolType struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	Name        string    `gorm:"uniqueIndex;not null" json:"name"` // Snake_case tool name matching directory (e.g., "aws_cloudwatch")
-	Description string    `gorm:"type:text" json:"description"`
-	Schema      JSONB     `gorm:"type:jsonb" json:"schema"` // JSON schema for settings validation
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	Name        string `gorm:"uniqueIndex;not null" json:"name"` // Snake_case tool name matching directory (e.g., "aws_cloudwatch")
+	Description string `gorm:"type:text" json:"description"`
+	Schema      JSONB  `gorm:"type:jsonb" json:"schema"` // JSON schema for settings validation
+	// Kind is empty for built-in and HTTP-connector types, ToolTypeKindMCP for
+	// the type the API manages for a custom MCP server.
+	Kind      string    `gorm:"size:16;not null;default:''" json:"kind"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 
 	// Relationships
 	Instances []ToolInstance `gorm:"foreignKey:ToolTypeID" json:"instances,omitempty"`
@@ -42,6 +48,7 @@ type ToolInstance struct {
 	LogicalName string    `gorm:"uniqueIndex;size:128" json:"logical_name"` // Machine-friendly logical name for agent referencing (e.g., "prod-ssh")
 	Settings    JSONB     `gorm:"type:jsonb" json:"settings"`               // Tool-specific settings (URLs, tokens, etc.)
 	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	ConnectorID *uint     `gorm:"index" json:"connector_id,omitempty"` // owning Connector; nil until reconciled
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 
@@ -307,7 +314,12 @@ func (c *HTTPConnector) GetAuthConfig() (*HTTPConnectorAuthConfig, error) {
 // MCPServerTransport represents the transport type for an MCP server connection
 type MCPServerTransport string
 
+// Only remote MCP servers are supported. "http" is the MCP Streamable HTTP
+// endpoint; "sse" is the legacy stored value with the same meaning. "stdio"
+// (a local command run inside the gateway) is no longer accepted: the
+// gateway skips such rows and the migration disables them.
 const (
+	MCPServerTransportHTTP  MCPServerTransport = "http"
 	MCPServerTransportSSE   MCPServerTransport = "sse"
 	MCPServerTransportStdio MCPServerTransport = "stdio"
 )
@@ -324,6 +336,8 @@ type MCPServerConfig struct {
 	EnvVars         JSONB              `gorm:"type:jsonb" json:"env_vars,omitempty"`       // For stdio transport: {"KEY": "value"}
 	NamespacePrefix string             `gorm:"size:128;not null" json:"namespace_prefix"`  // e.g., "ext.github"
 	AuthConfig      JSONB              `gorm:"type:jsonb" json:"auth_config,omitempty"`    // Auth to inject into connections
+	DisabledTools   StringList         `gorm:"type:jsonb" json:"disabled_tools"`           // upstream tool names the gateway does not register
+	ConnectorID     *uint              `gorm:"index" json:"connector_id,omitempty"`
 	Enabled         bool               `gorm:"default:true" json:"enabled"`
 	CreatedAt       time.Time          `json:"created_at"`
 	UpdatedAt       time.Time          `json:"updated_at"`
@@ -333,22 +347,38 @@ func (MCPServerConfig) TableName() string {
 	return "mcp_server_configs"
 }
 
-// Validate checks that the MCPServerConfig has valid configuration
+// Validate checks that the MCPServerConfig has valid configuration. Only
+// remote servers are valid: the URL must be an absolute http(s) URL. The
+// network policy (no loopback, link-local or metadata addresses) is applied
+// by the gateway at connect time, where the resolved IP is known.
 func (c *MCPServerConfig) Validate() error {
-	if c.Name == "" {
+	if strings.TrimSpace(c.Name) == "" {
 		return fmt.Errorf("name is required")
 	}
-	if c.NamespacePrefix == "" {
-		return fmt.Errorf("namespace_prefix is required")
+	if !mcpNamespacePattern.MatchString(c.NamespacePrefix) {
+		return fmt.Errorf("namespace_prefix must be lower-case letters, digits and underscores, in dot-separated segments (e.g. ext.github)")
 	}
-	if c.Transport != MCPServerTransportSSE && c.Transport != MCPServerTransportStdio {
-		return fmt.Errorf("transport must be 'sse' or 'stdio'")
+	switch c.Transport {
+	case MCPServerTransportHTTP, MCPServerTransportSSE:
+	case MCPServerTransportStdio:
+		return fmt.Errorf("stdio MCP servers are not supported; use a remote MCP server URL")
+	default:
+		return fmt.Errorf("transport must be 'http'")
 	}
-	if c.Transport == MCPServerTransportSSE && c.URL == "" {
-		return fmt.Errorf("url is required for SSE transport")
+	if c.Command != "" || len(c.Args) > 0 || len(c.EnvVars) > 0 {
+		return fmt.Errorf("command, args and env_vars are not supported; use a remote MCP server URL")
 	}
-	if c.Transport == MCPServerTransportStdio && c.Command == "" {
-		return fmt.Errorf("command is required for stdio transport")
+	u, err := url.Parse(strings.TrimSpace(c.URL))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("url must be an absolute http:// or https:// URL")
+	}
+	if u.User != nil {
+		return fmt.Errorf("url must not contain credentials; use auth_config")
 	}
 	return nil
 }
+
+// mcpNamespacePattern is the shape of an MCP namespace prefix. The gateway
+// splits tool names on the LAST dot, so the prefix is the tool type and the
+// remainder the upstream tool name.
+var mcpNamespacePattern = regexp.MustCompile(`^[a-z0-9_]+(\.[a-z0-9_]+)*$`)

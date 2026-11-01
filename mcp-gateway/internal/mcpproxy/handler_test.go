@@ -659,7 +659,7 @@ func TestCallTool_GracefulErrorOnServerCrash(t *testing.T) {
 	})
 	defer srv.Close()
 
-	pool := NewPool(
+	pool := NewPool(WithNetPolicy(testPolicy),
 		WithIdleTimeout(time.Minute),
 		WithMaxReconnectAttempts(1),
 		WithBackoff(5*time.Millisecond, 10*time.Millisecond),
@@ -700,7 +700,7 @@ func TestHandlerHealthStatus(t *testing.T) {
 	})
 	defer srv.Close()
 
-	pool := NewPool(
+	pool := NewPool(WithNetPolicy(testPolicy),
 		WithIdleTimeout(time.Minute),
 		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
 			return nil
@@ -736,7 +736,7 @@ func TestHandlerGracefulShutdown(t *testing.T) {
 	})
 	defer srv.Close()
 
-	pool := NewPool(
+	pool := NewPool(WithNetPolicy(testPolicy),
 		WithIdleTimeout(time.Minute),
 		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
 			return nil
@@ -775,7 +775,7 @@ func TestHandlerStartSchemaRefreshLoop_UpdatesToolMap(t *testing.T) {
 	})
 	defer srv.Close()
 
-	pool := NewPool(
+	pool := NewPool(WithNetPolicy(testPolicy),
 		WithIdleTimeout(time.Minute),
 		WithConnectFunc(func(ctx context.Context, conn *MCPConnection) error {
 			return nil

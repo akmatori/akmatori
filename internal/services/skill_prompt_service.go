@@ -866,6 +866,9 @@ gateway_call("events.report_alert", {"alert_name": "Disk usage above 90%%", "sum
 `+"```"+`
 `, logicalName, logicalName, logicalName)
 	default:
+		if tool.ToolType.Kind == database.ToolTypeKindMCP {
+			return fmt.Sprintf("Remote MCP server. List its functions with `list_tools_for_tool_type(\"%s\")`, read one with `get_tool_detail(\"%s.<function>\")`, then call `gateway_call(\"%s.<function>\", {<args>}, \"%s\")`.\n", typeName, typeName, typeName, logicalName)
+		}
 		return fmt.Sprintf("Use `gateway_call(\"%s.<tool_method>\", {<args>}, \"%s\")` to call this tool's methods.\n", typeName, logicalName)
 	}
 }

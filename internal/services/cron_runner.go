@@ -544,9 +544,10 @@ func (r *CronRunner) execute(job *database.CronJob) {
 // formatCronAgentMessage renders the channel-bound summary for an agent-mode
 // cron tick. On error the body still gets a header so the channel reader sees
 // which cron failed; on success it carries the agent's final response. The
-// body is byte-capped so a verbose agent transcript cannot exceed Slack's
-// chat.postMessage limit; truncation appends a short suffix so the operator
-// can tell their output was clipped.
+// body is provider-neutral Markdown (the provider renders it for its platform
+// and enforces its own size limit); it is still byte-capped here so a runaway
+// agent transcript cannot flood a channel with many split messages, and the
+// truncation suffix tells the operator their output was clipped.
 func formatCronAgentMessage(job *database.CronJob, response string, hasError bool, errorMsg string) string {
 	name := strings.TrimSpace(job.Name)
 	if name == "" {
@@ -557,13 +558,13 @@ func formatCronAgentMessage(job *database.CronJob, response string, hasError boo
 		if msg == "" {
 			msg = "Investigation failed"
 		}
-		return capCronMessageBytes(fmt.Sprintf("*%s*\nInvestigation failed: %s", name, msg))
+		return capCronMessageBytes(fmt.Sprintf("**%s**  \nInvestigation failed: %s", name, msg))
 	}
 	body := strings.TrimSpace(response)
 	if body == "" {
 		body = "Investigation completed (no output)"
 	}
-	return capCronMessageBytes(fmt.Sprintf("*%s*\n%s", name, body))
+	return capCronMessageBytes(fmt.Sprintf("**%s**  \n%s", name, body))
 }
 
 // resolveChannel returns the Channel the supplied cron job should post into.
@@ -697,11 +698,11 @@ func buildCronToolAllowlist(tools []database.ToolInstance) []ToolAllowlistEntry 
 	return withEventsTool(entries)
 }
 
-// cronChannelMaxMessageBytes caps the byte size of an outbound cron message.
-// Slack's chat.postMessage hard limit is ~40,000 bytes; we keep the cap at
-// 8000 to match the alert/Slack flow's slackMaxTextBytes so cron messages
-// stay readable in a long thread and so the operator sees their output
-// truncated before Slack truncates it silently.
+// cronChannelMaxMessageBytes caps the byte size of an outbound cron message
+// before it reaches the provider. It is provider-neutral: each provider still
+// enforces its own platform limit at send time (Slack byte budget, Telegram /
+// Discord message splitting). 8000 bytes keeps a cron post readable and
+// bounds Telegram/Discord to a handful of split messages.
 const cronChannelMaxMessageBytes = 8000
 
 // capCronMessageBytes truncates the supplied message to fit

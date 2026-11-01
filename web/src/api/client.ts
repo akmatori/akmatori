@@ -108,7 +108,7 @@ function getAuthHeaders(): Record<string, string> {
   return {};
 }
 
-async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
+export async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> {
   let response: Response;
 
   try {
@@ -228,7 +228,7 @@ export const toolsApi = {
 
   get: (id: number) => fetchApi<ToolInstance>(`/api/tools/${id}`),
 
-  create: (tool: { tool_type_id: number; name: string; logical_name?: string; settings: Record<string, unknown> }) =>
+  create: (tool: { tool_type_id: number; name: string; logical_name?: string; settings: Record<string, unknown>; connector_uuid?: string }) =>
     fetchApi<ToolInstance>('/api/tools', {
       method: 'POST',
       body: JSON.stringify(tool),
@@ -583,6 +583,13 @@ export const integrationsApi = {
   delete: (uuid: string) =>
     fetchApi<void>(`/api/integrations/${uuid}`, {
       method: 'DELETE',
+    }),
+
+  // test asks the provider to verify the stored credentials (Telegram getMe,
+  // Discord /users/@me, Slack auth.test).
+  test: (uuid: string) =>
+    fetchApi<{ ok: boolean; account?: string; error?: string }>(`/api/integrations/${uuid}/test`, {
+      method: 'POST',
     }),
 };
 

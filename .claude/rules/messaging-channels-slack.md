@@ -14,7 +14,8 @@ paths:
 
 Operators configure a messaging `Integration` (provider credentials) and `Channel` rows under it.
 Triggers (alert sources, cron jobs, workspace default) reference Channels by UUID. Slack is
-implemented; Telegram is a registry stub.
+inbound + outbound; Telegram and Discord are outbound-only Bot API providers (`can_listen=true`
+is rejected by the channels API).
 
 - never call Slack APIs directly from handlers or services — resolve a `Channel` and go through
   `ProviderRegistry.Get(channel.Integration.Provider)` (`PostMessage` / `PostThreadReply` /
@@ -30,7 +31,15 @@ implemented; Telegram is a registry stub.
   can_post=false` = silent listener: alerts investigated, results UI-only, no replies/reactions/banner
   (listener flow + `incidentThreadPostable`)
 - the `slack_channel` AlertSourceInstance type is deprecated and UI-hidden; do not reintroduce it
-- Telegram requests surface `ErrNotImplemented` from the registry — never silently no-op
+- outbound text handed to a `Provider` is provider-neutral GitHub-flavored Markdown; each provider
+  renders it and enforces its own limit at send time (Slack: `MarkdownToSlack` + 8000-byte cap;
+  Telegram: HTML `parse_mode`, 4096-char split, plain-text retry on "can't parse entities";
+  Discord: Markdown, 2000-char split, code fences closed/reopened). Never pre-render mrkdwn
+  before a `Provider` call or before storing a response; Slack-only direct-client paths
+  (`finalizeSlackMessageBody`, mention replies) convert at that boundary
+- Telegram/Discord read `bot_token` from the channel's Integration at call time (loaded when not
+  preloaded); Telegram external_id = chat id, optional `chat:topic` suffix; Discord = channel id
+- providers that implement `messaging.CredentialTester` back `POST /api/integrations/{uuid}/test`
 
 ## Slack investigation UX
 
@@ -49,4 +58,5 @@ Key files: `internal/handlers/slack_processor.go` (message/mention handling, rea
 `Channel.ExtractionPrompt`), `internal/handlers/slack_progress.go` (reasoning-line streaming),
 `internal/handlers/alert_slack.go` (outbound routing), `internal/services/channel_service.go`
 (`ResolveDefault`, `ResolveForAlertSource`), `internal/services/slack_summarizer.go`,
-`internal/messaging/` (`Provider`, `ProviderRegistry`, slack provider, telegram stub)
+`internal/messaging/` (`Provider`, `ProviderRegistry`, slack / telegram / discord providers,
+`render_telegram.go`, `render_discord.go`)

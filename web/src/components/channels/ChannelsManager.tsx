@@ -1,5 +1,5 @@
 import EmptyState from '../shared/EmptyState';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Plus, Save, X, Trash2, Edit2 } from 'lucide-react';
 import LoadingSpinner from '../LoadingSpinner';
 import ErrorMessage from '../ErrorMessage';
@@ -39,9 +39,38 @@ const EMPTY_FORM: FormState = {
   enabled: true,
 };
 
-export default function ChannelsManager() {
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [integrations, setIntegrations] = useState<Integration[]>([]);
+interface ChannelsManagerProps {
+  // Show and create channels of one integration only (connector page).
+  integrationUUID?: string;
+  // False for providers that can only post (Telegram, Discord).
+  listenSupported?: boolean;
+  // Extra per-channel cell, e.g. the formatting rules that apply.
+  renderExtra?: (channel: Channel) => ReactNode;
+  extraHeader?: string;
+  onChange?: () => void;
+}
+
+// externalIDHelp tells the operator what to paste as a channel's external ID.
+function externalIDHelp(provider: string): { placeholder: string; help: string } {
+  switch (provider) {
+    case 'telegram':
+      return { placeholder: '-1001234567890', help: 'For Telegram: the chat ID (e.g. -1001234567890 or @channelname). Add the bot to the chat first. For a forum topic use chat_id:topic_id.' };
+    case 'discord':
+      return { placeholder: '123456789012345678', help: 'For Discord: the channel ID (enable Developer Mode, then right-click the channel → Copy Channel ID).' };
+    default:
+      return { placeholder: 'C0123456789', help: 'For Slack: the Channel ID (not the name).' };
+  }
+}
+
+export default function ChannelsManager({
+  integrationUUID,
+  listenSupported = true,
+  renderExtra,
+  extraHeader,
+  onChange,
+}: ChannelsManagerProps = {}) {
+  const [allChannels, setChannels] = useState<Channel[]>([]);
+  const [allIntegrations, setIntegrations] = useState<Integration[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -69,8 +98,20 @@ export default function ChannelsManager() {
     reload();
   }, [reload]);
 
+  const integrations = integrationUUID
+    ? allIntegrations.filter((i) => i.uuid === integrationUUID)
+    : allIntegrations;
+  const scopedIntegrationIDs = new Set(integrations.map((i) => i.id));
+  const channels = integrationUUID
+    ? allChannels.filter((c) => scopedIntegrationIDs.has(c.integration_id))
+    : allChannels;
+
   const integrationByID = (id: number) =>
-    integrations.find((i) => i.id === id) ?? null;
+    allIntegrations.find((i) => i.id === id) ?? null;
+  const formProvider =
+    allIntegrations.find((i) => i.uuid === form.integration_uuid)?.provider ?? integrations[0]?.provider ?? 'slack';
+  const idHelp = externalIDHelp(formProvider);
+  const canListenHere = listenSupported && formProvider === 'slack';
 
   const startCreate = () => {
     setIsCreating(true);
@@ -141,6 +182,7 @@ export default function ChannelsManager() {
       }
       cancel();
       reload();
+      onChange?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save channel');
     }
@@ -151,6 +193,7 @@ export default function ChannelsManager() {
     try {
       await channelsApi.delete(uuid);
       reload();
+      onChange?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete channel');
     }
@@ -162,7 +205,11 @@ export default function ChannelsManager() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <p className="text-sm text-fg-muted">
-          Channels are addressable destinations inside an Integration. Use them to route alert notifications, listen for inbound messages, or set a default outbound destination.
+          {integrationUUID
+            ? canListenHere
+              ? 'Where alert notifications and results go, and which channels the agent listens to.'
+              : 'Where alert notifications and results go. This provider can post only; it does not listen.'
+            : 'Channels are addressable destinations inside an Integration. Use them to route alert notifications, listen for inbound messages, or set a default outbound destination.'}
         </p>
         {!isCreating && !editing && (
           <button
@@ -185,7 +232,7 @@ export default function ChannelsManager() {
             {isCreating ? 'Add channel' : 'Edit channel'}
           </h3>
           <div className="space-y-4">
-            <div>
+            <div className={integrationUUID ? 'hidden' : ''}>
               <label className="block text-sm font-medium text-fg mb-1">
                 Integration <span className="text-red-500">*</span>
               </label>
@@ -211,13 +258,11 @@ export default function ChannelsManager() {
               <input
                 type="text"
                 className="input-field"
-                placeholder="C0123456789"
+                placeholder={idHelp.placeholder}
                 value={form.external_id}
                 onChange={(e) => setForm({ ...form, external_id: e.target.value })}
               />
-              <p className="mt-1 text-xs text-fg-subtle">
-                For Slack: the Channel ID (not the name).
-              </p>
+              <p className="mt-1 text-xs text-fg-subtle">{idHelp.help}</p>
             </div>
 
             <div>
@@ -242,10 +287,14 @@ export default function ChannelsManager() {
                 />
                 <span className="text-sm text-fg">Can post</span>
               </label>
-              <label className="flex items-center gap-2 cursor-pointer">
+              <label
+                className={`flex items-center gap-2 ${canListenHere || form.can_listen ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
+                title={canListenHere ? undefined : 'This provider can post only'}
+              >
                 <input
                   type="checkbox"
                   checked={form.can_listen}
+                  disabled={!canListenHere && !form.can_listen}
                   onChange={(e) => setForm({ ...form, can_listen: e.target.checked })}
                 />
                 <span className="text-sm text-fg">Can listen</span>
@@ -342,9 +391,10 @@ export default function ChannelsManager() {
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-line">
-                <th className="py-2 px-3 text-xs text-fg-subtle">Integration</th>
+                {!integrationUUID && <th className="py-2 px-3 text-xs text-fg-subtle">Integration</th>}
                 <th className="py-2 px-3 text-xs text-fg-subtle">Channel</th>
                 <th className="py-2 px-3 text-xs text-fg-subtle">Roles</th>
+                {renderExtra && <th className="py-2 px-3 text-xs text-fg-subtle">{extraHeader}</th>}
                 <th className="py-2 px-3"></th>
               </tr>
             </thead>
@@ -354,7 +404,7 @@ export default function ChannelsManager() {
                 const provider = integ?.provider ?? '';
                 return (
                   <tr key={ch.uuid} className="border-b border-line">
-                    <td className="py-3 px-3">
+                    {!integrationUUID && <td className="py-3 px-3">
                       <div className="flex items-center gap-2">
                         <div className={`source-icon source-icon-${provider}`}>
                           {providerIconText(provider)}
@@ -368,7 +418,7 @@ export default function ChannelsManager() {
                           </div>
                         </div>
                       </div>
-                    </td>
+                    </td>}
                     <td className="py-3 px-3">
                       <div className="text-sm text-fg">
                         {ch.display_name || ch.external_id}
@@ -384,6 +434,7 @@ export default function ChannelsManager() {
                         ))}
                       </div>
                     </td>
+                    {renderExtra && <td className="py-3 px-3">{renderExtra(ch)}</td>}
                     <td className="py-3 px-3 text-right">
                       <div className="flex gap-2 justify-end">
                         <button

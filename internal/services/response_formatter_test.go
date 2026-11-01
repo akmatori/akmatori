@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/output"
 )
 
 func setupFormatterTestDB(t *testing.T) {
@@ -830,5 +831,46 @@ func TestNewResponseFormatter(t *testing.T) {
 	f := NewResponseFormatter(caller)
 	if f == nil || f.caller == nil {
 		t.Fatal("expected non-nil formatter+caller when constructed with caller")
+	}
+}
+
+// TestResponseFormatter_StoresMarkdownSlackConvertsAtBoundary proves the
+// formatter output (what lands in incident.response / agent_runs.response) is
+// provider-neutral Markdown, and the Slack post derived from it is mrkdwn
+// converted exactly once (no "**" left, labels still bold).
+func TestResponseFormatter_StoresMarkdownSlackConvertsAtBoundary(t *testing.T) {
+	setupFormatterTestDB(t)
+	seedFormatterSettings(t, database.FormattingRule{Enabled: true})
+	seedFormatterLLM(t, defaultLLMForFormatter())
+
+	caller := &fakeOneShotLLMCaller{respond: func(ctx context.Context) (string, error) {
+		return `{"status":"resolved","summary":"Disk freed on web-01.","actions_taken":["rotated logs"],"recommendations":["add alert"]}`, nil
+	}}
+	stored := formatCatchAll(NewResponseFormatter(caller), context.Background(), "raw", "log")
+
+	for _, want := range []string{"**Status:** ✅ resolved", "**Summary:** Disk freed on web-01.", "**Actions Taken:**", " • rotated logs"} {
+		if !strings.Contains(stored, want) {
+			t.Errorf("stored response missing Markdown %q:\n%s", want, stored)
+		}
+	}
+
+	slackBody, err := NewSlackSummarizer(nil).SummarizeForSlack(context.Background(), stored, 4000)
+	if err != nil {
+		t.Fatalf("SummarizeForSlack: %v", err)
+	}
+	if strings.Contains(slackBody, "**") {
+		t.Errorf("Slack body still carries Markdown bold:\n%s", slackBody)
+	}
+	if strings.Contains(slackBody, "  \n") {
+		t.Errorf("Slack body still carries Markdown hard breaks:\n%s", slackBody)
+	}
+	for _, want := range []string{"*Status:* ✅ resolved\n", "*Summary:* Disk freed on web-01.\n", " • rotated logs\n"} {
+		if !strings.Contains(slackBody, want) {
+			t.Errorf("Slack body missing mrkdwn %q:\n%s", want, slackBody)
+		}
+	}
+	// Converting again must be a no-op (no double conversion damage).
+	if again := output.MarkdownToSlack(slackBody); again != slackBody {
+		t.Errorf("MarkdownToSlack not idempotent on mrkdwn:\n%q\n%q", slackBody, again)
 	}
 }

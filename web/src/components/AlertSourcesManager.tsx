@@ -17,6 +17,7 @@ import ErrorMessage from './ErrorMessage';
 import AlertSourceForm from './alerts/AlertSourceForm';
 import { useAlertSourceManagement } from '../hooks/useAlertSourceManagement';
 import { alertSourcesApi } from '../api/client';
+import type { PartScope } from './connectors/partScope';
 
 const sourceTypeIcons: Record<string, string> = {
   alertmanager: 'AM',
@@ -27,7 +28,12 @@ const sourceTypeIcons: Record<string, string> = {
   slack_channel: 'SL',
 };
 
-export default function AlertSourcesManager() {
+interface AlertSourcesManagerProps {
+  // Limit the list and the "new" form to one connector.
+  scope?: PartScope;
+}
+
+export default function AlertSourcesManager({ scope }: AlertSourcesManagerProps = {}) {
   const {
     sources,
     sourceTypes,
@@ -47,7 +53,7 @@ export default function AlertSourcesManager() {
     handleCancel,
     toggleExpand,
     copyWebhookUrl,
-  } = useAlertSourceManagement();
+  } = useAlertSourceManagement(scope);
 
   if (loading) {
     return <LoadingSpinner />;
@@ -58,9 +64,11 @@ export default function AlertSourcesManager() {
       {/* Header with Create Button */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-fg-muted">
-          Configure webhook integrations for monitoring systems like Alertmanager, Grafana, PagerDuty, Datadog, and Zabbix.
+          {scope
+            ? 'Webhooks that receive alerts from this system. Paste the webhook URL into its alerting settings.'
+            : 'Configure webhook integrations for monitoring systems like Alertmanager, Grafana, PagerDuty, Datadog, and Zabbix.'}
         </p>
-        {!isCreating && !editingSource && (
+        {!isCreating && !editingSource && sourceTypes.length > 0 && (
           <button onClick={handleCreate} className="btn btn-primary flex-shrink-0">
             <Plus className="w-4 h-4" />
             New Source

@@ -713,74 +713,6 @@ func TestAuthorization_NoAllowlist_PreservesToolInstanceID(t *testing.T) {
 	}
 }
 
-func TestAuthorization_ProxyToolBypassesAllowlist(t *testing.T) {
-	s := newTestServer()
-	authorizer := auth.NewAuthorizer(time.Hour)
-	defer authorizer.Stop()
-	s.SetAuthorizer(authorizer)
-
-	// Register a proxy tool with compound namespace (e.g., ext.github.create_issue)
-	s.RegisterTool(Tool{
-		Name:        "ext.github.create_issue",
-		Description: "Create GitHub issue",
-		InputSchema: InputSchema{Type: "object"},
-	}, echoHandler)
-
-	// Set allowlist that only includes ssh — no ext.github entries
-	authorizer.SetAllowlist("incident-proxy", []auth.AllowlistEntry{
-		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
-	})
-
-	// Proxy tool should bypass the allowlist because its toolType ("ext.github")
-	// contains a dot, indicating it's not managed by the skill-based assignment system.
-	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
-		CallToolParams{Name: "ext.github.create_issue", Arguments: map[string]interface{}{"title": "test"}},
-		map[string]string{
-			"X-Incident-ID": "incident-proxy",
-		},
-	)
-
-	if resp.Error != nil {
-		t.Fatalf("expected proxy tool to bypass allowlist, got error: %s", resp.Error.Message)
-	}
-}
-
-func TestAuthorization_SingleSegmentProxyToolBypassesAllowlist(t *testing.T) {
-	s := newTestServer()
-	authorizer := auth.NewAuthorizer(time.Hour)
-	defer authorizer.Stop()
-	s.SetAuthorizer(authorizer)
-
-	// Register a single-segment proxy namespace (no dot in namespace).
-	// In production, this is done by registerProxyToolsFromHandler in the registry.
-	s.AddProxyNamespace("sysproxy")
-
-	s.RegisterTool(Tool{
-		Name:        "sysproxy.query",
-		Description: "System proxy tool",
-		InputSchema: InputSchema{Type: "object"},
-	}, echoHandler)
-
-	// Set allowlist that only includes SSH — no proxy entries
-	authorizer.SetAllowlist("incident-sysproxy", []auth.AllowlistEntry{
-		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
-	})
-
-	// sysproxy.query bypasses the allowlist because "sysproxy" is a registered proxy namespace
-	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
-		CallToolParams{Name: "sysproxy.query", Arguments: map[string]interface{}{
-			"searches": []map[string]interface{}{{"type": "lex", "query": "database"}},
-		}},
-		map[string]string{
-			"X-Incident-ID": "incident-sysproxy",
-		},
-	)
-
-	if resp.Error != nil {
-		t.Fatalf("expected sysproxy.query to bypass allowlist, got error: %s", resp.Error.Message)
-	}
-}
-
 func TestAuthorization_NonProxySingleSegmentStillChecked(t *testing.T) {
 	s := newTestServer()
 	authorizer := auth.NewAuthorizer(time.Hour)
@@ -972,48 +904,6 @@ func TestHandleListToolsByType_FilteredByAllowlist_FullAuthorization(t *testing.
 
 	if len(result.Tools) != 2 {
 		t.Errorf("expected 2 tools with full authorization, got %d", len(result.Tools))
-	}
-}
-
-func TestHandleListToolsByType_ProxyNamespaceBypassesAllowlistFilter(t *testing.T) {
-	s := newTestServer()
-	authorizer := auth.NewAuthorizer(time.Hour)
-	defer authorizer.Stop()
-	s.SetAuthorizer(authorizer)
-
-	// Register "sysproxy" as a proxy namespace
-	s.AddProxyNamespace("sysproxy")
-
-	s.SetDiscoverer(&mockDiscoverer{
-		tools: []ToolListItem{
-			{Name: "sysproxy.query", Description: "System proxy tool", ToolType: "sysproxy"},
-		},
-	})
-
-	// Only allow SSH — sysproxy is NOT in allowlist
-	allowlist := []auth.AllowlistEntry{
-		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
-	}
-	allowlistJSON, _ := json.Marshal(allowlist)
-
-	resp := sendJSONRPCWithHeaders(t, s, "tools/list_by_type",
-		ListToolsByTypeParams{ToolType: "sysproxy"},
-		map[string]string{
-			"X-Incident-ID":    "incident-proxy-filter",
-			"X-Tool-Allowlist": string(allowlistJSON),
-		},
-	)
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %s", resp.Error.Message)
-	}
-
-	resultBytes, _ := json.Marshal(resp.Result)
-	var result ListToolsByTypeResult
-	json.Unmarshal(resultBytes, &result)
-
-	// sysproxy should appear despite not being in allowlist (proxy namespace bypass)
-	if len(result.Tools) != 1 {
-		t.Errorf("expected 1 tool (sysproxy proxy bypass), got %d", len(result.Tools))
 	}
 }
 
@@ -1435,115 +1325,6 @@ func TestHandleListToolTypes_EmptyTypes(t *testing.T) {
 	}
 }
 
-func TestHandleListToolTypes_SingleSegmentProxyBypassesAllowlist(t *testing.T) {
-	s := newTestServer()
-	authorizer := auth.NewAuthorizer(time.Hour)
-	defer authorizer.Stop()
-	s.SetAuthorizer(authorizer)
-
-	// sysproxy is a proxy namespace — it should appear in list_tool_types even when
-	// the incident allowlist does not include it.
-	s.AddProxyNamespace("sysproxy")
-	s.SetDiscoverer(&mockDiscoverer{
-		availableTypes: []string{"ssh", "zabbix", "sysproxy"},
-	})
-
-	// Allowlist only contains ssh — no sysproxy entry
-	allowlist := []auth.AllowlistEntry{
-		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
-	}
-	allowlistJSON, _ := json.Marshal(allowlist)
-
-	resp := sendJSONRPCWithHeaders(t, s, "tools/list_types", nil,
-		map[string]string{
-			"X-Incident-ID":    "incident-sysproxy-types",
-			"X-Tool-Allowlist": string(allowlistJSON),
-		},
-	)
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %s", resp.Error.Message)
-	}
-
-	resultBytes, err := json.Marshal(resp.Result)
-	if err != nil {
-		t.Fatalf("failed to marshal result: %v", err)
-	}
-	var result ListToolTypesResult
-	if err := json.Unmarshal(resultBytes, &result); err != nil {
-		t.Fatalf("failed to unmarshal result: %v", err)
-	}
-
-	// Should include ssh (in allowlist) and sysproxy (proxy namespace bypass), but not zabbix
-	typeSet := map[string]bool{}
-	for _, tp := range result.Types {
-		typeSet[tp] = true
-	}
-
-	if !typeSet["ssh"] {
-		t.Error("ssh should be included (in allowlist)")
-	}
-	if !typeSet["sysproxy"] {
-		t.Error("sysproxy should be included (proxy namespace bypasses allowlist)")
-	}
-	if typeSet["zabbix"] {
-		t.Error("zabbix should be filtered out (not in allowlist and not a proxy namespace)")
-	}
-	if len(result.Types) != 2 {
-		t.Errorf("expected 2 types (ssh, sysproxy), got %d: %v", len(result.Types), result.Types)
-	}
-}
-
-func TestHandleListToolTypes_DotNamespacedBypassesAllowlist(t *testing.T) {
-	s := newTestServer()
-	authorizer := auth.NewAuthorizer(time.Hour)
-	defer authorizer.Stop()
-	s.SetAuthorizer(authorizer)
-
-	// Multi-segment namespaces with dots also bypass the allowlist filter
-	s.SetDiscoverer(&mockDiscoverer{
-		availableTypes: []string{"ssh", "custom.monitoring"},
-	})
-
-	allowlist := []auth.AllowlistEntry{
-		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
-	}
-	allowlistJSON, _ := json.Marshal(allowlist)
-
-	resp := sendJSONRPCWithHeaders(t, s, "tools/list_types", nil,
-		map[string]string{
-			"X-Incident-ID":    "incident-dot-ns",
-			"X-Tool-Allowlist": string(allowlistJSON),
-		},
-	)
-	if resp.Error != nil {
-		t.Fatalf("unexpected error: %s", resp.Error.Message)
-	}
-
-	resultBytes, err := json.Marshal(resp.Result)
-	if err != nil {
-		t.Fatalf("failed to marshal result: %v", err)
-	}
-	var result ListToolTypesResult
-	if err := json.Unmarshal(resultBytes, &result); err != nil {
-		t.Fatalf("failed to unmarshal result: %v", err)
-	}
-
-	typeSet := map[string]bool{}
-	for _, tp := range result.Types {
-		typeSet[tp] = true
-	}
-
-	if !typeSet["ssh"] {
-		t.Error("ssh should be included (in allowlist)")
-	}
-	if !typeSet["custom.monitoring"] {
-		t.Error("custom.monitoring should be included (dot-namespaced bypasses allowlist)")
-	}
-	if len(result.Types) != 2 {
-		t.Errorf("expected 2 types, got %d: %v", len(result.Types), result.Types)
-	}
-}
-
 func TestHandleListToolsByType_EmptyResultsWithHint(t *testing.T) {
 	s := newTestServer()
 	s.SetDiscoverer(&mockDiscoverer{
@@ -1732,5 +1513,162 @@ func TestAuthorization_NullAllowlistHeaderDoesNotBypass(t *testing.T) {
 	}
 	if resp.Error.Code != InvalidRequest {
 		t.Errorf("expected error code %d, got %d", InvalidRequest, resp.Error.Code)
+	}
+}
+
+// --- MCP proxy tools are authorized like any other tool type ---
+
+func TestAuthorization_ProxyToolRejectedWithoutAllowlistEntry(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	for _, name := range []string{"ext.github.create_issue", "github.create_issue"} {
+		s.RegisterTool(Tool{Name: name, InputSchema: InputSchema{Type: "object"}}, echoHandler)
+	}
+	authorizer.SetAllowlist("incident-proxy", []auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+	})
+
+	for _, name := range []string{"ext.github.create_issue", "github.create_issue"} {
+		resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+			CallToolParams{Name: name, Arguments: map[string]interface{}{"title": "x"}},
+			map[string]string{"X-Incident-ID": "incident-proxy"},
+		)
+		if resp.Error == nil {
+			t.Errorf("%s: expected rejection, proxy tools must not bypass the allowlist", name)
+		} else if resp.Error.Code != InvalidRequest {
+			t.Errorf("%s: expected code %d, got %d", name, InvalidRequest, resp.Error.Code)
+		}
+	}
+}
+
+func TestAuthorization_ProxyToolAllowedByShadowInstanceEntry(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+
+	var captured map[string]interface{}
+	s.RegisterTool(Tool{Name: "ext.github.create_issue", InputSchema: InputSchema{Type: "object"}},
+		func(_ context.Context, _ string, args map[string]interface{}) (interface{}, error) {
+			captured = args
+			return "ok", nil
+		})
+	authorizer.SetAllowlist("incident-proxy-ok", []auth.AllowlistEntry{
+		{InstanceID: 7, LogicalName: "github", ToolType: "ext.github"},
+	})
+
+	resp := sendJSONRPCWithHeaders(t, s, "tools/call",
+		CallToolParams{Name: "ext.github.create_issue", Arguments: map[string]interface{}{"title": "x"}},
+		map[string]string{"X-Incident-ID": "incident-proxy-ok"},
+	)
+	if resp.Error != nil {
+		t.Fatalf("expected authorized call, got %s", resp.Error.Message)
+	}
+	if captured["logical_name"] != "github" {
+		t.Errorf("expected logical_name injected from allowlist, got %v", captured["logical_name"])
+	}
+}
+
+func TestHandleListToolsByType_ProxyNamespaceFilteredByAllowlist(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+	s.SetDiscoverer(&mockDiscoverer{
+		tools:          []ToolListItem{{Name: "ext.github.query", ToolType: "ext.github"}},
+		availableTypes: []string{"ssh", "ext.github"},
+	})
+
+	allowlistJSON, _ := json.Marshal([]auth.AllowlistEntry{{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"}})
+	resp := sendJSONRPCWithHeaders(t, s, "tools/list_by_type",
+		ListToolsByTypeParams{ToolType: "ext.github"},
+		map[string]string{"X-Incident-ID": "incident-proxy-filter", "X-Tool-Allowlist": string(allowlistJSON)},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result ListToolsByTypeResult
+	_ = json.Unmarshal(resultBytes, &result)
+	if len(result.Tools) != 0 {
+		t.Errorf("expected proxy tool to be filtered out, got %d tools", len(result.Tools))
+	}
+	if !strings.HasSuffix(result.Hint, "Available tool types: ssh") {
+		t.Errorf("hint must list only authorized types: %s", result.Hint)
+	}
+}
+
+func TestHandleListToolTypes_ProxyTypesFilteredByAllowlist(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+	s.SetDiscoverer(&mockDiscoverer{availableTypes: []string{"ssh", "sysproxy", "custom.monitoring", "github"}})
+
+	allowlistJSON, _ := json.Marshal([]auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+		{InstanceID: 9, LogicalName: "github", ToolType: "github"},
+	})
+	resp := sendJSONRPCWithHeaders(t, s, "tools/list_types", nil,
+		map[string]string{"X-Incident-ID": "incident-types", "X-Tool-Allowlist": string(allowlistJSON)},
+	)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+	resultBytes, _ := json.Marshal(resp.Result)
+	var result ListToolTypesResult
+	_ = json.Unmarshal(resultBytes, &result)
+	got := strings.Join(result.Types, ",")
+	if got != "ssh,github" {
+		t.Errorf("expected only allowlisted types [ssh github], got %v", result.Types)
+	}
+}
+
+func TestHandleListTools_FilteredByAllowlist(t *testing.T) {
+	s := newTestServer()
+	authorizer := auth.NewAuthorizer(time.Hour)
+	defer authorizer.Stop()
+	s.SetAuthorizer(authorizer)
+	for _, name := range []string{"ssh.execute_command", "incidents.list", "ext.github.create_issue", "zabbix.get_hosts"} {
+		s.RegisterTool(Tool{Name: name, InputSchema: InputSchema{Type: "object"}}, echoHandler)
+	}
+
+	listNames := func(headers map[string]string) map[string]bool {
+		t.Helper()
+		resp := sendJSONRPCWithHeaders(t, s, "tools/list", nil, headers)
+		if resp.Error != nil {
+			t.Fatalf("unexpected error: %s", resp.Error.Message)
+		}
+		resultBytes, _ := json.Marshal(resp.Result)
+		var result ListToolsResult
+		_ = json.Unmarshal(resultBytes, &result)
+		names := map[string]bool{}
+		for _, tool := range result.Tools {
+			names[tool.Name] = true
+		}
+		return names
+	}
+
+	// No incident ID / no allowlist: everything.
+	if got := listNames(nil); len(got) != 4 {
+		t.Errorf("expected all 4 tools without an allowlist, got %v", got)
+	}
+
+	allowlistJSON, _ := json.Marshal([]auth.AllowlistEntry{
+		{InstanceID: 1, LogicalName: "prod-ssh", ToolType: "ssh"},
+		{ToolType: "incidents"},
+		{InstanceID: 7, LogicalName: "github", ToolType: "ext.github"},
+	})
+	got := listNames(map[string]string{"X-Incident-ID": "inc-list", "X-Tool-Allowlist": string(allowlistJSON)})
+	if len(got) != 3 || !got["ssh.execute_command"] || !got["incidents.list"] || !got["ext.github.create_issue"] {
+		t.Errorf("expected ssh, incidents and ext.github tools, got %v", got)
+	}
+
+	got = listNames(map[string]string{"X-Incident-ID": "inc-empty", "X-Tool-Allowlist": "[]"})
+	if len(got) != 0 {
+		t.Errorf("expected no tools for an empty allowlist, got %v", got)
 	}
 }

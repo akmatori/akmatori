@@ -11,6 +11,7 @@ describe('findNavItem', () => {
     expect(findNavItem('/incidents/abc-123')?.name).toBe('Incidents');
     expect(findNavItem('/proposals/xyz')?.name).toBe('Proposals');
     expect(findNavItem('/settings/ai')?.name).toBe('Settings');
+    expect(findNavItem('/connectors/channels')?.name).toBe('Connectors');
   });
 
   it('does not match on a shared prefix without a slash', () => {

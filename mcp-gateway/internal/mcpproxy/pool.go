@@ -5,12 +5,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
-	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,23 +45,68 @@ const (
 	DefaultMaxBackoff = 10 * time.Second
 )
 
+// MCPProtocolVersion is the MCP protocol revision the gateway asks for in
+// initialize. The server may answer with another revision; the gateway then
+// uses the server's answer.
+const MCPProtocolVersion = "2025-06-18"
+
 // TransportType defines how to communicate with an external MCP server.
+// Only remote MCP over Streamable HTTP is supported.
 type TransportType string
 
 const (
-	TransportSSE   TransportType = "sse"
-	TransportStdio TransportType = "stdio"
+	// TransportHTTP is the canonical value: an MCP Streamable HTTP endpoint URL.
+	TransportHTTP TransportType = "http"
+	// TransportSSE is the legacy stored value; it means the same as TransportHTTP.
+	TransportSSE TransportType = "sse"
 )
+
+// IsSupportedTransport reports whether t is a remote HTTP transport value.
+// An empty value is treated as "http".
+func IsSupportedTransport(t TransportType) bool {
+	switch t {
+	case "", TransportHTTP, TransportSSE:
+		return true
+	}
+	return false
+}
 
 // MCPServerConfig defines the configuration for connecting to an external MCP server.
 type MCPServerConfig struct {
-	Transport       TransportType     `json:"transport"`
-	URL             string            `json:"url,omitempty"`              // For SSE transport
-	Command         string            `json:"command,omitempty"`          // For stdio transport
-	Args            []string          `json:"args,omitempty"`             // For stdio transport
-	EnvVars         map[string]string `json:"env_vars,omitempty"`         // For stdio transport
-	NamespacePrefix string            `json:"namespace_prefix,omitempty"` // e.g., "ext.github"
-	AuthConfig      json.RawMessage   `json:"auth_config,omitempty"`      // Auth to inject
+	Transport       TransportType   `json:"transport"`
+	URL             string          `json:"url,omitempty"`              // MCP Streamable HTTP endpoint
+	NamespacePrefix string          `json:"namespace_prefix,omitempty"` // e.g., "ext.github"
+	AuthConfig      json.RawMessage `json:"auth_config,omitempty"`      // see parseAuthConfig
+}
+
+// configKey is a canonical serialization of the connection-relevant fields,
+// used to detect config changes (not pointer or byte-for-byte equality).
+func (c MCPServerConfig) configKey() string {
+	transport := c.Transport
+	if transport == "" || transport == TransportSSE {
+		transport = TransportHTTP
+	}
+	b, _ := json.Marshal(struct {
+		T string `json:"t"`
+		U string `json:"u"`
+		N string `json:"n"`
+		A string `json:"a"`
+	}{string(transport), strings.TrimSpace(c.URL), c.NamespacePrefix, canonicalJSON(c.AuthConfig)})
+	return string(b)
+}
+
+// canonicalJSON re-encodes raw so that key order and whitespace do not matter.
+func canonicalJSON(raw json.RawMessage) string {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return ""
+	}
+	var v interface{}
+	if err := json.Unmarshal(trimmed, &v); err != nil {
+		return string(trimmed)
+	}
+	b, _ := json.Marshal(v) // map keys are sorted by encoding/json
+	return string(b)
 }
 
 // MCPConnection represents an active connection to an external MCP server.
@@ -74,16 +119,12 @@ type MCPConnection struct {
 	connected  bool
 	closed     bool
 
-	// SSE transport
-	httpClient *http.Client
-	sseCancel  context.CancelFunc
-	sessionID  string // MCP Streamable HTTP session ID (if established)
-
-	// Stdio transport
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	stderr io.ReadCloser
+	// Streamable HTTP transport
+	httpClient      *http.Client
+	auth            *authHeader // injected into every request; secret
+	sessionID       string      // MCP Streamable HTTP session ID (if established)
+	protocolVersion string      // negotiated in initialize
+	serverInfo      ServerInfo  // from the initialize result
 
 	// JSON-RPC state
 	nextID int
@@ -122,8 +163,30 @@ type MCPConnectionPool struct {
 	// Schema refresh callback (called when tools change during refresh)
 	onSchemaRefresh func(instanceID uint, tools []mcp.Tool)
 
+	// SSRF policy for every outbound request
+	policy NetPolicy
+
 	// For testing: allow overriding connect behavior
 	connectFunc func(ctx context.Context, conn *MCPConnection) error
+}
+
+// ServerInfo is the serverInfo object from an MCP initialize result.
+type ServerInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// WithNetPolicy sets the SSRF policy for outbound connections. The default
+// is NetPolicyFromEnv().
+func WithNetPolicy(policy NetPolicy) PoolOption {
+	return func(p *MCPConnectionPool) {
+		p.policy = policy
+	}
+}
+
+// Policy returns the pool's network policy.
+func (p *MCPConnectionPool) Policy() NetPolicy {
+	return p.policy
 }
 
 // PoolOption configures the connection pool.
@@ -193,6 +256,7 @@ func NewPool(opts ...PoolOption) *MCPConnectionPool {
 		maxReconnectAttempts: DefaultMaxReconnectAttempts,
 		baseBackoff:          DefaultBaseBackoff,
 		maxBackoff:           DefaultMaxBackoff,
+		policy:               NetPolicyFromEnv(),
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -203,8 +267,19 @@ func NewPool(opts ...PoolOption) *MCPConnectionPool {
 
 // GetOrConnect returns an existing connection or establishes a new one.
 func (p *MCPConnectionPool) GetOrConnect(ctx context.Context, instanceID uint, config MCPServerConfig) (*MCPConnection, error) {
+	if !IsSupportedTransport(config.Transport) {
+		return nil, fmt.Errorf("unsupported transport %q: only remote HTTP MCP servers are supported", config.Transport)
+	}
+	if err := p.policy.ValidateURL(config.URL); err != nil {
+		return nil, err
+	}
+	auth, err := parseAuthConfig(config.AuthConfig)
+	if err != nil {
+		return nil, err
+	}
+
 	// Use a full lock to avoid TOCTOU races where two goroutines could both
-	// create connections for the same instanceID, leaking one subprocess.
+	// create connections for the same instanceID.
 	p.mu.Lock()
 
 	if p.stopped {
@@ -217,16 +292,17 @@ func (p *MCPConnectionPool) GetOrConnect(ctx context.Context, instanceID uint, c
 	if exists {
 		conn.mu.RLock()
 		connected := conn.connected && !conn.closed
+		sameConfig := conn.config.configKey() == config.configKey()
 		conn.mu.RUnlock()
 
-		if connected {
+		if connected && sameConfig {
 			conn.mu.Lock()
 			conn.lastUsed = time.Now()
 			conn.mu.Unlock()
 			p.mu.Unlock()
 			return conn, nil
 		}
-		// Connection exists but is not healthy — remove and reconnect
+		// Connection exists but is not healthy, or its config changed — remove and reconnect
 		delete(p.connections, instanceID)
 		go conn.close()
 	}
@@ -236,13 +312,7 @@ func (p *MCPConnectionPool) GetOrConnect(ctx context.Context, instanceID uint, c
 	p.mu.Unlock()
 
 	// Create new connection
-	conn = &MCPConnection{
-		config:     config,
-		instanceID: instanceID,
-		lastUsed:   time.Now(),
-		httpClient: &http.Client{Timeout: DefaultConnectTimeout},
-		logger:     p.logger.With("instance_id", instanceID, "transport", config.Transport),
-	}
+	conn = p.newConnection(instanceID, config, auth)
 
 	connectFn := p.connectFunc
 	if connectFn == nil {
@@ -281,7 +351,7 @@ func (p *MCPConnectionPool) GetOrConnect(ctx context.Context, instanceID uint, c
 		conn.close()
 		return nil, fmt.Errorf("connection pool is stopped")
 	}
-	if existing, ok := p.connections[instanceID]; ok {
+	if existing, ok := p.connections[instanceID]; ok && existing.config.configKey() == config.configKey() {
 		p.mu.Unlock()
 		conn.close()
 		existing.mu.Lock()
@@ -289,9 +359,13 @@ func (p *MCPConnectionPool) GetOrConnect(ctx context.Context, instanceID uint, c
 		existing.mu.Unlock()
 		return existing, nil
 	}
+	replaced := p.connections[instanceID]
 	p.connections[instanceID] = conn
 	p.configs[instanceID] = config
 	p.mu.Unlock()
+	if replaced != nil {
+		replaced.close()
+	}
 
 	p.logger.Info("connected to MCP server",
 		"instance_id", instanceID,
@@ -300,6 +374,18 @@ func (p *MCPConnectionPool) GetOrConnect(ctx context.Context, instanceID uint, c
 	)
 
 	return conn, nil
+}
+
+// newConnection builds an unconnected connection that uses the pool's policy.
+func (p *MCPConnectionPool) newConnection(instanceID uint, config MCPServerConfig, auth *authHeader) *MCPConnection {
+	return &MCPConnection{
+		config:     config,
+		instanceID: instanceID,
+		lastUsed:   time.Now(),
+		httpClient: p.policy.NewHTTPClient(DefaultConnectTimeout),
+		auth:       auth,
+		logger:     p.logger.With("instance_id", instanceID, "transport", config.Transport),
+	}
 }
 
 // GetCachedTools returns cached tool schemas for an instance without connecting.
@@ -444,6 +530,21 @@ func isTransientError(err error) bool {
 	if err == nil {
 		return false
 	}
+	// Policy refusals never become transient: retrying cannot change them.
+	if errors.Is(err, ErrBlockedAddress) || errors.Is(err, errRedirect) || errors.Is(err, errBodyTooLarge) {
+		return false
+	}
+	if errors.Is(err, errSessionExpired) {
+		return true
+	}
+	var statusErr *HTTPStatusError
+	if errors.As(err, &statusErr) {
+		switch statusErr.StatusCode {
+		case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			return true
+		}
+		return false
+	}
 	msg := err.Error()
 	transientPatterns := []string{
 		"connection refused",
@@ -454,8 +555,6 @@ func isTransientError(err error) bool {
 		"server unreachable",
 		"timeout",
 		"i/o timeout",
-		"write to stdin",
-		"read from stdout",
 		"send request",
 	}
 	for _, pattern := range transientPatterns {
@@ -585,6 +684,32 @@ func (p *MCPConnectionPool) HealthStatus(ctx context.Context) []ConnectionStatus
 	}
 
 	return statuses
+}
+
+// Remove closes a connection and forgets its stored config and cached tools,
+// so the next GetOrConnect uses the config it is given. Reload calls it for
+// deleted, disabled and changed servers.
+func (p *MCPConnectionPool) Remove(instanceID uint) {
+	p.mu.Lock()
+	conn, exists := p.connections[instanceID]
+	delete(p.connections, instanceID)
+	delete(p.configs, instanceID)
+	p.mu.Unlock()
+
+	p.schemaCache.Delete(fmt.Sprintf("tools:%d", instanceID))
+	if exists {
+		conn.close()
+		p.logger.Info("removed MCP connection", "instance_id", instanceID)
+	}
+}
+
+// HasConfig reports whether the pool keeps a config for the instance (it can
+// reconnect on demand, e.g. after an idle close).
+func (p *MCPConnectionPool) HasConfig(instanceID uint) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	_, ok := p.configs[instanceID]
+	return ok
 }
 
 // Close closes a specific connection.
@@ -769,6 +894,24 @@ func (p *MCPConnectionPool) fetchToolSchemas(ctx context.Context, conn *MCPConne
 
 // --- MCPConnection methods ---
 
+// errSessionExpired marks a 404 for a request that carried a session ID: the
+// server dropped the session, so the pool must re-initialize.
+var errSessionExpired = errors.New("MCP session expired (server returned 404)")
+
+// HTTPStatusError is a non-success HTTP status from an external MCP server.
+type HTTPStatusError struct {
+	StatusCode      int
+	WWWAuthenticate string
+	Body            string
+}
+
+func (e *HTTPStatusError) Error() string {
+	if e.Body == "" {
+		return fmt.Sprintf("server returned %d", e.StatusCode)
+	}
+	return fmt.Sprintf("server returned %d: %s", e.StatusCode, e.Body)
+}
+
 func (c *MCPConnection) nextRequestID() int {
 	c.idMu.Lock()
 	defer c.idMu.Unlock()
@@ -778,25 +921,43 @@ func (c *MCPConnection) nextRequestID() int {
 
 func (c *MCPConnection) sendRequest(ctx context.Context, method string, params interface{}) (*mcp.Response, error) {
 	c.mu.RLock()
-	transport := c.config.Transport
 	closed := c.closed
 	c.mu.RUnlock()
 
 	if closed {
 		return nil, fmt.Errorf("connection is closed")
 	}
-
-	switch transport {
-	case TransportSSE:
-		return c.sendSSERequest(ctx, method, params)
-	case TransportStdio:
-		return c.sendStdioRequest(ctx, method, params)
-	default:
-		return nil, fmt.Errorf("unsupported transport: %s", transport)
-	}
+	return c.sendHTTPRequest(ctx, method, params)
 }
 
-func (c *MCPConnection) sendSSERequest(ctx context.Context, method string, params interface{}) (*mcp.Response, error) {
+// rpcMessage is any JSON-RPC message the server may send back.
+type rpcMessage struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id,omitempty"`
+	Method  string          `json:"method,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *mcp.Error      `json:"error,omitempty"`
+}
+
+func (m *rpcMessage) toResponse() *mcp.Response {
+	resp := &mcp.Response{JSONRPC: m.JSONRPC, Error: m.Error}
+	if len(m.ID) > 0 {
+		var id interface{}
+		_ = json.Unmarshal(m.ID, &id)
+		resp.ID = id
+	}
+	if len(m.Result) > 0 {
+		resp.Result = m.Result
+	}
+	return resp
+}
+
+func idMatches(raw json.RawMessage, id int) bool {
+	s := strings.TrimSpace(string(raw))
+	return s == strconv.Itoa(id) || s == `"`+strconv.Itoa(id)+`"`
+}
+
+func (c *MCPConnection) sendHTTPRequest(ctx context.Context, method string, params interface{}) (*mcp.Response, error) {
 	var paramsRaw json.RawMessage
 	if params != nil {
 		b, err := json.Marshal(params)
@@ -806,129 +967,167 @@ func (c *MCPConnection) sendSSERequest(ctx context.Context, method string, param
 		paramsRaw = b
 	}
 
-	reqBody := mcp.Request{
+	id := c.nextRequestID()
+	bodyBytes, err := json.Marshal(mcp.Request{
 		JSONRPC: "2.0",
-		ID:      c.nextRequestID(),
+		ID:      id,
 		Method:  method,
 		Params:  paramsRaw,
-	}
-
-	bodyBytes, err := json.Marshal(reqBody)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
+	return c.post(ctx, bodyBytes, &id)
+}
 
-	// For SSE transport, POST to the server's /mcp endpoint
-	url := c.config.URL
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+// sendNotification posts a JSON-RPC notification (no id, no response expected).
+func (c *MCPConnection) sendNotification(ctx context.Context, method string) error {
+	body, _ := json.Marshal(map[string]string{"jsonrpc": "2.0", "method": method})
+	_, err := c.post(ctx, body, nil)
+	return err
+}
+
+// post sends one JSON-RPC message with the MCP Streamable HTTP rules: auth
+// header on every request, session and protocol-version headers once known,
+// JSON or SSE response bodies, and 202 Accepted for notifications. When
+// expectID is nil the call is a notification and the response body is ignored.
+func (c *MCPConnection) post(ctx context.Context, body []byte, expectID *int) (*mcp.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.config.URL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 
-	// Include MCP session ID if one was established during initialize
 	c.mu.RLock()
-	if c.sessionID != "" {
-		req.Header.Set("Mcp-Session-Id", c.sessionID)
-	}
+	sessionID := c.sessionID
+	protocolVersion := c.protocolVersion
+	auth := c.auth
+	client := c.httpClient
 	c.mu.RUnlock()
+	if sessionID != "" {
+		req.Header.Set("Mcp-Session-Id", sessionID)
+	}
+	if protocolVersion != "" {
+		req.Header.Set("Mcp-Protocol-Version", protocolVersion)
+	}
+	auth.apply(req.Header)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
+		if errors.Is(err, ErrBlockedAddress) || errors.Is(err, errRedirect) {
+			return nil, fmt.Errorf("request refused: %w", err)
+		}
 		return nil, fmt.Errorf("send request: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("server returned %d: %s", resp.StatusCode, string(body))
-	}
-
-	var mcpResp mcp.Response
-	if err := json.NewDecoder(resp.Body).Decode(&mcpResp); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-
-	return &mcpResp, nil
-}
-
-func (c *MCPConnection) sendStdioRequest(ctx context.Context, method string, params interface{}) (*mcp.Response, error) {
-	// Grab references to stdin/stdout under the lock, then release it before
-	// blocking on I/O to avoid holding the mutex while waiting for the subprocess.
-	c.mu.RLock()
-	stdinRef := c.stdin
-	stdoutRef := c.stdout
-	closed := c.closed
-	c.mu.RUnlock()
-
-	if closed || stdinRef == nil || stdoutRef == nil {
-		return nil, fmt.Errorf("stdio not initialized")
-	}
-
-	var paramsRaw json.RawMessage
-	if params != nil {
-		b, err := json.Marshal(params)
-		if err != nil {
-			return nil, fmt.Errorf("marshal params: %w", err)
-		}
-		paramsRaw = b
-	}
-
-	reqBody := mcp.Request{
-		JSONRPC: "2.0",
-		ID:      c.nextRequestID(),
-		Method:  method,
-		Params:  paramsRaw,
-	}
-
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-
-	// Stdio is a serial protocol — serialize write+read as a pair,
-	// but use a dedicated mutex so we don't block close() or status checks.
-	c.idMu.Lock()
-	defer c.idMu.Unlock()
-
-	// Write request followed by newline
-	bodyBytes = append(bodyBytes, '\n')
-	if _, err := stdinRef.Write(bodyBytes); err != nil {
-		return nil, fmt.Errorf("write to stdin: %w", err)
-	}
-
-	// Read response line
-	type result struct {
-		resp *mcp.Response
-		err  error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		line, err := stdoutRef.ReadBytes('\n')
-		if err != nil {
-			ch <- result{nil, fmt.Errorf("read from stdout: %w", err)}
-			return
-		}
-		var mcpResp mcp.Response
-		if err := json.Unmarshal(line, &mcpResp); err != nil {
-			ch <- result{nil, fmt.Errorf("decode response: %w", err)}
-			return
-		}
-		ch <- result{&mcpResp, nil}
+	defer func() {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		resp.Body.Close()
 	}()
 
-	select {
-	case <-ctx.Done():
-		// The read goroutine is still running and will consume the next response
-		// from stdout, desynchronizing the stdio protocol. Mark the connection
-		// as unhealthy so the pool reconnects on the next call.
+	if sid := resp.Header.Get("Mcp-Session-Id"); sid != "" {
 		c.mu.Lock()
+		c.sessionID = sid
+		c.mu.Unlock()
+	}
+
+	if resp.StatusCode == http.StatusNotFound && sessionID != "" {
+		c.mu.Lock()
+		if c.sessionID == sessionID {
+			c.sessionID = ""
+		}
 		c.connected = false
 		c.mu.Unlock()
-		return nil, ctx.Err()
-	case r := <-ch:
-		return r.resp, r.err
+		return nil, errSessionExpired
+	}
+
+	if expectID == nil {
+		if resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent {
+			return nil, nil
+		}
+		return nil, statusError(resp)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, statusError(resp)
+	}
+
+	reader := newCappedReader(resp.Body, MaxResponseBytes)
+	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]))
+	if mediaType == "text/event-stream" {
+		return readSSEResponse(reader, *expectID)
+	}
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, fmt.Errorf("decode response: empty body")
+	}
+	var msg rpcMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return msg.toResponse(), nil
+}
+
+func statusError(resp *http.Response) *HTTPStatusError {
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	return &HTTPStatusError{
+		StatusCode:      resp.StatusCode,
+		WWWAuthenticate: resp.Header.Get("WWW-Authenticate"),
+		Body:            strings.TrimSpace(string(b)),
+	}
+}
+
+// readSSEResponse reads Server-Sent Events until it finds the JSON-RPC
+// response whose id matches. Server requests, notifications and responses to
+// other ids are skipped.
+func readSSEResponse(r io.Reader, id int) (*mcp.Response, error) {
+	br := bufio.NewReader(r)
+	var data []string
+	dispatch := func() *mcp.Response {
+		if len(data) == 0 {
+			return nil
+		}
+		payload := strings.Join(data, "\n")
+		data = data[:0]
+		var msg rpcMessage
+		if err := json.Unmarshal([]byte(payload), &msg); err != nil {
+			return nil // not a single JSON-RPC message (e.g. a batch); skip
+		}
+		if msg.Method != "" || !idMatches(msg.ID, id) {
+			return nil
+		}
+		return msg.toResponse()
+	}
+	for {
+		line, err := br.ReadString('\n')
+		if len(line) > 0 || err == nil {
+			line = strings.TrimRight(line, "\r\n")
+			switch {
+			case line == "":
+				if resp := dispatch(); resp != nil {
+					return resp, nil
+				}
+			case strings.HasPrefix(line, ":"):
+				// comment / keep-alive
+			case strings.HasPrefix(line, "data:"):
+				data = append(data, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
+			default:
+				// event:, id:, retry: are not needed here
+			}
+		}
+		if err != nil {
+			if resp := dispatch(); resp != nil {
+				return resp, nil
+			}
+			if errors.Is(err, io.EOF) {
+				return nil, fmt.Errorf("SSE stream ended without a response to request %d: unexpected EOF", id)
+			}
+			return nil, fmt.Errorf("read SSE stream: %w", err)
+		}
 	}
 }
 
@@ -981,172 +1180,64 @@ func (c *MCPConnection) close() {
 	c.closed = true
 	c.connected = false
 
-	if c.sseCancel != nil {
-		c.sseCancel()
-	}
-
-	if c.stdin != nil {
-		c.stdin.Close()
-	}
-	if c.stderr != nil {
-		c.stderr.Close()
-	}
-	if c.cmd != nil && c.cmd.Process != nil {
-		c.cmd.Process.Kill()
-		c.cmd.Wait()
+	if c.httpClient != nil {
+		c.httpClient.CloseIdleConnections()
 	}
 }
 
-// defaultConnect establishes a connection based on transport type.
+// defaultConnect runs the MCP initialize handshake.
 func defaultConnect(ctx context.Context, conn *MCPConnection) error {
-	switch conn.config.Transport {
-	case TransportSSE:
-		return connectSSE(ctx, conn)
-	case TransportStdio:
-		return connectStdio(ctx, conn)
-	default:
+	if !IsSupportedTransport(conn.config.Transport) {
 		return fmt.Errorf("unsupported transport type: %s", conn.config.Transport)
 	}
-}
-
-// connectSSE validates the SSE endpoint is reachable.
-// It first tries an MCP Streamable HTTP initialize handshake (required by
-// streamable HTTP MCP servers). If that fails, it falls back to a basic
-// reachability check for legacy SSE servers.
-func connectSSE(ctx context.Context, conn *MCPConnection) error {
 	if conn.config.URL == "" {
-		return fmt.Errorf("URL is required for SSE transport")
+		return fmt.Errorf("URL is required")
 	}
-
-	// Try MCP Streamable HTTP initialize handshake first.
-	// Streamable HTTP servers require this to establish a session before accepting tool calls.
-	initErr := tryMCPInitialize(ctx, conn)
-	if initErr == nil {
-		return nil
-	}
-	slog.Debug("MCP initialize handshake failed, falling back to basic reachability check", "url", conn.config.URL, "error", initErr)
-
-	// Fall back to basic reachability check for non-session servers
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, conn.config.URL, nil)
-	if err != nil {
-		return fmt.Errorf("create health check request: %w", err)
-	}
-
-	resp, err := conn.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("server unreachable: %w", err)
-	}
-	resp.Body.Close()
-
-	return nil
+	return initialize(ctx, conn)
 }
 
-// tryMCPInitialize performs the MCP Streamable HTTP initialize handshake.
-// On success, the session ID is stored on the connection for subsequent requests.
-func tryMCPInitialize(ctx context.Context, conn *MCPConnection) error {
-	initReq := mcp.Request{
-		JSONRPC: "2.0",
-		ID:      conn.nextRequestID(),
-		Method:  "initialize",
-		Params:  json.RawMessage(`{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"akmatori-gateway","version":"1.0.0"}}`),
+// initialize performs the MCP initialize handshake and sends the
+// notifications/initialized notification. A server that cannot initialize is
+// not usable, so any failure here is returned to the caller.
+func initialize(ctx context.Context, conn *MCPConnection) error {
+	params := map[string]interface{}{
+		"protocolVersion": MCPProtocolVersion,
+		"capabilities":    map[string]interface{}{},
+		"clientInfo":      map[string]string{"name": "akmatori-gateway", "version": "1.0.0"},
 	}
-
-	bodyBytes, err := json.Marshal(initReq)
+	resp, err := conn.sendHTTPRequest(ctx, "initialize", params)
 	if err != nil {
-		return fmt.Errorf("marshal initialize: %w", err)
+		return fmt.Errorf("initialize: %w", err)
+	}
+	if resp.Error != nil {
+		return fmt.Errorf("initialize error: %s (code %d)", resp.Error.Message, resp.Error.Code)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, conn.config.URL, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return fmt.Errorf("create initialize request: %w", err)
+	var result struct {
+		ProtocolVersion string     `json:"protocolVersion"`
+		ServerInfo      ServerInfo `json:"serverInfo"`
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-
-	resp, err := conn.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("initialize request failed: %w", err)
+	resultBytes, _ := json.Marshal(resp.Result)
+	if err := json.Unmarshal(resultBytes, &result); err != nil {
+		return fmt.Errorf("initialize: invalid result: %w", err)
 	}
-	defer func() {
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("initialize returned %d", resp.StatusCode)
+	if result.ProtocolVersion == "" {
+		result.ProtocolVersion = MCPProtocolVersion
 	}
 
-	// Capture session ID from response header
-	if sid := resp.Header.Get("Mcp-Session-Id"); sid != "" {
-		conn.mu.Lock()
-		conn.sessionID = sid
-		conn.mu.Unlock()
-	}
+	conn.mu.Lock()
+	conn.protocolVersion = result.ProtocolVersion
+	conn.serverInfo = result.ServerInfo
+	conn.mu.Unlock()
 
-	// Send initialized notification (required by MCP protocol)
-	notifJSON := []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
-	notifReq, err := http.NewRequestWithContext(ctx, http.MethodPost, conn.config.URL, bytes.NewReader(notifJSON))
-	if err != nil {
-		return nil // Initialize succeeded; notification failure is non-fatal
-	}
-	notifReq.Header.Set("Content-Type", "application/json")
-	notifReq.Header.Set("Accept", "application/json, text/event-stream")
-	conn.mu.RLock()
-	if conn.sessionID != "" {
-		notifReq.Header.Set("Mcp-Session-Id", conn.sessionID)
-	}
-	conn.mu.RUnlock()
-	if notifResp, err := conn.httpClient.Do(notifReq); err == nil {
-		notifResp.Body.Close()
-	}
-
-	return nil
-}
-
-// connectStdio spawns a subprocess and sets up stdin/stdout communication.
-func connectStdio(ctx context.Context, conn *MCPConnection) error {
-	if conn.config.Command == "" {
-		return fmt.Errorf("command is required for stdio transport")
-	}
-
-	// Use background context for the subprocess lifetime — not the request context.
-	// The subprocess should live as long as the connection pool keeps it, not just
-	// for the duration of the originating request.
-	cmd := exec.Command(conn.config.Command, conn.config.Args...)
-
-	// Set environment variables (inherit parent env and add custom vars)
-	if len(conn.config.EnvVars) > 0 {
-		cmd.Env = os.Environ()
-		for k, v := range conn.config.EnvVars {
-			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+	if err := conn.sendNotification(ctx, "notifications/initialized"); err != nil {
+		// Initialize succeeded, so auth and URL are good; some servers reject
+		// the notification. Keep going.
+		logger := conn.logger
+		if logger == nil {
+			logger = slog.Default()
 		}
+		logger.Warn("notifications/initialized failed", "error", err)
 	}
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("create stdin pipe: %w", err)
-	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		stdin.Close()
-		return fmt.Errorf("create stdout pipe: %w", err)
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		stdin.Close()
-		return fmt.Errorf("create stderr pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start command: %w", err)
-	}
-
-	conn.cmd = cmd
-	conn.stdin = stdin
-	conn.stdout = bufio.NewReader(stdout)
-	conn.stderr = stderr
-
 	return nil
 }

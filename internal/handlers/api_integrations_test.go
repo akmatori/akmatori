@@ -303,7 +303,7 @@ func TestHandleIntegrations_Create_InvalidProvider(t *testing.T) {
 	mgr := &mockChannelManager{}
 	h := newHandlerWithChannelManager(mgr)
 
-	body, _ := json.Marshal(CreateIntegrationRequest{Provider: "discord", Name: "Discord"})
+	body, _ := json.Marshal(CreateIntegrationRequest{Provider: "matrix", Name: "Matrix"})
 	req := httptest.NewRequest(http.MethodPost, "/api/integrations", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

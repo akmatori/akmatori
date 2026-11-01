@@ -214,7 +214,7 @@ func (f *ResponseFormatter) formatWithConfig(ctx context.Context, rawResponse, f
 		}
 	}
 
-	rendered := output.RenderForSlack(parsed, specs)
+	rendered := output.RenderMarkdown(parsed, specs)
 	if rendered == "" {
 		return rawResponse
 	}

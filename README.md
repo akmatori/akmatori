@@ -32,7 +32,7 @@ infrastructure through real tools, and executes remediation behind approval gate
 - **Multi-source alert ingestion**: Alertmanager, PagerDuty, Grafana, Datadog, and Zabbix webhooks, plus Slack channel monitoring
 - **Agentic investigation**: every incident runs a full agent session with subagents for runbook lookup and cross-incident memory recall
 - **Approval-gated remediation**: risky actions become proposals you approve in the UI or Slack before anything executes
-- **Messaging channels**: configure providers (Slack today, Telegram on the roadmap) under Settings → Integrations, then attach Channels with post / listen / default capability flags that alert sources and cron jobs reference
+- **Connectors**: one page for everything the agent connects to: tools (monitoring, Kubernetes, SSH, databases), alert webhooks, messaging (Slack; Telegram and Discord for posting) and custom remote MCP servers (URL + token, API key header or OAuth sign-in). Channels and alert webhooks live inside their connector
 - **Cron jobs**: schedule recurring agent investigations that post results to a Channel, each with its own prompt and per-cron tool allowlist
 - **[Agent Skills](https://github.com/agentskills/agentskills) format**: skills follow the open Agent Skills specification for portability across AI agents
 - **Tools management**: configure reusable tools (SSH, scripts, API clients) and scope them per skill or cron
@@ -95,8 +95,8 @@ The recommended install pulls pre-built multi-arch images from GHCR — no `git 
 5. Configure your LLM provider in **Settings → LLM Provider**.
 
 6. (Optional) Connect Slack:
-   - **Settings → Integrations → Add Slack** to register your bot/signing/app tokens.
-   - **Settings → Channels → Add Channel** to attach posting and listening destinations. Tick `is_default_post` on the channel that should receive alerts when an alert source does not pin one explicitly. `can_post` / `can_listen` decide whether the channel appears in the alert-source picker or is monitored for inbound mentions.
+   - **Connectors → Add → Browse connectors → Slack** to register your bot/signing/app tokens.
+   - On the Slack connector, **Channels → New channel** to attach posting and listening destinations. Tick `is_default_post` on the channel that should receive alerts when an alert source does not pin one explicitly. `can_post` / `can_listen` decide whether the channel appears in the alert-source picker or is monitored for inbound mentions.
 
 7. (Optional) Schedule recurring runs in **Cron Jobs**: pick a schedule, write a prompt, attach the tools the agent is allowed to call, and point it at one of your Channels. Every tick runs as a full agent investigation under the `cron-agent` system skill.
 
@@ -152,7 +152,7 @@ HTTPS_PROXY=http://proxy.corp:3128
 # NO_PROXY defaults to the internal service names; override only if you need to add hosts.
 ```
 
-The runtime `HTTP_PROXY` covers the API server's outbound calls (Slack), the agent worker's LLM API calls, and the MCP Gateway's HTTP-connector tools and external MCP-server connections. The MCP Gateway's built-in monitoring/CMDB tools (Zabbix, Grafana, VictoriaMetrics, PagerDuty, NetBox, Kubernetes, Catchpoint, Jira) ignore the env-var proxy by design and have their own per-tool proxy toggle in **Settings → Proxy** — enable those if your monitoring endpoints also need to go through the corporate proxy.
+The runtime `HTTP_PROXY` covers the API server's outbound calls (Slack), the agent worker's LLM API calls, and the MCP Gateway's HTTP-connector tools. Remote MCP servers (custom connectors) are reached directly, never through the env proxy: the gateway checks the resolved destination address (no loopback, link-local or cloud metadata addresses; set `MCP_BLOCK_PRIVATE_NETWORKS=true` to also refuse private ranges). The MCP Gateway's built-in monitoring/CMDB tools (Zabbix, Grafana, VictoriaMetrics, PagerDuty, NetBox, Kubernetes, Catchpoint, Jira) ignore the env-var proxy by design and have their own per-tool proxy toggle in **Settings → Proxy** — enable those if your monitoring endpoints also need to go through the corporate proxy.
 
 </details>
 

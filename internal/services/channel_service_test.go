@@ -55,7 +55,7 @@ func seedSlackIntegration(t *testing.T, db *gorm.DB) *database.Integration {
 func TestChannelService_CreateIntegration_RejectsUnknownProvider(t *testing.T) {
 	svc, _ := setupChannelServiceTest(t)
 
-	_, err := svc.CreateIntegration(database.MessagingProvider("discord"), "Discord", nil, true)
+	_, err := svc.CreateIntegration(database.MessagingProvider("matrix"), "Matrix", nil, true)
 	if err == nil {
 		t.Fatal("CreateIntegration with unknown provider error = nil, want error")
 	}
@@ -967,5 +967,27 @@ func TestChannelService_DeleteIntegration_NotFound(t *testing.T) {
 	svc, _ := setupChannelServiceTest(t)
 	if err := svc.DeleteIntegration("ghost"); !errors.Is(err, ErrIntegrationNotFound) {
 		t.Errorf("err = %v, want ErrIntegrationNotFound", err)
+	}
+}
+
+// TestChannelService_UpdateIntegration_TelegramBlankTokenKeepsExisting keeps
+// the "omitted secret = keep existing" update semantics for bot providers.
+func TestChannelService_UpdateIntegration_TelegramBlankTokenKeepsExisting(t *testing.T) {
+	svc, _ := setupChannelServiceTest(t)
+	row, err := svc.CreateIntegration(database.MessagingProviderTelegram, "TG", database.JSONB{"bot_token": "1:OLD"}, true)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	name := "TG renamed"
+	got, err := svc.UpdateIntegration(row.UUID, &name, database.JSONB{"bot_token": ""}, nil)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if got.Credentials["bot_token"] != "1:OLD" {
+		t.Errorf("bot_token = %v, want kept 1:OLD", got.Credentials["bot_token"])
+	}
+	got, err = svc.UpdateIntegration(row.UUID, nil, database.JSONB{"bot_token": "2:NEW"}, nil)
+	if err != nil || got.Credentials["bot_token"] != "2:NEW" {
+		t.Errorf("rotate = %v, %v", got.Credentials["bot_token"], err)
 	}
 }
