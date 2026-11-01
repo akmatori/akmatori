@@ -584,6 +584,13 @@ export const integrationsApi = {
     fetchApi<void>(`/api/integrations/${uuid}`, {
       method: 'DELETE',
     }),
+
+  // test asks the provider to verify the stored credentials (Telegram getMe,
+  // Discord /users/@me, Slack auth.test).
+  test: (uuid: string) =>
+    fetchApi<{ ok: boolean; account?: string; error?: string }>(`/api/integrations/${uuid}/test`, {
+      method: 'POST',
+    }),
 };
 
 // Channels API

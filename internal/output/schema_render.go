@@ -20,10 +20,18 @@ type FieldSpec struct {
 	NonEmpty bool
 }
 
-// RenderForSlack renders a parsed LLM response map as Slack mrkdwn text.
-// It walks specs in order, producing a formatted section per field.
+// markdownHardBreak ends every rendered line. GitHub-flavored Markdown joins
+// consecutive lines into one paragraph; two trailing spaces force a line
+// break so the web UI keeps one field / bullet per line. MarkdownToSlack
+// strips them again at the Slack boundary.
+const markdownHardBreak = "  \n"
+
+// RenderMarkdown renders a parsed LLM response map as provider-neutral
+// GitHub-flavored Markdown (one field per line, "**Heading:**" labels, " • "
+// bullets). This is the text that is stored on incidents / agent runs and
+// handed to messaging providers, which render it for their platform.
 // Returns empty string when nothing produces visible output.
-func RenderForSlack(parsed map[string]any, specs []FieldSpec) string {
+func RenderMarkdown(parsed map[string]any, specs []FieldSpec) string {
 	var sb strings.Builder
 	for _, spec := range specs {
 		val, ok := parsed[spec.Name]
@@ -32,7 +40,13 @@ func RenderForSlack(parsed map[string]any, specs []FieldSpec) string {
 		}
 		sb.WriteString(renderField(spec, val))
 	}
-	return sb.String()
+	return strings.ReplaceAll(sb.String(), "\n", markdownHardBreak)
+}
+
+// RenderForSlack renders a parsed LLM response map as Slack mrkdwn text:
+// the neutral Markdown from RenderMarkdown converted at the Slack boundary.
+func RenderForSlack(parsed map[string]any, specs []FieldSpec) string {
+	return MarkdownToSlack(RenderMarkdown(parsed, specs))
 }
 
 // renderField renders a single field value according to its spec kind.
@@ -47,21 +61,21 @@ func renderField(spec FieldSpec, val any) string {
 		if spec.Name == "status" {
 			lower := strings.ToLower(s)
 			if lower == "resolved" || lower == "unresolved" || lower == "escalate" {
-				return fmt.Sprintf("*%s:* %s %s\n", heading, getStatusEmoji(lower), s)
+				return fmt.Sprintf("**%s:** %s %s\n", heading, getStatusEmoji(lower), s)
 			}
 		}
-		return fmt.Sprintf("*%s:* %s\n", heading, s)
+		return fmt.Sprintf("**%s:** %s\n", heading, s)
 	case "number":
-		return fmt.Sprintf("*%s:* %s\n", heading, formatNumber(val))
+		return fmt.Sprintf("**%s:** %s\n", heading, formatNumber(val))
 	case "bool":
-		return fmt.Sprintf("*%s:* %v\n", heading, val)
+		return fmt.Sprintf("**%s:** %v\n", heading, val)
 	case "list_string", "list_number", "list_bool":
 		arr, ok := val.([]any)
 		if !ok || len(arr) == 0 {
 			return ""
 		}
 		var sb strings.Builder
-		fmt.Fprintf(&sb, "*%s:*\n", heading)
+		fmt.Fprintf(&sb, "**%s:**\n", heading)
 		for _, elem := range arr {
 			if spec.Kind == "list_number" {
 				fmt.Fprintf(&sb, " • %s\n", formatNumber(elem))
@@ -105,7 +119,7 @@ func renderField(spec FieldSpec, val any) string {
 		if bullets.Len() == 0 {
 			return ""
 		}
-		return fmt.Sprintf("*%s:*\n", heading) + bullets.String()
+		return fmt.Sprintf("**%s:**\n", heading) + bullets.String()
 	case "object":
 		obj, ok := val.(map[string]any)
 		if !ok {
@@ -131,7 +145,7 @@ func renderField(spec FieldSpec, val any) string {
 		if children.Len() == 0 {
 			return ""
 		}
-		return fmt.Sprintf("*%s:*\n", heading) + children.String()
+		return fmt.Sprintf("**%s:**\n", heading) + children.String()
 	}
 	return ""
 }

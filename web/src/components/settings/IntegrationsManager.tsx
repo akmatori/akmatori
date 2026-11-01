@@ -1,6 +1,6 @@
 import EmptyState from '../shared/EmptyState';
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Save, X, Trash2, Edit2, Power, PowerOff } from 'lucide-react';
+import { Plus, Save, X, Trash2, Edit2, Power, PowerOff, Zap } from 'lucide-react';
 import LoadingSpinner from '../LoadingSpinner';
 import ErrorMessage from '../ErrorMessage';
 import { integrationsApi } from '../../api/client';
@@ -33,6 +33,9 @@ export default function IntegrationsManager() {
   const [editing, setEditing] = useState<Integration | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM());
+  // Per-integration result of the last "Test connection" click.
+  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; text: string }>>({});
+  const [testing, setTesting] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -119,6 +122,20 @@ export default function IntegrationsManager() {
       reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete integration');
+    }
+  };
+
+  const testConnection = async (uuid: string) => {
+    setTesting(uuid);
+    try {
+      const res = await integrationsApi.test(uuid);
+      const text = res.ok ? `Connected as ${res.account || 'bot'}` : res.error || 'Connection test failed';
+      setTestResults((prev) => ({ ...prev, [uuid]: { ok: res.ok, text } }));
+    } catch (err) {
+      const text = err instanceof Error ? err.message : 'Connection test failed';
+      setTestResults((prev) => ({ ...prev, [uuid]: { ok: false, text } }));
+    } finally {
+      setTesting(null);
     }
   };
 
@@ -233,7 +250,7 @@ export default function IntegrationsManager() {
       )}
 
       {integrations.length === 0 ? (
-        <EmptyState padding="py-12" title="No integrations configured" description="Add a Slack integration to get started." />
+        <EmptyState padding="py-12" title="No integrations configured" description="Add a Slack, Telegram or Discord integration to get started." />
       ) : (
         <div className="space-y-3">
           {integrations.map((row) => {
@@ -260,9 +277,25 @@ export default function IntegrationsManager() {
                         {cfg.description}
                       </p>
                     )}
+                    {testResults[row.uuid] && (
+                      <p
+                        className={`text-xs mt-0.5 ${testResults[row.uuid].ok ? 'text-green-600' : 'text-state-fail'}`}
+                        role="status"
+                      >
+                        {testResults[row.uuid].text}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="flex gap-2">
+                  <button
+                    className="btn btn-ghost p-2"
+                    onClick={() => testConnection(row.uuid)}
+                    disabled={testing === row.uuid}
+                    title="Test connection"
+                  >
+                    <Zap className="w-4 h-4" />
+                  </button>
                   <button
                     className="btn btn-ghost p-2"
                     onClick={() => startEdit(row)}

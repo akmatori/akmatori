@@ -6,8 +6,22 @@ import (
 	"fmt"
 
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/output"
 	"github.com/slack-go/slack"
 )
+
+// SlackMaxTextBytes is the byte budget the Slack provider enforces on every
+// outbound message. chat.postMessage accepts ~40,000 chars; Akmatori keeps
+// messages at 8000 bytes so they stay readable in a thread (same cap as the
+// alert flow's slackMaxTextBytes).
+const SlackMaxTextBytes = 8000
+
+// RenderSlack converts provider-neutral Markdown into Slack mrkdwn and
+// enforces SlackMaxTextBytes. Already-mrkdwn input passes through unchanged
+// apart from the byte cap (MarkdownToSlack is idempotent on mrkdwn).
+func RenderSlack(markdown string) string {
+	return output.TruncateSlackBytes(output.MarkdownToSlack(markdown), SlackMaxTextBytes)
+}
 
 // SlackClient is the subset of *slack.Client the SlackProvider depends on.
 // Pulling it out as an interface lets tests substitute a fake without
@@ -31,6 +45,9 @@ type SlackClientProvider interface {
 // just the transport responsibility.
 type SlackProvider struct {
 	clientFn func() SlackClient
+	// apiURL overrides the Slack Web API base URL for TestCredentials
+	// (tests only; empty = slack-go default).
+	apiURL string
 }
 
 // NewSlackProvider builds a slack provider that resolves its underlying
@@ -107,7 +124,8 @@ func validateSlackChannel(channel *database.Channel) error {
 
 // PostMessage posts text to the slack channel identified by Channel.ExternalID
 // (which the operator entered as a channel ID like C012345; resolution from
-// names lives elsewhere in the Slack manager).
+// names lives elsewhere in the Slack manager). text is provider-neutral
+// Markdown; it is rendered to mrkdwn and byte-capped here.
 func (p *SlackProvider) PostMessage(ctx context.Context, channel *database.Channel, text string) (*PostedMessage, error) {
 	if err := validateSlackChannel(channel); err != nil {
 		return nil, err
@@ -116,7 +134,7 @@ func (p *SlackProvider) PostMessage(ctx context.Context, channel *database.Chann
 	if err != nil {
 		return nil, err
 	}
-	_, ts, err := c.PostMessageContext(ctx, channel.ExternalID, slack.MsgOptionText(text, false))
+	_, ts, err := c.PostMessageContext(ctx, channel.ExternalID, slack.MsgOptionText(RenderSlack(text), false))
 	if err != nil {
 		return nil, fmt.Errorf("slack post message: %w", err)
 	}
@@ -140,7 +158,7 @@ func (p *SlackProvider) PostThreadReply(ctx context.Context, channel *database.C
 	_, ts, err := c.PostMessageContext(
 		ctx,
 		channel.ExternalID,
-		slack.MsgOptionText(text, false),
+		slack.MsgOptionText(RenderSlack(text), false),
 		slack.MsgOptionTS(parentMessageID),
 	)
 	if err != nil {
@@ -161,8 +179,29 @@ func (p *SlackProvider) UpdateMessage(ctx context.Context, channel *database.Cha
 	if err != nil {
 		return err
 	}
-	if _, _, _, err := c.UpdateMessageContext(ctx, channel.ExternalID, messageID, slack.MsgOptionText(text, false)); err != nil {
+	if _, _, _, err := c.UpdateMessageContext(ctx, channel.ExternalID, messageID, slack.MsgOptionText(RenderSlack(text), false)); err != nil {
 		return fmt.Errorf("slack update message: %w", err)
 	}
 	return nil
+}
+
+// TestCredentials calls auth.test with the integration's bot_token and
+// returns "<bot user> @ <workspace>".
+func (p *SlackProvider) TestCredentials(ctx context.Context, integration *database.Integration) (string, error) {
+	token, err := botTokenOf(integration)
+	if err != nil {
+		return "", err
+	}
+	opts := []slack.Option{slack.OptionHTTPClient(defaultBotHTTPClient())}
+	if p.apiURL != "" {
+		opts = append(opts, slack.OptionAPIURL(p.apiURL))
+	}
+	resp, err := slack.New(token, opts...).AuthTestContext(ctx)
+	if err != nil {
+		return "", fmt.Errorf("slack auth.test: %w", err)
+	}
+	if resp.Team != "" {
+		return resp.User + " @ " + resp.Team, nil
+	}
+	return resp.User, nil
 }

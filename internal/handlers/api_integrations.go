@@ -1,14 +1,66 @@
 package handlers
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/akmatori/akmatori/internal/api"
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/messaging"
 	"github.com/akmatori/akmatori/internal/services"
 )
+
+// botTokenProviders lists providers whose only credential is a bot token
+// ({"bot_token": "..."}) and which require it on create.
+var botTokenProviders = map[database.MessagingProvider]struct{}{
+	database.MessagingProviderTelegram: {},
+	database.MessagingProviderDiscord:  {},
+}
+
+// listeningProviders lists providers that support inbound listening
+// (can_listen=true channels). Telegram and Discord are outbound-only for now.
+var listeningProviders = map[database.MessagingProvider]struct{}{
+	database.MessagingProviderSlack: {},
+}
+
+// validateIntegrationCredentials enforces provider-specific required
+// credentials on create. Update keeps the "omitted / blank secret = keep
+// existing" semantics, so it is not checked there.
+func validateIntegrationCredentials(provider database.MessagingProvider, creds database.JSONB) error {
+	if _, ok := botTokenProviders[provider]; ok {
+		tok, _ := creds["bot_token"].(string)
+		if strings.TrimSpace(tok) == "" {
+			return fmt.Errorf("credentials.bot_token is required for %s integrations", provider)
+		}
+	}
+	return nil
+}
+
+// validateCanListen rejects can_listen=true for providers without inbound
+// support.
+func validateCanListen(provider database.MessagingProvider, canListen bool) error {
+	if !canListen {
+		return nil
+	}
+	if _, ok := listeningProviders[provider]; ok {
+		return nil
+	}
+	return fmt.Errorf("%s channels are outbound-only: can_listen is not supported yet", provider)
+}
+
+// integrationTestTimeout bounds POST /api/integrations/{uuid}/test.
+const integrationTestTimeout = 20 * time.Second
+
+// integrationTestResponse is the body of POST /api/integrations/{uuid}/test.
+type integrationTestResponse struct {
+	OK      bool   `json:"ok"`
+	Account string `json:"account,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
 
 // integrationCredentialSecretSubstrings lists credential key substrings that
 // indicate the value carries a secret and must be masked before being returned
@@ -163,6 +215,10 @@ func (h *APIHandler) handleIntegrations(w http.ResponseWriter, r *http.Request) 
 			api.RespondError(w, http.StatusBadRequest, "name is required")
 			return
 		}
+		if err := validateIntegrationCredentials(database.MessagingProvider(provider), req.Credentials); err != nil {
+			api.RespondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		enabled := true
 		if req.Enabled != nil {
 			enabled = *req.Enabled
@@ -198,6 +254,10 @@ func (h *APIHandler) handleIntegrationByUUID(w http.ResponseWriter, r *http.Requ
 	}
 
 	uuid := strings.TrimPrefix(r.URL.Path, "/api/integrations/")
+	if base, ok := strings.CutSuffix(uuid, "/test"); ok && base != "" && !strings.Contains(base, "/") {
+		h.handleIntegrationTest(w, r, base)
+		return
+	}
 	if uuid == "" || strings.Contains(uuid, "/") {
 		api.RespondError(w, http.StatusBadRequest, "Invalid integration UUID")
 		return
@@ -252,6 +312,44 @@ func (h *APIHandler) handleIntegrationByUUID(w http.ResponseWriter, r *http.Requ
 	default:
 		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
+}
+
+// handleIntegrationTest serves POST /api/integrations/{uuid}/test: it asks
+// the provider to verify the stored credentials (Telegram getMe, Discord
+// /users/@me, Slack auth.test). Platform failures are reported in the body
+// with ok=false and HTTP 200 so the UI can show the message.
+func (h *APIHandler) handleIntegrationTest(w http.ResponseWriter, r *http.Request, uuid string) {
+	if r.Method != http.MethodPost {
+		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	row, err := h.channelService.GetIntegrationByUUID(uuid)
+	if err != nil {
+		api.RespondError(w, integrationErrStatus(err), err.Error())
+		return
+	}
+	if h.providerRegistry == nil {
+		api.RespondJSON(w, http.StatusOK, integrationTestResponse{Error: "messaging providers are not configured"})
+		return
+	}
+	provider, err := h.providerRegistry.Get(row.Provider)
+	if err != nil {
+		api.RespondJSON(w, http.StatusOK, integrationTestResponse{Error: fmt.Sprintf("provider %s is not available", row.Provider)})
+		return
+	}
+	tester, ok := provider.(messaging.CredentialTester)
+	if !ok {
+		api.RespondJSON(w, http.StatusOK, integrationTestResponse{Error: fmt.Sprintf("provider %s does not support a connection test", row.Provider)})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), integrationTestTimeout)
+	defer cancel()
+	account, err := tester.TestCredentials(ctx, row)
+	if err != nil {
+		api.RespondJSON(w, http.StatusOK, integrationTestResponse{Error: err.Error()})
+		return
+	}
+	api.RespondJSON(w, http.StatusOK, integrationTestResponse{OK: true, Account: account})
 }
 
 // afterIntegrationMutation fans the post-CRUD signals out so the runtime

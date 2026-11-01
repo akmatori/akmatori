@@ -11,15 +11,16 @@ type MessagingProvider string
 const (
 	MessagingProviderSlack    MessagingProvider = "slack"
 	MessagingProviderTelegram MessagingProvider = "telegram"
+	MessagingProviderDiscord  MessagingProvider = "discord"
 )
 
 // ValidMessagingProviders returns all known messaging provider identifiers.
-// Telegram is included as a registry placeholder; the actual implementation is
-// a stub until the provider lands.
+// Telegram and Discord are outbound-only (no listening) for now.
 func ValidMessagingProviders() []MessagingProvider {
 	return []MessagingProvider{
 		MessagingProviderSlack,
 		MessagingProviderTelegram,
+		MessagingProviderDiscord,
 	}
 }
 

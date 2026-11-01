@@ -274,7 +274,8 @@ func (m *IncidentMerger) notifyMerged(ctx context.Context, merged *database.Inci
 		survivorLabel = fmt.Sprintf("%s (%s)", survivor.Title, shortUUID(verdict.IncidentUUID))
 	}
 
-	text := fmt.Sprintf(":twisted_rightwards_arrows: This incident was merged into *%s* — same root cause: %s",
+	// Provider-neutral Markdown; the provider renders it for its platform.
+	text := fmt.Sprintf(":twisted_rightwards_arrows: This incident was merged into **%s** — same root cause: %s",
 		survivorLabel, verdict.Reasoning)
 	if _, err := provider.PostThreadReply(ctx, &channel, merged.SlackMessageTS, text); err != nil {
 		slog.Warn("incident merger: merge note failed", "incident", merged.UUID, "err", err)

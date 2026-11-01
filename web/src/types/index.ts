@@ -441,7 +441,7 @@ export interface ScriptInfo {
 
 // Messaging integrations & channels
 
-export type MessagingProvider = 'slack' | 'telegram';
+export type MessagingProvider = 'slack' | 'telegram' | 'discord';
 
 export interface Integration {
   id: number;
