@@ -9,7 +9,7 @@ import Setup from './pages/Setup';
 import Dashboard from './pages/Dashboard';
 import Incidents from './pages/Incidents';
 import Skills from './pages/Skills';
-import Tools from './pages/Tools';
+import Connectors from './pages/Connectors';
 import ContextFiles from './pages/ContextFiles';
 import Runbooks from './pages/Runbooks';
 import Settings from './pages/Settings';
@@ -49,11 +49,15 @@ function App() {
                       <Route path="/proposals/:uuid" element={<ProposalDetail />} />
                       <Route path="/proposals" element={<Proposals />} />
                       <Route path="/skills" element={<Skills />} />
-                      <Route path="/tools" element={<Tools />} />
+                      <Route path="/connectors/:section?" element={<Connectors />} />
+                      <Route path="/tools" element={<Navigate to="/connectors/tools" replace />} />
                       <Route path="/context" element={<ContextFiles />} />
                       <Route path="/runbooks" element={<Runbooks />} />
                       <Route path="/cron" element={<CronJobsPage />} />
-                      <Route path="/settings/slack" element={<Navigate to="/settings/integrations" replace />} />
+                      <Route path="/settings/slack" element={<Navigate to="/connectors/messaging" replace />} />
+                      <Route path="/settings/integrations" element={<Navigate to="/connectors/messaging" replace />} />
+                      <Route path="/settings/channels" element={<Navigate to="/connectors/channels" replace />} />
+                      <Route path="/settings/alert-sources" element={<Navigate to="/connectors/alert-sources" replace />} />
                       <Route path="/settings/:section?" element={<Settings />} />
                     </Routes>
                   </Layout>

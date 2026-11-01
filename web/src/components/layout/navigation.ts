@@ -6,7 +6,7 @@ import {
   BookOpen,
   FileText,
   Bot,
-  Wrench,
+  Plug,
   Clock,
   Settings,
   type LucideIcon,
@@ -46,7 +46,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Automate',
     items: [
-      { name: 'Tools', href: '/tools', icon: Wrench },
+      { name: 'Connectors', href: '/connectors', icon: Plug },
       { name: 'Cron jobs', href: '/cron', icon: Clock },
     ],
   },

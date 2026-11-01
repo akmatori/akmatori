@@ -1,14 +1,13 @@
 import { Plus, Edit2, Trash2, Wrench } from 'lucide-react';
-import PageHeader from '../components/PageHeader';
-import LoadingSpinner from '../components/LoadingSpinner';
-import ErrorMessage from '../components/ErrorMessage';
-import ToolFormSection from '../components/tools/ToolFormSection';
-import { useToolManagement } from '../hooks/useToolManagement';
-import { useSSHKeyManagement } from '../hooks/useSSHKeyManagement';
-import EmptyState from '../components/shared/EmptyState';
-import type { ToolInstance } from '../types';
+import LoadingSpinner from '../LoadingSpinner';
+import ErrorMessage from '../ErrorMessage';
+import ToolFormSection from '../tools/ToolFormSection';
+import { useToolManagement } from '../../hooks/useToolManagement';
+import { useSSHKeyManagement } from '../../hooks/useSSHKeyManagement';
+import EmptyState from '../shared/EmptyState';
+import type { ToolInstance } from '../../types';
 
-export default function Tools() {
+export default function ToolsSection() {
   const {
     tools,
     toolTypes,
@@ -46,18 +45,14 @@ export default function Tools() {
 
   return (
     <div>
-      <PageHeader
-        title="Tools"
-        description="Manage tool instances and their configurations"
-        action={
-          !isCreating && !editingTool && (
-            <button onClick={handleCreate} className="btn btn-primary">
-              <Plus className="w-4 h-4" />
-              New tool
-            </button>
-          )
-        }
-      />
+      {!isCreating && !editingTool && (
+        <div className="mb-4 flex justify-end">
+          <button onClick={handleCreate} className="btn btn-primary">
+            <Plus className="w-4 h-4" />
+            New tool
+          </button>
+        </div>
+      )}
 
       {error && <ErrorMessage message={error} />}
 

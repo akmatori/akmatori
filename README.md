@@ -32,7 +32,7 @@ infrastructure through real tools, and executes remediation behind approval gate
 - **Multi-source alert ingestion**: Alertmanager, PagerDuty, Grafana, Datadog, and Zabbix webhooks, plus Slack channel monitoring
 - **Agentic investigation**: every incident runs a full agent session with subagents for runbook lookup and cross-incident memory recall
 - **Approval-gated remediation**: risky actions become proposals you approve in the UI or Slack before anything executes
-- **Messaging channels**: configure providers (Slack today, Telegram on the roadmap) under Settings → Integrations, then attach Channels with post / listen / default capability flags that alert sources and cron jobs reference
+- **Messaging channels**: configure providers (Slack today, Telegram on the roadmap) under Connectors → Messaging, then attach Channels with post / listen / default capability flags that alert sources and cron jobs reference
 - **Cron jobs**: schedule recurring agent investigations that post results to a Channel, each with its own prompt and per-cron tool allowlist
 - **[Agent Skills](https://github.com/agentskills/agentskills) format**: skills follow the open Agent Skills specification for portability across AI agents
 - **Tools management**: configure reusable tools (SSH, scripts, API clients) and scope them per skill or cron
@@ -95,8 +95,8 @@ The recommended install pulls pre-built multi-arch images from GHCR — no `git 
 5. Configure your LLM provider in **Settings → LLM Provider**.
 
 6. (Optional) Connect Slack:
-   - **Settings → Integrations → Add Slack** to register your bot/signing/app tokens.
-   - **Settings → Channels → Add Channel** to attach posting and listening destinations. Tick `is_default_post` on the channel that should receive alerts when an alert source does not pin one explicitly. `can_post` / `can_listen` decide whether the channel appears in the alert-source picker or is monitored for inbound mentions.
+   - **Connectors → Messaging → Add Slack** to register your bot/signing/app tokens.
+   - **Connectors → Channels → Add Channel** to attach posting and listening destinations. Tick `is_default_post` on the channel that should receive alerts when an alert source does not pin one explicitly. `can_post` / `can_listen` decide whether the channel appears in the alert-source picker or is monitored for inbound mentions.
 
 7. (Optional) Schedule recurring runs in **Cron Jobs**: pick a schedule, write a prompt, attach the tools the agent is allowed to call, and point it at one of your Channels. Every tick runs as a full agent investigation under the `cron-agent` system skill.
 
