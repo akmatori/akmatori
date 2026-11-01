@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, Loader2, X } from 'lucide-react';
 import { mcpServersApi } from '../../api/connectors';
 import { getErrorMessage } from '../../utils/errors';
@@ -11,12 +10,13 @@ import MCPTestResultView from './MCPTestResultView';
 
 interface Props {
   onClose: () => void;
+  // Called with the new connector's UUID; the page navigates to it.
+  onCreated: (connectorUUID: string) => void;
 }
 
 // AddMCPConnectorModal adds a remote MCP server as a custom connector. Only
 // remote servers (an http(s) URL) are supported.
-export default function AddMCPConnectorModal({ onClose }: Props) {
-  const navigate = useNavigate();
+export default function AddMCPConnectorModal({ onClose, onCreated }: Props) {
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [auth, setAuth] = useState<MCPAuthForm>(EMPTY_AUTH_FORM);
@@ -66,8 +66,7 @@ export default function AddMCPConnectorModal({ onClose }: Props) {
         window.location.assign(authorize_url);
         return;
       }
-      navigate(created.connector_uuid ? `/connectors/${created.connector_uuid}` : '/connectors');
-      onClose();
+      onCreated(created.connector_uuid ?? '');
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to add the connector'));
       setSaving(false);

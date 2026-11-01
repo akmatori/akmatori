@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { alertSourceTypesApi, alertSourcesApi, channelsApi } from '../api/client';
 import type { AlertSourceType, AlertSourceInstance, Channel } from '../types';
 import { visibleAlertSourceTypes } from '../components/alerts/alertSourceHelpers';
@@ -38,10 +38,13 @@ export function useAlertSourceManagement(scope?: PartScope) {
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [rawFormData, setFormData] = useState<AlertSourceFormData>(EMPTY_FORM);
   const firstCreatable = creatableAlertTypes(visibleAlertSourceTypes(sourceTypes), scope)[0]?.name ?? '';
-  const formData: AlertSourceFormData =
-    isCreating && !rawFormData.source_type_name && firstCreatable
-      ? { ...rawFormData, source_type_name: firstCreatable }
-      : rawFormData;
+  const formData: AlertSourceFormData = useMemo(
+    () =>
+      isCreating && !rawFormData.source_type_name && firstCreatable
+        ? { ...rawFormData, source_type_name: firstCreatable }
+        : rawFormData,
+    [isCreating, rawFormData, firstCreatable],
+  );
 
   const loadData = useCallback(async () => {
     try {
@@ -161,11 +164,13 @@ export function useAlertSourceManagement(scope?: PartScope) {
     [loadData, onChange],
   );
 
+  const onCancel = scope?.onCancel;
   const handleCancel = useCallback(() => {
     setIsCreating(false);
     setEditingSource(null);
     setFormData(EMPTY_FORM);
-  }, []);
+    onCancel?.();
+  }, [onCancel]);
 
   const toggleExpand = useCallback((uuid: string) => {
     setExpandedSource((prev) => (prev === uuid ? null : uuid));

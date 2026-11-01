@@ -15,6 +15,22 @@ gateway resolves routing, enforces allowlists, executes, returns output.
   names or instance hints
 - `ToolAllowlist` on `WebSocketMessage` is intentionally NOT `omitempty` — `[]` means reject-all,
   `null` means allow-all
+- MCP proxy tools (`<namespace_prefix>.<tool>`) go through the allowlist like every tool: the
+  tool type is the namespace prefix, and the entry comes from the MCP server's managed tool
+  instance (see the `connectors` rule). There is no proxy-namespace bypass any more; `tools/list`
+  is filtered by the allowlist too. `logical_name` / `tool_instance_id` are stripped before a call
+  goes upstream. Upstream names with `.` or other characters are sanitized to `_` in the
+  namespaced name (`disabled_tools` and status use the original names)
+- remote MCP only (no stdio). Outbound MCP HTTP uses `NetPolicy` (`netpolicy.go`): the resolved IP
+  is checked at dial time; loopback, link-local (incl. 169.254.169.254), unspecified and multicast
+  are refused; private ranges are allowed unless `MCP_BLOCK_PRIVATE_NETWORKS=true`;
+  `MCP_ALLOW_LOOPBACK=true` for dev/tests; no redirects; no env proxy (it would hide the
+  destination); 10 MiB response cap. Streamable HTTP responses may be JSON or `text/event-stream`
+- reload closes and re-initializes only servers whose url/transport/auth/namespace/disabled_tools
+  changed, and closes removed ones
+- admin endpoints (`/reload/*`, `/mcp-servers/test`, `/mcp-servers/status`) are `internalOnly`:
+  requests with forwarding headers are refused. The edge proxy (`proxy/nginx.conf`) exposes only
+  `/mcp/tools*` (schemas for the UI); `/mcp/mcp` and the admin paths are internal
 
 ## Incidents tool (built-in, credential-less)
 

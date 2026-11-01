@@ -1,6 +1,6 @@
 import type { MessagingProvider } from '../../types';
 
-// ProviderUIConfig captures everything the IntegrationsManager UI needs to
+// ProviderUIConfig captures everything the integration panel needs to
 // know to render a provider's row: display label, whether the "Add" button
 // is enabled (the data model already supports a provider even when the
 // runtime is a stub), and the description string used in tooltips.

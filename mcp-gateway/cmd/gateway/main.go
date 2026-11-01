@@ -120,7 +120,7 @@ func main() {
 	})
 
 	// Reload HTTP connector tools (called by API server after connector CRUD)
-	mux.HandleFunc("/reload/http-connectors", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/reload/http-connectors", internalOnly(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
@@ -129,10 +129,10 @@ func main() {
 		registry.ReloadHTTPConnectors(tools.DefaultHTTPConnectorLoader)
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"reloaded"}`))
-	})
+	}))
 
 	// Reload MCP proxy tools (called by API server after MCP server config CRUD)
-	mux.HandleFunc("/reload/mcp-servers", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/reload/mcp-servers", internalOnly(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
@@ -141,13 +141,13 @@ func main() {
 		registry.ReloadMCPProxyTools(mcpProxyLoader)
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"reloaded"}`))
-	})
+	}))
 
 	// Test an MCP server config with a throwaway connection (called by the API)
-	mux.HandleFunc("/mcp-servers/test", proxyHandler.TestHTTPHandler(tools.LoadStoredMCPServerConfig))
+	mux.HandleFunc("/mcp-servers/test", internalOnly(proxyHandler.TestHTTPHandler(tools.LoadStoredMCPServerConfig)))
 
 	// Per-server connection status for every loaded MCP server config
-	mux.HandleFunc("/mcp-servers/status", proxyHandler.StatusHTTPHandler())
+	mux.HandleFunc("/mcp-servers/status", internalOnly(proxyHandler.StatusHTTPHandler()))
 
 	// Tool schemas endpoint
 	mux.HandleFunc("/tools", func(w http.ResponseWriter, r *http.Request) {
@@ -215,5 +215,20 @@ func main() {
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		slog.Error("server error", "err", err)
 		os.Exit(1)
+	}
+}
+
+// internalOnly refuses requests that came through a reverse proxy. The
+// gateway's admin endpoints (reloads, MCP server test and status) are for
+// the API on the internal network only; the edge proxy sets forwarding
+// headers, so a request carrying them came from outside. Defense in depth
+// on top of the proxy, which does not route these paths.
+func internalOnly(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" || r.Header.Get("Forwarded") != "" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		h(w, r)
 	}
 }

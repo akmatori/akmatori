@@ -13,6 +13,8 @@ export interface PartScope {
   onCreated?: (id: number) => void;
   // Open the "new" form right away (add-from-catalog page).
   startCreating?: boolean;
+  // Called when the operator cancels the form.
+  onCancel?: () => void;
 }
 
 // Credential-less built-in tools are part of Akmatori itself, not connectors.

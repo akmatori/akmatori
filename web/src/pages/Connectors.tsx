@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronDown, Plug, Plus, Search, Server } from 'lucide-react';
 import { connectorsApi } from '../api/connectors';
 import { getErrorMessage } from '../utils/errors';
+import { useLatestRef } from '../hooks/useLatestRef';
 import { formatRelativeAgo } from '../utils/format';
 import type { ConnectorCatalogEntry, ConnectorSummary } from '../types/connectors';
 import SegmentedControl from '../components/shared/SegmentedControl';
@@ -79,6 +80,7 @@ function CatalogCard({ e, count }: { e: ConnectorCatalogEntry; count: number }) 
 }
 
 export default function Connectors() {
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const tab: Tab = params.get('tab') === 'discover' ? 'discover' : 'yours';
   const showMCP = params.get('add') === 'mcp';
@@ -100,9 +102,11 @@ export default function Connectors() {
     }
   }, []);
 
+  // Initial load (through a ref so the effect runs once).
+  const loadRef = useLatestRef(load);
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadRef.current();
+  }, [loadRef]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -151,7 +155,7 @@ export default function Connectors() {
         <div className="relative flex-1 min-w-[12rem] max-w-md">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" aria-hidden="true" />
           <input
-            className="input-field pl-9"
+            className="input-field !pl-9"
             placeholder="Search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -230,6 +234,7 @@ export default function Connectors() {
             closeMCP();
             void load();
           }}
+          onCreated={(connectorUUID) => navigate(connectorUUID ? `/connectors/${connectorUUID}` : '/connectors', { replace: true })}
         />
       )}
     </div>

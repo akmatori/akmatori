@@ -10,6 +10,8 @@ import Dashboard from './pages/Dashboard';
 import Incidents from './pages/Incidents';
 import Skills from './pages/Skills';
 import Connectors from './pages/Connectors';
+import ConnectorDetail from './pages/ConnectorDetail';
+import ConnectorNew from './pages/ConnectorNew';
 import ContextFiles from './pages/ContextFiles';
 import Runbooks from './pages/Runbooks';
 import Settings from './pages/Settings';
@@ -49,15 +51,17 @@ function App() {
                       <Route path="/proposals/:uuid" element={<ProposalDetail />} />
                       <Route path="/proposals" element={<Proposals />} />
                       <Route path="/skills" element={<Skills />} />
-                      <Route path="/connectors/:section?" element={<Connectors />} />
-                      <Route path="/tools" element={<Navigate to="/connectors/tools" replace />} />
+                      <Route path="/connectors" element={<Connectors />} />
+                      <Route path="/connectors/new/:catalogId" element={<ConnectorNew />} />
+                      <Route path="/connectors/:uuid" element={<ConnectorDetail />} />
+                      <Route path="/tools" element={<Navigate to="/connectors" replace />} />
                       <Route path="/context" element={<ContextFiles />} />
                       <Route path="/runbooks" element={<Runbooks />} />
                       <Route path="/cron" element={<CronJobsPage />} />
-                      <Route path="/settings/slack" element={<Navigate to="/connectors/messaging" replace />} />
-                      <Route path="/settings/integrations" element={<Navigate to="/connectors/messaging" replace />} />
-                      <Route path="/settings/channels" element={<Navigate to="/connectors/channels" replace />} />
-                      <Route path="/settings/alert-sources" element={<Navigate to="/connectors/alert-sources" replace />} />
+                      <Route path="/settings/slack" element={<Navigate to="/connectors" replace />} />
+                      <Route path="/settings/integrations" element={<Navigate to="/connectors" replace />} />
+                      <Route path="/settings/channels" element={<Navigate to="/connectors" replace />} />
+                      <Route path="/settings/alert-sources" element={<Navigate to="/connectors" replace />} />
                       <Route path="/settings/:section?" element={<Settings />} />
                     </Routes>
                   </Layout>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { toolsApi, toolTypesApi } from '../api/client';
 import type { ToolInstance, ToolType } from '../types';
 import { EMPTY_TOOL_FORM, type ToolFormData, type ToolSchema } from '../components/tools/toolFormTypes';
@@ -46,10 +46,14 @@ export function useToolManagement(scope?: PartScope) {
   const onCreated = scope?.onCreated;
   // A form opened before the types loaded has no type yet: use the first
   // type it may create.
-  const formData: ToolFormData =
-    isCreating && !rawFormData.tool_type_id && creatableTypes[0]
-      ? { ...rawFormData, tool_type_id: creatableTypes[0].id }
-      : rawFormData;
+  const firstTypeID = creatableTypes[0]?.id ?? 0;
+  const formData: ToolFormData = useMemo(
+    () =>
+      isCreating && !rawFormData.tool_type_id && firstTypeID
+        ? { ...rawFormData, tool_type_id: firstTypeID }
+        : rawFormData,
+    [isCreating, rawFormData, firstTypeID],
+  );
 
   const handleCreate = useCallback(() => {
     setIsCreating(true);
@@ -127,11 +131,13 @@ export function useToolManagement(scope?: PartScope) {
     }
   }, [loadData, onChange]);
 
+  const onCancel = scope?.onCancel;
   const handleCancel = useCallback(() => {
     setIsCreating(false);
     setEditingTool(null);
     setFormData(EMPTY_TOOL_FORM);
-  }, []);
+    onCancel?.();
+  }, [onCancel]);
 
   const updateSetting = useCallback((key: string, value: unknown) => {
     setFormData((prev) => ({

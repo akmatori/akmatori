@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, CheckCircle2, Pencil, Trash2, XCircle } from 'lucide-react';
 import { connectorsApi } from '../api/connectors';
 import { getErrorMessage } from '../utils/errors';
+import { useLatestRef } from '../hooks/useLatestRef';
 import type { ConnectorDetail as Detail, ConnectorSummary } from '../types/connectors';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
@@ -57,9 +58,11 @@ export default function ConnectorDetail() {
     }
   }, [uuid]);
 
+  // Load on mount and when the route moves to another connector.
+  const loadRef = useLatestRef(load);
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadRef.current();
+  }, [loadRef, uuid]);
 
   const tabs = useMemo(() => (detail ? tabsFor(detail) : []), [detail]);
   const requested = params.get('tab') as TabID | null;
@@ -183,8 +186,8 @@ export default function ConnectorDetail() {
             key={t.id}
             onClick={() => setTab(t.id)}
             aria-current={active === t.id ? 'page' : undefined}
-            className={`px-3 h-9 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${
-              active === t.id ? 'border-primary-500 text-fg' : 'border-transparent text-fg-muted hover:text-fg'
+            className={`px-3 h-9 text-sm whitespace-nowrap border-b-2 transition-colors ${
+              active === t.id ? '!border-primary-500 text-fg' : '!border-transparent text-fg-muted hover:text-fg'
             }`}
           >
             {t.label}

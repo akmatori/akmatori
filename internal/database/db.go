@@ -305,9 +305,10 @@ func runMigrations(db *gorm.DB) error {
 // migrateDisableStdioMCPServers disables every enabled stdio MCP server
 // config. The gateway no longer runs local commands. Idempotent.
 func migrateDisableStdioMCPServers(db *gorm.DB) error {
-	res := db.Model(&MCPServerConfig{}).
-		Where("transport = ? AND enabled = ?", MCPServerTransportStdio, true).
-		Update("enabled", false)
+	// Raw SQL on a fresh session: the pinned migration connection can carry
+	// GORM statement state (table name) from the step before.
+	res := db.Session(&gorm.Session{NewDB: true}).
+		Exec("UPDATE mcp_server_configs SET enabled = ? WHERE transport = ? AND enabled = ?", false, string(MCPServerTransportStdio), true)
 	if res.Error != nil {
 		return fmt.Errorf("disable stdio MCP servers: %w", res.Error)
 	}

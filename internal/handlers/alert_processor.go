@@ -167,9 +167,15 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		release()
 		slog.Info("created incident for alert", "incident_id", incidentUUID)
 
-		// Post to Slack
+		// Post the alert. An explicit Telegram/Discord notification channel
+		// gets the banner there and the result as a reply; everything else
+		// keeps the Slack flow.
 		var channelID, threadTS, channelUUID string
-		if h.isSlackEnabled() {
+		var ext *externalThread
+		if extCh := h.resolveExternalChannel(instance); extCh != nil {
+			ext = h.postAlertExternal(extCh, normalized, instance)
+			channelUUID = extCh.UUID
+		} else if h.isSlackEnabled() {
 			var err error
 			channelID, threadTS, channelUUID, err = h.postAlertToSlack(normalized, instance)
 			if err != nil {
@@ -187,7 +193,7 @@ func (h *AlertHandler) processAlert(instance *database.AlertSourceInstance, norm
 		if err := h.skillService.UpdateIncidentStatus(incidentUUID, database.IncidentStatusRunning); err != nil {
 			slog.Warn("failed to update incident status", "err", err)
 		}
-		go h.runInvestigation(incidentUUID, normalized, instance, channelID, threadTS, channelUUID)
+		go h.runInvestigation(incidentUUID, normalized, instance, channelID, threadTS, channelUUID, ext)
 
 		return nil, nil
 	})
@@ -639,7 +645,7 @@ func (h *AlertHandler) beginIncidentRun(incidentUUID, eventUUID, sourceUUID stri
 	return runID, err
 }
 
-func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, channelID, threadTS, channelUUID string) {
+func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.NormalizedAlert, instance *database.AlertSourceInstance, channelID, threadTS, channelUUID string, ext *externalThread) {
 	slog.Info("starting investigation for alert", "alert_name", alert.AlertName, "incident_id", incidentUUID)
 
 	sourceUUID := ""
@@ -649,6 +655,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 	runID, beginErr := h.beginIncidentRun(incidentUUID, alert.EventUUID, sourceUUID)
 	if beginErr != nil {
 		h.updateSlackWithResult(channelID, threadTS, fmt.Sprintf("Failed to start investigation: %v", beginErr), true)
+		h.postResultExternal(ext, fmt.Sprintf("Failed to start investigation: %v", beginErr), true)
 		return
 	}
 
@@ -830,6 +837,15 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 		}
 
 		h.updateSlackWithResult(channelID, threadTS, formattedResp, hasError)
+		// Bot providers get the neutral Markdown (they split long text
+		// themselves), not the Slack-summarized body.
+		if ext != nil {
+			result := formattedWithMetrics
+			if hasError || result == "" {
+				result = formattedResp
+			}
+			h.postResultExternal(ext, result, hasError)
+		}
 
 		slog.Info("investigation completed for alert via WebSocket", "alert_name", alert.AlertName)
 		return
@@ -842,6 +858,7 @@ func (h *AlertHandler) runInvestigation(incidentUUID string, alert alerts.Normal
 		slog.Error("failed to update incident status", "err", updateErr)
 	}
 	h.updateSlackWithResult(channelID, threadTS, errorMsg, true)
+	h.postResultExternal(ext, errorMsg, true)
 }
 
 // runListenerChannelInvestigation runs investigation and posts results to the
