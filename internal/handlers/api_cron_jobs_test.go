@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -30,8 +31,7 @@ type mockCronJobManager struct {
 	lastCreated *database.CronJob
 	lastPatch   *services.CronJobUpdate
 	lastRunUUID string
-	lastToolIDs []uint
-	createTools []database.ToolInstance
+	lastTools   services.CronJobTools
 }
 
 func (m *mockCronJobManager) ListJobs() ([]database.CronJob, error) {
@@ -54,8 +54,8 @@ func (m *mockCronJobManager) GetJobByUUID(uuid string) (*database.CronJob, error
 	return nil, services.ErrCronJobNotFound
 }
 
-func (m *mockCronJobManager) CreateJob(name, schedule, prompt string, channelUUID string, enabled, postResults bool, toolInstanceIDs []uint) (*database.CronJob, error) {
-	m.lastToolIDs = toolInstanceIDs
+func (m *mockCronJobManager) CreateJob(name, schedule, prompt string, channelUUID string, enabled, postResults bool, tools services.CronJobTools) (*database.CronJob, error) {
+	m.lastTools = tools
 	if m.createErr != nil {
 		return nil, m.createErr
 	}
@@ -65,8 +65,9 @@ func (m *mockCronJobManager) CreateJob(name, schedule, prompt string, channelUUI
 		Schedule:    schedule,
 		Prompt:      prompt,
 		Enabled:     enabled,
-		PostResults: postResults,
-		Tools:       m.createTools,
+		PostResults:  postResults,
+		ToolsEnabled: tools.ToolsEnabled,
+		BuiltinTools: database.StringList(tools.BuiltinTools),
 	}
 	m.lastCreated = row
 	m.jobs = append(m.jobs, *row)
@@ -367,13 +368,13 @@ func TestHandleCronJobs_Create_InternalErrorSurface(t *testing.T) {
 }
 
 // TestHandleCronJobs_Create_ToolErrorSurfaceAs500 pins that DB errors wrapped
-// by the new per-cron tool resolution helpers ("attach cron job tools:",
+// by the create-time bool pins ("apply tools_enabled=false on create:",
 // "apply enabled=false on create:") surface as 500, not 400. Without these
 // prefixes in isCronClientError the handler would route an infra outage to
 // a 4xx, hiding the failure from monitoring.
 func TestHandleCronJobs_Create_ToolErrorSurfaceAs500(t *testing.T) {
 	cases := map[string]error{
-		"attach":         errors.New("attach cron job tools: db down"),
+		"tools_enabled":  errors.New("apply tools_enabled=false on create: db down"),
 		"enabled_update": errors.New("apply enabled=false on create: db down"),
 	}
 	for name, e := range cases {
@@ -393,10 +394,10 @@ func TestHandleCronJobs_Create_ToolErrorSurfaceAs500(t *testing.T) {
 }
 
 // TestHandleCronJobs_Update_ToolErrorSurfaceAs500 mirrors the create-side
-// regression test for the UPDATE path, where "update cron job tools:" wraps
-// Association.Replace errors.
+// regression test for the UPDATE path, where "update cron job:" wraps the
+// column update (tool fields included).
 func TestHandleCronJobs_Update_ToolErrorSurfaceAs500(t *testing.T) {
-	mgr := &mockCronJobManager{updateErr: errors.New("update cron job tools: db down")}
+	mgr := &mockCronJobManager{updateErr: errors.New("update cron job: db down")}
 	h := newHandlerWithCronManager(mgr)
 	body, _ := json.Marshal(UpdateCronJobRequest{Name: ptr("X")})
 	req := httptest.NewRequest(http.MethodPut, "/api/cron-jobs/u1", bytes.NewReader(body))
@@ -519,114 +520,101 @@ func TestHandleCronJobByUUID_ServiceUnavailable(t *testing.T) {
 	}
 }
 
-// TestHandleCronJobs_Create_WithTools threads tool_instance_ids through to
-// CreateJob and verifies the response carries the per-cron Tools summary
-// for the UI.
-func TestHandleCronJobs_Create_WithTools(t *testing.T) {
-	mgr := &mockCronJobManager{
-		createTools: []database.ToolInstance{
-			{
-				ID:          11,
-				Name:        "Prod SSH",
-				LogicalName: "prod-ssh",
-				Enabled:     true,
-				ToolType:    database.ToolType{ID: 1, Name: "ssh"},
-			},
-			{
-				ID:          12,
-				Name:        "Prod Logs",
-				LogicalName: "prod-logs",
-				Enabled:     true,
-				ToolType:    database.ToolType{ID: 2, Name: "loki"},
-			},
-		},
-	}
+// TestHandleCronJobs_Create_ToolFields threads tools_enabled and
+// builtin_tools to CreateJob and back into the response.
+func TestHandleCronJobs_Create_ToolFields(t *testing.T) {
+	mgr := &mockCronJobManager{}
 	h := newHandlerWithCronManager(mgr)
 
+	off := false
+	builtins := []string{"events", "incidents"}
 	body, _ := json.Marshal(CreateCronJobRequest{
-		Name:            "Daily",
-		Schedule:        "0 9 * * *",
-		Prompt:          "Report",
-		ToolInstanceIDs: []uint{11, 12},
+		Name: "Daily", Schedule: "0 9 * * *", Prompt: "Report",
+		ToolsEnabled: &off, BuiltinTools: &builtins,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/cron-jobs", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	h.handleCronJobs(w, req)
-
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	if !reflect.DeepEqual(mgr.lastToolIDs, []uint{11, 12}) {
-		t.Fatalf("tool ids not propagated: got %v, want [11 12]", mgr.lastToolIDs)
+	if mgr.lastTools.ToolsEnabled || !reflect.DeepEqual(mgr.lastTools.BuiltinTools, builtins) {
+		t.Fatalf("tool fields not propagated: %+v", mgr.lastTools)
 	}
-
 	var got cronJobResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(got.Tools) != 2 {
-		t.Fatalf("expected 2 tools in response, got %+v", got.Tools)
-	}
-	if got.Tools[0].LogicalName != "prod-ssh" || got.Tools[0].ToolType != "ssh" {
-		t.Errorf("first tool summary wrong: %+v", got.Tools[0])
-	}
-	if got.Tools[1].LogicalName != "prod-logs" || got.Tools[1].ToolType != "loki" {
-		t.Errorf("second tool summary wrong: %+v", got.Tools[1])
+	if got.ToolsEnabled || !reflect.DeepEqual(got.BuiltinTools, builtins) {
+		t.Errorf("response tool fields wrong: %+v", got)
 	}
 }
 
-// TestHandleCronJobByUUID_Update_SwapsTools verifies that the PUT handler
-// distinguishes "leave tools alone" (field absent) from "replace tools"
-// (explicit slice) by passing a *[]uint through to CronJobUpdate.
-func TestHandleCronJobByUUID_Update_SwapsTools(t *testing.T) {
-	mgr := &mockCronJobManager{
-		jobs: []database.CronJob{{UUID: "u1", Name: "Daily"}},
-	}
+// TestHandleCronJobs_Create_ToolDefaults: omitted fields mean every
+// connector tool and the default built-ins (nil list → service default).
+func TestHandleCronJobs_Create_ToolDefaults(t *testing.T) {
+	mgr := &mockCronJobManager{}
 	h := newHandlerWithCronManager(mgr)
-
-	body, _ := json.Marshal(UpdateCronJobRequest{
-		ToolInstanceIDs: &[]uint{42, 43},
-	})
-	req := httptest.NewRequest(http.MethodPut, "/api/cron-jobs/u1", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
+	req := httptest.NewRequest(http.MethodPost, "/api/cron-jobs",
+		strings.NewReader(`{"name":"Daily","schedule":"0 9 * * *","prompt":"Report"}`))
 	w := httptest.NewRecorder()
-	h.handleCronJobByUUID(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	h.handleCronJobs(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	if mgr.lastPatch == nil || mgr.lastPatch.ToolInstanceIDs == nil {
-		t.Fatalf("ToolInstanceIDs pointer not threaded through patch: %+v", mgr.lastPatch)
-	}
-	if !reflect.DeepEqual(*mgr.lastPatch.ToolInstanceIDs, []uint{42, 43}) {
-		t.Fatalf("tools patch not propagated: got %v, want [42 43]", *mgr.lastPatch.ToolInstanceIDs)
+	if !mgr.lastTools.ToolsEnabled || mgr.lastTools.BuiltinTools != nil {
+		t.Errorf("defaults wrong: %+v", mgr.lastTools)
 	}
 }
 
-// TestHandleCronJobByUUID_Update_LeavesToolsAloneByDefault verifies that a
-// PUT that omits tool_instance_ids leaves CronJobUpdate.ToolInstanceIDs nil
-// (the runner reads nil as "do not touch the per-cron tool allowlist").
-func TestHandleCronJobByUUID_Update_LeavesToolsAloneByDefault(t *testing.T) {
-	mgr := &mockCronJobManager{
-		jobs: []database.CronJob{{UUID: "u1", Name: "Daily"}},
+// TestHandleCronJobs_Create_LegacyToolInstanceIDsRefused: the removed field
+// is an unknown field (400), not silently ignored.
+func TestHandleCronJobs_Create_LegacyToolInstanceIDsRefused(t *testing.T) {
+	h := newHandlerWithCronManager(&mockCronJobManager{})
+	req := httptest.NewRequest(http.MethodPost, "/api/cron-jobs",
+		strings.NewReader(`{"name":"Daily","schedule":"0 9 * * *","prompt":"Report","tool_instance_ids":[1]}`))
+	w := httptest.NewRecorder()
+	h.handleCronJobs(w, req)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "tool_instance_ids") {
+		t.Fatalf("expected 400 naming tool_instance_ids, got %d: %s", w.Code, w.Body.String())
 	}
+}
+
+// TestHandleCronJobs_Create_UnknownBuiltinIs400 maps the typed error.
+func TestHandleCronJobs_Create_UnknownBuiltinIs400(t *testing.T) {
+	mgr := &mockCronJobManager{createErr: fmt.Errorf("%w %q", services.ErrUnknownBuiltinTool, "ssh")}
+	h := newHandlerWithCronManager(mgr)
+	req := httptest.NewRequest(http.MethodPost, "/api/cron-jobs",
+		strings.NewReader(`{"name":"Daily","schedule":"0 9 * * *","prompt":"Report","builtin_tools":["ssh"]}`))
+	w := httptest.NewRecorder()
+	h.handleCronJobs(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+// TestHandleCronJobByUUID_Update_ToolFields: present fields reach the
+// patch; absent ones stay nil (untouched).
+func TestHandleCronJobByUUID_Update_ToolFields(t *testing.T) {
+	mgr := &mockCronJobManager{jobs: []database.CronJob{{UUID: "u1", Name: "Daily"}}}
 	h := newHandlerWithCronManager(mgr)
 
-	body, _ := json.Marshal(UpdateCronJobRequest{Schedule: ptr("*/15 * * * *")})
-	req := httptest.NewRequest(http.MethodPut, "/api/cron-jobs/u1", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
+	req := httptest.NewRequest(http.MethodPut, "/api/cron-jobs/u1",
+		strings.NewReader(`{"tools_enabled":false,"builtin_tools":[]}`))
 	w := httptest.NewRecorder()
 	h.handleCronJobByUUID(w, req)
-
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	if mgr.lastPatch == nil {
-		t.Fatalf("expected patch to be recorded")
+	if mgr.lastPatch.ToolsEnabled == nil || *mgr.lastPatch.ToolsEnabled || mgr.lastPatch.BuiltinTools == nil || len(*mgr.lastPatch.BuiltinTools) != 0 {
+		t.Fatalf("patch = %+v", mgr.lastPatch)
 	}
-	if mgr.lastPatch.ToolInstanceIDs != nil {
-		t.Errorf("expected nil ToolInstanceIDs on patch (untouched), got %+v", *mgr.lastPatch.ToolInstanceIDs)
+
+	req = httptest.NewRequest(http.MethodPut, "/api/cron-jobs/u1", strings.NewReader(`{"schedule":"*/15 * * * *"}`))
+	w = httptest.NewRecorder()
+	h.handleCronJobByUUID(w, req)
+	if mgr.lastPatch.ToolsEnabled != nil || mgr.lastPatch.BuiltinTools != nil {
+		t.Errorf("absent tool fields must stay nil: %+v", mgr.lastPatch)
 	}
 }
 
@@ -712,17 +700,13 @@ func TestCronJobResponse_OmitsLegacyFields(t *testing.T) {
 	}
 }
 
-// TestCronJobResponse_ExposesIsSystemAndTools verifies the response shape
-// always includes the new is_system flag and a tools array — the frontend
-// renders a "System" pill and the tool picker off these fields.
-func TestCronJobResponse_ExposesIsSystemAndTools(t *testing.T) {
+// TestCronJobResponse_ExposesIsSystemAndToolFields verifies the response
+// always carries is_system, tools_enabled and a builtin_tools array.
+func TestCronJobResponse_ExposesIsSystemAndToolFields(t *testing.T) {
 	mgr := &mockCronJobManager{jobs: []database.CronJob{{
 		UUID:     "u1",
-		Name:     "memory-curator",
+		Name:     "Dreaming",
 		IsSystem: true,
-		Tools: []database.ToolInstance{
-			{ID: 7, Name: "Prod SSH", LogicalName: "prod-ssh", Enabled: true, ToolType: database.ToolType{Name: "ssh"}},
-		},
 	}}}
 	h := newHandlerWithCronManager(mgr)
 
@@ -733,15 +717,18 @@ func TestCronJobResponse_ExposesIsSystemAndTools(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	var got cronJobResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+	var generic map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &generic); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if !got.IsSystem {
-		t.Errorf("expected is_system=true on response: %+v", got)
+	if generic["is_system"] != true || generic["tools_enabled"] != false {
+		t.Errorf("flags wrong: %+v", generic)
 	}
-	if len(got.Tools) != 1 || got.Tools[0].LogicalName != "prod-ssh" || got.Tools[0].ToolType != "ssh" {
-		t.Errorf("tools summary wrong: %+v", got.Tools)
+	if list, ok := generic["builtin_tools"].([]interface{}); !ok || len(list) != 0 {
+		t.Errorf("builtin_tools must be an empty array, got %#v", generic["builtin_tools"])
+	}
+	if _, ok := generic["tools"]; ok {
+		t.Errorf("legacy tools field must be gone: %+v", generic)
 	}
 }
 

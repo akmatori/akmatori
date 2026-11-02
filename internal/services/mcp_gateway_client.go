@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -105,6 +106,47 @@ func (c *MCPGatewayClient) Status(ctx context.Context) (map[uint]MCPServerRuntim
 		out[s.ID] = s
 	}
 	return out, nil
+}
+
+// GatewayToolParam is one parameter of a registered gateway tool.
+type GatewayToolParam struct {
+	Type        string   `json:"type"`
+	Description string   `json:"description,omitempty"`
+	Enum        []string `json:"enum,omitempty"`
+}
+
+// GatewayTool is one registered gateway tool with its input schema.
+type GatewayTool struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	InputSchema struct {
+		Properties map[string]GatewayToolParam `json:"properties,omitempty"`
+		Required   []string                    `json:"required,omitempty"`
+	} `json:"input_schema"`
+}
+
+// NamespaceTools lists the tools the gateway has registered for one
+// namespace (MCP server prefix or HTTP connector), with input schemas.
+func (c *MCPGatewayClient) NamespaceTools(ctx context.Context, namespace string) ([]GatewayTool, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/registry/tools?namespace="+url.QueryEscape(namespace), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("MCP gateway unreachable: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("MCP gateway registry returned %d", resp.StatusCode)
+	}
+	var body struct {
+		Tools []GatewayTool `json:"tools"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&body); err != nil {
+		return nil, fmt.Errorf("decode MCP gateway registry: %w", err)
+	}
+	return body.Tools, nil
 }
 
 // Reload asks the gateway to reload MCP server registrations.

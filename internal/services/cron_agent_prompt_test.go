@@ -147,6 +147,12 @@ func TestSeedSystemCronJobs_IdempotentAndPreservesOperatorState(t *testing.T) {
 	if !row.Enabled {
 		t.Error("Dreaming must default to Enabled=true")
 	}
+	if row.ToolsEnabled {
+		t.Error("Dreaming must seed with tools_enabled=false (no connector tools)")
+	}
+	if !equalStringSets(row.BuiltinTools, []string{"events", "runbooks", "memory"}) {
+		t.Errorf("Dreaming builtin_tools = %v", row.BuiltinTools)
+	}
 	if row.Schedule != "0 2 * * *" {
 		t.Errorf("Dreaming schedule wrong, got %q", row.Schedule)
 	}
@@ -268,7 +274,6 @@ func newCronAgentTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&database.Skill{},
 		&database.CronJob{},
-		&database.CronJobTool{},
 		&database.Integration{},
 		&database.Channel{},
 	); err != nil {

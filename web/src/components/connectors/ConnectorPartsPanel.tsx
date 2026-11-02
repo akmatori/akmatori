@@ -87,8 +87,8 @@ export default function ConnectorPartsPanel({ detail, siblings, onChange, onMove
       <div>
         <h2 className="text-sm font-semibold text-fg">What this connector contains</h2>
         <p className="text-xs text-fg-subtle mt-1">
-          A connector groups the tools, alert webhooks and messaging of one system. Webhook URLs, tool names and skill
-          assignments do not change when you move them.
+          A connector groups the tools, alert webhooks and messaging of one system. Webhook URLs and tool names do not
+          change when you move them.
         </p>
       </div>
       {error && <ErrorMessage message={error} />}

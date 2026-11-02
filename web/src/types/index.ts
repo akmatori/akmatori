@@ -8,7 +8,6 @@ export interface Skill {
   enabled: boolean;
   created_at: string;
   updated_at: string;
-  tools?: ToolInstance[];
 }
 
 export interface ToolType {
@@ -373,6 +372,19 @@ export interface Proposal {
   updated_at: string;
 }
 
+// CronProposalContent is the JSON shape of proposed_content /
+// current_snapshot for cron_new and cron_update proposals. The API translates
+// older proposals (tool_logical_names) on read; the field stays optional so the
+// diff can still render it if a row carries it.
+export interface CronProposalContent {
+  name?: string;
+  schedule?: string;
+  prompt?: string;
+  tools_enabled?: boolean;
+  builtin_tools?: CronBuiltinTool[];
+  tool_logical_names?: string[];
+}
+
 export interface ProposalChatMessage {
   id: number;
   proposal_uuid: string;
@@ -572,16 +584,9 @@ export interface UpdateAlertSourceRequest {
 
 export type CronRunStatus = '' | 'ok' | 'error';
 
-// CronJobTool is the slim per-cron tool view returned on /api/cron-jobs.
-// The backend omits Settings (which can hold secrets) and embeds only the
-// ToolType name. Mirrors `toolInstanceSummary` in api_cron_jobs.go.
-export interface CronJobTool {
-  id: number;
-  name: string;
-  logical_name: string;
-  tool_type: string;
-  enabled: boolean;
-}
+// CronBuiltinTool is a built-in tool namespace a cron run may call. See
+// CRON_BUILTIN_TOOLS in components/cron/cronJobHelpers.ts for display order.
+export type CronBuiltinTool = 'events' | 'runbooks' | 'memory' | 'incidents' | 'proposals';
 
 export interface CronJob {
   id: number;
@@ -600,7 +605,10 @@ export interface CronJob {
   created_at: string;
   updated_at: string;
   channel?: Channel | null;
-  tools: CronJobTool[];
+  // tools_enabled: the run may call every enabled connector tool.
+  tools_enabled: boolean;
+  // builtin_tools: the built-in namespaces the run may call.
+  builtin_tools: CronBuiltinTool[];
 }
 
 export interface CreateCronJobRequest {
@@ -610,7 +618,8 @@ export interface CreateCronJobRequest {
   channel_uuid?: string;
   enabled?: boolean;
   post_results?: boolean;
-  tool_instance_ids?: number[];
+  tools_enabled?: boolean;
+  builtin_tools?: CronBuiltinTool[];
 }
 
 export interface UpdateCronJobRequest {
@@ -620,7 +629,8 @@ export interface UpdateCronJobRequest {
   channel_uuid?: string;
   enabled?: boolean;
   post_results?: boolean;
-  tool_instance_ids?: number[];
+  tools_enabled?: boolean;
+  builtin_tools?: CronBuiltinTool[];
 }
 
 // SSH Keys (for SSH tool management)

@@ -108,15 +108,14 @@ func (ToolInstance) TableName() string {
 
 // Skill represents a skill definition
 type Skill struct {
-	ID          uint           `gorm:"primaryKey" json:"id"`
-	Name        string         `gorm:"uniqueIndex;size:64;not null" json:"name"`
-	Description string         `gorm:"size:1024" json:"description"`
-	Category    string         `gorm:"size:64" json:"category"`
-	IsSystem    bool           `gorm:"default:false" json:"is_system"`
-	Enabled     bool           `gorm:"default:true" json:"enabled"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	Tools       []ToolInstance `gorm:"many2many:skill_tools;" json:"tools,omitempty"`
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	Name        string    `gorm:"uniqueIndex;size:64;not null" json:"name"`
+	Description string    `gorm:"size:1024" json:"description"`
+	Category    string    `gorm:"size:64" json:"category"`
+	IsSystem    bool      `gorm:"default:false" json:"is_system"`
+	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func (Skill) TableName() string {

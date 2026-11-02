@@ -315,7 +315,7 @@ func (s *SkillService) SyncSkillsFromFilesystem() error {
 }
 
 // RegenerateSkillMd rewrites a single skill's SKILL.md from the current
-// database row, on-disk prompt body, assigned tools, and per-scope memory
+// database row, on-disk prompt body, and per-scope memory
 // manifest. Used by the memory CRUD handlers so a skill-scoped memory write
 // is reflected in that skill's prompt without waiting for a restart or a
 // manual prompt edit. Returns nil silently for the hardcoded-prompt system
@@ -324,6 +324,9 @@ func (s *SkillService) SyncSkillsFromFilesystem() error {
 func (s *SkillService) RegenerateSkillMd(name string) error {
 	if name == "" || name == "incident-manager" || name == "cron-agent" || name == "proposal-editor" {
 		return nil
+	}
+	if IsGeneratedSkill(name) {
+		return s.RegenerateConnectedToolsSkill()
 	}
 	skill, err := s.GetSkill(name)
 	if err != nil {
@@ -345,8 +348,7 @@ func (s *SkillService) RegenerateSkillMd(name string) error {
 	if err := s.SyncSkillAssets(name, prompt); err != nil {
 		slog.Warn("failed to sync assets while regenerating skill", "skill", name, "err", err)
 	}
-	tools := s.getSkillTools(name)
-	skillMd := s.generateSkillMd(name, skill.Description, prompt, tools)
+	skillMd := s.generateSkillMd(name, skill.Description, prompt)
 	skillPath := filepath.Join(s.GetSkillDir(name), "SKILL.md")
 	if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
 		return fmt.Errorf("regenerate %s: write SKILL.md: %w", name, err)
@@ -377,6 +379,10 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 		if skill.Name == "incident-manager" || skill.Name == "cron-agent" || skill.Name == "proposal-editor" {
 			continue
 		}
+		// connected-tools is rendered from the tool instances below.
+		if IsGeneratedSkill(skill.Name) {
+			continue
+		}
 
 		// Ensure skill directory exists on disk
 		if err := s.EnsureSkillDirectories(skill.Name); err != nil {
@@ -396,11 +402,8 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 			slog.Warn("failed to sync assets for skill", "skill", skill.Name, "err", err)
 		}
 
-		// Get tools for this skill
-		tools := s.getSkillTools(skill.Name)
-
 		// Write SKILL.md with frontmatter + prompt body
-		skillMd := s.generateSkillMd(skill.Name, skill.Description, prompt, tools)
+		skillMd := s.generateSkillMd(skill.Name, skill.Description, prompt)
 		skillPath := filepath.Join(s.GetSkillDir(skill.Name), "SKILL.md")
 
 		if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
@@ -411,5 +414,8 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 		slog.Info("regenerated SKILL.md for skill", "skill", skill.Name)
 	}
 
+	if err := s.RegenerateConnectedToolsSkill(); err != nil {
+		slog.Warn("failed to regenerate connected-tools SKILL.md", "err", err)
+	}
 	return nil
 }

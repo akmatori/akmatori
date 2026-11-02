@@ -28,7 +28,6 @@ func setupIncidentTestDB(t *testing.T) *gorm.DB {
 		&database.Skill{},
 		&database.ToolType{},
 		&database.ToolInstance{},
-		&database.SkillTool{},
 		&database.Incident{},
 		&database.AgentRun{},
 		&database.Event{},

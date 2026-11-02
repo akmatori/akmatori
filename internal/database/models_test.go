@@ -663,7 +663,6 @@ func TestTableNames(t *testing.T) {
 		{Skill{}, "skills"},
 		{ToolType{}, "tool_types"},
 		{ToolInstance{}, "tool_instances"},
-		{SkillTool{}, "skill_tools"},
 		{EventSource{}, "event_sources"},
 		{Incident{}, "incidents"},
 		{SlackSettings{}, "slack_settings"},

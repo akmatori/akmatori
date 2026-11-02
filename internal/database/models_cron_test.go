@@ -8,91 +8,48 @@ import (
 	"gorm.io/gorm"
 )
 
-// TestCronJob_Schema_RoundTripsIsSystemAndTools confirms the redesigned
-// CronJob schema persists the new IsSystem flag and the per-cron Tools
-// many-to-many through the cron_job_tools join table. The reload step covers
-// both branches of the agent-only redesign: the system-cron guard (IsSystem)
-// and the per-cron tool allowlist that Task 3 will start threading into the
-// agent invocation.
-func TestCronJob_Schema_RoundTripsIsSystemAndTools(t *testing.T) {
+// TestCronJob_Schema_RoundTripsToolFields confirms tools_enabled and the
+// builtin_tools JSON list persist, and that tools_enabled defaults to true.
+func TestCronJob_Schema_RoundTripsToolFields(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(
-		&Integration{},
-		&Channel{},
-		&ToolType{},
-		&ToolInstance{},
-		&CronJob{},
-		&CronJobTool{},
-	); err != nil {
+	if err := db.AutoMigrate(&Integration{}, &Channel{}, &CronJob{}); err != nil {
 		t.Fatalf("automigrate: %v", err)
 	}
-
-	toolType := ToolType{Name: "kubectl", Description: "kubectl wrapper"}
-	if err := db.Create(&toolType).Error; err != nil {
-		t.Fatalf("seed tool type: %v", err)
-	}
-	toolA := ToolInstance{ToolTypeID: toolType.ID, Name: "prod-k8s", LogicalName: "prod-k8s", Enabled: true}
-	toolB := ToolInstance{ToolTypeID: toolType.ID, Name: "staging-k8s", LogicalName: "staging-k8s", Enabled: true}
-	if err := db.Create(&toolA).Error; err != nil {
-		t.Fatalf("seed tool A: %v", err)
-	}
-	if err := db.Create(&toolB).Error; err != nil {
-		t.Fatalf("seed tool B: %v", err)
-	}
-
 	job := CronJob{
-		UUID:     uuid.New().String(),
-		Name:     "memory-curator",
-		Schedule: "0 2 * * *",
-		Prompt:   "Consolidate global memory",
-		IsSystem: true,
-		Enabled:  true,
-		Tools:    []ToolInstance{toolA, toolB},
+		UUID:         uuid.New().String(),
+		Name:         "maint",
+		Schedule:     "0 * * * *",
+		Prompt:       "p",
+		IsSystem:     true,
+		BuiltinTools: StringList{"events", "memory"},
 	}
 	if err := db.Create(&job).Error; err != nil {
-		t.Fatalf("create cron job: %v", err)
+		t.Fatalf("create: %v", err)
 	}
-
 	var reloaded CronJob
-	if err := db.Preload("Tools").First(&reloaded, job.ID).Error; err != nil {
+	if err := db.First(&reloaded, job.ID).Error; err != nil {
 		t.Fatalf("reload: %v", err)
 	}
 	if !reloaded.IsSystem {
-		t.Errorf("IsSystem = false after reload, want true")
+		t.Error("IsSystem lost")
 	}
-	if len(reloaded.Tools) != 2 {
-		t.Fatalf("Tools len = %d, want 2", len(reloaded.Tools))
+	if !reloaded.ToolsEnabled {
+		t.Error("tools_enabled default = false, want true")
 	}
-	got := map[string]bool{reloaded.Tools[0].LogicalName: true, reloaded.Tools[1].LogicalName: true}
-	for _, want := range []string{"prod-k8s", "staging-k8s"} {
-		if !got[want] {
-			t.Errorf("Tools missing %q", want)
-		}
+	if len(reloaded.BuiltinTools) != 2 || reloaded.BuiltinTools[0] != "events" || reloaded.BuiltinTools[1] != "memory" {
+		t.Errorf("BuiltinTools = %v", reloaded.BuiltinTools)
 	}
-
-	// Verify the join table rows are present so a follow-up Association
-	// .Replace() in Task 3 has a known starting state.
-	var joinCount int64
-	if err := db.Model(&CronJobTool{}).Where("cron_job_id = ?", job.ID).Count(&joinCount).Error; err != nil {
-		t.Fatalf("count cron_job_tools: %v", err)
+	if err := db.Model(&reloaded).Update("tools_enabled", false).Error; err != nil {
+		t.Fatal(err)
 	}
-	if joinCount != 2 {
-		t.Errorf("cron_job_tools rows = %d, want 2", joinCount)
+	if err := db.First(&reloaded, job.ID).Error; err != nil {
+		t.Fatal(err)
 	}
-
-	// Replacing the association should drop the old rows. Mirrors the API
-	// flow Task 3 will introduce for the per-cron tool picker.
-	if err := db.Model(&reloaded).Association("Tools").Replace([]ToolInstance{toolA}); err != nil {
-		t.Fatalf("Association.Replace: %v", err)
-	}
-	if err := db.Model(&CronJobTool{}).Where("cron_job_id = ?", job.ID).Count(&joinCount).Error; err != nil {
-		t.Fatalf("re-count cron_job_tools: %v", err)
-	}
-	if joinCount != 1 {
-		t.Errorf("after Replace, cron_job_tools rows = %d, want 1", joinCount)
+	if reloaded.ToolsEnabled {
+		t.Error("tools_enabled=false did not persist")
 	}
 }
 
@@ -106,7 +63,7 @@ func TestCronJob_Schema_DefaultIsSystem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&CronJob{}, &CronJobTool{}); err != nil {
+	if err := db.AutoMigrate(&CronJob{}); err != nil {
 		t.Fatalf("automigrate: %v", err)
 	}
 	job := CronJob{

@@ -231,8 +231,8 @@ export default function MCPServerPanel({ part, onChange }: Props) {
         <div>
           <h2 className="text-sm font-semibold text-fg">Tools</h2>
           <p className="text-xs text-fg-subtle mt-1">
-            Turn off tools the agent must not call. The agent calls them as <code>{server.namespace_prefix}.&lt;tool&gt;</code>,
-            and only in skills or cron jobs that this connector is assigned to (Skills → edit → Tools).
+            Turn off tools the agent must not call. The agent calls them as <code>{server.namespace_prefix}.&lt;tool&gt;</code>.
+            They are available to every skill while the connector is enabled, and to cron jobs that allow connector tools.
           </p>
         </div>
         {tools === null ? (

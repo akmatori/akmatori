@@ -1,6 +1,11 @@
 package database
 
-import "time"
+import (
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 // Mirror structs for tables owned by the main API. The gateway never runs
 // migrations — the main API's AutoMigrate owns the DDL. When a table is
@@ -62,27 +67,53 @@ func (Memory) TableName() string {
 }
 
 // CronJob mirrors the main API's CronJob model (read-only in the gateway).
+// ToolsEnabled + BuiltinTools are the cron's tool access (the skill and cron
+// tool mappings are gone).
 type CronJob struct {
-	ID       uint           `gorm:"primaryKey" json:"id"`
-	UUID     string         `json:"uuid"`
-	Name     string         `json:"name"`
-	Schedule string         `json:"schedule"`
-	Prompt   string         `gorm:"type:text" json:"prompt"`
-	IsSystem bool           `json:"is_system"`
-	Enabled  bool           `json:"enabled"`
-	Tools    []ToolInstance `gorm:"many2many:cron_job_tools;joinForeignKey:CronJobID;joinReferences:ToolInstanceID" json:"tools,omitempty"`
+	ID           uint       `gorm:"primaryKey" json:"id"`
+	UUID         string     `json:"uuid"`
+	Name         string     `json:"name"`
+	Schedule     string     `json:"schedule"`
+	Prompt       string     `gorm:"type:text" json:"prompt"`
+	IsSystem     bool       `json:"is_system"`
+	Enabled      bool       `json:"enabled"`
+	ToolsEnabled bool       `gorm:"not null;default:true" json:"tools_enabled"`
+	BuiltinTools StringList `gorm:"type:jsonb" json:"builtin_tools"`
 }
 
 func (CronJob) TableName() string {
 	return "cron_jobs"
 }
 
-// CronJobTool mirrors the cron_job_tools join table.
-type CronJobTool struct {
-	CronJobID      uint `gorm:"primaryKey" json:"cron_job_id"`
-	ToolInstanceID uint `gorm:"primaryKey" json:"tool_instance_id"`
+// StringList is a JSON array of strings stored in a jsonb column.
+type StringList []string
+
+// Scan implements sql.Scanner.
+func (l *StringList) Scan(value interface{}) error {
+	if value == nil {
+		*l = nil
+		return nil
+	}
+	var raw []byte
+	switch v := value.(type) {
+	case []byte:
+		raw = v
+	case string:
+		raw = []byte(v)
+	default:
+		return fmt.Errorf("StringList: unsupported scan type %T", value)
+	}
+	if len(raw) == 0 || string(raw) == "null" {
+		*l = nil
+		return nil
+	}
+	return json.Unmarshal(raw, l)
 }
 
-func (CronJobTool) TableName() string {
-	return "cron_job_tools"
+// Value implements driver.Valuer.
+func (l StringList) Value() (driver.Value, error) {
+	if l == nil {
+		return nil, nil
+	}
+	return json.Marshal([]string(l))
 }

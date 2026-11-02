@@ -24,7 +24,6 @@ func newTestDB(t *testing.T) *gorm.DB {
 		&database.Runbook{},
 		&database.Memory{},
 		&database.CronJob{},
-		&database.CronJobTool{},
 		&database.ToolInstance{},
 		&database.ToolType{},
 		&database.Skill{},
@@ -122,7 +121,9 @@ func TestCreate_ContentShapeValidation(t *testing.T) {
 		{"memory bad type", "memory_new", map[string]interface{}{"scope": "global", "type": "bogus", "name": "n", "body": "b"}},
 		{"memory missing body", "memory_new", map[string]interface{}{"scope": "global", "type": "host", "name": "n"}},
 		{"cron bad schedule", "cron_new", map[string]interface{}{"name": "j", "schedule": "hourly", "prompt": "p"}},
-		{"cron bad tools", "cron_new", map[string]interface{}{"name": "j", "schedule": "0 5 * * *", "prompt": "p", "tool_logical_names": []interface{}{7}}},
+		{"cron legacy tool names", "cron_new", map[string]interface{}{"name": "j", "schedule": "0 5 * * *", "prompt": "p", "tool_logical_names": []interface{}{"prod-ssh"}}},
+		{"cron tools_enabled not bool", "cron_new", map[string]interface{}{"name": "j", "schedule": "0 5 * * *", "prompt": "p", "tools_enabled": "yes"}},
+		{"cron unknown builtin", "cron_new", map[string]interface{}{"name": "j", "schedule": "0 5 * * *", "prompt": "p", "builtin_tools": []interface{}{"ssh"}}},
 		{"skill missing prompt", "skill_prompt_update", map[string]interface{}{"skill_name": "s"}},
 	}
 	for _, tc := range cases {
@@ -381,13 +382,10 @@ func TestListCronJobs(t *testing.T) {
 	db := newTestDB(t)
 	tool := newTool(db)
 
-	tt := database.ToolType{Name: "incidents"}
-	db.Create(&tt)
-	ti := database.ToolInstance{ToolTypeID: tt.ID, Name: "Incidents", LogicalName: "incidents", Enabled: true}
-	db.Create(&ti)
-	job := database.CronJob{UUID: "cj1", Name: "digest", Schedule: "0 8 * * *", Prompt: "do it", Enabled: true}
+	job := database.CronJob{UUID: "cj1", Name: "digest", Schedule: "0 8 * * *", Prompt: "do it", Enabled: true,
+		BuiltinTools: database.StringList{"events", "incidents"}}
 	db.Create(&job)
-	db.Create(&database.CronJobTool{CronJobID: job.ID, ToolInstanceID: ti.ID})
+	db.Model(&job).Update("tools_enabled", false)
 
 	result, err := tool.ListCronJobs(context.Background(), "", nil)
 	if err != nil {
@@ -401,8 +399,48 @@ func TestListCronJobs(t *testing.T) {
 	if row["uuid"] != "cj1" || row["schedule"] != "0 8 * * *" {
 		t.Errorf("unexpected cron row: %v", row)
 	}
-	tools := row["tool_logical_names"].([]interface{})
-	if len(tools) != 1 || tools[0] != "incidents" {
-		t.Errorf("expected tool logical names, got %v", tools)
+	if row["tools_enabled"] != false {
+		t.Errorf("tools_enabled = %v, want false", row["tools_enabled"])
+	}
+	tools := row["builtin_tools"].([]interface{})
+	if len(tools) != 2 || tools[0] != "events" || tools[1] != "incidents" {
+		t.Errorf("expected builtin_tools, got %v", tools)
+	}
+	if _, ok := row["tool_logical_names"]; ok {
+		t.Error("legacy tool_logical_names must be gone")
+	}
+}
+
+func TestCreate_CronUpdateSnapshotCarriesToolFields(t *testing.T) {
+	db := newTestDB(t)
+	tool := newTool(db)
+	db.Create(&database.CronJob{UUID: "cj1", Name: "digest", Schedule: "0 8 * * *", Prompt: "p", Enabled: true,
+		BuiltinTools: database.StringList{"events"}})
+
+	if _, err := tool.Create(context.Background(), "", map[string]interface{}{
+		"kind":       "cron_update",
+		"title":      "Run later",
+		"target_ref": "cj1",
+		"proposed_content": map[string]interface{}{
+			"name": "digest", "schedule": "0 9 * * *", "prompt": "p",
+			"tools_enabled": false, "builtin_tools": []interface{}{"events", "incidents"},
+		},
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	var row database.Proposal
+	db.Where("kind = ?", "cron_update").First(&row)
+	var snap map[string]interface{}
+	if err := json.Unmarshal([]byte(row.CurrentSnapshot), &snap); err != nil {
+		t.Fatalf("snapshot not JSON: %v", err)
+	}
+	if snap["tools_enabled"] != true {
+		t.Errorf("snapshot tools_enabled = %v, want the column default true", snap["tools_enabled"])
+	}
+	if b, ok := snap["builtin_tools"].([]interface{}); !ok || len(b) != 1 || b[0] != "events" {
+		t.Errorf("snapshot builtin_tools = %v", snap["builtin_tools"])
+	}
+	if _, ok := snap["tool_logical_names"]; ok {
+		t.Error("snapshot must not carry tool_logical_names")
 	}
 }

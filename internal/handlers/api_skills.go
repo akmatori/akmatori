@@ -5,6 +5,7 @@ import (
 
 	"github.com/akmatori/akmatori/internal/api"
 	"github.com/akmatori/akmatori/internal/database"
+	"github.com/akmatori/akmatori/internal/services"
 )
 
 // handleSkills handles GET /api/skills and POST /api/skills
@@ -14,7 +15,7 @@ func (h *APIHandler) handleSkills(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		var skills []database.Skill
-		if err := db.Preload("Tools").Preload("Tools.ToolType").Find(&skills).Error; err != nil {
+		if err := db.Find(&skills).Error; err != nil {
 			api.RespondError(w, http.StatusInternalServerError, "Failed to get skills")
 			return
 		}
@@ -86,7 +87,7 @@ func (h *APIHandler) handleSkillByName(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		var skill database.Skill
-		if err := db.Preload("Tools").Preload("Tools.ToolType").Where("name = ?", skillName).First(&skill).Error; err != nil {
+		if err := db.Where("name = ?", skillName).First(&skill).Error; err != nil {
 			api.RespondError(w, http.StatusNotFound, "Skill not found")
 			return
 		}
@@ -95,6 +96,10 @@ func (h *APIHandler) handleSkillByName(w http.ResponseWriter, r *http.Request) {
 		api.RespondJSON(w, http.StatusOK, api.SkillResponse{Skill: skill, Prompt: prompt})
 
 	case http.MethodPut:
+		if services.IsGeneratedSkill(skillName) {
+			api.RespondError(w, http.StatusForbidden, services.ErrGeneratedSkill.Error())
+			return
+		}
 		var updates map[string]interface{}
 		if err := api.DecodeJSON(r, &updates); err != nil {
 			api.RespondError(w, http.StatusBadRequest, err.Error())
@@ -133,7 +138,7 @@ func (h *APIHandler) handleSkillByName(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		db.Preload("Tools").Preload("Tools.ToolType").Where("name = ?", skillName).First(&skill)
+		db.Where("name = ?", skillName).First(&skill)
 		promptText, _ := h.skillService.GetSkillPrompt(skill.Name)
 		api.RespondJSON(w, http.StatusOK, api.SkillResponse{Skill: skill, Prompt: promptText})
 
@@ -171,6 +176,10 @@ func (h *APIHandler) handleSkillPrompt(w http.ResponseWriter, r *http.Request, s
 			return
 		}
 
+		if services.IsGeneratedSkill(skillName) {
+			api.RespondError(w, http.StatusForbidden, services.ErrGeneratedSkill.Error())
+			return
+		}
 		if err := h.skillService.UpdateSkillPrompt(skillName, req.Prompt); err != nil {
 			api.RespondError(w, http.StatusInternalServerError, "Failed to update prompt")
 			return
@@ -183,38 +192,17 @@ func (h *APIHandler) handleSkillPrompt(w http.ResponseWriter, r *http.Request, s
 	}
 }
 
-// handleSkillTools handles GET/PUT /api/skills/:name/tools
-func (h *APIHandler) handleSkillTools(w http.ResponseWriter, r *http.Request, skillName string) {
-	db := database.GetDB()
+// skillToolsGoneMessage is the 410 body of the retired /api/skills/:name/tools.
+const skillToolsGoneMessage = "tools are available to all skills; manage them under /connectors"
 
-	switch r.Method {
-	case http.MethodGet:
-		var skill database.Skill
-		if err := db.Preload("Tools").Preload("Tools.ToolType").Where("name = ?", skillName).First(&skill).Error; err != nil {
-			api.RespondError(w, http.StatusNotFound, "Skill not found")
-			return
-		}
-		api.RespondJSON(w, http.StatusOK, skill.Tools)
-
-	case http.MethodPut:
-		var req api.UpdateSkillToolsRequest
-		if err := api.DecodeJSON(r, &req); err != nil {
-			api.RespondError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-
-		if err := h.skillService.AssignTools(skillName, req.ToolInstanceIDs); err != nil {
-			api.RespondError(w, http.StatusInternalServerError, "Failed to assign tools")
-			return
-		}
-
-		var skill database.Skill
-		db.Preload("Tools").Preload("Tools.ToolType").Where("name = ?", skillName).First(&skill)
-		api.RespondJSON(w, http.StatusOK, skill)
-
-	default:
+// handleSkillTools answers the retired GET/PUT /api/skills/:name/tools with
+// 410 Gone: every connected tool is available to every skill.
+func (h *APIHandler) handleSkillTools(w http.ResponseWriter, r *http.Request, _ string) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPut {
 		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
 	}
+	api.RespondError(w, http.StatusGone, skillToolsGoneMessage)
 }
 
 // handleSkillsSync handles POST /api/skills/sync

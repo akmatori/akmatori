@@ -212,23 +212,15 @@ components:
           allOf: [{$ref: '#/components/schemas/Channel'}]
           nullable: true
           description: Resolved channel for outbound posts. Omitted when the cron has no `channel_id` assigned and no workspace-default channel can be resolved at read time.
-        tools:
+        tools_enabled:
+          type: boolean
+          description: When true, the run may call every enabled connector tool (the same set an incident run gets). Tools are not mapped to skills or crons.
+        builtin_tools:
           type: array
-          description: Per-cron tool allowlist. Always present (possibly empty). The cron-agent invocation is restricted to these ToolInstances; the global skill/tool settings are NOT inherited. Settings JSONB is intentionally omitted from this slim projection to keep secrets off the wire.
-          items:
-            $ref: '#/components/schemas/CronJobToolSummary'
+          description: Built-in namespaces the run may call. Always present (possibly empty).
+          items: {type: string, enum: [events, runbooks, memory, incidents, proposals]}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
-
-    CronJobToolSummary:
-      type: object
-      description: Slim, secret-free projection of a ToolInstance exposed on the cron-jobs endpoint.
-      properties:
-        id: {type: integer}
-        name: {type: string}
-        logical_name: {type: string}
-        tool_type: {type: string}
-        enabled: {type: boolean}
 
     PaginationMeta:
       type: object
@@ -262,10 +254,6 @@ components:
         prompt:
           type: string
           description: SKILL.md prompt content
-        tools:
-          type: array
-          items:
-            $ref: '#/components/schemas/ToolInstance'
         created_at:
           type: string
           format: date-time
@@ -818,39 +806,27 @@ paths:
         schema:
           type: string
     get:
-      summary: Get skill tools
+      summary: Retired — tools are available to all skills
       operationId: getSkillTools
+      deprecated: true
       tags: [Skills]
       responses:
-        '200':
-          description: Tool instances assigned to skill
+        '410':
+          description: Gone. Every enabled connector tool is available to every skill; manage tools under /connectors.
           content:
             application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ToolInstance'
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
     put:
-      summary: Update skill tools
+      summary: Retired — tools are available to all skills
       operationId: updateSkillTools
+      deprecated: true
       tags: [Skills]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                tool_instance_ids:
-                  type: array
-                  items:
-                    type: integer
       responses:
-        '200':
-          description: Updated skill
+        '410':
+          description: Gone. Every enabled connector tool is available to every skill; manage tools under /connectors.
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Skill'
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
 
   /skills/sync:
     post:
@@ -1821,12 +1797,19 @@ paths:
                   format: uuid
                   description: Optional channel to post to. Defaults to the workspace default channel.
                 enabled: {type: boolean, default: true}
-                tool_instance_ids:
+                post_results: {type: boolean, default: true}
+                tools_enabled:
+                  type: boolean
+                  default: true
+                  description: The run may call every enabled connector tool.
+                builtin_tools:
                   type: array
-                  description: Per-cron tool allowlist passed to the cron-agent invocation. Omitted or empty means the agent runs with no infrastructure tools (memory + runbooks only).
-                  items: {type: integer}
+                  default: [events, runbooks, memory]
+                  description: Built-in namespaces the run may call. An unknown name is a 400.
+                  items: {type: string, enum: [events, runbooks, memory, incidents, proposals]}
               description: |
-                Unknown fields (e.g. the legacy `mode` or `description`) are
+                Unknown fields (e.g. the legacy `mode`, `description` or
+                `tool_instance_ids`) are
                 rejected with 400 — the handler decodes with
                 `DisallowUnknownFields`.
       responses:
@@ -1873,9 +1856,9 @@ paths:
       operationId: updateCronJob
       tags: [Cron Jobs]
       description: |
-        Partial patch — only fields present in the body are applied. To leave
-        the per-cron tool allowlist alone, omit `tool_instance_ids`; pass an
-        explicit empty array to clear it. System cron jobs (`is_system=true`)
+        Partial patch — only fields present in the body are applied. Omit
+        `tools_enabled` / `builtin_tools` to leave the tool access alone; pass
+        `builtin_tools: []` to clear the built-ins. System cron jobs (`is_system=true`)
         accept all field updates including `enabled`, but cannot be deleted.
       requestBody:
         required: true
@@ -1893,10 +1876,11 @@ paths:
                   format: uuid
                   description: Pass an empty string to explicitly clear the channel association.
                 enabled: {type: boolean}
-                tool_instance_ids:
+                post_results: {type: boolean}
+                tools_enabled: {type: boolean}
+                builtin_tools:
                   type: array
-                  items: {type: integer}
-                  description: When present, replaces the cron-agent tool allowlist. Omit to leave existing tools untouched; pass `[]` to clear.
+                  items: {type: string, enum: [events, runbooks, memory, incidents, proposals]}
       responses:
         '200':
           description: Updated cron job

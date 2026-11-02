@@ -1,0 +1,152 @@
+package services
+
+import (
+	"testing"
+
+	"github.com/akmatori/akmatori/internal/database"
+	"gorm.io/gorm"
+)
+
+func seedAuthzTools(t *testing.T, db *gorm.DB) map[string]database.ToolInstance {
+	t.Helper()
+	out := map[string]database.ToolInstance{}
+	types := map[string]uint{}
+	for _, name := range []string{"ssh", "zabbix", "incidents", "proposals", "events", "github_ext"} {
+		tt := database.ToolType{Name: name}
+		if name == "github_ext" {
+			tt.Kind = database.ToolTypeKindMCP
+		}
+		if err := db.Create(&tt).Error; err != nil {
+			t.Fatal(err)
+		}
+		types[name] = tt.ID
+	}
+	// Created out of ID order on purpose: zabbix first, then ssh.
+	for _, ti := range []database.ToolInstance{
+		{ToolTypeID: types["zabbix"], Name: "Zabbix", LogicalName: "prod-zabbix", Enabled: true},
+		{ToolTypeID: types["ssh"], Name: "SSH A", LogicalName: "ssh-a", Enabled: true},
+		{ToolTypeID: types["ssh"], Name: "SSH off", LogicalName: "ssh-off", Enabled: true},
+		{ToolTypeID: types["incidents"], Name: "Incidents", LogicalName: "incidents", Enabled: true},
+		{ToolTypeID: types["proposals"], Name: "Proposals", LogicalName: "proposals", Enabled: true},
+		{ToolTypeID: types["events"], Name: "Events", LogicalName: "events", Enabled: true},
+		{ToolTypeID: types["github_ext"], Name: "GitHub", LogicalName: "github", Enabled: true},
+	} {
+		ti := ti
+		if err := db.Create(&ti).Error; err != nil {
+			t.Fatal(err)
+		}
+		out[ti.LogicalName] = ti
+	}
+	if err := db.Model(&database.ToolInstance{}).Where("logical_name = ?", "ssh-off").Update("enabled", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func entryTypes(entries []ToolAllowlistEntry) (instances []string, builtins map[string]bool) {
+	builtins = map[string]bool{}
+	for _, e := range entries {
+		if e.InstanceID == 0 {
+			builtins[e.ToolType] = true
+			continue
+		}
+		instances = append(instances, e.LogicalName)
+	}
+	return
+}
+
+func TestIncidentRunAllowlist(t *testing.T) {
+	db := setupSkillTestDB(t)
+	tools := seedAuthzTools(t, db)
+
+	entries := IncidentRunAllowlist(db)
+	instances, builtins := entryTypes(entries)
+	want := []string{"prod-zabbix", "ssh-a", "github"}
+	if len(instances) != len(want) {
+		t.Fatalf("connector instances = %v, want %v", instances, want)
+	}
+	for i := range want {
+		if instances[i] != want[i] {
+			t.Errorf("instance %d = %s, want %s (ordered by ID)", i, instances[i], want[i])
+		}
+	}
+	for i := 1; i < len(entries); i++ {
+		if entries[i].InstanceID != 0 && entries[i-1].InstanceID > entries[i].InstanceID {
+			t.Errorf("not ordered by instance ID: %+v", entries)
+		}
+	}
+	if !builtins["events"] || !builtins["incidents"] {
+		t.Errorf("incident built-ins missing: %v", builtins)
+	}
+	if builtins["proposals"] {
+		t.Error("proposals must never reach incident runs")
+	}
+	if builtins["runbooks"] || builtins["memory"] {
+		t.Error("runbooks/memory are not live yet")
+	}
+	for _, e := range entries {
+		if e.LogicalName == "ssh-off" {
+			t.Error("disabled instance in allowlist")
+		}
+		if e.InstanceID == tools["incidents"].ID {
+			t.Error("built-in instances must be type-only entries")
+		}
+	}
+}
+
+func TestIncidentRunAllowlist_NoConnectors(t *testing.T) {
+	db := setupSkillTestDB(t)
+	entries := IncidentRunAllowlist(db)
+	if entries == nil {
+		t.Fatal("allowlist must be non-nil")
+	}
+	instances, builtins := entryTypes(entries)
+	if len(instances) != 0 || !builtins["events"] {
+		t.Errorf("got %v %v", instances, builtins)
+	}
+}
+
+func TestIncidentRunAllowlist_FailsClosed(t *testing.T) {
+	db := setupSkillTestDB(t)
+	sqlDB, _ := db.DB()
+	_ = sqlDB.Close()
+	entries := IncidentRunAllowlist(db)
+	if entries == nil || len(entries) != 0 {
+		t.Errorf("lookup error must yield a non-nil empty allowlist, got %v", entries)
+	}
+}
+
+func TestCronAllowlist(t *testing.T) {
+	db := setupSkillTestDB(t)
+	seedAuthzTools(t, db)
+
+	on := CronAllowlist(db, &database.CronJob{ToolsEnabled: true, BuiltinTools: database.StringList{"events"}})
+	instances, builtins := entryTypes(on)
+	if len(instances) != 3 || !builtins["events"] || builtins["incidents"] {
+		t.Errorf("tools_enabled: %v %v", instances, builtins)
+	}
+
+	off := CronAllowlist(db, &database.CronJob{BuiltinTools: database.StringList{"events", "memory", "incidents", "proposals"}})
+	instances, builtins = entryTypes(off)
+	if len(instances) != 0 {
+		t.Errorf("tools_enabled=false leaked connectors: %v", instances)
+	}
+	if !builtins["incidents"] || !builtins["proposals"] || builtins["memory"] {
+		t.Errorf("builtins = %v", builtins)
+	}
+
+	none := CronAllowlist(db, &database.CronJob{BuiltinTools: database.StringList{}})
+	if none == nil || len(none) != 0 {
+		t.Errorf("no tools must be a non-nil empty allowlist, got %v", none)
+	}
+}
+
+func TestNormalizeBuiltinTools(t *testing.T) {
+	got, _, ok := NormalizeBuiltinTools([]string{"proposals", "events", "memory", "events"})
+	if !ok || len(got) != 3 || got[0] != "events" || got[1] != "memory" || got[2] != "proposals" {
+		t.Errorf("got %v %v", got, ok)
+	}
+	if _, bad, ok := NormalizeBuiltinTools([]string{"events", "ssh"}); ok || bad != "ssh" {
+		t.Errorf("ssh must be refused, got bad=%q ok=%v", bad, ok)
+	}
+}

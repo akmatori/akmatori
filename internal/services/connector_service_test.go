@@ -41,7 +41,7 @@ func setupConnectorDB(t *testing.T) *gorm.DB {
 		&database.AlertSourceType{}, &database.AlertSourceInstance{},
 		&database.Integration{}, &database.Channel{},
 		&database.MCPServerConfig{}, &database.HTTPConnector{},
-		&database.Alert{}, &database.SkillTool{}, &database.CronJobTool{},
+		&database.Alert{},
 	)
 }
 

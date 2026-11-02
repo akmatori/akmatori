@@ -1,13 +1,23 @@
 import EmptyState from '../components/shared/EmptyState';
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Plus, Edit2, Trash2, Save, X, Bot, Wrench, Power, PowerOff, Shield, RefreshCw, Eye } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import { SuccessMessage } from '../components/ErrorMessage';
 import PromptEditor from '../components/PromptEditor';
-import { skillsApi, toolsApi } from '../api/client';
-import type { Skill, ToolInstance } from '../types';
+import { skillsApi } from '../api/client';
+import type { Skill } from '../types';
+
+// CONNECTED_TOOLS_SKILL is the system skill the backend generates from the
+// enabled connectors. It is always read-only.
+const CONNECTED_TOOLS_SKILL = 'connected-tools';
+const CONNECTED_TOOLS_NOTE = 'Generated from your enabled connectors. Lists every tool the agent can call.';
+
+function isConnectedTools(skill: Skill | null | undefined): boolean {
+  return skill?.name === CONNECTED_TOOLS_SKILL;
+}
 
 // Modal component for creating/editing skills
 interface SkillModalProps {
@@ -15,7 +25,6 @@ interface SkillModalProps {
   skill: Skill | null;
   isCreating: boolean;
   isViewOnly: boolean;
-  toolInstances: ToolInstance[];
   onClose: () => void;
   onSave: (data: SkillFormData) => Promise<void>;
 }
@@ -25,16 +34,14 @@ interface SkillFormData {
   description: string;
   prompt: string;
   enabled: boolean;
-  toolIds: number[];
 }
 
-function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onClose, onSave }: SkillModalProps) {
+function SkillModal({ isOpen, skill, isCreating, isViewOnly, onClose, onSave }: SkillModalProps) {
   const [formData, setFormData] = useState<SkillFormData>({
     name: '',
     description: '',
     prompt: '',
     enabled: true,
-    toolIds: [],
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -46,7 +53,6 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
         description: skill.description || '',
         prompt: skill.prompt || '',
         enabled: skill.enabled,
-        toolIds: skill.tools?.map(t => t.id) || [],
       });
     } else {
       setFormData({
@@ -54,7 +60,6 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
         description: '',
         prompt: '',
         enabled: true,
-        toolIds: [],
       });
     }
     setError('');
@@ -84,16 +89,6 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
     } finally {
       setSaving(false);
     }
-  };
-
-  const toggleToolSelection = (toolId: number) => {
-    if (isViewOnly) return;
-    setFormData(prev => ({
-      ...prev,
-      toolIds: prev.toolIds.includes(toolId)
-        ? prev.toolIds.filter(id => id !== toolId)
-        : [...prev.toolIds, toolId]
-    }));
   };
 
   if (!isOpen) return null;
@@ -143,7 +138,17 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
                   <div className="text-sm text-primary-800 dark:text-primary-200">
                     <p className="font-medium">System Skill (Read-Only)</p>
                     <p className="mt-1 text-primary-600 dark:text-primary-300">
-                      This is the core incident manager. Its prompt is defined in the system configuration and cannot be modified here.
+                      {isConnectedTools(skill) ? (
+                        <>
+                          {CONNECTED_TOOLS_NOTE} Manage them on the{' '}
+                          <Link to="/connectors" className="underline" onClick={onClose}>
+                            Connectors
+                          </Link>{' '}
+                          page.
+                        </>
+                      ) : (
+                        'This is the core incident manager. Its prompt is defined in the system configuration and cannot be modified here.'
+                      )}
                     </p>
                   </div>
                 </div>
@@ -229,51 +234,18 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
               </div>
             )}
 
-            {/* Tool Assignments - only for non-system, non-view-only skills */}
-            {!isSystemSkill && !isViewOnly && (
-              <div>
-                <label className="block text-sm font-medium text-fg mb-2">
-                  Tool Connections
-                </label>
-                <div className="border border-line rounded-lg p-3 max-h-48 overflow-y-auto bg-surface-2">
-                  {toolInstances.length === 0 ? (
-                    <div className="text-center py-4">
-                      <Wrench className="w-6 h-6 mx-auto text-gray-400 mb-1" />
-                      <p className="text-fg-subtle text-sm">No tools available</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {toolInstances.filter(tool => tool.enabled).map((tool) => (
-                        <div
-                          key={tool.id}
-                          className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-all ${
-                            formData.toolIds.includes(tool.id)
-                              ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                              : 'border-line hover:border-gray-300'
-                          }`}
-                          onClick={() => toggleToolSelection(tool.id)}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={formData.toolIds.includes(tool.id)}
-                            onChange={() => toggleToolSelection(tool.id)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="w-4 h-4"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-fg text-sm truncate">
-                              {tool.name}
-                            </div>
-                            <div className="text-xs text-fg-subtle truncate">
-                              {tool.tool_type?.description}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
+            {/* Tools hint - tools are not chosen per skill */}
+            {!isSystemSkill && (
+              <p className="flex items-start gap-2 text-xs text-fg-subtle">
+                <Wrench className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                <span>
+                  Tools come from{' '}
+                  <Link to="/connectors" className="text-primary-400 hover:underline" onClick={onClose}>
+                    Connectors
+                  </Link>{' '}
+                  and are available to every skill.
+                </span>
+              </p>
             )}
           </div>
 
@@ -297,7 +269,6 @@ function SkillModal({ isOpen, skill, isCreating, isViewOnly, toolInstances, onCl
 
 export default function Skills() {
   const [skills, setSkills] = useState<Skill[]>([]);
-  const [toolInstances, setToolInstances] = useState<ToolInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -317,12 +288,8 @@ export default function Skills() {
     try {
       setLoading(true);
       setError('');
-      const [skillsData, toolsData] = await Promise.all([
-        skillsApi.list(),
-        toolsApi.list(),
-      ]);
+      const skillsData = await skillsApi.list();
       setSkills(skillsData || []);
-      setToolInstances(toolsData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
     } finally {
@@ -367,29 +334,20 @@ export default function Skills() {
   };
 
   const handleSave = async (data: SkillFormData) => {
-    let skillName: string;
-
     if (isCreating) {
-      const newSkill = await skillsApi.create({
+      await skillsApi.create({
         name: data.name,
         description: data.description,
         prompt: data.prompt,
       });
-      skillName = newSkill.name;
     } else if (editingSkill) {
       await skillsApi.update(editingSkill.name, {
         description: data.description,
         enabled: data.enabled,
         prompt: data.prompt,
       });
-      skillName = editingSkill.name;
     } else {
       return;
-    }
-
-    // Update tools assignment (only for non-system skills)
-    if (!editingSkill?.is_system) {
-      await skillsApi.updateTools(skillName, data.toolIds);
     }
 
     setSuccess('Skill saved successfully');
@@ -430,7 +388,7 @@ export default function Skills() {
     <div>
       <PageHeader
         title="Skills"
-        description="Manage your AI skills and their tool assignments"
+        description="Manage your AI skills. Tools come from Connectors and are available to every skill."
         action={
           <div className="flex gap-2">
             <button onClick={handleSync} disabled={syncing} className="btn btn-secondary">
@@ -492,15 +450,17 @@ export default function Skills() {
                         <span className={`badge text-xs ${skill.enabled ? 'badge-success' : 'badge-default'}`}>
                           {skill.enabled ? 'Enabled' : 'Disabled'}
                         </span>
-                        {skill.tools && skill.tools.length > 0 && (
-                          <span className="badge badge-warning text-xs">
+                        {isConnectedTools(skill) && (
+                          <span className="badge badge-default text-xs" title={CONNECTED_TOOLS_NOTE}>
                             <Wrench className="w-3 h-3" />
-                            {skill.tools.length} tool{skill.tools.length > 1 ? 's' : ''}
+                            Generated
                           </span>
                         )}
                       </div>
                       <p className="text-sm text-fg-subtle mt-1 truncate">
-                        {skill.description || 'No description'}
+                        {isConnectedTools(skill)
+                          ? CONNECTED_TOOLS_NOTE
+                          : skill.description || 'No description'}
                       </p>
                     </div>
                   </div>
@@ -547,7 +507,6 @@ export default function Skills() {
         skill={editingSkill}
         isCreating={isCreating}
         isViewOnly={isViewOnly}
-        toolInstances={toolInstances}
         onClose={closeModal}
         onSave={handleSave}
       />

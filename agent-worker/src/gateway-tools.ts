@@ -135,14 +135,14 @@ export function createGatewayCallTool(ctx: GatewayToolContext) {
     description:
       "Call a tool on the MCP Gateway. Use this to execute infrastructure tools " +
       "(SSH commands, Zabbix queries, VictoriaMetrics queries, etc.) by name. " +
-      "Each skill's SKILL.md lists the available tools and their logical instance names.",
+      "connected-tools/SKILL.md lists every available tool and its logical instance names.",
     // promptSnippet is required since pi-mono 0.59.0 for the tool to appear
     // in the "Available tools" section of the system prompt.
     promptSnippet:
       "Call infrastructure tools (SSH, Zabbix, VictoriaMetrics, etc.) on the MCP Gateway by name",
     promptGuidelines: [
       "Use gateway_call to invoke infrastructure tools. Always include the args parameter as an object, even if empty: gateway_call({ tool_name: \"...\", args: {} })",
-      "Each skill's SKILL.md lists assigned tools with their logical names and available operations. Read SKILL.md first.",
+      "Every connected tool is available to every skill. connected-tools/SKILL.md lists them with logical names, parameters and examples. Read it before the first call; pass the logical name as instance when a tool type has several instances.",
       "Example: gateway_call({ tool_name: \"ssh.execute_command\", args: { command: \"uptime\", servers: [\"web-01\"] }, instance: \"prod-ssh\" })",
       "Example: gateway_call({ tool_name: \"zabbix.get_problems\", args: { severity_min: 3 }, instance: \"prod-zabbix\" })",
       "For large result sets, the output is automatically saved to a file and a preview is returned.",

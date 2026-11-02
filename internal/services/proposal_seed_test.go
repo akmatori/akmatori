@@ -18,7 +18,6 @@ func newProposalSeedTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&database.Skill{},
 		&database.CronJob{},
-		&database.CronJobTool{},
 		&database.ToolType{},
 		&database.ToolInstance{},
 	); err != nil {
@@ -111,7 +110,7 @@ func TestSeedImprovementEvaluatorCron_SeedsDisabledWithTools(t *testing.T) {
 	}
 
 	var job database.CronJob
-	if err := db.Preload("Tools").Where("name = ?", "improvement-evaluator").First(&job).Error; err != nil {
+	if err := db.Where("name = ?", "improvement-evaluator").First(&job).Error; err != nil {
 		t.Fatalf("job not seeded: %v", err)
 	}
 	if !job.IsSystem {
@@ -120,15 +119,15 @@ func TestSeedImprovementEvaluatorCron_SeedsDisabledWithTools(t *testing.T) {
 	if job.Enabled {
 		t.Error("evaluator cron must seed DISABLED (operator opts in)")
 	}
-	if len(job.Tools) != 2 {
-		t.Fatalf("expected incidents+proposals tools attached, got %d", len(job.Tools))
+	if job.ToolsEnabled {
+		t.Error("evaluator cron must seed with tools_enabled=false")
 	}
 	names := map[string]bool{}
-	for _, ti := range job.Tools {
-		names[ti.LogicalName] = true
+	for _, n := range job.BuiltinTools {
+		names[n] = true
 	}
-	if !names["incidents"] || !names["proposals"] {
-		t.Errorf("expected incidents+proposals, got %v", names)
+	if !names["incidents"] || !names["proposals"] || !names["events"] {
+		t.Errorf("expected events+incidents+proposals built-ins, got %v", job.BuiltinTools)
 	}
 	if !strings.Contains(job.Prompt, "proposals.create") || !strings.Contains(job.Prompt, "incidents.list") {
 		t.Errorf("evaluator prompt must reference the gateway ops it depends on")
@@ -157,16 +156,6 @@ func TestSeedImprovementEvaluatorCron_SeedsDisabledWithTools(t *testing.T) {
 	db.Model(&database.CronJob{}).Where("name = ?", "improvement-evaluator").Count(&count)
 	if count != 1 {
 		t.Errorf("expected exactly one row, got %d", count)
-	}
-}
-
-// TestSeedImprovementEvaluatorCron_RequiresToolInstances verifies the seed
-// fails loudly when called before EnsureToolTypes (boot-order guard).
-func TestSeedImprovementEvaluatorCron_RequiresToolInstances(t *testing.T) {
-	newProposalSeedTestDB(t)
-	err := database.SeedImprovementEvaluatorCron()
-	if err == nil || !strings.Contains(err.Error(), "EnsureToolTypes") {
-		t.Fatalf("expected boot-order error, got %v", err)
 	}
 }
 

@@ -15,13 +15,10 @@ type Skill struct {
 	Name        string    `gorm:"uniqueIndex;size:64;not null" json:"name"` // kebab-case name (e.g., "zabbix-analyst")
 	Description string    `gorm:"size:1024" json:"description"`             // Short description for skill discovery
 	Category    string    `gorm:"size:64" json:"category"`                  // Optional category (e.g., "monitoring", "database")
-	IsSystem    bool      `gorm:"default:false" json:"is_system"`           // System skills cannot be deleted and don't connect to tools
+	IsSystem    bool      `gorm:"default:false" json:"is_system"`           // System skills cannot be deleted
 	Enabled     bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
-
-	// Relationships - tools are symlinked to skills/{name}/scripts/ with imports embedded in SKILL.md
-	Tools []ToolInstance `gorm:"many2many:skill_tools;" json:"tools,omitempty"`
 }
 
 // ToolType represents a predefined tool type (e.g., zabbix, grafana)
@@ -54,15 +51,6 @@ type ToolInstance struct {
 
 	// Relationships
 	ToolType ToolType `gorm:"foreignKey:ToolTypeID" json:"tool_type,omitempty"`
-	Skills   []Skill  `gorm:"many2many:skill_tools;" json:"skills,omitempty"`
-}
-
-// SkillTool represents the many-to-many relationship between skills and tools
-// GORM auto-manages this table via the many2many:skill_tools tag
-type SkillTool struct {
-	SkillID        uint      `gorm:"primaryKey" json:"skill_id"`
-	ToolInstanceID uint      `gorm:"primaryKey" json:"tool_instance_id"`
-	CreatedAt      time.Time `json:"created_at"`
 }
 
 // EventSourceType represents the type of event source
@@ -95,10 +83,6 @@ func (ToolType) TableName() string {
 
 func (ToolInstance) TableName() string {
 	return "tool_instances"
-}
-
-func (SkillTool) TableName() string {
-	return "skill_tools"
 }
 
 func (EventSource) TableName() string {
@@ -341,11 +325,11 @@ type MCPServerConfig struct {
 	// writes (callback, refresh, sign-out) only apply when it still equals
 	// the version they started from, so a slow refresh or an old sign-in
 	// cannot undo a sign-out or put tokens on a changed server.
-	AuthVersion int `gorm:"not null;default:0" json:"-"`
-	ConnectorID     *uint              `gorm:"index" json:"connector_id,omitempty"`
-	Enabled         bool               `gorm:"default:true" json:"enabled"`
-	CreatedAt       time.Time          `json:"created_at"`
-	UpdatedAt       time.Time          `json:"updated_at"`
+	AuthVersion int       `gorm:"not null;default:0" json:"-"`
+	ConnectorID *uint     `gorm:"index" json:"connector_id,omitempty"`
+	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func (MCPServerConfig) TableName() string {

@@ -4,7 +4,7 @@ import {
   fieldOrder,
   fieldLabel,
   parseContent,
-  fieldToText,
+  fieldValueText,
 } from './proposalHelpers';
 
 interface ProposalDiffProps {
@@ -22,8 +22,8 @@ export default function ProposalDiff({ proposal }: ProposalDiffProps) {
   return (
     <div className="space-y-4">
       {fields.map((field) => {
-        const currentText = fieldToText(current[field]);
-        const proposedText = fieldToText(proposed[field]);
+        const currentText = fieldValueText(field, current[field]);
+        const proposedText = fieldValueText(field, proposed[field]);
         const changed = kc.isUpdate && currentText !== proposedText;
         // Skip fields that are empty on both sides.
         if (!currentText && !proposedText) return null;

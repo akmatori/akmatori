@@ -1,8 +1,8 @@
 import { useMemo, useState, useEffect } from 'react';
-import { Save, X, Power, PowerOff, Wrench } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Save, X, Power, PowerOff } from 'lucide-react';
 import ChannelPicker from '../channels/ChannelPicker';
-import { toolsApi } from '../../api/client';
-import type { CronJob, ToolInstance } from '../../types';
+import type { CronBuiltinTool, CronJob } from '../../types';
 import {
   SCHEDULE_PRESETS,
   ADVANCED_SCHEDULE_VALUE,
@@ -12,6 +12,8 @@ import {
   formatRelativeTime,
   EMPTY_CRON_FORM,
   formStateFromJob,
+  CRON_BUILTIN_TOOLS,
+  sortBuiltinTools,
   type CronJobFormState,
 } from './cronJobHelpers';
 
@@ -31,9 +33,6 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [toolInstances, setToolInstances] = useState<ToolInstance[]>([]);
-  const [toolsLoading, setToolsLoading] = useState(true);
-  const [toolsError, setToolsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (initial) {
@@ -41,27 +40,6 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
       setScheduleMode(matchesPreset(initial.schedule));
     }
   }, [initial]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        setToolsLoading(true);
-        setToolsError(null);
-        const rows = await toolsApi.list();
-        if (!cancelled) setToolInstances(rows);
-      } catch (err) {
-        if (!cancelled) {
-          setToolsError(err instanceof Error ? err.message : 'Failed to load tools');
-        }
-      } finally {
-        if (!cancelled) setToolsLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const validation = useMemo(() => validateCronExpression(form.schedule), [form.schedule]);
   const nextRunPreview = useMemo(() => {
@@ -76,12 +54,12 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
     }
   };
 
-  const toggleTool = (id: number) => {
+  const toggleBuiltin = (name: CronBuiltinTool) => {
     setForm((f) => ({
       ...f,
-      tool_instance_ids: f.tool_instance_ids.includes(id)
-        ? f.tool_instance_ids.filter((x) => x !== id)
-        : [...f.tool_instance_ids, id],
+      builtin_tools: f.builtin_tools.includes(name)
+        ? f.builtin_tools.filter((x) => x !== name)
+        : sortBuiltinTools([...f.builtin_tools, name]),
     }));
   };
 
@@ -108,8 +86,6 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
       setSubmitting(false);
     }
   };
-
-  const enabledTools = toolInstances.filter((t) => t.enabled);
 
   return (
     <div className="p-6 bg-surface-2 rounded-lg border border-line animate-fade-in">
@@ -178,64 +154,68 @@ export default function CronJobForm({ isCreating, initial, onSave, onCancel }: C
             onChange={(e) => setForm({ ...form, prompt: e.target.value })}
           />
           <p className="mt-1 text-xs text-fg-subtle">
-            The prompt is handed to the cron-agent skill as its initial task. The agent uses the
-            tools you assign below plus memory + runbook recall.
+            The prompt is handed to the cron-agent skill as its initial task. The agent can use
+            the tools you allow below.
           </p>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-fg mb-2">
-            Tools
+        <div className="flex items-center gap-3 p-4 rounded-lg bg-surface border border-line">
+          <input
+            type="checkbox"
+            role="switch"
+            id="cron-tools-enabled"
+            aria-label="Allow connector tools"
+            checked={form.tools_enabled}
+            onChange={(e) => setForm({ ...form, tools_enabled: e.target.checked })}
+          />
+          <label htmlFor="cron-tools-enabled" className="cursor-pointer">
+            <span className="text-sm text-fg">Allow connector tools</span>
+            <span className="block text-xs text-fg-subtle">
+              {form.tools_enabled ? (
+                <>
+                  The run may call every tool from your enabled{' '}
+                  <Link to="/connectors" className="text-primary-400 hover:underline">
+                    connectors
+                  </Link>
+                  .
+                </>
+              ) : (
+                'The run may not call connector tools.'
+              )}
+            </span>
           </label>
-          <div className="border border-line rounded-lg p-3 max-h-48 overflow-y-auto bg-surface">
-            {toolsLoading ? (
-              <div className="text-center py-4 text-sm text-fg-subtle">
-                Loading tools…
-              </div>
-            ) : toolsError ? (
-              <div className="text-center py-4 text-sm text-state-fail">
-                {toolsError}
-              </div>
-            ) : enabledTools.length === 0 ? (
-              <div className="text-center py-4">
-                <Wrench className="w-6 h-6 mx-auto text-gray-400 mb-1" />
-                <p className="text-fg-subtle text-sm">No tools available</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {enabledTools.map((tool) => (
-                  <label
-                    key={tool.id}
-                    className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-all ${
-                      form.tool_instance_ids.includes(tool.id)
-                        ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                        : 'border-line hover:border-gray-300'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={form.tool_instance_ids.includes(tool.id)}
-                      onChange={() => toggleTool(tool.id)}
-                      className="w-4 h-4"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-fg text-sm truncate">
-                        {tool.name}
-                      </div>
-                      <div className="text-xs text-fg-subtle truncate">
-                        {tool.tool_type?.name ?? '—'}
-                      </div>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-          <p className="mt-1 text-xs text-fg-subtle">
-            Each cron has its own allowlist — independent of the incident-manager's global tool
-            set.
-          </p>
         </div>
+
+        <fieldset>
+          <legend className="block text-sm font-medium text-fg mb-2">Built-in tools</legend>
+          <div className="space-y-2 border border-line rounded-lg p-3 bg-surface">
+            {CRON_BUILTIN_TOOLS.map((tool) => {
+              const checked = form.builtin_tools.includes(tool.value);
+              return (
+                <label
+                  key={tool.value}
+                  className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-all ${
+                    checked
+                      ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                      : 'border-line hover:border-gray-300'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleBuiltin(tool.value)}
+                    className="w-4 h-4"
+                    aria-label={tool.label}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-fg text-sm">{tool.label}</div>
+                    <div className="text-xs text-fg-subtle">{tool.description}</div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
 
         <div className="flex items-center gap-3 p-4 rounded-lg bg-surface border border-line">
           <input

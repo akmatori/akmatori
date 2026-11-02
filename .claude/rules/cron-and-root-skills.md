@@ -17,8 +17,9 @@ Cron jobs run on a per-job schedule and always execute as a full agent investiga
 - every cron tick is request work, never an incident: a `cron` request event, `PrepareRequestScope`
   under `cron-agent`, and a run with `source_kind="cron"` and `source_uuid=<cron_job.uuid>` (see the
   `agent-runs` rule)
-- each cron carries its own `Tools []ToolInstance` allowlist (m2m via `cron_job_tools`) mapped to
-  `ToolAllowlistEntry` — global skill/tool settings are NOT inherited
+- each cron carries its tool access as `tools_enabled` (every enabled connector tool, or none) and
+  `builtin_tools` (built-in namespaces); `CronAllowlist` builds the allowlist (see the
+  `tool-authorization` rule). A `tools_enabled` run also gets the `connected-tools` skill
 - `cron-agent` is a system skill (`IsSystem=true`), exempt from SKILL.md generation; prompt surfaces
   via `skill_prompt_service`
 - system crons seed via `seedSystemCronJobs()` with per-seed `Enabled` defaults (`Dreaming` enabled,
@@ -29,8 +30,8 @@ Cron jobs run on a per-job schedule and always execute as a full agent investiga
   resolution entirely and records its outcome only on the run row
 - crons spawn with ONLY the `cron-agent` root prompt — do NOT wrap the task with
   `executor.PrependGuidance` (incident-triage framed); the task is prefixed only with the current UTC time
-- tool-less crons (e.g. `Dreaming`) MUST send an explicit allowlist that holds only the built-in
-  `events` entry (`withEventsTool`, every run gets it so a cron can call `events.report_alert`);
+- tool-less crons (e.g. `Dreaming`, `tools_enabled=false`) MUST send an explicit allowlist that
+  holds only their built-in entries (by default `events`, so a cron can call `events.report_alert`);
   `ToolAllowlist` on `WebSocketMessage` is intentionally NOT `omitempty` — `[]` means reject-all,
   `null` means allow-all
 - a cron that finds a problem reports it with `events.report_alert` (see the `events` rule); the
@@ -41,8 +42,6 @@ Cron jobs run on a per-job schedule and always execute as a full agent investiga
 - cron expressions are validated at write time (invalid → 400); `CronRunner` survives tick failures,
   recording `LastRunStatus=error` + `LastRunError`
 - manual fire is `POST /api/cron-jobs/{uuid}/run`; CRUD reloads the runner without restart
-- `CronJobTool` is the explicit join-table model; include it alongside `CronJob` in all `AutoMigrate`
-  calls and test schemas — GORM does not auto-discover it from the `many2many:` tag
 
 # Root-skill agent runs
 

@@ -227,8 +227,7 @@ export default function ConnectorDetail() {
             <section className="card space-y-3 border-state-fail/30">
               <h2 className="text-sm font-semibold text-fg">Delete connector</h2>
               <p className="text-sm text-fg-muted">
-                Deletes everything in this connector ({partCount} {partCount === 1 ? 'item' : 'items'}): tools and their skill
-                and cron assignments, alert webhooks (their URLs stop working), messaging channels, and the MCP server.
+                Deletes everything in this connector ({partCount} {partCount === 1 ? 'item' : 'items'}): tools, alert webhooks (their URLs stop working), messaging channels, and the MCP server.
               </p>
               {confirmDelete ? (
                 <div className="flex gap-2">

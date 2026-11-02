@@ -515,12 +515,6 @@ func deleteManagedTool(tx *gorm.DB, prefix string) error {
 		return err
 	}
 	if len(ids) > 0 {
-		if err := tx.Where("tool_instance_id IN ?", ids).Delete(&database.CronJobTool{}).Error; err != nil {
-			return fmt.Errorf("clear cron assignments: %w", err)
-		}
-		if err := tx.Where("tool_instance_id IN ?", ids).Delete(&database.SkillTool{}).Error; err != nil {
-			return fmt.Errorf("clear skill assignments: %w", err)
-		}
 		if err := tx.Where("id IN ?", ids).Delete(&database.ToolInstance{}).Error; err != nil {
 			return fmt.Errorf("delete managed tool instance: %w", err)
 		}

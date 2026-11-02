@@ -231,6 +231,7 @@ func (h *APIHandler) handleMCPServers(w http.ResponseWriter, r *http.Request) {
 			result = fresh
 		}
 		h.triggerGatewayMCPReload()
+		h.regenerateConnectedTools()
 		out := []mcpServerResponse{toMCPServerResponse(result)}
 		h.addConnectorUUIDs(out)
 		api.RespondJSON(w, http.StatusCreated, out[0])
@@ -319,7 +320,7 @@ func (h *APIHandler) handleMCPServerByID(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		h.triggerGatewayMCPReload()
-		h.regenerateSkillsForTools()
+		h.regenerateConnectedTools()
 		out := []mcpServerResponse{toMCPServerResponse(config)}
 		h.addConnectorUUIDs(out)
 		api.RespondJSON(w, http.StatusOK, out[0])
@@ -331,7 +332,7 @@ func (h *APIHandler) handleMCPServerByID(w http.ResponseWriter, r *http.Request)
 		}
 		h.afterPartDeleted()
 		h.triggerGatewayMCPReload()
-		h.regenerateSkillsForTools()
+		h.regenerateConnectedTools()
 		api.RespondNoContent(w)
 
 	default:
@@ -467,16 +468,26 @@ func (h *APIHandler) triggerGatewayMCPReload() {
 	}
 }
 
-// regenerateSkillsForTools rewrites every SKILL.md so tool names and types
-// in "Assigned Tools" follow a renamed or deleted MCP server.
-func (h *APIHandler) regenerateSkillsForTools() {
-	regen, ok := h.skillService.(interface{ RegenerateAllSkillMds() error })
+// regenerateConnectedTools re-renders connected-tools/SKILL.md after a tool
+// instance, HTTP connector or MCP server change. It renders at once and again
+// after connectedToolsSettleDelay, because the gateway reloads its registry
+// asynchronously and an MCP server lists its functions only once connected.
+func (h *APIHandler) regenerateConnectedTools() {
+	regen, ok := h.skillService.(interface{ RegenerateConnectedToolsSkill() error })
 	if !ok {
 		return
 	}
 	go func() {
-		if err := regen.RegenerateAllSkillMds(); err != nil {
-			slog.Warn("failed to regenerate SKILL.md files after MCP change", "err", err)
+		if err := regen.RegenerateConnectedToolsSkill(); err != nil {
+			slog.Warn("failed to regenerate connected-tools SKILL.md", "err", err)
+		}
+		time.Sleep(connectedToolsSettleDelay)
+		if err := regen.RegenerateConnectedToolsSkill(); err != nil {
+			slog.Warn("failed to regenerate connected-tools SKILL.md", "err", err)
 		}
 	}()
 }
+
+// connectedToolsSettleDelay is how long regenerateConnectedTools waits for
+// the gateway reload before the second render.
+var connectedToolsSettleDelay = 15 * time.Second

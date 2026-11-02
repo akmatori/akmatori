@@ -177,8 +177,8 @@ func (h *APIHandler) handleConnectorByUUID(w http.ResponseWriter, r *http.Reques
 		if len(d.Parts.AlertSources) > 0 {
 			h.reloadAlertChannels()
 		}
-		if d.Parts.MCPServer != nil {
-			h.regenerateSkillsForTools()
+		if d.Parts.MCPServer != nil || len(d.Parts.ToolInstances) > 0 {
+			h.regenerateConnectedTools()
 		}
 		api.RespondNoContent(w)
 	default:

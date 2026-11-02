@@ -25,6 +25,7 @@ type SkillService struct {
 	oneShotLLMCaller OneShotLLMCaller       // optional; nil = title generation falls back deterministically
 	memoryIngester   MemoryIngester         // optional; nil = post-investigation file ingest is a no-op
 	incidentMerger   IncidentMergeEvaluator // optional; nil = post-investigation merge pass is a no-op
+	gatewayTools     GatewayToolLister      // optional; nil = connected-tools renders discovery hints for MCP/HTTP tools
 }
 
 // SetMemoryIngester wires the post-investigation memory file ingester that
@@ -126,7 +127,7 @@ func (s *SkillService) CreateSkill(name, description, category, prompt string) (
 	}
 
 	// Generate and write SKILL.md (no tools yet for new skill)
-	skillMd := s.generateSkillMd(name, description, prompt, nil)
+	skillMd := s.generateSkillMd(name, description, prompt)
 	skillPath := filepath.Join(skillDir, "SKILL.md")
 	if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write SKILL.md: %w", err)
@@ -153,6 +154,9 @@ func (s *SkillService) CreateSkill(name, description, category, prompt string) (
 
 // UpdateSkill updates a skill's metadata and optionally the SKILL.md
 func (s *SkillService) UpdateSkill(name string, description, category string, enabled bool) (*database.Skill, error) {
+	if IsGeneratedSkill(name) {
+		return nil, ErrGeneratedSkill
+	}
 	var skill database.Skill
 	if err := s.db.Where("name = ?", name).First(&skill).Error; err != nil {
 		return nil, fmt.Errorf("skill not found: %w", err)
@@ -171,8 +175,7 @@ func (s *SkillService) UpdateSkill(name string, description, category string, en
 	skillPath := filepath.Join(s.GetSkillDir(name), "SKILL.md")
 	if _, err := os.Stat(skillPath); err == nil {
 		body, _ := s.GetSkillPrompt(name)
-		tools := s.getSkillTools(name)
-		skillMd := s.generateSkillMd(name, description, body, tools)
+		skillMd := s.generateSkillMd(name, description, body)
 		if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
 			slog.Warn("failed to update SKILL.md", "err", err)
 		}
@@ -211,7 +214,7 @@ func (s *SkillService) DeleteSkill(name string) error {
 // ListSkills returns all skills from the database
 func (s *SkillService) ListSkills() ([]database.Skill, error) {
 	var skills []database.Skill
-	if err := s.db.Preload("Tools").Find(&skills).Error; err != nil {
+	if err := s.db.Find(&skills).Error; err != nil {
 		return nil, fmt.Errorf("failed to list skills: %w", err)
 	}
 	return skills, nil
@@ -220,7 +223,7 @@ func (s *SkillService) ListSkills() ([]database.Skill, error) {
 // ListEnabledSkills returns all enabled skills
 func (s *SkillService) ListEnabledSkills() ([]database.Skill, error) {
 	var skills []database.Skill
-	if err := s.db.Preload("Tools").Where("enabled = ?", true).Find(&skills).Error; err != nil {
+	if err := s.db.Where("enabled = ?", true).Find(&skills).Error; err != nil {
 		return nil, fmt.Errorf("failed to list enabled skills: %w", err)
 	}
 	return skills, nil
@@ -235,7 +238,7 @@ func (s *SkillService) GetEnabledSkillNames() []string {
 	}
 	var names []string
 	for _, sk := range skills {
-		if !sk.IsSystem {
+		if !sk.IsSystem || IsGeneratedSkill(sk.Name) {
 			names = append(names, sk.Name)
 		}
 	}
@@ -249,114 +252,18 @@ type ToolAllowlistEntry struct {
 	ToolType    string `json:"tool_type"`
 }
 
-// GetToolAllowlist builds an allowlist of tool instances from all enabled, non-system skills.
-// The allowlist is deduplicated by instance ID (a tool instance assigned to multiple skills
-// only appears once). Returns an empty slice (not nil) if no tools are assigned, so the
-// gateway receives an explicit empty allowlist and rejects all tool calls.
+// GetToolAllowlist is the allowlist of every incident run: all enabled
+// connector tools plus the incident built-ins (see IncidentRunAllowlist).
+// Lookup errors return an empty slice, so the gateway rejects every call.
 func (s *SkillService) GetToolAllowlist() []ToolAllowlistEntry {
-	var skills []database.Skill
-	err := s.db.Preload("Tools.ToolType").Where("enabled = ?", true).Find(&skills).Error
-	if err != nil {
-		slog.Error("failed to list enabled skills for allowlist", "error", err)
-		return []ToolAllowlistEntry{}
-	}
-
-	seen := make(map[uint]bool)
-	entries := make([]ToolAllowlistEntry, 0)
-	for _, sk := range skills {
-		if sk.IsSystem {
-			continue
-		}
-		for _, tool := range sk.Tools {
-			if !tool.Enabled || seen[tool.ID] {
-				continue
-			}
-			seen[tool.ID] = true
-
-			// Resolve tool type name — it's already loaded via Preload in ListEnabledSkills,
-			// but the nested ToolType may not be preloaded. Query if needed.
-			toolTypeName := tool.ToolType.Name
-			if toolTypeName == "" {
-				var tt database.ToolType
-				if err := s.db.First(&tt, tool.ToolTypeID).Error; err == nil {
-					toolTypeName = tt.Name
-				}
-			}
-
-			entries = append(entries, ToolAllowlistEntry{
-				InstanceID:  tool.ID,
-				LogicalName: tool.LogicalName,
-				ToolType:    toolTypeName,
-			})
-		}
-	}
-	return withEventsTool(entries)
+	return IncidentRunAllowlist(s.db)
 }
 
 // GetSkill returns a skill by name
 func (s *SkillService) GetSkill(name string) (*database.Skill, error) {
 	var skill database.Skill
-	if err := s.db.Preload("Tools").Where("name = ?", name).First(&skill).Error; err != nil {
+	if err := s.db.Where("name = ?", name).First(&skill).Error; err != nil {
 		return nil, fmt.Errorf("skill not found: %w", err)
 	}
 	return &skill, nil
-}
-
-// getSkillTools fetches tool instances for a skill from the database
-func (s *SkillService) getSkillTools(skillName string) []database.ToolInstance {
-	skill, err := s.GetSkill(skillName)
-	if err != nil {
-		return nil
-	}
-
-	var skillTools []database.SkillTool
-	if err := s.db.Where("skill_id = ?", skill.ID).Find(&skillTools).Error; err != nil {
-		return nil
-	}
-
-	var tools []database.ToolInstance
-	for _, st := range skillTools {
-		var tool database.ToolInstance
-		if err := s.db.Preload("ToolType").First(&tool, st.ToolInstanceID).Error; err != nil {
-			continue
-		}
-		if tool.Enabled && tool.ToolType.ID != 0 {
-			tools = append(tools, tool)
-		}
-	}
-	return tools
-}
-
-// AssignTools assigns tools to a skill and regenerates SKILL.md
-// Tools are registered as pi-mono ToolDefinition objects at session creation time.
-func (s *SkillService) AssignTools(skillName string, toolIDs []uint) error {
-	// Verify skill exists
-	skill, err := s.GetSkill(skillName)
-	if err != nil {
-		return err
-	}
-
-	// Get tool instances
-	var tools []database.ToolInstance
-	if len(toolIDs) > 0 {
-		if err := s.db.Preload("ToolType").Where("id IN ?", toolIDs).Find(&tools).Error; err != nil {
-			return fmt.Errorf("failed to get tools: %w", err)
-		}
-	}
-
-	// Update database association
-	// Tool credentials are fetched by MCP Gateway at execution time for security
-	if err := s.db.Model(skill).Association("Tools").Replace(tools); err != nil {
-		return fmt.Errorf("failed to update tool associations: %w", err)
-	}
-
-	// Regenerate SKILL.md with updated tool list
-	prompt, _ := s.GetSkillPrompt(skillName)
-	skillMd := s.generateSkillMd(skillName, skill.Description, prompt, tools)
-	skillPath := filepath.Join(s.GetSkillDir(skillName), "SKILL.md")
-	if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
-		return fmt.Errorf("failed to regenerate SKILL.md: %w", err)
-	}
-
-	return nil
 }

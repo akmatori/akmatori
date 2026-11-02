@@ -5,6 +5,7 @@ import {
   contentFamily,
   fieldOrder,
   fieldLabel,
+  fieldValueText,
   parseContent,
   fieldToText,
   sourceIncidentUUIDs,
@@ -45,7 +46,14 @@ describe('contentFamily / fieldOrder', () => {
   it('returns per-kind field ordering matching the backend JSON shapes', () => {
     expect(fieldOrder('runbook_new')).toEqual(['title', 'content']);
     expect(fieldOrder('memory_update')).toEqual(['scope', 'type', 'name', 'description', 'body']);
-    expect(fieldOrder('cron_update')).toEqual(['name', 'schedule', 'prompt', 'tool_logical_names']);
+    expect(fieldOrder('cron_update')).toEqual([
+      'name',
+      'schedule',
+      'prompt',
+      'tools_enabled',
+      'builtin_tools',
+      'tool_logical_names',
+    ]);
     expect(fieldOrder('skill_prompt_update')).toEqual(['skill_name', 'prompt']);
   });
 });
@@ -54,6 +62,28 @@ describe('fieldLabel', () => {
   it('humanizes snake_case field names', () => {
     expect(fieldLabel('tool_logical_names')).toBe('Tool logical names');
     expect(fieldLabel('title')).toBe('Title');
+  });
+
+  it('uses explicit labels for the cron tool fields', () => {
+    expect(fieldLabel('tools_enabled')).toBe('Connector tools');
+    expect(fieldLabel('builtin_tools')).toBe('Built-in tools');
+  });
+});
+
+describe('fieldValueText', () => {
+  it('formats tools_enabled as Allowed / Not allowed', () => {
+    expect(fieldValueText('tools_enabled', true)).toBe('Allowed');
+    expect(fieldValueText('tools_enabled', false)).toBe('Not allowed');
+  });
+
+  it('formats builtin_tools as labels in display order, None when empty', () => {
+    expect(fieldValueText('builtin_tools', ['memory', 'events'])).toBe('Events, Memory');
+    expect(fieldValueText('builtin_tools', [])).toBe('None');
+    expect(fieldValueText('builtin_tools', undefined)).toBe('');
+  });
+
+  it('falls back to fieldToText for other fields', () => {
+    expect(fieldValueText('tool_logical_names', ['a', 'b'])).toBe('a, b');
   });
 });
 

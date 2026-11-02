@@ -127,14 +127,23 @@ func validateContent(kind string, m map[string]interface{}) error {
 		if len(strings.Fields(schedule)) != 5 {
 			return errors.New("proposed_content.schedule must be a 5-field cron expression (m h dom mon dow)")
 		}
-		if v, ok := m["tool_logical_names"]; ok {
+		if _, ok := m["tool_logical_names"]; ok {
+			return errors.New("proposed_content.tool_logical_names is gone: use tools_enabled (bool: every connected tool) and builtin_tools (array of " + strings.Join(builtinToolNames, ", ") + ")")
+		}
+		if v, ok := m["tools_enabled"]; ok {
+			if _, ok := v.(bool); !ok {
+				return errors.New("proposed_content.tools_enabled must be a boolean")
+			}
+		}
+		if v, ok := m["builtin_tools"]; ok {
 			arr, ok := v.([]interface{})
 			if !ok {
-				return errors.New("proposed_content.tool_logical_names must be an array of strings")
+				return errors.New("proposed_content.builtin_tools must be an array of strings")
 			}
 			for _, e := range arr {
-				if _, ok := e.(string); !ok {
-					return errors.New("proposed_content.tool_logical_names must be an array of strings")
+				name, ok := e.(string)
+				if !ok || !isBuiltinToolName(name) {
+					return fmt.Errorf("proposed_content.builtin_tools: %v is not one of %s", e, strings.Join(builtinToolNames, ", "))
 				}
 			}
 		}
@@ -188,7 +197,7 @@ func (t *ProposalsTool) snapshotForTarget(ctx context.Context, kind, targetRef s
 		})
 	case kindCronUpdate:
 		var job database.CronJob
-		if err := t.db.WithContext(ctx).Preload("Tools").Where("uuid = ?", targetRef).First(&job).Error; err != nil {
+		if err := t.db.WithContext(ctx).Where("uuid = ?", targetRef).First(&job).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return "", fmt.Errorf("cron job %s not found", targetRef)
 			}
@@ -196,7 +205,7 @@ func (t *ProposalsTool) snapshotForTarget(ctx context.Context, kind, targetRef s
 		}
 		return marshalSnapshot(map[string]interface{}{
 			"name": job.Name, "schedule": job.Schedule, "prompt": job.Prompt,
-			"tool_logical_names": toolLogicalNames(job.Tools),
+			"tools_enabled": job.ToolsEnabled, "builtin_tools": builtinList(job.BuiltinTools),
 		})
 	case kindSkillPromptUpdate:
 		var skill database.Skill
@@ -223,16 +232,25 @@ func marshalSnapshot(m map[string]interface{}) (string, error) {
 	return string(b), nil
 }
 
-func toolLogicalNames(tools []database.ToolInstance) []string {
-	names := make([]string, 0, len(tools))
-	for _, ti := range tools {
-		name := ti.LogicalName
-		if name == "" {
-			name = ti.Name
+// builtinToolNames are the built-in namespaces a cron may name in
+// builtin_tools. Keep in sync with services.BuiltinToolNamespaces in the API.
+var builtinToolNames = []string{"events", "runbooks", "memory", "incidents", "proposals"}
+
+func isBuiltinToolName(name string) bool {
+	for _, n := range builtinToolNames {
+		if n == name {
+			return true
 		}
-		names = append(names, name)
 	}
-	return names
+	return false
+}
+
+// builtinList returns a non-nil list so the JSON shape is always an array.
+func builtinList(l database.StringList) []string {
+	if l == nil {
+		return []string{}
+	}
+	return []string(l)
 }
 
 // Create inserts a new pending proposal. Supported args: kind*, title*,
@@ -591,19 +609,20 @@ func (t *ProposalsTool) UpdateDraft(ctx context.Context, _ string, args map[stri
 // inspect current definitions before proposing cron changes.
 func (t *ProposalsTool) ListCronJobs(ctx context.Context, _ string, _ map[string]interface{}) (interface{}, error) {
 	var jobs []database.CronJob
-	if err := t.db.WithContext(ctx).Preload("Tools").Order("name ASC").Find(&jobs).Error; err != nil {
+	if err := t.db.WithContext(ctx).Order("name ASC").Find(&jobs).Error; err != nil {
 		return nil, err
 	}
 	items := make([]map[string]interface{}, 0, len(jobs))
 	for _, j := range jobs {
 		items = append(items, map[string]interface{}{
-			"uuid":               j.UUID,
-			"name":               j.Name,
-			"schedule":           j.Schedule,
-			"prompt":             j.Prompt,
-			"enabled":            j.Enabled,
-			"is_system":          j.IsSystem,
-			"tool_logical_names": toolLogicalNames(j.Tools),
+			"uuid":          j.UUID,
+			"name":          j.Name,
+			"schedule":      j.Schedule,
+			"prompt":        j.Prompt,
+			"enabled":       j.Enabled,
+			"is_system":     j.IsSystem,
+			"tools_enabled": j.ToolsEnabled,
+			"builtin_tools": builtinList(j.BuiltinTools),
 		})
 	}
 	b, err := json.Marshal(map[string]interface{}{
