@@ -200,16 +200,6 @@ export const skillsApi = {
       body: JSON.stringify({ prompt }),
     }),
 
-  // Get tools assigned to a skill
-  getTools: (name: string) => fetchApi<ToolInstance[]>(`/api/skills/${encodeURIComponent(name)}/tools`),
-
-  // Update tools assigned to a skill (triggers SKILL.md regeneration)
-  updateTools: (name: string, toolInstanceIds: number[]) =>
-    fetchApi<Skill>(`/api/skills/${encodeURIComponent(name)}/tools`, {
-      method: 'PUT',
-      body: JSON.stringify({ tool_instance_ids: toolInstanceIds }),
-    }),
-
   // Sync skills from filesystem to database
   sync: () =>
     fetchApi<{ status: string; message: string }>('/api/skills/sync', {

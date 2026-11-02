@@ -11,6 +11,10 @@ import {
   runStatusLabel,
   EMPTY_CRON_FORM,
   formStateFromJob,
+  CRON_BUILTIN_TOOLS,
+  DEFAULT_CRON_BUILTIN_TOOLS,
+  sortBuiltinTools,
+  builtinToolLabel,
 } from './cronJobHelpers';
 import * as helpers from './cronJobHelpers';
 import type { CronJob } from '../../types';
@@ -32,7 +36,8 @@ const makeJob = (overrides: Partial<CronJob>): CronJob => ({
   created_at: '',
   updated_at: '',
   channel: overrides.channel ?? null,
-  tools: overrides.tools ?? [],
+  tools_enabled: overrides.tools_enabled ?? true,
+  builtin_tools: overrides.builtin_tools ?? ['events', 'runbooks', 'memory'],
 });
 
 describe('SCHEDULE_PRESETS', () => {
@@ -229,8 +234,10 @@ describe('EMPTY_CRON_FORM', () => {
     expect(validateCronExpression(EMPTY_CRON_FORM.schedule).valid).toBe(true);
   });
 
-  it('starts with no tools and enabled=true', () => {
-    expect(EMPTY_CRON_FORM.tool_instance_ids).toEqual([]);
+  it('starts with connector tools on, the default built-ins, and enabled=true', () => {
+    expect(EMPTY_CRON_FORM.tools_enabled).toBe(true);
+    expect(EMPTY_CRON_FORM.builtin_tools).toEqual(['events', 'runbooks', 'memory']);
+    expect(EMPTY_CRON_FORM.builtin_tools).toEqual(DEFAULT_CRON_BUILTIN_TOOLS);
     expect(EMPTY_CRON_FORM.enabled).toBe(true);
   });
 });
@@ -264,7 +271,7 @@ describe('formStateFromJob', () => {
     expect(state.name).toBe('Morning digest');
     expect(state.channel_uuid).toBe('ch-uuid');
     expect(state.enabled).toBe(false);
-    expect(state.tool_instance_ids).toEqual([]);
+    expect(state.tools_enabled).toBe(true);
   });
 
   it('leaves channel_uuid null when the job has no channel association', () => {
@@ -272,24 +279,38 @@ describe('formStateFromJob', () => {
     expect(state.channel_uuid).toBeNull();
   });
 
-  it('lifts the assigned tool IDs into tool_instance_ids in order', () => {
+  it('copies tools_enabled and orders builtin_tools for display', () => {
     const state = formStateFromJob(
-      makeJob({
-        tools: [
-          { id: 7, name: 'zbx', logical_name: 'zbx', tool_type: 'zabbix', enabled: true },
-          { id: 3, name: 'grafana', logical_name: 'grafana', tool_type: 'grafana', enabled: true },
-        ],
-      }),
+      makeJob({ tools_enabled: false, builtin_tools: ['proposals', 'events'] }),
     );
-    expect(state.tool_instance_ids).toEqual([7, 3]);
+    expect(state.tools_enabled).toBe(false);
+    expect(state.builtin_tools).toEqual(['events', 'proposals']);
   });
 
-  it('treats a row with no tools field as an empty allowlist (defensive against older API responses)', () => {
-    const job = makeJob({});
-    // Simulate an older / partial server response that omitted the tools array.
-    const stripped = { ...job, tools: undefined as unknown as CronJob['tools'] };
-    const state = formStateFromJob(stripped as CronJob);
-    expect(state.tool_instance_ids).toEqual([]);
+  it('keeps an empty builtin_tools list empty', () => {
+    const state = formStateFromJob(makeJob({ builtin_tools: [] }));
+    expect(state.builtin_tools).toEqual([]);
+  });
+});
+
+describe('CRON_BUILTIN_TOOLS', () => {
+  it('lists the built-in namespaces in display order', () => {
+    expect(CRON_BUILTIN_TOOLS.map((t) => t.value)).toEqual([
+      'events',
+      'runbooks',
+      'memory',
+      'incidents',
+      'proposals',
+    ]);
+  });
+
+  it('sortBuiltinTools drops unknown names and sorts known ones', () => {
+    expect(sortBuiltinTools(['memory', 'bogus', 'events'])).toEqual(['events', 'memory']);
+  });
+
+  it('builtinToolLabel falls back to the raw name', () => {
+    expect(builtinToolLabel('incidents')).toBe('Incidents');
+    expect(builtinToolLabel('bogus')).toBe('bogus');
   });
 });
 

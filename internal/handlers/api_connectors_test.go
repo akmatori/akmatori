@@ -343,7 +343,7 @@ func TestMCPOAuth_RedirectToConnector(t *testing.T) {
 // ---------- tools handler: MCP-managed instances ----------
 
 func TestToolsAPI_ManagedToolIsReadOnly(t *testing.T) {
-	db := testhelpers.NewGlobalSQLiteDB(t, &database.ToolType{}, &database.ToolInstance{}, &database.SkillTool{}, &database.CronJobTool{})
+	db := testhelpers.NewGlobalSQLiteDB(t, &database.ToolType{}, &database.ToolInstance{})
 	tt := database.ToolType{Name: "ext.github", Kind: database.ToolTypeKindMCP}
 	if err := db.Create(&tt).Error; err != nil {
 		t.Fatal(err)

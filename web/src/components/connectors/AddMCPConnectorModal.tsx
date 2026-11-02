@@ -97,7 +97,7 @@ export default function AddMCPConnectorModal({ onClose, onCreated }: Props) {
 
           <div className="px-6 py-5 space-y-5">
             <p className="text-sm text-fg-muted">
-              Connect the agent to a remote MCP server. After you add it, assign it to the skills (or cron jobs) that may use its tools.
+              Connect the agent to a remote MCP server. Its tools are available to the agent as soon as the connector is enabled.
             </p>
 
             <div>

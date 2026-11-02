@@ -35,7 +35,7 @@ infrastructure through real tools, and executes remediation behind approval gate
 - **Connectors**: one page for everything the agent connects to: tools (monitoring, Kubernetes, SSH, databases), alert webhooks, messaging (Slack; Telegram and Discord for posting) and custom remote MCP servers (URL + token, API key header or OAuth sign-in). Channels and alert webhooks live inside their connector
 - **Cron jobs**: schedule recurring agent investigations that post results to a Channel, each with its own prompt and per-cron tool allowlist
 - **[Agent Skills](https://github.com/agentskills/agentskills) format**: skills follow the open Agent Skills specification for portability across AI agents
-- **Tools management**: configure reusable tools (SSH, scripts, API clients) and scope them per skill or cron
+- **Connectors**: connect tools (SSH, monitoring, ticketing, HTTP APIs, remote MCP servers) once; every enabled connector is available to every skill
 - **Context files**: upload reference documents the agent uses during incident analysis
 - **Web dashboard**: manage incidents, skills, tools, and settings through a modern, mobile-responsive UI
 - **Self-hosted**: your data never leaves your infrastructure
@@ -98,7 +98,7 @@ The recommended install pulls pre-built multi-arch images from GHCR — no `git 
    - **Connectors → Add → Browse connectors → Slack** to register your bot/signing/app tokens.
    - On the Slack connector, **Channels → New channel** to attach posting and listening destinations. Tick `is_default_post` on the channel that should receive alerts when an alert source does not pin one explicitly. `can_post` / `can_listen` decide whether the channel appears in the alert-source picker or is monitored for inbound mentions.
 
-7. (Optional) Schedule recurring runs in **Cron Jobs**: pick a schedule, write a prompt, attach the tools the agent is allowed to call, and point it at one of your Channels. Every tick runs as a full agent investigation under the `cron-agent` system skill.
+7. (Optional) Schedule recurring runs in **Cron Jobs**: pick a schedule, write a prompt, choose whether the run may call your connector tools and which built-in tools it gets, and point it at one of your Channels. Every tick runs as a full agent investigation under the `cron-agent` system skill.
 
 ### Upgrade
 

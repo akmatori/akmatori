@@ -45,8 +45,8 @@ point at it through a nullable `connector_id`: `tool_instances`, `alert_source_i
   gone: the API rejects command/args/env_vars, the migration disables stored stdio rows, the
   gateway skips them
 - every MCP server owns a managed `tool_types` row (`kind = "mcp"`, name = namespace prefix) and
-  one tool instance (`settings.mcp_server_config_id`). Skills (`skill_tools`), cron jobs
-  (`cron_job_tools`) and the per-run allowlist bind that instance, so the gateway authorizes MCP
+  one tool instance (`settings.mcp_server_config_id`). The per-run allowlist carries that
+  instance like any connector tool (see the `tool-authorization` rule), so the gateway authorizes MCP
   tools like any tool. `MCPServerService` keeps them in sync on create/update/delete (+
   `SyncAllManagedTools` at start); `/api/tools` PUT/DELETE on a managed instance → 409
 - `auth_config` types: `bearer` (token), `header` (header_name + value), `oauth` (tokens from the

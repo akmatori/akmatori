@@ -153,6 +153,13 @@ func runMigrations(db *gorm.DB) error {
 		return err
 	}
 
+	// Pre-migration: replace the skill_tools and cron_job_tools mappings with
+	// cron_jobs.tools_enabled + builtin_tools (every connector tool is
+	// available to every skill). Backfills from the join, then drops both.
+	if err := preMigrateToolMappings(db); err != nil {
+		return err
+	}
+
 	// Reset GORM session state before AutoMigrate. The preMigrate step
 	// operates on specific tables, leaving internal GORM state (table name,
 	// clauses) that can leak into AutoMigrate's processing of other models
@@ -166,7 +173,6 @@ func runMigrations(db *gorm.DB) error {
 		&Skill{},
 		&ToolType{},
 		&ToolInstance{},
-		&SkillTool{},
 		&EventSource{},
 		&Incident{},
 		&AgentRun{},
@@ -186,7 +192,6 @@ func runMigrations(db *gorm.DB) error {
 		&Integration{},
 		&Channel{},
 		&CronJob{},
-		&CronJobTool{},
 		// Alerts (first-class alert rows attached to incidents)
 		&Alert{},
 		// Every inbound item (webhook items, Slack messages, mentions, manual
@@ -852,7 +857,7 @@ const DefaultIncidentManagerPrompt = `You are a Senior Incident Manager responsi
 
    If the host filter returns nothing, retry once without "host" for the same time range and scan the titles for the same site or service. A change shortly before the first alert is a strong root-cause lead: check it and name it in your findings. Skip this step for a question that is not about a problem.
 
-5. **Load relevant skills**: Read the SKILL.md file for each skill relevant to this incident
+5. **Load relevant skills**: Read the SKILL.md file for each skill relevant to this incident, and read connected-tools/SKILL.md for the tool list, parameter schemas and gateway_call examples before the first tool call. Every connected tool is available to every skill.
 6. **Correlate findings**: Connect information from multiple sources
 7. **Determine root cause**: Identify what triggered the incident
 8. **Recommend actions**: Suggest specific remediation steps
@@ -910,7 +915,7 @@ const DefaultCronAgentPrompt = `You are the Cron Agent — a scheduled, autonomo
 
    Read the most relevant file via the local read tool. If memory-searcher errors, fall back to browsing /akmatori/memory/ directly. Skip when the task has no plausible memory dependency.
 
-4. **Execute the task** using only the tools assigned to this cron job. Each cron job declares its own tool allowlist — call those tools via gateway_call(...). Unlike incident-manager runs, no per-skill SKILL.md is loaded for cron-agent: use list_tools_for_tool_type and get_tool_detail to inspect parameter schemas before the first call to a tool you have not used recently. Tools that are NOT in your allowlist will be rejected by the gateway; do not attempt them.
+4. **Execute the task** with the tools this cron job allows, through gateway_call(...). When the job allows infrastructure tools, read connected-tools/SKILL.md first: it lists every connected tool with parameter schemas and examples. Otherwise only the built-in tools of the job are available (for example events). The gateway rejects tools the job does not allow; do not attempt them.
 
 5. **Report problems as alerts**: When the task finds a real problem that needs investigation (not a normal state, not a note for the report), report it once per run:
 
@@ -935,7 +940,7 @@ const DefaultCronAgentPrompt = `You are the Cron Agent — a scheduled, autonomo
 
 ## What Cron Agent does NOT do
 
-- Does not page humans or open tickets unless the assigned tools include a paging/ticketing tool AND the task prompt explicitly asks for it.
+- Does not page humans or open tickets unless the allowed tools include a paging/ticketing tool AND the task prompt explicitly asks for it.
 - Does not retry indefinitely; one tick is one execution.
 - Does not edit incident-manager state, alert sources, or other crons.`
 
@@ -1149,12 +1154,13 @@ func SeedSystemCronJobs() error {
 		}
 
 		row := &CronJob{
-			UUID:     uuid.New().String(),
-			Name:     s.Name,
-			Schedule: s.Schedule,
-			Prompt:   s.Prompt,
-			IsSystem: true,
-			Enabled:  s.Enabled,
+			UUID:         uuid.New().String(),
+			Name:         s.Name,
+			Schedule:     s.Schedule,
+			Prompt:       s.Prompt,
+			IsSystem:     true,
+			Enabled:      s.Enabled,
+			BuiltinTools: StringList{"events", "runbooks", "memory"},
 		}
 		// Wrap insert + enabled-pin in a transaction so a failed pin cannot
 		// leave the seeded row persisted with the wrong enabled state (GORM v2
@@ -1166,6 +1172,10 @@ func SeedSystemCronJobs() error {
 			}
 			if err := tx.Model(row).Update("enabled", s.Enabled).Error; err != nil {
 				return fmt.Errorf("pin seeded system cron %s enabled state: %w", s.Name, err)
+			}
+			// Maintenance crons need no connector tools.
+			if err := tx.Model(row).Update("tools_enabled", false).Error; err != nil {
+				return fmt.Errorf("pin seeded system cron %s tools_enabled: %w", s.Name, err)
 			}
 			return nil
 		}); err != nil {
@@ -1203,11 +1213,9 @@ const improvementEvaluatorCronPrompt = `You are running the periodic self-improv
 6. Final summary: one line per proposal created (title + kind), or "no-op: nothing actionable" when the review surfaced nothing worth proposing.`
 
 // SeedImprovementEvaluatorCron idempotently seeds the improvement-evaluator
-// system cron with the incidents + proposals tools attached. Same semantics
+// system cron with the incidents + proposals built-ins. Same semantics
 // as SeedSystemCronJobs (created disabled, operator edits preserved, shadow
-// rows refuse the seed) — but split out because it must run AFTER
-// EnsureToolTypes has seeded the credential-less incidents/proposals tool
-// instances, which happens later in the boot sequence than InitializeDefaults.
+// rows refuse the seed).
 func SeedImprovementEvaluatorCron() error {
 	var existing CronJob
 	err := DB.Where("name = ? AND is_system = ?", improvementEvaluatorCronName, true).First(&existing).Error
@@ -1231,24 +1239,14 @@ func SeedImprovementEvaluatorCron() error {
 		return nil
 	}
 
-	// The allowlist tools must exist before seeding; missing instances mean
-	// the boot sequence called this too early (before EnsureToolTypes).
-	var tools []ToolInstance
-	if err := DB.Where("logical_name IN ?", []string{"incidents", "proposals"}).Find(&tools).Error; err != nil {
-		return fmt.Errorf("lookup evaluator cron tools: %w", err)
-	}
-	if len(tools) < 2 {
-		return fmt.Errorf("seed system cron %s: incidents/proposals tool instances not seeded yet (found %d of 2) — call after EnsureToolTypes", improvementEvaluatorCronName, len(tools))
-	}
-
 	row := &CronJob{
-		UUID:     uuid.New().String(),
-		Name:     improvementEvaluatorCronName,
-		Schedule: improvementEvaluatorCronSchedule,
-		Prompt:   improvementEvaluatorCronPrompt,
-		IsSystem: true,
-		Enabled:  false, // operator opts in
-		Tools:    tools,
+		UUID:         uuid.New().String(),
+		Name:         improvementEvaluatorCronName,
+		Schedule:     improvementEvaluatorCronSchedule,
+		Prompt:       improvementEvaluatorCronPrompt,
+		IsSystem:     true,
+		Enabled:      false, // operator opts in
+		BuiltinTools: StringList{"events", "runbooks", "memory", "incidents", "proposals"},
 	}
 	// Same insert + enabled-pin transaction as SeedSystemCronJobs: GORM v2
 	// omits zero-value bools from INSERT, so the column default would flip
@@ -1259,6 +1257,9 @@ func SeedImprovementEvaluatorCron() error {
 		}
 		if err := tx.Model(row).Update("enabled", false).Error; err != nil {
 			return fmt.Errorf("pin seeded system cron %s to disabled: %w", improvementEvaluatorCronName, err)
+		}
+		if err := tx.Model(row).Update("tools_enabled", false).Error; err != nil {
+			return fmt.Errorf("pin seeded system cron %s tools_enabled: %w", improvementEvaluatorCronName, err)
 		}
 		return nil
 	}); err != nil {

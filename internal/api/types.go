@@ -16,11 +16,6 @@ type CreateSkillRequest struct {
 	Prompt      string `json:"prompt"`
 }
 
-// UpdateSkillToolsRequest is the request body for PUT /api/skills/:name/tools.
-type UpdateSkillToolsRequest struct {
-	ToolInstanceIDs []uint `json:"tool_instance_ids"`
-}
-
 // UpdateSkillPromptRequest is the request body for PUT /api/skills/:name/prompt.
 type UpdateSkillPromptRequest struct {
 	Prompt string `json:"prompt"`

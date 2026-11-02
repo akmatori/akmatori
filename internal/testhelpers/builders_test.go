@@ -50,17 +50,6 @@ func TestSkillBuilder_Disabled(t *testing.T) {
 	}
 }
 
-func TestSkillBuilder_WithTools(t *testing.T) {
-	tool1 := NewToolInstanceBuilder().WithName("tool-1").Build()
-	tool2 := NewToolInstanceBuilder().WithName("tool-2").Build()
-
-	skill := NewSkillBuilder().WithTools(tool1, tool2).Build()
-
-	if len(skill.Tools) != 2 {
-		t.Errorf("expected 2 tools, got %d", len(skill.Tools))
-	}
-}
-
 func TestToolInstanceBuilder(t *testing.T) {
 	instance := NewToolInstanceBuilder().
 		WithID(10).

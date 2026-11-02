@@ -29,8 +29,11 @@ Proposals tab, refine via chat, and approve (auto-apply) or reject.
   newest run status), NEVER `ContinueIncident`; proposal state + transcript rebuilt into
   each task; transcript in `proposal_chat_messages` written by the handler; allowlist =
   `ChatToolAllowlist()` (incidents+proposals; non-nil empty on failure); no `executor.PrependGuidance`
-- `SeedImprovementEvaluatorCron()` runs from `main.go` AFTER `EnsureToolTypes()` (attaches the seeded
-  tool instances); seeds disabled, same preserve-edits/shadow-check semantics as `SeedSystemCronJobs`
+- `SeedImprovementEvaluatorCron()` seeds `tools_enabled=false` + built-ins `incidents`, `proposals`
+  (and the defaults); seeds disabled, same preserve-edits/shadow-check semantics as `SeedSystemCronJobs`
+- cron proposal content is `{name, schedule, prompt, tools_enabled?, builtin_tools?}`; the gateway
+  refuses the legacy `tool_logical_names`, the API translates pending legacy rows on read (see the
+  `tool-authorization` rule). A `cron_update` without `tools_enabled` leaves the tool access alone
 - gateway `proposals.create` dedups pending rows (kind+target_ref, or kind+title for `*_new`) and
   drops hallucinated `source_incident_uuids`; `proposals` is built-in + credentialless
 - incident feedback UI posts to `POST /api/incidents/{uuid}/feedback`; feedback memories feed the

@@ -44,11 +44,16 @@ type proposalMemoryContent struct {
 	Body        string `json:"body"`
 }
 
+// proposalCronContent carries the cron's tool access as tools_enabled +
+// builtin_tools. Proposals created before the tool mapping was removed carry
+// tool_logical_names instead; translateLegacyCronProposal rewrites them.
 type proposalCronContent struct {
 	Name             string   `json:"name"`
 	Schedule         string   `json:"schedule"`
 	Prompt           string   `json:"prompt"`
-	ToolLogicalNames []string `json:"tool_logical_names"`
+	ToolsEnabled     *bool    `json:"tools_enabled,omitempty"`
+	BuiltinTools     []string `json:"builtin_tools,omitempty"`
+	ToolLogicalNames []string `json:"tool_logical_names,omitempty"`
 }
 
 type proposalSkillPromptContent struct {
@@ -98,6 +103,7 @@ func (s *ProposalService) ListProposals(status, kind string, limit, offset int) 
 	}
 	for i := range rows {
 		s.backfillSkillSnapshot(&rows[i])
+		s.translateLegacyCronProposal(&rows[i])
 	}
 	return rows, total, nil
 }
@@ -113,6 +119,7 @@ func (s *ProposalService) GetProposal(uuid string) (*database.Proposal, error) {
 		return nil, err
 	}
 	s.backfillSkillSnapshot(&row)
+	s.translateLegacyCronProposal(&row)
 	return &row, nil
 }
 
@@ -285,16 +292,8 @@ func (s *ProposalService) checkStale(p *database.Proposal) (bool, string) {
 		if job.Name != snap.Name || job.Schedule != snap.Schedule || job.Prompt != snap.Prompt {
 			return true, "cron job changed since the proposal was created"
 		}
-		live := make([]string, 0, len(job.Tools))
-		for _, t := range job.Tools {
-			name := t.LogicalName
-			if name == "" {
-				name = t.Name
-			}
-			live = append(live, name)
-		}
-		if !equalStringSets(live, snap.ToolLogicalNames) {
-			return true, "cron job tool allowlist changed since the proposal was created"
+		if snap.ToolsEnabled != nil && (*snap.ToolsEnabled != job.ToolsEnabled || !equalStringSets(job.BuiltinTools, snap.BuiltinTools)) {
+			return true, "cron job tool access changed since the proposal was created"
 		}
 	case database.ProposalKindCronNew:
 		var content proposalCronContent
@@ -380,9 +379,10 @@ func (s *ProposalService) apply(ctx context.Context, p *database.Proposal) error
 		if err := json.Unmarshal([]byte(p.ProposedContent), &content); err != nil {
 			return fmt.Errorf("invalid proposed_content: %w", err)
 		}
-		toolIDs, err := s.resolveToolLogicalNames(content.ToolLogicalNames)
-		if err != nil {
-			return err
+		toolsEnabled := content.ToolsEnabled != nil && *content.ToolsEnabled
+		builtins := content.BuiltinTools
+		if builtins == nil {
+			builtins = DefaultCronBuiltinTools
 		}
 		if p.Kind == database.ProposalKindCronNew {
 			// New crons apply DISABLED and without an explicit channel: an
@@ -390,15 +390,21 @@ func (s *ProposalService) apply(ctx context.Context, p *database.Proposal) error
 			// explicit operator enable, and channel selection stays an
 			// operator decision (the runner falls back to the provider
 			// default at fire time).
-			_, err := s.crons.CreateJob(content.Name, content.Schedule, content.Prompt, "", false, true, toolIDs)
+			_, err := s.crons.CreateJob(content.Name, content.Schedule, content.Prompt, "", false, true,
+				CronJobTools{ToolsEnabled: toolsEnabled, BuiltinTools: builtins})
 			return err
 		}
 		patch := CronJobUpdate{
-			Name:            &content.Name,
-			Schedule:        &content.Schedule,
-			Prompt:          &content.Prompt,
-			ToolInstanceIDs: &toolIDs,
+			Name:     &content.Name,
+			Schedule: &content.Schedule,
+			Prompt:   &content.Prompt,
 		}
+		// An update without tool fields leaves the cron's tool access alone.
+		if content.ToolsEnabled != nil {
+			patch.ToolsEnabled = &toolsEnabled
+			patch.BuiltinTools = &builtins
+		}
+		var err error
 		_, err = s.crons.UpdateJob(p.TargetRef, patch)
 		return err
 
@@ -425,34 +431,72 @@ func (s *ProposalService) apply(ctx context.Context, p *database.Proposal) error
 	return fmt.Errorf("unknown proposal kind %q", p.Kind)
 }
 
-// resolveToolLogicalNames maps logical names to enabled ToolInstance IDs.
-// Unknown or disabled names fail the apply with a clear message rather than
-// silently dropping tools the operator reviewed.
-func (s *ProposalService) resolveToolLogicalNames(names []string) ([]uint, error) {
-	ids := make([]uint, 0, len(names))
+// translateLegacyCronProposal rewrites the cron content of a proposal made
+// before the tool mapping was removed: tool_logical_names become
+// tools_enabled + builtin_tools, with the same rule as the migration of
+// cron_job_tools (database.LegacyCronToolFields). Applied in memory on every
+// read, so list, approve and the staleness check all see the new shape.
+func (s *ProposalService) translateLegacyCronProposal(p *database.Proposal) {
+	if p.Kind != database.ProposalKindCronNew && p.Kind != database.ProposalKindCronUpdate {
+		return
+	}
+	p.ProposedContent = s.translateLegacyCronContent(p.ProposedContent)
+	p.CurrentSnapshot = s.translateLegacyCronContent(p.CurrentSnapshot)
+}
+
+func (s *ProposalService) translateLegacyCronContent(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	var c proposalCronContent
+	if json.Unmarshal([]byte(raw), &c) != nil || c.ToolsEnabled != nil {
+		return raw
+	}
+	var legacy map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &legacy) != nil {
+		return raw
+	}
+	if _, ok := legacy["tool_logical_names"]; !ok {
+		return raw
+	}
+	types := s.toolTypesForLogicalNames(c.ToolLogicalNames)
+	enabled, builtins := database.LegacyCronToolFields(types)
+	c.ToolsEnabled = &enabled
+	c.BuiltinTools = []string(builtins)
+	c.ToolLogicalNames = nil
+	b, err := json.Marshal(c)
+	if err != nil {
+		return raw
+	}
+	return string(b)
+}
+
+// toolTypesForLogicalNames resolves logical names to tool type names. A name
+// that matches no instance counts as a connector tool: the reviewer saw an
+// infrastructure tool there.
+func (s *ProposalService) toolTypesForLogicalNames(names []string) []string {
 	if len(names) == 0 {
-		return ids, nil
+		return nil
 	}
 	var instances []database.ToolInstance
-	if err := s.db.Where("logical_name IN ? AND enabled = ?", names, true).Find(&instances).Error; err != nil {
-		return nil, fmt.Errorf("resolve tool logical names: %w", err)
+	if err := s.db.Preload("ToolType").Where("logical_name IN ?", names).Find(&instances).Error; err != nil {
+		slog.Warn("proposal translation: resolve tool logical names", "err", err)
 	}
-	byName := make(map[string]uint, len(instances))
+	byName := make(map[string]string, len(instances))
 	for _, ti := range instances {
-		byName[ti.LogicalName] = ti.ID
+		byName[ti.LogicalName] = ti.ToolType.Name
 	}
-	var missing []string
+	out := make([]string, 0, len(names))
 	for _, n := range names {
-		if id, ok := byName[n]; ok {
-			ids = append(ids, id)
+		if tt, ok := byName[n]; ok && tt != "" {
+			out = append(out, tt)
+		} else if database.IsBuiltinToolType(n) {
+			out = append(out, n)
 		} else {
-			missing = append(missing, n)
+			out = append(out, "unknown-connector")
 		}
 	}
-	if len(missing) > 0 {
-		return nil, fmt.Errorf("unknown or disabled tool logical names: %s", strings.Join(missing, ", "))
-	}
-	return ids, nil
+	return out
 }
 
 // equalStringSets compares two string slices as sets (order-insensitive).

@@ -79,6 +79,7 @@ func (h *APIHandler) handleHTTPConnectors(w http.ResponseWriter, r *http.Request
 		}
 
 		h.triggerGatewayReload()
+		h.regenerateConnectedTools()
 		api.RespondJSON(w, http.StatusCreated, result)
 
 	default:
@@ -148,6 +149,7 @@ func (h *APIHandler) handleHTTPConnectorByID(w http.ResponseWriter, r *http.Requ
 		}
 
 		h.triggerGatewayReload()
+		h.regenerateConnectedTools()
 		api.RespondJSON(w, http.StatusOK, connector)
 
 	case http.MethodDelete:
@@ -161,6 +163,7 @@ func (h *APIHandler) handleHTTPConnectorByID(w http.ResponseWriter, r *http.Requ
 		}
 
 		h.triggerGatewayReload()
+		h.regenerateConnectedTools()
 		api.RespondNoContent(w)
 
 	default:

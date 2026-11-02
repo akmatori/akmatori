@@ -126,21 +126,11 @@ func (s *ToolService) UpdateToolInstance(id uint, name string, logicalName strin
 }
 
 // DeleteToolInstance deletes a tool instance.
-// The DB has no ON DELETE CASCADE on cron_job_tools or skill_tools, so clear
-// both join tables inside a transaction before deleting the parent row.
 func (s *ToolService) DeleteToolInstance(id uint) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("tool_instance_id = ?", id).Delete(&database.CronJobTool{}).Error; err != nil {
-			return fmt.Errorf("failed to delete tool instance: clear cron assignments: %w", err)
-		}
-		if err := tx.Where("tool_instance_id = ?", id).Delete(&database.SkillTool{}).Error; err != nil {
-			return fmt.Errorf("failed to delete tool instance: clear skill assignments: %w", err)
-		}
-		if err := tx.Delete(&database.ToolInstance{}, id).Error; err != nil {
-			return fmt.Errorf("failed to delete tool instance: %w", err)
-		}
-		return nil
-	})
+	if err := s.db.Delete(&database.ToolInstance{}, id).Error; err != nil {
+		return fmt.Errorf("failed to delete tool instance: %w", err)
+	}
+	return nil
 }
 
 // ListToolTypes lists all tool types

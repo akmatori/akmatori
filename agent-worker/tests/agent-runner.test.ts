@@ -2906,6 +2906,10 @@ describe("extractSkillNameFromReadPath", () => {
     expect(extractSkillNameFromReadPath(skillsDir, "/akmatori/skills/SKILL.md")).toBeUndefined();
   });
 
+  it("ignores the generated connected-tools skill so the domain skill stays latched", () => {
+    expect(extractSkillNameFromReadPath(skillsDir, "/akmatori/skills/connected-tools/SKILL.md")).toBeUndefined();
+  });
+
   it("handles missing skillsDir and non-string args", () => {
     expect(extractSkillNameFromReadPath(undefined, "/akmatori/skills/netbox/SKILL.md")).toBeUndefined();
     expect(extractSkillNameFromReadPath(skillsDir, undefined)).toBeUndefined();

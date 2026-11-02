@@ -67,12 +67,6 @@ func (b *SkillBuilder) Disabled() *SkillBuilder {
 	return b
 }
 
-// WithTools adds tool instances to the skill
-func (b *SkillBuilder) WithTools(tools ...database.ToolInstance) *SkillBuilder {
-	b.skill.Tools = append(b.skill.Tools, tools...)
-	return b
-}
-
 // Build returns the constructed skill
 func (b *SkillBuilder) Build() database.Skill {
 	return b.skill

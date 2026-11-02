@@ -19,7 +19,6 @@ type SkillManager interface {
 	GetEnabledSkillNames() []string
 	GetToolAllowlist() []ToolAllowlistEntry
 	GetSkill(name string) (*database.Skill, error)
-	AssignTools(skillName string, toolIDs []uint) error
 	GetSkillDir(skillName string) string
 	GetSkillScriptsDir(skillName string) string
 	GetSkillPrompt(skillName string) (string, error)
@@ -194,14 +193,12 @@ type ProviderRegistry interface {
 // jobs. It is satisfied by *CronRunner; handlers depend on this interface so
 // tests can stub it without spinning up a scheduler.
 //
-// toolInstanceIDs on CreateJob is the per-cron tool allowlist (cron jobs ship
-// with their own subset of the global tool catalog rather than inheriting the
-// alert-driven incident-manager allowlist). Empty slice means the cron-agent
-// runs with no infrastructure tools (memory + runbooks only).
+// tools on CreateJob is the cron's tool access: every connector tool or none
+// (ToolsEnabled), plus the named built-ins (see the tool-authorization rule).
 type CronJobManager interface {
 	ListJobs() ([]database.CronJob, error)
 	GetJobByUUID(uuid string) (*database.CronJob, error)
-	CreateJob(name, schedule, prompt string, channelUUID string, enabled, postResults bool, toolInstanceIDs []uint) (*database.CronJob, error)
+	CreateJob(name, schedule, prompt string, channelUUID string, enabled, postResults bool, tools CronJobTools) (*database.CronJob, error)
 	UpdateJob(uuid string, patch CronJobUpdate) (*database.CronJob, error)
 	DeleteJob(uuid string) error
 	RunNow(uuid string) error

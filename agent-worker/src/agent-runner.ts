@@ -59,8 +59,8 @@ import { createGatewayCallTool, createGatewayFetchTool, createListToolsForToolTy
 const BASH_TOOL_GUIDELINES: string[] = [
   "ALL infrastructure operations go through gateway_call. NEVER call tool names directly (e.g. victoria_metrics.label_values, ssh.execute_command, zabbix.get_hosts). Infrastructure tools: gateway_call, list_tools_for_tool_type, get_tool_detail, list_tool_types, execute_script.",
   "If you get a \"Tool not found\" error, you are calling it wrong — use gateway_call instead. Example: gateway_call(\"victoria_metrics.instant_query\", {query: \"up\"}, \"my-vm-instance\").",
-  "ALWAYS use the read tool to load the relevant SKILL.md file first — it contains your instructions, output format requirements, and gateway_call usage examples for your assigned tools.",
-  "Only use list_tools_for_tool_type / get_tool_detail as a fallback if SKILL.md doesn't cover the tool you need.",
+  "ALWAYS use the read tool to load the relevant SKILL.md file first — it contains your instructions and output format requirements. Then read connected-tools/SKILL.md before the first gateway_call: it lists every connected tool with parameter schemas and gateway_call examples.",
+  "Only use list_tools_for_tool_type / get_tool_detail for a tool that connected-tools/SKILL.md does not list.",
   "For batch operations across multiple hosts or complex data processing, use execute_script. It runs JavaScript with built-in gateway_call(), list_tools_for_tool_type(), get_tool_detail(), and synchronous fs (readFileSync, writeFileSync). Do NOT use require() or import() in scripts.",
 ];
 
@@ -171,8 +171,16 @@ export function extractSkillNameFromReadPath(
   if (rel.length !== 2 || rel[1] !== "SKILL.md" || rel[0] === "") {
     return undefined;
   }
+  // Generated system skills (the tool list) are read by every run; they
+  // must not replace the domain skill that formatting rules match on.
+  if (GENERATED_SKILL_NAMES.has(rel[0])) {
+    return undefined;
+  }
   return rel[0];
 }
+
+/** Generated system skills that never latch last_skill. */
+export const GENERATED_SKILL_NAMES: ReadonlySet<string> = new Set(["connected-tools"]);
 
 export function mapThinkingLevel(level: ThinkingLevel): PiThinkingLevel | "off" {
   if (level === "off") return "off";

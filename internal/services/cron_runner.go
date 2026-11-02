@@ -56,18 +56,39 @@ const cronProviderResolveDefault = database.MessagingProviderSlack
 // partial updates explicit so the handler can submit just the operator-edited
 // columns rather than re-sending the entire row.
 //
-// ToolInstanceIDs is a pointer to a slice so the handler can distinguish
-// "leave tools alone" (nil) from "replace with empty list" (&[]uint{}).
-// Without the indirection, a missing JSON field would be indistinguishable
-// from one that explicitly clears the allowlist.
+// BuiltinTools is a pointer to a slice so the handler can distinguish
+// "leave built-ins alone" (nil) from "replace with empty list" (&[]string{}).
 type CronJobUpdate struct {
-	Name            *string
-	Schedule        *string
-	Prompt          *string
-	ChannelUUID     *string
-	Enabled         *bool
-	PostResults     *bool
-	ToolInstanceIDs *[]uint
+	Name         *string
+	Schedule     *string
+	Prompt       *string
+	ChannelUUID  *string
+	Enabled      *bool
+	PostResults  *bool
+	ToolsEnabled *bool
+	BuiltinTools *[]string
+}
+
+// CronJobTools is the tool access of a new cron job (see the
+// tool-authorization rule): ToolsEnabled grants every enabled connector tool,
+// BuiltinTools the named built-ins. A nil BuiltinTools means
+// DefaultCronBuiltinTools.
+type CronJobTools struct {
+	ToolsEnabled bool
+	BuiltinTools []string
+}
+
+// ErrUnknownBuiltinTool is returned for a builtin_tools name that is not a
+// built-in namespace; the API maps it to 400.
+var ErrUnknownBuiltinTool = errors.New("unknown built-in tool")
+
+// normalizeCronBuiltinTools validates a builtin_tools list.
+func normalizeCronBuiltinTools(names []string) (database.StringList, error) {
+	out, bad, ok := NormalizeBuiltinTools(names)
+	if !ok {
+		return nil, fmt.Errorf("%w %q (valid: %s)", ErrUnknownBuiltinTool, bad, strings.Join(BuiltinToolNamespaces, ", "))
+	}
+	return database.StringList(out), nil
 }
 
 // cronScheduler is the slice of robfig/cron/v3.*Cron the runner depends on so
@@ -280,7 +301,7 @@ func (r *CronRunner) Reload(jobID uint) error {
 // the hot path.
 func (r *CronRunner) fire(jobID uint) {
 	var job database.CronJob
-	if err := r.db.Preload("Channel.Integration").Preload("Tools.ToolType").First(&job, jobID).Error; err != nil {
+	if err := r.db.Preload("Channel.Integration").First(&job, jobID).Error; err != nil {
 		slog.Warn("cron tick: job vanished", "id", jobID, "err", err)
 		return
 	}
@@ -298,7 +319,7 @@ func (r *CronRunner) fire(jobID uint) {
 // outcome.
 func (r *CronRunner) RunNow(uuidStr string) error {
 	var job database.CronJob
-	err := r.db.Preload("Channel.Integration").Preload("Tools.ToolType").Where("uuid = ?", uuidStr).First(&job).Error
+	err := r.db.Preload("Channel.Integration").Where("uuid = ?", uuidStr).First(&job).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrCronJobNotFound
@@ -335,11 +356,9 @@ func (r *CronRunner) WaitForInflight() {
 // run records LastRunStatus=error rather than propagating up — the runner
 // must survive a misbehaving tick.
 //
-// Tool allowlist is per-cron: the runner derives a ToolAllowlistEntry list
-// from job.Tools (preloaded by fire/RunNow) rather than calling the global
-// SkillIncidentManager.GetToolAllowlist(). Each cron declares its own narrow
-// set of infrastructure tools — a dreaming-style memory-curator cron, for
-// example, ships with no infrastructure tools at all.
+// Tool allowlist is per-cron (CronAllowlist): every enabled connector tool
+// when tools_enabled, plus the job's builtin_tools. A dreaming-style
+// maintenance cron ships with tools_enabled=false.
 func (r *CronRunner) execute(job *database.CronJob) {
 	if r.channels == nil || r.registry == nil {
 		r.recordResult(job, database.CronJobRunStatusError, "cron runner is missing channel/provider wiring")
@@ -417,7 +436,11 @@ func (r *CronRunner) execute(job *database.CronJob) {
 	// NOT forwarded — a scheduled cron run should not pick up the alert-driven
 	// incident-manager prompt nor inherit unrelated operator skills.
 	skillNames := []string{cronAgentSkillName}
-	toolAllowlist := buildCronToolAllowlist(job.Tools)
+	if job.ToolsEnabled {
+		// The tool list and examples for the connector tools.
+		skillNames = append(skillNames, ConnectedToolsSkillName)
+	}
+	toolAllowlist := CronAllowlist(r.db, job)
 
 	taskHeader := fmt.Sprintf("Cron Investigation: %s\nSchedule: %s\n\n--- Execution Log ---\n\n", job.Name, job.Schedule)
 
@@ -671,33 +694,6 @@ func (r *CronRunner) loadChannelByID(id uint) (*database.Channel, error) {
 // tests agree on a single literal.
 const cronAgentSkillName = "cron-agent"
 
-// buildCronToolAllowlist maps a CronJob's preloaded Tools slice into the
-// ToolAllowlistEntry shape the agent worker expects. Disabled tool instances
-// are filtered out so an operator-disabled tool cannot be silently invoked
-// by a cron run; the ToolType name is taken from the preloaded relation,
-// matching SkillService.GetToolAllowlist's behavior.
-//
-// The built-in events tool is always added (see withEventsTool): it is how a
-// cron run reports a problem it found. With no tools assigned the gateway
-// therefore rejects every infrastructure tool call but events.* (memory-only /
-// runbook-only cron runs are an intended deployment mode for dreaming-style
-// maintenance jobs).
-func buildCronToolAllowlist(tools []database.ToolInstance) []ToolAllowlistEntry {
-	entries := make([]ToolAllowlistEntry, 0, len(tools))
-	for i := range tools {
-		t := tools[i]
-		if !t.Enabled {
-			continue
-		}
-		entries = append(entries, ToolAllowlistEntry{
-			InstanceID:  t.ID,
-			LogicalName: t.LogicalName,
-			ToolType:    t.ToolType.Name,
-		})
-	}
-	return withEventsTool(entries)
-}
-
 // cronChannelMaxMessageBytes caps the byte size of an outbound cron message
 // before it reaches the provider. It is provider-neutral: each provider still
 // enforces its own platform limit at send time (Slack byte budget, Telegram /
@@ -760,11 +756,10 @@ func (r *CronRunner) recordResult(job *database.CronJob, status string, errMsg s
 
 // ListJobs returns every CronJob ordered by name. Preloads Channel + its
 // Integration so the API response can render the post destination without an
-// N+1 query, and Tools.ToolType so the response can render the per-cron tool
-// allowlist for the UI tool picker.
+// N+1 query.
 func (r *CronRunner) ListJobs() ([]database.CronJob, error) {
 	var jobs []database.CronJob
-	if err := r.db.Preload("Channel.Integration").Preload("Tools.ToolType").Order("name asc").Find(&jobs).Error; err != nil {
+	if err := r.db.Preload("Channel.Integration").Order("name asc").Find(&jobs).Error; err != nil {
 		return nil, fmt.Errorf("list cron jobs: %w", err)
 	}
 	return jobs, nil
@@ -776,7 +771,7 @@ func (r *CronRunner) ListJobs() ([]database.CronJob, error) {
 // without an extra round trip.
 func (r *CronRunner) GetJobByUUID(uuidStr string) (*database.CronJob, error) {
 	var job database.CronJob
-	err := r.db.Preload("Channel.Integration").Preload("Tools.ToolType").Where("uuid = ?", uuidStr).First(&job).Error
+	err := r.db.Preload("Channel.Integration").Where("uuid = ?", uuidStr).First(&job).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrCronJobNotFound
@@ -788,12 +783,11 @@ func (r *CronRunner) GetJobByUUID(uuidStr string) (*database.CronJob, error) {
 
 // CreateJob inserts a new CronJob row, registers it with the scheduler, and
 // returns the persisted row. Empty channelUUID is accepted; the runner falls
-// back to the workspace default at tick time. toolInstanceIDs is the
-// per-cron tool allowlist — empty slice or nil means the cron-agent runs
-// with no infrastructure tools (memory + runbooks only). Operator-created
+// back to the workspace default at tick time. tools is the cron's tool
+// access (see CronJobTools). Operator-created
 // jobs are always IsSystem=false; system rows are seeded exclusively via
 // database.SeedSystemCronJobs.
-func (r *CronRunner) CreateJob(name, schedule, prompt string, channelUUID string, enabled, postResults bool, toolInstanceIDs []uint) (*database.CronJob, error) {
+func (r *CronRunner) CreateJob(name, schedule, prompt string, channelUUID string, enabled, postResults bool, tools CronJobTools) (*database.CronJob, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("cron job name cannot be empty")
@@ -819,19 +813,25 @@ func (r *CronRunner) CreateJob(name, schedule, prompt string, channelUUID string
 		channelID = &id
 	}
 
-	tools, err := r.resolveToolInstances(toolInstanceIDs)
+	builtinNames := tools.BuiltinTools
+	if builtinNames == nil {
+		builtinNames = DefaultCronBuiltinTools
+	}
+	builtins, err := normalizeCronBuiltinTools(builtinNames)
 	if err != nil {
 		return nil, err
 	}
 
 	row := &database.CronJob{
-		UUID:        uuid.New().String(),
-		Name:        name,
-		Schedule:    schedule,
-		Prompt:      prompt,
-		ChannelID:   channelID,
-		Enabled:     enabled,
-		PostResults: postResults,
+		UUID:         uuid.New().String(),
+		Name:         name,
+		Schedule:     schedule,
+		Prompt:       prompt,
+		ChannelID:    channelID,
+		Enabled:      enabled,
+		PostResults:  postResults,
+		ToolsEnabled: tools.ToolsEnabled,
+		BuiltinTools: builtins,
 	}
 	if err := r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(row).Error; err != nil {
@@ -854,8 +854,11 @@ func (r *CronRunner) CreateJob(name, schedule, prompt string, channelUUID string
 				return fmt.Errorf("apply post_results=false on create: %w", err)
 			}
 		}
-		if err := tx.Model(row).Association("Tools").Replace(tools); err != nil {
-			return fmt.Errorf("attach cron job tools: %w", err)
+		// Same zero-bool INSERT caveat: the column default is true.
+		if !tools.ToolsEnabled {
+			if err := tx.Model(row).Update("tools_enabled", false).Error; err != nil {
+				return fmt.Errorf("apply tools_enabled=false on create: %w", err)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -865,46 +868,6 @@ func (r *CronRunner) CreateJob(name, schedule, prompt string, channelUUID string
 		slog.Warn("failed to schedule newly created cron job", "uuid", row.UUID, "err", err)
 	}
 	return r.GetJobByUUID(row.UUID)
-}
-
-// resolveToolInstances loads ToolInstance rows for the supplied IDs, with
-// ToolType preloaded so the agent allowlist mapping does not need a second
-// query. An empty input returns an empty slice so an operator can explicitly
-// clear a cron's tool allowlist. An unknown ID surfaces as a typed error so
-// the API can map it to 400; partial resolution would silently drop tools
-// without operator feedback.
-func (r *CronRunner) resolveToolInstances(ids []uint) ([]database.ToolInstance, error) {
-	if len(ids) == 0 {
-		return []database.ToolInstance{}, nil
-	}
-	// Deduplicate so a caller that sends [5, 5] doesn't produce a false
-	// "not found" from the len mismatch check below (the DB returns one row
-	// for IN (5, 5) while len(ids) == 2).
-	seen := make(map[uint]struct{}, len(ids))
-	deduped := ids[:0:0]
-	for _, id := range ids {
-		if _, ok := seen[id]; !ok {
-			seen[id] = struct{}{}
-			deduped = append(deduped, id)
-		}
-	}
-	ids = deduped
-	var tools []database.ToolInstance
-	if err := r.db.Preload("ToolType").Where("id IN ?", ids).Find(&tools).Error; err != nil {
-		return nil, fmt.Errorf("load cron job tools: %w", err)
-	}
-	if len(tools) != len(ids) {
-		found := make(map[uint]bool, len(tools))
-		for _, t := range tools {
-			found[t.ID] = true
-		}
-		for _, id := range ids {
-			if !found[id] {
-				return nil, fmt.Errorf("tool instance %d not found", id)
-			}
-		}
-	}
-	return tools, nil
 }
 
 // UpdateJob applies the supplied patch. Re-registers the scheduler entry so a
@@ -959,36 +922,21 @@ func (r *CronRunner) UpdateJob(uuidStr string, patch CronJobUpdate) (*database.C
 	if patch.PostResults != nil {
 		updates["post_results"] = *patch.PostResults
 	}
-	// Pre-resolve the new tools BEFORE issuing the column update so an unknown
-	// tool ID fails the whole patch cleanly rather than leaving column fields
-	// partially applied with a stale Tools association.
-	var newTools []database.ToolInstance
-	replaceTools := false
-	if patch.ToolInstanceIDs != nil {
-		replaceTools = true
-		resolved, rerr := r.resolveToolInstances(*patch.ToolInstanceIDs)
-		if rerr != nil {
-			return nil, rerr
-		}
-		newTools = resolved
+	if patch.ToolsEnabled != nil {
+		updates["tools_enabled"] = *patch.ToolsEnabled
 	}
-	if len(updates) == 0 && !replaceTools {
+	if patch.BuiltinTools != nil {
+		builtins, err := normalizeCronBuiltinTools(*patch.BuiltinTools)
+		if err != nil {
+			return nil, err
+		}
+		updates["builtin_tools"] = builtins
+	}
+	if len(updates) == 0 {
 		return job, nil
 	}
-	if err := r.db.Transaction(func(tx *gorm.DB) error {
-		if len(updates) > 0 {
-			if err := tx.Model(&database.CronJob{}).Where("id = ?", job.ID).Updates(updates).Error; err != nil {
-				return fmt.Errorf("update cron job: %w", err)
-			}
-		}
-		if replaceTools {
-			if err := tx.Model(&database.CronJob{ID: job.ID}).Association("Tools").Replace(newTools); err != nil {
-				return fmt.Errorf("update cron job tools: %w", err)
-			}
-		}
-		return nil
-	}); err != nil {
-		return nil, err
+	if err := r.db.Model(&database.CronJob{}).Where("id = ?", job.ID).Updates(updates).Error; err != nil {
+		return nil, fmt.Errorf("update cron job: %w", err)
 	}
 	if err := r.Reload(job.ID); err != nil {
 		slog.Warn("failed to reload cron job after update", "uuid", job.UUID, "err", err)
@@ -1008,17 +956,7 @@ func (r *CronRunner) DeleteJob(uuidStr string) error {
 	if job.IsSystem {
 		return ErrSystemCronImmutable
 	}
-	// Clear the m2m join rows and delete the parent inside a transaction so a
-	// failed parent delete cannot leave the cron alive with an empty allowlist.
-	if err := r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&database.CronJob{ID: job.ID}).Association("Tools").Clear(); err != nil {
-			return fmt.Errorf("clear tools: %w", err)
-		}
-		if err := tx.Delete(&database.CronJob{}, job.ID).Error; err != nil {
-			return fmt.Errorf("delete: %w", err)
-		}
-		return nil
-	}); err != nil {
+	if err := r.db.Delete(&database.CronJob{}, job.ID).Error; err != nil {
 		return fmt.Errorf("delete cron job: %w", err)
 	}
 	if err := r.Reload(job.ID); err != nil {

@@ -149,6 +149,10 @@ func main() {
 	// Per-server connection status for every loaded MCP server config
 	mux.HandleFunc("/mcp-servers/status", internalOnly(proxyHandler.StatusHTTPHandler()))
 
+	// Registered tools of one namespace with input schemas (the API renders
+	// them into the connected-tools skill)
+	mux.HandleFunc("/registry/tools", internalOnly(registry.NamespaceToolsHandler()))
+
 	// Tool schemas endpoint
 	mux.HandleFunc("/tools", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

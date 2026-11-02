@@ -1,4 +1,5 @@
 import type { Proposal, ProposalKind, ProposalStatus } from '../../types';
+import { builtinToolLabel, sortBuiltinTools } from '../cron/cronJobHelpers';
 
 export interface KindConfig {
   label: string;
@@ -41,7 +42,9 @@ export function statusConfig(status: ProposalStatus): { label: string; badgeClas
 const FIELD_ORDER: Record<string, string[]> = {
   runbook: ['title', 'content'],
   memory: ['scope', 'type', 'name', 'description', 'body'],
-  cron: ['name', 'schedule', 'prompt', 'tool_logical_names'],
+  // tool_logical_names is the legacy shape; it renders only when a row
+  // still carries it (empty fields are skipped).
+  cron: ['name', 'schedule', 'prompt', 'tools_enabled', 'builtin_tools', 'tool_logical_names'],
   skill_prompt: ['skill_name', 'prompt'],
 };
 
@@ -56,7 +59,13 @@ export function fieldOrder(kind: ProposalKind): string[] {
   return FIELD_ORDER[contentFamily(kind)] ?? [];
 }
 
+const FIELD_LABELS: Record<string, string> = {
+  tools_enabled: 'Connector tools',
+  builtin_tools: 'Built-in tools',
+};
+
 export function fieldLabel(field: string): string {
+  if (FIELD_LABELS[field]) return FIELD_LABELS[field];
   return field.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 }
 
@@ -78,6 +87,24 @@ export function fieldToText(value: unknown): string {
   if (Array.isArray(value)) return value.join(', ');
   if (typeof value === 'string') return value;
   return JSON.stringify(value);
+}
+
+// fieldValueText is fieldToText with per-field formatting for the cron tool
+// fields: tools_enabled renders as Allowed / Not allowed, and builtin_tools
+// renders labels in display order ("None" for an empty list).
+export function fieldValueText(field: string, value: unknown): string {
+  if (value === undefined || value === null) return '';
+  if (field === 'tools_enabled' && typeof value === 'boolean') {
+    return value ? 'Allowed' : 'Not allowed';
+  }
+  if (field === 'builtin_tools' && Array.isArray(value)) {
+    const names = value.filter((v): v is string => typeof v === 'string');
+    const known = sortBuiltinTools(names);
+    const unknown = names.filter((n) => !(known as string[]).includes(n));
+    const all = [...known.map(builtinToolLabel), ...unknown];
+    return all.length === 0 ? 'None' : all.join(', ');
+  }
+  return fieldToText(value);
 }
 
 export function sourceIncidentUUIDs(p: Proposal): string[] {

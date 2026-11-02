@@ -14,8 +14,7 @@ func setupMCPServerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	return testhelpers.NewGlobalSQLiteDB(t,
 		&database.MCPServerConfig{}, &database.HTTPConnector{},
-		&database.ToolType{}, &database.ToolInstance{}, &database.SkillTool{},
-		&database.CronJobTool{}, &database.Connector{},
+		&database.ToolType{}, &database.ToolInstance{}, &database.Connector{},
 	)
 }
 
@@ -404,21 +403,14 @@ func TestUpdateMCPServer_LegacyStdioRowCanBeDisabled(t *testing.T) {
 	}
 }
 
-func TestDeleteMCPServer_RemovesManagedToolAndBindings(t *testing.T) {
+func TestDeleteMCPServer_RemovesManagedTool(t *testing.T) {
 	db := setupMCPServerTestDB(t)
 	svc := NewMCPServerServiceWithDB(db)
 	created, err := svc.CreateMCPServer(validMCPServerConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
-	instID, err := svc.ManagedToolInstanceID(created.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Create(&database.SkillTool{SkillID: 7, ToolInstanceID: instID}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Create(&database.CronJobTool{CronJobID: 3, ToolInstanceID: instID}).Error; err != nil {
+	if _, err := svc.ManagedToolInstanceID(created.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -427,7 +419,6 @@ func TestDeleteMCPServer_RemovesManagedToolAndBindings(t *testing.T) {
 	}
 	for name, model := range map[string]interface{}{
 		"configs": &database.MCPServerConfig{}, "tool types": &database.ToolType{}, "tool instances": &database.ToolInstance{},
-		"skill_tools": &database.SkillTool{}, "cron_job_tools": &database.CronJobTool{},
 	} {
 		var n int64
 		db.Model(model).Count(&n)

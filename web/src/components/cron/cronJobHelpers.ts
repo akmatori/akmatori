@@ -1,4 +1,27 @@
-import type { CronJob, CronRunStatus } from '../../types';
+import type { CronBuiltinTool, CronJob, CronRunStatus } from '../../types';
+
+// CRON_BUILTIN_TOOLS lists the built-in tool namespaces a cron run may call,
+// in display order. Mirrors the backend allowlist.
+export const CRON_BUILTIN_TOOLS: { value: CronBuiltinTool; label: string; description: string }[] = [
+  { value: 'events', label: 'Events', description: 'Search events; report problems as alerts' },
+  { value: 'runbooks', label: 'Runbooks', description: 'Search runbooks' },
+  { value: 'memory', label: 'Memory', description: 'Search and write memories' },
+  { value: 'incidents', label: 'Incidents', description: 'Read past incidents' },
+  { value: 'proposals', label: 'Proposals', description: 'Create improvement proposals' },
+];
+
+// DEFAULT_CRON_BUILTIN_TOOLS matches the backend create default.
+export const DEFAULT_CRON_BUILTIN_TOOLS: CronBuiltinTool[] = ['events', 'runbooks', 'memory'];
+
+// sortBuiltinTools returns the known names from `tools` in display order.
+export function sortBuiltinTools(tools: readonly string[]): CronBuiltinTool[] {
+  return CRON_BUILTIN_TOOLS.map((t) => t.value).filter((v) => tools.includes(v));
+}
+
+// builtinToolLabel returns the display label for a built-in namespace.
+export function builtinToolLabel(name: string): string {
+  return CRON_BUILTIN_TOOLS.find((t) => t.value === name)?.label ?? name;
+}
 
 // CronJobFormState is the in-memory shape of the CronJobForm component. Kept
 // in this helper module so the manager's save callback can type its input
@@ -10,7 +33,8 @@ export interface CronJobFormState {
   channel_uuid: string | null;
   enabled: boolean;
   post_results: boolean;
-  tool_instance_ids: number[];
+  tools_enabled: boolean;
+  builtin_tools: CronBuiltinTool[];
 }
 
 export const EMPTY_CRON_FORM: CronJobFormState = {
@@ -20,7 +44,8 @@ export const EMPTY_CRON_FORM: CronJobFormState = {
   channel_uuid: null,
   enabled: true,
   post_results: true,
-  tool_instance_ids: [],
+  tools_enabled: true,
+  builtin_tools: [...DEFAULT_CRON_BUILTIN_TOOLS],
 };
 
 // formStateFromJob lifts an existing CronJob row into the form's local state.
@@ -34,7 +59,8 @@ export function formStateFromJob(job: CronJob): CronJobFormState {
     channel_uuid: job.channel?.uuid ?? null,
     enabled: job.enabled,
     post_results: job.post_results ?? true,
-    tool_instance_ids: (job.tools ?? []).map((t) => t.id),
+    tools_enabled: job.tools_enabled ?? true,
+    builtin_tools: sortBuiltinTools(job.builtin_tools ?? []),
   };
 }
 

@@ -24,7 +24,6 @@ func newProposalTestDB(t *testing.T) *gorm.DB {
 		&database.Runbook{},
 		&database.Memory{},
 		&database.CronJob{},
-		&database.CronJobTool{},
 		&database.ToolType{},
 		&database.ToolInstance{},
 	); err != nil {
@@ -81,17 +80,17 @@ type fakeCrons struct {
 	createdName     string
 	createdSchedule string
 	createdEnabled  bool
-	createdToolIDs  []uint
+	createdTools    CronJobTools
 	updatedUUID     string
 	updatedPatch    CronJobUpdate
 	live            map[string]*database.CronJob
 }
 
-func (f *fakeCrons) CreateJob(name, schedule, prompt string, channelUUID string, enabled, postResults bool, toolInstanceIDs []uint) (*database.CronJob, error) {
+func (f *fakeCrons) CreateJob(name, schedule, prompt string, channelUUID string, enabled, postResults bool, tools CronJobTools) (*database.CronJob, error) {
 	f.createdName = name
 	f.createdSchedule = schedule
 	f.createdEnabled = enabled
-	f.createdToolIDs = toolInstanceIDs
+	f.createdTools = tools
 	return &database.CronJob{Name: name, Schedule: schedule, Prompt: prompt, Enabled: enabled}, nil
 }
 
@@ -279,45 +278,100 @@ func TestApprove_MemoryUpdate_IdentityFromTargetRef(t *testing.T) {
 	}
 }
 
-func TestApprove_CronNew_AppliesDisabledWithResolvedTools(t *testing.T) {
+func TestApprove_CronNew_AppliesDisabledWithToolFields(t *testing.T) {
 	db := newProposalTestDB(t)
 	crons := &fakeCrons{}
 	svc := NewProposalService(db, &fakeRunbooks{}, &fakeMemories{}, crons, &fakeSkills{})
-
-	tt := database.ToolType{Name: "incidents"}
-	db.Create(&tt)
-	ti := database.ToolInstance{ToolTypeID: tt.ID, Name: "Incidents", LogicalName: "incidents", Enabled: true}
-	db.Create(&ti)
-
 	seedProposal(t, db, &database.Proposal{
 		UUID: "p1", Kind: database.ProposalKindCronNew, Title: "Add weekly review",
-		ProposedContent: `{"name":"weekly-review","schedule":"0 9 * * 1","prompt":"review things","tool_logical_names":["incidents"]}`,
+		ProposedContent: `{"name":"weekly-review","schedule":"0 9 * * 1","prompt":"review things","tools_enabled":true,"builtin_tools":["events","incidents"]}`,
 	})
-
 	if _, err := svc.Approve(context.Background(), "p1"); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	if crons.createdName != "weekly-review" || crons.createdEnabled {
 		t.Errorf("cron must be created DISABLED, got name=%s enabled=%v", crons.createdName, crons.createdEnabled)
 	}
-	if len(crons.createdToolIDs) != 1 || crons.createdToolIDs[0] != ti.ID {
-		t.Errorf("tool logical names not resolved: %v", crons.createdToolIDs)
+	if !crons.createdTools.ToolsEnabled || !equalStringSets(crons.createdTools.BuiltinTools, []string{"events", "incidents"}) {
+		t.Errorf("tool fields not applied: %+v", crons.createdTools)
 	}
 }
 
-func TestApprove_CronNew_UnknownToolFailsApply(t *testing.T) {
+// TestApprove_CronNew_LegacyToolLogicalNames: a pending proposal made
+// before the tool mapping was removed is translated with the migration rule.
+func TestApprove_CronNew_LegacyToolLogicalNames(t *testing.T) {
 	db := newProposalTestDB(t)
-	svc := NewProposalService(db, &fakeRunbooks{}, &fakeMemories{}, &fakeCrons{}, &fakeSkills{})
+	crons := &fakeCrons{}
+	svc := NewProposalService(db, &fakeRunbooks{}, &fakeMemories{}, crons, &fakeSkills{})
+
+	inc := database.ToolType{Name: "incidents"}
+	db.Create(&inc)
+	db.Create(&database.ToolInstance{ToolTypeID: inc.ID, Name: "Incidents", LogicalName: "incidents", Enabled: true})
+
 	seedProposal(t, db, &database.Proposal{
-		UUID: "p1", Kind: database.ProposalKindCronNew, Title: "Add",
-		ProposedContent: `{"name":"j","schedule":"0 9 * * 1","prompt":"p","tool_logical_names":["ghost-tool"]}`,
+		UUID: "p1", Kind: database.ProposalKindCronNew, Title: "Add weekly review",
+		ProposedContent: `{"name":"weekly-review","schedule":"0 9 * * 1","prompt":"review things","tool_logical_names":["incidents"]}`,
 	})
-	p, err := svc.Approve(context.Background(), "p1")
-	if err == nil || !strings.Contains(err.Error(), "ghost-tool") {
-		t.Fatalf("expected unknown-tool apply failure, got %v", err)
+	got, err := svc.GetProposal("p1")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if p.Status != database.ProposalStatusApplyFailed {
-		t.Errorf("expected apply_failed, got %s", p.Status)
+	if strings.Contains(got.ProposedContent, "tool_logical_names") || !strings.Contains(got.ProposedContent, `"tools_enabled":false`) {
+		t.Errorf("read not translated: %s", got.ProposedContent)
+	}
+	if _, err := svc.Approve(context.Background(), "p1"); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if crons.createdTools.ToolsEnabled {
+		t.Error("only a built-in was named; tools_enabled must be false")
+	}
+	if !equalStringSets(crons.createdTools.BuiltinTools, []string{"events", "runbooks", "memory", "incidents"}) {
+		t.Errorf("builtin_tools = %v", crons.createdTools.BuiltinTools)
+	}
+
+	// A name that matches no instance counts as a connector tool.
+	seedProposal(t, db, &database.Proposal{
+		UUID: "p2", Kind: database.ProposalKindCronNew, Title: "Add disk check",
+		ProposedContent: `{"name":"j","schedule":"0 9 * * 1","prompt":"p","tool_logical_names":["prod-ssh"]}`,
+	})
+	if _, err := svc.Approve(context.Background(), "p2"); err != nil {
+		t.Fatalf("approve p2: %v", err)
+	}
+	if !crons.createdTools.ToolsEnabled {
+		t.Error("an unknown logical name must enable connector tools")
+	}
+}
+
+// TestApprove_CronUpdate_LegacySnapshotNotStale: the snapshot of a legacy
+// cron_update proposal is translated the same way, so the upgrade alone
+// does not mark it superseded.
+func TestApprove_CronUpdate_LegacySnapshotNotStale(t *testing.T) {
+	db := newProposalTestDB(t)
+	crons := &fakeCrons{live: map[string]*database.CronJob{
+		"c1": {UUID: "c1", Name: "j", Schedule: "0 9 * * 1", Prompt: "p", ToolsEnabled: false, BuiltinTools: database.StringList{"events", "runbooks", "memory"}},
+	}}
+	svc := NewProposalService(db, &fakeRunbooks{}, &fakeMemories{}, crons, &fakeSkills{})
+	seedProposal(t, db, &database.Proposal{
+		UUID: "p1", Kind: database.ProposalKindCronUpdate, Title: "Tweak", TargetRef: "c1",
+		CurrentSnapshot: `{"name":"j","schedule":"0 9 * * 1","prompt":"p","tool_logical_names":[]}`,
+		ProposedContent: `{"name":"j","schedule":"0 10 * * 1","prompt":"p","tool_logical_names":[]}`,
+	})
+	if _, err := svc.Approve(context.Background(), "p1"); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if crons.updatedPatch.ToolsEnabled == nil || *crons.updatedPatch.ToolsEnabled {
+		t.Errorf("patch tools_enabled = %v, want false", crons.updatedPatch.ToolsEnabled)
+	}
+
+	// A live change of the tool access marks a new-shape proposal stale.
+	crons.live["c1"].ToolsEnabled = true
+	seedProposal(t, db, &database.Proposal{
+		UUID: "p2", Kind: database.ProposalKindCronUpdate, Title: "Tweak 2", TargetRef: "c1",
+		CurrentSnapshot: `{"name":"j","schedule":"0 9 * * 1","prompt":"p","tools_enabled":false,"builtin_tools":["events","runbooks","memory"]}`,
+		ProposedContent: `{"name":"j","schedule":"0 11 * * 1","prompt":"p","tools_enabled":false,"builtin_tools":["events"]}`,
+	})
+	if _, err := svc.Approve(context.Background(), "p2"); !errors.Is(err, ErrProposalStale) {
+		t.Fatalf("err = %v, want ErrProposalStale", err)
 	}
 }
 

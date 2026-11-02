@@ -6,7 +6,8 @@ paths:
 
 # MCP Gateway and tool routing
 
-Flow: agent reads generated `SKILL.md` guidance → agent calls
+Flow: agent reads its skill's `SKILL.md` and the generated `connected-tools/SKILL.md` (every
+connected tool; see the `tool-authorization` rule) → agent calls
 `gateway_call(toolName, args, instanceHint?)` → worker sends JSON-RPC to MCP Gateway with
 `X-Incident-ID` (the run's scope: incident UUID or request scope, see the `agent-runs` rule) →
 gateway resolves routing, enforces allowlists, executes, returns output.
@@ -32,7 +33,9 @@ gateway resolves routing, enforces allowlists, executes, returns output.
   `ErrStaleConfig` instead of replacing the current connection
 - a stored-server test (`/mcp-servers/test` with `id`) starts from the stored config and applies
   each given field (url, auth_config, transport) on its own
-- admin endpoints (`/reload/*`, `/mcp-servers/test`, `/mcp-servers/status`) are `internalOnly`:
+- `/registry/tools?namespace=<ns>` (internal) lists a namespace's registered tools with input
+  schemas; the API renders them into `connected-tools/SKILL.md`
+- admin endpoints (`/reload/*`, `/mcp-servers/test`, `/mcp-servers/status`, `/registry/tools`) are `internalOnly`:
   requests with forwarding headers are refused. The edge proxy (`proxy/nginx.conf`) exposes only
   `/mcp/tools*` (schemas for the UI); `/mcp/mcp` and the admin paths are internal
 
@@ -64,8 +67,8 @@ gateway-first via `gateway_call`.
 report a problem. Same seed and registration pattern as `incidents`; `events` is in
 `builtInToolNamespaces` and `credentiallessNamespaces`.
 
-- every agent run is allowed it: the API adds a type-only `{ToolType: "events"}` entry to every
-  allowlist (`withEventsTool` in `GetToolAllowlist` and `buildCronToolAllowlist`)
+- incident runs always get it; cron runs get it through `builtin_tools` (default on): a type-only
+  `{ToolType: "events"}` entry (`IncidentRunAllowlist`, `CronAllowlist`)
 - `get` on a request event adds `run` (the scope's answer and log)
 - `report_alert` refuses non-cron runs (it looks up the newest run of the `X-Incident-ID` scope and
   takes the job name from `cron_jobs`), caps reports

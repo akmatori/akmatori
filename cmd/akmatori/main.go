@@ -122,9 +122,8 @@ func main() {
 		slog.Info("tool types ready")
 	}
 
-	// Seed the improvement-evaluator system cron. Runs here (not in
-	// InitializeDefaults) because it attaches the credential-less
-	// incidents/proposals tool instances that EnsureToolTypes just seeded.
+	// Seed the improvement-evaluator system cron (built-ins incidents +
+	// proposals; type-only, so no tool instance is needed).
 	if err := database.SeedImprovementEvaluatorCron(); err != nil {
 		slog.Warn("failed to seed improvement-evaluator cron", "err", err)
 	}
@@ -159,6 +158,12 @@ func main() {
 	memoryService := services.NewMemoryService(dataDir)
 	if err := memoryService.SyncMemoryFiles(); err != nil {
 		slog.Warn("failed to sync memory files", "err", err)
+	}
+
+	// Seed the generated connected-tools system skill (every connected tool,
+	// rendered once; replaces the per-skill tool mapping).
+	if err := skillService.EnsureConnectedToolsSkill(); err != nil {
+		slog.Warn("failed to seed connected-tools skill", "err", err)
 	}
 
 	// Regenerate all SKILL.md files (now seeing the freshly synced memory manifests).
@@ -403,6 +408,11 @@ func main() {
 	apiHandler.SetMCPServerReloader(handlers.GatewayMCPReloadFunc(mcpGatewayURL))
 	mcpGateway := services.NewMCPGatewayClient(mcpGatewayURL)
 	apiHandler.SetMCPGateway(mcpGateway)
+	// connected-tools/SKILL.md lists MCP server and HTTP connector functions
+	// from the gateway registry; re-render every 5 minutes so functions
+	// discovered after a reload reach the file.
+	skillService.SetGatewayToolLister(mcpGateway)
+	skillService.StartConnectedToolsRefresh(context.Background(), 5*time.Minute)
 
 	// Connectors: group tool instances, alert sources, messaging
 	// integrations and MCP servers for the Connectors page. MCP servers get

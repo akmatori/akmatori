@@ -68,6 +68,7 @@ func (h *APIHandler) handleTools(w http.ResponseWriter, r *http.Request) {
 		if fresh, err := h.toolService.GetToolInstance(instance.ID); err == nil && fresh != nil {
 			instance = fresh
 		}
+		h.regenerateConnectedTools()
 		api.RespondJSON(w, http.StatusCreated, instance)
 
 	default:
@@ -132,6 +133,7 @@ func (h *APIHandler) handleToolByID(w http.ResponseWriter, r *http.Request) {
 
 		instance, _ := h.toolService.GetToolInstance(uint(id))
 		h.maskSSHKeys(instance)
+		h.regenerateConnectedTools()
 		api.RespondJSON(w, http.StatusOK, instance)
 
 	case http.MethodDelete:
@@ -143,6 +145,7 @@ func (h *APIHandler) handleToolByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.afterPartDeleted()
+		h.regenerateConnectedTools()
 		api.RespondNoContent(w)
 
 	default:

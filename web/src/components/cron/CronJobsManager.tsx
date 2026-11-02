@@ -10,6 +10,8 @@ import CronJobForm from './CronJobForm';
 import {
   lastRunBadge,
   formatRelativeTime,
+  sortBuiltinTools,
+  builtinToolLabel,
   type CronJobFormState,
 } from './cronJobHelpers';
 import { channelDisplayLabel, providerLabel } from '../channels/channelHelpers';
@@ -63,7 +65,8 @@ export default function CronJobsManager() {
         channel_uuid: form.channel_uuid ?? '',
         enabled: form.enabled,
         post_results: form.post_results,
-        tool_instance_ids: form.tool_instance_ids,
+        tools_enabled: form.tools_enabled,
+        builtin_tools: form.builtin_tools,
       });
     } else if (editing) {
       await cronJobsApi.update(editing.uuid, {
@@ -73,7 +76,8 @@ export default function CronJobsManager() {
         channel_uuid: form.channel_uuid ?? '',
         enabled: form.enabled,
         post_results: form.post_results,
-        tool_instance_ids: form.tool_instance_ids,
+        tools_enabled: form.tools_enabled,
+        builtin_tools: form.builtin_tools,
       });
     }
     cancel();
@@ -169,7 +173,11 @@ export default function CronJobsManager() {
                 const nextRunText = job.next_run_at
                   ? formatRelativeTime(new Date(job.next_run_at))
                   : '—';
-                const toolCount = job.tools?.length ?? 0;
+                const builtins = sortBuiltinTools(job.builtin_tools ?? []);
+                const builtinText =
+                  builtins.length === 0
+                    ? 'No built-in tools'
+                    : `Built-in: ${builtins.map(builtinToolLabel).join(', ')}`;
                 return (
                   <tr key={job.uuid} className="border-b border-line">
                     <td className="py-3 px-3">
@@ -200,17 +208,22 @@ export default function CronJobsManager() {
                       <span className="text-sm text-fg">{channelText}</span>
                     </td>
                     <td className="py-3 px-3">
-                      {toolCount === 0 ? (
-                        <span className="text-xs text-fg-subtle">None</span>
-                      ) : (
+                      <div className="flex flex-col gap-1">
                         <span
-                          className="badge badge-default text-xs"
-                          title={(job.tools ?? []).map((t) => t.name).join(', ')}
+                          className="badge badge-default text-xs w-fit"
+                          title={
+                            job.tools_enabled
+                              ? 'The run may call every enabled connector tool.'
+                              : 'The run may not call connector tools.'
+                          }
                         >
                           <Wrench className="w-3 h-3" />
-                          {toolCount} tool{toolCount > 1 ? 's' : ''}
+                          {job.tools_enabled ? 'Connectors: on' : 'Connectors: off'}
                         </span>
-                      )}
+                        <span className="text-xs text-fg-subtle">
+                          {builtinText}
+                        </span>
+                      </div>
                     </td>
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2">
