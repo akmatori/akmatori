@@ -36,6 +36,10 @@ Proposals tab, refine via chat, and approve (auto-apply) or reject.
   `tool-authorization` rule). A `cron_update` without `tools_enabled` leaves the tool access alone
 - gateway `proposals.create` dedups pending rows (kind+target_ref, or kind+title for `*_new`) and
   drops hallucinated `source_incident_uuids`; `proposals` is built-in + credentialless
+- approving a `memory_*` proposal goes through `UpsertByName` with `created_by=operator`, which
+  takes ownership: the memory becomes protected from agent writes. Proposal chat gets the
+  runbooks/memory built-ins for reading; the gateway refuses `memory.write`/`memory.delete` from
+  proposal runs
 - incident feedback UI posts to `POST /api/incidents/{uuid}/feedback`; feedback memories feed the
   next evaluator run
 

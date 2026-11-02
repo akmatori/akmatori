@@ -57,18 +57,18 @@ func TestDefaultProposalEditorPrompt_PinsRequiredDirectives(t *testing.T) {
 		`proposals.update_draft`,
 		`incidents.get`,
 		`proposals.list_cron_jobs`,
-		"runbook-searcher",
-		"memory-searcher",
+		`runbooks.search`,
+		`memory.search`,
 		"never apply proposals",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("DefaultProposalEditorPrompt is missing required directive %q", want)
 		}
 	}
-	// The editor must not invoke memory-writer — proposal application is the
+	// The editor must not write memories — proposal application is the
 	// only mutation path and it belongs to the operator's approve action.
-	if !strings.Contains(prompt, "never call the memory-writer") {
-		t.Errorf("DefaultProposalEditorPrompt must forbid memory-writer usage")
+	if !strings.Contains(prompt, "never call memory.write or memory.delete") {
+		t.Errorf("DefaultProposalEditorPrompt must forbid memory writes")
 	}
 }
 

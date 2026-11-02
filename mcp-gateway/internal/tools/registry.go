@@ -18,6 +18,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/tools/catchpoint"
 	"github.com/akmatori/mcp-gateway/internal/tools/clickhouse"
 	"github.com/akmatori/mcp-gateway/internal/tools/events"
+	"github.com/akmatori/mcp-gateway/internal/tools/knowledge"
 	"github.com/akmatori/mcp-gateway/internal/tools/grafana"
 	"github.com/akmatori/mcp-gateway/internal/tools/httpconnector"
 	"github.com/akmatori/mcp-gateway/internal/tools/incidents"
@@ -82,6 +83,7 @@ type Registry struct {
 	jiraLimit       *ratelimit.Limiter
 	incidentsTool   *incidents.IncidentsTool
 	eventsTool      *events.EventsTool
+	knowledgeTool   *knowledge.Tool
 	proposalsTool   *proposals.ProposalsTool
 
 	// HTTP connector state
@@ -189,6 +191,9 @@ func (r *Registry) RegisterAllTools() {
 	// Register Events tools (no rate limiter — local DB queries)
 	r.registerEventsTools()
 
+	// Register runbooks.* and memory.* (no rate limiter — local DB queries)
+	r.registerKnowledgeTools()
+
 	r.logger.Println("All tools registered")
 }
 
@@ -250,6 +255,8 @@ var builtInToolNamespaces = map[string]bool{
 	"incidents":        true,
 	"proposals":        true,
 	"events":           true,
+	"runbooks":         true,
+	"memory":           true,
 }
 
 // DefaultMCPProxyLoader loads MCP server configs from the database and converts them

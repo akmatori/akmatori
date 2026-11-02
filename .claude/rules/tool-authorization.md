@@ -18,14 +18,14 @@ returns, enforce it in the gateway per run, never through SKILL.md text.
 - **connector tools**: every tool type that is not a built-in (built-in tool types, HTTP connectors,
   MCP servers' managed instances). Authorized per instance (`InstanceID` + `LogicalName`)
 - **built-ins**: credential-less namespaces served by the gateway: `events`, `incidents`,
-  `proposals` (later `runbooks`, `memory`). Authorized with a type-only entry `{ToolType: ns}`;
-  never shown as connectors. `builtinToolLive` in `tool_authz.go` marks which are served in this
-  release; a name that is not live is accepted and stored but left out of the allowlist
+  `proposals`, `runbooks`, `memory`. Authorized with a type-only entry `{ToolType: ns}`; never
+  shown as connectors. `builtinToolLive` in `tool_authz.go` marks which are served; a name that is
+  not live is accepted and stored but left out of the allowlist
 
 | Run kind | Connector tools | Built-ins |
 |---|---|---|
-| Incident (alert, Slack, API request) — `IncidentRunAllowlist` | all enabled | `events`, `incidents` (+ `runbooks`, `memory` when live) |
-| Proposal chat — `ChatToolAllowlist` | none | `incidents`, `proposals` |
+| Incident (alert, Slack, API request) — `IncidentRunAllowlist` | all enabled | `events`, `incidents`, `runbooks`, `memory` |
+| Proposal chat — `ProposalChatAllowlist` | none | `incidents`, `proposals`, `runbooks`, `memory` (memory writes refused by the gateway) |
 | Cron, `tools_enabled=true` — `CronAllowlist` | all enabled | the job's `builtin_tools` |
 | Cron, `tools_enabled=false` | none | the job's `builtin_tools` |
 

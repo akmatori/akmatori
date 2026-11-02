@@ -179,10 +179,6 @@ export interface LLMConfig {
   top_p: number | null;
   top_k: number | null;
   max_tokens: number | null;
-  // Subagent model override (same provider). null means the runbook/memory
-  // search subagents run on the parent's model and thinking level.
-  subagent_model: string | null;
-  subagent_thinking_level: ThinkingLevel | null;
   created_at: string;
   updated_at: string;
 }
@@ -203,8 +199,6 @@ export interface CreateLLMConfigRequest {
   top_p?: number;
   top_k?: number;
   max_tokens?: number;
-  subagent_model?: string;
-  subagent_thinking_level?: string;
 }
 
 // On update, an omitted sampling key leaves the stored value alone while an
@@ -219,8 +213,6 @@ export interface UpdateLLMConfigRequest {
   top_p?: number | null;
   top_k?: number | null;
   max_tokens?: number | null;
-  subagent_model?: string | null;
-  subagent_thinking_level?: string | null;
 }
 
 // Proxy Settings types

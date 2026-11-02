@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"sync"
 	"fmt"
 	"log/slog"
 	"os"
@@ -23,16 +24,19 @@ type SkillService struct {
 	toolService      *ToolService
 	contextService   *ContextService
 	oneShotLLMCaller OneShotLLMCaller       // optional; nil = title generation falls back deterministically
-	memoryIngester   MemoryIngester         // optional; nil = post-investigation file ingest is a no-op
+	memoryRefresher  MemoryRefresher        // optional; nil = the disk mirror is not refreshed after runs
 	incidentMerger   IncidentMergeEvaluator // optional; nil = post-investigation merge pass is a no-op
 	gatewayTools     GatewayToolLister      // optional; nil = connected-tools renders discovery hints for MCP/HTTP tools
+
+	memoryMu          sync.Mutex
+	memoryFingerprint string // count + newest updated_at of memories at the last refresh
 }
 
-// SetMemoryIngester wires the post-investigation memory file ingester that
-// runs in a detached goroutine when an incident transitions to a terminal
-// status. Optional — when unset, ingest is skipped silently.
-func (s *SkillService) SetMemoryIngester(m MemoryIngester) {
-	s.memoryIngester = m
+// SetMemoryRefresher wires the read-only disk mirror refresh that runs after
+// a run changed memories. Optional — when unset, only SKILL.md files are
+// regenerated.
+func (s *SkillService) SetMemoryRefresher(m MemoryRefresher) {
+	s.memoryRefresher = m
 }
 
 // NewSkillService creates a new skill service. The oneShotLLMCaller is optional:
@@ -50,11 +54,10 @@ func NewSkillService(dataDir string, toolService *ToolService, contextService *C
 	}
 }
 
-// MemoryIngester represents the post-incident file-to-DB ingest call.
-// Kept as a narrow interface so SkillService can be tested without pulling
-// in the full MemoryService.
-type MemoryIngester interface {
-	IngestFromDisk(ctx context.Context) error
+// MemoryRefresher rewrites the read-only memory mirror on disk. Narrow so
+// SkillService can be tested without the full MemoryService.
+type MemoryRefresher interface {
+	SyncMemoryFiles() error
 }
 
 // SetIncidentMerger wires the post-investigation root-cause merge pass that

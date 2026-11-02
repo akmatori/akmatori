@@ -51,9 +51,8 @@ func (Runbook) TableName() string {
 }
 
 // Memory stores cross-incident knowledge the AI agent and operators accumulate
-// over time. Scoped per skill or "global"; mirrored to disk for the
-// memory-searcher and memory-writer subagents, and ingested back into the
-// database after each incident.
+// over time. Scoped per skill or "global". Agents read and write it through
+// the gateway memory.* tools; a read-only copy is mirrored to disk.
 //
 // SourceFileID links a memory to the context file it summarizes. It is
 // server managed: ingest and the update API never change it, and deleting

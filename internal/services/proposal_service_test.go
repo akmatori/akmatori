@@ -512,34 +512,24 @@ func TestChatTranscriptAndAllowlist(t *testing.T) {
 		t.Errorf("messages out of order: %+v", msgs)
 	}
 
-	// Allowlist: empty (non-nil) when the instances are missing.
+	// Allowlist: type-only built-ins, no connector tools, never nil.
 	entries := svc.ChatToolAllowlist()
 	if entries == nil {
-		t.Fatal("allowlist must be non-nil even when empty ([] = reject all)")
-	}
-	if len(entries) != 0 {
-		t.Fatalf("expected empty allowlist, got %v", entries)
-	}
-
-	// Seeded instances resolve into entries.
-	tt := database.ToolType{Name: "incidents"}
-	db.Create(&tt)
-	tt2 := database.ToolType{Name: "proposals"}
-	db.Create(&tt2)
-	db.Create(&database.ToolInstance{ToolTypeID: tt.ID, Name: "Incidents", LogicalName: "incidents", Enabled: true})
-	db.Create(&database.ToolInstance{ToolTypeID: tt2.ID, Name: "Proposals", LogicalName: "proposals", Enabled: true})
-	entries = svc.ChatToolAllowlist()
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 allowlist entries, got %v", entries)
+		t.Fatal("allowlist must be non-nil ([] = reject all)")
 	}
 	types := map[string]bool{}
 	for _, e := range entries {
 		types[e.ToolType] = true
-		if e.InstanceID == 0 || e.LogicalName == "" {
-			t.Errorf("entry missing instance identity: %+v", e)
+		if e.InstanceID != 0 || e.LogicalName != "" {
+			t.Errorf("chat entries must be type-only: %+v", e)
 		}
 	}
-	if !types["incidents"] || !types["proposals"] {
-		t.Errorf("expected incidents+proposals entries, got %v", entries)
+	for _, want := range []string{"incidents", "proposals", "runbooks", "memory"} {
+		if !types[want] {
+			t.Errorf("chat allowlist missing %s: %v", want, entries)
+		}
+	}
+	if types["events"] || len(entries) != 4 {
+		t.Errorf("unexpected chat allowlist: %v", entries)
 	}
 }

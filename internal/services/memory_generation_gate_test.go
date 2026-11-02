@@ -81,16 +81,16 @@ func TestIngestFromDisk_GenerationOnIngests(t *testing.T) {
 
 func TestRenderMemoryRecallSection_GenerationOff(t *testing.T) {
 	mem := setupMemoryServiceTest(t)
-	svc := &SkillService{memoryDir: mem.MemoryDir()}
+	svc := &SkillService{db: mem.db, memoryDir: mem.MemoryDir()}
 
-	on := svc.renderMemoryRecallSection(MemoryScopeGlobal, "inc-1")
-	if !strings.Contains(on, "### Record durable findings") || !strings.Contains(on, `"agent": "memory-writer"`) {
-		t.Fatalf("gate unset should keep the memory-writer guidance:\n%s", on)
+	on := svc.renderMemoryRecallSection(MemoryScopeGlobal)
+	if !strings.Contains(on, "### Record durable findings") || !strings.Contains(on, `gateway_call("memory.write"`) {
+		t.Fatalf("gate unset should keep the memory.write guidance:\n%s", on)
 	}
 
 	setMemoryGeneration(t, mem, false)
-	off := svc.renderMemoryRecallSection(MemoryScopeGlobal, "inc-1")
-	if strings.Contains(off, `"agent": "memory-writer"`) || strings.Contains(off, "### Record durable findings") {
+	off := svc.renderMemoryRecallSection(MemoryScopeGlobal)
+	if strings.Contains(off, `gateway_call("memory.write"`) || strings.Contains(off, "### Record durable findings") {
 		t.Errorf("gate off still tells the agent to write:\n%s", off)
 	}
 	if !strings.Contains(off, memoryGenerationOffInstruction) {

@@ -546,25 +546,9 @@ func (s *ProposalService) ListChatMessages(proposalUUID string) ([]database.Prop
 	return rows, err
 }
 
-// ChatToolAllowlist resolves the incidents + proposals tool instances into
-// the allowlist for proposal-editor chat runs. Returns a NON-NIL empty slice
-// on lookup failure so the frame serializes as [] (reject all tool calls) —
-// never nil, which would mean "no allowlist = allow all".
+// ChatToolAllowlist is the allowlist of proposal-editor chat runs: the
+// incidents, proposals, runbooks and memory built-ins (type-only entries, no
+// lookup). Always non-nil.
 func (s *ProposalService) ChatToolAllowlist() []ToolAllowlistEntry {
-	entries := make([]ToolAllowlistEntry, 0, 2)
-	var instances []database.ToolInstance
-	if err := s.db.Preload("ToolType").
-		Where("logical_name IN ? AND enabled = ?", []string{"incidents", "proposals"}, true).
-		Find(&instances).Error; err != nil {
-		slog.Warn("proposal chat allowlist lookup failed; chat runs tool-less", "err", err)
-		return entries
-	}
-	for _, ti := range instances {
-		entries = append(entries, ToolAllowlistEntry{
-			InstanceID:  ti.ID,
-			LogicalName: ti.LogicalName,
-			ToolType:    ti.ToolType.Name,
-		})
-	}
-	return entries
+	return ProposalChatAllowlist()
 }

@@ -5,223 +5,84 @@ import (
 	"testing"
 )
 
-func TestDefaultIncidentManagerPrompt_ContainsRunbookSearcherSubagent(t *testing.T) {
-	tests := []struct {
-		name     string
-		contains string
-	}{
-		{"subagent call shape", `subagent(`},
-		{"runbook-searcher agent name", `"agent": "runbook-searcher"`},
-		{"runbook directory fallback", `/akmatori/runbooks/`},
-	}
+// retiredKnowledgeRefs are the subagent names and agent-side paths that the
+// gateway knowledge tools replaced. No default prompt may name them.
+var retiredKnowledgeRefs = []string{
+	"subagent(", "runbook-searcher", "memory-searcher", "memory-writer",
+	"/akmatori/runbooks", "/akmatori/memory", "Action: upsert", "Action: delete",
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if !strings.Contains(DefaultIncidentManagerPrompt, tt.contains) {
-				t.Errorf("DefaultIncidentManagerPrompt should contain %q", tt.contains)
+func TestDefaultPrompts_NoRetiredKnowledgeRefs(t *testing.T) {
+	prompts := map[string]string{
+		"incident-manager":      DefaultIncidentManagerPrompt,
+		"cron-agent":            DefaultCronAgentPrompt,
+		"proposal-editor":       DefaultProposalEditorPrompt,
+		"Dreaming":              dreamingCronPrompt,
+		"improvement-evaluator": improvementEvaluatorCronPrompt,
+	}
+	for name, p := range prompts {
+		for _, bad := range retiredKnowledgeRefs {
+			if strings.Contains(p, bad) {
+				t.Errorf("%s prompt still contains %q", name, bad)
 			}
-		})
+		}
 	}
 }
 
-func TestDefaultIncidentManagerPrompt_NoLegacyQMDOrMemoryToolReferences(t *testing.T) {
-	// Regression: after the QMD subagent migration, the incident-manager
-	// prompt must not reference the retired gateway tools.
-	for _, banned := range []string{
-		"qmd.query",
-		"qmd.get",
-		"memory.search",
-		"memory.get",
+// TestDefaultIncidentManagerPrompt_KnowledgeSteps pins the mandatory order:
+// runbooks.search, then memory.search, both before any infrastructure tool,
+// then the change check and the skills.
+func TestDefaultIncidentManagerPrompt_KnowledgeSteps(t *testing.T) {
+	p := DefaultIncidentManagerPrompt
+	runbookIdx := strings.Index(p, `gateway_call("runbooks.search"`)
+	memoryIdx := strings.Index(p, `gateway_call("memory.search"`)
+	changeIdx := strings.Index(p, "**Check recent changes**")
+	if runbookIdx == -1 || memoryIdx == -1 || !(runbookIdx < memoryIdx && memoryIdx < changeIdx) {
+		t.Fatalf("order runbooks.search < memory.search < change check broken (%d %d %d)", runbookIdx, memoryIdx, changeIdx)
+	}
+	for _, want := range []string{
+		"MANDATORY - Search runbooks FIRST",
+		"Original alert text",
+		"retry up to 2 times",
+		`gateway_call("runbooks.get"`,
+		`gateway_call("memory.get"`,
+		"PRIMARY investigation guide",
+		`"scopes": [`,
+		`gateway_call("memory.write"`,
 	} {
-		if strings.Contains(DefaultIncidentManagerPrompt, banned) {
-			t.Errorf("DefaultIncidentManagerPrompt must not contain legacy tool reference %q", banned)
+		if !strings.Contains(p, want) {
+			t.Errorf("incident-manager prompt missing %q", want)
 		}
 	}
 }
 
-func TestDefaultIncidentManagerPrompt_HasFallbackInstruction(t *testing.T) {
-	// The subagent-errored / unavailable fallback path must be explicit.
-	if !strings.Contains(DefaultIncidentManagerPrompt, "unavailable") {
-		t.Error("prompt should mention fallback when the subagent is unavailable")
-	}
-}
-
-func TestDefaultIncidentManagerPrompt_MandatoryRunbookSearch(t *testing.T) {
-	tests := []struct {
-		name     string
-		contains string
-	}{
-		{"mandatory keyword", "MANDATORY"},
-		{"search first instruction", "MANDATORY - Search runbooks FIRST before using any infrastructure tools"},
-		{"must search before other steps", "You MUST search for relevant runbooks before performing any other investigation steps"},
-		{"runbook-searcher delegated", "runbook-searcher"},
-		{"empty not a skip reason", "Empty results are NOT a reason to skip"},
-		{"primary guide", "PRIMARY investigation guide"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if !strings.Contains(DefaultIncidentManagerPrompt, tt.contains) {
-				t.Errorf("DefaultIncidentManagerPrompt should contain %q", tt.contains)
-			}
-		})
-	}
-}
-
-func TestDefaultIncidentManagerPrompt_RunbookSearchBeforeInfraTools(t *testing.T) {
-	// Verify that runbook search (step 2) comes before "Load relevant skills" (step 3)
-	mandatoryIdx := strings.Index(DefaultIncidentManagerPrompt, "MANDATORY - Search runbooks FIRST")
-	skillsIdx := strings.Index(DefaultIncidentManagerPrompt, "Load relevant skills")
-
-	if mandatoryIdx == -1 {
-		t.Fatal("prompt must contain mandatory runbook search step")
-	}
-	if skillsIdx == -1 {
-		t.Fatal("prompt must contain load relevant skills step")
-	}
-	if mandatoryIdx >= skillsIdx {
-		t.Error("mandatory runbook search must appear before load relevant skills step")
-	}
-}
-
-func TestDefaultIncidentManagerPrompt_NoSeparateRunbooksSection(t *testing.T) {
-	// The subagent instructions should be inline in the workflow, not in a separate "## Runbooks" section
-	if strings.Contains(DefaultIncidentManagerPrompt, "## Runbooks") {
-		t.Error("runbook-search instructions should be inline in the workflow, not in a separate Runbooks section")
-	}
-}
-
-// TestDefaultIncidentManagerPrompt_RunbookSearcherRetryBudget asserts the
-// runbook-search step caps total subagent invocations at 3 (initial plus up to
-// 2 retries) and names target_service / host as a possible retry angle.
-func TestDefaultIncidentManagerPrompt_RunbookSearcherRetryBudget(t *testing.T) {
-	tests := []struct {
-		name     string
-		contains string
-	}{
-		{"full-alert-text placeholder", "<full Original alert text when present"},
-		{"natural-language fallback", "one-sentence natural-language summary"},
-		{"max 3 calls cue", "Cap total runbook-searcher invocations at 3"},
-		{"retry guidance", "up to 2 retries"},
-		{"target_service mentioned as retry angle", "target_service"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if !strings.Contains(DefaultIncidentManagerPrompt, tt.contains) {
-				t.Errorf("DefaultIncidentManagerPrompt should contain %q", tt.contains)
-			}
-		})
-	}
-}
-
-// TestDefaultIncidentManagerPrompt_SingleRunbookSearcherInvocation pins the
-// structural invariant that the runbook-search step shows exactly ONE
-// subagent({"agent": "runbook-searcher", ...}) example. Without this, a
-// future edit could split the example into multiple per-retry invocations or
-// drift the agent name.
-func TestDefaultIncidentManagerPrompt_SingleRunbookSearcherInvocation(t *testing.T) {
-	if got := strings.Count(DefaultIncidentManagerPrompt, `"agent": "runbook-searcher"`); got != 1 {
-		t.Errorf("expected exactly 1 subagent({\"agent\": \"runbook-searcher\"...}) example in prompt, got %d", got)
-	}
-}
-
-// TestDefaultIncidentManagerPrompt_PassesFullAlertTextToSubagent pins the
-// conditional clause that asks the agent to pass the full "Original alert
-// text:" block verbatim as the subagent task. The runbook-searcher subagent
-// extracts distinctive keywords on its own, so the parent agent does not
-// need to embed example phrases in the prompt. Mirrors
-// TestPrependGuidance_PassesFullAlertTextToSubagent in internal/executor —
-// both prompts are kept in sync per the "keep them in sync" invariant noted
-// in executor.go's PrependGuidance comment.
-//
-// Asserted as a single normalized clause (not independent substrings) so
-// the rule can't be silently weakened by scattering the tokens.
-func TestDefaultIncidentManagerPrompt_PassesFullAlertTextToSubagent(t *testing.T) {
-	normalized := strings.Join(strings.Fields(DefaultIncidentManagerPrompt), " ")
-	want := `When the prompt contains an "Original alert text:" block, pass that block verbatim as the "task"`
-	if !strings.Contains(normalized, want) {
-		t.Errorf("DefaultIncidentManagerPrompt missing full-alert-text pass-through clause\nwant: %s", want)
-	}
-}
-
-// TestDefaultIncidentManagerPrompt_ContainsMemorySearcherSubagent pins the
-// memory-search workflow step: after the runbook search, the agent must
-// delegate a cross-incident memory search to the memory-searcher subagent
-// with the full alert text as the task.
-func TestDefaultIncidentManagerPrompt_ContainsMemorySearcherSubagent(t *testing.T) {
-	tests := []struct {
-		name     string
-		contains string
-	}{
-		{"memory-searcher agent name", `"agent": "memory-searcher"`},
-		{"memory directory fallback", `/akmatori/memory/`},
-		{"max 3 memory calls cue", "Cap total memory-searcher invocations at 3"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if !strings.Contains(DefaultIncidentManagerPrompt, tt.contains) {
-				t.Errorf("DefaultIncidentManagerPrompt should contain %q", tt.contains)
-			}
-		})
-	}
-}
-
-// TestDefaultIncidentManagerPrompt_MemorySearchAfterRunbookSearch verifies
-// the workflow order: runbook search runs first, memory search runs right
-// after it, and both run before "Load relevant skills".
-func TestDefaultIncidentManagerPrompt_MemorySearchAfterRunbookSearch(t *testing.T) {
-	runbookIdx := strings.Index(DefaultIncidentManagerPrompt, "MANDATORY - Search runbooks FIRST")
-	memoryIdx := strings.Index(DefaultIncidentManagerPrompt, "MANDATORY - Search cross-incident memory next")
-	skillsIdx := strings.Index(DefaultIncidentManagerPrompt, "Load relevant skills")
-
-	if runbookIdx == -1 {
-		t.Fatal("prompt must contain mandatory runbook search step")
-	}
-	if memoryIdx == -1 {
-		t.Fatal("prompt must contain mandatory memory search step")
-	}
-	if skillsIdx == -1 {
-		t.Fatal("prompt must contain load relevant skills step")
-	}
-	if runbookIdx >= memoryIdx {
-		t.Error("runbook search must appear before memory search")
-	}
-	if memoryIdx >= skillsIdx {
-		t.Error("memory search must appear before load relevant skills")
-	}
-}
-
-// TestDefaultIncidentManagerPrompt_SingleMemorySearcherInvocation pins the
-// structural invariant that the memory-search step shows exactly ONE
-// subagent({"agent": "memory-searcher", ...}) example. Mirrors the
-// equivalent runbook-searcher invariant above.
-func TestDefaultIncidentManagerPrompt_SingleMemorySearcherInvocation(t *testing.T) {
-	if got := strings.Count(DefaultIncidentManagerPrompt, `"agent": "memory-searcher"`); got != 1 {
-		t.Errorf("expected exactly 1 subagent({\"agent\": \"memory-searcher\"...}) example in prompt, got %d", got)
-	}
-}
-
-// TestDefaultIncidentManagerPrompt_MemoryWriterGuidance verifies that the
-// incident-manager prompt instructs the agent to use memory-writer for durable
-// findings, and that stale suppression guidance (suppress:true) is absent.
-func TestDefaultIncidentManagerPrompt_MemoryWriterGuidance(t *testing.T) {
-	present := []string{
-		`"agent": "memory-writer"`,
-	}
-	absent := []string{
-		"suppress:true",
-		"safe to suppress",
-	}
-	for _, s := range present {
-		if !strings.Contains(DefaultIncidentManagerPrompt, s) {
-			t.Errorf("DefaultIncidentManagerPrompt should contain %q", s)
+func TestDefaultCronAgentPrompt_KnowledgeTools(t *testing.T) {
+	for _, want := range []string{`gateway_call("runbooks.search"`, `gateway_call("memory.search"`, `gateway_call("memory.list"`, `gateway_call("memory.write"`, `gateway_call("memory.delete"`} {
+		if !strings.Contains(DefaultCronAgentPrompt, want) {
+			t.Errorf("cron prompt missing %q", want)
 		}
 	}
-	for _, s := range absent {
-		if strings.Contains(DefaultIncidentManagerPrompt, s) {
-			t.Errorf("DefaultIncidentManagerPrompt must not contain stale suppression guidance %q", s)
+}
+
+func TestDreamingAndEvaluatorPrompts_UseMemoryList(t *testing.T) {
+	if !strings.Contains(dreamingCronPrompt, `gateway_call("memory.list", {"scopes": ["global"], "since"`) || !strings.Contains(dreamingCronPrompt, "next_cursor") {
+		t.Error("Dreaming must enumerate with memory.list since + next_cursor")
+	}
+	if !strings.Contains(improvementEvaluatorCronPrompt, `gateway_call("memory.list", {"type": "feedback"`) {
+		t.Error("evaluator must list recent feedback with memory.list")
+	}
+}
+
+func TestLegacySystemCronPrompts_ExcludeCurrent(t *testing.T) {
+	current := map[string]string{dreamingCronName: dreamingCronPrompt, improvementEvaluatorCronName: improvementEvaluatorCronPrompt}
+	for name, olds := range legacySystemCronPrompts {
+		if len(olds) == 0 {
+			t.Errorf("%s: no legacy prompts", name)
+		}
+		for _, old := range olds {
+			if old == current[name] {
+				t.Errorf("%s: the current default is listed as legacy", name)
+			}
 		}
 	}
 }

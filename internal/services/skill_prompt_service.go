@@ -171,10 +171,7 @@ func (s *SkillService) generateSkillMd(name, description, body string) string {
 	// Transform [[filename]] references to markdown links [filename](assets/filename)
 	resolvedBody := s.contextService.ResolveReferencesToMarkdownLinks(body)
 
-	// SKILL.md is rendered once per skill (not per incident), so the
-	// incident UUID is unknown here. The agent derives it from its CWD at
-	// runtime via the placeholder.
-	memorySection := s.renderMemoryRecallSection(name, "")
+	memorySection := s.renderMemoryRecallSection(name)
 
 	return fmt.Sprintf("---\n%s---\n\n%s%s%s\n", string(yamlBytes), resolvedBody, memorySection, connectedToolsPointer)
 }
@@ -187,18 +184,15 @@ const connectedToolsPointerHeader = "## Connected tools (generated)\n"
 const connectedToolsPointer = "\n\n" + connectedToolsPointerHeader + "\nEvery connected tool is available to this skill. Read `connected-tools/SKILL.md` for the tool list, parameter schemas and `gateway_call` examples before the first tool call.\n"
 
 // memoryRecallInstruction is the always-on guidance prepended to every scope's
-// memory section. It delegates recall to the memory-searcher subagent, which
-// runs in its own scoped subprocess against /akmatori/memory/.
+// memory section: recall goes through the gateway memory tools.
 const memoryRecallInstruction = "Before answering questions about prior incidents, hosts, tool quirks, or operator " +
-	"feedback, delegate the recall to the memory-searcher subagent. It runs in its own scoped subprocess against " +
-	"/akmatori/memory/ and returns top file paths with brief excerpts. Read full files directly with the local read " +
-	"tool when needed.\n\n" +
-	"`subagent({\"agent\": \"memory-searcher\", \"task\": \"<full Original alert text when present, otherwise the topic you want to recall — host name, error pattern, tool quirk, feedback topic>\"})`\n\n" +
-	"When the prompt contains an \"Original alert text:\" block, pass that block verbatim as the task — the " +
-	"memory-searcher subagent will extract distinctive keywords on its own.\n\n" +
-	"Memory bodies link with `[[...]]`: `[[slug]]` is `/akmatori/memory/<same scope or global>/slug.md`, " +
-	"`[[scope/slug]]` is `/akmatori/memory/scope/slug.md`, and `[[file.ext]]` is `/akmatori/context/file.ext`. " +
-	"Follow a link with the read tool when it is relevant.\n\n" +
+	"feedback, search the cross-incident memory:\n\n" +
+	"`gateway_call(\"memory.search\", {\"query\": \"<the Original alert text block verbatim when present, otherwise the topic: host name, error pattern, tool quirk, feedback topic>\", \"scopes\": [\"<this scope>\", \"global\"]})`\n\n" +
+	"Read a memory in full with `gateway_call(\"memory.get\", {\"id\": <id>})`. The manifest below lists the newest " +
+	"memories of this scope by name and description; `memory.get` with scope and name reads one of them.\n\n" +
+	"Memory bodies link with `[[...]]`: `[[slug]]` is a memory in the same scope or global, `[[scope/slug]]` a memory " +
+	"in that scope, and `[[file.ext]]` the context file `/akmatori/context/file.ext`. `memory.get` resolves the links " +
+	"in its `references`. Follow one when it is relevant.\n\n" +
 	"Cite `Source: <name>` when it helps."
 
 // agentContextDir is where the agent worker mounts the context directory
@@ -272,58 +266,33 @@ func formatFileSize(n int64) string {
 	}
 }
 
-// memoryWriteInstructionTemplate is the end-of-investigation guidance that
-// asks the agent to record durable cross-incident facts via the memory-writer
-// subagent. The first %s is the scope slug; the second %s is the same scope
-// slug repeated inside the call example; the third %s is the incident UUID
-// (or a literal placeholder if not known at render time, e.g. for SKILL.md
-// which is shared across incidents).
-//
-// The pi-subagents `subagent` tool schema only forwards `agent`, `task`, and
-// a fixed set of control fields — any extra top-level keys like `scope` or
-// `incident` are silently dropped. The scope and incident UUID are therefore
-// embedded INSIDE the task string and the memory-writer subagent extracts
-// them from its task body.
+// memoryWriteInstructionTemplate is the end-of-investigation guidance to
+// record durable findings with memory.write. %s is the scope slug (twice).
 const memoryWriteInstructionTemplate = "When the investigation surfaces durable cross-incident facts (host quirks, " +
 	"recurring incident patterns, tool quirks, validated runbook gaps, or operator feedback) that will speed up " +
-	"future troubleshooting, record them by invoking the memory-writer subagent. The memory-writer expects the " +
-	"task body to start with `Scope: <scope>` and `Incident UUID: <uuid>` header lines, followed by the reasoning " +
-	"log and the directive to save ONLY important, non-obvious information. Use scope `\"%s\"`:\n\n" +
-	"`subagent({\"agent\": \"memory-writer\", \"task\": \"Scope: %s\\nIncident UUID: %s\\n\\n<full reasoning log and instruction to save only important information that will help speed up troubleshooting next time>\"})`\n\n" +
-	"memory-writer is idempotent — if a memory with the same semantic name already exists, it updates in place. " +
-	"Skip the call when nothing durable was learned."
+	"future troubleshooting, record them with memory.write. Search first and update the memory that covers the " +
+	"subject (same scope and name) instead of adding a new name; correct or delete (memory.delete) a memory the new " +
+	"facts prove wrong. Use scope `\"%s\"` (or `\"global\"` for facts every skill needs):\n\n" +
+	"`gateway_call(\"memory.write\", {\"scope\": \"%s\", \"name\": \"<lowercase-slug>\", \"type\": \"fact\", \"description\": \"<one line, at most 500 bytes>\", \"body\": \"<the details, absolute dates>\"})`\n\n" +
+	"A feedback body is the rule, then `**Why:**` and `**How to apply:**` lines. Never save what runbooks, alerts or " +
+	"context files already say. Skip the call when nothing durable was learned."
 
 // memoryGenerationOffInstruction replaces the record-findings guidance when
 // an operator turned agent memory off. It overrides the root prompts, which
-// still mention memory-writer; IngestFromDisk discards agent writes anyway.
-const memoryGenerationOffInstruction = "An operator turned off memory generation. Do NOT call the memory-writer " +
-	"subagent and do not write under /akmatori/memory/, even where other instructions or a task ask you to record " +
-	"findings or to update or delete memories: anything written there is discarded. Recall with memory-searcher " +
-	"still works."
+// still mention memory.write; the gateway refuses the writes anyway.
+const memoryGenerationOffInstruction = "An operator turned off memory generation. Do NOT call memory.write or " +
+	"memory.delete, even where other instructions or a task ask you to record findings or to update or delete " +
+	"memories: the gateway refuses them. memory.search, memory.list and memory.get still work."
 
-// incidentUUIDFromCwdPlaceholder is substituted for the incident UUID in
-// scopes where the UUID is unknown at render time (SKILL.md is shared across
-// incidents). The agent derives the UUID from its workspace directory.
-const incidentUUIDFromCwdPlaceholder = "<your incident UUID, i.e. the basename of your /workspaces/<uuid> working directory>"
-
-// renderMemoryRecallSection returns the recall instruction plus the on-disk
-// MEMORY.md manifest for the given scope ("global" for AGENTS.md, the skill
-// name for SKILL.md), followed by the Record durable findings subsection that
-// invokes the memory-writer subagent. When the manifest is missing or
-// unreadable, only the recall + write instructions are returned — the agent
-// can still call memory-searcher and discover entries dynamically. Returns an
-// empty string only when the service has no memoryDir configured (defensive;
-// should not happen in prod).
-//
-// incidentUUID is substituted into the memory-writer call example when known
-// at render time (per-incident AGENTS.md). For shared SKILL.md renders the
-// caller passes "" and the placeholder asks the agent to derive the UUID
-// from its workspace directory.
-func (s *SkillService) renderMemoryRecallSection(scope string, incidentUUID string) string {
-	if s.memoryDir == "" {
+// renderMemoryRecallSection returns the recall instruction plus the scope's
+// manifest rendered from the database ("global" for AGENTS.md, the skill name
+// for SKILL.md), followed by the Record durable findings subsection (or the
+// memory-off note). Returns "" when the service has no database.
+func (s *SkillService) renderMemoryRecallSection(scope string) string {
+	if s.db == nil {
 		return ""
 	}
-	manifest := s.readMemoryManifest(scope)
+	manifest := RenderMemoryManifest(s.db, scope)
 
 	var b strings.Builder
 	b.WriteString("\n\n## Cross-incident Memory\n\n")
@@ -346,33 +315,10 @@ func (s *SkillService) renderMemoryRecallSection(scope string, incidentUUID stri
 		b.WriteString("\n")
 		return b.String()
 	}
-	uuidArg := incidentUUID
-	if uuidArg == "" {
-		uuidArg = incidentUUIDFromCwdPlaceholder
-	}
 	b.WriteString("\n### Record durable findings\n\n")
-	fmt.Fprintf(&b, memoryWriteInstructionTemplate, scope, scope, uuidArg)
+	fmt.Fprintf(&b, memoryWriteInstructionTemplate, scope, scope)
 	b.WriteString("\n")
 	return b.String()
-}
-
-// readMemoryManifest returns the on-disk MEMORY.md for a scope, or an empty
-// string when the file is missing/unreadable. Errors are logged at debug
-// (not warn) because first-run is normal and the agent has a sensible
-// fallback (delegate recall to the memory-searcher subagent).
-func (s *SkillService) readMemoryManifest(scope string) string {
-	if s.memoryDir == "" || scope == "" {
-		return ""
-	}
-	path := filepath.Join(s.memoryDir, scope, "MEMORY.md")
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			slog.Debug("memory manifest unreadable", "scope", scope, "err", err)
-		}
-		return ""
-	}
-	return string(b)
 }
 
 // sshHasConfiguredHosts checks if the SSH tool instance has any configured hosts.
@@ -852,6 +798,36 @@ gateway_call("events.get", {"uuid": "<event-uuid>"}, "%s")
 gateway_call("events.report_alert", {"alert_name": "Disk usage above 90%%", "summary": "/var at 94%% on db1", "host": "db1", "severity": "high"}, "%s")
 `+"```"+`
 `, logicalName, logicalName, logicalName)
+	case "runbooks":
+		return `
+**Parameters:**
+- ` + "`search`" + `: query* (alert text, host, service or error string), limit (default 5, max 20). Ranked by relevance; returns id, title, excerpt.
+- ` + "`get`" + `: id* (from search). The full runbook.
+(* = required)
+
+Usage (via gateway_call):
+` + "```" + `
+gateway_call("runbooks.search", {"query": "502 Bad Gateway on nginx-edge-03"})
+gateway_call("runbooks.get", {"id": 12})
+` + "```" + `
+`
+	case "memory":
+		return `
+**Parameters:**
+- ` + "`search`" + `: query* | scopes (e.g. ["<skill>", "global"]), type (fact, feedback), limit (default 5, max 20). Ranked by relevance.
+- ` + "`list`" + `: scopes, type, since (ISO-8601 or Unix seconds), limit (default 50, max 200), cursor (next_cursor). Newest first, no bodies.
+- ` + "`get`" + `: id, or scope + name. The full memory and its [[...]] references.
+- ` + "`write`" + `: scope*, name*, type*, description* (one line, at most 500 bytes), body* (at most 8 KiB). Same scope + name updates. Operator and context-file memories are protected.
+- ` + "`delete`" + `: scope*, name*.
+(* = required)
+
+Usage (via gateway_call):
+` + "```" + `
+gateway_call("memory.search", {"query": "nginx-edge-03 502", "scopes": ["linux-admin", "global"]})
+gateway_call("memory.get", {"id": 41})
+gateway_call("memory.write", {"scope": "global", "name": "nginx-edge-03-flaky-nic", "type": "fact", "description": "nginx-edge-03 eth1 drops packets under load", "body": "Seen 2026-09-14 and 2026-10-02 ..."})
+` + "```" + `
+`
 	default:
 		if tool.ToolType.Kind == database.ToolTypeKindMCP {
 			return fmt.Sprintf("Remote MCP server. List its functions with `list_tools_for_tool_type(\"%s\")`, read one with `get_tool_detail(\"%s.<function>\")`, then call `gateway_call(\"%s.<function>\", {<args>}, \"%s\")`.\n", typeName, typeName, typeName, logicalName)

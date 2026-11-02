@@ -160,17 +160,6 @@ type LLMSettings struct {
 	TopK        *int     `gorm:"default:null" json:"top_k"`
 	MaxTokens   *int     `gorm:"default:null" json:"max_tokens"`
 
-	// Subagent model override. The runbook-searcher / memory-searcher children
-	// spawned by pi-subagents are read-only grep/read loops that run on every
-	// incident; a cheaper model from the SAME provider usually does that job.
-	// NULL means "same model and thinking level as the parent" (the historical
-	// behaviour). The worker writes these into the child's pi settings as
-	// `subagents.defaultModel` / `subagents.defaultThinking`; memory-writer is
-	// always pinned back to the parent model. Must be a model id of the same
-	// provider: the child authenticates with the parent's credential.
-	SubagentModel         *string `gorm:"type:varchar(100);default:null" json:"subagent_model"`
-	SubagentThinkingLevel *string `gorm:"type:varchar(50);default:null" json:"subagent_thinking_level"`
-
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -309,8 +298,8 @@ type GeneralSettings struct {
 	IncidentAutoCloseMinutes *int `gorm:"default:null" json:"incident_auto_close_minutes"`
 
 	// MemoryGenerationEnabled gates agent-written memory: off, the agent
-	// prompts drop the memory-writer instructions and IngestFromDisk discards
-	// whatever agents wrote to the memory directory. Operator writes (UI, API,
+	// prompts drop the memory.write instructions and the gateway refuses
+	// memory.write and memory.delete. Operator writes (UI, API,
 	// Slack feedback) are not affected. Nil means ENABLED, the behavior
 	// before this setting existed.
 	MemoryGenerationEnabled *bool `gorm:"default:null" json:"memory_generation_enabled"`

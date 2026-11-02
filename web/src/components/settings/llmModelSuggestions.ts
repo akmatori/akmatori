@@ -38,8 +38,7 @@ export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: stri
     { value: 'claude-opus-4-8', label: 'claude-opus-4-8' },
     { value: 'claude-opus-4-7', label: 'claude-opus-4-7' },
     { value: 'claude-sonnet-4-6', label: 'claude-sonnet-4-6' },
-    // Haiku 5.5 (pi-ai 1.1.0+): 1M context, $0.10 / $0.50 per M tokens — the
-    // cheap pick for the subagent model override.
+    // Haiku 5.5 (pi-ai 1.1.0+): 1M context, $0.10 / $0.50 per M tokens.
     { value: 'claude-haiku-5-5', label: 'claude-haiku-5-5 (Fast)' },
     { value: 'claude-haiku-4-5', label: 'claude-haiku-4-5' },
   ],
@@ -91,7 +90,7 @@ export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: stri
   ],
   minimax: [
     { value: 'MiniMax-M3', label: 'MiniMax-M3 (Recommended)' },
-    // pi-ai 1.4.0+: half the price of M3 — the cheap pick for subagents.
+    // pi-ai 1.4.0+: half the price of M3.
     { value: 'MiniMax-M3.1-Flash', label: 'MiniMax-M3.1-Flash (Fast)' },
     { value: 'MiniMax-M2.7', label: 'MiniMax-M2.7' },
     { value: 'MiniMax-M2.7-highspeed', label: 'MiniMax-M2.7-highspeed (Fast)' },

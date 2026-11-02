@@ -948,15 +948,22 @@ func (s *MemoryService) upsertByNameNoSync(m *database.Memory) (*database.Memory
 	m.Scope = strings.TrimSpace(m.Scope)
 	m.Name = strings.TrimSpace(m.Name)
 
+	// An operator upsert (proposal approval, Slack feedback, from-text) also
+	// takes ownership: the row becomes created_by=operator, which the gateway
+	// memory tools never change. Other upserts keep the stored authorship.
+	columns := []string{"type", "description", "body", "incident_uuid", "updated_at"}
+	changed := "memories.type <> excluded.type" +
+		" OR memories.description <> excluded.description" +
+		" OR memories.body <> excluded.body" +
+		" OR COALESCE(memories.incident_uuid, '') <> COALESCE(excluded.incident_uuid, '')"
+	if m.CreatedBy == MemoryCreatedByOperator {
+		columns = append(columns, "created_by")
+		changed += " OR COALESCE(memories.created_by, '') <> excluded.created_by"
+	}
 	if err := s.db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "scope"}, {Name: "name"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"type", "description", "body", "incident_uuid", "updated_at",
-		}),
-		Where: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "memories.type <> excluded.type" +
-			" OR memories.description <> excluded.description" +
-			" OR memories.body <> excluded.body" +
-			" OR COALESCE(memories.incident_uuid, '') <> COALESCE(excluded.incident_uuid, '')"}}},
+		Columns:   []clause.Column{{Name: "scope"}, {Name: "name"}},
+		DoUpdates: clause.AssignmentColumns(columns),
+		Where:     clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: changed}}},
 	}).Create(m).Error; err != nil {
 		return nil, fmt.Errorf("failed to upsert memory: %w", err)
 	}
@@ -1163,11 +1170,35 @@ func limitManifestEntries(entries []database.Memory, max int) (limited []databas
 	return limited, len(entries) - len(limited)
 }
 
+// RenderMemoryManifest renders the manifest of one scope from the database
+// (the same rules as the on-disk MEMORY.md: feedback first, 150 entries, line
+// and byte caps). Returns "" when the scope has no memories or the read fails.
+func RenderMemoryManifest(db *gorm.DB, scope string) string {
+	if db == nil || scope == "" {
+		return ""
+	}
+	var entries []database.Memory
+	if err := db.Select("id", "scope", "name", "type", "description", "updated_at").
+		Where("scope = ?", scope).Find(&entries).Error; err != nil {
+		slog.Debug("memory manifest: list memories", "scope", scope, "err", err)
+		return ""
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+	limited, truncated := limitManifestEntries(entries, manifestMaxEntriesPerScope)
+	manifest := renderManifest(scope, limited)
+	if truncated > 0 {
+		manifest += fmt.Sprintf("<!-- truncated: %d more entries not shown -->\n", truncated)
+	}
+	return manifest
+}
+
 // renderManifest builds the per-scope MEMORY.md table. Hard-capped at
 // manifestMaxLines / manifestMaxBytes — the manifest is injected into prompts,
 // so it MUST stay small even as memory accumulates. When an entry would push
 // the manifest past either cap, we stop and emit a truncation marker telling
-// the agent to use the memory-searcher subagent for the rest.
+// the agent to use memory.search for the rest.
 func renderManifest(scope string, entries []database.Memory) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Memory Manifest — scope: %s\n\n", scope)
@@ -1197,13 +1228,13 @@ func renderManifest(scope string, entries []database.Memory) string {
 	}
 
 	if truncated > 0 {
-		fmt.Fprintf(&b, "\n_… %d more memories truncated. Use the memory-searcher subagent to find them._\n", truncated)
+		fmt.Fprintf(&b, "\n_… %d more memories truncated. Find them with memory.search._\n", truncated)
 	}
 
 	// If the table never emitted a row (e.g., header alone exceeded the cap),
 	// keep at least the header for diagnostic clarity.
 	if b.Len() == header {
-		b.WriteString("_Manifest exceeded byte cap; use the memory-searcher subagent to access entries._\n")
+		b.WriteString("_Manifest exceeded byte cap; find memories with memory.search._\n")
 	}
 
 	return b.String()
@@ -1282,4 +1313,33 @@ func removeStaleScopesInRoot(root *os.Root, keep map[string]bool) error {
 		}
 	}
 	return nil
+}
+
+// SystemSettingMemoryDiskIngestedAt marks that the one-time import of on-disk
+// memory files ran (gateway knowledge tools replaced the memory-writer
+// subagent; the directory is a read-only mirror from then on).
+const SystemSettingMemoryDiskIngestedAt = "memory_disk_ingested_at"
+
+// diskIngester is the slice of MemoryService IngestDiskMemoriesOnce needs.
+type diskIngester interface {
+	IngestFromDisk(ctx context.Context) error
+}
+
+// IngestDiskMemoriesOnce runs IngestFromDisk once per install, before the
+// first SyncMemoryFiles of this version, so memory files edited by hand reach
+// the database instead of being overwritten. A failure is logged and retried
+// on the next start.
+func IngestDiskMemoriesOnce(m diskIngester) {
+	if database.HasSystemSetting(SystemSettingMemoryDiskIngestedAt) {
+		return
+	}
+	if err := m.IngestFromDisk(context.Background()); err != nil {
+		slog.Warn("one-time import of memory files failed; retrying on next start", "err", err)
+		return
+	}
+	if err := database.SetSystemSetting(SystemSettingMemoryDiskIngestedAt, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		slog.Warn("failed to record the one-time memory file import", "err", err)
+		return
+	}
+	slog.Info("imported memory files from disk once; the memory directory is a read-only mirror from now on")
 }

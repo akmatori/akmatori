@@ -20,6 +20,8 @@ export type { ToolAllowlistEntry };
 export interface GatewayClientOptions {
   gatewayUrl: string;
   incidentId: string;
+  /** Agent run id from the WebSocket frame. Sent as X-Run-ID when set; the gateway needs it on mutating calls. */
+  runId?: string;
   workDir?: string;
   /** Request timeout in milliseconds (default: 300000 = 5 minutes) */
   timeoutMs?: number;
@@ -185,6 +187,7 @@ const OUTPUT_SIZE_THRESHOLD = 4096;
 export class GatewayClient {
   private readonly gatewayUrl: string;
   private readonly incidentId: string;
+  private readonly runId: string | undefined;
   private readonly workDir: string | undefined;
   private readonly timeoutMs: number;
   private readonly toolAllowlist: ToolAllowlistEntry[] | undefined;
@@ -193,6 +196,7 @@ export class GatewayClient {
   constructor(options: GatewayClientOptions) {
     this.gatewayUrl = options.gatewayUrl.replace(/\/+$/, "");
     this.incidentId = options.incidentId;
+    this.runId = options.runId;
     this.workDir = options.workDir;
     this.timeoutMs = options.timeoutMs ?? 300_000;
     this.toolAllowlist = options.toolAllowlist;
@@ -359,6 +363,9 @@ export class GatewayClient {
       };
       if (this.incidentId) {
         headers["X-Incident-ID"] = this.incidentId;
+      }
+      if (this.runId) {
+        headers["X-Run-ID"] = this.runId;
       }
       if (this.toolAllowlist) {
         headers["X-Tool-Allowlist"] = JSON.stringify(this.toolAllowlist);
