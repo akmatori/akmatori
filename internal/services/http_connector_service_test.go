@@ -12,7 +12,7 @@ import (
 func setupHTTPConnectorTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	return testhelpers.NewGlobalSQLiteDB(t, &database.HTTPConnector{}, &database.MCPServerConfig{})
+	return testhelpers.NewGlobalSQLiteDB(t, &database.HTTPConnector{}, &database.MCPServerConfig{}, &database.ToolType{}, &database.ToolInstance{})
 }
 
 func validHTTPConnector() *database.HTTPConnector {

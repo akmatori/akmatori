@@ -421,6 +421,11 @@ func main() {
 	if err := mcpServerService.SyncAllManagedTools(); err != nil {
 		slog.Warn("failed to sync MCP server tool instances", "err", err)
 	}
+	// HTTP connectors defined before their tool types existed get one now, so
+	// that a tool instance (base URL, credentials) can be created for them.
+	if err := httpConnectorService.EnsureConnectorToolTypes(); err != nil {
+		slog.Warn("failed to ensure HTTP connector tool types", "err", err)
+	}
 	connectorService := services.NewConnectorService(database.GetDB(), services.ConnectorDeps{
 		DeleteToolInstance: toolService.DeleteToolInstance,
 		DeleteAlertSource:  alertService.DeleteInstanceByID,
