@@ -28,6 +28,8 @@ mirror is removed.
   first and update the memory that covers the subject; correct or delete a memory the new facts
   prove wrong; absolute dates; feedback bodies are rule + `**Why:**` + `**How to apply:**`; never
   save what runbooks, alerts or context files already say; never the `file-` prefix
+- `memory.write` refuses a missing, null or non-string scope/name/type/description/body (the
+  dispatcher does not enforce the schema; a missing body read as "" would erase it)
 - `memory.write` validation = the API's `validate` (shared fixture
   `tests/fixtures/memory_validation_cases.json`, run by both modules) plus agent-only rules: a
   description over 500 bytes is CUT (UTF-8 safe, `description_truncated: true`), scope must be
@@ -45,9 +47,13 @@ mirror is removed.
   `UpdatedAt` descending, feedback first (at most 50 of the 150, unused fact slots go back to
   feedback), line and byte caps. SKILL.md embeds its scope's manifest, so `FinishRun` regenerates
   every SKILL.md (and the disk mirror) when the memories fingerprint (count + newest
-  `updated_at`) changed; AGENTS.md is rendered per run
+  `updated_at`) changed, and keeps the old fingerprint after a failed write so the next run
+  retries; AGENTS.md is rendered per run
 - upgrade: `IngestDiskMemoriesOnce` imports the old disk files once (system setting
-  `memory_disk_ingested_at`) before the first sync; `DisableReservedNamespaceCollisions` disables a
+  `memory_disk_ingested_at`) before the first sync. It first copies the files to
+  `akmatori_data/memory-import-backup/`, ignores the generation gate, skips invalid files (kept in
+  the backup) and, on a DB failure, returns an error with NO sync and no flag (retry on next
+  start); the startup sync and the `FinishRun` mirror sync wait for the flag; `DisableReservedNamespaceCollisions` disables a
   connector named `runbooks` / `memory`; `WarnRetiredKnowledgeReferences` logs skills, runbooks,
   memories and cron prompts that still name the subagents; seeds replace never-edited system cron
   prompts (`legacySystemCronPrompts`, append the old text whenever a default changes)

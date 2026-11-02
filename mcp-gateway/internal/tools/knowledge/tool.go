@@ -74,6 +74,21 @@ func stringArg(args map[string]interface{}, key string) string {
 	return strings.TrimSpace(s)
 }
 
+// requireStringArgs returns an error unless every key is present with a
+// string value ("" is allowed).
+func requireStringArgs(args map[string]interface{}, keys ...string) error {
+	for _, k := range keys {
+		v, ok := args[k]
+		if !ok || v == nil {
+			return fmt.Errorf("%s is required", k)
+		}
+		if _, ok := v.(string); !ok {
+			return fmt.Errorf("%s must be a string", k)
+		}
+	}
+	return nil
+}
+
 // rawStringArg returns a string arg without trimming (descriptions, bodies).
 func rawStringArg(args map[string]interface{}, key string) string {
 	s, _ := args[key].(string)
@@ -538,6 +553,11 @@ func (t *Tool) prepareWrite(ctx context.Context, in *memoryInput) (truncated boo
 func (t *Tool) MemoryWrite(ctx context.Context, scopeID string, args map[string]interface{}) (interface{}, error) {
 	if !t.memoryGenerationEnabled(ctx) {
 		return nil, errMemoryGenerationOff
+	}
+	// The dispatcher does not enforce the input schema. A missing or
+	// non-string body would read as "" and erase the stored body.
+	if err := requireStringArgs(args, "scope", "name", "type", "description", "body"); err != nil {
+		return nil, err
 	}
 	run, err := t.requireRun(ctx, scopeID)
 	if err != nil {

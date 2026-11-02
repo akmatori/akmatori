@@ -159,9 +159,10 @@ func main() {
 	// One time, before the disk becomes a pure read-only mirror: import memory
 	// files an operator or the old memory-writer subagent left on disk, so
 	// hand edits are not overwritten by the first sync.
-	services.IngestDiskMemoriesOnce(memoryService)
-	if err := memoryService.SyncMemoryFiles(); err != nil {
-		slog.Warn("failed to sync memory files", "err", err)
+	if services.IngestDiskMemoriesOnce(memoryService) {
+		if err := memoryService.SyncMemoryFiles(); err != nil {
+			slog.Warn("failed to sync memory files", "err", err)
+		}
 	}
 
 	// Seed the generated connected-tools system skill (every connected tool,

@@ -113,6 +113,9 @@ type GatewayToolParam struct {
 	Type        string   `json:"type"`
 	Description string   `json:"description,omitempty"`
 	Enum        []string `json:"enum,omitempty"`
+	Items       *struct {
+		Type string `json:"type"`
+	} `json:"items,omitempty"`
 }
 
 // GatewayTool is one registered gateway tool with its input schema.

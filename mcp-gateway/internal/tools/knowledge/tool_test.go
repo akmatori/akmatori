@@ -151,6 +151,34 @@ func TestMemoryWrite_CreateUpdateUnchanged(t *testing.T) {
 	}
 }
 
+func TestMemoryWrite_MissingOrNonStringBodyKeepsBody(t *testing.T) {
+	tool, db := newTestTool(t)
+	ctx := runCtx("run-1")
+	if _, err := write(t, tool, ctx, memArgs("edge-nic", "keep me")); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(map[string]interface{}){
+		"missing":    func(a map[string]interface{}) { delete(a, "body") },
+		"null":       func(a map[string]interface{}) { a["body"] = nil },
+		"non-string": func(a map[string]interface{}) { a["body"] = 42 },
+	} {
+		args := memArgs("edge-nic", "x")
+		mutate(args)
+		if _, err := write(t, tool, ctx, args); err == nil {
+			t.Errorf("%s body: want an error", name)
+		}
+	}
+	var m database.Memory
+	db.Where("name = ?", "edge-nic").Take(&m)
+	if m.Body != "keep me" {
+		t.Errorf("body = %q, want it unchanged", m.Body)
+	}
+	// An explicit empty body is still a valid write.
+	if _, err := write(t, tool, ctx, memArgs("edge-nic", "")); err != nil {
+		t.Errorf("empty body: %v", err)
+	}
+}
+
 func TestMemoryWrite_Protection(t *testing.T) {
 	tool, db := newTestTool(t)
 	ctx := runCtx("run-1")

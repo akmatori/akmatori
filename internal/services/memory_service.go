@@ -586,8 +586,9 @@ func writeMemoryFileInRoot(root *os.Root, name string, data []byte) error {
 // IngestFromDisk walks <memoryDir>/<scope>/*.md (skipping MEMORY.md) and
 // upserts each well-formed memory file into the database keyed by (scope, name).
 // Paths that escape a known scope directory are rejected. Files that fail to
-// parse or validate are logged and skipped — ingest is best-effort and must
-// never partial-fail the caller (called from post-incident hooks).
+// parse or validate are logged and skipped (a copy stays in
+// memory-import-backup). A database failure returns an error without the
+// final sync, so the caller can retry without losing files.
 //
 // Idempotency: re-running on the same directory state is a no-op at the row
 // level (UpsertByName conflict on (scope, name) overwrites in place). The
@@ -613,18 +614,20 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 	if s.memoryDir == "" {
 		return fmt.Errorf("memory directory not configured")
 	}
-	if !MemoryGenerationEnabled() {
-		// The operator turned agent memory off. The prompt tells the agent
-		// not to write, but the memory dir is rw-mounted, so enforce it here:
-		// a sync rewrites every file from the database and removes files with
-		// no row, which discards agent creates, edits and tombstones.
-		slog.Info("memory ingest skipped: memory generation is off; discarding agent writes")
-		return s.SyncMemoryFiles()
-	}
+	// No MemoryGenerationEnabled check: this is the one-time import of the
+	// old disk mirror. The old per-run ingest already discarded agent files
+	// while generation was off, so files left now are hand edits (or crash
+	// leftovers), and the sync after this import would delete them.
 
 	rootAbs, err := filepath.Abs(s.memoryDir)
 	if err != nil {
 		return fmt.Errorf("resolve memory dir: %w", err)
+	}
+	// Copy the directory once before anything can change it: the sync after
+	// the import rewrites every file from the database and removes files
+	// that have no row, including files that failed to import.
+	if err := backupMemoryDirOnce(rootAbs); err != nil {
+		return fmt.Errorf("back up memory dir before import: %w", err)
 	}
 
 	// os.OpenRoot pins the directory tree to a single inode and rejects any
@@ -763,6 +766,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 	ingested := 0
 	deleted := 0
 	tombstoneFailure := false
+	upsertFailures := 0
 	for _, entry := range parsed {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -782,11 +786,22 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 			// had already been removed by an earlier ingest.
 			continue
 		}
+		if err := s.validate(entry.mem); err != nil {
+			// Permanent: retrying will not help. The file stays in the backup.
+			slog.Warn("memory ingest: invalid file skipped (a copy is in "+memoryImportBackupDir+")", "scope", entry.mem.Scope, "name", entry.mem.Name, "err", err)
+			continue
+		}
 		if _, err := s.upsertByNameNoSync(entry.mem); err != nil {
 			slog.Warn("memory ingest: upsert", "scope", entry.mem.Scope, "name", entry.mem.Name, "err", err)
+			upsertFailures++
 			continue
 		}
 		ingested++
+	}
+	if upsertFailures > 0 || tombstoneFailure {
+		// A database failure may be temporary. Do not sync (it would
+		// delete the files that did not import) and let the caller retry.
+		return fmt.Errorf("memory ingest: %d upserts failed, tombstone failure=%v; files kept for a retry", upsertFailures, tombstoneFailure)
 	}
 
 	// Single sync after the batch instead of one per row: SyncMemoryFiles
@@ -1329,17 +1344,84 @@ type diskIngester interface {
 // first SyncMemoryFiles of this version, so memory files edited by hand reach
 // the database instead of being overwritten. A failure is logged and retried
 // on the next start.
-func IngestDiskMemoriesOnce(m diskIngester) {
+//
+// It returns false when the import has not completed; the caller must then
+// not sync the memory files, because the sync deletes files with no row.
+func IngestDiskMemoriesOnce(m diskIngester) bool {
 	if database.HasSystemSetting(SystemSettingMemoryDiskIngestedAt) {
-		return
+		return true
 	}
 	if err := m.IngestFromDisk(context.Background()); err != nil {
-		slog.Warn("one-time import of memory files failed; retrying on next start", "err", err)
-		return
+		slog.Error("one-time import of memory files failed; the memory files are not synced and the import runs again on next start", "err", err)
+		return false
 	}
 	if err := database.SetSystemSetting(SystemSettingMemoryDiskIngestedAt, time.Now().UTC().Format(time.RFC3339)); err != nil {
-		slog.Warn("failed to record the one-time memory file import", "err", err)
-		return
+		slog.Error("failed to record the one-time memory file import; it runs again on next start", "err", err)
+		return false
 	}
 	slog.Info("imported memory files from disk once; the memory directory is a read-only mirror from now on")
+	return true
+}
+
+// memoryImportBackupDir is the sibling of the memory dir that holds the copy
+// made before the one-time import.
+const memoryImportBackupDir = "memory-import-backup"
+
+// backupMemoryDirOnce copies the regular .md files of memoryDir (one level of
+// scope dirs) to <parent>/memory-import-backup, unless that dir exists. A
+// missing memory dir is not an error. Symlinks and other non-regular files
+// are skipped, so a planted entry cannot block the import.
+func backupMemoryDirOnce(memoryDir string) error {
+	dst := filepath.Join(filepath.Dir(memoryDir), memoryImportBackupDir)
+	if _, err := os.Stat(dst); err == nil {
+		return nil
+	}
+	root, err := os.OpenRoot(memoryDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	tmp := dst + ".tmp"
+	_ = os.RemoveAll(tmp)
+	scopes, err := readDirFromRoot(root, ".")
+	if err != nil {
+		return err
+	}
+	copied := 0
+	for _, sc := range scopes {
+		if !sc.IsDir() || !validMemoryName(sc.Name()) {
+			continue
+		}
+		files, err := readDirFromRoot(root, sc.Name())
+		if err != nil {
+			return err
+		}
+		for _, f := range files {
+			if !f.Type().IsRegular() || !strings.HasSuffix(f.Name(), ".md") {
+				continue
+			}
+			data, ok := readMemoryFileFromRoot(root, filepath.Join(sc.Name(), f.Name()))
+			if !ok {
+				continue
+			}
+			if err := os.MkdirAll(filepath.Join(tmp, sc.Name()), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(tmp, sc.Name(), f.Name()), data, 0o644); err != nil {
+				return err
+			}
+			copied++
+		}
+	}
+	if copied == 0 {
+		return nil
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		return err
+	}
+	slog.Info("copied the memory files before the one-time import", "dir", dst, "files", copied)
+	return nil
 }

@@ -60,10 +60,16 @@ func LegacyCronToolFields(toolTypes []string) (bool, StringList) {
 // mappings. Every connector tool is available to every skill now; cron jobs
 // keep tools_enabled + builtin_tools, backfilled from cron_job_tools. Runs
 // before AutoMigrate, in one transaction, and is a no-op once the join table
-// is gone (or on a fresh install, where AutoMigrate adds the columns).
+// is gone and the columns exist (or on a fresh install, where AutoMigrate
+// adds the columns). A cron_jobs table from before cron_job_tools is
+// backfilled too (no mapping = no connectors, the default built-ins).
 func preMigrateToolMappings(db *gorm.DB) error {
 	m := db.Migrator()
-	if !m.HasTable("cron_job_tools") {
+	// A schema from before cron_job_tools (cron_jobs without the new
+	// columns) still needs the backfill: AutoMigrate alone would give its
+	// jobs tools_enabled=true and no built-ins.
+	oldCronSchema := m.HasTable("cron_jobs") && !m.HasColumn(&CronJob{}, "tools_enabled")
+	if !m.HasTable("cron_job_tools") && !oldCronSchema {
 		if m.HasTable("skill_tools") {
 			if err := db.Exec("DROP TABLE skill_tools").Error; err != nil {
 				return fmt.Errorf("drop skill_tools: %w", err)
@@ -95,11 +101,13 @@ func preMigrateToolMappings(db *gorm.DB) error {
 				Name      string
 			}
 			var rows []joinRow
-			if err := tx.Raw(`SELECT cjt.cron_job_id AS cron_job_id, tt.name AS name
-				FROM cron_job_tools cjt
-				JOIN tool_instances ti ON ti.id = cjt.tool_instance_id
-				JOIN tool_types tt ON tt.id = ti.tool_type_id`).Scan(&rows).Error; err != nil {
-				return fmt.Errorf("read cron_job_tools: %w", err)
+			if tm.HasTable("cron_job_tools") {
+				if err := tx.Raw(`SELECT cjt.cron_job_id AS cron_job_id, tt.name AS name
+					FROM cron_job_tools cjt
+					JOIN tool_instances ti ON ti.id = cjt.tool_instance_id
+					JOIN tool_types tt ON tt.id = ti.tool_type_id`).Scan(&rows).Error; err != nil {
+					return fmt.Errorf("read cron_job_tools: %w", err)
+				}
 			}
 			typesByJob := map[uint][]string{}
 			for _, r := range rows {
@@ -116,8 +124,10 @@ func preMigrateToolMappings(db *gorm.DB) error {
 			}
 			slog.Info("migrated cron job tool mappings", "cron_jobs", len(jobIDs))
 		}
-		if err := tx.Exec("DROP TABLE cron_job_tools").Error; err != nil {
-			return fmt.Errorf("drop cron_job_tools: %w", err)
+		if tm.HasTable("cron_job_tools") {
+			if err := tx.Exec("DROP TABLE cron_job_tools").Error; err != nil {
+				return fmt.Errorf("drop cron_job_tools: %w", err)
+			}
 		}
 		if tm.HasTable("skill_tools") {
 			if err := tx.Exec("DROP TABLE skill_tools").Error; err != nil {

@@ -11,19 +11,40 @@ import (
 	"github.com/akmatori/akmatori/internal/database"
 )
 
-type countingRefresher struct{ syncs int }
+type countingRefresher struct {
+	syncs int
+	fail  bool
+}
 
-func (c *countingRefresher) SyncMemoryFiles() error { c.syncs++; return nil }
+func (c *countingRefresher) SyncMemoryFiles() error {
+	c.syncs++
+	if c.fail {
+		return errors.New("disk full")
+	}
+	return nil
+}
 
 func TestRefreshAfterMemoryChange(t *testing.T) {
 	db := setupSkillTestDB(t)
 	if err := db.AutoMigrate(&database.Memory{}); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.AutoMigrate(&database.SystemSetting{}); err != nil {
+		t.Fatal(err)
+	}
 	svc := newTestSkillService(t, db)
 	ref := &countingRefresher{}
 	svc.SetMemoryRefresher(ref)
 	db.Create(&database.Skill{Name: "linux-admin", Description: "Linux", Enabled: true})
+
+	// Before the one-time disk import completes the mirror is not synced
+	// (the sync would delete files that have not been imported).
+	svc.RefreshAfterMemoryChange("r-pre")
+	if ref.syncs != 0 {
+		t.Fatalf("synced before the import: syncs = %d", ref.syncs)
+	}
+	svc.memoryFingerprint = ""
+	db.Create(&database.SystemSetting{Key: SystemSettingMemoryDiskIngestedAt, Value: "x"})
 
 	svc.RefreshAfterMemoryChange("r0")
 	if ref.syncs != 1 {
@@ -51,6 +72,21 @@ func TestRefreshAfterMemoryChange(t *testing.T) {
 	svc.RefreshAfterMemoryChange("r3")
 	if ref.syncs != 3 {
 		t.Errorf("delete not detected: syncs = %d", ref.syncs)
+	}
+
+	// A failed refresh keeps the old fingerprint: the next run retries
+	// although no memory changed in between.
+	ref.fail = true
+	db.Create(&database.Memory{Scope: "global", Name: "n2", Type: "fact", Description: "d", Body: "b", CreatedBy: "agent"})
+	svc.RefreshAfterMemoryChange("r4")
+	ref.fail = false
+	svc.RefreshAfterMemoryChange("r5")
+	if ref.syncs != 5 {
+		t.Errorf("failed refresh not retried: syncs = %d, want 5", ref.syncs)
+	}
+	svc.RefreshAfterMemoryChange("r6")
+	if ref.syncs != 5 {
+		t.Errorf("refresh after recovery synced again: syncs = %d", ref.syncs)
 	}
 }
 

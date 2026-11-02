@@ -380,11 +380,11 @@ func (s *ProposalService) apply(ctx context.Context, p *database.Proposal) error
 			return fmt.Errorf("invalid proposed_content: %w", err)
 		}
 		toolsEnabled := content.ToolsEnabled != nil && *content.ToolsEnabled
-		builtins := content.BuiltinTools
-		if builtins == nil {
-			builtins = DefaultCronBuiltinTools
-		}
 		if p.Kind == database.ProposalKindCronNew {
+			builtins := content.BuiltinTools
+			if builtins == nil {
+				builtins = DefaultCronBuiltinTools
+			}
 			// New crons apply DISABLED and without an explicit channel: an
 			// LLM-authored schedule must never start firing without an
 			// explicit operator enable, and channel selection stays an
@@ -399,9 +399,14 @@ func (s *ProposalService) apply(ctx context.Context, p *database.Proposal) error
 			Schedule: &content.Schedule,
 			Prompt:   &content.Prompt,
 		}
-		// An update without tool fields leaves the cron's tool access alone.
+		// Each tool field applies only when the proposal carries it: an
+		// update without it leaves that part of the cron's access alone, and
+		// an explicit "builtin_tools": [] removes every built-in.
 		if content.ToolsEnabled != nil {
 			patch.ToolsEnabled = &toolsEnabled
+		}
+		if content.BuiltinTools != nil {
+			builtins := content.BuiltinTools
 			patch.BuiltinTools = &builtins
 		}
 		var err error

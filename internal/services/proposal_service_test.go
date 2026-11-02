@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"context"
 	"encoding/json"
 	"errors"
@@ -375,6 +376,47 @@ func TestApprove_CronUpdate_LegacySnapshotNotStale(t *testing.T) {
 	}
 }
 
+// TestApprove_CronUpdate_ToolFieldsApplyIndependently: each tool field of a
+// cron_update applies only when present; an explicit [] removes the built-ins.
+func TestApprove_CronUpdate_ToolFieldsApplyIndependently(t *testing.T) {
+	cases := []struct {
+		name         string
+		content      string
+		wantEnabled  *bool
+		wantBuiltins *[]string
+	}{
+		{"builtins only", `"builtin_tools":["events"]`, nil, &[]string{"events"}},
+		{"explicit empty builtins", `"builtin_tools":[]`, nil, &[]string{}},
+		{"connectors only", `"tools_enabled":true`, boolPtr(true), nil},
+		{"neither", `"prompt2":"x"`, nil, nil},
+	}
+	for i, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			db := newProposalTestDB(t)
+			crons := &fakeCrons{live: map[string]*database.CronJob{
+				"c1": {UUID: "c1", Name: "j", Schedule: "0 9 * * 1", Prompt: "p", BuiltinTools: database.StringList{"events", "incidents"}},
+			}}
+			svc := NewProposalService(db, &fakeRunbooks{}, &fakeMemories{}, crons, &fakeSkills{})
+			uuid := fmt.Sprintf("p%d", i)
+			seedProposal(t, db, &database.Proposal{
+				UUID: uuid, Kind: database.ProposalKindCronUpdate, Title: "Tweak", TargetRef: "c1",
+				CurrentSnapshot: `{"name":"j","schedule":"0 9 * * 1","prompt":"p"}`,
+				ProposedContent: `{"name":"j","schedule":"0 10 * * 1","prompt":"p",` + c.content + `}`,
+			})
+			if _, err := svc.Approve(context.Background(), uuid); err != nil {
+				t.Fatalf("approve: %v", err)
+			}
+			got := crons.updatedPatch
+			if (got.ToolsEnabled == nil) != (c.wantEnabled == nil) || (got.ToolsEnabled != nil && *got.ToolsEnabled != *c.wantEnabled) {
+				t.Errorf("tools_enabled patch = %v, want %v", got.ToolsEnabled, c.wantEnabled)
+			}
+			if (got.BuiltinTools == nil) != (c.wantBuiltins == nil) || (got.BuiltinTools != nil && !equalStringSets(*got.BuiltinTools, *c.wantBuiltins)) {
+				t.Errorf("builtin_tools patch = %v, want %v", got.BuiltinTools, c.wantBuiltins)
+			}
+		})
+	}
+}
+
 func TestApprove_SkillPrompt_SystemSkillRefused(t *testing.T) {
 	db := newProposalTestDB(t)
 	skills := &fakeSkills{
@@ -533,3 +575,5 @@ func TestChatTranscriptAndAllowlist(t *testing.T) {
 		t.Errorf("unexpected chat allowlist: %v", entries)
 	}
 }
+
+func boolPtr(b bool) *bool { return &b }

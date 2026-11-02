@@ -41,13 +41,18 @@ returns, enforce it in the gateway per run, never through SKILL.md text.
   canonical order
 - the migration backfills `tools_enabled` = "the cron had a connector instance joined" and
   `builtin_tools` = joined built-ins + `events`, `runbooks`, `memory` (`LegacyCronToolFields`).
+  It also runs for a `cron_jobs` table from before `cron_job_tools` (no new columns): no mapping
+  = `tools_enabled=false` + the defaults. A `cron_update` proposal applies `tools_enabled` and
+  `builtin_tools` each only when present (`[]` removes every built-in); `cron_new` defaults them.
   Pending cron proposals with `tool_logical_names` are translated with the same rule on every read
   (`translateLegacyCronProposal`); the gateway refuses `tool_logical_names` on new proposals
 - `connected-tools` is a generated system skill (`IsSystem=true`, `IsGeneratedSkill`): its SKILL.md
   lists every enabled connector instance (hand-written examples, or MCP / HTTP connector functions
   from the gateway's internal `/registry/tools`, with a discovery hint when the gateway is down) and
   the built-ins. Re-rendered on tool instance / HTTP connector / MCP server changes (now and after
-  15 s), every 5 min, and at start; written only when the content changed. It is in
+  15 s), every 5 min, and at start; written only when the content changed, under a mutex, by
+  temp file + rename (a worker never reads a partial file). MCP params render enum values and
+  array item types; the worker reads descriptions with `get_tool_detail` before a first call. It is in
   `GetEnabledSkillNames`, cron runs with `tools_enabled` get it in their skill list, the worker does
   not latch it as `last_skill`, and PUT on it is 403. A non-system skill that used the name is
   renamed `connected-tools-N` at start

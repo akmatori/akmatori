@@ -827,9 +827,18 @@ func (s *SkillService) memoryFingerprintNow() (string, error) {
 	return fmt.Sprintf("%d/%d", row.N, row.Max.Time.UnixNano()), nil
 }
 
+// memoryImportDone reports whether IngestDiskMemoriesOnce has completed.
+func memoryImportDone(db *gorm.DB) bool {
+	var n int64
+	if err := db.Model(&database.SystemSetting{}).Where("key = ?", SystemSettingMemoryDiskIngestedAt).Count(&n).Error; err != nil {
+		return false
+	}
+	return n > 0
+}
+
 // RefreshAfterMemoryChange regenerates every SKILL.md and the disk mirror
-// when the memories changed since the last refresh. Best-effort: errors are
-// logged. runID is for the log only.
+// when the memories changed since the last refresh. Errors are logged and the
+// refresh is tried again by the next finished run. runID is for the log only.
 func (s *SkillService) RefreshAfterMemoryChange(runID string) {
 	s.memoryMu.Lock()
 	defer s.memoryMu.Unlock()
@@ -841,15 +850,24 @@ func (s *SkillService) RefreshAfterMemoryChange(runID string) {
 	if fp == s.memoryFingerprint {
 		return
 	}
+	ok := true
 	if err := s.RegenerateAllSkillMds(); err != nil {
 		slog.Warn("memory refresh: regenerate SKILL.md files", "run", runID, "err", err)
+		ok = false
 	}
-	if s.memoryRefresher != nil {
+	// The mirror sync deletes files with no row, so it waits for the
+	// one-time import of the old disk files (IngestDiskMemoriesOnce).
+	if s.memoryRefresher != nil && memoryImportDone(s.db) {
 		if err := s.memoryRefresher.SyncMemoryFiles(); err != nil {
 			slog.Warn("memory refresh: sync memory files", "run", runID, "err", err)
+			ok = false
 		}
 	}
-	s.memoryFingerprint = fp
+	// Keep the old fingerprint after a failure, so the next finished run
+	// tries again even when no memory changed in between.
+	if ok {
+		s.memoryFingerprint = fp
+	}
 }
 
 // generateAgentsMd renders the AGENTS.md file for a fresh agent invocation.
