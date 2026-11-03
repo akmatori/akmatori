@@ -193,6 +193,11 @@ const memoryRecallInstruction = "Before answering questions about prior incident
 	"Memory bodies link with `[[...]]`: `[[slug]]` is a memory in the same scope or global, `[[scope/slug]]` a memory " +
 	"in that scope, and `[[file.ext]]` the context file `/akmatori/context/file.ext`. `memory.get` resolves the links " +
 	"in its `references`. Follow one when it is relevant.\n\n" +
+	"`evidence` says how far to trust a memory. `confirmed`: an operator checked it. `observed`: a fact seen " +
+	"directly, not a cause. `unverified`: a cause nobody confirmed, or an old note nobody assessed. Treat an " +
+	"unverified memory as a lead, not a fact: check it against live data before you act on it, and say " +
+	"\"unverified, from memory <name>\" when you use it. When a memory contradicts what the tools show now, trust " +
+	"the tools and say so in the answer.\n\n" +
 	"Cite `Source: <name>` when it helps."
 
 // agentContextDir is where the agent worker mounts the context directory
@@ -273,9 +278,12 @@ const memoryWriteInstructionTemplate = "When the investigation surfaces durable 
 	"future troubleshooting, record them with memory.write. Search first and update the memory that covers the " +
 	"subject (same scope and name) instead of adding a new name; correct or delete (memory.delete) a memory the new " +
 	"facts prove wrong. Use scope `\"%s\"` (or `\"global\"` for facts every skill needs):\n\n" +
-	"`gateway_call(\"memory.write\", {\"scope\": \"%s\", \"name\": \"<lowercase-slug>\", \"type\": \"fact\", \"description\": \"<one line, at most 500 bytes>\", \"body\": \"<the details, absolute dates>\"})`\n\n" +
-	"A feedback body is the rule, then `**Why:**` and `**How to apply:**` lines. Never save what runbooks, alerts or " +
-	"context files already say. Skip the call when nothing durable was learned."
+	"`gateway_call(\"memory.write\", {\"scope\": \"%s\", \"name\": \"<lowercase-slug>\", \"type\": \"fact\", \"claim\": \"factual\", \"description\": \"<one line, at most 500 bytes>\", \"body\": \"<the details, absolute dates>\", \"evidence_note\": \"<what you saw that supports it>\"})`\n\n" +
+	"A feedback body is the rule, then `**Why:**` and `**How to apply:**` lines. A memory that says X caused Y is " +
+	"`\"claim\": \"causal\"` and is stored as unverified: give the time the cause and the effect each started in " +
+	"`evidence_note`, and check that the cause came first. Never save what runbooks, alerts or " +
+	"context files already say. Skip the call when nothing durable was learned. Make memory.write calls before " +
+	"your final response: the final message is the full findings report, never a note about the saved memory."
 
 // memoryGenerationOffInstruction replaces the record-findings guidance when
 // an operator turned agent memory off. It overrides the root prompts, which
@@ -768,7 +776,7 @@ gateway_call("incidents.get", {"uuid": "<incident-uuid>"}, "%s")
 	case "proposals":
 		return fmt.Sprintf(`
 **Parameters:**
-- `+"`create`"+`: kind*, title*, proposed_content* (object) | reasoning, target_ref (required for *_update kinds), source_incident_uuids (array). Kinds: runbook_new, runbook_update, memory_new, memory_update, cron_new, cron_update, skill_prompt_update. proposed_content shapes — runbook: {title, content}; memory: {scope, type, name, description, body}; cron: {name, schedule, prompt, tool_logical_names?}; skill_prompt: {skill_name, prompt}.
+- `+"`create`"+`: kind*, title*, proposed_content* (object) | reasoning, target_ref (required for *_update kinds), source_incident_uuids (array). Kinds: runbook_new, runbook_update, memory_new, memory_update, cron_new, cron_update, skill_prompt_update. proposed_content shapes — runbook: {title, content}; memory: {scope, type, name, description, body, claim?, evidence?, evidence_note?} (a causal claim is always unverified); cron: {name, schedule, prompt, tool_logical_names?}; skill_prompt: {skill_name, prompt}.
 - `+"`list`"+`: status (default "pending"), kind, include_content (bool), limit, offset
 - `+"`get`"+`: uuid* (string)
 - `+"`update_draft`"+`: uuid* | title, reasoning, proposed_content (object, full replacement in the per-kind shape). Pending proposals only.

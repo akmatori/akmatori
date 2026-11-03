@@ -101,8 +101,9 @@ func (s *MemoryService) CreateWithUniqueName(m *database.Memory) (*database.Memo
 // guard a partial PUT (e.g. just {"type":"feedback"}) would clobber the
 // existing Description with "" and fail validation. The body is the one
 // field that may legitimately be empty, so setBody=true replaces it even
-// with "" (the API sets it when the request carries a "body" key).
-func (s *MemoryService) UpdateMemory(id uint, m *database.Memory, setBody bool) (*database.Memory, error) {
+// with "" (the API sets it when the request carries a "body" key); the
+// same holds for the evidence note (set.EvidenceNote).
+func (s *MemoryService) UpdateMemory(id uint, m *database.Memory, set MemoryUpdateSet) (*database.Memory, error) {
 	var existing database.Memory
 	if err := s.db.First(&existing, id).Error; err != nil {
 		return nil, errMemoryNotFound
@@ -120,8 +121,17 @@ func (s *MemoryService) UpdateMemory(id uint, m *database.Memory, setBody bool) 
 	if m.Description != "" {
 		merged.Description = m.Description
 	}
-	if setBody || m.Body != "" {
+	if set.Body || m.Body != "" {
 		merged.Body = m.Body
+	}
+	if m.Evidence != "" {
+		merged.Evidence = m.Evidence
+	}
+	if m.Claim != "" {
+		merged.Claim = m.Claim
+	}
+	if set.EvidenceNote || m.EvidenceNote != "" {
+		merged.EvidenceNote = m.EvidenceNote
 	}
 	if m.IncidentUUID != "" {
 		merged.IncidentUUID = m.IncidentUUID
@@ -139,6 +149,13 @@ func (s *MemoryService) UpdateMemory(id uint, m *database.Memory, setBody bool) 
 		return nil, fmt.Errorf("memory updated but file sync failed: %w", err)
 	}
 	return &merged, nil
+}
+
+// MemoryUpdateSet names the UpdateMemory fields that an empty value clears
+// instead of leaving unchanged.
+type MemoryUpdateSet struct {
+	Body         bool
+	EvidenceNote bool
 }
 
 // UpsertByName inserts or updates a memory keyed by (scope, name).
@@ -215,6 +232,7 @@ type MemoryFilter struct {
 	Scope        string
 	Type         string
 	IncidentUUID string
+	Evidence     string
 }
 
 // ListMemories applies optional scope, type and incident filters. Empty
@@ -230,6 +248,9 @@ func (s *MemoryService) ListMemories(f MemoryFilter) ([]database.Memory, error) 
 	}
 	if f.IncidentUUID != "" {
 		q = q.Where("incident_uuid = ?", f.IncidentUUID)
+	}
+	if f.Evidence != "" {
+		q = q.Where("evidence = ?", f.Evidence)
 	}
 	if err := q.Find(&memories).Error; err != nil {
 		return nil, fmt.Errorf("failed to list memories: %w", err)
@@ -341,7 +362,7 @@ func (s *MemoryService) validate(m *database.Memory) error {
 	if m.CreatedBy != "" && m.CreatedBy != MemoryCreatedByAgent && m.CreatedBy != MemoryCreatedByOperator {
 		return fmt.Errorf("created_by must be %q, %q, or empty", MemoryCreatedByAgent, MemoryCreatedByOperator)
 	}
-	return nil
+	return validateMemoryEvidence(m)
 }
 
 var memoryNameRegex = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
@@ -658,6 +679,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 		mem       *database.Memory
 		legacy    bool // true if filename matches the legacy `<id>-<name>.md`
 		tombstone bool // true if frontmatter carried `deleted: true`
+		gradeless bool // true if the file carried no evidence grade
 	}
 	var parsed []*parsedEntry
 	for _, scopeEnt := range scopeEntries {
@@ -719,6 +741,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 				slog.Warn("memory ingest: parse file", "path", rel, "err", err)
 				continue
 			}
+			gradeless := false
 			if !tombstone {
 				// Force agent authorship: the file's frontmatter is agent-
 				// controlled and cannot be trusted to claim operator
@@ -726,6 +749,26 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 				// level via upsertByNameNoSync's DoUpdates exclusion of
 				// created_by — see this function's doc comment.
 				mem.CreatedBy = MemoryCreatedByAgent
+				// A file with no grade predates grades: nobody assessed it.
+				// A new row is unverified with the legacy note; an existing
+				// row keeps its grade (the upgrade backfill already graded
+				// it, and the import must not undo that). Then the agent
+				// rules apply (no confirmed, causes unverified).
+				gradeless = mem.Evidence == ""
+				if gradeless {
+					mem.Evidence = MemoryEvidenceUnverified
+					if mem.EvidenceNote == "" {
+						mem.EvidenceNote = MemoryLegacyEvidenceNote
+					}
+				}
+				if _, err := ApplyAgentMemoryEvidence(mem); err != nil {
+					slog.Info("memory ingest: invalid evidence, storing as unverified", "scope", scope, "name", mem.Name, "err", err)
+					mem.Evidence, mem.Claim = MemoryEvidenceUnverified, ""
+					if _, err := ApplyAgentMemoryEvidence(mem); err != nil {
+						slog.Warn("memory ingest: evidence", "scope", scope, "name", mem.Name, "err", err)
+						continue
+					}
+				}
 				// The writer is told ≤500 chars but miscounts; validate()
 				// would then refuse the whole file and the update is lost.
 				// Cut the summary instead: parseMemoryFile has already
@@ -737,7 +780,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 				}
 			}
 
-			entry := &parsedEntry{mem: mem, legacy: legacyIngestName(f.Name(), mem.Name), tombstone: tombstone}
+			entry := &parsedEntry{mem: mem, legacy: legacyIngestName(f.Name(), mem.Name), tombstone: tombstone, gradeless: gradeless}
 			if idx, ok := seenInScope[mem.Name]; ok {
 				prior := parsed[idx]
 				switch {
@@ -791,7 +834,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 			slog.Warn("memory ingest: invalid file skipped (a copy is in "+memoryImportBackupDir+")", "scope", entry.mem.Scope, "name", entry.mem.Name, "err", err)
 			continue
 		}
-		if _, err := s.upsertByNameNoSync(entry.mem); err != nil {
+		if _, err := s.upsertByNameNoSyncOpts(entry.mem, entry.gradeless); err != nil {
 			slog.Warn("memory ingest: upsert", "scope", entry.mem.Scope, "name", entry.mem.Name, "err", err)
 			upsertFailures++
 			continue
@@ -957,6 +1000,16 @@ func legacyIngestName(filename, name string) bool {
 // keeps the newest-by-UpdatedAt entries, so that made its selection
 // arbitrary.
 func (s *MemoryService) upsertByNameNoSync(m *database.Memory) (*database.Memory, error) {
+	return s.upsertByNameNoSyncOpts(m, false)
+}
+
+// upsertByNameNoSyncOpts is upsertByNameNoSync with keepEvidence: when true,
+// a conflict leaves the stored evidence, claim and evidence_note alone (the
+// values in m are used only for a new row). IngestFromDisk sets it for a file
+// without a grade: the file says nothing about evidence, and the upgrade
+// import must not turn the backfilled grades into unverified or stamp
+// updated_at on every row.
+func (s *MemoryService) upsertByNameNoSyncOpts(m *database.Memory, keepEvidence bool) (*database.Memory, error) {
 	if err := s.validate(m); err != nil {
 		return nil, err
 	}
@@ -971,6 +1024,12 @@ func (s *MemoryService) upsertByNameNoSync(m *database.Memory) (*database.Memory
 		" OR memories.description <> excluded.description" +
 		" OR memories.body <> excluded.body" +
 		" OR COALESCE(memories.incident_uuid, '') <> COALESCE(excluded.incident_uuid, '')"
+	if !keepEvidence {
+		columns = append(columns, "evidence", "claim", "evidence_note")
+		changed += " OR COALESCE(memories.evidence, '') <> COALESCE(excluded.evidence, '')" +
+			" OR COALESCE(memories.claim, '') <> COALESCE(excluded.claim, '')" +
+			" OR COALESCE(memories.evidence_note, '') <> COALESCE(excluded.evidence_note, '')"
+	}
 	if m.CreatedBy == MemoryCreatedByOperator {
 		columns = append(columns, "created_by")
 		changed += " OR COALESCE(memories.created_by, '') <> excluded.created_by"
@@ -1061,6 +1120,9 @@ func parseMemoryFile(data []byte, scope string) (*database.Memory, bool, error) 
 		Body:         body,
 		IncidentUUID: strings.TrimSpace(fm.IncidentUUID),
 		CreatedBy:    strings.TrimSpace(fm.CreatedBy),
+		Evidence:     strings.TrimSpace(fm.Evidence),
+		Claim:        strings.TrimSpace(fm.Claim),
+		EvidenceNote: strings.TrimSpace(fm.EvidenceNote),
 	}, false, nil
 }
 
@@ -1115,6 +1177,9 @@ type memoryFrontmatter struct {
 	Scope        string `yaml:"scope,omitempty"`
 	IncidentUUID string `yaml:"incident_uuid,omitempty"`
 	CreatedBy    string `yaml:"created_by,omitempty"`
+	Evidence     string `yaml:"evidence,omitempty"`
+	Claim        string `yaml:"claim,omitempty"`
+	EvidenceNote string `yaml:"evidence_note,omitempty"`
 	Deleted      bool   `yaml:"deleted,omitempty"`
 }
 
@@ -1131,6 +1196,9 @@ func renderMemoryFile(m database.Memory) string {
 		Scope:        m.Scope,
 		IncidentUUID: m.IncidentUUID,
 		CreatedBy:    m.CreatedBy,
+		Evidence:     m.Evidence,
+		Claim:        m.Claim,
+		EvidenceNote: strings.ReplaceAll(m.EvidenceNote, "\n", " "),
 	}
 	yamlBytes, err := yaml.Marshal(fm)
 	if err != nil {
@@ -1193,7 +1261,7 @@ func RenderMemoryManifest(db *gorm.DB, scope string) string {
 		return ""
 	}
 	var entries []database.Memory
-	if err := db.Select("id", "scope", "name", "type", "description", "updated_at").
+	if err := db.Select("id", "scope", "name", "type", "description", "evidence", "updated_at").
 		Where("scope = ?", scope).Find(&entries).Error; err != nil {
 		slog.Debug("memory manifest: list memories", "scope", scope, "err", err)
 		return ""
@@ -1221,8 +1289,8 @@ func renderManifest(scope string, entries []database.Memory) string {
 		b.WriteString("_No memories yet._\n")
 		return b.String()
 	}
-	b.WriteString("| name | type | description |\n")
-	b.WriteString("| --- | --- | --- |\n")
+	b.WriteString("| name | type | evidence | description |\n")
+	b.WriteString("| --- | --- | --- | --- |\n")
 
 	header := b.Len()
 	emitted := 0
@@ -1231,7 +1299,11 @@ func renderManifest(scope string, entries []database.Memory) string {
 	for _, m := range entries {
 		// Inline pipes break Markdown table parsing; replace with bullets.
 		desc := strings.ReplaceAll(strings.ReplaceAll(m.Description, "\n", " "), "|", "·")
-		row := fmt.Sprintf("| `%s` | %s | %s |\n", m.Name, m.Type, desc)
+		evidence := m.Evidence
+		if evidence == "" {
+			evidence = MemoryEvidenceUnverified
+		}
+		row := fmt.Sprintf("| `%s` | %s | %s | %s |\n", m.Name, m.Type, evidence, desc)
 		// linesEmitted = header table (2 lines: header + separator) + rows so far.
 		linesEmitted := 2 + emitted
 		if linesEmitted+1 > manifestMaxLines || b.Len()+len(row) > manifestMaxBytes {

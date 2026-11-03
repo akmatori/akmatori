@@ -41,8 +41,8 @@ mirror is removed.
 - writes need `X-Run-ID` of a running, non-proposal run whose `scope_uuid` equals `X-Incident-ID`;
   provenance `incident_uuid` = the run's incident (empty for request runs); caps 20 writes and 10
   deletes per run; the gate `MemoryGenerationEnabled` is read per write (fail open)
-- the upsert updates only when type/description/body differ, so `updated_at` (manifest order)
-  stays stable
+- the upsert updates only when type/description/body/evidence/claim/evidence_note differ (NULL-safe),
+  so `updated_at` (manifest order) stays stable
 - the manifest is rendered from the DB (`RenderMemoryManifest`): capped at 150 entries per scope by
   `UpdatedAt` descending, feedback first (at most 50 of the 150, unused fact slots go back to
   feedback), line and byte caps. SKILL.md embeds its scope's manifest, so `FinishRun` regenerates
@@ -69,13 +69,39 @@ mirror is removed.
   (`GET /api/memories/{id}` → `references`) and `memory.get` returns them for the agent (memories
   by scope + name + id, files by path); anything that is not a
   slug, `scope/slug` or a valid context filename is `invalid` and never becomes a path
-- memory API for the UI: `PUT /api/memories/{id}` clears the body only when the request has a
-  `body` key (`UpdateMemory(id, m, setBody)`; other empty fields mean "unchanged");
+- memory API for the UI: `PUT /api/memories/{id}` clears the body (or `evidence_note`) only when
+  the request has that key (`UpdateMemory(id, m, MemoryUpdateSet{Body, EvidenceNote})`; other empty
+  fields mean "unchanged"); `GET /api/memories?evidence=` filters by grade;
   `GET /api/memories?incident_uuid=` lists memories that originated from an incident;
   `GET /api/memories/export` is a zip of `<scope>/<name>.md` in the on-disk format;
   `POST /api/memories/from-text` drafts an operator memory with `MemoryDrafter` (one-shot LLM,
   deterministic fallback: first line = description, text = body, type feedback) and creates it
   with `CreateWithUniqueName` (`-2`, `-3`… — never overwrites another memory)
+- evidence grades (`memory_evidence.go`, gateway `knowledge/evidence.go`, shared fixture
+  `tests/fixtures/memory_evidence_cases.json`): `evidence` = `confirmed` (operator only) |
+  `observed` (seen directly, not a cause) | `unverified` (unconfirmed cause or legacy row);
+  `claim` = `causal` | `factual` | "" (not assessed); `evidence_note` ≤ 500 bytes. Ownership
+  (`created_by`) is NOT verification. Agent rules (`ApplyAgentMemoryEvidence`: gateway
+  `memory.write`, proposal approval, disk ingest, later the post-incident extractor): claim
+  defaults to factual, causal wording (`causalPattern`, same regex in both modules) makes it
+  causal (not for `feedback`: its `**Why:**` line says "because" by format), causal is always
+  unverified, `confirmed` is rewritten to unverified with a note.
+  Operator writes (REST, from-text, Slack feedback) may set any grade; empty = observed
+  (unverified for causal); `created_by=agent` + `confirmed` is a 400. File summaries are
+  observed/factual. The upgrade backfill (`migrateMemoryEvidence`, once, in one transaction, when
+  the column is added): operator rows and file summaries observed, every other row unverified
+  with note `legacy: not assessed`; `updated_at` stays. The one-time disk import that follows
+  leaves the evidence columns of an existing row alone when the file has no grade
+  (`upsertByNameNoSyncOpts(keepEvidence)`), so it cannot undo the backfill.
+  A rewrite is not a check (`MergeStoredMemoryEvidence`, gateway `mergeStoredEvidence`: proposal
+  approval and `memory.write` on an existing row): grade omitted + same text = stored grade,
+  claim and note stay; grade omitted + changed text = stored unverified stays unverified, stored
+  confirmed falls to the agent default with the note `operator confirmation reset`; `observed`
+  on a stored unverified row needs a non-empty `evidence_note` (else it stays unverified,
+  `note_on_evidence` says so); note omitted = stored note stays, except the legacy note on
+  changed text. `memory.write` reports the stored grade for `unchanged`/`refused_protected`.
+  The manifest has an `evidence` column; the recall text says unverified = a lead to check.
+  Proposal snapshots carry the grade; a snapshot without it (older) does not compare it
 - `GeneralSettings.MemoryGenerationEnabled` (nil = on) gates AGENT memory only. Off:
   `renderMemoryRecallSection` swaps "Record durable findings" for a do-not-write note and the
   gateway refuses `memory.write` / `memory.delete`. The gate is checked at each write, so writes

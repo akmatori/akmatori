@@ -1071,3 +1071,28 @@ func TestIngestFromDisk_TombstoneForUnknownSlugIsNoOp(t *testing.T) {
 		t.Errorf("orphan tombstone should be purged from disk; stat err=%v", err)
 	}
 }
+
+// The upgrade import runs right after the evidence backfill: a mirror file
+// without a grade must not undo the backfilled grade or stamp updated_at.
+func TestIngestFromDisk_GradelessFileKeepsStoredGrade(t *testing.T) {
+	svc := setupMemoryServiceTest(t)
+	old := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	svc.db.Create(&database.Memory{Scope: MemoryScopeGlobal, Type: MemoryTypeFact, Name: "redis-port", Description: "redis runs on 16379", Body: "Redis prod cluster listens on 16379, not 6379.",
+		CreatedBy: MemoryCreatedByOperator, Evidence: MemoryEvidenceObserved, Claim: MemoryClaimFactual, CreatedAt: old, UpdatedAt: old})
+	globalDir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
+	writeMemoryFile(t, globalDir, "redis-port", "redis runs on 16379", MemoryTypeFact, MemoryScopeGlobal, "", "Redis prod cluster listens on 16379, not 6379.")
+	writeMemoryFile(t, globalDir, "new-row", "new file", MemoryTypeFact, MemoryScopeGlobal, "", "A file the import has not seen.")
+
+	if err := svc.IngestFromDisk(context.Background()); err != nil {
+		t.Fatalf("IngestFromDisk: %v", err)
+	}
+	var kept, created database.Memory
+	svc.db.Where("name = ?", "redis-port").Take(&kept)
+	if kept.Evidence != MemoryEvidenceObserved || kept.EvidenceNote != "" || kept.CreatedBy != MemoryCreatedByOperator || !kept.UpdatedAt.Equal(old) {
+		t.Errorf("stored row changed: %+v", kept)
+	}
+	svc.db.Where("name = ?", "new-row").Take(&created)
+	if created.Evidence != MemoryEvidenceUnverified || created.EvidenceNote != MemoryLegacyEvidenceNote {
+		t.Errorf("new row: %+v", created)
+	}
+}

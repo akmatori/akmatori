@@ -62,6 +62,9 @@ type Memory struct {
 	IncidentUUID string    `json:"incident_uuid,omitempty"`
 	CreatedBy    string    `json:"created_by,omitempty"`
 	SourceFileID *uint     `json:"source_file_id,omitempty"`
+	Evidence     string    `gorm:"default:unverified" json:"evidence"`
+	Claim        string    `json:"claim,omitempty"`
+	EvidenceNote string    `json:"evidence_note,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

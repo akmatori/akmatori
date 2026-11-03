@@ -96,7 +96,7 @@ func (m *mockMemoryService) CreateWithUniqueName(mem *database.Memory) (*databas
 	return m.CreateMemory(mem)
 }
 
-func (m *mockMemoryService) UpdateMemory(id uint, mem *database.Memory, setBody bool) (*database.Memory, error) {
+func (m *mockMemoryService) UpdateMemory(id uint, mem *database.Memory, set services.MemoryUpdateSet) (*database.Memory, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.updateErr != nil {
@@ -113,7 +113,7 @@ func (m *mockMemoryService) UpdateMemory(id uint, mem *database.Memory, setBody 
 			if mem.Description != "" {
 				m.memories[i].Description = mem.Description
 			}
-			if setBody || mem.Body != "" {
+			if set.Body || mem.Body != "" {
 				m.memories[i].Body = mem.Body
 			}
 			cp := m.memories[i]
@@ -766,5 +766,24 @@ func TestHandleIncidentFeedback_LongMultibyteBodyStaysValidUTF8(t *testing.T) {
 	// mid-rune the result wouldn't be a multiple of 3.
 	if len(got.Body)%3 != 0 {
 		t.Errorf("body len %d is not on a 3-byte UTF-8 boundary — body was sliced mid-rune", len(got.Body))
+	}
+}
+
+// Only an operator confirms: an agent-authored row cannot be posted as confirmed.
+func TestHandleMemories_AgentConfirmedRefused(t *testing.T) {
+	mock := newMockMemoryService()
+	h := newMemoryAPIHandler(mock)
+	req := validMemoryRequest("agent-row")
+	req.CreatedBy = services.MemoryCreatedByAgent
+	req.Evidence = services.MemoryEvidenceConfirmed
+	if w := doJSON(t, h, http.MethodPost, "/api/memories", req); w.Code != http.StatusBadRequest || mock.lastCreated != nil {
+		t.Fatalf("POST status = %d, created = %+v", w.Code, mock.lastCreated)
+	}
+	if w := doJSON(t, h, http.MethodPut, "/api/memories/1", req); w.Code != http.StatusBadRequest {
+		t.Fatalf("PUT status = %d, body = %s", w.Code, w.Body.String())
+	}
+	req.CreatedBy = services.MemoryCreatedByOperator
+	if w := doJSON(t, h, http.MethodPost, "/api/memories", req); w.Code != http.StatusCreated {
+		t.Fatalf("operator POST status = %d, body = %s", w.Code, w.Body.String())
 	}
 }

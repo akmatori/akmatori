@@ -27,6 +27,8 @@ func (s *MemoryService) SaveFileSummary(fileID uint, filename, description, body
 		merged.Type = MemoryTypeFact
 		merged.Description = description
 		merged.Body = body
+		merged.Evidence = MemoryEvidenceObserved
+		merged.Claim = MemoryClaimFactual
 		if err := s.validate(&merged); err != nil {
 			return nil, err
 		}
@@ -34,6 +36,8 @@ func (s *MemoryService) SaveFileSummary(fileID uint, filename, description, body
 			"type":        merged.Type,
 			"description": merged.Description,
 			"body":        merged.Body,
+			"evidence":    merged.Evidence,
+			"claim":       merged.Claim,
 		}).Error; err != nil {
 			return nil, fmt.Errorf("failed to update file summary memory: %w", err)
 		}
@@ -55,6 +59,9 @@ func (s *MemoryService) SaveFileSummary(fileID uint, filename, description, body
 		Body:         body,
 		CreatedBy:    MemoryCreatedByAgent,
 		SourceFileID: &id,
+		// A summary restates the file; it is not a cause the system found.
+		Evidence: MemoryEvidenceObserved,
+		Claim:    MemoryClaimFactual,
 	})
 }
 

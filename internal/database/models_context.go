@@ -58,15 +58,23 @@ func (Runbook) TableName() string {
 // server managed: ingest and the update API never change it, and deleting
 // the file deletes its memories.
 type Memory struct {
-	ID           uint      `gorm:"primaryKey" json:"id"`
-	Scope        string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_memories_scope_name,priority:1" json:"scope"`
-	Type         string    `gorm:"type:varchar(32);not null;index" json:"type"`
-	Name         string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_memories_scope_name,priority:2" json:"name"`
-	Description  string    `gorm:"type:varchar(500);not null" json:"description"`
-	Body         string    `gorm:"type:text;not null" json:"body"`
-	IncidentUUID string    `gorm:"type:varchar(64);index" json:"incident_uuid,omitempty"`
-	CreatedBy    string    `gorm:"type:varchar(32)" json:"created_by,omitempty"`
-	SourceFileID *uint     `gorm:"index" json:"source_file_id,omitempty"`
+	ID           uint   `gorm:"primaryKey" json:"id"`
+	Scope        string `gorm:"type:varchar(255);not null;uniqueIndex:idx_memories_scope_name,priority:1" json:"scope"`
+	Type         string `gorm:"type:varchar(32);not null;index" json:"type"`
+	Name         string `gorm:"type:varchar(255);not null;uniqueIndex:idx_memories_scope_name,priority:2" json:"name"`
+	Description  string `gorm:"type:varchar(500);not null" json:"description"`
+	Body         string `gorm:"type:text;not null" json:"body"`
+	IncidentUUID string `gorm:"type:varchar(64);index" json:"incident_uuid,omitempty"`
+	CreatedBy    string `gorm:"type:varchar(32)" json:"created_by,omitempty"`
+	SourceFileID *uint  `gorm:"index" json:"source_file_id,omitempty"`
+	// Evidence grades how far a reader can trust the memory: confirmed (an
+	// operator checked it), observed (seen directly, not a cause) or
+	// unverified (an unconfirmed cause, or a legacy row). Claim is causal |
+	// factual, empty = not assessed. EvidenceNote says why. See
+	// services/memory_evidence.go.
+	Evidence     string    `gorm:"type:varchar(16);not null;default:'unverified';index" json:"evidence"`
+	Claim        string    `gorm:"type:varchar(16);not null;default:''" json:"claim,omitempty"`
+	EvidenceNote string    `gorm:"type:varchar(500);not null;default:''" json:"evidence_note,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
