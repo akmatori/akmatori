@@ -40,21 +40,6 @@ Use Scope: global and the cron run's incident UUID for every memory-writer call.
 If memory-searcher returns no entries or no clear duplicates, exit with a one-line "no-op: nothing to consolidate" summary.`,
 		`You are running the nightly memory consolidation pass over the global cross-incident memory scope (/akmatori/memory/global/).
 
-Goal: keep the global memory scope tight and high-signal. Focus only on the global scope. Process entries updated in the last 14 days — use the memory-searcher subagent to surface candidates from that window. Concretely:
-
-1. Use the memory-searcher subagent to list current entries — search broadly enough to surface duplicates, near-duplicates, and stale rows among entries updated in the last 14 days.
-2. For each duplicate or near-duplicate cluster, decide which entry to keep (prefer the most specific, most recent, most operator-validated wording) and which to remove.
-3. For each kept entry that should incorporate facts from a soon-to-be-deleted duplicate, prepare a merged body.
-4. Apply mutations one at a time via the memory-writer subagent. For each duplicate or superseded entry, emit Action: delete <slug> via memory-writer rather than rewriting both:
-   - Action: upsert <slug> — write the merged or refreshed body (memory-writer is idempotent and overwrites by name).
-   - Action: delete <slug> — remove a duplicate or obsolete entry.
-5. End with a concise summary of the pass: how many entries scanned, how many merged, how many deleted. List the affected slugs.
-
-Use Scope: global and the cron run's incident UUID for every memory-writer call. Do not touch any scope other than global.
-
-If memory-searcher returns no entries or no clear duplicates, exit with a one-line "no-op: nothing to consolidate" summary.`,
-		`You are running the nightly memory consolidation pass over the global cross-incident memory scope (/akmatori/memory/global/).
-
 Goal: keep the global memory scope tight and high-signal. Concretely:
 
 1. Use the memory-searcher subagent to list current entries — search broadly enough to surface duplicates, near-duplicates, and stale rows.

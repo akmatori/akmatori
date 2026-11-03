@@ -854,7 +854,9 @@ func (s *SkillService) FinishRun(runID string, outcome RunOutcome) error {
 		}
 	}
 
-	if s.memoryRefresher != nil {
+	// SKILL.md manifests are regenerated whether or not the disk mirror is
+	// wired (RefreshAfterMemoryChange skips the mirror on its own).
+	if s.db != nil {
 		go s.RefreshAfterMemoryChange(runID)
 	}
 	return nil
@@ -955,7 +957,7 @@ func (s *SkillService) generateAgentsMd(path string, rootSkillName string, incid
 	sb.WriteString(s.renderMemoryRecallSectionFor(MemoryScopeGlobal, kind))
 	sb.WriteString(s.renderContextFilesSection())
 
-	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
+	if err := writeFileAtomic(path, []byte(sb.String()), 0644); err != nil {
 		return fmt.Errorf("failed to write AGENTS.md: %w", err)
 	}
 

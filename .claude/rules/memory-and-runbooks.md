@@ -40,7 +40,9 @@ mirror is removed.
   ownership of an agent row. Legacy rows with empty `created_by` are agent-writable
 - writes need `X-Run-ID` of a running, non-proposal run whose `scope_uuid` equals `X-Incident-ID`;
   provenance `incident_uuid` = the run's incident (empty for request runs); caps 20 writes and 10
-  deletes per run; the gate `MemoryGenerationEnabled` is read per write (fail open)
+  deletes per run, charged only by a write that created or updated a row and a delete that removed
+  one (`hasQuota` before, `takeQuota` after); the gate `MemoryGenerationEnabled` is read per write
+  (fail open). `memory.list` `since` takes ISO-8601 or Unix seconds or milliseconds (`unixArg`)
 - the upsert updates only when type/description/body/evidence/claim/evidence_note differ (NULL-safe),
   so `updated_at` (manifest order) stays stable
 - the manifest is rendered from the DB (`RenderMemoryManifest`): capped at 150 entries per scope by
@@ -48,7 +50,9 @@ mirror is removed.
   feedback), line and byte caps. SKILL.md embeds its scope's manifest, so `FinishRun` regenerates
   every SKILL.md (and the disk mirror) when the memories fingerprint (count + newest
   `updated_at`) changed, and keeps the old fingerprint after a failed write so the next run
-  retries; AGENTS.md is rendered per run
+  retries (the regeneration does not depend on the mirror refresher being wired); AGENTS.md is
+  rendered per run. SKILL.md, AGENTS.md, scripts and runbook files are written with
+  `writeFileAtomic` (temp file + rename), never a plain `os.WriteFile`
 - upgrade: `IngestDiskMemoriesOnce` imports the old disk files once (system setting
   `memory_disk_ingested_at`) before the first sync. It first copies the files to
   `akmatori_data/memory-import-backup/`, ignores the generation gate, skips invalid files (kept in

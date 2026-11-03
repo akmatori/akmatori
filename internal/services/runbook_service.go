@@ -166,7 +166,7 @@ func (s *RunbookService) SyncRunbookFiles() error {
 		// Write the file
 		content := fmt.Sprintf("# %s\n\n%s\n", rb.Title, rb.Content)
 		filePath := filepath.Join(s.runbooksDir, filename)
-		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		if err := writeFileAtomic(filePath, []byte(content), 0644); err != nil {
 			return fmt.Errorf("failed to write runbook file %s: %w", filename, err)
 		}
 	}

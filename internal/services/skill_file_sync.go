@@ -226,7 +226,7 @@ func (s *SkillService) UpdateSkillScript(skillName, filename, content string) er
 	scriptPath := filepath.Join(s.GetSkillScriptsDir(skillName), filename)
 
 	// Write file content
-	if err := os.WriteFile(scriptPath, []byte(content), 0644); err != nil {
+	if err := writeFileAtomic(scriptPath, []byte(content), 0644); err != nil {
 		return fmt.Errorf("failed to write script: %w", err)
 	}
 
@@ -351,7 +351,7 @@ func (s *SkillService) RegenerateSkillMd(name string) error {
 	}
 	skillMd := s.generateSkillMd(name, skill.Description, prompt)
 	skillPath := filepath.Join(s.GetSkillDir(name), "SKILL.md")
-	if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
+	if err := writeFileAtomic(skillPath, []byte(skillMd), 0644); err != nil {
 		return fmt.Errorf("regenerate %s: write SKILL.md: %w", name, err)
 	}
 	return nil
@@ -408,7 +408,7 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 		skillMd := s.generateSkillMd(skill.Name, skill.Description, prompt)
 		skillPath := filepath.Join(s.GetSkillDir(skill.Name), "SKILL.md")
 
-		if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
+		if err := writeFileAtomic(skillPath, []byte(skillMd), 0644); err != nil {
 			slog.Warn("failed to regenerate SKILL.md for skill", "skill", skill.Name, "err", err)
 			writeErrs = append(writeErrs, fmt.Errorf("%s: %w", skill.Name, err))
 			continue

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -325,6 +326,50 @@ func TestMemoryWrite_RedactsSecrets(t *testing.T) {
 	}
 }
 
+// TestMemoryWrite_QuotaChargedOnChange: an unchanged write and a refused
+// write do not use a slot of the per-run budget; a failed delete neither.
+func TestMemoryWrite_QuotaChargedOnChange(t *testing.T) {
+	tool, db := newTestTool(t)
+	ctx := runCtx("run-1")
+	db.Create(&database.Memory{Scope: "global", Name: "op", Type: "fact", Description: "d", Body: "b", CreatedBy: "operator"})
+	for i := 0; i < maxWritesPerRun; i++ {
+		if _, err := write(t, tool, ctx, memArgs("same", "b")); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+		if _, err := write(t, tool, ctx, memArgs("op", "b")); err != nil {
+			t.Fatalf("refused write %d: %v", i, err)
+		}
+	}
+	// One created + many unchanged and refused: the budget still has room.
+	if _, err := write(t, tool, ctx, memArgs("another", "b")); err != nil {
+		t.Errorf("unchanged and refused writes used the budget: %v", err)
+	}
+	for i := 0; i < maxDeletesPerRun+2; i++ {
+		if _, err := tool.MemoryDelete(ctx, testScope, map[string]interface{}{"scope": "global", "name": "op"}); err != nil {
+			t.Fatalf("refused delete %d: %v", i, err)
+		}
+	}
+	if _, err := tool.MemoryDelete(ctx, testScope, map[string]interface{}{"scope": "global", "name": "same"}); err != nil {
+		t.Errorf("refused deletes used the budget: %v", err)
+	}
+}
+
+func TestTimeArg_UnixSecondsAndMillis(t *testing.T) {
+	want := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	for name, v := range map[string]interface{}{
+		"seconds number": float64(want.Unix()),
+		"millis number":  float64(want.UnixMilli()),
+		"seconds string": strconv.FormatInt(want.Unix(), 10),
+		"millis string":  strconv.FormatInt(want.UnixMilli(), 10),
+		"iso":            want.Format(time.RFC3339),
+	} {
+		got, ok := timeArg(map[string]interface{}{"since": v}, "since")
+		if !ok || !got.Equal(want) {
+			t.Errorf("%s: got %v ok=%v", name, got, ok)
+		}
+	}
+}
+
 func TestMemoryWrite_RequestRunHasNoIncident(t *testing.T) {
 	tool, db := newTestTool(t)
 	db.Create(&database.AgentRun{RunID: "run-cron", ScopeUUID: "cron-scope", SourceKind: "cron", Status: "running"})
@@ -353,12 +398,17 @@ func TestMemoryWrite_PerRunCaps(t *testing.T) {
 	if _, err := write(t, tool, runCtx("run-2"), memArgs("next-turn", "b")); err != nil {
 		t.Errorf("second run blocked by the first run's cap: %v", err)
 	}
+	// Only a delete that removed a row uses a slot.
 	for i := 0; i < maxDeletesPerRun; i++ {
-		if _, err := tool.MemoryDelete(runCtx("run-2"), testScope, map[string]interface{}{"scope": "global", "name": "zz"}); err != nil {
+		name := "zz" + string(rune('a'+i))
+		if _, err := write(t, tool, runCtx("run-2"), memArgs(name, "b")); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		if _, err := tool.MemoryDelete(runCtx("run-2"), testScope, map[string]interface{}{"scope": "global", "name": name}); err != nil {
 			t.Fatalf("delete %d: %v", i, err)
 		}
 	}
-	if _, err := tool.MemoryDelete(runCtx("run-2"), testScope, map[string]interface{}{"scope": "global", "name": "zz"}); err == nil {
+	if _, err := tool.MemoryDelete(runCtx("run-2"), testScope, map[string]interface{}{"scope": "global", "name": "next-turn"}); err == nil {
 		t.Error("delete cap not enforced")
 	}
 }
