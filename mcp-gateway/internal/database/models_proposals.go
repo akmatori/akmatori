@@ -50,16 +50,20 @@ func (Runbook) TableName() string {
 	return "runbooks"
 }
 
-// Memory mirrors the main API's Memory model.
+// Memory mirrors the main API's Memory model. The knowledge tools
+// (memory.*) read and write it.
 type Memory struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	Scope       string    `json:"scope"`
-	Type        string    `json:"type"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Body        string    `gorm:"type:text" json:"body"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	Scope        string    `gorm:"uniqueIndex:idx_memories_scope_name,priority:1" json:"scope"`
+	Type         string    `json:"type"`
+	Name         string    `gorm:"uniqueIndex:idx_memories_scope_name,priority:2" json:"name"`
+	Description  string    `json:"description"`
+	Body         string    `gorm:"type:text" json:"body"`
+	IncidentUUID string    `json:"incident_uuid,omitempty"`
+	CreatedBy    string    `json:"created_by,omitempty"`
+	SourceFileID *uint     `json:"source_file_id,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func (Memory) TableName() string {
@@ -116,4 +120,26 @@ func (l StringList) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return json.Marshal([]string(l))
+}
+
+// GeneralSettings mirrors the one column of the main API's general_settings
+// row that the memory tools read: the agent-memory gate (nil = on).
+type GeneralSettings struct {
+	ID                      uint  `gorm:"primaryKey"`
+	MemoryGenerationEnabled *bool `gorm:"default:null"`
+}
+
+func (GeneralSettings) TableName() string {
+	return "general_settings"
+}
+
+// ContextFile mirrors the main API's context_files table (memory.get
+// resolves [[file.ext]] references against it).
+type ContextFile struct {
+	ID       uint   `gorm:"primaryKey"`
+	Filename string `gorm:"uniqueIndex"`
+}
+
+func (ContextFile) TableName() string {
+	return "context_files"
 }

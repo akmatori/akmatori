@@ -22,11 +22,7 @@ name: akmatori
 
 services:
   # Init service to create data directories with correct permissions
-  # Also auto-generates a postgres password if one doesn't exist yet, and seeds
-  # the pi-subagents config (same JSON as akmatori_data/extensions/subagent/
-  # config.json; installs that only download this file would otherwise run
-  # pi-subagents defaults, where `subagent` calls are async and the parent
-  # ends its turn before the searchers return). An existing file is kept.
+  # Also auto-generates a postgres password if one doesn't exist yet.
   init-dirs:
     image: alpine:3.19
     container_name: akmatori-init
@@ -35,18 +31,13 @@ services:
       - ./akmatori_data:/akmatori
     command: >
       sh -c "
-        mkdir -p /akmatori/incidents /akmatori/context /akmatori/skills /akmatori/runbooks /akmatori/memory /akmatori/agents /akmatori/extensions/subagent /akmatori/secrets &&
-        if [ ! -f /akmatori/extensions/subagent/config.json ]; then
-          echo '{\"toolDescriptionMode\":\"compact\",\"toolActivation\":\"eager\",\"asyncByDefault\":false,\"enableSlashCommands\":false}' > /akmatori/extensions/subagent/config.json;
-          echo 'Wrote default pi-subagents config';
-        fi &&
+        mkdir -p /akmatori/incidents /akmatori/context /akmatori/skills /akmatori/runbooks /akmatori/memory /akmatori/extensions /akmatori/secrets &&
         if [ ! -f /akmatori/secrets/postgres_password ]; then
           head -c 32 /dev/urandom | base64 | tr -d '=/+' | head -c 32 > /akmatori/secrets/postgres_password;
           echo 'Generated new PostgreSQL password';
         fi &&
         chmod 644 /akmatori/secrets/postgres_password &&
         chown -R 1000:1000 /akmatori &&
-        chmod -R g+rwX,o+rwX /akmatori/memory &&
         echo 'Data directories initialized with correct permissions'
       "
     restart: "no"
@@ -190,10 +181,9 @@ services:
       - ./akmatori_data/incidents:/workspaces:rw      # ONLY incidents - no access to skills/tools source
       - ./akmatori_data/context:/akmatori/context:ro  # Shared context files (read-only)
       - ./akmatori_data/skills:/akmatori/skills:ro    # Skill definitions for pi-mono resource loader
-      - ./akmatori_data/runbooks:/akmatori/runbooks:ro  # Runbook SOPs scoped to runbook-searcher subagent
-      - ./akmatori_data/memory:/akmatori/memory:rw      # Cross-incident memory (memory-writer subagent edits in place; init-dirs widens perms to o+rwX so UID 1001 can write)
-      - ./akmatori_data/agents:/home/agent/.pi/agent/agents:ro       # Subagent definitions (runbook-searcher, memory-searcher, memory-writer)
-      - ./akmatori_data/extensions:/home/agent/.pi/agent/extensions:ro  # Operator-supplied pi extensions (baked pi-subagents lives at /opt/pi-extensions and is loaded via additionalExtensionPaths)
+      - ./akmatori_data/runbooks:/akmatori/runbooks:ro  # Read-only mirror of the runbooks (agents use gateway runbooks.*; removed in a later release)
+      - ./akmatori_data/memory:/akmatori/memory:ro      # Read-only mirror of the memories (agents use gateway memory.*; removed in a later release)
+      - ./akmatori_data/extensions:/home/agent/.pi/agent/extensions:ro  # Operator-supplied pi extensions
     healthcheck:
       test: ["CMD", "pgrep", "node"]
       interval: 30s

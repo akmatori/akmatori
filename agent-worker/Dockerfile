@@ -15,8 +15,8 @@ FROM node:22.23-bookworm AS builder
 WORKDIR /app
 
 # Copy package files first for layer caching.
-# Build context is the repo root so we can also pull akmatori_data/agents/
-# into the runtime stage; that means every path here is repo-rooted.
+# Build context is the repo root (docker-compose.dev.yml), so every path here
+# is repo-rooted.
 COPY agent-worker/package.json agent-worker/package-lock.json ./
 
 # Install all dependencies (including devDependencies for build)
@@ -32,16 +32,14 @@ RUN npm run build
 # Runtime stage
 FROM node:22.23-bookworm
 
-# Install system dependencies needed by pi-mono's bash tool and the
-# subagent search workflow. ripgrep + fzf back the runbook/memory recon
-# subagents that replaced the QMD sidecar. fd-find provides the `fdfind`
+# Install system dependencies needed by pi-mono's tools. ripgrep backs
+# pi-mono's `grep` tool. fd-find provides the `fdfind`
 # binary that pi-mono's `find` tool spawns (it accepts both `fd` and
 # `fdfind` via systemBinaryNames); without it pi-mono falls back to
 # downloading fd from GitHub at runtime, which fails in air-gapped
 # deployments.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ripgrep \
-    fzf \
     fd-find \
     git \
     jq \
@@ -54,48 +52,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd -g 1001 agent && \
     useradd -u 1001 -g agent -m -s /bin/bash agent
 
-# Create working directories. The pi-subagents extension is materialised
-# under /opt/pi-extensions/pi-subagents rather than ~/.pi/agent/extensions so
-# the host bind-mount on /home/agent/.pi/agent/extensions (operator-supplied
-# extensions) does not shadow it. The agent-runner passes this path via
-# additionalExtensionPaths to the pi-mono resource loader.
+# Create working directories.
 #
 # ~/.pi/agent (pi's agentDir) must exist in the image and belong to `agent`.
-# Compose bind-mounts agents/ and extensions/ INTO it on top of the
-# agent_sessions volume; when the image lacks the directory, Docker creates it
-# as root on a fresh volume, and then the worker cannot write the child
-# settings.json and child `pi` fails every subagent launch with
-# "EACCES ... auth.json".
-RUN mkdir -p /home/agent/.pi/agent/agents /home/agent/.pi/agent/extensions /opt/pi-extensions/pi-subagents /workspaces && \
-    chown -R agent:agent /home/agent /workspaces /opt/pi-extensions
+# Compose bind-mounts extensions/ INTO it on top of the agent_sessions volume;
+# when the image lacks the directory, Docker creates it as root on a fresh
+# volume, and pi (which keeps its settings and credential store there) then
+# fails with EACCES.
+RUN mkdir -p /home/agent/.pi/agent/extensions /workspaces && \
+    chown -R agent:agent /home/agent /workspaces
 
 WORKDIR /home/agent/app
 
 # Copy package files and install production dependencies only
 COPY agent-worker/package.json agent-worker/package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
-
-# Materialise the pi-subagents extension into the image. Copying the full
-# package preserves package.json so pi-mono's resource loader honours its
-# `pi.extensions` manifest (./src/extension/index.ts).
-RUN cp -r node_modules/pi-subagents/. /opt/pi-extensions/pi-subagents/ && \
-    chown -R agent:agent /opt/pi-extensions
-
-# Bake Akmatori's system-supplied subagent definitions into the pi-subagents
-# builtin agents directory so they are discoverable in end-user installs that
-# never populate the host-side ./akmatori_data/agents/ bind mount. The host
-# mount remains as an operator-override path: user agents loaded from
-# ~/.pi/agent/agents/ override these builtins by name (mergeAgentsForScope).
-#
-# COPY each tracked built-in agent file individually rather than a wildcard.
-# A wildcard plus the matching .dockerignore re-include (akmatori_data/agents/
-# is gitignored at the directory level for operator-authored files, but `*.md`
-# is re-included for the build context) would bake operator-local agent files
-# into developer images and could leak private prompts. Explicit names keep
-# this list to the three system-supplied builtins.
-COPY --chown=agent:agent akmatori_data/agents/runbook-searcher.md /opt/pi-extensions/pi-subagents/agents/runbook-searcher.md
-COPY --chown=agent:agent akmatori_data/agents/memory-searcher.md /opt/pi-extensions/pi-subagents/agents/memory-searcher.md
-COPY --chown=agent:agent akmatori_data/agents/memory-writer.md /opt/pi-extensions/pi-subagents/agents/memory-writer.md
 
 # Copy built JavaScript from builder
 COPY --from=builder /app/dist/ ./dist/
@@ -107,16 +78,9 @@ RUN chown -R agent:agent /home/agent/app
 USER agent
 
 # Environment variables (defaults, can be overridden).
-# Put the local node_modules/.bin on PATH so subagent subprocesses can spawn
-# the bundled `pi` CLI without an absolute path.
+# Put the local node_modules/.bin on PATH so the bundled `pi` CLI runs without
+# an absolute path (for example `pi auth check` when diagnosing a provider).
 ENV PATH=/home/agent/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-# pi-subagents >= 0.70 locates the host pi package by walking up from
-# process.argv[1]; our entrypoint is dist/index.js (not pi), so that lookup
-# fails and every child launch died with "Background children require a
-# supported standalone Pi host or the installed npm package". This env var is
-# the documented override, read by both the background runner and the
-# foreground child loader.
-ENV PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT=/home/agent/app/node_modules/@earendil-works/pi-coding-agent
 ENV API_WS_URL=ws://akmatori-api:3000/ws/agent
 ENV MCP_GATEWAY_URL=http://mcp-gateway:8080
 ENV WORKSPACE_DIR=/workspaces

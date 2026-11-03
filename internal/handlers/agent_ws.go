@@ -101,7 +101,7 @@ type AgentMessage struct {
 	// calls" rather than "no allowlist active" (the latter is the nil-slice =>
 	// JSON null case). The seeded memory-curator cron and any other tool-less
 	// scheduled run rely on the empty-slice path to confine the agent to
-	// subagent calls. Adding `omitempty` here would drop the empty slice and
+	// its built-in tools. Adding `omitempty` here would drop the empty slice and
 	// silently re-grant all tools.
 	ToolAllowlist []services.ToolAllowlistEntry `json:"tool_allowlist"`
 
@@ -124,11 +124,6 @@ type AgentMessage struct {
 	Temperature *float64 `json:"temperature,omitempty"`
 	TopP        *float64 `json:"top_p,omitempty"`
 	TopK        *int     `json:"top_k,omitempty"`
-
-	// Subagent model override (new_incident/continue_incident). nil = the
-	// worker pins children to the parent's model, as before.
-	SubagentModel         *string `json:"subagent_model,omitempty"`
-	SubagentThinkingLevel *string `json:"subagent_thinking_level,omitempty"`
 
 	// RunID identifies a single StartIncident/ContinueIncident invocation.
 	// The API generates a fresh run_id per call; the worker echoes it on every
@@ -799,7 +794,6 @@ func (h *AgentWSHandler) StartIncident(incidentID, runID, task string, llm *LLMS
 		msg.ThinkingLevel = llm.ThinkingLevel
 		msg.BaseURL = llm.BaseURL
 		applySamplingSettings(&msg, llm)
-		applySubagentSettings(&msg, llm)
 	}
 
 	// Fetch proxy settings from database and include in message
@@ -837,7 +831,6 @@ func (h *AgentWSHandler) ContinueIncident(incidentID, runID, sessionID, message 
 		msg.ThinkingLevel = llm.ThinkingLevel
 		msg.BaseURL = llm.BaseURL
 		applySamplingSettings(&msg, llm)
-		applySubagentSettings(&msg, llm)
 	}
 
 	// Fetch proxy settings from database and include in message
@@ -1135,22 +1128,6 @@ func (h *AgentWSHandler) BroadcastProxyConfig(settings *database.ProxySettings) 
 //
 // On oneshot_llm_request the frame already carries the call site's own
 // max_tokens/temperature; a configured override deliberately replaces them.
-// applySubagentSettings copies the subagent model override onto the frame.
-// Only set when the operator configured one; a nil field stays off the wire so
-// the worker keeps pinning children to the parent model.
-func applySubagentSettings(msg *AgentMessage, llm *LLMSettingsForWorker) {
-	if llm == nil {
-		return
-	}
-	if llm.SubagentModel != nil && *llm.SubagentModel != "" {
-		v := *llm.SubagentModel
-		msg.SubagentModel = &v
-	}
-	if llm.SubagentThinkingLevel != nil && *llm.SubagentThinkingLevel != "" {
-		v := *llm.SubagentThinkingLevel
-		msg.SubagentThinkingLevel = &v
-	}
-}
 
 func applySamplingSettings(msg *AgentMessage, llm *LLMSettingsForWorker) {
 	if llm == nil {

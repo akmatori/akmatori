@@ -156,8 +156,13 @@ func main() {
 	// regenerated SKILL.md files would bake in the stale view and stay
 	// stale until the next restart or manual skill edit.
 	memoryService := services.NewMemoryService(dataDir)
-	if err := memoryService.SyncMemoryFiles(); err != nil {
-		slog.Warn("failed to sync memory files", "err", err)
+	// One time, before the disk becomes a pure read-only mirror: import memory
+	// files an operator or the old memory-writer subagent left on disk, so
+	// hand edits are not overwritten by the first sync.
+	if services.IngestDiskMemoriesOnce(memoryService) {
+		if err := memoryService.SyncMemoryFiles(); err != nil {
+			slog.Warn("failed to sync memory files", "err", err)
+		}
 	}
 
 	// Seed the generated connected-tools system skill (every connected tool,
@@ -170,6 +175,7 @@ func main() {
 	if err := skillService.RegenerateAllSkillMds(); err != nil {
 		slog.Warn("failed to regenerate SKILL.md files", "err", err)
 	}
+	services.WarnRetiredKnowledgeReferences(database.GetDB(), skillService.GetSkillDir(""))
 
 	// Initialize agent executor
 	agentExecutor := executor.NewExecutor()
@@ -189,11 +195,9 @@ func main() {
 		slog.Warn("failed to sync runbook files", "err", err)
 	}
 
-	// Wire post-investigation memory ingest. When skillService finishes
-	// an incident with status=completed, the on-disk memory directory written
-	// by the memory-writer subagent is re-ingested into Postgres so REST and
-	// UI surfaces see fresh entries.
-	skillService.SetMemoryIngester(memoryService)
+	// After a run that changed memories (gateway memory.write / delete),
+	// regenerate SKILL.md files and refresh the read-only disk mirror.
+	skillService.SetMemoryRefresher(memoryService)
 
 	// Initialize default alert source types
 	if err := alertService.InitializeDefaultSourceTypes(); err != nil {
@@ -418,6 +422,7 @@ func main() {
 	// integrations and MCP servers for the Connectors page. MCP servers get
 	// their managed tool instance first (upgrade path), then every unlinked
 	// part gets a connector of its own.
+	services.DisableReservedNamespaceCollisions(database.GetDB())
 	if err := mcpServerService.SyncAllManagedTools(); err != nil {
 		slog.Warn("failed to sync MCP server tool instances", "err", err)
 	}

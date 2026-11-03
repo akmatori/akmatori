@@ -784,11 +784,10 @@ func (s *SkillService) UpdateRunLog(runID, fullLog string) error {
 type RunOutcome = database.AgentRunResult
 
 // FinishRun stores a finished run's log, answer and session, and finishes
-// the incident it worked on (see completeIncident). After every run the
-// on-disk memory directory is re-ingested into Postgres in a detached
-// goroutine: the agent's memory-writer subagent has already produced the
-// files; ingest reconciles them with the DB so the REST API and Slack/UI
-// surfaces see fresh entries without restarting the API.
+// the incident it worked on (see completeIncident). Agents write memories
+// through the gateway during the run; when the memories changed, a detached
+// goroutine regenerates every SKILL.md (each embeds its scope's manifest)
+// and refreshes the read-only disk mirror.
 func (s *SkillService) FinishRun(runID string, outcome RunOutcome) error {
 	var run database.AgentRun
 	if err := s.db.Select("run_id, incident_uuid").Where("run_id = ?", runID).First(&run).Error; err != nil {
@@ -809,18 +808,66 @@ func (s *SkillService) FinishRun(runID string, outcome RunOutcome) error {
 		}
 	}
 
-	if s.memoryIngester != nil {
-		// Detached: the request context may already be cancelled by the time
-		// this runs, so a fresh background context is used. Failures are
-		// logged-only — ingest is best-effort and must not affect the caller.
-		ingester := s.memoryIngester
-		go func() {
-			if err := ingester.IngestFromDisk(context.Background()); err != nil {
-				slog.Warn("memory ingest from disk failed", "run", runID, "err", err)
-			}
-		}()
+	if s.memoryRefresher != nil {
+		go s.RefreshAfterMemoryChange(runID)
 	}
 	return nil
+}
+
+// memoryFingerprintNow returns count + newest updated_at of the memories
+// table. A create, an update and a delete each change it.
+func (s *SkillService) memoryFingerprintNow() (string, error) {
+	var row struct {
+		N   int64
+		Max database.FlexTime
+	}
+	if err := s.db.Model(&database.Memory{}).Select("COUNT(*) AS n, MAX(updated_at) AS max").Scan(&row).Error; err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d/%d", row.N, row.Max.Time.UnixNano()), nil
+}
+
+// memoryImportDone reports whether IngestDiskMemoriesOnce has completed.
+func memoryImportDone(db *gorm.DB) bool {
+	var n int64
+	if err := db.Model(&database.SystemSetting{}).Where("key = ?", SystemSettingMemoryDiskIngestedAt).Count(&n).Error; err != nil {
+		return false
+	}
+	return n > 0
+}
+
+// RefreshAfterMemoryChange regenerates every SKILL.md and the disk mirror
+// when the memories changed since the last refresh. Errors are logged and the
+// refresh is tried again by the next finished run. runID is for the log only.
+func (s *SkillService) RefreshAfterMemoryChange(runID string) {
+	s.memoryMu.Lock()
+	defer s.memoryMu.Unlock()
+	fp, err := s.memoryFingerprintNow()
+	if err != nil {
+		slog.Warn("memory refresh: read fingerprint", "run", runID, "err", err)
+		return
+	}
+	if fp == s.memoryFingerprint {
+		return
+	}
+	ok := true
+	if err := s.RegenerateAllSkillMds(); err != nil {
+		slog.Warn("memory refresh: regenerate SKILL.md files", "run", runID, "err", err)
+		ok = false
+	}
+	// The mirror sync deletes files with no row, so it waits for the
+	// one-time import of the old disk files (IngestDiskMemoriesOnce).
+	if s.memoryRefresher != nil && memoryImportDone(s.db) {
+		if err := s.memoryRefresher.SyncMemoryFiles(); err != nil {
+			slog.Warn("memory refresh: sync memory files", "run", runID, "err", err)
+			ok = false
+		}
+	}
+	// Keep the old fingerprint after a failure, so the next finished run
+	// tries again even when no memory changed in between.
+	if ok {
+		s.memoryFingerprint = fp
+	}
 }
 
 // generateAgentsMd renders the AGENTS.md file for a fresh agent invocation.
@@ -834,12 +881,9 @@ func (s *SkillService) FinishRun(runID string, outcome RunOutcome) error {
 // The cross-incident "global" memory manifest is appended below the prompt
 // regardless of root skill so the agent sees a small, always-up-to-date
 // summary of long-lived facts and operator feedback before any tool call.
-// Full bodies are fetched on demand via the memory-searcher subagent. The
+// Full bodies are fetched on demand with memory.get. The
 // uploaded context files follow as a "Reference files" list, so the agent
 // knows what is mounted at /akmatori/context/ without a skill [[reference]].
-//
-// incidentUUID is substituted into the memory-writer call example so the
-// model can quote it verbatim instead of having to derive it from CWD.
 func (s *SkillService) generateAgentsMd(path string, rootSkillName string, incidentUUID string) error {
 	// Get the root system skill's prompt. Falls back to the hardcoded default
 	// when the on-disk skill row is absent (fresh install pre-seed) so the
@@ -862,7 +906,7 @@ func (s *SkillService) generateAgentsMd(path string, rootSkillName string, incid
 	sb.WriteString("\n\n")
 	sb.WriteString(prompt)
 	sb.WriteString("\n")
-	sb.WriteString(s.renderMemoryRecallSection(MemoryScopeGlobal, incidentUUID))
+	sb.WriteString(s.renderMemoryRecallSection(MemoryScopeGlobal))
 	sb.WriteString(s.renderContextFilesSection())
 
 	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {

@@ -24,45 +24,62 @@ func setMemoryGeneration(t *testing.T, svc *MemoryService, enabled bool) {
 	}
 }
 
-func TestIngestFromDisk_GenerationOffDiscardsAgentWrites(t *testing.T) {
+// The one-time import ignores the generation gate: under the old per-run
+// ingest, agent files were discarded while generation was off, so the files
+// left at upgrade are hand edits, and the sync after the import would delete
+// them.
+func TestIngestFromDisk_GenerationOffStillImports(t *testing.T) {
 	svc := setupMemoryServiceTest(t)
-	kept, err := svc.CreateMemory(validMemory("kept-fact"))
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	doomed, err := svc.CreateMemory(validMemory("not-deleted"))
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
 	setMemoryGeneration(t, svc, false)
-
 	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
-	// The agent creates a memory, rewrites one, and tombstones another.
-	writeMemoryFile(t, dir, "agent-new", "new fact", MemoryTypeFact, MemoryScopeGlobal, "inc-1", "new body")
-	writeMemoryFile(t, dir, "kept-fact", "agent rewrite", MemoryTypeFact, MemoryScopeGlobal, "inc-1", "agent body")
-	writeTombstoneFile(t, dir, "not-deleted")
-
+	writeMemoryFile(t, dir, "hand-edit", "operator note", MemoryTypeFact, MemoryScopeGlobal, "", "body")
 	if err := svc.IngestFromDisk(context.Background()); err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
-
-	mems, _ := svc.ListMemoriesByScope(MemoryScopeGlobal)
-	if len(mems) != 2 {
-		t.Fatalf("expected the 2 operator rows only, got %d: %+v", len(mems), mems)
+	if err := mustFindMemory(svc, MemoryScopeGlobal, "hand-edit"); err != nil {
+		t.Errorf("hand edit not imported: %v", err)
 	}
-	for _, m := range mems {
-		if m.ID == kept.ID && m.Description != kept.Description {
-			t.Errorf("agent rewrite reached the DB: %+v", m)
+}
+
+// An invalid file is skipped but kept in the backup; a database failure
+// returns an error and leaves every file on disk for the retry.
+func TestIngestFromDisk_BackupAndFailureKeepFiles(t *testing.T) {
+	svc := setupMemoryServiceTest(t)
+	dir := filepath.Join(svc.MemoryDir(), MemoryScopeGlobal)
+	writeMemoryFile(t, dir, "good", "fine", MemoryTypeFact, MemoryScopeGlobal, "", "body")
+	writeMemoryFile(t, dir, "bad", "", MemoryTypeFact, MemoryScopeGlobal, "", "no description")
+
+	// Break the database: the upsert fails, so no sync may run.
+	if err := svc.db.Migrator().RenameTable("memories", "memories_away"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.IngestFromDisk(context.Background()); err == nil {
+		t.Fatal("want an error when the upsert fails")
+	}
+	for _, f := range []string{"good.md", "bad.md"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Errorf("%s removed after a failed import: %v", f, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "agent-new.md")); !os.IsNotExist(err) {
-		t.Errorf("agent-created file should be discarded; stat err=%v", err)
+	backup := filepath.Join(filepath.Dir(svc.MemoryDir()), memoryImportBackupDir, MemoryScopeGlobal)
+	for _, f := range []string{"good.md", "bad.md"} {
+		if _, err := os.Stat(filepath.Join(backup, f)); err != nil {
+			t.Errorf("%s not in the backup: %v", f, err)
+		}
 	}
-	if file := readFile(t, filepath.Join(dir, "kept-fact.md")); strings.Contains(file, "agent rewrite") {
-		t.Errorf("agent rewrite should be reverted on disk:\n%s", file)
+
+	// Retry after the database is back: good imports, bad is skipped.
+	if err := svc.db.Migrator().RenameTable("memories_away", "memories"); err != nil {
+		t.Fatal(err)
 	}
-	if file := readFile(t, filepath.Join(dir, doomed.Name+".md")); strings.Contains(file, "deleted: true") {
-		t.Errorf("tombstone should be reverted on disk:\n%s", file)
+	if err := svc.IngestFromDisk(context.Background()); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if err := mustFindMemory(svc, MemoryScopeGlobal, "good"); err != nil {
+		t.Errorf("good not imported on retry: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(backup, "bad.md")); err != nil {
+		t.Errorf("the backup must keep the invalid file: %v", err)
 	}
 }
 
@@ -81,16 +98,16 @@ func TestIngestFromDisk_GenerationOnIngests(t *testing.T) {
 
 func TestRenderMemoryRecallSection_GenerationOff(t *testing.T) {
 	mem := setupMemoryServiceTest(t)
-	svc := &SkillService{memoryDir: mem.MemoryDir()}
+	svc := &SkillService{db: mem.db, memoryDir: mem.MemoryDir()}
 
-	on := svc.renderMemoryRecallSection(MemoryScopeGlobal, "inc-1")
-	if !strings.Contains(on, "### Record durable findings") || !strings.Contains(on, `"agent": "memory-writer"`) {
-		t.Fatalf("gate unset should keep the memory-writer guidance:\n%s", on)
+	on := svc.renderMemoryRecallSection(MemoryScopeGlobal)
+	if !strings.Contains(on, "### Record durable findings") || !strings.Contains(on, `gateway_call("memory.write"`) {
+		t.Fatalf("gate unset should keep the memory.write guidance:\n%s", on)
 	}
 
 	setMemoryGeneration(t, mem, false)
-	off := svc.renderMemoryRecallSection(MemoryScopeGlobal, "inc-1")
-	if strings.Contains(off, `"agent": "memory-writer"`) || strings.Contains(off, "### Record durable findings") {
+	off := svc.renderMemoryRecallSection(MemoryScopeGlobal)
+	if strings.Contains(off, `gateway_call("memory.write"`) || strings.Contains(off, "### Record durable findings") {
 		t.Errorf("gate off still tells the agent to write:\n%s", off)
 	}
 	if !strings.Contains(off, memoryGenerationOffInstruction) {
@@ -99,4 +116,9 @@ func TestRenderMemoryRecallSection_GenerationOff(t *testing.T) {
 	if !strings.Contains(off, memoryRecallInstruction) {
 		t.Errorf("recall must stay available with the gate off:\n%s", off)
 	}
+}
+
+func mustFindMemory(svc *MemoryService, scope, name string) error {
+	var m database.Memory
+	return svc.db.Where("scope = ? AND name = ?", scope, name).Take(&m).Error
 }

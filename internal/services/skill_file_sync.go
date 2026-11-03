@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -372,6 +373,7 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 		return fmt.Errorf("failed to list skills: %w", err)
 	}
 
+	var writeErrs []error
 	for _, skill := range skills {
 		// Skip hardcoded-prompt system skills (handled directly by AGENTS.md
 		// for incident-manager and by the respective spawn paths for
@@ -408,6 +410,7 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 
 		if err := os.WriteFile(skillPath, []byte(skillMd), 0644); err != nil {
 			slog.Warn("failed to regenerate SKILL.md for skill", "skill", skill.Name, "err", err)
+			writeErrs = append(writeErrs, fmt.Errorf("%s: %w", skill.Name, err))
 			continue
 		}
 
@@ -417,5 +420,7 @@ func (s *SkillService) RegenerateAllSkillMds() error {
 	if err := s.RegenerateConnectedToolsSkill(); err != nil {
 		slog.Warn("failed to regenerate connected-tools SKILL.md", "err", err)
 	}
-	return nil
+	// The other skills are still written; the error tells a caller (the
+	// memory refresh) that a SKILL.md may be stale, so it retries later.
+	return errors.Join(writeErrs...)
 }

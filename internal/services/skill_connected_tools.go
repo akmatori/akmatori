@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -112,7 +113,13 @@ func (s *SkillService) renameCollidingSkill(sk database.Skill) error {
 
 // RegenerateConnectedToolsSkill renders connected-tools/SKILL.md from every
 // enabled tool instance. The file is written only when its content changed.
+//
+// Calls are serialized (connector changes, the periodic refresh and skill
+// regeneration all call it) and the file is replaced by a rename, so a
+// worker never reads a partly written file.
 func (s *SkillService) RegenerateConnectedToolsSkill() error {
+	connectedToolsMu.Lock()
+	defer connectedToolsMu.Unlock()
 	var instances []database.ToolInstance
 	if err := s.db.Preload("ToolType").Where("enabled = ?", true).Order("id ASC").Find(&instances).Error; err != nil {
 		return fmt.Errorf("list tool instances: %w", err)
@@ -144,11 +151,30 @@ func (s *SkillService) RegenerateConnectedToolsSkill() error {
 	if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, []byte(content)) {
 		return nil
 	}
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	tmp, err := os.CreateTemp(dir, ".SKILL.md.*")
+	if err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
+	}
+	_, werr := tmp.WriteString(content)
+	cerr := tmp.Close()
+	if werr == nil {
+		werr = cerr
+	}
+	if werr == nil {
+		werr = os.Chmod(tmp.Name(), 0644)
+	}
+	if werr == nil {
+		werr = os.Rename(tmp.Name(), path)
+	}
+	if werr != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("write %s: %w", path, werr)
 	}
 	return nil
 }
+
+// connectedToolsMu serializes RegenerateConnectedToolsSkill.
+var connectedToolsMu sync.Mutex
 
 // StartConnectedToolsRefresh re-renders connected-tools/SKILL.md every
 // interval, so MCP server functions discovered after a reload reach the file.
@@ -290,7 +316,7 @@ func renderGatewayFunctions(namespace, logicalName string, fns []GatewayTool) st
 			if required[name] {
 				mark = "*"
 			}
-			params = append(params, fmt.Sprintf("%s%s: %s", name, mark, p.Type))
+			params = append(params, fmt.Sprintf("%s%s: %s", name, mark, paramTypeLabel(p)))
 		}
 		sort.Strings(params)
 		desc := firstLine(fn.Description, 160)
@@ -299,8 +325,26 @@ func renderGatewayFunctions(namespace, logicalName string, fns []GatewayTool) st
 		}
 		fmt.Fprintf(&b, "- `%s(%s)`%s\n", fn.Name, strings.Join(params, ", "), desc)
 	}
-	fmt.Fprintf(&b, "\nCall: `gateway_call(\"%s.<function>\", {<args>}, \"%s\")`. Full schema: `get_tool_detail(\"%s.<function>\")`.\n", namespace, logicalName, namespace)
+	fmt.Fprintf(&b, "\nCall: `gateway_call(\"%s.<function>\", {<args>}, \"%s\")`. The list is short; read a function's parameter descriptions with `get_tool_detail(\"%s.<function>\")` before you call it the first time or when a call is refused.\n", namespace, logicalName, namespace)
 	return b.String()
+}
+
+// paramTypeLabel renders a parameter type with its constraints: enum values
+// ("string(a|b|c)", at most 8) and array item types ("array<string>").
+func paramTypeLabel(p GatewayToolParam) string {
+	t := p.Type
+	if t == "array" && p.Items != nil && p.Items.Type != "" {
+		t = "array<" + p.Items.Type + ">"
+	}
+	if len(p.Enum) > 0 {
+		vals := p.Enum
+		more := ""
+		if len(vals) > 8 {
+			vals, more = vals[:8], "|…"
+		}
+		t += "(" + strings.Join(vals, "|") + more + ")"
+	}
+	return t
 }
 
 // firstLine returns the first line of s, cut to max runes.

@@ -51,7 +51,7 @@ type fileSummaryStore interface {
 }
 
 // ContextFileSummarizer turns an uploaded context file into one summary
-// memory (global fact, linked with source_file_id), so memory-searcher
+// memory (global fact, linked with source_file_id), so memory.search
 // finds the file by its content. It runs one job at a time in the
 // background; the file row carries the status. Without an LLM the job fails
 // and stores no memory: the file stays listed in AGENTS.md, and the operator

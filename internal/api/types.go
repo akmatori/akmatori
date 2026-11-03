@@ -104,9 +104,6 @@ type CreateLLMSettingsRequest struct {
 	TopP          *float64 `json:"top_p"`
 	TopK          *int     `json:"top_k"`
 	MaxTokens     *int     `json:"max_tokens"`
-	// Subagent model override (same provider); omitted/null = same as parent.
-	SubagentModel         *string `json:"subagent_model"`
-	SubagentThinkingLevel *string `json:"subagent_thinking_level"`
 }
 
 // UpdateLLMSettingsRequest is the request body for PUT /api/settings/llm/{id}.
@@ -122,9 +119,6 @@ type UpdateLLMSettingsRequest struct {
 	TopP          Nullable[float64] `json:"top_p"`
 	TopK          Nullable[int]     `json:"top_k"`
 	MaxTokens     Nullable[int]     `json:"max_tokens"`
-	// Explicit null clears the override back to "same as parent".
-	SubagentModel         Nullable[string] `json:"subagent_model"`
-	SubagentThinkingLevel Nullable[string] `json:"subagent_thinking_level"`
 }
 
 // UpdateProxySettingsRequest is the request body for PUT /api/settings/proxy.

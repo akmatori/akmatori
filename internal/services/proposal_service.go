@@ -380,11 +380,11 @@ func (s *ProposalService) apply(ctx context.Context, p *database.Proposal) error
 			return fmt.Errorf("invalid proposed_content: %w", err)
 		}
 		toolsEnabled := content.ToolsEnabled != nil && *content.ToolsEnabled
-		builtins := content.BuiltinTools
-		if builtins == nil {
-			builtins = DefaultCronBuiltinTools
-		}
 		if p.Kind == database.ProposalKindCronNew {
+			builtins := content.BuiltinTools
+			if builtins == nil {
+				builtins = DefaultCronBuiltinTools
+			}
 			// New crons apply DISABLED and without an explicit channel: an
 			// LLM-authored schedule must never start firing without an
 			// explicit operator enable, and channel selection stays an
@@ -399,9 +399,14 @@ func (s *ProposalService) apply(ctx context.Context, p *database.Proposal) error
 			Schedule: &content.Schedule,
 			Prompt:   &content.Prompt,
 		}
-		// An update without tool fields leaves the cron's tool access alone.
+		// Each tool field applies only when the proposal carries it: an
+		// update without it leaves that part of the cron's access alone, and
+		// an explicit "builtin_tools": [] removes every built-in.
 		if content.ToolsEnabled != nil {
 			patch.ToolsEnabled = &toolsEnabled
+		}
+		if content.BuiltinTools != nil {
+			builtins := content.BuiltinTools
 			patch.BuiltinTools = &builtins
 		}
 		var err error
@@ -546,25 +551,9 @@ func (s *ProposalService) ListChatMessages(proposalUUID string) ([]database.Prop
 	return rows, err
 }
 
-// ChatToolAllowlist resolves the incidents + proposals tool instances into
-// the allowlist for proposal-editor chat runs. Returns a NON-NIL empty slice
-// on lookup failure so the frame serializes as [] (reject all tool calls) —
-// never nil, which would mean "no allowlist = allow all".
+// ChatToolAllowlist is the allowlist of proposal-editor chat runs: the
+// incidents, proposals, runbooks and memory built-ins (type-only entries, no
+// lookup). Always non-nil.
 func (s *ProposalService) ChatToolAllowlist() []ToolAllowlistEntry {
-	entries := make([]ToolAllowlistEntry, 0, 2)
-	var instances []database.ToolInstance
-	if err := s.db.Preload("ToolType").
-		Where("logical_name IN ? AND enabled = ?", []string{"incidents", "proposals"}, true).
-		Find(&instances).Error; err != nil {
-		slog.Warn("proposal chat allowlist lookup failed; chat runs tool-less", "err", err)
-		return entries
-	}
-	for _, ti := range instances {
-		entries = append(entries, ToolAllowlistEntry{
-			InstanceID:  ti.ID,
-			LogicalName: ti.LogicalName,
-			ToolType:    ti.ToolType.Name,
-		})
-	}
-	return entries
+	return ProposalChatAllowlist()
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -183,5 +184,73 @@ func TestEnsureConnectedToolsSkill(t *testing.T) {
 	}
 	if err := svc.UpdateSkillPrompt(ConnectedToolsSkillName, "x"); !errors.Is(err, ErrGeneratedSkill) {
 		t.Errorf("prompt update err = %v, want ErrGeneratedSkill", err)
+	}
+}
+
+func TestParamTypeLabel(t *testing.T) {
+	arr := GatewayToolParam{Type: "array"}
+	arr.Items = &struct {
+		Type string `json:"type"`
+	}{Type: "string"}
+	many := GatewayToolParam{Type: "string", Enum: []string{"a", "b", "c", "d", "e", "f", "g", "h", "i"}}
+	for _, c := range []struct {
+		p    GatewayToolParam
+		want string
+	}{
+		{GatewayToolParam{Type: "string"}, "string"},
+		{GatewayToolParam{Type: "string", Enum: []string{"open", "closed"}}, "string(open|closed)"},
+		{arr, "array<string>"},
+		{many, "string(a|b|c|d|e|f|g|h|…)"},
+	} {
+		if got := paramTypeLabel(c.p); got != c.want {
+			t.Errorf("paramTypeLabel = %q, want %q", got, c.want)
+		}
+	}
+}
+
+// sizedGatewayTools returns a long or a short function list on alternate
+// calls, so concurrent renders write files of different sizes.
+type sizedGatewayTools struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (f *sizedGatewayTools) NamespaceTools(context.Context, string) ([]GatewayTool, error) {
+	f.mu.Lock()
+	f.n++
+	long := f.n%2 == 0
+	f.mu.Unlock()
+	gt := githubTool()
+	if long {
+		gt.Description = strings.Repeat("long description ", 9)
+	}
+	return []GatewayTool{gt}, nil
+}
+
+func TestRegenerateConnectedToolsSkill_ConcurrentRendersStayWhole(t *testing.T) {
+	db := setupSkillTestDB(t)
+	svc := newTestSkillService(t, db)
+	seedAuthzTools(t, db)
+	svc.SetGatewayToolLister(&sizedGatewayTools{})
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := svc.RegenerateConnectedToolsSkill(); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	md := readConnectedTools(t, svc)
+	if strings.Count(md, "name: connected-tools") != 1 || strings.Count(md, "## Built-in tools") != 1 || strings.Count(md, "github_ext.search_issues(") != 1 {
+		t.Errorf("file is not one whole render:\n%s", md)
+	}
+	entries, _ := os.ReadDir(svc.GetSkillDir(ConnectedToolsSkillName))
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".SKILL.md.") {
+			t.Errorf("temp file left: %s", e.Name())
+		}
 	}
 }

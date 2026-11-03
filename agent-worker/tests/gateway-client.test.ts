@@ -583,6 +583,38 @@ describe("GatewayClient", () => {
       }
     });
 
+    it("sends X-Run-ID next to X-Incident-ID when runId is set", async () => {
+      const mock = await createMockGateway(() =>
+        jsonRpcSuccess({ content: [{ type: "text", text: '"ok"' }] }),
+      );
+
+      try {
+        const client = new GatewayClient({ gatewayUrl: mock.url, incidentId: "inc-1", runId: "run-42" });
+        await client.call("memory.write", {});
+
+        expect(mock.requests[0].headers["x-incident-id"]).toBe("inc-1");
+        expect(mock.requests[0].headers["x-run-id"]).toBe("run-42");
+      } finally {
+        mock.server.close();
+      }
+    });
+
+    it("omits X-Run-ID when runId is not set", async () => {
+      const mock = await createMockGateway(() =>
+        jsonRpcSuccess({ content: [{ type: "text", text: '"ok"' }] }),
+      );
+
+      try {
+        const client = new GatewayClient({ gatewayUrl: mock.url, incidentId: "inc-1" });
+        await client.call("tool", {});
+
+        expect(mock.requests[0].headers["x-incident-id"]).toBe("inc-1");
+        expect(mock.requests[0].headers["x-run-id"]).toBeUndefined();
+      } finally {
+        mock.server.close();
+      }
+    });
+
     it("strips trailing slashes from gatewayUrl", async () => {
       const mock = await createMockGateway(() =>
         jsonRpcSuccess({ content: [{ type: "text", text: '"ok"' }] }),

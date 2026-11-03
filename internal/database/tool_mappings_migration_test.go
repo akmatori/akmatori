@@ -150,6 +150,38 @@ func TestPreMigrateToolMappings_OnlySkillToolsLeft(t *testing.T) {
 	}
 }
 
+// A cron_jobs table from before cron_job_tools existed has neither the join
+// table nor the new columns. Its jobs must still get the fail-closed backfill,
+// not AutoMigrate's tools_enabled=true with no built-ins.
+func TestPreMigrateToolMappings_ScheduleBeforeCronToolsIsBackfilled(t *testing.T) {
+	db := legacyToolMappingSchema(t)
+	if err := db.Exec("DROP TABLE cron_job_tools").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := preMigrateToolMappings(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := db.AutoMigrate(&CronJob{}); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+	// Second start: columns exist, no join table → no-op that keeps the rows.
+	if err := db.Exec("UPDATE cron_jobs SET builtin_tools = ? WHERE id = 1", `["events"]`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := preMigrateToolMappings(db); err != nil {
+		t.Fatalf("second start: %v", err)
+	}
+	for _, id := range []int{2, 3, 4} {
+		enabled, builtins := readMigratedCron(t, db, id)
+		if enabled || !equalList(builtins, []string{"events", "runbooks", "memory"}) {
+			t.Errorf("cron %d: %v %v, want false + defaults", id, enabled, builtins)
+		}
+	}
+	if _, builtins := readMigratedCron(t, db, 1); !equalList(builtins, []string{"events"}) {
+		t.Errorf("second start rewrote cron 1: %v", builtins)
+	}
+}
+
 func TestLegacyCronToolFields(t *testing.T) {
 	enabled, builtins := LegacyCronToolFields([]string{"proposals", "jira", "incidents"})
 	if !enabled || !equalList(builtins, []string{"events", "runbooks", "memory", "incidents", "proposals"}) {

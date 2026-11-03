@@ -40,8 +40,17 @@ var builtinToolLive = map[string]bool{
 	BuiltinIncidents: true,
 	BuiltinProposals: true,
 	BuiltinEvents:    true,
-	BuiltinRunbooks:  false,
-	BuiltinMemory:    false,
+	BuiltinRunbooks:  true,
+	BuiltinMemory:    true,
+}
+
+// ProposalChatBuiltins are the built-ins of a proposal chat run. The gateway
+// refuses memory writes from proposal runs: changes go through proposals.
+var ProposalChatBuiltins = []string{BuiltinIncidents, BuiltinProposals, BuiltinRunbooks, BuiltinMemory}
+
+// ProposalChatAllowlist is the allowlist of a proposal chat run.
+func ProposalChatAllowlist() []ToolAllowlistEntry {
+	return builtinEntries(ProposalChatBuiltins)
 }
 
 // IsBuiltinToolNamespace reports whether name is a built-in namespace.

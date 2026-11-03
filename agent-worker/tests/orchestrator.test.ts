@@ -466,7 +466,7 @@ describe("Orchestrator", () => {
       );
     });
 
-    it("should exclude pi-subagents tools the parent never uses", async () => {
+    it("should start the session without a subagent tool or excluded tools", async () => {
       const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
 
       await orchestrator.start();
@@ -483,11 +483,11 @@ describe("Orchestrator", () => {
         (m) => m.type === "agent_completed" && m.incident_id === "incident-exclude-tools",
       );
 
-      expect(createAgentSession).toHaveBeenCalledWith(
-        expect.objectContaining({
-          excludeTools: ["bg_wait", "contact_supervisor"],
-        }),
-      );
+      const opts = (createAgentSession as any).mock.calls.at(-1)[0];
+      expect(opts.excludeTools).toBeUndefined();
+      const names = opts.customTools.map((t: any) => t.name);
+      expect(names).toContain("gateway_call");
+      expect(names).not.toContain("subagent");
     });
 
     it("should echo run_id on agent_output and agent_completed frames", async () => {
@@ -518,6 +518,55 @@ describe("Orchestrator", () => {
       for (const m of outputMsgs) {
         expect(m.run_id).toBe("run-aaaa-bbbb");
       }
+    });
+
+    it("should pass run_id to the runner on new_incident and continue_incident", async () => {
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      const runner = (orchestrator as any).runner;
+      const executeSpy = vi.spyOn(runner, "execute");
+      const resumeSpy = vi.spyOn(runner, "resume");
+
+      sendFromServer({
+        type: "new_incident",
+        incident_id: "incident-runid-pass",
+        task: "t",
+        api_key: "sk-key",
+        run_id: "run-exec-1",
+      });
+      await waitForMessage((m) => m.type === "agent_completed" && m.incident_id === "incident-runid-pass");
+      expect((executeSpy.mock.calls.at(-1)?.[0] as any).runId).toBe("run-exec-1");
+
+      sendFromServer({
+        type: "continue_incident",
+        incident_id: "incident-runid-pass",
+        session_id: "s",
+        message: "more",
+        api_key: "sk-key",
+        run_id: "run-resume-2",
+      });
+      await waitForMessage(
+        (m) => m.type === "agent_completed" && m.incident_id === "incident-runid-pass" && m.run_id === "run-resume-2",
+      );
+      expect((resumeSpy.mock.calls.at(-1)?.[0] as any).runId).toBe("run-resume-2");
+    });
+
+    it("should leave runId unset when the frame has no run_id", async () => {
+      await orchestrator.start();
+      await waitForMessage((m) => m.type === "status");
+
+      const runner = (orchestrator as any).runner;
+      const executeSpy = vi.spyOn(runner, "execute");
+
+      sendFromServer({
+        type: "new_incident",
+        incident_id: "incident-runid-none",
+        task: "t",
+        api_key: "sk-key",
+      });
+      await waitForMessage((m) => m.type === "agent_completed" && m.incident_id === "incident-runid-none");
+      expect((executeSpy.mock.calls.at(-1)?.[0] as any).runId).toBeUndefined();
     });
 
     it("should echo run_id on agent_error when LLM settings are missing", async () => {
@@ -998,44 +1047,28 @@ describe("Orchestrator", () => {
   // -----------------------------------------------------------------------
 
   describe("LLM settings extraction", () => {
-    it("forwards the subagent model override and leaves it absent when unset", async () => {
-      const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
-
+    it("ignores subagent model fields an older API may still send", async () => {
       await orchestrator.start();
       await waitForMessage((m) => m.type === "status");
 
-      // The runner receives the extracted LLMSettings; spy on it to read them.
       const runner = (orchestrator as any).runner;
       const executeSpy = vi.spyOn(runner, "execute");
 
       sendFromServer({
         type: "new_incident",
-        incident_id: "incident-subagent-001",
-        task: "Test subagent override",
+        incident_id: "incident-legacy-fields",
+        task: "Test legacy frame",
         api_key: "sk-key",
         provider: "anthropic",
         model: "claude-sonnet-5",
         subagent_model: "claude-haiku-4-5",
         subagent_thinking_level: "low",
       });
-      await waitForMessage((m) => m.type === "agent_completed" && m.incident_id === "incident-subagent-001");
-      let params = executeSpy.mock.calls.at(-1)?.[0] as any;
-      expect(params.llmSettings.subagent_model).toBe("claude-haiku-4-5");
-      expect(params.llmSettings.subagent_thinking_level).toBe("low");
-
-      sendFromServer({
-        type: "new_incident",
-        incident_id: "incident-subagent-002",
-        task: "Test no override",
-        api_key: "sk-key",
-        provider: "anthropic",
-        model: "claude-sonnet-5",
-      });
-      await waitForMessage((m) => m.type === "agent_completed" && m.incident_id === "incident-subagent-002");
-      params = executeSpy.mock.calls.at(-1)?.[0] as any;
-      expect(params.llmSettings.subagent_model).toBeUndefined();
-      expect(params.llmSettings.subagent_thinking_level).toBeUndefined();
-      expect(createAgentSession).toHaveBeenCalled();
+      await waitForMessage((m) => m.type === "agent_completed" && m.incident_id === "incident-legacy-fields");
+      const params = executeSpy.mock.calls.at(-1)?.[0] as any;
+      expect(params.llmSettings).not.toHaveProperty("subagent_model");
+      expect(params.llmSettings).not.toHaveProperty("subagent_thinking_level");
+      expect(params.llmSettings.model).toBe("claude-sonnet-5");
     });
 
     it("should map thinking_level to thinking_level", async () => {

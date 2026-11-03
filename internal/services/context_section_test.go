@@ -33,7 +33,11 @@ func newContextSectionTestService(t *testing.T, files ...database.ContextFile) *
 			t.Fatalf("seed %s: %v", files[i].Filename, err)
 		}
 	}
+	if err := db.AutoMigrate(&database.Memory{}); err != nil {
+		t.Fatal(err)
+	}
 	return &SkillService{
+		db:             db,
 		dataDir:        tmp,
 		incidentsDir:   filepath.Join(tmp, "incidents"),
 		skillsDir:      filepath.Join(tmp, "skills"),

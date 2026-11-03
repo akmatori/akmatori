@@ -20,28 +20,19 @@ func TestDefaultCronAgentPrompt_PinsRequiredDirectives(t *testing.T) {
 		t.Fatal("DefaultCronAgentPrompt must be non-empty")
 	}
 
-	// The cron-agent must delegate memory recall to memory-searcher and offer
-	// memory mutations (upsert/delete) via memory-writer. Without these the
-	// memory-curator system cron has no way to dedupe or remove entries.
+	// The cron-agent recalls and changes memory through the gateway
+	// knowledge tools; Dreaming has no other way to dedupe or remove entries.
 	for _, want := range []string{
-		`"agent": "memory-searcher"`,
-		`"agent": "memory-writer"`,
-		"Action: upsert",
-		"Action: delete",
+		`gateway_call("memory.search"`,
+		`gateway_call("memory.list"`,
+		`gateway_call("memory.write"`,
+		`gateway_call("memory.delete"`,
+		`gateway_call("runbooks.search"`,
 		"gateway_call",
-		"Scope:",
-		"Incident UUID:",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("DefaultCronAgentPrompt is missing required directive %q", want)
 		}
-	}
-
-	// Runbook recall is optional for cron runs (a consolidation pass does not
-	// need a runbook), but the prompt should still tell the agent how to
-	// delegate the lookup when the task references a procedure.
-	if !strings.Contains(prompt, `"agent": "runbook-searcher"`) {
-		t.Errorf("DefaultCronAgentPrompt should mention runbook-searcher for optional procedure lookup")
 	}
 
 	// Affirmative incident-triage framing must not appear — a cron run is not

@@ -22,7 +22,7 @@ infrastructure through real tools, and executes remediation behind approval gate
 ## How It Works
 
 1. **An alert fires** — from an Alertmanager, PagerDuty, Grafana, Datadog, or Zabbix webhook, a monitored Slack channel, or a cron schedule.
-2. **An agent investigates** — a full LLM agent session queries your infrastructure through gateway tools (SSH, Kubernetes, Zabbix, Grafana, VictoriaMetrics, …) and consults your runbooks and cross-incident memory via subagents.
+2. **An agent investigates** — a full LLM agent session queries your infrastructure through gateway tools (SSH, Kubernetes, Zabbix, Grafana, VictoriaMetrics, …) and consults your runbooks and cross-incident memory through built-in search tools.
 3. **Remediation waits for you** — risky actions become proposals you approve in the UI or Slack before anything executes.
 4. **Results land where you work** — findings post back to the dashboard and your Slack channels, and durable learnings are written to memory for the next incident.
 
@@ -30,7 +30,7 @@ infrastructure through real tools, and executes remediation behind approval gate
 
 - **Multi-LLM**: OpenAI, Anthropic, Google, OpenRouter, NVIDIA NIM, MiniMax, Ant Ling, or any OpenAI-compatible on-prem endpoint (GLM, Kimi, Mistral, LLaMA, …)
 - **Multi-source alert ingestion**: Alertmanager, PagerDuty, Grafana, Datadog, and Zabbix webhooks, plus Slack channel monitoring
-- **Agentic investigation**: every incident runs a full agent session with subagents for runbook lookup and cross-incident memory recall
+- **Agentic investigation**: every incident runs a full agent session that searches your runbooks and cross-incident memory before it touches infrastructure
 - **Approval-gated remediation**: risky actions become proposals you approve in the UI or Slack before anything executes
 - **Connectors**: one page for everything the agent connects to: tools (monitoring, Kubernetes, SSH, databases), alert webhooks, messaging (Slack; Telegram and Discord for posting) and custom remote MCP servers (URL + token, API key header or OAuth sign-in). Channels and alert webhooks live inside their connector
 - **Cron jobs**: schedule recurring agent investigations that post results to a Channel, each with its own prompt and per-cron tool allowlist
@@ -171,8 +171,9 @@ Akmatori uses a secure multi-container architecture:
 ┌─────────────────┐              ▼
 │  Slack Bot      │◀───▶┌─────────────────┐     ┌─────────────────┐
 │                 │     │  Agent Worker   │◀───▶│   MCP Gateway   │
-└─────────────────┘     │  (pi-mono +     │     │  (SSH, APIs)    │
-                        │   subagents)    │     │                 │
+└─────────────────┘     │  (pi-mono)      │     │  (SSH, APIs,    │
+                        │                 │     │   runbooks,     │
+                        │                 │     │   memory)       │
                         └────────┬────────┘     └─────────────────┘
                                  │
                                  ▼
@@ -191,7 +192,7 @@ Akmatori uses a secure multi-container architecture:
 - Network isolation between containers
 - API keys passed per-incident via WebSocket
 
-**Runbook and memory search:** runbooks and cross-incident memory live as markdown files mounted into the agent container (`runbooks` read-only, `memory` read-write). The main agent reaches them through pi-mono subagents — `runbook-searcher` for SOP lookup, `memory-searcher` for prior-incident recall, and `memory-writer` to record durable findings at the end of an investigation. The API materializes new memory files back into Postgres at incident completion.
+**Runbook and memory search:** runbooks and cross-incident memory live in Postgres. The agent reaches them through built-in MCP Gateway tools: `runbooks.search` / `runbooks.get` for SOP lookup, `memory.search` / `memory.get` for prior-incident recall, and `memory.write` / `memory.delete` to record durable findings. Search is ranked keyword search (BM25) with no extra LLM calls. Operator-written memories are never changed by the agent.
 
 ## Development
 
