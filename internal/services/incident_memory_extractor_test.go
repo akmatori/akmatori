@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -500,5 +502,106 @@ func TestCutHeadTail(t *testing.T) {
 	}
 	if cutHeadTail("short", 50, 10, 20) != "short" {
 		t.Error("short text changed")
+	}
+}
+
+// TestExtractor_SpilledToolOutputs: the heads of the spilled tool outputs of
+// the family reach the prompt, newest first, within the caps; a symlink in
+// the directory is not followed.
+func TestExtractor_SpilledToolOutputs(t *testing.T) {
+	db := extractorTestDB(t)
+	seedClosedIncident(t, db, "inc-1", "answer", database.AlertResolvedBySource)
+	db.Create(&database.Incident{UUID: "inc-child", SourceKind: "alert", Status: database.IncidentStatusMerged, MergedIntoUUID: "inc-1", MemoryExtraction: database.MemoryExtractionSkipped})
+	dir := t.TempDir()
+	spill := filepath.Join(dir, "inc-1", "tool_outputs")
+	if err := os.MkdirAll(spill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	childSpill := filepath.Join(dir, "inc-child", "tool_outputs")
+	if err := os.MkdirAll(childSpill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	big := strings.Repeat("x", extractionSpillFileMax+100)
+	for name, content := range map[string]string{
+		filepath.Join(spill, "prometheus_1.txt"):    "PROM-OLD: load 95% at 10:05\n",
+		filepath.Join(spill, "ssh_2.txt"):           "SSH-NEW: dmesg NETDEV WATCHDOG eth1\n",
+		filepath.Join(spill, "huge_3.txt"):          big,
+		filepath.Join(childSpill, "child_4.txt"):    "CHILD-SPILL: same deploy\n",
+		filepath.Join(dir, "inc-1", "session.json"): "NOT-SPILL",
+	} {
+		if err := os.WriteFile(name, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	secret := filepath.Join(dir, "secret.txt")
+	if err := os.WriteFile(secret, []byte("OUTSIDE-LINK"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(spill, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	in, err := collectExtractionInput(db, &database.Incident{UUID: "inc-1", Status: database.IncidentStatusClosed, SourceKind: "alert"}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"PROM-OLD", "SSH-NEW", "CHILD-SPILL", "TOOL OUTPUT ssh_2.txt (incident inc-1"} {
+		if !strings.Contains(in.Prompt, want) {
+			t.Errorf("prompt missing %q", want)
+		}
+	}
+	for _, bad := range []string{"OUTSIDE-LINK", "NOT-SPILL"} {
+		if strings.Contains(in.Prompt, bad) {
+			t.Errorf("prompt carries %q", bad)
+		}
+	}
+	for _, sp := range in.Spill {
+		if len(sp.Head) > extractionSpillFileMax {
+			t.Errorf("%s head %d bytes over the cap", sp.Name, len(sp.Head))
+		}
+	}
+	total := 0
+	for _, sp := range in.Spill {
+		total += len(sp.Head)
+	}
+	if total > extractionSpillTotal {
+		t.Errorf("spill total %d over the cap", total)
+	}
+	// No directory: no spill, no error.
+	in, err = collectExtractionInput(db, &database.Incident{UUID: "inc-1", Status: database.IncidentStatusClosed, SourceKind: "alert"}, filepath.Join(dir, "missing"))
+	if err != nil || len(in.Spill) != 0 {
+		t.Errorf("missing dir: spill=%d err=%v", len(in.Spill), err)
+	}
+}
+
+// TestExtractor_Backfill queues only the closed alert incidents that were
+// never extracted and resolved in the window.
+func TestExtractor_Backfill(t *testing.T) {
+	db := extractorTestDB(t)
+	e, _ := newTestExtractor(t, db, nil)
+	old := time.Now().AddDate(0, 0, -40)
+	recent := time.Now().AddDate(0, 0, -3)
+	db.Create(&database.Incident{UUID: "never-recent", SourceKind: "alert", Status: database.IncidentStatusClosed, ResolvedAt: &recent})
+	db.Create(&database.Incident{UUID: "never-old", SourceKind: "alert", Status: database.IncidentStatusClosed, ResolvedAt: &old})
+	db.Create(&database.Incident{UUID: "done", SourceKind: "alert", Status: database.IncidentStatusClosed, ResolvedAt: &recent, MemoryExtraction: database.MemoryExtractionSucceeded})
+	db.Create(&database.Incident{UUID: "open", SourceKind: "alert", Status: database.IncidentStatusMonitor, ResolvedAt: &recent})
+	n, err := e.Backfill(context.Background(), time.Now().AddDate(0, 0, -30))
+	if err != nil || n != 1 {
+		t.Fatalf("queued %d err %v", n, err)
+	}
+	if inc := loadInc(t, db, "never-recent"); inc.MemoryExtraction != database.MemoryExtractionPending {
+		t.Errorf("never-recent: %q", inc.MemoryExtraction)
+	}
+	for _, uuid := range []string{"never-old", "open"} {
+		if inc := loadInc(t, db, uuid); inc.MemoryExtraction != "" {
+			t.Errorf("%s queued: %q", uuid, inc.MemoryExtraction)
+		}
+	}
+	if inc := loadInc(t, db, "done"); inc.MemoryExtraction != database.MemoryExtractionSucceeded {
+		t.Errorf("done re-queued: %q", inc.MemoryExtraction)
+	}
+	select {
+	case <-e.kick:
+	default:
+		t.Error("backfill did not kick the loop")
 	}
 }

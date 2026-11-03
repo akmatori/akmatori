@@ -4,20 +4,28 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/akmatori/akmatori/internal/services"
 	"gorm.io/gorm"
 )
 
 type fakeMemoryExtractor struct {
-	err  error
-	last string
+	err   error
+	last  string
+	since time.Time
 }
 
 func (f *fakeMemoryExtractor) Rerun(_ context.Context, uuid string) error {
 	f.last = uuid
 	return f.err
+}
+
+func (f *fakeMemoryExtractor) Backfill(_ context.Context, since time.Time) (int64, error) {
+	f.since = since
+	return 3, f.err
 }
 
 // TestHandleIncidentExtractMemory maps the rerun outcomes to status codes:
@@ -51,6 +59,27 @@ func TestHandleIncidentExtractMemory(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("backfill", func(t *testing.T) {
+		h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		fake := &fakeMemoryExtractor{}
+		h.SetMemoryExtractor(fake)
+		mux := http.NewServeMux()
+		h.SetupRoutes(mux)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/incidents/extract-memory-backfill", strings.NewReader(`{"days": 7}`)))
+		if rec.Code != http.StatusAccepted || !strings.Contains(rec.Body.String(), `"queued":3`) {
+			t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
+		}
+		if d := time.Since(fake.since); d < 6*24*time.Hour || d > 8*24*time.Hour {
+			t.Errorf("since = %v", fake.since)
+		}
+		rec = httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/incidents/extract-memory-backfill", strings.NewReader(`{"days": 400}`)))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("days 400: status = %d", rec.Code)
+		}
+	})
 
 	t.Run("no service", func(t *testing.T) {
 		h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)

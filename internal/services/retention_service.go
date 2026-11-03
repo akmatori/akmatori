@@ -94,10 +94,14 @@ func (s *RetentionService) RunCleanup() (*CleanupResult, error) {
 func (s *RetentionService) cleanupExpiredIncidents(retentionDays int, result *CleanupResult) {
 	cutoff := time.Now().AddDate(0, 0, -retentionDays)
 
+	// Finished investigations expire by completion time; closed and merged
+	// incidents (terminal, reached later) by the time they closed.
 	var incidents []database.Incident
 	err := s.db.Select("id, uuid, status, completed_at").
-		Where("status IN ? AND completed_at < ?",
+		Where("(status IN ? AND completed_at < ?) OR (status IN ? AND COALESCE(resolved_at, completed_at, updated_at) < ?)",
 			[]database.IncidentStatus{database.IncidentStatusCompleted, database.IncidentStatusFailed, database.IncidentStatusDiagnosed},
+			cutoff,
+			[]database.IncidentStatus{database.IncidentStatusClosed, database.IncidentStatusMerged},
 			cutoff,
 		).Find(&incidents).Error
 	if err != nil {
@@ -139,6 +143,9 @@ func (s *RetentionService) cleanupExpiredIncidents(retentionDays int, result *Cl
 			if err := clearRunWork(tx.Where("incident_uuid = ?", incident.UUID)); err != nil {
 				return fmt.Errorf("clear run work: %w", err)
 			}
+			if err := noteSourceIncidentDeleted(tx, incident.UUID); err != nil {
+				return fmt.Errorf("note memories: %w", err)
+			}
 			return tx.Delete(&incident).Error
 		}); err != nil {
 			slog.Error("failed to delete incident record", "uuid", incident.UUID, "error", err)
@@ -171,6 +178,23 @@ func (s *RetentionService) cleanupExpiredEvents(retentionDays int, result *Clean
 
 // clearRunWork empties the payload columns of the runs selected by q. The
 // rows and their metric columns stay: they feed per-model statistics.
+// sourceIncidentDeletedNote is appended to the evidence note of the agent
+// memories of a deleted incident: their support is gone, and Dreaming
+// reviews them. Operator rows and confirmed memories are left alone.
+const sourceIncidentDeletedNote = "source incident deleted"
+
+// noteSourceIncidentDeleted marks the agent memories of incidentUUID. The
+// note is appended in SQL (both dialects have || and substr) and capped at
+// the column size; a memory that already carries it is skipped.
+func noteSourceIncidentDeleted(tx *gorm.DB, incidentUUID string) error {
+	if !tx.Migrator().HasTable(&database.Memory{}) {
+		return nil
+	}
+	return tx.Exec(`UPDATE memories SET evidence_note = substr(CASE WHEN COALESCE(evidence_note, '') = '' THEN ? ELSE evidence_note || ' (' || ? || ')' END, 1, 500)
+		WHERE incident_uuid = ? AND (created_by IS NULL OR created_by <> 'operator') AND evidence <> 'confirmed' AND COALESCE(evidence_note, '') NOT LIKE ?`,
+		sourceIncidentDeletedNote, sourceIncidentDeletedNote, incidentUUID, "%"+sourceIncidentDeletedNote+"%").Error
+}
+
 func clearRunWork(q *gorm.DB) error {
 	return q.Model(&database.AgentRun{}).Updates(map[string]interface{}{
 		"full_log":   "",

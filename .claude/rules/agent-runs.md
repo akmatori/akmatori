@@ -51,8 +51,9 @@ An `incidents` row is a production problem and nothing else: only alerts open in
   oldest first, `=== Run i of n ===` headers), token/time sums and `runs`;
   `GET /api/requests/{uuid}` (+ `/response`) is request work (status = newest run). `POST
   /api/incidents` returns the request scope as `uuid` for a request (`event_kind: request`)
-- retention: an expired incident is deleted and its runs' payload (`full_log`, `response`,
-  `session_id`) is cleared; expired request scopes (newest run finished before the cutoff, none
+- retention: an expired incident (completed/failed/diagnosed by `completed_at`; closed/merged by
+  the close time) is deleted, its agent memories get the note `source incident deleted`, and its
+  runs' payload (`full_log`, `response`, `session_id`) is cleared; expired request scopes (newest run finished before the cutoff, none
   running) get the same clear and lose their directory. Run rows and metrics are never deleted
 - migration `migrateSplitAgentRuns` (runs while `incidents.full_log` exists): copies the work onto
   each incident's newest run (a model-less synthetic run when it had none), turns non-alert

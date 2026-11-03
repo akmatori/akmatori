@@ -24,6 +24,7 @@ func setupRetentionTestDB(t *testing.T) *gorm.DB {
 		&database.AgentRun{},
 		&database.Alert{},
 		&database.Event{},
+		&database.Memory{},
 		&database.RetentionSettings{},
 	)
 	if err != nil {
@@ -35,6 +36,7 @@ func setupRetentionTestDB(t *testing.T) *gorm.DB {
 	db.Exec("DELETE FROM agent_runs")
 	db.Exec("DELETE FROM alerts")
 	db.Exec("DELETE FROM events")
+	db.Exec("DELETE FROM memories")
 	db.Exec("DELETE FROM retention_settings")
 
 	origDB := database.DB
@@ -740,5 +742,77 @@ func TestRunCleanup_ExpiredRequests(t *testing.T) {
 	result, _ = NewRetentionService(dataDir, db).RunCleanup()
 	if result.ExpiredRequestsCleared != 0 {
 		t.Errorf("second pass cleared %d, want 0", result.ExpiredRequestsCleared)
+	}
+}
+
+// TestRunCleanup_ClosedIncidentsExpireByCloseTime: closed and merged
+// incidents expire by the time they closed; their agent memories keep
+// their text and get the "source incident deleted" note, operator and
+// confirmed memories are untouched.
+func TestRunCleanup_ClosedIncidentsExpireByCloseTime(t *testing.T) {
+	db := setupRetentionTestDB(t)
+	dataDir := t.TempDir()
+	db.Create(&database.RetentionSettings{Enabled: true, RetentionDays: 30, CleanupIntervalHours: 6})
+
+	oldCompleted := time.Now().AddDate(0, 0, -60)
+	recentClose := time.Now().AddDate(0, 0, -5)
+	oldClose := time.Now().AddDate(0, 0, -45)
+	// Completed long ago, closed recently: kept.
+	db.Create(&database.Incident{UUID: "closed-recent", Source: "t", Status: database.IncidentStatusClosed, CompletedAt: &oldCompleted, ResolvedAt: &recentClose})
+	// Closed long ago: deleted.
+	db.Create(&database.Incident{UUID: "closed-old", Source: "t", Status: database.IncidentStatusClosed, CompletedAt: &oldCompleted, ResolvedAt: &oldClose})
+	db.Create(&database.Incident{UUID: "merged-old", Source: "t", Status: database.IncidentStatusMerged, CompletedAt: &oldCompleted, MergedIntoUUID: "closed-old"})
+	db.Model(&database.Incident{}).Where("uuid = ?", "merged-old").Update("updated_at", oldClose)
+	for _, m := range []database.Memory{
+		{Scope: "global", Name: "agent-note", Type: "fact", Description: "d", Body: "b", IncidentUUID: "closed-old", CreatedBy: MemoryCreatedByAgent, Evidence: MemoryEvidenceUnverified, EvidenceNote: "seen 2026-10-01"},
+		{Scope: "global", Name: "agent-blank", Type: "fact", Description: "d", Body: "b", IncidentUUID: "closed-old", CreatedBy: MemoryCreatedByAgent, Evidence: MemoryEvidenceObserved},
+		{Scope: "global", Name: "op-note", Type: "feedback", Description: "d", Body: "b", IncidentUUID: "closed-old", CreatedBy: MemoryCreatedByOperator, Evidence: MemoryEvidenceObserved},
+		{Scope: "global", Name: "confirmed-note", Type: "fact", Description: "d", Body: "b", IncidentUUID: "closed-old", CreatedBy: MemoryCreatedByAgent, Evidence: MemoryEvidenceConfirmed},
+		{Scope: "global", Name: "other-inc", Type: "fact", Description: "d", Body: "b", IncidentUUID: "closed-recent", CreatedBy: MemoryCreatedByAgent, Evidence: MemoryEvidenceUnverified},
+	} {
+		if err := db.Create(&m).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	svc := NewRetentionService(dataDir, db)
+	result, err := svc.RunCleanup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExpiredIncidentsDeleted != 2 {
+		t.Errorf("deleted %d incidents, want 2 (closed-old, merged-old)", result.ExpiredIncidentsDeleted)
+	}
+	var n int64
+	db.Model(&database.Incident{}).Where("uuid = ?", "closed-recent").Count(&n)
+	if n != 1 {
+		t.Error("recently closed incident deleted")
+	}
+	want := map[string]string{
+		"agent-note":     "seen 2026-10-01 (" + sourceIncidentDeletedNote + ")",
+		"agent-blank":    sourceIncidentDeletedNote,
+		"op-note":        "",
+		"confirmed-note": "",
+		"other-inc":      "",
+	}
+	for name, note := range want {
+		var m database.Memory
+		if err := db.Where("name = ?", name).Take(&m).Error; err != nil {
+			t.Fatalf("%s: %v (memories must survive the incident)", name, err)
+		}
+		if m.EvidenceNote != note {
+			t.Errorf("%s note = %q, want %q", name, m.EvidenceNote, note)
+		}
+	}
+	// A second run does not append the note twice.
+	db.Create(&database.Incident{UUID: "closed-old-2", Source: "t", Status: database.IncidentStatusClosed, ResolvedAt: &oldClose})
+	db.Model(&database.Memory{}).Where("name = ?", "agent-note").Update("incident_uuid", "closed-old-2")
+	if _, err := svc.RunCleanup(); err != nil {
+		t.Fatal(err)
+	}
+	var m database.Memory
+	db.Where("name = ?", "agent-note").Take(&m)
+	if m.EvidenceNote != want["agent-note"] {
+		t.Errorf("note appended twice: %q", m.EvidenceNote)
 	}
 }

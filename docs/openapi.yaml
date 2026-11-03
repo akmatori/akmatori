@@ -1213,6 +1213,45 @@ paths:
         '503':
           description: The memory extraction service is not available.
 
+  /incidents/extract-memory-backfill:
+    post:
+      summary: Queue the post-incident memory pass for incidents closed before it existed
+      description: |
+        Queues the memory pass for the closed alert incidents resolved in the last `days`
+        days that were never extracted (memory_extraction empty). Incidents already
+        extracted are left alone; use the per-incident rerun for those.
+      operationId: extractMemoryBackfill
+      tags: [Incidents]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                days:
+                  type: integer
+                  minimum: 1
+                  maximum: 365
+                  default: 30
+      responses:
+        '202':
+          description: Queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queued:
+                    type: integer
+                  since:
+                    type: string
+                    format: date-time
+        '400':
+          description: days out of range
+        '503':
+          description: The memory extraction service is not available.
+
   /requests/{uuid}:
     parameters:
       - name: uuid

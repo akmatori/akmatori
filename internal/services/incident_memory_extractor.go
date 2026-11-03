@@ -77,6 +77,15 @@ type IncidentMemoryExtractor struct {
 	kick      chan struct{}
 	now       func() time.Time
 	tick      time.Duration
+	// incidentsDir is the work directory root; when set, the pass also reads
+	// the tool outputs the worker spilled to <dir>/<uuid>/tool_outputs/.
+	incidentsDir string
+}
+
+// SetIncidentsDir enables bounded reads of the spilled tool outputs of the
+// family's work directories.
+func (e *IncidentMemoryExtractor) SetIncidentsDir(dir string) {
+	e.incidentsDir = dir
 }
 
 // NewIncidentMemoryExtractor returns the extractor. A nil caller fails every
@@ -223,7 +232,7 @@ func (e *IncidentMemoryExtractor) process(ctx context.Context, inc *database.Inc
 		e.finish(ctx, inc.UUID, claimAt, database.MemoryExtractionSkipped, "memory generation is off")
 		return
 	}
-	in, err := collectExtractionInput(e.db.WithContext(ctx), inc)
+	in, err := collectExtractionInput(e.db.WithContext(ctx), inc, e.incidentsDir)
 	if err != nil {
 		e.retryOrFail(ctx, inc, claimAt, err)
 		return
@@ -378,6 +387,31 @@ func (e *IncidentMemoryExtractor) Rerun(ctx context.Context, uuid string) error 
 	}
 	e.Kick()
 	return nil
+}
+
+// Backfill queues the closed alert incidents that were never extracted
+// (closed before the pass existed) and resolved at or after since. It
+// returns how many it queued; a rerun of an extracted incident goes through
+// Rerun.
+func (e *IncidentMemoryExtractor) Backfill(ctx context.Context, since time.Time) (int64, error) {
+	res := e.db.WithContext(ctx).Model(&database.Incident{}).
+		Where("source_kind = ? AND status = ? AND (memory_extraction IS NULL OR memory_extraction = '') AND resolved_at >= ?",
+			database.IncidentSourceKindAlert, database.IncidentStatusClosed, since).
+		Updates(map[string]interface{}{
+			"memory_extraction":          database.MemoryExtractionPending,
+			"memory_extraction_at":       nil,
+			"memory_extraction_error":    "",
+			"memory_extraction_attempts": 0,
+			"memory_extraction_retry_at": nil,
+		})
+	if res.Error != nil {
+		return 0, fmt.Errorf("queue backfill: %w", res.Error)
+	}
+	if res.RowsAffected > 0 {
+		slog.Info("memory extraction: queued a backfill", "incidents", res.RowsAffected, "since", since.UTC().Format(time.RFC3339))
+		e.Kick()
+	}
+	return res.RowsAffected, nil
 }
 
 func cutExtractionError(s string) string {

@@ -137,7 +137,21 @@ mirror is removed.
   protection predicate in the SQL, a name owned by anyone else gets `-2`, `-3`…; a partial
   failure rolls everything back. `POST /api/incidents/{uuid}/extract-memory` (`Rerun`): closed +
   not pending/running → pending, attempts reset, 202; pending/running → 409; not closed or
-  merged → 409; missing → 404
+  merged → 409; missing → 404. `POST /api/incidents/extract-memory-backfill` `{days}` (default
+  30, max 365) → `Backfill(since)`: queues the closed alert incidents resolved since then whose
+  `memory_extraction` is empty (closed before the pass existed), 202 `{queued, since}`. The pass
+  also reads the heads of the spilled tool outputs (`<incidents dir>/<uuid>/tool_outputs/*`,
+  `readSpilledToolOutputs` through `os.Root`, regular files only, newest first, 8 KiB per file,
+  32 KiB and 8 files total; `SetIncidentsDir` wires the root)
+- retention: a `closed` or `merged` incident expires by its close time (`COALESCE(resolved_at,
+  completed_at, updated_at)`), like a completed one by `completed_at`; the delete transaction
+  appends `source incident deleted` to the evidence note of its agent memories
+  (`noteSourceIncidentDeleted`: not operator rows, not confirmed, never twice) and keeps the rows
+  for Dreaming to review
+- Slack remember command (`slack_remember.go`): a thread reply `remember: X`, `/remember X` or
+  `!remember X` (with or without the bot mention) is stored as an operator feedback memory on the
+  thread's work with the note "operator asked to remember it", with no classifier and no LLM;
+  ack = 👍, plus the short text on the mention path. Checked before the classifier in both paths
 - Dreaming (`dreamingCronPrompt`) carries the evidence rules: a merged memory takes the LOWEST
   grade of its cluster (an operator-confirmed member is kept as is and never lowered), never
   writes `confirmed`, keeps causal claims unverified, lists the source incidents in the note, and

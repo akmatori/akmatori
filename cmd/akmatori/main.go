@@ -401,6 +401,7 @@ func main() {
 	if err := memoryExtractor.ResetInterrupted(); err != nil {
 		slog.Warn("failed to re-queue interrupted memory extractions", "err", err)
 	}
+	memoryExtractor.SetIncidentsDir(filepath.Join(dataDir, "incidents"))
 	apiHandler.SetMemoryExtractor(memoryExtractor)
 	skillService.SetExtractionKicker(memoryExtractor)
 	staleCloseService.SetExtractionKicker(memoryExtractor)
