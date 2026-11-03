@@ -378,6 +378,35 @@ components:
           type: string
           format: date-time
           nullable: true
+        memory_extraction:
+          type: string
+          enum: ['', pending, running, succeeded, no_output, skipped, failed]
+          description: |
+            State of the post-incident memory pass. Empty: never queued (closed before the
+            pass existed, or not closed). no_output: the pass ran and found nothing durable, or
+            no finished run had an answer. skipped: memory generation is off, the incident was
+            merged, or the row went away. failed: the retries are used up (see
+            memory_extraction_error).
+        memory_extraction_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the current or last pass claimed the incident.
+        memory_extraction_error:
+          type: string
+        memory_extraction_attempts:
+          type: integer
+        memory_extraction_retry_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Set while a failed attempt waits for its retry.
+        memory_extraction_note:
+          type: string
+          description: For example "redacted 2 secrets".
+        memory_timeline:
+          type: string
+          description: The timeline the pass extracted, one line per entry. Not a memory.
         created_at:
           type: string
           format: date-time
@@ -1148,6 +1177,41 @@ paths:
                 $ref: '#/components/schemas/Incident'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /incidents/{uuid}/extract-memory:
+    parameters:
+      - name: uuid
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Run the post-incident memory pass again
+      description: |
+        Queues the post-incident memory extraction of a closed incident again. The pass
+        reads the outcome (close reason, how each alert resolved, the runs' self-reports),
+        the transcripts and the final answers, and writes graded memories; the memories
+        this incident wrote before are updated in place. The queue is drained by a
+        background worker; the incident's memory_extraction field shows the progress.
+      operationId: extractIncidentMemory
+      tags: [Incidents]
+      responses:
+        '202':
+          description: Queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [pending]
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The incident is not closed (a merged incident is read with its survivor), or the pass is already pending or running.
+        '503':
+          description: The memory extraction service is not available.
 
   /requests/{uuid}:
     parameters:

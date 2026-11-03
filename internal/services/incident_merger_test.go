@@ -97,6 +97,11 @@ func TestIncidentMerger_ConfidentMatch_MergesIncidents(t *testing.T) {
 	if merged.MonitorUntil != nil {
 		t.Error("expected merged incident monitor_until cleared")
 	}
+	// The survivor's post-incident pass reads the merged runs; the merged
+	// row itself is never extracted.
+	if merged.MemoryExtraction != database.MemoryExtractionSkipped || !strings.Contains(merged.MemoryExtractionError, "merged into inc-old") {
+		t.Errorf("merged extraction = %q (%q), want skipped", merged.MemoryExtraction, merged.MemoryExtractionError)
+	}
 
 	var alert database.Alert
 	if err := db.Where("uuid = ?", "alert-new").First(&alert).Error; err != nil {

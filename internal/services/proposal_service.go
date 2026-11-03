@@ -394,6 +394,18 @@ func (s *ProposalService) apply(ctx context.Context, p *database.Proposal) error
 			Claim:        strValue(content.Claim),
 			EvidenceNote: strValue(content.EvidenceNote),
 		}
+		// A model-drafted memory must not carry a token the agent saw.
+		var redacted int
+		mem.Description, redacted = RedactSecrets(mem.Description)
+		if body, n := RedactSecrets(mem.Body); n > 0 {
+			mem.Body, redacted = body, redacted+n
+		}
+		if note, n := RedactSecrets(mem.EvidenceNote); n > 0 {
+			mem.EvidenceNote, redacted = note, redacted+n
+		}
+		if redacted > 0 {
+			slog.Info("proposal approval: redacted secrets in the memory", "proposal", p.UUID, "count", redacted)
+		}
 		// The operator approves the change, not every claim in it: a
 		// model-drafted cause stays unverified until an operator confirms
 		// it on the memory itself.

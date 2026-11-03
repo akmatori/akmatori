@@ -47,6 +47,22 @@ const (
 	CloseReasonAutoStale = "auto_stale"
 )
 
+// Memory extraction states of a closed incident (Incident.MemoryExtraction).
+// Empty = never queued (closed before the extractor existed, or not closed).
+const (
+	MemoryExtractionPending   = "pending"
+	MemoryExtractionRunning   = "running"
+	MemoryExtractionSucceeded = "succeeded"
+	// MemoryExtractionNoOutput: the pass ran and found nothing durable, or
+	// the incident has no finished run to read.
+	MemoryExtractionNoOutput = "no_output"
+	// MemoryExtractionSkipped: the gate is off, the incident was merged, or
+	// the row went away.
+	MemoryExtractionSkipped = "skipped"
+	// MemoryExtractionFailed: the retries are used up; Error has the reason.
+	MemoryExtractionFailed = "failed"
+)
+
 // Incident is a production problem opened from an alert through the
 // correlation gate. Only alerts open incidents (see the events rule); the
 // agent work done on an incident lives on its agent_runs rows.
@@ -95,6 +111,21 @@ type Incident struct {
 	// self-report, not ground truth — resolution quality signals additionally
 	// come from the monitor window and alert resolved_at.
 	ResultStatus string `gorm:"size:16;index" json:"result_status,omitempty"`
+
+	// Post-incident memory extraction queue (services.IncidentMemoryExtractor).
+	// Every close path sets MemoryExtraction to pending in the UPDATE that
+	// closes the row; the worker claims pending rows (MemoryExtractionAt is
+	// the claim time and the lease), retries transient failures with a
+	// backoff (Attempts, RetryAt) and records the outcome: succeeded,
+	// no_output, skipped or failed (Error says why). MemoryTimeline is the
+	// timeline the pass extracted, for the UI; it is not a memory.
+	MemoryExtraction         string     `gorm:"size:16;index" json:"memory_extraction,omitempty"`
+	MemoryExtractionAt       *time.Time `json:"memory_extraction_at,omitempty"`
+	MemoryExtractionError    string     `gorm:"size:300" json:"memory_extraction_error,omitempty"`
+	MemoryExtractionAttempts int        `json:"memory_extraction_attempts"`
+	MemoryExtractionRetryAt  *time.Time `json:"memory_extraction_retry_at,omitempty"`
+	MemoryExtractionNote     string     `gorm:"size:200" json:"memory_extraction_note,omitempty"`
+	MemoryTimeline           string     `gorm:"type:text" json:"memory_timeline,omitempty"`
 
 	// AlertCount is not stored; populated by API handlers via COUNT query.
 	AlertCount int64 `gorm:"-" json:"alert_count"`

@@ -285,6 +285,26 @@ const memoryWriteInstructionTemplate = "When the investigation surfaces durable 
 	"context files already say. Skip the call when nothing durable was learned. Make memory.write calls before " +
 	"your final response: the final message is the full findings report, never a note about the saved memory."
 
+// memorySharedWriteNote opens the Record durable findings section of a
+// SKILL.md, which every run shares: the writes are allowed in request work
+// and refused in alert investigations (the gateway refuses them; the
+// post-incident pass records the findings).
+const memorySharedWriteNote = "Memory writes are allowed in request work (a Slack mention, an API task, a cron tick) and " +
+	"refused in alert investigations, where a post-incident pass records the findings when the incident closes. " +
+	"When they are allowed: "
+
+// memoryIncidentRunInstruction replaces the record-findings guidance in the
+// AGENTS.md of an alert investigation. It overrides the root prompt, which
+// still describes memory.write for request work; the gateway refuses the
+// writes anyway.
+const memoryIncidentRunInstruction = "This is an alert investigation: do NOT call memory.write or memory.delete, even where " +
+	"other instructions ask you to record findings; the gateway refuses them. A post-incident pass records the " +
+	"durable findings when the incident closes, from your final answer. So put in the final answer: the timeline " +
+	"with timestamps (what moved first), your findings marked as observed or as a hypothesis, and these blocks " +
+	"when they apply: `Operator asked to remember:` with what an operator asked you to remember (verbatim), and " +
+	"`Memory contradicted:` with the name of a memory the tools showed to be wrong and what you saw instead. " +
+	"memory.search, memory.list and memory.get work as usual."
+
 // memoryGenerationOffInstruction replaces the record-findings guidance when
 // an operator turned agent memory off. It overrides the root prompts, which
 // still mention memory.write; the gateway refuses the writes anyway.
@@ -292,11 +312,29 @@ const memoryGenerationOffInstruction = "An operator turned off memory generation
 	"memory.delete, even where other instructions or a task ask you to record findings or to update or delete " +
 	"memories: the gateway refuses them. memory.search, memory.list and memory.get still work."
 
+// scopeKind says which run an AGENTS.md is rendered for. A SKILL.md is
+// shared by every run (scopeKindShared).
+type scopeKind int
+
+const (
+	scopeKindShared scopeKind = iota
+	scopeKindIncident
+	scopeKindRequest
+)
+
 // renderMemoryRecallSection returns the recall instruction plus the scope's
 // manifest rendered from the database ("global" for AGENTS.md, the skill name
 // for SKILL.md), followed by the Record durable findings subsection (or the
 // memory-off note). Returns "" when the service has no database.
 func (s *SkillService) renderMemoryRecallSection(scope string) string {
+	return s.renderMemoryRecallSectionFor(scope, scopeKindShared)
+}
+
+// renderMemoryRecallSectionFor is renderMemoryRecallSection with the run
+// kind: an alert investigation gets the do-not-write instruction (the
+// post-incident pass records its findings), request work gets the write
+// guidance, a shared SKILL.md gets both in one neutral note.
+func (s *SkillService) renderMemoryRecallSectionFor(scope string, kind scopeKind) string {
 	if s.db == nil {
 		return ""
 	}
@@ -324,7 +362,15 @@ func (s *SkillService) renderMemoryRecallSection(scope string) string {
 		return b.String()
 	}
 	b.WriteString("\n### Record durable findings\n\n")
-	fmt.Fprintf(&b, memoryWriteInstructionTemplate, scope, scope)
+	switch kind {
+	case scopeKindIncident:
+		b.WriteString(memoryIncidentRunInstruction)
+	case scopeKindRequest:
+		fmt.Fprintf(&b, memoryWriteInstructionTemplate, scope, scope)
+	default:
+		b.WriteString(memorySharedWriteNote)
+		fmt.Fprintf(&b, memoryWriteInstructionTemplate, scope, scope)
+	}
 	b.WriteString("\n")
 	return b.String()
 }

@@ -447,7 +447,7 @@ func (h *AlertHandler) processResolvedAlert(sourceUUID string, normalized alerts
 		// state (shorten an existing monitor window, or promote a completed
 		// incident that was held out of monitor mode because this alert was
 		// still firing at investigation-completion time).
-		if err := services.ResolveAlertTx(tx, &a, now); err != nil {
+		if err := services.ResolveAlertTx(tx, &a, now, database.AlertResolvedBySource); err != nil {
 			return fmt.Errorf("resolve alert: %w", err)
 		}
 		return nil

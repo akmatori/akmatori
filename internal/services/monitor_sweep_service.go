@@ -22,7 +22,8 @@ const monitorSweepInterval = 15 * time.Minute
 // passes with no recurrence, the incident is done being watched and should
 // move to "closed" rather than sit in "monitor" indefinitely.
 type MonitorSweepService struct {
-	db *gorm.DB
+	db     *gorm.DB
+	kicker ExtractionKicker
 }
 
 // NewMonitorSweepService creates a new monitor sweep service.
@@ -55,18 +56,14 @@ func (s *MonitorSweepService) RunSweep() (*SweepResult, error) {
 			Updates(map[string]interface{}{
 				"status":      string(database.AlertStatusResolved),
 				"resolved_at": now,
+				"resolved_by": database.AlertResolvedBySweep,
 			}).Error; err != nil {
 			return fmt.Errorf("resolve firing alerts on expired-monitor incidents: %w", err)
 		}
 
 		update := tx.Model(&database.Incident{}).
 			Where("status = ? AND monitor_until < ?", database.IncidentStatusMonitor, now).
-			Updates(map[string]interface{}{
-				"status":        database.IncidentStatusClosed,
-				"resolved_at":   &now,
-				"monitor_until": nil,
-				"closed_reason": database.CloseReasonMonitorExpired,
-			})
+			Updates(closeIncidentValues(now, database.CloseReasonMonitorExpired))
 		if update.Error != nil {
 			return fmt.Errorf("close expired-monitor incidents: %w", update.Error)
 		}
@@ -79,8 +76,16 @@ func (s *MonitorSweepService) RunSweep() (*SweepResult, error) {
 
 	if result.IncidentsClosed > 0 {
 		slog.Info("monitor sweep closed expired incidents", "count", result.IncidentsClosed)
+		if s.kicker != nil {
+			s.kicker.Kick()
+		}
 	}
 	return result, nil
+}
+
+// SetExtractionKicker wires the memory extractor's wake-up; optional.
+func (s *MonitorSweepService) SetExtractionKicker(k ExtractionKicker) {
+	s.kicker = k
 }
 
 // StartBackgroundSweep runs RunSweep once at startup, then on a fixed ticker

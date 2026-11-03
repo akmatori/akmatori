@@ -34,7 +34,11 @@ func newTestTool(t *testing.T) (*Tool, *gorm.DB) {
 	}
 	db.Create(&database.Skill{Name: "linux-admin", Enabled: true})
 	db.Create(&database.Skill{Name: "connected-tools", IsSystem: true, Enabled: true})
-	db.Create(&database.AgentRun{RunID: "run-1", ScopeUUID: testScope, IncidentUUID: "inc-1", SourceKind: "alert", Status: "running"})
+	// run-1 is request work (a Slack mention): the run kind that writes
+	// memory. Alert investigations (run-alert) are refused: the API's
+	// post-incident pass records their findings.
+	db.Create(&database.AgentRun{RunID: "run-1", ScopeUUID: testScope, SourceKind: "slack_mention", Status: "running"})
+	db.Create(&database.AgentRun{RunID: "run-alert", ScopeUUID: "inc-1", IncidentUUID: "inc-1", SourceKind: "alert", Status: "running"})
 	return NewTool(db, log.New(io.Discard, "", 0)), db
 }
 
@@ -126,7 +130,7 @@ func TestMemoryWrite_CreateUpdateUnchanged(t *testing.T) {
 	}
 	var m database.Memory
 	db.Where("name = ?", "edge-nic").Take(&m)
-	if m.CreatedBy != "agent" || m.IncidentUUID != "inc-1" {
+	if m.CreatedBy != "agent" || m.IncidentUUID != "" {
 		t.Errorf("provenance: %+v", m)
 	}
 	first := m.UpdatedAt
@@ -266,6 +270,58 @@ func TestMemoryWrite_RunIdentity(t *testing.T) {
 	// Reads need no run id.
 	if _, err := tool.MemoryList(context.Background(), testScope, map[string]interface{}{}); err != nil {
 		t.Errorf("list without run id: %v", err)
+	}
+}
+
+// TestMemoryWrite_AlertRunRefused: an alert investigation does not write
+// memory (write and delete); the refusal names the post-incident pass. A
+// proposal chat run is refused with its own message first.
+func TestMemoryWrite_AlertRunRefused(t *testing.T) {
+	tool, db := newTestTool(t)
+	_, err := tool.MemoryWrite(runCtx("run-alert"), "inc-1", memArgs("alert-fact", "b"))
+	if err == nil || !strings.Contains(err.Error(), "post-incident pass") {
+		t.Fatalf("alert run write: %v", err)
+	}
+	_, err = tool.MemoryDelete(runCtx("run-alert"), "inc-1", map[string]interface{}{"scope": "global", "name": "x"})
+	if err == nil || !strings.Contains(err.Error(), "post-incident pass") {
+		t.Fatalf("alert run delete: %v", err)
+	}
+	var n int64
+	db.Model(&database.Memory{}).Count(&n)
+	if n != 0 {
+		t.Errorf("alert run stored %d memories", n)
+	}
+	db.Create(&database.AgentRun{RunID: "run-chat-inc", ScopeUUID: "inc-2", IncidentUUID: "inc-2", SourceKind: "proposal", Status: "running"})
+	_, err = tool.MemoryWrite(runCtx("run-chat-inc"), "inc-2", memArgs("x", "b"))
+	if err == nil || !strings.Contains(err.Error(), "proposal") {
+		t.Errorf("proposal refusal must come first: %v", err)
+	}
+	// Request runs (Slack, cron) still write.
+	if _, err := write(t, tool, runCtx("run-1"), memArgs("slack-fact", "b")); err != nil {
+		t.Errorf("slack run write: %v", err)
+	}
+}
+
+// TestMemoryWrite_RedactsSecrets: a token in the description, body or note
+// is replaced before the upsert and the response says how many.
+func TestMemoryWrite_RedactsSecrets(t *testing.T) {
+	tool, db := newTestTool(t)
+	args := memArgs("api-host", "Call it with Authorization: Bearer abcdefghijklmnop and see the result.")
+	args["evidence_note"] = "token=0123456789abcdef in the config"
+	r, err := write(t, tool, runCtx("run-1"), args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r["redacted"] != float64(2) {
+		t.Errorf("redacted = %v, want 2", r["redacted"])
+	}
+	var m database.Memory
+	db.Where("name = ?", "api-host").Take(&m)
+	if strings.Contains(m.Body, "abcdefghijklmnop") || strings.Contains(m.EvidenceNote, "0123456789abcdef") {
+		t.Errorf("secret stored: %+v", m)
+	}
+	if !strings.Contains(m.Body, redactedSecret) || !strings.Contains(m.EvidenceNote, redactedSecret) {
+		t.Errorf("no marker: %+v", m)
 	}
 }
 

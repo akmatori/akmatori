@@ -888,6 +888,11 @@ func TestResolveAlert_AlreadyResolved_ReturnsError(t *testing.T) {
 	if !errors.Is(err, ErrAlertAlreadyResolved) {
 		t.Errorf("second ResolveAlert error = %v, want ErrAlertAlreadyResolved", err)
 	}
+	var alert database.Alert
+	db.Where("uuid = ?", alertUUID).First(&alert)
+	if alert.ResolvedBy != database.AlertResolvedByOperator {
+		t.Errorf("ResolvedBy = %q, want operator", alert.ResolvedBy)
+	}
 }
 
 // --- CloseIncident Tests ---
@@ -937,6 +942,14 @@ func TestCloseIncident_InProgress_ConfirmForceCloses(t *testing.T) {
 	db.Where("uuid = ?", alertUUID).First(&alert)
 	if alert.Status != database.AlertStatusResolved {
 		t.Errorf("alert status = %q, want resolved after confirmed force-close", alert.Status)
+	}
+	if alert.ResolvedBy != database.AlertResolvedByOperator {
+		t.Errorf("ResolvedBy = %q, want operator", alert.ResolvedBy)
+	}
+	// The close queues the post-incident memory pass in the same UPDATE; the
+	// pass itself waits for the running run to finish (claim predicate).
+	if incident.MemoryExtraction != database.MemoryExtractionPending || incident.ClosedReason != database.CloseReasonManual {
+		t.Errorf("MemoryExtraction = %q ClosedReason = %q, want pending/manual", incident.MemoryExtraction, incident.ClosedReason)
 	}
 }
 

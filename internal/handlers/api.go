@@ -33,6 +33,7 @@ type APIHandler struct {
 	cronService          services.CronJobManager
 	proposalService      services.ProposalManager
 	staleIncidentCloser  services.StaleIncidentCloser
+	memoryExtractor      services.MemoryExtractionManager // nil = the rerun endpoint answers 503
 	responseFormatter    *services.ResponseFormatter
 	eventService         *services.EventService
 	alertExtractor       *extraction.AlertExtractor
@@ -155,6 +156,12 @@ func (h *APIHandler) SetStaleIncidentCloser(svc services.StaleIncidentCloser) {
 	h.staleIncidentCloser = svc
 }
 
+// SetMemoryExtractor wires the post-incident memory pass behind
+// POST /api/incidents/{uuid}/extract-memory.
+func (h *APIHandler) SetMemoryExtractor(e services.MemoryExtractionManager) {
+	h.memoryExtractor = e
+}
+
 // SetMemoryDrafter wires the drafter behind POST /api/memories/from-text.
 // Unset, the endpoint still works with the deterministic draft.
 func (h *APIHandler) SetMemoryDrafter(d *services.MemoryDrafter) {
@@ -192,6 +199,7 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/incidents/{uuid}/response", h.handleIncidentResponse)
 	mux.HandleFunc("GET /api/incidents/{uuid}", h.handleIncidentByID)
 	mux.HandleFunc("POST /api/incidents/{uuid}/close", h.handleIncidentClose)
+	mux.HandleFunc("POST /api/incidents/{uuid}/extract-memory", h.handleIncidentExtractMemory)
 	mux.HandleFunc("POST /api/incidents/sweep-stale", h.handleIncidentSweepStale)
 	// Request work: agent runs that are not incidents (Slack and API
 	// requests, cron ticks, proposal chats), keyed by their scope.

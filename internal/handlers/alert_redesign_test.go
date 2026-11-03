@@ -201,6 +201,9 @@ func TestProcessResolvedAlert_MatchBySourceFingerprint_MarksResolved(t *testing.
 	if a.Status != database.AlertStatusResolved {
 		t.Errorf("alert status = %q, want resolved", a.Status)
 	}
+	if a.ResolvedBy != database.AlertResolvedBySource {
+		t.Errorf("resolved_by = %q, want source", a.ResolvedBy)
+	}
 	if a.ResolvedAt == nil {
 		t.Error("alert resolved_at should be set after processResolvedAlert")
 	}

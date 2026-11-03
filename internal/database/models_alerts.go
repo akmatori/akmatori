@@ -15,7 +15,13 @@ type Alert struct {
 	TargetHost        string      `gorm:"size:255" json:"target_host"`
 	FiredAt           time.Time   `json:"fired_at"`
 	ResolvedAt        *time.Time  `json:"resolved_at,omitempty"`
-	RawPayload        JSONB       `gorm:"type:jsonb" json:"raw_payload"`
+	// ResolvedBy says who resolved the alert, stamped in the same UPDATE as
+	// ResolvedAt: source (the monitoring system sent a resolve), operator
+	// (manual resolve or close) or sweep (monitor or stale close). Empty on
+	// rows resolved before the column existed: unknown. The post-incident
+	// memory pass reads it: an alert a sweep resolved was not seen to recover.
+	ResolvedBy string `gorm:"size:16" json:"resolved_by,omitempty"`
+	RawPayload JSONB  `gorm:"type:jsonb" json:"raw_payload"`
 
 	// EventUUID is the events row that created this alert. Empty for rows
 	// created before the events table existed and not yet backfilled.
@@ -32,13 +38,13 @@ type Alert struct {
 	LastSeenAt *time.Time `gorm:"index" json:"last_seen_at,omitempty"`
 
 	// Correlation fields: set when this alert is linked to an existing incident.
-	Correlated              bool     `gorm:"default:false" json:"correlated"`
-	CorrelationConfidence   *float64 `json:"correlation_confidence,omitempty"`
-	CorrelationReasoning    string   `gorm:"type:text" json:"correlation_reasoning,omitempty"`
-	CorrelationDecision     string   `gorm:"size:16;index" json:"correlation_decision,omitempty"`
+	Correlated            bool     `gorm:"default:false" json:"correlated"`
+	CorrelationConfidence *float64 `json:"correlation_confidence,omitempty"`
+	CorrelationReasoning  string   `gorm:"type:text" json:"correlation_reasoning,omitempty"`
+	CorrelationDecision   string   `gorm:"size:16;index" json:"correlation_decision,omitempty"`
 
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (Alert) TableName() string {
@@ -74,10 +80,10 @@ type AlertSourceInstance struct {
 	AlertSourceTypeID     uint      `gorm:"not null;index" json:"alert_source_type_id"`
 	Name                  string    `gorm:"uniqueIndex;size:128;not null" json:"name"` // User-friendly name
 	Description           string    `gorm:"type:text" json:"description"`
-	WebhookSecret         string    `gorm:"type:text" json:"webhook_secret"`           // Instance-specific secret
-	FieldMappings         JSONB     `gorm:"type:jsonb" json:"field_mappings"`          // Override default mappings
-	Settings              JSONB     `gorm:"type:jsonb" json:"settings"`                // Additional instance settings
-	NotificationChannelID *uint     `gorm:"index" json:"notification_channel_id"`      // Optional FK to channels.id; nil falls back to provider default
+	WebhookSecret         string    `gorm:"type:text" json:"webhook_secret"`      // Instance-specific secret
+	FieldMappings         JSONB     `gorm:"type:jsonb" json:"field_mappings"`     // Override default mappings
+	Settings              JSONB     `gorm:"type:jsonb" json:"settings"`           // Additional instance settings
+	NotificationChannelID *uint     `gorm:"index" json:"notification_channel_id"` // Optional FK to channels.id; nil falls back to provider default
 	Enabled               bool      `gorm:"default:true" json:"enabled"`
 	ConnectorID           *uint     `gorm:"index" json:"connector_id,omitempty"` // owning Connector; nil until reconciled
 	CreatedAt             time.Time `json:"created_at"`
@@ -113,6 +119,13 @@ type AlertStatus string
 const (
 	AlertStatusFiring   AlertStatus = "firing"
 	AlertStatusResolved AlertStatus = "resolved"
+)
+
+// Who resolved an alert (Alert.ResolvedBy).
+const (
+	AlertResolvedBySource   = "source"
+	AlertResolvedByOperator = "operator"
+	AlertResolvedBySweep    = "sweep"
 )
 
 // GetSeverityEmoji returns an emoji for the alert severity

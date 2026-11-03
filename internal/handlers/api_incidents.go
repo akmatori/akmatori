@@ -399,6 +399,31 @@ func (h *APIHandler) handleIncidentClose(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// handleIncidentExtractMemory handles POST /api/incidents/{uuid}/extract-memory:
+// it queues the post-incident memory pass again for a closed incident (the
+// prior output of this incident is replaced). 202 when queued, 404 when
+// missing, 409 when the incident is not closed (merged incidents are read
+// with their survivor) or the pass is already pending or running.
+func (h *APIHandler) handleIncidentExtractMemory(w http.ResponseWriter, r *http.Request) {
+	if h.memoryExtractor == nil {
+		api.RespondError(w, http.StatusServiceUnavailable, "memory extraction service not available")
+		return
+	}
+	incidentUUID := r.PathValue("uuid")
+	err := h.memoryExtractor.Rerun(r.Context(), incidentUUID)
+	switch {
+	case err == nil:
+		api.RespondJSON(w, http.StatusAccepted, map[string]string{"status": database.MemoryExtractionPending})
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		api.RespondError(w, http.StatusNotFound, "Incident not found")
+	case errors.Is(err, services.ErrExtractionNotClosed), errors.Is(err, services.ErrExtractionBusy):
+		api.RespondError(w, http.StatusConflict, err.Error())
+	default:
+		slog.Error("memory extraction rerun failed", "incident", incidentUUID, "err", err)
+		api.RespondError(w, http.StatusInternalServerError, "Failed to queue memory extraction")
+	}
+}
+
 // handleIncidentSweepStale handles POST /api/incidents/sweep-stale. It runs
 // the stale-incident close sweep on demand.
 //
