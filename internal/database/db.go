@@ -899,7 +899,7 @@ Escalate to human operators when:
 
 ## Recording durable findings
 
-Before closing the investigation, record durable facts, verdicts and patterns that will help future investigations with gateway_call("memory.write", {...}). Search first (memory.search) and update the memory that covers the subject (same scope + name) instead of adding a new name. Include the root cause, the remediation, and any host or service quirks discovered. The memory.write tool description has the full rules. Future investigations find these memories with memory.search.`
+Record durable facts, verdicts and patterns that will help future investigations with gateway_call("memory.write", {...}) BEFORE you write your final response. Your final message must be the complete findings report (root cause, evidence, remediation): it is the only text the operator and the incident record get. Never end with a short note about the memory you saved. Search first (memory.search) and update the memory that covers the subject (same scope + name) instead of adding a new name. Include the root cause, the remediation, and any host or service quirks discovered. The memory.write tool description has the full rules. Future investigations find these memories with memory.search.`
 
 // DefaultCronAgentPrompt is the root prompt for the cron-agent system skill.
 // It mirrors the incident-manager bootstrap but is scoped to scheduled,
@@ -941,7 +941,7 @@ const DefaultCronAgentPrompt = `You are the Cron Agent — a scheduled, autonomo
 
    The memory.write tool description has the full rules. Skip when nothing durable was learned and the task did not ask for a memory change.
 
-7. **Produce the final summary**: End your run with a concise summary of what you did and what (if anything) the operator should look at. The summary is posted as-is to the cron's configured channel, so keep it scannable: a one-line headline, optional bullet detail, and a single explicit next step when needed.
+7. **Produce the final summary** (after any memory.write, as your last message): End your run with a concise summary of what you did and what (if anything) the operator should look at. The summary is posted as-is to the cron's configured channel, so keep it scannable: a one-line headline, optional bullet detail, and a single explicit next step when needed.
 
 ## Response Guidelines
 

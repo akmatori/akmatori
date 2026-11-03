@@ -282,7 +282,8 @@ const memoryWriteInstructionTemplate = "When the investigation surfaces durable 
 	"A feedback body is the rule, then `**Why:**` and `**How to apply:**` lines. A memory that says X caused Y is " +
 	"`\"claim\": \"causal\"` and is stored as unverified: give the time the cause and the effect each started in " +
 	"`evidence_note`, and check that the cause came first. Never save what runbooks, alerts or " +
-	"context files already say. Skip the call when nothing durable was learned."
+	"context files already say. Skip the call when nothing durable was learned. Make memory.write calls before " +
+	"your final response: the final message is the full findings report, never a note about the saved memory."
 
 // memoryGenerationOffInstruction replaces the record-findings guidance when
 // an operator turned agent memory off. It overrides the root prompts, which
