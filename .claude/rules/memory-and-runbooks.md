@@ -134,6 +134,18 @@ mirror is removed.
   failure rolls everything back. `POST /api/incidents/{uuid}/extract-memory` (`Rerun`): closed +
   not pending/running → pending, attempts reset, 202; pending/running → 409; not closed or
   merged → 409; missing → 404
+- Dreaming (`dreamingCronPrompt`) carries the evidence rules: a merged memory takes the LOWEST
+  grade of its cluster (an operator-confirmed member is kept as is and never lowered), never
+  writes `confirmed`, keeps causal claims unverified, lists the source incidents in the note, and
+  rewrites a contradicted agent memory only on a specific newer observation. The previous text is
+  in `legacySystemCronPrompts` (append again on the next change)
+- UI: `EvidenceBadge` (green confirmed, grey observed, amber unverified; tooltip = claim + note)
+  on the memory list (with an evidence `SegmentedControl` filter) and detail; the edit form sets
+  evidence, claim and the note (`evidence_note` always sent, so an emptied field clears it); the
+  incident Summary tab of a closed incident shows `IncidentMemorySection` (extraction state from
+  `memoryExtractionHelpers.ts`, "Run memory pass" button → `incidentsApi.extractMemory`, the
+  timeline, the memories from this incident); the page polls every 5 s while the pass is
+  pending/running
 - secrets: `RedactSecrets` (`secret_redaction.go`, gateway mirror `knowledge/redact.go`, shared
   fixture `tests/fixtures/secret_redaction_cases.json`) replaces PEM private key blocks, URL
   passwords, `Bearer` tokens (8+ chars), `sk-…` keys, `AKIA…` ids and `key[:=]value` credentials

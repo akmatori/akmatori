@@ -77,6 +77,17 @@ func TestDreamingAndEvaluatorPrompts_UseMemoryList(t *testing.T) {
 	}
 }
 
+// TestDreamingPrompt_EvidenceRules pins the consolidation rules of the
+// evidence grades: lowest grade wins, confirmed is never written, a
+// contradiction needs a specific newer observation.
+func TestDreamingPrompt_EvidenceRules(t *testing.T) {
+	for _, want := range []string{"LOWEST evidence", `Never write "evidence": "confirmed"`, "Memory contradicted:", `"evidence_note"`, "stays unverified"} {
+		if !strings.Contains(dreamingCronPrompt, want) {
+			t.Errorf("Dreaming prompt missing %q", want)
+		}
+	}
+}
+
 func TestLegacySystemCronPrompts_ExcludeCurrent(t *testing.T) {
 	current := map[string]string{dreamingCronName: dreamingCronPrompt, improvementEvaluatorCronName: improvementEvaluatorCronPrompt}
 	for name, olds := range legacySystemCronPrompts {

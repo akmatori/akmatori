@@ -296,6 +296,11 @@ export const incidentsApi = {
       method: 'POST',
       body: JSON.stringify({ confirm }),
     }),
+
+  // Queue the post-incident memory pass again for a closed incident. 409
+  // when it is not closed or the pass is already pending or running.
+  extractMemory: (uuid: string) =>
+    fetchApi<{ status: string }>(`/api/incidents/${uuid}/extract-memory`, { method: 'POST' }),
 };
 
 // Request work: agent runs that are not incidents, keyed by their scope.
@@ -679,11 +684,12 @@ export const cronJobsApi = {
 
 // Memories API
 export const memoriesApi = {
-  list: (params?: { scope?: string; type?: string; incidentUuid?: string }) => {
+  list: (params?: { scope?: string; type?: string; incidentUuid?: string; evidence?: string }) => {
     const qs = new URLSearchParams();
     if (params?.scope) qs.set('scope', params.scope);
     if (params?.type) qs.set('type', params.type);
     if (params?.incidentUuid) qs.set('incident_uuid', params.incidentUuid);
+    if (params?.evidence) qs.set('evidence', params.evidence);
     const query = qs.toString();
     return fetchApi<Memory[]>(`/api/memories${query ? '?' + query : ''}`);
   },

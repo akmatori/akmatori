@@ -9,7 +9,20 @@ import EmptyState from '../shared/EmptyState';
 import { getErrorMessage } from '../../utils/errors';
 import { formatRelativeAgo } from '../../utils/format';
 import MemoryGenerationSwitch from './MemoryGenerationSwitch';
-import { GLOBAL_SCOPE, MEMORY_TYPE_LABELS, compareScopes, filterMemories, groupByScope, memoryHref } from './memoryHelpers';
+import EvidenceBadge from './EvidenceBadge';
+import SegmentedControl from '../shared/SegmentedControl';
+import {
+  EVIDENCE_LABELS,
+  GLOBAL_SCOPE,
+  MEMORY_EVIDENCES,
+  MEMORY_TYPE_LABELS,
+  compareScopes,
+  filterByEvidence,
+  filterMemories,
+  groupByScope,
+  memoryHref,
+  type EvidenceFilter,
+} from './memoryHelpers';
 
 interface MemoryListProps {
   // When set, only memories that originated from this incident are shown.
@@ -23,6 +36,7 @@ export default function MemoryList({ incidentUuid }: MemoryListProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [evidenceFilter, setEvidenceFilter] = useState<EvidenceFilter>('all');
   const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
@@ -41,7 +55,10 @@ export default function MemoryList({ incidentUuid }: MemoryListProps) {
     void load();
   }, [load]);
 
-  const groups = useMemo(() => groupByScope(filterMemories(memories, query)), [memories, query]);
+  const groups = useMemo(
+    () => groupByScope(filterByEvidence(filterMemories(memories, query), evidenceFilter)),
+    [memories, query, evidenceFilter],
+  );
   const scopes = useMemo(() => {
     const set = new Set(memories.map((m) => m.scope));
     set.add(GLOBAL_SCOPE);
@@ -104,6 +121,14 @@ export default function MemoryList({ incidentUuid }: MemoryListProps) {
             className="input-field h-9 !pl-8"
           />
         </label>
+        <SegmentedControl<EvidenceFilter>
+          value={evidenceFilter}
+          onChange={setEvidenceFilter}
+          options={[
+            { value: 'all', label: 'All' },
+            ...MEMORY_EVIDENCES.map((e) => ({ value: e, label: EVIDENCE_LABELS[e] })),
+          ]}
+        />
         <button type="button" onClick={handleExport} disabled={exporting || memories.length === 0} className="btn btn-secondary">
           <Download size={15} aria-hidden="true" />
           {exporting ? 'Exporting…' : 'Export'}
@@ -113,7 +138,7 @@ export default function MemoryList({ incidentUuid }: MemoryListProps) {
       {groups.length === 0 ? (
         <EmptyState
           icon={Brain}
-          title={memories.length === 0 ? 'No memories yet' : 'No memories match your search'}
+          title={memories.length === 0 ? 'No memories yet' : 'No memories match your filter'}
           description={
             memories.length === 0
               ? 'The agent saves what it learns from incidents here. You can also tell it something above.'
@@ -132,7 +157,10 @@ export default function MemoryList({ incidentUuid }: MemoryListProps) {
                 <li key={m.id}>
                   <Link to={memoryHref(m.id)} className="flex items-start gap-4 px-4 py-3 hover:bg-surface-2 transition-colors">
                     <div className="min-w-0 flex-1">
-                      <p className="font-mono text-sm text-fg truncate">{m.name}</p>
+                      <p className="flex items-center gap-2 min-w-0">
+                        <span className="font-mono text-sm text-fg truncate">{m.name}</span>
+                        <EvidenceBadge memory={m} />
+                      </p>
                       <p className="mt-0.5 text-sm text-fg-muted line-clamp-2">{m.description}</p>
                     </div>
                     <div className="flex-shrink-0 text-right text-xs text-fg-subtle space-y-1">
