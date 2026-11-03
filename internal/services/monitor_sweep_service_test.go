@@ -120,10 +120,17 @@ func TestRunSweep_FiringAlertOnExpiredMonitor_ResolvedBeforeClose(t *testing.T) 
 	if alert.Status != database.AlertStatusResolved || alert.ResolvedAt == nil {
 		t.Errorf("alert should be resolved as a safety net, got status=%q resolved_at=%v", alert.Status, alert.ResolvedAt)
 	}
+	if alert.ResolvedBy != database.AlertResolvedBySweep {
+		t.Errorf("ResolvedBy = %q, want sweep", alert.ResolvedBy)
+	}
 
 	var incident database.Incident
 	db.Where("uuid = ?", incUUID).First(&incident)
 	if incident.Status != database.IncidentStatusClosed {
 		t.Errorf("Status = %q, want closed", incident.Status)
+	}
+	// The close queues the post-incident memory pass in the same UPDATE.
+	if incident.MemoryExtraction != database.MemoryExtractionPending {
+		t.Errorf("MemoryExtraction = %q, want pending", incident.MemoryExtraction)
 	}
 }

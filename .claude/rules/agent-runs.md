@@ -39,6 +39,10 @@ An `incidents` row is a production problem and nothing else: only alerts open in
   written on the run by `run_id` before `OnCompleted`; `result_status` stays on the incident (guarded by
   `isCurrentRun`). Frames with no live callback are dropped — there is no legacy DB fallback
 - `RecordAgentRunDispatch` stamps the model at dispatch and creates the row when a caller made none
+- `prepareScopeDir(rootSkill, scope, kind)`: `SpawnIncidentManager` renders the incident AGENTS.md
+  (no memory writes; the post-incident pass records findings from the final answer),
+  `PrepareRequestScope` the request one (memory.write guidance); `EnsureScopeDir` picks the kind
+  by looking the scope up in `incidents`
 - callers that return the scope to a client (API task, proposal chat) call `BeginRun` BEFORE they
   respond, so the next GET finds the run
 - Slack thread → work: `lookupSlackThread` checks `agent_runs.slack_thread_ts` (request work) first,

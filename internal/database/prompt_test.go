@@ -49,6 +49,10 @@ func TestDefaultIncidentManagerPrompt_KnowledgeSteps(t *testing.T) {
 		"PRIMARY investigation guide",
 		`"scopes": [`,
 		`gateway_call("memory.write"`,
+		"Memory contradicted:",
+		"Operator asked to remember:",
+		"post-incident pass",
+		"unverified",
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("incident-manager prompt missing %q", want)

@@ -171,6 +171,15 @@ func TestStaleClose_ClosesCompletedWithStuckFiringAlert(t *testing.T) {
 	if firing != 0 {
 		t.Errorf("firing alerts left = %d, want 0", firing)
 	}
+	var alert database.Alert
+	db.Where("incident_uuid = ?", incUUID).First(&alert)
+	if alert.ResolvedBy != database.AlertResolvedBySweep {
+		t.Errorf("ResolvedBy = %q, want sweep", alert.ResolvedBy)
+	}
+	// The close queues the post-incident memory pass in the same UPDATE.
+	if inc.MemoryExtraction != database.MemoryExtractionPending {
+		t.Errorf("MemoryExtraction = %q, want pending", inc.MemoryExtraction)
+	}
 }
 
 // TestStaleClose_KeepsActiveIncidents asserts the cases that must survive a

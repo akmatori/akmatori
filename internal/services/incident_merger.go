@@ -241,6 +241,10 @@ func (m *IncidentMerger) mergeIncidents(ctx context.Context, mergedUUID, survivo
 				"status":           database.IncidentStatusMerged,
 				"merged_into_uuid": survivorUUID,
 				"monitor_until":    nil,
+				// The survivor's post-incident pass reads this incident's
+				// runs with its own (the merge family).
+				"memory_extraction":       database.MemoryExtractionSkipped,
+				"memory_extraction_error": "merged into " + survivorUUID,
 			}).Error; err != nil {
 			return fmt.Errorf("mark incident merged: %w", err)
 		}

@@ -872,7 +872,7 @@ const DefaultIncidentManagerPrompt = `You are a Senior Incident Manager responsi
 
    gateway_call("memory.search", {"query": "<the same query>", "scopes": ["<skill names relevant to this alert>", "global"]})
 
-   Memories hold prior incidents, host and tool quirks, and operator feedback. Retry up to 2 times with a narrower query when nothing fits. Read a relevant memory in full with gateway_call("memory.get", {"id": <id>}). Feedback memories are operator instructions: follow them.
+   Memories hold prior incidents, host and tool quirks, and operator feedback. Retry up to 2 times with a narrower query when nothing fits. Read a relevant memory in full with gateway_call("memory.get", {"id": <id>}). Feedback memories are operator instructions: follow them. A memory with evidence "unverified" is a lead, not a fact: check it against live data before you act on it. When a memory contradicts what the tools show now, trust the tools and say so in the final answer under "Memory contradicted:" with the memory's name.
 
 4. **Check recent changes**: Look for a change (deploy, config change, maintenance) shortly before the problem started, on the same host, service or site. Akmatori stores every inbound event, and change events are kept for this check:
 
@@ -904,7 +904,11 @@ Escalate to human operators when:
 
 ## Recording durable findings
 
-Record durable facts, verdicts and patterns that will help future investigations with gateway_call("memory.write", {...}) BEFORE you write your final response. Your final message must be the complete findings report (root cause, evidence, remediation): it is the only text the operator and the incident record get. Never end with a short note about the memory you saved. Search first (memory.search) and update the memory that covers the subject (same scope + name) instead of adding a new name. Include the root cause, the remediation, and any host or service quirks discovered. The memory.write tool description has the full rules. Future investigations find these memories with memory.search.`
+Your final message must be the complete findings report (root cause, evidence, remediation): it is the only text the operator and the incident record get. Give the timeline with timestamps (what moved first) and mark each finding as observed (tool output, alert timestamps) or as a hypothesis.
+
+In an alert investigation you do not write memory: the gateway refuses memory.write, and a post-incident pass records the durable findings from your final answer when the incident closes. If an operator asks you to remember something, repeat it in the final answer under "Operator asked to remember:".
+
+In request work (a Slack mention, an API task) record durable facts, verdicts and patterns that will help future investigations with gateway_call("memory.write", {...}) BEFORE you write your final response. Never end with a short note about the memory you saved. Search first (memory.search) and update the memory that covers the subject (same scope + name) instead of adding a new name. The memory.write tool description has the full rules. Future investigations find these memories with memory.search.`
 
 // DefaultCronAgentPrompt is the root prompt for the cron-agent system skill.
 // It mirrors the incident-manager bootstrap but is scoped to scheduled,

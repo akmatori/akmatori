@@ -513,8 +513,16 @@ func (t *Tool) requireRun(ctx context.Context, scopeID string) (*database.AgentR
 	if run.SourceKind == "proposal" {
 		return nil, errors.New("proposal chat does not write memories: change the proposal's proposed_content with proposals.update_draft")
 	}
+	if run.IncidentUUID != "" {
+		return nil, errors.New(errAlertRunWrites)
+	}
 	return &run, nil
 }
+
+// errAlertRunWrites: an alert investigation does not write memory; the
+// post-incident pass (API, IncidentMemoryExtractor) records the findings
+// when the incident closes, from the final answer.
+const errAlertRunWrites = "alert investigations do not write memory: the post-incident pass records findings when the incident closes; put the timeline and your findings in the final answer"
 
 // takeQuota counts one write or delete of a run; false when over the cap.
 func (t *Tool) takeQuota(runID string, isDelete bool) bool {
@@ -606,6 +614,9 @@ func (t *Tool) MemoryWrite(ctx context.Context, scopeID string, args map[string]
 		Evidence: stringArg(args, "evidence"), Claim: stringArg(args, "claim"), EvidenceNote: stringArg(args, "evidence_note"),
 	}
 	requested := in.Evidence
+	// A token the agent saw during the run must not become a memory.
+	var redacted int
+	in.Description, in.Body, in.EvidenceNote, redacted = redactMemoryInput(in.Description, in.Body, in.EvidenceNote)
 	truncated, err := t.prepareWrite(ctx, &in)
 	if err != nil {
 		return nil, err
@@ -641,6 +652,9 @@ func (t *Tool) MemoryWrite(ctx context.Context, scopeID string, args map[string]
 			resp["evidence_note"] = in.EvidenceNote
 			resp["note_on_evidence"] = "Stored as unverified: a cause or an unchecked memory stays a lead until an operator confirms it."
 		}
+	}
+	if redacted > 0 {
+		resp["redacted"] = redacted
 	}
 	if truncated {
 		resp["description_truncated"] = true

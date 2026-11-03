@@ -123,6 +123,12 @@ type MemoryManager interface {
 	ExportZip(w io.Writer) error
 }
 
+// MemoryExtractionManager is the post-incident memory pass
+// (IncidentMemoryExtractor) as the API handler sees it.
+type MemoryExtractionManager interface {
+	Rerun(ctx context.Context, incidentUUID string) error
+}
+
 // ContextSummaryManager writes and removes the summary memories of context
 // files (ContextFileSummarizer).
 type ContextSummaryManager interface {

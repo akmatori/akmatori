@@ -393,6 +393,18 @@ func main() {
 	staleCloseService := services.NewStaleCloseService(database.GetDB())
 	apiHandler.SetStaleIncidentCloser(staleCloseService)
 
+	// Post-incident memory pass: alert investigations no longer write memory
+	// during the run; when an incident closes, a one-shot call reads the
+	// outcome and the transcripts and writes graded memories. Every close
+	// path queues the row and kicks the loop (started below, once ctx exists).
+	memoryExtractor := services.NewIncidentMemoryExtractor(database.GetDB(), agentWSHandler, memoryService, skillService)
+	if err := memoryExtractor.ResetInterrupted(); err != nil {
+		slog.Warn("failed to re-queue interrupted memory extractions", "err", err)
+	}
+	apiHandler.SetMemoryExtractor(memoryExtractor)
+	skillService.SetExtractionKicker(memoryExtractor)
+	staleCloseService.SetExtractionKicker(memoryExtractor)
+
 	// Wire listener channel reload: when channels (or, transitionally, alert
 	// sources) are created/updated/deleted via API, reload the Slack handler's
 	// channel mappings so changes take effect immediately.
@@ -516,8 +528,13 @@ func main() {
 	// Start monitor sweep service: auto-closes incidents whose monitor window
 	// has expired so "monitor" doesn't accumulate indefinitely.
 	monitorSweepService := services.NewMonitorSweepService(database.GetDB())
+	monitorSweepService.SetExtractionKicker(memoryExtractor)
 	go monitorSweepService.StartBackgroundSweep(ctx)
 	slog.Info("monitor sweep service started")
+
+	// The post-incident memory pass starts before the sweeps queue their
+	// first closes; its startup reset ran above.
+	go memoryExtractor.Run(ctx)
 
 	// Start the stale incident close ticker. Covers the incidents the monitor
 	// sweep cannot reach — those held at "completed" by an alert their source

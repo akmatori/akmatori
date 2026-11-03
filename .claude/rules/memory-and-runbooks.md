@@ -102,6 +102,43 @@ mirror is removed.
   changed text. `memory.write` reports the stored grade for `unchanged`/`refused_protected`.
   The manifest has an `evidence` column; the recall text says unverified = a lead to check.
   Proposal snapshots carry the grade; a snapshot without it (older) does not compare it
+- post-incident memory pass (`incident_memory_extractor.go`, `incident_memory_extraction_input.go`,
+  `incident_memory_extraction_prompt.go`, `memory_extraction_apply.go`; plan
+  `docs/plans/2026-11-02-post-incident-memory-extractor.md`): alert investigations do NOT write
+  memory. The gateway `requireRun` refuses `memory.write` / `memory.delete` for a run with
+  `incident_uuid` (after the proposal refusal); the incident AGENTS.md (`scopeKindIncident`,
+  `memoryIncidentRunInstruction`) tells the agent to put the timeline, the findings marked
+  observed/hypothesis, `Operator asked to remember:` and `Memory contradicted:` in the final
+  answer; request AGENTS.md keeps the write guidance; a SKILL.md (shared) carries the neutral
+  `memorySharedWriteNote`. Queue on the incident row: every close path (`closeIncidentValues`:
+  `CloseIncident`, monitor sweep, stale close) sets `memory_extraction = pending` in the UPDATE
+  that closes; the merger sets the child `skipped` (the survivor's pass reads the family's runs).
+  Worker `Run`: ticker 30 s + `Kick()` (wired into the close paths by `SetExtractionKicker`),
+  claim = conditional UPDATE (`claimableWhere`: closed alert incident, pending with no future
+  `retry_at` OR running past the 15-min lease, no run still running) that also counts the
+  attempt; `memory_extraction_at` is the claim time (µs-truncated so it round-trips) and the
+  lease; transient failures (no LLM, timeout, invalid JSON, DB error) re-queue with backoff
+  2 min / 10 min / 1 h and `failed` after 3 attempts; startup `ResetInterrupted` turns running
+  into pending. Outcomes `succeeded | no_output | skipped | failed` (+ `memory_extraction_error`,
+  `_note` = `redacted N secrets`, `memory_timeline` for the UI). Input: facts (close reason,
+  alerts with `resolved_by` = `source | operator | sweep`, runs' self-reports and times), the
+  original alert text, `full_log` of every finished family run (32 KiB each, head 8 + tail 24,
+  96 KiB total, newest kept), final answers (16 KiB), feedback memories, the global and skill
+  manifests; the whole prompt goes through `RedactSecrets`. Output: strict JSON, at most 5
+  memories; Go grades them (`buildExtractedMemories` → `ApplyAgentMemoryEvidence`, causal always
+  unverified, cause/effect order check appended to the note, unknown scope → global, bad name
+  slugified, secrets redacted). `MemoryService.ApplyExtraction` writes in one transaction: the
+  outcome UPDATE carries the claim guard (RowsAffected 0 = `ErrExtractionStale`, nothing written),
+  a name this incident wrote before (also under a `-N` suffix) is updated in place with the
+  protection predicate in the SQL, a name owned by anyone else gets `-2`, `-3`…; a partial
+  failure rolls everything back. `POST /api/incidents/{uuid}/extract-memory` (`Rerun`): closed +
+  not pending/running → pending, attempts reset, 202; pending/running → 409; not closed or
+  merged → 409; missing → 404
+- secrets: `RedactSecrets` (`secret_redaction.go`, gateway mirror `knowledge/redact.go`, shared
+  fixture `tests/fixtures/secret_redaction_cases.json`) replaces PEM private key blocks, URL
+  passwords, `Bearer` tokens (8+ chars), `sk-…` keys, `AKIA…` ids and `key[:=]value` credentials
+  (api_key/token/secret/password, value 8+ chars) with `[REDACTED_SECRET]`. Applied to the
+  extractor input and output, to `memory.write` (response `redacted: N`) and to proposal approval
 - `GeneralSettings.MemoryGenerationEnabled` (nil = on) gates AGENT memory only. Off:
   `renderMemoryRecallSection` swaps "Record durable findings" for a do-not-write note and the
   gateway refuses `memory.write` / `memory.delete`. The gate is checked at each write, so writes

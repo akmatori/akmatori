@@ -153,7 +153,7 @@ func TestGenerateIncidentAgentsMd_ContainsPrompt(t *testing.T) {
 	svc := newTestSkillService(t, db)
 
 	tmpFile := filepath.Join(t.TempDir(), "AGENTS.md")
-	err := svc.generateAgentsMd(tmpFile, "incident-manager", "test-incident-uuid")
+	err := svc.generateAgentsMd(tmpFile, "incident-manager", "test-incident-uuid", scopeKindIncident)
 	if err != nil {
 		t.Fatalf("generateAgentsMd failed: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestGenerateIncidentAgentsMd_NoStructuredOutputProtocol(t *testing.T) {
 	svc := newTestSkillService(t, db)
 
 	tmpFile := filepath.Join(t.TempDir(), "AGENTS.md")
-	err := svc.generateAgentsMd(tmpFile, "incident-manager", "test-incident-uuid")
+	err := svc.generateAgentsMd(tmpFile, "incident-manager", "test-incident-uuid", scopeKindIncident)
 	if err != nil {
 		t.Fatalf("generateAgentsMd failed: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestGenerateIncidentAgentsMd_NoSkillsEmbedded(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMd), 0644)
 
 	tmpFile := filepath.Join(t.TempDir(), "AGENTS.md")
-	err := svc.generateAgentsMd(tmpFile, "incident-manager", "test-incident-uuid")
+	err := svc.generateAgentsMd(tmpFile, "incident-manager", "test-incident-uuid", scopeKindIncident)
 	if err != nil {
 		t.Fatalf("generateAgentsMd failed: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestGenerateIncidentAgentsMd_ExcludesIncidentManager(t *testing.T) {
 	})
 
 	tmpFile := filepath.Join(t.TempDir(), "AGENTS.md")
-	err := svc.generateAgentsMd(tmpFile, "incident-manager", "test-incident-uuid")
+	err := svc.generateAgentsMd(tmpFile, "incident-manager", "test-incident-uuid", scopeKindIncident)
 	if err != nil {
 		t.Fatalf("generateAgentsMd failed: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestGenerateIncidentAgentsMd_CronAgentHeader(t *testing.T) {
 	svc := newTestSkillService(t, db)
 
 	tmpFile := filepath.Join(t.TempDir(), "AGENTS.md")
-	err := svc.generateAgentsMd(tmpFile, "cron-agent", "test-incident-uuid")
+	err := svc.generateAgentsMd(tmpFile, "cron-agent", "test-incident-uuid", scopeKindRequest)
 	if err != nil {
 		t.Fatalf("generateAgentsMd failed: %v", err)
 	}
