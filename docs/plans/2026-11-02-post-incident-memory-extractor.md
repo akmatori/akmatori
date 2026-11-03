@@ -7,7 +7,8 @@ v1 reads `agent_runs.full_log` only (no `session_export.jsonl`), the claim UPDAT
 a rerun updates this incident's earlier `-N` suffixed names in place, and the protection predicate is
 pinned by the module tests rather than a JSON fixture. PR 3 (UI + Dreaming) implemented 2026-11-03
 on branch `feat/memory-ui-dreaming` (stacked on PR 2). PR 4 (usage and retirement) is tracked as
-GitHub issue #65; the "Not in scope" follow-ups as #67. Revision 3 (2026-11-03) adds secret redaction, retry/lease
+GitHub issue #65; the "Not in scope" follow-ups as #67, of which the remember command, the spill-file
+reads, the backfill endpoint and the retention of closed incidents shipped on 2026-11-03. Revision 3 (2026-11-03) adds secret redaction, retry/lease
 job mechanics and the PR 4 design, marked **(rev 3)**. Prepared 2026-11-02 against branch `feat/gateway-knowledge-tools` at bf60ffc
 (B1 of the 2026-11-01 plan: gateway knowledge tools, no subagents). B2 of that plan (remove the disk
 mirrors) is independent of this one.

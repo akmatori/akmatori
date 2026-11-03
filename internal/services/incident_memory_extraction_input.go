@@ -2,6 +2,10 @@ package services
 
 import (
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,6 +30,11 @@ const (
 	extractionAlertTextMax = 4 * 1024
 	// Alert rows listed in the facts.
 	extractionAlertsMax = 50
+	// Spilled tool outputs (<work dir>/tool_outputs/*.txt): head per file
+	// and total, newest files first.
+	extractionSpillFileMax = 8 * 1024
+	extractionSpillTotal   = 32 * 1024
+	extractionSpillFiles   = 8
 )
 
 // extractionInput is everything the post-incident pass reads for one
@@ -39,6 +48,9 @@ type extractionInput struct {
 	Alerts     []database.Alert
 	Feedback   []database.Memory
 	SkillScope string
+	// Spill holds the spilled tool outputs of the family's work directories
+	// (file name → head), newest first.
+	Spill []spillFile
 	// Prompt is the rendered user content, secrets redacted.
 	Prompt string
 	// Redacted counts the secrets replaced in Prompt.
@@ -59,7 +71,7 @@ func (in *extractionInput) hasAnswer() bool {
 // the prompt. The family is the incident plus the incidents merged into it;
 // its runs are read oldest first, its alerts are the survivor's (the merge
 // re-points them).
-func collectExtractionInput(db *gorm.DB, inc *database.Incident) (*extractionInput, error) {
+func collectExtractionInput(db *gorm.DB, inc *database.Incident, incidentsDir string) (*extractionInput, error) {
 	in := &extractionInput{Incident: *inc, Family: []string{inc.UUID}}
 
 	var children []string
@@ -90,9 +102,110 @@ func collectExtractionInput(db *gorm.DB, inc *database.Incident) (*extractionInp
 		}
 	}
 
+	if incidentsDir != "" {
+		in.Spill = readSpilledToolOutputs(incidentsDir, in.Family)
+	}
+
 	prompt := renderExtractionPrompt(db, in)
 	in.Prompt, in.Redacted = RedactSecrets(prompt)
 	return in, nil
+}
+
+// spillFile is the head of one spilled tool output.
+type spillFile struct {
+	Incident string
+	Name     string
+	Size     int64
+	Head     string
+}
+
+// readSpilledToolOutputs reads the heads of the tool outputs the worker
+// spilled to <incidentsDir>/<uuid>/tool_outputs/ for the family, newest
+// first, within the file and total caps. Only regular files directly in that
+// directory are read, through os.Root, so a planted link cannot reach out
+// of the work directory. A missing directory is not an error.
+func readSpilledToolOutputs(incidentsDir string, family []string) []spillFile {
+	type candidate struct {
+		incident, name string
+		size           int64
+		mod            time.Time
+	}
+	var all []candidate
+	for _, uuid := range family {
+		if !validMemoryName(uuid) && !isUUIDLike(uuid) {
+			continue
+		}
+		root, err := os.OpenRoot(filepath.Join(incidentsDir, uuid, "tool_outputs"))
+		if err != nil {
+			continue
+		}
+		entries, err := readDirFromRoot(root, ".")
+		root.Close()
+		if err != nil {
+			continue
+		}
+		for _, ent := range entries {
+			if !ent.Type().IsRegular() {
+				continue
+			}
+			info, err := ent.Info()
+			if err != nil || info.Size() == 0 {
+				continue
+			}
+			all = append(all, candidate{uuid, ent.Name(), info.Size(), info.ModTime()})
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].mod.After(all[j].mod) })
+	var out []spillFile
+	budget := extractionSpillTotal
+	for _, c := range all {
+		if len(out) >= extractionSpillFiles || budget <= 0 {
+			break
+		}
+		root, err := os.OpenRoot(filepath.Join(incidentsDir, c.incident, "tool_outputs"))
+		if err != nil {
+			continue
+		}
+		f, err := root.Open(c.name)
+		if err != nil {
+			root.Close()
+			continue
+		}
+		limit := extractionSpillFileMax
+		if limit > budget {
+			limit = budget
+		}
+		buf := make([]byte, limit)
+		n, _ := io.ReadFull(f, buf)
+		f.Close()
+		root.Close()
+		head, _ := cutUTF8Bytes(string(buf[:n]), limit)
+		if strings.TrimSpace(head) == "" {
+			continue
+		}
+		budget -= len(head)
+		out = append(out, spillFile{Incident: c.incident, Name: c.name, Size: c.size, Head: head})
+	}
+	return out
+}
+
+// isUUIDLike accepts the UUID shape the work directories are named by.
+func isUUIDLike(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case i == 8 || i == 13 || i == 18 || i == 23:
+			if r != '-' {
+				return false
+			}
+		case (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F'):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // renderExtractionPrompt renders the user content: the facts, the original
@@ -186,6 +299,12 @@ func renderExtractionPrompt(db *gorm.DB, in *extractionInput) string {
 		fmt.Fprintf(&b, "===== FINAL ANSWER run %d (%s) (data) =====\n", i+1, r.RunID)
 		b.WriteString(ans)
 		b.WriteString("\n===== END FINAL ANSWER =====\n\n")
+	}
+
+	for _, sp := range in.Spill {
+		fmt.Fprintf(&b, "===== TOOL OUTPUT %s (incident %s, %d bytes, first %d shown) (data) =====\n", sp.Name, sp.Incident, sp.Size, len(sp.Head))
+		b.WriteString(sp.Head)
+		b.WriteString("\n===== END TOOL OUTPUT =====\n\n")
 	}
 
 	if len(in.Feedback) > 0 {

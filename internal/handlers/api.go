@@ -200,6 +200,7 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/incidents/{uuid}", h.handleIncidentByID)
 	mux.HandleFunc("POST /api/incidents/{uuid}/close", h.handleIncidentClose)
 	mux.HandleFunc("POST /api/incidents/{uuid}/extract-memory", h.handleIncidentExtractMemory)
+	mux.HandleFunc("POST /api/incidents/extract-memory-backfill", h.handleIncidentExtractMemoryBackfill)
 	mux.HandleFunc("POST /api/incidents/sweep-stale", h.handleIncidentSweepStale)
 	// Request work: agent runs that are not incidents (Slack and API
 	// requests, cron ticks, proposal chats), keyed by their scope.

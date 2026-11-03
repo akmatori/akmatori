@@ -49,7 +49,9 @@ is rejected by the channels API).
 - final thread output is summarized to fit Slack byte limits; any new Slack-facing summary or
   banner text must truncate safely and degrade cleanly
 - mention handling is classify-first: confident operator feedback is stored as memory; other
-  mentions continue the investigation
+  mentions continue the investigation. A `remember: X` / `/remember X` / `!remember X` reply is
+  stored as memory before any classification, on both the mention and the non-mention path
+  (`rememberCommand`, `captureRemember`); it needs no LLM
 - feedback ack: non-mention confident feedback → 👍 only; @mention confident feedback → emoji +
   short text; both use injectable `feedbackAcker`, best-effort
 - session resume is NOT used — Slack chat starts a fresh agent session per turn

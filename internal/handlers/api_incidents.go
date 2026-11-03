@@ -424,6 +424,49 @@ func (h *APIHandler) handleIncidentExtractMemory(w http.ResponseWriter, r *http.
 	}
 }
 
+// extractMemoryBackfillRequest is the body of the backfill endpoint.
+type extractMemoryBackfillRequest struct {
+	// Days back from now; closed alert incidents resolved in that window that
+	// were never extracted are queued. Default 30, at most 365.
+	Days int `json:"days"`
+}
+
+const (
+	extractBackfillDefaultDays = 30
+	extractBackfillMaxDays     = 365
+)
+
+// handleIncidentExtractMemoryBackfill handles
+// POST /api/incidents/extract-memory-backfill: it queues the post-incident
+// memory pass for the closed incidents of the last N days that closed before
+// the pass existed (memory_extraction empty). Incidents already extracted
+// are left alone; use the per-incident rerun for those.
+func (h *APIHandler) handleIncidentExtractMemoryBackfill(w http.ResponseWriter, r *http.Request) {
+	if h.memoryExtractor == nil {
+		api.RespondError(w, http.StatusServiceUnavailable, "memory extraction service not available")
+		return
+	}
+	req := extractMemoryBackfillRequest{Days: extractBackfillDefaultDays}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := api.DecodeJSON(r, &req); err != nil {
+			api.RespondError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+	if req.Days <= 0 || req.Days > extractBackfillMaxDays {
+		api.RespondError(w, http.StatusBadRequest, fmt.Sprintf("days must be between 1 and %d", extractBackfillMaxDays))
+		return
+	}
+	since := time.Now().AddDate(0, 0, -req.Days)
+	queued, err := h.memoryExtractor.Backfill(r.Context(), since)
+	if err != nil {
+		slog.Error("memory extraction backfill failed", "days", req.Days, "err", err)
+		api.RespondError(w, http.StatusInternalServerError, "Failed to queue the backfill")
+		return
+	}
+	api.RespondJSON(w, http.StatusAccepted, map[string]interface{}{"queued": queued, "since": since.UTC().Format(time.RFC3339)})
+}
+
 // handleIncidentSweepStale handles POST /api/incidents/sweep-stale. It runs
 // the stale-incident close sweep on demand.
 //

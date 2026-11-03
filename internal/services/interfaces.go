@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
@@ -127,6 +128,7 @@ type MemoryManager interface {
 // (IncidentMemoryExtractor) as the API handler sees it.
 type MemoryExtractionManager interface {
 	Rerun(ctx context.Context, incidentUUID string) error
+	Backfill(ctx context.Context, since time.Time) (int64, error)
 }
 
 // ContextSummaryManager writes and removes the summary memories of context

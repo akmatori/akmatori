@@ -54,6 +54,11 @@ func (h *SlackHandler) maybeCaptureSlackFeedback(channel, threadTS, messageTS, t
 	if user == h.botUserID {
 		return
 	}
+	// A remember command is stored as is: no classifier, no LLM.
+	if body, ok := rememberCommand(text, h.botUserID); ok {
+		h.captureRemember(channel, threadTS, messageTS, body, false)
+		return
+	}
 	verdict, incident, err := h.classifyThreadReplyForFeedback(threadTS, text)
 	if err != nil {
 		return
