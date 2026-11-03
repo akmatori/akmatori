@@ -41,7 +41,7 @@ components:
 
     Memory:
       type: object
-      description: Cross-incident memory entry (host fact, recurring pattern, tool quirk, or operator feedback)
+      description: Cross-incident memory entry (a fact about the environment, or operator feedback)
       properties:
         id: {type: integer}
         scope:
@@ -49,7 +49,8 @@ components:
           description: '"global" or a skill name'
         type:
           type: string
-          enum: [host, incident_pattern, tool_quirk, feedback]
+          enum: [fact, feedback]
+          description: The legacy host, incident_pattern and tool_quirk are accepted and stored as fact.
         name:
           type: string
           description: Slug-safe (a-z, 0-9, hyphen). Unique per (scope, name).
@@ -65,6 +66,20 @@ components:
         created_by:
           type: string
           enum: [agent, operator]
+        evidence:
+          type: string
+          enum: [confirmed, observed, unverified]
+          description: >-
+            How far to trust the memory, separate from who wrote it. confirmed: an operator
+            checked it (only operators set it). observed: a fact seen directly, not a cause.
+            unverified: a cause nobody confirmed, or a row from before grades.
+        claim:
+          type: string
+          enum: [causal, factual, ""]
+          description: causal (X caused Y) or factual; empty = not assessed. Agent-written causal claims are always unverified.
+        evidence_note:
+          type: string
+          description: What supports the memory (≤500 bytes)
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
 
@@ -75,12 +90,20 @@ components:
         scope: {type: string}
         type:
           type: string
-          enum: [host, incident_pattern, tool_quirk, feedback]
+          enum: [fact, feedback]
         name: {type: string}
         description: {type: string}
         body: {type: string}
         incident_uuid: {type: string}
         created_by: {type: string, enum: [agent, operator]}
+        evidence:
+          type: string
+          enum: [confirmed, observed, unverified]
+          description: Empty on create = observed (unverified for a causal claim). Omitted on update = unchanged.
+        claim: {type: string, enum: [causal, factual]}
+        evidence_note:
+          type: string
+          description: On update, an empty string clears the note; an omitted key leaves it unchanged.
 
     Integration:
       type: object
@@ -2072,7 +2095,14 @@ paths:
           description: 'Filter by scope ("global" or skill name)'
         - name: type
           in: query
-          schema: {type: string, enum: [host, incident_pattern, tool_quirk, feedback]}
+          schema: {type: string, enum: [fact, feedback]}
+        - name: evidence
+          in: query
+          schema: {type: string, enum: [confirmed, observed, unverified]}
+        - name: incident_uuid
+          in: query
+          schema: {type: string}
+          description: Memories that originated from this incident
       responses:
         '200':
           description: List of memories

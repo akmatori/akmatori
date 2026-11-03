@@ -42,6 +42,21 @@ type proposalMemoryContent struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Body        string `json:"body"`
+	// Evidence fields. The proposal is model-written, so approval applies
+	// the agent rules (no confirmed, causes unverified). In a snapshot they
+	// are pointers: a snapshot taken before evidence grades has none, and
+	// then they are not compared.
+	Evidence     *string `json:"evidence,omitempty"`
+	Claim        *string `json:"claim,omitempty"`
+	EvidenceNote *string `json:"evidence_note,omitempty"`
+}
+
+// strValue returns *p, or "" for nil.
+func strValue(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 // proposalCronContent carries the cron's tool access as tools_enabled +
@@ -280,6 +295,11 @@ func (s *ProposalService) checkStale(p *database.Proposal) (bool, string) {
 		if mem.Body != snap.Body || mem.Description != snap.Description || NormalizeMemoryType(mem.Type) != NormalizeMemoryType(snap.Type) {
 			return true, "memory content changed since the proposal was created"
 		}
+		if (snap.Evidence != nil && *snap.Evidence != mem.Evidence) ||
+			(snap.Claim != nil && *snap.Claim != mem.Claim) ||
+			(snap.EvidenceNote != nil && *snap.EvidenceNote != mem.EvidenceNote) {
+			return true, "memory evidence changed since the proposal was created"
+		}
 	case database.ProposalKindCronUpdate:
 		job, err := s.crons.GetJobByUUID(p.TargetRef)
 		if err != nil {
@@ -363,15 +383,36 @@ func (s *ProposalService) apply(ctx context.Context, p *database.Proposal) error
 			}
 			content.Scope, content.Name = scope, name
 		}
+		mem := &database.Memory{
+			Scope:        content.Scope,
+			Type:         content.Type,
+			Name:         content.Name,
+			Description:  content.Description,
+			Body:         content.Body,
+			CreatedBy:    database.ProposalCreatedByOperator,
+			Evidence:     strValue(content.Evidence),
+			Claim:        strValue(content.Claim),
+			EvidenceNote: strValue(content.EvidenceNote),
+		}
+		// The operator approves the change, not every claim in it: a
+		// model-drafted cause stays unverified until an operator confirms
+		// it on the memory itself.
+		if _, err := ApplyAgentMemoryEvidence(mem); err != nil {
+			return fmt.Errorf("invalid proposed_content: %w", err)
+		}
+		// A rewrite is not a check: content without a grade does not raise
+		// an unverified memory, and content without a note keeps the note.
+		var stored database.Memory
+		if err := s.db.Select("evidence", "evidence_note").Where("scope = ? AND name = ?", mem.Scope, mem.Name).Take(&stored).Error; err == nil {
+			if content.Evidence == nil && stored.Evidence == MemoryEvidenceUnverified {
+				mem.Evidence = MemoryEvidenceUnverified
+			}
+			if content.EvidenceNote == nil && mem.EvidenceNote == "" {
+				mem.EvidenceNote = stored.EvidenceNote
+			}
+		}
 		// UpsertByName is idempotent by (scope, name) and syncs files itself.
-		_, err := s.memories.UpsertByName(&database.Memory{
-			Scope:       content.Scope,
-			Type:        content.Type,
-			Name:        content.Name,
-			Description: content.Description,
-			Body:        content.Body,
-			CreatedBy:   database.ProposalCreatedByOperator,
-		})
+		_, err := s.memories.UpsertByName(mem)
 		return err
 
 	case database.ProposalKindCronNew, database.ProposalKindCronUpdate:

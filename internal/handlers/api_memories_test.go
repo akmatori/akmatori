@@ -96,7 +96,7 @@ func (m *mockMemoryService) CreateWithUniqueName(mem *database.Memory) (*databas
 	return m.CreateMemory(mem)
 }
 
-func (m *mockMemoryService) UpdateMemory(id uint, mem *database.Memory, setBody bool) (*database.Memory, error) {
+func (m *mockMemoryService) UpdateMemory(id uint, mem *database.Memory, set services.MemoryUpdateSet) (*database.Memory, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.updateErr != nil {
@@ -113,7 +113,7 @@ func (m *mockMemoryService) UpdateMemory(id uint, mem *database.Memory, setBody 
 			if mem.Description != "" {
 				m.memories[i].Description = mem.Description
 			}
-			if setBody || mem.Body != "" {
+			if set.Body || mem.Body != "" {
 				m.memories[i].Body = mem.Body
 			}
 			cp := m.memories[i]

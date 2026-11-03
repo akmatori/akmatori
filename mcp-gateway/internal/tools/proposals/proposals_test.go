@@ -444,3 +444,29 @@ func TestCreate_CronUpdateSnapshotCarriesToolFields(t *testing.T) {
 		t.Error("snapshot must not carry tool_logical_names")
 	}
 }
+
+// The memory snapshot carries the grade, so the API can see an evidence
+// change as staleness.
+func TestCreate_MemoryUpdateSnapshotCarriesEvidence(t *testing.T) {
+	db := newTestDB(t)
+	tool := newTool(db)
+	db.Create(&database.Memory{Scope: "global", Type: "fact", Name: "web-1", Description: "d", Body: "b",
+		Evidence: "confirmed", Claim: "causal", EvidenceNote: "checked by the on-call"})
+	if _, err := tool.Create(context.Background(), "", map[string]interface{}{
+		"kind":             "memory_update",
+		"title":            "Refresh web-1",
+		"target_ref":       "global/web-1",
+		"proposed_content": map[string]interface{}{"scope": "global", "type": "fact", "name": "web-1", "description": "d2", "body": "b2"},
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	var row database.Proposal
+	db.Where("kind = ?", "memory_update").First(&row)
+	var snap map[string]string
+	if err := json.Unmarshal([]byte(row.CurrentSnapshot), &snap); err != nil {
+		t.Fatalf("snapshot not JSON: %v", err)
+	}
+	if snap["evidence"] != "confirmed" || snap["claim"] != "causal" || snap["evidence_note"] != "checked by the on-call" {
+		t.Errorf("snapshot: %v", snap)
+	}
+}

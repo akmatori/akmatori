@@ -89,6 +89,19 @@ func requireStringArgs(args map[string]interface{}, keys ...string) error {
 	return nil
 }
 
+// optionalStringArgs returns an error when a key is present with a value
+// that is not a string (null counts as absent).
+func optionalStringArgs(args map[string]interface{}, keys ...string) error {
+	for _, k := range keys {
+		if v, ok := args[k]; ok && v != nil {
+			if _, ok := v.(string); !ok {
+				return fmt.Errorf("%s must be a string", k)
+			}
+		}
+	}
+	return nil
+}
+
 // rawStringArg returns a string arg without trimming (descriptions, bodies).
 func rawStringArg(args map[string]interface{}, key string) string {
 	s, _ := args[key].(string)
@@ -234,7 +247,18 @@ type memoryHit struct {
 	Description string    `json:"description"`
 	Excerpt     string    `json:"excerpt,omitempty"`
 	CreatedBy   string    `json:"created_by,omitempty"`
+	Evidence    string    `json:"evidence"`
+	Claim       string    `json:"claim,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// hitEvidence is the grade to show: a row written before grades by a
+// gateway ahead of the API has none, and reads as unverified.
+func hitEvidence(m database.Memory) string {
+	if m.Evidence == "" {
+		return evidenceUnverified
+	}
+	return m.Evidence
 }
 
 func memoryQuery(db *gorm.DB, args map[string]interface{}) (*gorm.DB, error) {
@@ -247,6 +271,12 @@ func memoryQuery(db *gorm.DB, args map[string]interface{}) (*gorm.DB, error) {
 			return nil, fmt.Errorf("type must be fact or feedback")
 		}
 		q = q.Where("type = ?", typ)
+	}
+	if ev := stringArg(args, "evidence"); ev != "" {
+		if !validEvidence(ev) {
+			return nil, fmt.Errorf("evidence must be confirmed, observed or unverified")
+		}
+		q = q.Where("evidence = ?", ev)
 	}
 	return q, nil
 }
@@ -264,7 +294,7 @@ func (t *Tool) MemorySearch(ctx context.Context, _ string, args map[string]inter
 		return nil, err
 	}
 	var rows []database.Memory
-	if err := q.Select("id", "scope", "name", "type", "description", "body", "created_by", "source_file_id", "updated_at").
+	if err := q.Select("id", "scope", "name", "type", "description", "body", "created_by", "source_file_id", "evidence", "claim", "updated_at").
 		Order("updated_at DESC").Order("id DESC").Limit(corpusCap).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("load memories: %w", err)
 	}
@@ -279,7 +309,7 @@ func (t *Tool) MemorySearch(ctx context.Context, _ string, args map[string]inter
 	for _, h := range hits {
 		m := byID[h.Doc.ID]
 		out = append(out, memoryHit{ID: m.ID, Scope: m.Scope, Name: m.Name, Type: m.Type, Description: m.Description,
-			Excerpt: excerpt(m.Body, h.Terms), CreatedBy: m.CreatedBy, UpdatedAt: m.UpdatedAt})
+			Excerpt: excerpt(m.Body, h.Terms), CreatedBy: m.CreatedBy, Evidence: hitEvidence(m), Claim: m.Claim, UpdatedAt: m.UpdatedAt})
 	}
 	resp := map[string]interface{}{"results": out, "count": len(out)}
 	if len(rows) == corpusCap {
@@ -331,7 +361,7 @@ func (t *Tool) MemoryList(ctx context.Context, _ string, args map[string]interfa
 		q = q.Where("(updated_at < ? OR (updated_at = ? AND id < ?))", ts, ts, id)
 	}
 	var rows []database.Memory
-	if err := q.Select("id", "scope", "name", "type", "description", "created_by", "updated_at").
+	if err := q.Select("id", "scope", "name", "type", "description", "created_by", "evidence", "claim", "updated_at").
 		Order("updated_at DESC").Order("id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list memories: %w", err)
 	}
@@ -342,7 +372,7 @@ func (t *Tool) MemoryList(ctx context.Context, _ string, args map[string]interfa
 	}
 	items := make([]memoryHit, 0, len(rows))
 	for _, m := range rows {
-		items = append(items, memoryHit{ID: m.ID, Scope: m.Scope, Name: m.Name, Type: m.Type, Description: m.Description, CreatedBy: m.CreatedBy, UpdatedAt: m.UpdatedAt})
+		items = append(items, memoryHit{ID: m.ID, Scope: m.Scope, Name: m.Name, Type: m.Type, Description: m.Description, CreatedBy: m.CreatedBy, Evidence: hitEvidence(m), Claim: m.Claim, UpdatedAt: m.UpdatedAt})
 	}
 	return marshal(map[string]interface{}{"items": items, "count": len(items), "next_cursor": next})
 }
@@ -437,6 +467,7 @@ func (t *Tool) MemoryGet(ctx context.Context, _ string, args map[string]interfac
 	return marshal(map[string]interface{}{
 		"id": m.ID, "scope": m.Scope, "name": m.Name, "type": m.Type, "description": m.Description,
 		"body": m.Body, "created_by": m.CreatedBy, "incident_uuid": m.IncidentUUID,
+		"evidence": hitEvidence(m), "claim": m.Claim, "evidence_note": m.EvidenceNote,
 		"protected": isProtected(m), "updated_at": m.UpdatedAt, "references": refs,
 	})
 }
@@ -539,6 +570,9 @@ func (t *Tool) prepareWrite(ctx context.Context, in *memoryInput) (truncated boo
 	if truncated, err = applyAgentPolicy(in); err != nil {
 		return false, err
 	}
+	if _, err = applyAgentEvidence(in); err != nil {
+		return false, err
+	}
 	if err = validateShared(in); err != nil {
 		return false, err
 	}
@@ -559,6 +593,9 @@ func (t *Tool) MemoryWrite(ctx context.Context, scopeID string, args map[string]
 	if err := requireStringArgs(args, "scope", "name", "type", "description", "body"); err != nil {
 		return nil, err
 	}
+	if err := optionalStringArgs(args, "evidence", "claim", "evidence_note"); err != nil {
+		return nil, err
+	}
 	run, err := t.requireRun(ctx, scopeID)
 	if err != nil {
 		return nil, err
@@ -566,9 +603,15 @@ func (t *Tool) MemoryWrite(ctx context.Context, scopeID string, args map[string]
 	in := memoryInput{
 		Scope: stringArg(args, "scope"), Name: stringArg(args, "name"), Type: stringArg(args, "type"),
 		Description: rawStringArg(args, "description"), Body: rawStringArg(args, "body"),
+		Evidence: stringArg(args, "evidence"), Claim: stringArg(args, "claim"), EvidenceNote: stringArg(args, "evidence_note"),
 	}
+	requested := in.Evidence
+	noteGiven := in.EvidenceNote != ""
 	truncated, err := t.prepareWrite(ctx, &in)
 	if err != nil {
+		return nil, err
+	}
+	if err := t.keepStoredEvidence(ctx, &in, requested == "", noteGiven); err != nil {
 		return nil, err
 	}
 	if !t.takeQuota(run.RunID, false) {
@@ -580,9 +623,13 @@ func (t *Tool) MemoryWrite(ctx context.Context, scopeID string, args map[string]
 		return nil, err
 	}
 	t.logger.Printf("memory.write run=%s scope=%s name=%s action=%s", run.RunID, in.Scope, in.Name, action)
-	resp := map[string]interface{}{"scope": in.Scope, "name": in.Name, "action": action}
+	resp := map[string]interface{}{"scope": in.Scope, "name": in.Name, "action": action, "evidence": in.Evidence, "claim": in.Claim}
 	if saved != nil {
 		resp["id"] = saved.ID
+	}
+	if in.Evidence == evidenceUnverified || (requested != "" && requested != in.Evidence) {
+		resp["evidence_note"] = in.EvidenceNote
+		resp["note_on_evidence"] = "Stored as unverified: a cause or an unchecked memory stays a lead until an operator confirms it."
 	}
 	if truncated {
 		resp["description_truncated"] = true
@@ -594,19 +641,45 @@ func (t *Tool) MemoryWrite(ctx context.Context, scopeID string, args map[string]
 	return marshal(resp)
 }
 
+// keepStoredEvidence stops an update from raising a grade by omission: when
+// the call gives no evidence and the stored row is unverified, it stays
+// unverified (a merge or a rewrite is not a check), and when the call gives
+// no note, the stored note stays.
+func (t *Tool) keepStoredEvidence(ctx context.Context, in *memoryInput, evidenceOmitted, noteGiven bool) error {
+	var stored database.Memory
+	err := t.db.WithContext(ctx).Select("evidence", "evidence_note").
+		Where("scope = ? AND name = ?", in.Scope, in.Name).Take(&stored).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read memory: %w", err)
+	}
+	if evidenceOmitted && stored.Evidence == evidenceUnverified {
+		in.Evidence = evidenceUnverified
+	}
+	if !noteGiven && in.EvidenceNote == "" {
+		in.EvidenceNote = stored.EvidenceNote
+	}
+	return nil
+}
+
 // upsert applies the write with the protection in the WHERE clause.
 func (t *Tool) upsert(ctx context.Context, in memoryInput, incidentUUID string) (string, *database.Memory, error) {
 	db := t.db.WithContext(ctx)
 	update := func() (int64, error) {
 		values := map[string]interface{}{
-			"type": in.Type, "description": in.Description, "body": in.Body, "updated_at": t.now().UTC(),
+			"type": in.Type, "description": in.Description, "body": in.Body,
+			"evidence": in.Evidence, "claim": in.Claim, "evidence_note": in.EvidenceNote,
+			"updated_at": t.now().UTC(),
 		}
 		if incidentUUID != "" {
 			values["incident_uuid"] = incidentUUID
 		}
 		res := db.Model(&database.Memory{}).
 			Where(writableWhere, in.Scope, in.Name).
-			Where("(type <> ? OR description <> ? OR body <> ?)", in.Type, in.Description, in.Body).
+			Where("(type <> ? OR description <> ? OR body <> ? OR COALESCE(evidence, '') <> ? OR COALESCE(claim, '') <> ? OR COALESCE(evidence_note, '') <> ?)",
+				in.Type, in.Description, in.Body, in.Evidence, in.Claim, in.EvidenceNote).
 			Updates(values)
 		return res.RowsAffected, res.Error
 	}
@@ -641,6 +714,7 @@ func (t *Tool) upsert(ctx context.Context, in memoryInput, incidentUUID string) 
 		now := t.now().UTC()
 		row := database.Memory{
 			Scope: in.Scope, Name: in.Name, Type: in.Type, Description: in.Description, Body: in.Body,
+			Evidence: in.Evidence, Claim: in.Claim, EvidenceNote: in.EvidenceNote,
 			IncidentUUID: incidentUUID, CreatedBy: createdByAgent, CreatedAt: now, UpdatedAt: now,
 		}
 		res := db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "scope"}, {Name: "name"}}, DoNothing: true}).Create(&row)

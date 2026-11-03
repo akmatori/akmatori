@@ -110,7 +110,7 @@ type RunbookManager interface {
 type MemoryManager interface {
 	CreateMemory(m *database.Memory) (*database.Memory, error)
 	CreateWithUniqueName(m *database.Memory) (*database.Memory, error)
-	UpdateMemory(id uint, m *database.Memory, setBody bool) (*database.Memory, error)
+	UpdateMemory(id uint, m *database.Memory, set MemoryUpdateSet) (*database.Memory, error)
 	UpsertByName(m *database.Memory) (*database.Memory, error)
 	DeleteMemory(id uint) error
 	GetMemory(id uint) (*database.Memory, error)

@@ -4938,7 +4938,7 @@ func (r *Registry) registerProposalsTools() {
 					},
 					"proposed_content": {
 						Type:        "object",
-						Description: "Per-kind JSON object. runbook: {title, content}. memory: {scope, type, name, description, body}. cron: {name, schedule, prompt, tools_enabled? (bool, default false: every connected tool), builtin_tools? (array of events, runbooks, memory, incidents, proposals; default events, runbooks, memory)}. skill_prompt: {skill_name, prompt}.",
+						Description: "Per-kind JSON object. runbook: {title, content}. memory: {scope, type, name, description, body, claim? (factual | causal), evidence? (observed | unverified; a causal claim is always unverified), evidence_note? (what supports it)}. cron: {name, schedule, prompt, tools_enabled? (bool, default false: every connected tool), builtin_tools? (array of events, runbooks, memory, incidents, proposals; default events, runbooks, memory)}. skill_prompt: {skill_name, prompt}.",
 					},
 					"source_incident_uuids": {
 						Type:        "array",

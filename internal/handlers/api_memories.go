@@ -25,6 +25,11 @@ type MemoryRequest struct {
 	Body         string `json:"body"`
 	IncidentUUID string `json:"incident_uuid,omitempty"`
 	CreatedBy    string `json:"created_by,omitempty"`
+	// Evidence is confirmed | observed | unverified (empty: observed, or
+	// unverified for a causal claim). Claim is causal | factual.
+	Evidence     string `json:"evidence,omitempty"`
+	Claim        string `json:"claim,omitempty"`
+	EvidenceNote string `json:"evidence_note,omitempty"`
 }
 
 // memoryUpdateRequest is the PUT body. Body shadows MemoryRequest.Body so
@@ -32,7 +37,8 @@ type MemoryRequest struct {
 // (clear the body).
 type memoryUpdateRequest struct {
 	MemoryRequest
-	Body *string `json:"body"`
+	Body         *string `json:"body"`
+	EvidenceNote *string `json:"evidence_note"`
 }
 
 // MemoryFromTextRequest is the body for POST /api/memories/from-text: free
@@ -71,10 +77,16 @@ func (h *APIHandler) handleMemories(w http.ResponseWriter, r *http.Request) {
 			api.RespondError(w, http.StatusBadRequest, "invalid type filter")
 			return
 		}
+		evidence := r.URL.Query().Get("evidence")
+		if evidence != "" && !services.ValidMemoryEvidence(evidence) {
+			api.RespondError(w, http.StatusBadRequest, "invalid evidence filter")
+			return
+		}
 		memories, err := h.memoryService.ListMemories(services.MemoryFilter{
 			Scope:        scope,
 			Type:         memType,
 			IncidentUUID: r.URL.Query().Get("incident_uuid"),
+			Evidence:     evidence,
 		})
 		if err != nil {
 			api.RespondError(w, http.StatusInternalServerError, "failed to list memories")
@@ -96,6 +108,9 @@ func (h *APIHandler) handleMemories(w http.ResponseWriter, r *http.Request) {
 			Body:         req.Body,
 			IncidentUUID: req.IncidentUUID,
 			CreatedBy:    req.CreatedBy,
+			Evidence:     req.Evidence,
+			Claim:        req.Claim,
+			EvidenceNote: req.EvidenceNote,
 		}
 		created, err := h.memoryService.CreateMemory(m)
 		if err != nil {
@@ -172,11 +187,16 @@ func (h *APIHandler) handleMemoryByID(w http.ResponseWriter, r *http.Request) {
 			Description:  req.Description,
 			IncidentUUID: req.IncidentUUID,
 			CreatedBy:    req.CreatedBy,
+			Evidence:     req.Evidence,
+			Claim:        req.Claim,
 		}
 		if req.Body != nil {
 			m.Body = *req.Body
 		}
-		updated, err := h.memoryService.UpdateMemory(uint(id), m, req.Body != nil)
+		if req.EvidenceNote != nil {
+			m.EvidenceNote = *req.EvidenceNote
+		}
+		updated, err := h.memoryService.UpdateMemory(uint(id), m, services.MemoryUpdateSet{Body: req.Body != nil, EvidenceNote: req.EvidenceNote != nil})
 		if err != nil {
 			respondMemoryWriteError(w, err)
 			return

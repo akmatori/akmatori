@@ -326,7 +326,7 @@ func TestMemoryService_Update(t *testing.T) {
 		Description: "updated desc",
 		Body:        "updated body",
 		CreatedBy:   MemoryCreatedByAgent,
-	}, false)
+	}, MemoryUpdateSet{})
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestMemoryService_Update(t *testing.T) {
 		t.Fatalf("update changed name: got %q", updated.Name)
 	}
 
-	_, err = svc.UpdateMemory(99999, &database.Memory{Description: "x", Body: "y"}, false)
+	_, err = svc.UpdateMemory(99999, &database.Memory{Description: "x", Body: "y"}, MemoryUpdateSet{})
 	if !IsMemoryNotFoundErr(err) {
 		t.Fatalf("expected not-found, got %v", err)
 	}
@@ -360,7 +360,7 @@ func TestMemoryService_Update_PartialPreservesOmittedFields(t *testing.T) {
 	// Send only Type — the rest of the request is empty.
 	updated, err := svc.UpdateMemory(created.ID, &database.Memory{
 		Type: MemoryTypeFeedback,
-	}, false)
+	}, MemoryUpdateSet{})
 	if err != nil {
 		t.Fatalf("partial update should succeed, got: %v", err)
 	}

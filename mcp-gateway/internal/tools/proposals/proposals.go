@@ -194,6 +194,7 @@ func (t *ProposalsTool) snapshotForTarget(ctx context.Context, kind, targetRef s
 		return marshalSnapshot(map[string]interface{}{
 			"scope": mem.Scope, "type": mem.Type, "name": mem.Name,
 			"description": mem.Description, "body": mem.Body,
+			"evidence": mem.Evidence, "claim": mem.Claim, "evidence_note": mem.EvidenceNote,
 		})
 	case kindCronUpdate:
 		var job database.CronJob

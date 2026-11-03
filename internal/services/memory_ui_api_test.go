@@ -21,7 +21,7 @@ func TestMemoryService_UpdateMemory_SetBodyClears(t *testing.T) {
 	}
 
 	// Empty body without setBody keeps the old body (partial update).
-	kept, err := svc.UpdateMemory(m.ID, &database.Memory{Description: "new description"}, false)
+	kept, err := svc.UpdateMemory(m.ID, &database.Memory{Description: "new description"}, MemoryUpdateSet{})
 	if err != nil {
 		t.Fatalf("partial update: %v", err)
 	}
@@ -29,7 +29,7 @@ func TestMemoryService_UpdateMemory_SetBodyClears(t *testing.T) {
 		t.Errorf("partial update changed body to %q", kept.Body)
 	}
 
-	cleared, err := svc.UpdateMemory(m.ID, &database.Memory{}, true)
+	cleared, err := svc.UpdateMemory(m.ID, &database.Memory{}, MemoryUpdateSet{Body: true})
 	if err != nil {
 		t.Fatalf("clear update: %v", err)
 	}

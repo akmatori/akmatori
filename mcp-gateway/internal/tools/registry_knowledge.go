@@ -17,8 +17,10 @@ const memoryWriteDescription = `Record a durable finding as a memory, or update 
 - description: one line, at most 500 bytes (longer is cut). Put details in the body (at most 8 KiB).
 - scope: "global", or the name of the skill the memory belongs to. name: lowercase slug (a-z, 0-9, hyphens), not starting with "file-".
 - Operator-authored memories and context-file summaries are protected: the write answers action "refused_protected" and changes nothing.
-Example: {"scope": "global", "name": "nginx-edge-03-flaky-nic", "type": "fact", "description": "nginx-edge-03 eth1 drops packets under load; 502s follow", "body": "Seen 2026-09-14 and 2026-10-02: NETDEV WATCHDOG on eth1, then 502 on the edge. Fix: fail traffic over to nginx-edge-04."}
-Returns {id, scope, name, action: created | updated | unchanged | refused_protected}.`
+- claim: "factual" (what is: config, tool behaviour, what you saw) or "causal" (X caused Y). A causal claim is stored as evidence "unverified": only an operator can confirm a cause. Put the start time of the cause and of the effect in evidence_note, and check that the cause came first; an effect that started later is not the cause. Causal wording ("caused by", "because", "due to", "root cause") marks the claim causal.
+- evidence: "observed" (default for a factual claim) or "unverified". "confirmed" is for operators and is stored as unverified.
+Example: {"scope": "global", "name": "nginx-edge-03-flaky-nic", "type": "fact", "claim": "factual", "description": "nginx-edge-03 eth1 logs NETDEV WATCHDOG under load", "body": "Seen 2026-09-14 and 2026-10-02: NETDEV WATCHDOG on eth1 at the start of each 502 burst on the edge. Failing traffic over to nginx-edge-04 ended both bursts.", "evidence_note": "kern.log 2026-10-02 10:02 UTC; 502s from 10:03 UTC"}
+Returns {id, scope, name, action: created | updated | unchanged | refused_protected, evidence, claim}.`
 
 // registerKnowledgeTools registers runbooks.* and memory.*: lexical search
 // and memory reads and writes on the gateway's own DB connection.
@@ -64,11 +66,12 @@ func (r *Registry) registerKnowledgeTools() {
 		Name:        "memory.list",
 		Description: "List memories newest first (no bodies), for maintenance: filter by scopes, type and since (updated at or after), and page with next_cursor until it is empty.",
 		InputSchema: mcp.InputSchema{Type: "object", Properties: map[string]mcp.Property{
-			"scopes": {Type: "array", Items: &mcp.Items{Type: "string"}, Description: "Scopes to list (default: all)"},
-			"type":   {Type: "string", Description: "fact or feedback", Enum: []string{"fact", "feedback"}},
-			"since":  {Type: "string", Description: "Only memories updated at or after this time: ISO-8601 or Unix seconds"},
-			"limit":  {Type: "integer", Description: "Page size (default 50, max 200)"},
-			"cursor": {Type: "string", Description: "next_cursor of the previous page"},
+			"scopes":   {Type: "array", Items: &mcp.Items{Type: "string"}, Description: "Scopes to list (default: all)"},
+			"type":     {Type: "string", Description: "fact or feedback", Enum: []string{"fact", "feedback"}},
+			"evidence": {Type: "string", Description: "confirmed, observed or unverified", Enum: []string{"confirmed", "observed", "unverified"}},
+			"since":    {Type: "string", Description: "Only memories updated at or after this time: ISO-8601 or Unix seconds"},
+			"limit":    {Type: "integer", Description: "Page size (default 50, max 200)"},
+			"cursor":   {Type: "string", Description: "next_cursor of the previous page"},
 		}},
 	}, func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
 		return kt.MemoryList(ctx, incidentID, args)
@@ -90,11 +93,14 @@ func (r *Registry) registerKnowledgeTools() {
 		Name:        "memory.write",
 		Description: memoryWriteDescription,
 		InputSchema: mcp.InputSchema{Type: "object", Properties: map[string]mcp.Property{
-			"scope":       {Type: "string", Description: "\"global\" or a skill name (required)"},
-			"name":        {Type: "string", Description: "Lowercase slug, unique in the scope (required)"},
-			"type":        {Type: "string", Description: "fact or feedback (required)", Enum: []string{"fact", "feedback"}},
-			"description": {Type: "string", Description: "One line, at most 500 bytes (required)"},
-			"body":        {Type: "string", Description: "The details, at most 8 KiB (required)"},
+			"scope":         {Type: "string", Description: "\"global\" or a skill name (required)"},
+			"name":          {Type: "string", Description: "Lowercase slug, unique in the scope (required)"},
+			"type":          {Type: "string", Description: "fact or feedback (required)", Enum: []string{"fact", "feedback"}},
+			"description":   {Type: "string", Description: "One line, at most 500 bytes (required)"},
+			"body":          {Type: "string", Description: "The details, at most 8 KiB (required)"},
+			"claim":         {Type: "string", Description: "factual (default) or causal", Enum: []string{"factual", "causal"}},
+			"evidence":      {Type: "string", Description: "observed (default for factual) or unverified; causal claims are always unverified", Enum: []string{"observed", "unverified"}},
+			"evidence_note": {Type: "string", Description: "What supports the memory: tool output, timestamps of cause and effect, at most 500 bytes"},
 		}, Required: []string{"scope", "name", "type", "description", "body"}},
 	}, func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
 		return kt.MemoryWrite(ctx, incidentID, args)

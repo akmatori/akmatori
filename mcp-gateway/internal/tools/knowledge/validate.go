@@ -38,6 +38,10 @@ type memoryInput struct {
 	Type        string
 	Description string
 	Body        string
+	// Evidence fields (optional in the call); applyAgentEvidence fills them.
+	Evidence     string
+	Claim        string
+	EvidenceNote string
 }
 
 // normalize trims the fields and folds legacy types to fact.

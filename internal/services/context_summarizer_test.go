@@ -116,7 +116,7 @@ func TestContextSummarizer_RerunUpdatesSameMemory(t *testing.T) {
 	}
 	first, _ := f.mem.ListMemoriesByScope(MemoryScopeGlobal)
 	// The operator renames the memory; a rerun must keep that name.
-	if _, err := f.mem.UpdateMemory(first[0].ID, &database.Memory{Name: "redis-file"}, false); err != nil {
+	if _, err := f.mem.UpdateMemory(first[0].ID, &database.Memory{Name: "redis-file"}, MemoryUpdateSet{}); err != nil {
 		t.Fatalf("rename: %v", err)
 	}
 	f.caller.respond = func(context.Context) (string, error) {

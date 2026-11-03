@@ -165,6 +165,10 @@ func runMigrations(db *gorm.DB) error {
 		return err
 	}
 
+	// Memories without the evidence columns get a one-time backfill after
+	// AutoMigrate adds them (migrateMemoryEvidence).
+	memoryEvidenceBackfill := memoryEvidenceNeedsBackfill(db)
+
 	// Reset GORM session state before AutoMigrate. The preMigrate step
 	// operates on specific tables, leaving internal GORM state (table name,
 	// clauses) that can leak into AutoMigrate's processing of other models
@@ -301,6 +305,12 @@ func runMigrations(db *gorm.DB) error {
 		slog.Warn("legacy memory type migration failed; it retries on the next start", "err", err)
 	}
 
+	if memoryEvidenceBackfill {
+		if err := migrateMemoryEvidence(db); err != nil {
+			return err
+		}
+	}
+
 	// A connector shows and deletes exactly one MCP server. Best-effort: an
 	// install that already has two in one connector keeps working; the
 	// service-level check still refuses new ones.
@@ -354,6 +364,41 @@ func migrateLegacyMemoryTypes(db *gorm.DB) error {
 	}
 	return nil
 }
+
+// memoryEvidenceNeedsBackfill reports whether the memories table exists
+// without the evidence column, so the rows predate evidence grades.
+func memoryEvidenceNeedsBackfill(db *gorm.DB) bool {
+	m := db.Session(&gorm.Session{NewDB: true}).Migrator()
+	return m.HasTable(&Memory{}) && !m.HasColumn(&Memory{}, "evidence")
+}
+
+// migrateMemoryEvidence grades the rows that existed before evidence
+// grades. AutoMigrate added the column with the default 'unverified', which
+// is right for agent rows (nobody assessed them); operator rows and
+// context-file summaries are 'observed'. Authorship is not verification, so
+// no row becomes 'confirmed'. A raw UPDATE leaves updated_at alone, so the
+// manifest order does not change. It runs once, in the start that adds the
+// column; a failure stops the start, and the next start does not retry
+// because the column then exists, so the error must be fixed by hand.
+func migrateMemoryEvidence(db *gorm.DB) error {
+	tx := db.Session(&gorm.Session{NewDB: true})
+	if err := tx.Exec("UPDATE memories SET evidence = 'observed' WHERE created_by = 'operator' OR source_file_id IS NOT NULL").Error; err != nil {
+		return fmt.Errorf("backfill memory evidence (observed): %w", err)
+	}
+	if err := tx.Exec("UPDATE memories SET claim = 'factual' WHERE source_file_id IS NOT NULL").Error; err != nil {
+		return fmt.Errorf("backfill memory claim: %w", err)
+	}
+	res := tx.Exec("UPDATE memories SET evidence_note = ? WHERE evidence = 'unverified'", legacyMemoryEvidenceNote)
+	if res.Error != nil {
+		return fmt.Errorf("backfill memory evidence (unverified): %w", res.Error)
+	}
+	slog.Info("graded existing memories", "unverified", res.RowsAffected)
+	return nil
+}
+
+// legacyMemoryEvidenceNote is services.MemoryLegacyEvidenceNote (the
+// database package cannot import services).
+const legacyMemoryEvidenceNote = "legacy: not assessed"
 
 // preMigrateCronJobsDropLegacyColumns removes the legacy `mode` and
 // `description` columns from cron_jobs. The agent-only cron redesign collapses
