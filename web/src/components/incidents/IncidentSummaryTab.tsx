@@ -11,12 +11,14 @@ interface IncidentSummaryTabProps {
   incident: AgentWork;
   // Show the feedback strip once the work has finished (incidents only).
   feedback?: boolean;
+  // Show the memories line; off when the page renders the Memory section.
+  memories?: boolean;
 }
 
 // IncidentSummaryTab renders the agent's final response as Markdown, with
 // the memories line and the feedback strip once the investigation has
 // finished.
-export default function IncidentSummaryTab({ incident, feedback = true }: IncidentSummaryTabProps) {
+export default function IncidentSummaryTab({ incident, feedback = true, memories = true }: IncidentSummaryTabProps) {
   if (!incident.response) {
     return (
       <p className="py-8 text-center text-fg-subtle">
@@ -47,7 +49,7 @@ export default function IncidentSummaryTab({ incident, feedback = true }: Incide
       </div>
       {feedback && isFinishedStatus(incident.status) && (
         <>
-          <IncidentMemoriesLine incidentUUID={incident.uuid} />
+          {memories && <IncidentMemoriesLine incidentUUID={incident.uuid} />}
           <IncidentFeedbackStrip incidentUUID={incident.uuid} />
         </>
       )}

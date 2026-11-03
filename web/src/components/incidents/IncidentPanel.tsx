@@ -13,11 +13,15 @@ import SourceKindChip from '../shared/SourceKindChip';
 import IncidentSummaryTab from './IncidentSummaryTab';
 import IncidentTimelineTab from './IncidentTimelineTab';
 import IncidentAlertsTab from './IncidentAlertsTab';
+import IncidentMemorySection from './IncidentMemorySection';
+import { isExtractionInProgress, showsMemorySection } from './memoryExtractionHelpers';
 import RunsTab from '../runs/RunsTab';
 import { getIncidentState, isStalled, TONE_CLASSES } from './incidentStatus';
 
 // Poll an in-flight incident this often.
 const LIVE_POLL_INTERVAL = 2000;
+// Poll while the post-incident memory pass is pending or running.
+const EXTRACTION_POLL_INTERVAL = 5000;
 
 type TabId = 'summary' | 'timeline' | 'alerts' | 'runs';
 
@@ -58,7 +62,8 @@ export default function IncidentPanel({ uuid, onUpdate }: IncidentPanelProps) {
   }, [uuid]);
 
   const live = !!incident && (incident.status === 'running' || incident.status === 'pending') && !isStalled(incident);
-  useInterval(() => { void refresh(); }, live ? LIVE_POLL_INTERVAL : null);
+  const extracting = !!incident && isExtractionInProgress(incident);
+  useInterval(() => { void refresh(); }, live ? LIVE_POLL_INTERVAL : extracting ? EXTRACTION_POLL_INTERVAL : null);
 
   const close = useCloseIncident(uuid, refresh);
 
@@ -153,7 +158,12 @@ export default function IncidentPanel({ uuid, onUpdate }: IncidentPanelProps) {
         aria-labelledby={`incident-tab-${activeTab}`}
         className="flex-1 min-h-0 overflow-y-auto px-5 py-5"
       >
-        {activeTab === 'summary' && <IncidentSummaryTab incident={incident} />}
+        {activeTab === 'summary' && (
+          <>
+            <IncidentSummaryTab incident={incident} memories={!showsMemorySection(incident)} />
+            {showsMemorySection(incident) && <IncidentMemorySection incident={incident} onChanged={refresh} />}
+          </>
+        )}
         {activeTab === 'timeline' && <IncidentTimelineTab incident={incident} live={live} />}
         {activeTab === 'alerts' && <IncidentAlertsTab incidentUUID={incident.uuid} />}
         {activeTab === 'runs' && <RunsTab runs={incident.runs ?? []} />}

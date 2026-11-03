@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Memory, MemoryRef } from '../../types';
-import { filterMemories, groupByScope, linkifyRefs } from './memoryHelpers';
+import { filterByEvidence, filterMemories, groupByScope, linkifyRefs, memoryEvidence } from './memoryHelpers';
 
 function mem(id: number, scope: string, name: string, updated: string, extra: Partial<Memory> = {}): Memory {
   return {
@@ -67,5 +67,23 @@ describe('linkifyRefs', () => {
 
   it('leaves a body without refs unchanged', () => {
     expect(linkifyRefs('plain text', [])).toBe('plain text');
+  });
+});
+
+describe('evidence', () => {
+  it('reads a row without a grade as unverified (the backfill default)', () => {
+    expect(memoryEvidence(mem(1, 'global', 'old', '2026-10-01T00:00:00Z'))).toBe('unverified');
+    expect(memoryEvidence(mem(2, 'global', 'ok', '2026-10-01T00:00:00Z', { evidence: 'confirmed' }))).toBe('confirmed');
+  });
+
+  it('filters by grade and keeps everything for all', () => {
+    const list = [
+      mem(1, 'global', 'a', '2026-10-01T00:00:00Z', { evidence: 'confirmed' }),
+      mem(2, 'global', 'b', '2026-10-01T00:00:00Z', { evidence: 'observed' }),
+      mem(3, 'global', 'c', '2026-10-01T00:00:00Z'),
+    ];
+    expect(filterByEvidence(list, 'all')).toHaveLength(3);
+    expect(filterByEvidence(list, 'unverified').map((m) => m.name)).toEqual(['c']);
+    expect(filterByEvidence(list, 'confirmed').map((m) => m.name)).toEqual(['a']);
   });
 });

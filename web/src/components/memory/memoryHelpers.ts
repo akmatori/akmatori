@@ -1,4 +1,4 @@
-import type { Memory, MemoryRef } from '../../types';
+import type { Memory, MemoryEvidence, MemoryRef } from '../../types';
 
 export const GLOBAL_SCOPE = 'global';
 
@@ -11,6 +11,49 @@ export const MEMORY_TYPE_LABELS: Record<string, string> = {
   fact: 'Fact',
   feedback: 'Feedback',
 };
+
+// The evidence grades (services.MemoryEvidence*), in display order.
+export const MEMORY_EVIDENCES = ['confirmed', 'observed', 'unverified'] as const;
+
+export const EVIDENCE_LABELS: Record<MemoryEvidence, string> = {
+  confirmed: 'Confirmed',
+  observed: 'Observed',
+  unverified: 'Unverified',
+};
+
+// What each grade means, for tooltips and the edit form.
+export const EVIDENCE_DESCRIPTIONS: Record<MemoryEvidence, string> = {
+  confirmed: 'You checked this; the agent will treat it as fact.',
+  observed: 'Seen directly (tool output, config, a timeline), not a cause.',
+  unverified: 'An unconfirmed cause, or an old note nobody assessed. The agent treats it as a lead to check.',
+};
+
+export const CLAIM_LABELS: Record<string, string> = {
+  factual: 'Factual',
+  causal: 'Causal',
+};
+
+// Tailwind classes of the evidence badge: green confirmed, grey observed,
+// amber unverified.
+export const EVIDENCE_BADGE_CLASSES: Record<MemoryEvidence, string> = {
+  confirmed: 'bg-state-ok/15 text-state-ok',
+  observed: 'bg-surface-2 text-fg-muted',
+  unverified: 'bg-state-need/15 text-state-need',
+};
+
+// memoryEvidence returns the grade of a memory; a row from before the
+// grades reads as unverified, which is what the backfill assigns.
+export function memoryEvidence(m: Pick<Memory, 'evidence'>): MemoryEvidence {
+  return m.evidence ?? 'unverified';
+}
+
+export type EvidenceFilter = 'all' | MemoryEvidence;
+
+// filterByEvidence keeps the memories of one grade ('all' keeps everything).
+export function filterByEvidence(memories: Memory[], filter: EvidenceFilter): Memory[] {
+  if (filter === 'all') return memories;
+  return memories.filter((m) => memoryEvidence(m) === filter);
+}
 
 export interface MemoryScopeGroup {
   scope: string;
