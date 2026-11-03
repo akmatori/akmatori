@@ -21,6 +21,7 @@ interface IncidentMemorySectionProps {
 // timeline it extracted and the memories it recorded for this incident.
 export default function IncidentMemorySection({ incident, onChanged }: IncidentMemorySectionProps) {
   const [memories, setMemories] = useState<Memory[]>([]);
+  const [used, setUsed] = useState<Memory[]>([]);
   const [rerunning, setRerunning] = useState(false);
   const [error, setError] = useState('');
   const state = extractionState(incident);
@@ -37,6 +38,14 @@ export default function IncidentMemorySection({ incident, onChanged }: IncidentM
       })
       .catch(() => {
         // The list is optional; the state line still shows.
+      });
+    memoriesApi
+      .list({ usedInIncident: incident.uuid })
+      .then((list) => {
+        if (!cancelled) setUsed(list);
+      })
+      .catch(() => {
+        // Optional as well.
       });
     return () => {
       cancelled = true;
@@ -92,6 +101,31 @@ export default function IncidentMemorySection({ incident, onChanged }: IncidentM
           <pre className="mt-1 whitespace-pre-wrap break-words rounded-lg bg-surface-2 px-3 py-2 text-sm text-fg">
             {incident.memory_timeline}
           </pre>
+        </div>
+      )}
+
+      {used.length > 0 && (
+        <div className="mt-4">
+          <h4 className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
+            {used.length === 1 ? '1 memory the runs used' : `${used.length} memories the runs used`}
+          </h4>
+          <ul className="mt-1 divide-y divide-line rounded-lg border border-line">
+            {used.map((m) => (
+              <li key={m.id}>
+                <Link to={memoryHref(m.id)} className="flex items-start gap-3 px-3 py-2 hover:bg-surface-2 transition-colors">
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-center gap-2 min-w-0">
+                      <span className="font-mono text-sm text-fg truncate">
+                        {m.scope === 'global' ? m.name : `${m.scope}/${m.name}`}
+                      </span>
+                      <EvidenceBadge memory={m} />
+                    </p>
+                    <p className="mt-0.5 text-sm text-fg-muted line-clamp-2">{m.description}</p>
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

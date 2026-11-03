@@ -198,6 +198,7 @@ func main() {
 	// After a run that changed memories (gateway memory.write / delete),
 	// regenerate SKILL.md files and refresh the read-only disk mirror.
 	skillService.SetMemoryRefresher(memoryService)
+	skillService.SetMemoryCiter(memoryService)
 
 	// Initialize default alert source types
 	if err := alertService.InitializeDefaultSourceTypes(); err != nil {

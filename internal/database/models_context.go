@@ -72,13 +72,48 @@ type Memory struct {
 	// unverified (an unconfirmed cause, or a legacy row). Claim is causal |
 	// factual, empty = not assessed. EvidenceNote says why. See
 	// services/memory_evidence.go.
-	Evidence     string    `gorm:"type:varchar(16);not null;default:'unverified';index" json:"evidence"`
-	Claim        string    `gorm:"type:varchar(16);not null;default:''" json:"claim,omitempty"`
-	EvidenceNote string    `gorm:"type:varchar(500);not null;default:''" json:"evidence_note,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	Evidence     string `gorm:"type:varchar(16);not null;default:'unverified';index" json:"evidence"`
+	Claim        string `gorm:"type:varchar(16);not null;default:''" json:"claim,omitempty"`
+	EvidenceNote string `gorm:"type:varchar(500);not null;default:''" json:"evidence_note,omitempty"`
+	// Usage, denormalised from memory_uses: UseCount counts reads in full
+	// (memory.get) and citations in final answers; LastUsedAt also moves on
+	// a search hit. The manifest ranks by the later of LastUsedAt and
+	// UpdatedAt, so what runs use stays in the cap.
+	UseCount   int        `gorm:"not null;default:0" json:"use_count"`
+	LastUsedAt *time.Time `gorm:"index" json:"last_used_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 func (Memory) TableName() string {
 	return "memories"
+}
+
+// Kinds of a memory use (MemoryUse.Kind).
+const (
+	// MemoryUseSearch: returned as a memory.search hit (moves last_used_at
+	// only, so a broad search does not inflate use_count).
+	MemoryUseSearch = "search"
+	// MemoryUseGet: read in full with memory.get.
+	MemoryUseGet = "get"
+	// MemoryUseCited: named in a final answer's "Memory used:" block (the
+	// only signal for a memory read from the manifest without memory.get).
+	MemoryUseCited = "cited"
+)
+
+// MemoryUse records one use of a memory by a run: the gateway inserts
+// search and get rows, FinishRun inserts cited rows. Rows follow the memory
+// (ON DELETE CASCADE). The gateway mirrors the model.
+type MemoryUse struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	MemoryID     uint      `gorm:"not null;index" json:"memory_id"`
+	Memory       Memory    `gorm:"foreignKey:MemoryID;constraint:OnDelete:CASCADE" json:"-"`
+	RunID        string    `gorm:"size:36;index" json:"run_id,omitempty"`
+	IncidentUUID string    `gorm:"size:36;index" json:"incident_uuid,omitempty"`
+	Kind         string    `gorm:"size:8;not null" json:"kind"`
+	At           time.Time `gorm:"index" json:"at"`
+}
+
+func (MemoryUse) TableName() string {
+	return "memory_uses"
 }

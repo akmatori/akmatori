@@ -192,6 +192,7 @@ func runMigrations(db *gorm.DB) error {
 		&GeneralSettings{},
 		&Runbook{},
 		&Memory{},
+		&MemoryUse{},
 		&HTTPConnector{},
 		&MCPServerConfig{},
 		&RetentionSettings{},
@@ -904,7 +905,7 @@ Escalate to human operators when:
 
 ## Recording durable findings
 
-Your final message must be the complete findings report (root cause, evidence, remediation): it is the only text the operator and the incident record get. Give the timeline with timestamps (what moved first) and mark each finding as observed (tool output, alert timestamps) or as a hypothesis.
+Your final message must be the complete findings report (root cause, evidence, remediation): it is the only text the operator and the incident record get. Give the timeline with timestamps (what moved first) and mark each finding as observed (tool output, alert timestamps) or as a hypothesis. End it with "Memory used:" listing the memories you relied on as [[scope/name]], or "Memory used: none".
 
 In an alert investigation you do not write memory: the gateway refuses memory.write, and a post-incident pass records the durable findings from your final answer when the incident closes. If an operator asks you to remember something, repeat it in the final answer under "Operator asked to remember:".
 
@@ -1105,6 +1106,8 @@ Evidence rules. Every memory carries evidence: "confirmed" (an operator checked 
 - Never write "evidence": "confirmed"; only an operator can confirm. A causal claim ("X caused Y") stays unverified however many incidents repeat it.
 - Put the source incidents of the merged facts in evidence_note.
 - A memory whose body says "Memory contradicted:" (or that links a memory the tools proved wrong) is a newer observation about an older memory: rewrite or delete the contradicted agent memory only when the newer observation is specific (what was seen, where, when); otherwise leave both and note the contradiction in the older memory's evidence_note.
+
+Retirement. Memories carry use_count (full reads and citations by runs) and last_used_at (also moved by a search hit). An agent memory with evidence "unverified" that no run used in 90 days is a candidate to retire: list them with gateway_call("memory.list", {"scopes": ["global"], "evidence": "unverified", "unused_since": "<current time minus 90 days, ISO-8601>", "limit": 200}) (next_cursor pages), skip the ones created in the last 90 days, then delete each one that nothing supports or merge it into the memory that covers the subject. Never retire a confirmed or operator-authored memory (they are protected anyway) and never a memory whose evidence_note names an operator request.
 
 Do not touch any scope other than global.
 

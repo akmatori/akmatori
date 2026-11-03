@@ -51,7 +51,7 @@ func (r *Registry) registerKnowledgeTools() {
 
 	r.server.RegisterTool(mcp.Tool{
 		Name:        "memory.search",
-		Description: "Search cross-incident memories (facts about the environment and operator feedback) by keywords, ranked by relevance. Name and description weigh more than the body. Returns id, scope, name, type, description and an excerpt; read one with memory.get.",
+		Description: "Search cross-incident memories (facts about the environment and operator feedback) by keywords, ranked by relevance. Name and description weigh more than the body. Returns id, scope, name, type, evidence, description, use_count and an excerpt; read one with memory.get. End your final answer with a \"Memory used:\" line naming the memories you relied on as [[scope/name]].",
 		InputSchema: mcp.InputSchema{Type: "object", Properties: map[string]mcp.Property{
 			"query":    {Type: "string", Description: "Alert text, host, service, symptom or topic (required)"},
 			"scopes":   {Type: "array", Items: &mcp.Items{Type: "string"}, Description: "Scopes to search, e.g. [\"<skill>\", \"global\"] (default: all)"},
@@ -65,12 +65,13 @@ func (r *Registry) registerKnowledgeTools() {
 
 	r.server.RegisterTool(mcp.Tool{
 		Name:        "memory.list",
-		Description: "List memories newest first (no bodies), for maintenance: filter by scopes, type and since (updated at or after), and page with next_cursor until it is empty.",
+		Description: "List memories newest first (no bodies), for maintenance: filter by scopes, type, evidence, since (updated at or after) and unused_since (no run used it since), and page with next_cursor until it is empty. Each item carries use_count and last_used_at.",
 		InputSchema: mcp.InputSchema{Type: "object", Properties: map[string]mcp.Property{
 			"scopes":   {Type: "array", Items: &mcp.Items{Type: "string"}, Description: "Scopes to list (default: all)"},
 			"type":     {Type: "string", Description: "fact or feedback", Enum: []string{"fact", "feedback"}},
 			"evidence": {Type: "string", Description: "confirmed, observed or unverified", Enum: []string{"confirmed", "observed", "unverified"}},
 			"since":    {Type: "string", Description: "Only memories updated at or after this time: ISO-8601 or Unix seconds"},
+			"unused_since": {Type: "string", Description: "Only memories no run used since this time (never used included): ISO-8601 or Unix seconds"},
 			"limit":    {Type: "integer", Description: "Page size (default 50, max 200)"},
 			"cursor":   {Type: "string", Description: "next_cursor of the previous page"},
 		}},

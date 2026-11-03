@@ -684,12 +684,13 @@ export const cronJobsApi = {
 
 // Memories API
 export const memoriesApi = {
-  list: (params?: { scope?: string; type?: string; incidentUuid?: string; evidence?: string }) => {
+  list: (params?: { scope?: string; type?: string; incidentUuid?: string; evidence?: string; usedInIncident?: string }) => {
     const qs = new URLSearchParams();
     if (params?.scope) qs.set('scope', params.scope);
     if (params?.type) qs.set('type', params.type);
     if (params?.incidentUuid) qs.set('incident_uuid', params.incidentUuid);
     if (params?.evidence) qs.set('evidence', params.evidence);
+    if (params?.usedInIncident) qs.set('used_in_incident', params.usedInIncident);
     const query = qs.toString();
     return fetchApi<Memory[]>(`/api/memories${query ? '?' + query : ''}`);
   },

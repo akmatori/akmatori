@@ -53,24 +53,41 @@ func (Runbook) TableName() string {
 // Memory mirrors the main API's Memory model. The knowledge tools
 // (memory.*) read and write it.
 type Memory struct {
-	ID           uint      `gorm:"primaryKey" json:"id"`
-	Scope        string    `gorm:"uniqueIndex:idx_memories_scope_name,priority:1" json:"scope"`
-	Type         string    `json:"type"`
-	Name         string    `gorm:"uniqueIndex:idx_memories_scope_name,priority:2" json:"name"`
-	Description  string    `json:"description"`
-	Body         string    `gorm:"type:text" json:"body"`
-	IncidentUUID string    `json:"incident_uuid,omitempty"`
-	CreatedBy    string    `json:"created_by,omitempty"`
-	SourceFileID *uint     `json:"source_file_id,omitempty"`
-	Evidence     string    `gorm:"default:unverified" json:"evidence"`
-	Claim        string    `json:"claim,omitempty"`
-	EvidenceNote string    `json:"evidence_note,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           uint       `gorm:"primaryKey" json:"id"`
+	Scope        string     `gorm:"uniqueIndex:idx_memories_scope_name,priority:1" json:"scope"`
+	Type         string     `json:"type"`
+	Name         string     `gorm:"uniqueIndex:idx_memories_scope_name,priority:2" json:"name"`
+	Description  string     `json:"description"`
+	Body         string     `gorm:"type:text" json:"body"`
+	IncidentUUID string     `json:"incident_uuid,omitempty"`
+	CreatedBy    string     `json:"created_by,omitempty"`
+	SourceFileID *uint      `json:"source_file_id,omitempty"`
+	Evidence     string     `gorm:"default:unverified" json:"evidence"`
+	Claim        string     `json:"claim,omitempty"`
+	EvidenceNote string     `json:"evidence_note,omitempty"`
+	UseCount     int        `gorm:"default:0" json:"use_count"`
+	LastUsedAt   *time.Time `json:"last_used_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 func (Memory) TableName() string {
 	return "memories"
+}
+
+// MemoryUse mirrors the API's MemoryUse: one use of a memory by a run. The
+// gateway inserts search and get rows; the API owns the table.
+type MemoryUse struct {
+	ID           uint      `gorm:"primaryKey"`
+	MemoryID     uint      `gorm:"not null;index"`
+	RunID        string    `gorm:"size:36;index"`
+	IncidentUUID string    `gorm:"size:36;index"`
+	Kind         string    `gorm:"size:8;not null"`
+	At           time.Time `gorm:"index"`
+}
+
+func (MemoryUse) TableName() string {
+	return "memory_uses"
 }
 
 // CronJob mirrors the main API's CronJob model (read-only in the gateway).

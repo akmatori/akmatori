@@ -15,6 +15,28 @@ Goal: keep the global memory scope tight and high-signal. Focus only on the glob
 2. For each duplicate or near-duplicate cluster, decide which memory to keep (prefer the most specific, most recent, operator-validated wording) and which to remove.
 3. For each kept memory that should take facts from a duplicate, prepare a merged body.
 4. Apply the changes one at a time:
+   - gateway_call("memory.write", {"scope": "global", "name": "<kept name>", "type": "<type>", "claim": "<factual | causal>", "evidence": "<observed | unverified>", "evidence_note": "<what supports it; the source incidents>", "description": "<one line>", "body": "<merged body>"}) — the same name updates the memory.
+   - gateway_call("memory.delete", {"scope": "global", "name": "<duplicate name>"}) — remove a duplicate or obsolete memory.
+   Operator-authored memories and context-file summaries are protected (action "refused_protected"). Keep them as they are; when an agent memory duplicates one, delete the agent memory.
+5. End with a concise summary of the pass: how many memories you scanned, merged and deleted. List the affected names.
+
+Evidence rules. Every memory carries evidence: "confirmed" (an operator checked it), "observed" (seen directly, not a cause) or "unverified" (an unconfirmed cause, or an old note nobody assessed), and claim: "factual" or "causal".
+- A merged memory takes the LOWEST evidence of its cluster: if any member is unverified, the kept memory is unverified. The one exception is a memory an operator confirmed: keep that one as it is, merge the others into it only when their facts do not change its claim, and never lower it.
+- Never write "evidence": "confirmed"; only an operator can confirm. A causal claim ("X caused Y") stays unverified however many incidents repeat it.
+- Put the source incidents of the merged facts in evidence_note.
+- A memory whose body says "Memory contradicted:" (or that links a memory the tools proved wrong) is a newer observation about an older memory: rewrite or delete the contradicted agent memory only when the newer observation is specific (what was seen, where, when); otherwise leave both and note the contradiction in the older memory's evidence_note.
+
+Do not touch any scope other than global.
+
+If memory.list returns no memories or there are no clear duplicates, end with the one-line summary "no-op: nothing to consolidate".`,
+		`You are running the nightly memory consolidation pass over the global cross-incident memory scope.
+
+Goal: keep the global memory scope tight and high-signal. Focus only on the global scope and on memories updated in the last 14 days. Concretely:
+
+1. List the candidates: gateway_call("memory.list", {"scopes": ["global"], "since": "<current time minus 14 days, ISO-8601>", "limit": 200}). While next_cursor is not empty, call again with "cursor": <next_cursor>. To check older memories for duplicates of a candidate, use gateway_call("memory.search", {"query": "<candidate description>", "scopes": ["global"]}). Read bodies with gateway_call("memory.get", {"id": <id>}).
+2. For each duplicate or near-duplicate cluster, decide which memory to keep (prefer the most specific, most recent, operator-validated wording) and which to remove.
+3. For each kept memory that should take facts from a duplicate, prepare a merged body.
+4. Apply the changes one at a time:
    - gateway_call("memory.write", {"scope": "global", "name": "<kept name>", "type": "<type>", "description": "<one line>", "body": "<merged body>"}) — the same name updates the memory.
    - gateway_call("memory.delete", {"scope": "global", "name": "<duplicate name>"}) — remove a duplicate or obsolete memory.
    Operator-authored memories and context-file summaries are protected (action "refused_protected"). Keep them as they are; when an agent memory duplicates one, delete the agent memory.

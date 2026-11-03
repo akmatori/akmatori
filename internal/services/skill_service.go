@@ -27,10 +27,22 @@ type SkillService struct {
 	memoryRefresher  MemoryRefresher        // optional; nil = the disk mirror is not refreshed after runs
 	incidentMerger   IncidentMergeEvaluator // optional; nil = post-investigation merge pass is a no-op
 	extractionKicker ExtractionKicker       // optional; wakes the post-incident memory extractor after a close
+	memoryCiter      MemoryCiter            // optional; records the "Memory used:" block of a final answer
 	gatewayTools     GatewayToolLister      // optional; nil = connected-tools renders discovery hints for MCP/HTTP tools
 
 	memoryMu          sync.Mutex
 	memoryFingerprint string // count + newest updated_at of memories at the last refresh
+}
+
+// MemoryCiter records the memories a final answer cites
+// (MemoryService.RecordCitedMemories).
+type MemoryCiter interface {
+	RecordCitedMemories(runID, incidentUUID, response string) int
+}
+
+// SetMemoryCiter wires the citation recorder; optional.
+func (s *SkillService) SetMemoryCiter(c MemoryCiter) {
+	s.memoryCiter = c
 }
 
 // SetMemoryRefresher wires the read-only disk mirror refresh that runs after

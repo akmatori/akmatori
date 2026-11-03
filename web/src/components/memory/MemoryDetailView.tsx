@@ -8,7 +8,7 @@ import type { MemoryDetail } from '../../types';
 import LoadingSpinner from '../LoadingSpinner';
 import ErrorMessage from '../ErrorMessage';
 import { getErrorMessage } from '../../utils/errors';
-import { formatAbsolute } from '../../utils/format';
+import { formatAbsolute, formatRelativeAgo } from '../../utils/format';
 import type { MemoryClaim, MemoryEvidence } from '../../types';
 import EvidenceBadge from './EvidenceBadge';
 import {
@@ -21,6 +21,7 @@ import {
   MEMORY_TYPE_LABELS,
   linkifyRefs,
   memoryEvidence,
+  usageLabel,
 } from './memoryHelpers';
 
 // The API cap on evidence_note (services.MemoryEvidenceNoteMaxLen).
@@ -182,6 +183,10 @@ export default function MemoryDetailView({ id }: MemoryDetailViewProps) {
             <div>
               <dt className="text-fg-subtle">Last updated</dt>
               <dd className="mt-0.5 text-fg">{formatAbsolute(memory.updated_at)}</dd>
+            </div>
+            <div>
+              <dt className="text-fg-subtle">Use by runs</dt>
+              <dd className="mt-0.5 text-fg">{usageLabel(memory, formatRelativeAgo)}</dd>
             </div>
             {memory.evidence_note && (
               <div className="sm:col-span-2">

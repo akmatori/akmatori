@@ -62,7 +62,8 @@ type IncidentFeedbackRequest struct {
 	Text string `json:"text"`
 }
 
-// handleMemories handles GET (list, with ?scope=, ?type= and ?incident_uuid=
+// handleMemories handles GET (list, with ?scope=, ?type=, ?evidence=,
+// ?incident_uuid= (origin) and ?used_in_incident= (used by its runs)
 // filters) and POST.
 func (h *APIHandler) handleMemories(w http.ResponseWriter, r *http.Request) {
 	if h.memoryService == nil {
@@ -83,10 +84,11 @@ func (h *APIHandler) handleMemories(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		memories, err := h.memoryService.ListMemories(services.MemoryFilter{
-			Scope:        scope,
-			Type:         memType,
-			IncidentUUID: r.URL.Query().Get("incident_uuid"),
-			Evidence:     evidence,
+			Scope:          scope,
+			Type:           memType,
+			IncidentUUID:   r.URL.Query().Get("incident_uuid"),
+			Evidence:       evidence,
+			UsedInIncident: r.URL.Query().Get("used_in_incident"),
 		})
 		if err != nil {
 			api.RespondError(w, http.StatusInternalServerError, "failed to list memories")
