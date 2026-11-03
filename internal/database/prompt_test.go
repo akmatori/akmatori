@@ -94,10 +94,15 @@ func TestLegacySystemCronPrompts_ExcludeCurrent(t *testing.T) {
 		if len(olds) == 0 {
 			t.Errorf("%s: no legacy prompts", name)
 		}
+		seen := map[string]bool{}
 		for _, old := range olds {
 			if old == current[name] {
 				t.Errorf("%s: the current default is listed as legacy", name)
 			}
+			if seen[old] {
+				t.Errorf("%s: a legacy prompt is listed twice", name)
+			}
+			seen[old] = true
 		}
 	}
 }

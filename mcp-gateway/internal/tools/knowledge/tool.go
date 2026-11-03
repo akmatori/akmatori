@@ -154,14 +154,14 @@ func stringListArg(args map[string]interface{}, key string) []string {
 func timeArg(args map[string]interface{}, key string) (time.Time, bool) {
 	switch v := args[key].(type) {
 	case float64:
-		return time.Unix(int64(v), 0).UTC(), true
+		return unixArg(int64(v)), true
 	case string:
 		s := strings.TrimSpace(v)
 		if s == "" {
 			return time.Time{}, false
 		}
 		if i, err := strconv.ParseInt(s, 10, 64); err == nil {
-			return time.Unix(i, 0).UTC(), true
+			return unixArg(i), true
 		}
 		for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05", "2006-01-02 15:04:05", "2006-01-02"} {
 			if t, err := time.Parse(layout, s); err == nil {
@@ -170,6 +170,20 @@ func timeArg(args map[string]interface{}, key string) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
+}
+
+// unixMillisThreshold separates Unix seconds from milliseconds: a value
+// above it is read as milliseconds (seconds would mean the year 5138).
+const unixMillisThreshold = 100_000_000_000
+
+// unixArg reads a Unix time in seconds or milliseconds; a millisecond value
+// (what Date.now() gives) used to become a date in the far future and an
+// empty list.
+func unixArg(v int64) time.Time {
+	if v > unixMillisThreshold || v < -unixMillisThreshold {
+		return time.UnixMilli(v).UTC()
+	}
+	return time.Unix(v, 0).UTC()
 }
 
 func (t *Tool) warnTruncated(kind string) {
@@ -524,6 +538,22 @@ func (t *Tool) requireRun(ctx context.Context, scopeID string) (*database.AgentR
 // when the incident closes, from the final answer.
 const errAlertRunWrites = "alert investigations do not write memory: the post-incident pass records findings when the incident closes; put the timeline and your findings in the final answer"
 
+// hasQuota reports whether the run may still write (or delete) one more
+// memory; it charges nothing. takeQuota counts the slot once the write
+// changed something, so a refused, unchanged or failed write is free.
+func (t *Tool) hasQuota(runID string, isDelete bool) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	c := t.counters[runID]
+	if c == nil {
+		return true
+	}
+	if isDelete {
+		return c.deletes < maxDeletesPerRun
+	}
+	return c.writes < maxWritesPerRun
+}
+
 // takeQuota counts one write or delete of a run; false when over the cap.
 func (t *Tool) takeQuota(runID string, isDelete bool) bool {
 	t.mu.Lock()
@@ -625,13 +655,18 @@ func (t *Tool) MemoryWrite(ctx context.Context, scopeID string, args map[string]
 	if err != nil {
 		return nil, err
 	}
-	if !t.takeQuota(run.RunID, false) {
+	if !t.hasQuota(run.RunID, false) {
 		return nil, fmt.Errorf("write limit reached: at most %d memory writes per run", maxWritesPerRun)
 	}
 
 	action, saved, err := t.upsert(ctx, in, run.IncidentUUID)
 	if err != nil {
 		return nil, err
+	}
+	// A slot is used by a write that changed something; a refused or an
+	// unchanged write does not use up the run's budget.
+	if action == "created" || action == "updated" {
+		t.takeQuota(run.RunID, false)
 	}
 	t.logger.Printf("memory.write run=%s scope=%s name=%s action=%s", run.RunID, in.Scope, in.Name, action)
 	resp := map[string]interface{}{"scope": in.Scope, "name": in.Name, "action": action}
@@ -768,13 +803,16 @@ func (t *Tool) MemoryDelete(ctx context.Context, scopeID string, args map[string
 	if scope == "" || name == "" {
 		return nil, errors.New("scope and name are required")
 	}
-	if !t.takeQuota(run.RunID, true) {
+	if !t.hasQuota(run.RunID, true) {
 		return nil, fmt.Errorf("delete limit reached: at most %d memory deletes per run", maxDeletesPerRun)
 	}
 	db := t.db.WithContext(ctx)
 	res := db.Where(writableWhere, scope, name).Delete(&database.Memory{})
 	if res.Error != nil {
 		return nil, fmt.Errorf("delete memory: %w", res.Error)
+	}
+	if res.RowsAffected > 0 {
+		t.takeQuota(run.RunID, true)
 	}
 	action := "deleted"
 	if res.RowsAffected == 0 {
