@@ -380,20 +380,25 @@ func memoryEvidenceNeedsBackfill(db *gorm.DB) bool {
 // manifest order does not change. It runs once, in the start that adds the
 // column; a failure stops the start, and the next start does not retry
 // because the column then exists, so the error must be fixed by hand.
+//
+// The three statements run in one transaction: the backfill is gated on the
+// column being new, so a failure half way would otherwise leave rows ungraded
+// with no retry on the next start.
 func migrateMemoryEvidence(db *gorm.DB) error {
-	tx := db.Session(&gorm.Session{NewDB: true})
-	if err := tx.Exec("UPDATE memories SET evidence = 'observed' WHERE created_by = 'operator' OR source_file_id IS NOT NULL").Error; err != nil {
-		return fmt.Errorf("backfill memory evidence (observed): %w", err)
-	}
-	if err := tx.Exec("UPDATE memories SET claim = 'factual' WHERE source_file_id IS NOT NULL").Error; err != nil {
-		return fmt.Errorf("backfill memory claim: %w", err)
-	}
-	res := tx.Exec("UPDATE memories SET evidence_note = ? WHERE evidence = 'unverified'", legacyMemoryEvidenceNote)
-	if res.Error != nil {
-		return fmt.Errorf("backfill memory evidence (unverified): %w", res.Error)
-	}
-	slog.Info("graded existing memories", "unverified", res.RowsAffected)
-	return nil
+	return db.Session(&gorm.Session{NewDB: true}).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("UPDATE memories SET evidence = 'observed' WHERE created_by = 'operator' OR source_file_id IS NOT NULL").Error; err != nil {
+			return fmt.Errorf("backfill memory evidence (observed): %w", err)
+		}
+		if err := tx.Exec("UPDATE memories SET claim = 'factual' WHERE source_file_id IS NOT NULL").Error; err != nil {
+			return fmt.Errorf("backfill memory claim: %w", err)
+		}
+		res := tx.Exec("UPDATE memories SET evidence_note = ? WHERE evidence = 'unverified'", legacyMemoryEvidenceNote)
+		if res.Error != nil {
+			return fmt.Errorf("backfill memory evidence (unverified): %w", res.Error)
+		}
+		slog.Info("graded existing memories", "unverified", res.RowsAffected)
+		return nil
+	})
 }
 
 // legacyMemoryEvidenceNote is services.MemoryLegacyEvidenceNote (the

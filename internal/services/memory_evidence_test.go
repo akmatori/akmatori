@@ -43,7 +43,7 @@ func TestMemoryEvidenceFixture(t *testing.T) {
 	for _, c := range f.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			m := &database.Memory{
-				Description: c.Input["description"], Body: c.Input["body"],
+				Type: c.Input["type"], Description: c.Input["description"], Body: c.Input["body"],
 				Evidence: c.Input["evidence"], Claim: c.Input["claim"], EvidenceNote: c.Input["evidence_note"],
 			}
 			truncated, err := ApplyAgentMemoryEvidence(m)
@@ -243,5 +243,38 @@ func TestSaveFileSummary_Observed(t *testing.T) {
 	}
 	if again.Evidence != MemoryEvidenceObserved {
 		t.Errorf("rerun: %+v", again)
+	}
+}
+
+// A rewrite is not a check: the stored grade rules the merge.
+func TestMergeStoredMemoryEvidence(t *testing.T) {
+	cases := []struct {
+		name                 string
+		stored, in           database.Memory
+		omitted              bool
+		wantEvidence, wantNo string
+		wantRefused          bool
+	}{
+		{"omitted, same text keeps confirmed", database.Memory{Description: "d", Body: "b", Evidence: "confirmed", Claim: "causal", EvidenceNote: "checked by ops"}, database.Memory{Description: "d", Body: "b", Evidence: "observed", Claim: "factual"}, true, "confirmed", "checked by ops", false},
+		{"omitted, changed text resets confirmed", database.Memory{Description: "d", Body: "b", Evidence: "confirmed"}, database.Memory{Description: "d", Body: "b2", Evidence: "observed", Claim: "factual"}, true, "observed", memoryConfirmationResetNote, false},
+		{"omitted, changed text keeps unverified and drops the legacy note", database.Memory{Description: "d", Body: "b", Evidence: "unverified", EvidenceNote: MemoryLegacyEvidenceNote}, database.Memory{Description: "d", Body: "b2", Evidence: "observed", Claim: "factual"}, true, "unverified", "", false},
+		{"omitted, changed text keeps an operator note", database.Memory{Description: "d", Body: "b", Evidence: "unverified", EvidenceNote: "suspected, check X"}, database.Memory{Description: "d", Body: "b2", Evidence: "observed", Claim: "factual"}, true, "unverified", "suspected, check X", false},
+		{"observed without a note does not raise", database.Memory{Description: "d", Body: "b", Evidence: "unverified", EvidenceNote: MemoryLegacyEvidenceNote}, database.Memory{Description: "d", Body: "b2", Evidence: "observed", Claim: "factual"}, false, "unverified", memoryRaiseNeedsNote, true},
+		{"observed with a note raises", database.Memory{Description: "d", Body: "b", Evidence: "unverified", EvidenceNote: MemoryLegacyEvidenceNote}, database.Memory{Description: "d", Body: "b2", Evidence: "observed", Claim: "factual", EvidenceNote: "seen in redis.conf"}, false, "observed", "seen in redis.conf", false},
+		{"omitted on observed row follows the text", database.Memory{Description: "d", Body: "b", Evidence: "observed", Claim: "factual"}, database.Memory{Description: "d", Body: "b2", Evidence: "unverified", Claim: "causal", EvidenceNote: "causal claim; stored as unverified"}, true, "unverified", "causal claim; stored as unverified", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := MergeStoredMemoryEvidence(&c.in, &c.stored, c.omitted)
+			if got != c.wantRefused || c.in.Evidence != c.wantEvidence || c.in.EvidenceNote != c.wantNo {
+				t.Errorf("refused=%v evidence=%q note=%q", got, c.in.Evidence, c.in.EvidenceNote)
+			}
+		})
+	}
+	// Same text: the stored claim wins too.
+	in := database.Memory{Description: "d", Body: "b", Evidence: "observed", Claim: "factual"}
+	MergeStoredMemoryEvidence(&in, &database.Memory{Description: "d", Body: "b", Evidence: "unverified", Claim: "causal"}, true)
+	if in.Claim != "causal" || in.Evidence != "unverified" {
+		t.Errorf("claim=%q evidence=%q", in.Claim, in.Evidence)
 	}
 }

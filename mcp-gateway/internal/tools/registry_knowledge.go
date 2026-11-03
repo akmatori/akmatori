@@ -53,10 +53,11 @@ func (r *Registry) registerKnowledgeTools() {
 		Name:        "memory.search",
 		Description: "Search cross-incident memories (facts about the environment and operator feedback) by keywords, ranked by relevance. Name and description weigh more than the body. Returns id, scope, name, type, description and an excerpt; read one with memory.get.",
 		InputSchema: mcp.InputSchema{Type: "object", Properties: map[string]mcp.Property{
-			"query":  {Type: "string", Description: "Alert text, host, service, symptom or topic (required)"},
-			"scopes": {Type: "array", Items: &mcp.Items{Type: "string"}, Description: "Scopes to search, e.g. [\"<skill>\", \"global\"] (default: all)"},
-			"type":   {Type: "string", Description: "fact or feedback (default: both)", Enum: []string{"fact", "feedback"}},
-			"limit":  {Type: "integer", Description: "Maximum results (default 5, max 20)"},
+			"query":    {Type: "string", Description: "Alert text, host, service, symptom or topic (required)"},
+			"scopes":   {Type: "array", Items: &mcp.Items{Type: "string"}, Description: "Scopes to search, e.g. [\"<skill>\", \"global\"] (default: all)"},
+			"type":     {Type: "string", Description: "fact or feedback (default: both)", Enum: []string{"fact", "feedback"}},
+			"evidence": {Type: "string", Description: "confirmed, observed or unverified (default: all)", Enum: []string{"confirmed", "observed", "unverified"}},
+			"limit":    {Type: "integer", Description: "Maximum results (default 5, max 20)"},
 		}, Required: []string{"query"}},
 	}, func(ctx context.Context, incidentID string, args map[string]interface{}) (interface{}, error) {
 		return kt.MemorySearch(ctx, incidentID, args)

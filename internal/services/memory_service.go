@@ -679,6 +679,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 		mem       *database.Memory
 		legacy    bool // true if filename matches the legacy `<id>-<name>.md`
 		tombstone bool // true if frontmatter carried `deleted: true`
+		gradeless bool // true if the file carried no evidence grade
 	}
 	var parsed []*parsedEntry
 	for _, scopeEnt := range scopeEntries {
@@ -740,6 +741,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 				slog.Warn("memory ingest: parse file", "path", rel, "err", err)
 				continue
 			}
+			gradeless := false
 			if !tombstone {
 				// Force agent authorship: the file's frontmatter is agent-
 				// controlled and cannot be trusted to claim operator
@@ -748,8 +750,12 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 				// created_by — see this function's doc comment.
 				mem.CreatedBy = MemoryCreatedByAgent
 				// A file with no grade predates grades: nobody assessed it.
-				// Then the agent rules apply (no confirmed, causes unverified).
-				if mem.Evidence == "" {
+				// A new row is unverified with the legacy note; an existing
+				// row keeps its grade (the upgrade backfill already graded
+				// it, and the import must not undo that). Then the agent
+				// rules apply (no confirmed, causes unverified).
+				gradeless = mem.Evidence == ""
+				if gradeless {
 					mem.Evidence = MemoryEvidenceUnverified
 					if mem.EvidenceNote == "" {
 						mem.EvidenceNote = MemoryLegacyEvidenceNote
@@ -774,7 +780,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 				}
 			}
 
-			entry := &parsedEntry{mem: mem, legacy: legacyIngestName(f.Name(), mem.Name), tombstone: tombstone}
+			entry := &parsedEntry{mem: mem, legacy: legacyIngestName(f.Name(), mem.Name), tombstone: tombstone, gradeless: gradeless}
 			if idx, ok := seenInScope[mem.Name]; ok {
 				prior := parsed[idx]
 				switch {
@@ -828,7 +834,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 			slog.Warn("memory ingest: invalid file skipped (a copy is in "+memoryImportBackupDir+")", "scope", entry.mem.Scope, "name", entry.mem.Name, "err", err)
 			continue
 		}
-		if _, err := s.upsertByNameNoSync(entry.mem); err != nil {
+		if _, err := s.upsertByNameNoSyncOpts(entry.mem, entry.gradeless); err != nil {
 			slog.Warn("memory ingest: upsert", "scope", entry.mem.Scope, "name", entry.mem.Name, "err", err)
 			upsertFailures++
 			continue
@@ -994,6 +1000,16 @@ func legacyIngestName(filename, name string) bool {
 // keeps the newest-by-UpdatedAt entries, so that made its selection
 // arbitrary.
 func (s *MemoryService) upsertByNameNoSync(m *database.Memory) (*database.Memory, error) {
+	return s.upsertByNameNoSyncOpts(m, false)
+}
+
+// upsertByNameNoSyncOpts is upsertByNameNoSync with keepEvidence: when true,
+// a conflict leaves the stored evidence, claim and evidence_note alone (the
+// values in m are used only for a new row). IngestFromDisk sets it for a file
+// without a grade: the file says nothing about evidence, and the upgrade
+// import must not turn the backfilled grades into unverified or stamp
+// updated_at on every row.
+func (s *MemoryService) upsertByNameNoSyncOpts(m *database.Memory, keepEvidence bool) (*database.Memory, error) {
 	if err := s.validate(m); err != nil {
 		return nil, err
 	}
@@ -1003,14 +1019,17 @@ func (s *MemoryService) upsertByNameNoSync(m *database.Memory) (*database.Memory
 	// An operator upsert (proposal approval, Slack feedback, from-text) also
 	// takes ownership: the row becomes created_by=operator, which the gateway
 	// memory tools never change. Other upserts keep the stored authorship.
-	columns := []string{"type", "description", "body", "incident_uuid", "evidence", "claim", "evidence_note", "updated_at"}
+	columns := []string{"type", "description", "body", "incident_uuid", "updated_at"}
 	changed := "memories.type <> excluded.type" +
 		" OR memories.description <> excluded.description" +
 		" OR memories.body <> excluded.body" +
-		" OR COALESCE(memories.incident_uuid, '') <> COALESCE(excluded.incident_uuid, '')" +
-		" OR COALESCE(memories.evidence, '') <> COALESCE(excluded.evidence, '')" +
-		" OR COALESCE(memories.claim, '') <> COALESCE(excluded.claim, '')" +
-		" OR COALESCE(memories.evidence_note, '') <> COALESCE(excluded.evidence_note, '')"
+		" OR COALESCE(memories.incident_uuid, '') <> COALESCE(excluded.incident_uuid, '')"
+	if !keepEvidence {
+		columns = append(columns, "evidence", "claim", "evidence_note")
+		changed += " OR COALESCE(memories.evidence, '') <> COALESCE(excluded.evidence, '')" +
+			" OR COALESCE(memories.claim, '') <> COALESCE(excluded.claim, '')" +
+			" OR COALESCE(memories.evidence_note, '') <> COALESCE(excluded.evidence_note, '')"
+	}
 	if m.CreatedBy == MemoryCreatedByOperator {
 		columns = append(columns, "created_by")
 		changed += " OR COALESCE(memories.created_by, '') <> excluded.created_by"

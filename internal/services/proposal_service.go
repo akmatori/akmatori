@@ -400,16 +400,11 @@ func (s *ProposalService) apply(ctx context.Context, p *database.Proposal) error
 		if _, err := ApplyAgentMemoryEvidence(mem); err != nil {
 			return fmt.Errorf("invalid proposed_content: %w", err)
 		}
-		// A rewrite is not a check: content without a grade does not raise
-		// an unverified memory, and content without a note keeps the note.
+		// A rewrite is not a check: the stored grade rules the merge
+		// (MergeStoredMemoryEvidence).
 		var stored database.Memory
-		if err := s.db.Select("evidence", "evidence_note").Where("scope = ? AND name = ?", mem.Scope, mem.Name).Take(&stored).Error; err == nil {
-			if content.Evidence == nil && stored.Evidence == MemoryEvidenceUnverified {
-				mem.Evidence = MemoryEvidenceUnverified
-			}
-			if content.EvidenceNote == nil && mem.EvidenceNote == "" {
-				mem.EvidenceNote = stored.EvidenceNote
-			}
+		if err := s.db.Where("scope = ? AND name = ?", mem.Scope, mem.Name).Take(&stored).Error; err == nil {
+			MergeStoredMemoryEvidence(mem, &stored, content.Evidence == nil)
 		}
 		// UpsertByName is idempotent by (scope, name) and syncs files itself.
 		_, err := s.memories.UpsertByName(mem)

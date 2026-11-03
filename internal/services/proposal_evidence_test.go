@@ -90,7 +90,37 @@ func TestApprove_MemoryUpdate_OmittedEvidenceKeepsStoredGrade(t *testing.T) {
 	if _, err := svc.Approve(context.Background(), "p1"); err != nil {
 		t.Fatal(err)
 	}
-	if up := memories.upserted[0]; up.Evidence != MemoryEvidenceUnverified || up.EvidenceNote != "legacy: not assessed" {
+	// The text changed: the grade stays unverified and the legacy note goes.
+	if up := memories.upserted[0]; up.Evidence != MemoryEvidenceUnverified || up.EvidenceNote != "" {
 		t.Errorf("upsert: %+v", up)
+	}
+}
+
+// A confirmed memory keeps its grade through a type-only proposal and loses
+// it, with a note, when the text changes.
+func TestApprove_MemoryUpdate_ConfirmedGrade(t *testing.T) {
+	for _, c := range []struct {
+		name, body, wantEvidence, wantNote string
+	}{
+		{"same text keeps confirmed", "b", "confirmed", "checked by ops"},
+		{"changed text resets", "b2", "observed", memoryConfirmationResetNote},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			db := newProposalTestDB(t)
+			memories := &fakeMemories{}
+			svc := NewProposalService(db, &fakeRunbooks{}, memories, &fakeCrons{}, &fakeSkills{})
+			db.Create(&database.Memory{Scope: "global", Type: "fact", Name: "web-1", Description: "d", Body: "b", CreatedBy: "operator", Evidence: "confirmed", Claim: "factual", EvidenceNote: "checked by ops"})
+			seedProposal(t, db, &database.Proposal{
+				UUID: "p1", Kind: database.ProposalKindMemoryUpdate, Title: "Retype", TargetRef: "global/web-1",
+				CurrentSnapshot: `{"scope":"global","type":"fact","name":"web-1","description":"d","body":"b"}`,
+				ProposedContent: `{"scope":"global","type":"feedback","name":"web-1","description":"d","body":"` + c.body + `"}`,
+			})
+			if _, err := svc.Approve(context.Background(), "p1"); err != nil {
+				t.Fatal(err)
+			}
+			if up := memories.upserted[0]; up.Evidence != c.wantEvidence || up.EvidenceNote != c.wantNote {
+				t.Errorf("upsert: %+v", up)
+			}
+		})
 	}
 }

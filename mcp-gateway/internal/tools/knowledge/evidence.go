@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/akmatori/mcp-gateway/internal/database"
 )
 
 // Evidence grades and claim kinds, as in the main API's
@@ -47,7 +49,9 @@ func applyAgentEvidence(in *memoryInput) (truncated bool, err error) {
 	if in.Claim == "" {
 		in.Claim = claimFactual
 	}
-	if in.Claim != claimCausal && (causalPattern.MatchString(in.Description) || causalPattern.MatchString(in.Body)) {
+	// A feedback memory is a rule, not a cause: its **Why:** line says
+	// "because" by format, so the net does not run on it.
+	if in.Claim != claimCausal && in.Type != typeFeedback && (causalPattern.MatchString(in.Description) || causalPattern.MatchString(in.Body)) {
 		in.Claim = claimCausal
 	}
 	switch {
@@ -65,15 +69,53 @@ func applyAgentEvidence(in *memoryInput) (truncated bool, err error) {
 			in.Evidence = evidenceObserved
 		}
 	}
-	if len(in.EvidenceNote) > evidenceNoteMaxLen {
-		cut := evidenceNoteMaxLen
-		for cut > 0 && (in.EvidenceNote[cut]&0xC0) == 0x80 {
-			cut--
-		}
-		in.EvidenceNote = strings.TrimSpace(in.EvidenceNote[:cut])
-		truncated = true
-	}
+	in.EvidenceNote, truncated = cutUTF8(in.EvidenceNote, evidenceNoteMaxLen)
 	return truncated, nil
+}
+
+// Notes that mergeStoredEvidence adds (the API's MergeStoredMemoryEvidence
+// uses the same text).
+const (
+	confirmationResetNote = "operator confirmation reset: content changed"
+	raiseNeedsNote        = "raising unverified to observed needs an evidence_note that says what was observed; stays unverified"
+	legacyEvidenceNote    = "legacy: not assessed"
+)
+
+// mergeStoredEvidence is the API's MergeStoredMemoryEvidence: the stored row
+// rules an update's grade, because a rewrite is not a check.
+//
+//   - evidence omitted and the text unchanged: the stored grade, claim and
+//     note stay;
+//   - evidence omitted and the text changed: a stored unverified stays
+//     unverified; a stored confirmed falls to the agent default, with a note;
+//   - observed given on a stored unverified row without an evidence_note: the
+//     row stays unverified and the note says why (raiseRefused = true);
+//   - note omitted: the stored note stays, except the legacy backfill note
+//     on changed text.
+func mergeStoredEvidence(in *memoryInput, stored *database.Memory, evidenceOmitted bool) (raiseRefused bool) {
+	textChanged := strings.TrimSpace(stored.Description) != strings.TrimSpace(in.Description) ||
+		strings.TrimSpace(stored.Body) != strings.TrimSpace(in.Body)
+	noteOmitted := in.EvidenceNote == ""
+	switch {
+	case evidenceOmitted && !textChanged && stored.Evidence != "":
+		in.Evidence = stored.Evidence
+		if stored.Claim != "" {
+			in.Claim = stored.Claim
+		}
+	case evidenceOmitted && stored.Evidence == evidenceUnverified:
+		in.Evidence = evidenceUnverified
+	case evidenceOmitted && stored.Evidence == evidenceConfirmed:
+		in.EvidenceNote = appendEvidenceNote(in.EvidenceNote, confirmationResetNote)
+	case !evidenceOmitted && noteOmitted && stored.Evidence == evidenceUnverified && in.Evidence == evidenceObserved:
+		in.Evidence = evidenceUnverified
+		in.EvidenceNote = raiseNeedsNote
+		raiseRefused = true
+	}
+	if noteOmitted && in.EvidenceNote == "" && (!textChanged || stored.EvidenceNote != legacyEvidenceNote) {
+		in.EvidenceNote = stored.EvidenceNote
+	}
+	in.EvidenceNote, _ = cutUTF8(in.EvidenceNote, evidenceNoteMaxLen)
+	return raiseRefused
 }
 
 func appendEvidenceNote(note, reason string) string {

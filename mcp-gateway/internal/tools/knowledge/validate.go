@@ -90,13 +90,19 @@ func applyAgentPolicy(in *memoryInput) (truncated bool, err error) {
 	if strings.HasPrefix(in.Name, reservedNamePrefix) {
 		return false, fmt.Errorf("name must not start with %q (reserved for context file summaries)", reservedNamePrefix)
 	}
-	if len(in.Description) > memoryDescriptionMaxLen {
-		cut := memoryDescriptionMaxLen
-		for cut > 0 && (in.Description[cut]&0xC0) == 0x80 {
-			cut--
-		}
-		in.Description = strings.TrimSpace(in.Description[:cut])
-		truncated = true
-	}
+	in.Description, truncated = cutUTF8(in.Description, memoryDescriptionMaxLen)
 	return truncated, nil
+}
+
+// cutUTF8 cuts s to max bytes without splitting a UTF-8 rune and trims the
+// result (truncated = true when it cut).
+func cutUTF8(s string, max int) (string, bool) {
+	if len(s) <= max {
+		return s, false
+	}
+	cut := max
+	for cut > 0 && (s[cut]&0xC0) == 0x80 {
+		cut--
+	}
+	return strings.TrimSpace(s[:cut]), true
 }

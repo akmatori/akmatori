@@ -41,7 +41,7 @@ func TestMemoryEvidenceFixture(t *testing.T) {
 	for _, c := range f.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			in := memoryInput{
-				Description: c.Input["description"], Body: c.Input["body"],
+				Type: c.Input["type"], Description: c.Input["description"], Body: c.Input["body"],
 				Evidence: c.Input["evidence"], Claim: c.Input["claim"], EvidenceNote: c.Input["evidence_note"],
 			}
 			truncated, err := applyAgentEvidence(&in)
@@ -194,11 +194,20 @@ func TestMemoryWrite_OmittedEvidenceKeepsStoredGrade(t *testing.T) {
 	}
 	var m database.Memory
 	db.Where("name = ?", "legacy-row").Take(&m)
-	if m.Evidence != "unverified" || m.EvidenceNote != "legacy: not assessed" || m.Body != "merged body" {
+	// The text changed: the legacy note does not describe the rewrite.
+	if m.Evidence != "unverified" || m.EvidenceNote != "" || m.Body != "merged body" {
 		t.Errorf("stored: %+v", m)
 	}
+	// observed without a note is not a check: the row stays unverified.
 	args := memArgs("legacy-row", "merged body")
 	args["evidence"] = "observed"
+	if r, err := write(t, tool, runCtx("run-1"), args); err != nil || r["evidence"] != "unverified" || r["note_on_evidence"] == nil {
+		t.Fatalf("raise without note: %v %v", r, err)
+	}
+	db.Where("name = ?", "legacy-row").Take(&m)
+	if m.Evidence != "unverified" || m.EvidenceNote != raiseNeedsNote {
+		t.Errorf("raise without note stored: %+v", m)
+	}
 	args["evidence_note"] = "checked redis.conf 2026-11-03"
 	if r, err := write(t, tool, runCtx("run-1"), args); err != nil || r["evidence"] != "observed" {
 		t.Fatalf("explicit: %v %v", r, err)
@@ -206,5 +215,39 @@ func TestMemoryWrite_OmittedEvidenceKeepsStoredGrade(t *testing.T) {
 	db.Where("name = ?", "legacy-row").Take(&m)
 	if m.Evidence != "observed" || m.EvidenceNote != "checked redis.conf 2026-11-03" {
 		t.Errorf("explicit stored: %+v", m)
+	}
+}
+
+// A refused write reports the stored grade, not the input's.
+func TestMemoryWrite_RefusedReportsStoredEvidence(t *testing.T) {
+	tool, db := newTestTool(t)
+	db.Create(&database.Memory{Scope: "global", Type: "fact", Name: "op-fact", Description: "d", Body: "b", CreatedBy: "operator", Evidence: "confirmed", Claim: "factual"})
+	args := memArgs("op-fact", "the gap was caused by load")
+	r, err := write(t, tool, runCtx("run-1"), args)
+	if err != nil || r["action"] != "refused_protected" {
+		t.Fatalf("write: %v %v", r, err)
+	}
+	if r["evidence"] != "confirmed" || r["claim"] != "factual" || r["note_on_evidence"] != nil {
+		t.Errorf("response: %v", r)
+	}
+}
+
+// A confirmed row that an agent may still write (legacy authorship) loses
+// the confirmation when the text changes, with a note.
+func TestMemoryWrite_ChangedTextResetsConfirmed(t *testing.T) {
+	tool, db := newTestTool(t)
+	db.Create(&database.Memory{Scope: "global", Type: "fact", Name: "legacy-confirmed", Description: "desc legacy-confirmed", Body: "b", Evidence: "confirmed", Claim: "factual", EvidenceNote: "checked by ops"})
+	r, err := write(t, tool, runCtx("run-1"), memArgs("legacy-confirmed", "b"))
+	if err != nil || r["action"] != "unchanged" || r["evidence"] != "confirmed" {
+		t.Fatalf("same text: %v %v", r, err)
+	}
+	r, err = write(t, tool, runCtx("run-1"), memArgs("legacy-confirmed", "b2"))
+	if err != nil || r["action"] != "updated" || r["evidence"] != "observed" {
+		t.Fatalf("changed text: %v %v", r, err)
+	}
+	var m database.Memory
+	db.Where("name = ?", "legacy-confirmed").Take(&m)
+	if m.Evidence != "observed" || m.EvidenceNote != confirmationResetNote {
+		t.Errorf("stored: %+v", m)
 	}
 }

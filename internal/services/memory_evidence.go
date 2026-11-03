@@ -111,7 +111,9 @@ func ApplyAgentMemoryEvidence(m *database.Memory) (truncated bool, err error) {
 	if m.Claim == "" {
 		m.Claim = MemoryClaimFactual
 	}
-	if m.Claim != MemoryClaimCausal && memoryLooksCausal(m.Description, m.Body) {
+	// A feedback memory is a rule, not a cause: its **Why:** line says
+	// "because" by format, so the net does not run on it.
+	if m.Claim != MemoryClaimCausal && m.Type != MemoryTypeFeedback && memoryLooksCausal(m.Description, m.Body) {
 		m.Claim = MemoryClaimCausal
 	}
 	switch {
@@ -125,6 +127,51 @@ func ApplyAgentMemoryEvidence(m *database.Memory) (truncated bool, err error) {
 	defaultMemoryEvidence(m)
 	m.EvidenceNote, truncated = cutEvidenceNote(m.EvidenceNote)
 	return truncated, nil
+}
+
+// Notes that MergeStoredMemoryEvidence adds. The gateway uses the same text.
+const (
+	memoryConfirmationResetNote = "operator confirmation reset: content changed"
+	memoryRaiseNeedsNote        = "raising unverified to observed needs an evidence_note that says what was observed; stays unverified"
+)
+
+// MergeStoredMemoryEvidence applies the stored row to an agent or model
+// update (after ApplyAgentMemoryEvidence). A rewrite is not a check:
+//
+//   - evidence omitted and the text unchanged: the stored grade, claim and
+//     note stay (a type or note change does not touch the grade);
+//   - evidence omitted and the text changed: a stored unverified stays
+//     unverified; a stored confirmed falls to the agent default, with a note;
+//   - observed given on a stored unverified row without an evidence_note: the
+//     row stays unverified and the note says why (raiseRefused = true);
+//   - note omitted: the stored note stays, except the legacy backfill note
+//     on changed text.
+//
+// The gateway's keepStoredEvidence mirrors these rules.
+func MergeStoredMemoryEvidence(m, stored *database.Memory, evidenceOmitted bool) (raiseRefused bool) {
+	textChanged := strings.TrimSpace(stored.Description) != strings.TrimSpace(m.Description) ||
+		strings.TrimSpace(stored.Body) != strings.TrimSpace(m.Body)
+	noteOmitted := m.EvidenceNote == ""
+	switch {
+	case evidenceOmitted && !textChanged && stored.Evidence != "":
+		m.Evidence = stored.Evidence
+		if stored.Claim != "" {
+			m.Claim = stored.Claim
+		}
+	case evidenceOmitted && stored.Evidence == MemoryEvidenceUnverified:
+		m.Evidence = MemoryEvidenceUnverified
+	case evidenceOmitted && stored.Evidence == MemoryEvidenceConfirmed:
+		m.EvidenceNote = appendEvidenceNote(m.EvidenceNote, memoryConfirmationResetNote)
+	case !evidenceOmitted && noteOmitted && stored.Evidence == MemoryEvidenceUnverified && m.Evidence == MemoryEvidenceObserved:
+		m.Evidence = MemoryEvidenceUnverified
+		m.EvidenceNote = memoryRaiseNeedsNote
+		raiseRefused = true
+	}
+	if noteOmitted && m.EvidenceNote == "" && (!textChanged || stored.EvidenceNote != MemoryLegacyEvidenceNote) {
+		m.EvidenceNote = stored.EvidenceNote
+	}
+	m.EvidenceNote, _ = cutEvidenceNote(m.EvidenceNote)
+	return raiseRefused
 }
 
 func appendEvidenceNote(note, reason string) string {

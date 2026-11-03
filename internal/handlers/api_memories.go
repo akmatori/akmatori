@@ -100,6 +100,10 @@ func (h *APIHandler) handleMemories(w http.ResponseWriter, r *http.Request) {
 			api.RespondError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
+		if msg := agentConfirmedError(req); msg != "" {
+			api.RespondError(w, http.StatusBadRequest, msg)
+			return
+		}
 		m := &database.Memory{
 			Scope:        req.Scope,
 			Type:         req.Type,
@@ -172,6 +176,10 @@ func (h *APIHandler) handleMemoryByID(w http.ResponseWriter, r *http.Request) {
 		var req memoryUpdateRequest
 		if err := api.DecodeJSON(r, &req); err != nil {
 			api.RespondError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if msg := agentConfirmedError(req.MemoryRequest); msg != "" {
+			api.RespondError(w, http.StatusBadRequest, msg)
 			return
 		}
 		// Capture the prior scope BEFORE update so a cross-scope move
@@ -435,6 +443,16 @@ func (h *APIHandler) regenerateSkillForMemoryScope(scope string) {
 
 // respondMemoryWriteError maps service-layer errors onto HTTP statuses.
 // Validation problems → 400, missing rows → 404, sync issues → 500.
+// agentConfirmedError refuses a request that marks an agent-authored memory
+// confirmed: only an operator confirms. The REST API is an operator surface,
+// but a client that writes created_by=agent must not get the operator grade.
+func agentConfirmedError(req MemoryRequest) string {
+	if req.CreatedBy == services.MemoryCreatedByAgent && strings.TrimSpace(req.Evidence) == services.MemoryEvidenceConfirmed {
+		return "evidence confirmed requires created_by operator"
+	}
+	return ""
+}
+
 func respondMemoryWriteError(w http.ResponseWriter, err error) {
 	if services.IsMemoryNotFoundErr(err) {
 		api.RespondError(w, http.StatusNotFound, err.Error())

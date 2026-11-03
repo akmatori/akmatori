@@ -221,6 +221,43 @@
    "expect": {
     "error": true
    }
+  },
+  {
+   "name": "feedback why-line is not a cause",
+   "input": {
+    "type": "feedback",
+    "description": "check the HAProxy backend first",
+    "body": "Check the backend first.\n\n**Why:** because the alert fires on the frontend.\n\n**How to apply:** open the backend stats before the frontend logs."
+   },
+   "expect": {
+    "evidence": "observed",
+    "claim": "factual"
+   }
+  },
+  {
+   "name": "fact with because is causal",
+   "input": {
+    "type": "fact",
+    "description": "the queue grows because the consumer restarts",
+    "body": "seen twice"
+   },
+   "expect": {
+    "evidence": "unverified",
+    "claim": "causal"
+   }
+  },
+  {
+   "name": "feedback with explicit causal claim stays causal",
+   "input": {
+    "type": "feedback",
+    "claim": "causal",
+    "description": "restart order",
+    "body": "**Why:** x"
+   },
+   "expect": {
+    "evidence": "unverified",
+    "claim": "causal"
+   }
   }
  ]
 }

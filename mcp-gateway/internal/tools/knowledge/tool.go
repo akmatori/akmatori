@@ -606,12 +606,12 @@ func (t *Tool) MemoryWrite(ctx context.Context, scopeID string, args map[string]
 		Evidence: stringArg(args, "evidence"), Claim: stringArg(args, "claim"), EvidenceNote: stringArg(args, "evidence_note"),
 	}
 	requested := in.Evidence
-	noteGiven := in.EvidenceNote != ""
 	truncated, err := t.prepareWrite(ctx, &in)
 	if err != nil {
 		return nil, err
 	}
-	if err := t.keepStoredEvidence(ctx, &in, requested == "", noteGiven); err != nil {
+	raiseRefused, err := t.keepStoredEvidence(ctx, &in, requested == "")
+	if err != nil {
 		return nil, err
 	}
 	if !t.takeQuota(run.RunID, false) {
@@ -623,13 +623,24 @@ func (t *Tool) MemoryWrite(ctx context.Context, scopeID string, args map[string]
 		return nil, err
 	}
 	t.logger.Printf("memory.write run=%s scope=%s name=%s action=%s", run.RunID, in.Scope, in.Name, action)
-	resp := map[string]interface{}{"scope": in.Scope, "name": in.Name, "action": action, "evidence": in.Evidence, "claim": in.Claim}
+	resp := map[string]interface{}{"scope": in.Scope, "name": in.Name, "action": action}
 	if saved != nil {
 		resp["id"] = saved.ID
 	}
-	if in.Evidence == evidenceUnverified || (requested != "" && requested != in.Evidence) {
-		resp["evidence_note"] = in.EvidenceNote
-		resp["note_on_evidence"] = "Stored as unverified: a cause or an unchecked memory stays a lead until an operator confirms it."
+	// The grade in the response is what is stored: for a refused or an
+	// unchanged write that is the stored row, not the input.
+	if saved != nil && action != "created" && action != "updated" {
+		resp["evidence"], resp["claim"] = hitEvidence(*saved), saved.Claim
+	} else {
+		resp["evidence"], resp["claim"] = in.Evidence, in.Claim
+		switch {
+		case raiseRefused:
+			resp["evidence_note"] = in.EvidenceNote
+			resp["note_on_evidence"] = "Stays unverified: to mark it observed, say in evidence_note what you saw and where."
+		case in.Evidence == evidenceUnverified || (requested != "" && requested != in.Evidence):
+			resp["evidence_note"] = in.EvidenceNote
+			resp["note_on_evidence"] = "Stored as unverified: a cause or an unchecked memory stays a lead until an operator confirms it."
+		}
 	}
 	if truncated {
 		resp["description_truncated"] = true
@@ -641,27 +652,21 @@ func (t *Tool) MemoryWrite(ctx context.Context, scopeID string, args map[string]
 	return marshal(resp)
 }
 
-// keepStoredEvidence stops an update from raising a grade by omission: when
-// the call gives no evidence and the stored row is unverified, it stays
-// unverified (a merge or a rewrite is not a check), and when the call gives
-// no note, the stored note stays.
-func (t *Tool) keepStoredEvidence(ctx context.Context, in *memoryInput, evidenceOmitted, noteGiven bool) error {
+// keepStoredEvidence applies the stored row's grade to an update
+// (mergeStoredEvidence): a merge or a rewrite is not a check. raiseRefused
+// is true when the call asked for observed on an unverified row without a
+// note.
+func (t *Tool) keepStoredEvidence(ctx context.Context, in *memoryInput, evidenceOmitted bool) (raiseRefused bool, err error) {
 	var stored database.Memory
-	err := t.db.WithContext(ctx).Select("evidence", "evidence_note").
+	err = t.db.WithContext(ctx).Select("description", "body", "evidence", "claim", "evidence_note").
 		Where("scope = ? AND name = ?", in.Scope, in.Name).Take(&stored).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("read memory: %w", err)
+		return false, fmt.Errorf("read memory: %w", err)
 	}
-	if evidenceOmitted && stored.Evidence == evidenceUnverified {
-		in.Evidence = evidenceUnverified
-	}
-	if !noteGiven && in.EvidenceNote == "" {
-		in.EvidenceNote = stored.EvidenceNote
-	}
-	return nil
+	return mergeStoredEvidence(in, &stored, evidenceOmitted), nil
 }
 
 // upsert applies the write with the protection in the WHERE clause.
