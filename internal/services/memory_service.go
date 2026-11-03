@@ -191,9 +191,20 @@ func (s *MemoryService) UpsertByName(m *database.Memory) (*database.Memory, erro
 
 // DeleteMemory removes a memory by ID and re-syncs files.
 func (s *MemoryService) DeleteMemory(id uint) error {
-	result := s.db.Delete(&database.Memory{}, id)
-	if result.Error != nil {
-		return fmt.Errorf("failed to delete memory: %w", result.Error)
+	// The uses follow the memory (ON DELETE CASCADE in PostgreSQL); the
+	// explicit delete keeps SQLite, which does not enforce the constraint
+	// by default, consistent.
+	var result *gorm.DB
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if tx.Migrator().HasTable(&database.MemoryUse{}) {
+			if err := tx.Where("memory_id = ?", id).Delete(&database.MemoryUse{}).Error; err != nil {
+				return err
+			}
+		}
+		result = tx.Delete(&database.Memory{}, id)
+		return result.Error
+	}); err != nil {
+		return fmt.Errorf("failed to delete memory: %w", err)
 	}
 	if result.RowsAffected == 0 {
 		return errMemoryNotFound
@@ -233,6 +244,9 @@ type MemoryFilter struct {
 	Type         string
 	IncidentUUID string
 	Evidence     string
+	// UsedInIncident lists the memories the runs of that incident used
+	// (memory_uses), newest use first.
+	UsedInIncident string
 }
 
 // ListMemories applies optional scope, type and incident filters. Empty
@@ -251,6 +265,19 @@ func (s *MemoryService) ListMemories(f MemoryFilter) ([]database.Memory, error) 
 	}
 	if f.Evidence != "" {
 		q = q.Where("evidence = ?", f.Evidence)
+	}
+	if f.UsedInIncident != "" {
+		q = s.db.Joins("JOIN (SELECT memory_id, MAX(at) AS last_at FROM memory_uses WHERE incident_uuid = ? GROUP BY memory_id) u ON u.memory_id = memories.id", f.UsedInIncident).
+			Order("u.last_at DESC").Order("memories.id DESC")
+		if f.Scope != "" {
+			q = q.Where("memories.scope = ?", f.Scope)
+		}
+		if f.Type != "" {
+			q = q.Where("memories.type = ?", f.Type)
+		}
+		if f.Evidence != "" {
+			q = q.Where("memories.evidence = ?", f.Evidence)
+		}
 	}
 	if err := q.Find(&memories).Error; err != nil {
 		return nil, fmt.Errorf("failed to list memories: %w", err)
@@ -1234,7 +1261,7 @@ func limitManifestEntries(entries []database.Memory, max int) (limited []databas
 	sorted := make([]database.Memory, len(entries))
 	copy(sorted, entries)
 	sort.SliceStable(sorted, func(i, j int) bool {
-		return sorted[i].UpdatedAt.After(sorted[j].UpdatedAt)
+		return manifestRank(sorted[i]).After(manifestRank(sorted[j]))
 	})
 	var feedback, facts []database.Memory
 	for _, m := range sorted {
@@ -1261,7 +1288,7 @@ func RenderMemoryManifest(db *gorm.DB, scope string) string {
 		return ""
 	}
 	var entries []database.Memory
-	if err := db.Select("id", "scope", "name", "type", "description", "evidence", "updated_at").
+	if err := db.Select("id", "scope", "name", "type", "description", "evidence", "updated_at", "last_used_at").
 		Where("scope = ?", scope).Find(&entries).Error; err != nil {
 		slog.Debug("memory manifest: list memories", "scope", scope, "err", err)
 		return ""

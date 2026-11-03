@@ -21,6 +21,7 @@ import {
   filterMemories,
   groupByScope,
   memoryHref,
+  usageLabel,
   type EvidenceFilter,
 } from './memoryHelpers';
 
@@ -168,6 +169,7 @@ export default function MemoryList({ incidentUuid }: MemoryListProps) {
                       <p>
                         {m.created_by === 'operator' ? 'Operator' : 'Agent'} · {formatRelativeAgo(m.updated_at)}
                       </p>
+                      <p>{usageLabel(m, formatRelativeAgo)}</p>
                     </div>
                   </Link>
                 </li>

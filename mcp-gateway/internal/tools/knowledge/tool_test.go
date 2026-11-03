@@ -29,7 +29,7 @@ func newTestTool(t *testing.T) (*Tool, *gorm.DB) {
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.AutoMigrate(&database.Memory{}, &database.Runbook{}, &database.Skill{}, &database.AgentRun{},
+	if err := db.AutoMigrate(&database.Memory{}, &database.MemoryUse{}, &database.Runbook{}, &database.Skill{}, &database.AgentRun{},
 		&database.GeneralSettings{}, &database.ContextFile{}); err != nil {
 		t.Fatal(err)
 	}
@@ -586,5 +586,69 @@ func TestMemoryGet_References(t *testing.T) {
 	}
 	if _, ok := refs[0].(map[string]interface{})["path"]; ok {
 		t.Error("memory refs must not carry a file path")
+	}
+}
+
+// TestMemoryUsage: memory.get records a use with the run and raises
+// use_count; a search hit records a row but moves last_used_at only;
+// memory.list returns the counters and takes unused_since; a delete removes
+// the uses.
+func TestMemoryUsage(t *testing.T) {
+	tool, db := newTestTool(t)
+	db.Create(&database.Memory{Scope: "global", Name: "edge-nic", Type: "fact", Description: "edge nic flaps", Body: "NETDEV WATCHDOG on eth1"})
+	db.Create(&database.Memory{Scope: "global", Name: "quiet", Type: "fact", Description: "nothing to do with it", Body: "zzz"})
+	var m database.Memory
+	db.Where("name = ?", "edge-nic").Take(&m)
+
+	if _, err := tool.MemoryGet(runCtx("run-alert"), "inc-1", map[string]interface{}{"id": float64(m.ID)}); err != nil {
+		t.Fatal(err)
+	}
+	var uses []database.MemoryUse
+	db.Find(&uses)
+	if len(uses) != 1 || uses[0].Kind != "get" || uses[0].RunID != "run-alert" || uses[0].IncidentUUID != "inc-1" || uses[0].MemoryID != m.ID {
+		t.Fatalf("uses after get: %+v", uses)
+	}
+	db.Where("id = ?", m.ID).Take(&m)
+	if m.UseCount != 1 || m.LastUsedAt == nil {
+		t.Fatalf("after get: count %d last %v", m.UseCount, m.LastUsedAt)
+	}
+
+	if _, err := tool.MemorySearch(context.Background(), testScope, map[string]interface{}{"query": "edge nic watchdog"}); err != nil {
+		t.Fatal(err)
+	}
+	db.Order("id").Find(&uses)
+	if len(uses) < 2 || uses[1].Kind != "search" || uses[1].RunID != "" {
+		t.Fatalf("uses after search: %+v", uses)
+	}
+	db.Where("id = ?", m.ID).Take(&m)
+	if m.UseCount != 1 {
+		t.Errorf("search raised use_count: %d", m.UseCount)
+	}
+
+	out, err := tool.MemoryList(context.Background(), testScope, map[string]interface{}{"unused_since": time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := decode(t, out)
+	items := r["items"].([]interface{})
+	if len(items) != 1 || items[0].(map[string]interface{})["name"] != "quiet" {
+		t.Errorf("unused_since: %v", items)
+	}
+	out, _ = tool.MemoryList(context.Background(), testScope, map[string]interface{}{})
+	for _, it := range decode(t, out)["items"].([]interface{}) {
+		item := it.(map[string]interface{})
+		if item["name"] == "edge-nic" && item["use_count"] != float64(1) {
+			t.Errorf("list use_count: %v", item)
+		}
+	}
+
+	db.Model(&database.Memory{}).Where("id = ?", m.ID).Update("created_by", "agent")
+	if _, err := tool.MemoryDelete(runCtx("run-1"), testScope, map[string]interface{}{"scope": "global", "name": "edge-nic"}); err != nil {
+		t.Fatal(err)
+	}
+	var left int64
+	db.Model(&database.MemoryUse{}).Where("memory_id = ?", m.ID).Count(&left)
+	if left != 0 {
+		t.Errorf("uses left after delete: %d", left)
 	}
 }

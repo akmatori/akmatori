@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Memory, MemoryRef } from '../../types';
-import { filterByEvidence, filterMemories, groupByScope, linkifyRefs, memoryEvidence } from './memoryHelpers';
+import { filterByEvidence, filterMemories, groupByScope, linkifyRefs, memoryEvidence, usageLabel } from './memoryHelpers';
 
 function mem(id: number, scope: string, name: string, updated: string, extra: Partial<Memory> = {}): Memory {
   return {
@@ -85,5 +85,15 @@ describe('evidence', () => {
     expect(filterByEvidence(list, 'all')).toHaveLength(3);
     expect(filterByEvidence(list, 'unverified').map((m) => m.name)).toEqual(['c']);
     expect(filterByEvidence(list, 'confirmed').map((m) => m.name)).toEqual(['a']);
+  });
+});
+
+describe('usageLabel', () => {
+  const ago = () => '2h ago';
+  it('describes never, once, many and search-only', () => {
+    expect(usageLabel({}, ago)).toBe('never used');
+    expect(usageLabel({ use_count: 1, last_used_at: 'x' }, ago)).toBe('used once, 2h ago');
+    expect(usageLabel({ use_count: 5, last_used_at: 'x' }, ago)).toBe('used 5×, 2h ago');
+    expect(usageLabel({ use_count: 0, last_used_at: 'x' }, ago)).toBe('seen in search, 2h ago');
   });
 });

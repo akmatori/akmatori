@@ -53,6 +53,7 @@ func TestDefaultIncidentManagerPrompt_KnowledgeSteps(t *testing.T) {
 		"Operator asked to remember:",
 		"post-incident pass",
 		"unverified",
+		"Memory used:",
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("incident-manager prompt missing %q", want)
@@ -81,7 +82,7 @@ func TestDreamingAndEvaluatorPrompts_UseMemoryList(t *testing.T) {
 // evidence grades: lowest grade wins, confirmed is never written, a
 // contradiction needs a specific newer observation.
 func TestDreamingPrompt_EvidenceRules(t *testing.T) {
-	for _, want := range []string{"LOWEST evidence", `Never write "evidence": "confirmed"`, "Memory contradicted:", `"evidence_note"`, "stays unverified"} {
+	for _, want := range []string{"LOWEST evidence", `Never write "evidence": "confirmed"`, "Memory contradicted:", `"evidence_note"`, "stays unverified", `"unused_since"`, "90 days", "Never retire a confirmed"} {
 		if !strings.Contains(dreamingCronPrompt, want) {
 			t.Errorf("Dreaming prompt missing %q", want)
 		}

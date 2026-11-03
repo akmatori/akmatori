@@ -198,6 +198,8 @@ const memoryRecallInstruction = "Before answering questions about prior incident
 	"unverified memory as a lead, not a fact: check it against live data before you act on it, and say " +
 	"\"unverified, from memory <name>\" when you use it. When a memory contradicts what the tools show now, trust " +
 	"the tools and say so in the answer.\n\n" +
+	"End your final answer with a `Memory used:` line that lists the memories you relied on as `[[scope/name]]` " +
+	"(or `Memory used: none`). It is how a memory's use is counted; unused memories are retired over time.\n\n" +
 	"Cite `Source: <name>` when it helps."
 
 // agentContextDir is where the agent worker mounts the context directory

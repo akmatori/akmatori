@@ -152,11 +152,28 @@ mirror is removed.
   `!remember X` (with or without the bot mention) is stored as an operator feedback memory on the
   thread's work with the note "operator asked to remember it", with no classifier and no LLM;
   ack = 👍, plus the short text on the mention path. Checked before the classifier in both paths
+- usage tracking (`memory_usage.go`, plan D8): `memory_uses` (`memory_id`, `run_id`, `incident_uuid`,
+  `kind` = `search | get | cited`, `at`; `ON DELETE CASCADE`, plus an explicit delete in
+  `DeleteMemory` and the gateway `memory.delete` for SQLite) and the denormalised
+  `memories.use_count` / `last_used_at`. The gateway records a `search` row per hit (moves
+  `last_used_at` only) and a `get` row per full read (`use_count + 1`) with the calling run's id
+  and incident (`recordUses`, best effort); `FinishRun` parses the final answer's `Memory used:`
+  block (`ParseMemoryUsed`: refs on the heading line and the lines after it until a blank line;
+  `[[scope/name]]` exact, `[[name]]` global first) and records `cited` rows
+  (`RecordCitedMemories`, wired by `SetMemoryCiter`). The manifest ranks by `manifestRank` = the
+  later of `last_used_at` and `updated_at` (a new memory is visible at once, a used one stays in
+  the 150 cap). `memory.list` / `memory.search` return `use_count` and `last_used_at`; `memory.list`
+  takes `unused_since` (`last_used_at IS NULL OR < t`). REST `GET /api/memories?used_in_incident=`
+  lists the memories an incident's runs used, newest use first. Retirement is Dreaming's job
+  (the prompt: unverified agent memories unused for 90 days, not created in the last 90 days,
+  never confirmed/operator); no code deletes for lack of use. UI: `usageLabel` on the list and
+  detail, "memories the runs used" on the incident Memory section
 - Dreaming (`dreamingCronPrompt`) carries the evidence rules: a merged memory takes the LOWEST
   grade of its cluster (an operator-confirmed member is kept as is and never lowered), never
   writes `confirmed`, keeps causal claims unverified, lists the source incidents in the note, and
-  rewrites a contradicted agent memory only on a specific newer observation. The previous text is
-  in `legacySystemCronPrompts` (append again on the next change)
+  rewrites a contradicted agent memory only on a specific newer observation, and retires unused
+  unverified agent memories (above). The previous texts are in `legacySystemCronPrompts` (append
+  again on the next change)
 - UI: `EvidenceBadge` (green confirmed, grey observed, amber unverified; tooltip = claim + note)
   on the memory list (with an evidence `SegmentedControl` filter) and detail; the edit form sets
   evidence, claim and the note (`evidence_note` always sent, so an emptied field clears it); the

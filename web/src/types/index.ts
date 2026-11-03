@@ -311,6 +311,9 @@ export interface Memory {
   evidence?: MemoryEvidence;
   claim?: MemoryClaim;
   evidence_note?: string;
+  // Full reads and citations by runs; a search hit moves last_used_at only.
+  use_count?: number;
+  last_used_at?: string;
   created_at: string;
   updated_at: string;
 }

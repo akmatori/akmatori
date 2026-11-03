@@ -843,6 +843,13 @@ func (s *SkillService) FinishRun(runID string, outcome RunOutcome) error {
 		return fmt.Errorf("failed to store run %s: %w", runID, err)
 	}
 	now := time.Now()
+	// The memories the answer relied on (read from the manifest without a
+	// memory.get) are recorded here; gateway reads record themselves.
+	if s.memoryCiter != nil && !outcome.Failed && outcome.Response != "" {
+		if n := s.memoryCiter.RecordCitedMemories(runID, run.IncidentUUID, outcome.Response); n > 0 {
+			slog.Info("recorded cited memories", "run", runID, "count", n)
+		}
+	}
 
 	if run.IncidentUUID != "" {
 		status := database.IncidentStatusCompleted

@@ -254,17 +254,61 @@ func (t *Tool) RunbooksGet(ctx context.Context, _ string, args map[string]interf
 // ---------- memory reads ----------
 
 type memoryHit struct {
-	ID          uint      `json:"id"`
-	Scope       string    `json:"scope"`
-	Name        string    `json:"name"`
-	Type        string    `json:"type"`
-	Description string    `json:"description"`
-	Excerpt     string    `json:"excerpt,omitempty"`
-	CreatedBy   string    `json:"created_by,omitempty"`
-	Evidence    string    `json:"evidence"`
-	Claim       string    `json:"claim,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          uint       `json:"id"`
+	Scope       string     `json:"scope"`
+	Name        string     `json:"name"`
+	Type        string     `json:"type"`
+	Description string     `json:"description"`
+	Excerpt     string     `json:"excerpt,omitempty"`
+	CreatedBy   string     `json:"created_by,omitempty"`
+	Evidence    string     `json:"evidence"`
+	Claim       string     `json:"claim,omitempty"`
+	UseCount    int        `json:"use_count"`
+	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
+
+// recordUses records one use of each memory by the calling run: a row in
+// memory_uses and the denormalised counters (get raises use_count, search
+// moves last_used_at only). Reads need no run id; without one the row has
+// no run. Best effort: a failure is logged, the read still answers.
+func (t *Tool) recordUses(ctx context.Context, kind string, ids []uint) {
+	if len(ids) == 0 {
+		return
+	}
+	runID := mcp.RunIDFromContext(ctx)
+	incidentUUID := ""
+	if runID != "" {
+		var run database.AgentRun
+		if err := t.db.WithContext(ctx).Select("incident_uuid").Where("run_id = ?", runID).Take(&run).Error; err == nil {
+			incidentUUID = run.IncidentUUID
+		}
+	}
+	now := t.now().UTC()
+	rows := make([]database.MemoryUse, 0, len(ids))
+	for _, id := range ids {
+		rows = append(rows, database.MemoryUse{MemoryID: id, RunID: runID, IncidentUUID: incidentUUID, Kind: kind, At: now})
+	}
+	err := t.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&rows).Error; err != nil {
+			return err
+		}
+		values := map[string]interface{}{"last_used_at": now}
+		if kind != memoryUseSearch {
+			values["use_count"] = gorm.Expr("use_count + 1")
+		}
+		return tx.Model(&database.Memory{}).Where("id IN ?", ids).UpdateColumns(values).Error
+	})
+	if err != nil {
+		t.logger.Printf("memory usage: record %s uses run=%s: %v", kind, runID, err)
+	}
+}
+
+// Kinds of a memory use, as the API's database.MemoryUse*.
+const (
+	memoryUseSearch = "search"
+	memoryUseGet    = "get"
+)
 
 // hitEvidence is the grade to show: a row written before grades by a
 // gateway ahead of the API has none, and reads as unverified.
@@ -308,7 +352,7 @@ func (t *Tool) MemorySearch(ctx context.Context, _ string, args map[string]inter
 		return nil, err
 	}
 	var rows []database.Memory
-	if err := q.Select("id", "scope", "name", "type", "description", "body", "created_by", "source_file_id", "evidence", "claim", "updated_at").
+	if err := q.Select("id", "scope", "name", "type", "description", "body", "created_by", "source_file_id", "evidence", "claim", "use_count", "last_used_at", "updated_at").
 		Order("updated_at DESC").Order("id DESC").Limit(corpusCap).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("load memories: %w", err)
 	}
@@ -320,11 +364,15 @@ func (t *Tool) MemorySearch(ctx context.Context, _ string, args map[string]inter
 	}
 	hits := search(docs, query, limit)
 	out := make([]memoryHit, 0, len(hits))
+	ids := make([]uint, 0, len(hits))
 	for _, h := range hits {
 		m := byID[h.Doc.ID]
+		ids = append(ids, m.ID)
 		out = append(out, memoryHit{ID: m.ID, Scope: m.Scope, Name: m.Name, Type: m.Type, Description: m.Description,
-			Excerpt: excerpt(m.Body, h.Terms), CreatedBy: m.CreatedBy, Evidence: hitEvidence(m), Claim: m.Claim, UpdatedAt: m.UpdatedAt})
+			Excerpt: excerpt(m.Body, h.Terms), CreatedBy: m.CreatedBy, Evidence: hitEvidence(m), Claim: m.Claim,
+			UseCount: m.UseCount, LastUsedAt: m.LastUsedAt, UpdatedAt: m.UpdatedAt})
 	}
+	t.recordUses(ctx, memoryUseSearch, ids)
 	resp := map[string]interface{}{"results": out, "count": len(out)}
 	if len(rows) == corpusCap {
 		resp["truncated_corpus"] = true
@@ -367,6 +415,11 @@ func (t *Tool) MemoryList(ctx context.Context, _ string, args map[string]interfa
 	} else if stringArg(args, "since") != "" {
 		return nil, errors.New("since must be ISO-8601 or Unix seconds")
 	}
+	if unused, ok := timeArg(args, "unused_since"); ok {
+		q = q.Where("(last_used_at IS NULL OR last_used_at < ?)", unused)
+	} else if stringArg(args, "unused_since") != "" {
+		return nil, errors.New("unused_since must be ISO-8601 or Unix seconds")
+	}
 	if c := stringArg(args, "cursor"); c != "" {
 		ts, id, err := decodeCursor(c)
 		if err != nil {
@@ -375,7 +428,7 @@ func (t *Tool) MemoryList(ctx context.Context, _ string, args map[string]interfa
 		q = q.Where("(updated_at < ? OR (updated_at = ? AND id < ?))", ts, ts, id)
 	}
 	var rows []database.Memory
-	if err := q.Select("id", "scope", "name", "type", "description", "created_by", "evidence", "claim", "updated_at").
+	if err := q.Select("id", "scope", "name", "type", "description", "created_by", "evidence", "claim", "use_count", "last_used_at", "created_at", "updated_at").
 		Order("updated_at DESC").Order("id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list memories: %w", err)
 	}
@@ -386,7 +439,8 @@ func (t *Tool) MemoryList(ctx context.Context, _ string, args map[string]interfa
 	}
 	items := make([]memoryHit, 0, len(rows))
 	for _, m := range rows {
-		items = append(items, memoryHit{ID: m.ID, Scope: m.Scope, Name: m.Name, Type: m.Type, Description: m.Description, CreatedBy: m.CreatedBy, Evidence: hitEvidence(m), Claim: m.Claim, UpdatedAt: m.UpdatedAt})
+		items = append(items, memoryHit{ID: m.ID, Scope: m.Scope, Name: m.Name, Type: m.Type, Description: m.Description, CreatedBy: m.CreatedBy,
+			Evidence: hitEvidence(m), Claim: m.Claim, UseCount: m.UseCount, LastUsedAt: m.LastUsedAt, UpdatedAt: m.UpdatedAt})
 	}
 	return marshal(map[string]interface{}{"items": items, "count": len(items), "next_cursor": next})
 }
@@ -478,10 +532,12 @@ func (t *Tool) MemoryGet(ctx context.Context, _ string, args map[string]interfac
 	if refs == nil {
 		refs = []memoryRef{}
 	}
+	t.recordUses(ctx, memoryUseGet, []uint{m.ID})
 	return marshal(map[string]interface{}{
 		"id": m.ID, "scope": m.Scope, "name": m.Name, "type": m.Type, "description": m.Description,
 		"body": m.Body, "created_by": m.CreatedBy, "incident_uuid": m.IncidentUUID,
 		"evidence": hitEvidence(m), "claim": m.Claim, "evidence_note": m.EvidenceNote,
+		"use_count": m.UseCount + 1, "last_used_at": t.now().UTC(),
 		"protected": isProtected(m), "updated_at": m.UpdatedAt, "references": refs,
 	})
 }
@@ -807,9 +863,17 @@ func (t *Tool) MemoryDelete(ctx context.Context, scopeID string, args map[string
 		return nil, fmt.Errorf("delete limit reached: at most %d memory deletes per run", maxDeletesPerRun)
 	}
 	db := t.db.WithContext(ctx)
-	res := db.Where(writableWhere, scope, name).Delete(&database.Memory{})
-	if res.Error != nil {
-		return nil, fmt.Errorf("delete memory: %w", res.Error)
+	var res *gorm.DB
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		// The uses follow the memory (SQLite does not enforce the cascade).
+		if err := tx.Where("memory_id IN (?)", tx.Model(&database.Memory{}).Select("id").Where(writableWhere, scope, name)).
+			Delete(&database.MemoryUse{}).Error; err != nil {
+			return err
+		}
+		res = tx.Where(writableWhere, scope, name).Delete(&database.Memory{})
+		return res.Error
+	}); err != nil {
+		return nil, fmt.Errorf("delete memory: %w", err)
 	}
 	if res.RowsAffected > 0 {
 		t.takeQuota(run.RunID, true)

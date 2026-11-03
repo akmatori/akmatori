@@ -49,6 +49,15 @@ export function memoryEvidence(m: Pick<Memory, 'evidence'>): MemoryEvidence {
 
 export type EvidenceFilter = 'all' | MemoryEvidence;
 
+// usageLabel says how often and when runs used a memory: "never used",
+// "used once, 2h ago", "used 5×, 3d ago".
+export function usageLabel(m: Pick<Memory, 'use_count' | 'last_used_at'>, ago: (iso: string) => string): string {
+  const n = m.use_count ?? 0;
+  if (n === 0 && !m.last_used_at) return 'never used';
+  const times = n === 0 ? 'seen in search' : n === 1 ? 'used once' : `used ${n}×`;
+  return m.last_used_at ? `${times}, ${ago(m.last_used_at)}` : times;
+}
+
 // filterByEvidence keeps the memories of one grade ('all' keeps everything).
 export function filterByEvidence(memories: Memory[], filter: EvidenceFilter): Memory[] {
   if (filter === 'all') return memories;

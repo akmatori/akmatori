@@ -80,6 +80,13 @@ components:
         evidence_note:
           type: string
           description: What supports the memory (≤500 bytes)
+        use_count:
+          type: integer
+          description: Full reads (memory.get) and citations by runs. A search hit moves last_used_at only.
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
 
@@ -2206,6 +2213,11 @@ paths:
           in: query
           schema: {type: string}
           description: Memories that originated from this incident
+        - name: used_in_incident
+          in: query
+          schema:
+            type: string
+          description: Only memories the runs of this incident used (search hit, full read or citation), newest use first.
       responses:
         '200':
           description: List of memories
