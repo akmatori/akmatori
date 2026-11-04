@@ -199,7 +199,7 @@ describe("GatewayClient", () => {
   // -----------------------------------------------------------------------
 
   describe("output management", () => {
-    it("returns inline for small responses (< 4KB)", async () => {
+    it("returns inline for small responses (< 32 KB)", async () => {
       const smallData = { key: "value" };
       const mock = await createMockGateway(() =>
         jsonRpcSuccess({
@@ -254,7 +254,7 @@ describe("GatewayClient", () => {
     });
 
     it("returns large responses inline and writes no file when options.inline is set", async () => {
-      const largeData = { data: "y".repeat(5000) };
+      const largeData = { data: "y".repeat(40000) };
       const mock = await createMockGateway(() =>
         jsonRpcSuccess({
           content: [{ type: "text", text: JSON.stringify(largeData) }],
@@ -279,8 +279,8 @@ describe("GatewayClient", () => {
       }
     });
 
-    it("writes large responses (>= 4KB) to file", async () => {
-      const largeData = { data: "x".repeat(5000) };
+    it("writes large responses (>= 32 KB) to file", async () => {
+      const largeData = { data: "x".repeat(40000) };
       const mock = await createMockGateway(() =>
         jsonRpcSuccess({
           content: [{ type: "text", text: JSON.stringify(largeData) }],
@@ -309,7 +309,7 @@ describe("GatewayClient", () => {
     });
 
     it("returns inline for large responses when no workDir", async () => {
-      const largeData = { data: "x".repeat(5000) };
+      const largeData = { data: "x".repeat(40000) };
       const mock = await createMockGateway(() =>
         jsonRpcSuccess({
           content: [{ type: "text", text: JSON.stringify(largeData) }],
@@ -332,7 +332,7 @@ describe("GatewayClient", () => {
     });
 
     it("creates tool_outputs directory if needed", async () => {
-      const largeText = "x".repeat(5000);
+      const largeText = "x".repeat(40000);
       const mock = await createMockGateway(() =>
         jsonRpcSuccess({
           content: [{ type: "text", text: largeText }],

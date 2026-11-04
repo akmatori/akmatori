@@ -48,7 +48,7 @@ export interface CallOptions {
   /**
    * Return the complete result inline and never write the output file.
    * Used by the codemode-only `gateway_fetch` tool: a script reduces the
-   * payload itself, so the 4 KB preview would only get in its way. Never set
+   * payload itself, so the 32 KB preview would only get in its way. Never set
    * this on the model-facing `gateway_call`.
    */
   inline?: boolean;
@@ -181,8 +181,13 @@ export function buildSmartPreview(serialized: string, outputFile: string): strin
 // Client
 // ---------------------------------------------------------------------------
 
-/** Output size threshold: responses >= 4KB are written to file */
-const OUTPUT_SIZE_THRESHOLD = 4096;
+/**
+ * Output size threshold: responses >= 32 KB are written to file and the
+ * model gets a preview. 4 KB (the old value) hid most SSH command output
+ * behind a 200-character preview, so agents stopped at the first symptom
+ * instead of reading the logs they had fetched.
+ */
+export const OUTPUT_SIZE_THRESHOLD = 32 * 1024;
 
 export class GatewayClient {
   private readonly gatewayUrl: string;
@@ -205,7 +210,7 @@ export class GatewayClient {
   /**
    * Call a tool on the MCP Gateway.
    *
-   * If the response is >= 4KB and a workDir is configured, the full output
+   * If the response is >= OUTPUT_SIZE_THRESHOLD and a workDir is configured, the full output
    * is written to a file and a truncated preview is returned inline.
    */
   call(

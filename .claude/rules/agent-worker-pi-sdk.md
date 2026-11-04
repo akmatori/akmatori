@@ -57,7 +57,7 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
 - **Codemode spike** (`AKMATORI_CODEMODE=1`, off by default): adds `createCodemodeExtension({mode:"on",
   models:false})` to `extensionFactories`, `defaultTools: ["+codemode"]` to the in-memory settings, and
   the codemode-only `gateway_fetch` tool (`exposure: "codemode"`, namespace `akmatori`) which calls the
-  gateway with `{ inline: true }` so scripts get the COMPLETE result (no 4 KB preview). Scripts run in
+  gateway with `{ inline: true }` so scripts get the COMPLETE result (no 32 KB preview). Scripts run in
   pi's QuickJS sandbox: no fs, no network, no timers. `execute_script` stays registered until the bench
   decides. `tool_execution_*` events of nested calls carry `parentToolCallId`
 - Cache warming is ON by default (`cacheWarming: "streaming"`, pi 0.86+) but only for models that declare
@@ -94,11 +94,16 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
   Wire fields on `AgentMessage` stay pointers: `omitempty` drops a deliberate `0`. Anthropic rejects
   temperature/top_p/top_k under extended thinking, and the Responses API rejects them under
   reasoning — `sampling.ts` drops them there rather than failing the request
-- **Tool output limits** (`tool-output-limit.ts`): `gateway_call` previews ≥ 4 KB, `execute_script`
+- **Tool output limits** (`tool-output-limit.ts`): `gateway_call` previews ≥ 32 KB, `execute_script`
   cuts at 50 KB, and an always-on `tool_result` extension caps every top-level tool result at 256 KB
   (nested codemode calls skipped). Over-limit text goes to `<workDir>/tool_outputs/`. Reason: one
   tool result stays in context through compaction — a 9.4 MB minified-JS grep line printed by
   `execute_script` broke kimi-k3.1-pro (Moonshot 8 MB cap). Never return a tool result unbounded
+- **System prompt.** `DefaultResourceLoader` gets `systemPrompt: AKMATORI_SYSTEM_PROMPT`
+  (`system-prompt.ts`) instead of pi's "expert coding assistant" preamble. A custom prompt DROPS pi's
+  tool list and every tool's `promptGuidelines`, so tool rules the model needs go into that prompt
+- **Tool results are plain text** (`model-text.ts`): `gateway_call` objects and JSON returned by
+  `execute_script` render YAML-like with multi-line strings as blocks, never escaped `\n` JSON
 - Bash tool stays local (TypeScript variance friction)
 - import `typebox` from `typebox`, not `@sinclair/typebox`
 - `DefaultResourceLoader` requires `agentDir` (`getAgentDir()` in prod and mocks)

@@ -6,6 +6,7 @@
  * session lifecycle (execute / resume / cancel), and proxy configuration.
  */
 
+import { AKMATORI_SYSTEM_PROMPT } from "./system-prompt.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
@@ -128,7 +129,7 @@ export interface AgentRunnerConfig {
    * Spike flag (AKMATORI_CODEMODE=1): enable pi's built-in `codemode` tool
    * next to `execute_script`. Scripts run in pi's QuickJS sandbox and reach
    * the gateway through the codemode-only `gateway_fetch` tool, which returns
-   * complete results instead of the 4 KB preview. Off by default until the
+   * complete results instead of the 32 KB preview. Off by default until the
    * bench compares the two.
    */
   codemode?: boolean;
@@ -707,6 +708,8 @@ export class AgentRunner {
         createToolOutputLimitExtension({ workDir: params.workDir }),
         ...(this.codemode ? [createCodemodeExtension({ mode: "on", models: false })] : []),
       ],
+      // Akmatori's own preamble instead of pi's coding-assistant default.
+      systemPrompt: AKMATORI_SYSTEM_PROMPT,
       noExtensions: false,
       noPromptTemplates: true,
       noThemes: true,

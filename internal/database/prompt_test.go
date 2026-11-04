@@ -133,3 +133,16 @@ func TestDefaultCronAgentPrompt_ReportsProblemsAsAlerts(t *testing.T) {
 		t.Error("alert reporting must come before the final summary")
 	}
 }
+
+func TestDefaultIncidentManagerPrompt_RootCauseDepth(t *testing.T) {
+	for _, want := range []string{
+		"## Finding the real root cause",
+		"Do not stop at the first symptom",
+		"explains every symptom",
+		"Get an overview of the affected system",
+	} {
+		if !strings.Contains(DefaultIncidentManagerPrompt, want) {
+			t.Errorf("DefaultIncidentManagerPrompt should contain %q", want)
+		}
+	}
+}
