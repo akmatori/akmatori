@@ -15,7 +15,11 @@ infrastructure through real tools, and executes remediation behind approval gate
 
 [Website](https://akmatori.com) · [Documentation](https://akmatori.com/docs) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Issues](https://github.com/akmatori/akmatori/issues) · [Discord](https://discord.gg/fMbAqqp7nY)
 
-<img width="1436" height="659" alt="Akmatori incident dashboard" src="https://github.com/user-attachments/assets/b2c78bf5-9e20-47da-8ec6-b841c6a0a3de" />
+<img width="1440" alt="Akmatori incident view: the agent found the root cause of an HTTP 502 alert" src="docs/assets/incident-view.webp" />
+
+**▶ [Watch the 3-minute demo](https://img.akmatori.com/akmatori-demo-2026-11.mp4)**: a tour of the product, then a real HTTP 502 incident on a Linux server, investigated live (alert to root cause in 2 min 26 s).
+
+<a href="https://img.akmatori.com/akmatori-demo-2026-11.mp4"><img width="600" alt="Watch the 3-minute Akmatori demo" src="docs/assets/demo-poster.webp" /></a>
 
 </div>
 
