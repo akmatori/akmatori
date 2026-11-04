@@ -38,6 +38,12 @@ point at it through a nullable `connector_id`: `tool_instances`, `alert_source_i
   `/mcp-servers/status`), `disabled`, `needs_setup` (no parts, or a messaging integration without
   channels), `unknown`. Webhook silence is not an error; `last_alert_at` is shown instead
 - SQLite returns `MAX(datetime)` as text: scan such aggregates into `database.FlexTime`
+- every HTTP connector owns a plain `tool_types` row (`kind = ""`, name = `tool_type_name`, schema =
+  `base_url_field` + the auth fields) kept in step by `ensureConnectorToolType` on create/update
+  (a rename moves the row and its instances), `deleteToolTypeIfUnused` on delete, and
+  `EnsureConnectorToolTypes` at start (upgrade backfill). The gateway resolves the base URL and
+  credentials from a tool instance of that type, so without the row the connector's tools cannot
+  run. The worked example is `docs/examples/cve-watch/`
 
 # Remote MCP servers (custom connectors)
 
