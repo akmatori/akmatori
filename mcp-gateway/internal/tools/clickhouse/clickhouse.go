@@ -280,7 +280,10 @@ func (t *ClickHouseTool) executeQueryInternal(ctx context.Context, config *CHCon
 
 	t.logger.Printf("ClickHouse query: %s", truncateQuery(query))
 
-	rows, err := db.QueryContext(ctx, query)
+	qctx, cancel := withoutDeadline(ctx)
+	defer cancel()
+
+	rows, err := db.QueryContext(qctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query execution failed: %w", err)
 	}
@@ -349,6 +352,19 @@ func (t *ClickHouseTool) cachedQuery(ctx context.Context, incidentID, cacheKey s
 	t.responseCache.SetWithTTL(fullCacheKey, result, ttl)
 	t.logger.Printf("Response cached for %s (TTL: %v)", cacheKey, ttl)
 	return result, nil
+}
+
+// withoutDeadline returns a context that is cancelled together with ctx but has no deadline.
+// clickhouse-go sends max_execution_time with every query whose context has a deadline,
+// and ClickHouse rejects that setting for readonly=1 users (code 164). The deadline is still
+// enforced on the client side, because cancellation of ctx cancels the returned context.
+func withoutDeadline(ctx context.Context) (context.Context, context.CancelFunc) {
+	qctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	stop := context.AfterFunc(ctx, cancel)
+	return qctx, func() {
+		stop()
+		cancel()
+	}
 }
 
 // truncateQuery truncates a query string for logging
