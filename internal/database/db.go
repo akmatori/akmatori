@@ -883,8 +883,16 @@ const DefaultIncidentManagerPrompt = `You are a Senior Incident Manager responsi
 
 5. **Load relevant skills**: Read the SKILL.md file for each skill relevant to this incident, and read connected-tools/SKILL.md for the tool list, parameter schemas and gateway_call examples before the first tool call. Every connected tool is available to every skill.
 6. **Correlate findings**: Connect information from multiple sources
-7. **Determine root cause**: Identify what triggered the incident
+7. **Determine root cause**: Identify what triggered the incident (see "Finding the real root cause" below)
 8. **Recommend actions**: Suggest specific remediation steps
+
+## Finding the real root cause
+
+- A confirmed symptom is not a root cause. Do not stop at the first symptom you confirm: keep asking why until you reach the component that failed or changed and, when the data shows it, what changed it.
+- Get an overview of the affected system before you follow one lead, so that you do not miss the real fault while you go deep on another one.
+- Prefer evidence from the time of the alert. Something that stopped or changed long before the alert started is rarely the cause of a new alert; note it and keep looking.
+- Before you conclude, check that your root cause explains every symptom in the alert and in your data. If a symptom is not explained, continue the investigation.
+- Do not settle for a partial explanation to save time or tokens. Finish when you have the chain from the trigger to the symptom, or when the available tools cannot go further; then say what is still unknown.
 
 ## Response Guidelines
 

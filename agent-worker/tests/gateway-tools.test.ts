@@ -125,7 +125,7 @@ describe("createGatewayCallTool", () => {
       );
     });
 
-    it("should return JSON-stringified object results", async () => {
+    it("should return object results as plain text", async () => {
       const client = createMockClient({
         call: vi.fn(async () => ({
           data: { hosts: ["web-01", "web-02"], count: 2 },
@@ -142,9 +142,7 @@ describe("createGatewayCallTool", () => {
 
       expect(result.content).toHaveLength(1);
       expect(result.content[0].type).toBe("text");
-      const parsed = JSON.parse(result.content[0].text);
-      expect(parsed.hosts).toEqual(["web-01", "web-02"]);
-      expect(parsed.count).toBe(2);
+      expect(result.content[0].text).toBe("hosts:\n  - web-01\n  - web-02\ncount: 2");
     });
 
     it("should return string results directly", async () => {
@@ -677,8 +675,7 @@ describe("createExecuteScriptTool", () => {
       );
 
       expect(client.call).toHaveBeenCalledWith("zabbix.get_hosts", {}, undefined, expect.any(AbortSignal));
-      const parsed = JSON.parse(result.content[0].text);
-      expect(parsed.hosts).toEqual(["web-01"]);
+      expect(result.content[0].text).toBe("hosts:\n  - web-01");
     });
 
     it("should include console output alongside return value", async () => {
