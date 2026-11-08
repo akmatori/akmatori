@@ -263,7 +263,47 @@ const PROVIDER_API_MAP: Record<string, string> = {
   "ant-ling": "openai-completions",
 };
 
+/**
+ * OpenRouter app attribution (openrouter.ai/docs/app-attribution): requests
+ * that carry these headers count toward Akmatori on OpenRouter's app pages and
+ * rankings. pi attributes agent-loop requests to pi.dev (only while pi install
+ * telemetry is on) and one-shot requests to nobody. The header names match
+ * pi-ai's own spelling exactly: openai-completions merges
+ * `{ ...identityHeaders, ...model.headers }` case-sensitively, so model
+ * headers replace pi's values instead of sending a second copy.
+ * Operators turn it off with AKMATORI_OPENROUTER_ATTRIBUTION=0.
+ */
+export const OPENROUTER_ATTRIBUTION_HEADERS: Readonly<Record<string, string>> = {
+  "HTTP-Referer": "https://akmatori.com",
+  "X-OpenRouter-Title": "Akmatori",
+  "X-OpenRouter-Categories": "cloud-agent",
+};
+
+export function openRouterAttributionEnabled(
+  value: string | undefined = process.env.AKMATORI_OPENROUTER_ATTRIBUTION,
+): boolean {
+  if (value === undefined) return true;
+  return !["0", "false", "no", "off"].includes(value.trim().toLowerCase());
+}
+
+function isOpenRouterTarget(provider: string, baseUrl: string | undefined): boolean {
+  return provider === "openrouter" || (baseUrl ?? "").includes("openrouter.ai");
+}
+
 export function resolveModel(
+  provider: string,
+  modelId: string,
+  baseUrl?: string,
+): Model<any> {
+  const model = resolveModelSpec(provider, modelId, baseUrl);
+  if (!openRouterAttributionEnabled() || !isOpenRouterTarget(provider, model.baseUrl)) {
+    return model;
+  }
+  // Operator-set model headers (none today) win over the defaults.
+  return { ...model, headers: { ...OPENROUTER_ATTRIBUTION_HEADERS, ...model.headers } };
+}
+
+function resolveModelSpec(
   provider: string,
   modelId: string,
   baseUrl?: string,

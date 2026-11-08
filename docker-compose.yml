@@ -170,6 +170,8 @@ services:
       # gateway calls via tools.gateway_fetch). Off until the bench compares them.
       - AKMATORI_CODEMODE=${AKMATORI_CODEMODE:-0}
       - PI_CACHE_RETENTION=long  # Extended prompt caching: 1hr Anthropic, 24hr OpenAI
+      # OpenRouter app attribution headers (HTTP-Referer: https://akmatori.com). 0 = off.
+      - AKMATORI_OPENROUTER_ATTRIBUTION=${AKMATORI_OPENROUTER_ATTRIBUTION:-1}
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - NO_PROXY=${NO_PROXY:-postgres,akmatori-api,mcp-gateway,akmatori-agent,frontend,localhost,127.0.0.1}
