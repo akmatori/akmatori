@@ -1,7 +1,6 @@
 package services
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,13 +10,20 @@ import (
 	"gorm.io/gorm"
 )
 
-// newSkillServiceForPromptTest builds a minimal SkillService with the memory
-// directory pointed at a temp dir. Tools and DB are not exercised here; we
-// only assert manifest injection.
+// newSkillServiceForPromptTest builds a minimal SkillService backed by an
+// in-memory database: the manifest is rendered from the memories table.
 func newSkillServiceForPromptTest(t *testing.T) *SkillService {
 	t.Helper()
 	tmp := t.TempDir()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&database.Memory{}, &database.Skill{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
 	return &SkillService{
+		db:           db,
 		dataDir:      tmp,
 		incidentsDir: filepath.Join(tmp, "incidents"),
 		skillsDir:    filepath.Join(tmp, "skills"),
@@ -25,88 +31,68 @@ func newSkillServiceForPromptTest(t *testing.T) *SkillService {
 	}
 }
 
+// writeManifest stores one memory in scope whose description is body, so the
+// rendered manifest contains body.
 func writeManifest(t *testing.T, svc *SkillService, scope, body string) {
 	t.Helper()
-	dir := filepath.Join(svc.memoryDir, scope)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte(body), 0644); err != nil {
-		t.Fatalf("write manifest: %v", err)
+	name := SlugifyMemoryName(scope + "-entry")
+	if err := svc.db.Create(&database.Memory{Scope: scope, Name: name, Type: MemoryTypeFact, Description: body, Body: "b"}).Error; err != nil {
+		t.Fatalf("seed memory: %v", err)
 	}
 }
 
 func TestRenderMemoryRecallSection_WithManifest(t *testing.T) {
 	svc := newSkillServiceForPromptTest(t)
-	writeManifest(t, svc, MemoryScopeGlobal, "# Memory Manifest — scope: global\n\n| name | type | description |\n| --- | --- | --- |\n| `prod-db` | host | data dir on /mnt/data |\n")
+	writeManifest(t, svc, MemoryScopeGlobal, "data dir on /mnt/data")
 
-	got := svc.renderMemoryRecallSection(MemoryScopeGlobal, "")
+	got := svc.renderMemoryRecallSection(MemoryScopeGlobal)
 	for _, want := range []string{
 		"## Cross-incident Memory",
-		// Recall is delegated to the memory-searcher subagent.
-		`"agent": "memory-searcher"`,
-		"subagent(",
-		// Record durable findings subsection invokes memory-writer.
+		`gateway_call("memory.search"`,
+		`gateway_call("memory.get"`,
 		"### Record durable findings",
-		`"agent": "memory-writer"`,
-		// Write instruction names the scope explicitly inside the task body.
-		`Scope: global`,
-		"prod-db",
+		`gateway_call("memory.write", {"scope": "global"`,
+		"# Memory Manifest — scope: global",
 		"data dir on /mnt/data",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected substring %q, got:\n%s", want, got)
 		}
 	}
-	// Regression: legacy gateway tool names must not survive the subagent migration.
-	for _, banned := range []string{
-		"gateway_call(\"memory.search\"",
-		"gateway_call(\"memory.get\"",
-		"memory.search",
-		"memory.get",
-	} {
+	for _, banned := range []string{"subagent(", "memory-searcher", "memory-writer", "/akmatori/memory"} {
 		if strings.Contains(got, banned) {
-			t.Errorf("recall section must not contain legacy tool reference %q; got:\n%s", banned, got)
+			t.Errorf("recall section must not contain %q; got:\n%s", banned, got)
 		}
 	}
 }
 
 // TestRenderMemoryRecallSection_ScopedToSkillUsesSkillScope verifies the
-// memory-writer instruction bakes in the caller's scope so the agent doesn't
-// have to guess. The "global" scope is exercised by the WithManifest test
-// above; this test pins skill-scope behavior.
+// memory.write example bakes in the caller's scope.
 func TestRenderMemoryRecallSection_ScopedToSkillUsesSkillScope(t *testing.T) {
 	svc := newSkillServiceForPromptTest(t)
-	got := svc.renderMemoryRecallSection("redis-skill", "")
-	if !strings.Contains(got, `Scope: redis-skill`) {
-		t.Errorf("expected memory-writer scope to be redis-skill in task body, got:\n%s", got)
-	}
-	// SKILL.md is shared across incidents → must use the CWD-derivation placeholder.
-	if !strings.Contains(got, "your incident UUID") {
-		t.Errorf("SKILL.md scope renders should fall back to the CWD UUID placeholder, got:\n%s", got)
+	got := svc.renderMemoryRecallSection("redis-skill")
+	if !strings.Contains(got, `{"scope": "redis-skill"`) {
+		t.Errorf("expected memory.write scope redis-skill, got:\n%s", got)
 	}
 }
 
-// TestRenderMemoryRecallSection_InjectsIncidentUUIDForAgentsMd guards the
-// per-incident path: when AGENTS.md is rendered the actual incident UUID is
-// substituted into the memory-writer task example so the model doesn't have
-// to derive it from CWD. SKILL.md uses "" and falls back to the placeholder
-// (covered above).
-func TestRenderMemoryRecallSection_InjectsIncidentUUIDForAgentsMd(t *testing.T) {
+// TestRenderMemoryRecallSection_ManifestFollowsDatabase: a memory written by
+// the gateway shows up in the next render with no disk sync.
+func TestRenderMemoryRecallSection_ManifestFollowsDatabase(t *testing.T) {
 	svc := newSkillServiceForPromptTest(t)
-	got := svc.renderMemoryRecallSection(MemoryScopeGlobal, "deadbeef-1234-5678-9abc-def012345678")
-	if !strings.Contains(got, "Incident UUID: deadbeef-1234-5678-9abc-def012345678") {
-		t.Errorf("expected literal incident UUID in task body, got:\n%s", got)
+	if got := svc.renderMemoryRecallSection("redis-skill"); !strings.Contains(got, "_No memories indexed") {
+		t.Fatalf("empty scope placeholder missing:\n%s", got)
 	}
-	if strings.Contains(got, "your incident UUID") {
-		t.Errorf("placeholder must NOT appear when a real UUID is known: %s", got)
+	writeManifest(t, svc, "redis-skill", "maxmemory is 8gb")
+	if got := svc.renderMemoryRecallSection("redis-skill"); !strings.Contains(got, "maxmemory is 8gb") {
+		t.Errorf("new memory not in the manifest:\n%s", got)
 	}
 }
 
 func TestRenderMemoryRecallSection_NoManifest(t *testing.T) {
 	svc := newSkillServiceForPromptTest(t)
 
-	got := svc.renderMemoryRecallSection(MemoryScopeGlobal, "")
+	got := svc.renderMemoryRecallSection(MemoryScopeGlobal)
 	if !strings.Contains(got, "## Cross-incident Memory") {
 		t.Errorf("expected header even when no manifest exists, got:\n%s", got)
 	}
@@ -118,34 +104,10 @@ func TestRenderMemoryRecallSection_NoManifest(t *testing.T) {
 	}
 }
 
-func TestRenderMemoryRecallSection_EmptyMemoryDir(t *testing.T) {
-	svc := &SkillService{} // no memoryDir
-	if got := svc.renderMemoryRecallSection(MemoryScopeGlobal, ""); got != "" {
-		t.Errorf("expected empty string when memoryDir not configured, got %q", got)
-	}
-}
-
-func TestReadMemoryManifest_PassesThrough(t *testing.T) {
-	svc := newSkillServiceForPromptTest(t)
-	writeManifest(t, svc, "redis", "manifest body for redis")
-
-	got := svc.readMemoryManifest("redis")
-	if got != "manifest body for redis" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestReadMemoryManifest_MissingScope(t *testing.T) {
-	svc := newSkillServiceForPromptTest(t)
-	if got := svc.readMemoryManifest("never-existed"); got != "" {
-		t.Errorf("expected empty for missing scope, got %q", got)
-	}
-}
-
-func TestReadMemoryManifest_EmptyScope(t *testing.T) {
-	svc := newSkillServiceForPromptTest(t)
-	if got := svc.readMemoryManifest(""); got != "" {
-		t.Errorf("expected empty for empty scope, got %q", got)
+func TestRenderMemoryRecallSection_NoDatabase(t *testing.T) {
+	svc := &SkillService{}
+	if got := svc.renderMemoryRecallSection(MemoryScopeGlobal); got != "" {
+		t.Errorf("expected empty string without a database, got %q", got)
 	}
 }
 
@@ -155,13 +117,8 @@ func TestGenerateSkillMd_InjectsScopeMemoryBeforeTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ctx service: %v", err)
 	}
-	svc := &SkillService{
-		dataDir:        tmp,
-		incidentsDir:   filepath.Join(tmp, "incidents"),
-		skillsDir:      filepath.Join(tmp, "skills"),
-		memoryDir:      filepath.Join(tmp, "memory"),
-		contextService: ctxSvc,
-	}
+	svc := newSkillServiceForPromptTest(t)
+	svc.contextService = ctxSvc
 	writeManifest(t, svc, "redis-skill", "manifest body for redis-skill")
 
 	out := svc.generateSkillMd("redis-skill", "Redis investigator", "## Body\n\nDo redis stuff.\n")
@@ -181,16 +138,11 @@ func TestGenerateSkillMd_InjectsScopeMemoryBeforeTools(t *testing.T) {
 
 func TestGenerateIncidentAgentsMd_InjectsGlobalManifest(t *testing.T) {
 	tmp := t.TempDir()
-	svc := &SkillService{
-		dataDir:      tmp,
-		incidentsDir: filepath.Join(tmp, "incidents"),
-		skillsDir:    filepath.Join(tmp, "skills"),
-		memoryDir:    filepath.Join(tmp, "memory"),
-	}
+	svc := newSkillServiceForPromptTest(t)
 	writeManifest(t, svc, MemoryScopeGlobal, "manifest for global scope")
 
 	out := filepath.Join(tmp, "AGENTS.md")
-	if err := svc.generateAgentsMd(out, "incident-manager", "test-incident-uuid"); err != nil {
+	if err := svc.generateAgentsMd(out, "incident-manager", "test-incident-uuid", scopeKindIncident); err != nil {
 		t.Fatalf("generate AGENTS.md: %v", err)
 	}
 	got := readFile(t, out)
@@ -245,7 +197,10 @@ func TestRegenerateSkillMd_PicksUpCurrentManifest(t *testing.T) {
 		t.Errorf("first regen should show empty-manifest placeholder, got:\n%s", first)
 	}
 
-	// Now write a manifest as the memory service would, then regenerate.
+	// Now store a memory (as the gateway would), then regenerate.
+	if err := db.AutoMigrate(&database.Memory{}); err != nil {
+		t.Fatal(err)
+	}
 	writeManifest(t, svc, "test-skill", "manifest body for test-skill — fresh content")
 	if err := svc.RegenerateSkillMd("test-skill"); err != nil {
 		t.Fatalf("second regen: %v", err)
@@ -271,14 +226,9 @@ func TestRegenerateSkillMd_NoOpForIncidentManager(t *testing.T) {
 
 func TestGenerateIncidentAgentsMd_NoManifestFallsBackGracefully(t *testing.T) {
 	tmp := t.TempDir()
-	svc := &SkillService{
-		dataDir:      tmp,
-		incidentsDir: filepath.Join(tmp, "incidents"),
-		skillsDir:    filepath.Join(tmp, "skills"),
-		memoryDir:    filepath.Join(tmp, "memory"),
-	}
+	svc := newSkillServiceForPromptTest(t)
 	out := filepath.Join(tmp, "AGENTS.md")
-	if err := svc.generateAgentsMd(out, "incident-manager", "test-incident-uuid"); err != nil {
+	if err := svc.generateAgentsMd(out, "incident-manager", "test-incident-uuid", scopeKindIncident); err != nil {
 		t.Fatalf("generate AGENTS.md: %v", err)
 	}
 	got := readFile(t, out)
@@ -293,13 +243,8 @@ func TestGenerateSkillMd_RoundTripDoesNotDuplicateMemorySection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ctx service: %v", err)
 	}
-	svc := &SkillService{
-		dataDir:        tmp,
-		incidentsDir:   filepath.Join(tmp, "incidents"),
-		skillsDir:      filepath.Join(tmp, "skills"),
-		memoryDir:      filepath.Join(tmp, "memory"),
-		contextService: ctxSvc,
-	}
+	svc := newSkillServiceForPromptTest(t)
+	svc.contextService = ctxSvc
 	writeManifest(t, svc, "redis-skill", "manifest body")
 
 	originalBody := "## Body\n\nDo redis stuff.\n"
@@ -381,13 +326,8 @@ func TestGenerateSkillMd_RoundTripWithEmptyBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ctx service: %v", err)
 	}
-	svc := &SkillService{
-		dataDir:        tmp,
-		incidentsDir:   filepath.Join(tmp, "incidents"),
-		skillsDir:      filepath.Join(tmp, "skills"),
-		memoryDir:      filepath.Join(tmp, "memory"),
-		contextService: ctxSvc,
-	}
+	svc := newSkillServiceForPromptTest(t)
+	svc.contextService = ctxSvc
 	writeManifest(t, svc, "redis-skill", "fresh manifest body")
 
 	// Empty user prompt — generateSkillMd should still emit a memory section,
@@ -424,13 +364,8 @@ func TestGenerateSkillMd_NoTools_NoToolsSection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ctx service: %v", err)
 	}
-	svc := &SkillService{
-		dataDir:        tmp,
-		incidentsDir:   filepath.Join(tmp, "incidents"),
-		skillsDir:      filepath.Join(tmp, "skills"),
-		memoryDir:      filepath.Join(tmp, "memory"),
-		contextService: ctxSvc,
-	}
+	svc := newSkillServiceForPromptTest(t)
+	svc.contextService = ctxSvc
 
 	out := svc.generateSkillMd("plain-skill", "Test", "Body content")
 

@@ -146,7 +146,7 @@ func (s *Server) HandleHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := s.handleRequest(r.Context(), &req, incidentID)
+	resp := s.handleRequest(WithRunID(r.Context(), r.Header.Get(RunIDHeader)), &req, incidentID)
 	s.sendHTTPResponse(w, resp)
 }
 
@@ -195,7 +195,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request, incidentID st
 			continue
 		}
 
-		resp := s.handleRequest(r.Context(), &req, incidentID)
+		resp := s.handleRequest(WithRunID(r.Context(), r.Header.Get(RunIDHeader)), &req, incidentID)
 		s.sendSSEResponse(w, flusher, resp)
 	}
 }

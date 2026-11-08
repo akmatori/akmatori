@@ -290,10 +290,12 @@ func countFiringAlerts(tx *gorm.DB, incidentUUID string) (int64, error) {
 // held out of monitor mode by UpdateIncidentComplete (because alerts were
 // still firing at investigation-completion time) is promoted to monitor now,
 // with a fresh monitor_until. Runs entirely within the caller's transaction.
-func ResolveAlertTx(tx *gorm.DB, alert *database.Alert, resolvedAt time.Time) error {
+// resolvedBy (database.AlertResolvedBy*) says who resolved it.
+func ResolveAlertTx(tx *gorm.DB, alert *database.Alert, resolvedAt time.Time, resolvedBy string) error {
 	if err := tx.Model(alert).Updates(map[string]interface{}{
 		"status":      string(database.AlertStatusResolved),
 		"resolved_at": resolvedAt,
+		"resolved_by": resolvedBy,
 	}).Error; err != nil {
 		return fmt.Errorf("ResolveAlertTx: mark alert resolved: %w", err)
 	}
@@ -361,7 +363,7 @@ func (s *SkillService) ResolveAlert(ctx context.Context, alertUUID string) error
 		if alert.Status != database.AlertStatusFiring {
 			return ErrAlertAlreadyResolved
 		}
-		return ResolveAlertTx(tx, &alert, time.Now())
+		return ResolveAlertTx(tx, &alert, time.Now(), database.AlertResolvedByOperator)
 	})
 }
 
@@ -376,7 +378,7 @@ func (s *SkillService) ResolveAlert(ctx context.Context, alertUUID string) error
 // linked firing alerts as part of the close regardless of investigation
 // status.
 func (s *SkillService) CloseIncident(ctx context.Context, incidentUUID string, confirm bool) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var incident database.Incident
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("uuid = ?", incidentUUID).First(&incident).Error; err != nil {
@@ -404,21 +406,49 @@ func (s *SkillService) CloseIncident(ctx context.Context, incidentUUID string, c
 				Updates(map[string]interface{}{
 					"status":      string(database.AlertStatusResolved),
 					"resolved_at": now,
+					"resolved_by": database.AlertResolvedByOperator,
 				}).Error; err != nil {
 				return fmt.Errorf("CloseIncident: resolve linked alerts: %w", err)
 			}
 		}
 
-		if err := tx.Model(&incident).Updates(map[string]interface{}{
-			"status":        database.IncidentStatusClosed,
-			"resolved_at":   &now,
-			"monitor_until": nil,
-			"closed_reason": database.CloseReasonManual,
-		}).Error; err != nil {
+		if err := tx.Model(&incident).Updates(closeIncidentValues(now, database.CloseReasonManual)).Error; err != nil {
 			return fmt.Errorf("CloseIncident: update incident: %w", err)
 		}
 		return nil
 	})
+	if err == nil && s.extractionKicker != nil {
+		s.extractionKicker.Kick()
+	}
+	return err
+}
+
+// closeIncidentValues is the UPDATE every close path applies: the status,
+// the close reason, and the post-incident memory extraction queued in the
+// same statement, so a closed incident is never left unqueued. A re-close
+// after a reopen starts a fresh job (attempts and retry time reset).
+func closeIncidentValues(now time.Time, reason string) map[string]interface{} {
+	return map[string]interface{}{
+		"status":                     database.IncidentStatusClosed,
+		"resolved_at":                &now,
+		"monitor_until":              nil,
+		"closed_reason":              reason,
+		"memory_extraction":          database.MemoryExtractionPending,
+		"memory_extraction_at":       nil,
+		"memory_extraction_error":    "",
+		"memory_extraction_attempts": 0,
+		"memory_extraction_retry_at": nil,
+	}
+}
+
+// ExtractionKicker wakes the post-incident memory extractor after a close.
+type ExtractionKicker interface {
+	Kick()
+}
+
+// SetExtractionKicker wires the memory extractor's wake-up; optional.
+func (s *SkillService) SetExtractionKicker(k ExtractionKicker) {
+	s.extractionKicker = k
 }
 
 // UnlinkAlertFromIncident detaches an alert from its current incident and
@@ -603,7 +633,7 @@ type IncidentContext struct {
 // Returns the new incident UUID + working directory.
 func (s *SkillService) SpawnIncidentManager(ctx *IncidentContext) (string, string, error) {
 	incidentUUID := uuid.New().String()
-	incidentDir, err := s.prepareScopeDir("incident-manager", incidentUUID)
+	incidentDir, err := s.prepareScopeDir("incident-manager", incidentUUID, scopeKindIncident)
 	if err != nil {
 		return "", "", err
 	}
@@ -674,7 +704,7 @@ func (s *SkillService) PrepareRequestScope(rootSkillName, eventUUID string) (str
 	if scopeUUID == "" {
 		scopeUUID = uuid.New().String()
 	}
-	dir, err := s.prepareScopeDir(rootSkillName, scopeUUID)
+	dir, err := s.prepareScopeDir(rootSkillName, scopeUUID, scopeKindRequest)
 	if err != nil {
 		return "", "", err
 	}
@@ -690,15 +720,31 @@ func (s *SkillService) EnsureScopeDir(rootSkillName, scopeUUID string) error {
 	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); err == nil {
 		return nil
 	}
-	_, err := s.prepareScopeDir(rootSkillName, scopeUUID)
+	kind := scopeKindRequest
+	if s.isIncidentScope(scopeUUID) {
+		kind = scopeKindIncident
+	}
+	_, err := s.prepareScopeDir(rootSkillName, scopeUUID, kind)
 	return err
+}
+
+// isIncidentScope reports whether scopeUUID is an incident (alert work).
+func (s *SkillService) isIncidentScope(scopeUUID string) bool {
+	if s.db == nil {
+		return false
+	}
+	var n int64
+	if err := s.db.Model(&database.Incident{}).Where("uuid = ?", scopeUUID).Count(&n).Error; err != nil {
+		return false
+	}
+	return n > 0
 }
 
 // prepareScopeDir creates the work directory of a scope and writes its
 // AGENTS.md. The root skill's prompt becomes the AGENTS.md root (the file
 // pi-mono reads when starting a session); cross-incident memory recall is
-// appended below the prompt.
-func (s *SkillService) prepareScopeDir(rootSkillName, scopeUUID string) (string, error) {
+// appended below the prompt, with the run kind's memory-write guidance.
+func (s *SkillService) prepareScopeDir(rootSkillName, scopeUUID string, kind scopeKind) (string, error) {
 	// 0777 so the agent worker (UID 1001) can create files
 	dir := filepath.Join(s.incidentsDir, scopeUUID)
 	if err := os.MkdirAll(dir, 0777); err != nil {
@@ -708,7 +754,7 @@ func (s *SkillService) prepareScopeDir(rootSkillName, scopeUUID string) (string,
 	if err := os.Chmod(dir, 0777); err != nil {
 		slog.Error("failed to chmod work directory", "dir", dir, "err", err)
 	}
-	if err := s.generateAgentsMd(filepath.Join(dir, "AGENTS.md"), rootSkillName, scopeUUID); err != nil {
+	if err := s.generateAgentsMd(filepath.Join(dir, "AGENTS.md"), rootSkillName, scopeUUID, kind); err != nil {
 		return "", fmt.Errorf("failed to generate AGENTS.md: %w", err)
 	}
 	return dir, nil
@@ -784,11 +830,10 @@ func (s *SkillService) UpdateRunLog(runID, fullLog string) error {
 type RunOutcome = database.AgentRunResult
 
 // FinishRun stores a finished run's log, answer and session, and finishes
-// the incident it worked on (see completeIncident). After every run the
-// on-disk memory directory is re-ingested into Postgres in a detached
-// goroutine: the agent's memory-writer subagent has already produced the
-// files; ingest reconciles them with the DB so the REST API and Slack/UI
-// surfaces see fresh entries without restarting the API.
+// the incident it worked on (see completeIncident). Agents write memories
+// through the gateway during the run; when the memories changed, a detached
+// goroutine regenerates every SKILL.md (each embeds its scope's manifest)
+// and refreshes the read-only disk mirror.
 func (s *SkillService) FinishRun(runID string, outcome RunOutcome) error {
 	var run database.AgentRun
 	if err := s.db.Select("run_id, incident_uuid").Where("run_id = ?", runID).First(&run).Error; err != nil {
@@ -798,6 +843,13 @@ func (s *SkillService) FinishRun(runID string, outcome RunOutcome) error {
 		return fmt.Errorf("failed to store run %s: %w", runID, err)
 	}
 	now := time.Now()
+	// The memories the answer relied on (read from the manifest without a
+	// memory.get) are recorded here; gateway reads record themselves.
+	if s.memoryCiter != nil && !outcome.Failed && outcome.Response != "" {
+		if n := s.memoryCiter.RecordCitedMemories(runID, run.IncidentUUID, outcome.Response); n > 0 {
+			slog.Info("recorded cited memories", "run", runID, "count", n)
+		}
+	}
 
 	if run.IncidentUUID != "" {
 		status := database.IncidentStatusCompleted
@@ -809,18 +861,72 @@ func (s *SkillService) FinishRun(runID string, outcome RunOutcome) error {
 		}
 	}
 
-	if s.memoryIngester != nil {
-		// Detached: the request context may already be cancelled by the time
-		// this runs, so a fresh background context is used. Failures are
-		// logged-only — ingest is best-effort and must not affect the caller.
-		ingester := s.memoryIngester
+	// SKILL.md manifests are regenerated whether or not the disk mirror is
+	// wired (RefreshAfterMemoryChange skips the mirror on its own).
+	if s.db != nil {
+		s.memoryRefreshWG.Add(1)
 		go func() {
-			if err := ingester.IngestFromDisk(context.Background()); err != nil {
-				slog.Warn("memory ingest from disk failed", "run", runID, "err", err)
-			}
+			defer s.memoryRefreshWG.Done()
+			s.RefreshAfterMemoryChange(runID)
 		}()
 	}
 	return nil
+}
+
+// memoryFingerprintNow returns count + newest updated_at of the memories
+// table. A create, an update and a delete each change it.
+func (s *SkillService) memoryFingerprintNow() (string, error) {
+	var row struct {
+		N   int64
+		Max database.FlexTime
+	}
+	if err := s.db.Model(&database.Memory{}).Select("COUNT(*) AS n, MAX(updated_at) AS max").Scan(&row).Error; err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d/%d", row.N, row.Max.Time.UnixNano()), nil
+}
+
+// memoryImportDone reports whether IngestDiskMemoriesOnce has completed.
+func memoryImportDone(db *gorm.DB) bool {
+	var n int64
+	if err := db.Model(&database.SystemSetting{}).Where("key = ?", SystemSettingMemoryDiskIngestedAt).Count(&n).Error; err != nil {
+		return false
+	}
+	return n > 0
+}
+
+// RefreshAfterMemoryChange regenerates every SKILL.md and the disk mirror
+// when the memories changed since the last refresh. Errors are logged and the
+// refresh is tried again by the next finished run. runID is for the log only.
+func (s *SkillService) RefreshAfterMemoryChange(runID string) {
+	s.memoryMu.Lock()
+	defer s.memoryMu.Unlock()
+	fp, err := s.memoryFingerprintNow()
+	if err != nil {
+		slog.Warn("memory refresh: read fingerprint", "run", runID, "err", err)
+		return
+	}
+	if fp == s.memoryFingerprint {
+		return
+	}
+	ok := true
+	if err := s.RegenerateAllSkillMds(); err != nil {
+		slog.Warn("memory refresh: regenerate SKILL.md files", "run", runID, "err", err)
+		ok = false
+	}
+	// The mirror sync deletes files with no row, so it waits for the
+	// one-time import of the old disk files (IngestDiskMemoriesOnce).
+	if s.memoryRefresher != nil && memoryImportDone(s.db) {
+		if err := s.memoryRefresher.SyncMemoryFiles(); err != nil {
+			slog.Warn("memory refresh: sync memory files", "run", runID, "err", err)
+			ok = false
+		}
+	}
+	// Keep the old fingerprint after a failure, so the next finished run
+	// tries again even when no memory changed in between.
+	if ok {
+		s.memoryFingerprint = fp
+	}
 }
 
 // generateAgentsMd renders the AGENTS.md file for a fresh agent invocation.
@@ -834,13 +940,10 @@ func (s *SkillService) FinishRun(runID string, outcome RunOutcome) error {
 // The cross-incident "global" memory manifest is appended below the prompt
 // regardless of root skill so the agent sees a small, always-up-to-date
 // summary of long-lived facts and operator feedback before any tool call.
-// Full bodies are fetched on demand via the memory-searcher subagent. The
+// Full bodies are fetched on demand with memory.get. The
 // uploaded context files follow as a "Reference files" list, so the agent
 // knows what is mounted at /akmatori/context/ without a skill [[reference]].
-//
-// incidentUUID is substituted into the memory-writer call example so the
-// model can quote it verbatim instead of having to derive it from CWD.
-func (s *SkillService) generateAgentsMd(path string, rootSkillName string, incidentUUID string) error {
+func (s *SkillService) generateAgentsMd(path string, rootSkillName string, incidentUUID string, kind scopeKind) error {
 	// Get the root system skill's prompt. Falls back to the hardcoded default
 	// when the on-disk skill row is absent (fresh install pre-seed) so the
 	// agent still receives a usable instruction.
@@ -862,10 +965,10 @@ func (s *SkillService) generateAgentsMd(path string, rootSkillName string, incid
 	sb.WriteString("\n\n")
 	sb.WriteString(prompt)
 	sb.WriteString("\n")
-	sb.WriteString(s.renderMemoryRecallSection(MemoryScopeGlobal, incidentUUID))
+	sb.WriteString(s.renderMemoryRecallSectionFor(MemoryScopeGlobal, kind))
 	sb.WriteString(s.renderContextFilesSection())
 
-	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
+	if err := writeFileAtomic(path, []byte(sb.String()), 0644); err != nil {
 		return fmt.Errorf("failed to write AGENTS.md: %w", err)
 	}
 

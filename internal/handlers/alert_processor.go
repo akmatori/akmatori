@@ -26,8 +26,8 @@ import (
 // originalAlertTextMaxBytes caps how much of the verbatim alert text
 // (raw_payload.original_message, populated by the Slack alert extractor) is
 // rendered into the investigation prompt. Long Slack messages are truncated
-// with a UTF-8-safe ellipsis. The agent feeds this excerpt to the
-// runbook-searcher subagent, so a generous cap leaves room for distinctive
+// with a UTF-8-safe ellipsis. The agent passes this excerpt to
+// runbooks.search and memory.search, so a generous cap leaves room for distinctive
 // phrasing on retries without re-fetching the source message.
 const originalAlertTextMaxBytes = 1500
 
@@ -447,7 +447,7 @@ func (h *AlertHandler) processResolvedAlert(sourceUUID string, normalized alerts
 		// state (shorten an existing monitor window, or promote a completed
 		// incident that was held out of monitor mode because this alert was
 		// still firing at investigation-completion time).
-		if err := services.ResolveAlertTx(tx, &a, now); err != nil {
+		if err := services.ResolveAlertTx(tx, &a, now, database.AlertResolvedBySource); err != nil {
 			return fmt.Errorf("resolve alert: %w", err)
 		}
 		return nil
@@ -600,8 +600,8 @@ Description: %s`,
 	}
 
 	// Always render the labeled "Original alert text:" block when the
-	// extractor populated raw_payload.original_message. The agent feeds this
-	// raw excerpt to the runbook-searcher subagent, so preserving it (even
+	// extractor populated raw_payload.original_message. The agent passes this
+	// raw excerpt to runbooks.search, so preserving it (even
 	// when Description carries the same string) gives the agent the full
 	// source text instead of the 100-char truncated summary that the
 	// Slack-channel fallback path otherwise leaves in Description. Duplicating

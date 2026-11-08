@@ -6,6 +6,7 @@
  * via the TypeScript GatewayClient.
  */
 
+import { toModelText, jsonTextToModelText } from "./model-text.js";
 import { Type, type Static } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { GatewayClient, CallResult, ListToolsResult, ToolDetailResult } from "./gateway-client.js";
@@ -78,7 +79,7 @@ export type ExecuteScriptInput = Static<typeof ExecuteScriptParams>;
  *
  * pi's `codemode` tool runs model-written JavaScript in a QuickJS sandbox
  * with no file system, so a script cannot follow the "full output saved to
- * <file>" hint that `gateway_call` returns for results >= 4 KB. This tool has
+ * <file>" hint that `gateway_call` returns for results >= 32 KB. This tool has
  * `exposure: "codemode"`: it is never declared to the model directly, only
  * callable as `tools.gateway_fetch(...)` from a script, and it returns the
  * complete result inline (JSON text) so the script can filter it and return
@@ -90,7 +91,7 @@ export function createGatewayFetchTool(ctx: GatewayToolContext) {
     label: "Gateway Fetch (codemode)",
     description:
       "Call a tool on the MCP Gateway from a codemode script and receive the COMPLETE result as JSON text " +
-      "(no 4 KB preview, no output file). Same tool names, args and instance names as gateway_call. " +
+      "(no 32 KB preview, no output file). Same tool names, args and instance names as gateway_call. " +
       "Reduce the data in the script and return only what the investigation needs.",
     parameters: GatewayCallParams,
     exposure: "codemode",
@@ -162,12 +163,8 @@ export function createGatewayCallTool(ctx: GatewayToolContext) {
           signal,
         );
 
-        let text: string;
-        if (typeof result.data === "string") {
-          text = result.data;
-        } else {
-          text = JSON.stringify(result.data, null, 2);
-        }
+        // Plain text, not JSON: multi-line stdout/logs stay readable.
+        let text = toModelText(result.data);
 
         if (result.outputFile) {
           text += `\n\n[Full output saved to: ${result.outputFile}]`;
@@ -395,7 +392,8 @@ export function createExecuteScriptTool(ctx: ExecuteScriptToolContext) {
       try {
         const result = await executor.execute(params.code, signal);
 
-        let text = result.output;
+        // A returned object/array is shown as plain text (see model-text.ts).
+        let text = jsonTextToModelText(result.output);
         if (result.logs.length > 0 && result.output !== result.logs.join("\n")) {
           text += `\n\n--- Console Output ---\n${result.logs.join("\n")}`;
         }

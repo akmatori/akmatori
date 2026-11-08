@@ -39,6 +39,12 @@ An `incidents` row is a production problem and nothing else: only alerts open in
   written on the run by `run_id` before `OnCompleted`; `result_status` stays on the incident (guarded by
   `isCurrentRun`). Frames with no live callback are dropped — there is no legacy DB fallback
 - `RecordAgentRunDispatch` stamps the model at dispatch and creates the row when a caller made none
+- `FinishRun` records the memories the final answer cites (`Memory used:` block → `memory_uses`,
+  see the `memory-and-runbooks` rule) before the manifest refresh
+- `prepareScopeDir(rootSkill, scope, kind)`: `SpawnIncidentManager` renders the incident AGENTS.md
+  (no memory writes; the post-incident pass records findings from the final answer),
+  `PrepareRequestScope` the request one (memory.write guidance); `EnsureScopeDir` picks the kind
+  by looking the scope up in `incidents`
 - callers that return the scope to a client (API task, proposal chat) call `BeginRun` BEFORE they
   respond, so the next GET finds the run
 - Slack thread → work: `lookupSlackThread` checks `agent_runs.slack_thread_ts` (request work) first,
@@ -47,8 +53,9 @@ An `incidents` row is a production problem and nothing else: only alerts open in
   oldest first, `=== Run i of n ===` headers), token/time sums and `runs`;
   `GET /api/requests/{uuid}` (+ `/response`) is request work (status = newest run). `POST
   /api/incidents` returns the request scope as `uuid` for a request (`event_kind: request`)
-- retention: an expired incident is deleted and its runs' payload (`full_log`, `response`,
-  `session_id`) is cleared; expired request scopes (newest run finished before the cutoff, none
+- retention: an expired incident (completed/failed/diagnosed by `completed_at`; closed/merged by
+  the close time) is deleted, its agent memories get the note `source incident deleted`, and its
+  runs' payload (`full_log`, `response`, `session_id`) is cleared; expired request scopes (newest run finished before the cutoff, none
   running) get the same clear and lose their directory. Run rows and metrics are never deleted
 - migration `migrateSplitAgentRuns` (runs while `incidents.full_log` exists): copies the work onto
   each incident's newest run (a model-less synthetic run when it had none), turns non-alert

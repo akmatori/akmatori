@@ -83,10 +83,6 @@ type LLMSettingsForWorker struct {
 	TopP        *float64
 	TopK        *int
 	MaxTokens   *int
-
-	// Subagent model override, nil = same as parent (see LLMSettings).
-	SubagentModel         *string
-	SubagentThinkingLevel *string
 }
 
 // BuildLLMSettingsForWorker creates LLMSettingsForWorker from database LLMSettings.
@@ -105,9 +101,6 @@ func BuildLLMSettingsForWorker(dbSettings *database.LLMSettings) *LLMSettingsFor
 		TopP:          dbSettings.TopP,
 		TopK:          dbSettings.TopK,
 		MaxTokens:     dbSettings.MaxTokens,
-
-		SubagentModel:         dbSettings.SubagentModel,
-		SubagentThinkingLevel: dbSettings.SubagentThinkingLevel,
 	}
 }
 

@@ -101,8 +101,9 @@ func (s *MemoryService) CreateWithUniqueName(m *database.Memory) (*database.Memo
 // guard a partial PUT (e.g. just {"type":"feedback"}) would clobber the
 // existing Description with "" and fail validation. The body is the one
 // field that may legitimately be empty, so setBody=true replaces it even
-// with "" (the API sets it when the request carries a "body" key).
-func (s *MemoryService) UpdateMemory(id uint, m *database.Memory, setBody bool) (*database.Memory, error) {
+// with "" (the API sets it when the request carries a "body" key); the
+// same holds for the evidence note (set.EvidenceNote).
+func (s *MemoryService) UpdateMemory(id uint, m *database.Memory, set MemoryUpdateSet) (*database.Memory, error) {
 	var existing database.Memory
 	if err := s.db.First(&existing, id).Error; err != nil {
 		return nil, errMemoryNotFound
@@ -120,8 +121,17 @@ func (s *MemoryService) UpdateMemory(id uint, m *database.Memory, setBody bool) 
 	if m.Description != "" {
 		merged.Description = m.Description
 	}
-	if setBody || m.Body != "" {
+	if set.Body || m.Body != "" {
 		merged.Body = m.Body
+	}
+	if m.Evidence != "" {
+		merged.Evidence = m.Evidence
+	}
+	if m.Claim != "" {
+		merged.Claim = m.Claim
+	}
+	if set.EvidenceNote || m.EvidenceNote != "" {
+		merged.EvidenceNote = m.EvidenceNote
 	}
 	if m.IncidentUUID != "" {
 		merged.IncidentUUID = m.IncidentUUID
@@ -139,6 +149,13 @@ func (s *MemoryService) UpdateMemory(id uint, m *database.Memory, setBody bool) 
 		return nil, fmt.Errorf("memory updated but file sync failed: %w", err)
 	}
 	return &merged, nil
+}
+
+// MemoryUpdateSet names the UpdateMemory fields that an empty value clears
+// instead of leaving unchanged.
+type MemoryUpdateSet struct {
+	Body         bool
+	EvidenceNote bool
 }
 
 // UpsertByName inserts or updates a memory keyed by (scope, name).
@@ -174,9 +191,20 @@ func (s *MemoryService) UpsertByName(m *database.Memory) (*database.Memory, erro
 
 // DeleteMemory removes a memory by ID and re-syncs files.
 func (s *MemoryService) DeleteMemory(id uint) error {
-	result := s.db.Delete(&database.Memory{}, id)
-	if result.Error != nil {
-		return fmt.Errorf("failed to delete memory: %w", result.Error)
+	// The uses follow the memory (ON DELETE CASCADE in PostgreSQL); the
+	// explicit delete keeps SQLite, which does not enforce the constraint
+	// by default, consistent.
+	var result *gorm.DB
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if tx.Migrator().HasTable(&database.MemoryUse{}) {
+			if err := tx.Where("memory_id = ?", id).Delete(&database.MemoryUse{}).Error; err != nil {
+				return err
+			}
+		}
+		result = tx.Delete(&database.Memory{}, id)
+		return result.Error
+	}); err != nil {
+		return fmt.Errorf("failed to delete memory: %w", err)
 	}
 	if result.RowsAffected == 0 {
 		return errMemoryNotFound
@@ -215,6 +243,10 @@ type MemoryFilter struct {
 	Scope        string
 	Type         string
 	IncidentUUID string
+	Evidence     string
+	// UsedInIncident lists the memories the runs of that incident used
+	// (memory_uses), newest use first.
+	UsedInIncident string
 }
 
 // ListMemories applies optional scope, type and incident filters. Empty
@@ -230,6 +262,22 @@ func (s *MemoryService) ListMemories(f MemoryFilter) ([]database.Memory, error) 
 	}
 	if f.IncidentUUID != "" {
 		q = q.Where("incident_uuid = ?", f.IncidentUUID)
+	}
+	if f.Evidence != "" {
+		q = q.Where("evidence = ?", f.Evidence)
+	}
+	if f.UsedInIncident != "" {
+		q = s.db.Joins("JOIN (SELECT memory_id, MAX(at) AS last_at FROM memory_uses WHERE incident_uuid = ? GROUP BY memory_id) u ON u.memory_id = memories.id", f.UsedInIncident).
+			Order("u.last_at DESC").Order("memories.id DESC")
+		if f.Scope != "" {
+			q = q.Where("memories.scope = ?", f.Scope)
+		}
+		if f.Type != "" {
+			q = q.Where("memories.type = ?", f.Type)
+		}
+		if f.Evidence != "" {
+			q = q.Where("memories.evidence = ?", f.Evidence)
+		}
 	}
 	if err := q.Find(&memories).Error; err != nil {
 		return nil, fmt.Errorf("failed to list memories: %w", err)
@@ -341,7 +389,7 @@ func (s *MemoryService) validate(m *database.Memory) error {
 	if m.CreatedBy != "" && m.CreatedBy != MemoryCreatedByAgent && m.CreatedBy != MemoryCreatedByOperator {
 		return fmt.Errorf("created_by must be %q, %q, or empty", MemoryCreatedByAgent, MemoryCreatedByOperator)
 	}
-	return nil
+	return validateMemoryEvidence(m)
 }
 
 var memoryNameRegex = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
@@ -586,8 +634,9 @@ func writeMemoryFileInRoot(root *os.Root, name string, data []byte) error {
 // IngestFromDisk walks <memoryDir>/<scope>/*.md (skipping MEMORY.md) and
 // upserts each well-formed memory file into the database keyed by (scope, name).
 // Paths that escape a known scope directory are rejected. Files that fail to
-// parse or validate are logged and skipped — ingest is best-effort and must
-// never partial-fail the caller (called from post-incident hooks).
+// parse or validate are logged and skipped (a copy stays in
+// memory-import-backup). A database failure returns an error without the
+// final sync, so the caller can retry without losing files.
 //
 // Idempotency: re-running on the same directory state is a no-op at the row
 // level (UpsertByName conflict on (scope, name) overwrites in place). The
@@ -613,18 +662,20 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 	if s.memoryDir == "" {
 		return fmt.Errorf("memory directory not configured")
 	}
-	if !MemoryGenerationEnabled() {
-		// The operator turned agent memory off. The prompt tells the agent
-		// not to write, but the memory dir is rw-mounted, so enforce it here:
-		// a sync rewrites every file from the database and removes files with
-		// no row, which discards agent creates, edits and tombstones.
-		slog.Info("memory ingest skipped: memory generation is off; discarding agent writes")
-		return s.SyncMemoryFiles()
-	}
+	// No MemoryGenerationEnabled check: this is the one-time import of the
+	// old disk mirror. The old per-run ingest already discarded agent files
+	// while generation was off, so files left now are hand edits (or crash
+	// leftovers), and the sync after this import would delete them.
 
 	rootAbs, err := filepath.Abs(s.memoryDir)
 	if err != nil {
 		return fmt.Errorf("resolve memory dir: %w", err)
+	}
+	// Copy the directory once before anything can change it: the sync after
+	// the import rewrites every file from the database and removes files
+	// that have no row, including files that failed to import.
+	if err := backupMemoryDirOnce(rootAbs); err != nil {
+		return fmt.Errorf("back up memory dir before import: %w", err)
 	}
 
 	// os.OpenRoot pins the directory tree to a single inode and rejects any
@@ -655,6 +706,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 		mem       *database.Memory
 		legacy    bool // true if filename matches the legacy `<id>-<name>.md`
 		tombstone bool // true if frontmatter carried `deleted: true`
+		gradeless bool // true if the file carried no evidence grade
 	}
 	var parsed []*parsedEntry
 	for _, scopeEnt := range scopeEntries {
@@ -716,6 +768,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 				slog.Warn("memory ingest: parse file", "path", rel, "err", err)
 				continue
 			}
+			gradeless := false
 			if !tombstone {
 				// Force agent authorship: the file's frontmatter is agent-
 				// controlled and cannot be trusted to claim operator
@@ -723,6 +776,26 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 				// level via upsertByNameNoSync's DoUpdates exclusion of
 				// created_by — see this function's doc comment.
 				mem.CreatedBy = MemoryCreatedByAgent
+				// A file with no grade predates grades: nobody assessed it.
+				// A new row is unverified with the legacy note; an existing
+				// row keeps its grade (the upgrade backfill already graded
+				// it, and the import must not undo that). Then the agent
+				// rules apply (no confirmed, causes unverified).
+				gradeless = mem.Evidence == ""
+				if gradeless {
+					mem.Evidence = MemoryEvidenceUnverified
+					if mem.EvidenceNote == "" {
+						mem.EvidenceNote = MemoryLegacyEvidenceNote
+					}
+				}
+				if _, err := ApplyAgentMemoryEvidence(mem); err != nil {
+					slog.Info("memory ingest: invalid evidence, storing as unverified", "scope", scope, "name", mem.Name, "err", err)
+					mem.Evidence, mem.Claim = MemoryEvidenceUnverified, ""
+					if _, err := ApplyAgentMemoryEvidence(mem); err != nil {
+						slog.Warn("memory ingest: evidence", "scope", scope, "name", mem.Name, "err", err)
+						continue
+					}
+				}
 				// The writer is told ≤500 chars but miscounts; validate()
 				// would then refuse the whole file and the update is lost.
 				// Cut the summary instead: parseMemoryFile has already
@@ -734,7 +807,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 				}
 			}
 
-			entry := &parsedEntry{mem: mem, legacy: legacyIngestName(f.Name(), mem.Name), tombstone: tombstone}
+			entry := &parsedEntry{mem: mem, legacy: legacyIngestName(f.Name(), mem.Name), tombstone: tombstone, gradeless: gradeless}
 			if idx, ok := seenInScope[mem.Name]; ok {
 				prior := parsed[idx]
 				switch {
@@ -763,6 +836,7 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 	ingested := 0
 	deleted := 0
 	tombstoneFailure := false
+	upsertFailures := 0
 	for _, entry := range parsed {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -782,11 +856,22 @@ func (s *MemoryService) IngestFromDisk(ctx context.Context) error {
 			// had already been removed by an earlier ingest.
 			continue
 		}
-		if _, err := s.upsertByNameNoSync(entry.mem); err != nil {
+		if err := s.validate(entry.mem); err != nil {
+			// Permanent: retrying will not help. The file stays in the backup.
+			slog.Warn("memory ingest: invalid file skipped (a copy is in "+memoryImportBackupDir+")", "scope", entry.mem.Scope, "name", entry.mem.Name, "err", err)
+			continue
+		}
+		if _, err := s.upsertByNameNoSyncOpts(entry.mem, entry.gradeless); err != nil {
 			slog.Warn("memory ingest: upsert", "scope", entry.mem.Scope, "name", entry.mem.Name, "err", err)
+			upsertFailures++
 			continue
 		}
 		ingested++
+	}
+	if upsertFailures > 0 || tombstoneFailure {
+		// A database failure may be temporary. Do not sync (it would
+		// delete the files that did not import) and let the caller retry.
+		return fmt.Errorf("memory ingest: %d upserts failed, tombstone failure=%v; files kept for a retry", upsertFailures, tombstoneFailure)
 	}
 
 	// Single sync after the batch instead of one per row: SyncMemoryFiles
@@ -942,21 +1027,44 @@ func legacyIngestName(filename, name string) bool {
 // keeps the newest-by-UpdatedAt entries, so that made its selection
 // arbitrary.
 func (s *MemoryService) upsertByNameNoSync(m *database.Memory) (*database.Memory, error) {
+	return s.upsertByNameNoSyncOpts(m, false)
+}
+
+// upsertByNameNoSyncOpts is upsertByNameNoSync with keepEvidence: when true,
+// a conflict leaves the stored evidence, claim and evidence_note alone (the
+// values in m are used only for a new row). IngestFromDisk sets it for a file
+// without a grade: the file says nothing about evidence, and the upgrade
+// import must not turn the backfilled grades into unverified or stamp
+// updated_at on every row.
+func (s *MemoryService) upsertByNameNoSyncOpts(m *database.Memory, keepEvidence bool) (*database.Memory, error) {
 	if err := s.validate(m); err != nil {
 		return nil, err
 	}
 	m.Scope = strings.TrimSpace(m.Scope)
 	m.Name = strings.TrimSpace(m.Name)
 
+	// An operator upsert (proposal approval, Slack feedback, from-text) also
+	// takes ownership: the row becomes created_by=operator, which the gateway
+	// memory tools never change. Other upserts keep the stored authorship.
+	columns := []string{"type", "description", "body", "incident_uuid", "updated_at"}
+	changed := "memories.type <> excluded.type" +
+		" OR memories.description <> excluded.description" +
+		" OR memories.body <> excluded.body" +
+		" OR COALESCE(memories.incident_uuid, '') <> COALESCE(excluded.incident_uuid, '')"
+	if !keepEvidence {
+		columns = append(columns, "evidence", "claim", "evidence_note")
+		changed += " OR COALESCE(memories.evidence, '') <> COALESCE(excluded.evidence, '')" +
+			" OR COALESCE(memories.claim, '') <> COALESCE(excluded.claim, '')" +
+			" OR COALESCE(memories.evidence_note, '') <> COALESCE(excluded.evidence_note, '')"
+	}
+	if m.CreatedBy == MemoryCreatedByOperator {
+		columns = append(columns, "created_by")
+		changed += " OR COALESCE(memories.created_by, '') <> excluded.created_by"
+	}
 	if err := s.db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "scope"}, {Name: "name"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"type", "description", "body", "incident_uuid", "updated_at",
-		}),
-		Where: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "memories.type <> excluded.type" +
-			" OR memories.description <> excluded.description" +
-			" OR memories.body <> excluded.body" +
-			" OR COALESCE(memories.incident_uuid, '') <> COALESCE(excluded.incident_uuid, '')"}}},
+		Columns:   []clause.Column{{Name: "scope"}, {Name: "name"}},
+		DoUpdates: clause.AssignmentColumns(columns),
+		Where:     clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: changed}}},
 	}).Create(m).Error; err != nil {
 		return nil, fmt.Errorf("failed to upsert memory: %w", err)
 	}
@@ -1039,6 +1147,9 @@ func parseMemoryFile(data []byte, scope string) (*database.Memory, bool, error) 
 		Body:         body,
 		IncidentUUID: strings.TrimSpace(fm.IncidentUUID),
 		CreatedBy:    strings.TrimSpace(fm.CreatedBy),
+		Evidence:     strings.TrimSpace(fm.Evidence),
+		Claim:        strings.TrimSpace(fm.Claim),
+		EvidenceNote: strings.TrimSpace(fm.EvidenceNote),
 	}, false, nil
 }
 
@@ -1093,6 +1204,9 @@ type memoryFrontmatter struct {
 	Scope        string `yaml:"scope,omitempty"`
 	IncidentUUID string `yaml:"incident_uuid,omitempty"`
 	CreatedBy    string `yaml:"created_by,omitempty"`
+	Evidence     string `yaml:"evidence,omitempty"`
+	Claim        string `yaml:"claim,omitempty"`
+	EvidenceNote string `yaml:"evidence_note,omitempty"`
 	Deleted      bool   `yaml:"deleted,omitempty"`
 }
 
@@ -1109,6 +1223,9 @@ func renderMemoryFile(m database.Memory) string {
 		Scope:        m.Scope,
 		IncidentUUID: m.IncidentUUID,
 		CreatedBy:    m.CreatedBy,
+		Evidence:     m.Evidence,
+		Claim:        m.Claim,
+		EvidenceNote: strings.ReplaceAll(m.EvidenceNote, "\n", " "),
 	}
 	yamlBytes, err := yaml.Marshal(fm)
 	if err != nil {
@@ -1144,7 +1261,7 @@ func limitManifestEntries(entries []database.Memory, max int) (limited []databas
 	sorted := make([]database.Memory, len(entries))
 	copy(sorted, entries)
 	sort.SliceStable(sorted, func(i, j int) bool {
-		return sorted[i].UpdatedAt.After(sorted[j].UpdatedAt)
+		return manifestRank(sorted[i]).After(manifestRank(sorted[j]))
 	})
 	var feedback, facts []database.Memory
 	for _, m := range sorted {
@@ -1163,11 +1280,35 @@ func limitManifestEntries(entries []database.Memory, max int) (limited []databas
 	return limited, len(entries) - len(limited)
 }
 
+// RenderMemoryManifest renders the manifest of one scope from the database
+// (the same rules as the on-disk MEMORY.md: feedback first, 150 entries, line
+// and byte caps). Returns "" when the scope has no memories or the read fails.
+func RenderMemoryManifest(db *gorm.DB, scope string) string {
+	if db == nil || scope == "" {
+		return ""
+	}
+	var entries []database.Memory
+	if err := db.Select("id", "scope", "name", "type", "description", "evidence", "updated_at", "last_used_at").
+		Where("scope = ?", scope).Find(&entries).Error; err != nil {
+		slog.Debug("memory manifest: list memories", "scope", scope, "err", err)
+		return ""
+	}
+	if len(entries) == 0 {
+		return ""
+	}
+	limited, truncated := limitManifestEntries(entries, manifestMaxEntriesPerScope)
+	manifest := renderManifest(scope, limited)
+	if truncated > 0 {
+		manifest += fmt.Sprintf("<!-- truncated: %d more entries not shown -->\n", truncated)
+	}
+	return manifest
+}
+
 // renderManifest builds the per-scope MEMORY.md table. Hard-capped at
 // manifestMaxLines / manifestMaxBytes — the manifest is injected into prompts,
 // so it MUST stay small even as memory accumulates. When an entry would push
 // the manifest past either cap, we stop and emit a truncation marker telling
-// the agent to use the memory-searcher subagent for the rest.
+// the agent to use memory.search for the rest.
 func renderManifest(scope string, entries []database.Memory) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Memory Manifest — scope: %s\n\n", scope)
@@ -1175,8 +1316,8 @@ func renderManifest(scope string, entries []database.Memory) string {
 		b.WriteString("_No memories yet._\n")
 		return b.String()
 	}
-	b.WriteString("| name | type | description |\n")
-	b.WriteString("| --- | --- | --- |\n")
+	b.WriteString("| name | type | evidence | description |\n")
+	b.WriteString("| --- | --- | --- | --- |\n")
 
 	header := b.Len()
 	emitted := 0
@@ -1185,7 +1326,11 @@ func renderManifest(scope string, entries []database.Memory) string {
 	for _, m := range entries {
 		// Inline pipes break Markdown table parsing; replace with bullets.
 		desc := strings.ReplaceAll(strings.ReplaceAll(m.Description, "\n", " "), "|", "·")
-		row := fmt.Sprintf("| `%s` | %s | %s |\n", m.Name, m.Type, desc)
+		evidence := m.Evidence
+		if evidence == "" {
+			evidence = MemoryEvidenceUnverified
+		}
+		row := fmt.Sprintf("| `%s` | %s | %s | %s |\n", m.Name, m.Type, evidence, desc)
 		// linesEmitted = header table (2 lines: header + separator) + rows so far.
 		linesEmitted := 2 + emitted
 		if linesEmitted+1 > manifestMaxLines || b.Len()+len(row) > manifestMaxBytes {
@@ -1197,13 +1342,13 @@ func renderManifest(scope string, entries []database.Memory) string {
 	}
 
 	if truncated > 0 {
-		fmt.Fprintf(&b, "\n_… %d more memories truncated. Use the memory-searcher subagent to find them._\n", truncated)
+		fmt.Fprintf(&b, "\n_… %d more memories truncated. Find them with memory.search._\n", truncated)
 	}
 
 	// If the table never emitted a row (e.g., header alone exceeded the cap),
 	// keep at least the header for diagnostic clarity.
 	if b.Len() == header {
-		b.WriteString("_Manifest exceeded byte cap; use the memory-searcher subagent to access entries._\n")
+		b.WriteString("_Manifest exceeded byte cap; find memories with memory.search._\n")
 	}
 
 	return b.String()
@@ -1281,5 +1426,101 @@ func removeStaleScopesInRoot(root *os.Root, keep map[string]bool) error {
 			slog.Warn("failed to remove stale scope dir", "dir", name, "err", err)
 		}
 	}
+	return nil
+}
+
+// SystemSettingMemoryDiskIngestedAt marks that the one-time import of on-disk
+// memory files ran (gateway knowledge tools replaced the memory-writer
+// subagent; the directory is a read-only mirror from then on).
+const SystemSettingMemoryDiskIngestedAt = "memory_disk_ingested_at"
+
+// diskIngester is the slice of MemoryService IngestDiskMemoriesOnce needs.
+type diskIngester interface {
+	IngestFromDisk(ctx context.Context) error
+}
+
+// IngestDiskMemoriesOnce runs IngestFromDisk once per install, before the
+// first SyncMemoryFiles of this version, so memory files edited by hand reach
+// the database instead of being overwritten. A failure is logged and retried
+// on the next start.
+//
+// It returns false when the import has not completed; the caller must then
+// not sync the memory files, because the sync deletes files with no row.
+func IngestDiskMemoriesOnce(m diskIngester) bool {
+	if database.HasSystemSetting(SystemSettingMemoryDiskIngestedAt) {
+		return true
+	}
+	if err := m.IngestFromDisk(context.Background()); err != nil {
+		slog.Error("one-time import of memory files failed; the memory files are not synced and the import runs again on next start", "err", err)
+		return false
+	}
+	if err := database.SetSystemSetting(SystemSettingMemoryDiskIngestedAt, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		slog.Error("failed to record the one-time memory file import; it runs again on next start", "err", err)
+		return false
+	}
+	slog.Info("imported memory files from disk once; the memory directory is a read-only mirror from now on")
+	return true
+}
+
+// memoryImportBackupDir is the sibling of the memory dir that holds the copy
+// made before the one-time import.
+const memoryImportBackupDir = "memory-import-backup"
+
+// backupMemoryDirOnce copies the regular .md files of memoryDir (one level of
+// scope dirs) to <parent>/memory-import-backup, unless that dir exists. A
+// missing memory dir is not an error. Symlinks and other non-regular files
+// are skipped, so a planted entry cannot block the import.
+func backupMemoryDirOnce(memoryDir string) error {
+	dst := filepath.Join(filepath.Dir(memoryDir), memoryImportBackupDir)
+	if _, err := os.Stat(dst); err == nil {
+		return nil
+	}
+	root, err := os.OpenRoot(memoryDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	tmp := dst + ".tmp"
+	_ = os.RemoveAll(tmp)
+	scopes, err := readDirFromRoot(root, ".")
+	if err != nil {
+		return err
+	}
+	copied := 0
+	for _, sc := range scopes {
+		if !sc.IsDir() || !validMemoryName(sc.Name()) {
+			continue
+		}
+		files, err := readDirFromRoot(root, sc.Name())
+		if err != nil {
+			return err
+		}
+		for _, f := range files {
+			if !f.Type().IsRegular() || !strings.HasSuffix(f.Name(), ".md") {
+				continue
+			}
+			data, ok := readMemoryFileFromRoot(root, filepath.Join(sc.Name(), f.Name()))
+			if !ok {
+				continue
+			}
+			if err := os.MkdirAll(filepath.Join(tmp, sc.Name()), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(tmp, sc.Name(), f.Name()), data, 0o644); err != nil {
+				return err
+			}
+			copied++
+		}
+	}
+	if copied == 0 {
+		return nil
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		return err
+	}
+	slog.Info("copied the memory files before the one-time import", "dir", dst, "files", copied)
 	return nil
 }

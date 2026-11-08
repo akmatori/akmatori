@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/akmatori/akmatori/internal/alerts"
 	"github.com/akmatori/akmatori/internal/database"
@@ -110,7 +111,7 @@ type RunbookManager interface {
 type MemoryManager interface {
 	CreateMemory(m *database.Memory) (*database.Memory, error)
 	CreateWithUniqueName(m *database.Memory) (*database.Memory, error)
-	UpdateMemory(id uint, m *database.Memory, setBody bool) (*database.Memory, error)
+	UpdateMemory(id uint, m *database.Memory, set MemoryUpdateSet) (*database.Memory, error)
 	UpsertByName(m *database.Memory) (*database.Memory, error)
 	DeleteMemory(id uint) error
 	GetMemory(id uint) (*database.Memory, error)
@@ -121,6 +122,13 @@ type MemoryManager interface {
 	SyncMemoryFiles() error
 	ResolveRefs(m *database.Memory) []MemoryRef
 	ExportZip(w io.Writer) error
+}
+
+// MemoryExtractionManager is the post-incident memory pass
+// (IncidentMemoryExtractor) as the API handler sees it.
+type MemoryExtractionManager interface {
+	Rerun(ctx context.Context, incidentUUID string) error
+	Backfill(ctx context.Context, since time.Time) (int64, error)
 }
 
 // ContextSummaryManager writes and removes the summary memories of context

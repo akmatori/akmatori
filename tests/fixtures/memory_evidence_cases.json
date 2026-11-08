@@ -1,0 +1,263 @@
+{
+ "_comment": "Agent evidence rules shared by the API (internal/services/memory_evidence.go ApplyAgentMemoryEvidence) and the gateway memory.write tool (mcp-gateway/internal/tools/knowledge/evidence.go applyAgentEvidence). Both test suites run every case. A causal claim is always unverified; only an operator can set confirmed.",
+ "cases": [
+  {
+   "name": "factual by default",
+   "input": {
+    "description": "redis prod listens on 16379",
+    "body": "Seen in redis.conf on 2026-10-14."
+   },
+   "expect": {
+    "evidence": "observed",
+    "claim": "factual"
+   }
+  },
+  {
+   "name": "explicit factual observed",
+   "input": {
+    "claim": "factual",
+    "evidence": "observed",
+    "description": "edge-03 eth1 logs NETDEV WATCHDOG",
+    "body": "kern.log"
+   },
+   "expect": {
+    "evidence": "observed",
+    "claim": "factual"
+   }
+  },
+  {
+   "name": "factual may be unverified",
+   "input": {
+    "claim": "factual",
+    "evidence": "unverified",
+    "description": "ingest lag seen once on db-2",
+    "body": "one sample"
+   },
+   "expect": {
+    "evidence": "unverified",
+    "claim": "factual"
+   }
+  },
+  {
+   "name": "causal defaults to unverified",
+   "input": {
+    "claim": "causal",
+    "description": "disk pressure on db-2 makes ingest lag",
+    "body": "b"
+   },
+   "expect": {
+    "evidence": "unverified",
+    "claim": "causal"
+   }
+  },
+  {
+   "name": "causal observed is downgraded",
+   "input": {
+    "claim": "causal",
+    "evidence": "observed",
+    "description": "disk pressure on db-2 makes ingest lag",
+    "body": "b"
+   },
+   "expect": {
+    "evidence": "unverified",
+    "claim": "causal",
+    "note_contains": "causal claim; stored as unverified"
+   }
+  },
+  {
+   "name": "confirmed from an agent is refused",
+   "input": {
+    "claim": "factual",
+    "evidence": "confirmed",
+    "description": "redis prod port 16379",
+    "body": "b"
+   },
+   "expect": {
+    "evidence": "unverified",
+    "claim": "factual",
+    "note_contains": "only an operator can confirm"
+   }
+  },
+  {
+   "name": "causal wording in description",
+   "input": {
+    "claim": "factual",
+    "evidence": "observed",
+    "description": "502s on the edge are caused by eth1 drops",
+    "body": "b"
+   },
+   "expect": {
+    "evidence": "unverified",
+    "claim": "causal"
+   }
+  },
+  {
+   "name": "causal wording in body",
+   "input": {
+    "description": "ingest gap on 2026-11-02",
+    "body": "The gap happened because the load was high."
+   },
+   "expect": {
+    "evidence": "unverified",
+    "claim": "causal"
+   }
+  },
+  {
+   "name": "root cause wording",
+   "input": {
+    "description": "Root cause: expired TLS cert on lb-1",
+    "body": "b"
+   },
+   "expect": {
+    "evidence": "unverified",
+    "claim": "causal"
+   }
+  },
+  {
+   "name": "caused wording without a claim",
+   "input": {
+    "description": "high load caused the ingest gap",
+    "body": "b"
+   },
+   "expect": {
+    "evidence": "unverified",
+    "claim": "causal"
+   }
+  },
+  {
+   "name": "causing wording",
+   "input": {
+    "claim": "factual",
+    "description": "a cron on db-2 is causing lock waits",
+    "body": "b"
+   },
+   "expect": {
+    "evidence": "unverified",
+    "claim": "causal"
+   }
+  },
+  {
+   "name": "due to wording",
+   "input": {
+    "description": "timeouts due to DNS on dc-2",
+    "body": "b"
+   },
+   "expect": {
+    "evidence": "unverified",
+    "claim": "causal"
+   }
+  },
+  {
+   "name": "word boundary: causeway is not a cause",
+   "input": {
+    "description": "causeway-db listens on 5432",
+    "body": "b"
+   },
+   "expect": {
+    "evidence": "observed",
+    "claim": "factual"
+   }
+  },
+  {
+   "name": "reported case: effect named as cause",
+   "input": {
+    "claim": "causal",
+    "evidence": "observed",
+    "description": "high load on ingest-1 caused the data gap",
+    "body": "Gap 2026-11-02.",
+    "evidence_note": "load rose 10:05 UTC, gap started 10:02 UTC"
+   },
+   "expect": {
+    "evidence": "unverified",
+    "claim": "causal",
+    "note_contains": "load rose 10:05 UTC, gap started 10:02 UTC (causal claim; stored as unverified)"
+   }
+  },
+  {
+   "name": "note is cut UTF-8 safe",
+   "input": {
+    "description": "redis prod port 16379",
+    "body": "b",
+    "evidence_note": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+   },
+   "expect": {
+    "evidence": "observed",
+    "claim": "factual",
+    "truncated": true,
+    "note_max_bytes": 500
+   }
+  },
+  {
+   "name": "whitespace is trimmed",
+   "input": {
+    "claim": " factual ",
+    "evidence": " observed ",
+    "description": "redis prod port 16379",
+    "body": "b"
+   },
+   "expect": {
+    "evidence": "observed",
+    "claim": "factual"
+   }
+  },
+  {
+   "name": "unknown evidence",
+   "input": {
+    "evidence": "verified",
+    "description": "d",
+    "body": "b"
+   },
+   "expect": {
+    "error": true
+   }
+  },
+  {
+   "name": "unknown claim",
+   "input": {
+    "claim": "maybe",
+    "description": "d",
+    "body": "b"
+   },
+   "expect": {
+    "error": true
+   }
+  },
+  {
+   "name": "feedback why-line is not a cause",
+   "input": {
+    "type": "feedback",
+    "description": "check the HAProxy backend first",
+    "body": "Check the backend first.\n\n**Why:** because the alert fires on the frontend.\n\n**How to apply:** open the backend stats before the frontend logs."
+   },
+   "expect": {
+    "evidence": "observed",
+    "claim": "factual"
+   }
+  },
+  {
+   "name": "fact with because is causal",
+   "input": {
+    "type": "fact",
+    "description": "the queue grows because the consumer restarts",
+    "body": "seen twice"
+   },
+   "expect": {
+    "evidence": "unverified",
+    "claim": "causal"
+   }
+  },
+  {
+   "name": "feedback with explicit causal claim stays causal",
+   "input": {
+    "type": "feedback",
+    "claim": "causal",
+    "description": "restart order",
+    "body": "**Why:** x"
+   },
+   "expect": {
+    "evidence": "unverified",
+    "claim": "causal"
+   }
+  }
+ ]
+}

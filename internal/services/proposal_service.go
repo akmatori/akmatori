@@ -42,6 +42,21 @@ type proposalMemoryContent struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Body        string `json:"body"`
+	// Evidence fields. The proposal is model-written, so approval applies
+	// the agent rules (no confirmed, causes unverified). In a snapshot they
+	// are pointers: a snapshot taken before evidence grades has none, and
+	// then they are not compared.
+	Evidence     *string `json:"evidence,omitempty"`
+	Claim        *string `json:"claim,omitempty"`
+	EvidenceNote *string `json:"evidence_note,omitempty"`
+}
+
+// strValue returns *p, or "" for nil.
+func strValue(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 // proposalCronContent carries the cron's tool access as tools_enabled +
@@ -280,6 +295,11 @@ func (s *ProposalService) checkStale(p *database.Proposal) (bool, string) {
 		if mem.Body != snap.Body || mem.Description != snap.Description || NormalizeMemoryType(mem.Type) != NormalizeMemoryType(snap.Type) {
 			return true, "memory content changed since the proposal was created"
 		}
+		if (snap.Evidence != nil && *snap.Evidence != mem.Evidence) ||
+			(snap.Claim != nil && *snap.Claim != mem.Claim) ||
+			(snap.EvidenceNote != nil && *snap.EvidenceNote != mem.EvidenceNote) {
+			return true, "memory evidence changed since the proposal was created"
+		}
 	case database.ProposalKindCronUpdate:
 		job, err := s.crons.GetJobByUUID(p.TargetRef)
 		if err != nil {
@@ -363,15 +383,43 @@ func (s *ProposalService) apply(ctx context.Context, p *database.Proposal) error
 			}
 			content.Scope, content.Name = scope, name
 		}
+		mem := &database.Memory{
+			Scope:        content.Scope,
+			Type:         content.Type,
+			Name:         content.Name,
+			Description:  content.Description,
+			Body:         content.Body,
+			CreatedBy:    database.ProposalCreatedByOperator,
+			Evidence:     strValue(content.Evidence),
+			Claim:        strValue(content.Claim),
+			EvidenceNote: strValue(content.EvidenceNote),
+		}
+		// A model-drafted memory must not carry a token the agent saw.
+		var redacted int
+		mem.Description, redacted = RedactSecrets(mem.Description)
+		if body, n := RedactSecrets(mem.Body); n > 0 {
+			mem.Body, redacted = body, redacted+n
+		}
+		if note, n := RedactSecrets(mem.EvidenceNote); n > 0 {
+			mem.EvidenceNote, redacted = note, redacted+n
+		}
+		if redacted > 0 {
+			slog.Info("proposal approval: redacted secrets in the memory", "proposal", p.UUID, "count", redacted)
+		}
+		// The operator approves the change, not every claim in it: a
+		// model-drafted cause stays unverified until an operator confirms
+		// it on the memory itself.
+		if _, err := ApplyAgentMemoryEvidence(mem); err != nil {
+			return fmt.Errorf("invalid proposed_content: %w", err)
+		}
+		// A rewrite is not a check: the stored grade rules the merge
+		// (MergeStoredMemoryEvidence).
+		var stored database.Memory
+		if err := s.db.Where("scope = ? AND name = ?", mem.Scope, mem.Name).Take(&stored).Error; err == nil {
+			MergeStoredMemoryEvidence(mem, &stored, content.Evidence == nil)
+		}
 		// UpsertByName is idempotent by (scope, name) and syncs files itself.
-		_, err := s.memories.UpsertByName(&database.Memory{
-			Scope:       content.Scope,
-			Type:        content.Type,
-			Name:        content.Name,
-			Description: content.Description,
-			Body:        content.Body,
-			CreatedBy:   database.ProposalCreatedByOperator,
-		})
+		_, err := s.memories.UpsertByName(mem)
 		return err
 
 	case database.ProposalKindCronNew, database.ProposalKindCronUpdate:
@@ -380,11 +428,11 @@ func (s *ProposalService) apply(ctx context.Context, p *database.Proposal) error
 			return fmt.Errorf("invalid proposed_content: %w", err)
 		}
 		toolsEnabled := content.ToolsEnabled != nil && *content.ToolsEnabled
-		builtins := content.BuiltinTools
-		if builtins == nil {
-			builtins = DefaultCronBuiltinTools
-		}
 		if p.Kind == database.ProposalKindCronNew {
+			builtins := content.BuiltinTools
+			if builtins == nil {
+				builtins = DefaultCronBuiltinTools
+			}
 			// New crons apply DISABLED and without an explicit channel: an
 			// LLM-authored schedule must never start firing without an
 			// explicit operator enable, and channel selection stays an
@@ -399,9 +447,14 @@ func (s *ProposalService) apply(ctx context.Context, p *database.Proposal) error
 			Schedule: &content.Schedule,
 			Prompt:   &content.Prompt,
 		}
-		// An update without tool fields leaves the cron's tool access alone.
+		// Each tool field applies only when the proposal carries it: an
+		// update without it leaves that part of the cron's access alone, and
+		// an explicit "builtin_tools": [] removes every built-in.
 		if content.ToolsEnabled != nil {
 			patch.ToolsEnabled = &toolsEnabled
+		}
+		if content.BuiltinTools != nil {
+			builtins := content.BuiltinTools
 			patch.BuiltinTools = &builtins
 		}
 		var err error
@@ -546,25 +599,9 @@ func (s *ProposalService) ListChatMessages(proposalUUID string) ([]database.Prop
 	return rows, err
 }
 
-// ChatToolAllowlist resolves the incidents + proposals tool instances into
-// the allowlist for proposal-editor chat runs. Returns a NON-NIL empty slice
-// on lookup failure so the frame serializes as [] (reject all tool calls) —
-// never nil, which would mean "no allowlist = allow all".
+// ChatToolAllowlist is the allowlist of proposal-editor chat runs: the
+// incidents, proposals, runbooks and memory built-ins (type-only entries, no
+// lookup). Always non-nil.
 func (s *ProposalService) ChatToolAllowlist() []ToolAllowlistEntry {
-	entries := make([]ToolAllowlistEntry, 0, 2)
-	var instances []database.ToolInstance
-	if err := s.db.Preload("ToolType").
-		Where("logical_name IN ? AND enabled = ?", []string{"incidents", "proposals"}, true).
-		Find(&instances).Error; err != nil {
-		slog.Warn("proposal chat allowlist lookup failed; chat runs tool-less", "err", err)
-		return entries
-	}
-	for _, ti := range instances {
-		entries = append(entries, ToolAllowlistEntry{
-			InstanceID:  ti.ID,
-			LogicalName: ti.LogicalName,
-			ToolType:    ti.ToolType.Name,
-		})
-	}
-	return entries
+	return ProposalChatAllowlist()
 }

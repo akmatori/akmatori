@@ -36,6 +36,8 @@ export interface ToolInstance {
 
 export type IncidentStatus = 'pending' | 'running' | 'diagnosed' | 'completed' | 'failed' | 'monitor' | 'closed' | 'merged';
 
+export type MemoryExtractionStatus = '' | 'pending' | 'running' | 'succeeded' | 'no_output' | 'skipped' | 'failed';
+
 export interface Incident {
   id: number;
   uuid: string;
@@ -57,6 +59,16 @@ export interface Incident {
   // Why the incident closed: 'manual' | 'monitor_expired' | 'auto_stale'.
   // Absent on open incidents and on rows closed before the field existed.
   closed_reason?: string;
+  // The post-incident memory pass (queued when the incident closes). Empty
+  // or absent: never queued.
+  memory_extraction?: MemoryExtractionStatus;
+  memory_extraction_at?: string;
+  memory_extraction_error?: string;
+  memory_extraction_attempts?: number;
+  memory_extraction_retry_at?: string;
+  memory_extraction_note?: string;
+  // The timeline the pass extracted, one line per entry.
+  memory_timeline?: string;
   alert_count?: number;
   source_kind?: string;
   first_seen?: string;
@@ -179,10 +191,6 @@ export interface LLMConfig {
   top_p: number | null;
   top_k: number | null;
   max_tokens: number | null;
-  // Subagent model override (same provider). null means the runbook/memory
-  // search subagents run on the parent's model and thinking level.
-  subagent_model: string | null;
-  subagent_thinking_level: ThinkingLevel | null;
   created_at: string;
   updated_at: string;
 }
@@ -203,8 +211,6 @@ export interface CreateLLMConfigRequest {
   top_p?: number;
   top_k?: number;
   max_tokens?: number;
-  subagent_model?: string;
-  subagent_thinking_level?: string;
 }
 
 // On update, an omitted sampling key leaves the stored value alone while an
@@ -219,8 +225,6 @@ export interface UpdateLLMConfigRequest {
   top_p?: number | null;
   top_k?: number | null;
   max_tokens?: number | null;
-  subagent_model?: string | null;
-  subagent_thinking_level?: string | null;
 }
 
 // Proxy Settings types
@@ -284,6 +288,15 @@ export interface ContextFile {
 export type ContextSummaryStatus = '' | 'pending' | 'done' | 'failed' | 'skipped';
 
 // Cross-incident memory
+// How far a reader can trust a memory, separately from who wrote it:
+// confirmed = an operator checked it; observed = seen directly, not a cause;
+// unverified = an unconfirmed cause, or an old note nobody assessed.
+export type MemoryEvidence = 'confirmed' | 'observed' | 'unverified';
+
+// A causal claim says X caused Y; a factual claim says what is. Empty on
+// rows nobody assessed.
+export type MemoryClaim = 'causal' | 'factual' | '';
+
 export interface Memory {
   id: number;
   scope: string;
@@ -295,6 +308,12 @@ export interface Memory {
   created_by?: string;
   // The context file this memory summarizes.
   source_file_id?: number;
+  evidence?: MemoryEvidence;
+  claim?: MemoryClaim;
+  evidence_note?: string;
+  // Full reads and citations by runs; a search hit moves last_used_at only.
+  use_count?: number;
+  last_used_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -324,6 +343,10 @@ export interface MemoryInput {
   description: string;
   body?: string;
   incident_uuid?: string;
+  evidence?: MemoryEvidence;
+  claim?: MemoryClaim;
+  // On update, `evidence_note: ''` clears the note.
+  evidence_note?: string;
 }
 
 // Runbooks

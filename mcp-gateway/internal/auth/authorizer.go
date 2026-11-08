@@ -20,6 +20,8 @@ var credentiallessNamespaces = map[string]bool{
 	"incidents": true,
 	"proposals": true,
 	"events":    true,
+	"runbooks":  true,
+	"memory":    true,
 }
 
 // incidentAllowlist stores an allowlist with its expiry time.

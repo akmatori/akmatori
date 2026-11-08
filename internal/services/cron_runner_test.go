@@ -1008,7 +1008,7 @@ func TestCronRunner_AgentTick_EmptyAllowlistRejectsAllTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if got, want := string(encoded), `{"tool_allowlist":[{"instance_id":0,"logical_name":"","tool_type":"events"}]}`; got != want {
+	if got, want := string(encoded), `{"tool_allowlist":[{"instance_id":0,"logical_name":"","tool_type":"events"},{"instance_id":0,"logical_name":"","tool_type":"runbooks"},{"instance_id":0,"logical_name":"","tool_type":"memory"}]}`; got != want {
 		t.Errorf("wire format = %s, want %s", got, want)
 	}
 }

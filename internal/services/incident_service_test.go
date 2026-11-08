@@ -57,6 +57,10 @@ func newIncidentTestService(t *testing.T, db *gorm.DB) *SkillService {
 
 	svc := NewSkillService(dataDir, nil, contextService, nil)
 	svc.db = db
+	// FinishRun refreshes SKILL.md files under dataDir in the background.
+	// Cleanups run last-in first-out, so this wait runs before t.TempDir
+	// removes dataDir ("directory not empty" otherwise).
+	t.Cleanup(svc.memoryRefreshWG.Wait)
 
 	_ = os.MkdirAll(svc.incidentsDir, 0755)
 	_ = os.MkdirAll(svc.skillsDir, 0755)
@@ -888,6 +892,11 @@ func TestResolveAlert_AlreadyResolved_ReturnsError(t *testing.T) {
 	if !errors.Is(err, ErrAlertAlreadyResolved) {
 		t.Errorf("second ResolveAlert error = %v, want ErrAlertAlreadyResolved", err)
 	}
+	var alert database.Alert
+	db.Where("uuid = ?", alertUUID).First(&alert)
+	if alert.ResolvedBy != database.AlertResolvedByOperator {
+		t.Errorf("ResolvedBy = %q, want operator", alert.ResolvedBy)
+	}
 }
 
 // --- CloseIncident Tests ---
@@ -937,6 +946,14 @@ func TestCloseIncident_InProgress_ConfirmForceCloses(t *testing.T) {
 	db.Where("uuid = ?", alertUUID).First(&alert)
 	if alert.Status != database.AlertStatusResolved {
 		t.Errorf("alert status = %q, want resolved after confirmed force-close", alert.Status)
+	}
+	if alert.ResolvedBy != database.AlertResolvedByOperator {
+		t.Errorf("ResolvedBy = %q, want operator", alert.ResolvedBy)
+	}
+	// The close queues the post-incident memory pass in the same UPDATE; the
+	// pass itself waits for the running run to finish (claim predicate).
+	if incident.MemoryExtraction != database.MemoryExtractionPending || incident.ClosedReason != database.CloseReasonManual {
+		t.Errorf("MemoryExtraction = %q ClosedReason = %q, want pending/manual", incident.MemoryExtraction, incident.ClosedReason)
 	}
 }
 

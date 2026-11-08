@@ -134,6 +134,11 @@ never reach it and it stays open forever. `StaleCloseService` is that missing li
   off — that is the point, so an operator can size the blast radius before enabling it
 - every close path stamps `Incident.ClosedReason` (`manual` / `monitor_expired` / `auto_stale`) and
   the UI shows it; a close with no visible cause reads as data loss
+- every close path uses `closeIncidentValues`, which also queues the post-incident memory pass
+  (`memory_extraction = pending`, attempts and retry reset) in the same UPDATE, and every resolve
+  path stamps `alerts.resolved_by` (`source` from `processResolvedAlert`, `operator` from
+  `ResolveAlert` / `CloseIncident`, `sweep` from both sweeps) next to `resolved_at`; the pass reads
+  it (see the `memory-and-runbooks` rule). `ResolveAlertTx` takes the `resolvedBy` argument
 
 # Post-investigation incident merge
 

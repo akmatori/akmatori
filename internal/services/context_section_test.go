@@ -33,7 +33,11 @@ func newContextSectionTestService(t *testing.T, files ...database.ContextFile) *
 			t.Fatalf("seed %s: %v", files[i].Filename, err)
 		}
 	}
+	if err := db.AutoMigrate(&database.Memory{}); err != nil {
+		t.Fatal(err)
+	}
 	return &SkillService{
+		db:             db,
 		dataDir:        tmp,
 		incidentsDir:   filepath.Join(tmp, "incidents"),
 		skillsDir:      filepath.Join(tmp, "skills"),
@@ -49,7 +53,7 @@ func TestGenerateAgentsMd_ListsReferenceFiles(t *testing.T) {
 	)
 
 	out := filepath.Join(svc.dataDir, "AGENTS.md")
-	if err := svc.generateAgentsMd(out, "incident-manager", "test-incident-uuid"); err != nil {
+	if err := svc.generateAgentsMd(out, "incident-manager", "test-incident-uuid", scopeKindIncident); err != nil {
 		t.Fatalf("generate AGENTS.md: %v", err)
 	}
 	got := readFile(t, out)

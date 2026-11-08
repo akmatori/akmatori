@@ -8,8 +8,8 @@
  * - `limitToolOutput()` — used by our own tools: saves the full text to
  *   `<workDir>/tool_outputs/` and returns a head preview plus the path.
  * - `createToolOutputLimitExtension()` — a pi `tool_result` hook that caps
- *   every top-level tool result, so tools we do not own (subagent, codemode,
- *   future MCP bridges) cannot flood the context either.
+ *   every top-level tool result, so tools we do not own (codemode, operator
+ *   extensions, future MCP bridges) cannot flood the context either.
  */
 
 import * as fs from "node:fs";

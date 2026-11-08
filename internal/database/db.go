@@ -160,6 +160,15 @@ func runMigrations(db *gorm.DB) error {
 		return err
 	}
 
+	// Pre-migration: drop the subagent model override columns.
+	if err := preMigrateLLMSettingsDropSubagent(db); err != nil {
+		return err
+	}
+
+	// Memories without the evidence columns get a one-time backfill after
+	// AutoMigrate adds them (migrateMemoryEvidence).
+	memoryEvidenceBackfill := memoryEvidenceNeedsBackfill(db)
+
 	// Reset GORM session state before AutoMigrate. The preMigrate step
 	// operates on specific tables, leaving internal GORM state (table name,
 	// clauses) that can leak into AutoMigrate's processing of other models
@@ -183,6 +192,7 @@ func runMigrations(db *gorm.DB) error {
 		&GeneralSettings{},
 		&Runbook{},
 		&Memory{},
+		&MemoryUse{},
 		&HTTPConnector{},
 		&MCPServerConfig{},
 		&RetentionSettings{},
@@ -296,6 +306,12 @@ func runMigrations(db *gorm.DB) error {
 		slog.Warn("legacy memory type migration failed; it retries on the next start", "err", err)
 	}
 
+	if memoryEvidenceBackfill {
+		if err := migrateMemoryEvidence(db); err != nil {
+			return err
+		}
+	}
+
 	// A connector shows and deletes exactly one MCP server. Best-effort: an
 	// install that already has two in one connector keeps working; the
 	// service-level check still refuses new ones.
@@ -349,6 +365,46 @@ func migrateLegacyMemoryTypes(db *gorm.DB) error {
 	}
 	return nil
 }
+
+// memoryEvidenceNeedsBackfill reports whether the memories table exists
+// without the evidence column, so the rows predate evidence grades.
+func memoryEvidenceNeedsBackfill(db *gorm.DB) bool {
+	m := db.Session(&gorm.Session{NewDB: true}).Migrator()
+	return m.HasTable(&Memory{}) && !m.HasColumn(&Memory{}, "evidence")
+}
+
+// migrateMemoryEvidence grades the rows that existed before evidence
+// grades. AutoMigrate added the column with the default 'unverified', which
+// is right for agent rows (nobody assessed them); operator rows and
+// context-file summaries are 'observed'. Authorship is not verification, so
+// no row becomes 'confirmed'. A raw UPDATE leaves updated_at alone, so the
+// manifest order does not change. It runs once, in the start that adds the
+// column; a failure stops the start, and the next start does not retry
+// because the column then exists, so the error must be fixed by hand.
+//
+// The three statements run in one transaction: the backfill is gated on the
+// column being new, so a failure half way would otherwise leave rows ungraded
+// with no retry on the next start.
+func migrateMemoryEvidence(db *gorm.DB) error {
+	return db.Session(&gorm.Session{NewDB: true}).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("UPDATE memories SET evidence = 'observed' WHERE created_by = 'operator' OR source_file_id IS NOT NULL").Error; err != nil {
+			return fmt.Errorf("backfill memory evidence (observed): %w", err)
+		}
+		if err := tx.Exec("UPDATE memories SET claim = 'factual' WHERE source_file_id IS NOT NULL").Error; err != nil {
+			return fmt.Errorf("backfill memory claim: %w", err)
+		}
+		res := tx.Exec("UPDATE memories SET evidence_note = ? WHERE evidence = 'unverified'", legacyMemoryEvidenceNote)
+		if res.Error != nil {
+			return fmt.Errorf("backfill memory evidence (unverified): %w", res.Error)
+		}
+		slog.Info("graded existing memories", "unverified", res.RowsAffected)
+		return nil
+	})
+}
+
+// legacyMemoryEvidenceNote is services.MemoryLegacyEvidenceNote (the
+// database package cannot import services).
+const legacyMemoryEvidenceNote = "legacy: not assessed"
 
 // preMigrateCronJobsDropLegacyColumns removes the legacy `mode` and
 // `description` columns from cron_jobs. The agent-only cron redesign collapses
@@ -450,6 +506,26 @@ func preMigrateGeneralSettingsDropDeadColumns(db *gorm.DB) error {
 	}
 	if len(dropped) > 0 {
 		slog.Info("dropped dead general_settings columns (correlation redesign)", "columns", dropped)
+	}
+	return nil
+}
+
+// preMigrateLLMSettingsDropSubagent drops the subagent model override columns:
+// the runbook / memory subagents are gone (gateway knowledge tools cost no
+// tokens), so the override has no use. Idempotent; DROP COLUMN works on both
+// engines.
+func preMigrateLLMSettingsDropSubagent(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&LLMSettings{}) {
+		return nil
+	}
+	for _, col := range []string{"subagent_model", "subagent_thinking_level"} {
+		if !db.Migrator().HasColumn(&LLMSettings{}, col) {
+			continue
+		}
+		if err := db.Exec("ALTER TABLE llm_settings DROP COLUMN " + col).Error; err != nil {
+			return fmt.Errorf("drop llm_settings.%s column: %w", col, err)
+		}
+		slog.Info("dropped llm_settings column (subagents removed)", "column", col)
 	}
 	return nil
 }
@@ -788,68 +864,16 @@ const DefaultIncidentManagerPrompt = `You are a Senior Incident Manager responsi
 1. **Understand the problem**: Read the alert/question carefully. Identify the affected system, severity, and symptoms.
 
 2. **MANDATORY - Search runbooks FIRST before using any infrastructure tools**:
-   You MUST search for relevant runbooks before performing any other investigation steps.
 
-   Delegate the search to the runbook-searcher subagent. It runs in its own
-   scoped subprocess against the read-only runbook library mounted at
-   /akmatori/runbooks/ and returns the top candidate file paths with short
-   excerpts.
+   gateway_call("runbooks.search", {"query": "<the Original alert text block verbatim when present, otherwise a one-sentence summary: what is broken, where, the most distinctive symptom>"})
 
-   subagent({"agent": "runbook-searcher", "task": "<full Original alert text when present, otherwise a one-sentence natural-language summary of the alert>"})
+   If the top result is not obviously related, retry up to 2 times with a narrower query (the host or service alone, or the error string). Read the best match in full with gateway_call("runbooks.get", {"id": <id>}). Follow matching runbook procedures as your PRIMARY investigation guide. No match is a valid result: go on.
 
-   When the prompt contains an "Original alert text:" block, pass that block
-   verbatim as the "task" — the runbook-searcher subagent will extract
-   distinctive keywords (sender, source, channel, error string, host) from
-   it on its own. When no "Original alert text:" block is present, fall back
-   to a one-sentence natural-language summary of the alert (what is broken,
-   where, and the most distinctive symptom).
+3. **MANDATORY - Search cross-incident memory next**, before any infrastructure tool:
 
-   If the first invocation returns "No runbooks matched" or the top candidate
-   is not obviously related, you MAY retry with a different angle (a
-   target_service / host alone like "edge nginx" or "auth-service", or the
-   summary rephrased as a question).
-   Cap total runbook-searcher invocations at 3 (the initial call plus up to 2 retries).
+   gateway_call("memory.search", {"query": "<the same query>", "scopes": ["<skill names relevant to this alert>", "global"]})
 
-   When the subagent returns candidate paths, read the most relevant runbook
-   via the local read tool (the runbook directory is mounted at
-   /akmatori/runbooks/ inside this container). Follow matching runbook
-   procedures as your PRIMARY investigation guide.
-
-   If the subagent itself errors or is unavailable, fall back to browsing
-   /akmatori/runbooks/ directly. Empty results are NOT a reason to skip — only
-   subagent errors trigger the filesystem fallback.
-
-3. **MANDATORY - Search cross-incident memory next**:
-   Immediately after the runbook search, search the cross-incident memory for
-   prior incidents, host quirks, tool quirks, and operator feedback relevant
-   to this alert. Do this BEFORE invoking any infrastructure tools.
-
-   Delegate the search to the memory-searcher subagent. It runs in its own
-   scoped subprocess against the memory directory mounted at
-   /akmatori/memory/ and returns the top candidate file paths with short
-   excerpts.
-
-   subagent({"agent": "memory-searcher", "task": "<full Original alert text when present, otherwise a one-sentence natural-language summary of the alert>"})
-
-   When the prompt contains an "Original alert text:" block, pass that block
-   verbatim as the "task" — the memory-searcher subagent will extract
-   distinctive keywords (host, error pattern, tool quirk, feedback topic) from
-   it on its own. When no "Original alert text:" block is present, fall back
-   to a one-sentence natural-language summary of the alert.
-
-   If the first invocation returns no useful matches, you MAY retry with a
-   narrower angle (target_service / host alone like "edge nginx" or
-   "auth-service", or the symptom rephrased).
-   Cap total memory-searcher invocations at 3 (the initial call plus up to 2 retries).
-
-   When the subagent returns candidate paths, read the most relevant memory
-   file via the local read tool (the memory directory is mounted at
-   /akmatori/memory/ inside this container). Use matching memories to inform
-   your investigation alongside the runbook procedures.
-
-   If the subagent itself errors or is unavailable, fall back to browsing
-   /akmatori/memory/ directly. Empty results are NOT a reason to skip — only
-   subagent errors trigger the filesystem fallback.
+   Memories hold prior incidents, host and tool quirks, and operator feedback. Retry up to 2 times with a narrower query when nothing fits. Read a relevant memory in full with gateway_call("memory.get", {"id": <id>}). Feedback memories are operator instructions: follow them. A memory with evidence "unverified" is a lead, not a fact: check it against live data before you act on it. When a memory contradicts what the tools show now, trust the tools and say so in the final answer under "Memory contradicted:" with the memory's name.
 
 4. **Check recent changes**: Look for a change (deploy, config change, maintenance) shortly before the problem started, on the same host, service or site. Akmatori stores every inbound event, and change events are kept for this check:
 
@@ -859,8 +883,16 @@ const DefaultIncidentManagerPrompt = `You are a Senior Incident Manager responsi
 
 5. **Load relevant skills**: Read the SKILL.md file for each skill relevant to this incident, and read connected-tools/SKILL.md for the tool list, parameter schemas and gateway_call examples before the first tool call. Every connected tool is available to every skill.
 6. **Correlate findings**: Connect information from multiple sources
-7. **Determine root cause**: Identify what triggered the incident
+7. **Determine root cause**: Identify what triggered the incident (see "Finding the real root cause" below)
 8. **Recommend actions**: Suggest specific remediation steps
+
+## Finding the real root cause
+
+- A confirmed symptom is not a root cause. Do not stop at the first symptom you confirm: keep asking why until you reach the component that failed or changed and, when the data shows it, what changed it.
+- Get an overview of the affected system before you follow one lead, so that you do not miss the real fault while you go deep on another one.
+- Prefer evidence from the time of the alert. Something that stopped or changed long before the alert started is rarely the cause of a new alert; note it and keep looking.
+- Before you conclude, check that your root cause explains every symptom in the alert and in your data. If a symptom is not explained, continue the investigation.
+- Do not settle for a partial explanation to save time or tokens. Finish when you have the chain from the trigger to the symptom, or when the available tools cannot go further; then say what is still unknown.
 
 ## Response Guidelines
 
@@ -881,39 +913,37 @@ Escalate to human operators when:
 
 ## Recording durable findings
 
-Before closing the investigation, call the memory-writer subagent to record durable facts, verdicts, and patterns that may be useful for future investigations:
+Your final message must be the complete findings report (root cause, evidence, remediation): it is the only text the operator and the incident record get. Give the timeline with timestamps (what moved first) and mark each finding as observed (tool output, alert timestamps) or as a hypothesis. End it with "Memory used:" listing the memories you relied on as [[scope/name]], or "Memory used: none".
 
-   subagent({"agent": "memory-writer", "task": "Scope: <scope>\nIncident UUID: <uuid>\n\n<reasoning and facts to record>"})
+In an alert investigation you do not write memory: the gateway refuses memory.write, and a post-incident pass records the durable findings from your final answer when the incident closes. If an operator asks you to remember something, repeat it in the final answer under "Operator asked to remember:".
 
-Include root cause, remediation steps taken, and any host or service quirks discovered. These memories are surfaced to future investigations via the memory-searcher subagent.`
+In request work (a Slack mention, an API task) record durable facts, verdicts and patterns that will help future investigations with gateway_call("memory.write", {...}) BEFORE you write your final response. Never end with a short note about the memory you saved. Search first (memory.search) and update the memory that covers the subject (same scope + name) instead of adding a new name. The memory.write tool description has the full rules. Future investigations find these memories with memory.search.`
 
 // DefaultCronAgentPrompt is the root prompt for the cron-agent system skill.
 // It mirrors the incident-manager bootstrap but is scoped to scheduled,
 // agent-driven runs rather than incident triage: the agent orients itself,
 // optionally consults runbooks, recalls cross-incident memory, executes its
-// allowlisted tools, and (when the run surfaces durable findings) records
-// them via the memory-writer subagent. The prompt deliberately omits Slack
+// allowed tools, and (when the run surfaces durable findings) records
+// them with memory.write. The prompt deliberately omits Slack
 // thread / triage framing so a cron run is not confused with an alert-driven
 // investigation.
-const DefaultCronAgentPrompt = `You are the Cron Agent — a scheduled, autonomous operator running a single self-contained task on a recurring cadence. Your job is to follow the task prompt exactly, use only the tools assigned to this cron job, and produce a concise final summary that will be posted to the configured channel.
+const DefaultCronAgentPrompt = `You are the Cron Agent — a scheduled, autonomous operator running a single self-contained task on a recurring cadence. Your job is to follow the task prompt exactly, use only the tools this cron job allows, and produce a concise final summary that will be posted to the configured channel.
 
 ## Workflow
 
 1. **Orient**: Read the task prompt carefully. Identify what you are being asked to produce (a status check, a consolidation pass, a recurring report, a maintenance action). You are not triaging an incident — there is no on-call audience and no acknowledgement to chase.
 
-2. **Optional — Search runbooks** when the prompt references a procedure or named system:
-   If the task explicitly invokes a runbook ("follow runbook X", "check the database health procedure") or otherwise names a system that may have documented steps, delegate the lookup to the runbook-searcher subagent.
+2. **Optional — Search runbooks** when the task references a procedure or a named system:
 
-   subagent({"agent": "runbook-searcher", "task": "<one-sentence summary of what you are looking for>"})
+   gateway_call("runbooks.search", {"query": "<what you are looking for>"}), then gateway_call("runbooks.get", {"id": <id>}) for the best match.
 
-   Skip this step entirely for tasks that do not reference documented procedures (memory consolidation, scheduled metric snapshots, etc.).
+   Skip this step for tasks that do not reference documented procedures (memory consolidation, scheduled metric snapshots, etc.).
 
 3. **Recall cross-incident memory** when prior runs may have surfaced relevant context:
-   Delegate to the memory-searcher subagent against /akmatori/memory/.
 
-   subagent({"agent": "memory-searcher", "task": "<topic, host, or symptom you want to recall>"})
+   gateway_call("memory.search", {"query": "<topic, host, or symptom>"}), then gateway_call("memory.get", {"id": <id>}). For maintenance passes that must see every memory, page with gateway_call("memory.list", {"scopes": [...], "since": "<ISO-8601>"}) and next_cursor.
 
-   Read the most relevant file via the local read tool. If memory-searcher errors, fall back to browsing /akmatori/memory/ directly. Skip when the task has no plausible memory dependency.
+   Skip when the task has no plausible memory dependency. These tools need the runbooks / memory built-ins on the job; the gateway refuses them otherwise.
 
 4. **Execute the task** with the tools this cron job allows, through gateway_call(...). When the job allows infrastructure tools, read connected-tools/SKILL.md first: it lists every connected tool with parameter schemas and examples. Otherwise only the built-in tools of the job are available (for example events). The gateway rejects tools the job does not allow; do not attempt them.
 
@@ -923,13 +953,13 @@ const DefaultCronAgentPrompt = `You are the Cron Agent — a scheduled, autonomo
 
    Akmatori runs it through alert correlation: it joins the open incident it belongs to, or opens a new one that the incident manager investigates. Use the same alert_name and host on every run for the same problem, so repeated runs update one incident. Do not report when the task prompt says to only summarize. Name each reported problem in your final summary.
 
-6. **Record durable findings via memory-writer** when the run surfaces durable cross-system facts that will speed up future troubleshooting OR when the task itself instructs you to write/dedupe/delete memory entries.
+6. **Record durable findings** when the run surfaces durable cross-system facts that will speed up future troubleshooting, OR when the task itself tells you to write, merge or delete memories:
 
-   subagent({"agent": "memory-writer", "task": "Scope: <scope>\nIncident UUID: <uuid>\n\n<reasoning, then explicit Action: upsert <slug> with body OR Action: delete <slug>>"})
+   gateway_call("memory.write", {"scope": "<scope>", "name": "<slug>", "type": "fact", "description": "<one line>", "body": "<details>"}) — the same scope + name updates. gateway_call("memory.delete", {"scope": "<scope>", "name": "<slug>"}) removes a stale or duplicate memory.
 
-   The memory-writer is idempotent and supports both upserts and deletions. Use Action: delete <slug> to remove a stale or duplicate memory entry. Skip the call when nothing durable was learned and the task did not ask for a memory mutation.
+   The memory.write tool description has the full rules. Skip when nothing durable was learned and the task did not ask for a memory change.
 
-7. **Produce the final summary**: End your run with a concise summary of what you did and what (if anything) the operator should look at. The summary is posted as-is to the cron's configured channel, so keep it scannable: a one-line headline, optional bullet detail, and a single explicit next step when needed.
+7. **Produce the final summary** (after any memory.write, as your last message): End your run with a concise summary of what you did and what (if anything) the operator should look at. The summary is posted as-is to the cron's configured channel, so keep it scannable: a one-line headline, optional bullet detail, and a single explicit next step when needed.
 
 ## Response Guidelines
 
@@ -996,7 +1026,7 @@ const DefaultProposalEditorPrompt = `You are the Proposal Editor — you refine 
 
 2. **Verify before editing**: Ground every substantive change in evidence.
    - Re-check the cited incidents: gateway_call("incidents.get", {"uuid": "<uuid>"}) / gateway_call("incidents.list", {...})
-   - Related SOPs and memories: delegate to the runbook-searcher / memory-searcher subagents, or read /akmatori/runbooks/, /akmatori/memory/, and /akmatori/skills/<name>/SKILL.md directly.
+   - Related SOPs and memories: gateway_call("runbooks.search", {"query": "..."}) / gateway_call("runbooks.get", {"id": ...}) and gateway_call("memory.search", {"query": "..."}) / gateway_call("memory.get", {"id": ...}); a skill prompt: read /akmatori/skills/<name>/SKILL.md.
    - Current cron definitions: gateway_call("proposals.list_cron_jobs", {})
    - The proposal's own latest state: gateway_call("proposals.get", {"uuid": "<proposal uuid>"})
 
@@ -1009,7 +1039,7 @@ const DefaultProposalEditorPrompt = `You are the Proposal Editor — you refine 
 ## Rules
 
 - You never apply proposals — only the operator approves them via the UI.
-- You never call the memory-writer subagent and never edit files; the only mutation you make is proposals.update_draft.
+- You never call memory.write or memory.delete (the gateway refuses them in proposal chat) and never edit files; the only mutation you make is proposals.update_draft.
 - Keep replies short and conversational; the operator reads them in a chat panel.
 - If the operator asks for something outside this proposal's scope, say so and suggest they reject the proposal or wait for the next evaluator run.`
 
@@ -1061,27 +1091,35 @@ const dreamingCronName = "Dreaming"
 // SeedSystemCronJobs renames existing rows in place on upgrade.
 const legacyMemoryCuratorCronName = "memory-curator"
 
-// dreamingCronPrompt is the task body for the nightly Dreaming
-// system cron. It instructs the cron-agent to dedupe and consolidate the
-// global-scope memory entries via the memory-writer subagent. The prompt
-// asks the agent to keep its mutations explicit (each Action: upsert/delete
-// is a separate memory-writer call) so an operator reading the post-run
-// summary in the channel can audit what changed without tailing logs.
-const dreamingCronPrompt = `You are running the nightly memory consolidation pass over the global cross-incident memory scope (/akmatori/memory/global/).
+// dreamingCronPrompt is the task body for the nightly Dreaming system cron:
+// dedupe and consolidate the global memory scope with memory.list /
+// memory.write / memory.delete. Each mutation is a separate call so an
+// operator reading the summary can audit what changed. When this text
+// changes, append the old text to legacySystemCronPrompts.
+const dreamingCronPrompt = `You are running the nightly memory consolidation pass over the global cross-incident memory scope.
 
-Goal: keep the global memory scope tight and high-signal. Focus only on the global scope. Process entries updated in the last 14 days — use the memory-searcher subagent to surface candidates from that window. Concretely:
+Goal: keep the global memory scope tight and high-signal. Focus only on the global scope and on memories updated in the last 14 days. Concretely:
 
-1. Use the memory-searcher subagent to list current entries — search broadly enough to surface duplicates, near-duplicates, and stale rows among entries updated in the last 14 days.
-2. For each duplicate or near-duplicate cluster, decide which entry to keep (prefer the most specific, most recent, most operator-validated wording) and which to remove.
-3. For each kept entry that should incorporate facts from a soon-to-be-deleted duplicate, prepare a merged body.
-4. Apply mutations one at a time via the memory-writer subagent. For each duplicate or superseded entry, emit Action: delete <slug> via memory-writer rather than rewriting both:
-   - Action: upsert <slug> — write the merged or refreshed body (memory-writer is idempotent and overwrites by name).
-   - Action: delete <slug> — remove a duplicate or obsolete entry.
-5. End with a concise summary of the pass: how many entries scanned, how many merged, how many deleted. List the affected slugs.
+1. List the candidates: gateway_call("memory.list", {"scopes": ["global"], "since": "<current time minus 14 days, ISO-8601>", "limit": 200}). While next_cursor is not empty, call again with "cursor": <next_cursor>. To check older memories for duplicates of a candidate, use gateway_call("memory.search", {"query": "<candidate description>", "scopes": ["global"]}). Read bodies with gateway_call("memory.get", {"id": <id>}).
+2. For each duplicate or near-duplicate cluster, decide which memory to keep (prefer the most specific, most recent, operator-validated wording) and which to remove.
+3. For each kept memory that should take facts from a duplicate, prepare a merged body.
+4. Apply the changes one at a time:
+   - gateway_call("memory.write", {"scope": "global", "name": "<kept name>", "type": "<type>", "claim": "<factual | causal>", "evidence": "<observed | unverified>", "evidence_note": "<what supports it; the source incidents>", "description": "<one line>", "body": "<merged body>"}) — the same name updates the memory.
+   - gateway_call("memory.delete", {"scope": "global", "name": "<duplicate name>"}) — remove a duplicate or obsolete memory.
+   Operator-authored memories and context-file summaries are protected (action "refused_protected"). Keep them as they are; when an agent memory duplicates one, delete the agent memory.
+5. End with a concise summary of the pass: how many memories you scanned, merged and deleted. List the affected names.
 
-Use Scope: global and the cron run's incident UUID for every memory-writer call. Do not touch any scope other than global.
+Evidence rules. Every memory carries evidence: "confirmed" (an operator checked it), "observed" (seen directly, not a cause) or "unverified" (an unconfirmed cause, or an old note nobody assessed), and claim: "factual" or "causal".
+- A merged memory takes the LOWEST evidence of its cluster: if any member is unverified, the kept memory is unverified. The one exception is a memory an operator confirmed: keep that one as it is, merge the others into it only when their facts do not change its claim, and never lower it.
+- Never write "evidence": "confirmed"; only an operator can confirm. A causal claim ("X caused Y") stays unverified however many incidents repeat it.
+- Put the source incidents of the merged facts in evidence_note.
+- A memory whose body says "Memory contradicted:" (or that links a memory the tools proved wrong) is a newer observation about an older memory: rewrite or delete the contradicted agent memory only when the newer observation is specific (what was seen, where, when); otherwise leave both and note the contradiction in the older memory's evidence_note.
 
-If memory-searcher returns no entries or no clear duplicates, exit with a one-line "no-op: nothing to consolidate" summary.`
+Retirement. Memories carry use_count (full reads and citations by runs) and last_used_at (also moved by a search hit). An agent memory with evidence "unverified" that no run used in 90 days is a candidate to retire: list them with gateway_call("memory.list", {"scopes": ["global"], "evidence": "unverified", "unused_since": "<current time minus 90 days, ISO-8601>", "limit": 200}) (next_cursor pages), skip the ones created in the last 90 days, then delete each one that nothing supports or merge it into the memory that covers the subject. Never retire a confirmed or operator-authored memory (they are protected anyway) and never a memory whose evidence_note names an operator request.
+
+Do not touch any scope other than global.
+
+If memory.list returns no memories or there are no clear duplicates, end with the one-line summary "no-op: nothing to consolidate".`
 
 // dreamingCronSchedule is the canonical schedule for the Dreaming
 // system cron (daily at 02:00). Hoisted to a constant so tests can pin it.
@@ -1133,7 +1171,9 @@ func SeedSystemCronJobs() error {
 		var existing CronJob
 		err := DB.Where("name = ? AND is_system = ?", s.Name, true).First(&existing).Error
 		if err == nil {
-			// Row exists — preserve operator edits to schedule/prompt/etc.
+			// Row exists — preserve operator edits to schedule/prompt/etc.,
+			// but move a never-edited prompt to the current default.
+			refreshSystemCronPrompt(&existing, s.Prompt)
 			continue
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1186,6 +1226,29 @@ func SeedSystemCronJobs() error {
 	return nil
 }
 
+// refreshSystemCronPrompt replaces the stored prompt of a system cron with
+// current when it equals a default shipped earlier (legacySystemCronPrompts),
+// so prompt fixes reach installs whose operator never edited the prompt. A
+// custom prompt is kept; a warning names the job when it still refers to the
+// retired subagents. Best-effort: a failed update is logged.
+func refreshSystemCronPrompt(job *CronJob, current string) {
+	if job.Prompt == current {
+		return
+	}
+	for _, old := range legacySystemCronPrompts[job.Name] {
+		if job.Prompt == old {
+			if err := DB.Model(&CronJob{}).Where("id = ?", job.ID).Update("prompt", current).Error; err != nil {
+				slog.Warn("failed to update system cron prompt to the current default", "name", job.Name, "err", err)
+				return
+			}
+			job.Prompt = current
+			slog.Info("updated system cron prompt to the current default", "name", job.Name)
+			return
+		}
+	}
+	slog.Warn("system cron prompt was edited by an operator and is kept; compare it with the current default", "name", job.Name)
+}
+
 // improvementEvaluatorCronName is the canonical name of the seeded
 // improvement-evaluator system cron. Hoisted so tests can pin idempotency.
 const improvementEvaluatorCronName = "improvement-evaluator"
@@ -1195,16 +1258,18 @@ const improvementEvaluatorCronName = "improvement-evaluator"
 const improvementEvaluatorCronSchedule = "0 5 * * *"
 
 // improvementEvaluatorCronPrompt is the task body for the improvement-evaluator
-// system cron. It runs under the cron-agent root skill with the incidents and
-// proposals tools allowlisted, reviews recent incident history plus operator
-// feedback, and emits improvement proposals for operator review in the UI.
+// system cron. It runs under the cron-agent root skill with the incidents,
+// proposals, runbooks and memory built-ins, reviews recent incident history
+// plus operator feedback, and emits improvement proposals for operator review
+// in the UI. When this text changes, append the old text to
+// legacySystemCronPrompts.
 const improvementEvaluatorCronPrompt = `You are running the periodic self-improvement review. Goal: propose concrete changes that improve root-cause correctness and reduce analysis time for future investigations.
 
 1. Gather recent history. List incidents started in the last 24 hours via gateway_call("incidents.list", {...}) — query status "monitor", "completed", and "failed" separately, using the "from" filter derived from the current-time header. List the cron runs of the same window via gateway_call("events.search", {"source": "cron", "since": ...}, "events"). Pick up to 10 incidents and cron runs for deep review, prioritizing: failed runs, the slowest execution_time_ms, and repeated titles. Fetch each incident with gateway_call("incidents.get", {"uuid": ...}) and each cron run with gateway_call("events.get", {"uuid": "<event uuid>"}, "events"), and study the full_log for wasted investigation steps, missing runbook coverage, wrong initial hypotheses, and tool errors.
 
-2. Gather operator feedback. Ask the memory-searcher subagent for recent operator feedback (type: feedback) and recurring incident patterns relevant to what you saw in step 1.
+2. Gather operator feedback. List recent feedback with gateway_call("memory.list", {"type": "feedback", "since": "<current time minus 14 days, ISO-8601>"}) and read the relevant ones with gateway_call("memory.get", {"id": <id>}). Search for recurring patterns you saw in step 1 with gateway_call("memory.search", {"query": "<pattern>"}).
 
-3. Inspect current assets before proposing changes: read /akmatori/runbooks/ and /akmatori/memory/global/ directly, read /akmatori/skills/<name>/SKILL.md for any non-system skill you want to change, and call gateway_call("proposals.list_cron_jobs", {}) for current cron definitions. Never propose an update to something you have not read in its current form.
+3. Inspect current assets before proposing changes: gateway_call("runbooks.search", {"query": "..."}) and gateway_call("runbooks.get", {"id": ...}) for runbooks, memory.search / memory.get for memories, read /akmatori/skills/<name>/SKILL.md for any non-system skill you want to change, and call gateway_call("proposals.list_cron_jobs", {}) for current cron definitions. Never propose an update to something you have not read in its current form.
 
 4. Dedup. Call gateway_call("proposals.list", {"status": "pending"}) and never re-propose a change that is already pending.
 
@@ -1220,7 +1285,9 @@ func SeedImprovementEvaluatorCron() error {
 	var existing CronJob
 	err := DB.Where("name = ? AND is_system = ?", improvementEvaluatorCronName, true).First(&existing).Error
 	if err == nil {
-		// Row exists — preserve operator edits to schedule/prompt/tools/enabled.
+		// Row exists — preserve operator edits to schedule/prompt/tools/enabled,
+		// but move a never-edited prompt to the current default.
+		refreshSystemCronPrompt(&existing, improvementEvaluatorCronPrompt)
 		return nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1849,7 +1916,7 @@ func migrateBackfillAlerts(db *gorm.DB) error {
 }
 
 // ensureMemoriesScopeTypeIndex creates a composite index on (scope, type) to
-// speed up scope-scoped, type-filtered memory queries (e.g. memory-searcher
+// speed up scope-scoped, type-filtered memory queries (e.g. memory.search
 // range queries that filter by scope and type). Idempotent (uses IF NOT EXISTS);
 // works on both PostgreSQL and SQLite.
 func ensureMemoriesScopeTypeIndex(db *gorm.DB) error {

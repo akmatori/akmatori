@@ -197,6 +197,7 @@ export class Orchestrator {
 
     const params: ExecuteParams = {
       incidentId,
+      runId,
       task: msg.task ?? "",
       llmSettings,
       proxyConfig,
@@ -260,6 +261,7 @@ export class Orchestrator {
 
     const params: ResumeParams = {
       incidentId,
+      runId,
       sessionId: msg.session_id ?? "",
       message: msg.message ?? "",
       llmSettings,
@@ -485,11 +487,6 @@ export class Orchestrator {
       top_p: msg.top_p,
       top_k: msg.top_k,
       max_tokens: msg.max_tokens,
-      // Subagent override: absent stays absent (children inherit the parent).
-      subagent_model: msg.subagent_model || undefined,
-      subagent_thinking_level: msg.subagent_thinking_level
-        ? this.mapThinkingLevel(msg.subagent_thinking_level)
-        : undefined,
     };
   }
 

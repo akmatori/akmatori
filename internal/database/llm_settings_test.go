@@ -551,3 +551,23 @@ func TestProviderDisplayName(t *testing.T) {
 		})
 	}
 }
+
+func TestPreMigrateLLMSettingsDropSubagent(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TABLE llm_settings (id INTEGER PRIMARY KEY, name TEXT, subagent_model TEXT, subagent_thinking_level TEXT)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := preMigrateLLMSettingsDropSubagent(db); err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+	}
+	for _, col := range []string{"subagent_model", "subagent_thinking_level"} {
+		if db.Migrator().HasColumn(&LLMSettings{}, col) {
+			t.Errorf("%s still present", col)
+		}
+	}
+}

@@ -4,17 +4,8 @@
 # the build context tarball Docker streams to the daemon.
 
 # Local-only operator data (incidents, secrets, generated runbook/memory dumps).
-# The agent-worker Dockerfile re-includes only the three system-supplied
-# subagent .md files explicitly: anything else operators drop into
-# akmatori_data/agents/ stays out of the build context so it can't be baked
-# into developer images by accident (would leak operator-authored prompts).
-# Keep this list in sync with the COPY lines in agent-worker/Dockerfile.
+# Nothing under akmatori_data/ is baked into an image.
 akmatori_data/*
-!akmatori_data/agents/
-akmatori_data/agents/*
-!akmatori_data/agents/runbook-searcher.md
-!akmatori_data/agents/memory-searcher.md
-!akmatori_data/agents/memory-writer.md
 
 # VCS / metadata
 .git

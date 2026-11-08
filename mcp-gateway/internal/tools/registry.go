@@ -18,6 +18,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/tools/catchpoint"
 	"github.com/akmatori/mcp-gateway/internal/tools/clickhouse"
 	"github.com/akmatori/mcp-gateway/internal/tools/events"
+	"github.com/akmatori/mcp-gateway/internal/tools/knowledge"
 	"github.com/akmatori/mcp-gateway/internal/tools/grafana"
 	"github.com/akmatori/mcp-gateway/internal/tools/httpconnector"
 	"github.com/akmatori/mcp-gateway/internal/tools/incidents"
@@ -82,6 +83,7 @@ type Registry struct {
 	jiraLimit       *ratelimit.Limiter
 	incidentsTool   *incidents.IncidentsTool
 	eventsTool      *events.EventsTool
+	knowledgeTool   *knowledge.Tool
 	proposalsTool   *proposals.ProposalsTool
 
 	// HTTP connector state
@@ -189,6 +191,9 @@ func (r *Registry) RegisterAllTools() {
 	// Register Events tools (no rate limiter — local DB queries)
 	r.registerEventsTools()
 
+	// Register runbooks.* and memory.* (no rate limiter — local DB queries)
+	r.registerKnowledgeTools()
+
 	r.logger.Println("All tools registered")
 }
 
@@ -250,6 +255,8 @@ var builtInToolNamespaces = map[string]bool{
 	"incidents":        true,
 	"proposals":        true,
 	"events":           true,
+	"runbooks":         true,
+	"memory":           true,
 }
 
 // DefaultMCPProxyLoader loads MCP server configs from the database and converts them
@@ -4931,7 +4938,7 @@ func (r *Registry) registerProposalsTools() {
 					},
 					"proposed_content": {
 						Type:        "object",
-						Description: "Per-kind JSON object. runbook: {title, content}. memory: {scope, type, name, description, body}. cron: {name, schedule, prompt, tools_enabled? (bool, default false: every connected tool), builtin_tools? (array of events, runbooks, memory, incidents, proposals; default events, runbooks, memory)}. skill_prompt: {skill_name, prompt}.",
+						Description: "Per-kind JSON object. runbook: {title, content}. memory: {scope, type, name, description, body, claim? (factual | causal), evidence? (observed | unverified; a causal claim is always unverified), evidence_note? (what supports it)}. cron: {name, schedule, prompt, tools_enabled? (bool, default false: every connected tool), builtin_tools? (array of events, runbooks, memory, incidents, proposals; default events, runbooks, memory)}. skill_prompt: {skill_name, prompt}.",
 					},
 					"source_incident_uuids": {
 						Type:        "array",

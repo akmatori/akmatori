@@ -81,8 +81,8 @@ func TestIncidentRunAllowlist(t *testing.T) {
 	if builtins["proposals"] {
 		t.Error("proposals must never reach incident runs")
 	}
-	if builtins["runbooks"] || builtins["memory"] {
-		t.Error("runbooks/memory are not live yet")
+	if !builtins["runbooks"] || !builtins["memory"] {
+		t.Error("incident runs need the runbooks and memory built-ins")
 	}
 	for _, e := range entries {
 		if e.LogicalName == "ssh-off" {
@@ -131,7 +131,7 @@ func TestCronAllowlist(t *testing.T) {
 	if len(instances) != 0 {
 		t.Errorf("tools_enabled=false leaked connectors: %v", instances)
 	}
-	if !builtins["incidents"] || !builtins["proposals"] || builtins["memory"] {
+	if !builtins["incidents"] || !builtins["proposals"] || !builtins["memory"] || builtins["runbooks"] {
 		t.Errorf("builtins = %v", builtins)
 	}
 

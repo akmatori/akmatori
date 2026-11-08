@@ -9,7 +9,8 @@ paths:
 Flow: agent reads its skill's `SKILL.md` and the generated `connected-tools/SKILL.md` (every
 connected tool; see the `tool-authorization` rule) → agent calls
 `gateway_call(toolName, args, instanceHint?)` → worker sends JSON-RPC to MCP Gateway with
-`X-Incident-ID` (the run's scope: incident UUID or request scope, see the `agent-runs` rule) →
+`X-Incident-ID` (the run's scope: incident UUID or request scope, see the `agent-runs` rule) and
+`X-Run-ID` (the run; `mcp.RunIDFromContext` in handlers) →
 gateway resolves routing, enforces allowlists, executes, returns output.
 
 - do not teach agents to call tool implementations directly; routing is handled by logical instance
@@ -77,3 +78,16 @@ report a problem. Same seed and registration pattern as `incidents`; `events` is
   `ProcessReportedAlert`
 - `get` cuts the raw payload to 20,000 bytes of JSON (returned as a string with
   `raw_payload_truncated: true`)
+
+## Knowledge tools (built-in, credential-less): runbooks.*, memory.*
+
+`runbooks.search` / `runbooks.get` and `memory.search` / `memory.list` / `memory.get` /
+`memory.write` / `memory.delete` (`tools/knowledge`, `registerKnowledgeTools`). They replaced the
+pi-subagents; behaviour and memory rules are in the `memory-and-runbooks` rule.
+
+- `runbooks` and `memory` are in `builtInToolNamespaces`, `credentiallessNamespaces` and the API's
+  `reservedToolNamespaces`; incident runs and proposal chat get both, crons via `builtin_tools`
+- reads need no run id; writes need `X-Run-ID` of a running run of the `X-Incident-ID` scope that
+  is not proposal chat (`requireRun`), caps are per run id (in memory, a restart resets them)
+- writes go through the gateway's own `database.DB`; the API sees them at once and refreshes
+  SKILL.md manifests in `FinishRun`

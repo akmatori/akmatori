@@ -384,6 +384,11 @@ func (h *SlackHandler) routeBotMentionThreadReply(channel, threadTS, messageTS, 
 	})
 
 	go func() {
+		// A remember command is stored as is: no classifier, no LLM.
+		if body, ok := rememberCommand(text, h.botUserID); ok {
+			h.captureRemember(channel, threadTS, messageTS, body, true)
+			return
+		}
 		verdict, incident, err := h.classifyThreadReplyForFeedback(threadTS, text)
 		if err == nil && incident != nil && verdict.IsConfidentFeedback() {
 			// Mention path keeps today's behaviour: persist + emoji + short text

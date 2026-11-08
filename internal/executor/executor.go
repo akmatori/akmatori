@@ -130,13 +130,11 @@ func buildSafeEnvironment() []string {
 	return env
 }
 
-// PrependGuidance adds the current time, task framing, and runbook-first
-// instruction to a task. The runbook search reminder is placed in the user
+// PrependGuidance adds the current time, task framing, and the runbook- and
+// memory-first instruction to a task. The reminder is placed in the user
 // message (not just the system prompt) because models follow user-turn
-// instructions more reliably than long system prompt sections. The
-// runbook-searcher and memory-searcher subagent shapes mirror the same steps
-// in DefaultIncidentManagerPrompt — keep them in sync so the system prompt
-// and the user-turn reminder agree on the subagent names and retry budgets.
+// instructions more reliably than long system prompt sections. Keep the tool
+// calls and retry budget in sync with DefaultIncidentManagerPrompt.
 func PrependGuidance(task string) string {
 	currentTime := time.Now().UTC().Format("2006-01-02 15:04:05 UTC")
 	return fmt.Sprintf(`Current time: %s
@@ -144,44 +142,22 @@ func PrependGuidance(task string) string {
 IMPORTANT: Before using any infrastructure tools, you MUST first search runbooks,
 then search cross-incident memory.
 
-Step 1 — Delegate the runbook search to the runbook-searcher subagent. It runs
-in its own scoped subprocess against the read-only runbook library mounted at
-/akmatori/runbooks/ and returns the top candidate file paths with short excerpts.
+Step 1 — Search the runbooks:
 
-  subagent({"agent": "runbook-searcher", "task": "<full Original alert text when present, otherwise a one-sentence natural-language summary of the alert>"})
+  gateway_call("runbooks.search", {"query": "<the Original alert text block verbatim when present, otherwise a one-sentence summary of the alert>"})
 
-When the prompt contains an "Original alert text:" block, pass that block verbatim
-as the "task" — the runbook-searcher subagent will extract distinctive keywords
-(sender, source, channel, error string, host) from it on its own. When no
-"Original alert text:" block is present, fall back to a one-sentence
-natural-language summary of the alert (what is broken, where, and the most
-distinctive symptom).
-
-If the first invocation returns "No runbooks matched" or the top candidate is
-not obviously related, you MAY retry with a different angle (target_service /
-host alone like "edge nginx" or "auth-service", or the summary rephrased as a
-question). Cap total runbook-searcher invocations at 3 (the initial call plus
-up to 2 retries).
-
-When the subagent returns candidate paths, read the most relevant runbook directly
-from /akmatori/runbooks/. Follow matching runbook procedures as your PRIMARY
+If the top result is not obviously related, retry up to 2 times with a narrower
+query (the host or service alone, or the error string). Read the best match with
+gateway_call("runbooks.get", {"id": <id>}) and follow it as your PRIMARY
 investigation guide.
 
-Step 2 — Immediately after the runbook search, delegate a cross-incident memory
-search to the memory-searcher subagent. It runs in its own scoped subprocess
-against the memory directory mounted at /akmatori/memory/ and returns the top
-candidate file paths with short excerpts.
+Step 2 — Search cross-incident memory with the SAME query:
 
-  subagent({"agent": "memory-searcher", "task": "<full Original alert text when present, otherwise a one-sentence natural-language summary of the alert>"})
+  gateway_call("memory.search", {"query": "<the same query>", "scopes": ["<relevant skill names>", "global"]})
 
-Use the SAME task string you used for the runbook search — the memory-searcher
-subagent extracts its own keywords (host, error pattern, tool quirk, feedback
-topic). Cap total memory-searcher invocations at 3 (the initial call plus up
-to 2 retries).
-
-When the subagent returns candidate paths, read the most relevant memory file
-directly from /akmatori/memory/ and apply matching prior-incident learnings,
-host quirks, and operator feedback alongside the runbook procedures.
+Read relevant memories with gateway_call("memory.get", {"id": <id>}) and apply
+prior-incident learnings, host quirks, and operator feedback alongside the
+runbook procedures.
 
 Please help with the following incident or request:
 

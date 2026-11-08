@@ -41,7 +41,7 @@ components:
 
     Memory:
       type: object
-      description: Cross-incident memory entry (host fact, recurring pattern, tool quirk, or operator feedback)
+      description: Cross-incident memory entry (a fact about the environment, or operator feedback)
       properties:
         id: {type: integer}
         scope:
@@ -49,7 +49,8 @@ components:
           description: '"global" or a skill name'
         type:
           type: string
-          enum: [host, incident_pattern, tool_quirk, feedback]
+          enum: [fact, feedback]
+          description: The legacy host, incident_pattern and tool_quirk are accepted and stored as fact.
         name:
           type: string
           description: Slug-safe (a-z, 0-9, hyphen). Unique per (scope, name).
@@ -65,6 +66,27 @@ components:
         created_by:
           type: string
           enum: [agent, operator]
+        evidence:
+          type: string
+          enum: [confirmed, observed, unverified]
+          description: >-
+            How far to trust the memory, separate from who wrote it. confirmed: an operator
+            checked it (only operators set it). observed: a fact seen directly, not a cause.
+            unverified: a cause nobody confirmed, or a row from before grades.
+        claim:
+          type: string
+          enum: [causal, factual, ""]
+          description: causal (X caused Y) or factual; empty = not assessed. Agent-written causal claims are always unverified.
+        evidence_note:
+          type: string
+          description: What supports the memory (≤500 bytes)
+        use_count:
+          type: integer
+          description: Full reads (memory.get) and citations by runs. A search hit moves last_used_at only.
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
 
@@ -75,12 +97,20 @@ components:
         scope: {type: string}
         type:
           type: string
-          enum: [host, incident_pattern, tool_quirk, feedback]
+          enum: [fact, feedback]
         name: {type: string}
         description: {type: string}
         body: {type: string}
         incident_uuid: {type: string}
         created_by: {type: string, enum: [agent, operator]}
+        evidence:
+          type: string
+          enum: [confirmed, observed, unverified]
+          description: Empty on create = observed (unverified for a causal claim). Omitted on update = unchanged.
+        claim: {type: string, enum: [causal, factual]}
+        evidence_note:
+          type: string
+          description: On update, an empty string clears the note; an omitted key leaves it unchanged.
 
     Integration:
       type: object
@@ -355,6 +385,35 @@ components:
           type: string
           format: date-time
           nullable: true
+        memory_extraction:
+          type: string
+          enum: ['', pending, running, succeeded, no_output, skipped, failed]
+          description: |
+            State of the post-incident memory pass. Empty: never queued (closed before the
+            pass existed, or not closed). no_output: the pass ran and found nothing durable, or
+            no finished run had an answer. skipped: memory generation is off, the incident was
+            merged, or the row went away. failed: the retries are used up (see
+            memory_extraction_error).
+        memory_extraction_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the current or last pass claimed the incident.
+        memory_extraction_error:
+          type: string
+        memory_extraction_attempts:
+          type: integer
+        memory_extraction_retry_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Set while a failed attempt waits for its retry.
+        memory_extraction_note:
+          type: string
+          description: For example "redacted 2 secrets".
+        memory_timeline:
+          type: string
+          description: The timeline the pass extracted, one line per entry. Not a memory.
         created_at:
           type: string
           format: date-time
@@ -1126,6 +1185,80 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /incidents/{uuid}/extract-memory:
+    parameters:
+      - name: uuid
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Run the post-incident memory pass again
+      description: |
+        Queues the post-incident memory extraction of a closed incident again. The pass
+        reads the outcome (close reason, how each alert resolved, the runs' self-reports),
+        the transcripts and the final answers, and writes graded memories; the memories
+        this incident wrote before are updated in place. The queue is drained by a
+        background worker; the incident's memory_extraction field shows the progress.
+      operationId: extractIncidentMemory
+      tags: [Incidents]
+      responses:
+        '202':
+          description: Queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [pending]
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The incident is not closed (a merged incident is read with its survivor), or the pass is already pending or running.
+        '503':
+          description: The memory extraction service is not available.
+
+  /incidents/extract-memory-backfill:
+    post:
+      summary: Queue the post-incident memory pass for incidents closed before it existed
+      description: |
+        Queues the memory pass for the closed alert incidents resolved in the last `days`
+        days that were never extracted (memory_extraction empty). Incidents already
+        extracted are left alone; use the per-incident rerun for those.
+      operationId: extractMemoryBackfill
+      tags: [Incidents]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                days:
+                  type: integer
+                  minimum: 1
+                  maximum: 365
+                  default: 30
+      responses:
+        '202':
+          description: Queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queued:
+                    type: integer
+                  since:
+                    type: string
+                    format: date-time
+        '400':
+          description: days out of range
+        '503':
+          description: The memory extraction service is not available.
+
   /requests/{uuid}:
     parameters:
       - name: uuid
@@ -1242,18 +1375,6 @@ paths:
                 base_url:
                   type: string
                   format: uri
-                subagent_model:
-                  type: string
-                  nullable: true
-                  description: >-
-                    Model id (same provider) for the runbook/memory search subagents.
-                    Omit to leave unchanged, null or "" to clear. Unset = same as parent;
-                    memory-writer always keeps the parent model.
-                subagent_thinking_level:
-                  type: string
-                  nullable: true
-                  enum: [off, minimal, low, medium, high, xhigh, max]
-                  description: Thinking level for the subagents; only applies with subagent_model. Unset = same as parent.
                 temperature:
                   type: number
                   nullable: true
@@ -2084,7 +2205,19 @@ paths:
           description: 'Filter by scope ("global" or skill name)'
         - name: type
           in: query
-          schema: {type: string, enum: [host, incident_pattern, tool_quirk, feedback]}
+          schema: {type: string, enum: [fact, feedback]}
+        - name: evidence
+          in: query
+          schema: {type: string, enum: [confirmed, observed, unverified]}
+        - name: incident_uuid
+          in: query
+          schema: {type: string}
+          description: Memories that originated from this incident
+        - name: used_in_incident
+          in: query
+          schema:
+            type: string
+          description: Only memories the runs of this incident used (search hit, full read or citation), newest use first.
       responses:
         '200':
           description: List of memories

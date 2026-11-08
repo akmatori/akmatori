@@ -8,8 +8,24 @@ import type { MemoryDetail } from '../../types';
 import LoadingSpinner from '../LoadingSpinner';
 import ErrorMessage from '../ErrorMessage';
 import { getErrorMessage } from '../../utils/errors';
-import { formatAbsolute } from '../../utils/format';
-import { GLOBAL_SCOPE, MEMORY_TYPES, MEMORY_TYPE_LABELS, linkifyRefs } from './memoryHelpers';
+import { formatAbsolute, formatRelativeAgo } from '../../utils/format';
+import type { MemoryClaim, MemoryEvidence } from '../../types';
+import EvidenceBadge from './EvidenceBadge';
+import {
+  CLAIM_LABELS,
+  EVIDENCE_DESCRIPTIONS,
+  EVIDENCE_LABELS,
+  GLOBAL_SCOPE,
+  MEMORY_EVIDENCES,
+  MEMORY_TYPES,
+  MEMORY_TYPE_LABELS,
+  linkifyRefs,
+  memoryEvidence,
+  usageLabel,
+} from './memoryHelpers';
+
+// The API cap on evidence_note (services.MemoryEvidenceNoteMaxLen).
+const EVIDENCE_NOTE_MAX = 500;
 
 // The API caps (services.MemoryDescriptionMaxLen / MemoryBodyMaxBytes).
 const DESCRIPTION_MAX = 500;
@@ -45,6 +61,9 @@ export default function MemoryDetailView({ id }: MemoryDetailViewProps) {
   const [description, setDescription] = useState('');
   const [type, setType] = useState('');
   const [body, setBody] = useState('');
+  const [evidence, setEvidence] = useState<MemoryEvidence>('observed');
+  const [claim, setClaim] = useState<MemoryClaim>('factual');
+  const [evidenceNote, setEvidenceNote] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -65,18 +84,30 @@ export default function MemoryDetailView({ id }: MemoryDetailViewProps) {
     setDescription(m.description);
     setType(m.type);
     setBody(m.body);
+    setEvidence(memoryEvidence(m));
+    setClaim(m.claim || 'factual');
+    setEvidenceNote(m.evidence_note ?? '');
     setEditing(true);
   };
 
   const bodyBytes = new TextEncoder().encode(body).length;
-  const canSave = description.trim() !== '' && description.length <= DESCRIPTION_MAX && bodyBytes <= BODY_MAX_BYTES;
+  const noteBytes = new TextEncoder().encode(evidenceNote).length;
+  const canSave =
+    description.trim() !== '' && description.length <= DESCRIPTION_MAX && bodyBytes <= BODY_MAX_BYTES && noteBytes <= EVIDENCE_NOTE_MAX;
 
   const save = async () => {
     if (!canSave) return;
     setBusy(true);
     try {
-      // body is always sent, so an emptied textarea clears the body.
-      await memoriesApi.update(id, { description: description.trim(), type, body });
+      // body and evidence_note are always sent, so an emptied field clears it.
+      await memoriesApi.update(id, {
+        description: description.trim(),
+        type,
+        body,
+        evidence,
+        claim,
+        evidence_note: evidenceNote.trim(),
+      });
       setEditing(false);
       await load();
     } catch (err) {
@@ -113,10 +144,14 @@ export default function MemoryDetailView({ id }: MemoryDetailViewProps) {
           <div className="flex flex-wrap items-start gap-3">
             <div className="min-w-0 flex-1">
               <h2 className="font-mono text-lg text-fg break-all">{memory.name}</h2>
-              <p className="mt-1 text-sm text-fg-subtle">
-                {memory.scope === GLOBAL_SCOPE ? 'Global' : `Skill: ${memory.scope}`} ·{' '}
-                {MEMORY_TYPE_LABELS[memory.type] ?? memory.type} ·{' '}
-                {memory.created_by === 'operator' ? 'Written by an operator' : 'Learned by the agent'}
+              <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-fg-subtle">
+                <span>
+                  {memory.scope === GLOBAL_SCOPE ? 'Global' : `Skill: ${memory.scope}`} ·{' '}
+                  {MEMORY_TYPE_LABELS[memory.type] ?? memory.type} ·{' '}
+                  {memory.created_by === 'operator' ? 'Written by an operator' : 'Learned by the agent'} ·
+                </span>
+                <EvidenceBadge memory={memory} />
+                {memory.claim && <span>{CLAIM_LABELS[memory.claim] ?? memory.claim} claim</span>}
               </p>
             </div>
             {!editing && !confirmDelete && (
@@ -149,6 +184,16 @@ export default function MemoryDetailView({ id }: MemoryDetailViewProps) {
               <dt className="text-fg-subtle">Last updated</dt>
               <dd className="mt-0.5 text-fg">{formatAbsolute(memory.updated_at)}</dd>
             </div>
+            <div>
+              <dt className="text-fg-subtle">Use by runs</dt>
+              <dd className="mt-0.5 text-fg">{usageLabel(memory, formatRelativeAgo)}</dd>
+            </div>
+            {memory.evidence_note && (
+              <div className="sm:col-span-2">
+                <dt className="text-fg-subtle">Evidence</dt>
+                <dd className="mt-0.5 text-fg whitespace-pre-wrap break-words">{memory.evidence_note}</dd>
+              </div>
+            )}
             {memory.incident_uuid && (
               <div>
                 <dt className="text-fg-subtle">Source incident</dt>
@@ -186,6 +231,55 @@ export default function MemoryDetailView({ id }: MemoryDetailViewProps) {
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="memory-evidence" className="block text-sm font-medium text-fg mb-1.5">
+                    Evidence
+                  </label>
+                  <select
+                    id="memory-evidence"
+                    value={evidence}
+                    onChange={(e) => setEvidence(e.target.value as MemoryEvidence)}
+                    className="input-field w-auto"
+                  >
+                    {MEMORY_EVIDENCES.map((e) => (
+                      <option key={e} value={e} title={EVIDENCE_DESCRIPTIONS[e]}>
+                        {EVIDENCE_LABELS[e]}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-fg-subtle">{EVIDENCE_DESCRIPTIONS[evidence]}</p>
+                </div>
+                <div>
+                  <label htmlFor="memory-claim" className="block text-sm font-medium text-fg mb-1.5">
+                    Claim
+                  </label>
+                  <select
+                    id="memory-claim"
+                    value={claim}
+                    onChange={(e) => setClaim(e.target.value as MemoryClaim)}
+                    className="input-field w-auto"
+                  >
+                    <option value="factual">{CLAIM_LABELS.factual}: what is</option>
+                    <option value="causal">{CLAIM_LABELS.causal}: X caused Y</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label htmlFor="memory-evidence-note" className="block text-sm font-medium text-fg mb-1.5">
+                  Evidence note
+                </label>
+                <input
+                  id="memory-evidence-note"
+                  value={evidenceNote}
+                  onChange={(e) => setEvidenceNote(e.target.value)}
+                  placeholder="What supports it: tool output, timestamps of cause and effect, the source incident"
+                  className="input-field"
+                />
+                <p className={`mt-1 text-xs ${noteBytes > EVIDENCE_NOTE_MAX ? 'text-state-fail' : 'text-fg-subtle'}`}>
+                  {noteBytes} / {EVIDENCE_NOTE_MAX} bytes.
+                </p>
               </div>
               <div>
                 <label htmlFor="memory-body" className="block text-sm font-medium text-fg mb-1.5">

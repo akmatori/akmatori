@@ -1,6 +1,6 @@
 # Connectors for all skills, and gateway knowledge tools instead of subagents
 
-Status: Part A implemented 2026-11-02 (branch `feat/connectors-for-all-skills`); B1, B2 open.
+Status: Part A merged 2026-11-02 (PR #60). B1 implemented 2026-11-02 (branch `feat/gateway-knowledge-tools`). B2 open.
 Prepared 2026-11-01 against `main` at 6fe75f0 (Connectors, PR #58/#59).
 Revision 2, same day, after the Codex review in
 `2026-11-01-connectors-for-all-skills-and-gateway-knowledge-tools-codex-review.md`. Every review item
@@ -360,6 +360,25 @@ Policy:
 ---
 
 ## Part B1 — Gateway knowledge tools replace the subagents
+
+Implementation notes (2026-11-02), where the code differs from the text below:
+
+- Proposal chat gets `runbooks` and `memory` for reading; the gateway refuses `memory.write` /
+  `memory.delete` from runs with `source_kind=proposal` (changes go through proposals).
+- Writes are refused for finished runs (`completed`, `failed`, `superseded`), not only for
+  superseded ones.
+- Approval authorship: `UpsertByName` takes ownership whenever the caller passes
+  `created_by=operator` (proposal approval, Slack feedback, from-text), with no new parameter.
+- `FinishRun` refreshes when a fingerprint (row count + newest `updated_at`) changed, so deletes
+  count too; the refresh is in-process state, so the first run after a start always refreshes once.
+- Collision handling disables the colliding HTTP connector / MCP server and logs a warning; there
+  is no special `error: namespace reserved` status (the Connectors page shows `disabled`).
+- The repo-wide grep test is limited to the default prompts (`TestDefaultPrompts_NoRetiredKnowledgeRefs`)
+  and `PrependGuidance`: the disk-mirror code that B2 deletes still names the old flow in comments.
+- No `runbooks` / `memory` tool type rows or instances are seeded: built-ins are type-only entries.
+- Bench: local commit 807389c on `akmatori-bench` branch `knowledge-tools` (not pushed): accept the
+  410, save `full_log.txt`, count knowledge calls and hits per cell. The Dreaming maintenance
+  scenario and the A/B are not done yet.
 
 ### Task B1.1: Run identity and gateway mirrors
 

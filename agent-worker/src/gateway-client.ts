@@ -20,6 +20,8 @@ export type { ToolAllowlistEntry };
 export interface GatewayClientOptions {
   gatewayUrl: string;
   incidentId: string;
+  /** Agent run id from the WebSocket frame. Sent as X-Run-ID when set; the gateway needs it on mutating calls. */
+  runId?: string;
   workDir?: string;
   /** Request timeout in milliseconds (default: 300000 = 5 minutes) */
   timeoutMs?: number;
@@ -46,7 +48,7 @@ export interface CallOptions {
   /**
    * Return the complete result inline and never write the output file.
    * Used by the codemode-only `gateway_fetch` tool: a script reduces the
-   * payload itself, so the 4 KB preview would only get in its way. Never set
+   * payload itself, so the 32 KB preview would only get in its way. Never set
    * this on the model-facing `gateway_call`.
    */
   inline?: boolean;
@@ -179,12 +181,18 @@ export function buildSmartPreview(serialized: string, outputFile: string): strin
 // Client
 // ---------------------------------------------------------------------------
 
-/** Output size threshold: responses >= 4KB are written to file */
-const OUTPUT_SIZE_THRESHOLD = 4096;
+/**
+ * Output size threshold: responses >= 32 KB are written to file and the
+ * model gets a preview. 4 KB (the old value) hid most SSH command output
+ * behind a 200-character preview, so agents stopped at the first symptom
+ * instead of reading the logs they had fetched.
+ */
+export const OUTPUT_SIZE_THRESHOLD = 32 * 1024;
 
 export class GatewayClient {
   private readonly gatewayUrl: string;
   private readonly incidentId: string;
+  private readonly runId: string | undefined;
   private readonly workDir: string | undefined;
   private readonly timeoutMs: number;
   private readonly toolAllowlist: ToolAllowlistEntry[] | undefined;
@@ -193,6 +201,7 @@ export class GatewayClient {
   constructor(options: GatewayClientOptions) {
     this.gatewayUrl = options.gatewayUrl.replace(/\/+$/, "");
     this.incidentId = options.incidentId;
+    this.runId = options.runId;
     this.workDir = options.workDir;
     this.timeoutMs = options.timeoutMs ?? 300_000;
     this.toolAllowlist = options.toolAllowlist;
@@ -201,7 +210,7 @@ export class GatewayClient {
   /**
    * Call a tool on the MCP Gateway.
    *
-   * If the response is >= 4KB and a workDir is configured, the full output
+   * If the response is >= OUTPUT_SIZE_THRESHOLD and a workDir is configured, the full output
    * is written to a file and a truncated preview is returned inline.
    */
   call(
@@ -359,6 +368,9 @@ export class GatewayClient {
       };
       if (this.incidentId) {
         headers["X-Incident-ID"] = this.incidentId;
+      }
+      if (this.runId) {
+        headers["X-Run-ID"] = this.runId;
       }
       if (this.toolAllowlist) {
         headers["X-Tool-Allowlist"] = JSON.stringify(this.toolAllowlist);

@@ -34,7 +34,8 @@ const (
 // resolve therefore sits at "completed" with a permanently firing alert, and
 // nothing in the lifecycle ever closes it.
 type StaleCloseService struct {
-	db *gorm.DB
+	db     *gorm.DB
+	kicker ExtractionKicker
 }
 
 // NewStaleCloseService creates a new stale-close service.
@@ -239,6 +240,7 @@ func (s *StaleCloseService) closeBatch(ctx context.Context, uuids []string, cuto
 			Updates(map[string]interface{}{
 				"status":      string(database.AlertStatusResolved),
 				"resolved_at": now,
+				"resolved_by": database.AlertResolvedBySweep,
 			}).Error; err != nil {
 			return fmt.Errorf("resolve firing alerts: %w", err)
 		}
@@ -255,12 +257,7 @@ func (s *StaleCloseService) closeBatch(ctx context.Context, uuids []string, cuto
 
 		update := tx.Model(&database.Incident{}).
 			Where("incidents.uuid IN ? AND incidents.status IN ? AND "+staleCond, args...).
-			Updates(map[string]interface{}{
-				"status":        database.IncidentStatusClosed,
-				"resolved_at":   &now,
-				"monitor_until": nil,
-				"closed_reason": database.CloseReasonAutoStale,
-			})
+			Updates(closeIncidentValues(now, database.CloseReasonAutoStale))
 		if update.Error != nil {
 			return fmt.Errorf("close incidents: %w", update.Error)
 		}
@@ -270,7 +267,15 @@ func (s *StaleCloseService) closeBatch(ctx context.Context, uuids []string, cuto
 	if err != nil {
 		return 0, err
 	}
+	if closed > 0 && s.kicker != nil {
+		s.kicker.Kick()
+	}
 	return closed, nil
+}
+
+// SetExtractionKicker wires the memory extractor's wake-up; optional.
+func (s *StaleCloseService) SetExtractionKicker(k ExtractionKicker) {
+	s.kicker = k
 }
 
 // StartBackgroundSweep runs the sweep once at startup, then on a fixed ticker

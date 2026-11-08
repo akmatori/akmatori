@@ -25,6 +25,11 @@ type MemoryRequest struct {
 	Body         string `json:"body"`
 	IncidentUUID string `json:"incident_uuid,omitempty"`
 	CreatedBy    string `json:"created_by,omitempty"`
+	// Evidence is confirmed | observed | unverified (empty: observed, or
+	// unverified for a causal claim). Claim is causal | factual.
+	Evidence     string `json:"evidence,omitempty"`
+	Claim        string `json:"claim,omitempty"`
+	EvidenceNote string `json:"evidence_note,omitempty"`
 }
 
 // memoryUpdateRequest is the PUT body. Body shadows MemoryRequest.Body so
@@ -32,7 +37,8 @@ type MemoryRequest struct {
 // (clear the body).
 type memoryUpdateRequest struct {
 	MemoryRequest
-	Body *string `json:"body"`
+	Body         *string `json:"body"`
+	EvidenceNote *string `json:"evidence_note"`
 }
 
 // MemoryFromTextRequest is the body for POST /api/memories/from-text: free
@@ -56,7 +62,8 @@ type IncidentFeedbackRequest struct {
 	Text string `json:"text"`
 }
 
-// handleMemories handles GET (list, with ?scope=, ?type= and ?incident_uuid=
+// handleMemories handles GET (list, with ?scope=, ?type=, ?evidence=,
+// ?incident_uuid= (origin) and ?used_in_incident= (used by its runs)
 // filters) and POST.
 func (h *APIHandler) handleMemories(w http.ResponseWriter, r *http.Request) {
 	if h.memoryService == nil {
@@ -71,10 +78,17 @@ func (h *APIHandler) handleMemories(w http.ResponseWriter, r *http.Request) {
 			api.RespondError(w, http.StatusBadRequest, "invalid type filter")
 			return
 		}
+		evidence := r.URL.Query().Get("evidence")
+		if evidence != "" && !services.ValidMemoryEvidence(evidence) {
+			api.RespondError(w, http.StatusBadRequest, "invalid evidence filter")
+			return
+		}
 		memories, err := h.memoryService.ListMemories(services.MemoryFilter{
-			Scope:        scope,
-			Type:         memType,
-			IncidentUUID: r.URL.Query().Get("incident_uuid"),
+			Scope:          scope,
+			Type:           memType,
+			IncidentUUID:   r.URL.Query().Get("incident_uuid"),
+			Evidence:       evidence,
+			UsedInIncident: r.URL.Query().Get("used_in_incident"),
 		})
 		if err != nil {
 			api.RespondError(w, http.StatusInternalServerError, "failed to list memories")
@@ -88,6 +102,10 @@ func (h *APIHandler) handleMemories(w http.ResponseWriter, r *http.Request) {
 			api.RespondError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
+		if msg := agentConfirmedError(req); msg != "" {
+			api.RespondError(w, http.StatusBadRequest, msg)
+			return
+		}
 		m := &database.Memory{
 			Scope:        req.Scope,
 			Type:         req.Type,
@@ -96,6 +114,9 @@ func (h *APIHandler) handleMemories(w http.ResponseWriter, r *http.Request) {
 			Body:         req.Body,
 			IncidentUUID: req.IncidentUUID,
 			CreatedBy:    req.CreatedBy,
+			Evidence:     req.Evidence,
+			Claim:        req.Claim,
+			EvidenceNote: req.EvidenceNote,
 		}
 		created, err := h.memoryService.CreateMemory(m)
 		if err != nil {
@@ -159,6 +180,10 @@ func (h *APIHandler) handleMemoryByID(w http.ResponseWriter, r *http.Request) {
 			api.RespondError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
+		if msg := agentConfirmedError(req.MemoryRequest); msg != "" {
+			api.RespondError(w, http.StatusBadRequest, msg)
+			return
+		}
 		// Capture the prior scope BEFORE update so a cross-scope move
 		// (e.g. "redis" → "postgres") can refresh both affected SKILL.mds.
 		var priorScope string
@@ -172,11 +197,16 @@ func (h *APIHandler) handleMemoryByID(w http.ResponseWriter, r *http.Request) {
 			Description:  req.Description,
 			IncidentUUID: req.IncidentUUID,
 			CreatedBy:    req.CreatedBy,
+			Evidence:     req.Evidence,
+			Claim:        req.Claim,
 		}
 		if req.Body != nil {
 			m.Body = *req.Body
 		}
-		updated, err := h.memoryService.UpdateMemory(uint(id), m, req.Body != nil)
+		if req.EvidenceNote != nil {
+			m.EvidenceNote = *req.EvidenceNote
+		}
+		updated, err := h.memoryService.UpdateMemory(uint(id), m, services.MemoryUpdateSet{Body: req.Body != nil, EvidenceNote: req.EvidenceNote != nil})
 		if err != nil {
 			respondMemoryWriteError(w, err)
 			return
@@ -415,6 +445,16 @@ func (h *APIHandler) regenerateSkillForMemoryScope(scope string) {
 
 // respondMemoryWriteError maps service-layer errors onto HTTP statuses.
 // Validation problems → 400, missing rows → 404, sync issues → 500.
+// agentConfirmedError refuses a request that marks an agent-authored memory
+// confirmed: only an operator confirms. The REST API is an operator surface,
+// but a client that writes created_by=agent must not get the operator grade.
+func agentConfirmedError(req MemoryRequest) string {
+	if req.CreatedBy == services.MemoryCreatedByAgent && strings.TrimSpace(req.Evidence) == services.MemoryEvidenceConfirmed {
+		return "evidence confirmed requires created_by operator"
+	}
+	return ""
+}
+
 func respondMemoryWriteError(w http.ResponseWriter, err error) {
 	if services.IsMemoryNotFoundErr(err) {
 		api.RespondError(w, http.StatusNotFound, err.Error())

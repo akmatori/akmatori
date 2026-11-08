@@ -15,7 +15,7 @@ var reservedToolNamespaces = []string{
 	"ssh", "zabbix", "victoria_metrics", "catchpoint",
 	"postgresql", "grafana", "pagerduty", "clickhouse",
 	"netbox", "kubernetes", "jira",
-	"incidents", "proposals", "events",
+	"incidents", "proposals", "events", "runbooks", "memory",
 }
 
 // isReservedToolNamespace checks if a name conflicts with a built-in tool namespace.

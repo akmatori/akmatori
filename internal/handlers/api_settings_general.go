@@ -181,7 +181,7 @@ func (h *APIHandler) handleGeneralSettings(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		if memoryGenerationChanged && h.skillService != nil {
-			// SKILL.md embeds the memory-writer instructions; AGENTS.md is
+			// SKILL.md embeds the memory.write instructions; AGENTS.md is
 			// rendered per run and picks up the change by itself.
 			go func() {
 				if err := h.skillService.RegenerateAllSkillMds(); err != nil {

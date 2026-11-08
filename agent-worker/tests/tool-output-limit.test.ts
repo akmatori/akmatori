@@ -65,7 +65,7 @@ describe("createToolOutputLimitExtension", () => {
 
   const event = (text: string, extra: Record<string, unknown> = {}) => ({
     type: "tool_result",
-    toolName: "subagent",
+    toolName: "codemode",
     toolCallId: "tc1",
     input: {},
     content: [{ type: "text", text }],
