@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -77,8 +78,14 @@ func (s *HTTPConnectorService) CreateHTTPConnector(connector *database.HTTPConne
 	}
 
 	connector.Enabled = true
-	if err := s.db.Create(connector).Error; err != nil {
-		return nil, fmt.Errorf("failed to create HTTP connector: %w", err)
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(connector).Error; err != nil {
+			return fmt.Errorf("failed to create HTTP connector: %w", err)
+		}
+		return ensureConnectorToolType(tx, connector, "")
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return connector, nil
@@ -99,6 +106,7 @@ func (s *HTTPConnectorService) UpdateHTTPConnector(id uint, updates map[string]i
 	if err := s.db.First(&connector, id).Error; err != nil {
 		return nil, fmt.Errorf("HTTP connector not found: %w", err)
 	}
+	previousName := connector.ToolTypeName
 
 	// Apply updates to a copy for validation
 	if v, ok := updates["tool_type_name"]; ok {
@@ -153,23 +161,38 @@ func (s *HTTPConnectorService) UpdateHTTPConnector(id uint, updates map[string]i
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
-	if err := s.db.Save(&connector).Error; err != nil {
-		return nil, fmt.Errorf("failed to update HTTP connector: %w", err)
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&connector).Error; err != nil {
+			return fmt.Errorf("failed to update HTTP connector: %w", err)
+		}
+		return ensureConnectorToolType(tx, &connector, previousName)
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return &connector, nil
 }
 
 // DeleteHTTPConnector deletes an HTTP connector by ID
+// The connector's tool type is removed too unless tool instances still use it.
 func (s *HTTPConnectorService) DeleteHTTPConnector(id uint) error {
-	result := s.db.Delete(&database.HTTPConnector{}, id)
-	if result.Error != nil {
-		return fmt.Errorf("failed to delete HTTP connector: %w", result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("HTTP connector not found")
-	}
-	return nil
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var connector database.HTTPConnector
+		if err := tx.First(&connector, id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("HTTP connector not found")
+			}
+			return fmt.Errorf("failed to load HTTP connector: %w", err)
+		}
+		if err := tx.Delete(&database.HTTPConnector{}, id).Error; err != nil {
+			return fmt.Errorf("failed to delete HTTP connector: %w", err)
+		}
+		if isReservedToolNamespace(connector.ToolTypeName) {
+			return nil
+		}
+		return deleteToolTypeIfUnused(tx, connector.ToolTypeName)
+	})
 }
 
 // ListHTTPConnectors lists all HTTP connectors
