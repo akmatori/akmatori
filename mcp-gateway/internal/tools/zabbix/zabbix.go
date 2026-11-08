@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -649,8 +650,34 @@ func (t *ZabbixTool) GetTriggers(ctx context.Context, incidentID string, args ma
 	return string(result), nil
 }
 
-// APIRequest performs a raw Zabbix API request (not cached for flexibility)
+// readOnlyMethodPattern matches Zabbix read methods: "<object>.get". Object
+// names in the Zabbix API are lowercase letters only (host, hostgroup,
+// usermacro, ...), so anything else is not a read method.
+var readOnlyMethodPattern = regexp.MustCompile(`^[a-z]+\.get$`)
+
+// readOnlyExtraMethods are read methods that do not end in ".get".
+var readOnlyExtraMethods = map[string]struct{}{
+	"apiinfo.version": {},
+}
+
+// IsReadOnlyMethod reports whether a Zabbix API method only reads data.
+// The check is case-insensitive, so "Host.Delete" cannot slip past it.
+func IsReadOnlyMethod(method string) bool {
+	m := strings.ToLower(method)
+	if _, ok := readOnlyExtraMethods[m]; ok {
+		return true
+	}
+	return readOnlyMethodPattern.MatchString(m)
+}
+
+// APIRequest performs a raw Zabbix API request (not cached for flexibility).
+// It accepts read methods only: the agent investigates, it does not change
+// Zabbix. Writes such as host.delete or user.update are rejected here, before
+// any request goes out, whatever rights the configured token has.
 func (t *ZabbixTool) APIRequest(ctx context.Context, incidentID string, method string, params map[string]interface{}, logicalName ...string) (string, error) {
+	if !IsReadOnlyMethod(method) {
+		return "", fmt.Errorf("zabbix.api_request accepts read-only methods only (<object>.get or apiinfo.version); %q is not allowed", method)
+	}
 	if params == nil {
 		params = make(map[string]interface{})
 	}
