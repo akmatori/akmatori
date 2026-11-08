@@ -6,6 +6,8 @@ import {
   AgentRunner,
   extractSkillNameFromReadPath,
   mapThinkingLevel,
+  OPENROUTER_ATTRIBUTION_HEADERS,
+  openRouterAttributionEnabled,
   resolveModel,
   type ExecuteParams,
   type ResumeParams,
@@ -1843,5 +1845,49 @@ describe("resolveModel prompt-cache lifetime", () => {
   it("leaves promptCache unset on non-Anthropic synthesized specs", () => {
     const model = resolveModel("custom", "my-local-model", "http://llm.internal/v1") as any;
     expect(model.promptCache).toBeUndefined();
+  });
+});
+
+describe("resolveModel OpenRouter attribution", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("adds Akmatori attribution headers to built-in OpenRouter models", () => {
+    // Both APIs OpenRouter built-ins use: openai-completions and anthropic-messages.
+    for (const id of ["openai/gpt-5.5", "anthropic/claude-fable-5"]) {
+      const model = resolveModel("openrouter", id);
+      expect(model.headers).toEqual(OPENROUTER_ATTRIBUTION_HEADERS);
+    }
+  });
+
+  it("adds them to synthesized OpenRouter specs", () => {
+    const model = resolveModel("openrouter", "vendor/not-in-catalog-9");
+    expect(model.headers?.["HTTP-Referer"]).toBe("https://akmatori.com");
+    expect(model.headers?.["X-OpenRouter-Title"]).toBe("Akmatori");
+  });
+
+  it("adds them when a custom provider points at openrouter.ai", () => {
+    const model = resolveModel("custom", "openai/gpt-5.5", "https://openrouter.ai/api/v1");
+    expect(model.headers).toEqual(OPENROUTER_ATTRIBUTION_HEADERS);
+  });
+
+  it("sends no attribution headers to other providers", () => {
+    expect(resolveModel("anthropic", "claude-sonnet-5").headers).toBeUndefined();
+    expect(resolveModel("custom", "m", "https://llm.internal/v1").headers).toBeUndefined();
+  });
+
+  it("is turned off by AKMATORI_OPENROUTER_ATTRIBUTION=0", () => {
+    vi.stubEnv("AKMATORI_OPENROUTER_ATTRIBUTION", "0");
+    expect(resolveModel("openrouter", "openai/gpt-5.5").headers).toBeUndefined();
+  });
+
+  it("parses the opt-out value", () => {
+    expect(openRouterAttributionEnabled(undefined)).toBe(true);
+    expect(openRouterAttributionEnabled("")).toBe(true);
+    expect(openRouterAttributionEnabled("1")).toBe(true);
+    for (const off of ["0", "false", "FALSE", " no ", "off"]) {
+      expect(openRouterAttributionEnabled(off)).toBe(false);
+    }
   });
 });

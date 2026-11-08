@@ -104,6 +104,11 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
   tool list and every tool's `promptGuidelines`, so tool rules the model needs go into that prompt
 - **Tool results are plain text** (`model-text.ts`): `gateway_call` objects and JSON returned by
   `execute_script` render YAML-like with multi-line strings as blocks, never escaped `\n` JSON
+- **OpenRouter attribution.** `resolveModel()` adds `OPENROUTER_ATTRIBUTION_HEADERS` (Akmatori
+  `HTTP-Referer`/`X-OpenRouter-Title`) to `model.headers` for provider `openrouter` or an
+  `openrouter.ai` base URL; `AKMATORI_OPENROUTER_ATTRIBUTION=0` turns it off. pi's own identity
+  attributes to pi.dev; openai-completions/-responses merge `{...identity, ...model.headers}`
+  case-SENSITIVELY, so keep pi's exact header spelling or both copies are sent
 - Bash tool stays local (TypeScript variance friction)
 - import `typebox` from `typebox`, not `@sinclair/typebox`
 - `DefaultResourceLoader` requires `agentDir` (`getAgentDir()` in prod and mocks)
