@@ -1,8 +1,13 @@
 package adapters
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -133,31 +138,44 @@ func TestPagerDutyAdapter_ParsePayload_ResolvedIncident(t *testing.T) {
 	}
 }
 
-func TestPagerDutyAdapter_ParsePayload_AcknowledgedIncident(t *testing.T) {
+func TestPagerDutyAdapter_ParsePayload_NonLifecycleEventsIgnored(t *testing.T) {
 	adapter := NewPagerDutyAdapter()
 	instance := &database.AlertSourceInstance{}
 
-	payload := []byte(`{
-		"event": {
-			"id": "event-ack",
-			"event_type": "incident.acknowledged",
-			"data": {
-				"id": "incident-ack-123",
-				"title": "Acknowledged Incident",
-				"urgency": "high",
-				"service": {"name": "Test"}
+	// Acknowledged means a person took the page, not that the problem is
+	// gone; the others do not change whether the incident is open.
+	for _, eventType := range []string{
+		"incident.acknowledged",
+		"incident.unacknowledged",
+		"incident.annotated",
+		"incident.reassigned",
+		"incident.escalated",
+		"incident.priority_updated",
+		"pagey.ping",
+	} {
+		t.Run(eventType, func(t *testing.T) {
+			payload := []byte(`{"event":{"id":"ev-1","event_type":"` + eventType + `","data":{"id":"incident-1","title":"Disk full","urgency":"high"}}}`)
+			alerts, err := adapter.ParsePayload(payload, instance)
+			if err != nil {
+				t.Fatalf("ParsePayload returned error: %v", err)
 			}
-		}
-	}`)
+			if len(alerts) != 0 {
+				t.Errorf("expected no alerts for %s, got %d with status %q", eventType, len(alerts), alerts[0].Status)
+			}
+		})
+	}
+}
 
-	alerts, err := adapter.ParsePayload(payload, instance)
+func TestPagerDutyAdapter_ParsePayload_ReopenedIncidentFires(t *testing.T) {
+	adapter := NewPagerDutyAdapter()
+	payload := []byte(`{"event":{"id":"ev-2","event_type":"incident.reopened","data":{"id":"incident-2","title":"Disk full","urgency":"high"}}}`)
+
+	alerts, err := adapter.ParsePayload(payload, &database.AlertSourceInstance{})
 	if err != nil {
 		t.Fatalf("ParsePayload returned error: %v", err)
 	}
-
-	// Acknowledged should be treated as resolved
-	if alerts[0].Status != database.AlertStatusResolved {
-		t.Errorf("Expected acknowledged incident to be 'resolved', got '%s'", alerts[0].Status)
+	if len(alerts) != 1 || alerts[0].Status != database.AlertStatusFiring {
+		t.Fatalf("expected one firing alert, got %+v", alerts)
 	}
 }
 
@@ -267,33 +285,64 @@ func TestPagerDutyAdapter_ValidateWebhookSecret_BearerToken(t *testing.T) {
 	}
 }
 
-func TestPagerDutyAdapter_ValidateWebhookSecret_SignatureFormat(t *testing.T) {
+func pagerDutySign(secret, body string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(body))
+	return "v1=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+func TestPagerDutyAdapter_ValidateWebhookSecret_Signature(t *testing.T) {
 	adapter := NewPagerDutyAdapter()
-	instance := &database.AlertSourceInstance{
-		WebhookSecret: "pd-secret",
+	instance := &database.AlertSourceInstance{WebhookSecret: "pd-secret"}
+	body := `{"event":{"event_type":"incident.triggered"}}`
+
+	tests := []struct {
+		name    string
+		header  string
+		wantErr bool
+	}{
+		{"valid signature", pagerDutySign("pd-secret", body), false},
+		{"valid signature during secret rotation", pagerDutySign("old-secret", body) + "," + pagerDutySign("pd-secret", body), false},
+		{"any v1= value is not enough", "v1=abc123", true},
+		{"signature with the wrong secret", pagerDutySign("other-secret", body), true},
+		{"signature of a different body", pagerDutySign("pd-secret", body+" "), true},
+		{"invalid format", "invalid-format", true},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/webhook/alert", strings.NewReader(body))
+			req.Header.Set("X-PagerDuty-Signature", tt.header)
 
-	req := httptest.NewRequest(http.MethodPost, "/webhook/alert", nil)
-	req.Header.Set("X-PagerDuty-Signature", "v1=abc123")
+			err := adapter.ValidateWebhookSecret(req, instance)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateWebhookSecret() error = %v, wantErr %v", err, tt.wantErr)
+			}
 
-	err := adapter.ValidateWebhookSecret(req, instance)
-	if err != nil {
-		t.Errorf("Expected no error for valid signature format, got: %v", err)
+			// The handler reads the body after validation: it must be intact.
+			rest, readErr := io.ReadAll(req.Body)
+			if readErr != nil {
+				t.Fatalf("read body after validation: %v", readErr)
+			}
+			if string(rest) != body {
+				t.Errorf("body after validation = %q, want %q", rest, body)
+			}
+		})
 	}
 }
 
-func TestPagerDutyAdapter_ValidateWebhookSecret_InvalidSignatureFormat(t *testing.T) {
+func TestPagerDutyAdapter_ValidateWebhookSecret_MissingHeaders(t *testing.T) {
 	adapter := NewPagerDutyAdapter()
-	instance := &database.AlertSourceInstance{
-		WebhookSecret: "pd-secret",
+	instance := &database.AlertSourceInstance{WebhookSecret: "pd-secret"}
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/alert", strings.NewReader("{}"))
+	if err := adapter.ValidateWebhookSecret(req, instance); err == nil {
+		t.Error("expected error without signature or authorization, got nil")
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/webhook/alert", nil)
-	req.Header.Set("X-PagerDuty-Signature", "invalid-format")
-
-	err := adapter.ValidateWebhookSecret(req, instance)
-	if err == nil {
-		t.Error("Expected error for invalid signature format, got nil")
+	req = httptest.NewRequest(http.MethodPost, "/webhook/alert", strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer wrong")
+	if err := adapter.ValidateWebhookSecret(req, instance); err == nil {
+		t.Error("expected error for a wrong bearer token, got nil")
 	}
 }
 

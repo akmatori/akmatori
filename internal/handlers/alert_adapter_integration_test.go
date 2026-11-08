@@ -252,8 +252,9 @@ func TestWebhookSecretValidation_AllAdapters(t *testing.T) {
 		{"zabbix_custom_header", adapters.NewZabbixAdapter(), "zabbix-key", "X-Zabbix-Secret", "zabbix-key", true},
 		{"zabbix_wrong_header", adapters.NewZabbixAdapter(), "zabbix-key", "Authorization", "zabbix-key", false},
 
-		// PagerDuty variations (signature format: v1=<hmac> or Bearer token)
-		{"pagerduty_signature", adapters.NewPagerDutyAdapter(), "pd-token", "X-PagerDuty-Signature", "v1=abc123", true},
+		// PagerDuty variations (v1=<HMAC of the body> or Bearer token; the
+		// HMAC itself is covered in the adapter tests)
+		{"pagerduty_unverified_signature", adapters.NewPagerDutyAdapter(), "pd-token", "X-PagerDuty-Signature", "v1=abc123", false},
 		{"pagerduty_bearer", adapters.NewPagerDutyAdapter(), "pd-token", "Authorization", "Bearer pd-token", true},
 	}
 
