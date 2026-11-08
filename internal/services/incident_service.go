@@ -864,7 +864,11 @@ func (s *SkillService) FinishRun(runID string, outcome RunOutcome) error {
 	// SKILL.md manifests are regenerated whether or not the disk mirror is
 	// wired (RefreshAfterMemoryChange skips the mirror on its own).
 	if s.db != nil {
-		go s.RefreshAfterMemoryChange(runID)
+		s.memoryRefreshWG.Add(1)
+		go func() {
+			defer s.memoryRefreshWG.Done()
+			s.RefreshAfterMemoryChange(runID)
+		}()
 	}
 	return nil
 }

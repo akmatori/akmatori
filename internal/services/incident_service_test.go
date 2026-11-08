@@ -57,6 +57,10 @@ func newIncidentTestService(t *testing.T, db *gorm.DB) *SkillService {
 
 	svc := NewSkillService(dataDir, nil, contextService, nil)
 	svc.db = db
+	// FinishRun refreshes SKILL.md files under dataDir in the background.
+	// Cleanups run last-in first-out, so this wait runs before t.TempDir
+	// removes dataDir ("directory not empty" otherwise).
+	t.Cleanup(svc.memoryRefreshWG.Wait)
 
 	_ = os.MkdirAll(svc.incidentsDir, 0755)
 	_ = os.MkdirAll(svc.skillsDir, 0755)
