@@ -315,7 +315,7 @@ func TestWebhookFlow_PagerDutyPayloadParsing(t *testing.T) {
 					}
 				}
 			}`,
-			expectedAlerts: 1,
+			expectedAlerts: 0, // acknowledged neither fires nor resolves
 		},
 	}
 
