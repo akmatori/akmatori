@@ -31,7 +31,8 @@ type SkillService struct {
 	gatewayTools     GatewayToolLister      // optional; nil = connected-tools renders discovery hints for MCP/HTTP tools
 
 	memoryMu          sync.Mutex
-	memoryFingerprint string // count + newest updated_at of memories at the last refresh
+	memoryFingerprint string         // count + newest updated_at of memories at the last refresh
+	memoryRefreshWG   sync.WaitGroup // background refreshes started by FinishRun; tests wait on it
 }
 
 // MemoryCiter records the memories a final answer cites
