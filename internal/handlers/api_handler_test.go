@@ -245,9 +245,7 @@ func TestSplitPath_EdgeCases(t *testing.T) {
 }
 
 // TestAPIHandler_MaskSSHKeys tests SSH key masking
-func TestAPIHandler_MaskSSHKeys(t *testing.T) {
-	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-
+func TestRedactToolInstance(t *testing.T) {
 	tests := []struct {
 		name   string
 		input  *database.ToolInstance
@@ -318,9 +316,9 @@ func TestAPIHandler_MaskSSHKeys(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h.maskSSHKeys(tt.input)
+			redactToolInstance(tt.input)
 			if !tt.verify(tt.input) {
-				t.Errorf("maskSSHKeys verification failed")
+				t.Errorf("redactToolInstance verification failed")
 			}
 		})
 	}

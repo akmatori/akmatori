@@ -224,7 +224,10 @@ export const toolsApi = {
       body: JSON.stringify(tool),
     }),
 
-  update: (id: number, tool: { name: string; logical_name?: string; settings: Record<string, unknown>; enabled: boolean }) =>
+  // Partial update: omitted fields keep their stored value. Secret settings
+  // come back masked from the API; sending the mask (or omitting the key)
+  // keeps the stored secret, and ssh_keys are always preserved server-side.
+  update: (id: number, tool: { name?: string; logical_name?: string; settings?: Record<string, unknown>; enabled?: boolean }) =>
     fetchApi<ToolInstance>(`/api/tools/${id}`, {
       method: 'PUT',
       body: JSON.stringify(tool),

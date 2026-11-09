@@ -1052,13 +1052,13 @@ func (r *Registry) registerZabbixTools() {
 	r.server.RegisterTool(
 		mcp.Tool{
 			Name:        "zabbix.api_request",
-			Description: "Make a raw Zabbix API request",
+			Description: "Make a raw read-only Zabbix API request (<object>.get methods and apiinfo.version only)",
 			InputSchema: mcp.InputSchema{
 				Type: "object",
 				Properties: map[string]mcp.Property{
 					"method": {
 						Type:        "string",
-						Description: "Zabbix API method (e.g., 'host.get', 'item.get')",
+						Description: "Zabbix API read method (e.g., 'host.get', 'event.get'); write methods are rejected",
 					},
 					"params": {
 						Type:        "object",

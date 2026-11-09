@@ -203,6 +203,9 @@ export default function ToolFormSection({
           className="input-field"
           placeholder={prop.example || ''}
           value={inputValue(current)}
+          // Stored secrets come back as a mask; select it on focus so typing
+          // replaces it instead of appending to the placeholder.
+          onFocus={prop.secret ? (e) => e.target.select() : undefined}
           onChange={(e) => updateSetting(key, inputType === 'number' ? (e.target.value ? Number(e.target.value) : undefined) : e.target.value)}
         />
       </div>

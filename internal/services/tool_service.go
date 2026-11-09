@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -84,38 +85,73 @@ func (s *ToolService) GetToolInstance(id uint) (*database.ToolInstance, error) {
 	return &instance, nil
 }
 
-// UpdateToolInstance updates a tool instance.
-// If logicalName is non-empty it is sanitized via SlugifyLogicalName; otherwise it is re-derived from name.
-func (s *ToolService) UpdateToolInstance(id uint, name string, logicalName string, settings database.JSONB, enabled bool) error {
-	// Get existing instance to preserve ssh_keys
+// ToolInstanceUpdate is a partial update for a tool instance. A nil field
+// leaves the stored value unchanged.
+type ToolInstanceUpdate struct {
+	Name *string
+	// LogicalName: nil = unchanged; "" = re-derive from the (new or stored)
+	// name; anything else is sanitized via SlugifyLogicalName.
+	LogicalName *string
+	// Settings replaces the stored settings object when non-nil. ssh_keys are
+	// always kept from the stored row (managed via the SSH key endpoints), and
+	// secret keys that are omitted or sent as database.ToolSecretMask keep
+	// their stored value.
+	Settings *database.JSONB
+	Enabled  *bool
+}
+
+// UpdateToolInstance applies a partial update to a tool instance.
+func (s *ToolService) UpdateToolInstance(id uint, upd ToolInstanceUpdate) error {
 	var existing database.ToolInstance
 	if err := s.db.First(&existing, id).Error; err != nil {
 		return fmt.Errorf("failed to find tool instance: %w", err)
 	}
 
-	// Always preserve ssh_keys from existing settings - they are managed via dedicated SSH key endpoints
-	if settings != nil {
+	updates := map[string]interface{}{}
+
+	name := existing.Name
+	if upd.Name != nil {
+		name = strings.TrimSpace(*upd.Name)
+		if name == "" {
+			return fmt.Errorf("validation failed: name cannot be empty")
+		}
+		updates["name"] = name
+	}
+
+	if upd.LogicalName != nil {
+		logicalName := *upd.LogicalName
+		if logicalName == "" {
+			logicalName = database.SlugifyLogicalName(name)
+		} else {
+			logicalName = database.SlugifyLogicalName(logicalName)
+		}
+		if logicalName == "" {
+			return fmt.Errorf("validation failed: logical name resolves to empty after sanitization")
+		}
+		updates["logical_name"] = logicalName
+	}
+
+	if upd.Settings != nil {
+		settings := make(database.JSONB, len(*upd.Settings))
+		for k, v := range *upd.Settings {
+			settings[k] = v
+		}
+		// Always preserve ssh_keys from existing settings - they are managed via dedicated SSH key endpoints
 		if existingKeys, ok := existing.Settings["ssh_keys"]; ok {
 			settings["ssh_keys"] = existingKeys
 		} else {
 			delete(settings, "ssh_keys")
 		}
+		database.RestoreToolSecretSettings(settings, existing.Settings)
+		updates["settings"] = settings
 	}
 
-	if logicalName == "" {
-		logicalName = database.SlugifyLogicalName(name)
-	} else {
-		logicalName = database.SlugifyLogicalName(logicalName)
-	}
-	if logicalName == "" {
-		return fmt.Errorf("validation failed: logical name resolves to empty after sanitization")
+	if upd.Enabled != nil {
+		updates["enabled"] = *upd.Enabled
 	}
 
-	updates := map[string]interface{}{
-		"name":         name,
-		"logical_name": logicalName,
-		"settings":     settings,
-		"enabled":      enabled,
+	if len(updates) == 0 {
+		return nil
 	}
 
 	if err := s.db.Model(&database.ToolInstance{}).Where("id = ?", id).Updates(updates).Error; err != nil {

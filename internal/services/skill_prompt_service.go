@@ -518,7 +518,7 @@ Usage (via gateway_call):
 - `+"`get_items_batch`"+`: searches* | hostids, start_search, output, limit_per_search
 - `+"`get_history`"+`: itemids* | history, time_from, time_till, limit, sortfield, sortorder
 - `+"`get_triggers`"+`: hostids, only_true, min_severity, output
-- `+"`api_request`"+`: method* | params
+- `+"`api_request`"+`: method* | params (read methods only: <object>.get, apiinfo.version)
 (* = required)
 
 Usage (via gateway_call):

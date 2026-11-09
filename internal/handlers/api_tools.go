@@ -35,6 +35,7 @@ func (h *APIHandler) handleTools(w http.ResponseWriter, r *http.Request) {
 			api.RespondError(w, http.StatusInternalServerError, "Failed to get tools")
 			return
 		}
+		redactToolInstances(instances)
 		api.RespondJSON(w, http.StatusOK, instances)
 
 	case http.MethodPost:
@@ -69,6 +70,7 @@ func (h *APIHandler) handleTools(w http.ResponseWriter, r *http.Request) {
 			instance = fresh
 		}
 		h.regenerateConnectedTools()
+		redactToolInstance(instance)
 		api.RespondJSON(w, http.StatusCreated, instance)
 
 	default:
@@ -105,7 +107,7 @@ func (h *APIHandler) handleToolByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		h.maskSSHKeys(instance)
+		redactToolInstance(instance)
 		api.RespondJSON(w, http.StatusOK, instance)
 
 	case http.MethodPut:
@@ -118,7 +120,13 @@ func (h *APIHandler) handleToolByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := h.toolService.UpdateToolInstance(uint(id), req.Name, req.LogicalName, req.Settings, req.Enabled); err != nil {
+		upd := services.ToolInstanceUpdate{
+			Name:        req.Name,
+			LogicalName: req.LogicalName,
+			Settings:    req.Settings,
+			Enabled:     req.Enabled,
+		}
+		if err := h.toolService.UpdateToolInstance(uint(id), upd); err != nil {
 			if containsString(err.Error(), "validation failed") {
 				api.RespondError(w, http.StatusBadRequest, err.Error())
 			} else if containsString(err.Error(), "not found") || containsString(err.Error(), "record not found") {
@@ -131,9 +139,13 @@ func (h *APIHandler) handleToolByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		instance, _ := h.toolService.GetToolInstance(uint(id))
-		h.maskSSHKeys(instance)
 		h.regenerateConnectedTools()
+		instance, err := h.toolService.GetToolInstance(uint(id))
+		if err != nil {
+			api.RespondError(w, http.StatusInternalServerError, "Failed to reload tool")
+			return
+		}
+		redactToolInstance(instance)
 		api.RespondJSON(w, http.StatusOK, instance)
 
 	case http.MethodDelete:
@@ -178,18 +190,20 @@ func (h *APIHandler) rejectManagedTool(w http.ResponseWriter, id uint) bool {
 	return true
 }
 
-// maskSSHKeys removes private_key from SSH keys in the response
-func (h *APIHandler) maskSSHKeys(instance *database.ToolInstance) {
-	if instance == nil || instance.Settings == nil {
+// redactToolInstance replaces instance.Settings with a copy safe for API
+// responses: SSH private keys stripped, secret settings masked. Every handler
+// that returns a ToolInstance (directly or nested) must call this first.
+func redactToolInstance(instance *database.ToolInstance) {
+	if instance == nil {
 		return
 	}
+	instance.Settings = database.RedactToolSettings(instance.Settings)
+}
 
-	if keys, ok := instance.Settings["ssh_keys"].([]interface{}); ok {
-		for _, keyData := range keys {
-			if keyMap, ok := keyData.(map[string]interface{}); ok {
-				delete(keyMap, "private_key")
-			}
-		}
+// redactToolInstances applies redactToolInstance to every element in place.
+func redactToolInstances(instances []database.ToolInstance) {
+	for i := range instances {
+		redactToolInstance(&instances[i])
 	}
 }
 
