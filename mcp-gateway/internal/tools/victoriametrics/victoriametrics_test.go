@@ -892,7 +892,7 @@ func TestAPIRequest_CustomMethod(t *testing.T) {
 	})
 
 	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
-		"path":   "/api/v1/admin/snapshot",
+		"path":   "/api/v1/query",
 		"method": "post",
 	})
 	if err != nil {
@@ -970,7 +970,7 @@ func TestAPIRequest_DefaultsToGET(t *testing.T) {
 	})
 
 	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
-		"path": "/test",
+		"path": "/api/v1/status/buildinfo",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1323,7 +1323,7 @@ func TestAPIRequest_EmptyURL(t *testing.T) {
 	tool.configCache.Set(configCacheKey("test-incident"), config)
 
 	_, err := tool.APIRequest(context.Background(), "test-incident", map[string]interface{}{
-		"path": "/test",
+		"path": "/api/v1/status/buildinfo",
 	})
 	if err == nil {
 		t.Fatal("expected error for empty URL")

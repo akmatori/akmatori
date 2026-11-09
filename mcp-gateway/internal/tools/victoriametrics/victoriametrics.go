@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -515,7 +516,40 @@ func (t *VictoriaMetricsTool) Series(ctx context.Context, incidentID string, arg
 	return string(result), nil
 }
 
-// APIRequest performs a generic API request (not cached)
+// readOnlyPathPrefix matches the optional prefix in front of a read endpoint:
+// "/select/<tenant>/prometheus" (cluster vmselect) or "/prometheus".
+var readOnlyPathPrefix = regexp.MustCompile(`^(/select/[^/]+/prometheus|/prometheus)`)
+
+// readOnlyEndpoints matches the VictoriaMetrics endpoints that only read data.
+// Everything else is refused: /api/v1/admin/tsdb/delete_series, /api/v1/import*,
+// /api/v1/write, /influx/write, /snapshot/*, /internal/* and other endpoints
+// that change or delete data (some of them accept GET, so the HTTP method is
+// not a sufficient guard).
+var readOnlyEndpoints = regexp.MustCompile(`^(` +
+	`/api/v1/query|/api/v1/query_range|/api/v1/query_exemplars|` +
+	`/api/v1/series|/api/v1/series/count|/api/v1/labels|/api/v1/label/[^/]+/values|` +
+	`/api/v1/metadata|/api/v1/export|/api/v1/export/csv|/api/v1/export/native|` +
+	`/api/v1/status/[a-z_]+|/federate|/health|/metrics` +
+	`)/?$`)
+
+// IsReadOnlyPath reports whether a decoded API path is a read-only
+// VictoriaMetrics endpoint. Duplicate slashes are collapsed first, so
+// "//api/v1/admin/..." cannot slip past the prefix check.
+func IsReadOnlyPath(path string) bool {
+	for strings.Contains(path, "//") {
+		path = strings.ReplaceAll(path, "//", "/")
+	}
+	if loc := readOnlyPathPrefix.FindStringIndex(path); loc != nil {
+		rest := path[loc[1]:]
+		if rest == "" || rest[0] == '/' {
+			path = rest
+		}
+	}
+	return readOnlyEndpoints.MatchString(path)
+}
+
+// APIRequest performs a generic API request (not cached). It accepts
+// read-only endpoints only (see IsReadOnlyPath), whatever the HTTP method.
 func (t *VictoriaMetricsTool) APIRequest(ctx context.Context, incidentID string, args map[string]interface{}) (string, error) {
 	logicalName := extractLogicalName(args)
 
@@ -544,6 +578,9 @@ func (t *VictoriaMetricsTool) APIRequest(ctx context.Context, incidentID string,
 		return "", fmt.Errorf("invalid path: must not contain query string or fragment (use params argument instead)")
 	}
 	path = decodedPath
+	if !IsReadOnlyPath(path) {
+		return "", fmt.Errorf("victoria_metrics.api_request accepts read-only endpoints only (query, query_range, series, labels, label values, metadata, export, status, health, metrics); %q is not allowed", path)
+	}
 
 	method := http.MethodGet
 	if m, ok := args["method"].(string); ok && m != "" {
