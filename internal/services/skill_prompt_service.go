@@ -539,7 +539,7 @@ gateway_call("zabbix.api_request", {"method": "host.get", "params": {"output": [
 - `+"`range_query`"+`: query*, start*, end*, step* | timeout
 - `+"`label_values`"+`: label_name* | match, start, end
 - `+"`series`"+`: match* | start, end
-- `+"`api_request`"+`: path* | method, params
+- `+"`api_request`"+`: path* | method, params (read-only endpoints only: query, series, labels, metadata, export, status)
 (* = required)
 
 Usage (via gateway_call):

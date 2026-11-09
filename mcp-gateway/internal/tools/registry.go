@@ -1217,13 +1217,13 @@ func (r *Registry) registerVictoriaMetricsTools() {
 	r.server.RegisterTool(
 		mcp.Tool{
 			Name:        "victoria_metrics.api_request",
-			Description: "Make a generic HTTP request to VictoriaMetrics API",
+			Description: "Make a read-only HTTP request to the VictoriaMetrics API (query, query_range, series, labels, label values, metadata, export, status, health, metrics; admin and write endpoints are rejected)",
 			InputSchema: mcp.InputSchema{
 				Type: "object",
 				Properties: map[string]mcp.Property{
 					"path": {
 						Type:        "string",
-						Description: "API path (e.g., '/api/v1/status/tsdb')",
+						Description: "Read-only API path (e.g., '/api/v1/status/tsdb'); an optional '/select/<tenant>/prometheus' or '/prometheus' prefix is allowed",
 					},
 					"method": {
 						Type:        "string",
