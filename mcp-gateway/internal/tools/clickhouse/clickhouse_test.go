@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/akmatori/mcp-gateway/internal/ratelimit"
 )
@@ -466,6 +467,35 @@ func TestHasLimitClause(t *testing.T) {
 				t.Errorf("hasLimitClause(%q) = %v, want %v", tt.query, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWithoutDeadline(t *testing.T) {
+	parent, cancelParent := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancelParent()
+
+	qctx, cancel := withoutDeadline(parent)
+	defer cancel()
+
+	if _, ok := qctx.Deadline(); ok {
+		t.Error("expected no deadline on the query context")
+	}
+
+	select {
+	case <-qctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("query context was not cancelled when the parent deadline passed")
+	}
+}
+
+func TestWithoutDeadline_CancelReleases(t *testing.T) {
+	qctx, cancel := withoutDeadline(context.Background())
+	cancel()
+
+	select {
+	case <-qctx.Done():
+	default:
+		t.Error("expected query context to be cancelled by its cancel func")
 	}
 }
 
