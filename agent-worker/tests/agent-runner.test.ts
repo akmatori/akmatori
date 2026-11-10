@@ -387,6 +387,13 @@ describe("resolveModel", () => {
     expect((model as { compat?: { supportsDeveloperRole?: boolean } }).compat?.supportsDeveloperRole).toBe(false);
   });
 
+  it("should not send store to custom endpoints", () => {
+    // LiteLLM rejects `store` for ollama_chat/ models with 400
+    // UnsupportedParamsError unless the proxy sets drop_params.
+    const model = resolveModel("custom", "my-model", "http://litellm:4000/v1");
+    expect((model as { compat?: { supportsStore?: boolean } }).compat?.supportsStore).toBe(false);
+  });
+
   it("should not force-disable long cache retention for openrouter", () => {
     const model = resolveModel("openrouter", "anthropic/claude-3.5-sonnet");
     expect((model as { compat?: { supportsLongCacheRetention?: boolean } }).compat?.supportsLongCacheRetention).toBeUndefined();
