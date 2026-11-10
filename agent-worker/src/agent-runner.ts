@@ -365,10 +365,14 @@ function resolveModelSpec(
   //   OpenAI-compatible gateways (vLLM/SGLang chat templates) can drop that
   //   role without an error: on gcore's DeepSeek endpoint every one-shot call
   //   ran with no system prompt, so correlation got prose instead of JSON.
+  // - Do not send OpenAI's `store` field to custom endpoints: LiteLLM 1.108.0
+  //   rejects every request to an ollama_chat/ model with 400
+  //   UnsupportedParamsError ['store'] unless the proxy sets drop_params.
   const compatFlags: Record<string, unknown> = {};
   if (provider === "custom") {
     compatFlags.supportsLongCacheRetention = false;
     compatFlags.supportsDeveloperRole = false;
+    compatFlags.supportsStore = false;
   }
   if (provider === "ant-ling") {
     compatFlags.supportsStore = false;
