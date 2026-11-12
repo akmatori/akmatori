@@ -204,7 +204,7 @@ func (h *APIHandler) handleChannels(w http.ResponseWriter, r *http.Request) {
 		// Reload Slack listener mappings so new can_listen channels become
 		// active immediately. Safe to call even when the channel only posts;
 		// the loader filters by can_listen on its own.
-		h.reloadAlertChannels()
+		h.afterChannelMutation()
 		api.RespondJSON(w, http.StatusCreated, toChannelResponse(row))
 
 	default:
@@ -280,7 +280,7 @@ func (h *APIHandler) handleChannelByUUID(w http.ResponseWriter, r *http.Request)
 			api.RespondError(w, integrationErrStatus(err), err.Error())
 			return
 		}
-		h.reloadAlertChannels()
+		h.afterChannelMutation()
 		api.RespondJSON(w, http.StatusOK, toChannelResponse(row))
 
 	case http.MethodDelete:
@@ -288,7 +288,7 @@ func (h *APIHandler) handleChannelByUUID(w http.ResponseWriter, r *http.Request)
 			api.RespondError(w, integrationErrStatus(err), err.Error())
 			return
 		}
-		h.reloadAlertChannels()
+		h.afterChannelMutation()
 		api.RespondNoContent(w)
 
 	default:

@@ -25,6 +25,8 @@ func setupSkillTestDB(t *testing.T) *gorm.DB {
 		&database.ToolInstance{},
 		&database.Incident{},
 		&database.LLMSettings{},
+		&database.Integration{},
+		&database.Channel{},
 	)
 	if err != nil {
 		t.Fatalf("failed to migrate test database: %v", err)
@@ -324,7 +326,7 @@ func TestGenerateSkillMd_NoPythonImports(t *testing.T) {
 	tools := []database.ToolInstance{*toolInstance}
 
 	result := svc.generateSkillMd("test-skill", "Test skill description", "Investigate the server") +
-		generateConnectedToolsSkillMd(tools, nil)
+		generateConnectedToolsSkillMd(tools, nil, false)
 
 	// Should NOT contain old-style Python import statements (sys.path.insert, from scripts.*)
 	if strings.Contains(result, "import sys") {
@@ -560,7 +562,7 @@ func TestGenerateSkillMd_ContainsGatewayCallExamples(t *testing.T) {
 	tools[1].ID = 2
 	_ = svc
 
-	result := generateConnectedToolsSkillMd(tools, nil)
+	result := generateConnectedToolsSkillMd(tools, nil, false)
 
 	// Should contain gateway_call examples
 	if !strings.Contains(result, "gateway_call") {

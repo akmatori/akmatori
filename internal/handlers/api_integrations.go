@@ -360,9 +360,20 @@ func (h *APIHandler) handleIntegrationTest(w http.ResponseWriter, r *http.Reques
 // been — provider can be empty when the row is gone before lookup).
 func (h *APIHandler) afterIntegrationMutation(provider database.MessagingProvider) {
 	h.reloadAlertChannels()
+	if provider == "" || provider == database.MessagingProviderTelegram {
+		// connected-tools/SKILL.md lists telegram.* only while a chat exists.
+		h.regenerateConnectedTools()
+	}
 	if h.slackManager != nil && (provider == "" || provider == database.MessagingProviderSlack) {
 		h.slackManager.TriggerReload()
 	}
+}
+
+// afterChannelMutation reloads the listener mappings and re-renders
+// connected-tools/SKILL.md (its telegram.* section depends on the chats).
+func (h *APIHandler) afterChannelMutation() {
+	h.reloadAlertChannels()
+	h.regenerateConnectedTools()
 }
 
 // isProviderKnown reports whether the supplied provider identifier is one the

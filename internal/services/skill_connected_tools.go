@@ -141,7 +141,7 @@ func (s *SkillService) RegenerateConnectedToolsSkill() error {
 			gatewayTools[ns] = tools
 		}
 	}
-	content := generateConnectedToolsSkillMd(instances, gatewayTools)
+	content := generateConnectedToolsSkillMd(instances, gatewayTools, TelegramToolAvailable(s.db))
 
 	dir := s.GetSkillDir(ConnectedToolsSkillName)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -206,8 +206,29 @@ func hasHandWrittenToolExample(toolType string) bool {
 	return false
 }
 
+// telegramToolSection documents telegram.* in connected-tools/SKILL.md.
+const telegramToolSection = `
+## telegram
+
+Send messages to the chats of the Telegram connector. No logical_name needed.
+
+**Parameters:**
+- ` + "`list_chats`" + `: (no parameters). Returns the chats you may send to (chat id, name, default).
+- ` + "`send_message`" + `: text* (plain text) | chat (chat id or name from list_chats; default: the default chat). At most 10 per run.
+(* = required)
+
+Your final answer reaches the run's channel without this tool. Send a message only when a skill, runbook or operator asks for one, or the team must know now.
+
+Usage (via gateway_call):
+` + "```" + `
+gateway_call("telegram.list_chats", {})
+gateway_call("telegram.send_message", {"chat": "oncall", "text": "db-1 disk is 95% full; investigating"})
+` + "```" + `
+`
+
 // generateConnectedToolsSkillMd renders the connected-tools SKILL.md.
-func generateConnectedToolsSkillMd(instances []database.ToolInstance, gatewayTools map[string][]GatewayTool) string {
+// telegram adds the telegram.* section (the Telegram connector has a chat).
+func generateConnectedToolsSkillMd(instances []database.ToolInstance, gatewayTools map[string][]GatewayTool, telegram bool) string {
 	fm, err := yaml.Marshal(SkillFrontmatter{
 		Name:        ConnectedToolsSkillName,
 		Description: connectedToolsDescription,
@@ -240,7 +261,7 @@ func generateConnectedToolsSkillMd(instances []database.ToolInstance, gatewayToo
 	b.WriteString("- When a tool type has several instances, pass the instance's `logical_name` as the third `gateway_call` argument.\n")
 	b.WriteString("- Use `execute_script` with its built-in `gateway_call()` for batch operations.\n")
 
-	if len(types) == 0 {
+	if len(types) == 0 && !telegram {
 		b.WriteString("\nNo connectors are enabled. Only the built-in tools below are available.\n")
 	}
 	for _, tt := range types {
@@ -264,6 +285,9 @@ func generateConnectedToolsSkillMd(instances []database.ToolInstance, gatewayToo
 			}
 			b.WriteString(generateToolUsageExample(ti))
 		}
+	}
+	if telegram {
+		b.WriteString(telegramToolSection)
 	}
 
 	b.WriteString("\n## Built-in tools\n\nServed by Akmatori itself; no logical_name needed. A run gets only the built-ins its kind allows; the gateway refuses the others.\n")

@@ -22,6 +22,12 @@ returns, enforce it in the gateway per run, never through SKILL.md text.
   shown as connectors. `builtinToolLive` in `tool_authz.go` marks which are served; a name that is
   not live is accepted and stored but left out of the allowlist
 
+- **messaging tools**: `telegram.*` uses the Telegram connector's bot token and chats, so it has
+  no tool instance. Authorized with a type-only `{ToolType: "telegram"}` entry, added wherever
+  connector tools are (incident runs, `tools_enabled` crons) only while `TelegramToolAvailable`
+  (enabled Telegram integration with a `bot_token` and an enabled `can_post` chat). The gateway
+  lists `telegram` in `credentiallessNamespaces`; the API reserves the namespace
+
 | Run kind | Connector tools | Built-ins |
 |---|---|---|
 | Incident (alert, Slack, API request) — `IncidentRunAllowlist` | all enabled | `events`, `incidents`, `runbooks`, `memory` |
