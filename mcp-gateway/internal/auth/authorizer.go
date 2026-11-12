@@ -22,6 +22,9 @@ var credentiallessNamespaces = map[string]bool{
 	"events":    true,
 	"runbooks":  true,
 	"memory":    true,
+	// telegram reads its bot token from the Telegram connector, not from a
+	// tool instance.
+	"telegram": true,
 }
 
 // incidentAllowlist stores an allowlist with its expiry time.

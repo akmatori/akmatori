@@ -121,19 +121,66 @@ func connectorToolEntries(db *gorm.DB) ([]ToolAllowlistEntry, bool) {
 	return entries, true
 }
 
+// MessagingToolTelegram is the gateway namespace of telegram.list_chats and
+// telegram.send_message. It is a connector tool without a tool instance: the
+// gateway reads the bot token and chats of the Telegram connector, so the
+// allowlist entry is type-only.
+const MessagingToolTelegram = "telegram"
+
+// TelegramToolAvailable reports whether the Telegram connector can serve the
+// agent's telegram.* tools: an enabled Telegram integration with a bot token
+// and at least one enabled chat that can post. A lookup error counts as not
+// available.
+func TelegramToolAvailable(db *gorm.DB) bool {
+	var integrations []database.Integration
+	if err := db.Where("provider = ? AND enabled = ?", database.MessagingProviderTelegram, true).Find(&integrations).Error; err != nil {
+		slog.Error("tool authorization: list telegram integrations", "error", err)
+		return false
+	}
+	ids := make([]uint, 0, len(integrations))
+	for _, in := range integrations {
+		if token, _ := in.Credentials["bot_token"].(string); token != "" {
+			ids = append(ids, in.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return false
+	}
+	var n int64
+	if err := db.Model(&database.Channel{}).
+		Where("integration_id IN ? AND enabled = ? AND can_post = ?", ids, true, true).
+		Count(&n).Error; err != nil {
+		slog.Error("tool authorization: count telegram chats", "error", err)
+		return false
+	}
+	return n > 0
+}
+
+// messagingToolEntries returns the type-only entries of the messaging tools
+// the connectors can serve now.
+func messagingToolEntries(db *gorm.DB) []ToolAllowlistEntry {
+	if TelegramToolAvailable(db) {
+		return []ToolAllowlistEntry{{ToolType: MessagingToolTelegram}}
+	}
+	return nil
+}
+
 // IncidentRunAllowlist is the allowlist of every incident run (alert, Slack,
-// API request): all enabled connector tools plus the incident built-ins. A
-// lookup error fails closed: a non-nil empty slice rejects every call.
+// API request): all enabled connector tools, the messaging tools, plus the
+// incident built-ins. A lookup error fails closed: a non-nil empty slice
+// rejects every call.
 func IncidentRunAllowlist(db *gorm.DB) []ToolAllowlistEntry {
 	entries, ok := connectorToolEntries(db)
 	if !ok {
 		return []ToolAllowlistEntry{}
 	}
+	entries = append(entries, messagingToolEntries(db)...)
 	return append(entries, builtinEntries(incidentRunBuiltins)...)
 }
 
 // CronAllowlist is the allowlist of one cron run: all enabled connector tools
-// when ToolsEnabled, plus the job's builtin_tools. A lookup error fails closed.
+// and the messaging tools when ToolsEnabled, plus the job's builtin_tools. A
+// lookup error fails closed.
 func CronAllowlist(db *gorm.DB, job *database.CronJob) []ToolAllowlistEntry {
 	entries := make([]ToolAllowlistEntry, 0)
 	if job.ToolsEnabled {
@@ -142,6 +189,7 @@ func CronAllowlist(db *gorm.DB, job *database.CronJob) []ToolAllowlistEntry {
 			return []ToolAllowlistEntry{}
 		}
 		entries = append(entries, conn...)
+		entries = append(entries, messagingToolEntries(db)...)
 	}
 	return append(entries, builtinEntries(job.BuiltinTools)...)
 }

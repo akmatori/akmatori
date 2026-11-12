@@ -1,6 +1,7 @@
 package services
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -141,6 +142,94 @@ func TestCronAllowlist(t *testing.T) {
 	}
 }
 
+// seedTelegram adds a Telegram integration with one chat. It returns the
+// integration and the chat.
+func seedTelegram(t *testing.T, db *gorm.DB, token string) (database.Integration, database.Channel) {
+	t.Helper()
+	in := database.Integration{UUID: "tg-" + token, Provider: database.MessagingProviderTelegram, Name: "TG",
+		Credentials: database.JSONB{"bot_token": token}, Enabled: true}
+	if err := db.Create(&in).Error; err != nil {
+		t.Fatal(err)
+	}
+	ch := database.Channel{UUID: "ch-" + token, IntegrationID: in.ID, ExternalID: "-1001", DisplayName: "oncall", CanPost: true, Enabled: true}
+	if err := db.Create(&ch).Error; err != nil {
+		t.Fatal(err)
+	}
+	return in, ch
+}
+
+func TestTelegramToolAvailable(t *testing.T) {
+	db := setupSkillTestDB(t)
+	if TelegramToolAvailable(db) {
+		t.Fatal("no integration: must be unavailable")
+	}
+	_, ch := seedTelegram(t, db, "123:abc")
+	if !TelegramToolAvailable(db) {
+		t.Fatal("integration with token and chat: must be available")
+	}
+
+	db.Model(&database.Channel{}).Where("id = ?", ch.ID).Update("can_post", false)
+	if TelegramToolAvailable(db) {
+		t.Error("chat that cannot post: must be unavailable")
+	}
+	db.Model(&database.Channel{}).Where("id = ?", ch.ID).Updates(map[string]any{"can_post": true, "enabled": false})
+	if TelegramToolAvailable(db) {
+		t.Error("disabled chat: must be unavailable")
+	}
+	db.Model(&database.Channel{}).Where("id = ?", ch.ID).Update("enabled", true)
+	db.Model(&database.Integration{}).Where("1 = 1").Update("enabled", false)
+	if TelegramToolAvailable(db) {
+		t.Error("disabled integration: must be unavailable")
+	}
+	db.Model(&database.Integration{}).Where("1 = 1").Updates(map[string]any{"enabled": true, "credentials": database.JSONB{"bot_token": ""}})
+	if TelegramToolAvailable(db) {
+		t.Error("integration without token: must be unavailable")
+	}
+
+	// A Slack chat never makes the telegram tool available.
+	db2 := setupSkillTestDB(t)
+	sl := database.Integration{UUID: "sl", Provider: database.MessagingProviderSlack, Name: "S", Credentials: database.JSONB{"bot_token": "xoxb"}, Enabled: true}
+	db2.Create(&sl)
+	db2.Create(&database.Channel{UUID: "c", IntegrationID: sl.ID, ExternalID: "C1", CanPost: true, Enabled: true})
+	if TelegramToolAvailable(db2) {
+		t.Error("slack integration: must be unavailable")
+	}
+}
+
+func TestAllowlists_Telegram(t *testing.T) {
+	db := setupSkillTestDB(t)
+	seedAuthzTools(t, db)
+
+	_, builtins := entryTypes(IncidentRunAllowlist(db))
+	if builtins[MessagingToolTelegram] {
+		t.Fatal("telegram granted without a Telegram connector")
+	}
+
+	seedTelegram(t, db, "123:abc")
+	_, builtins = entryTypes(IncidentRunAllowlist(db))
+	if !builtins[MessagingToolTelegram] {
+		t.Error("incident runs must get telegram when a chat exists")
+	}
+	_, builtins = entryTypes(CronAllowlist(db, &database.CronJob{ToolsEnabled: true}))
+	if !builtins[MessagingToolTelegram] {
+		t.Error("tools_enabled crons must get telegram")
+	}
+	_, builtins = entryTypes(CronAllowlist(db, &database.CronJob{BuiltinTools: database.StringList{"events"}}))
+	if builtins[MessagingToolTelegram] {
+		t.Error("tools_enabled=false crons must not get telegram")
+	}
+	_, builtins = entryTypes(ProposalChatAllowlist())
+	if builtins[MessagingToolTelegram] {
+		t.Error("proposal chat must not get telegram")
+	}
+}
+
+func TestReservedToolNamespaces_Telegram(t *testing.T) {
+	if !isReservedToolNamespace(MessagingToolTelegram) {
+		t.Error("telegram must be reserved for HTTP connectors and MCP servers")
+	}
+}
+
 func TestNormalizeBuiltinTools(t *testing.T) {
 	got, _, ok := NormalizeBuiltinTools([]string{"proposals", "events", "memory", "events"})
 	if !ok || len(got) != 3 || got[0] != "events" || got[1] != "memory" || got[2] != "proposals" {
@@ -148,5 +237,25 @@ func TestNormalizeBuiltinTools(t *testing.T) {
 	}
 	if _, bad, ok := NormalizeBuiltinTools([]string{"events", "ssh"}); ok || bad != "ssh" {
 		t.Errorf("ssh must be refused, got bad=%q ok=%v", bad, ok)
+	}
+}
+
+func TestConnectedToolsSkillMd_Telegram(t *testing.T) {
+	without := generateConnectedToolsSkillMd(nil, nil, false)
+	if strings.Contains(without, "telegram.send_message") {
+		t.Error("telegram section must be absent without a Telegram chat")
+	}
+	if !strings.Contains(without, "No connectors are enabled") {
+		t.Error("no connectors: the hint must stay")
+	}
+	with := generateConnectedToolsSkillMd(nil, nil, true)
+	if !strings.Contains(with, "## telegram") || !strings.Contains(with, `"telegram.send_message"`) || !strings.Contains(with, `"telegram.list_chats"`) {
+		t.Errorf("telegram section missing:\n%s", with)
+	}
+	if strings.Contains(with, "No connectors are enabled") {
+		t.Error("telegram is a connector tool: the no-connectors hint must go")
+	}
+	if strings.Index(with, "## telegram") > strings.Index(with, "## Built-in tools") {
+		t.Error("telegram belongs with the connector tools, before the built-ins")
 	}
 }

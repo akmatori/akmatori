@@ -19,6 +19,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/tools/clickhouse"
 	"github.com/akmatori/mcp-gateway/internal/tools/events"
 	"github.com/akmatori/mcp-gateway/internal/tools/knowledge"
+	"github.com/akmatori/mcp-gateway/internal/tools/telegram"
 	"github.com/akmatori/mcp-gateway/internal/tools/grafana"
 	"github.com/akmatori/mcp-gateway/internal/tools/httpconnector"
 	"github.com/akmatori/mcp-gateway/internal/tools/incidents"
@@ -84,6 +85,7 @@ type Registry struct {
 	incidentsTool   *incidents.IncidentsTool
 	eventsTool      *events.EventsTool
 	knowledgeTool   *knowledge.Tool
+	telegramTool    *telegram.Tool
 	proposalsTool   *proposals.ProposalsTool
 
 	// HTTP connector state
@@ -194,6 +196,9 @@ func (r *Registry) RegisterAllTools() {
 	// Register runbooks.* and memory.* (no rate limiter — local DB queries)
 	r.registerKnowledgeTools()
 
+	// Register telegram.* (sends through the Telegram connector's bot)
+	r.registerTelegramTools()
+
 	r.logger.Println("All tools registered")
 }
 
@@ -257,6 +262,7 @@ var builtInToolNamespaces = map[string]bool{
 	"events":           true,
 	"runbooks":         true,
 	"memory":           true,
+	"telegram":         true,
 }
 
 // DefaultMCPProxyLoader loads MCP server configs from the database and converts them

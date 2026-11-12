@@ -91,3 +91,20 @@ pi-subagents; behaviour and memory rules are in the `memory-and-runbooks` rule.
   is not proposal chat (`requireRun`), caps are per run id (in memory, a restart resets them)
 - writes go through the gateway's own `database.DB`; the API sees them at once and refreshes
   SKILL.md manifests in `FinishRun`
+
+## Telegram tool (connector-backed, no tool instance): telegram.*
+
+`telegram.list_chats` / `telegram.send_message` (`tools/telegram`, `registerTelegramTools`). The
+gateway reads the bot token and chats from the Telegram connector's `integrations` / `channels`
+rows (mirror models in `database/models_messaging.go`); nothing is configured twice.
+
+- only enabled, `can_post` chats of an enabled Telegram integration with a `bot_token` are
+  accepted, by chat id or name; without `chat` the default chat (or the only chat) is used
+- plain text (no `parse_mode`), split at 4096 runes, at most 4 parts; `chat:topic` external ids
+  post to the forum topic; one retry on 429; errors never carry the request URL (it holds the token)
+- sends need `X-Run-ID` of a running, non-proposal run of the scope; at most 10 sends per run
+  (in memory); a failed send is free. The HTTP proxy follows the Slack proxy toggle, like the API
+- `telegram` is in `builtInToolNamespaces`, `credentiallessNamespaces` and the API's
+  `reservedToolNamespaces`; the allowlist entry comes from `messagingToolEntries` (see the
+  `tool-authorization` rule). `connected-tools/SKILL.md` gets a `## telegram` section while the
+  tool is available; integration and channel CRUD re-render it
