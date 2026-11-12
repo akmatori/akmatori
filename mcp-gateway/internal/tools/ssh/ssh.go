@@ -17,7 +17,11 @@ import (
 
 // SSHTool handles SSH operations
 type SSHTool struct {
-	logger *log.Logger
+	logger   *log.Logger
+	hostDocs hostDocumentTracker
+	// hostDocRoot is a path prefix for the host document files. It is empty
+	// outside tests.
+	hostDocRoot string
 }
 
 // NewSSHTool creates a new SSH tool
@@ -66,6 +70,10 @@ type SSHConfig struct {
 	CommandTimeout    int
 	ConnectionTimeout int
 	KnownHostsPolicy  string
+
+	// ReadHostDocument makes the tool read /etc/agents on the first command
+	// that an incident runs on a host (default: true).
+	ReadHostDocument bool
 }
 
 // ServerResult represents the result of a command on a single server
@@ -77,6 +85,9 @@ type ServerResult struct {
 	ExitCode   int    `json:"exit_code"`
 	DurationMs int64  `json:"duration_ms"`
 	Error      string `json:"error,omitempty"`
+	// HostDocument is set on the first command of an incident on this host,
+	// when the host has an /etc/agents document.
+	HostDocument *HostDocument `json:"host_document,omitempty"`
 }
 
 // ExecuteResult represents the overall execution result
@@ -122,6 +133,7 @@ func (t *SSHTool) getConfig(ctx context.Context, incidentID string, instanceID *
 		ConnectionTimeout: 30,
 		KnownHostsPolicy:  "auto_add",
 		Keys:              make(map[string]*SSHKey),
+		ReadHostDocument:  true,
 	}
 
 	settings := creds.Settings
@@ -184,6 +196,10 @@ func (t *SSHTool) getConfig(ctx context.Context, incidentID string, instanceID *
 
 	if policy, ok := settings["ssh_known_hosts_policy"].(string); ok {
 		config.KnownHostsPolicy = policy
+	}
+
+	if read, ok := settings["read_host_document"].(bool); ok {
+		config.ReadHostDocument = read
 	}
 
 	// Parse ad-hoc connection settings
@@ -509,7 +525,7 @@ func parsePrivateKey(keyData string) (ssh.Signer, error) {
 }
 
 // executeOnServer executes a command on a single server using per-host config
-func (t *SSHTool) executeOnServer(ctx context.Context, hostConfig *SSHHostConfig, command string, config *SSHConfig) ServerResult {
+func (t *SSHTool) executeOnServer(ctx context.Context, incidentID string, hostConfig *SSHHostConfig, command string, config *SSHConfig) ServerResult {
 	startTime := time.Now()
 
 	result := ServerResult{
@@ -533,6 +549,28 @@ func (t *SSHTool) executeOnServer(ctx context.Context, hostConfig *SSHHostConfig
 		return result
 	}
 	defer conn.Close()
+
+	// First command of this incident on this host: read the host document
+	// (/etc/agents). A failure to read it never blocks the command.
+	if config.ReadHostDocument {
+		key := hostDocumentKey(incidentID, hostConfig)
+		if !t.hostDocs.wasRead(key, startTime) {
+			doc, docErr := t.loadHostDocument(ctx, conn, hostConfig.Hostname)
+			if docErr != nil {
+				t.logger.Printf("ssh: host document not read on %s: %v", hostConfig.Hostname, docErr)
+			} else {
+				t.hostDocs.markRead(key, startTime)
+				result.HostDocument = doc
+				// The agent must see the document before its first change on
+				// the host. Hold a write command once; the retry runs.
+				if doc != nil && doc.Content != "" && validator.ValidateCommand(command, false) != nil {
+					result.Error = hostDocumentWriteHold
+					result.DurationMs = time.Since(startTime).Milliseconds()
+					return result
+				}
+			}
+		}
+	}
 
 	// Create session
 	session, err := conn.NewSession()
@@ -688,7 +726,7 @@ func (t *SSHTool) ExecuteCommand(ctx context.Context, incidentID string, command
 		wg.Add(1)
 		go func(idx int, host *SSHHostConfig) {
 			defer wg.Done()
-			results[idx] = t.executeOnServer(ctx, host, command, config)
+			results[idx] = t.executeOnServer(ctx, incidentID, host, command, config)
 		}(i, &targetHosts[i])
 	}
 
