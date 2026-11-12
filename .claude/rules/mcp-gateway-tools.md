@@ -124,3 +124,24 @@ rows (mirror models in `database/models_messaging.go`); nothing is configured tw
 - content limit 32 KiB (kept from the start, cut on a rune boundary, `truncated: true`)
 - setting `read_host_document` (default true) turns it off per SSH instance
 - the rules for the agent travel in `host_document.note`; do not move them into skill prompts
+
+## SSH command policy
+
+Read-only mode (`command_validator.go`) blocks write commands unless the host has
+`allow_write_commands` (ad-hoc hosts: `adhoc_allow_write_commands`). On top of it, each SSH tool
+instance has an operator policy (`command_policy.go`, `ValidateCommandWithPolicy`) for all its hosts:
+
+- `ssh_allowed_commands` / `ssh_denied_commands`: textarea settings, one pattern per line (`#`
+  comments); a JSON array of strings is accepted too. Words match words; `*` in a word matches
+  any characters; a lone `*` is one word, or any remaining words when it is last
+- order: deny (always, also with write access; matches the start of each simple command after env
+  assignments, `sudo` and the program path; `$(...)` and backtick contents are checked too) →
+  write access → allow (whole simple command, never one with `$`, a backtick, `<`, `>`, `&`, `(`,
+  `)`, `{`, `}` or a backslash) → the
+  read-only rules for every part an allow pattern does not cover
+- without allow patterns the read-only path is `ValidateCommand` unchanged. A deny is a guard
+  rail, not a sandbox: with write access `sh -c` can hide a command
+- `connected-tools/SKILL.md` lists both lists for the agent (`extractToolDetails`), and a blocked
+  error appends the allow patterns
+- an allowed write command is still a write for the host-document hold (`ValidateCommand(cmd,
+  false)`): it waits once for the agent to read the host document

@@ -469,6 +469,32 @@ func TestExtractToolDetails_SSH(t *testing.T) {
 	}
 }
 
+func TestExtractToolDetails_SSHCommandPolicy(t *testing.T) {
+	tool := database.ToolInstance{
+		Name:     "ssh-prod",
+		ToolType: database.ToolType{Name: "ssh"},
+		Settings: database.JSONB{
+			"ssh_hosts":            []interface{}{map[string]interface{}{"hostname": "web-01", "address": "10.0.0.1"}},
+			"ssh_allowed_commands": "systemctl restart nginx\r\n# comment\n\n journalctl -u nginx * \n",
+			"ssh_denied_commands":  []interface{}{"reboot", " "},
+		},
+	}
+	details := extractToolDetails(tool)
+	for _, want := range []string{"`systemctl restart nginx`, `journalctl -u nginx *`", "Always denied, on every host: `reboot`"} {
+		if !strings.Contains(details, want) {
+			t.Errorf("details must contain %q:\n%s", want, details)
+		}
+	}
+	if strings.Contains(details, "comment") {
+		t.Error("comments must not be listed")
+	}
+
+	tool.Settings = database.JSONB{"ssh_hosts": tool.Settings["ssh_hosts"]}
+	if d := extractToolDetails(tool); strings.Contains(d, "allowed on read-only") || strings.Contains(d, "denied") {
+		t.Errorf("no policy: no policy lines, got:\n%s", d)
+	}
+}
+
 func TestExtractToolDetails_Zabbix(t *testing.T) {
 	// Zabbix URL is an internal MCP Gateway detail — should NOT appear in SKILL.md
 	tool := database.ToolInstance{
