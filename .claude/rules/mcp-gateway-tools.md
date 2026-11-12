@@ -108,3 +108,19 @@ rows (mirror models in `database/models_messaging.go`); nothing is configured tw
   `reservedToolNamespaces`; the allowlist entry comes from `messagingToolEntries` (see the
   `tool-authorization` rule). `connected-tools/SKILL.md` gets a `## telegram` section while the
   tool is available; integration and channel CRUD re-render it
+
+## SSH host document (/etc/agents)
+
+`tools/ssh/host_document.go`. On the first command of a scope (`X-Incident-ID`) on a host,
+`executeOnServer` opens a second session on the same connection, pipes the loader script to
+`sh -s`, and returns the result as `host_document` on that `ServerResult` (spec: etc-agents.org).
+
+- the script applies the spec's trust check (uid 0, no group/other write) on the host; skipped
+  files come back in `skipped_untrusted_files`, never in `content`
+- a first command that is a write command is held once (`hostDocumentWriteHold`) when the host
+  has trusted content, so the agent reads the document before its first change; the retry runs
+- a read failure is logged and never blocks the command; the next command tries again
+- "already read" is in memory per scope + user@address:port for 12 h; a gateway restart resets it
+- content limit 32 KiB (kept from the start, cut on a rune boundary, `truncated: true`)
+- setting `read_host_document` (default true) turns it off per SSH instance
+- the rules for the agent travel in `host_document.note`; do not move them into skill prompts

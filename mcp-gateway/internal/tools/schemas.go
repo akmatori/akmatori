@@ -212,6 +212,12 @@ func getSSHSchema() ToolTypeSchema {
 					Default:     false,
 					Advanced:    true,
 				},
+				"read_host_document": {
+					Type:        "boolean",
+					Description: "Read the host document (/etc/agents and /etc/agents.d, see etc-agents.org) on the first command that an incident runs on a host, and return it to the agent with the command result. If the first command is a write command, it is held once so that the agent reads the document first.",
+					Default:     true,
+					Advanced:    true,
+				},
 				"allow_adhoc_connections": {
 					Type:        "boolean",
 					Description: "Allow SSH connections to servers not in the ssh_hosts list. The agent can connect to any server using default credentials.",
@@ -245,7 +251,7 @@ func getSSHSchema() ToolTypeSchema {
 				Name:        "execute_command",
 				Description: "Execute a command on all or specified servers in parallel. Commands are validated against read-only mode (blocks rm, mv, kill, etc. by default).",
 				Parameters:  "command: str - The shell command to execute; servers: list[str] - Optional list of hostnames to target (defaults to all)",
-				Returns:     "JSON string with per-server results: {results: [{server, success, stdout, stderr, exit_code, duration_ms}], summary: {total, succeeded, failed}}",
+				Returns:     "JSON string with per-server results: {results: [{server, success, stdout, stderr, exit_code, duration_ms, host_document?}], summary: {total, succeeded, failed}}. host_document is present on the first command on a host that has an /etc/agents file: text that the host's administrators wrote for agents. Read it before you change anything on that host.",
 			},
 			{
 				Name:        "test_connectivity",
