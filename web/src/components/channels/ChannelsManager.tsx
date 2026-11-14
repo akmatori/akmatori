@@ -42,7 +42,7 @@ const EMPTY_FORM: FormState = {
 interface ChannelsManagerProps {
   // Show and create channels of one integration only (connector page).
   integrationUUID?: string;
-  // False for providers that can only post (Telegram, Discord).
+  // False for providers that can only post (Telegram, Discord, Zulip).
   listenSupported?: boolean;
   // Extra per-channel cell, e.g. the formatting rules that apply.
   renderExtra?: (channel: Channel) => ReactNode;
@@ -57,6 +57,8 @@ function externalIDHelp(provider: string): { placeholder: string; help: string }
       return { placeholder: '-1001234567890', help: 'For Telegram: the chat ID (e.g. -1001234567890 or @channelname). Add the bot to the chat first. For a forum topic use chat_id:topic_id.' };
     case 'discord':
       return { placeholder: '123456789012345678', help: 'For Discord: the channel ID (enable Developer Mode, then right-click the channel → Copy Channel ID).' };
+    case 'zulip':
+      return { placeholder: 'alerts', help: 'For Zulip: the channel (stream) name, or its ID. The topic is set on the integration.' };
     default:
       return { placeholder: 'C0123456789', help: 'For Slack: the Channel ID (not the name).' };
   }
