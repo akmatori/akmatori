@@ -13,6 +13,7 @@ const PLATFORM_NOTES: Record<string, string> = {
   slack: 'Slack: Markdown is converted to Slack mrkdwn; long messages are cut to Slack’s size limit.',
   telegram: 'Telegram: Markdown is converted to Telegram HTML; messages over 4096 characters are split.',
   discord: 'Discord: Markdown is sent as is; messages over 2000 characters are split, code blocks stay intact.',
+  zulip: 'Zulip: Markdown is sent as is (mentions become silent); messages over 10000 characters are split, code blocks stay intact.',
 };
 
 interface Target {

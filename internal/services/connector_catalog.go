@@ -74,6 +74,7 @@ var staticCatalog = []ConnectorCatalogEntry{
 	{ID: "slack", Name: "Slack", Category: "messaging", Description: "Post alerts and results; listen to channels and answer mentions.", MessagingProvider: string(database.MessagingProviderSlack), ListenSupported: true},
 	{ID: "telegram", Name: "Telegram", Category: "messaging", Description: "Post alerts and results to Telegram chats; the agent can also send messages to them (telegram.send_message).", MessagingProvider: string(database.MessagingProviderTelegram), Note: "Posting only"},
 	{ID: "discord", Name: "Discord", Category: "messaging", Description: "Post alerts and results to Discord channels.", MessagingProvider: "discord", Note: "Posting only"},
+	{ID: "zulip", Name: "Zulip", Category: "messaging", Description: "Post alerts and results to Zulip channels (streams).", MessagingProvider: string(database.MessagingProviderZulip), Note: "Posting only"},
 	{ID: CatalogIDCustomMCP, Name: "Custom MCP server", Category: "custom", Kind: ConnectorKindCustomMCP, Description: "Connect a remote MCP server by URL. Its tools become available to the agent as soon as the connector is enabled."},
 }
 

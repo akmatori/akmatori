@@ -14,7 +14,7 @@ paths:
 
 Operators configure a messaging `Integration` (provider credentials) and `Channel` rows under it.
 Triggers (alert sources, cron jobs, workspace default) reference Channels by UUID. Slack is
-inbound + outbound; Telegram and Discord are outbound-only Bot API providers (`can_listen=true`
+inbound + outbound; Telegram, Discord and Zulip are outbound-only providers (`can_listen=true`
 is rejected by the channels API).
 
 - never call Slack APIs directly from handlers or services — resolve a `Channel` and go through
@@ -34,11 +34,17 @@ is rejected by the channels API).
 - outbound text handed to a `Provider` is provider-neutral GitHub-flavored Markdown; each provider
   renders it and enforces its own limit at send time (Slack: `MarkdownToSlack` + 8000-byte cap;
   Telegram: HTML `parse_mode`, 4096-char split, plain-text retry on "can't parse entities";
-  Discord: Markdown, 2000-char split, code fences closed/reopened). Never pre-render mrkdwn
+  Discord: Markdown, 2000-char split, code fences closed/reopened; Zulip: Markdown, mentions made
+  silent (`@**x**` → `@_**x**`), 10000-char split, code fences closed/reopened). Never pre-render mrkdwn
   before a `Provider` call or before storing a response; Slack-only direct-client paths
   (`finalizeSlackMessageBody`, mention replies) convert at that boundary
 - Telegram/Discord read `bot_token` from the channel's Integration at call time (loaded when not
   preloaded); Telegram external_id = chat id, optional `chat:topic` suffix; Discord = channel id
+- Zulip (outbound only): credentials `site_url`, `email`, `api_key` (bot, HTTP basic auth;
+  required on create) and optional `topic` (default "Akmatori", cut to 60 chars); external_id =
+  channel (stream) name or id. API calls are form-encoded through `botHTTP` (timeout, proxy, one
+  429 retry). A thread reply posts to the parent's stream + topic (`GET /messages/{id}` →
+  `message.display_recipient` / `message.subject`), falling back to the channel's topic
 - providers that implement `messaging.CredentialTester` back `POST /api/integrations/{uuid}/test`
 
 ## Slack investigation UX

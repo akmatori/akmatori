@@ -23,7 +23,7 @@ export interface ProviderUIConfig {
 }
 
 // PROVIDER_CONFIGS is the single source of truth for which providers the UI
-// supports. Telegram and Discord are outbound-only: their channels can post
+// supports. Telegram, Discord and Zulip are outbound-only: their channels can post
 // alerts and cron results but cannot listen (the API rejects can_listen).
 export const PROVIDER_CONFIGS: ProviderUIConfig[] = [
   {
@@ -109,6 +109,13 @@ export const PROVIDER_CONFIGS: ProviderUIConfig[] = [
         label: 'API Key',
         secret: true,
         placeholder: 'Zulip bot API key',
+        hint: 'Create a bot under Personal settings → Bots; the bot must be subscribed to (or allowed to post in) each channel.',
+      },
+      {
+        name: 'topic',
+        label: 'Topic (optional)',
+        placeholder: 'Akmatori',
+        hint: 'Every alert and cron result is posted under this topic; replies stay in the topic of the original message.',
       },
     ],
   },

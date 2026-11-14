@@ -37,6 +37,13 @@ func validateIntegrationCredentials(provider database.MessagingProvider, creds d
 			return fmt.Errorf("credentials.bot_token is required for %s integrations", provider)
 		}
 	}
+	if provider == database.MessagingProviderZulip {
+		for _, key := range []string{"site_url", "email", "api_key"} {
+			if v, _ := creds[key].(string); strings.TrimSpace(v) == "" {
+				return fmt.Errorf("credentials.%s is required for zulip integrations", key)
+			}
+		}
+	}
 	return nil
 }
 
