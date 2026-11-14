@@ -244,6 +244,21 @@ func getSSHSchema() ToolTypeSchema {
 					Advanced:    true,
 					Warning:     "Enabling this allows destructive commands like rm, mv, kill on any server the agent connects to.",
 				},
+				"ssh_allowed_commands": {
+					Type:        "string",
+					Format:      "textarea",
+					Description: "Allowed commands: one pattern per line, also allowed on read-only hosts. A pattern matches the whole command; a last word \"*\" allows any arguments, \"*\" in a word matches any characters. Commands with $ ` < > & ( ) { } \\ never match. Lines starting with # are comments.",
+					Example:     "systemctl restart nginx\njournalctl -u nginx *\nsudo systemctl reload haproxy",
+					Advanced:    true,
+					Warning:     "Each pattern lets the agent run that command on every host of this tool without write access.",
+				},
+				"ssh_denied_commands": {
+					Type:        "string",
+					Format:      "textarea",
+					Description: "Denied commands: one pattern per line, blocked on every host, also hosts with write commands allowed. A pattern matches the start of the command after sudo and the program path (\"reboot\" denies \"sudo /sbin/reboot now\"). A guard rail, not a sandbox: with write access a shell can hide a command (sh -c).",
+					Example:     "reboot\nshutdown\nrm -rf *\nsystemctl stop *",
+					Advanced:    true,
+				},
 			},
 		},
 		Functions: []ToolFunction{

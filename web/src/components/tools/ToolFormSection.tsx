@@ -158,6 +158,12 @@ export default function ToolFormSection({
           <label className="block text-sm font-medium text-fg mb-1">
             {prop.description || key}
             {isRequired && <span className="text-red-500 ml-1">*</span>}
+            {prop.warning && (
+              <span className="block mt-1 text-yellow-600 dark:text-yellow-400 text-xs">
+                <AlertTriangle className="w-3 h-3 inline mr-1" />
+                {prop.warning}
+              </span>
+            )}
           </label>
           <textarea
             className="input-field min-h-[100px] font-mono text-sm"

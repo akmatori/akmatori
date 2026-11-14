@@ -66,6 +66,10 @@ type SSHConfig struct {
 	AdhocDefaultPort        int    // default: 22
 	AdhocAllowWriteCommands bool   // default: false
 
+	// Operator command policy (ssh_allowed_commands / ssh_denied_commands),
+	// applied to every host of the instance
+	CommandPolicy *CommandPolicy
+
 	// Global settings
 	CommandTimeout    int
 	ConnectionTimeout int
@@ -218,6 +222,10 @@ func (t *SSHTool) getConfig(ctx context.Context, incidentID string, instanceID *
 	if allow, ok := settings["adhoc_allow_write_commands"].(bool); ok {
 		config.AdhocAllowWriteCommands = allow
 	}
+	config.CommandPolicy = NewCommandPolicy(
+		ParseCommandPatterns(settings["ssh_allowed_commands"]),
+		ParseCommandPatterns(settings["ssh_denied_commands"]),
+	)
 
 	// Parse ssh_hosts array
 	hostsData, ok := settings["ssh_hosts"].([]interface{})
@@ -533,9 +541,9 @@ func (t *SSHTool) executeOnServer(ctx context.Context, incidentID string, hostCo
 		ExitCode: -1,
 	}
 
-	// Validate command against read-only mode
+	// Validate command against the operator policy and read-only mode
 	validator := NewCommandValidator()
-	if err := validator.ValidateCommand(command, hostConfig.AllowWriteCommands); err != nil {
+	if err := validator.ValidateCommandWithPolicy(command, hostConfig.AllowWriteCommands, config.CommandPolicy); err != nil {
 		result.Error = err.Error()
 		result.DurationMs = time.Since(startTime).Milliseconds()
 		return result

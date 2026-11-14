@@ -949,10 +949,50 @@ func extractToolDetails(tool database.ToolInstance) string {
 			}
 		}
 
+		// Operator command policy (enforced by the gateway on every host)
+		if allowed := sshCommandPatterns(tool.Settings["ssh_allowed_commands"]); len(allowed) > 0 {
+			fmt.Fprintf(&details, "Also allowed on read-only hosts (a last \"*\" = any arguments; no $ ` < > & ( ) { } \\ in such commands): %s\n", quotePatterns(allowed))
+		}
+		if denied := sshCommandPatterns(tool.Settings["ssh_denied_commands"]); len(denied) > 0 {
+			fmt.Fprintf(&details, "Always denied, on every host: %s\n", quotePatterns(denied))
+		}
+
 		return details.String()
 	}
 
 	return ""
+}
+
+// sshCommandPatterns reads an SSH command pattern setting (one pattern per
+// line, or a JSON array), like ParseCommandPatterns in the gateway.
+func sshCommandPatterns(v interface{}) []string {
+	var lines []string
+	switch t := v.(type) {
+	case string:
+		lines = strings.Split(t, "\n")
+	case []interface{}:
+		for _, item := range t {
+			if s, ok := item.(string); ok {
+				lines = append(lines, s)
+			}
+		}
+	}
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		l = strings.Join(strings.Fields(l), " ")
+		if l != "" && !strings.HasPrefix(l, "#") {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func quotePatterns(patterns []string) string {
+	q := make([]string, len(patterns))
+	for i, p := range patterns {
+		q[i] = "`" + p + "`"
+	}
+	return strings.Join(q, ", ")
 }
 
 // truncateString truncates a string to max rune length, safe for multi-byte UTF-8
