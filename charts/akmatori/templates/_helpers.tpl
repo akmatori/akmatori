@@ -54,6 +54,28 @@ app.kubernetes.io/component: {{ index . 1 }}
 {{- end }}
 {{- end -}}
 
+{{/*
+Affinity for the two pods that mount the data PVC (api, agent). With a
+ReadWriteOnce volume both must run on one node. Each pod requires a node that
+runs either of them, so the pod that restarts follows the pod that still runs
+(and still holds the volume). The first pod of a fresh install matches its own
+term, which the scheduler allows when no other matching pod exists.
+*/}}
+{{- define "akmatori.dataAffinity" -}}
+{{- if eq .Values.persistence.accessMode "ReadWriteOnce" }}
+affinity:
+  podAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: {{ .Chart.Name }}
+            app.kubernetes.io/instance: {{ .Release.Name }}
+          matchExpressions:
+            - { key: app.kubernetes.io/component, operator: In, values: [api, agent] }
+        topologyKey: kubernetes.io/hostname
+{{- end }}
+{{- end -}}
+
 {{/* Init container that waits for the bundled PostgreSQL (compose: depends_on service_healthy). */}}
 {{- define "akmatori.waitForPostgres" -}}
 {{- if .Values.postgresql.enabled }}

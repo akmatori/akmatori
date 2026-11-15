@@ -1,17 +1,12 @@
-{{- $api := printf "%s:3000" (include "akmatori.apiHost" .) -}}
-{{- $gw := printf "%s:8080" (include "akmatori.gatewayHost" .) -}}
-{{- $ui := printf "%s:80" (include "akmatori.frontendHost" .) -}}
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ include "akmatori.fullname" . }}-proxy
-  labels:
-    {{- include "akmatori.labels" . | nindent 4 }}
-    app.kubernetes.io/component: proxy
-data:
-  # Same routes as proxy/nginx.conf. Kubernetes Service IPs are stable, so
-  # static upstreams are enough here.
-  default.conf: |
+{{- /*
+nginx config: same routes as proxy/nginx.conf. Kubernetes Service IPs are
+stable, so static upstreams are enough. Defined once so the Deployment can
+hash the full text (any change restarts nginx).
+*/ -}}
+{{- define "akmatori.proxyConf" }}
+{{- $api := printf "%s:3000" (include "akmatori.apiHost" .) }}
+{{- $gw := printf "%s:8080" (include "akmatori.gatewayHost" .) }}
+{{- $ui := printf "%s:80" (include "akmatori.frontendHost" .) }}
     upstream frontend { server {{ $ui }}; }
     upstream backend { server {{ $api }}; }
     upstream mcp_gateway { server {{ $gw }}; }
@@ -72,6 +67,16 @@ data:
             proxy_set_header X-Forwarded-Proto $scheme;
         }
     }
+{{ end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "akmatori.fullname" . }}-proxy
+  labels:
+    {{- include "akmatori.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+data:
+  default.conf: |{{ include "akmatori.proxyConf" . }}
 ---
 apiVersion: v1
 kind: Service
@@ -114,7 +119,7 @@ spec:
       labels:
         {{- include "akmatori.selector" (list . "proxy") | nindent 8 }}
       annotations:
-        checksum/config: {{ printf "%s|%s|%s|%s" $api $gw $ui .Values.proxyServer.clientMaxBodySize | sha256sum | trunc 16 }}
+        checksum/config: {{ include "akmatori.proxyConf" . | sha256sum }}
     spec:
       containers:
         - name: nginx

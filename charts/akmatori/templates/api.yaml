@@ -86,17 +86,15 @@ spec:
             {{- with .Values.baseUrl }}
             - { name: AKMATORI_BASE_URL, value: {{ . | quote }} }
             {{- end }}
+            # Optional keys: a missing key leaves the variable unset (setup
+            # wizard / JWT secret from the database).
             {{- $authSecret := default (include "akmatori.secretName" .) .Values.existingAuthSecret }}
-            {{- if or .Values.existingAuthSecret .Values.adminPassword }}
             - name: ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef: { name: {{ $authSecret }}, key: admin-password, optional: true }
-            {{- end }}
-            {{- if or .Values.existingAuthSecret .Values.jwtSecret }}
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef: { name: {{ $authSecret }}, key: jwt-secret, optional: true }
-            {{- end }}
             {{- include "akmatori.proxyEnv" . | nindent 12 }}
             {{- with .Values.api.extraEnv }}
             {{- toYaml . | nindent 12 }}
@@ -125,6 +123,7 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: {{ include "akmatori.dataClaim" . }}
+      {{- include "akmatori.dataAffinity" . | nindent 6 }}
       {{- with .Values.api.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -28,16 +28,7 @@ spec:
         runAsUser: 1001
         runAsGroup: 1001
         runAsNonRoot: true
-      {{- if eq .Values.persistence.accessMode "ReadWriteOnce" }}
-      # The data volume is ReadWriteOnce: run next to the API pod.
-      affinity:
-        podAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchLabels:
-                  {{- include "akmatori.selector" (list . "api") | nindent 18 }}
-              topologyKey: kubernetes.io/hostname
-      {{- end }}
+      {{- include "akmatori.dataAffinity" . | nindent 6 }}
       initContainers:
         # The API pod creates the data subdirectories. If they were missing
         # when the subPath mounts below are set up, the kubelet would create

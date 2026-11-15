@@ -127,5 +127,12 @@ externalDatabase:
 # release. Needs a CNI that enforces NetworkPolicy (Calico, Cilium, ...).
 networkPolicy:
   enabled: true
+  # The policies above limit ingress only, so they cannot protect a database
+  # outside the release. With an external PostgreSQL, list its address here
+  # (e.g. ["10.0.5.20/32"]): the agent then gets an egress policy that allows
+  # everything except these CIDRs. Do the same for other hosts the agent must
+  # not reach (cloud metadata is 169.254.169.254/32). To remove the policy,
+  # set it to [] (with --reuse-values, null keeps the old list).
+  agentEgressDenyCIDRs: []
 
 podSecurityContext: {}

@@ -78,8 +78,11 @@ ingress:
 ```
 
 ```bash
-helm upgrade --install akmatori ./akmatori/charts/akmatori -n akmatori -f values-prod.yaml
+helm upgrade akmatori ./akmatori/charts/akmatori -n akmatori --reuse-values -f values-prod.yaml
 ```
+
+Without `--reuse-values`, `helm upgrade` drops the values that you set before with `--set`.
+The simplest rule: keep all your settings in one values file and always pass it.
 
 **LoadBalancer** (no Ingress controller): set `proxyServer.service.type=LoadBalancer`.
 Use `proxyServer.service.loadBalancerSourceRanges` to limit the source addresses. This gives
@@ -98,10 +101,11 @@ The main values (see [`values.yaml`](../charts/akmatori/values.yaml) for all of 
 | `adminPassword`, `jwtSecret` | empty | Skip the setup wizard / fix the JWT secret. |
 | `existingAuthSecret` | empty | Secret with the keys `admin-password` and `jwt-secret`. |
 | `persistence.size` | `10Gi` | Shared data volume (`/akmatori`). |
-| `persistence.accessMode` | `ReadWriteOnce` | With `ReadWriteOnce`, the agent pod runs on the API pod's node. |
+| `persistence.accessMode` | `ReadWriteOnce` | With `ReadWriteOnce`, the API and agent pods run on one node. |
 | `postgresql.enabled` | `true` | `false` = use `externalDatabase.url` or `externalDatabase.existingSecret`. |
 | `proxy.httpProxy`, `proxy.httpsProxy` | empty | Outbound HTTP proxy for the API, gateway and agent. |
 | `networkPolicy.enabled` | `true` | NetworkPolicies that copy the Docker networks. |
+| `networkPolicy.agentEgressDenyCIDRs` | `[]` | CIDRs the agent must not reach (set it for an external database). |
 | `*.resources` | small | Requests and limits per component. |
 
 ### External PostgreSQL
@@ -110,8 +114,13 @@ The main values (see [`values.yaml`](../charts/akmatori/values.yaml) for all of 
 kubectl -n akmatori create secret generic akmatori-db \
   --from-literal=database-url='postgres://akmatori:PASSWORD@db.example.com:5432/akmatori?sslmode=require'
 helm upgrade --install akmatori ./akmatori/charts/akmatori -n akmatori \
-  --set postgresql.enabled=false --set externalDatabase.existingSecret=akmatori-db
+  --set postgresql.enabled=false --set externalDatabase.existingSecret=akmatori-db \
+  --set 'networkPolicy.agentEgressDenyCIDRs={10.0.5.20/32}'
 ```
+
+The chart's NetworkPolicies protect only the bundled PostgreSQL. For an external database,
+put its address in `networkPolicy.agentEgressDenyCIDRs` (above, `10.0.5.20/32`), or let the
+database accept connections only from the API and gateway pods.
 
 ### Corporate HTTP proxy
 
@@ -128,7 +137,8 @@ Image pulls through a proxy are a node (container runtime) setting; allow `ghcr.
 
 The chart keeps the isolation of the Docker install:
 
-- The agent worker runs as UID 1001 and has no access to PostgreSQL (NetworkPolicy).
+- The agent worker runs as UID 1001 and has no access to the bundled PostgreSQL (NetworkPolicy;
+  for an external database see [External PostgreSQL](#external-postgresql)).
   It has no LLM keys or tool secrets in its environment; the API sends LLM keys over the
   WebSocket, and the MCP gateway reads tool credentials from the database.
 - The agent mounts skills, context, runbook and memory files read-only. It writes only to
@@ -143,7 +153,15 @@ git -C akmatori pull
 helm upgrade akmatori ./akmatori/charts/akmatori -n akmatori --reuse-values --wait
 ```
 
-The generated database password stays in the Secret `akmatori-secrets` across upgrades.
+The Secret `akmatori-secrets` keeps the database password, and the admin password and JWT
+secret if you set them, across upgrades, also when a later upgrade does not pass them.
+To remove the admin password from the environment, delete the `admin-password` key from the
+Secret and restart the API; set a password in the UI first, or the API returns to setup mode.
+
+The chart refuses a new `postgresql.password` on an existing install: PostgreSQL keeps the
+old password in its data directory. To change it, run `ALTER ROLE akmatori PASSWORD '...'`
+in PostgreSQL, then edit the `postgres-password` and `database-url` keys in the Secret, and
+restart the API and the gateway.
 To pin a build, set `image.tag` (for example `0.4.0` or `main-<sha>`). The API and the agent
 use the `Recreate` strategy, so there is a short downtime during an upgrade.
 
@@ -172,6 +190,6 @@ kubectl delete namespace akmatori
 |---|---|
 | Agent log: `Unexpected server response: 503` | Setup mode. Set the admin password in the UI. |
 | `akmatori-postgres-0` is `Pending` | No default StorageClass. Set `postgresql.persistence.storageClass`. |
-| Agent pod is `Pending` with a pod affinity message | The data volume is `ReadWriteOnce` and the API pod's node is full. Add capacity, or use a `ReadWriteMany` StorageClass with `persistence.accessMode=ReadWriteMany`. |
+| API or agent pod is `Pending` with a pod affinity message | The data volume is `ReadWriteOnce`, so the API and the agent run on one node, and that node is full. Add capacity, or use a `ReadWriteMany` StorageClass with `persistence.accessMode=ReadWriteMany`. |
 | Agent init container prints `waiting for /akmatori/...` | The API pod has not started yet. Check `kubectl -n akmatori describe pod -l app.kubernetes.io/component=api`. |
 | LLM calls time out | The cluster has no outbound HTTPS. Set `proxy.httpsProxy`, or allow egress to your provider. |
