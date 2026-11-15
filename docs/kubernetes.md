@@ -25,12 +25,20 @@ The names above are for the release name `akmatori`. Another release name gives 
 
 ## Install
 
+Each release publishes the chart to GHCR as an OCI chart, with the same version as the
+release. The chart version also sets the default image tag.
+
 ```bash
-git clone --depth 1 https://github.com/akmatori/akmatori.git
-helm upgrade --install akmatori ./akmatori/charts/akmatori \
+CHART=oci://ghcr.io/akmatori/charts/akmatori
+helm upgrade --install akmatori $CHART --version 0.5.0 \
   --namespace akmatori --create-namespace --wait
 kubectl -n akmatori get pods
 ```
+
+To install from a git checkout instead (for example to test `main`), set
+`CHART=./akmatori/charts/akmatori` after
+`git clone --depth 1 https://github.com/akmatori/akmatori.git`, and leave out `--version`.
+The commands below use `$CHART` for both ways.
 
 All six pods must be `Running` and `READY 1/1`. The first start takes 1–3 minutes: the
 API waits for PostgreSQL and runs the database migrations.
@@ -79,7 +87,7 @@ ingress:
 ```
 
 ```bash
-helm upgrade akmatori ./akmatori/charts/akmatori -n akmatori --reset-then-reuse-values -f values-prod.yaml
+helm upgrade akmatori $CHART -n akmatori --reset-then-reuse-values -f values-prod.yaml
 ```
 
 Without `--reset-then-reuse-values` (Helm 3.14 or later), `helm upgrade` drops the values
@@ -116,7 +124,7 @@ The main values (see [`values.yaml`](../charts/akmatori/values.yaml) for all of 
 ```bash
 kubectl -n akmatori create secret generic akmatori-db \
   --from-literal=database-url='postgres://akmatori:PASSWORD@db.example.com:5432/akmatori?sslmode=require'
-helm upgrade --install akmatori ./akmatori/charts/akmatori -n akmatori \
+helm upgrade --install akmatori $CHART -n akmatori \
   --set postgresql.enabled=false --set externalDatabase.existingSecret=akmatori-db \
   --set 'networkPolicy.agentEgressDenyCIDRs={10.0.5.20/32}'
 ```
@@ -134,7 +142,7 @@ only allow traffic, so another policy that allows a listed CIDR for the agent ca
 ### Corporate HTTP proxy
 
 ```bash
-helm upgrade --install akmatori ./akmatori/charts/akmatori -n akmatori \
+helm upgrade --install akmatori $CHART -n akmatori \
   --set proxy.httpProxy=http://proxy.corp:3128 --set proxy.httpsProxy=http://proxy.corp:3128
 ```
 
@@ -158,9 +166,12 @@ The chart keeps the isolation of the Docker install:
 ## Upgrade
 
 ```bash
-git -C akmatori pull
-helm upgrade akmatori ./akmatori/charts/akmatori -n akmatori --reset-then-reuse-values --wait
+helm upgrade akmatori $CHART --version <new-version> -n akmatori --reset-then-reuse-values --wait
 ```
+
+From a git checkout: run `git -C akmatori pull` first and leave out `--version`.
+Read the release notes before an upgrade: some releases change or delete data on the
+first start.
 
 The Secret `akmatori-secrets` keeps the database password, and the admin password and JWT
 secret if you set them, across upgrades, also when a later upgrade does not pass them.
@@ -189,7 +200,7 @@ PostgreSQL keeps the old password in its data directory. To change it:
    file. With `--reset-then-reuse-values`, pass `--set postgresql.password=<new>` once.
    Otherwise the next upgrade compares the old value with the new Secret and stops.
 
-To pin a build, set `image.tag` (for example `0.4.0` or `main-<sha>`). The API and the agent
+To pin a build, set `image.tag` (for example `0.5.0` or `main-<sha>`). The API and the agent
 use the `Recreate` strategy, so there is a short downtime during an upgrade.
 
 Back up the database before an upgrade:

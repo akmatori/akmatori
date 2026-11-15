@@ -2,8 +2,8 @@ apiVersion: v2
 name: akmatori
 description: Akmatori, the AI agent for SRE and on-call teams (API, agent worker, MCP gateway, web UI, PostgreSQL)
 type: application
-version: 0.1.0
-appVersion: "0.4.0"
+version: 0.5.0
+appVersion: "0.5.0"
 home: https://akmatori.com
 sources:
   - https://github.com/akmatori/akmatori
