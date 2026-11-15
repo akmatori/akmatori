@@ -1,0 +1,151 @@
+# Default values for the Akmatori chart.
+# The layout follows docker-compose.yml: one API, one agent worker, one MCP
+# gateway, the web UI, an nginx proxy in front of them, and PostgreSQL.
+
+image:
+  registry: ghcr.io/akmatori
+  # Image tag for api, agent, mcp-gateway and frontend. Empty = .Chart.AppVersion.
+  # Use "main" to track the main branch, or a fixed "main-<sha>" build.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Public URL of the install (used in Slack/Telegram links). Optional; you can
+# also set it later in Settings -> General.
+baseUrl: ""
+
+# First-run secrets. Leave empty to use the setup wizard (admin password) and
+# an auto-generated JWT secret stored in the database.
+adminPassword: ""
+jwtSecret: ""
+# Use an existing Secret for the values above instead (keys: admin-password,
+# jwt-secret). Missing keys are ignored.
+existingAuthSecret: ""
+
+# Outbound HTTP proxy for the API, gateway and agent (LLM and tool traffic).
+# In-cluster service names are added to NO_PROXY automatically.
+proxy:
+  httpProxy: ""
+  httpsProxy: ""
+  noProxy: ""
+
+api:
+  # The API runs crons and holds agent WebSocket sessions: keep one replica.
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+
+mcpGateway:
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 512Mi }
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+
+agent:
+  # Runs the pi coding agent per incident; size it for your LLM concurrency.
+  resources:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits: { memory: 2Gi }
+  codemode: "0"
+  openrouterAttribution: "1"
+  extraEnv: []
+  # pi session data (~/.pi) is an emptyDir: Akmatori starts a fresh agent
+  # session per turn and sends LLM keys over the WebSocket.
+  # With persistence.accessMode=ReadWriteOnce the agent runs on the API's node
+  # and also gets api.nodeSelector and api.tolerations (merged with these).
+  nodeSelector: {}
+  tolerations: []
+
+frontend:
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { memory: 128Mi }
+
+# nginx in front of the UI, API and the public part of the MCP gateway.
+# This is the only Service you expose (Ingress, LoadBalancer or port-forward).
+proxyServer:
+  image: nginx:1.29-alpine
+  service:
+    type: ClusterIP # LoadBalancer or NodePort to expose it without an Ingress
+    port: 80
+    annotations: {}
+    loadBalancerSourceRanges: []
+  # Max body size for context file uploads and webhooks.
+  clientMaxBodySize: 50m
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { memory: 128Mi }
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Example:
+  #   cert-manager.io/cluster-issuer: letsencrypt
+  #   nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  hosts:
+    - host: akmatori.example.com
+  tls: []
+  #  - secretName: akmatori-tls
+  #    hosts: [akmatori.example.com]
+
+# Shared data volume (/akmatori): skills, context files, runbook and memory
+# mirrors, incident work directories. The API, and the agent worker mount it.
+# With ReadWriteOnce the agent pod is pinned to the API pod's node.
+persistence:
+  size: 10Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  existingClaim: ""
+
+postgresql:
+  # false = use externalDatabase below.
+  enabled: true
+  image: postgres:16-alpine
+  database: akmatori
+  username: akmatori
+  # Empty = generated once and kept in the Secret across upgrades.
+  password: ""
+  persistence:
+    size: 10Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+
+externalDatabase:
+  # Full URL, e.g. postgres://user:pass@host:5432/akmatori?sslmode=require
+  url: ""
+  # Or a Secret that holds the URL.
+  existingSecret: ""
+  existingSecretKey: database-url
+
+# NetworkPolicies that copy the Docker Compose isolation: the agent worker
+# cannot reach PostgreSQL, and only the proxy is reachable from outside the
+# release. Needs a CNI that enforces NetworkPolicy (Calico, Cilium, ...).
+networkPolicy:
+  enabled: true
+  # The policies above limit ingress only, so they cannot protect a database
+  # outside the release. With an external PostgreSQL, list its address here
+  # (e.g. ["10.0.5.20/32"]): the agent then gets an egress policy that allows
+  # everything except these CIDRs. Do the same for other hosts the agent must
+  # not reach (cloud metadata is 169.254.169.254/32). To remove the policy,
+  # set it to [] (when Helm reuses values, null keeps the old list). IPv4 and IPv6
+  # CIDRs are both accepted.
+  agentEgressDenyCIDRs: []
+  # Extra egress rules for the agent, used only with agentEgressDenyCIDRs.
+  # On Cilium, CIDR rules do not match pods, so allow in-cluster destinations
+  # here, for example an HTTP proxy in namespace "proxy":
+  #   - to:
+  #       - namespaceSelector:
+  #           matchLabels: { kubernetes.io/metadata.name: proxy }
+  #     ports:
+  #       - { port: 3128, protocol: TCP }
+  agentEgressExtraRules: []
+
+podSecurityContext: {}

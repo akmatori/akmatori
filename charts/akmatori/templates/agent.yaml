@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "akmatori.fullname" . }}-agent
+  labels:
+    {{- include "akmatori.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "akmatori.selector" (list . "agent") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "akmatori.selector" (list . "agent") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # UID 1001 and no fsGroup: the agent reads the API's files but cannot
+      # change them (same as docker-compose.yml). It writes only to the
+      # per-incident directories, which the API creates with mode 0777.
+      securityContext:
+        runAsUser: 1001
+        runAsGroup: 1001
+        runAsNonRoot: true
+      {{- include "akmatori.dataAffinity" . | nindent 6 }}
+      initContainers:
+        # The API pod creates the data subdirectories. If they were missing
+        # when the subPath mounts below are set up, the kubelet would create
+        # them as root and the API could not write to them.
+        - name: wait-for-data-dirs
+          image: {{ include "akmatori.image" (list . "agent") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-c", "for d in incidents context skills runbooks memory extensions; do until [ -d /data/$d ]; do echo waiting for /akmatori/$d; sleep 2; done; done"]
+          volumeMounts:
+            - { name: data, mountPath: /data, readOnly: true }
+        # pi loads extensions from ~/.pi/agent/extensions. A volume mounted
+        # inside the sessions emptyDir would create ~/.pi/agent as root
+        # (EACCES for pi), so link it to the read-only mount instead.
+        - name: link-extensions
+          image: {{ include "akmatori.image" (list . "agent") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-c", "mkdir -p /home/agent/.pi/agent && ln -sfn /akmatori/extensions /home/agent/.pi/agent/extensions"]
+          volumeMounts:
+            - name: sessions
+              mountPath: /home/agent/.pi
+      containers:
+        - name: agent
+          image: {{ include "akmatori.image" (list . "agent") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - { name: API_WS_URL, value: "ws://{{ include "akmatori.apiHost" . }}:3000/ws/agent" }
+            - { name: MCP_GATEWAY_URL, value: "http://{{ include "akmatori.gatewayHost" . }}:8080" }
+            - { name: WORKSPACE_DIR, value: /workspaces }
+            - { name: SKILLS_DIR, value: /akmatori/skills }
+            - { name: AKMATORI_CODEMODE, value: {{ .Values.agent.codemode | quote }} }
+            - { name: PI_CACHE_RETENTION, value: long }
+            - { name: AKMATORI_OPENROUTER_ATTRIBUTION, value: {{ .Values.agent.openrouterAttribution | quote }} }
+            {{- include "akmatori.proxyEnv" . | nindent 12 }}
+            {{- with .Values.agent.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            exec:
+              command: ["pgrep", "node"]
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.agent.resources | nindent 12 }}
+          volumeMounts:
+            - { name: sessions, mountPath: /home/agent/.pi }
+            - { name: data, mountPath: /workspaces, subPath: incidents }
+            - { name: data, mountPath: /akmatori/context, subPath: context, readOnly: true }
+            - { name: data, mountPath: /akmatori/skills, subPath: skills, readOnly: true }
+            - { name: data, mountPath: /akmatori/runbooks, subPath: runbooks, readOnly: true }
+            - { name: data, mountPath: /akmatori/memory, subPath: memory, readOnly: true }
+            - { name: data, mountPath: /akmatori/extensions, subPath: extensions, readOnly: true }
+      volumes:
+        - name: sessions
+          emptyDir: {}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "akmatori.dataClaim" . }}
+      {{- /*
+      With a ReadWriteOnce volume the agent shares the API's node, so it also
+      takes the API's node constraints. Otherwise the agent could start first
+      on a node the API may not use, and the API could never be scheduled.
+      */}}
+      {{- $rwo := eq .Values.persistence.accessMode "ReadWriteOnce" }}
+      {{- /* default: `helm upgrade --reuse-values` from an older chart has no agent.nodeSelector */}}
+      {{- $nodeSelector := default (dict) .Values.agent.nodeSelector }}
+      {{- $tolerations := default (list) .Values.agent.tolerations }}
+      {{- if $rwo }}
+      {{- $nodeSelector = merge (deepCopy $nodeSelector) (default (dict) .Values.api.nodeSelector) }}
+      {{- $tolerations = concat $tolerations (default (list) .Values.api.tolerations) | uniq }}
+      {{- end }}
+      {{- with $nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

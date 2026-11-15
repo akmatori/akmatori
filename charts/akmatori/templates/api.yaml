@@ -1,0 +1,134 @@
+{{- if not .Values.persistence.existingClaim }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "akmatori.dataClaim" . }}
+  labels:
+    {{- include "akmatori.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [{{ .Values.persistence.accessMode }}]
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "akmatori.apiHost" . }}
+  labels:
+    {{- include "akmatori.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+  selector:
+    {{- include "akmatori.selector" (list . "api") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "akmatori.apiHost" . }}
+  labels:
+    {{- include "akmatori.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  # Single instance: the API owns crons and the agent WebSocket.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "akmatori.selector" (list . "api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "akmatori.selector" (list . "api") | nindent 8 }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        {{- with .Values.podSecurityContext }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      initContainers:
+        {{- include "akmatori.waitForPostgres" . | nindent 8 }}
+        # Same job as the init-dirs service in docker-compose.yml.
+        - name: init-dirs
+          image: {{ include "akmatori.image" (list . "api") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["sh", "-c", "mkdir -p /akmatori/incidents /akmatori/context /akmatori/skills /akmatori/runbooks /akmatori/memory /akmatori/extensions"]
+          volumeMounts:
+            - name: data
+              mountPath: /akmatori
+      containers:
+        - name: api
+          image: {{ include "akmatori.image" (list . "api") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            {{- include "akmatori.databaseEnv" . | nindent 12 }}
+            - { name: MCP_GATEWAY_URL, value: "http://{{ include "akmatori.gatewayHost" . }}:8080" }
+            {{- with .Values.baseUrl }}
+            - { name: AKMATORI_BASE_URL, value: {{ . | quote }} }
+            {{- end }}
+            # Optional keys: a missing key leaves the variable unset (setup
+            # wizard / JWT secret from the database).
+            {{- $authSecret := default (include "akmatori.secretName" .) .Values.existingAuthSecret }}
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ $authSecret }}, key: admin-password, optional: true }
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ $authSecret }}, key: jwt-secret, optional: true }
+            {{- include "akmatori.proxyEnv" . | nindent 12 }}
+            {{- with .Values.api.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 3000
+          startupProbe:
+            # First start runs database migrations.
+            httpGet: { path: /health, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /akmatori
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "akmatori.dataClaim" . }}
+      {{- include "akmatori.dataAffinity" . | nindent 6 }}
+      {{- with .Values.api.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.api.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,145 @@
+{{- /*
+nginx config: same routes as proxy/nginx.conf. Kubernetes Service IPs are
+stable, so static upstreams are enough. Defined once so the Deployment can
+hash the full text (any change restarts nginx).
+*/ -}}
+{{- define "akmatori.proxyConf" }}
+{{- $api := printf "%s:3000" (include "akmatori.apiHost" .) }}
+{{- $gw := printf "%s:8080" (include "akmatori.gatewayHost" .) }}
+{{- $ui := printf "%s:80" (include "akmatori.frontendHost" .) }}
+    upstream frontend { server {{ $ui }}; }
+    upstream backend { server {{ $api }}; }
+    upstream mcp_gateway { server {{ $gw }}; }
+
+    server {
+        listen 80;
+        server_name _;
+        client_max_body_size {{ .Values.proxyServer.clientMaxBodySize }};
+
+        location = /healthz {
+            access_log off;
+            return 200 "ok\n";
+        }
+
+        # API, auth and webhooks (WebSocket upgrade for live updates).
+        location ~ ^/(api|auth|webhook)/ {
+            proxy_pass http://backend;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_cache_bypass $http_upgrade;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Only the MCP tool schema list is public (the UI renders tool forms
+        # from it). Tool calls and gateway admin endpoints stay internal.
+        location ~ ^/mcp/tools(/.*)?$ {
+            limit_except GET OPTIONS { deny all; }
+            proxy_pass http://mcp_gateway/tools$1$is_args$args;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        location /mcp/ {
+            return 404;
+        }
+
+        # The agent worker WebSocket is internal only.
+        location /ws/ {
+            return 404;
+        }
+
+        location / {
+            proxy_pass http://frontend;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_cache_bypass $http_upgrade;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+    }
+{{ end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "akmatori.fullname" . }}-proxy
+  labels:
+    {{- include "akmatori.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+data:
+  default.conf: |{{ include "akmatori.proxyConf" . }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "akmatori.fullname" . }}
+  labels:
+    {{- include "akmatori.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+  {{- with .Values.proxyServer.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.proxyServer.service.type }}
+  {{- with .Values.proxyServer.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  ports:
+    - name: http
+      port: {{ .Values.proxyServer.service.port }}
+      targetPort: http
+  selector:
+    {{- include "akmatori.selector" (list . "proxy") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "akmatori.fullname" . }}-proxy
+  labels:
+    {{- include "akmatori.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "akmatori.selector" (list . "proxy") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "akmatori.selector" (list . "proxy") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include "akmatori.proxyConf" . | sha256sum }}
+    spec:
+      containers:
+        - name: nginx
+          image: {{ .Values.proxyServer.image }}
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.proxyServer.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "akmatori.fullname" . }}-proxy

@@ -1,0 +1,105 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- /*
+Ingress rules that copy the Docker Compose networks:
+  postgres     <- api, mcp-gateway        (the agent has no database access)
+  api          <- proxy, agent
+  mcp-gateway  <- proxy, api, agent
+  frontend     <- proxy
+  agent        <- nothing (outbound only)
+  proxy        <- anyone (the only entry point)
+*/ -}}
+{{- $rules := list
+  (list "postgres" (list "api" "mcp-gateway") 5432)
+  (list "api" (list "proxy" "agent") 3000)
+  (list "mcp-gateway" (list "proxy" "api" "agent") 8080)
+  (list "frontend" (list "proxy") 80)
+  (list "agent" (list) 0)
+}}
+{{- range $rules }}
+{{- $target := index . 0 }}
+{{- $from := index . 1 }}
+{{- $port := index . 2 }}
+{{- if or (ne $target "postgres") $.Values.postgresql.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "akmatori.fullname" $ }}-{{ $target }}
+  labels:
+    {{- include "akmatori.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "akmatori.selector" (list $ $target) | nindent 6 }}
+  policyTypes: [Ingress]
+  {{- if $from }}
+  ingress:
+    - from:
+        {{- range $from }}
+        - podSelector:
+            matchLabels:
+              {{- include "akmatori.selector" (list $ .) | nindent 14 }}
+        {{- end }}
+      ports:
+        - port: {{ $port }}
+          protocol: TCP
+  {{- else }}
+  ingress: []
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- with .Values.networkPolicy.agentEgressDenyCIDRs }}
+{{- $v4 := list }}
+{{- $v6 := list }}
+{{- range . }}
+{{- if contains ":" . }}{{ $v6 = append $v6 . }}{{ else }}{{ $v4 = append $v4 . }}{{ end }}
+{{- end }}
+---
+# Agent egress: everything except the listed CIDRs (for example an external
+# PostgreSQL, which the ingress policies above cannot protect). NetworkPolicy
+# rules only allow, so another policy that allows these CIDRs for the agent
+# pods cancels this exclusion.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "akmatori.fullname" $ }}-agent-egress
+  labels:
+    {{- include "akmatori.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "akmatori.selector" (list $ "agent") | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "akmatori.selector" (list $ "api") | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "akmatori.selector" (list $ "mcp-gateway") | nindent 14 }}
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    # ipBlock rules match pod IPs on Calico but not on Cilium: allow in-cluster
+    # destinations (an HTTP proxy, an on-prem LLM) with agentEgressExtraRules.
+    {{- with $.Values.networkPolicy.agentEgressExtraRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            {{- with $v4 }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+        - ipBlock:
+            cidr: ::/0
+            {{- with $v6 }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+{{- end }}
+{{- end }}

@@ -114,6 +114,17 @@ docker compose pull
 docker compose up -d
 ```
 
+### Kubernetes
+
+A Helm chart is in [`charts/akmatori`](charts/akmatori). It installs the same services and images:
+
+```bash
+helm upgrade --install akmatori ./charts/akmatori --namespace akmatori --create-namespace --wait
+kubectl -n akmatori port-forward svc/akmatori 8080:80
+```
+
+See [docs/kubernetes.md](docs/kubernetes.md) for Ingress, external PostgreSQL, proxies and upgrades.
+
 ### Behind an HTTP proxy
 
 <details>

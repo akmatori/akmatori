@@ -56,6 +56,20 @@ jobs:
       - run: npm run build
       - run: npm test
 
+  helm:
+    name: Helm chart (lint + template)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint charts/akmatori
+      - run: |
+          helm template akmatori charts/akmatori > /dev/null
+          helm template akmatori charts/akmatori \
+            --set ingress.enabled=true,proxyServer.service.type=LoadBalancer \
+            --set postgresql.enabled=false,externalDatabase.url=postgres://u:p@db:5432/akmatori \
+            --set adminPassword=x,proxy.httpProxy=http://proxy:3128 > /dev/null
+
   web:
     name: Web (typecheck + lint + test)
     runs-on: ubuntu-latest

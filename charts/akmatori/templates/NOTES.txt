@@ -1,0 +1,26 @@
+Akmatori is starting in namespace {{ .Release.Namespace }}.
+
+Watch the pods:
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }} -w
+
+{{- if .Values.ingress.enabled }}
+
+Open the UI:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}/
+{{- end }}
+{{- else if eq .Values.proxyServer.service.type "LoadBalancer" }}
+
+Get the external IP, then open http://<EXTERNAL-IP>/ :
+  kubectl -n {{ .Release.Namespace }} get svc {{ include "akmatori.fullname" . }} -w
+{{- else }}
+
+Open the UI with a port-forward, then go to http://localhost:8080/ :
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "akmatori.fullname" . }} 8080:{{ .Values.proxyServer.service.port }}
+{{- end }}
+
+{{- if not (or .Values.adminPassword .Values.existingAuthSecret) }}
+
+The first visit opens the setup wizard: set the admin password there.
+Do this before you expose the UI to other people.
+{{- end }}
