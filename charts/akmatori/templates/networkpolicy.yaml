@@ -49,9 +49,16 @@ spec:
 {{- end }}
 {{- end }}
 {{- with .Values.networkPolicy.agentEgressDenyCIDRs }}
+{{- $v4 := list }}
+{{- $v6 := list }}
+{{- range . }}
+{{- if contains ":" . }}{{ $v6 = append $v6 . }}{{ else }}{{ $v4 = append $v4 . }}{{ end }}
+{{- end }}
 ---
 # Agent egress: everything except the listed CIDRs (for example an external
-# PostgreSQL, which the ingress policies above cannot protect).
+# PostgreSQL, which the ingress policies above cannot protect). NetworkPolicy
+# rules only allow, so another policy that allows these CIDRs for the agent
+# pods cancels this exclusion.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -76,10 +83,23 @@ spec:
       ports:
         - { port: 53, protocol: UDP }
         - { port: 53, protocol: TCP }
+    # ipBlock rules match pod IPs on Calico but not on Cilium: allow in-cluster
+    # destinations (an HTTP proxy, an on-prem LLM) with agentEgressExtraRules.
+    {{- with $.Values.networkPolicy.agentEgressExtraRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
+            {{- with $v4 }}
             except:
               {{- toYaml . | nindent 14 }}
+            {{- end }}
+        - ipBlock:
+            cidr: ::/0
+            {{- with $v6 }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
 {{- end }}
 {{- end }}

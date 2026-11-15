@@ -85,7 +85,24 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: {{ include "akmatori.dataClaim" . }}
-      {{- with .Values.agent.tolerations }}
+      {{- /*
+      With a ReadWriteOnce volume the agent shares the API's node, so it also
+      takes the API's node constraints. Otherwise the agent could start first
+      on a node the API may not use, and the API could never be scheduled.
+      */}}
+      {{- $rwo := eq .Values.persistence.accessMode "ReadWriteOnce" }}
+      {{- /* default: `helm upgrade --reuse-values` from an older chart has no agent.nodeSelector */}}
+      {{- $nodeSelector := default (dict) .Values.agent.nodeSelector }}
+      {{- $tolerations := default (list) .Values.agent.tolerations }}
+      {{- if $rwo }}
+      {{- $nodeSelector = merge (deepCopy $nodeSelector) (default (dict) .Values.api.nodeSelector) }}
+      {{- $tolerations = concat $tolerations (default (list) .Values.api.tolerations) | uniq }}
+      {{- end }}
+      {{- with $nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}

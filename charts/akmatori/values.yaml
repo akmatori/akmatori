@@ -56,6 +56,9 @@ agent:
   extraEnv: []
   # pi session data (~/.pi) is an emptyDir: Akmatori starts a fresh agent
   # session per turn and sends LLM keys over the WebSocket.
+  # With persistence.accessMode=ReadWriteOnce the agent runs on the API's node
+  # and also gets api.nodeSelector and api.tolerations (merged with these).
+  nodeSelector: {}
   tolerations: []
 
 frontend:
@@ -132,7 +135,17 @@ networkPolicy:
   # (e.g. ["10.0.5.20/32"]): the agent then gets an egress policy that allows
   # everything except these CIDRs. Do the same for other hosts the agent must
   # not reach (cloud metadata is 169.254.169.254/32). To remove the policy,
-  # set it to [] (with --reuse-values, null keeps the old list).
+  # set it to [] (when Helm reuses values, null keeps the old list). IPv4 and IPv6
+  # CIDRs are both accepted.
   agentEgressDenyCIDRs: []
+  # Extra egress rules for the agent, used only with agentEgressDenyCIDRs.
+  # On Cilium, CIDR rules do not match pods, so allow in-cluster destinations
+  # here, for example an HTTP proxy in namespace "proxy":
+  #   - to:
+  #       - namespaceSelector:
+  #           matchLabels: { kubernetes.io/metadata.name: proxy }
+  #     ports:
+  #       - { port: 3128, protocol: TCP }
+  agentEgressExtraRules: []
 
 podSecurityContext: {}

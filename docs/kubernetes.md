@@ -16,7 +16,7 @@ The names above are for the release name `akmatori`. Another release name gives 
 
 ## Requirements
 
-- Kubernetes 1.27 or later, `kubectl`, and Helm 3.
+- Kubernetes 1.27 or later, `kubectl`, and Helm 3 or 4 (tested with Helm 4.3).
 - A default StorageClass (or set `persistence.storageClass` and `postgresql.persistence.storageClass`).
 - About 0.5 vCPU and 1.5 GiB of memory for requests; the agent uses more while it investigates.
 - Outbound HTTPS from the cluster to your LLM provider and to `ghcr.io`.
@@ -50,6 +50,7 @@ the log shows `Connected to ws://akmatori-api:3000/ws/agent`.
 
 > **Set the admin password before you expose the UI.** In setup mode, the first visitor
 > sets the password. To skip the wizard, set `adminPassword` (or `existingAuthSecret`).
+> Choose one way and keep it: see [Admin password](#upgrade) before you change it later.
 
 Then do the same steps as for Docker: **Settings → LLM Provider**, connectors, alert sources.
 
@@ -78,11 +79,13 @@ ingress:
 ```
 
 ```bash
-helm upgrade akmatori ./akmatori/charts/akmatori -n akmatori --reuse-values -f values-prod.yaml
+helm upgrade akmatori ./akmatori/charts/akmatori -n akmatori --reset-then-reuse-values -f values-prod.yaml
 ```
 
-Without `--reuse-values`, `helm upgrade` drops the values that you set before with `--set`.
-The simplest rule: keep all your settings in one values file and always pass it.
+Without `--reset-then-reuse-values` (Helm 3.14 or later), `helm upgrade` drops the values
+that you set before with `--set`. Do not use plain `--reuse-values`: it also skips the new
+defaults of a newer chart. The simplest rule: keep all your settings in one values file and
+always pass it.
 
 **LoadBalancer** (no Ingress controller): set `proxyServer.service.type=LoadBalancer`.
 Use `proxyServer.service.loadBalancerSourceRanges` to limit the source addresses. This gives
@@ -119,8 +122,14 @@ helm upgrade --install akmatori ./akmatori/charts/akmatori -n akmatori \
 ```
 
 The chart's NetworkPolicies protect only the bundled PostgreSQL. For an external database,
-put its address in `networkPolicy.agentEgressDenyCIDRs` (above, `10.0.5.20/32`), or let the
-database accept connections only from the API and gateway pods.
+put its address in `networkPolicy.agentEgressDenyCIDRs` (above, `10.0.5.20/32`; IPv4 and IPv6
+are accepted), or let the database accept connections only from the API and gateway pods.
+
+With `agentEgressDenyCIDRs` set, the agent can reach only the API, the gateway, DNS and the
+IP ranges outside the list. On Cilium, IP ranges do not match pods: if the agent must reach
+something inside the cluster (an HTTP proxy, an on-prem LLM), add a rule for it in
+`networkPolicy.agentEgressExtraRules` (see the example in `values.yaml`). NetworkPolicies
+only allow traffic, so another policy that allows a listed CIDR for the agent cancels the block.
 
 ### Corporate HTTP proxy
 
@@ -150,18 +159,36 @@ The chart keeps the isolation of the Docker install:
 
 ```bash
 git -C akmatori pull
-helm upgrade akmatori ./akmatori/charts/akmatori -n akmatori --reuse-values --wait
+helm upgrade akmatori ./akmatori/charts/akmatori -n akmatori --reset-then-reuse-values --wait
 ```
 
 The Secret `akmatori-secrets` keeps the database password, and the admin password and JWT
 secret if you set them, across upgrades, also when a later upgrade does not pass them.
-To remove the admin password from the environment, delete the `admin-password` key from the
-Secret and restart the API; set a password in the UI first, or the API returns to setup mode.
+The chart reads the old values from the cluster (Helm `lookup`). `helm template` and client
+dry runs cannot do this: they show a new random database password and no admin password.
+Do not apply their output to an existing install; use `helm upgrade` (or `--dry-run=server`).
 
-The chart refuses a new `postgresql.password` on an existing install: PostgreSQL keeps the
-old password in its data directory. To change it, run `ALTER ROLE akmatori PASSWORD '...'`
-in PostgreSQL, then edit the `postgres-password` and `database-url` keys in the Secret, and
-restart the API and the gateway.
+**Admin password.** An `adminPassword` from the chart always wins over the password set in
+the setup wizard. To change it, set a new `adminPassword` and upgrade. Akmatori has no
+password-change page, and the API does not store an `adminPassword` in the database, so if
+you remove it, the API returns to setup mode and the next visitor sets the password. To move
+back to a wizard password: disable the Ingress or LoadBalancer first, remove `adminPassword`
+from your values, delete the `admin-password` key from the Secret, restart the API, set the
+password through `kubectl port-forward`, then enable public access again.
+
+**Database password.** The chart refuses a new `postgresql.password` on an existing install:
+PostgreSQL keeps the old password in its data directory. To change it:
+
+1. Run `ALTER ROLE akmatori PASSWORD '<new>'` in PostgreSQL
+   (`kubectl -n akmatori exec -it akmatori-postgres-0 -- psql -U akmatori`).
+2. Edit the `postgres-password` and `database-url` keys in the Secret `akmatori-secrets`.
+   Percent-encode special characters in the URL.
+3. Restart the API and the gateway:
+   `kubectl -n akmatori rollout restart deploy/akmatori-api deploy/akmatori-mcp-gateway`.
+4. If you set `postgresql.password` before, change it to the new password in your values
+   file. With `--reset-then-reuse-values`, pass `--set postgresql.password=<new>` once.
+   Otherwise the next upgrade compares the old value with the new Secret and stops.
+
 To pin a build, set `image.tag` (for example `0.4.0` or `main-<sha>`). The API and the agent
 use the `Recreate` strategy, so there is a short downtime during an upgrade.
 
