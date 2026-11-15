@@ -116,10 +116,11 @@ docker compose up -d
 
 ### Kubernetes
 
-A Helm chart is in [`charts/akmatori`](charts/akmatori). It installs the same services and images:
+The Helm chart ([`charts/akmatori`](charts/akmatori)) installs the same services and images. Each release publishes it to GHCR:
 
 ```bash
-helm upgrade --install akmatori ./charts/akmatori --namespace akmatori --create-namespace --wait
+helm upgrade --install akmatori oci://ghcr.io/akmatori/charts/akmatori --version 0.5.0 \
+  --namespace akmatori --create-namespace --wait
 kubectl -n akmatori port-forward svc/akmatori 8080:80
 ```
 
