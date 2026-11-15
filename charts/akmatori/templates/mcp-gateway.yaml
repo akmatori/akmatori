@@ -1,0 +1,79 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "akmatori.gatewayHost" . }}
+  labels:
+    {{- include "akmatori.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp-gateway
+spec:
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+  selector:
+    {{- include "akmatori.selector" (list . "mcp-gateway") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "akmatori.gatewayHost" . }}
+  labels:
+    {{- include "akmatori.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "akmatori.selector" (list . "mcp-gateway") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "akmatori.selector" (list . "mcp-gateway") | nindent 8 }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+      {{- if .Values.postgresql.enabled }}
+      initContainers:
+        {{- include "akmatori.waitForPostgres" . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: mcp-gateway
+          image: {{ include "akmatori.image" (list . "mcp-gateway") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            {{- include "akmatori.databaseEnv" . | nindent 12 }}
+            {{- include "akmatori.proxyEnv" . | nindent 12 }}
+            {{- with .Values.mcpGateway.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.mcpGateway.resources | nindent 12 }}
+      {{- with .Values.mcpGateway.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mcpGateway.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
