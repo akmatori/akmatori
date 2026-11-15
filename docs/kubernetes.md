@@ -67,24 +67,31 @@ Then do the same steps as for Docker: **Settings → LLM Provider**, connectors,
 Send all traffic to the `akmatori` Service. The proxy keeps the MCP tool endpoints and the
 agent WebSocket internal, so do not route paths to the other Services.
 
-**Ingress** (example with ingress-nginx and cert-manager):
+**Ingress** (example with Traefik and cert-manager; tested with Traefik 3.7):
 
 ```yaml
 # values-prod.yaml
 baseUrl: https://akmatori.example.com
 ingress:
   enabled: true
-  className: nginx
+  className: traefik
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt
-    nginx.ingress.kubernetes.io/proxy-body-size: 50m
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
   hosts:
     - host: akmatori.example.com
   tls:
     - secretName: akmatori-tls
       hosts: [akmatori.example.com]
 ```
+
+The chart creates a standard Ingress, so other controllers work too. Check the request body
+limit of your controller: context file uploads can be up to 10 MB (the API limit). Traefik
+has no body limit by default (a 9 MB upload passed in our test).
+
+ingress-nginx (`kubernetes/ingress-nginx`) is retired: it gets no releases or security fixes
+after March 2026. Its default body limit is 1 MB. If you still run it, add
+`nginx.ingress.kubernetes.io/proxy-body-size: 11m` to `ingress.annotations`, and plan the
+move to another controller or to Gateway API.
 
 ```bash
 helm upgrade akmatori $CHART -n akmatori --reset-then-reuse-values -f values-prod.yaml

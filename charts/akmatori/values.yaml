@@ -85,9 +85,9 @@ ingress:
   enabled: false
   className: ""
   annotations: {}
-  # Example:
+  # Example (cert-manager). Context uploads can be 10 MB: raise the body
+  # limit if your controller has one (ingress-nginx: proxy-body-size: 11m).
   #   cert-manager.io/cluster-issuer: letsencrypt
-  #   nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
   hosts:
     - host: akmatori.example.com
   tls: []
