@@ -3,6 +3,7 @@ package services
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/akmatori/akmatori/internal/database"
@@ -26,6 +27,42 @@ var ErrIntegrationNotFound = errors.New("integration not found")
 // "one default per provider" invariant holds even if an operator configures
 // more than one Integration row for the same provider.
 var ErrDuplicateDefaultPost = errors.New("another channel is already the default post target for this provider")
+
+// onChangeFilterMax caps the on_change_filter regex length.
+const onChangeFilterMax = 1024
+
+// NormalizeOnChange maps "" to the default action "store" and trims the value.
+func NormalizeOnChange(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return database.ChannelOnChangeStore
+	}
+	return v
+}
+
+// validateOnChange checks the on_change settings of a channel as they will
+// be stored. "run" replies in the message thread, so the channel must listen
+// and post.
+func validateOnChange(onChange, filter string, canListen, canPost bool) error {
+	switch onChange {
+	case database.ChannelOnChangeStore:
+	case database.ChannelOnChangeRun:
+		if !canListen || !canPost {
+			return fmt.Errorf("on_change=run needs can_listen=true and can_post=true (the run replies in the message thread)")
+		}
+	default:
+		return fmt.Errorf("on_change must be %q or %q", database.ChannelOnChangeStore, database.ChannelOnChangeRun)
+	}
+	if len(filter) > onChangeFilterMax {
+		return fmt.Errorf("on_change_filter is longer than %d characters", onChangeFilterMax)
+	}
+	if filter != "" {
+		if _, err := regexp.Compile(filter); err != nil {
+			return fmt.Errorf("on_change_filter is not a valid regular expression: %v", err)
+		}
+	}
+	return nil
+}
 
 // ChannelService implements the CRUD + resolution surface for Integration
 // and Channel rows. It is intentionally provider-agnostic: routing to the
@@ -264,6 +301,11 @@ func (s *ChannelService) CreateChannel(c *database.Channel) (*database.Channel, 
 	if c.IsDefaultPost && !c.CanPost {
 		return nil, fmt.Errorf("channel marked is_default_post must also have can_post=true")
 	}
+	c.OnChange = NormalizeOnChange(c.OnChange)
+	c.OnChangeSkill = strings.TrimSpace(c.OnChangeSkill)
+	if err := validateOnChange(c.OnChange, c.OnChangeFilter, c.CanListen, c.CanPost); err != nil {
+		return nil, err
+	}
 
 	requestedEnabled := c.Enabled
 	err := s.db.Transaction(func(tx *gorm.DB) error {
@@ -304,6 +346,9 @@ type ChannelUpdate struct {
 	ExtractionPrompt     *string
 	ProcessBotMessages   *bool
 	ProcessHumanMessages *bool
+	OnChange             *string
+	OnChangeFilter       *string
+	OnChangeSkill        *string
 	Enabled              *bool
 }
 
@@ -342,6 +387,15 @@ func (s *ChannelService) UpdateChannel(uuidStr string, patch ChannelUpdate) (*da
 	if patch.ProcessHumanMessages != nil {
 		updates["process_human_messages"] = *patch.ProcessHumanMessages
 	}
+	if patch.OnChange != nil {
+		updates["on_change"] = NormalizeOnChange(*patch.OnChange)
+	}
+	if patch.OnChangeFilter != nil {
+		updates["on_change_filter"] = *patch.OnChangeFilter
+	}
+	if patch.OnChangeSkill != nil {
+		updates["on_change_skill"] = strings.TrimSpace(*patch.OnChangeSkill)
+	}
 	if patch.Enabled != nil {
 		updates["enabled"] = *patch.Enabled
 	}
@@ -365,6 +419,21 @@ func (s *ChannelService) UpdateChannel(uuidStr string, patch ChannelUpdate) (*da
 	}
 	if effectiveIsDefaultPost && !effectiveCanPost {
 		return nil, fmt.Errorf("channel marked is_default_post must also have can_post=true")
+	}
+	effectiveCanListen := row.CanListen
+	if patch.CanListen != nil {
+		effectiveCanListen = *patch.CanListen
+	}
+	effectiveOnChange := NormalizeOnChange(row.OnChange)
+	if v, ok := updates["on_change"].(string); ok {
+		effectiveOnChange = v
+	}
+	effectiveFilter := row.OnChangeFilter
+	if patch.OnChangeFilter != nil {
+		effectiveFilter = *patch.OnChangeFilter
+	}
+	if err := validateOnChange(effectiveOnChange, effectiveFilter, effectiveCanListen, effectiveCanPost); err != nil {
+		return nil, err
 	}
 
 	err = s.db.Transaction(func(tx *gorm.DB) error {

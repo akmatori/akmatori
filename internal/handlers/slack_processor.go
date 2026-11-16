@@ -141,6 +141,43 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		slog.Info("prepared request", "scope", scopeUUID, "working_dir", workingDir)
 		work = &slackThreadWork{ScopeUUID: scopeUUID}
 	}
+	h.runInThread(threadRun{
+		Channel:    channel,
+		ThreadID:   threadID,
+		User:       user,
+		Text:       text,
+		Task:       text,
+		Work:       work,
+		EventUUID:  eventUUID,
+		SourceKind: database.IncidentSourceKindSlackMention,
+		SourceUUID: h.mentionSourceUUID(channel),
+	})
+}
+
+// threadRun is one agent run whose answer goes to a Slack thread.
+type threadRun struct {
+	Channel  string // Slack channel id
+	ThreadID string // thread root ts
+	User     string // Slack user who posted Text
+	// Text is the Slack message as posted: the run log header and the
+	// fallback log show it. Task is what the agent gets (Text, or Text
+	// with instructions).
+	Text string
+	Task string
+	Work *slackThreadWork
+	// EventUUID is the event that started the run.
+	EventUUID string
+	// SourceKind and SourceUUID name the trigger of new request work
+	// (ignored for incident work, which copies the incident's source).
+	SourceKind string
+	SourceUUID string
+}
+
+// runInThread runs the agent for one Slack thread message and posts the
+// answer in that thread: typing banner while it runs, result reaction, final
+// reply. The caller has prepared the scope (Work).
+func (h *SlackHandler) runInThread(r threadRun) {
+	channel, threadID, user, text, work, eventUUID := r.Channel, r.ThreadID, r.User, r.Text, r.Work, r.EventUUID
 	// incidentUUID is the scope the worker keys the run by.
 	incidentUUID := work.ScopeUUID
 
@@ -151,8 +188,8 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 		RootSkill:    "incident-manager",
 	}
 	if work.IncidentUUID == "" {
-		start.SourceKind = database.IncidentSourceKindSlackMention
-		start.SourceUUID = h.mentionSourceUUID(channel)
+		start.SourceKind = r.SourceKind
+		start.SourceUUID = r.SourceUUID
 		start.SlackChannelID = channel
 		start.SlackThreadTS = threadID
 	}
@@ -192,7 +229,7 @@ func (h *SlackHandler) processMessage(channel, threadTS, messageTS, text, user s
 	// downtime channel rather than sweeping all four projects), and the agent
 	// has no other way to see where the message came from.
 	taskWithGuidance := executor.PrependGuidance(
-		withSourceChannel(h.channelResolver.ResolveLabel(channel), text),
+		withSourceChannel(h.channelResolver.ResolveLabel(channel), r.Task),
 	)
 
 	// Execute via WebSocket-based agent worker
@@ -430,8 +467,10 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 	slog.Info("processing listener channel message", "user", event.User, "channel", event.Channel)
 
 	// Extract message text (including text from blocks and attachments)
-	messageText := h.extractFullMessageText(event)
-	messageText = utils.StripSlackMrkdwn(messageText)
+	// rawText keeps the Slack link targets (<url|title>) that
+	// StripSlackMrkdwn drops: a change run needs the pull request URL.
+	rawText := h.extractFullMessageText(event)
+	messageText := utils.StripSlackMrkdwn(rawText)
 	if messageText == "" {
 		slog.Info("empty message text, skipping")
 		return
@@ -494,6 +533,11 @@ func (h *SlackHandler) handleAlertChannelMessage(event *slackevents.MessageEvent
 			RawPayload:  normalized.RawPayload,
 		}, verdict)
 		normalized.EventUUID = ev.UUID
+		if ev.Kind == database.EventKindChange && changeRunMatches(channel, event, rawText) {
+			slog.Info("listener change message starts a run", "channel", event.Channel, "event_uuid", ev.UUID)
+			h.runChangeReview(channel, event, threadTS, rawText, ev.UUID)
+			return
+		}
 		if ev.Kind != database.EventKindAlert {
 			slog.Info("listener message is not an alert; stored as event, no investigation",
 				"channel", event.Channel, "kind", ev.Kind, "event_uuid", ev.UUID)

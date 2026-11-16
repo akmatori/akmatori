@@ -990,3 +990,58 @@ func TestChannelService_UpdateIntegration_TelegramBlankTokenKeepsExisting(t *tes
 		t.Errorf("rotate = %v, %v", got.Credentials["bot_token"], err)
 	}
 }
+
+// on_change defaults to store; run needs a listening and posting channel and
+// a valid filter regex. Update checks the values as they will be stored.
+func TestChannelService_OnChange(t *testing.T) {
+	svc, db := setupChannelServiceTest(t)
+	integration := seedSlackIntegration(t, db)
+
+	plain, err := svc.CreateChannel(&database.Channel{IntegrationID: integration.ID, ExternalID: "C-plain", CanListen: true})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if plain.OnChange != database.ChannelOnChangeStore {
+		t.Errorf("default OnChange = %q, want store", plain.OnChange)
+	}
+
+	bad := []database.Channel{
+		{ExternalID: "C1", CanListen: true, OnChange: "run"},                                     // cannot post
+		{ExternalID: "C2", CanListen: true, CanPost: true, OnChange: "always"},                   // unknown value
+		{ExternalID: "C3", CanListen: true, CanPost: true, OnChange: "run", OnChangeFilter: "("}, // bad regex
+	}
+	for i := range bad {
+		bad[i].IntegrationID = integration.ID
+		if _, err := svc.CreateChannel(&bad[i]); err == nil {
+			t.Errorf("CreateChannel(%s) succeeded, want a validation error", bad[i].ExternalID)
+		}
+	}
+
+	run, err := svc.CreateChannel(&database.Channel{
+		IntegrationID: integration.ID, ExternalID: "C-run", CanListen: true, CanPost: true,
+		OnChange: "run", OnChangeFilter: `/pull/\d+`, OnChangeSkill: " pr-review ",
+	})
+	if err != nil {
+		t.Fatalf("create run channel: %v", err)
+	}
+	if run.OnChange != "run" || run.OnChangeSkill != "pr-review" {
+		t.Errorf("run channel = %q/%q", run.OnChange, run.OnChangeSkill)
+	}
+
+	noPost := false
+	if _, err := svc.UpdateChannel(run.UUID, ChannelUpdate{CanPost: &noPost}); err == nil {
+		t.Error("can_post=false on an on_change=run channel succeeded, want an error")
+	}
+	badFilter := "[a-"
+	if _, err := svc.UpdateChannel(run.UUID, ChannelUpdate{OnChangeFilter: &badFilter}); err == nil {
+		t.Error("invalid on_change_filter update succeeded, want an error")
+	}
+	store, empty := "", ""
+	got, err := svc.UpdateChannel(run.UUID, ChannelUpdate{OnChange: &store, OnChangeFilter: &empty, CanPost: &noPost})
+	if err != nil {
+		t.Fatalf("back to store: %v", err)
+	}
+	if got.OnChange != database.ChannelOnChangeStore || got.OnChangeFilter != "" || got.CanPost {
+		t.Errorf("after update = %q/%q/%v, want store, no filter, no post", got.OnChange, got.OnChangeFilter, got.CanPost)
+	}
+}

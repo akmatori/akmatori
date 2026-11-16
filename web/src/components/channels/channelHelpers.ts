@@ -1,4 +1,4 @@
-import type { Channel, MessagingProvider } from '../../types';
+import type { Channel, ChannelOnChange, MessagingProvider } from '../../types';
 
 // providerLabel returns a short, user-facing label for a messaging provider.
 export function providerLabel(provider: MessagingProvider | string): string {
@@ -131,4 +131,24 @@ export function roleBadgeLabel(role: ChannelRole): string {
     case 'disabled':
       return 'Disabled';
   }
+}
+
+// onChangeFields returns the on_change settings a channel form sends. A
+// change run replies in the thread, so a channel that cannot post (or does
+// not listen) always sends "store"; the filter and skill are cleared then.
+export function onChangeFields(form: {
+  can_listen: boolean;
+  can_post: boolean;
+  on_change: ChannelOnChange;
+  on_change_filter: string;
+  on_change_skill: string;
+}): { on_change: ChannelOnChange; on_change_filter: string; on_change_skill: string } {
+  if (form.on_change !== 'run' || !form.can_listen || !form.can_post) {
+    return { on_change: 'store', on_change_filter: '', on_change_skill: '' };
+  }
+  return {
+    on_change: 'run',
+    on_change_filter: form.on_change_filter.trim(),
+    on_change_skill: form.on_change_skill.trim(),
+  };
 }

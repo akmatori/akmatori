@@ -63,6 +63,12 @@ func (Integration) TableName() string {
 // reference it. IsDefaultPost marks the per-provider workspace default for
 // outbound posting; at most one per provider is enforced by a partial-unique
 // DB index plus a service-layer check.
+//
+// OnChange says what a listener message classified as "change" does: "store"
+// (record the event only) or "run" (also start an agent run that replies in
+// the message thread; never an incident). OnChangeFilter is an optional regex
+// the raw message text must match for "run"; OnChangeSkill is an optional
+// skill the run is asked to use.
 type Channel struct {
 	ID                   uint      `gorm:"primaryKey" json:"id"`
 	UUID                 string    `gorm:"uniqueIndex;size:36;not null" json:"uuid"`
@@ -75,12 +81,21 @@ type Channel struct {
 	ExtractionPrompt     string    `gorm:"type:text" json:"extraction_prompt"`
 	ProcessBotMessages   bool      `json:"process_bot_messages"`
 	ProcessHumanMessages bool      `json:"process_human_messages"`
+	OnChange             string    `gorm:"size:16;not null;default:store" json:"on_change"`
+	OnChangeFilter       string    `gorm:"type:text" json:"on_change_filter"`
+	OnChangeSkill        string    `gorm:"size:255" json:"on_change_skill"`
 	Enabled              bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
 
 	Integration Integration `gorm:"foreignKey:IntegrationID" json:"integration,omitempty"`
 }
+
+// Channel.OnChange values.
+const (
+	ChannelOnChangeStore = "store"
+	ChannelOnChangeRun   = "run"
+)
 
 func (Channel) TableName() string {
 	return "channels"

@@ -514,6 +514,11 @@ export interface Channel {
   extraction_prompt: string;
   process_bot_messages: boolean;
   process_human_messages: boolean;
+  // What a listener message classified as "change" does: store the event
+  // only, or start an agent run that replies in the message thread.
+  on_change: ChannelOnChange;
+  on_change_filter: string;
+  on_change_skill: string;
   enabled: boolean;
   created_at: string;
   updated_at: string;
@@ -530,8 +535,13 @@ export interface CreateChannelRequest {
   extraction_prompt?: string;
   process_bot_messages?: boolean;
   process_human_messages?: boolean;
+  on_change?: ChannelOnChange;
+  on_change_filter?: string;
+  on_change_skill?: string;
   enabled?: boolean;
 }
+
+export type ChannelOnChange = 'store' | 'run';
 
 export interface UpdateChannelRequest {
   external_id?: string;
@@ -542,6 +552,9 @@ export interface UpdateChannelRequest {
   extraction_prompt?: string;
   process_bot_messages?: boolean;
   process_human_messages?: boolean;
+  on_change?: ChannelOnChange;
+  on_change_filter?: string;
+  on_change_skill?: string;
   enabled?: boolean;
 }
 

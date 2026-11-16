@@ -26,7 +26,9 @@ is rejected by the channels API).
 - at most one `is_default_post=true` per provider (partial-unique index + service-layer check)
 - inbound listening reads `Channel.ExtractionPrompt` + the `ProcessBotMessages`/`ProcessHumanMessages`
   source gates (`slack.go` dispatch); `process_bot_messages` backfills true on upgrade
-  (preMigrate in db.go)
+  (preMigrate in db.go). `on_change` (`store` default | `run`), `on_change_filter`, `on_change_skill`
+  decide whether a `change` message starts a thread-reply run (see the `events` rule); the service
+  rejects `run` without `can_listen` + `can_post` and an invalid filter regex
 - `Channel.CanPost`/`CanListen` gate which triggers may reference a channel; `can_listen=true,
   can_post=false` = silent listener: alerts investigated, results UI-only, no replies/reactions/banner
   (listener flow + `incidentThreadPostable`)

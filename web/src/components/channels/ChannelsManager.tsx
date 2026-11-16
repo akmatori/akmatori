@@ -4,9 +4,10 @@ import { Plus, Save, X, Trash2, Edit2 } from 'lucide-react';
 import LoadingSpinner from '../LoadingSpinner';
 import ErrorMessage from '../ErrorMessage';
 import { channelsApi, integrationsApi } from '../../api/client';
-import type { Channel, Integration } from '../../types';
+import type { Channel, ChannelOnChange, Integration } from '../../types';
 import {
   channelRoles,
+  onChangeFields,
   roleBadgeClass,
   roleBadgeLabel,
   providerIconText,
@@ -23,6 +24,9 @@ type FormState = {
   extraction_prompt: string;
   process_bot_messages: boolean;
   process_human_messages: boolean;
+  on_change: ChannelOnChange;
+  on_change_filter: string;
+  on_change_skill: string;
   enabled: boolean;
 };
 
@@ -36,6 +40,9 @@ const EMPTY_FORM: FormState = {
   extraction_prompt: '',
   process_bot_messages: true,
   process_human_messages: false,
+  on_change: 'store',
+  on_change_filter: '',
+  on_change_skill: '',
   enabled: true,
 };
 
@@ -135,6 +142,9 @@ export default function ChannelsManager({
       extraction_prompt: row.extraction_prompt,
       process_bot_messages: row.process_bot_messages,
       process_human_messages: row.process_human_messages,
+      on_change: row.on_change === 'run' ? 'run' : 'store',
+      on_change_filter: row.on_change_filter ?? '',
+      on_change_skill: row.on_change_skill ?? '',
       enabled: row.enabled,
     });
   };
@@ -167,6 +177,7 @@ export default function ChannelsManager({
           extraction_prompt: form.extraction_prompt || undefined,
           process_bot_messages: form.process_bot_messages,
           process_human_messages: form.process_human_messages,
+          ...onChangeFields(form),
           enabled: form.enabled,
         });
       } else if (editing) {
@@ -179,6 +190,7 @@ export default function ChannelsManager({
           extraction_prompt: form.extraction_prompt,
           process_bot_messages: form.process_bot_messages,
           process_human_messages: form.process_human_messages,
+          ...onChangeFields(form),
           enabled: form.enabled,
         });
       }
@@ -368,6 +380,62 @@ export default function ChannelsManager({
                     Neither source is selected: this channel will not create alerts. Only explicit
                     @mentions of the bot will be handled.
                   </p>
+                )}
+                <div>
+                  <label className="block text-sm font-medium text-fg mb-1" htmlFor="channel-on-change">
+                    Change messages
+                  </label>
+                  <select
+                    id="channel-on-change"
+                    className="input-field"
+                    value={form.can_post ? form.on_change : 'store'}
+                    disabled={!form.can_post}
+                    onChange={(e) =>
+                      setForm({ ...form, on_change: e.target.value === 'run' ? 'run' : 'store' })
+                    }
+                  >
+                    <option value="store">Store as a change event</option>
+                    <option value="run">Start an agent run (reply in the thread)</option>
+                  </select>
+                  <p className="mt-1 text-xs text-fg-subtle">
+                    A message classified as a change (a deploy, a pull request to merge) is always
+                    stored for later investigations. With an agent run, a new top-level change
+                    message also gets a review in its thread: risk, test evidence, rollback. It
+                    never opens an incident.
+                    {!form.can_post && ' Needs “Can post”, because the run replies in the thread.'}
+                  </p>
+                </div>
+                {form.can_post && form.on_change === 'run' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-fg mb-1" htmlFor="channel-on-change-filter">
+                        Run only when the message matches (regex, optional)
+                      </label>
+                      <input
+                        id="channel-on-change-filter"
+                        className="input-field font-mono"
+                        placeholder="github\.com/[^/]+/[^/]+/pull/\d+"
+                        value={form.on_change_filter}
+                        onChange={(e) => setForm({ ...form, on_change_filter: e.target.value })}
+                      />
+                      <p className="mt-1 text-xs text-fg-subtle">
+                        Matched against the raw Slack text, link URLs included. Empty = every
+                        change message.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-fg mb-1" htmlFor="channel-on-change-skill">
+                        Skill for the run (optional)
+                      </label>
+                      <input
+                        id="channel-on-change-skill"
+                        className="input-field"
+                        placeholder="pr-review"
+                        value={form.on_change_skill}
+                        onChange={(e) => setForm({ ...form, on_change_skill: e.target.value })}
+                      />
+                    </div>
+                  </>
                 )}
               </>
             )}
