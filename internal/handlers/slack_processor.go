@@ -410,24 +410,18 @@ func (h *SlackHandler) runInThread(r threadRun) {
 // the raw agent output) so the web UI shows the full result, not the
 // Slack-sized summarization.
 func (h *SlackHandler) finishSlackMessage(channel, threadID, runID, user, text, finalResponse, dbResponse, fullLog string, hasError bool, sessionID string) {
-	// The hourglass reaction is now removed by the TypingController in
-	// processMessage's deferred Stop; here we only add the terminal
-	// success/error reaction.
-
-	// Add result reaction
+	// The hourglass reaction is removed by the TypingController in
+	// processMessage's deferred Stop. A failed run gets the x reaction. A
+	// successful run gets no reaction: a check mark on an alert reads as
+	// "solved" although the agent only investigated it, and in a change
+	// channel it reads as the approver's "merged" marker. The thread reply
+	// shows that the run finished.
 	if hasError {
 		if addErr := h.client.AddReaction("x", slack.ItemRef{
 			Channel:   channel,
 			Timestamp: threadID,
 		}); addErr != nil {
 			slog.Warn("failed to add error reaction", "err", addErr)
-		}
-	} else {
-		if addErr := h.client.AddReaction("white_check_mark", slack.ItemRef{
-			Channel:   channel,
-			Timestamp: threadID,
-		}); addErr != nil {
-			slog.Warn("failed to add success reaction", "err", addErr)
 		}
 	}
 
@@ -448,7 +442,7 @@ func (h *SlackHandler) finishSlackMessage(channel, threadID, runID, user, text, 
 
 	// Post the full final body as a fresh thread reply. chat.postMessage
 	// allows up to ~40,000 chars so long summaries always reach the user.
-	// Completion is signaled by the success/error reaction added above and
+	// Completion is signaled by this reply (and the x reaction on error) and
 	// the typing banner clearing as the run's deferred Stop fires.
 	if _, _, postErr := h.client.PostMessage(
 		channel,

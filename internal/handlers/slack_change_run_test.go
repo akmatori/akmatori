@@ -183,3 +183,39 @@ func TestExtractSlackMessageText_AttachmentTitleLink(t *testing.T) {
 		t.Error("filter does not match the attachment link")
 	}
 }
+
+// A finished run adds no white_check_mark in any channel: on an alert it reads
+// as "solved" although the agent only investigated, and in a change channel
+// it reads as the approver's "merged" marker. A failed run keeps the x.
+func TestFinishSlackMessage_NoCheckMarkReaction(t *testing.T) {
+	fake := &fakeSlackAPI{}
+	srv := httptest.NewServer(http.HandlerFunc(fake.handler))
+	t.Cleanup(srv.Close)
+	h := &SlackHandler{
+		client: slack.New("xoxb-test", slack.OptionAPIURL(srv.URL+"/")),
+		alertChannels: map[string]*database.Channel{
+			"CCHG": {ExternalID: "CCHG", CanListen: true, CanPost: true, OnChange: "run"},
+			"CALR": {ExternalID: "CALR", CanListen: true, CanPost: true, OnChange: "store"},
+		},
+	}
+
+	h.finishSlackMessage("CCHG", "1700.1", "", "U1", "review PR", "review", "review", "", false, "")
+	h.finishSlackMessage("CALR", "1700.2", "", "U1", "alert", "report", "report", "", false, "")
+	h.finishSlackMessage("CMENTION", "1700.3", "", "U1", "question", "answer", "answer", "", false, "")
+	h.finishSlackMessage("CALR", "1700.4", "", "U1", "alert", "failed", "failed", "", true, "")
+
+	if got := fake.reactionsOn("CCHG"); len(got) != 0 {
+		t.Fatalf("change channel reactions = %v, want none", got)
+	}
+	if got := fake.reactionsOn("CMENTION"); len(got) != 0 {
+		t.Fatalf("mention channel reactions = %v, want none", got)
+	}
+	if got := fake.reactionsOn("CALR"); len(got) != 1 || got[0] != "x" {
+		t.Fatalf("alert channel reactions = %v, want only the error x", got)
+	}
+	for _, ch := range []string{"CCHG", "CALR", "CMENTION"} {
+		if len(fake.postsTo(ch)) == 0 {
+			t.Fatalf("no thread reply in %s", ch)
+		}
+	}
+}

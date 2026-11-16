@@ -16,8 +16,9 @@ import (
 // fakeSlackAPI records chat.postMessage calls and answers every Slack Web
 // API call with ok.
 type fakeSlackAPI struct {
-	mu    sync.Mutex
-	posts []map[string]string
+	mu        sync.Mutex
+	posts     []map[string]string
+	reactions []map[string]string
 }
 
 func (f *fakeSlackAPI) handler(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +33,27 @@ func (f *fakeSlackAPI) handler(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"ok":true,"channel":"` + r.Form.Get("channel") + `","ts":"1700000000.000100"}`))
 		return
 	}
+	if strings.HasSuffix(r.URL.Path, "/reactions.add") {
+		f.mu.Lock()
+		f.reactions = append(f.reactions, map[string]string{
+			"channel": r.Form.Get("channel"), "name": r.Form.Get("name"), "timestamp": r.Form.Get("timestamp"),
+		})
+		f.mu.Unlock()
+	}
 	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+// reactionsOn returns the reaction names added to messages in channel.
+func (f *fakeSlackAPI) reactionsOn(channel string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, r := range f.reactions {
+		if r["channel"] == channel {
+			out = append(out, r["name"])
+		}
+	}
+	return out
 }
 
 func (f *fakeSlackAPI) postsTo(channel string) []map[string]string {
@@ -148,5 +169,27 @@ func TestProcessReportedAlert_CronReportWithoutChannelStaysInUI(t *testing.T) {
 	}
 	if inc.SlackChannelID != "" || inc.SlackMessageTS != "" {
 		t.Fatalf("incident Slack context = %q/%q, want none", inc.SlackChannelID, inc.SlackMessageTS)
+	}
+}
+
+// Alert results get no white_check_mark: on an alert it reads as "solved"
+// although the agent only investigated. A failed run keeps the x.
+func TestAlertSlackReactions_NoCheckMark(t *testing.T) {
+	setupEventsHandlerDB(t)
+	h, fake := newSlackAlertHandler(t, &eventsSkillService{corrGateSkillService: &corrGateSkillService{}})
+
+	h.updateSlackChannelReactions("CALR", "1700.1", false) // finished or merged
+	h.updateSlackWithResult("CALR", "1700.2", "report", false)
+	if got := fake.reactionsOn("CALR"); len(got) != 0 {
+		t.Fatalf("reactions after success = %v, want none", got)
+	}
+	if posts := fake.postsTo("CALR"); len(posts) != 1 || posts[0]["thread_ts"] != "1700.2" {
+		t.Fatalf("posts = %+v, want the result reply in the thread", posts)
+	}
+
+	h.updateSlackChannelReactions("CALR", "1700.3", true)
+	h.updateSlackWithResult("CALR", "1700.4", "failed", true)
+	if got := fake.reactionsOn("CALR"); len(got) != 2 || got[0] != "x" || got[1] != "x" {
+		t.Fatalf("reactions after errors = %v, want x, x", got)
 	}
 }
