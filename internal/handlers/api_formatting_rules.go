@@ -24,11 +24,12 @@ const (
 )
 
 var validFormattingSourceKinds = map[string]bool{
-	database.IncidentSourceKindAlert:        true,
-	database.IncidentSourceKindCron:         true,
-	database.IncidentSourceKindSlackMention: true,
-	database.IncidentSourceKindManual:       true,
-	database.IncidentSourceKindProposal:     true,
+	database.IncidentSourceKindAlert:         true,
+	database.IncidentSourceKindCron:          true,
+	database.IncidentSourceKindSlackMention:  true,
+	database.IncidentSourceKindSlackListener: true,
+	database.IncidentSourceKindManual:        true,
+	database.IncidentSourceKindProposal:      true,
 }
 
 // handleFormattingRules handles GET (ordered list) and POST (create) on

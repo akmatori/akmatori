@@ -186,6 +186,21 @@ components:
           type: string
           description: Optional per-channel system prompt for inbound extraction
         process_human_messages: {type: boolean}
+        on_change:
+          type: string
+          enum: [store, run]
+          default: store
+          description: |
+            What a listener message classified as `change` does. `store` records the
+            event only. `run` also starts an agent run for a top-level message that
+            replies in the message thread (a pre-merge or pre-deploy review); it never
+            opens an incident. `run` needs can_listen=true and can_post=true.
+        on_change_filter:
+          type: string
+          description: Optional regex (max 1024 chars) the raw Slack message text must match for `run`; empty = every change message.
+        on_change_skill:
+          type: string
+          description: Optional skill name the change run is asked to use.
         enabled: {type: boolean}
         integration: {$ref: '#/components/schemas/Integration'}
         created_at: {type: string, format: date-time}
@@ -203,6 +218,9 @@ components:
         is_default_post: {type: boolean}
         extraction_prompt: {type: string}
         process_human_messages: {type: boolean}
+        on_change: {type: string, enum: [store, run], description: "See Channel.on_change; omitted = store"}
+        on_change_filter: {type: string}
+        on_change_skill: {type: string}
         enabled: {type: boolean}
 
     ChannelUpdateRequest:
@@ -216,6 +234,9 @@ components:
         is_default_post: {type: boolean}
         extraction_prompt: {type: string}
         process_human_messages: {type: boolean}
+        on_change: {type: string, enum: [store, run], description: "See Channel.on_change; empty = store"}
+        on_change_filter: {type: string}
+        on_change_skill: {type: string}
         enabled: {type: boolean}
 
     CronJob:

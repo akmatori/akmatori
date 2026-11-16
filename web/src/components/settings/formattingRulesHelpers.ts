@@ -15,6 +15,7 @@ export const MATCH_SOURCE_KINDS: Array<{ value: string; label: string }> = [
   { value: 'alert', label: 'Alert' },
   { value: 'cron', label: 'Cron job' },
   { value: 'slack_mention', label: 'Slack mention' },
+  { value: 'slack_listener', label: 'Slack channel change run' },
   { value: 'manual', label: 'Manual / API' },
 ];
 

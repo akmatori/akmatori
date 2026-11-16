@@ -46,6 +46,9 @@ type channelResponse struct {
 	ExtractionPrompt     string               `json:"extraction_prompt"`
 	ProcessBotMessages   bool                 `json:"process_bot_messages"`
 	ProcessHumanMessages bool                 `json:"process_human_messages"`
+	OnChange             string               `json:"on_change"`
+	OnChangeFilter       string               `json:"on_change_filter"`
+	OnChangeSkill        string               `json:"on_change_skill"`
 	Enabled              bool                 `json:"enabled"`
 	CreatedAt            interface{}          `json:"created_at"`
 	UpdatedAt            interface{}          `json:"updated_at"`
@@ -65,6 +68,9 @@ func toChannelResponse(row *database.Channel) channelResponse {
 		ExtractionPrompt:     row.ExtractionPrompt,
 		ProcessBotMessages:   row.ProcessBotMessages,
 		ProcessHumanMessages: row.ProcessHumanMessages,
+		OnChange:             services.NormalizeOnChange(row.OnChange),
+		OnChangeFilter:       row.OnChangeFilter,
+		OnChangeSkill:        row.OnChangeSkill,
 		Enabled:              row.Enabled,
 		CreatedAt:            row.CreatedAt,
 		UpdatedAt:            row.UpdatedAt,
@@ -97,6 +103,9 @@ type CreateChannelRequest struct {
 	ExtractionPrompt     string `json:"extraction_prompt,omitempty"`
 	ProcessBotMessages   *bool  `json:"process_bot_messages,omitempty"`
 	ProcessHumanMessages bool   `json:"process_human_messages,omitempty"`
+	OnChange             string `json:"on_change,omitempty"`
+	OnChangeFilter       string `json:"on_change_filter,omitempty"`
+	OnChangeSkill        string `json:"on_change_skill,omitempty"`
 	Enabled              *bool  `json:"enabled,omitempty"`
 }
 
@@ -113,6 +122,9 @@ type UpdateChannelRequest struct {
 	ExtractionPrompt     *string `json:"extraction_prompt,omitempty"`
 	ProcessBotMessages   *bool   `json:"process_bot_messages,omitempty"`
 	ProcessHumanMessages *bool   `json:"process_human_messages,omitempty"`
+	OnChange             *string `json:"on_change,omitempty"`
+	OnChangeFilter       *string `json:"on_change_filter,omitempty"`
+	OnChangeSkill        *string `json:"on_change_skill,omitempty"`
 	Enabled              *bool   `json:"enabled,omitempty"`
 }
 
@@ -193,6 +205,9 @@ func (h *APIHandler) handleChannels(w http.ResponseWriter, r *http.Request) {
 			ExtractionPrompt:     req.ExtractionPrompt,
 			ProcessBotMessages:   processBotMessages,
 			ProcessHumanMessages: req.ProcessHumanMessages,
+			OnChange:             req.OnChange,
+			OnChangeFilter:       req.OnChangeFilter,
+			OnChangeSkill:        req.OnChangeSkill,
 			Enabled:              enabled,
 		}
 
@@ -273,6 +288,9 @@ func (h *APIHandler) handleChannelByUUID(w http.ResponseWriter, r *http.Request)
 			ExtractionPrompt:     req.ExtractionPrompt,
 			ProcessBotMessages:   req.ProcessBotMessages,
 			ProcessHumanMessages: req.ProcessHumanMessages,
+			OnChange:             req.OnChange,
+			OnChangeFilter:       req.OnChangeFilter,
+			OnChangeSkill:        req.OnChangeSkill,
 			Enabled:              req.Enabled,
 		}
 		row, err := h.channelService.UpdateChannel(uuid, patch)

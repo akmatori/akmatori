@@ -8,6 +8,7 @@ import {
   channelRoles,
   roleBadgeClass,
   roleBadgeLabel,
+  onChangeFields,
 } from './channelHelpers';
 import type { Channel, Integration } from '../../types';
 
@@ -45,6 +46,9 @@ const makeChannel = (overrides: Partial<Channel>): Channel => ({
   extraction_prompt: overrides.extraction_prompt ?? '',
   process_bot_messages: true,
   process_human_messages: overrides.process_human_messages ?? false,
+  on_change: 'store',
+  on_change_filter: '',
+  on_change_skill: '',
   enabled: overrides.enabled ?? true,
   integration: overrides.integration ?? slackIntegration,
   created_at: '',
@@ -193,5 +197,28 @@ describe('roleBadgeClass / roleBadgeLabel', () => {
     expect(roleBadgeLabel('post')).toBe('Post');
     expect(roleBadgeLabel('listen')).toBe('Listen');
     expect(roleBadgeLabel('disabled')).toBe('Disabled');
+  });
+});
+
+describe('onChangeFields', () => {
+  const base = {
+    can_listen: true,
+    can_post: true,
+    on_change: 'run' as const,
+    on_change_filter: ' /pull/\\d+ ',
+    on_change_skill: ' pr-review ',
+  };
+  it('sends run with trimmed filter and skill', () => {
+    expect(onChangeFields(base)).toEqual({
+      on_change: 'run',
+      on_change_filter: '/pull/\\d+',
+      on_change_skill: 'pr-review',
+    });
+  });
+  it('falls back to store when the channel cannot post or listen', () => {
+    const store = { on_change: 'store', on_change_filter: '', on_change_skill: '' };
+    expect(onChangeFields({ ...base, can_post: false })).toEqual(store);
+    expect(onChangeFields({ ...base, can_listen: false })).toEqual(store);
+    expect(onChangeFields({ ...base, on_change: 'store' })).toEqual(store);
   });
 });

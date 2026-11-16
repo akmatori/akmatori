@@ -30,8 +30,11 @@ const (
 	IncidentSourceKindAlert        = "alert"
 	IncidentSourceKindCron         = "cron"
 	IncidentSourceKindSlackMention = "slack_mention"
-	IncidentSourceKindManual       = "manual"
-	IncidentSourceKindProposal     = "proposal"
+	// IncidentSourceKindSlackListener is a run started by a listener-channel
+	// post (a "change" message on a channel with on_change=run).
+	IncidentSourceKindSlackListener = "slack_listener"
+	IncidentSourceKindManual        = "manual"
+	IncidentSourceKindProposal      = "proposal"
 )
 
 // IncidentCloseReason records why an incident reached "closed" status. An
