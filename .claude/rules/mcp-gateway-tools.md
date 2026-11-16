@@ -145,3 +145,21 @@ instance has an operator policy (`command_policy.go`, `ValidateCommandWithPolicy
   error appends the allow patterns
 - an allowed write command is still a write for the host-document hold (`ValidateCommand(cmd,
   false)`): it waits once for the agent to read the host document
+
+## Gitea tool: gitea.*
+
+`tools/gitea`, `registerGiteaTools` (`registry_gitea.go`). Read pull requests for pre-merge review;
+Forgejo speaks the same API.
+
+- settings: `gitea_url` (a trailing `/api/v1` is dropped), `gitea_token` (secret, sent as
+  `Authorization: token …`), `gitea_allowed_repos` (textarea: `owner/repo` or `owner/*` per line;
+  empty = all the token can read), `gitea_allow_comments` (default off), `gitea_verify_ssl`,
+  `gitea_timeout`
+- a pull request is `repo` + `number` or `pr_url`; a `pr_url` on another host is refused. The
+  allowlist is checked before any request
+- outputs are compact JSON, not raw API objects. Diffs are split per file from `pulls/{n}.diff`
+  (renames match the old path too) and cut at `max_bytes` (default 50000, max 200000) with a
+  `[TRUNCATED …]` marker; files come from `/raw/` and binary files are not shown
+- listings page by `X-Total-Count` (Gitea may cap the page size), at most 20 pages
+- `create_pull_request_comment` re-reads `gitea_allow_comments` from the DB on every call (no cache)
+- no proxy toggle and no env proxy; redirects are refused (the token would follow them)

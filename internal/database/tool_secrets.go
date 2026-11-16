@@ -24,6 +24,7 @@ var toolSecretSettingKeys = map[string]struct{}{
 	"netbox_api_token":     {},
 	"k8s_token":            {},
 	"jira_api_token":       {},
+	"gitea_token":          {},
 }
 
 // IsToolSecretSetting reports whether a top-level tool settings key holds a

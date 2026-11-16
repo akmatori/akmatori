@@ -850,3 +850,47 @@ func TestGenerateToolUsageExample_NoPythonImports(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateToolUsageExample_Gitea(t *testing.T) {
+	tool := database.ToolInstance{
+		ID:          9,
+		Name:        "git",
+		LogicalName: "git",
+		Settings:    database.JSONB{},
+		ToolType:    database.ToolType{ID: 9, Name: "gitea"},
+	}
+	example := generateToolUsageExample(tool)
+	for _, fn := range []string{"gitea.get_pull_request\"", "gitea.list_pull_request_files", "gitea.get_pull_request_diff", "gitea.get_file", "gitea.list_pull_request_comments", "gitea.search_pull_requests", "create_pull_request_comment"} {
+		if !strings.Contains(example, fn) {
+			t.Errorf("expected %s in the example, got: %s", fn, example)
+		}
+	}
+	if strings.Contains(example, "%!") || !strings.Contains(example, `"git")`) {
+		t.Errorf("bad format arguments in the example: %s", example)
+	}
+}
+
+func TestExtractToolDetails_Gitea(t *testing.T) {
+	tool := database.ToolInstance{
+		Name: "git",
+		Settings: database.JSONB{
+			"gitea_url":           "https://git.example.com/",
+			"gitea_token":         "secret",
+			"gitea_allowed_repos": "Infra/Puppet\n# comment\nops/*",
+		},
+		ToolType: database.ToolType{Name: "gitea"},
+	}
+	details := extractToolDetails(tool)
+	for _, want := range []string{"Instance: https://git.example.com (", "`infra/puppet`, `ops/*`", "Comments: disabled"} {
+		if !strings.Contains(details, want) {
+			t.Errorf("expected %q in details, got: %s", want, details)
+		}
+	}
+	if strings.Contains(details, "secret") {
+		t.Fatal("details must not contain the token")
+	}
+	tool.Settings["gitea_allow_comments"] = true
+	if !strings.Contains(extractToolDetails(tool), "Comments: allowed") {
+		t.Error("expected comments allowed")
+	}
+}
