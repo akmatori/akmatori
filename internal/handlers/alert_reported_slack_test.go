@@ -171,3 +171,25 @@ func TestProcessReportedAlert_CronReportWithoutChannelStaysInUI(t *testing.T) {
 		t.Fatalf("incident Slack context = %q/%q, want none", inc.SlackChannelID, inc.SlackMessageTS)
 	}
 }
+
+// Alert results get no white_check_mark: on an alert it reads as "solved"
+// although the agent only investigated. A failed run keeps the x.
+func TestAlertSlackReactions_NoCheckMark(t *testing.T) {
+	setupEventsHandlerDB(t)
+	h, fake := newSlackAlertHandler(t, &eventsSkillService{corrGateSkillService: &corrGateSkillService{}})
+
+	h.updateSlackChannelReactions("CALR", "1700.1", false) // finished or merged
+	h.updateSlackWithResult("CALR", "1700.2", "report", false)
+	if got := fake.reactionsOn("CALR"); len(got) != 0 {
+		t.Fatalf("reactions after success = %v, want none", got)
+	}
+	if posts := fake.postsTo("CALR"); len(posts) != 1 || posts[0]["thread_ts"] != "1700.2" {
+		t.Fatalf("posts = %+v, want the result reply in the thread", posts)
+	}
+
+	h.updateSlackChannelReactions("CALR", "1700.3", true)
+	h.updateSlackWithResult("CALR", "1700.4", "failed", true)
+	if got := fake.reactionsOn("CALR"); len(got) != 2 || got[0] != "x" || got[1] != "x" {
+		t.Fatalf("reactions after errors = %v, want x, x", got)
+	}
+}

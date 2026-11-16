@@ -404,41 +404,24 @@ func (h *SlackHandler) runInThread(r threadRun) {
 		errMsg, errMsg, "", true, "")
 }
 
-// skipSuccessReaction reports whether a finished run must not put the
-// white_check_mark reaction on the thread root. In a listener channel with
-// on_change=run the root is a change request ("please review and merge
-// <PR>"), and teams use that emoji as the approver's "merged" marker, so a
-// bot check mark reads as "already merged". The reply in the thread already
-// shows that the run finished. The error reaction stays.
-func (h *SlackHandler) skipSuccessReaction(channelID string) bool {
-	ch, ok := h.isAlertChannel(channelID)
-	return ok && services.NormalizeOnChange(ch.OnChange) == database.ChannelOnChangeRun
-}
-
 // finishSlackMessage handles the final steps of Slack message processing.
 // finalResponse is what gets posted to Slack; dbResponse is the response
 // stored on the run (the formatted output when the formatter ran, otherwise
 // the raw agent output) so the web UI shows the full result, not the
 // Slack-sized summarization.
 func (h *SlackHandler) finishSlackMessage(channel, threadID, runID, user, text, finalResponse, dbResponse, fullLog string, hasError bool, sessionID string) {
-	// The hourglass reaction is now removed by the TypingController in
-	// processMessage's deferred Stop; here we only add the terminal
-	// success/error reaction.
-
-	// Add result reaction
+	// The hourglass reaction is removed by the TypingController in
+	// processMessage's deferred Stop. A failed run gets the x reaction. A
+	// successful run gets no reaction: a check mark on an alert reads as
+	// "solved" although the agent only investigated it, and in a change
+	// channel it reads as the approver's "merged" marker. The thread reply
+	// shows that the run finished.
 	if hasError {
 		if addErr := h.client.AddReaction("x", slack.ItemRef{
 			Channel:   channel,
 			Timestamp: threadID,
 		}); addErr != nil {
 			slog.Warn("failed to add error reaction", "err", addErr)
-		}
-	} else if !h.skipSuccessReaction(channel) {
-		if addErr := h.client.AddReaction("white_check_mark", slack.ItemRef{
-			Channel:   channel,
-			Timestamp: threadID,
-		}); addErr != nil {
-			slog.Warn("failed to add success reaction", "err", addErr)
 		}
 	}
 
@@ -459,8 +442,7 @@ func (h *SlackHandler) finishSlackMessage(channel, threadID, runID, user, text, 
 
 	// Post the full final body as a fresh thread reply. chat.postMessage
 	// allows up to ~40,000 chars so long summaries always reach the user.
-	// Completion is signaled by the success/error reaction added above (no
-	// success reaction in an on_change=run channel) and
+	// Completion is signaled by this reply (and the x reaction on error) and
 	// the typing banner clearing as the run's deferred Stop fires.
 	if _, _, postErr := h.client.PostMessage(
 		channel,

@@ -227,22 +227,22 @@ func (h *AlertHandler) postSlackThreadReply(channelID, threadTS, message string)
 	}
 }
 
-// updateSlackChannelReactions updates reactions on the original Slack message
+// updateSlackChannelReactions marks a failed run on the original Slack
+// message with the x reaction. A successful run (or an alert merged into an
+// incident) gets no reaction: a check mark reads as "solved" although the
+// agent only investigated. The thread reply shows the result.
 func (h *AlertHandler) updateSlackChannelReactions(channelID, messageTS string, hasError bool) {
+	if !hasError {
+		return
+	}
 	slackClient := h.slackManager.GetClient()
 	if slackClient == nil {
 		return
 	}
 
-	// The hourglass reaction is now removed by the TypingController in
+	// The hourglass reaction is removed by the TypingController in
 	// runListenerChannelInvestigation's deferred Stop.
-
-	// Add result reaction
-	reactionName := "white_check_mark"
-	if hasError {
-		reactionName = "x"
-	}
-	if err := slackClient.AddReaction(reactionName, slack.ItemRef{
+	if err := slackClient.AddReaction("x", slack.ItemRef{
 		Channel:   channelID,
 		Timestamp: messageTS,
 	}); err != nil {
@@ -264,16 +264,15 @@ func (h *AlertHandler) updateSlackWithResult(channelID, threadTS, response strin
 		return
 	}
 
-	// Add result reaction
-	reactionName := "white_check_mark"
+	// Only a failed run gets a reaction (x); no check mark on success, see
+	// updateSlackChannelReactions.
 	if hasError {
-		reactionName = "x"
-	}
-	if err := slackClient.AddReaction(reactionName, slack.ItemRef{
-		Channel:   channelID,
-		Timestamp: threadTS,
-	}); err != nil {
-		slog.Warn("failed to add reaction", "err", err)
+		if err := slackClient.AddReaction("x", slack.ItemRef{
+			Channel:   channelID,
+			Timestamp: threadTS,
+		}); err != nil {
+			slog.Warn("failed to add reaction", "err", err)
+		}
 	}
 
 	// Post result summary
