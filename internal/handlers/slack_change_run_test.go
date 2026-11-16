@@ -134,3 +134,52 @@ func TestHandleAlertChannelMessage_ChangeStoredByDefault(t *testing.T) {
 		t.Fatalf("runs started = %d, want 0", len(svc.starts))
 	}
 }
+
+// A redelivered message, or one the app_mention path already answered,
+// starts no second run; nor does a thread that already has work.
+func TestRunChangeReview_OneRunPerMessage(t *testing.T) {
+	db := setupEventsHandlerDB(t)
+	srv := httptest.NewServer(http.HandlerFunc((&fakeSlackAPI{}).handler))
+	t.Cleanup(srv.Close)
+	svc := &requestRunSkillService{}
+	h := &SlackHandler{client: slack.New("xoxb-test", slack.OptionAPIURL(srv.URL+"/")), skillService: svc}
+	channel := &database.Channel{UUID: "ch", CanListen: true, CanPost: true, OnChange: "run"}
+	ev := &slackevents.MessageEvent{Channel: "CCHG", TimeStamp: "1700.3", Text: "merge PR 3"}
+
+	h.runChangeReview(channel, ev, "1700.3", ev.Text, "ev-1")
+	h.runChangeReview(channel, ev, "1700.3", ev.Text, "ev-2") // redelivery
+	if len(svc.starts) != 1 {
+		t.Fatalf("runs after redelivery = %d, want 1", len(svc.starts))
+	}
+
+	// The key expired, but the thread already has request work.
+	h.processedMsgs.Delete("CCHG:1700.3")
+	if err := db.Create(&database.AgentRun{RunID: "r-1", ScopeUUID: "ev-1", SlackThreadTS: "1700.3"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	h.runChangeReview(channel, ev, "1700.3", ev.Text, "ev-3")
+	if len(svc.starts) != 1 {
+		t.Fatalf("runs after late redelivery = %d, want 1", len(svc.starts))
+	}
+
+	// The app_mention path answered the post first.
+	h.processedMsgs.Store("CCHG:1700.4", struct{}{})
+	h.runChangeReview(channel, &slackevents.MessageEvent{Channel: "CCHG", TimeStamp: "1700.4"}, "1700.4", "x", "ev-4")
+	if len(svc.starts) != 1 {
+		t.Fatalf("runs after mention = %d, want 1", len(svc.starts))
+	}
+}
+
+func TestExtractSlackMessageText_AttachmentTitleLink(t *testing.T) {
+	msg := slack.Message{Msg: slack.Msg{Attachments: []slack.Attachment{{
+		Title: "PR #12: bump timeout", TitleLink: "https://github.com/acme/api/pull/12", Text: "tested on staging",
+	}}}}
+	raw := extractSlackMessageText(msg)
+	if !strings.Contains(raw, "<https://github.com/acme/api/pull/12|PR #12: bump timeout>") {
+		t.Errorf("raw text = %q, want the title as a Slack link", raw)
+	}
+	if !changeRunMatches(&database.Channel{OnChange: "run", CanPost: true, OnChangeFilter: `/pull/\d+`},
+		&slackevents.MessageEvent{TimeStamp: "1"}, raw) {
+		t.Error("filter does not match the attachment link")
+	}
+}

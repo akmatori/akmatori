@@ -24,8 +24,17 @@ func extractSlackMessageText(msg slack.Message) string {
 		if att.Pretext != "" {
 			attParts = append(attParts, att.Pretext)
 		}
-		if att.Title != "" {
+		// The title link is written in Slack link syntax: StripSlackMrkdwn
+		// turns it back into the plain title (alert extraction sees the same
+		// text as before), and the raw text keeps the URL (a change run needs
+		// the pull request link a forge notification puts here).
+		switch {
+		case att.Title != "" && att.TitleLink != "":
+			attParts = append(attParts, fmt.Sprintf("<%s|%s>", att.TitleLink, att.Title))
+		case att.Title != "":
 			attParts = append(attParts, att.Title)
+		case att.TitleLink != "":
+			attParts = append(attParts, fmt.Sprintf("<%s>", att.TitleLink))
 		}
 		if att.Text != "" {
 			attParts = append(attParts, att.Text)

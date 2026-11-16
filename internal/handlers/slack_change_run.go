@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/akmatori/akmatori/internal/database"
 	"github.com/akmatori/akmatori/internal/services"
@@ -56,7 +57,27 @@ func changeRunTask(message, skill string) string {
 // runChangeReview starts request work for a change message and answers in
 // the message thread. It never opens an incident. A later @mention in the
 // thread continues the same work (lookupSlackThread finds the run).
+//
+// One message starts at most one run. The in-memory key is the one the
+// app_mention path uses, so an @mention of the bot in the same post (which
+// that path answers first: it does not wait for classification) wins. The
+// thread lookup catches a Slack redelivery after the key expired: the first
+// run already stored the thread on its agent_runs row.
 func (h *SlackHandler) runChangeReview(channel *database.Channel, event *slackevents.MessageEvent, threadTS, rawText, eventUUID string) {
+	dedupeKey := event.Channel + ":" + event.TimeStamp
+	if _, loaded := h.processedMsgs.LoadOrStore(dedupeKey, struct{}{}); loaded {
+		slog.Info("change message already handled; no change run", "dedupe_key", dedupeKey, "event_uuid", eventUUID)
+		return
+	}
+	go func() {
+		time.Sleep(60 * time.Second)
+		h.processedMsgs.Delete(dedupeKey)
+	}()
+	if work, err := lookupSlackThread(threadTS); err == nil && work != nil {
+		slog.Info("thread already has work; no change run", "thread_ts", threadTS, "scope", work.ScopeUUID, "incident", work.IncidentUUID)
+		return
+	}
+
 	scopeUUID, _, err := h.skillService.PrepareRequestScope("incident-manager", eventUUID)
 	if err != nil {
 		slog.Error("failed to prepare change run", "channel", event.Channel, "err", err)

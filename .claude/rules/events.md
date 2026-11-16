@@ -39,7 +39,9 @@ Only `alert` events open or join incidents; everything else never touches the in
   `incident-manager` with `source_kind=slack_listener`, `source_uuid=<channel uuid>`, replying in the
   message thread via `runInThread` (the mention flow's run loop). Never an incident; a fallback verdict
   is `alert`, so a failed classification never starts a change run. `on_change_skill` adds a
-  "use skill X" line to the task
+  "use skill X" line to the task. One run per message: the `processedMsgs` key (shared with the
+  app_mention path) plus `lookupSlackThread` (a redelivery after the key expired). Attachment titles
+  carry `title_link` as `<url|title>` so the raw text keeps forge PR links
 - **fail safe**: every failure (no caller, worker down, unparseable, unknown class, non-fallback
   class below 0.7) gives the fallback class with `classification=fallback`. Webhook/listener fall back
   to `alert` (a dropped real alert is worse than an extra investigation); mentions/API fall back to
