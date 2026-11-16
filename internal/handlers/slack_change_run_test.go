@@ -183,3 +183,37 @@ func TestExtractSlackMessageText_AttachmentTitleLink(t *testing.T) {
 		t.Error("filter does not match the attachment link")
 	}
 }
+
+// A finished run in an on_change=run channel adds no white_check_mark to the
+// thread root: there the emoji is the approver's "merged" marker. Other
+// channels keep it, and errors keep the x reaction everywhere.
+func TestFinishSlackMessage_NoCheckMarkInChangeRunChannel(t *testing.T) {
+	fake := &fakeSlackAPI{}
+	srv := httptest.NewServer(http.HandlerFunc(fake.handler))
+	t.Cleanup(srv.Close)
+	h := &SlackHandler{
+		client: slack.New("xoxb-test", slack.OptionAPIURL(srv.URL+"/")),
+		alertChannels: map[string]*database.Channel{
+			"CCHG": {ExternalID: "CCHG", CanListen: true, CanPost: true, OnChange: "run"},
+			"CALR": {ExternalID: "CALR", CanListen: true, CanPost: true, OnChange: "store"},
+		},
+	}
+
+	h.finishSlackMessage("CCHG", "1700.1", "", "U1", "review PR", "review", "review", "", false, "")
+	h.finishSlackMessage("CALR", "1700.2", "", "U1", "alert", "report", "report", "", false, "")
+	h.finishSlackMessage("CMENTION", "1700.3", "", "U1", "question", "answer", "answer", "", false, "")
+	h.finishSlackMessage("CCHG", "1700.4", "", "U1", "review PR", "failed", "failed", "", true, "")
+
+	if got := fake.reactionsOn("CCHG"); len(got) != 1 || got[0] != "x" {
+		t.Fatalf("on_change=run channel reactions = %v, want only the error x", got)
+	}
+	if got := fake.reactionsOn("CALR"); len(got) != 1 || got[0] != "white_check_mark" {
+		t.Fatalf("on_change=store channel reactions = %v, want white_check_mark", got)
+	}
+	if got := fake.reactionsOn("CMENTION"); len(got) != 1 || got[0] != "white_check_mark" {
+		t.Fatalf("non-listener channel reactions = %v, want white_check_mark", got)
+	}
+	if posts := fake.postsTo("CCHG"); len(posts) != 2 {
+		t.Fatalf("posts in change channel = %d, want 2 thread replies", len(posts))
+	}
+}
