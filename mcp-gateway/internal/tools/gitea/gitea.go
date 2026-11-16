@@ -504,11 +504,12 @@ func cut(s string, n int) (string, bool) {
 	if len(s) <= n {
 		return s, false
 	}
-	s = s[:n]
-	for len(s) > 0 && !utf8.ValidString(s) {
-		s = s[:len(s)-1]
+	// Step back over continuation bytes only (at most UTFMax-1), so text that
+	// is not UTF-8 is cut at n and not emptied.
+	for i := 0; i < utf8.UTFMax-1 && n > 0 && !utf8.RuneStart(s[n]); i++ {
+		n--
 	}
-	return s, true
+	return s[:n], true
 }
 
 func marshal(v interface{}) (string, error) {
@@ -788,36 +789,67 @@ func splitDiff(diff string) (order []string, sections map[string]string) {
 	return order, sections
 }
 
-// diffGitNames reads `diff --git a/<old> b/<new>`. Paths with spaces are
-// ambiguous in this header, so it splits at " b/" and returns the new path
-// first.
+// diffGitNames reads `diff --git a/<old> b/<new>` and returns the new path
+// first. Git quotes each path on its own (C-style, when it has special or
+// non-ASCII characters), so either side can be quoted. An unquoted old path
+// with spaces is ambiguous; it is split at the first " b/" (or ` "b/`).
 func diffGitNames(header string) []string {
 	rest := strings.TrimPrefix(header, "diff --git ")
-	unq := func(s string) string {
-		if u, err := strconv.Unquote(s); err == nil {
-			return u
-		}
-		return s
-	}
-	if i := strings.Index(rest, " b/"); i >= 0 && strings.HasPrefix(rest, "a/") {
-		oldP, newP := rest[2:i], rest[i+3:]
-		if newP == oldP {
-			return []string{newP}
-		}
-		return []string{newP, oldP}
-	}
-	// Quoted paths: "a/x y" "b/x y"
+	var oldRaw, newRaw string
 	if strings.HasPrefix(rest, "\"") {
-		if j := strings.Index(rest, "\" \""); j > 0 {
-			oldP := strings.TrimPrefix(unq(rest[:j+1]), "a/")
-			newP := strings.TrimPrefix(unq(rest[j+2:]), "b/")
-			if newP == oldP {
-				return []string{newP}
-			}
-			return []string{newP, oldP}
+		end := quotedEnd(rest)
+		if end < 0 || end+1 >= len(rest) || rest[end+1] != ' ' {
+			return []string{rest}
+		}
+		oldRaw, newRaw = rest[:end+1], rest[end+2:]
+	} else {
+		i := strings.Index(rest, " b/")
+		if j := strings.Index(rest, " \"b/"); j >= 0 && (i < 0 || j < i) {
+			i = j
+		}
+		if i < 0 {
+			return []string{rest}
+		}
+		oldRaw, newRaw = rest[:i], rest[i+1:]
+	}
+	oldP, ok1 := diffPath(oldRaw, "a/")
+	newP, ok2 := diffPath(newRaw, "b/")
+	if !ok1 || !ok2 {
+		return []string{rest}
+	}
+	if newP == oldP {
+		return []string{newP}
+	}
+	return []string{newP, oldP}
+}
+
+// quotedEnd returns the index of the closing quote of the C-style quoted
+// string at the start of s, or -1.
+func quotedEnd(s string) int {
+	for i := 1; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			i++
+		case '"':
+			return i
 		}
 	}
-	return []string{rest}
+	return -1
+}
+
+// diffPath unquotes one header path (if quoted) and drops its a/ or b/ prefix.
+func diffPath(raw, prefix string) (string, bool) {
+	if strings.HasPrefix(raw, "\"") {
+		u, err := strconv.Unquote(raw)
+		if err != nil {
+			return "", false
+		}
+		raw = u
+	}
+	if !strings.HasPrefix(raw, prefix) {
+		return "", false
+	}
+	return raw[len(prefix):], true
 }
 
 // GetPullRequestDiff returns the diff of one file or of the whole pull
@@ -842,6 +874,7 @@ func (t *GiteaTool) GetPullRequestDiff(ctx context.Context, incidentID string, a
 	order, sections := splitDiff(diff)
 
 	header := fmt.Sprintf("# %s#%d diff", p.repo(), p.number)
+	partial := false
 	if file != "" {
 		sec, ok := sections[file]
 		if !ok {
@@ -857,7 +890,11 @@ func (t *GiteaTool) GetPullRequestDiff(ctx context.Context, incidentID string, a
 		}
 		header += " — file " + file
 		diff = sec
+		// The download cap stops inside the last section, so only that file
+		// can be partial.
+		partial = over && len(order) > 0 && sections[order[len(order)-1]] == sec
 	} else {
+		partial = over
 		header += fmt.Sprintf(" — %d files", len(order))
 	}
 
@@ -867,16 +904,19 @@ func (t *GiteaTool) GetPullRequestDiff(ctx context.Context, incidentID string, a
 	b.WriteString(header)
 	b.WriteString("\n\n")
 	b.WriteString(body)
-	if truncated || (over && file == "") {
+	if truncated || partial {
 		if !strings.HasSuffix(body, "\n") {
 			b.WriteString("\n")
 		}
 		size := fmt.Sprintf("%d bytes", total)
-		if over && file == "" {
-			size = fmt.Sprintf("over %d bytes", maxRawResponseBytes)
+		if partial {
+			size = fmt.Sprintf("over %d bytes", total)
 		}
 		hint := fmt.Sprintf("Call list_pull_request_files, then get_pull_request_diff with file=<path> for each file, or raise max_bytes (max %d).", MaxMaxBytes)
-		if file != "" {
+		switch {
+		case file != "" && partial && !truncated:
+			hint = fmt.Sprintf("The pull request diff is over %d MB and was read only in part, so the end of this file's diff is missing. Read the file with get_file at the head sha instead.", maxRawResponseBytes/(1024*1024))
+		case file != "":
 			hint = fmt.Sprintf("Raise max_bytes (max %d) to see more of this file.", MaxMaxBytes)
 		}
 		fmt.Fprintf(&b, "\n[TRUNCATED: showed %d of %s. %s]\n", len(body), size, hint)
@@ -914,7 +954,7 @@ func (t *GiteaTool) GetFile(ctx context.Context, incidentID string, args map[str
 	if ref != "" {
 		q.Set("ref", ref)
 	}
-	raw, over, _, err := t.do(ctx, cfg, http.MethodGet, repoPath(owner, name)+"/raw/"+strings.Join(segs, "/"), q, nil, "*/*", maxBytes)
+	raw, over, _, err := t.do(ctx, cfg, http.MethodGet, repoPath(owner, name)+"/raw/"+strings.Join(segs, "/"), q, nil, "*/*", maxBytes+utf8.UTFMax-1)
 	if err != nil {
 		return "", err
 	}
@@ -930,8 +970,9 @@ func (t *GiteaTool) GetFile(ctx context.Context, incidentID string, args map[str
 	if strings.IndexByte(string(sample), 0) >= 0 {
 		return head + "[binary file; content not shown]\n", nil
 	}
-	text, _ := cut(string(raw), maxBytes)
-	if over {
+	// Read a few bytes past max_bytes so cut can end on a rune boundary.
+	text, cutHere := cut(string(raw), maxBytes)
+	if over || cutHere {
 		shown := len(text)
 		if !strings.HasSuffix(text, "\n") {
 			text += "\n"
@@ -1081,7 +1122,8 @@ func (t *GiteaTool) SearchPullRequests(ctx context.Context, incidentID string, a
 		q.Set("created_by", v)
 	}
 	var issues []apiIssue
-	if err := t.getJSON(ctx, cfg, repoPath(owner, name)+"/issues", q, &issues); err != nil {
+	total, err := t.getJSONTotal(ctx, cfg, repoPath(owner, name)+"/issues", q, &issues)
+	if err != nil {
 		return "", err
 	}
 	list := make([]map[string]interface{}, 0, len(issues))
@@ -1101,7 +1143,16 @@ func (t *GiteaTool) SearchPullRequests(ctx context.Context, incidentID string, a
 	out := map[string]interface{}{
 		"repo": owner + "/" + name, "state": state, "page": page, "count": len(list), "pull_requests": list,
 	}
-	if len(list) == limit {
+	// Gitea may serve fewer items than limit per page (MAX_RESPONSE_ITEMS), so
+	// the end comes from X-Total-Count; without it a full page means "maybe more".
+	// A short page is either the server's page size or the last page; page*len
+	// can only under-count what was served, so at worst next_page is empty.
+	if total >= 0 {
+		out["total_count"] = total
+		if len(list) > 0 && page*len(list) < total {
+			out["next_page"] = page + 1
+		}
+	} else if len(list) == limit {
 		out["next_page"] = page + 1
 	}
 	return marshal(out)

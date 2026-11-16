@@ -18,19 +18,19 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/tools/catchpoint"
 	"github.com/akmatori/mcp-gateway/internal/tools/clickhouse"
 	"github.com/akmatori/mcp-gateway/internal/tools/events"
-	"github.com/akmatori/mcp-gateway/internal/tools/knowledge"
-	"github.com/akmatori/mcp-gateway/internal/tools/telegram"
+	"github.com/akmatori/mcp-gateway/internal/tools/gitea"
 	"github.com/akmatori/mcp-gateway/internal/tools/grafana"
 	"github.com/akmatori/mcp-gateway/internal/tools/httpconnector"
 	"github.com/akmatori/mcp-gateway/internal/tools/incidents"
-	"github.com/akmatori/mcp-gateway/internal/tools/gitea"
 	"github.com/akmatori/mcp-gateway/internal/tools/jira"
 	"github.com/akmatori/mcp-gateway/internal/tools/k8s"
+	"github.com/akmatori/mcp-gateway/internal/tools/knowledge"
 	"github.com/akmatori/mcp-gateway/internal/tools/netbox"
 	"github.com/akmatori/mcp-gateway/internal/tools/pagerduty"
 	"github.com/akmatori/mcp-gateway/internal/tools/postgresql"
 	"github.com/akmatori/mcp-gateway/internal/tools/proposals"
 	"github.com/akmatori/mcp-gateway/internal/tools/ssh"
+	"github.com/akmatori/mcp-gateway/internal/tools/telegram"
 	"github.com/akmatori/mcp-gateway/internal/tools/victoriametrics"
 	"github.com/akmatori/mcp-gateway/internal/tools/zabbix"
 )
@@ -186,9 +186,6 @@ func (r *Registry) RegisterAllTools() {
 
 	// Register Jira tools with rate limiter
 	r.registerJiraTools()
-
-	// Register Gitea tools with rate limiter
-	r.registerGiteaTools()
 
 	// Register Gitea tools (rate limiter created inside)
 	r.registerGiteaTools()

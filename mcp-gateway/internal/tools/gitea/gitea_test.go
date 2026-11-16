@@ -497,3 +497,88 @@ func TestGetPullRequest_ZeroCountsOmitted(t *testing.T) {
 		t.Fatalf("zero counts mean unknown and must be left out: %s", out)
 	}
 }
+
+func TestCut_NotUTF8KeepsText(t *testing.T) {
+	latin1 := "caf\xe9 caf\xe9 caf\xe9"
+	s, short := cut(latin1, 10)
+	if !short || len(s) != 10 {
+		t.Fatalf("non-UTF-8 text must be cut at n, got %q", s)
+	}
+}
+
+func TestDiffGitNames_Quoting(t *testing.T) {
+	cases := []struct {
+		header string
+		want   []string
+	}{
+		{`diff --git a/x.pp b/x.pp`, []string{"x.pp"}},
+		{`diff --git a/old.pp b/new.pp`, []string{"new.pp", "old.pp"}},
+		{`diff --git "a/x y.pp" "b/x y.pp"`, []string{"x y.pp"}},
+		{`diff --git a/plain.txt "b/caf\303\251.txt"`, []string{"café.txt", "plain.txt"}},
+		{`diff --git "a/caf\303\251.txt" b/plain.txt`, []string{"plain.txt", "café.txt"}},
+		{`diff --git "a/q\"uote.txt" b/q.txt`, []string{"q.txt", `q"uote.txt`}},
+	}
+	for _, c := range cases {
+		got := diffGitNames(c.header)
+		if strings.Join(got, "|") != strings.Join(c.want, "|") {
+			t.Errorf("%s: got %q, want %q", c.header, got, c.want)
+		}
+	}
+}
+
+func TestGetPullRequestDiff_OneFileCutByDownloadCap(t *testing.T) {
+	// The first file fills the download cap except for a few bytes, so the
+	// second file's diff is read only in part but fits max_bytes.
+	first := "diff --git a/big.txt b/big.txt\n--- a/big.txt\n+++ b/big.txt\n@@ -0,0 +1 @@\n+"
+	pad := maxRawResponseBytes - len(first) - 1 - 60
+	diff := first + strings.Repeat("x", pad) + "\n" +
+		"diff --git a/small.txt b/small.txt\n--- a/small.txt\n+++ b/small.txt\n@@ -1 +1 @@\n-old line\n+new line\n"
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/repos/infra/puppet/pulls/42.diff", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, diff)
+	})
+	tool, _, _ := newTestTool(t, Config{}, mux)
+	out, err := tool.GetPullRequestDiff(context.Background(), testIncident, map[string]interface{}{"repo": "infra/puppet", "number": float64(42), "file": "small.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "[TRUNCATED:") || !strings.Contains(out, "get_file") {
+		t.Fatalf("a file cut by the download cap must be marked:\n%s", out)
+	}
+}
+
+func TestSearchPullRequests_ServerCapsPageSize(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/repos/infra/puppet/issues", func(w http.ResponseWriter, r *http.Request) {
+		// The client asks for 20; the server serves 2 per page of 5.
+		w.Header().Set("X-Total-Count", "5")
+		writeJSON(w, []map[string]interface{}{
+			{"number": 5, "title": "a", "state": "open"},
+			{"number": 4, "title": "b", "state": "open"},
+		})
+	})
+	tool, _, _ := newTestTool(t, Config{}, mux)
+	out, err := tool.SearchPullRequests(context.Background(), testIncident, map[string]interface{}{"repo": "infra/puppet"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := decode(t, out)
+	if m["total_count"].(float64) != 5 || m["next_page"] == nil || m["next_page"].(float64) != 2 {
+		t.Fatalf("a capped page must still report next_page: %s", out)
+	}
+}
+
+func TestGetFile_CutOnRuneBoundary(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/repos/infra/puppet/raw/a.txt", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "héllo world")
+	})
+	tool, _, _ := newTestTool(t, Config{}, mux)
+	out, err := tool.GetFile(context.Background(), testIncident, map[string]interface{}{"repo": "infra/puppet", "path": "a.txt", "max_bytes": float64(2)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "\xc3\n") || !strings.Contains(out, "\n\nh\n") || !strings.Contains(out, "showed the first 1 bytes") {
+		t.Fatalf("unexpected output:\n%q", out)
+	}
+}
