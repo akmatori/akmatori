@@ -201,6 +201,7 @@ func (s *ToolService) EnsureToolTypes() error {
 		{Name: "netbox", Description: "NetBox CMDB integration for DCIM, IPAM, circuits, virtualization, and tenancy"},
 		{Name: "kubernetes", Description: "Kubernetes read-only diagnostics for pods, deployments, nodes, services, events, and logs"},
 		{Name: "jira", Description: "Jira issue tracking integration (Cloud and Server/Data Center) for searching, viewing, commenting, and transitioning issues"},
+		{Name: "gitea", Description: "Gitea pull requests for pre-merge review: pull request details, changed files, diffs, comments and repository files"},
 		{Name: "incidents", Description: "Read-only access to Akmatori's own incidents (list and get) for digests and reporting"},
 		{Name: "proposals", Description: "Create, inspect, and revise self-improvement proposals reviewed by operators in the Proposals tab"},
 		{Name: "events", Description: "Search Akmatori's inbound events (alerts, changes, info, requests); cron runs report problems as alert events"},

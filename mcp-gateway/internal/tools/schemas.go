@@ -67,6 +67,7 @@ func GetToolSchemas() map[string]ToolTypeSchema {
 		"netbox":           getNetBoxSchema(),
 		"kubernetes":       getK8sSchema(),
 		"jira":             getJiraSchema(),
+		"gitea":            getGiteaSchema(),
 	}
 }
 
@@ -1502,6 +1503,65 @@ func getJiraSchema() ToolTypeSchema {
 				Parameters:  "key (required), fields (required)",
 				Returns:     "JSON status object",
 			},
+		},
+	}
+}
+
+func getGiteaSchema() ToolTypeSchema {
+	return ToolTypeSchema{
+		Name:        "gitea",
+		Description: "Gitea (and Forgejo) pull requests for pre-merge review: read a pull request, its changed files, diffs (per file, with a byte budget), comments and reviews, and repository files at any ref. Commenting is off unless gitea_allow_comments=true.",
+		Version:     "1.0.0",
+		SettingsSchema: SettingsSchema{
+			Type:     "object",
+			Required: []string{"gitea_url", "gitea_token"},
+			Properties: map[string]PropertySchema{
+				"gitea_url": {
+					Type:        "string",
+					Description: "Gitea base URL (without /api/v1)",
+					Example:     "https://git.example.com",
+				},
+				"gitea_token": {
+					Type:        "string",
+					Description: "Gitea access token. Read-only scopes are enough: read:repository (and read:issue for comments); add write:issue only to allow comments.",
+					Secret:      true,
+				},
+				"gitea_allowed_repos": {
+					Type:        "string",
+					Description: "Repositories the agent may read, one per line as owner/repo or owner/* (# starts a comment). Empty = every repository the token can read.",
+					Format:      "textarea",
+					Example:     "infra/puppet\ninfra/*",
+				},
+				"gitea_allow_comments": {
+					Type:        "boolean",
+					Description: "Allow gitea.create_pull_request_comment. Disabled by default.",
+					Default:     false,
+					Warning:     "Enabling this lets the agent post comments on pull requests with this token.",
+				},
+				"gitea_verify_ssl": {
+					Type:        "boolean",
+					Description: "Verify SSL certificates",
+					Default:     true,
+					Advanced:    true,
+				},
+				"gitea_timeout": {
+					Type:        "integer",
+					Description: "API request timeout in seconds",
+					Default:     30,
+					Minimum:     intPtr(5),
+					Maximum:     intPtr(300),
+					Advanced:    true,
+				},
+			},
+		},
+		Functions: []ToolFunction{
+			{Name: "get_pull_request", Description: "Pull request metadata", Parameters: "repo + number, or pr_url", Returns: "JSON: title, body, author, base/head, state, mergeable, labels"},
+			{Name: "list_pull_request_files", Description: "Changed files with status and line counts", Parameters: "repo + number, or pr_url", Returns: "JSON: files array"},
+			{Name: "get_pull_request_diff", Description: "Unified diff of one file or all files, cut at max_bytes", Parameters: "repo + number, or pr_url; file, max_bytes", Returns: "diff text with a [TRUNCATED] marker when cut"},
+			{Name: "get_file", Description: "A file at a branch, tag or commit", Parameters: "repo (required), path (required), ref, max_bytes", Returns: "file text"},
+			{Name: "list_pull_request_comments", Description: "Conversation comments and reviews with inline comments", Parameters: "repo + number, or pr_url", Returns: "JSON: comments, reviews"},
+			{Name: "search_pull_requests", Description: "List pull requests of a repository", Parameters: "repo (required), state, query, labels, author, limit, page", Returns: "JSON: pull_requests array"},
+			{Name: "create_pull_request_comment", Description: "Post a comment (write). Requires gitea_allow_comments=true.", Parameters: "repo + number, or pr_url; body (required)", Returns: "JSON: comment_id, html_url"},
 		},
 	}
 }
