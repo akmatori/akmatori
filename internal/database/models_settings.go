@@ -149,6 +149,11 @@ type LLMSettings struct {
 	BaseURL       string        `gorm:"type:text" json:"base_url"`
 	Enabled       bool          `gorm:"default:false" json:"enabled"`
 	Active        bool          `gorm:"default:false" json:"active"`
+	// Fallback marks the config used when the active one fails with a
+	// transient provider error (5xx, connection refused, timeout). At most
+	// one row has it, and never the active row (SetFallbackLLMConfig and
+	// SetActiveLLMConfig keep both rules).
+	Fallback bool `gorm:"default:false" json:"fallback"`
 
 	// Sampling overrides. NULL means "send nothing and let the provider pick",
 	// which is the historical behaviour — neither Akmatori nor pi-mono sets any

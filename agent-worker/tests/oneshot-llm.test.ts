@@ -461,3 +461,195 @@ describe("runOneshotLLM", () => {
     expect(out).toBe("A long summary that was cut");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fallback LLM (issue #105)
+// ---------------------------------------------------------------------------
+
+describe("runOneshotWithFallback", () => {
+  const primary: LLMSettings = {
+    provider: "custom",
+    api_key: "sk-primary",
+    model: "deepseek-v4.1-flash",
+    base_url: "https://llm.internal/v1",
+    thinking_level: "medium",
+  };
+  const fallback: LLMSettings = {
+    provider: "openai",
+    api_key: "sk-fallback",
+    model: "gpt-4o-mini",
+    thinking_level: "medium",
+    max_tokens: 300,
+    temperature: 0,
+  };
+  const errorResult = (errorMessage: string) => ({
+    ...assistantText(""),
+    content: [],
+    stopReason: "error" as const,
+    errorMessage,
+  });
+
+  beforeEach(async () => {
+    const { primaryBreaker } = await import("../src/llm-fallback.js");
+    primaryBreaker.reset();
+  });
+
+  it("answers from the primary and reports it", async () => {
+    const { runOneshotWithFallback } = await import("../src/oneshot-llm.js");
+    completeMock.mockResolvedValue(assistantText("from primary"));
+    const out = await runOneshotWithFallback({
+      requestId: "r1",
+      user: "classify",
+      llmSettings: primary,
+      fallbackLlmSettings: fallback,
+    });
+    expect(out.text).toBe("from primary");
+    expect(out.used).toEqual({ llm_provider: "custom", llm_model: "deepseek-v4.1-flash", llm_thinking_level: "medium" });
+    expect(completeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the fallback after a 500 with the fallback's key and merged sampling", async () => {
+    const { runOneshotWithFallback } = await import("../src/oneshot-llm.js");
+    completeMock
+      .mockResolvedValueOnce(errorResult("500 status code (no body)"))
+      .mockResolvedValueOnce(assistantText("from fallback"));
+    const out = await runOneshotWithFallback({
+      requestId: "r2",
+      user: "classify",
+      maxTokens: 50,
+      temperature: 0.3,
+      llmSettings: primary,
+      fallbackLlmSettings: fallback,
+    });
+    expect(out.text).toBe("from fallback");
+    expect(out.used.llm_model).toBe("gpt-4o-mini");
+    expect(out.used.llm_fallback_from).toBe("custom/deepseek-v4.1-flash");
+    expect(out.used.llm_fallback_reason).toBe("500 status code (no body)");
+    const [model, , options] = completeMock.mock.calls[1];
+    expect(model.id).toBe("gpt-4o-mini");
+    expect(options.apiKey).toBe("sk-fallback");
+    expect(options.maxTokens).toBe(300 + REASONING_HEADROOM_TOKENS); // synthesized spec = reasoning model
+    expect(options.temperature).toBe(0);
+  });
+
+  it("does not fall back on a non-transient error", async () => {
+    const { runOneshotWithFallback } = await import("../src/oneshot-llm.js");
+    completeMock.mockResolvedValue(errorResult("401 Incorrect API key provided"));
+    await expect(
+      runOneshotWithFallback({ requestId: "r3", user: "x", llmSettings: primary, fallbackLlmSettings: fallback }),
+    ).rejects.toThrow("401 Incorrect API key provided");
+    expect(completeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("without a fallback config behaves like runOneshotLLM", async () => {
+    const { runOneshotWithFallback } = await import("../src/oneshot-llm.js");
+    completeMock.mockResolvedValue(errorResult("500 status code (no body)"));
+    await expect(
+      runOneshotWithFallback({ requestId: "r4", user: "x", llmSettings: primary }),
+    ).rejects.toThrow("500 status code (no body)");
+    expect(completeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives the primary 60% of the caller's wait and the fallback the rest", async () => {
+    const { runOneshotWithFallback } = await import("../src/oneshot-llm.js");
+    completeMock
+      .mockResolvedValueOnce(errorResult("Request timed out."))
+      .mockResolvedValueOnce(assistantText("fb"));
+    await runOneshotWithFallback({
+      requestId: "r6",
+      user: "x",
+      llmSettings: primary,
+      fallbackLlmSettings: fallback,
+      budgetMs: 30_000,
+    });
+    expect(completeMock.mock.calls[0][2].timeoutMs).toBe(18_000);
+    const fallbackTimeout = completeMock.mock.calls[1][2].timeoutMs;
+    expect(fallbackTimeout).toBeGreaterThan(25_000);
+    expect(fallbackTimeout).toBeLessThanOrEqual(30_000);
+  });
+
+  it("caps the primary's connection retries by its share of the budget", async () => {
+    const { runOneshotWithFallback } = await import("../src/oneshot-llm.js");
+    // Each primary request takes 1.5 s and fails with a retryable connection
+    // error. Budget 8 s → primary share 4.8 s: request 1 (0-1.5 s), delay,
+    // request 2 (2.0-3.5 s); a third would not fit, so the fallback starts at
+    // ~3.5 s with ~4.5 s left. Without the cap all 3 requests would run.
+    completeMock.mockImplementation(async (model: { id: string }) => {
+      if (model.id === "gpt-4o-mini") return assistantText("fb");
+      await new Promise((r) => setTimeout(r, 1_500));
+      return errorResult("terminated");
+    });
+    const out = await runOneshotWithFallback({
+      requestId: "r8",
+      user: "x",
+      llmSettings: primary,
+      fallbackLlmSettings: fallback,
+      budgetMs: 8_000,
+    });
+    expect(out.text).toBe("fb");
+    const primaryCalls = completeMock.mock.calls.filter(([m]) => (m as { id: string }).id !== "gpt-4o-mini");
+    expect(primaryCalls).toHaveLength(2);
+    expect((primaryCalls[1][2] as { timeoutMs: number }).timeoutMs).toBeLessThanOrEqual(2_800);
+    const [, , fbOpts] = completeMock.mock.calls.at(-1)!;
+    expect((fbOpts as { timeoutMs: number }).timeoutMs).toBeGreaterThan(3_000);
+  }, 15_000);
+
+  it("aborts a primary stream that stalls and still answers from the fallback", async () => {
+    const { runOneshotWithFallback } = await import("../src/oneshot-llm.js");
+    // The primary never resolves on its own (stream stalled after headers);
+    // only the abort signal ends it, as pi-ai does with stopReason "aborted".
+    completeMock.mockImplementation(async (model: { id: string }, _ctx: unknown, opts: { signal?: AbortSignal }) => {
+      if (model.id === "gpt-4o-mini") return assistantText("fb");
+      await new Promise<void>((resolve) => opts.signal?.addEventListener("abort", () => resolve()));
+      return { ...assistantText(""), content: [], stopReason: "aborted" as const };
+    });
+    const out = await runOneshotWithFallback({
+      requestId: "r9",
+      user: "x",
+      llmSettings: primary,
+      fallbackLlmSettings: fallback,
+      budgetMs: 8_000,
+    });
+    expect(out.text).toBe("fb");
+    expect(out.used.llm_fallback_reason).toContain("timed out");
+  }, 15_000);
+
+  it("does not start a fallback the caller cannot wait for", async () => {
+    const { runOneshotWithFallback } = await import("../src/oneshot-llm.js");
+    completeMock.mockImplementationOnce(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+      return errorResult("500 status code (no body)");
+    });
+    await expect(
+      runOneshotWithFallback({
+        requestId: "r7",
+        user: "x",
+        llmSettings: primary,
+        fallbackLlmSettings: fallback,
+        budgetMs: 1_000,
+      }),
+    ).rejects.toThrow("500 status code (no body)");
+    expect(completeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("goes straight to the fallback while the breaker is open", async () => {
+    const { runOneshotWithFallback } = await import("../src/oneshot-llm.js");
+    const { FAILURE_THRESHOLD } = await import("../src/llm-fallback.js");
+    completeMock.mockImplementation(async (model: { id: string }) =>
+      model.id === "gpt-4o-mini" ? assistantText("fb") : errorResult("503 Service Unavailable"),
+    );
+    for (let i = 0; i < FAILURE_THRESHOLD; i++) {
+      await runOneshotWithFallback({ requestId: `w${i}`, user: "x", llmSettings: primary, fallbackLlmSettings: fallback });
+    }
+    completeMock.mockClear();
+    const out = await runOneshotWithFallback({
+      requestId: "r5",
+      user: "x",
+      llmSettings: primary,
+      fallbackLlmSettings: fallback,
+    });
+    expect(out.text).toBe("fb");
+    expect(out.used.llm_fallback_reason).toBe("primary skipped: circuit breaker open");
+    expect(completeMock).toHaveBeenCalledTimes(1);
+  });
+});

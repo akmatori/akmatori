@@ -231,6 +231,25 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
     }
   };
 
+  const handleFallback = async (id: number, set: boolean) => {
+    try {
+      setSaving(true);
+      setError(null);
+      if (set) {
+        await llmSettingsApi.setFallback(id);
+        showSuccess('Fallback configuration set');
+      } else {
+        await llmSettingsApi.clearFallback(id);
+        showSuccess('Fallback configuration removed');
+      }
+      await loadConfigs();
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to change the fallback configuration'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleActivate = async (id: number) => {
     try {
       setSaving(true);
@@ -267,6 +286,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
 
   const activeConfig = configs.find(c => c.id === activeId);
   const otherConfigured = configs.filter(c => c.is_configured && c.id !== activeId);
+  const fallbackConfig = configs.find(c => c.fallback && c.id !== activeId && c.is_configured);
   const hasConfigured = configs.some(c => c.is_configured);
 
   const renderForm = () => {
@@ -548,6 +568,11 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                 {activeConfig.base_url && ` \u00B7 Custom URL`}
                 {describeSampling(activeConfig) && ` \u00B7 ${describeSampling(activeConfig)}`}
               </p>
+              <p className="text-xs text-fg-subtle mt-1">
+                {fallbackConfig
+                  ? `Fallback: ${fallbackConfig.name} (${fallbackConfig.model || 'no model set'}) — used when this provider fails with a server or connection error`
+                  : 'No fallback set. Mark another configuration as fallback to keep runs working when this provider is down.'}
+              </p>
             </div>
             <button
               onClick={() => openEditForm(activeConfig)}
@@ -594,6 +619,11 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                     <span className="text-xs text-fg-subtle">
                       {PROVIDER_LABELS[config.provider] || config.provider}
                     </span>
+                    {config.fallback && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300">
+                        Fallback
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-fg-subtle mt-0.5">
                     {config.model || 'No model set'}
@@ -609,6 +639,16 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                     className="px-2.5 py-1 rounded text-xs font-medium text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-colors"
                   >
                     Activate
+                  </button>
+                  <button
+                    onClick={() => handleFallback(config.id, !config.fallback)}
+                    disabled={saving}
+                    className="px-2.5 py-1 rounded text-xs font-medium text-fg-muted bg-surface-2 hover:text-fg transition-colors"
+                    title={config.fallback
+                      ? 'Stop using this configuration as the fallback'
+                      : 'Use this configuration when the active one fails with a server or connection error'}
+                  >
+                    {config.fallback ? 'Remove fallback' : 'Use as fallback'}
                   </button>
                   <button
                     onClick={() => openEditForm(config)}

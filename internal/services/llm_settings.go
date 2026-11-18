@@ -70,6 +70,9 @@ var ErrIncidentSuperseded = errors.New("incident superseded by a newer request")
 // LLMSettingsForWorker holds LLM configuration forwarded to the agent worker
 // for both incident execution and one-shot LLM calls.
 type LLMSettingsForWorker struct {
+	// Name is the operator's config name (llm_settings.name), used only in
+	// log lines such as "switched to fallback <name>".
+	Name          string
 	Provider      string
 	APIKey        string
 	Model         string
@@ -92,6 +95,7 @@ func BuildLLMSettingsForWorker(dbSettings *database.LLMSettings) *LLMSettingsFor
 		return nil
 	}
 	return &LLMSettingsForWorker{
+		Name:          dbSettings.Name,
 		Provider:      string(dbSettings.Provider),
 		APIKey:        dbSettings.APIKey,
 		Model:         dbSettings.Model,
@@ -102,6 +106,32 @@ func BuildLLMSettingsForWorker(dbSettings *database.LLMSettings) *LLMSettingsFor
 		TopK:          dbSettings.TopK,
 		MaxTokens:     dbSettings.MaxTokens,
 	}
+}
+
+// loadFallbackLLMSettings is swapped in tests.
+var loadFallbackLLMSettings = database.GetFallbackLLMSettings
+
+// ResolveFallbackLLM returns the operator's fallback config for a request that
+// runs on primary, or nil when none is set, the database is not ready, or the
+// fallback is the same endpoint and model as primary (a second attempt there
+// would only repeat the failure). A nil primary gets no fallback: with no
+// active config the behaviour stays exactly as before.
+func ResolveFallbackLLM(primary *LLMSettingsForWorker) *LLMSettingsForWorker {
+	if primary == nil {
+		return nil
+	}
+	row, err := loadFallbackLLMSettings()
+	if err != nil || row == nil {
+		return nil
+	}
+	fb := BuildLLMSettingsForWorker(row)
+	if fb == nil {
+		return nil
+	}
+	if fb.Provider == primary.Provider && fb.Model == primary.Model && fb.BaseURL == primary.BaseURL {
+		return nil
+	}
+	return fb
 }
 
 // OneShotLLMCaller issues a one-shot, provider-agnostic LLM completion through

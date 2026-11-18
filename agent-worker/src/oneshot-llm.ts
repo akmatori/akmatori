@@ -19,6 +19,15 @@ import type { LLMSettings, ProxyConfig } from "./types.js";
 import { applyProxyConfig } from "./proxy.js";
 import { resolveModel } from "./agent-runner.js";
 import { createSamplingPayloadHook } from "./sampling.js";
+import {
+  isFallbackEligibleError,
+  llmKey,
+  primaryBreaker,
+  shortError,
+  switchNotice,
+  usedInfo,
+  type LLMUsedInfo,
+} from "./llm-fallback.js";
 
 // Above every Go caller's own deadline (45 s at most), so the API side decides
 // when a call has taken too long and the worker never cuts it off first.
@@ -77,13 +86,46 @@ export interface OneshotLLMParams {
   signal?: AbortSignal;
   /** Override the per-call HTTP timeout (ms). Defaults to 60s. */
   timeoutMs?: number;
+  /**
+   * Cap on the WHOLE call, retries and their delays included (ms). Unset =
+   * no cap beyond each request's timeoutMs (the pre-fallback behaviour).
+   */
+  totalTimeoutMs?: number;
 }
+
+/** A retry is not started with less time left than this. */
+const MIN_REQUEST_MS = 1_000;
 
 /**
  * Run a single-turn LLM completion and return the assistant text.
  * Throws on validation errors, provider errors, or non-text responses.
  */
 export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
+  if (params.totalTimeoutMs === undefined) {
+    return runOneshotBody(params);
+  }
+  // A per-request timeoutMs does not bound a stream that stalls after the
+  // headers (the OpenAI SDK clears its timer then; the Google adapter has
+  // none), so the whole call is also bounded by an abort signal.
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(), params.totalTimeoutMs);
+  const signal = params.signal ? AbortSignal.any([params.signal, deadline.signal]) : deadline.signal;
+  try {
+    return await runOneshotBody({ ...params, signal });
+  } catch (err) {
+    if (deadline.signal.aborted && !params.signal?.aborted) {
+      throw new Error(BUDGET_TIMEOUT_MESSAGE);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Fallback-eligible ("timed out") error for a call that used its whole budget. */
+const BUDGET_TIMEOUT_MESSAGE = "oneshot_llm: request timed out (time budget used up)";
+
+async function runOneshotBody(params: OneshotLLMParams): Promise<string> {
   if (!params.requestId) {
     throw new Error("oneshot_llm: missing request_id");
   }
@@ -140,10 +182,23 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
     params.temperature !== undefined && !temperatureRejectedModels.has(modelKey);
 
   const startedAt = Date.now();
+  // totalTimeoutMs caps the whole call: every request and retry sleep. Each
+  // request's HTTP timeout shrinks to the time left, so retries cannot run
+  // past the budget a fallback attempt depends on.
+  const deadline = params.totalTimeoutMs !== undefined ? startedAt + params.totalTimeoutMs : undefined;
+  const timeLeft = () => (deadline === undefined ? Infinity : deadline - Date.now());
+  const within = <T extends { timeoutMs: number }>(opts: T): T => {
+    const left = timeLeft();
+    if (left <= 0) {
+      throw new Error(BUDGET_TIMEOUT_MESSAGE);
+    }
+    return left < opts.timeoutMs ? { ...opts, timeoutMs: Math.floor(left) } : opts;
+  };
+
   let result: AssistantMessage = await complete(
     model,
     context,
-    sendTemperature ? { ...baseOptions, temperature: params.temperature } : baseOptions,
+    within(sendTemperature ? { ...baseOptions, temperature: params.temperature } : baseOptions),
   );
   for (
     let retry = 1;
@@ -151,6 +206,7 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
     result.stopReason === "error" &&
     TRANSIENT_ERROR_RE.test(result.errorMessage ?? "") &&
     Date.now() - startedAt < TRANSIENT_RETRY_WINDOW_MS &&
+    timeLeft() > TRANSIENT_RETRY_DELAY_MS * retry + MIN_REQUEST_MS &&
     !params.signal?.aborted;
     retry++
   ) {
@@ -161,7 +217,7 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
     result = await complete(
       model,
       context,
-      sendTemperature ? { ...baseOptions, temperature: params.temperature } : baseOptions,
+      within(sendTemperature ? { ...baseOptions, temperature: params.temperature } : baseOptions),
     );
   }
 
@@ -184,7 +240,7 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
       `oneshot_llm ${params.requestId}: provider rejected temperature (${result.errorMessage}); retrying without it`,
     );
     temperatureRejectedModels.add(modelKey);
-    result = await complete(model, context, baseOptions);
+    result = await complete(model, context, within(baseOptions));
   }
 
   if (result.stopReason === "error") {
@@ -220,4 +276,91 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
   }
 
   return text;
+}
+
+export interface OneshotFallbackParams extends OneshotLLMParams {
+  /**
+   * Fallback config from the frame's `fallback_llm`. Its sampling fields are
+   * already merged with the call site's values on the Go side, so the
+   * fallback call uses them as they are.
+   */
+  fallbackLlmSettings?: LLMSettings;
+  /**
+   * How long the API waits for the answer (frame `timeout_ms`). With a
+   * fallback, the primary gets PRIMARY_BUDGET_SHARE of it and the fallback
+   * the rest, so a hanging primary cannot use the whole wait.
+   */
+  budgetMs?: number;
+}
+
+/** Share of the caller's wait the primary may use when a fallback is set. */
+export const PRIMARY_BUDGET_SHARE = 0.6;
+/** Below this, a fallback attempt cannot finish before the caller gives up. */
+const MIN_FALLBACK_MS = 3_000;
+
+export interface OneshotResult {
+  text: string;
+  used: LLMUsedInfo;
+}
+
+/**
+ * runOneshotLLM on the primary config; on a transient provider error, the
+ * same call on the fallback config. Shares the circuit breaker with agent
+ * runs, so a primary that is down is skipped here too. Without a fallback
+ * config this is runOneshotLLM.
+ */
+export async function runOneshotWithFallback(params: OneshotFallbackParams): Promise<OneshotResult> {
+  const { fallbackLlmSettings: fallback, budgetMs, ...baseParams } = params;
+  const primary = params.llmSettings;
+  if (!fallback) {
+    return { text: await runOneshotLLM(baseParams), used: usedInfo(primary) };
+  }
+  const startedAt = Date.now();
+  const budget = budgetMs !== undefined && budgetMs > 0 ? Math.min(budgetMs, DEFAULT_TIMEOUT_MS) : DEFAULT_TIMEOUT_MS;
+  const primaryParams: OneshotLLMParams = {
+    ...baseParams,
+    timeoutMs: Math.min(baseParams.timeoutMs ?? DEFAULT_TIMEOUT_MS, Math.floor(budget * PRIMARY_BUDGET_SHARE)),
+    totalTimeoutMs: Math.floor(budget * PRIMARY_BUDGET_SHARE),
+  };
+  // Skipped primary: the fallback may use the whole wait.
+  const fallbackParams: OneshotLLMParams = {
+    ...baseParams,
+    timeoutMs: budget,
+    totalTimeoutMs: budget,
+    llmSettings: fallback,
+    maxTokens: fallback.max_tokens,
+    temperature: fallback.temperature,
+    topP: fallback.top_p,
+    topK: fallback.top_k,
+  };
+  const key = llmKey(primary);
+  if (primaryBreaker.shouldSkipPrimary(key)) {
+    return {
+      text: await runOneshotLLM(fallbackParams),
+      used: usedInfo(fallback, primary, "primary skipped: circuit breaker open"),
+    };
+  }
+  try {
+    const text = await runOneshotLLM(primaryParams);
+    primaryBreaker.recordSuccess(key);
+    return { text, used: usedInfo(primary) };
+  } catch (err) {
+    const errMsg = (err as Error)?.message ?? String(err);
+    if (!isFallbackEligibleError(errMsg) || params.signal?.aborted) {
+      primaryBreaker.releaseProbe(key);
+      throw err;
+    }
+    primaryBreaker.recordFailure(key);
+    const reason = shortError(errMsg);
+    const left = budget - (Date.now() - startedAt);
+    if (left < MIN_FALLBACK_MS) {
+      // The caller stops waiting before a fallback answer could arrive.
+      throw err;
+    }
+    console.warn(`oneshot_llm ${params.requestId}: ${switchNotice(primary, fallback, reason)}`);
+    return {
+      text: await runOneshotLLM({ ...fallbackParams, timeoutMs: left, totalTimeoutMs: left }),
+      used: usedInfo(fallback, primary, reason),
+    };
+  }
 }

@@ -1533,13 +1533,95 @@ func SetActiveLLMConfig(id uint) error {
 			return err
 		}
 		// Set both active and enabled so the config passes IsActive() checks
-		// used by incident dispatch (BuildLLMSettingsForWorker).
+		// used by incident dispatch (BuildLLMSettingsForWorker). The active
+		// config cannot be its own fallback, so activating the fallback row
+		// leaves the install with no fallback.
 		return tx.Model(&LLMSettings{}).Where("id = ?", id).Updates(map[string]interface{}{
-			"active":  true,
-			"enabled": true,
+			"active":   true,
+			"enabled":  true,
+			"fallback": false,
 		}).Error
 	})
 }
+
+// GetFallbackLLMSettings returns the config marked as fallback, or nil when
+// none is set (or the marked row is the active one or has no API key).
+func GetFallbackLLMSettings() (*LLMSettings, error) {
+	if DB == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	var rows []LLMSettings
+	if err := DB.Where("fallback = ? AND active = ? AND api_key <> ''", true, false).
+		Order("id asc").Limit(1).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return &rows[0], nil
+}
+
+// SetFallbackLLMConfig marks the config with the given ID as the fallback and
+// clears the flag on every other row. The active config cannot be the
+// fallback, and a fallback needs an API key. Same locking as
+// SetActiveLLMConfig, so the two cannot race into an active fallback.
+func SetFallbackLLMConfig(id uint) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var allConfigs []LLMSettings
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Find(&allConfigs).Error; err != nil {
+			return err
+		}
+		var target *LLMSettings
+		for i := range allConfigs {
+			if allConfigs[i].ID == id {
+				target = &allConfigs[i]
+				break
+			}
+		}
+		if target == nil {
+			return fmt.Errorf("LLM config with id %d not found", id)
+		}
+		if target.Active {
+			return ErrFallbackIsActive
+		}
+		if target.APIKey == "" {
+			return ErrFallbackNoAPIKey
+		}
+		if err := tx.Model(&LLMSettings{}).Where("fallback = ?", true).Update("fallback", false).Error; err != nil {
+			return err
+		}
+		return tx.Model(&LLMSettings{}).Where("id = ?", id).Updates(map[string]interface{}{
+			"fallback": true,
+			"enabled":  true,
+		}).Error
+	})
+}
+
+// ClearFallbackLLMConfig removes the fallback flag from the config with the
+// given ID. Clearing a row that is not the fallback is a no-op.
+func ClearFallbackLLMConfig(id uint) error {
+	res := DB.Model(&LLMSettings{}).Where("id = ?", id).Update("fallback", false)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		var count int64
+		if err := DB.Model(&LLMSettings{}).Where("id = ?", id).Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return fmt.Errorf("LLM config with id %d not found", id)
+		}
+	}
+	return nil
+}
+
+// Fallback validation errors, matched by the settings handler.
+var (
+	ErrFallbackIsActive = errors.New("the active configuration cannot be the fallback")
+	ErrFallbackNoAPIKey = errors.New("cannot use a configuration without an API key as the fallback")
+	ErrFallbackKeyClear = errors.New("cannot clear the API key on the fallback configuration; remove it as fallback first")
+)
 
 // CreateLLMSettings creates a new LLM settings configuration.
 func CreateLLMSettings(settings *LLMSettings) error {
@@ -1561,6 +1643,9 @@ func UpdateLLMSettings(id uint, updates map[string]interface{}) (*LLMSettings, e
 		if apiKey, ok := updates["api_key"]; ok {
 			if apiKey == "" && settings.Active {
 				return fmt.Errorf("cannot clear the API key on the active configuration")
+			}
+			if apiKey == "" && settings.Fallback {
+				return ErrFallbackKeyClear
 			}
 		}
 		if err := tx.Model(&settings).Updates(updates).Error; err != nil {

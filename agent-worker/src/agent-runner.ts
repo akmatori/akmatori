@@ -27,6 +27,42 @@ import type { LLMSettings, ExecuteResult, ProxyConfig, ThinkingLevel, ToolAllowl
 import { applyProxyConfig } from "./proxy.js";
 import { createSamplingPayloadHook, pickSamplingParams } from "./sampling.js";
 import {
+  isFallbackEligibleError,
+  llmKey,
+  noReplayNotice,
+  primaryBreaker,
+  shortError,
+  skipNotice,
+  switchNotice,
+  usedInfo,
+  type LLMUsedInfo,
+} from "./llm-fallback.js";
+
+/** Flags a fallback-enabled run as cancelled or replaced. */
+interface RunToken {
+  cancelled: boolean;
+}
+
+/**
+ * Tools that only read: running them again on the fallback model cannot
+ * repeat a change. Everything else (bash, gateway_call, execute_script,
+ * write/edit, codemode) counts as a possible side effect.
+ */
+const READ_ONLY_TOOLS = new Set([
+  "read",
+  "ls",
+  "grep",
+  "find",
+  "list_tool_types",
+  "list_tools_for_tool_type",
+  "get_tool_detail",
+]);
+
+/** Stamp which LLM config answered onto a run result. */
+function withUsed(result: ExecuteResult, used: LLMUsedInfo): ExecuteResult {
+  return { ...result, ...used };
+}
+import {
   formatToolArgs,
   formatToolOutput,
   extractToolText,
@@ -85,6 +121,8 @@ export interface ExecuteParams {
   runId?: string;
   task: string;
   llmSettings: LLMSettings;
+  /** Used when the primary fails with a transient provider error. */
+  fallbackLlmSettings?: LLMSettings;
   proxyConfig?: ProxyConfig;
   workDir: string;
   /** Names of enabled skills — only these will be loaded from the shared skills directory */
@@ -109,6 +147,8 @@ export interface ResumeParams {
   sessionId: string;
   message: string;
   llmSettings: LLMSettings;
+  /** See ExecuteParams.fallbackLlmSettings. */
+  fallbackLlmSettings?: LLMSettings;
   proxyConfig?: ProxyConfig;
   workDir: string;
   /** Names of enabled skills — only these will be loaded from the shared skills directory */
@@ -633,15 +673,127 @@ export class AgentRunner {
    * Execute a new agent session for an incident.
    */
   async execute(params: ExecuteParams): Promise<ExecuteResult> {
-    return this.runSession(params, params.task, false);
+    return this.runWithFallback(params, (p, ownerCheck) => this.runSession(p, p.task, false, ownerCheck));
   }
 
   /**
    * Resume an existing session with a follow-up message.
    */
   async resume(params: ResumeParams): Promise<ExecuteResult> {
-    return this.runSession(params, params.message, true);
+    return this.runWithFallback(params, (p, ownerCheck) => this.runSession(p, p.message, true, ownerCheck));
   }
+
+  /**
+   * Run on the primary LLM; when it fails with a transient provider error
+   * (after pi's own retries) and a fallback config is set, run the same
+   * request again on the fallback in a fresh session (resume: the session
+   * file the primary attempt left).
+   *
+   * The fresh session does not know what the primary attempt did, so the
+   * switch happens only when that attempt ran NO tool call: a tool may have
+   * changed something (an ssh command, a restart), and replaying the task
+   * could repeat it. The usual outage case (the endpoint is down, the first
+   * turn fails with 0 tokens) has no tool calls.
+   *
+   * Skips the primary at once while the shared circuit breaker is open. No
+   * fallback config → exactly the old single-attempt behaviour.
+   */
+  private async runWithFallback<P extends ExecuteParams | ResumeParams>(
+    params: P,
+    run: (p: P, ownerCheck?: () => boolean) => Promise<ExecuteResult>,
+  ): Promise<ExecuteResult> {
+    const primary = params.llmSettings;
+    const fallback = params.fallbackLlmSettings;
+    if (!fallback) {
+      return withUsed(await run(params), usedInfo(primary));
+    }
+    // The token marks the scope busy for the WHOLE run, including the gap
+    // between the primary session ending and the fallback session
+    // registering: hasActiveSession() stays true, so a replacement launch or
+    // cancel_incident reaches cancel(), which flags the token.
+    const token: RunToken = { cancelled: false };
+    const previous = this.runTokens.get(params.incidentId);
+    if (previous) previous.cancelled = true;
+    this.runTokens.set(params.incidentId, token);
+    try {
+      return await this.attemptWithFallback(params, run, primary, fallback, token);
+    } finally {
+      if (this.runTokens.get(params.incidentId) === token) {
+        this.runTokens.delete(params.incidentId);
+      }
+    }
+  }
+
+  private async attemptWithFallback<P extends ExecuteParams | ResumeParams>(
+    params: P,
+    run: (p: P, ownerCheck?: () => boolean) => Promise<ExecuteResult>,
+    primary: LLMSettings,
+    fallback: LLMSettings,
+    token: RunToken,
+  ): Promise<ExecuteResult> {
+    const key = llmKey(primary);
+    const ownerCheck = () => !token.cancelled;
+
+    if (primaryBreaker.shouldSkipPrimary(key)) {
+      const notice = skipNotice(primary, fallback, primaryBreaker.failures(key));
+      console.warn(`[agent-runner] incident ${params.incidentId}: ${notice}`);
+      params.onOutput(`\n⚠️ ${notice}\n`);
+      // Only the fallback session registers, so it resolves the launch chain.
+      const result = await run({ ...params, llmSettings: fallback }, ownerCheck);
+      return withUsed(result, usedInfo(fallback, primary, "primary skipped: circuit breaker open"));
+    }
+
+    const first = await run(params, ownerCheck);
+    if (!first.error) {
+      primaryBreaker.recordSuccess(key);
+      return withUsed(first, usedInfo(primary));
+    }
+    if (!isFallbackEligibleError(first.error)) {
+      // Not an outage (bad key, bad request): the breaker learns nothing.
+      primaryBreaker.releaseProbe(key);
+      return withUsed(first, usedInfo(primary));
+    }
+    primaryBreaker.recordFailure(key);
+    // Cancelled, or replaced by a newer launch for the same scope: the API
+    // no longer waits for this run, so do not start a second attempt.
+    if (token.cancelled) {
+      return withUsed(first, usedInfo(primary));
+    }
+
+    const reason = shortError(first.error);
+    const toolCalls = first.tool_calls ?? 0;
+    if (toolCalls > 0) {
+      const notice = noReplayNotice(primary, fallback, reason, toolCalls);
+      console.warn(`[agent-runner] incident ${params.incidentId}: ${notice}`);
+      params.onOutput(`\n⚠️ ${notice}\n`);
+      return withUsed({ ...first, full_log: `${first.full_log}\n⚠️ ${notice}\n` }, usedInfo(primary));
+    }
+
+    const notice = switchNotice(primary, fallback, reason);
+    console.warn(`[agent-runner] incident ${params.incidentId}: ${notice}`);
+    params.onOutput(`\n⚠️ ${notice}\n`);
+    // The primary session already resolved the launch chain.
+    const second = await run({ ...params, llmSettings: fallback, onRegistered: undefined }, ownerCheck);
+    return withUsed(
+      {
+        ...second,
+        full_log: `${first.full_log}\n⚠️ ${notice}\n${second.full_log}`,
+        // The run's cost and time include the failed primary attempt.
+        tokens_used: first.tokens_used + second.tokens_used,
+        execution_time_ms: first.execution_time_ms + second.execution_time_ms,
+        input_tokens: (first.input_tokens ?? 0) + (second.input_tokens ?? 0),
+        output_tokens: (first.output_tokens ?? 0) + (second.output_tokens ?? 0),
+        cache_read_tokens: (first.cache_read_tokens ?? 0) + (second.cache_read_tokens ?? 0),
+        cache_write_tokens: (first.cache_write_tokens ?? 0) + (second.cache_write_tokens ?? 0),
+        cost_usd: (first.cost_usd ?? 0) + (second.cost_usd ?? 0),
+        last_skill: second.last_skill ?? first.last_skill,
+      },
+      usedInfo(fallback, primary, reason),
+    );
+  }
+
+  /** In-flight fallback-enabled runs per scope; see runWithFallback. */
+  private runTokens = new Map<string, RunToken>();
 
   /**
    * Common session setup and execution logic shared by execute() and resume().
@@ -650,6 +802,12 @@ export class AgentRunner {
     params: ExecuteParams | ResumeParams,
     promptText: string,
     isResume: boolean,
+    /**
+     * False once the run was cancelled or replaced (fallback-enabled runs
+     * only). Checked after registration, before the prompt, so a session
+     * whose bootstrap raced a cancel never starts work.
+     */
+    ownerCheck?: () => boolean,
   ): Promise<ExecuteResult> {
     const startTime = Date.now();
 
@@ -865,6 +1023,26 @@ export class AgentRunner {
       };
     }
 
+    // A cancel or a replacement launch that arrived while this session was
+    // bootstrapping (possible for a fallback attempt) must not start work.
+    // Checked BEFORE registration: a stale session must never take (and on
+    // cleanup delete) the activeSessions slot of the run that replaced it.
+    if (ownerCheck && !ownerCheck()) {
+      try {
+        await session.abort();
+      } catch {
+        // best effort
+      }
+      return {
+        session_id: session.sessionId,
+        response: "",
+        full_log: "",
+        error: "Execution cancelled",
+        tokens_used: 0,
+        execution_time_ms: Date.now() - startTime,
+      };
+    }
+
     this.activeSessions.set(params.incidentId, session);
     // Signal the orchestrator that this launch has registered so it can
     // release the per-incident launch chain. Subsequent launches that were
@@ -888,12 +1066,18 @@ export class AgentRunner {
 
     let lastErrorMessage = "";
     let lastSkillName: string | undefined;
+    // Tool calls that can change something (see READ_ONLY_TOOLS); a fallback
+    // replay is safe only while this stays 0.
+    let sideEffectToolCalls = 0;
     const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
       params.onEvent?.(event);
 
       // Track the last skill the agent consulted: pi-mono skills are invoked
       // by reading <skillsDir>/<name>/SKILL.md with the read tool. Latched on
       // tool_execution_start so even an aborted run keeps the observation.
+      if (event.type === "tool_execution_start" && !READ_ONLY_TOOLS.has(event.toolName)) {
+        sideEffectToolCalls++;
+      }
       if (event.type === "tool_execution_start" && event.toolName === "read") {
         const args = event.args as Record<string, unknown> | undefined;
         const skill = extractSkillNameFromReadPath(
@@ -957,6 +1141,7 @@ export class AgentRunner {
         ...usageResultFields(usageTotals),
         session_export: sessionExportPath,
         last_skill: lastSkillName,
+        tool_calls: sideEffectToolCalls,
       };
     } catch (err) {
       const sessionExportPath = this.exportSession(sessionManager, params.workDir);
@@ -971,6 +1156,7 @@ export class AgentRunner {
         ...usageResultFields(usageTotals),
         session_export: sessionExportPath,
         last_skill: lastSkillName,
+        tool_calls: sideEffectToolCalls,
       };
     } finally {
       unsubscribe();
@@ -999,6 +1185,8 @@ export class AgentRunner {
    * still in the map.
    */
   async cancel(incidentId: string): Promise<void> {
+    const token = this.runTokens.get(incidentId);
+    if (token) token.cancelled = true;
     const session = this.activeSessions.get(incidentId);
     if (session) {
       await session.abort();
@@ -1026,7 +1214,7 @@ export class AgentRunner {
    * Check if an incident has an active session.
    */
   hasActiveSession(incidentId: string): boolean {
-    return this.activeSessions.has(incidentId);
+    return this.activeSessions.has(incidentId) || this.runTokens.has(incidentId);
   }
 
   // -------------------------------------------------------------------------

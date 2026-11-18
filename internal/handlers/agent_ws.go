@@ -87,6 +87,23 @@ type AgentMessage struct {
 	Model         string `json:"model,omitempty"`
 	ThinkingLevel string `json:"thinking_level,omitempty"`
 	BaseURL       string `json:"base_url,omitempty"`
+	// LLMName is the primary config's name, for the worker's log lines.
+	LLMName string `json:"llm_name,omitempty"`
+
+	// FallbackLLM is the config the worker switches to when the primary fails
+	// with a transient provider error (new_incident, continue_incident,
+	// oneshot_llm_request). Nil when the operator set no fallback: the frame
+	// is then byte-identical to the pre-fallback protocol.
+	FallbackLLM *WireLLMConfig `json:"fallback_llm,omitempty"`
+
+	// Which config answered (agent_completed, agent_error,
+	// oneshot_llm_response). LLMFallbackFrom is "<provider>/<model>" of the
+	// primary and is set only when the fallback answered.
+	LLMProvider       string `json:"llm_provider,omitempty"`
+	LLMModel          string `json:"llm_model,omitempty"`
+	LLMThinkingLevel  string `json:"llm_thinking_level,omitempty"`
+	LLMFallbackFrom   string `json:"llm_fallback_from,omitempty"`
+	LLMFallbackReason string `json:"llm_fallback_reason,omitempty"`
 
 	// Proxy configuration with toggles (sent with new_incident)
 	ProxyConfig *ProxyConfig `json:"proxy_config,omitempty"`
@@ -107,6 +124,10 @@ type AgentMessage struct {
 
 	// One-shot LLM request/response correlation fields
 	RequestID string `json:"request_id,omitempty"`
+	// TimeoutMs is how long the API waits for this one-shot answer (sent only
+	// with a fallback, so the worker can split the time between the primary
+	// and the fallback instead of spending it all on a hanging primary).
+	TimeoutMs int64  `json:"timeout_ms,omitempty"`
 	System    string `json:"system,omitempty"`
 	User      string `json:"user,omitempty"`
 	Summary   string `json:"summary,omitempty"`
@@ -131,6 +152,22 @@ type AgentMessage struct {
 	// drops events whose run_id does not match the currently registered
 	// callback so a superseded run cannot leak frames into the new waiter.
 	RunID string `json:"run_id,omitempty"`
+}
+
+// WireLLMConfig is one LLM config as a nested frame object (fallback_llm).
+// Sampling fields are pointers for the same reason as on AgentMessage: an
+// explicit 0 must survive omitempty.
+type WireLLMConfig struct {
+	Name          string   `json:"name,omitempty"`
+	Provider      string   `json:"provider"`
+	APIKey        string   `json:"api_key"`
+	Model         string   `json:"model"`
+	ThinkingLevel string   `json:"thinking_level,omitempty"`
+	BaseURL       string   `json:"base_url,omitempty"`
+	Temperature   *float64 `json:"temperature,omitempty"`
+	TopP          *float64 `json:"top_p,omitempty"`
+	TopK          *int     `json:"top_k,omitempty"`
+	MaxTokens     *int     `json:"max_tokens,omitempty"`
 }
 
 // LLMSettingsForWorker is re-exported from services so handler code that
@@ -187,6 +224,9 @@ type AgentWSHandler struct {
 	callbackMu       sync.RWMutex
 	pendingOneshot   map[string]pendingOneshotEntry // request_id -> response channel + owning conn
 	pendingOneshotMu sync.Mutex
+
+	// resolveFallback picks the fallback config for a dispatch; tests swap it.
+	resolveFallback func(primary *LLMSettingsForWorker) *LLMSettingsForWorker
 }
 
 // IncidentCallback is re-exported from services so handler code that
@@ -214,8 +254,9 @@ func NewAgentWSHandler() *AgentWSHandler {
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 		},
-		callbacks:      make(map[string]incidentCallbackEntry),
-		pendingOneshot: make(map[string]pendingOneshotEntry),
+		callbacks:       make(map[string]incidentCallbackEntry),
+		pendingOneshot:  make(map[string]pendingOneshotEntry),
+		resolveFallback: services.ResolveFallbackLLM,
 	}
 }
 
@@ -510,6 +551,7 @@ func (h *AgentWSHandler) handleAgentCompleted(msg AgentMessage) {
 	// unconditionally — even a superseded run's numbers are recorded (its
 	// status stays "superseded"); only the incident row is guarded below.
 	outcome := parseRunOutcome(msg.Output)
+	recordRunFallback(msg)
 	if msg.RunID != "" {
 		if err := database.CompleteAgentRun(msg.RunID, database.AgentRunMetrics{
 			TokensUsed:       int64(msg.TokensUsed),
@@ -659,6 +701,7 @@ func (h *AgentWSHandler) dispatchOnCompleted(msg AgentMessage, output string) bo
 // fire OnSuperseded between snapshot and call.
 func (h *AgentWSHandler) handleAgentError(msg AgentMessage) {
 	slog.Error("incident failed", "incident_id", msg.IncidentID, "err", msg.Error)
+	recordRunFallback(msg)
 
 	// Finalize the per-run telemetry row. Unconditional (mirrors
 	// handleAgentCompleted): a superseded run keeps its status but records
@@ -793,7 +836,9 @@ func (h *AgentWSHandler) StartIncident(incidentID, runID, task string, llm *LLMS
 		msg.Model = llm.Model
 		msg.ThinkingLevel = llm.ThinkingLevel
 		msg.BaseURL = llm.BaseURL
+		msg.LLMName = llm.Name
 		applySamplingSettings(&msg, llm)
+		msg.FallbackLLM = h.fallbackWire(llm, nil, nil)
 	}
 
 	// Fetch proxy settings from database and include in message
@@ -830,7 +875,9 @@ func (h *AgentWSHandler) ContinueIncident(incidentID, runID, sessionID, message 
 		msg.Model = llm.Model
 		msg.ThinkingLevel = llm.ThinkingLevel
 		msg.BaseURL = llm.BaseURL
+		msg.LLMName = llm.Name
 		applySamplingSettings(&msg, llm)
+		msg.FallbackLLM = h.fallbackWire(llm, nil, nil)
 	}
 
 	// Fetch proxy settings from database and include in message
@@ -1011,9 +1058,22 @@ func (h *AgentWSHandler) OneShotLLM(ctx context.Context, llm *LLMSettingsForWork
 		msg.Model = llm.Model
 		msg.ThinkingLevel = llm.ThinkingLevel
 		msg.BaseURL = llm.BaseURL
+		msg.LLMName = llm.Name
 		// Operator-configured sampling wins over the call-site defaults each
 		// one-shot caller hardcodes (0.0 for classification, 0.3 for titles, …).
 		applySamplingSettings(&msg, llm)
+		// The fallback gets the call-site values with ITS overrides on top,
+		// not the primary's overrides.
+		msg.FallbackLLM = h.fallbackWire(llm, &maxTokens, &temperature)
+		if msg.FallbackLLM != nil {
+			budget := oneshotLLMDefaultTimeout
+			if deadline, ok := ctx.Deadline(); ok {
+				budget = time.Until(deadline)
+			}
+			if budget > 0 {
+				msg.TimeoutMs = budget.Milliseconds()
+			}
+		}
 	}
 
 	// Reuse the same proxy-settings pattern as StartIncident/ContinueIncident.
@@ -1072,6 +1132,13 @@ func (h *AgentWSHandler) OneShotLLM(ctx context.Context, llm *LLMSettingsForWork
 
 	select {
 	case resp := <-ch:
+		if resp.LLMFallbackFrom != "" {
+			slog.Warn("one-shot LLM call answered by fallback",
+				"primary", resp.LLMFallbackFrom,
+				"fallback", resp.LLMProvider+"/"+resp.LLMModel,
+				"reason", resp.LLMFallbackReason,
+				"failed", resp.Error != "")
+		}
 		if resp.Error != "" {
 			// Preserve the ErrWorkerNotConnected sentinel so callers using
 			// errors.Is can distinguish a worker drop from a real provider error.
@@ -1119,6 +1186,69 @@ func (h *AgentWSHandler) BroadcastProxyConfig(settings *database.ProxySettings) 
 	}
 
 	return h.SendToWorker(msg)
+}
+
+// fallbackWire builds the fallback_llm object for a dispatch on primary, or
+// nil when no fallback applies. For one-shot frames callMaxTokens and
+// callTemperature are the call site's own values: the fallback's configured
+// overrides replace them exactly as the primary's do (applySamplingSettings).
+func (h *AgentWSHandler) fallbackWire(primary *LLMSettingsForWorker, callMaxTokens *int, callTemperature *float64) *WireLLMConfig {
+	if h.resolveFallback == nil {
+		return nil
+	}
+	fb := h.resolveFallback(primary)
+	if fb == nil {
+		return nil
+	}
+	w := &WireLLMConfig{
+		Name:          fb.Name,
+		Provider:      fb.Provider,
+		APIKey:        fb.APIKey,
+		Model:         fb.Model,
+		ThinkingLevel: fb.ThinkingLevel,
+		BaseURL:       fb.BaseURL,
+		Temperature:   copyPtr(callTemperature),
+		MaxTokens:     copyPtr(callMaxTokens),
+		TopP:          copyPtr(fb.TopP),
+		TopK:          copyPtr(fb.TopK),
+	}
+	if fb.Temperature != nil {
+		w.Temperature = copyPtr(fb.Temperature)
+	}
+	if fb.MaxTokens != nil {
+		w.MaxTokens = copyPtr(fb.MaxTokens)
+	}
+	return w
+}
+
+func copyPtr[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
+}
+
+// recordRunFallback logs a run that the fallback LLM answered (or tried to)
+// and re-stamps its run row with the config that really ran. A frame from a
+// worker without fallback support carries no llm_fallback_from: no-op.
+func recordRunFallback(msg AgentMessage) {
+	if msg.LLMFallbackFrom == "" {
+		return
+	}
+	slog.Warn("agent run switched to fallback LLM",
+		"incident_id", msg.IncidentID,
+		"run_id", msg.RunID,
+		"primary", msg.LLMFallbackFrom,
+		"fallback", msg.LLMProvider+"/"+msg.LLMModel,
+		"reason", msg.LLMFallbackReason)
+	if msg.RunID == "" {
+		return
+	}
+	if err := database.RecordAgentRunFallback(msg.RunID, msg.LLMProvider, msg.LLMModel, msg.LLMThinkingLevel,
+		msg.LLMFallbackFrom, msg.LLMFallbackReason); err != nil {
+		slog.Warn("failed to record fallback LLM on agent run", "run_id", msg.RunID, "err", err)
+	}
 }
 
 // applySamplingSettings copies the operator-configured sampling overrides from

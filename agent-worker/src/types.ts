@@ -71,10 +71,31 @@ export interface LLMSettings {
   model: string;
   thinking_level: ThinkingLevel;
   base_url?: string;
+  /** Operator's config name (llm_settings.name), for log lines only. */
+  name?: string;
 
   // Operator-configured sampling overrides. Absent means the API sent nothing
   // for that parameter, so the request must omit it and let the provider
   // decide — the historical behaviour for every field here.
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  max_tokens?: number;
+}
+
+/**
+ * Fallback LLM config as sent on the wire (`fallback_llm`). Same fields as the
+ * primary config's flat frame fields; sampling fields are present only when
+ * the operator set them (on one-shot frames they are already merged with the
+ * call site's own max_tokens/temperature).
+ */
+export interface WireLLMConfig {
+  name?: string;
+  provider: string;
+  api_key: string;
+  model: string;
+  thinking_level?: string;
+  base_url?: string;
   temperature?: number;
   top_p?: number;
   top_k?: number;
@@ -136,6 +157,25 @@ export interface WebSocketMessage {
   model?: string;
   thinking_level?: string;
   base_url?: string;
+  /** Name of the primary config (for log lines). */
+  llm_name?: string;
+
+  /**
+   * Fallback config (new_incident, continue_incident, oneshot_llm_request).
+   * Absent when the operator set none: behaviour is then unchanged.
+   */
+  fallback_llm?: WireLLMConfig;
+
+  /**
+   * Which config answered (agent_completed, agent_error,
+   * oneshot_llm_response). llm_fallback_from/llm_fallback_reason are set only
+   * when the fallback was used.
+   */
+  llm_provider?: string;
+  llm_model?: string;
+  llm_thinking_level?: string;
+  llm_fallback_from?: string;
+  llm_fallback_reason?: string;
 
   // Proxy configuration with toggles (sent with new_incident)
   proxy_config?: ProxyConfig;
@@ -148,6 +188,8 @@ export interface WebSocketMessage {
 
   // One-shot LLM request/response correlation and payload
   request_id?: string;
+  /** How long the API waits for the one-shot answer (sent with a fallback only). */
+  timeout_ms?: number;
   system?: string;
   user?: string;
   summary?: string;
@@ -191,6 +233,17 @@ export interface ExecuteResult {
   session_export?: string;
   /** Name of the last skill whose SKILL.md the agent read during the run */
   last_skill?: string;
+  /**
+   * Worker-internal: tool calls of this attempt that can change something
+   * (not read/ls/grep/find/tool discovery). Never sent to the API.
+   */
+  tool_calls?: number;
+  /** Which config answered; see WebSocketMessage.llm_*. */
+  llm_provider?: string;
+  llm_model?: string;
+  llm_thinking_level?: string;
+  llm_fallback_from?: string;
+  llm_fallback_reason?: string;
 }
 
 // ---------------------------------------------------------------------------

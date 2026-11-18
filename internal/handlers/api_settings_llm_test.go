@@ -546,3 +546,59 @@ func TestHandleLLMSettingsByID_Update_ClearAPIKeyOnInactive(t *testing.T) {
 		t.Errorf("expected 200 for clearing API key on inactive config, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestHandleLLMSettingsByID_Fallback(t *testing.T) {
+	h := setupLLMHandlerTest(t)
+	active := seedLLMConfig(t, "main", database.LLMProviderOpenAI, true)
+	backup := seedLLMConfig(t, "backup", database.LLMProviderAnthropic, false)
+
+	do := func(method, path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, nil)
+		w := httptest.NewRecorder()
+		h.handleLLMSettingsByID(w, req)
+		return w
+	}
+
+	if w := do(http.MethodPut, fmt.Sprintf("/api/settings/llm/%d/fallback", active.ID)); w.Code != http.StatusBadRequest {
+		t.Errorf("active as fallback: status %d, want 400", w.Code)
+	}
+	if w := do(http.MethodPut, "/api/settings/llm/9999/fallback"); w.Code != http.StatusNotFound {
+		t.Errorf("missing id: status %d, want 404", w.Code)
+	}
+	w := do(http.MethodPut, fmt.Sprintf("/api/settings/llm/%d/fallback", backup.ID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("set fallback: status %d body %s", w.Code, w.Body.String())
+	}
+	var cfg map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &cfg)
+	if cfg["fallback"] != true {
+		t.Errorf("response fallback = %v", cfg["fallback"])
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/settings/llm", nil)
+	lw := httptest.NewRecorder()
+	h.handleLLMSettings(lw, listReq)
+	var list map[string]any
+	_ = json.Unmarshal(lw.Body.Bytes(), &list)
+	if list["fallback_id"] != float64(backup.ID) {
+		t.Errorf("fallback_id = %v, want %d", list["fallback_id"], backup.ID)
+	}
+
+	body, _ := json.Marshal(map[string]string{"api_key": ""})
+	ureq := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/settings/llm/%d", backup.ID), bytes.NewReader(body))
+	uw := httptest.NewRecorder()
+	h.handleLLMSettingsByID(uw, ureq)
+	if uw.Code != http.StatusBadRequest {
+		t.Errorf("clear fallback key: status %d, want 400", uw.Code)
+	}
+
+	if w := do(http.MethodDelete, fmt.Sprintf("/api/settings/llm/%d/fallback", backup.ID)); w.Code != http.StatusOK {
+		t.Fatalf("clear fallback: status %d", w.Code)
+	}
+	if fb, _ := database.GetFallbackLLMSettings(); fb != nil {
+		t.Errorf("fallback after DELETE = %+v", fb)
+	}
+	if w := do(http.MethodPost, fmt.Sprintf("/api/settings/llm/%d/fallback", backup.ID)); w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST: status %d, want 405", w.Code)
+	}
+}

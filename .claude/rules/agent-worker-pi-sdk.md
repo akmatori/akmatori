@@ -109,6 +109,18 @@ Session resume is NOT used — Slack and proposal chat start fresh agent session
   `openrouter.ai` base URL; `AKMATORI_OPENROUTER_ATTRIBUTION=0` turns it off. pi's own identity
   attributes to pi.dev; openai-completions/-responses merge `{...identity, ...model.headers}`
   case-SENSITIVELY, so keep pi's exact header spelling or both copies are sent
+- **Fallback LLM** (`llm-fallback.ts`, #105): frames may carry `fallback_llm`. After pi's own retries,
+  a transient primary error (pi-ai `isRetryableAssistantError` + Node socket codes; never 401/403 or
+  context overflow) re-runs the request on the fallback: agent runs in a FRESH session
+  (`runWithFallback`), but ONLY when the primary attempt ran no side-effect tool (anything outside
+  `READ_ONLY_TOOLS`) — a replay could repeat an ssh command. A `RunToken` keeps
+  `hasActiveSession()` true across both attempts and `ownerCheck` stops a fallback session whose
+  bootstrap raced a cancel/replacement. One-shot calls via `runOneshotWithFallback`: the primary
+  gets 60% of the frame's `timeout_ms` (the Go caller's remaining wait), the fallback the rest. One
+  process-wide `primaryBreaker` (3 failures in a row → skip for 5 min → half-open: exactly ONE probe,
+  `shouldSkipPrimary` reserves it) serves both paths. Result frames report `llm_provider`/`llm_model`/
+  `llm_thinking_level` and, on a switch, `llm_fallback_from`/`llm_fallback_reason`; the API
+  re-stamps the `agent_runs` row (`RecordAgentRunFallback`). No `fallback_llm` → old behaviour
 - Bash tool stays local (TypeScript variance friction)
 - import `typebox` from `typebox`, not `@sinclair/typebox`
 - `DefaultResourceLoader` requires `agentDir` (`getAgentDir()` in prod and mocks)

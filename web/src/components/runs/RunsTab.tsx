@@ -28,6 +28,14 @@ export default function RunsTab({ runs }: RunsTabProps) {
               </span>
               <span className="text-fg-muted" title={run.started_at}>{formatShortDateTime(run.started_at)}</span>
               {run.model && <span className="font-mono text-xs text-fg-muted">{run.model}</span>}
+              {run.fallback_from && (
+                <span
+                  className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300"
+                  title={`Primary ${run.fallback_from} failed: ${run.fallback_reason ?? 'unknown error'}`}
+                >
+                  Fallback LLM (primary {run.fallback_from})
+                </span>
+              )}
             </p>
             <p className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs text-fg-subtle">
               {run.execution_time_ms > 0 && <span>{formatExecutionTime(run.execution_time_ms)}</span>}

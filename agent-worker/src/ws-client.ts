@@ -6,6 +6,27 @@
  */
 
 import WebSocket from "ws";
+
+/** Which LLM config answered (see WebSocketMessage.llm_*). */
+export interface LLMUsedFields {
+  llm_provider?: string;
+  llm_model?: string;
+  llm_thinking_level?: string;
+  llm_fallback_from?: string;
+  llm_fallback_reason?: string;
+}
+
+/** Copy only the llm_* fields, so a whole ExecuteResult can be passed in. */
+function pickUsed(used?: LLMUsedFields): LLMUsedFields {
+  if (!used) return {};
+  const out: LLMUsedFields = {};
+  if (used.llm_provider) out.llm_provider = used.llm_provider;
+  if (used.llm_model) out.llm_model = used.llm_model;
+  if (used.llm_thinking_level) out.llm_thinking_level = used.llm_thinking_level;
+  if (used.llm_fallback_from) out.llm_fallback_from = used.llm_fallback_from;
+  if (used.llm_fallback_reason) out.llm_fallback_reason = used.llm_fallback_reason;
+  return out;
+}
 import {
   type WebSocketMessage,
   type MessageType,
@@ -155,6 +176,7 @@ export class WebSocketClient {
       cache_write_tokens?: number;
       cost_usd?: number;
     },
+    used?: LLMUsedFields,
   ): void {
     this.send({
       type: "agent_completed",
@@ -166,6 +188,7 @@ export class WebSocketClient {
       ...(runId ? { run_id: runId } : {}),
       ...(lastSkill ? { last_skill: lastSkill } : {}),
       ...(usage ?? {}),
+      ...pickUsed(used),
     });
   }
 
@@ -174,22 +197,24 @@ export class WebSocketClient {
    * so a superseded-run error is dropped on the API side rather than firing
    * OnError on the new waiter's callback.
    */
-  sendError(incidentId: string, runId: string | undefined, errorMsg: string): void {
+  sendError(incidentId: string, runId: string | undefined, errorMsg: string, used?: LLMUsedFields): void {
     this.send({
       type: "agent_error",
       incident_id: incidentId,
       error: errorMsg,
       ...(runId ? { run_id: runId } : {}),
+      ...pickUsed(used),
     });
   }
 
   /** Send a one-shot LLM response correlated with the originating request. */
-  sendOneshotResponse(requestId: string, summary: string, errorMsg?: string): void {
+  sendOneshotResponse(requestId: string, summary: string, errorMsg?: string, used?: LLMUsedFields): void {
     this.send({
       type: "oneshot_llm_response",
       request_id: requestId,
       summary,
       ...(errorMsg ? { error: errorMsg } : {}),
+      ...pickUsed(used),
     });
   }
 
