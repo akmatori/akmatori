@@ -146,20 +146,43 @@ instance has an operator policy (`command_policy.go`, `ValidateCommandWithPolicy
 - an allowed write command is still a write for the host-document hold (`ValidateCommand(cmd,
   false)`): it waits once for the agent to read the host document
 
-## Gitea tool: gitea.*
+## Pull request review tools: gitea.*, github.*
 
-`tools/gitea`, `registerGiteaTools` (`registry_gitea.go`). Read pull requests for pre-merge review;
-Forgejo speaks the same API.
+`tools/gitea` (`registry_gitea.go`) and `tools/github` (`registry_github.go`): the same 7 tools for
+pre-merge review. `tools/forge` holds what does not depend on the forge API: repo / number / pr_url
+arguments and the allowlist (`forge.Resolver`), `max_bytes`, the per-file diff split (renames match
+the old path too; quoted paths), `RenderDiff` / `RenderFile` (cut at `max_bytes`, default 50000,
+max 200000, with a `[TRUNCATED …]` marker; binary files are not shown). Keep output shapes the same
+in both tools; change shared behaviour in `forge`.
 
-- settings: `gitea_url` (a trailing `/api/v1` is dropped), `gitea_token` (secret, sent as
-  `Authorization: token …`), `gitea_allowed_repos` (textarea: `owner/repo` or `owner/*` per line;
-  empty = all the token can read), `gitea_allow_comments` (default off), `gitea_verify_ssl`,
-  `gitea_timeout`
+- settings `<forge>_url`, `<forge>_token` (secret), `<forge>_allowed_repos` (textarea: `owner/repo`
+  or `owner/*` per line; empty = all the token can read), `<forge>_allow_comments` (default off),
+  `<forge>_verify_ssl`, `<forge>_timeout`
 - a pull request is `repo` + `number` or `pr_url`; a `pr_url` on another host is refused. The
   allowlist is checked before any request
-- outputs are compact JSON, not raw API objects. Diffs are split per file from `pulls/{n}.diff`
-  (renames match the old path too) and cut at `max_bytes` (default 50000, max 200000) with a
-  `[TRUNCATED …]` marker; files come from `/raw/` and binary files are not shown
-- listings page by `X-Total-Count` (Gitea may cap the page size), at most 20 pages
-- `create_pull_request_comment` re-reads `gitea_allow_comments` from the DB on every call (no cache)
-- no proxy toggle and no env proxy; redirects are refused (the token would follow them)
+- `create_pull_request_comment` re-reads `<forge>_allow_comments` from the DB on every call (no cache)
+
+Gitea (Forgejo speaks the same API): `gitea_url` drops a trailing `/api/v1`; `Authorization: token …`;
+diff from `pulls/{n}.diff`, files from `/raw/`; listings page by `X-Total-Count` (Gitea may cap the
+page size), at most 20 pages; no proxy and no env proxy; redirects are refused.
+
+GitHub: `github_url` may be the web or the API URL (`baseURLs`): empty / github.com →
+`api.github.com`, `<x>.ghe.com` → `api.<x>.ghe.com`, other hosts → `<url>/api/v3`;
+`Authorization: Bearer …`, `X-GitHub-Api-Version`, a `User-Agent`.
+
+- listings follow the `Link` rel="next" header (100 per page, at most 30 pages = GitHub's 3000-file cap)
+- diff: `pulls/{n}` with `Accept: application/vnd.github.diff`; on 406 (too large) it is built from
+  the files API `patch` fields, with a note
+- `get_file`: contents API with `application/vnd.github.raw+json`; a directory gives its listing
+- comments: issue comments + reviews + `pulls/{n}/comments` (inline), grouped by review
+- search: `/search/issues` with `repo:<o>/<r> is:pr`; query words that widen the search (`repo:`,
+  `org:`, `user:`, `owner:`, `is:`, `type:`) are dropped and reported, and items of other repos
+  are filtered out
+- rate limit errors (403/429 with `X-RateLimit-Remaining: 0` or `Retry-After`) say when to retry
+- redirects are followed only on the API host (renamed repositories), at most 3
+- proxy: the global proxy when its GitHub switch is on (`proxy_settings.github_enabled`); no env proxy
+
+Upgrade: `services.RenameReservedMCPNamespaces` (API start, before `EnsureToolTypes`) moves an MCP
+server with prefix `github` or `gitea` to `<ns>_mcp` (or `_mcp_2`, …) with its managed tool type,
+and disables an HTTP connector with that name. The seed looks tool types up by name, so this must
+run first.

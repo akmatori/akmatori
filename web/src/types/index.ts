@@ -247,6 +247,7 @@ export interface ProxySettings {
     netbox: ProxyServiceConfig;
     kubernetes: ProxyServiceConfig;
     jira: ProxyServiceConfig;
+    github?: ProxyServiceConfig;
     ssh: ProxyServiceConfig;
   };
 }
@@ -265,6 +266,7 @@ export interface ProxySettingsUpdate {
     netbox: { enabled: boolean };
     kubernetes: { enabled: boolean };
     jira: { enabled: boolean };
+    github: { enabled: boolean };
   };
 }
 

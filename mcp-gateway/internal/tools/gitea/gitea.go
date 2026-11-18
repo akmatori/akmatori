@@ -16,7 +16,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +24,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/cache"
 	"github.com/akmatori/mcp-gateway/internal/database"
 	"github.com/akmatori/mcp-gateway/internal/ratelimit"
+	"github.com/akmatori/mcp-gateway/internal/tools/forge"
 	"github.com/akmatori/mcp-gateway/internal/validation"
 )
 
@@ -34,14 +34,8 @@ const (
 	ConfigCacheTTL   = 5 * time.Minute
 	CacheCleanupTick = time.Minute
 
-	// maxJSONResponseBytes caps a JSON API response.
-	maxJSONResponseBytes = 5 * 1024 * 1024
-	// maxRawResponseBytes caps a raw diff or file read from the forge; the
-	// agent still only gets max_bytes of it.
-	maxRawResponseBytes = 20 * 1024 * 1024
-
-	DefaultMaxBytes = 50_000
-	MaxMaxBytes     = 200_000
+	maxJSONResponseBytes = forge.MaxJSONResponseBytes
+	maxRawResponseBytes  = forge.MaxRawResponseBytes
 
 	// pageLimit is the page size asked from Gitea. Gitea caps it with
 	// MAX_RESPONSE_ITEMS (default 50).
@@ -49,11 +43,11 @@ const (
 	// maxPages bounds every paged listing.
 	maxPages = 20
 
-	maxCommentBodyBytes = 4_000
-	maxPRBodyBytes      = 20_000
-	maxReviews          = 30
-	maxComments         = 100
-	maxCommentLength    = 60_000
+	maxCommentBodyBytes = forge.MaxCommentBodyBytes
+	maxPRBodyBytes      = forge.MaxPRBodyBytes
+	maxReviews          = forge.MaxReviews
+	maxComments         = forge.MaxComments
+	maxCommentLength    = forge.MaxCommentLength
 )
 
 // Config holds one Gitea instance's settings.
@@ -115,40 +109,6 @@ func clampTimeout(timeout int) int {
 	return timeout
 }
 
-// ParseAllowedRepos reads gitea_allowed_repos: a string with one entry per
-// line (or separated by commas or spaces; "#" starts a comment), or a JSON
-// array of strings. Entries are lowercased.
-func ParseAllowedRepos(v interface{}) []string {
-	var raw []string
-	switch val := v.(type) {
-	case string:
-		for _, line := range strings.Split(val, "\n") {
-			if i := strings.Index(line, "#"); i >= 0 {
-				line = line[:i]
-			}
-			raw = append(raw, strings.FieldsFunc(line, func(r rune) bool {
-				return r == ',' || r == ' ' || r == '\t' || r == '\r'
-			})...)
-		}
-	case []interface{}:
-		for _, item := range val {
-			if s, ok := item.(string); ok {
-				raw = append(raw, s)
-			}
-		}
-	case []string:
-		raw = val
-	}
-	out := make([]string, 0, len(raw))
-	for _, s := range raw {
-		s = strings.ToLower(strings.Trim(strings.TrimSpace(s), "/"))
-		if s != "" {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
 func buildConfig(settings map[string]interface{}) *Config {
 	c := &Config{VerifySSL: true, Timeout: 30}
 	if u, ok := settings["gitea_url"].(string); ok {
@@ -166,7 +126,7 @@ func buildConfig(settings map[string]interface{}) *Config {
 		c.Timeout = int(v)
 	}
 	c.Timeout = clampTimeout(c.Timeout)
-	c.AllowedRepos = ParseAllowedRepos(settings["gitea_allowed_repos"])
+	c.AllowedRepos = forge.ParseAllowedRepos(settings["gitea_allowed_repos"])
 	if v, ok := settings["gitea_allow_comments"].(bool); ok {
 		c.AllowComments = v
 	}
@@ -208,143 +168,16 @@ func (t *GiteaTool) verifyCommentGate(ctx context.Context, incidentID, logicalNa
 	return cfg, nil
 }
 
-var repoPartRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
-
-// splitRepo validates "owner/repo".
-func splitRepo(repo string) (owner, name string, err error) {
-	repo = strings.Trim(strings.TrimSpace(repo), "/")
-	parts := strings.Split(repo, "/")
-	if len(parts) != 2 || !repoPartRe.MatchString(parts[0]) || !repoPartRe.MatchString(parts[1]) ||
-		parts[0] == "." || parts[0] == ".." || parts[1] == "." || parts[1] == ".." {
-		return "", "", fmt.Errorf("repo must be \"owner/repo\", got %q", repo)
+// resolver applies gitea_allowed_repos and reads pr_url links of this
+// instance (a Gitea served under a sub-path is handled).
+func resolver(cfg *Config) forge.Resolver {
+	return forge.Resolver{
+		Allowed: cfg.AllowedRepos,
+		Setting: "gitea_allowed_repos",
+		ParseURL: func(raw string) (forge.PR, error) {
+			return forge.ParsePRURL(cfg.URL, raw, "Gitea")
+		},
 	}
-	return parts[0], strings.TrimSuffix(parts[1], ".git"), nil
-}
-
-// repoAllowed applies gitea_allowed_repos.
-func repoAllowed(cfg *Config, owner, name string) bool {
-	if len(cfg.AllowedRepos) == 0 {
-		return true
-	}
-	full := strings.ToLower(owner + "/" + name)
-	ownerAll := strings.ToLower(owner) + "/*"
-	for _, a := range cfg.AllowedRepos {
-		if a == full || a == ownerAll || a == "*" {
-			return true
-		}
-	}
-	return false
-}
-
-var prURLPathRe = regexp.MustCompile(`^/([^/]+)/([^/]+)/(?:pulls|pull)/(\d+)(?:/.*)?$`)
-
-// prTarget is the repository and pull request number a call is about.
-type prTarget struct {
-	owner, name string
-	number      int
-}
-
-func (p prTarget) repo() string { return p.owner + "/" + p.name }
-
-// parsePRURL reads https://<host>/<owner>/<repo>/pulls/<n>. The host must be
-// the configured instance's host, so a link can never send the token
-// elsewhere (requests always go to cfg.URL anyway).
-func parsePRURL(cfg *Config, raw string) (prTarget, error) {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Host == "" {
-		return prTarget{}, fmt.Errorf("pr_url is not a URL: %q", raw)
-	}
-	base, err := url.Parse(cfg.URL)
-	if err == nil && base.Host != "" && !strings.EqualFold(base.Host, u.Host) {
-		return prTarget{}, fmt.Errorf("pr_url host %q is not this Gitea instance (%s)", u.Host, base.Host)
-	}
-	p := u.Path
-	if base != nil && base.Path != "" && base.Path != "/" {
-		// Gitea served under a sub-path, e.g. https://example.com/git
-		p = strings.TrimPrefix(p, strings.TrimRight(base.Path, "/"))
-	}
-	m := prURLPathRe.FindStringSubmatch(p)
-	if m == nil {
-		return prTarget{}, fmt.Errorf("pr_url must look like https://<host>/<owner>/<repo>/pulls/<number>, got %q", raw)
-	}
-	owner, name, err := splitRepo(m[1] + "/" + m[2])
-	if err != nil {
-		return prTarget{}, err
-	}
-	n, _ := strconv.Atoi(m[3])
-	return prTarget{owner: owner, name: name, number: n}, nil
-}
-
-func intArg(args map[string]interface{}, key string) (int, bool) {
-	switch v := args[key].(type) {
-	case float64:
-		return int(v), true
-	case int:
-		return v, true
-	case string:
-		n, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(v), "#"))
-		if err == nil {
-			return n, true
-		}
-	}
-	return 0, false
-}
-
-func stringArg(args map[string]interface{}, key string) string {
-	if v, ok := args[key].(string); ok {
-		return strings.TrimSpace(v)
-	}
-	return ""
-}
-
-func maxBytesArg(args map[string]interface{}) int {
-	n, ok := intArg(args, "max_bytes")
-	if !ok || n <= 0 {
-		return DefaultMaxBytes
-	}
-	if n > MaxMaxBytes {
-		return MaxMaxBytes
-	}
-	return n
-}
-
-// resolveRepo validates the repo argument against the allowlist.
-func resolveRepo(cfg *Config, args map[string]interface{}) (owner, name string, err error) {
-	repo := stringArg(args, "repo")
-	if repo == "" {
-		return "", "", fmt.Errorf("repo is required (\"owner/repo\")%s", validation.SuggestParam("repo", args))
-	}
-	owner, name, err = splitRepo(repo)
-	if err != nil {
-		return "", "", err
-	}
-	if !repoAllowed(cfg, owner, name) {
-		return "", "", fmt.Errorf("repo %s/%s is not in gitea_allowed_repos for this instance", owner, name)
-	}
-	return owner, name, nil
-}
-
-// resolvePR reads repo + number, or pr_url, and applies the allowlist.
-func resolvePR(cfg *Config, args map[string]interface{}) (prTarget, error) {
-	if raw := stringArg(args, "pr_url"); raw != "" {
-		p, err := parsePRURL(cfg, raw)
-		if err != nil {
-			return prTarget{}, err
-		}
-		if !repoAllowed(cfg, p.owner, p.name) {
-			return prTarget{}, fmt.Errorf("repo %s is not in gitea_allowed_repos for this instance", p.repo())
-		}
-		return p, nil
-	}
-	owner, name, err := resolveRepo(cfg, args)
-	if err != nil {
-		return prTarget{}, err
-	}
-	n, ok := intArg(args, "number")
-	if !ok || n <= 0 {
-		return prTarget{}, fmt.Errorf("number is required (the pull request number), or pass pr_url%s", validation.SuggestParam("number", args))
-	}
-	return prTarget{owner: owner, name: name, number: n}, nil
 }
 
 func repoPath(owner, name string) string {
@@ -429,11 +262,7 @@ func (t *GiteaTool) do(ctx context.Context, cfg *Config, method, path string, qu
 		return nil, false, 0, fmt.Errorf("read Gitea response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		msg := string(data)
-		if len(msg) > 300 {
-			msg = msg[:300] + "..."
-		}
-		return nil, false, 0, &apiError{Status: resp.StatusCode, Body: strings.TrimSpace(msg)}
+		return nil, false, 0, &apiError{Status: resp.StatusCode, Body: forge.ShortError(data)}
 	}
 	total = -1
 	if v := resp.Header.Get("X-Total-Count"); v != "" {
@@ -497,27 +326,6 @@ func getPaged[T any](ctx context.Context, t *GiteaTool, cfg *Config, path string
 		}
 	}
 	return all, true, nil
-}
-
-// cut keeps at most n bytes of s on a rune boundary.
-func cut(s string, n int) (string, bool) {
-	if len(s) <= n {
-		return s, false
-	}
-	// Step back over continuation bytes only (at most UTFMax-1), so text that
-	// is not UTF-8 is cut at n and not emptied.
-	for i := 0; i < utf8.UTFMax-1 && n > 0 && !utf8.RuneStart(s[n]); i++ {
-		n--
-	}
-	return s[:n], true
-}
-
-func marshal(v interface{}) (string, error) {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
 }
 
 // --- API shapes (only the fields we use) ---
@@ -653,17 +461,17 @@ func (t *GiteaTool) GetPullRequest(ctx context.Context, incidentID string, args 
 	if err != nil {
 		return "", err
 	}
-	p, err := resolvePR(cfg, args)
+	p, err := resolver(cfg).PR(args)
 	if err != nil {
 		return "", err
 	}
 	var pr apiPR
-	if err := t.getJSON(ctx, cfg, fmt.Sprintf("%s/pulls/%d", repoPath(p.owner, p.name), p.number), nil, &pr); err != nil {
+	if err := t.getJSON(ctx, cfg, fmt.Sprintf("%s/pulls/%d", repoPath(p.Owner, p.Name), p.Number), nil, &pr); err != nil {
 		return "", err
 	}
-	body, bodyCut := cut(pr.Body, maxPRBodyBytes)
+	body, bodyCut := forge.Cut(pr.Body, maxPRBodyBytes)
 	out := map[string]interface{}{
-		"repo":                p.repo(),
+		"repo":                p.Repo(),
 		"number":              pr.Number,
 		"title":               pr.Title,
 		"body":                body,
@@ -710,7 +518,7 @@ func (t *GiteaTool) GetPullRequest(ctx context.Context, incidentID string, args 
 			out["deletions"] = *pr.Deletions
 		}
 	}
-	return marshal(out)
+	return forge.Marshal(out)
 }
 
 // ListPullRequestFiles returns the changed files with status and line counts.
@@ -719,11 +527,11 @@ func (t *GiteaTool) ListPullRequestFiles(ctx context.Context, incidentID string,
 	if err != nil {
 		return "", err
 	}
-	p, err := resolvePR(cfg, args)
+	p, err := resolver(cfg).PR(args)
 	if err != nil {
 		return "", err
 	}
-	files, capped, err := getPaged[apiChangedFile](ctx, t, cfg, fmt.Sprintf("%s/pulls/%d/files", repoPath(p.owner, p.name), p.number), nil)
+	files, capped, err := getPaged[apiChangedFile](ctx, t, cfg, fmt.Sprintf("%s/pulls/%d/files", repoPath(p.Owner, p.Name), p.Number), nil)
 	if err != nil {
 		return "", err
 	}
@@ -744,8 +552,8 @@ func (t *GiteaTool) ListPullRequestFiles(ctx context.Context, incidentID string,
 		list = append(list, item)
 	}
 	out := map[string]interface{}{
-		"repo":      p.repo(),
-		"number":    p.number,
+		"repo":      p.Repo(),
+		"number":    p.Number,
 		"count":     len(list),
 		"additions": adds,
 		"deletions": dels,
@@ -754,102 +562,7 @@ func (t *GiteaTool) ListPullRequestFiles(ctx context.Context, incidentID string,
 	if capped {
 		out["truncated"] = fmt.Sprintf("stopped after %d pages; the pull request has more files", maxPages)
 	}
-	return marshal(out)
-}
-
-// splitDiff returns the per-file sections of a unified git diff, keyed by
-// the new path (and the old path, for renames and deletions).
-func splitDiff(diff string) (order []string, sections map[string]string) {
-	sections = map[string]string{}
-	var cur strings.Builder
-	var names []string
-	flush := func() {
-		if len(names) == 0 {
-			return
-		}
-		text := cur.String()
-		order = append(order, names[0])
-		for _, n := range names {
-			if _, ok := sections[n]; !ok {
-				sections[n] = text
-			}
-		}
-	}
-	for _, line := range strings.SplitAfter(diff, "\n") {
-		if strings.HasPrefix(line, "diff --git ") {
-			flush()
-			cur.Reset()
-			names = diffGitNames(strings.TrimRight(line, "\r\n"))
-		}
-		if len(names) > 0 {
-			cur.WriteString(line)
-		}
-	}
-	flush()
-	return order, sections
-}
-
-// diffGitNames reads `diff --git a/<old> b/<new>` and returns the new path
-// first. Git quotes each path on its own (C-style, when it has special or
-// non-ASCII characters), so either side can be quoted. An unquoted old path
-// with spaces is ambiguous; it is split at the first " b/" (or ` "b/`).
-func diffGitNames(header string) []string {
-	rest := strings.TrimPrefix(header, "diff --git ")
-	var oldRaw, newRaw string
-	if strings.HasPrefix(rest, "\"") {
-		end := quotedEnd(rest)
-		if end < 0 || end+1 >= len(rest) || rest[end+1] != ' ' {
-			return []string{rest}
-		}
-		oldRaw, newRaw = rest[:end+1], rest[end+2:]
-	} else {
-		i := strings.Index(rest, " b/")
-		if j := strings.Index(rest, " \"b/"); j >= 0 && (i < 0 || j < i) {
-			i = j
-		}
-		if i < 0 {
-			return []string{rest}
-		}
-		oldRaw, newRaw = rest[:i], rest[i+1:]
-	}
-	oldP, ok1 := diffPath(oldRaw, "a/")
-	newP, ok2 := diffPath(newRaw, "b/")
-	if !ok1 || !ok2 {
-		return []string{rest}
-	}
-	if newP == oldP {
-		return []string{newP}
-	}
-	return []string{newP, oldP}
-}
-
-// quotedEnd returns the index of the closing quote of the C-style quoted
-// string at the start of s, or -1.
-func quotedEnd(s string) int {
-	for i := 1; i < len(s); i++ {
-		switch s[i] {
-		case '\\':
-			i++
-		case '"':
-			return i
-		}
-	}
-	return -1
-}
-
-// diffPath unquotes one header path (if quoted) and drops its a/ or b/ prefix.
-func diffPath(raw, prefix string) (string, bool) {
-	if strings.HasPrefix(raw, "\"") {
-		u, err := strconv.Unquote(raw)
-		if err != nil {
-			return "", false
-		}
-		raw = u
-	}
-	if !strings.HasPrefix(raw, prefix) {
-		return "", false
-	}
-	return raw[len(prefix):], true
+	return forge.Marshal(out)
 }
 
 // GetPullRequestDiff returns the diff of one file or of the whole pull
@@ -859,69 +572,18 @@ func (t *GiteaTool) GetPullRequestDiff(ctx context.Context, incidentID string, a
 	if err != nil {
 		return "", err
 	}
-	p, err := resolvePR(cfg, args)
+	p, err := resolver(cfg).PR(args)
 	if err != nil {
 		return "", err
 	}
-	maxBytes := maxBytesArg(args)
-	file := strings.TrimPrefix(stringArg(args, "file"), "/")
-
-	raw, over, _, err := t.do(ctx, cfg, http.MethodGet, fmt.Sprintf("%s/pulls/%d.diff", repoPath(p.owner, p.name), p.number), nil, nil, "text/plain", maxRawResponseBytes)
+	raw, over, _, err := t.do(ctx, cfg, http.MethodGet, fmt.Sprintf("%s/pulls/%d.diff", repoPath(p.Owner, p.Name), p.Number), nil, nil, "text/plain", maxRawResponseBytes)
 	if err != nil {
 		return "", err
 	}
-	diff := string(raw)
-	order, sections := splitDiff(diff)
-
-	header := fmt.Sprintf("# %s#%d diff", p.repo(), p.number)
-	partial := false
-	if file != "" {
-		sec, ok := sections[file]
-		if !ok {
-			hint := ""
-			if over {
-				hint = fmt.Sprintf(" (the diff is over %d MB and was read only in part; the file may be in the unread part)", maxRawResponseBytes/(1024*1024))
-			}
-			names := order
-			if len(names) > 30 {
-				names = names[:30]
-			}
-			return "", fmt.Errorf("file %q is not in the diff of %s#%d%s; files: %s", file, p.repo(), p.number, hint, strings.Join(names, ", "))
-		}
-		header += " — file " + file
-		diff = sec
-		// The download cap stops inside the last section, so only that file
-		// can be partial.
-		partial = over && len(order) > 0 && sections[order[len(order)-1]] == sec
-	} else {
-		partial = over
-		header += fmt.Sprintf(" — %d files", len(order))
-	}
-
-	total := len(diff)
-	body, truncated := cut(diff, maxBytes)
-	var b strings.Builder
-	b.WriteString(header)
-	b.WriteString("\n\n")
-	b.WriteString(body)
-	if truncated || partial {
-		if !strings.HasSuffix(body, "\n") {
-			b.WriteString("\n")
-		}
-		size := fmt.Sprintf("%d bytes", total)
-		if partial {
-			size = fmt.Sprintf("over %d bytes", total)
-		}
-		hint := fmt.Sprintf("Call list_pull_request_files, then get_pull_request_diff with file=<path> for each file, or raise max_bytes (max %d).", MaxMaxBytes)
-		switch {
-		case file != "" && partial && !truncated:
-			hint = fmt.Sprintf("The pull request diff is over %d MB and was read only in part, so the end of this file's diff is missing. Read the file with get_file at the head sha instead.", maxRawResponseBytes/(1024*1024))
-		case file != "":
-			hint = fmt.Sprintf("Raise max_bytes (max %d) to see more of this file.", MaxMaxBytes)
-		}
-		fmt.Fprintf(&b, "\n[TRUNCATED: showed %d of %s. %s]\n", len(body), size, hint)
-	}
-	return b.String(), nil
+	return forge.RenderDiff(forge.DiffView{
+		PR: p, Diff: string(raw), Over: over,
+		File: strings.TrimPrefix(forge.StringArg(args, "file"), "/"), MaxBytes: forge.MaxBytesArg(args),
+	})
 }
 
 // GetFile returns a file at a branch, tag or commit.
@@ -930,56 +592,26 @@ func (t *GiteaTool) GetFile(ctx context.Context, incidentID string, args map[str
 	if err != nil {
 		return "", err
 	}
-	owner, name, err := resolveRepo(cfg, args)
+	owner, name, err := resolver(cfg).Repo(args)
 	if err != nil {
 		return "", err
 	}
-	path := strings.Trim(stringArg(args, "path"), "/")
-	if path == "" {
-		return "", fmt.Errorf("path is required%s", validation.SuggestParam("path", args))
+	path, err := forge.FilePath(args)
+	if err != nil {
+		return "", err
 	}
-	for _, seg := range strings.Split(path, "/") {
-		if seg == ".." || seg == "." || seg == "" {
-			return "", fmt.Errorf("path %q must be a plain repository path", path)
-		}
-	}
-	ref := stringArg(args, "ref")
-	maxBytes := maxBytesArg(args)
-
-	segs := strings.Split(path, "/")
-	for i, s := range segs {
-		segs[i] = url.PathEscape(s)
-	}
+	ref := forge.StringArg(args, "ref")
+	maxBytes := forge.MaxBytesArg(args)
 	q := url.Values{}
 	if ref != "" {
 		q.Set("ref", ref)
 	}
-	raw, over, _, err := t.do(ctx, cfg, http.MethodGet, repoPath(owner, name)+"/raw/"+strings.Join(segs, "/"), q, nil, "*/*", maxBytes+utf8.UTFMax-1)
+	// Read a few bytes past max_bytes so the cut can end on a rune boundary.
+	raw, over, _, err := t.do(ctx, cfg, http.MethodGet, repoPath(owner, name)+"/raw/"+forge.EscapePath(path), q, nil, "*/*", maxBytes+utf8.UTFMax-1)
 	if err != nil {
 		return "", err
 	}
-	refText := ref
-	if refText == "" {
-		refText = "default branch"
-	}
-	head := fmt.Sprintf("# %s/%s:%s @ %s\n\n", owner, name, path, refText)
-	sample := raw
-	if len(sample) > 8000 {
-		sample = sample[:8000]
-	}
-	if strings.IndexByte(string(sample), 0) >= 0 {
-		return head + "[binary file; content not shown]\n", nil
-	}
-	// Read a few bytes past max_bytes so cut can end on a rune boundary.
-	text, cutHere := cut(string(raw), maxBytes)
-	if over || cutHere {
-		shown := len(text)
-		if !strings.HasSuffix(text, "\n") {
-			text += "\n"
-		}
-		text += fmt.Sprintf("\n[TRUNCATED: showed the first %d bytes. Raise max_bytes (max %d) to see more.]\n", shown, MaxMaxBytes)
-	}
-	return head + text, nil
+	return forge.RenderFile(owner+"/"+name, path, ref, raw, over, maxBytes), nil
 }
 
 // ListPullRequestComments returns the conversation comments and the reviews
@@ -989,15 +621,15 @@ func (t *GiteaTool) ListPullRequestComments(ctx context.Context, incidentID stri
 	if err != nil {
 		return "", err
 	}
-	p, err := resolvePR(cfg, args)
+	p, err := resolver(cfg).PR(args)
 	if err != nil {
 		return "", err
 	}
-	base := repoPath(p.owner, p.name)
+	base := repoPath(p.Owner, p.Name)
 
 	// This endpoint has no paging: it returns every comment at once.
 	var comments []apiComment
-	if err := t.getJSON(ctx, cfg, fmt.Sprintf("%s/issues/%d/comments", base, p.number), nil, &comments); err != nil {
+	if err := t.getJSON(ctx, cfg, fmt.Sprintf("%s/issues/%d/comments", base, p.Number), nil, &comments); err != nil {
 		return "", err
 	}
 	commentsCapped := false
@@ -1007,7 +639,7 @@ func (t *GiteaTool) ListPullRequestComments(ctx context.Context, incidentID stri
 	}
 	conv := make([]map[string]interface{}, 0, len(comments))
 	for _, c := range comments {
-		body, short := cut(c.Body, maxCommentBodyBytes)
+		body, short := forge.Cut(c.Body, maxCommentBodyBytes)
 		item := map[string]interface{}{
 			"id": c.ID, "author": login(c.User), "created_at": c.CreatedAt, "body": body,
 		}
@@ -1017,13 +649,13 @@ func (t *GiteaTool) ListPullRequestComments(ctx context.Context, incidentID stri
 		conv = append(conv, item)
 	}
 
-	reviews, _, err := getPaged[apiReview](ctx, t, cfg, fmt.Sprintf("%s/pulls/%d/reviews", base, p.number), nil)
+	reviews, _, err := getPaged[apiReview](ctx, t, cfg, fmt.Sprintf("%s/pulls/%d/reviews", base, p.Number), nil)
 	if err != nil {
 		return "", err
 	}
 	out := map[string]interface{}{
-		"repo":     p.repo(),
-		"number":   p.number,
+		"repo":     p.Repo(),
+		"number":   p.Number,
 		"comments": conv,
 	}
 	if commentsCapped {
@@ -1035,7 +667,7 @@ func (t *GiteaTool) ListPullRequestComments(ctx context.Context, incidentID stri
 			out["reviews_truncated"] = fmt.Sprintf("showing the first %d of %d reviews", maxReviews, len(reviews))
 			break
 		}
-		body, short := cut(r.Body, maxCommentBodyBytes)
+		body, short := forge.Cut(r.Body, maxCommentBodyBytes)
 		item := map[string]interface{}{
 			"id": r.ID, "author": login(r.User), "state": r.State, "submitted_at": r.SubmittedAt,
 			"body": body, "commit_id": r.CommitID,
@@ -1051,13 +683,13 @@ func (t *GiteaTool) ListPullRequestComments(ctx context.Context, incidentID stri
 		}
 		if r.CommentsCnt > 0 {
 			var rcs []apiReviewComment
-			if err := t.getJSON(ctx, cfg, fmt.Sprintf("%s/pulls/%d/reviews/%d/comments", base, p.number, r.ID), nil, &rcs); err != nil {
+			if err := t.getJSON(ctx, cfg, fmt.Sprintf("%s/pulls/%d/reviews/%d/comments", base, p.Number, r.ID), nil, &rcs); err != nil {
 				item["comments_error"] = err.Error()
 			} else {
 				inline := make([]map[string]interface{}, 0, len(rcs))
 				for _, rc := range rcs {
-					cb, _ := cut(rc.Body, maxCommentBodyBytes)
-					hunk, _ := cut(rc.DiffHunk, 1500)
+					cb, _ := forge.Cut(rc.Body, maxCommentBodyBytes)
+					hunk, _ := forge.Cut(rc.DiffHunk, 1500)
 					line := rc.Position
 					if line == 0 {
 						line = rc.OrigPos
@@ -1077,7 +709,7 @@ func (t *GiteaTool) ListPullRequestComments(ctx context.Context, incidentID stri
 		revs = append(revs, item)
 	}
 	out["reviews"] = revs
-	return marshal(out)
+	return forge.Marshal(out)
 }
 
 // SearchPullRequests lists pull requests of a repository, optionally by
@@ -1087,11 +719,11 @@ func (t *GiteaTool) SearchPullRequests(ctx context.Context, incidentID string, a
 	if err != nil {
 		return "", err
 	}
-	owner, name, err := resolveRepo(cfg, args)
+	owner, name, err := resolver(cfg).Repo(args)
 	if err != nil {
 		return "", err
 	}
-	state := strings.ToLower(stringArg(args, "state"))
+	state := strings.ToLower(forge.StringArg(args, "state"))
 	switch state {
 	case "":
 		state = "open"
@@ -1099,11 +731,11 @@ func (t *GiteaTool) SearchPullRequests(ctx context.Context, incidentID string, a
 	default:
 		return "", fmt.Errorf("state must be open, closed or all, got %q", state)
 	}
-	limit, ok := intArg(args, "limit")
+	limit, ok := forge.IntArg(args, "limit")
 	if !ok || limit <= 0 || limit > pageLimit {
 		limit = 20
 	}
-	page, ok := intArg(args, "page")
+	page, ok := forge.IntArg(args, "page")
 	if !ok || page <= 0 {
 		page = 1
 	}
@@ -1112,13 +744,13 @@ func (t *GiteaTool) SearchPullRequests(ctx context.Context, incidentID string, a
 	q.Set("state", state)
 	q.Set("limit", strconv.Itoa(limit))
 	q.Set("page", strconv.Itoa(page))
-	if query := stringArg(args, "query"); query != "" {
+	if query := forge.StringArg(args, "query"); query != "" {
 		q.Set("q", query)
 	}
-	if v := stringArg(args, "labels"); v != "" {
+	if v := forge.StringArg(args, "labels"); v != "" {
 		q.Set("labels", v)
 	}
-	if v := stringArg(args, "author"); v != "" {
+	if v := forge.StringArg(args, "author"); v != "" {
 		q.Set("created_by", v)
 	}
 	var issues []apiIssue
@@ -1155,7 +787,7 @@ func (t *GiteaTool) SearchPullRequests(ctx context.Context, incidentID string, a
 	} else if len(list) == limit {
 		out["next_page"] = page + 1
 	}
-	return marshal(out)
+	return forge.Marshal(out)
 }
 
 // CreatePullRequestComment posts a conversation comment on a pull request.
@@ -1170,18 +802,18 @@ func (t *GiteaTool) CreatePullRequestComment(ctx context.Context, incidentID str
 	if err != nil {
 		return "", err
 	}
-	p, err := resolvePR(cfg, args)
+	p, err := resolver(cfg).PR(args)
 	if err != nil {
 		return "", err
 	}
-	body := stringArg(args, "body")
+	body := forge.StringArg(args, "body")
 	if body == "" {
 		return "", fmt.Errorf("body is required%s", validation.SuggestParam("body", args))
 	}
 	if len(body) > maxCommentLength {
 		return "", fmt.Errorf("body is %d bytes; the limit is %d", len(body), maxCommentLength)
 	}
-	data, _, _, err := t.do(ctx, cfg, http.MethodPost, fmt.Sprintf("%s/issues/%d/comments", repoPath(p.owner, p.name), p.number),
+	data, _, _, err := t.do(ctx, cfg, http.MethodPost, fmt.Sprintf("%s/issues/%d/comments", repoPath(p.Owner, p.Name), p.Number),
 		nil, map[string]string{"body": body}, "application/json", maxJSONResponseBytes)
 	if err != nil {
 		return "", err
@@ -1190,7 +822,7 @@ func (t *GiteaTool) CreatePullRequestComment(ctx context.Context, incidentID str
 	if err := json.Unmarshal(data, &c); err != nil {
 		return "", fmt.Errorf("decode Gitea response: %w", err)
 	}
-	return marshal(map[string]interface{}{
-		"repo": p.repo(), "number": p.number, "comment_id": c.ID, "html_url": c.HTMLURL, "created_at": c.CreatedAt,
+	return forge.Marshal(map[string]interface{}{
+		"repo": p.Repo(), "number": p.Number, "comment_id": c.ID, "html_url": c.HTMLURL, "created_at": c.CreatedAt,
 	})
 }

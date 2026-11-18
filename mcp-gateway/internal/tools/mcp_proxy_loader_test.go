@@ -24,7 +24,7 @@ func TestDefaultMCPProxyLoader_HTTPOnlyAndDisabledTools(t *testing.T) {
 	t.Cleanup(func() { database.DB = prev })
 
 	rows := []database.MCPServerConfig{
-		{Name: "gh", Transport: "http", URL: "https://gh.example/mcp", NamespacePrefix: "github",
+		{Name: "gh", Transport: "http", URL: "https://gh.example/mcp", NamespacePrefix: "github_mcp",
 			AuthConfig:    database.JSONB{"type": "bearer", "token": "t"},
 			DisabledTools: database.JSONStringList{"delete_repo"}, Enabled: true},
 		{Name: "legacy", Transport: "sse", URL: "https://legacy.example/mcp", NamespacePrefix: "legacy", Enabled: true},
@@ -45,7 +45,7 @@ func TestDefaultMCPProxyLoader_HTTPOnlyAndDisabledTools(t *testing.T) {
 		t.Fatalf("expected http + legacy sse rows only, got %+v", regs)
 	}
 	gh := regs[0]
-	if gh.NamespacePrefix != "github" || gh.Config.Transport != mcpproxy.TransportHTTP {
+	if gh.NamespacePrefix != "github_mcp" || gh.Config.Transport != mcpproxy.TransportHTTP {
 		t.Errorf("unexpected registration %+v", gh)
 	}
 	if len(gh.DisabledTools) != 1 || gh.DisabledTools[0] != "delete_repo" {

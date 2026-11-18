@@ -832,6 +832,31 @@ gateway_call("gitea.list_pull_request_comments", {"repo": "infra/puppet", "numbe
 gateway_call("gitea.search_pull_requests", {"repo": "infra/puppet", "state": "all", "query": "keepalive"}, "%s")
 `+"```"+`
 `, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
+	case "github":
+		return fmt.Sprintf(`
+**Parameters:**
+- a pull request is `+"`repo`"+` ("owner/repo") + `+"`number`"+`, or `+"`pr_url`"+` (a link from this instance, e.g. https://github.com/owner/repo/pull/42)
+- `+"`get_pull_request`"+`: repo*, number* (or pr_url*)
+- `+"`list_pull_request_files`"+`: repo*, number* (or pr_url*)
+- `+"`get_pull_request_diff`"+`: repo*, number* (or pr_url*) | file, max_bytes (default 50000, max 200000)
+- `+"`get_file`"+`: repo*, path* | ref (branch, tag or sha), max_bytes. A directory path returns its listing.
+- `+"`list_pull_request_comments`"+`: repo*, number* (or pr_url*)
+- `+"`search_pull_requests`"+`: repo* | state (open, closed, all), query, labels, author, limit, page
+- `+"`create_pull_request_comment`"+` **(write)**: repo*, number* (or pr_url*), body*
+(* = required)
+
+Review a pull request: get_pull_request → list_pull_request_files → get_pull_request_diff per file (a whole-PR diff is cut at max_bytes and says [TRUNCATED]) → get_file at the head sha for context. GitHub allows 5000 API calls per hour per token, so read the files you need, not every file. **(write)** is refused unless the instance allows comments.
+
+Usage (via gateway_call):
+`+"```"+`
+gateway_call("github.get_pull_request", {"pr_url": "https://github.com/infra/terraform/pull/42"}, "%s")
+gateway_call("github.list_pull_request_files", {"repo": "infra/terraform", "number": 42}, "%s")
+gateway_call("github.get_pull_request_diff", {"repo": "infra/terraform", "number": 42, "file": "modules/web/main.tf"}, "%s")
+gateway_call("github.get_file", {"repo": "infra/terraform", "path": "modules/web/variables.tf", "ref": "<head sha>"}, "%s")
+gateway_call("github.list_pull_request_comments", {"repo": "infra/terraform", "number": 42}, "%s")
+gateway_call("github.search_pull_requests", {"repo": "infra/terraform", "state": "all", "query": "instance_type"}, "%s")
+`+"```"+`
+`, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
 	case "incidents":
 		return fmt.Sprintf(`
 **Parameters:**
@@ -988,10 +1013,26 @@ func extractToolDetails(tool database.ToolInstance) string {
 		if u, ok := tool.Settings["gitea_url"].(string); ok && strings.TrimSpace(u) != "" {
 			fmt.Fprintf(&details, "Instance: %s (pr_url links must point here)\n", strings.TrimRight(strings.TrimSpace(u), "/"))
 		}
-		if repos := giteaAllowedRepos(tool.Settings["gitea_allowed_repos"]); len(repos) > 0 {
+		if repos := forgeAllowedRepos(tool.Settings["gitea_allowed_repos"]); len(repos) > 0 {
 			fmt.Fprintf(&details, "Allowed repositories (others are refused): %s\n", quotePatterns(repos))
 		}
 		if allow, ok := tool.Settings["gitea_allow_comments"].(bool); ok && allow {
+			details.WriteString("Comments: allowed (create_pull_request_comment)\n")
+		} else {
+			details.WriteString("Comments: disabled (read-only; give the review in your answer)\n")
+		}
+		return details.String()
+	case "github":
+		var details strings.Builder
+		instance := "https://github.com"
+		if u, ok := tool.Settings["github_url"].(string); ok && strings.TrimSpace(u) != "" {
+			instance = strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(u), "/"), "/api/v3")
+		}
+		fmt.Fprintf(&details, "Instance: %s (pr_url links must point here)\n", instance)
+		if repos := forgeAllowedRepos(tool.Settings["github_allowed_repos"]); len(repos) > 0 {
+			fmt.Fprintf(&details, "Allowed repositories (others are refused): %s\n", quotePatterns(repos))
+		}
+		if allow, ok := tool.Settings["github_allow_comments"].(bool); ok && allow {
 			details.WriteString("Comments: allowed (create_pull_request_comment)\n")
 		} else {
 			details.WriteString("Comments: disabled (read-only; give the review in your answer)\n")
@@ -1002,10 +1043,10 @@ func extractToolDetails(tool database.ToolInstance) string {
 	return ""
 }
 
-// giteaAllowedRepos reads gitea_allowed_repos like ParseAllowedRepos in the
-// gateway: one entry per line (or comma/space separated, "#" comments), or a
+// forgeAllowedRepos reads gitea_allowed_repos / github_allowed_repos like
+// forge.ParseAllowedRepos in the gateway: one entry per line (or comma/space separated, "#" comments), or a
 // JSON array.
-func giteaAllowedRepos(v interface{}) []string {
+func forgeAllowedRepos(v interface{}) []string {
 	var raw []string
 	switch t := v.(type) {
 	case string:

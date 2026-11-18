@@ -19,6 +19,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/tools/clickhouse"
 	"github.com/akmatori/mcp-gateway/internal/tools/events"
 	"github.com/akmatori/mcp-gateway/internal/tools/gitea"
+	"github.com/akmatori/mcp-gateway/internal/tools/github"
 	"github.com/akmatori/mcp-gateway/internal/tools/grafana"
 	"github.com/akmatori/mcp-gateway/internal/tools/httpconnector"
 	"github.com/akmatori/mcp-gateway/internal/tools/incidents"
@@ -85,6 +86,8 @@ type Registry struct {
 	jiraLimit       *ratelimit.Limiter
 	giteaTool       *gitea.GiteaTool
 	giteaLimit      *ratelimit.Limiter
+	githubTool      *github.GitHubTool
+	githubLimit     *ratelimit.Limiter
 	incidentsTool   *incidents.IncidentsTool
 	eventsTool      *events.EventsTool
 	knowledgeTool   *knowledge.Tool
@@ -190,6 +193,9 @@ func (r *Registry) RegisterAllTools() {
 	// Register Gitea tools (rate limiter created inside)
 	r.registerGiteaTools()
 
+	// Register GitHub tools (rate limiter created inside)
+	r.registerGitHubTools()
+
 	// Register Incidents tools (no rate limiter — local DB queries)
 	r.registerIncidentsTools()
 
@@ -240,6 +246,9 @@ func (r *Registry) Stop() {
 	if r.jiraTool != nil {
 		r.jiraTool.Stop()
 	}
+	if r.githubTool != nil {
+		r.githubTool.Stop()
+	}
 	if r.giteaTool != nil {
 		r.giteaTool.Stop()
 	}
@@ -267,6 +276,7 @@ var builtInToolNamespaces = map[string]bool{
 	"kubernetes":       true,
 	"jira":             true,
 	"gitea":            true,
+	"github":           true,
 	"incidents":        true,
 	"proposals":        true,
 	"events":           true,
