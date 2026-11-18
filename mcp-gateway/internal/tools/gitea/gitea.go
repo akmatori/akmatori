@@ -64,6 +64,12 @@ type Config struct {
 	Timeout       int
 	AllowedRepos  []string // "owner/repo" or "owner/*"; empty = every repo the token can read
 	AllowComments bool
+
+	// Merging (off while MergeTargets is empty).
+	MergeTargets      []MergeTarget
+	MergeTargetErrors []string // bad gitea_merge_targets lines, skipped
+	MergeMaxFiles     int
+	MergeMaxLines     int
 }
 
 // GiteaTool handles Gitea API calls.
@@ -169,6 +175,15 @@ func buildConfig(settings map[string]interface{}) *Config {
 	c.AllowedRepos = ParseAllowedRepos(settings["gitea_allowed_repos"])
 	if v, ok := settings["gitea_allow_comments"].(bool); ok {
 		c.AllowComments = v
+	}
+	c.MergeTargets, c.MergeTargetErrors = ParseMergeTargets(settings["gitea_merge_targets"])
+	c.MergeMaxFiles = DefaultMergeMaxFiles
+	if v, ok := settings["gitea_merge_max_files"].(float64); ok && v >= 1 {
+		c.MergeMaxFiles = int(v)
+	}
+	c.MergeMaxLines = DefaultMergeMaxLines
+	if v, ok := settings["gitea_merge_max_lines"].(float64); ok && v >= 1 {
+		c.MergeMaxLines = int(v)
 	}
 	return c
 }
