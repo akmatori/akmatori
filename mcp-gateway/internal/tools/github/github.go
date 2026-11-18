@@ -628,8 +628,14 @@ func (t *GitHubTool) GetPullRequest(ctx context.Context, incidentID string, args
 	return forge.Marshal(out)
 }
 
+// listFiles reads the changed files. GitHub lists at most 3000 files and may
+// end there without a next link, so reaching that count also means "cut".
 func (t *GitHubTool) listFiles(ctx context.Context, cfg *Config, p forge.PR) ([]apiChangedFile, bool, error) {
-	return getPaged[apiChangedFile](ctx, t, cfg, fmt.Sprintf("%s/pulls/%d/files", repoPath(p.Owner, p.Name), p.Number), nil)
+	files, capped, err := getPaged[apiChangedFile](ctx, t, cfg, fmt.Sprintf("%s/pulls/%d/files", repoPath(p.Owner, p.Name), p.Number), nil)
+	if err == nil && len(files) >= maxPages*pageLimit {
+		capped = true
+	}
+	return files, capped, err
 }
 
 // ListPullRequestFiles returns the changed files with status and line counts.
@@ -685,12 +691,12 @@ func patchDiff(files []apiChangedFile) string {
 		if f.PreviousFilename != "" {
 			oldPath = f.PreviousFilename
 		}
-		fmt.Fprintf(&b, "diff --git a/%s b/%s\n", oldPath, f.Filename)
+		fmt.Fprintf(&b, "diff --git %s %s\n", headerPath("a/", oldPath), headerPath("b/", f.Filename))
 		if f.Patch == "" {
 			b.WriteString("(no text diff: a binary file, a rename without changes, or a file too large for GitHub to show; use get_file)\n")
 			continue
 		}
-		from, to := "a/"+oldPath, "b/"+f.Filename
+		from, to := headerPath("a/", oldPath), headerPath("b/", f.Filename)
 		switch f.Status {
 		case "added":
 			from = "/dev/null"
@@ -704,6 +710,22 @@ func patchDiff(files []apiChangedFile) string {
 		}
 	}
 	return b.String()
+}
+
+// headerPath writes a diff header path like git: quoted (with escapes) when
+// it holds a quote, a backslash, a control character or " b/", so
+// forge.SplitDiff reads the same name back.
+func headerPath(prefix, path string) string {
+	needs := strings.Contains(path, " b/") || strings.ContainsAny(path, "\"\\")
+	for _, r := range path {
+		if r < 0x20 || r == 0x7f {
+			needs = true
+		}
+	}
+	if !needs {
+		return prefix + path
+	}
+	return strconv.Quote(prefix + path)
 }
 
 // GetPullRequestDiff returns the diff of one file or of the whole pull
@@ -781,7 +803,7 @@ func (t *GitHubTool) GetFile(ctx context.Context, incidentID string, args map[st
 	}
 	if strings.Contains(r.contentType, "json") && strings.HasPrefix(strings.TrimSpace(string(r.data)), "[") {
 		var entries []apiContentEntry
-		if !r.over && json.Unmarshal(r.data, &entries) == nil {
+		if !r.over && json.Unmarshal(r.data, &entries) == nil && isListing(entries, path) {
 			list := make([]map[string]interface{}, 0, len(entries))
 			for _, e := range entries {
 				item := map[string]interface{}{"name": e.Name, "path": e.Path, "type": e.Type}
@@ -798,6 +820,25 @@ func (t *GitHubTool) GetFile(ctx context.Context, incidentID string, args map[st
 		}
 	}
 	return forge.RenderFile(owner+"/"+name, path, ref, r.data, r.over, maxBytes), nil
+}
+
+// isListing tells a contents-API directory listing from a JSON file that holds
+// an array: every entry must be a direct child of path with a known type.
+func isListing(entries []apiContentEntry, path string) bool {
+	if len(entries) == 0 {
+		return false
+	}
+	for _, e := range entries {
+		switch e.Type {
+		case "file", "dir", "symlink", "submodule":
+		default:
+			return false
+		}
+		if e.Name == "" || e.Path != path+"/"+e.Name {
+			return false
+		}
+	}
+	return true
 }
 
 // ListPullRequestComments returns the conversation comments, the reviews and

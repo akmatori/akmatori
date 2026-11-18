@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/akmatori/mcp-gateway/internal/tools/forge"
 )
 
 const testIncident = "test-incident"
@@ -406,5 +408,47 @@ func TestDo_RedirectSameHostOnly(t *testing.T) {
 	_, err = tool.GetPullRequest(context.Background(), testIncident, map[string]interface{}{"repo": "evil/x", "number": float64(4)})
 	if err == nil || !strings.Contains(err.Error(), "302") {
 		t.Fatalf("a redirect to another host must be refused, got %v", err)
+	}
+}
+
+func TestGetFile_JSONArrayFileIsNotADirectory(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/infra/terraform/contents/flags.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.github.raw+json; charset=utf-8")
+		_, _ = io.WriteString(w, `[{"enabled":true,"name":"x"}]`)
+	})
+	tool, _, _ := newTestTool(t, Config{}, mux)
+	out, err := tool.GetFile(context.Background(), testIncident, map[string]interface{}{"repo": "infra/terraform", "path": "flags.json"})
+	if err != nil || strings.Contains(out, `"type": "dir"`) || !strings.Contains(out, `"enabled":true`) {
+		t.Fatalf("a JSON file holding an array must come back as the file (%v):\n%s", err, out)
+	}
+}
+
+func TestListPullRequestFiles_GitHubCapIsReported(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/infra/terraform/pulls/42/files", func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		items := make([]map[string]interface{}, 100)
+		for i := range items {
+			items[i] = map[string]interface{}{"filename": fmt.Sprintf("f%s-%d.tf", page, i), "status": "added"}
+		}
+		if page != "30" {
+			w.Header().Set("Link", `<https://api.github.com/x>; rel="next"`)
+		}
+		writeJSON(w, items)
+	})
+	tool, _, _ := newTestTool(t, Config{}, mux)
+	out, err := tool.ListPullRequestFiles(context.Background(), testIncident, map[string]interface{}{"repo": "infra/terraform", "number": float64(42)})
+	if err != nil || !strings.Contains(out, "GitHub lists at most 3000 files") {
+		t.Fatalf("reaching GitHub's 3000-file cap without a next link must be reported (%v): %.300s", err, out)
+	}
+}
+
+func TestPatchDiff_QuotesSpecialNames(t *testing.T) {
+	odd := "dir/we\"ird\nname.tf"
+	d := patchDiff([]apiChangedFile{{Filename: odd, Status: "modified", Patch: "@@ -1 +1 @@\n-a\n+b"}})
+	order, secs := forge.SplitDiff(d)
+	if len(order) != 1 || order[0] != odd || !strings.Contains(secs[odd], "+b") {
+		t.Fatalf("a quoted name must split back to the same file: %q from\n%s", order, d)
 	}
 }
