@@ -19,6 +19,15 @@ import type { LLMSettings, ProxyConfig } from "./types.js";
 import { applyProxyConfig } from "./proxy.js";
 import { resolveModel } from "./agent-runner.js";
 import { createSamplingPayloadHook } from "./sampling.js";
+import {
+  isFallbackEligibleError,
+  llmKey,
+  primaryBreaker,
+  shortError,
+  switchNotice,
+  usedInfo,
+  type LLMUsedInfo,
+} from "./llm-fallback.js";
 
 // Above every Go caller's own deadline (45 s at most), so the API side decides
 // when a call has taken too long and the worker never cuts it off first.
@@ -220,4 +229,61 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
   }
 
   return text;
+}
+
+export interface OneshotFallbackParams extends OneshotLLMParams {
+  /**
+   * Fallback config from the frame's `fallback_llm`. Its sampling fields are
+   * already merged with the call site's values on the Go side, so the
+   * fallback call uses them as they are.
+   */
+  fallbackLlmSettings?: LLMSettings;
+}
+
+export interface OneshotResult {
+  text: string;
+  used: LLMUsedInfo;
+}
+
+/**
+ * runOneshotLLM on the primary config; on a transient provider error, the
+ * same call on the fallback config. Shares the circuit breaker with agent
+ * runs, so a primary that is down is skipped here too. Without a fallback
+ * config this is runOneshotLLM.
+ */
+export async function runOneshotWithFallback(params: OneshotFallbackParams): Promise<OneshotResult> {
+  const { fallbackLlmSettings: fallback, ...primaryParams } = params;
+  const primary = params.llmSettings;
+  if (!fallback) {
+    return { text: await runOneshotLLM(primaryParams), used: usedInfo(primary) };
+  }
+  const fallbackParams: OneshotLLMParams = {
+    ...primaryParams,
+    llmSettings: fallback,
+    maxTokens: fallback.max_tokens,
+    temperature: fallback.temperature,
+    topP: fallback.top_p,
+    topK: fallback.top_k,
+  };
+  const key = llmKey(primary);
+  if (primaryBreaker.isOpen(key)) {
+    return {
+      text: await runOneshotLLM(fallbackParams),
+      used: usedInfo(fallback, primary, "primary skipped: circuit breaker open"),
+    };
+  }
+  try {
+    const text = await runOneshotLLM(primaryParams);
+    primaryBreaker.recordSuccess(key);
+    return { text, used: usedInfo(primary) };
+  } catch (err) {
+    const errMsg = (err as Error)?.message ?? String(err);
+    if (!isFallbackEligibleError(errMsg) || params.signal?.aborted) {
+      throw err;
+    }
+    primaryBreaker.recordFailure(key);
+    const reason = shortError(errMsg);
+    console.warn(`oneshot_llm ${params.requestId}: ${switchNotice(primary, fallback, reason)}`);
+    return { text: await runOneshotLLM(fallbackParams), used: usedInfo(fallback, primary, reason) };
+  }
 }

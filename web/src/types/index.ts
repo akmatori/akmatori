@@ -89,6 +89,9 @@ export interface AgentRun {
   root_skill?: string;
   provider: string;
   model: string;
+  /** "<provider>/<model>" of the primary config when the fallback LLM answered. */
+  fallback_from?: string;
+  fallback_reason?: string;
   status: 'running' | 'completed' | 'failed' | 'superseded';
   outcome?: string;
   tokens_used: number;
@@ -185,6 +188,8 @@ export interface LLMConfig {
   is_configured: boolean;
   enabled: boolean;
   active: boolean;
+  /** Used when the active config fails with a transient provider error. */
+  fallback: boolean;
   // Sampling overrides. null means unset — the request omits the parameter and
   // the provider's own default applies.
   temperature: number | null;
@@ -198,6 +203,8 @@ export interface LLMConfig {
 export interface LLMSettingsListResponse {
   configs: LLMConfig[];
   active_id: number;
+  /** 0 when no fallback is set. */
+  fallback_id: number;
 }
 
 export interface CreateLLMConfigRequest {

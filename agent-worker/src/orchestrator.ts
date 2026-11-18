@@ -5,15 +5,16 @@
  * methods and streams output/completion/errors back through the WebSocket client.
  */
 
-import { WebSocketClient } from "./ws-client.js";
+import { WebSocketClient, type LLMUsedFields } from "./ws-client.js";
 import { AgentRunner, type ExecuteParams, type ResumeParams } from "./agent-runner.js";
-import { runOneshotLLM } from "./oneshot-llm.js";
+import { runOneshotWithFallback } from "./oneshot-llm.js";
 import type {
   WebSocketMessage,
   LLMSettings,
   ProxyConfig,
   ExecuteResult,
   ToolAllowlistEntry,
+  WireLLMConfig,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -200,6 +201,7 @@ export class Orchestrator {
       runId,
       task: msg.task ?? "",
       llmSettings,
+      fallbackLlmSettings: this.extractFallbackSettings(msg.fallback_llm),
       proxyConfig,
       enabledSkills: msg.enabled_skills,
       toolAllowlist: msg.tool_allowlist,
@@ -265,6 +267,7 @@ export class Orchestrator {
       sessionId: msg.session_id ?? "",
       message: msg.message ?? "",
       llmSettings,
+      fallbackLlmSettings: this.extractFallbackSettings(msg.fallback_llm),
       proxyConfig,
       enabledSkills: msg.enabled_skills,
       toolAllowlist: msg.tool_allowlist,
@@ -359,8 +362,8 @@ export class Orchestrator {
       return;
     }
 
-    const respond = (summary: string, errorMsg?: string): void => {
-      this.wsClient.sendOneshotResponse(requestId, summary, errorMsg);
+    const respond = (summary: string, errorMsg?: string, used?: LLMUsedFields): void => {
+      this.wsClient.sendOneshotResponse(requestId, summary, errorMsg, used);
     };
 
     const llmSettings = this.extractLLMSettings(msg);
@@ -376,7 +379,7 @@ export class Orchestrator {
 
     const proxyConfig = msg.proxy_config ?? this.cachedProxyConfig;
 
-    runOneshotLLM({
+    runOneshotWithFallback({
       requestId,
       system: msg.system,
       user: msg.user,
@@ -385,10 +388,16 @@ export class Orchestrator {
       topP: msg.top_p,
       topK: msg.top_k,
       llmSettings,
+      fallbackLlmSettings: this.extractFallbackSettings(msg.fallback_llm),
       proxyConfig,
     })
-      .then((summary) => {
-        respond(summary);
+      .then(({ text, used }) => {
+        if (used.llm_fallback_from) {
+          this.log(
+            `oneshot_llm_request ${requestId} answered by fallback ${used.llm_provider}/${used.llm_model} (primary ${used.llm_fallback_from}: ${used.llm_fallback_reason})`,
+          );
+        }
+        respond(text, undefined, used);
       })
       .catch((err: unknown) => {
         const errMsg = (err as Error)?.message ?? String(err);
@@ -431,7 +440,7 @@ export class Orchestrator {
 
       if (result.error) {
         this.log(`Incident ${incidentId} completed with error: ${result.error}`);
-        this.wsClient.sendError(incidentId, runId, result.error);
+        this.wsClient.sendError(incidentId, runId, result.error, result);
         return;
       }
 
@@ -450,6 +459,7 @@ export class Orchestrator {
           cache_write_tokens: result.cache_write_tokens,
           cost_usd: result.cost_usd,
         },
+        result,
       );
 
       this.log(
@@ -481,12 +491,33 @@ export class Orchestrator {
       model: msg.model ?? "gpt-5.5",
       thinking_level: this.mapThinkingLevel(msg.thinking_level),
       base_url: msg.base_url,
+      name: msg.llm_name,
       // Copied verbatim: an absent field must stay absent so the request omits
       // the parameter rather than substituting a worker-side default.
       temperature: msg.temperature,
       top_p: msg.top_p,
       top_k: msg.top_k,
       max_tokens: msg.max_tokens,
+    };
+  }
+
+  /**
+   * Fallback config from the frame's `fallback_llm`; undefined when absent or
+   * without an API key, so the run keeps its single-config behaviour.
+   */
+  private extractFallbackSettings(cfg: WireLLMConfig | undefined): LLMSettings | undefined {
+    if (!cfg || !cfg.api_key || !cfg.provider) return undefined;
+    return {
+      provider: cfg.provider as LLMSettings["provider"],
+      api_key: cfg.api_key,
+      model: cfg.model ?? "gpt-5.5",
+      thinking_level: this.mapThinkingLevel(cfg.thinking_level),
+      base_url: cfg.base_url,
+      name: cfg.name,
+      temperature: cfg.temperature,
+      top_p: cfg.top_p,
+      top_k: cfg.top_k,
+      max_tokens: cfg.max_tokens,
     };
   }
 

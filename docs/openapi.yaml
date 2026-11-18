@@ -473,6 +473,15 @@ components:
           type: string
         model:
           type: string
+          description: The model that answered (the fallback model when fallback_from is set).
+        fallback_from:
+          type: string
+          description: >-
+            "<provider>/<model>" of the active config when the fallback LLM
+            answered instead; absent for a run on the active config.
+        fallback_reason:
+          type: string
+          description: The active config's error, or "primary skipped: circuit breaker open".
         status:
           type: string
           enum: [running, completed, failed, superseded]
@@ -1442,6 +1451,41 @@ paths:
           description: Updated settings
         '400':
           description: Validation error (sampling parameter out of range, invalid provider/thinking_level/base_url)
+
+  /settings/llm/{id}/fallback:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+    put:
+      summary: Use an LLM configuration as the fallback
+      description: >-
+        The fallback answers agent runs and one-shot calls (classification,
+        extraction, titles, ...) when the active configuration fails with a
+        transient provider error (5xx, connection refused, timeout) after its
+        retries. At most one configuration is the fallback; setting a new one
+        clears the old flag. Activating the fallback configuration clears its
+        flag. The list response has fallback_id (0 = none).
+      operationId: setFallbackLLMConfig
+      tags: [Settings]
+      responses:
+        '200':
+          description: The configuration, with fallback true
+        '400':
+          description: The configuration is active or has no API key
+        '404':
+          description: Configuration not found
+    delete:
+      summary: Stop using an LLM configuration as the fallback
+      operationId: clearFallbackLLMConfig
+      tags: [Settings]
+      responses:
+        '200':
+          description: The configuration, with fallback false
+        '404':
+          description: Configuration not found
 
   /settings/proxy:
     get:

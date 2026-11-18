@@ -373,6 +373,16 @@ export const llmSettingsApi = {
     fetchApi<LLMConfig>(`/api/settings/llm/${id}/activate`, {
       method: 'PUT',
     }),
+
+  setFallback: (id: number) =>
+    fetchApi<LLMConfig>(`/api/settings/llm/${id}/fallback`, {
+      method: 'PUT',
+    }),
+
+  clearFallback: (id: number) =>
+    fetchApi<LLMConfig>(`/api/settings/llm/${id}/fallback`, {
+      method: 'DELETE',
+    }),
 };
 
 // Proxy Settings API

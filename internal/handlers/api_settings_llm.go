@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -23,7 +24,8 @@ func (h *APIHandler) handleLLMSettings(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleLLMSettingsByID handles GET/PUT/DELETE /api/settings/llm/{id} and PUT /api/settings/llm/{id}/activate.
+// handleLLMSettingsByID handles GET/PUT/DELETE /api/settings/llm/{id},
+// PUT /api/settings/llm/{id}/activate and PUT/DELETE /api/settings/llm/{id}/fallback.
 func (h *APIHandler) handleLLMSettingsByID(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path[len("/api/settings/llm/"):]
 	parts := strings.Split(path, "/")
@@ -41,6 +43,19 @@ func (h *APIHandler) handleLLMSettingsByID(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		h.activateLLMConfig(w, r, uint(id))
+		return
+	}
+
+	// Handle /api/settings/llm/{id}/fallback
+	if len(parts) >= 2 && parts[1] == "fallback" {
+		switch r.Method {
+		case http.MethodPut:
+			h.setFallbackLLMConfig(w, r, uint(id))
+		case http.MethodDelete:
+			h.clearFallbackLLMConfig(w, r, uint(id))
+		default:
+			api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		}
 		return
 	}
 
@@ -102,9 +117,20 @@ func (h *APIHandler) listLLMConfigs(w http.ResponseWriter, _ *http.Request) {
 		activeID = pick.ID
 	}
 
+	// fallback_id mirrors GetFallbackLLMSettings(): the lowest-PK row marked
+	// fallback that is not active and has a key; 0 = no fallback.
+	var fallbackID uint
+	for i := range allSettings {
+		s := &allSettings[i]
+		if s.Fallback && !s.Active && s.APIKey != "" && (fallbackID == 0 || s.ID < fallbackID) {
+			fallbackID = s.ID
+		}
+	}
+
 	response := map[string]interface{}{
-		"configs":   configs,
-		"active_id": activeID,
+		"configs":     configs,
+		"active_id":   activeID,
+		"fallback_id": fallbackID,
 	}
 	api.RespondJSON(w, http.StatusOK, response)
 }
@@ -275,6 +301,8 @@ func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id 
 		errMsg := err.Error()
 		if containsString(errMsg, "not found") || containsString(errMsg, "record not found") {
 			api.RespondError(w, http.StatusNotFound, "LLM configuration not found")
+		} else if errors.Is(err, database.ErrFallbackKeyClear) {
+			api.RespondError(w, http.StatusBadRequest, "Cannot clear the API key on the fallback configuration; remove it as fallback first")
 		} else if containsString(errMsg, "cannot clear") || containsString(errMsg, "active") {
 			api.RespondError(w, http.StatusBadRequest, "Cannot clear the API key on the active configuration")
 		} else if containsString(errMsg, "UNIQUE") || containsString(errMsg, "duplicate key") || containsString(errMsg, "unique") {
@@ -331,6 +359,46 @@ func (h *APIHandler) activateLLMConfig(w http.ResponseWriter, _ *http.Request, i
 	api.RespondJSON(w, http.StatusOK, llmConfigResponse(settings))
 }
 
+// setFallbackLLMConfig marks a configuration as the fallback LLM: it answers
+// when the active configuration fails with a transient provider error.
+func (h *APIHandler) setFallbackLLMConfig(w http.ResponseWriter, _ *http.Request, id uint) {
+	if err := database.SetFallbackLLMConfig(id); err != nil {
+		switch {
+		case errors.Is(err, database.ErrFallbackIsActive), errors.Is(err, database.ErrFallbackNoAPIKey):
+			api.RespondError(w, http.StatusBadRequest, err.Error())
+		case containsString(err.Error(), "not found"):
+			api.RespondError(w, http.StatusNotFound, "LLM configuration not found")
+		default:
+			api.RespondError(w, http.StatusInternalServerError, "Failed to set fallback configuration")
+		}
+		return
+	}
+	settings, err := database.GetLLMSettingsByID(id)
+	if err != nil {
+		api.RespondError(w, http.StatusInternalServerError, "Failed to retrieve fallback configuration")
+		return
+	}
+	api.RespondJSON(w, http.StatusOK, llmConfigResponse(settings))
+}
+
+// clearFallbackLLMConfig removes the fallback flag from a configuration.
+func (h *APIHandler) clearFallbackLLMConfig(w http.ResponseWriter, _ *http.Request, id uint) {
+	if err := database.ClearFallbackLLMConfig(id); err != nil {
+		if containsString(err.Error(), "not found") {
+			api.RespondError(w, http.StatusNotFound, "LLM configuration not found")
+		} else {
+			api.RespondError(w, http.StatusInternalServerError, "Failed to clear fallback configuration")
+		}
+		return
+	}
+	settings, err := database.GetLLMSettingsByID(id)
+	if err != nil {
+		api.RespondError(w, http.StatusInternalServerError, "Failed to retrieve configuration")
+		return
+	}
+	api.RespondJSON(w, http.StatusOK, llmConfigResponse(settings))
+}
+
 // llmConfigResponse builds a standard response map for an LLM config, masking the API key.
 func llmConfigResponse(s *database.LLMSettings) map[string]interface{} {
 	return map[string]interface{}{
@@ -344,6 +412,7 @@ func llmConfigResponse(s *database.LLMSettings) map[string]interface{} {
 		"is_configured":  s.APIKey != "",
 		"enabled":        s.Enabled,
 		"active":         s.Active,
+		"fallback":       s.Fallback,
 		// null = unset = provider default; the UI renders these as blank fields.
 		"temperature": s.Temperature,
 		"top_p":       s.TopP,

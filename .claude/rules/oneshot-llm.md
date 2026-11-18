@@ -32,6 +32,11 @@ inside the extraction call).
 - time limits: Go callers own the deadline (correlation and merge 45 s: a reasoning model needs
   13-20 s for a 25-candidate prompt); the worker HTTP limit (60 s) stays above all of them. A
   generated title on several lines or over 120 runes is rejected for the fallback
+- fallback LLM (#105): the transport (`agent_ws.go` `fallbackWire`) adds `fallback_llm` to every
+  `oneshot_llm_request` when an `llm_settings` row has `fallback=true`; its sampling is the call
+  site's values with the FALLBACK's overrides on top. `runOneshotWithFallback` retries on it after a
+  transient error (`isFallbackEligibleError` in `llm-fallback.ts`), so classification does not drop
+  to `extraction_mode: fallback` only because the primary is down. Go callers need no change
 - If a feature only needs a single completion, do not spin up a full agent session
 
 Key files: `internal/services/title_generator.go`, `internal/services/slack_summarizer.go`,

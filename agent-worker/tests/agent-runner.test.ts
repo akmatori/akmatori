@@ -1898,3 +1898,140 @@ describe("resolveModel OpenRouter attribution", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fallback LLM (issue #105)
+// ---------------------------------------------------------------------------
+
+describe("AgentRunner fallback LLM", () => {
+  let runner: AgentRunner;
+  const fallback = makeLLMSettings({
+    provider: "openrouter",
+    model: "openai/gpt-5.5",
+    api_key: "sk-or-fallback",
+    name: "OpenRouter backup",
+  });
+  const primary = makeLLMSettings({
+    provider: "custom",
+    model: "deepseek-v4.1-flash",
+    base_url: "https://llm.internal/v1",
+    name: "On-prem DeepSeek",
+  });
+
+  /** prompt() implementation that ends the turn with a provider error. */
+  function failingPrompt(errorMessage: string) {
+    return async () => {
+      mockSession._emitEvent({
+        type: "turn_end",
+        message: { role: "assistant", stopReason: "error", errorMessage, usage: { totalTokens: 0 } },
+        toolResults: [],
+      });
+    };
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockSession = createMockSession();
+    createAgentSessionCalls = [];
+    registeredProviders = [];
+    runner = new AgentRunner({ mcpGatewayUrl: "http://mcp-gateway:8080" });
+    const { primaryBreaker } = await import("../src/llm-fallback.js");
+    primaryBreaker.reset();
+  });
+
+  it("keeps the single-attempt behaviour when no fallback is set", async () => {
+    mockSession.prompt.mockImplementationOnce(failingPrompt("500 status code (no body)"));
+    const result = await runner.execute(makeExecuteParams({ llmSettings: primary }));
+    expect(result.error).toBe("500 status code (no body)");
+    expect(createAgentSessionCalls).toHaveLength(1);
+    expect(result.llm_fallback_from).toBeUndefined();
+    expect(result.llm_model).toBe("deepseek-v4.1-flash");
+  });
+
+  it("runs again on the fallback after a 5xx and reports the fallback model", async () => {
+    mockSession.prompt.mockImplementationOnce(failingPrompt("500 status code (no body)"));
+    const onOutput = vi.fn();
+    const result = await runner.execute(
+      makeExecuteParams({ llmSettings: primary, fallbackLlmSettings: fallback, onOutput }),
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.response).toBe("Analysis complete.");
+    expect(createAgentSessionCalls).toHaveLength(2);
+    expect(createAgentSessionCalls[1].model.id).toBe("openai/gpt-5.5");
+    expect(result.llm_provider).toBe("openrouter");
+    expect(result.llm_model).toBe("openai/gpt-5.5");
+    expect(result.llm_fallback_from).toBe("custom/deepseek-v4.1-flash");
+    expect(result.llm_fallback_reason).toBe("500 status code (no body)");
+    const notice = onOutput.mock.calls.map((c) => c[0]).join("");
+    expect(notice).toContain("Primary LLM On-prem DeepSeek (custom/deepseek-v4.1-flash) failed (500 status code (no body))");
+    expect(notice).toContain("switched to fallback OpenRouter backup (openrouter/openai/gpt-5.5)");
+    expect(result.full_log).toContain("switched to fallback");
+  });
+
+  it("falls back on resume too", async () => {
+    mockSession.prompt.mockImplementationOnce(failingPrompt("Connection error: connect ECONNREFUSED"));
+    const result = await runner.resume(
+      makeResumeParams({ llmSettings: primary, fallbackLlmSettings: fallback }),
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.llm_fallback_from).toBe("custom/deepseek-v4.1-flash");
+  });
+
+  it("does not fall back on a non-transient error (bad key, context overflow)", async () => {
+    for (const err of [
+      "401 Incorrect API key provided",
+      "400 This model's maximum context length is 128000 tokens",
+    ]) {
+      createAgentSessionCalls = [];
+      mockSession.prompt.mockImplementationOnce(failingPrompt(err));
+      const result = await runner.execute(
+        makeExecuteParams({ llmSettings: primary, fallbackLlmSettings: fallback }),
+      );
+      expect(result.error).toBe(err);
+      expect(createAgentSessionCalls).toHaveLength(1);
+      expect(result.llm_fallback_from).toBeUndefined();
+    }
+  });
+
+  it("returns the fallback's error when both fail", async () => {
+    mockSession.prompt
+      .mockImplementationOnce(failingPrompt("503 Service Unavailable"))
+      .mockImplementationOnce(failingPrompt("502 Bad Gateway"));
+    const result = await runner.execute(
+      makeExecuteParams({ llmSettings: primary, fallbackLlmSettings: fallback }),
+    );
+    expect(result.error).toBe("502 Bad Gateway");
+    expect(result.llm_model).toBe("openai/gpt-5.5");
+    expect(result.llm_fallback_from).toBe("custom/deepseek-v4.1-flash");
+  });
+
+  it("does not start a fallback attempt for a cancelled run", async () => {
+    mockSession.prompt.mockImplementationOnce(async () => {
+      await runner.cancel("inc-001");
+      await failingPrompt("500 status code (no body)")();
+    });
+    const result = await runner.execute(
+      makeExecuteParams({ llmSettings: primary, fallbackLlmSettings: fallback }),
+    );
+    expect(result.error).toBe("500 status code (no body)");
+    expect(createAgentSessionCalls).toHaveLength(1);
+  });
+
+  it("skips the primary while the circuit breaker is open", async () => {
+    const { FAILURE_THRESHOLD } = await import("../src/llm-fallback.js");
+    for (let i = 0; i < FAILURE_THRESHOLD; i++) {
+      mockSession.prompt.mockImplementationOnce(failingPrompt("500 status code (no body)"));
+      await runner.execute(makeExecuteParams({ llmSettings: primary, fallbackLlmSettings: fallback }));
+    }
+    createAgentSessionCalls = [];
+    const onOutput = vi.fn();
+    const result = await runner.execute(
+      makeExecuteParams({ llmSettings: primary, fallbackLlmSettings: fallback, onOutput }),
+    );
+    expect(createAgentSessionCalls).toHaveLength(1);
+    expect(createAgentSessionCalls[0].model.id).toBe("openai/gpt-5.5");
+    expect(result.llm_fallback_reason).toBe("primary skipped: circuit breaker open");
+    expect(onOutput.mock.calls.map((c) => c[0]).join("")).toContain("skipped (failed 3 times in a row");
+  });
+});

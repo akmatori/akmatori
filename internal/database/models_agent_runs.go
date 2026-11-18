@@ -68,6 +68,12 @@ type AgentRun struct {
 	Provider      string `gorm:"size:32;index" json:"provider"`
 	Model         string `gorm:"size:128;index" json:"model"`
 	ThinkingLevel string `gorm:"size:16" json:"thinking_level"`
+	// FallbackFrom is "<provider>/<model>" of the primary config when the
+	// fallback config answered (Provider/Model then name the fallback);
+	// FallbackReason is the primary's error or "primary skipped: circuit
+	// breaker open". Both empty for a run on the primary.
+	FallbackFrom   string `gorm:"size:160" json:"fallback_from,omitempty"`
+	FallbackReason string `gorm:"type:text" json:"fallback_reason,omitempty"`
 
 	Status  AgentRunStatus `gorm:"size:16;index;not null;default:'running'" json:"status"`
 	Outcome string         `gorm:"size:16" json:"outcome,omitempty"`
@@ -170,6 +176,29 @@ func RecordAgentRunDispatch(runID, scopeUUID, provider, model, thinkingLevel str
 		run.IncidentUUID, run.SourceKind, run.SourceUUID = inc.UUID, inc.SourceKind, inc.SourceUUID
 	}
 	return BeginAgentRun(DB, run)
+}
+
+// RecordAgentRunFallback re-stamps the run with the config that really
+// answered after the worker switched to the fallback LLM. Dispatch stamped the
+// primary; this keeps per-model stats honest.
+func RecordAgentRunFallback(runID, provider, model, thinkingLevel, fallbackFrom, reason string) error {
+	if DB == nil {
+		return gorm.ErrInvalidDB
+	}
+	updates := map[string]any{
+		"fallback_from":   fallbackFrom,
+		"fallback_reason": reason,
+	}
+	if provider != "" {
+		updates["provider"] = provider
+	}
+	if model != "" {
+		updates["model"] = model
+	}
+	if thinkingLevel != "" {
+		updates["thinking_level"] = thinkingLevel
+	}
+	return DB.Model(&AgentRun{}).Where("run_id = ?", runID).Updates(updates).Error
 }
 
 // UpdateAgentRunLog replaces the run's streamed log.

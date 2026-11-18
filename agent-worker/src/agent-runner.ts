@@ -27,6 +27,21 @@ import type { LLMSettings, ExecuteResult, ProxyConfig, ThinkingLevel, ToolAllowl
 import { applyProxyConfig } from "./proxy.js";
 import { createSamplingPayloadHook, pickSamplingParams } from "./sampling.js";
 import {
+  isFallbackEligibleError,
+  llmKey,
+  primaryBreaker,
+  shortError,
+  skipNotice,
+  switchNotice,
+  usedInfo,
+  type LLMUsedInfo,
+} from "./llm-fallback.js";
+
+/** Stamp which LLM config answered onto a run result. */
+function withUsed(result: ExecuteResult, used: LLMUsedInfo): ExecuteResult {
+  return { ...result, ...used };
+}
+import {
   formatToolArgs,
   formatToolOutput,
   extractToolText,
@@ -85,6 +100,8 @@ export interface ExecuteParams {
   runId?: string;
   task: string;
   llmSettings: LLMSettings;
+  /** Used when the primary fails with a transient provider error. */
+  fallbackLlmSettings?: LLMSettings;
   proxyConfig?: ProxyConfig;
   workDir: string;
   /** Names of enabled skills — only these will be loaded from the shared skills directory */
@@ -109,6 +126,8 @@ export interface ResumeParams {
   sessionId: string;
   message: string;
   llmSettings: LLMSettings;
+  /** See ExecuteParams.fallbackLlmSettings. */
+  fallbackLlmSettings?: LLMSettings;
   proxyConfig?: ProxyConfig;
   workDir: string;
   /** Names of enabled skills — only these will be loaded from the shared skills directory */
@@ -633,14 +652,107 @@ export class AgentRunner {
    * Execute a new agent session for an incident.
    */
   async execute(params: ExecuteParams): Promise<ExecuteResult> {
-    return this.runSession(params, params.task, false);
+    return this.runWithFallback(params, (p) => this.runSession(p, p.task, false));
   }
 
   /**
    * Resume an existing session with a follow-up message.
    */
   async resume(params: ResumeParams): Promise<ExecuteResult> {
-    return this.runSession(params, params.message, true);
+    return this.runWithFallback(params, (p) => this.runSession(p, p.message, true));
+  }
+
+  /**
+   * Run on the primary LLM; when it fails with a transient provider error
+   * (after pi's own retries) and a fallback config is set, run the same
+   * request again on the fallback. The fallback attempt is a fresh session
+   * (resume: the session file the primary attempt left), so a run that failed
+   * mid-way repeats its read-only investigation steps on the second model.
+   *
+   * Skips the primary at once while the shared circuit breaker is open. No
+   * fallback config → exactly the old single-attempt behaviour.
+   */
+  private async runWithFallback<P extends ExecuteParams | ResumeParams>(
+    params: P,
+    run: (p: P) => Promise<ExecuteResult>,
+  ): Promise<ExecuteResult> {
+    const primary = params.llmSettings;
+    const fallback = params.fallbackLlmSettings;
+    if (!fallback) {
+      return withUsed(await run(params), usedInfo(primary));
+    }
+    const generation = this.nextGeneration(params.incidentId);
+    try {
+      return await this.attemptWithFallback(params, run, primary, fallback, generation);
+    } finally {
+      if (this.generations.get(params.incidentId) === generation) {
+        this.generations.delete(params.incidentId);
+      }
+    }
+  }
+
+  private async attemptWithFallback<P extends ExecuteParams | ResumeParams>(
+    params: P,
+    run: (p: P) => Promise<ExecuteResult>,
+    primary: LLMSettings,
+    fallback: LLMSettings,
+    generation: number,
+  ): Promise<ExecuteResult> {
+    const key = llmKey(primary);
+
+    if (primaryBreaker.isOpen(key)) {
+      const notice = skipNotice(primary, fallback, primaryBreaker.failures(key));
+      console.warn(`[agent-runner] incident ${params.incidentId}: ${notice}`);
+      params.onOutput(`\n⚠️ ${notice}\n`);
+      const result = await run({ ...params, llmSettings: fallback });
+      return withUsed(result, usedInfo(fallback, primary, "primary skipped: circuit breaker open"));
+    }
+
+    const first = await run(params);
+    if (!first.error) {
+      primaryBreaker.recordSuccess(key);
+      return withUsed(first, usedInfo(primary));
+    }
+    if (!isFallbackEligibleError(first.error)) {
+      return withUsed(first, usedInfo(primary));
+    }
+    primaryBreaker.recordFailure(key);
+    // Cancelled, or replaced by a newer launch for the same scope: the API
+    // no longer waits for this run, so do not start a second attempt.
+    if (this.generations.get(params.incidentId) !== generation) {
+      return withUsed(first, usedInfo(primary));
+    }
+
+    const reason = shortError(first.error);
+    const notice = switchNotice(primary, fallback, reason);
+    console.warn(`[agent-runner] incident ${params.incidentId}: ${notice}`);
+    params.onOutput(`\n⚠️ ${notice}\n`);
+    const second = await run({ ...params, llmSettings: fallback });
+    return withUsed(
+      {
+        ...second,
+        full_log: `${first.full_log}\n⚠️ ${notice}\n${second.full_log}`,
+        // The run's cost and time include the failed primary attempt.
+        tokens_used: first.tokens_used + second.tokens_used,
+        execution_time_ms: first.execution_time_ms + second.execution_time_ms,
+        input_tokens: (first.input_tokens ?? 0) + (second.input_tokens ?? 0),
+        output_tokens: (first.output_tokens ?? 0) + (second.output_tokens ?? 0),
+        cache_read_tokens: (first.cache_read_tokens ?? 0) + (second.cache_read_tokens ?? 0),
+        cache_write_tokens: (first.cache_write_tokens ?? 0) + (second.cache_write_tokens ?? 0),
+        cost_usd: (first.cost_usd ?? 0) + (second.cost_usd ?? 0),
+        last_skill: second.last_skill ?? first.last_skill,
+      },
+      usedInfo(fallback, primary, reason),
+    );
+  }
+
+  /** Per-scope launch counter; cancel() bumps it so a cancelled run never falls back. */
+  private generations = new Map<string, number>();
+
+  private nextGeneration(incidentId: string): number {
+    const next = (this.generations.get(incidentId) ?? 0) + 1;
+    this.generations.set(incidentId, next);
+    return next;
   }
 
   /**
@@ -999,6 +1111,9 @@ export class AgentRunner {
    * still in the map.
    */
   async cancel(incidentId: string): Promise<void> {
+    if (this.generations.has(incidentId)) {
+      this.nextGeneration(incidentId);
+    }
     const session = this.activeSessions.get(incidentId);
     if (session) {
       await session.abort();
