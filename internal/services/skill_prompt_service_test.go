@@ -860,7 +860,7 @@ func TestGenerateToolUsageExample_Gitea(t *testing.T) {
 		ToolType:    database.ToolType{ID: 9, Name: "gitea"},
 	}
 	example := generateToolUsageExample(tool)
-	for _, fn := range []string{"gitea.get_pull_request\"", "gitea.list_pull_request_files", "gitea.get_pull_request_diff", "gitea.get_file", "gitea.list_pull_request_comments", "gitea.search_pull_requests", "create_pull_request_comment"} {
+	for _, fn := range []string{"gitea.get_pull_request\"", "gitea.list_pull_request_files", "gitea.get_pull_request_diff", "gitea.get_file", "gitea.list_pull_request_comments", "gitea.search_pull_requests", "create_pull_request_comment", "gitea.merge_pull_request"} {
 		if !strings.Contains(example, fn) {
 			t.Errorf("expected %s in the example, got: %s", fn, example)
 		}
@@ -892,5 +892,12 @@ func TestExtractToolDetails_Gitea(t *testing.T) {
 	tool.Settings["gitea_allow_comments"] = true
 	if !strings.Contains(extractToolDetails(tool), "Comments: allowed") {
 		t.Error("expected comments allowed")
+	}
+	if !strings.Contains(extractToolDetails(tool), "Merge: disabled") {
+		t.Error("expected merge disabled by default")
+	}
+	tool.Settings["gitea_merge_targets"] = "ops/prometheus-rules:test rules/**/*.rule  # alerts\ninfra/puppet:preprod !.gocd.yaml\n"
+	if d := extractToolDetails(tool); !strings.Contains(d, "Merge: allowed only into `ops/prometheus-rules:test`, `infra/puppet:preprod`") {
+		t.Errorf("expected merge targets in details, got: %s", d)
 	}
 }
