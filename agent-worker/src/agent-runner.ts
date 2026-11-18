@@ -1023,23 +1023,15 @@ export class AgentRunner {
       };
     }
 
-    this.activeSessions.set(params.incidentId, session);
-    // Signal the orchestrator that this launch has registered so it can
-    // release the per-incident launch chain. Subsequent launches that were
-    // queued behind us now see a populated activeSessions slot and their
-    // abortInFlightSession can target this session instead of no-op'ing.
-    params.onRegistered?.();
-
     // A cancel or a replacement launch that arrived while this session was
     // bootstrapping (possible for a fallback attempt) must not start work.
+    // Checked BEFORE registration: a stale session must never take (and on
+    // cleanup delete) the activeSessions slot of the run that replaced it.
     if (ownerCheck && !ownerCheck()) {
       try {
         await session.abort();
       } catch {
         // best effort
-      }
-      if (this.activeSessions.get(params.incidentId) === session) {
-        this.activeSessions.delete(params.incidentId);
       }
       return {
         session_id: session.sessionId,
@@ -1050,6 +1042,13 @@ export class AgentRunner {
         execution_time_ms: Date.now() - startTime,
       };
     }
+
+    this.activeSessions.set(params.incidentId, session);
+    // Signal the orchestrator that this launch has registered so it can
+    // release the per-incident launch chain. Subsequent launches that were
+    // queued behind us now see a populated activeSessions slot and their
+    // abortInFlightSession can target this session instead of no-op'ing.
+    params.onRegistered?.();
 
     // Accumulate response and token usage
     let responseText = "";

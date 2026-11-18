@@ -2074,6 +2074,30 @@ describe("AgentRunner fallback LLM", () => {
     expect(runner.hasActiveSession("inc-001")).toBe(false);
   });
 
+  it("a stale fallback session never takes the slot of the run that replaced it", async () => {
+    const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
+    mockSession.prompt.mockImplementationOnce(failingPrompt("500 status code (no body)"));
+    const replacement = { abort: vi.fn(async () => {}) };
+    (createAgentSession as any)
+      .mockImplementationOnce(async (opts: any) => {
+        createAgentSessionCalls.push(opts);
+        return { session: mockSession, extensionsResult: {} };
+      })
+      .mockImplementationOnce(async (opts: any) => {
+        createAgentSessionCalls.push(opts);
+        // A replacement launch cancels this run and registers its own session
+        // while the fallback session is still being created.
+        await runner.cancel("inc-001");
+        (runner as any).activeSessions.set("inc-001", replacement);
+        return { session: mockSession, extensionsResult: {} };
+      });
+    const result = await runner.execute(
+      makeExecuteParams({ llmSettings: primary, fallbackLlmSettings: fallback }),
+    );
+    expect(result.error).toBe("Execution cancelled");
+    expect((runner as any).activeSessions.get("inc-001")).toBe(replacement);
+  });
+
   it("skips the primary while the circuit breaker is open", async () => {
     const { FAILURE_THRESHOLD } = await import("../src/llm-fallback.js");
     for (let i = 0; i < FAILURE_THRESHOLD; i++) {

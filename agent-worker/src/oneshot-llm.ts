@@ -86,7 +86,15 @@ export interface OneshotLLMParams {
   signal?: AbortSignal;
   /** Override the per-call HTTP timeout (ms). Defaults to 60s. */
   timeoutMs?: number;
+  /**
+   * Cap on the WHOLE call, retries and their delays included (ms). Unset =
+   * no cap beyond each request's timeoutMs (the pre-fallback behaviour).
+   */
+  totalTimeoutMs?: number;
 }
+
+/** A retry is not started with less time left than this. */
+const MIN_REQUEST_MS = 1_000;
 
 /**
  * Run a single-turn LLM completion and return the assistant text.
@@ -149,10 +157,23 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
     params.temperature !== undefined && !temperatureRejectedModels.has(modelKey);
 
   const startedAt = Date.now();
+  // totalTimeoutMs caps the whole call: every request and retry sleep. Each
+  // request's HTTP timeout shrinks to the time left, so retries cannot run
+  // past the budget a fallback attempt depends on.
+  const deadline = params.totalTimeoutMs !== undefined ? startedAt + params.totalTimeoutMs : undefined;
+  const timeLeft = () => (deadline === undefined ? Infinity : deadline - Date.now());
+  const within = <T extends { timeoutMs: number }>(opts: T): T => {
+    const left = timeLeft();
+    if (left <= 0) {
+      throw new Error("oneshot_llm: request timed out (time budget used up)");
+    }
+    return left < opts.timeoutMs ? { ...opts, timeoutMs: Math.floor(left) } : opts;
+  };
+
   let result: AssistantMessage = await complete(
     model,
     context,
-    sendTemperature ? { ...baseOptions, temperature: params.temperature } : baseOptions,
+    within(sendTemperature ? { ...baseOptions, temperature: params.temperature } : baseOptions),
   );
   for (
     let retry = 1;
@@ -160,6 +181,7 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
     result.stopReason === "error" &&
     TRANSIENT_ERROR_RE.test(result.errorMessage ?? "") &&
     Date.now() - startedAt < TRANSIENT_RETRY_WINDOW_MS &&
+    timeLeft() > TRANSIENT_RETRY_DELAY_MS * retry + MIN_REQUEST_MS &&
     !params.signal?.aborted;
     retry++
   ) {
@@ -170,7 +192,7 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
     result = await complete(
       model,
       context,
-      sendTemperature ? { ...baseOptions, temperature: params.temperature } : baseOptions,
+      within(sendTemperature ? { ...baseOptions, temperature: params.temperature } : baseOptions),
     );
   }
 
@@ -193,7 +215,7 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
       `oneshot_llm ${params.requestId}: provider rejected temperature (${result.errorMessage}); retrying without it`,
     );
     temperatureRejectedModels.add(modelKey);
-    result = await complete(model, context, baseOptions);
+    result = await complete(model, context, within(baseOptions));
   }
 
   if (result.stopReason === "error") {
@@ -273,11 +295,13 @@ export async function runOneshotWithFallback(params: OneshotFallbackParams): Pro
   const primaryParams: OneshotLLMParams = {
     ...baseParams,
     timeoutMs: Math.min(baseParams.timeoutMs ?? DEFAULT_TIMEOUT_MS, Math.floor(budget * PRIMARY_BUDGET_SHARE)),
+    totalTimeoutMs: Math.floor(budget * PRIMARY_BUDGET_SHARE),
   };
   // Skipped primary: the fallback may use the whole wait.
   const fallbackParams: OneshotLLMParams = {
     ...baseParams,
     timeoutMs: budget,
+    totalTimeoutMs: budget,
     llmSettings: fallback,
     maxTokens: fallback.max_tokens,
     temperature: fallback.temperature,
@@ -310,7 +334,7 @@ export async function runOneshotWithFallback(params: OneshotFallbackParams): Pro
     }
     console.warn(`oneshot_llm ${params.requestId}: ${switchNotice(primary, fallback, reason)}`);
     return {
-      text: await runOneshotLLM({ ...fallbackParams, timeoutMs: left }),
+      text: await runOneshotLLM({ ...fallbackParams, timeoutMs: left, totalTimeoutMs: left }),
       used: usedInfo(fallback, primary, reason),
     };
   }

@@ -568,6 +568,32 @@ describe("runOneshotWithFallback", () => {
     expect(fallbackTimeout).toBeLessThanOrEqual(30_000);
   });
 
+  it("caps the primary's connection retries by its share of the budget", async () => {
+    const { runOneshotWithFallback } = await import("../src/oneshot-llm.js");
+    // Each primary request takes 1.5 s and fails with a retryable connection
+    // error. Budget 8 s → primary share 4.8 s: request 1 (0-1.5 s), delay,
+    // request 2 (2.0-3.5 s); a third would not fit, so the fallback starts at
+    // ~3.5 s with ~4.5 s left. Without the cap all 3 requests would run.
+    completeMock.mockImplementation(async (model: { id: string }) => {
+      if (model.id === "gpt-4o-mini") return assistantText("fb");
+      await new Promise((r) => setTimeout(r, 1_500));
+      return errorResult("terminated");
+    });
+    const out = await runOneshotWithFallback({
+      requestId: "r8",
+      user: "x",
+      llmSettings: primary,
+      fallbackLlmSettings: fallback,
+      budgetMs: 8_000,
+    });
+    expect(out.text).toBe("fb");
+    const primaryCalls = completeMock.mock.calls.filter(([m]) => (m as { id: string }).id !== "gpt-4o-mini");
+    expect(primaryCalls).toHaveLength(2);
+    expect((primaryCalls[1][2] as { timeoutMs: number }).timeoutMs).toBeLessThanOrEqual(2_800);
+    const [, , fbOpts] = completeMock.mock.calls.at(-1)!;
+    expect((fbOpts as { timeoutMs: number }).timeoutMs).toBeGreaterThan(3_000);
+  }, 15_000);
+
   it("does not start a fallback the caller cannot wait for", async () => {
     const { runOneshotWithFallback } = await import("../src/oneshot-llm.js");
     completeMock.mockImplementationOnce(async () => {
