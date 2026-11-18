@@ -894,3 +894,48 @@ func TestExtractToolDetails_Gitea(t *testing.T) {
 		t.Error("expected comments allowed")
 	}
 }
+
+func TestGenerateToolUsageExample_GitHub(t *testing.T) {
+	tool := database.ToolInstance{
+		ID:          10,
+		Name:        "gh",
+		LogicalName: "gh",
+		Settings:    database.JSONB{},
+		ToolType:    database.ToolType{ID: 10, Name: "github"},
+	}
+	example := generateToolUsageExample(tool)
+	for _, fn := range []string{"github.get_pull_request\"", "github.list_pull_request_files", "github.get_pull_request_diff", "github.get_file", "github.list_pull_request_comments", "github.search_pull_requests", "create_pull_request_comment"} {
+		if !strings.Contains(example, fn) {
+			t.Errorf("expected %s in the example, got: %s", fn, example)
+		}
+	}
+	if strings.Contains(example, "%!") || !strings.Contains(example, `"gh")`) {
+		t.Errorf("bad format arguments in the example: %s", example)
+	}
+}
+
+func TestExtractToolDetails_GitHub(t *testing.T) {
+	tool := database.ToolInstance{
+		Name: "gh",
+		Settings: database.JSONB{
+			"github_token":         "secret",
+			"github_allowed_repos": "Infra/Terraform\ninfra/*",
+		},
+		ToolType: database.ToolType{Name: "github"},
+	}
+	details := extractToolDetails(tool)
+	for _, want := range []string{"Instance: https://github.com (", "`infra/terraform`, `infra/*`", "Comments: disabled"} {
+		if !strings.Contains(details, want) {
+			t.Errorf("expected %q in details, got: %s", want, details)
+		}
+	}
+	if strings.Contains(details, "secret") {
+		t.Fatal("details must not contain the token")
+	}
+	tool.Settings["github_url"] = "https://ghe.example.com/api/v3/"
+	tool.Settings["github_allow_comments"] = true
+	d := extractToolDetails(tool)
+	if !strings.Contains(d, "Instance: https://ghe.example.com (") || !strings.Contains(d, "Comments: allowed") {
+		t.Errorf("unexpected details: %s", d)
+	}
+}

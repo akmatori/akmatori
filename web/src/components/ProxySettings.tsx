@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Server, MessageSquare, Shield, Terminal, BarChart3, Activity, LayoutDashboard, Bell, Box, Network, Ticket } from 'lucide-react';
+import { Save, Server, MessageSquare, Shield, Terminal, BarChart3, Activity, LayoutDashboard, Bell, Box, Network, Ticket, GitPullRequest } from 'lucide-react';
 import LoadingSpinner from './LoadingSpinner';
 import ErrorMessage, { SuccessMessage } from './ErrorMessage';
 import { proxySettingsApi } from '../api/client';
@@ -66,6 +66,7 @@ export default function ProxySettings() {
   const [netboxEnabled, setNetboxEnabled] = useState(false);
   const [kubernetesEnabled, setKubernetesEnabled] = useState(false);
   const [jiraEnabled, setJiraEnabled] = useState(false);
+  const [githubEnabled, setGithubEnabled] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -87,6 +88,7 @@ export default function ProxySettings() {
       setNetboxEnabled(data.services.netbox?.enabled ?? false);
       setKubernetesEnabled(data.services.kubernetes?.enabled ?? false);
       setJiraEnabled(data.services.jira?.enabled ?? false);
+      setGithubEnabled(data.services.github?.enabled ?? false);
       setError(null);
     } catch (err) {
       setError('Failed to load proxy settings');
@@ -115,6 +117,7 @@ export default function ProxySettings() {
           netbox: { enabled: netboxEnabled },
           kubernetes: { enabled: kubernetesEnabled },
           jira: { enabled: jiraEnabled },
+          github: { enabled: githubEnabled },
         },
       };
 
@@ -273,6 +276,15 @@ export default function ProxySettings() {
             supported={true}
             disabled={!hasProxy}
             onChange={setJiraEnabled}
+          />
+          <ServiceToggle
+            name="GitHub"
+            description="Pull request review"
+            icon={GitPullRequest}
+            enabled={githubEnabled}
+            supported={true}
+            disabled={!hasProxy}
+            onChange={setGithubEnabled}
           />
           <ServiceToggle
             name="SSH"

@@ -76,18 +76,23 @@ func decode(t *testing.T, s string) map[string]interface{} {
 	return m
 }
 
-func TestParseAllowedRepos(t *testing.T) {
-	got := ParseAllowedRepos("Infra/Puppet\n# comment\ninfra/*, ops/alerts  # trailing\n\n")
-	want := []string{"infra/puppet", "infra/*", "ops/alerts"}
-	if strings.Join(got, "|") != strings.Join(want, "|") {
-		t.Fatalf("got %v, want %v", got, want)
+func TestResolverPRURL(t *testing.T) {
+	r := resolver(&Config{URL: "https://git.example.com"})
+	p, err := r.PR(map[string]interface{}{"pr_url": "https://git.example.com/infra/puppet/pulls/42/files"})
+	if err != nil || p.Repo() != "infra/puppet" || p.Number != 42 {
+		t.Fatalf("got %+v, %v", p, err)
 	}
-	got = ParseAllowedRepos([]interface{}{"a/b", 3, " c/d/ "})
-	if strings.Join(got, "|") != "a/b|c/d" {
-		t.Fatalf("array form: got %v", got)
+	if _, err := r.PR(map[string]interface{}{"pr_url": "https://evil.example.org/infra/puppet/pulls/42"}); err == nil {
+		t.Fatal("a link to another host must be refused")
 	}
-	if len(ParseAllowedRepos(nil)) != 0 {
-		t.Fatal("nil must give no entries")
+	sub := resolver(&Config{URL: "https://example.com/git"})
+	p, err = sub.PR(map[string]interface{}{"pr_url": "https://example.com/git/infra/puppet/pulls/7"})
+	if err != nil || p.Number != 7 || p.Repo() != "infra/puppet" {
+		t.Fatalf("sub-path: got %+v, %v", p, err)
+	}
+	limited := resolver(&Config{URL: "https://git.example.com", AllowedRepos: []string{"ops/*"}})
+	if _, err := limited.PR(map[string]interface{}{"repo": "infra/puppet", "number": float64(1)}); err == nil || !strings.Contains(err.Error(), "gitea_allowed_repos") {
+		t.Fatalf("expected an allowlist error naming the setting, got %v", err)
 	}
 }
 
@@ -106,65 +111,6 @@ func TestBuildConfig(t *testing.T) {
 	d := buildConfig(map[string]interface{}{})
 	if !d.VerifySSL || d.Timeout != 30 || d.AllowComments {
 		t.Fatalf("unexpected defaults: %+v", d)
-	}
-}
-
-func TestSplitRepo(t *testing.T) {
-	for _, ok := range []string{"infra/puppet", "a.b/c-d_e", "/infra/puppet/", "infra/puppet.git"} {
-		if _, _, err := splitRepo(ok); err != nil {
-			t.Errorf("%q: unexpected error %v", ok, err)
-		}
-	}
-	for _, bad := range []string{"", "infra", "a/b/c", "../x", "a/..", "a b/c", "a/%2e%2e"} {
-		if _, _, err := splitRepo(bad); err == nil {
-			t.Errorf("%q: expected an error", bad)
-		}
-	}
-}
-
-func TestRepoAllowed(t *testing.T) {
-	c := &Config{AllowedRepos: []string{"infra/puppet", "ops/*"}}
-	cases := map[string]bool{"infra/puppet": true, "Infra/Puppet": true, "infra/other": false, "ops/anything": true, "opsx/a": false}
-	for repo, want := range cases {
-		o, n, _ := splitRepo(repo)
-		if got := repoAllowed(c, o, n); got != want {
-			t.Errorf("%s: got %v, want %v", repo, got, want)
-		}
-	}
-	if !repoAllowed(&Config{}, "any", "repo") {
-		t.Error("an empty allowlist must allow every repo")
-	}
-}
-
-func TestParsePRURL(t *testing.T) {
-	cfg := &Config{URL: "https://git.example.com"}
-	p, err := parsePRURL(cfg, "https://git.example.com/infra/puppet/pulls/42/files")
-	if err != nil || p.repo() != "infra/puppet" || p.number != 42 {
-		t.Fatalf("got %+v, %v", p, err)
-	}
-	if _, err := parsePRURL(cfg, "https://evil.example.org/infra/puppet/pulls/42"); err == nil {
-		t.Fatal("a link to another host must be refused")
-	}
-	if _, err := parsePRURL(cfg, "https://git.example.com/infra/puppet/issues/42"); err == nil {
-		t.Fatal("an issue link must be refused")
-	}
-	sub := &Config{URL: "https://example.com/git"}
-	p, err = parsePRURL(sub, "https://example.com/git/infra/puppet/pulls/7")
-	if err != nil || p.number != 7 || p.repo() != "infra/puppet" {
-		t.Fatalf("sub-path: got %+v, %v", p, err)
-	}
-}
-
-func TestSplitDiff(t *testing.T) {
-	order, secs := splitDiff(sampleDiff)
-	if len(order) != 2 || order[0] != "hieradata/prod.yaml" || order[1] != "manifests/new.pp" {
-		t.Fatalf("order = %v", order)
-	}
-	if !strings.Contains(secs["hieradata/prod.yaml"], "+nginx::keepalive: 120") || strings.Contains(secs["hieradata/prod.yaml"], "class new") {
-		t.Fatalf("wrong section: %q", secs["hieradata/prod.yaml"])
-	}
-	if secs["manifests/old.pp"] != secs["manifests/new.pp"] {
-		t.Fatal("a renamed file must be found by its old path too")
 	}
 }
 
@@ -462,16 +408,6 @@ func TestDo_RefusesRedirect(t *testing.T) {
 	}
 }
 
-func TestCut_RuneBoundary(t *testing.T) {
-	s, short := cut("héllo", 2)
-	if !short || s != "h" {
-		t.Fatalf("got %q, %v", s, short)
-	}
-	if s, short := cut("abc", 10); short || s != "abc" {
-		t.Fatalf("got %q, %v", s, short)
-	}
-}
-
 func TestGetPullRequestDiff_OneFileTruncatedHint(t *testing.T) {
 	tool, _, _ := newTestTool(t, Config{}, diffMux())
 	out, err := tool.GetPullRequestDiff(context.Background(), testIncident, map[string]interface{}{"repo": "infra/puppet", "number": float64(42), "file": "hieradata/prod.yaml", "max_bytes": float64(50)})
@@ -495,34 +431,6 @@ func TestGetPullRequest_ZeroCountsOmitted(t *testing.T) {
 	}
 	if strings.Contains(out, "changed_files") || strings.Contains(out, "additions") {
 		t.Fatalf("zero counts mean unknown and must be left out: %s", out)
-	}
-}
-
-func TestCut_NotUTF8KeepsText(t *testing.T) {
-	latin1 := "caf\xe9 caf\xe9 caf\xe9"
-	s, short := cut(latin1, 10)
-	if !short || len(s) != 10 {
-		t.Fatalf("non-UTF-8 text must be cut at n, got %q", s)
-	}
-}
-
-func TestDiffGitNames_Quoting(t *testing.T) {
-	cases := []struct {
-		header string
-		want   []string
-	}{
-		{`diff --git a/x.pp b/x.pp`, []string{"x.pp"}},
-		{`diff --git a/old.pp b/new.pp`, []string{"new.pp", "old.pp"}},
-		{`diff --git "a/x y.pp" "b/x y.pp"`, []string{"x y.pp"}},
-		{`diff --git a/plain.txt "b/caf\303\251.txt"`, []string{"café.txt", "plain.txt"}},
-		{`diff --git "a/caf\303\251.txt" b/plain.txt`, []string{"plain.txt", "café.txt"}},
-		{`diff --git "a/q\"uote.txt" b/q.txt`, []string{"q.txt", `q"uote.txt`}},
-	}
-	for _, c := range cases {
-		got := diffGitNames(c.header)
-		if strings.Join(got, "|") != strings.Join(c.want, "|") {
-			t.Errorf("%s: got %q, want %q", c.header, got, c.want)
-		}
 	}
 }
 

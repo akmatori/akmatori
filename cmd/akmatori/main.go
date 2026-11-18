@@ -115,6 +115,11 @@ func main() {
 	toolService := services.NewToolService()
 	slog.Info("tool service initialized")
 
+	// MCP servers that used a namespace a built-in tool took over (github,
+	// gitea) move to <ns>_mcp first: the seed below looks tool types up by
+	// name, and a managed MCP tool type has its server's prefix as name.
+	services.RenameReservedMCPNamespaces(database.GetDB())
+
 	// Ensure tool types exist in database
 	if err := toolService.EnsureToolTypes(); err != nil {
 		slog.Warn("failed to ensure tool types", "err", err)

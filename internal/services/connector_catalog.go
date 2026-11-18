@@ -69,6 +69,7 @@ var staticCatalog = []ConnectorCatalogEntry{
 	{ID: "kubernetes", Name: "Kubernetes", Category: "infrastructure", Description: "Read-only diagnostics for pods, deployments, nodes, events and logs.", ToolTypes: []string{"kubernetes"}},
 	{ID: "ssh", Name: "SSH", Category: "infrastructure", Description: "Run commands on your servers over SSH.", ToolTypes: []string{"ssh"}},
 	{ID: "gitea", Name: "Gitea", Category: "infrastructure", Description: "Read pull requests, diffs and comments for pre-merge review of infrastructure changes.", ToolTypes: []string{"gitea"}},
+	{ID: "github", Name: "GitHub", Category: "infrastructure", Description: "Read pull requests, diffs, reviews and comments on github.com or GitHub Enterprise for pre-merge review of infrastructure changes.", ToolTypes: []string{"github"}},
 	{ID: "netbox", Name: "NetBox", Category: "infrastructure", Description: "CMDB: devices, IPAM, circuits, virtualization and tenancy.", ToolTypes: []string{"netbox"}},
 	{ID: "postgresql", Name: "PostgreSQL", Category: "data", Description: "Read-only queries and diagnostics.", ToolTypes: []string{"postgresql"}},
 	{ID: "clickhouse", Name: "ClickHouse", Category: "data", Description: "Read-only queries and OLAP diagnostics.", ToolTypes: []string{"clickhouse"}},

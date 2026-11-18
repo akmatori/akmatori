@@ -160,6 +160,9 @@ type UpdateProxySettingsRequest struct {
 		Jira struct {
 			Enabled bool `json:"enabled"`
 		} `json:"jira"`
+		GitHub struct {
+			Enabled bool `json:"enabled"`
+		} `json:"github"`
 	} `json:"services"`
 }
 

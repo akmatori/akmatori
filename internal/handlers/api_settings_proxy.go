@@ -75,6 +75,10 @@ func (h *APIHandler) GetProxySettings(w http.ResponseWriter, r *http.Request) {
 				"enabled":   settings.JiraEnabled,
 				"supported": true,
 			},
+			"github": map[string]interface{}{
+				"enabled":   settings.GitHubEnabled,
+				"supported": true,
+			},
 			"ssh": map[string]interface{}{
 				"enabled":   false,
 				"supported": false,
@@ -116,6 +120,7 @@ func (h *APIHandler) UpdateProxySettings(w http.ResponseWriter, r *http.Request)
 	settings.NetBoxEnabled = input.Services.NetBox.Enabled
 	settings.K8sEnabled = input.Services.Kubernetes.Enabled
 	settings.JiraEnabled = input.Services.Jira.Enabled
+	settings.GitHubEnabled = input.Services.GitHub.Enabled
 
 	if err := database.UpdateProxySettings(settings); err != nil {
 		api.RespondError(w, http.StatusInternalServerError, "Failed to update proxy settings")

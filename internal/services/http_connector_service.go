@@ -14,7 +14,7 @@ import (
 var reservedToolNamespaces = []string{
 	"ssh", "zabbix", "victoria_metrics", "catchpoint",
 	"postgresql", "grafana", "pagerduty", "clickhouse",
-	"netbox", "kubernetes", "jira", "gitea",
+	"netbox", "kubernetes", "jira", "gitea", "github",
 	"incidents", "proposals", "events", "runbooks", "memory",
 	"telegram",
 }
