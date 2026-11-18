@@ -37,25 +37,50 @@ describe("isFallbackEligibleError", () => {
 });
 
 describe("PrimaryCircuitBreaker", () => {
-  it("opens after the threshold, probes after the window, closes on success", () => {
+  it("opens after the threshold and closes on a successful probe", () => {
     let now = 1_000;
     const breaker = new PrimaryCircuitBreaker(3, 60_000, () => now);
     breaker.recordFailure("k");
     breaker.recordFailure("k");
-    expect(breaker.isOpen("k")).toBe(false);
+    expect(breaker.shouldSkipPrimary("k")).toBe(false);
     breaker.recordFailure("k");
-    expect(breaker.isOpen("k")).toBe(true);
-    expect(breaker.isOpen("other")).toBe(false);
+    expect(breaker.shouldSkipPrimary("k")).toBe(true);
+    expect(breaker.shouldSkipPrimary("other")).toBe(false);
 
     now += 60_001;
-    expect(breaker.isOpen("k")).toBe(false); // probe allowed
-    breaker.recordFailure("k"); // failed probe re-opens at once
-    expect(breaker.isOpen("k")).toBe(true);
-
-    now += 60_001;
+    expect(breaker.shouldSkipPrimary("k")).toBe(false); // this caller probes
     breaker.recordSuccess("k");
-    expect(breaker.isOpen("k")).toBe(false);
+    expect(breaker.shouldSkipPrimary("k")).toBe(false);
     expect(breaker.failures("k")).toBe(0);
+  });
+
+  it("admits only one probe in the half-open state", () => {
+    let now = 1_000;
+    const breaker = new PrimaryCircuitBreaker(1, 60_000, () => now);
+    breaker.recordFailure("k");
+    now += 60_001;
+    expect(breaker.shouldSkipPrimary("k")).toBe(false); // probe admitted
+    expect(breaker.shouldSkipPrimary("k")).toBe(true); // others keep the fallback
+    expect(breaker.shouldSkipPrimary("k")).toBe(true);
+
+    breaker.recordFailure("k"); // failed probe re-opens at once
+    expect(breaker.shouldSkipPrimary("k")).toBe(true);
+    now += 60_001;
+    expect(breaker.shouldSkipPrimary("k")).toBe(false); // next probe
+  });
+
+  it("frees the probe slot on a non-outage error and replaces a lost probe", () => {
+    let now = 1_000;
+    const breaker = new PrimaryCircuitBreaker(1, 60_000, () => now);
+    breaker.recordFailure("k");
+    now += 60_001;
+    expect(breaker.shouldSkipPrimary("k")).toBe(false);
+    breaker.releaseProbe("k");
+    expect(breaker.shouldSkipPrimary("k")).toBe(false); // slot free again
+    // This probe never reports: after another window a new probe may go.
+    expect(breaker.shouldSkipPrimary("k")).toBe(true);
+    now += 60_001;
+    expect(breaker.shouldSkipPrimary("k")).toBe(false);
   });
 });
 

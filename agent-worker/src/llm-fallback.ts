@@ -72,11 +72,19 @@ export function shortError(errorMessage: string, max = 200): string {
 interface BreakerState {
   failures: number;
   openUntil: number;
+  /** When the half-open probe started; 0 = no probe in flight. */
+  probeSince: number;
 }
 
 /**
  * Per-primary circuit breaker. Process-lifetime state: a worker restart
  * starts closed, which is the safe default (one request probes the primary).
+ *
+ * closed → (threshold failures in a row) → open for openMs → half-open: ONE
+ * caller gets the primary as a probe, all others keep using the fallback
+ * until the probe reports. Probe success closes the breaker; probe failure
+ * re-opens it. A probe that never reports (lost frame, crash) is replaced
+ * after another openMs.
  */
 export class PrimaryCircuitBreaker {
   private readonly states = new Map<string, BreakerState>();
@@ -87,10 +95,20 @@ export class PrimaryCircuitBreaker {
     private readonly now: () => number = Date.now,
   ) {}
 
-  /** True while the primary should be skipped. */
-  isOpen(key: string): boolean {
+  /**
+   * Decide whether this request skips the primary. Returns false for the one
+   * caller admitted as the half-open probe (and reserves the probe), so call
+   * it once per request and report the result with recordSuccess,
+   * recordFailure or releaseProbe.
+   */
+  shouldSkipPrimary(key: string): boolean {
     const state = this.states.get(key);
-    return state !== undefined && state.openUntil > this.now();
+    if (!state || state.failures < this.threshold) return false;
+    const now = this.now();
+    if (state.openUntil > now) return true;
+    if (state.probeSince > 0 && now - state.probeSince < this.openMs) return true;
+    state.probeSince = now;
+    return false;
   }
 
   /** Consecutive primary failures recorded for key. */
@@ -100,12 +118,13 @@ export class PrimaryCircuitBreaker {
 
   /**
    * Record a primary failure. At the threshold the breaker opens; a failed
-   * probe after the open window re-opens it at once (failures stay above the
-   * threshold until a success resets them).
+   * probe re-opens it at once (failures stay above the threshold until a
+   * success resets them).
    */
   recordFailure(key: string): void {
-    const state = this.states.get(key) ?? { failures: 0, openUntil: 0 };
+    const state = this.states.get(key) ?? { failures: 0, openUntil: 0, probeSince: 0 };
     state.failures += 1;
+    state.probeSince = 0;
     if (state.failures >= this.threshold) {
       state.openUntil = this.now() + this.openMs;
     }
@@ -115,6 +134,15 @@ export class PrimaryCircuitBreaker {
   /** Record a primary success: the breaker closes and the count resets. */
   recordSuccess(key: string): void {
     this.states.delete(key);
+  }
+
+  /**
+   * The primary answered with an error that says nothing about an outage
+   * (bad key, bad request): keep the counts, free the probe slot.
+   */
+  releaseProbe(key: string): void {
+    const state = this.states.get(key);
+    if (state) state.probeSince = 0;
   }
 
   /** Test helper. */
@@ -154,4 +182,8 @@ export function switchNotice(primary: LLMSettings, fallback: LLMSettings, reason
 
 export function skipNotice(primary: LLMSettings, fallback: LLMSettings, failures: number): string {
   return `Primary LLM ${describeLLM(primary)} skipped (failed ${failures} times in a row; next probe within ${Math.round(OPEN_MS / 60_000)} min), using fallback ${describeLLM(fallback)}`;
+}
+
+export function noReplayNotice(primary: LLMSettings, fallback: LLMSettings, reason: string, toolCalls: number): string {
+  return `Primary LLM ${describeLLM(primary)} failed (${reason}) after ${toolCalls} tool call(s) that may have changed something; not replaying the run on fallback ${describeLLM(fallback)}. Later runs use the fallback while the primary keeps failing`;
 }

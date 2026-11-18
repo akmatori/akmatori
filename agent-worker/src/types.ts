@@ -188,6 +188,8 @@ export interface WebSocketMessage {
 
   // One-shot LLM request/response correlation and payload
   request_id?: string;
+  /** How long the API waits for the one-shot answer (sent with a fallback only). */
+  timeout_ms?: number;
   system?: string;
   user?: string;
   summary?: string;
@@ -231,6 +233,11 @@ export interface ExecuteResult {
   session_export?: string;
   /** Name of the last skill whose SKILL.md the agent read during the run */
   last_skill?: string;
+  /**
+   * Worker-internal: tool calls of this attempt that can change something
+   * (not read/ls/grep/find/tool discovery). Never sent to the API.
+   */
+  tool_calls?: number;
   /** Which config answered; see WebSocketMessage.llm_*. */
   llm_provider?: string;
   llm_model?: string;

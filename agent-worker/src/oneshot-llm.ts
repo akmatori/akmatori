@@ -238,7 +238,18 @@ export interface OneshotFallbackParams extends OneshotLLMParams {
    * fallback call uses them as they are.
    */
   fallbackLlmSettings?: LLMSettings;
+  /**
+   * How long the API waits for the answer (frame `timeout_ms`). With a
+   * fallback, the primary gets PRIMARY_BUDGET_SHARE of it and the fallback
+   * the rest, so a hanging primary cannot use the whole wait.
+   */
+  budgetMs?: number;
 }
+
+/** Share of the caller's wait the primary may use when a fallback is set. */
+export const PRIMARY_BUDGET_SHARE = 0.6;
+/** Below this, a fallback attempt cannot finish before the caller gives up. */
+const MIN_FALLBACK_MS = 3_000;
 
 export interface OneshotResult {
   text: string;
@@ -252,13 +263,21 @@ export interface OneshotResult {
  * config this is runOneshotLLM.
  */
 export async function runOneshotWithFallback(params: OneshotFallbackParams): Promise<OneshotResult> {
-  const { fallbackLlmSettings: fallback, ...primaryParams } = params;
+  const { fallbackLlmSettings: fallback, budgetMs, ...baseParams } = params;
   const primary = params.llmSettings;
   if (!fallback) {
-    return { text: await runOneshotLLM(primaryParams), used: usedInfo(primary) };
+    return { text: await runOneshotLLM(baseParams), used: usedInfo(primary) };
   }
+  const startedAt = Date.now();
+  const budget = budgetMs !== undefined && budgetMs > 0 ? Math.min(budgetMs, DEFAULT_TIMEOUT_MS) : DEFAULT_TIMEOUT_MS;
+  const primaryParams: OneshotLLMParams = {
+    ...baseParams,
+    timeoutMs: Math.min(baseParams.timeoutMs ?? DEFAULT_TIMEOUT_MS, Math.floor(budget * PRIMARY_BUDGET_SHARE)),
+  };
+  // Skipped primary: the fallback may use the whole wait.
   const fallbackParams: OneshotLLMParams = {
-    ...primaryParams,
+    ...baseParams,
+    timeoutMs: budget,
     llmSettings: fallback,
     maxTokens: fallback.max_tokens,
     temperature: fallback.temperature,
@@ -266,7 +285,7 @@ export async function runOneshotWithFallback(params: OneshotFallbackParams): Pro
     topK: fallback.top_k,
   };
   const key = llmKey(primary);
-  if (primaryBreaker.isOpen(key)) {
+  if (primaryBreaker.shouldSkipPrimary(key)) {
     return {
       text: await runOneshotLLM(fallbackParams),
       used: usedInfo(fallback, primary, "primary skipped: circuit breaker open"),
@@ -279,11 +298,20 @@ export async function runOneshotWithFallback(params: OneshotFallbackParams): Pro
   } catch (err) {
     const errMsg = (err as Error)?.message ?? String(err);
     if (!isFallbackEligibleError(errMsg) || params.signal?.aborted) {
+      primaryBreaker.releaseProbe(key);
       throw err;
     }
     primaryBreaker.recordFailure(key);
     const reason = shortError(errMsg);
+    const left = budget - (Date.now() - startedAt);
+    if (left < MIN_FALLBACK_MS) {
+      // The caller stops waiting before a fallback answer could arrive.
+      throw err;
+    }
     console.warn(`oneshot_llm ${params.requestId}: ${switchNotice(primary, fallback, reason)}`);
-    return { text: await runOneshotLLM(fallbackParams), used: usedInfo(fallback, primary, reason) };
+    return {
+      text: await runOneshotLLM({ ...fallbackParams, timeoutMs: left }),
+      used: usedInfo(fallback, primary, reason),
+    };
   }
 }

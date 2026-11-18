@@ -2018,6 +2018,62 @@ describe("AgentRunner fallback LLM", () => {
     expect(createAgentSessionCalls).toHaveLength(1);
   });
 
+  it("does not replay a run whose primary attempt ran a side-effect tool", async () => {
+    mockSession.prompt.mockImplementationOnce(async () => {
+      mockSession._emitEvent({ type: "tool_execution_start", toolCallId: "t0", toolName: "read", args: { path: "/x" } });
+      mockSession._emitEvent({ type: "tool_execution_start", toolCallId: "t1", toolName: "gateway_call", args: {} });
+      await failingPrompt("500 status code (no body)")();
+    });
+    const onOutput = vi.fn();
+    const result = await runner.execute(
+      makeExecuteParams({ llmSettings: primary, fallbackLlmSettings: fallback, onOutput }),
+    );
+    expect(result.error).toBe("500 status code (no body)");
+    expect(createAgentSessionCalls).toHaveLength(1);
+    expect(result.llm_fallback_from).toBeUndefined();
+    expect(onOutput.mock.calls.map((c) => c[0]).join("")).toContain("after 1 tool call(s)");
+  });
+
+  it("still falls back when the primary only read files", async () => {
+    mockSession.prompt.mockImplementationOnce(async () => {
+      mockSession._emitEvent({ type: "tool_execution_start", toolCallId: "t0", toolName: "read", args: { path: "/x" } });
+      await failingPrompt("503 Service Unavailable")();
+    });
+    const result = await runner.execute(
+      makeExecuteParams({ llmSettings: primary, fallbackLlmSettings: fallback }),
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.llm_fallback_from).toBe("custom/deepseek-v4.1-flash");
+  });
+
+  it("keeps the scope busy between the attempts and honours a cancel during fallback bootstrap", async () => {
+    const { createAgentSession } = await import("@earendil-works/pi-coding-agent");
+    mockSession.prompt.mockImplementationOnce(failingPrompt("500 status code (no body)"));
+    let busyDuringBootstrap: boolean | undefined;
+    (createAgentSession as any)
+      .mockImplementationOnce(async (opts: any) => {
+        createAgentSessionCalls.push(opts);
+        return { session: mockSession, extensionsResult: {} };
+      })
+      .mockImplementationOnce(async (opts: any) => {
+        createAgentSessionCalls.push(opts);
+        // A cancel arrives while the fallback session is being created.
+        busyDuringBootstrap = runner.hasActiveSession("inc-001");
+        await runner.cancel("inc-001");
+        return { session: mockSession, extensionsResult: {} };
+      });
+    const promptCalls = mockSession.prompt.mock.calls.length;
+    const result = await runner.execute(
+      makeExecuteParams({ llmSettings: primary, fallbackLlmSettings: fallback }),
+    );
+    expect(busyDuringBootstrap).toBe(true);
+    expect(createAgentSessionCalls).toHaveLength(2);
+    // Only the primary attempt prompted; the cancelled fallback never did.
+    expect(mockSession.prompt.mock.calls.length).toBe(promptCalls + 1);
+    expect(result.error).toBe("Execution cancelled");
+    expect(runner.hasActiveSession("inc-001")).toBe(false);
+  });
+
   it("skips the primary while the circuit breaker is open", async () => {
     const { FAILURE_THRESHOLD } = await import("../src/llm-fallback.js");
     for (let i = 0; i < FAILURE_THRESHOLD; i++) {

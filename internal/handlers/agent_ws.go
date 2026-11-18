@@ -124,6 +124,10 @@ type AgentMessage struct {
 
 	// One-shot LLM request/response correlation fields
 	RequestID string `json:"request_id,omitempty"`
+	// TimeoutMs is how long the API waits for this one-shot answer (sent only
+	// with a fallback, so the worker can split the time between the primary
+	// and the fallback instead of spending it all on a hanging primary).
+	TimeoutMs int64  `json:"timeout_ms,omitempty"`
 	System    string `json:"system,omitempty"`
 	User      string `json:"user,omitempty"`
 	Summary   string `json:"summary,omitempty"`
@@ -1061,6 +1065,15 @@ func (h *AgentWSHandler) OneShotLLM(ctx context.Context, llm *LLMSettingsForWork
 		// The fallback gets the call-site values with ITS overrides on top,
 		// not the primary's overrides.
 		msg.FallbackLLM = h.fallbackWire(llm, &maxTokens, &temperature)
+		if msg.FallbackLLM != nil {
+			budget := oneshotLLMDefaultTimeout
+			if deadline, ok := ctx.Deadline(); ok {
+				budget = time.Until(deadline)
+			}
+			if budget > 0 {
+				msg.TimeoutMs = budget.Milliseconds()
+			}
+		}
 	}
 
 	// Reuse the same proxy-settings pattern as StartIncident/ContinueIncident.

@@ -10,7 +10,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-
 func stubFallback(h *AgentWSHandler, fb *LLMSettingsForWorker) {
 	h.resolveFallback = func(primary *LLMSettingsForWorker) *LLMSettingsForWorker {
 		if primary == nil {
@@ -65,6 +64,9 @@ func TestOneShotLLM_SendsFallbackWithMergedSampling(t *testing.T) {
 	}()
 
 	msg, _ := readFrame(t, conn, AgentMessageTypeOneshotLLMRequest)
+	if msg.TimeoutMs <= 0 || msg.TimeoutMs > 2000 {
+		t.Errorf("timeout_ms = %d, want the caller's remaining wait (<= 2000)", msg.TimeoutMs)
+	}
 	if msg.LLMName != "Main" {
 		t.Errorf("llm_name = %q, want Main", msg.LLMName)
 	}
@@ -112,6 +114,9 @@ func TestOneShotLLM_NoFallbackKeepsFrame(t *testing.T) {
 		_, _ = handler.OneShotLLM(ctx, &LLMSettingsForWorker{Provider: "openai", APIKey: "k", Model: "m"}, "", "u", 10, 0)
 	}()
 	_, raw := readFrame(t, conn, AgentMessageTypeOneshotLLMRequest)
+	if _, ok := raw["timeout_ms"]; ok {
+		t.Errorf("timeout_ms must be absent when no fallback is set")
+	}
 	if _, ok := raw["fallback_llm"]; ok {
 		t.Errorf("fallback_llm must be absent when no fallback is set: %v", raw["fallback_llm"])
 	}

@@ -389,6 +389,7 @@ export class Orchestrator {
       topK: msg.top_k,
       llmSettings,
       fallbackLlmSettings: this.extractFallbackSettings(msg.fallback_llm),
+      budgetMs: msg.timeout_ms,
       proxyConfig,
     })
       .then(({ text, used }) => {

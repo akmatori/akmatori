@@ -550,6 +550,42 @@ describe("runOneshotWithFallback", () => {
     expect(completeMock).toHaveBeenCalledTimes(1);
   });
 
+  it("gives the primary 60% of the caller's wait and the fallback the rest", async () => {
+    const { runOneshotWithFallback } = await import("../src/oneshot-llm.js");
+    completeMock
+      .mockResolvedValueOnce(errorResult("Request timed out."))
+      .mockResolvedValueOnce(assistantText("fb"));
+    await runOneshotWithFallback({
+      requestId: "r6",
+      user: "x",
+      llmSettings: primary,
+      fallbackLlmSettings: fallback,
+      budgetMs: 30_000,
+    });
+    expect(completeMock.mock.calls[0][2].timeoutMs).toBe(18_000);
+    const fallbackTimeout = completeMock.mock.calls[1][2].timeoutMs;
+    expect(fallbackTimeout).toBeGreaterThan(25_000);
+    expect(fallbackTimeout).toBeLessThanOrEqual(30_000);
+  });
+
+  it("does not start a fallback the caller cannot wait for", async () => {
+    const { runOneshotWithFallback } = await import("../src/oneshot-llm.js");
+    completeMock.mockImplementationOnce(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+      return errorResult("500 status code (no body)");
+    });
+    await expect(
+      runOneshotWithFallback({
+        requestId: "r7",
+        user: "x",
+        llmSettings: primary,
+        fallbackLlmSettings: fallback,
+        budgetMs: 1_000,
+      }),
+    ).rejects.toThrow("500 status code (no body)");
+    expect(completeMock).toHaveBeenCalledTimes(1);
+  });
+
   it("goes straight to the fallback while the breaker is open", async () => {
     const { runOneshotWithFallback } = await import("../src/oneshot-llm.js");
     const { FAILURE_THRESHOLD } = await import("../src/llm-fallback.js");
