@@ -594,6 +594,26 @@ describe("runOneshotWithFallback", () => {
     expect((fbOpts as { timeoutMs: number }).timeoutMs).toBeGreaterThan(3_000);
   }, 15_000);
 
+  it("aborts a primary stream that stalls and still answers from the fallback", async () => {
+    const { runOneshotWithFallback } = await import("../src/oneshot-llm.js");
+    // The primary never resolves on its own (stream stalled after headers);
+    // only the abort signal ends it, as pi-ai does with stopReason "aborted".
+    completeMock.mockImplementation(async (model: { id: string }, _ctx: unknown, opts: { signal?: AbortSignal }) => {
+      if (model.id === "gpt-4o-mini") return assistantText("fb");
+      await new Promise<void>((resolve) => opts.signal?.addEventListener("abort", () => resolve()));
+      return { ...assistantText(""), content: [], stopReason: "aborted" as const };
+    });
+    const out = await runOneshotWithFallback({
+      requestId: "r9",
+      user: "x",
+      llmSettings: primary,
+      fallbackLlmSettings: fallback,
+      budgetMs: 8_000,
+    });
+    expect(out.text).toBe("fb");
+    expect(out.used.llm_fallback_reason).toContain("timed out");
+  }, 15_000);
+
   it("does not start a fallback the caller cannot wait for", async () => {
     const { runOneshotWithFallback } = await import("../src/oneshot-llm.js");
     completeMock.mockImplementationOnce(async () => {

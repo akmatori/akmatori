@@ -101,6 +101,31 @@ const MIN_REQUEST_MS = 1_000;
  * Throws on validation errors, provider errors, or non-text responses.
  */
 export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
+  if (params.totalTimeoutMs === undefined) {
+    return runOneshotBody(params);
+  }
+  // A per-request timeoutMs does not bound a stream that stalls after the
+  // headers (the OpenAI SDK clears its timer then; the Google adapter has
+  // none), so the whole call is also bounded by an abort signal.
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(), params.totalTimeoutMs);
+  const signal = params.signal ? AbortSignal.any([params.signal, deadline.signal]) : deadline.signal;
+  try {
+    return await runOneshotBody({ ...params, signal });
+  } catch (err) {
+    if (deadline.signal.aborted && !params.signal?.aborted) {
+      throw new Error(BUDGET_TIMEOUT_MESSAGE);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Fallback-eligible ("timed out") error for a call that used its whole budget. */
+const BUDGET_TIMEOUT_MESSAGE = "oneshot_llm: request timed out (time budget used up)";
+
+async function runOneshotBody(params: OneshotLLMParams): Promise<string> {
   if (!params.requestId) {
     throw new Error("oneshot_llm: missing request_id");
   }
@@ -165,7 +190,7 @@ export async function runOneshotLLM(params: OneshotLLMParams): Promise<string> {
   const within = <T extends { timeoutMs: number }>(opts: T): T => {
     const left = timeLeft();
     if (left <= 0) {
-      throw new Error("oneshot_llm: request timed out (time budget used up)");
+      throw new Error(BUDGET_TIMEOUT_MESSAGE);
     }
     return left < opts.timeoutMs ? { ...opts, timeoutMs: Math.floor(left) } : opts;
   };
