@@ -1196,11 +1196,14 @@ func TestAddTimeParams(t *testing.T) {
 	}
 	addTimeParams(params, args)
 
-	if params.Get("startTime") != "2024-01-01T00:00:00Z" {
-		t.Errorf("expected startTime, got %q", params.Get("startTime"))
+	if params.Get("startTimeUtc") != "2024-01-01T00:00:00Z" {
+		t.Errorf("expected startTimeUtc, got %q", params.Get("startTimeUtc"))
 	}
-	if params.Get("endTime") != "2024-01-02T00:00:00Z" {
-		t.Errorf("expected endTime, got %q", params.Get("endTime"))
+	if params.Get("endTimeUtc") != "2024-01-02T00:00:00Z" {
+		t.Errorf("expected endTimeUtc, got %q", params.Get("endTimeUtc"))
+	}
+	if params.Has("startTime") || params.Has("endTime") {
+		t.Errorf("legacy startTime/endTime must not be sent, got %v", params)
 	}
 }
 
