@@ -36,7 +36,7 @@ spec:
         - name: wait-for-data-dirs
           image: {{ include "akmatori.image" (list . "agent") }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["sh", "-c", "for d in incidents context skills runbooks memory extensions; do until [ -d /data/$d ]; do echo waiting for /akmatori/$d; sleep 2; done; done"]
+          command: ["sh", "-c", "for d in incidents context skills runbooks memory extensions repos; do until [ -d /data/$d ]; do echo waiting for /akmatori/$d; sleep 2; done; done"]
           volumeMounts:
             - { name: data, mountPath: /data, readOnly: true }
         # pi loads extensions from ~/.pi/agent/extensions. A volume mounted
@@ -58,6 +58,11 @@ spec:
             - { name: MCP_GATEWAY_URL, value: "http://{{ include "akmatori.gatewayHost" . }}:8080" }
             - { name: WORKSPACE_DIR, value: /workspaces }
             - { name: SKILLS_DIR, value: /akmatori/skills }
+            # git_repo mirrors belong to the API user and are read-only here.
+            - { name: GIT_CONFIG_COUNT, value: "1" }
+            - { name: GIT_CONFIG_KEY_0, value: safe.directory }
+            - { name: GIT_CONFIG_VALUE_0, value: "*" }
+            - { name: GIT_OPTIONAL_LOCKS, value: "0" }
             - { name: AKMATORI_CODEMODE, value: {{ .Values.agent.codemode | quote }} }
             - { name: PI_CACHE_RETENTION, value: long }
             - { name: AKMATORI_OPENROUTER_ATTRIBUTION, value: {{ .Values.agent.openrouterAttribution | quote }} }
@@ -79,6 +84,7 @@ spec:
             - { name: data, mountPath: /akmatori/runbooks, subPath: runbooks, readOnly: true }
             - { name: data, mountPath: /akmatori/memory, subPath: memory, readOnly: true }
             - { name: data, mountPath: /akmatori/extensions, subPath: extensions, readOnly: true }
+            - { name: data, mountPath: /akmatori/repos, subPath: repos, readOnly: true }
       volumes:
         - name: sessions
           emptyDir: {}

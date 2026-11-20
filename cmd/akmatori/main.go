@@ -550,6 +550,13 @@ func main() {
 	// handler wiring.
 	go staleCloseService.StartBackgroundSweep(ctx)
 
+	// Mirror git_repo tool instances into /akmatori/repos (read-only in the
+	// worker). The state dir (known_hosts, temporary keys) is not mounted
+	// into the worker.
+	services.NewGitRepoSyncService(database.GetDB(),
+		filepath.Join(dataDir, "repos"), filepath.Join(dataDir, "git-state")).Start(ctx)
+	slog.Info("git repository mirror service started")
+
 	// Refresh OAuth tokens of remote MCP servers before they expire.
 	mcpOAuth.StartRefresher(ctx)
 	slog.Info("stale incident close service started")

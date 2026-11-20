@@ -25,6 +25,8 @@ var toolSecretSettingKeys = map[string]struct{}{
 	"k8s_token":            {},
 	"jira_api_token":       {},
 	"gitea_token":          {},
+	"git_token":            {},
+	"git_ssh_private_key":  {},
 }
 
 // IsToolSecretSetting reports whether a top-level tool settings key holds a

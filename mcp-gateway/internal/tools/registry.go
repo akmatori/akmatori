@@ -267,6 +267,7 @@ var builtInToolNamespaces = map[string]bool{
 	"kubernetes":       true,
 	"jira":             true,
 	"gitea":            true,
+	"git_repo":         true,
 	"incidents":        true,
 	"proposals":        true,
 	"events":           true,

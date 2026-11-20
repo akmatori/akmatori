@@ -26,6 +26,8 @@ FROM alpine:3.19
 # of uploaded PDF context files)
 RUN apk add --no-cache \
     ca-certificates \
+    git \
+    openssh-client \
     poppler-utils \
     tzdata
 

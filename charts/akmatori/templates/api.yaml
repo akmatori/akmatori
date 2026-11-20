@@ -72,7 +72,7 @@ spec:
         - name: init-dirs
           image: {{ include "akmatori.image" (list . "api") }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["sh", "-c", "mkdir -p /akmatori/incidents /akmatori/context /akmatori/skills /akmatori/runbooks /akmatori/memory /akmatori/extensions"]
+          command: ["sh", "-c", "mkdir -p /akmatori/incidents /akmatori/context /akmatori/skills /akmatori/runbooks /akmatori/memory /akmatori/extensions /akmatori/repos"]
           volumeMounts:
             - name: data
               mountPath: /akmatori
