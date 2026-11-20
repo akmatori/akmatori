@@ -332,34 +332,11 @@ func (h *SlackHandler) handleAppMention(event *slackevents.AppMentionEvent) {
 	// If this is a thread reply, fetch the parent message for context
 	// so the AI knows what "this alert" or "this message" refers to.
 	if event.ThreadTimeStamp != "" {
-		parentText := h.fetchThreadParentText(event.Channel, event.ThreadTimeStamp)
-		if parentText != "" {
-			text = fmt.Sprintf("Context — original message in this thread:\n---\n%s\n---\n\nUser request: %s", parentText, text)
-		}
+		parentText, newer := h.fetchThreadContext(event.Channel, event.ThreadTimeStamp, event.TimeStamp)
+		text = formatThreadRequest(parentText, newer, text)
 	}
 
 	h.processMessage(event.Channel, event.ThreadTimeStamp, event.TimeStamp, text, event.User)
-}
-
-// fetchThreadParentText fetches the parent (first) message of a Slack thread.
-// Extracts text from the message body, attachments, and blocks since monitoring
-// tools (Zabbix, Datadog, etc.) often send content in attachments/blocks rather
-// than the plain Text field.
-func (h *SlackHandler) fetchThreadParentText(channelID, threadTS string) string {
-	msgs, _, _, err := h.client.GetConversationReplies(&slack.GetConversationRepliesParameters{
-		ChannelID: channelID,
-		Timestamp: threadTS,
-		Limit:     1,
-		Inclusive: true,
-	})
-	if err != nil {
-		slog.Error("failed to fetch thread parent message", "channel", channelID, "thread_ts", threadTS, "err", err)
-		return ""
-	}
-	if len(msgs) == 0 {
-		return ""
-	}
-	return extractSlackMessageText(msgs[0])
 }
 
 // routeBotMentionThreadReply is the classify-first entry point for an @mention
@@ -414,10 +391,10 @@ func (h *SlackHandler) handleBotMentionInThread(channel, threadTS, messageTS, ra
 	// Strip bot mention
 	text := strings.TrimSpace(strings.Replace(rawText, fmt.Sprintf("<@%s>", h.botUserID), "", 1))
 
-	// Fetch the parent message (the alert) for context
-	if parentText := h.fetchThreadParentText(channel, threadTS); parentText != "" {
-		text = fmt.Sprintf("Context — original message in this thread:\n---\n%s\n---\n\nUser request: %s", parentText, text)
-	}
+	// Fetch the parent message (the alert) and the messages since the bot's
+	// last reply for context.
+	parentText, newer := h.fetchThreadContext(channel, threadTS, messageTS)
+	text = formatThreadRequest(parentText, newer, text)
 
 	h.processMessage(channel, threadTS, messageTS, text, user)
 }
@@ -553,9 +530,8 @@ func (h *SlackHandler) handleMessage(event *slackevents.MessageEvent) {
 
 		// If this is a thread reply, fetch parent for context
 		if event.ThreadTimeStamp != "" {
-			if parentText := h.fetchThreadParentText(event.Channel, event.ThreadTimeStamp); parentText != "" {
-				text = fmt.Sprintf("Context — original message in this thread:\n---\n%s\n---\n\nUser request: %s", parentText, text)
-			}
+			parentText, newer := h.fetchThreadContext(event.Channel, event.ThreadTimeStamp, event.TimeStamp)
+			text = formatThreadRequest(parentText, newer, text)
 		}
 
 		h.processMessage(event.Channel, event.ThreadTimeStamp, event.TimeStamp, text, event.User)
