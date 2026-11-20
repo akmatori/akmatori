@@ -72,6 +72,9 @@ type GitRepoStatus struct {
 	// Blocked is set when the repository exceeded git_max_size_mb; the
 	// mirror is not retried until a setting changes.
 	Blocked string `json:"blocked,omitempty"`
+	// Unmanaged: the directory existed before Akmatori and is not ours. Such
+	// a directory is never written to or deleted, on any later pass either.
+	Unmanaged bool `json:"unmanaged,omitempty"`
 }
 
 type gitRepoSettings struct {
@@ -231,8 +234,10 @@ func (s *GitRepoSyncService) removeStale(wanted map[string]bool) {
 		if wanted[name] || !validMirrorName(name) {
 			continue
 		}
-		slog.Info("git_repo: removing mirror of a disabled or deleted instance", "name", name)
-		_ = os.RemoveAll(filepath.Join(s.root, name))
+		if st, err := readStatusFile(filepath.Join(s.root, n)); err != nil || !st.Unmanaged {
+			slog.Info("git_repo: removing mirror of a disabled or deleted instance", "name", name)
+			_ = os.RemoveAll(filepath.Join(s.root, name))
+		}
 		_ = os.Remove(filepath.Join(s.root, n))
 		_ = os.Remove(filepath.Join(s.stateDir, name+".known_hosts"))
 	}
@@ -262,16 +267,20 @@ func (s *GitRepoSyncService) syncInstance(ctx context.Context, inst database.Too
 		}
 	}
 
-	// A directory we did not create is never touched.
-	if prev == nil {
-		if _, err := os.Stat(dir); err == nil {
+	// A directory we did not create is never touched, on this pass or any
+	// later one: ownership is the status file without Unmanaged.
+	if prev == nil || prev.Unmanaged {
+		if _, err := os.Lstat(dir); err == nil {
+			st.Unmanaged = true
 			st.Error = fmt.Sprintf("%s already exists and is not managed by Akmatori; rename the instance's logical name or remove the directory", st.Path)
 			s.finish(st, prev)
 			return
 		}
+		prev = nil // the foreign directory is gone: start fresh
 	}
+	var pins []string
 	if cfgErr == nil {
-		cfgErr = s.checkRemote(ctx, cfg.URL)
+		pins, cfgErr = s.checkRemote(ctx, cfg.URL)
 	}
 	if cfgErr != nil {
 		st.Error = cfgErr.Error()
@@ -301,7 +310,7 @@ func (s *GitRepoSyncService) syncInstance(ctx context.Context, inst database.Too
 		}
 	}
 
-	env, cleanup, err := s.gitEnv(name, cfg)
+	env, cleanup, err := s.gitEnv(name, cfg, pins...)
 	if err != nil {
 		st.Error = err.Error()
 		s.finish(st, prev)
@@ -310,6 +319,7 @@ func (s *GitRepoSyncService) syncInstance(ctx context.Context, inst database.Too
 	defer cleanup()
 
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		_ = os.RemoveAll(dir) // ours (checked above) but not a repository any more
 		err = s.clone(ctx, env, cfg, dir, st)
 		if err != nil {
 			st.Error = err.Error()
@@ -322,8 +332,10 @@ func (s *GitRepoSyncService) syncInstance(ctx context.Context, inst database.Too
 		return
 	}
 
-	if cfg.HistoryDays > 0 && (st.LastTrimAt == nil || s.now().Sub(*st.LastTrimAt) > gitRepoTrimEvery) {
-		s.trim(ctx, env, cfg, dir, st)
+	if st.LastTrimAt == nil || s.now().Sub(*st.LastTrimAt) > gitRepoTrimEvery {
+		if err := s.trim(ctx, env, cfg, dir, st); err != nil {
+			st.Error = err.Error() // the mirror itself is current; retried next pass
+		}
 	}
 
 	st.SizeBytes = mirrorSize(dir)
@@ -374,7 +386,9 @@ func (s *GitRepoSyncService) clone(ctx context.Context, env []string, cfg gitRep
 		st.Branch = strings.TrimSpace(out)
 	}
 	if cfg.HistoryDays > 0 {
-		s.deepen(ctx, env, cfg, tmp, st)
+		if err := s.deepen(ctx, env, cfg, tmp, st); err != nil {
+			return err
+		}
 	}
 	_ = os.Chmod(tmp, 0o755) // MkdirTemp creates 0700; the worker must read it
 	if err := os.Rename(tmp, dir); err != nil {
@@ -385,19 +399,35 @@ func (s *GitRepoSyncService) clone(ctx context.Context, env []string, cfg gitRep
 	return nil
 }
 
-// deepen (or shorten) the history to the configured window. A window with no
-// commits in it fails in git; then the mirror keeps only the newest commit.
-func (s *GitRepoSyncService) deepen(ctx context.Context, env []string, cfg gitRepoSettings, dir string, st *GitRepoStatus) {
+// deepen (or shorten) the history to the configured window. When the window
+// holds no commits (an idle repository), git refuses --shallow-since; the
+// mirror then keeps only the newest commit. Other failures are returned.
+func (s *GitRepoSyncService) deepen(ctx context.Context, env []string, cfg gitRepoSettings, dir string, st *GitRepoStatus) error {
 	since := s.now().Add(-time.Duration(cfg.HistoryDays) * 24 * time.Hour)
 	cctx, cancel := context.WithTimeout(ctx, gitRepoCloneTimeout)
 	defer cancel()
-	if _, err := runGit(cctx, env, dir, "fetch", "--quiet", "--no-tags", "--update-shallow",
-		"--shallow-since="+strconv.FormatInt(since.Unix(), 10), "origin", branchRefspec(st.Branch)); err != nil {
-		slog.Debug("git_repo: history window not applied", "name", st.LogicalName, "err", err)
-		return
+	_, err := runGit(cctx, env, dir, "fetch", "--quiet", "--no-tags",
+		"--shallow-since="+strconv.FormatInt(since.Unix(), 10), "origin", branchRefspec(st.Branch))
+	if err != nil && strings.Contains(err.Error(), "no commits selected") {
+		st.HistoryFrom = nil
+		return s.fetchDepth1(ctx, env, dir, st)
+	}
+	if err != nil {
+		return fmt.Errorf("apply history window: %w", err)
 	}
 	from := since.UTC()
 	st.HistoryFrom = &from
+	return nil
+}
+
+// fetchDepth1 shortens the mirror to the newest commit.
+func (s *GitRepoSyncService) fetchDepth1(ctx context.Context, env []string, dir string, st *GitRepoStatus) error {
+	cctx, cancel := context.WithTimeout(ctx, gitRepoFetchTimeout)
+	defer cancel()
+	if _, err := runGit(cctx, env, dir, "fetch", "--quiet", "--no-tags", "--depth=1", "origin", branchRefspec(st.Branch)); err != nil {
+		return fmt.Errorf("fetch newest commit: %w", err)
+	}
+	return nil
 }
 
 func (s *GitRepoSyncService) fetch(ctx context.Context, env []string, cfg gitRepoSettings, dir string, st *GitRepoStatus) error {
@@ -410,7 +440,11 @@ func (s *GitRepoSyncService) fetch(ctx context.Context, env []string, cfg gitRep
 	}
 	cctx, cancel := context.WithTimeout(ctx, gitRepoFetchTimeout)
 	defer cancel()
-	if _, err := runGit(cctx, env, dir, "fetch", "--quiet", "--no-tags", "origin", branchRefspec(st.Branch)); err != nil {
+	args := []string{"fetch", "--quiet", "--no-tags"}
+	if cfg.HistoryDays == 0 {
+		args = append(args, "--depth=1") // newest commit only: do not grow history
+	}
+	if _, err := runGit(cctx, env, dir, append(args, "origin", branchRefspec(st.Branch))...); err != nil {
 		return fmt.Errorf("fetch: %w", err)
 	}
 	if _, err := runGit(ctx, env, dir, "reset", "--quiet", "--hard", "refs/remotes/origin/"+st.Branch); err != nil {
@@ -419,16 +453,31 @@ func (s *GitRepoSyncService) fetch(ctx context.Context, env []string, cfg gitRep
 	return nil
 }
 
-// trim cuts history older than the window and drops the unreachable objects,
-// so a mirror of a busy repository stays bounded.
-func (s *GitRepoSyncService) trim(ctx context.Context, env []string, cfg gitRepoSettings, dir string, st *GitRepoStatus) {
-	s.deepen(ctx, env, cfg, dir, st)
-	_, _ = runGit(ctx, env, dir, "reflog", "expire", "--expire=now", "--all")
+// trim cuts history older than the window (or everything but the newest
+// commit for git_history_days=0) and drops the unreachable objects, so a
+// mirror of a busy repository stays bounded. A failure is kept in the status
+// and the trim is retried on the next pass.
+func (s *GitRepoSyncService) trim(ctx context.Context, env []string, cfg gitRepoSettings, dir string, st *GitRepoStatus) error {
+	var err error
+	if cfg.HistoryDays > 0 {
+		err = s.deepen(ctx, env, cfg, dir, st)
+	} else {
+		err = s.fetchDepth1(ctx, env, dir, st)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := runGit(ctx, env, dir, "reflog", "expire", "--expire=now", "--all"); err != nil {
+		return fmt.Errorf("trim: %w", err)
+	}
 	cctx, cancel := context.WithTimeout(ctx, gitRepoCloneTimeout)
 	defer cancel()
-	_, _ = runGit(cctx, env, dir, "gc", "--quiet", "--prune=now")
+	if _, err := runGit(cctx, env, dir, "gc", "--quiet", "--prune=now"); err != nil {
+		return fmt.Errorf("trim: %w", err)
+	}
 	now := s.now().UTC()
 	st.LastTrimAt = &now
+	return nil
 }
 
 func (s *GitRepoSyncService) readHead(ctx context.Context, env []string, dir string, st *GitRepoStatus) {
@@ -455,7 +504,12 @@ func branchRefspec(branch string) string {
 // environment (an http.extraHeader through GIT_CONFIG_*, or a temporary key
 // file for ssh), never into the mirror's .git/config, which the worker can
 // read.
-func (s *GitRepoSyncService) gitEnv(name string, cfg gitRepoSettings) ([]string, func(), error) {
+//
+// pins are curl --resolve entries (host:port:addr) from checkRemote: git
+// connects only to the addresses that were checked, so a DNS answer that
+// changes after the check cannot point the fetch at loopback or metadata.
+// Redirects are refused for the same reason (http.followRedirects=false).
+func (s *GitRepoSyncService) gitEnv(name string, cfg gitRepoSettings, pins ...string) ([]string, func(), error) {
 	var env []string
 	for _, kv := range os.Environ() {
 		if strings.HasPrefix(kv, "GIT_") || strings.HasPrefix(kv, "SSH_AUTH_SOCK=") {
@@ -476,6 +530,10 @@ func (s *GitRepoSyncService) gitEnv(name string, cfg gitRepoSettings) ([]string,
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"LC_ALL=C",
 	)
+	gitCfg := [][2]string{{"http.followRedirects", "false"}}
+	for _, p := range pins {
+		gitCfg = append(gitCfg, [2]string{"http.curloptResolve", p})
+	}
 	cleanup := func() {}
 	switch cfg.Auth {
 	case "token":
@@ -484,11 +542,7 @@ func (s *GitRepoSyncService) gitEnv(name string, cfg gitRepoSettings) ([]string,
 			user = "git"
 		}
 		basic := base64.StdEncoding.EncodeToString([]byte(user + ":" + cfg.Token))
-		env = append(env,
-			"GIT_CONFIG_COUNT=1",
-			"GIT_CONFIG_KEY_0=http.extraHeader",
-			"GIT_CONFIG_VALUE_0=Authorization: Basic "+basic,
-		)
+		gitCfg = append(gitCfg, [2]string{"http.extraHeader", "Authorization: Basic " + basic})
 	case "ssh_key":
 		keyFile, err := os.CreateTemp(s.stateDir, ".key-")
 		if err != nil {
@@ -522,6 +576,10 @@ func (s *GitRepoSyncService) gitEnv(name string, cfg gitRepoSettings) ([]string,
 		env = append(env, "GIT_SSH_COMMAND=ssh -F /dev/null -o BatchMode=yes -o ConnectTimeout=20"+
 			" -o UserKnownHostsFile="+shellQuote(filepath.Join(s.stateDir, name+".known_hosts"))+
 			" -o StrictHostKeyChecking=accept-new")
+	}
+	env = append(env, "GIT_CONFIG_COUNT="+strconv.Itoa(len(gitCfg)))
+	for i, kv := range gitCfg {
+		env = append(env, fmt.Sprintf("GIT_CONFIG_KEY_%d=%s", i, kv[0]), fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", i, kv[1]))
 	}
 	return env, cleanup, nil
 }
@@ -654,40 +712,63 @@ func parseGitRepoSettings(m map[string]interface{}) (gitRepoSettings, error) {
 
 // checkRemote refuses remotes that resolve to loopback, link-local (cloud
 // metadata), unspecified or multicast addresses, like the MCP NetPolicy.
-// Private ranges are allowed: internal git servers are the main use.
-func (s *GitRepoSyncService) checkRemote(ctx context.Context, raw string) error {
-	host := ""
+// Private ranges are allowed: internal git servers are the main use. For
+// http(s) it returns curl --resolve pins so git connects to exactly the
+// checked addresses. ssh has no such hook: its dial is checked here only.
+func (s *GitRepoSyncService) checkRemote(ctx context.Context, raw string) ([]string, error) {
+	host, port, scheme := "", "", ""
 	if u, err := url.Parse(raw); err == nil && strings.Contains(raw, "://") {
-		if u.Scheme == "file" {
+		scheme = strings.ToLower(u.Scheme)
+		if scheme == "file" {
 			if s.allowFile {
-				return nil
+				return nil, nil
 			}
-			return errors.New("file:// remotes are not allowed")
+			return nil, errors.New("file:// remotes are not allowed")
 		}
-		host = u.Hostname()
+		host, port = u.Hostname(), u.Port()
 	} else if i := strings.Index(raw, "@"); i >= 0 {
 		rest := raw[i+1:]
-		host = rest[:strings.Index(rest, ":")]
+		host, scheme = rest[:strings.Index(rest, ":")], "ssh"
 	}
+	host = strings.Trim(host, "[]")
 	if host == "" {
-		return errors.New("git_url has no host")
+		return nil, errors.New("git_url has no host")
 	}
 	if s.allowLoopback {
-		return nil
+		return nil, nil
 	}
-	rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	addrs, err := net.DefaultResolver.LookupIPAddr(rctx, host)
-	if err != nil {
-		return fmt.Errorf("resolve %s: %v", host, err)
-	}
-	for _, a := range addrs {
-		ip := a.IP
-		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
-			return fmt.Errorf("git_url host %s resolves to %s, which is not allowed", host, ip)
+	var ips []net.IP
+	if ip := net.ParseIP(host); ip != nil {
+		ips = []net.IP{ip}
+	} else {
+		rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		addrs, err := net.DefaultResolver.LookupIPAddr(rctx, host)
+		if err != nil {
+			return nil, fmt.Errorf("resolve %s: %v", host, err)
+		}
+		for _, a := range addrs {
+			ips = append(ips, a.IP)
 		}
 	}
-	return nil
+	var list []string
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+			return nil, fmt.Errorf("git_url host %s resolves to %s, which is not allowed", host, ip)
+		}
+		if ip.To4() != nil {
+			list = append(list, ip.String())
+		} else {
+			list = append(list, "["+ip.String()+"]")
+		}
+	}
+	if scheme != "http" && scheme != "https" || net.ParseIP(host) != nil || len(list) == 0 {
+		return nil, nil
+	}
+	if port == "" {
+		port = map[string]string{"http": "80", "https": "443"}[scheme]
+	}
+	return []string{host + ":" + port + ":" + strings.Join(list, ",")}, nil
 }
 
 // redactGitURL drops user info from an https URL for display.

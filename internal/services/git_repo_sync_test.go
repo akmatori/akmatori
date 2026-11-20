@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,10 +25,15 @@ func requireGit(t *testing.T) {
 // gitT runs git for test fixtures with a fixed identity.
 func gitT(t *testing.T, dir string, args ...string) string {
 	t.Helper()
+	return gitTEnv(t, dir, nil, args...)
+}
+
+func gitTEnv(t *testing.T, dir string, extra []string, args ...string) string {
+	t.Helper()
 	cmd := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@example.com",
 		"-c", "init.defaultBranch=main", "-c", "commit.gpgsign=false"}, args...)...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	cmd.Env = append(append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1"), extra...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -255,7 +261,7 @@ func TestGitRepoSync_TokenStaysOutOfMirror(t *testing.T) {
 	}
 	defer cleanup()
 	joined := strings.Join(env, "\n")
-	if !strings.Contains(joined, "GIT_CONFIG_KEY_0=http.extraHeader") || !strings.Contains(joined, "Authorization: Basic Ym90OnMzY3JldA==") {
+	if !strings.Contains(joined, "=http.extraHeader") || !strings.Contains(joined, "Authorization: Basic Ym90OnMzY3JldA==") {
 		t.Fatalf("token header missing from env")
 	}
 	if !strings.Contains(joined, "GIT_ALLOW_PROTOCOL=https:http:ssh") {
@@ -348,11 +354,11 @@ func TestParseGitRepoSettings(t *testing.T) {
 func TestGitRepoCheckRemote(t *testing.T) {
 	s := &GitRepoSyncService{}
 	for _, u := range []string{"https://127.0.0.1/a.git", "ssh://git@169.254.169.254/a.git", "git@[::1]:a.git", "file:///etc"} {
-		if err := s.checkRemote(context.Background(), u); err == nil {
+		if _, err := s.checkRemote(context.Background(), u); err == nil {
 			t.Errorf("%s: want refusal", u)
 		}
 	}
-	if err := s.checkRemote(context.Background(), "https://10.1.2.3/a.git"); err != nil {
+	if _, err := s.checkRemote(context.Background(), "https://10.1.2.3/a.git"); err != nil {
 		t.Errorf("private address must be allowed: %v", err)
 	}
 }
@@ -375,5 +381,163 @@ func TestGitRepoDetails(t *testing.T) {
 	usage := generateToolUsageExample(*inst)
 	if !strings.Contains(usage, "cd "+filepath.Join(f.root, "cbnet")) || strings.Contains(usage, "gateway_call(") {
 		t.Errorf("usage example:\n%s", usage)
+	}
+}
+
+func (f *gitRepoFixture) commits(t *testing.T, name string) string {
+	t.Helper()
+	return gitT(t, filepath.Join(f.root, name), "rev-list", "--count", "HEAD")
+}
+
+// An unmanaged directory stays untouched on every later pass, and when its
+// instance is disabled; only the status file goes.
+func TestGitRepoSync_UnmanagedDirectorySurvivesLaterPasses(t *testing.T) {
+	f := newGitRepoFixture(t)
+	url, _ := newOrigin(t)
+	manual := filepath.Join(f.root, "cbnet")
+	if err := os.MkdirAll(manual, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(manual, "hand-made")
+	if err := os.WriteFile(marker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inst := f.addInstance(t, "cbnet", map[string]interface{}{"git_url": url})
+	for i := 0; i < 3; i++ {
+		f.clock = f.clock.Add(10 * time.Minute)
+		f.svc.SyncOnce(context.Background())
+		if st := f.status(t, "cbnet"); !st.Unmanaged || !strings.Contains(st.Error, "not managed") {
+			t.Fatalf("pass %d: %+v", i, st)
+		}
+	}
+	// A settings change must not re-clone over it either.
+	inst.Settings = database.JSONB{"git_url": url, "git_branch": "other"}
+	if err := f.db.Save(inst).Error; err != nil {
+		t.Fatal(err)
+	}
+	f.svc.SyncOnce(context.Background())
+	if err := f.db.Model(inst).Update("enabled", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	f.svc.SyncOnce(context.Background())
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("unmanaged directory was touched: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(f.root, "cbnet"+gitRepoStatusSuffix)); !os.IsNotExist(err) {
+		t.Fatal("status file of a removed instance kept")
+	}
+}
+
+// Once the operator removes the foreign directory, the mirror is created.
+func TestGitRepoSync_UnmanagedDirectoryRemovedThenCloned(t *testing.T) {
+	f := newGitRepoFixture(t)
+	url, _ := newOrigin(t)
+	if err := os.MkdirAll(filepath.Join(f.root, "cbnet"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.addInstance(t, "cbnet", map[string]interface{}{"git_url": url})
+	f.svc.SyncOnce(context.Background())
+	if err := os.RemoveAll(filepath.Join(f.root, "cbnet")); err != nil {
+		t.Fatal(err)
+	}
+	f.svc.SyncOnce(context.Background())
+	st := f.status(t, "cbnet")
+	if st.Unmanaged || st.Error != "" || st.HeadCommit == "" {
+		t.Fatalf("want a managed mirror: %+v", st)
+	}
+}
+
+// git_history_days=0 keeps exactly the newest commit across fetches.
+func TestGitRepoSync_ZeroDaysKeepsNewestCommitOnly(t *testing.T) {
+	f := newGitRepoFixture(t)
+	url, work := newOrigin(t)
+	f.addInstance(t, "z", map[string]interface{}{"git_url": url, "git_history_days": float64(0)})
+	f.svc.SyncOnce(context.Background())
+	for i := 0; i < 3; i++ {
+		head := commitFile(t, work, "router-1", fmt.Sprintf("rev %d\n", i))
+		gitT(t, work, "push", "-q", "origin", "main")
+		f.clock = f.clock.Add(6 * time.Minute)
+		f.svc.SyncOnce(context.Background())
+		if st := f.status(t, "z"); st.HeadCommit != head || st.Error != "" {
+			t.Fatalf("pass %d: %+v", i, st)
+		}
+		if n := f.commits(t, "z"); n != "1" {
+			t.Fatalf("pass %d: %s commits, want 1", i, n)
+		}
+	}
+}
+
+// A repository whose newest commit is older than the window keeps only the
+// newest commit, both on clone and when it goes idle later.
+func TestGitRepoSync_EmptyWindowFallsBackToNewestCommit(t *testing.T) {
+	f := newGitRepoFixture(t)
+	url, work := newOrigin(t)
+	old := f.clock.Add(-100 * 24 * time.Hour).Format(time.RFC3339)
+	for i := 0; i < 2; i++ {
+		if err := os.WriteFile(filepath.Join(work, "old"), []byte(fmt.Sprint(i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitT(t, work, "add", "old")
+		gitTEnv(t, work, []string{"GIT_COMMITTER_DATE=" + old, "GIT_AUTHOR_DATE=" + old}, "commit", "-q", "-m", "old")
+	}
+	gitT(t, work, "push", "-q", "origin", "main")
+
+	f.addInstance(t, "idle", map[string]interface{}{"git_url": url, "git_history_days": float64(30)})
+	f.svc.SyncOnce(context.Background())
+	if st := f.status(t, "idle"); st.Error != "" || st.HeadCommit == "" || st.HistoryFrom != nil {
+		t.Fatalf("clone of an idle repo: %+v", st)
+	}
+	if n := f.commits(t, "idle"); n != "1" {
+		t.Fatalf("%s commits, want 1", n)
+	}
+}
+
+func TestGitRepoSync_HistoryTrimmedWhenRepoGoesIdle(t *testing.T) {
+	f := newGitRepoFixture(t)
+	url, work := newOrigin(t)
+	commitFile(t, work, "router-1", "second\n")
+	gitT(t, work, "push", "-q", "origin", "main")
+	f.addInstance(t, "c", map[string]interface{}{"git_url": url, "git_history_days": float64(30)})
+	f.svc.SyncOnce(context.Background())
+	if n := f.commits(t, "c"); n != "3" && n != "2" {
+		t.Fatalf("initial history %s", n)
+	}
+	f.clock = f.clock.Add(60 * 24 * time.Hour) // every commit is now outside the window
+	f.svc.SyncOnce(context.Background())
+	st := f.status(t, "c")
+	if st.Error != "" {
+		t.Fatalf("trim error: %s", st.Error)
+	}
+	if n := f.commits(t, "c"); n != "1" {
+		t.Fatalf("after idle trim: %s commits, want 1", n)
+	}
+	if st.LastTrimAt == nil || !st.LastTrimAt.Equal(f.clock.UTC()) {
+		t.Fatalf("trim time not recorded: %+v", st.LastTrimAt)
+	}
+}
+
+func TestGitRepoEnv_NoRedirectsAndPinnedAddresses(t *testing.T) {
+	f := newGitRepoFixture(t)
+	env, cleanup, err := f.svc.gitEnv("x", gitRepoSettings{Auth: "token", Token: "t"}, "git.example.com:443:10.0.0.7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	got := map[string]string{}
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GIT_CONFIG_") {
+			i := strings.Index(kv, "=")
+			got[kv[:i]] = kv[i+1:]
+		}
+	}
+	if got["GIT_CONFIG_COUNT"] != "3" {
+		t.Fatalf("config entries: %v", got)
+	}
+	want := map[string]string{"http.followRedirects": "false", "http.curloptResolve": "git.example.com:443:10.0.0.7", "http.extraHeader": "Authorization: Basic Z2l0OnQ="}
+	for i := 0; i < 3; i++ {
+		k, v := got[fmt.Sprintf("GIT_CONFIG_KEY_%d", i)], got[fmt.Sprintf("GIT_CONFIG_VALUE_%d", i)]
+		if want[k] != v {
+			t.Errorf("%s = %q, want %q", k, v, want[k])
+		}
 	}
 }
