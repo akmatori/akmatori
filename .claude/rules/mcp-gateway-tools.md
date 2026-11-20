@@ -174,7 +174,7 @@ plus `<logical_name>.status.json`; the worker mounts `repos` read-only (compose 
 (`getGitRepoSchema`) only for the UI form; `connected-tools` gets a hand-written bash example and
 the path, branch, window and last error from the status file.
 
-- settings: `git_url` (https, http, ssh, scp-like; no credentials in it), `git_branch` (empty =
+- settings: `git_url` (https, http, ssh, scp-like; no credentials and, for http(s), no user name in it), `git_branch` (empty =
   remote default), `git_auth` none|token|ssh_key, `git_token` / `git_ssh_private_key` (secrets),
   `git_username`, `git_ssh_known_hosts` (empty = accept-new, pinned in the state dir),
   `git_history_days` (30; 0 = newest commit), `git_sync_interval` (300 s, min 60),
@@ -185,12 +185,15 @@ the path, branch, window and last error from the status file.
   starting with `-`, `ext::` and `file://` are refused; the remote host must not resolve to
   loopback, link-local or multicast (private ranges are allowed). For http(s) the checked
   addresses are pinned with `http.curloptResolve` and `http.followRedirects=false`, so a later DNS
-  answer or a redirect cannot move the fetch; ssh is checked before the dial only
+  answer or a redirect cannot move the fetch; the env proxy (`HTTP(S)_PROXY`, `ALL_PROXY`) is not
+  used, so the git host needs direct egress; ssh is checked before the dial only
 - a 30 s loop syncs due mirrors one at a time: clone `--depth 1` into a `.tmp-*` dir, then
   `fetch --shallow-since` for the window, then rename; later fetch + `reset --hard`; once a day
   re-apply the window (`git_history_days=0`: every fetch is `--depth=1`), `reflog expire` and
   `gc --prune=now`; a window with no commits in it (idle repo) falls back to the newest commit,
-  and a failed trim is recorded in the status and retried. A url/branch/auth change re-clones;
+  and a failed trim is recorded in the status and retried. A url/branch/auth change re-clones; a failure
+  before the old mirror is removed (DNS, refused address) keeps the old fingerprint in the status, so
+  the change is still applied on a later pass;
   over `git_max_size_mb` the mirror is removed and not retried until a setting changes
 - disabled or deleted instances lose their mirror. A directory Akmatori did not create gets a
   status with `unmanaged: true` and is never written to or deleted on any later pass (settings

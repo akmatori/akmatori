@@ -322,6 +322,7 @@ func TestParseGitRepoSettings(t *testing.T) {
 		{"option injection", map[string]interface{}{"git_url": "--upload-pack=touch /tmp/x"}, "must not start", ""},
 		{"ext transport", map[string]interface{}{"git_url": "ext::sh -c touch% /tmp/x"}, "must be https", ""},
 		{"password in url", map[string]interface{}{"git_url": "https://u:p@git.example.com/a.git"}, "must not contain a password", ""},
+		{"token as url user", map[string]interface{}{"git_url": "https://ghp_secret@git.example.com/a.git"}, "must not contain a user name", ""},
 		{"token over ssh", map[string]interface{}{"git_url": "ssh://git@h/a.git", "git_auth": "token", "git_token": "t"}, "only with an https", ""},
 		{"key over https", map[string]interface{}{"git_url": "https://h/a.git", "git_auth": "ssh_key", "git_ssh_private_key": "k"}, "only with an ssh", ""},
 		{"token missing", map[string]interface{}{"git_url": "https://h/a.git", "git_auth": "token"}, "needs git_token", ""},
@@ -538,6 +539,58 @@ func TestGitRepoEnv_NoRedirectsAndPinnedAddresses(t *testing.T) {
 		k, v := got[fmt.Sprintf("GIT_CONFIG_KEY_%d", i)], got[fmt.Sprintf("GIT_CONFIG_VALUE_%d", i)]
 		if want[k] != v {
 			t.Errorf("%s = %q, want %q", k, v, want[k])
+		}
+	}
+}
+
+func TestGitRepoSync_FailedURLChangeStillReclonesLater(t *testing.T) {
+	f := newGitRepoFixture(t)
+	urlA, _ := newOrigin(t)
+	urlB, workB := newOrigin(t)
+	commitFile(t, workB, "router-b", "hostname router-b\n")
+	gitT(t, workB, "push", "-q", "origin", "main")
+
+	inst := f.addInstance(t, "cfg", map[string]interface{}{"git_url": urlA})
+	f.svc.SyncOnce(context.Background())
+	applied := f.status(t, "cfg").Fingerprint
+
+	inst.Settings = database.JSONB{"git_url": urlB}
+	if err := f.db.Save(inst).Error; err != nil {
+		t.Fatal(err)
+	}
+	f.svc.allowFile = false // the new remote fails the preflight check (like a DNS error)
+	f.svc.SyncOnce(context.Background())
+	st := f.status(t, "cfg")
+	if st.Error == "" || st.Fingerprint != applied {
+		t.Fatalf("failed change must keep the applied fingerprint: %+v", st)
+	}
+
+	f.svc.allowFile = true // the remote is reachable again
+	f.svc.SyncOnce(context.Background())
+	if st := f.status(t, "cfg"); st.Error != "" {
+		t.Fatalf("status: %+v", st)
+	}
+	if _, err := os.Stat(filepath.Join(f.root, "cfg", "router-b")); err != nil {
+		t.Fatalf("mirror still follows the old origin: %v", err)
+	}
+	if got := gitT(t, filepath.Join(f.root, "cfg"), "remote", "get-url", "origin"); strings.TrimSpace(got) != urlB {
+		t.Fatalf("origin = %q, want %q", got, urlB)
+	}
+}
+
+func TestGitRepoEnv_DropsProxy(t *testing.T) {
+	f := newGitRepoFixture(t)
+	for _, k := range []string{"HTTPS_PROXY", "http_proxy", "ALL_PROXY", "NO_PROXY"} {
+		t.Setenv(k, "http://proxy.example:3128")
+	}
+	env, cleanup, err := f.svc.gitEnv("x", gitRepoSettings{Auth: "none"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	for _, kv := range env {
+		if isProxyEnv(kv) {
+			t.Errorf("proxy variable passed to git: %s", kv)
 		}
 	}
 }

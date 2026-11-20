@@ -278,13 +278,23 @@ func (s *GitRepoSyncService) syncInstance(ctx context.Context, inst database.Too
 		}
 		prev = nil // the foreign directory is gone: start fresh
 	}
+	// keepApplied records a failure that happened before the mirror was
+	// replaced: the status keeps the fingerprint of the settings the mirror
+	// on disk was built from, so the next pass still sees the change and
+	// re-clones instead of fetching the old origin with the new credentials.
+	keepApplied := func(err error) {
+		st.Error = err.Error()
+		if prev != nil {
+			st.Fingerprint, st.Branch = prev.Fingerprint, prev.Branch
+		}
+		s.finish(st, prev)
+	}
 	var pins []string
 	if cfgErr == nil {
 		pins, cfgErr = s.checkRemote(ctx, cfg.URL)
 	}
 	if cfgErr != nil {
-		st.Error = cfgErr.Error()
-		s.finish(st, prev)
+		keepApplied(cfgErr)
 		return
 	}
 
@@ -312,8 +322,12 @@ func (s *GitRepoSyncService) syncInstance(ctx context.Context, inst database.Too
 
 	env, cleanup, err := s.gitEnv(name, cfg, pins...)
 	if err != nil {
-		st.Error = err.Error()
-		s.finish(st, prev)
+		if changed {
+			st.Error = err.Error() // the old mirror is already gone
+			s.finish(st, prev)
+		} else {
+			keepApplied(err)
+		}
 		return
 	}
 	defer cleanup()
@@ -496,6 +510,11 @@ func (s *GitRepoSyncService) readHead(ctx context.Context, env []string, dir str
 	}
 }
 
+func isProxyEnv(kv string) bool {
+	k := strings.ToLower(kv[:strings.IndexByte(kv+"=", '=')])
+	return k == "http_proxy" || k == "https_proxy" || k == "all_proxy" || k == "no_proxy"
+}
+
 func branchRefspec(branch string) string {
 	return "+refs/heads/" + branch + ":refs/remotes/origin/" + branch
 }
@@ -508,11 +527,13 @@ func branchRefspec(branch string) string {
 // pins are curl --resolve entries (host:port:addr) from checkRemote: git
 // connects only to the addresses that were checked, so a DNS answer that
 // changes after the check cannot point the fetch at loopback or metadata.
-// Redirects are refused for the same reason (http.followRedirects=false).
+// Redirects are refused for the same reason (http.followRedirects=false),
+// and the env proxy is dropped: a proxy resolves the host itself, which would
+// bypass the pins (the same rule as MCP's NetPolicy).
 func (s *GitRepoSyncService) gitEnv(name string, cfg gitRepoSettings, pins ...string) ([]string, func(), error) {
 	var env []string
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "GIT_") || strings.HasPrefix(kv, "SSH_AUTH_SOCK=") {
+		if strings.HasPrefix(kv, "GIT_") || strings.HasPrefix(kv, "SSH_AUTH_SOCK=") || isProxyEnv(kv) {
 			continue
 		}
 		env = append(env, kv)
@@ -673,6 +694,10 @@ func parseGitRepoSettings(m map[string]interface{}) (gitRepoSettings, error) {
 		if u.User != nil {
 			if _, hasPass := u.User.Password(); hasPass {
 				return cfg, errors.New("git_url must not contain a password; put the token in git_token")
+			}
+			// https://TOKEN@host would be stored in .git/config, which agents read
+			if scheme == "https" || scheme == "http" {
+				return cfg, errors.New("git_url must not contain a user name; use git_username and git_token")
 			}
 		}
 		if u.Host == "" && scheme != "file" { // file:// is refused later unless a test allows it
