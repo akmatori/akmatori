@@ -639,7 +639,7 @@ func getCatchpointSchema() ToolTypeSchema {
 			},
 			{
 				Name:        "get_test_performance_raw",
-				Description: "Get raw test performance data points",
+				Description: "Get raw test performance data points (max 1 hour per call; without start_time/end_time returns the last hour)",
 				Parameters:  "test_ids (required), start_time, end_time, node_ids, page_number, page_size",
 				Returns:     "JSON with raw performance data points",
 			},

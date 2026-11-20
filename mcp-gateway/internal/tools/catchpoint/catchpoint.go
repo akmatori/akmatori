@@ -350,13 +350,16 @@ func addPaginationParams(params url.Values, args map[string]interface{}) {
 	}
 }
 
-// addTimeParams adds optional start_time and end_time parameters
+// addTimeParams adds optional start_time and end_time parameters.
+// The Catchpoint v4 API names them startTimeUtc and endTimeUtc. It silently
+// ignores unknown names and returns the default window (last hour), so the
+// names must match the spec exactly.
 func addTimeParams(params url.Values, args map[string]interface{}) {
 	if v, ok := args["start_time"].(string); ok && v != "" {
-		params.Set("startTime", v)
+		params.Set("startTimeUtc", v)
 	}
 	if v, ok := args["end_time"].(string); ok && v != "" {
-		params.Set("endTime", v)
+		params.Set("endTimeUtc", v)
 	}
 }
 
