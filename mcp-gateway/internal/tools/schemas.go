@@ -68,6 +68,7 @@ func GetToolSchemas() map[string]ToolTypeSchema {
 		"kubernetes":       getK8sSchema(),
 		"jira":             getJiraSchema(),
 		"gitea":            getGiteaSchema(),
+		"git_repo":         getGitRepoSchema(),
 	}
 }
 
@@ -1563,5 +1564,80 @@ func getGiteaSchema() ToolTypeSchema {
 			{Name: "search_pull_requests", Description: "List pull requests of a repository", Parameters: "repo (required), state, query, labels, author, limit, page", Returns: "JSON: pull_requests array"},
 			{Name: "create_pull_request_comment", Description: "Post a comment (write). Requires gitea_allow_comments=true.", Parameters: "repo + number, or pr_url; body (required)", Returns: "JSON: comment_id, html_url"},
 		},
+	}
+}
+
+// getGitRepoSchema describes a mirrored git repository. The API keeps the
+// mirror (internal/services/git_repo_sync.go); the gateway registers no
+// functions for it: agents read the files at /akmatori/repos/<logical_name>.
+func getGitRepoSchema() ToolTypeSchema {
+	return ToolTypeSchema{
+		Name:        "git_repo",
+		Description: "Read-only mirror of a git repository (device configs, runbooks, IaC). Akmatori clones it shallow and fetches it every git_sync_interval seconds; agents read it on disk at /akmatori/repos/<logical_name> with git and rg. No gateway functions.",
+		Version:     "1.0.0",
+		SettingsSchema: SettingsSchema{
+			Type:     "object",
+			Required: []string{"git_url"},
+			Properties: map[string]PropertySchema{
+				"git_url": {
+					Type:        "string",
+					Description: "Clone URL: https://host/owner/repo.git, ssh://git@host:port/owner/repo.git or git@host:owner/repo.git. No credentials in the URL.",
+					Example:     "ssh://git@git.example.com:2222/netops/configs.git",
+				},
+				"git_branch": {
+					Type:        "string",
+					Description: "Branch to mirror. Empty = the remote's default branch.",
+				},
+				"git_auth": {
+					Type:        "string",
+					Description: "none (public repository), token (https) or ssh_key (ssh). Empty = picked from the fields you fill in.",
+					Enum:        []string{"none", "token", "ssh_key"},
+				},
+				"git_token": {
+					Type:        "string",
+					Description: "Read-only access token for https (sent as HTTP basic auth, never stored in the mirror).",
+					Secret:      true,
+				},
+				"git_username": {
+					Type:        "string",
+					Description: "User name for the token. GitHub: x-access-token; GitLab: oauth2 or any; Gitea/Forgejo: your user name. Default: git.",
+					Advanced:    true,
+				},
+				"git_ssh_private_key": {
+					Type:        "string",
+					Description: "Private key (PEM/OpenSSH, no passphrase) of a read-only deploy key.",
+					Secret:      true,
+					Format:      "textarea",
+				},
+				"git_ssh_known_hosts": {
+					Type:        "string",
+					Description: "known_hosts lines for the git server (ssh-keyscan -p <port> <host>). Empty = trust the key seen on the first connect and pin it.",
+					Format:      "textarea",
+					Advanced:    true,
+				},
+				"git_history_days": {
+					Type:        "integer",
+					Description: "Days of history to keep (shallow clone, trimmed daily). 0 = newest commit only.",
+					Default:     30,
+					Minimum:     intPtr(0),
+					Maximum:     intPtr(3650),
+				},
+				"git_sync_interval": {
+					Type:        "integer",
+					Description: "Seconds between fetches.",
+					Default:     300,
+					Minimum:     intPtr(60),
+					Maximum:     intPtr(86400),
+				},
+				"git_max_size_mb": {
+					Type:        "integer",
+					Description: "The mirror is removed and not retried when it grows over this size (MB) until a setting changes.",
+					Default:     2048,
+					Minimum:     intPtr(1),
+					Advanced:    true,
+				},
+			},
+		},
+		Functions: []ToolFunction{},
 	}
 }

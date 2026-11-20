@@ -447,6 +447,19 @@ func generateToolUsageExample(tool database.ToolInstance) string {
 	}
 
 	switch typeName {
+	case GitRepoToolType:
+		return fmt.Sprintf(`
+No gateway_call: this is a read-only git mirror on disk (see Path above). Read it with bash:
+`+"```"+`
+cd %s/%s
+git log -5 --format='%%ci %%h %%an %%s'                 # newest commits (all times UTC)
+git log --since='6 hours ago' --format='%%ci %%h %%an %%s' -- <path>
+git diff "$(git rev-list -1 --before='<time>' HEAD)" HEAD -- <path>   # what changed since <time>
+git show "$(git rev-list -1 --before='<time>' HEAD)":<path>          # a file as of <time>
+rg -n '<regex>' <dir>                                    # search the working tree
+`+"```"+`
+The mirror is shallow: history before the window in the status file is missing, and a date before it has no answer. Check head_commit_at in the status file and say so when the data is old. Never write to the mirror.
+`, GitRepoRoot, logicalName)
 	case "ssh":
 		adhocEnabled, _ := tool.Settings["allow_adhoc_connections"].(bool)
 		adhocWriteEnabled, _ := tool.Settings["adhoc_allow_write_commands"].(bool)
@@ -929,6 +942,8 @@ func extractToolDetails(tool database.ToolInstance) string {
 	typeName := tool.ToolType.Name
 
 	switch typeName {
+	case GitRepoToolType:
+		return gitRepoDetails(tool)
 	case "ssh":
 		var details strings.Builder
 

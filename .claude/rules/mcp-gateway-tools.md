@@ -2,6 +2,7 @@
 paths:
   - "**/mcp-gateway/**"
   - "**/agent-worker/src/gateway-tools.ts"
+  - "**/internal/services/git_repo_sync*.go"
 ---
 
 # MCP Gateway and tool routing
@@ -163,3 +164,29 @@ Forgejo speaks the same API.
 - listings page by `X-Total-Count` (Gitea may cap the page size), at most 20 pages
 - `create_pull_request_comment` re-reads `gitea_allow_comments` from the DB on every call (no cache)
 - no proxy toggle and no env proxy; redirects are refused (the token would follow them)
+
+## Git repository mirrors: git_repo
+
+A tool type with **no gateway functions**. The API (`internal/services/git_repo_sync.go`, started
+from `main.go`) keeps one shallow mirror per enabled instance at `/akmatori/repos/<logical_name>`
+plus `<logical_name>.status.json`; the worker mounts `repos` read-only (compose and Helm) with
+`safe.directory=*` and `GIT_OPTIONAL_LOCKS=0`. The settings schema lives in the gateway
+(`getGitRepoSchema`) only for the UI form; `connected-tools` gets a hand-written bash example and
+the path, branch, window and last error from the status file.
+
+- settings: `git_url` (https, http, ssh, scp-like; no credentials in it), `git_branch` (empty =
+  remote default), `git_auth` none|token|ssh_key, `git_token` / `git_ssh_private_key` (secrets),
+  `git_username`, `git_ssh_known_hosts` (empty = accept-new, pinned in the state dir),
+  `git_history_days` (30; 0 = newest commit), `git_sync_interval` (300 s, min 60),
+  `git_max_size_mb` (2048)
+- credentials go only into git's environment (`http.extraHeader` via `GIT_CONFIG_*`, a temporary
+  0600 key file in `/akmatori/git-state`), never into the mirror's `.git/config`, which agents can
+  read. `git-state` is not mounted into the worker. `GIT_ALLOW_PROTOCOL=https:http:ssh`; URLs
+  starting with `-`, `ext::` and `file://` are refused; the remote host must not resolve to
+  loopback, link-local or multicast (private ranges are allowed)
+- a 30 s loop syncs due mirrors one at a time: clone `--depth 1` into a `.tmp-*` dir, then
+  `fetch --shallow-since` for the window, then rename; later fetch + `reset --hard`; once a day
+  re-apply the window, `reflog expire` and `gc --prune=now`. A url/branch/auth change re-clones;
+  over `git_max_size_mb` the mirror is removed and not retried until a setting changes
+- disabled or deleted instances lose their mirror. Only directories with a status file are ever
+  deleted: a directory Akmatori did not create is left alone and the status says so
