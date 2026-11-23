@@ -1523,7 +1523,7 @@ func getGiteaSchema() ToolTypeSchema {
 				},
 				"gitea_token": {
 					Type:        "string",
-					Description: "Gitea access token. Read-only scopes are enough: read:repository (and read:issue for comments); add write:issue only to allow comments, and write:repository only to allow merges.",
+					Description: "Gitea access token. Read-only scopes are enough: read:repository (and read:issue for comments); add write:issue only to allow comments, and write:repository plus read:user only to allow merges (the merge checks the token user).",
 					Secret:      true,
 				},
 				"gitea_allowed_repos": {
@@ -1585,7 +1585,7 @@ func getGiteaSchema() ToolTypeSchema {
 			{Name: "list_pull_request_comments", Description: "Conversation comments and reviews with inline comments", Parameters: "repo + number, or pr_url", Returns: "JSON: comments, reviews"},
 			{Name: "search_pull_requests", Description: "List pull requests of a repository", Parameters: "repo (required), state, query, labels, author, limit, page", Returns: "JSON: pull_requests array"},
 			{Name: "create_pull_request_comment", Description: "Post a comment (write). Requires gitea_allow_comments=true.", Parameters: "repo + number, or pr_url; body (required)", Returns: "JSON: comment_id, html_url"},
-			{Name: "merge_pull_request", Description: "Merge (write). Requires the repo and base branch in gitea_merge_targets; hard gates on head sha, paths, size, labels, author and reviews.", Parameters: "repo + number, or pr_url; head_sha (required), reason (required), style", Returns: "JSON: merged, merge_commit_sha, base, merged_head"},
+			{Name: "merge_pull_request", Description: "Merge (write). Requires the repo and base branch in gitea_merge_targets; hard gates on head sha, paths, size, labels, author and reviews.", Parameters: "repo + number, or pr_url; head_sha (required, full sha), reason (required), style", Returns: "JSON: merged, merge_commit_sha, base, merged_head"},
 		},
 	}
 }

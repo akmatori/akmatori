@@ -562,6 +562,7 @@ type apiPR struct {
 	Mergeable      bool       `json:"mergeable"`
 	MergedBy       *apiUser   `json:"merged_by"`
 	MergeCommitSha string     `json:"merge_commit_sha"`
+	MergeBase      string     `json:"merge_base"`
 	Labels         []apiLabel `json:"labels"`
 	Assignees      []apiUser  `json:"assignees"`
 	Reviewers      []apiUser  `json:"requested_reviewers"`

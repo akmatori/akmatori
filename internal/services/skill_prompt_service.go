@@ -821,7 +821,7 @@ gateway_call("jira.create_issue", {"project_key": "OPS", "issue_type": "Incident
 - `+"`merge_pull_request`"+` **(write)**: repo*, number* (or pr_url*), head_sha*, reason* | style (merge, rebase, rebase-merge, squash)
 (* = required)
 
-Review a pull request: get_pull_request → list_pull_request_files → get_pull_request_diff per file (a whole-PR diff is cut at max_bytes and says [TRUNCATED]) → get_file at the head sha for context. **(write)** is refused unless the instance allows comments or lists the merge target. Merge only when your instructions say so, and pass the head sha you reviewed: if the pull request changed since, the merge is refused.
+Review a pull request: get_pull_request → list_pull_request_files → get_pull_request_diff per file (a whole-PR diff is cut at max_bytes and says [TRUNCATED]) → get_file at the head sha for context. **(write)** is refused unless the instance allows comments or lists the merge target. Merge only when your instructions say so, and pass the full head sha you reviewed (head.sha, not a short sha): if the pull request changed since, the merge is refused.
 
 Usage (via gateway_call):
 `+"```"+`
@@ -831,7 +831,7 @@ gateway_call("gitea.get_pull_request_diff", {"repo": "infra/puppet", "number": 4
 gateway_call("gitea.get_file", {"repo": "infra/puppet", "path": "manifests/site.pp", "ref": "<head sha>"}, "%s")
 gateway_call("gitea.list_pull_request_comments", {"repo": "infra/puppet", "number": 42}, "%s")
 gateway_call("gitea.search_pull_requests", {"repo": "infra/puppet", "state": "all", "query": "keepalive"}, "%s")
-gateway_call("gitea.merge_pull_request", {"repo": "infra/puppet", "number": 42, "head_sha": "<head sha you reviewed>", "reason": "keepalive 60->120 on preprod only, reviewed"}, "%s")
+gateway_call("gitea.merge_pull_request", {"repo": "infra/puppet", "number": 42, "head_sha": "<full head.sha you reviewed>", "reason": "keepalive 60->120 on preprod only, reviewed"}, "%s")
 `+"```"+`
 `, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
 	case "incidents":

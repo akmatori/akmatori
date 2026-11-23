@@ -164,12 +164,17 @@ Forgejo speaks the same API.
 - `create_pull_request_comment` re-reads `gitea_allow_comments` from the DB on every call (no cache)
 - `merge_pull_request` (`gitea/merge.go`) is off while `gitea_merge_targets` is empty; it re-reads the
   setting from the DB on every call. A target line is `owner/repo:branch [glob ...] [!glob ...]`
-  (`**` crosses directories; globs are anchored at the repo root). Hard gates, in order: target
-  listed for the base branch, open, not draft, head starts with `head_sha`, no hold label
+  (`**` crosses directories and matches newlines; globs are anchored at the repo root and read as
+  runes). Hard gates, in order: target
+  listed for the base branch, open, not draft, head equals the full `head_sha` (40/64 hex, no prefix), no hold label
   (`hold`, `on-hold`, `do-not-merge`, `no-auto-merge`, `wip`), mergeable, author is not the token
-  user (`GET /user`), every changed path (and the old path of a rename) passes the globs,
+  user (`GET /user`, token needs `read:user`), every changed path passes the globs, checked on
+  both the live `pulls/{n}/files` list (with old paths of renames) and the commits pinned by
+  `compare/{merge_base}...{head_sha}` (a pinned rename not in the live list is refused, compare
+  has no old path),
   `gitea_merge_max_files` (10) and `gitea_merge_max_lines` (300), no reviewer whose latest
-  non-dismissed review is `REQUEST_CHANGES`. The POST sends `head_commit_id`, so Gitea also refuses
+  non-dismissed review is `REQUEST_CHANGES` (an incomplete review list is refused). State, target,
+  head and labels are checked again just before the POST. The POST sends `head_commit_id`, so Gitea also refuses
   the merge if the head moves after the check (409). The branch is never deleted. `reason` goes
   into the merge commit message
 - no proxy toggle and no env proxy; redirects are refused (the token would follow them)

@@ -141,10 +141,10 @@ func (r *Registry) registerGiteaTools() {
 		mcp.Tool{
 			Name: "gitea.merge_pull_request",
 			Description: "Merge a Gitea pull request (write). Refused unless the repository and base branch are in gitea_merge_targets. " +
-				"Hard gates: open, not draft, mergeable, no hold label, head still equals head_sha, author is not the token user, " +
+				"Hard gates: open, not draft, mergeable, no hold label, head equals the full head_sha (checked again just before the merge), author is not the token user, " +
 				"changed paths pass the target globs, file and line counts within limits, no reviewer requests changes.",
 			InputSchema: mcp.InputSchema{Type: "object", Properties: prProps(map[string]mcp.Property{
-				"head_sha": {Type: "string", Description: "Head commit sha you reviewed, from get_pull_request (required; at least 7 hex characters)"},
+				"head_sha": {Type: "string", Description: "Full head commit sha you reviewed, head.sha from get_pull_request (required; 40 or 64 hex characters, no short sha)"},
 				"reason":   {Type: "string", Description: "One line on why it is safe to merge; goes into the merge commit message (required)"},
 				"style":    {Type: "string", Description: "merge (default), rebase, rebase-merge or squash", Enum: []string{"merge", "rebase", "rebase-merge", "squash"}},
 			}), Required: []string{"head_sha", "reason"}},
