@@ -16,8 +16,11 @@ import (
 )
 
 // extractionTimeout is the upper bound for a single extraction call when the
-// caller does not provide its own deadline.
-const extractionTimeout = 30 * time.Second
+// caller does not provide its own deadline. A reasoning model (for example
+// DeepSeek-V4.1-Flash) often needs more than 30 s, and a timeout sends a
+// listener message to the fallback: kind "alert", so it opens an incident.
+// 45 s matches correlationTimeout and stays below the worker's 60 s limit.
+const extractionTimeout = 45 * time.Second
 
 // LLMSettingsGetter abstracts LLM settings retrieval for testing
 type LLMSettingsGetter func() (*database.LLMSettings, error)
