@@ -26,6 +26,8 @@ func connectorErrStatus(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, services.ErrConnectorPartIncompatible):
 		return http.StatusBadRequest
+	case errors.Is(err, services.ErrConnectorHasTool):
+		return http.StatusConflict
 	case containsString(err.Error(), "validation failed"):
 		return http.StatusBadRequest
 	}
@@ -210,6 +212,25 @@ func (h *APIHandler) checkConnectorTarget(w http.ResponseWriter, r *http.Request
 	}
 	if _, err := h.connectorService.Get(r.Context(), connectorUUID); err != nil {
 		respondConnectorError(w, err, "Failed to load connector")
+		return false
+	}
+	return true
+}
+
+// checkConnectorToolSlot refuses to create a tool into a connector that
+// already has one, before the tool row exists (LinkNew would refuse it too,
+// but only after the create, leaving the tool in a connector of its own).
+func (h *APIHandler) checkConnectorToolSlot(w http.ResponseWriter, r *http.Request, connectorUUID string) bool {
+	if connectorUUID == "" || h.connectorService == nil {
+		return true
+	}
+	d, err := h.connectorService.Get(r.Context(), connectorUUID)
+	if err != nil {
+		respondConnectorError(w, err, "Failed to load connector")
+		return false
+	}
+	if len(d.Parts.ToolInstances) > 0 {
+		api.RespondError(w, http.StatusConflict, services.ErrConnectorHasTool.Error())
 		return false
 	}
 	return true

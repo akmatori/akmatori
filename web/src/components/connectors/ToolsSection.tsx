@@ -49,9 +49,17 @@ export default function ToolsSection({ scope }: ToolsSectionProps = {}) {
     baseHandleCancel();
   };
 
+  // One connector holds one tool: one endpoint with one set of credentials.
+  const slotTaken = !!scope && tools.length > 0;
+
   return (
     <div>
-      {!isCreating && !editingTool && toolTypes.length > 0 && (
+      {slotTaken && !isCreating && !editingTool && (
+        <p className="mb-4 text-xs text-fg-subtle">
+          A connector holds one tool. For a second instance (for example staging), add another connector of this type.
+        </p>
+      )}
+      {!slotTaken && !isCreating && !editingTool && toolTypes.length > 0 && (
         <div className="mb-4 flex justify-end">
           <button onClick={handleCreate} className="btn btn-primary">
             <Plus className="w-4 h-4" />

@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { GitMerge, LogOut } from 'lucide-react';
 import { connectorsApi } from '../../api/connectors';
 import { getErrorMessage } from '../../utils/errors';
-import type { ConnectorDetail, ConnectorPartKind, ConnectorSummary } from '../../types/connectors';
+import type { ConnectorDetail, ConnectorSummary } from '../../types/connectors';
 import ErrorMessage from '../ErrorMessage';
+import { mergePlan, type PartRow } from './connectorHelpers';
 
 interface Props {
   detail: ConnectorDetail;
@@ -11,14 +12,6 @@ interface Props {
   siblings: ConnectorSummary[];
   onChange: () => void;
   onMovedAway: (newConnectorUUID: string) => void;
-}
-
-interface PartRow {
-  kind: ConnectorPartKind;
-  id: number;
-  label: string;
-  what: string;
-  movable: boolean;
 }
 
 function partRows(d: ConnectorDetail): PartRow[] {
@@ -45,6 +38,7 @@ export default function ConnectorPartsPanel({ detail, siblings, onChange, onMove
   const [mergeFrom, setMergeFrom] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const rows = partRows(detail);
   const mergeable = siblings.filter((s) => s.kind !== 'custom_mcp');
 
@@ -66,11 +60,17 @@ export default function ConnectorPartsPanel({ detail, siblings, onChange, onMove
     if (!mergeFrom) return;
     setBusy(true);
     setError('');
+    setNotice('');
     try {
       const other = await connectorsApi.get(mergeFrom);
-      for (const r of partRows(other)) {
-        if (r.kind === 'mcp_server' || !r.movable) continue;
+      const plan = mergePlan(rows, partRows(other));
+      for (const r of plan.move) {
         await connectorsApi.attach(detail.uuid, r.kind, r.id);
+      }
+      if (plan.keep.length > 0) {
+        setNotice(
+          `A connector holds one tool, so ${plan.keep.map((r) => r.label).join(', ')} stayed in its own connector.`,
+        );
       }
       setMergeFrom('');
       onChange();
@@ -92,6 +92,7 @@ export default function ConnectorPartsPanel({ detail, siblings, onChange, onMove
         </p>
       </div>
       {error && <ErrorMessage message={error} />}
+      {notice && <p className="text-xs text-fg-muted">{notice}</p>}
       {rows.length === 0 ? (
         <p className="text-sm text-fg-muted">Nothing yet.</p>
       ) : (

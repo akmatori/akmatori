@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   addPathFor,
+  mergePlan,
+  type PartRow,
   filterConnectors,
   groupCatalog,
   isValidRemoteURL,
@@ -153,5 +155,27 @@ describe('partScope', () => {
     expect(scopedAlertSources(sources, scope)).toHaveLength(1);
     const ats = [{ name: 'zabbix' }, { name: 'datadog' }] as AlertSourceType[];
     expect(creatableAlertTypes(ats, scope).map((t) => t.name)).toEqual(['zabbix']);
+  });
+});
+
+describe('mergePlan', () => {
+  const row = (kind: PartRow['kind'], id: number, movable = true): PartRow => ({ kind, id, label: `${kind}-${id}`, what: '', movable });
+
+  it('moves one tool into a connector without a tool', () => {
+    const plan = mergePlan([row('alert_source', 1)], [row('tool_instance', 2), row('tool_instance', 3), row('alert_source', 4)]);
+    expect(plan.move.map((r) => r.id)).toEqual([2, 4]);
+    expect(plan.keep.map((r) => r.id)).toEqual([3]);
+  });
+
+  it('keeps every tool when the target already has one', () => {
+    const plan = mergePlan([row('tool_instance', 1)], [row('tool_instance', 2), row('integration', 5)]);
+    expect(plan.move.map((r) => r.id)).toEqual([5]);
+    expect(plan.keep.map((r) => r.id)).toEqual([2]);
+  });
+
+  it('skips MCP servers and parts that cannot move', () => {
+    const plan = mergePlan([], [row('mcp_server', 1, false), row('tool_instance', 2, false)]);
+    expect(plan.move).toEqual([]);
+    expect(plan.keep).toEqual([]);
   });
 });

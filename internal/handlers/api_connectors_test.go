@@ -189,6 +189,7 @@ func TestConnectorsAPI_ErrorMapping(t *testing.T) {
 		{services.ErrConnectorNotFound, http.StatusNotFound},
 		{services.ErrConnectorPartNotFound, http.StatusNotFound},
 		{services.ErrConnectorPartIncompatible, http.StatusBadRequest},
+		{services.ErrConnectorHasTool, http.StatusConflict},
 		{errors.New("validation failed: name is required"), http.StatusBadRequest},
 		{errors.New("db exploded"), http.StatusInternalServerError},
 	}
@@ -210,6 +211,33 @@ func TestConnectorsAPI_ErrorMapping(t *testing.T) {
 				t.Errorf("internal error leaked: %s", w.Body.String())
 			}
 		}
+	}
+}
+
+func TestCheckConnectorToolSlot(t *testing.T) {
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	if !h.checkConnectorToolSlot(httptest.NewRecorder(), req, "c1") {
+		t.Fatal("slot check failed without a service")
+	}
+	fake := &fakeConnectorManager{detail: &services.ConnectorDetail{}}
+	h.SetConnectorService(fake)
+	if !h.checkConnectorToolSlot(httptest.NewRecorder(), req, "c1") {
+		t.Fatal("empty connector refused")
+	}
+	if !h.checkConnectorToolSlot(httptest.NewRecorder(), req, "") {
+		t.Fatal("no target refused")
+	}
+	fake.detail.Parts.ToolInstances = []services.ConnectorToolPart{{ID: 1}}
+	w := httptest.NewRecorder()
+	if h.checkConnectorToolSlot(w, req, "c1") || w.Code != http.StatusConflict {
+		t.Fatalf("connector with a tool: code %d", w.Code)
+	}
+	fake.detail = nil
+	fake.getErr = services.ErrConnectorNotFound
+	w = httptest.NewRecorder()
+	if h.checkConnectorToolSlot(w, req, "c1") || w.Code != http.StatusNotFound {
+		t.Fatalf("missing connector: code %d", w.Code)
 	}
 }
 

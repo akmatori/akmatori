@@ -994,6 +994,9 @@ paths:
                   description: Optional logical name; auto-derived from name if empty
                 settings:
                   type: object
+                connector_uuid:
+                  type: string
+                  description: Optional connector for the new tool. Without it, a new connector is created. A connector holds at most one tool.
       responses:
         '201':
           description: Tool created
@@ -1001,6 +1004,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ToolInstance'
+        '409':
+          description: The connector named by connector_uuid already has a tool. Add another connector for a second instance.
 
   /tools/{id}:
     parameters:
@@ -2491,7 +2496,7 @@ paths:
   /connectors/{uuid}/parts:
     post:
       summary: Move a part into this connector
-      description: The part must match the connector's catalog entry. Its old connector is deleted when it is left empty. Webhook URLs and tool names do not change.
+      description: The part must match the connector's catalog entry. A connector holds at most one tool and one MCP server. Its old connector is deleted when it is left empty. Webhook URLs and tool names do not change.
       operationId: attachConnectorPart
       tags: [Connectors]
       parameters:
@@ -2510,6 +2515,7 @@ paths:
         '200': { description: Connector detail, content: { application/json: { schema: { type: object } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: The connector already has a tool }
   /connectors/{uuid}/parts/{kind}/{id}:
     delete:
       summary: Move a part out into a connector of its own
