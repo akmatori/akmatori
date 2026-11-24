@@ -50,6 +50,9 @@ function ConnectorRow({ c }: { c: ConnectorSummary }) {
         {c.last_alert_at && (
           <p className="text-[11px] text-fg-subtle mt-0.5">alert {formatRelativeAgo(c.last_alert_at)}</p>
         )}
+        {!c.last_alert_at && (c.status.state === 'synced' || c.status.state === 'stale') && c.status.observed_at && (
+          <p className="text-[11px] text-fg-subtle mt-0.5">synced {formatRelativeAgo(c.status.observed_at)}</p>
+        )}
       </div>
     </Link>
   );

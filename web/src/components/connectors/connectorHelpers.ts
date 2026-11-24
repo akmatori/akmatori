@@ -73,6 +73,10 @@ export function statusView(state: ConnectorState): StatusView {
       return { label: 'Configured', tone: 'success' };
     case 'connected':
       return { label: 'Connected', tone: 'success' };
+    case 'synced':
+      return { label: 'Synced', tone: 'success' };
+    case 'stale':
+      return { label: 'Stale', tone: 'warning' };
     case 'disabled':
       return { label: 'Disabled', tone: 'muted' };
     case 'needs_setup':
