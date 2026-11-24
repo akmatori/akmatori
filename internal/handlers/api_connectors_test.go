@@ -25,6 +25,7 @@ type fakeConnectorManager struct {
 	detail     *services.ConnectorDetail
 	err        error // returned by every call that returns an error
 	getErr     error // Get only
+	linkErr    error // LinkNew with a target connector only
 	linked     []string
 	attached   []string
 	detached   []string
@@ -62,6 +63,9 @@ func (f *fakeConnectorManager) Delete(_ context.Context, u string) error {
 }
 func (f *fakeConnectorManager) LinkNew(kind string, id uint, u string) (*database.Connector, error) {
 	f.linked = append(f.linked, fmt.Sprintf("%s:%d:%s", kind, id, u))
+	if u != "" && f.linkErr != nil {
+		return nil, f.linkErr
+	}
 	return &database.Connector{}, f.err
 }
 func (f *fakeConnectorManager) Attach(u, kind string, id uint) error {
@@ -189,6 +193,7 @@ func TestConnectorsAPI_ErrorMapping(t *testing.T) {
 		{services.ErrConnectorNotFound, http.StatusNotFound},
 		{services.ErrConnectorPartNotFound, http.StatusNotFound},
 		{services.ErrConnectorPartIncompatible, http.StatusBadRequest},
+		{services.ErrConnectorHasTool, http.StatusConflict},
 		{errors.New("validation failed: name is required"), http.StatusBadRequest},
 		{errors.New("db exploded"), http.StatusInternalServerError},
 	}
@@ -210,6 +215,51 @@ func TestConnectorsAPI_ErrorMapping(t *testing.T) {
 				t.Errorf("internal error leaked: %s", w.Body.String())
 			}
 		}
+	}
+}
+
+func TestCheckConnectorToolSlot(t *testing.T) {
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	if !h.checkConnectorToolSlot(httptest.NewRecorder(), req, "c1") {
+		t.Fatal("slot check failed without a service")
+	}
+	fake := &fakeConnectorManager{detail: &services.ConnectorDetail{}}
+	h.SetConnectorService(fake)
+	if !h.checkConnectorToolSlot(httptest.NewRecorder(), req, "c1") {
+		t.Fatal("empty connector refused")
+	}
+	if !h.checkConnectorToolSlot(httptest.NewRecorder(), req, "") {
+		t.Fatal("no target refused")
+	}
+	fake.detail.Parts.ToolInstances = []services.ConnectorToolPart{{ID: 1}}
+	w := httptest.NewRecorder()
+	if h.checkConnectorToolSlot(w, req, "c1") || w.Code != http.StatusConflict {
+		t.Fatalf("connector with a tool: code %d", w.Code)
+	}
+	fake.detail = nil
+	fake.getErr = services.ErrConnectorNotFound
+	w = httptest.NewRecorder()
+	if h.checkConnectorToolSlot(w, req, "c1") || w.Code != http.StatusNotFound {
+		t.Fatalf("missing connector: code %d", w.Code)
+	}
+}
+
+// A create that loses the slot race gets a connector of its own at once.
+func TestLinkNewPart_ToolSlotTakenFallsBackToOwnConnector(t *testing.T) {
+	h := NewAPIHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	fake := &fakeConnectorManager{linkErr: services.ErrConnectorHasTool}
+	h.SetConnectorService(fake)
+	h.linkNewPart(services.PartToolInstance, 7, "c1")
+	if want := []string{"tool_instance:7:c1", "tool_instance:7:"}; fmt.Sprint(fake.linked) != fmt.Sprint(want) {
+		t.Fatalf("linked = %v, want %v", fake.linked, want)
+	}
+	// Other link errors do not fall back.
+	fake = &fakeConnectorManager{linkErr: services.ErrConnectorPartIncompatible}
+	h.SetConnectorService(fake)
+	h.linkNewPart(services.PartToolInstance, 8, "c1")
+	if len(fake.linked) != 1 {
+		t.Fatalf("linked = %v", fake.linked)
 	}
 }
 

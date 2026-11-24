@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -205,11 +206,19 @@ func TestConnectorLinkNew(t *testing.T) {
 	zbxConnUUID := f.uuidOf(t, f.connectorOf(t, &database.ToolInstance{}, f.zabbixTool.ID))
 
 	// Into an existing connector of a compatible type.
-	staging := database.ToolInstance{ToolTypeID: f.zabbixType.ID, Name: "Zabbix staging", LogicalName: "zabbix-staging", Enabled: true}
-	mustCreate(t, f.db, &staging)
-	c, err := f.svc.LinkNew(PartToolInstance, staging.ID, zbxConnUUID)
+	c, err := f.svc.LinkNew(PartAlertSource, f.zbxHook.ID, zbxConnUUID)
 	if err != nil || c.UUID != zbxConnUUID {
 		t.Fatalf("LinkNew into target: %v %v", c, err)
+	}
+
+	// A second tool cannot join: a second environment is a second connector.
+	staging := database.ToolInstance{ToolTypeID: f.zabbixType.ID, Name: "Zabbix staging", LogicalName: "zabbix-staging", Enabled: true}
+	mustCreate(t, f.db, &staging)
+	if _, err := f.svc.LinkNew(PartToolInstance, staging.ID, zbxConnUUID); !errors.Is(err, ErrConnectorHasTool) {
+		t.Fatalf("second tool LinkNew err = %v", err)
+	}
+	if f.connectorOf(t, &database.ToolInstance{}, staging.ID) != nil {
+		t.Fatal("second tool was linked")
 	}
 
 	// Incompatible: an Alertmanager source cannot join a Zabbix connector.
@@ -274,6 +283,23 @@ func TestConnectorAttachDetach(t *testing.T) {
 	if err := f.svc.Attach(zbxUUID, PartMCPServer, f.mcp.ID); !errors.Is(err, ErrConnectorPartIncompatible) {
 		t.Fatalf("MCP into zabbix err = %v", err)
 	}
+	// A second tool cannot join; it stays where it was.
+	staging := database.ToolInstance{ToolTypeID: f.zabbixType.ID, Name: "Zabbix staging", LogicalName: "zabbix-staging", Enabled: true}
+	mustCreate(t, f.db, &staging)
+	stagingConn, err := f.svc.LinkNew(PartToolInstance, staging.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.Attach(zbxUUID, PartToolInstance, staging.ID); !errors.Is(err, ErrConnectorHasTool) {
+		t.Fatalf("second tool Attach err = %v", err)
+	}
+	if got := f.connectorOf(t, &database.ToolInstance{}, staging.ID); got == nil || *got != stagingConn.ID {
+		t.Fatal("refused tool left its connector")
+	}
+	// Re-attaching the tool that is already there is not a second tool.
+	if err := f.svc.Attach(zbxUUID, PartToolInstance, f.zabbixTool.ID); err != nil {
+		t.Fatalf("re-attach own tool: %v", err)
+	}
 
 	// Detach the webhook again: new connector, old one keeps the tool.
 	d, err := f.svc.Get(context.Background(), zbxUUID)
@@ -298,6 +324,81 @@ func TestConnectorAttachDetach(t *testing.T) {
 	}
 	if _, err := f.svc.Detach(mcpUUID, PartToolInstance, managedInstanceID(t, f)); err == nil {
 		t.Fatal("managed tool detach accepted")
+	}
+}
+
+// Connectors made before the one-tool limit are split on start: the first
+// tool keeps the connector and its webhook; each extra tool gets its own.
+func TestConnectorReconcile_SplitsExtraTools(t *testing.T) {
+	f := newConnectorFixture(t)
+	if err := f.svc.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	zbxConn := f.connectorOf(t, &database.ToolInstance{}, f.zabbixTool.ID)
+	zbxUUID := f.uuidOf(t, zbxConn)
+	if err := f.svc.Attach(zbxUUID, PartAlertSource, f.zbxHook.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The old state: two more tools in the same connector, written directly.
+	var extra []database.ToolInstance
+	for _, n := range []string{"Zabbix staging", "Zabbix dev"} {
+		ti := database.ToolInstance{ToolTypeID: f.zabbixType.ID, Name: n, LogicalName: n, Enabled: true, ConnectorID: zbxConn}
+		mustCreate(t, f.db, &ti)
+		extra = append(extra, ti)
+	}
+	before := f.count(t)
+
+	if err := f.svc.Reconcile(); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if got := f.count(t); got != before+2 {
+		t.Fatalf("connectors = %d, want %d", got, before+2)
+	}
+	if got := f.connectorOf(t, &database.ToolInstance{}, f.zabbixTool.ID); got == nil || *got != *zbxConn {
+		t.Fatal("first tool left its connector")
+	}
+	if got := f.connectorOf(t, &database.AlertSourceInstance{}, f.zbxHook.ID); got == nil || *got != *zbxConn {
+		t.Fatal("webhook left the first tool's connector")
+	}
+	seen := map[uint]bool{*zbxConn: true}
+	for _, ti := range extra {
+		got := f.connectorOf(t, &database.ToolInstance{}, ti.ID)
+		if got == nil || seen[*got] {
+			t.Fatalf("tool %q connector = %v, want a new one of its own", ti.Name, got)
+		}
+		seen[*got] = true
+		var c database.Connector
+		f.db.First(&c, *got)
+		if c.Name != ti.Name || c.CatalogID != "zabbix" {
+			t.Fatalf("new connector = %+v", c)
+		}
+	}
+	// Idempotent; the MCP connector keeps its managed tool.
+	if err := f.svc.Reconcile(); err != nil || f.count(t) != before+2 {
+		t.Fatalf("second Reconcile: %v, connectors %d", err, f.count(t))
+	}
+	mcpConn := f.connectorOf(t, &database.MCPServerConfig{}, f.mcp.ID)
+	if got := f.connectorOf(t, &database.ToolInstance{}, managedInstanceID(t, f)); got == nil || *got != *mcpConn {
+		t.Fatal("managed MCP tool moved")
+	}
+}
+
+// A part name over the connectors.name size (255) is cut for the new
+// connector; PostgreSQL would refuse the insert and stop Reconcile.
+func TestConnectorLinkNew_LongNameIsCut(t *testing.T) {
+	f := newConnectorFixture(t)
+	long := strings.Repeat("я", 300)
+	ti := database.ToolInstance{ToolTypeID: f.zabbixType.ID, Name: long, LogicalName: "zabbix-long", Enabled: true}
+	mustCreate(t, f.db, &ti)
+	c, err := f.svc.LinkNew(PartToolInstance, ti.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []rune(c.Name); len(got) != 255 || string(got) != string([]rune(long)[:255]) {
+		t.Fatalf("connector name has %d runes", len(got))
+	}
+	if connectorNameFor("Zabbix prod") != "Zabbix prod" {
+		t.Fatal("short name changed")
 	}
 }
 

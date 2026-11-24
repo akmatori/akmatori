@@ -2,10 +2,41 @@ import type {
   ConnectorCapability,
   ConnectorCatalogEntry,
   ConnectorKind,
+  ConnectorPartKind,
   ConnectorState,
   ConnectorSummary,
 } from '../../types/connectors';
 import type { FormattingRule } from '../../types';
+
+// PartRow is one part of a connector as the Settings tab lists it.
+export interface PartRow {
+  kind: ConnectorPartKind;
+  id: number;
+  label: string;
+  what: string;
+  movable: boolean;
+}
+
+// mergePlan picks the parts of another connector that can move into this
+// one. A connector holds at most one tool, so a tool moves only when the
+// target has none, and only the first; the rest stay where they are.
+export function mergePlan(target: PartRow[], other: PartRow[]): { move: PartRow[]; keep: PartRow[] } {
+  let hasTool = target.some((r) => r.kind === 'tool_instance');
+  const move: PartRow[] = [];
+  const keep: PartRow[] = [];
+  for (const r of other) {
+    if (r.kind === 'mcp_server' || !r.movable) continue;
+    if (r.kind === 'tool_instance') {
+      if (hasTool) {
+        keep.push(r);
+        continue;
+      }
+      hasTool = true;
+    }
+    move.push(r);
+  }
+  return { move, keep };
+}
 
 export const CAPABILITY_LABELS: Record<ConnectorCapability, string> = {
   tools: 'Tools',

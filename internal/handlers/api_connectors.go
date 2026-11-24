@@ -26,6 +26,8 @@ func connectorErrStatus(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, services.ErrConnectorPartIncompatible):
 		return http.StatusBadRequest
+	case errors.Is(err, services.ErrConnectorHasTool):
+		return http.StatusConflict
 	case containsString(err.Error(), "validation failed"):
 		return http.StatusBadRequest
 	}
@@ -215,13 +217,39 @@ func (h *APIHandler) checkConnectorTarget(w http.ResponseWriter, r *http.Request
 	return true
 }
 
+// checkConnectorToolSlot refuses to create a tool into a connector that
+// already has one, before the tool row exists (LinkNew would refuse it too,
+// but only after the create, leaving the tool in a connector of its own).
+func (h *APIHandler) checkConnectorToolSlot(w http.ResponseWriter, r *http.Request, connectorUUID string) bool {
+	if connectorUUID == "" || h.connectorService == nil {
+		return true
+	}
+	d, err := h.connectorService.Get(r.Context(), connectorUUID)
+	if err != nil {
+		respondConnectorError(w, err, "Failed to load connector")
+		return false
+	}
+	if len(d.Parts.ToolInstances) > 0 {
+		api.RespondError(w, http.StatusConflict, services.ErrConnectorHasTool.Error())
+		return false
+	}
+	return true
+}
+
 // linkNewPart attaches a just-created part to its connector. Best-effort:
 // on failure the part stays unlinked and the next start reconciles it.
 func (h *APIHandler) linkNewPart(kind string, id uint, connectorUUID string) {
 	if h.connectorService == nil {
 		return
 	}
-	if _, err := h.connectorService.LinkNew(kind, id, connectorUUID); err != nil {
+	_, err := h.connectorService.LinkNew(kind, id, connectorUUID)
+	if errors.Is(err, services.ErrConnectorHasTool) {
+		// Another create filled the slot after checkConnectorToolSlot: the
+		// tool gets a connector of its own now, not at the next start.
+		slog.Warn("connector already has a tool; new tool gets its own connector", "id", id, "connector", connectorUUID)
+		_, err = h.connectorService.LinkNew(kind, id, "")
+	}
+	if err != nil {
 		slog.Warn("failed to link new part to a connector", "kind", kind, "id", id, "connector", connectorUUID, "err", err)
 	}
 }

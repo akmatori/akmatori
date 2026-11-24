@@ -647,6 +647,19 @@ func (s *ConnectorService) catalogIDForPart(cat *connectorCatalog, kind string, 
 	return ""
 }
 
+// maxConnectorNameRunes is the connectors.name column size (size:255). Part
+// names have no limit (tool_instances.name is text), so a new connector
+// named after a part is cut to fit; PostgreSQL would refuse the insert.
+const maxConnectorNameRunes = 255
+
+func connectorNameFor(partName string) string {
+	r := []rune(partName)
+	if len(r) <= maxConnectorNameRunes {
+		return partName
+	}
+	return string(r[:maxConnectorNameRunes])
+}
+
 // LinkNew attaches a just-created part. With connectorUUID set, the part
 // joins that connector (it must accept the part's type); otherwise a new
 // connector is created for it, named after the part. Errors leave the part
@@ -677,10 +690,8 @@ func (s *ConnectorService) linkNewLocked(kind string, id uint, connectorUUID str
 			if !cat.accepts(c.CatalogID, kind, p.typeName, p.toolTypeKind) {
 				return ErrConnectorPartIncompatible
 			}
-			if kind == PartMCPServer {
-				if err := oneMCPServerPerConnector(tx, c.ID, p.id); err != nil {
-					return err
-				}
+			if err := onePartSlot(tx, kind, c.ID, p.id); err != nil {
+				return err
 			}
 			linked = c
 		} else {
@@ -688,7 +699,7 @@ func (s *ConnectorService) linkNewLocked(kind string, id uint, connectorUUID str
 			if catalogID == "" {
 				return nil // hidden built-in: not a connector
 			}
-			c := &database.Connector{UUID: uuid.New().String(), CatalogID: catalogID, Name: p.name}
+			c := &database.Connector{UUID: uuid.New().String(), CatalogID: catalogID, Name: connectorNameFor(p.name)}
 			if err := tx.Create(c).Error; err != nil {
 				return fmt.Errorf("create connector: %w", err)
 			}
@@ -729,10 +740,8 @@ func (s *ConnectorService) Attach(connectorUUID, kind string, id uint) error {
 		if !cat.accepts(c.CatalogID, kind, p.typeName, p.toolTypeKind) {
 			return ErrConnectorPartIncompatible
 		}
-		if kind == PartMCPServer {
-			if err := oneMCPServerPerConnector(tx, c.ID, id); err != nil {
-				return err
-			}
+		if err := onePartSlot(tx, kind, c.ID, id); err != nil {
+			return err
 		}
 		if err := tx.Table(p.table).Where("id = ?", p.id).Update("connector_id", c.ID).Error; err != nil {
 			return err
@@ -795,6 +804,69 @@ func oneMCPServerPerConnector(tx *gorm.DB, connectorID, mcpID uint) error {
 		return ErrConnectorHasMCPServer
 	}
 	return nil
+}
+
+// ErrConnectorHasTool is returned when a connector already has a tool
+// instance. One connector is one endpoint with one set of credentials; a
+// second environment (for example staging) is a second connector.
+var ErrConnectorHasTool = errors.New("validation failed: a connector has at most one tool; add another connector for a second instance")
+
+// oneToolPerConnector refuses a second tool instance in a connector.
+func oneToolPerConnector(tx *gorm.DB, connectorID, toolID uint) error {
+	var n int64
+	if err := tx.Model(&database.ToolInstance{}).Where("connector_id = ? AND id <> ?", connectorID, toolID).Count(&n).Error; err != nil {
+		return err
+	}
+	if n > 0 {
+		return ErrConnectorHasTool
+	}
+	return nil
+}
+
+// onePartSlot applies the one-per-connector limits: one MCP server and one
+// tool instance. Alert sources and integrations have no limit.
+func onePartSlot(tx *gorm.DB, kind string, connectorID, partID uint) error {
+	switch kind {
+	case PartMCPServer:
+		return oneMCPServerPerConnector(tx, connectorID, partID)
+	case PartToolInstance:
+		return oneToolPerConnector(tx, connectorID, partID)
+	}
+	return nil
+}
+
+// splitExtraTools moves every tool instance after the first (lowest id) of
+// a connector into a connector of its own, named after the tool. It is the
+// upgrade step for connectors made before the one-tool limit (create into a
+// connector or Merge). Managed MCP instances are not touched: an MCP
+// connector has exactly one. Nothing is deleted; tool names, logical names
+// and settings do not change. Callers hold s.mu.
+func (s *ConnectorService) splitExtraTools() (int, error) {
+	var rows []database.ToolInstance
+	if err := s.db.Preload("ToolType").Where("connector_id IS NOT NULL").Order("connector_id, id").Find(&rows).Error; err != nil {
+		return 0, err
+	}
+	seen := map[uint]bool{}
+	moved := 0
+	for _, t := range rows {
+		if t.ToolType.Kind == database.ToolTypeKindMCP {
+			continue
+		}
+		cid := *t.ConnectorID
+		if !seen[cid] {
+			seen[cid] = true
+			continue
+		}
+		nc, err := s.linkNewLocked(PartToolInstance, t.ID, "")
+		if err != nil {
+			return moved, fmt.Errorf("split tool %d out of connector %d: %w", t.ID, cid, err)
+		}
+		moved++
+		if nc != nil {
+			slog.Info("moved an extra tool into its own connector", "tool", t.Name, "from_connector_id", cid, "connector", nc.UUID)
+		}
+	}
+	return moved, nil
 }
 
 // linkManagedTool points the managed tool instance of MCP server mcpID at
@@ -936,6 +1008,12 @@ func (s *ConnectorService) Reconcile() error {
 		return err
 	}
 	if err := link(PartIntegration, integIDs); err != nil {
+		return err
+	}
+
+	split, err := s.splitExtraTools()
+	created += split
+	if err != nil {
 		return err
 	}
 

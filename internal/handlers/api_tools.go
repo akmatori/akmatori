@@ -48,6 +48,9 @@ func (h *APIHandler) handleTools(w http.ResponseWriter, r *http.Request) {
 		if !h.checkConnectorTarget(w, r, req.ConnectorUUID) {
 			return
 		}
+		if !h.checkConnectorToolSlot(w, r, req.ConnectorUUID) {
+			return
+		}
 		if managed, err := h.isManagedToolType(req.ToolTypeID); err == nil && managed {
 			api.RespondError(w, http.StatusBadRequest, "this tool type belongs to an MCP server; add the MCP server as a connector instead")
 			return

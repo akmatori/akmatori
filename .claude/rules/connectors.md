@@ -19,7 +19,8 @@ point at it through a nullable `connector_id`: `tool_instances`, `alert_source_i
 - ownership is explicit, never inferred from a type or name. `ConnectorService.Reconcile()` (every
   start) gives each unlinked part its own connector (1:1 upgrade backfill), links each MCP server's
   managed tool instance to the MCP connector, and prunes empty connectors. Parts move with
-  `Attach` / `Detach`; the UI "Merge" moves every part of a same-catalog connector
+  `Attach` / `Detach`; the UI "Merge" moves the parts of a same-catalog connector (see the tool
+  limit below)
 - the Go catalog (`connector_catalog.go`) maps a catalog id to accepted tool types, alert source
   types and messaging provider; `accepts()` is the only compatibility check. HTTP connector
   definitions are `http:<tool_type_name>` entries; unknown tool/alert types get a generic entry;
@@ -33,7 +34,13 @@ point at it through a nullable `connector_id`: `tool_instances`, `alert_source_i
   under `ConnectorService.mu`; `Delete` re-checks that each part still belongs to the connector
   before deleting it; `Reconcile` first clears `connector_id` values that point at a missing row.
   A connector holds at most one MCP server (`oneMCPServerPerConnector` + the partial unique index
-  `uniq_mcp_server_connector`); the UI shows every integration of a merged messaging connector
+  `uniq_mcp_server_connector`) and at most one tool instance (`oneToolPerConnector`, checked in
+  `LinkNew`/`Attach` → `ErrConnectorHasTool`, 409; `POST /api/tools` checks before the create).
+  One connector = one endpoint with one set of credentials; a second environment is a second
+  connector. Alert sources and integrations have no limit. `Reconcile` runs `splitExtraTools`:
+  each tool after the first (lowest id) of a connector moves to a connector of its own (upgrade
+  of pre-limit installs; nothing is deleted). UI Merge uses `mergePlan` and leaves extra tools in
+  place; the UI shows every integration of a merged messaging connector
 - list/detail DTOs carry no credentials. Status: `ok`, `connected`/`error` (MCP, from the gateway's
   `/mcp-servers/status`), `disabled`, `needs_setup` (no parts, or a messaging integration without
   channels), `unknown`. Webhook silence is not an error; `last_alert_at` is shown instead
