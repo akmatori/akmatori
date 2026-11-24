@@ -825,7 +825,7 @@ func TestRouteBotMentionThreadReply_NoIncidentMatchFallsThrough(t *testing.T) {
 // fall-through is silently dropped — the agent never runs. This asserts the
 // inner function proceeds past the dedup point when the key is already set.
 //
-// The proof is reachability: with no Slack client wired, fetchThreadParentText
+// The proof is reachability: with no Slack client wired, fetchThreadContext
 // panics on the nil pointer. If handleBotMentionInThread short-circuited at
 // a dedup gate, no panic would occur and we'd silently return.
 func TestHandleBotMentionInThread_DoesNotShortCircuitOnPreClaimedDedup(t *testing.T) {
