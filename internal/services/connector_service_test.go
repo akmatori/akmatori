@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -379,6 +380,25 @@ func TestConnectorReconcile_SplitsExtraTools(t *testing.T) {
 	mcpConn := f.connectorOf(t, &database.MCPServerConfig{}, f.mcp.ID)
 	if got := f.connectorOf(t, &database.ToolInstance{}, managedInstanceID(t, f)); got == nil || *got != *mcpConn {
 		t.Fatal("managed MCP tool moved")
+	}
+}
+
+// A part name over the connectors.name size (255) is cut for the new
+// connector; PostgreSQL would refuse the insert and stop Reconcile.
+func TestConnectorLinkNew_LongNameIsCut(t *testing.T) {
+	f := newConnectorFixture(t)
+	long := strings.Repeat("я", 300)
+	ti := database.ToolInstance{ToolTypeID: f.zabbixType.ID, Name: long, LogicalName: "zabbix-long", Enabled: true}
+	mustCreate(t, f.db, &ti)
+	c, err := f.svc.LinkNew(PartToolInstance, ti.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []rune(c.Name); len(got) != 255 || string(got) != string([]rune(long)[:255]) {
+		t.Fatalf("connector name has %d runes", len(got))
+	}
+	if connectorNameFor("Zabbix prod") != "Zabbix prod" {
+		t.Fatal("short name changed")
 	}
 }
 

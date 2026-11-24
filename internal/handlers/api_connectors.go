@@ -242,7 +242,14 @@ func (h *APIHandler) linkNewPart(kind string, id uint, connectorUUID string) {
 	if h.connectorService == nil {
 		return
 	}
-	if _, err := h.connectorService.LinkNew(kind, id, connectorUUID); err != nil {
+	_, err := h.connectorService.LinkNew(kind, id, connectorUUID)
+	if errors.Is(err, services.ErrConnectorHasTool) {
+		// Another create filled the slot after checkConnectorToolSlot: the
+		// tool gets a connector of its own now, not at the next start.
+		slog.Warn("connector already has a tool; new tool gets its own connector", "id", id, "connector", connectorUUID)
+		_, err = h.connectorService.LinkNew(kind, id, "")
+	}
+	if err != nil {
 		slog.Warn("failed to link new part to a connector", "kind", kind, "id", id, "connector", connectorUUID, "err", err)
 	}
 }

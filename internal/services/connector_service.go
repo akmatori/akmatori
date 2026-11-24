@@ -647,6 +647,19 @@ func (s *ConnectorService) catalogIDForPart(cat *connectorCatalog, kind string, 
 	return ""
 }
 
+// maxConnectorNameRunes is the connectors.name column size (size:255). Part
+// names have no limit (tool_instances.name is text), so a new connector
+// named after a part is cut to fit; PostgreSQL would refuse the insert.
+const maxConnectorNameRunes = 255
+
+func connectorNameFor(partName string) string {
+	r := []rune(partName)
+	if len(r) <= maxConnectorNameRunes {
+		return partName
+	}
+	return string(r[:maxConnectorNameRunes])
+}
+
 // LinkNew attaches a just-created part. With connectorUUID set, the part
 // joins that connector (it must accept the part's type); otherwise a new
 // connector is created for it, named after the part. Errors leave the part
@@ -686,7 +699,7 @@ func (s *ConnectorService) linkNewLocked(kind string, id uint, connectorUUID str
 			if catalogID == "" {
 				return nil // hidden built-in: not a connector
 			}
-			c := &database.Connector{UUID: uuid.New().String(), CatalogID: catalogID, Name: p.name}
+			c := &database.Connector{UUID: uuid.New().String(), CatalogID: catalogID, Name: connectorNameFor(p.name)}
 			if err := tx.Create(c).Error; err != nil {
 				return fmt.Errorf("create connector: %w", err)
 			}
