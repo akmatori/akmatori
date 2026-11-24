@@ -61,7 +61,7 @@ func (h *APIHandler) handleTools(w http.ResponseWriter, r *http.Request) {
 			if containsString(err.Error(), "validation failed") {
 				api.RespondError(w, http.StatusBadRequest, err.Error())
 			} else if containsString(err.Error(), "already exists") || containsString(err.Error(), "UNIQUE constraint") || containsString(err.Error(), "duplicate key") {
-				api.RespondError(w, http.StatusConflict, err.Error())
+				api.RespondError(w, http.StatusConflict, toolConflictMessage(err))
 			} else {
 				api.RespondError(w, http.StatusInternalServerError, "Failed to create tool instance")
 			}
@@ -135,7 +135,7 @@ func (h *APIHandler) handleToolByID(w http.ResponseWriter, r *http.Request) {
 			} else if containsString(err.Error(), "not found") || containsString(err.Error(), "record not found") {
 				api.RespondError(w, http.StatusNotFound, err.Error())
 			} else if containsString(err.Error(), "already exists") || containsString(err.Error(), "UNIQUE constraint") || containsString(err.Error(), "duplicate key") {
-				api.RespondError(w, http.StatusConflict, err.Error())
+				api.RespondError(w, http.StatusConflict, toolConflictMessage(err))
 			} else {
 				api.RespondError(w, http.StatusInternalServerError, "Failed to update tool")
 			}
@@ -293,5 +293,19 @@ func (h *APIHandler) handleSSHKeyByID(w http.ResponseWriter, r *http.Request, to
 
 	default:
 		api.RespondError(w, http.StatusMethodNotAllowed, "Method not allowed")
+	}
+}
+
+// toolConflictMessage turns a unique-constraint error on a tool instance into
+// a sentence for the UI instead of the raw database error.
+func toolConflictMessage(err error) string {
+	msg := err.Error()
+	switch {
+	case containsString(msg, "logical_name") || containsString(msg, "logical name"):
+		return "A tool with this logical name already exists. Pick another name or edit the existing tool."
+	case containsString(msg, "UNIQUE constraint") || containsString(msg, "duplicate key"):
+		return "A tool with this name already exists. Pick another name or edit the existing tool."
+	default:
+		return msg // already a sentence from the service ("... already exists")
 	}
 }
