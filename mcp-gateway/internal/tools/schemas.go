@@ -1511,7 +1511,7 @@ func getJiraSchema() ToolTypeSchema {
 func getGiteaSchema() ToolTypeSchema {
 	return ToolTypeSchema{
 		Name:        "gitea",
-		Description: "Gitea (and Forgejo) pull requests for pre-merge review: read a pull request, its changed files, diffs (per file, with a byte budget), comments and reviews, and repository files at any ref. Commenting is off unless gitea_allow_comments=true.",
+		Description: "Gitea (and Forgejo) pull requests for pre-merge review: read a pull request, its changed files, diffs (per file, with a byte budget), comments and reviews, and repository files at any ref. Commenting is off unless gitea_allow_comments=true; merging is off unless gitea_merge_targets lists the repository and base branch.",
 		Version:     "1.0.0",
 		SettingsSchema: SettingsSchema{
 			Type:     "object",
@@ -1524,7 +1524,7 @@ func getGiteaSchema() ToolTypeSchema {
 				},
 				"gitea_token": {
 					Type:        "string",
-					Description: "Gitea access token. Read-only scopes are enough: read:repository (and read:issue for comments); add write:issue only to allow comments.",
+					Description: "Gitea access token. Read-only scopes are enough: read:repository (and read:issue for comments); add write:issue only to allow comments, and write:repository plus read:user only to allow merges (the merge checks the token user).",
 					Secret:      true,
 				},
 				"gitea_allowed_repos": {
@@ -1538,6 +1538,29 @@ func getGiteaSchema() ToolTypeSchema {
 					Description: "Allow gitea.create_pull_request_comment. Disabled by default.",
 					Default:     false,
 					Warning:     "Enabling this lets the agent post comments on pull requests with this token.",
+				},
+				"gitea_merge_targets": {
+					Type: "string",
+					Description: "Where gitea.merge_pull_request may merge, one per line: owner/repo:branch, then optional path globs " +
+						"(a changed file must match one plain glob, if any, and no !glob; ** crosses directories). Empty = merging disabled. " +
+						"The token needs write access, and the pull request author must not be the token user.",
+					Format:  "textarea",
+					Example: "ops/prometheus-rules:test rules/**/*.rule\ninfra/puppet:preprod !.gocd.yaml !Puppetfile",
+					Warning: "Every line lets the agent merge into that branch with this token. A branch that deploys on merge is a production change.",
+				},
+				"gitea_merge_max_files": {
+					Type:        "integer",
+					Description: "A merge is refused when the pull request changes more files than this",
+					Default:     10, // gitea.DefaultMergeMaxFiles
+					Minimum:     intPtr(1),
+					Advanced:    true,
+				},
+				"gitea_merge_max_lines": {
+					Type:        "integer",
+					Description: "A merge is refused when the pull request adds plus deletes more lines than this",
+					Default:     300, // gitea.DefaultMergeMaxLines
+					Minimum:     intPtr(1),
+					Advanced:    true,
 				},
 				"gitea_verify_ssl": {
 					Type:        "boolean",
@@ -1563,6 +1586,7 @@ func getGiteaSchema() ToolTypeSchema {
 			{Name: "list_pull_request_comments", Description: "Conversation comments and reviews with inline comments", Parameters: "repo + number, or pr_url", Returns: "JSON: comments, reviews"},
 			{Name: "search_pull_requests", Description: "List pull requests of a repository", Parameters: "repo (required), state, query, labels, author, limit, page", Returns: "JSON: pull_requests array"},
 			{Name: "create_pull_request_comment", Description: "Post a comment (write). Requires gitea_allow_comments=true.", Parameters: "repo + number, or pr_url; body (required)", Returns: "JSON: comment_id, html_url"},
+			{Name: "merge_pull_request", Description: "Merge (write). Requires the repo and base branch in gitea_merge_targets; hard gates on head sha, paths, size, labels, author and reviews.", Parameters: "repo + number, or pr_url; head_sha (required, full sha), reason (required), style", Returns: "JSON: merged, merge_commit_sha, base, merged_head"},
 		},
 	}
 }

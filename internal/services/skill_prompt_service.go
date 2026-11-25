@@ -831,9 +831,10 @@ gateway_call("jira.create_issue", {"project_key": "OPS", "issue_type": "Incident
 - `+"`list_pull_request_comments`"+`: repo*, number* (or pr_url*)
 - `+"`search_pull_requests`"+`: repo* | state (open, closed, all), query, labels, author, limit, page
 - `+"`create_pull_request_comment`"+` **(write)**: repo*, number* (or pr_url*), body*
+- `+"`merge_pull_request`"+` **(write)**: repo*, number* (or pr_url*), head_sha*, reason* | style (merge, rebase, rebase-merge, squash)
 (* = required)
 
-Review a pull request: get_pull_request → list_pull_request_files → get_pull_request_diff per file (a whole-PR diff is cut at max_bytes and says [TRUNCATED]) → get_file at the head sha for context. **(write)** is refused unless the instance allows comments.
+Review a pull request: get_pull_request → list_pull_request_files → get_pull_request_diff per file (a whole-PR diff is cut at max_bytes and says [TRUNCATED]) → get_file at the head sha for context. **(write)** is refused unless the instance allows comments or lists the merge target. Merge only when your instructions say so, and pass the full head sha you reviewed (head.sha, not a short sha): if the pull request changed since, the merge is refused.
 
 Usage (via gateway_call):
 `+"```"+`
@@ -843,8 +844,9 @@ gateway_call("gitea.get_pull_request_diff", {"repo": "infra/puppet", "number": 4
 gateway_call("gitea.get_file", {"repo": "infra/puppet", "path": "manifests/site.pp", "ref": "<head sha>"}, "%s")
 gateway_call("gitea.list_pull_request_comments", {"repo": "infra/puppet", "number": 42}, "%s")
 gateway_call("gitea.search_pull_requests", {"repo": "infra/puppet", "state": "all", "query": "keepalive"}, "%s")
+gateway_call("gitea.merge_pull_request", {"repo": "infra/puppet", "number": 42, "head_sha": "<full head.sha you reviewed>", "reason": "keepalive 60->120 on preprod only, reviewed"}, "%s")
 `+"```"+`
-`, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
+`, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
 	case "incidents":
 		return fmt.Sprintf(`
 **Parameters:**
@@ -1011,10 +1013,41 @@ func extractToolDetails(tool database.ToolInstance) string {
 		} else {
 			details.WriteString("Comments: disabled (read-only; give the review in your answer)\n")
 		}
+		if targets := giteaMergeTargets(tool.Settings["gitea_merge_targets"]); len(targets) > 0 {
+			fmt.Fprintf(&details, "Merge: allowed only into %s (merge_pull_request; every other repository or branch is refused)\n", quotePatterns(targets))
+		} else {
+			details.WriteString("Merge: disabled\n")
+		}
 		return details.String()
 	}
 
 	return ""
+}
+
+// giteaMergeTargets returns the owner/repo:branch part of each
+// gitea_merge_targets line, for the prompt (globs are enforced by the gateway).
+func giteaMergeTargets(v interface{}) []string {
+	var lines []string
+	switch t := v.(type) {
+	case string:
+		lines = strings.Split(t, "\n")
+	case []interface{}:
+		for _, item := range t {
+			if s, ok := item.(string); ok {
+				lines = append(lines, s)
+			}
+		}
+	}
+	var out []string
+	for _, line := range lines {
+		if i := strings.Index(line, "#"); i >= 0 {
+			line = line[:i]
+		}
+		if f := strings.Fields(line); len(f) > 0 && strings.Contains(f[0], ":") {
+			out = append(out, f[0])
+		}
+	}
+	return out
 }
 
 // giteaAllowedRepos reads gitea_allowed_repos like ParseAllowedRepos in the
