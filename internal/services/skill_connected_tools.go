@@ -200,7 +200,7 @@ func (s *SkillService) StartConnectedToolsRefresh(ctx context.Context, interval 
 func hasHandWrittenToolExample(toolType string) bool {
 	switch toolType {
 	case "ssh", "zabbix", "victoria_metrics", "postgresql", "grafana", "catchpoint",
-		"pagerduty", "clickhouse", "netbox", "kubernetes", "jira", "gitea", GitRepoToolType:
+		"pagerduty", "clickhouse", "netbox", "kubernetes", "jira", "gitea", "google_drive", GitRepoToolType:
 		return true
 	}
 	return false

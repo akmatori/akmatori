@@ -12,21 +12,22 @@ const ToolSecretMask = "********"
 // imported); TestToolSecretSettingKeys_MatchGatewaySchemas guards the drift.
 // SSH private keys live nested under "ssh_keys" and are handled separately.
 var toolSecretSettingKeys = map[string]struct{}{
-	"zabbix_token":         {},
-	"zabbix_password":      {},
-	"vm_bearer_token":      {},
-	"vm_password":          {},
-	"grafana_api_token":    {},
-	"catchpoint_api_token": {},
-	"ch_password":          {},
-	"pg_password":          {},
-	"pagerduty_api_token":  {},
-	"netbox_api_token":     {},
-	"k8s_token":            {},
-	"jira_api_token":       {},
-	"gitea_token":          {},
-	"git_token":            {},
-	"git_ssh_private_key":  {},
+	"zabbix_token":                {},
+	"zabbix_password":             {},
+	"vm_bearer_token":             {},
+	"vm_password":                 {},
+	"grafana_api_token":           {},
+	"catchpoint_api_token":        {},
+	"ch_password":                 {},
+	"pg_password":                 {},
+	"pagerduty_api_token":         {},
+	"netbox_api_token":            {},
+	"k8s_token":                   {},
+	"jira_api_token":              {},
+	"gitea_token":                 {},
+	"gdrive_service_account_json": {},
+	"git_token":                   {},
+	"git_ssh_private_key":         {},
 }
 
 // IsToolSecretSetting reports whether a top-level tool settings key holds a

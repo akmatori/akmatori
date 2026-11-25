@@ -68,6 +68,7 @@ func GetToolSchemas() map[string]ToolTypeSchema {
 		"kubernetes":       getK8sSchema(),
 		"jira":             getJiraSchema(),
 		"gitea":            getGiteaSchema(),
+		"google_drive":     getGoogleDriveSchema(),
 		"git_repo":         getGitRepoSchema(),
 	}
 }
@@ -1639,5 +1640,52 @@ func getGitRepoSchema() ToolTypeSchema {
 			},
 		},
 		Functions: []ToolFunction{},
+	}
+}
+
+func getGoogleDriveSchema() ToolTypeSchema {
+	return ToolTypeSchema{
+		Name:        "google_drive",
+		Description: "Google Drive, Docs, Sheets and Slides through a Google service account: search files, read Docs/Slides as text and Sheets as CSV, read Sheets ranges, and append or update Sheets rows (writes are off unless gdrive_allow_writes=true). The service account sees only files shared with its email.",
+		Version:     "1.0.0",
+		SettingsSchema: SettingsSchema{
+			Type:     "object",
+			Required: []string{"gdrive_service_account_json"},
+			Properties: map[string]PropertySchema{
+				"gdrive_service_account_json": {
+					Type:        "string",
+					Description: "Service-account JSON key (Google Cloud → IAM → Service accounts → Keys → Add key → JSON). Enable the Google Drive API and Google Sheets API in its project, then share the files or folders with the service account's client_email.",
+					Secret:      true,
+					Format:      "textarea",
+				},
+				"gdrive_allow_writes": {
+					Type:        "boolean",
+					Description: "Allow sheets_append_rows and sheets_update_values. Disabled by default.",
+					Default:     false,
+					Warning:     "Enabling this lets the agent change every spreadsheet shared with the service account as Editor.",
+				},
+				"gdrive_impersonate_user": {
+					Type:        "string",
+					Description: "Google Workspace user to act as (domain-wide delegation). Empty = the service account itself.",
+					Example:     "ops-bot@example.com",
+					Advanced:    true,
+				},
+				"gdrive_timeout": {
+					Type:        "integer",
+					Description: "API request timeout in seconds",
+					Default:     30,
+					Minimum:     intPtr(5),
+					Maximum:     intPtr(300),
+					Advanced:    true,
+				},
+			},
+		},
+		Functions: []ToolFunction{
+			{Name: "search_files", Description: "Search files shared with the service account", Parameters: "query, type, folder, limit, page_token", Returns: "JSON: files (id, name, type, owner, link), next_page_token"},
+			{Name: "read_file", Description: "Docs/Slides as text, Sheets as CSV per tab, text files", Parameters: "file (required: id or link), max_bytes", Returns: "JSON: file metadata and content, truncated flag"},
+			{Name: "sheets_get_values", Description: "List tabs, or read the values of a range", Parameters: "spreadsheet (required), range, max_rows", Returns: "JSON: tabs, or range and values"},
+			{Name: "sheets_append_rows", Description: "Append rows to a table (write). Requires gdrive_allow_writes=true.", Parameters: "spreadsheet, range, rows (required); value_input", Returns: "JSON: updated_range, updated_rows"},
+			{Name: "sheets_update_values", Description: "Overwrite a range (write). Requires gdrive_allow_writes=true.", Parameters: "spreadsheet, range, values (required); value_input", Returns: "JSON: updated_range, updated_cells"},
+		},
 	}
 }

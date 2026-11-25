@@ -69,6 +69,7 @@ var staticCatalog = []ConnectorCatalogEntry{
 	{ID: "kubernetes", Name: "Kubernetes", Category: "infrastructure", Description: "Read-only diagnostics for pods, deployments, nodes, events and logs.", ToolTypes: []string{"kubernetes"}},
 	{ID: "ssh", Name: "SSH", Category: "infrastructure", Description: "Run commands on your servers over SSH.", ToolTypes: []string{"ssh"}},
 	{ID: "gitea", Name: "Gitea", Category: "infrastructure", Description: "Read pull requests, diffs and comments for pre-merge review of infrastructure changes.", ToolTypes: []string{"gitea"}},
+	{ID: "google_drive", Name: "Google Drive", Category: "data", Description: "Search and read Google Drive files (Docs, Sheets, Slides) and append or update Google Sheets rows, as a service account.", ToolTypes: []string{"google_drive"}},
 	{ID: "git_repo", Name: "Git repository", Category: "infrastructure", Description: "Keep a read-only mirror of a git repository (configs, runbooks, IaC) that agents read with git and rg; fetched on an interval.", ToolTypes: []string{"git_repo"}},
 	{ID: "netbox", Name: "NetBox", Category: "infrastructure", Description: "CMDB: devices, IPAM, circuits, virtualization and tenancy.", ToolTypes: []string{"netbox"}},
 	{ID: "postgresql", Name: "PostgreSQL", Category: "data", Description: "Read-only queries and diagnostics.", ToolTypes: []string{"postgresql"}},
