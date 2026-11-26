@@ -157,6 +157,8 @@ func TestParseFileID(t *testing.T) {
 		"https://drive.google.com/file/d/abcdefghijKLMN/view":                     "abcdefghijKLMN",
 		"https://drive.google.com/open?id=abcdefghijKLMN":                         "abcdefghijKLMN",
 		"https://docs.google.com/document/u/1/d/abcdefghijKLMN/edit":              "abcdefghijKLMN",
+		"https://drive.google.com/drive/folders/abcdefghijKLMN":                   "abcdefghijKLMN",
+		"https://drive.google.com/drive/u/0/folders/abcdefghijKLMN?usp=sharing":   "abcdefghijKLMN",
 	}
 	for in, want := range cases {
 		got, err := ParseFileID(in)
@@ -173,13 +175,16 @@ func TestParseFileID(t *testing.T) {
 
 func TestNormalizeRange(t *testing.T) {
 	cases := map[string]string{
-		"Sheet1":                "'Sheet1'",
+		"Sheet1":                 "'Sheet1'",
 		"Daily checks 2026":      "'Daily checks 2026'",
 		"Daily checks 2026!A1:D": "'Daily checks 2026'!A1:D",
-		"'Q1'!A:F":              "'Q1'!A:F",
-		"A1:D10":                "A1:D10",
-		"Bob's tab":             "'Bob''s tab'",
-		"Agencies":              "'Agencies'",
+		"'Q1'!A:F":               "'Q1'!A:F",
+		"A1:D10":                 "A1:D10",
+		"Bob's tab":              "'Bob''s tab'",
+		"Agencies":               "'Agencies'",
+		"A:F":                    "A:F",
+		"$A:$F":                  "$A:$F",
+		"'A:F'":                  "'A:F'",
 	}
 	for in, want := range cases {
 		got, err := NormalizeRange(in)
@@ -189,6 +194,23 @@ func TestNormalizeRange(t *testing.T) {
 	}
 	if _, err := NormalizeRange(""); err == nil {
 		t.Error("empty range accepted")
+	}
+}
+
+func TestBoundRows(t *testing.T) {
+	cases := map[string]string{
+		"'Results'":       "'Results'!1:201",
+		"A:F":             "A1:F201",
+		"'Results'!A:F":   "'Results'!A1:F201",
+		"'Results'!A5:F":  "'Results'!A5:F205",
+		"'Results'!A1:F9": "'Results'!A1:F9",
+		"A1:D10":          "A1:D10",
+		"'Results'!1:50":  "'Results'!1:50",
+	}
+	for in, want := range cases {
+		if got := boundRows(in, 201); got != want {
+			t.Errorf("boundRows(%q) = %q; want %q", in, got, want)
+		}
 	}
 }
 
@@ -312,15 +334,17 @@ func TestReadFileSheetAsCSV(t *testing.T) {
 	})
 	fg.mux.HandleFunc("/v4/spreadsheets/"+sheetID, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]interface{}{"properties": map[string]string{"title": "Checks"}, "sheets": []interface{}{
-			map[string]interface{}{"properties": map[string]interface{}{"sheetId": 0, "title": "Agencies"}},
+			map[string]interface{}{"properties": map[string]interface{}{"sheetId": 0, "title": "Agencies", "gridProperties": map[string]int{"rowCount": 1500, "columnCount": 3}}},
 			map[string]interface{}{"properties": map[string]interface{}{"sheetId": 1, "title": "Q 2"}},
 		}})
 	})
 	fg.mux.HandleFunc("/v4/spreadsheets/"+sheetID+"/values/", func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v4/spreadsheets/" + sheetID + "/values/'Agencies'":
+		case "/v4/spreadsheets/" + sheetID + "/values/'Agencies'!1:1000":
 			writeJSON(w, map[string]interface{}{"range": "Agencies!A1:C2", "values": [][]interface{}{{"id", "name", "deficit"}, {"1234", "Acme, Inc", "-28"}}})
-		case "/v4/spreadsheets/" + sheetID + "/values/'Q 2'":
+		case "/v4/spreadsheets/" + sheetID + "/values/'Agencies'!1001:2000":
+			writeJSON(w, map[string]interface{}{"range": "Agencies!A1001:C1001", "values": [][]interface{}{{"5678", "Beta", "3"}}})
+		case "/v4/spreadsheets/" + sheetID + "/values/'Q 2'!1:1000":
 			writeJSON(w, map[string]interface{}{"range": "'Q 2'!A1", "values": [][]interface{}{{"x"}}})
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
@@ -331,7 +355,7 @@ func TestReadFileSheetAsCSV(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := decode(t, out)["content"].(string)
-	for _, want := range []string{"## tab: Agencies (2 rows with data)", `1234,"Acme, Inc",-28`, "## tab: Q 2"} {
+	for _, want := range []string{"## tab: Agencies (1500 rows x 3 columns)", `1234,"Acme, Inc",-28`, "5678,Beta,3", "## tab: Q 2"} {
 		if !strings.Contains(c, want) {
 			t.Errorf("missing %q in:\n%s", want, c)
 		}
@@ -355,7 +379,9 @@ func TestSheetsGetValues(t *testing.T) {
 			map[string]interface{}{"properties": map[string]interface{}{"sheetId": 7, "title": "Agencies", "gridProperties": map[string]int{"rowCount": 1000, "columnCount": 26}}},
 		}})
 	})
+	var gotPath string
 	fg.mux.HandleFunc("/v4/spreadsheets/"+sheetID+"/values/", func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
 		writeJSON(w, map[string]interface{}{"range": "Agencies!A1:B3", "values": [][]interface{}{{"a"}, {"b"}, {"c"}}})
 	})
 	ctx := context.Background()
@@ -373,6 +399,13 @@ func TestSheetsGetValues(t *testing.T) {
 	m := decode(t, out)
 	if len(m["values"].([]interface{})) != 2 || m["truncated"] != true || m["row_count"] != 3.0 {
 		t.Errorf("values: %s", out)
+	}
+	// A whole tab is asked for in bounded form: max_rows + 1 rows.
+	if _, err := tool.SheetsGetValues(ctx, testIncident, map[string]interface{}{"spreadsheet": sheetID, "range": "Agencies", "max_rows": 2.0}); err != nil {
+		t.Fatal(err)
+	}
+	if want := "/v4/spreadsheets/" + sheetID + "/values/'Agencies'!1:3"; gotPath != want {
+		t.Errorf("path = %s; want %s", gotPath, want)
 	}
 }
 

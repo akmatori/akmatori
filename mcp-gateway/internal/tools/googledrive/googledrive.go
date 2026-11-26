@@ -52,6 +52,8 @@ const (
 
 	defaultMaxRows = 200
 	maxMaxRows     = 5_000
+	csvChunkRows   = 1_000 // rows per values request in read_file
+	csvMaxChunks   = 20    // read_file reads at most 20k rows of one tab
 
 	// Write caps per call.
 	maxWriteRows  = 1_000
@@ -183,6 +185,7 @@ func (t *Tool) verifyWriteGate(ctx context.Context, incidentID, logicalName stri
 var (
 	fileIDRe     = regexp.MustCompile(`^[A-Za-z0-9_-]{10,200}$`)
 	urlPathIDRe  = regexp.MustCompile(`/d/([A-Za-z0-9_-]{10,200})`)
+	folderPathRe = regexp.MustCompile(`/folders/([A-Za-z0-9_-]{10,200})`)
 	googleDocHst = map[string]bool{"docs.google.com": true, "drive.google.com": true, "sheets.google.com": true, "slides.google.com": true}
 )
 
@@ -206,6 +209,9 @@ func ParseFileID(raw string) (string, error) {
 	if m := urlPathIDRe.FindStringSubmatch(u.Path); m != nil {
 		return m[1], nil
 	}
+	if m := folderPathRe.FindStringSubmatch(u.Path); m != nil {
+		return m[1], nil
+	}
 	if id := u.Query().Get("id"); fileIDRe.MatchString(id) {
 		return id, nil
 	}
@@ -214,7 +220,14 @@ func ParseFileID(raw string) (string, error) {
 
 // --- A1 ranges ---
 
-var a1CellsRe = regexp.MustCompile(`^\$?[A-Za-z]{0,3}\$?\d*(:\$?[A-Za-z]{0,3}\$?\d*)?$`)
+var (
+	a1CellsRe = regexp.MustCompile(`^\$?[A-Za-z]{0,3}\$?\d*(:\$?[A-Za-z]{0,3}\$?\d*)?$`)
+	// colRangeRe is a whole-column range such as A:F (no row numbers).
+	colRangeRe = regexp.MustCompile(`^\$?[A-Za-z]{1,3}:\$?[A-Za-z]{1,3}$`)
+	// openRowsRe is a column range with an optional start row and no end
+	// row (A:F, A2:F): it reaches to the last row of the tab.
+	openRowsRe = regexp.MustCompile(`^(\$?[A-Za-z]{1,3})\$?(\d*):(\$?[A-Za-z]{1,3})$`)
+)
 
 // quoteSheet quotes a tab name for A1 notation.
 func quoteSheet(name string) string {
@@ -226,7 +239,8 @@ func quoteSheet(name string) string {
 
 // NormalizeRange turns a tab name ("Daily checks 2026") or a range
 // ("Daily checks 2026!A1:D") into valid A1 notation: the tab part is quoted.
-// A bare cell range ("A1:D10") is passed through (it means the first tab).
+// A bare cell range ("A1:D10", "A:F") is passed through (it means the first
+// tab); quote a tab that is named like a range ("'A:F'").
 func NormalizeRange(r string) (string, error) {
 	r = strings.TrimSpace(r)
 	if r == "" {
@@ -239,10 +253,31 @@ func NormalizeRange(r string) (string, error) {
 		}
 		return quoteSheet(sheet) + "!" + cells, nil
 	}
-	if strings.ContainsAny(r, "0123456789") && a1CellsRe.MatchString(r) {
+	if (strings.ContainsAny(r, "0123456789") && a1CellsRe.MatchString(r)) || colRangeRe.MatchString(r) {
 		return r, nil
 	}
 	return quoteSheet(r), nil
+}
+
+// boundRows limits an open-ended normalized range to n rows, so that Google
+// does not send a whole tab when only the first rows are used: 'Tab' →
+// 'Tab'!1:n, A:F → A1:Fn, 'Tab'!A2:F → 'Tab'!A2:F(n+1). Ranges that already
+// have an end row are returned unchanged.
+func boundRows(a1 string, n int) string {
+	prefix, cells := "", a1
+	if i := strings.LastIndex(a1, "!"); i >= 0 {
+		prefix, cells = a1[:i+1], a1[i+1:]
+	} else if strings.HasPrefix(a1, "'") {
+		return fmt.Sprintf("%s!1:%d", a1, n)
+	}
+	if m := openRowsRe.FindStringSubmatch(cells); m != nil {
+		start := 1
+		if m[2] != "" {
+			start, _ = strconv.Atoi(m[2])
+		}
+		return fmt.Sprintf("%s%s%d:%s%d", prefix, m[1], start, m[3], start+n-1)
+	}
+	return a1
 }
 
 // --- HTTP ---
@@ -674,21 +709,35 @@ func (t *Tool) sheetAsCSV(ctx context.Context, cfg *Config, id string, budget in
 		if b.Len() >= budget {
 			return b.String(), true, nil
 		}
-		vr, err := t.getValues(ctx, cfg, id, quoteSheet(s.Properties.Title))
-		if err != nil {
-			return "", false, err
-		}
-		fmt.Fprintf(&b, "## tab: %s (%d rows with data)\n", s.Properties.Title, len(vr.Values))
+		title := s.Properties.Title
+		gridRows := s.Properties.GridProperties.RowCount
+		fmt.Fprintf(&b, "## tab: %s (%d rows x %d columns)\n", title, gridRows, s.Properties.GridProperties.ColumnCount)
 		w := csv.NewWriter(&b)
-		for _, row := range vr.Values {
-			rec := make([]string, len(row))
-			for i, c := range row {
-				rec[i] = cellString(c)
+		// Read the tab in blocks of csvChunkRows, so a big tab never makes
+		// one response larger than the 10 MB cap and reading stops at the
+		// byte budget.
+		for start, n := 1, 0; n < csvMaxChunks && (gridRows == 0 || start <= gridRows); start, n = start+csvChunkRows, n+1 {
+			vr, err := t.getValues(ctx, cfg, id, fmt.Sprintf("%s!%d:%d", quoteSheet(title), start, start+csvChunkRows-1))
+			if err != nil {
+				return "", false, err
 			}
-			_ = w.Write(rec)
-			if b.Len() >= budget {
+			for _, row := range vr.Values {
+				rec := make([]string, len(row))
+				for i, c := range row {
+					rec[i] = cellString(c)
+				}
+				_ = w.Write(rec)
+				if b.Len() >= budget {
+					w.Flush()
+					return b.String(), true, nil
+				}
+			}
+			if gridRows == 0 && len(vr.Values) < csvChunkRows {
+				break // size unknown: a short block is the end of the data
+			}
+			if n == csvMaxChunks-1 && start+csvChunkRows <= gridRows {
 				w.Flush()
-				return b.String(), true, nil
+				fmt.Fprintf(&b, "[TAB CUT after %d rows; use sheets_get_values for the rest]\n", start+csvChunkRows-1)
 			}
 		}
 		w.Flush()
@@ -725,7 +774,8 @@ func (t *Tool) SheetsGetValues(ctx context.Context, incidentID string, args map[
 		return "", err
 	}
 	maxRows := intArg(args, "max_rows", defaultMaxRows, 1, maxMaxRows)
-	vr, err := t.getValues(ctx, cfg, id, a1)
+	// Ask for one row more than max_rows, to know if there are more rows.
+	vr, err := t.getValues(ctx, cfg, id, boundRows(a1, maxRows+1))
 	if err != nil {
 		return "", err
 	}
