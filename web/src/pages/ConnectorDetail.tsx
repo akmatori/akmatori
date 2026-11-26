@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, CheckCircle2, Pencil, Trash2, XCircle } from 'lucide-react';
 import { connectorsApi } from '../api/connectors';
 import { getErrorMessage } from '../utils/errors';
+import { formatRelativeAgo } from '../utils/format';
 import { useLatestRef } from '../hooks/useLatestRef';
 import type { ConnectorDetail as Detail, ConnectorSummary } from '../types/connectors';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -165,6 +166,9 @@ export default function ConnectorDetail() {
             <span className={statusBadgeClass(st.tone)} title={detail.status.detail}>{st.label}</span>
             {detail.status.detail && detail.status.state !== 'ok' && (
               <span className="text-xs text-fg-subtle truncate max-w-xs" title={detail.status.detail}>{detail.status.detail}</span>
+            )}
+            {(detail.status.state === 'synced' || detail.status.state === 'stale') && detail.status.observed_at && (
+              <span className="text-xs text-fg-subtle">synced {formatRelativeAgo(detail.status.observed_at)}</span>
             )}
           </p>
         </div>

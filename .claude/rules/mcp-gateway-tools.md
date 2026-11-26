@@ -220,6 +220,10 @@ the path, branch, window and last error from the status file.
   before the old mirror is removed (DNS, refused address) keeps the old fingerprint in the status, so
   the change is still applied on a later pass;
   over `git_max_size_mb` the mirror is removed and not retried until a setting changes
+- the connector badge reads the status file (`gitRepoConnectorStatus`): `synced` (detail: newest
+  commit, `observed_at` = last good sync), `stale` (no good sync for 3 intervals + 1 min; the
+  interval is written to the status as `interval_sec`), `error` (last error; notes that agents still
+  read the last good mirror), `unknown` before the first sync
 - disabled or deleted instances lose their mirror. A directory Akmatori did not create gets a
   status with `unmanaged: true` and is never written to or deleted on any later pass (settings
   change, disable, delete); once the operator removes it, the next pass clones

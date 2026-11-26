@@ -59,6 +59,7 @@ type GitRepoStatus struct {
 	Branch        string     `json:"branch"`
 	Path          string     `json:"path"`
 	HistoryDays   int        `json:"history_days"`
+	IntervalSec   int        `json:"interval_sec,omitempty"`
 	HistoryFrom   *time.Time `json:"history_from,omitempty"`
 	HeadCommit    string     `json:"head_commit,omitempty"`
 	HeadCommitAt  *time.Time `json:"head_commit_at,omitempty"`
@@ -256,6 +257,7 @@ func (s *GitRepoSyncService) syncInstance(ctx context.Context, inst database.Too
 		Branch:      cfg.Branch,
 		Path:        filepath.Join(GitRepoRoot, name),
 		HistoryDays: cfg.HistoryDays,
+		IntervalSec: cfg.IntervalSec,
 		Fingerprint: gitRepoFingerprint(cfg),
 	}
 	if prev != nil {
@@ -877,4 +879,49 @@ func (s *GitRepoSyncService) GitRepoStatuses() []GitRepoStatus {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].LogicalName < out[j].LogicalName })
 	return out
+}
+
+// gitRepoStaleAfter is how long past the last good sync a mirror counts as
+// stale: three sync intervals plus a minute for the 30 s loop and a slow
+// fetch.
+func gitRepoStaleAfter(intervalSec int) time.Duration {
+	if intervalSec <= 0 {
+		intervalSec = gitRepoDefaultInterval
+	}
+	return 3*time.Duration(intervalSec)*time.Second + time.Minute
+}
+
+// gitRepoConnectorStatus is the connector badge for a git_repo instance,
+// from the mirror's status file: synced, stale, error, or unknown before the
+// first sync.
+func gitRepoConnectorStatus(logicalName string, now time.Time) ConnectorStatus {
+	st, err := ReadGitRepoStatus(logicalName)
+	if err != nil || st == nil {
+		return ConnectorStatus{State: "unknown", Detail: "Not synced yet."}
+	}
+	if st.Error != "" {
+		detail := st.Error
+		if st.LastSuccessAt != nil && !st.Unmanaged && st.Blocked == "" {
+			detail += fmt.Sprintf(" (agents still read the mirror from %s)", st.LastSuccessAt.UTC().Format("2006-01-02 15:04 UTC"))
+		}
+		return ConnectorStatus{State: "error", Detail: detail, ObservedAt: st.LastAttemptAt}
+	}
+	if st.LastSuccessAt == nil {
+		return ConnectorStatus{State: "unknown", Detail: "Not synced yet.", ObservedAt: st.LastAttemptAt}
+	}
+	head := ""
+	if st.HeadCommitAt != nil {
+		head = "newest commit " + st.HeadCommitAt.UTC().Format("2006-01-02 15:04 UTC")
+	}
+	if age := now.Sub(*st.LastSuccessAt); age > gitRepoStaleAfter(st.IntervalSec) {
+		detail := fmt.Sprintf("No successful sync for %s.", age.Round(time.Minute))
+		if head != "" {
+			detail += " Mirror has the " + head + "."
+		}
+		return ConnectorStatus{State: "stale", Detail: detail, ObservedAt: st.LastSuccessAt}
+	}
+	if head == "" {
+		head = "synced"
+	}
+	return ConnectorStatus{State: "synced", Detail: strings.ToUpper(head[:1]) + head[1:], ObservedAt: st.LastSuccessAt}
 }

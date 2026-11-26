@@ -594,3 +594,52 @@ func TestGitRepoEnv_DropsProxy(t *testing.T) {
 		}
 	}
 }
+
+func TestGitRepoConnectorStatus(t *testing.T) {
+	f := newGitRepoFixture(t)
+	if st := gitRepoConnectorStatus("cfg", f.clock); st.State != "unknown" {
+		t.Fatalf("before first sync: %+v", st)
+	}
+
+	url, _ := newOrigin(t)
+	inst := f.addInstance(t, "cfg", map[string]interface{}{"git_url": url, "git_sync_interval": float64(60)})
+	f.svc.SyncOnce(context.Background())
+	st := gitRepoConnectorStatus("cfg", f.clock)
+	if st.State != "synced" || !strings.HasPrefix(st.Detail, "Newest commit ") || st.ObservedAt == nil {
+		t.Fatalf("after sync: %+v", st)
+	}
+
+	// three intervals + a minute without a good sync
+	if st := gitRepoConnectorStatus("cfg", f.clock.Add(3*time.Minute+30*time.Second)); st.State != "synced" {
+		t.Fatalf("within the grace period: %+v", st)
+	}
+	if st := gitRepoConnectorStatus("cfg", f.clock.Add(5*time.Minute)); st.State != "stale" || !strings.Contains(st.Detail, "No successful sync for 5m") {
+		t.Fatalf("stale: %+v", st)
+	}
+
+	// the remote goes away: error, and the detail says the old data is still there
+	inst.Settings = database.JSONB{"git_url": url, "git_sync_interval": float64(60), "git_branch": "no-such-branch"}
+	if err := f.db.Save(inst).Error; err != nil {
+		t.Fatal(err)
+	}
+	f.svc.SyncOnce(context.Background())
+	if st := gitRepoConnectorStatus("cfg", f.clock); st.State != "error" || st.Detail == "" {
+		t.Fatalf("error: %+v", st)
+	}
+}
+
+func TestConnectorStatus_GitRepo(t *testing.T) {
+	f := newGitRepoFixture(t)
+	url, _ := newOrigin(t)
+	f.addInstance(t, "cfg", map[string]interface{}{"git_url": url})
+	f.svc.SyncOnce(context.Background())
+	d := &ConnectorDetail{Parts: ConnectorParts{ToolInstances: []ConnectorToolPart{{Name: "cfg", LogicalName: "cfg", ToolType: GitRepoToolType, Enabled: true}}}}
+	enabled, st := connectorStatus(d, nil)
+	if !enabled || st.State != "synced" {
+		t.Fatalf("git_repo connector = %v %+v", enabled, st)
+	}
+	d.Parts.ToolInstances[0].Enabled = false
+	if _, st := connectorStatus(d, nil); st.State != "disabled" {
+		t.Fatalf("disabled git_repo connector: %+v", st)
+	}
+}

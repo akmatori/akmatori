@@ -419,6 +419,11 @@ func connectorStatus(d *ConnectorDetail, mcpStatusErr error) (bool, ConnectorSta
 			return true, ConnectorStatus{State: "unknown", Detail: "Not connected yet."}
 		}
 	}
+	for _, t := range d.Parts.ToolInstances {
+		if t.Enabled && t.ToolType == GitRepoToolType {
+			return true, gitRepoConnectorStatus(t.LogicalName, time.Now())
+		}
+	}
 	for _, in := range d.Parts.Integrations {
 		if in.Enabled && in.ChannelCount == 0 {
 			return true, ConnectorStatus{State: "needs_setup", Detail: "Add a channel."}

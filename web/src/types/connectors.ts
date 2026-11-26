@@ -3,7 +3,15 @@
 export type ConnectorCapability = 'tools' | 'alerts' | 'messaging';
 export type ConnectorKind = 'builtin' | 'custom_mcp' | 'custom_http';
 export type ConnectorPartKind = 'tool_instance' | 'alert_source' | 'integration' | 'mcp_server';
-export type ConnectorState = 'ok' | 'connected' | 'disabled' | 'needs_setup' | 'error' | 'unknown';
+export type ConnectorState =
+  | 'ok'
+  | 'connected'
+  | 'synced'
+  | 'stale'
+  | 'disabled'
+  | 'needs_setup'
+  | 'error'
+  | 'unknown';
 
 export interface ConnectorCatalogEntry {
   id: string;

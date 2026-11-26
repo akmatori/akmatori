@@ -52,6 +52,8 @@ describe('statusView', () => {
     expect(statusView('needs_setup').tone).toBe('warning');
     expect(statusView('error').tone).toBe('danger');
     expect(statusView('unknown').label).toBe('Unknown');
+    expect(statusView('synced')).toEqual({ label: 'Synced', tone: 'success' });
+    expect(statusView('stale')).toEqual({ label: 'Stale', tone: 'warning' });
   });
 });
 
