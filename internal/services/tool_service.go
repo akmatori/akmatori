@@ -202,6 +202,7 @@ func (s *ToolService) EnsureToolTypes() error {
 		{Name: "kubernetes", Description: "Kubernetes read-only diagnostics for pods, deployments, nodes, services, events, and logs"},
 		{Name: "jira", Description: "Jira issue tracking integration (Cloud and Server/Data Center) for searching, viewing, commenting, and transitioning issues"},
 		{Name: "gitea", Description: "Gitea pull requests for pre-merge review: pull request details, changed files, diffs, comments and repository files"},
+		{Name: "google_drive", Description: "Google Drive, Docs, Sheets and Slides via a service account: search and read files, read Sheets ranges, append or update Sheets rows"},
 		{Name: "git_repo", Description: "Read-only mirror of a git repository, fetched on an interval; agents read it on disk with git and rg"},
 		{Name: "incidents", Description: "Read-only access to Akmatori's own incidents (list and get) for digests and reporting"},
 		{Name: "proposals", Description: "Create, inspect, and revise self-improvement proposals reviewed by operators in the Proposals tab"},

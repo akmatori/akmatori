@@ -820,6 +820,28 @@ gateway_call("jira.transition_issue", {"key": "OPS-1234", "transition_id": "31"}
 gateway_call("jira.create_issue", {"project_key": "OPS", "issue_type": "Incident", "summary": "Disk usage > 90%%", "labels": ["prod", "urgent"]}, "%s")
 `+"```"+`
 `, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName, logicalName)
+	case "google_drive":
+		return fmt.Sprintf(`
+**Parameters:**
+- a file or spreadsheet is an id or a docs.google.com / drive.google.com link
+- `+"`search_files`"+`: query, type (any, document, spreadsheet, presentation, folder, pdf), folder, limit, page_token
+- `+"`read_file`"+`: file* | max_bytes (default 50000, max 200000). Docs/Slides → text, Sheets → CSV per tab
+- `+"`sheets_get_values`"+`: spreadsheet* | range (a tab name, or tab!A1:D50; omit to list the tabs), max_rows
+- `+"`sheets_append_rows`"+` **(write)**: spreadsheet*, range* (tab name), rows* (array of rows) | value_input (USER_ENTERED, RAW)
+- `+"`sheets_update_values`"+` **(write)**: spreadsheet*, range*, values* | value_input
+(* = required)
+
+Before you append, read the header row (sheets_get_values with range "<tab>!1:1") and give the cells in the same column order. **(write)** is refused unless the connector allows writes. The service account sees only files shared with its email.
+
+Usage (via gateway_call):
+`+"```"+`
+gateway_call("google_drive.search_files", {"query": "daily checks", "type": "spreadsheet"}, "%s")
+gateway_call("google_drive.read_file", {"file": "https://docs.google.com/document/d/<id>/edit"}, "%s")
+gateway_call("google_drive.sheets_get_values", {"spreadsheet": "<id or link>"}, "%s")
+gateway_call("google_drive.sheets_get_values", {"spreadsheet": "<id or link>", "range": "Results!1:1"}, "%s")
+gateway_call("google_drive.sheets_append_rows", {"spreadsheet": "<id or link>", "range": "Results", "rows": [["2026-11-25 10:00", "api", "1234", "Acme", 12, 40, -28]]}, "%s")
+`+"```"+`
+`, logicalName, logicalName, logicalName, logicalName, logicalName)
 	case "gitea":
 		return fmt.Sprintf(`
 **Parameters:**
@@ -1012,9 +1034,39 @@ func extractToolDetails(tool database.ToolInstance) string {
 			details.WriteString("Comments: disabled (read-only; give the review in your answer)\n")
 		}
 		return details.String()
+	case "google_drive":
+		var details strings.Builder
+		if email := googleServiceAccountEmail(tool.Settings["gdrive_service_account_json"]); email != "" {
+			fmt.Fprintf(&details, "Service account: %s (a file must be shared with this email; Editor for writes)\n", email)
+		}
+		if u, ok := tool.Settings["gdrive_impersonate_user"].(string); ok && strings.TrimSpace(u) != "" {
+			fmt.Fprintf(&details, "Acts as: %s (domain-wide delegation)\n", strings.TrimSpace(u))
+		}
+		if allow, ok := tool.Settings["gdrive_allow_writes"].(bool); ok && allow {
+			details.WriteString("Writes: allowed (sheets_append_rows, sheets_update_values)\n")
+		} else {
+			details.WriteString("Writes: disabled (read-only; give the data in your answer)\n")
+		}
+		return details.String()
 	}
 
 	return ""
+}
+
+// googleServiceAccountEmail returns client_email of a service-account JSON
+// key, or "" (the email is not secret; the private key is never read here).
+func googleServiceAccountEmail(v interface{}) string {
+	s, ok := v.(string)
+	if !ok || strings.TrimSpace(s) == "" {
+		return ""
+	}
+	var key struct {
+		ClientEmail string `json:"client_email"`
+	}
+	if json.Unmarshal([]byte(s), &key) != nil {
+		return ""
+	}
+	return strings.TrimSpace(key.ClientEmail)
 }
 
 // giteaAllowedRepos reads gitea_allowed_repos like ParseAllowedRepos in the

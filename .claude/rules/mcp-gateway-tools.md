@@ -165,6 +165,31 @@ Forgejo speaks the same API.
 - `create_pull_request_comment` re-reads `gitea_allow_comments` from the DB on every call (no cache)
 - no proxy toggle and no env proxy; redirects are refused (the token would follow them)
 
+## Google Drive tool: google_drive.*
+
+`tools/googledrive`, `registerGoogleDriveTools` (`registry_googledrive.go`). Drive search and read
+(Docs/Slides → text export, Sheets → CSV per tab through the Sheets API, text files via `alt=media`;
+other types are refused with the link), Sheets `sheets_get_values` (no range = tab list),
+`sheets_append_rows`, `sheets_update_values`.
+
+- auth: a service-account JSON key (`gdrive_service_account_json`, secret textarea). The gateway
+  signs an RS256 JWT (RFC 7523, no Google SDK) and always posts it to
+  `https://oauth2.googleapis.com/token`; the key's `token_uri` is ignored, so a key cannot send the
+  assertion elsewhere. Optional `gdrive_impersonate_user` = `sub` claim (domain-wide delegation).
+  Access tokens are cached per key id + subject + scope until 2 min before expiry
+- reads ask for `drive.readonly spreadsheets.readonly`; only writes ask for `spreadsheets`. Writes
+  re-read `gdrive_allow_writes` from the DB on every call (default off) and are refused before any
+  Google call. Caps: 1000 rows / 50000 cells per write; cells are string, number, bool or null
+- access control is Google's own: the service account sees only files shared with its
+  `client_email` (Editor for writes). `extractToolDetails` shows that email to the agent
+- files/spreadsheets are ids or docs/drive.google.com links (`ParseFileID`; other hosts refused).
+  A range without `!` that is not an A1 cell range is a tab name and gets quoted (`NormalizeRange`)
+- Google is a fixed public endpoint, so this tool uses the runtime `HTTP(S)_PROXY`
+  (`ProxyFromEnvironment`), unlike the other built-in tools; closed networks reach Google through it.
+  Redirects only to https, at most 5; Go drops `Authorization` on a cross-host redirect
+- outputs are compact JSON; text is cut at `max_bytes` (default 50000, max 200000) with
+  `[TRUNCATED …]`; `sheets_get_values` returns `max_rows` rows (default 200, max 5000)
+
 ## Git repository mirrors: git_repo
 
 A tool type with **no gateway functions**. The API (`internal/services/git_repo_sync.go`, started

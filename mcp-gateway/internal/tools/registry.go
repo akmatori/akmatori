@@ -19,6 +19,7 @@ import (
 	"github.com/akmatori/mcp-gateway/internal/tools/clickhouse"
 	"github.com/akmatori/mcp-gateway/internal/tools/events"
 	"github.com/akmatori/mcp-gateway/internal/tools/gitea"
+	"github.com/akmatori/mcp-gateway/internal/tools/googledrive"
 	"github.com/akmatori/mcp-gateway/internal/tools/grafana"
 	"github.com/akmatori/mcp-gateway/internal/tools/httpconnector"
 	"github.com/akmatori/mcp-gateway/internal/tools/incidents"
@@ -61,35 +62,37 @@ const (
 
 // Registry manages tool registration
 type Registry struct {
-	server          *mcp.Server
-	logger          *log.Logger
-	zabbixTool      *zabbix.ZabbixTool
-	zabbixLimit     *ratelimit.Limiter
-	vmTool          *victoriametrics.VictoriaMetricsTool
-	vmLimit         *ratelimit.Limiter
-	catchpointTool  *catchpoint.CatchpointTool
-	catchpointLimit *ratelimit.Limiter
-	postgresqlTool  *postgresql.PostgreSQLTool
-	postgresqlLimit *ratelimit.Limiter
-	grafanaTool     *grafana.GrafanaTool
-	grafanaLimit    *ratelimit.Limiter
-	clickhouseTool  *clickhouse.ClickHouseTool
-	clickhouseLimit *ratelimit.Limiter
-	pagerdutyTool   *pagerduty.PagerDutyTool
-	pagerdutyLimit  *ratelimit.Limiter
-	netboxTool      *netbox.NetBoxTool
-	netboxLimit     *ratelimit.Limiter
-	k8sTool         *k8s.K8sTool
-	k8sLimit        *ratelimit.Limiter
-	jiraTool        *jira.JiraTool
-	jiraLimit       *ratelimit.Limiter
-	giteaTool       *gitea.GiteaTool
-	giteaLimit      *ratelimit.Limiter
-	incidentsTool   *incidents.IncidentsTool
-	eventsTool      *events.EventsTool
-	knowledgeTool   *knowledge.Tool
-	telegramTool    *telegram.Tool
-	proposalsTool   *proposals.ProposalsTool
+	server           *mcp.Server
+	logger           *log.Logger
+	zabbixTool       *zabbix.ZabbixTool
+	zabbixLimit      *ratelimit.Limiter
+	vmTool           *victoriametrics.VictoriaMetricsTool
+	vmLimit          *ratelimit.Limiter
+	catchpointTool   *catchpoint.CatchpointTool
+	catchpointLimit  *ratelimit.Limiter
+	postgresqlTool   *postgresql.PostgreSQLTool
+	postgresqlLimit  *ratelimit.Limiter
+	grafanaTool      *grafana.GrafanaTool
+	grafanaLimit     *ratelimit.Limiter
+	clickhouseTool   *clickhouse.ClickHouseTool
+	clickhouseLimit  *ratelimit.Limiter
+	pagerdutyTool    *pagerduty.PagerDutyTool
+	pagerdutyLimit   *ratelimit.Limiter
+	netboxTool       *netbox.NetBoxTool
+	netboxLimit      *ratelimit.Limiter
+	k8sTool          *k8s.K8sTool
+	k8sLimit         *ratelimit.Limiter
+	jiraTool         *jira.JiraTool
+	jiraLimit        *ratelimit.Limiter
+	giteaTool        *gitea.GiteaTool
+	giteaLimit       *ratelimit.Limiter
+	googleDriveTool  *googledrive.Tool
+	googleDriveLimit *ratelimit.Limiter
+	incidentsTool    *incidents.IncidentsTool
+	eventsTool       *events.EventsTool
+	knowledgeTool    *knowledge.Tool
+	telegramTool     *telegram.Tool
+	proposalsTool    *proposals.ProposalsTool
 
 	// HTTP connector state
 	httpExecutor       *httpconnector.HTTPConnectorExecutor
@@ -190,6 +193,9 @@ func (r *Registry) RegisterAllTools() {
 	// Register Gitea tools (rate limiter created inside)
 	r.registerGiteaTools()
 
+	// Register Google Drive tools (rate limiter created inside)
+	r.registerGoogleDriveTools()
+
 	// Register Incidents tools (no rate limiter — local DB queries)
 	r.registerIncidentsTools()
 
@@ -243,6 +249,9 @@ func (r *Registry) Stop() {
 	if r.giteaTool != nil {
 		r.giteaTool.Stop()
 	}
+	if r.googleDriveTool != nil {
+		r.googleDriveTool.Stop()
+	}
 	if r.httpExecutor != nil {
 		r.httpExecutor.Stop()
 	}
@@ -267,6 +276,7 @@ var builtInToolNamespaces = map[string]bool{
 	"kubernetes":       true,
 	"jira":             true,
 	"gitea":            true,
+	"google_drive":     true,
 	"git_repo":         true,
 	"incidents":        true,
 	"proposals":        true,

@@ -894,3 +894,51 @@ func TestExtractToolDetails_Gitea(t *testing.T) {
 		t.Error("expected comments allowed")
 	}
 }
+
+func TestGenerateToolUsageExample_GoogleDrive(t *testing.T) {
+	tool := database.ToolInstance{
+		ID:          10,
+		Name:        "gdrive",
+		LogicalName: "gdrive",
+		Settings:    database.JSONB{},
+		ToolType:    database.ToolType{ID: 10, Name: "google_drive"},
+	}
+	example := generateToolUsageExample(tool)
+	for _, fn := range []string{"google_drive.search_files", "google_drive.read_file", "google_drive.sheets_get_values", "google_drive.sheets_append_rows", "sheets_update_values"} {
+		if !strings.Contains(example, fn) {
+			t.Errorf("expected %s in the example, got: %s", fn, example)
+		}
+	}
+	if strings.Contains(example, "%!") || !strings.Contains(example, `"gdrive")`) {
+		t.Errorf("bad format arguments in the example: %s", example)
+	}
+}
+
+func TestExtractToolDetails_GoogleDrive(t *testing.T) {
+	tool := database.ToolInstance{
+		Name: "gdrive",
+		Settings: database.JSONB{
+			"gdrive_service_account_json": `{"type":"service_account","client_email":"bot@proj.iam.gserviceaccount.com","private_key":"-----BEGIN PRIVATE KEY-----\nSECRETKEY\n-----END PRIVATE KEY-----\n"}`,
+		},
+		ToolType: database.ToolType{Name: "google_drive"},
+	}
+	details := extractToolDetails(tool)
+	for _, want := range []string{"Service account: bot@proj.iam.gserviceaccount.com", "Writes: disabled"} {
+		if !strings.Contains(details, want) {
+			t.Errorf("expected %q in details, got: %s", want, details)
+		}
+	}
+	if strings.Contains(details, "SECRETKEY") {
+		t.Fatal("details must not contain the private key")
+	}
+	tool.Settings["gdrive_allow_writes"] = true
+	tool.Settings["gdrive_impersonate_user"] = "ops@example.com"
+	d := extractToolDetails(tool)
+	if !strings.Contains(d, "Writes: allowed") || !strings.Contains(d, "Acts as: ops@example.com") {
+		t.Errorf("details = %s", d)
+	}
+	tool.Settings["gdrive_service_account_json"] = "********"
+	if strings.Contains(extractToolDetails(tool), "Service account:") {
+		t.Error("a masked key must not produce an email line")
+	}
+}
