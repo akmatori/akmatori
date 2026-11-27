@@ -42,20 +42,22 @@ func (SlackSettings) TableName() string {
 type LLMProvider string
 
 const (
-	LLMProviderOpenAI     LLMProvider = "openai"
-	LLMProviderAnthropic  LLMProvider = "anthropic"
-	LLMProviderGoogle     LLMProvider = "google"
-	LLMProviderOpenRouter LLMProvider = "openrouter"
-	LLMProviderCustom     LLMProvider = "custom"
-	LLMProviderNvidiaNIM  LLMProvider = "nvidia"
-	LLMProviderMiniMax    LLMProvider = "minimax"
-	LLMProviderAntLing    LLMProvider = "ant-ling"
+	LLMProviderOpenAI      LLMProvider = "openai"
+	LLMProviderOpenAICodex LLMProvider = "openai-codex"
+	LLMProviderAnthropic   LLMProvider = "anthropic"
+	LLMProviderGoogle      LLMProvider = "google"
+	LLMProviderOpenRouter  LLMProvider = "openrouter"
+	LLMProviderCustom      LLMProvider = "custom"
+	LLMProviderNvidiaNIM   LLMProvider = "nvidia"
+	LLMProviderMiniMax     LLMProvider = "minimax"
+	LLMProviderAntLing     LLMProvider = "ant-ling"
 )
 
 // ValidLLMProviders returns all valid LLM provider values
 func ValidLLMProviders() []LLMProvider {
 	return []LLMProvider{
 		LLMProviderOpenAI,
+		LLMProviderOpenAICodex,
 		LLMProviderAnthropic,
 		LLMProviderGoogle,
 		LLMProviderOpenRouter,
@@ -71,6 +73,8 @@ func ProviderDisplayName(p LLMProvider) string {
 	switch p {
 	case LLMProviderOpenAI:
 		return "OpenAI"
+	case LLMProviderOpenAICodex:
+		return "Codex Subscription"
 	case LLMProviderAnthropic:
 		return "Anthropic"
 	case LLMProviderGoogle:
@@ -202,8 +206,11 @@ func ValidateSamplingParams(temperature, topP *float64, topK, maxTokens *int) st
 	return ""
 }
 
-// IsConfigured returns true if the LLM provider has an API key set
+// IsConfigured checks the saved settings. Codex OAuth credentials live on the worker.
 func (l *LLMSettings) IsConfigured() bool {
+	if l.Provider == LLMProviderOpenAICodex {
+		return l.Model != ""
+	}
 	return l.APIKey != ""
 }
 

@@ -174,7 +174,14 @@ export interface CreateIncidentResponse {
   event_kind?: EventKind;
 }
 
-export type LLMProvider = 'openai' | 'anthropic' | 'google' | 'openrouter' | 'custom' | 'nvidia' | 'minimax' | 'ant-ling';
+export type LLMProvider = 'openai' | 'openai-codex' | 'anthropic' | 'google' | 'openrouter' | 'custom' | 'nvidia' | 'minimax' | 'ant-ling';
+
+export interface CodexAuthStatus {
+  connected: boolean;
+  pending: boolean;
+  user_code?: string;
+  error?: string;
+}
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface LLMConfig {

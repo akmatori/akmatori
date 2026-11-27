@@ -27,6 +27,7 @@ const (
 	AgentMessageTypeCancelIncident    AgentMessageType = "cancel_incident"
 	AgentMessageTypeProxyConfigUpdate AgentMessageType = "proxy_config_update"
 	AgentMessageTypeOneshotLLMRequest AgentMessageType = "oneshot_llm_request"
+	AgentMessageTypeCodexAuthRequest  AgentMessageType = "codex_auth_request"
 
 	// Messages from Agent Worker to API
 	AgentMessageTypeAgentOutput        AgentMessageType = "agent_output"
@@ -35,6 +36,7 @@ const (
 	AgentMessageTypeHeartbeat          AgentMessageType = "heartbeat"
 	AgentMessageTypeStatus             AgentMessageType = "status"
 	AgentMessageTypeOneshotLLMResponse AgentMessageType = "oneshot_llm_response"
+	AgentMessageTypeCodexAuthResponse  AgentMessageType = "codex_auth_response"
 )
 
 // oneshotLLMDefaultTimeout is used when callers pass a context with no deadline.
@@ -123,7 +125,9 @@ type AgentMessage struct {
 	ToolAllowlist []services.ToolAllowlistEntry `json:"tool_allowlist"`
 
 	// One-shot LLM request/response correlation fields
-	RequestID string `json:"request_id,omitempty"`
+	RequestID       string           `json:"request_id,omitempty"`
+	CodexAuthAction string           `json:"codex_auth_action,omitempty"`
+	CodexAuth       *CodexAuthStatus `json:"codex_auth,omitempty"`
 	// TimeoutMs is how long the API waits for this one-shot answer (sent only
 	// with a fallback, so the worker can split the time between the primary
 	// and the fallback instead of spending it all on a hanging primary).
@@ -337,7 +341,7 @@ func (h *AgentWSHandler) handleMessage(msg AgentMessage) {
 	case AgentMessageTypeAgentError:
 		h.handleAgentError(msg)
 
-	case AgentMessageTypeOneshotLLMResponse:
+	case AgentMessageTypeOneshotLLMResponse, AgentMessageTypeCodexAuthResponse:
 		h.handleOneshotLLMResponse(msg)
 
 	default:
@@ -1040,12 +1044,8 @@ func (h *AgentWSHandler) OneShotLLM(ctx context.Context, llm *LLMSettingsForWork
 		return "", ErrWorkerNotConnected
 	}
 
-	requestID := uuid.New().String()
-	ch := make(chan *AgentMessage, 1)
-
 	msg := AgentMessage{
 		Type:        AgentMessageTypeOneshotLLMRequest,
-		RequestID:   requestID,
 		System:      system,
 		User:        user,
 		MaxTokens:   &maxTokens,
@@ -1088,9 +1088,41 @@ func (h *AgentWSHandler) OneShotLLM(ctx context.Context, llm *LLMSettingsForWork
 		}
 	}
 
-	data, err := json.Marshal(msg)
+	resp, err := h.requestWorker(ctx, msg, oneshotLLMDefaultTimeout)
 	if err != nil {
 		return "", err
+	}
+	if resp.LLMFallbackFrom != "" {
+		slog.Warn("one-shot LLM call answered by fallback",
+			"primary", resp.LLMFallbackFrom,
+			"fallback", resp.LLMProvider+"/"+resp.LLMModel,
+			"reason", resp.LLMFallbackReason,
+			"failed", resp.Error != "")
+	}
+	if err := workerResponseError(resp); err != nil {
+		return "", err
+	}
+	return resp.Summary, nil
+}
+
+func workerResponseError(resp *AgentMessage) error {
+	if resp.Error == "" {
+		return nil
+	}
+	if resp.Error == ErrWorkerNotConnected.Error() {
+		return ErrWorkerNotConnected
+	}
+	return errors.New(resp.Error)
+}
+
+// requestWorker sends a request and waits for its correlated reply.
+func (h *AgentWSHandler) requestWorker(ctx context.Context, msg AgentMessage, defaultTimeout time.Duration) (*AgentMessage, error) {
+	requestID := uuid.New().String()
+	msg.RequestID = requestID
+	ch := make(chan *AgentMessage, 1)
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return nil, err
 	}
 
 	// Atomically capture the current workerConn, register the pending entry
@@ -1103,7 +1135,7 @@ func (h *AgentWSHandler) OneShotLLM(ctx context.Context, llm *LLMSettingsForWork
 	conn := h.workerConn
 	if conn == nil {
 		h.mu.Unlock()
-		return "", ErrWorkerNotConnected
+		return nil, ErrWorkerNotConnected
 	}
 	h.pendingOneshotMu.Lock()
 	h.pendingOneshot[requestID] = pendingOneshotEntry{ch: ch, conn: conn}
@@ -1113,7 +1145,7 @@ func (h *AgentWSHandler) OneShotLLM(ctx context.Context, llm *LLMSettingsForWork
 		delete(h.pendingOneshot, requestID)
 		h.pendingOneshotMu.Unlock()
 		h.mu.Unlock()
-		return "", writeErr
+		return nil, writeErr
 	}
 	h.mu.Unlock()
 
@@ -1126,30 +1158,15 @@ func (h *AgentWSHandler) OneShotLLM(ctx context.Context, llm *LLMSettingsForWork
 	waitCtx := ctx
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
-		waitCtx, cancel = context.WithTimeout(ctx, oneshotLLMDefaultTimeout)
+		waitCtx, cancel = context.WithTimeout(ctx, defaultTimeout)
 		defer cancel()
 	}
 
 	select {
 	case resp := <-ch:
-		if resp.LLMFallbackFrom != "" {
-			slog.Warn("one-shot LLM call answered by fallback",
-				"primary", resp.LLMFallbackFrom,
-				"fallback", resp.LLMProvider+"/"+resp.LLMModel,
-				"reason", resp.LLMFallbackReason,
-				"failed", resp.Error != "")
-		}
-		if resp.Error != "" {
-			// Preserve the ErrWorkerNotConnected sentinel so callers using
-			// errors.Is can distinguish a worker drop from a real provider error.
-			if resp.Error == ErrWorkerNotConnected.Error() {
-				return "", ErrWorkerNotConnected
-			}
-			return "", errors.New(resp.Error)
-		}
-		return resp.Summary, nil
+		return resp, nil
 	case <-waitCtx.Done():
-		return "", waitCtx.Err()
+		return nil, waitCtx.Err()
 	}
 }
 

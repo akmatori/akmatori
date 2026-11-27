@@ -148,7 +148,7 @@ func (f *ResponseFormatter) formatWithConfig(ctx context.Context, rawResponse, f
 		slog.Warn("response formatter: failed to load llm settings, using raw response", "err", err)
 		return rawResponse
 	}
-	if llmSettings == nil || llmSettings.APIKey == "" {
+	if llmSettings == nil || !llmSettings.IsConfigured() {
 		return rawResponse
 	}
 

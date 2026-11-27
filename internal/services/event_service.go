@@ -263,7 +263,7 @@ func (s *EventService) Classify(ctx context.Context, in EventInput, allowed []st
 		return FallbackEventVerdict(fallback, "no LLM caller")
 	}
 	settings, err := s.getLLMSettings()
-	if err != nil || settings == nil || settings.APIKey == "" {
+	if err != nil || settings == nil || !settings.IsConfigured() {
 		return FallbackEventVerdict(fallback, "LLM not configured")
 	}
 	worker := BuildLLMSettingsForWorker(settings)

@@ -811,7 +811,7 @@ var defaultModelsPerProvider = map[LLMProvider]string{
 	LLMProviderAntLing:    "Ling-2.6-1T",
 }
 
-// seedLLMProviders ensures one row per provider exists in the llm_settings table.
+// seedLLMProviders ensures one row per API-key provider exists in the llm_settings table.
 // Idempotent: seeds missing providers without touching existing rows so upgrades
 // that add new providers (e.g. nvidia, minimax, ant-ling) work correctly.
 func seedLLMProviders() error {
@@ -824,6 +824,9 @@ func seedLLMProviders() error {
 
 	created := 0
 	for _, p := range ValidLLMProviders() {
+		if p == LLMProviderOpenAICodex {
+			continue
+		}
 		var count int64
 		DB.Model(&LLMSettings{}).Where("provider = ?", p).Count(&count)
 		if count > 0 {
@@ -1507,7 +1510,7 @@ func GetLLMSettingsByID(id uint) (*LLMSettings, error) {
 
 // SetActiveLLMConfig deactivates all LLM configs and activates the one with the given ID.
 // Uses SELECT FOR UPDATE to prevent concurrent activation races.
-// Returns an error if the target config has no API key (validated under lock).
+// Returns an error if required saved settings are missing (validated under lock).
 func SetActiveLLMConfig(id uint) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
 		// Lock all LLM config rows to serialize concurrent activate/update calls
@@ -1526,7 +1529,10 @@ func SetActiveLLMConfig(id uint) error {
 		if target == nil {
 			return fmt.Errorf("LLM config with id %d not found", id)
 		}
-		if target.APIKey == "" {
+		if !target.IsConfigured() {
+			if target.Provider == LLMProviderOpenAICodex {
+				return ErrCodexModelRequired
+			}
 			return fmt.Errorf("cannot activate a configuration without an API key")
 		}
 		if err := tx.Model(&LLMSettings{}).Where("active = ?", true).Update("active", false).Error; err != nil {
@@ -1545,25 +1551,27 @@ func SetActiveLLMConfig(id uint) error {
 }
 
 // GetFallbackLLMSettings returns the config marked as fallback, or nil when
-// none is set (or the marked row is the active one or has no API key).
+// none is set (or the marked row is active or missing required settings).
 func GetFallbackLLMSettings() (*LLMSettings, error) {
 	if DB == nil {
 		return nil, gorm.ErrInvalidDB
 	}
 	var rows []LLMSettings
-	if err := DB.Where("fallback = ? AND active = ? AND api_key <> ''", true, false).
-		Order("id asc").Limit(1).Find(&rows).Error; err != nil {
+	if err := DB.Where("fallback = ? AND active = ?", true, false).
+		Order("id asc").Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	if len(rows) == 0 {
-		return nil, nil
+	for i := range rows {
+		if rows[i].IsConfigured() {
+			return &rows[i], nil
+		}
 	}
-	return &rows[0], nil
+	return nil, nil
 }
 
 // SetFallbackLLMConfig marks the config with the given ID as the fallback and
 // clears the flag on every other row. The active config cannot be the
-// fallback, and a fallback needs an API key. Same locking as
+// fallback, and a fallback needs its required settings. Same locking as
 // SetActiveLLMConfig, so the two cannot race into an active fallback.
 func SetFallbackLLMConfig(id uint) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
@@ -1584,7 +1592,10 @@ func SetFallbackLLMConfig(id uint) error {
 		if target.Active {
 			return ErrFallbackIsActive
 		}
-		if target.APIKey == "" {
+		if !target.IsConfigured() {
+			if target.Provider == LLMProviderOpenAICodex {
+				return ErrCodexModelRequired
+			}
 			return ErrFallbackNoAPIKey
 		}
 		if err := tx.Model(&LLMSettings{}).Where("fallback = ?", true).Update("fallback", false).Error; err != nil {
@@ -1618,9 +1629,10 @@ func ClearFallbackLLMConfig(id uint) error {
 
 // Fallback validation errors, matched by the settings handler.
 var (
-	ErrFallbackIsActive = errors.New("the active configuration cannot be the fallback")
-	ErrFallbackNoAPIKey = errors.New("cannot use a configuration without an API key as the fallback")
-	ErrFallbackKeyClear = errors.New("cannot clear the API key on the fallback configuration; remove it as fallback first")
+	ErrFallbackIsActive   = errors.New("the active configuration cannot be the fallback")
+	ErrFallbackNoAPIKey   = errors.New("cannot use a configuration without an API key as the fallback")
+	ErrFallbackKeyClear   = errors.New("cannot clear the API key on the fallback configuration; remove it as fallback first")
+	ErrCodexModelRequired = errors.New("a Codex subscription configuration requires a model")
 )
 
 // CreateLLMSettings creates a new LLM settings configuration.

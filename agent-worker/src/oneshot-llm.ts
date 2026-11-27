@@ -18,6 +18,7 @@ import type { AssistantMessage, Context, Message } from "@earendil-works/pi-ai";
 import type { LLMSettings, ProxyConfig } from "./types.js";
 import { applyProxyConfig } from "./proxy.js";
 import { resolveModel } from "./agent-runner.js";
+import { CODEX_PROVIDER, createCodexRuntime, resolveCodexAccessToken } from "./codex-auth.js";
 import { createSamplingPayloadHook } from "./sampling.js";
 import {
   isFallbackEligibleError,
@@ -132,7 +133,8 @@ async function runOneshotBody(params: OneshotLLMParams): Promise<string> {
   if (!params.user) {
     throw new Error("oneshot_llm: missing user prompt");
   }
-  if (!params.llmSettings || !params.llmSettings.api_key) {
+  const isCodex = params.llmSettings?.provider === CODEX_PROVIDER;
+  if (!params.llmSettings || (!isCodex && !params.llmSettings.api_key)) {
     throw new Error("oneshot_llm: missing LLM settings (no API key)");
   }
 
@@ -143,6 +145,9 @@ async function runOneshotBody(params: OneshotLLMParams): Promise<string> {
     params.llmSettings.model,
     params.llmSettings.base_url,
   );
+  const apiKey = isCodex
+    ? await resolveCodexAccessToken(await createCodexRuntime(), model, params.signal)
+    : params.llmSettings.api_key;
 
   const messages: Message[] = [
     {
@@ -161,25 +166,26 @@ async function runOneshotBody(params: OneshotLLMParams): Promise<string> {
   // temperature-rejection retry below still has a parameter to strip. top_p and
   // top_k have no StreamOptions equivalent at all, so they go in through the
   // payload hook, which is a no-op when neither is configured.
-  const samplingHook = createSamplingPayloadHook(
+  const samplingHook = isCodex ? undefined : createSamplingPayloadHook(
     { top_p: params.topP, top_k: params.topK },
     (message) => console.warn(`oneshot_llm ${params.requestId}: ${message}`),
   );
 
+  const maxTokens = isCodex ? undefined : params.maxTokens;
   const baseOptions = {
-    apiKey: params.llmSettings.api_key,
-    maxTokens:
-      params.maxTokens !== undefined && model.reasoning
-        ? params.maxTokens + REASONING_HEADROOM_TOKENS
-        : params.maxTokens,
+    apiKey,
+    maxTokens: maxTokens !== undefined && model.reasoning
+      ? maxTokens + REASONING_HEADROOM_TOKENS
+      : maxTokens,
     timeoutMs: params.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     signal: params.signal,
+    ...(isCodex ? { transport: "sse" as const } : {}),
     ...(samplingHook ? { onPayload: samplingHook } : {}),
   };
 
   const modelKey = `${params.llmSettings.provider}/${params.llmSettings.model}`;
   const sendTemperature =
-    params.temperature !== undefined && !temperatureRejectedModels.has(modelKey);
+    !isCodex && params.temperature !== undefined && !temperatureRejectedModels.has(modelKey);
 
   const startedAt = Date.now();
   // totalTimeoutMs caps the whole call: every request and retry sleep. Each

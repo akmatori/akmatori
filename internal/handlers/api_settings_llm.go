@@ -72,16 +72,24 @@ func (h *APIHandler) handleLLMSettingsByID(w http.ResponseWriter, r *http.Reques
 }
 
 // listLLMConfigs returns all LLM configurations with the active config ID.
-func (h *APIHandler) listLLMConfigs(w http.ResponseWriter, _ *http.Request) {
+func (h *APIHandler) listLLMConfigs(w http.ResponseWriter, r *http.Request) {
 	allSettings, err := database.GetAllLLMSettings()
 	if err != nil {
 		api.RespondError(w, http.StatusInternalServerError, "Failed to retrieve LLM settings")
 		return
 	}
 
+	codexConnected := false
+	for _, s := range allSettings {
+		if s.Provider == database.LLMProviderOpenAICodex {
+			w.Header().Set("Cache-Control", "no-store")
+			codexConnected = h.isCodexConnected(r.Context())
+			break
+		}
+	}
 	configs := make([]map[string]interface{}, 0, len(allSettings))
 	for _, s := range allSettings {
-		configs = append(configs, llmConfigResponse(&s))
+		configs = append(configs, llmConfigResponse(&s, codexConnected))
 	}
 	// Derive active_id from the same snapshot used for configs to avoid a
 	// race where a concurrent create+activate between two queries could
@@ -118,11 +126,11 @@ func (h *APIHandler) listLLMConfigs(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	// fallback_id mirrors GetFallbackLLMSettings(): the lowest-PK row marked
-	// fallback that is not active and has a key; 0 = no fallback.
+	// fallback that is not active and has the required settings.
 	var fallbackID uint
 	for i := range allSettings {
 		s := &allSettings[i]
-		if s.Fallback && !s.Active && s.APIKey != "" && (fallbackID == 0 || s.ID < fallbackID) {
+		if s.Fallback && !s.Active && s.IsConfigured() && (fallbackID == 0 || s.ID < fallbackID) {
 			fallbackID = s.ID
 		}
 	}
@@ -157,8 +165,19 @@ func (h *APIHandler) createLLMConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !database.IsValidLLMProvider(req.Provider) {
-		api.RespondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid provider: %s. Valid options: openai, anthropic, google, openrouter, nvidia, minimax, ant-ling, custom", req.Provider))
+		api.RespondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid provider: %s. Valid options: %v", req.Provider, database.ValidLLMProviders()))
 		return
+	}
+	isCodex := req.Provider == string(database.LLMProviderOpenAICodex)
+	if isCodex {
+		if req.APIKey != "" || req.BaseURL != "" || req.Temperature != nil || req.TopP != nil || req.TopK != nil || req.MaxTokens != nil {
+			api.RespondError(w, http.StatusBadRequest, "Codex subscription uses ChatGPT sign-in, the Codex endpoint, and provider sampling defaults")
+			return
+		}
+		req.Model = strings.TrimSpace(req.Model)
+		if req.Model == "" {
+			req.Model = "gpt-6.1-sol"
+		}
 	}
 	if req.BaseURL != "" && !isValidURL(req.BaseURL) {
 		api.RespondError(w, http.StatusBadRequest, "Invalid base_url: must be a valid HTTP or HTTPS URL")
@@ -186,7 +205,7 @@ func (h *APIHandler) createLLMConfig(w http.ResponseWriter, r *http.Request) {
 		Model:         req.Model,
 		ThinkingLevel: thinkingLevel,
 		BaseURL:       req.BaseURL,
-		Enabled:       req.APIKey != "",
+		Enabled:       isCodex || req.APIKey != "",
 		Temperature:   req.Temperature,
 		TopP:          req.TopP,
 		TopK:          req.TopK,
@@ -202,23 +221,24 @@ func (h *APIHandler) createLLMConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api.RespondJSON(w, http.StatusCreated, llmConfigResponse(settings))
+	api.RespondJSON(w, http.StatusCreated, h.llmConfig(w, r, settings))
 }
 
 // getLLMConfig returns a single LLM configuration by ID.
-func (h *APIHandler) getLLMConfig(w http.ResponseWriter, _ *http.Request, id uint) {
+func (h *APIHandler) getLLMConfig(w http.ResponseWriter, r *http.Request, id uint) {
 	settings, err := database.GetLLMSettingsByID(id)
 	if err != nil {
 		api.RespondError(w, http.StatusNotFound, "LLM configuration not found")
 		return
 	}
-	api.RespondJSON(w, http.StatusOK, llmConfigResponse(settings))
+	api.RespondJSON(w, http.StatusOK, h.llmConfig(w, r, settings))
 }
 
 // updateLLMConfig updates an existing LLM configuration by ID.
 func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id uint) {
 	// Quick existence check (non-authoritative, just for early 404)
-	if _, err := database.GetLLMSettingsByID(id); err != nil {
+	existing, err := database.GetLLMSettingsByID(id)
+	if err != nil {
 		api.RespondError(w, http.StatusNotFound, "LLM configuration not found")
 		return
 	}
@@ -227,6 +247,19 @@ func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id 
 	if err := api.DecodeJSON(r, &req); err != nil {
 		api.RespondError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if existing.Provider == database.LLMProviderOpenAICodex {
+		if req.APIKey != nil || (req.BaseURL != nil && *req.BaseURL != "") || req.Temperature.Value != nil || req.TopP.Value != nil || req.TopK.Value != nil || req.MaxTokens.Value != nil {
+			api.RespondError(w, http.StatusBadRequest, "Codex subscription uses ChatGPT sign-in, the Codex endpoint, and provider sampling defaults")
+			return
+		}
+		if req.Model != nil {
+			*req.Model = strings.TrimSpace(*req.Model)
+			if *req.Model == "" {
+				api.RespondError(w, http.StatusBadRequest, database.ErrCodexModelRequired.Error())
+				return
+			}
+		}
 	}
 
 	if req.Name != nil {
@@ -291,7 +324,7 @@ func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id 
 			api.RespondError(w, http.StatusInternalServerError, "Failed to retrieve configuration")
 			return
 		}
-		api.RespondJSON(w, http.StatusOK, llmConfigResponse(settings))
+		api.RespondJSON(w, http.StatusOK, h.llmConfig(w, r, settings))
 		return
 	}
 
@@ -316,7 +349,7 @@ func (h *APIHandler) updateLLMConfig(w http.ResponseWriter, r *http.Request, id 
 		}
 		return
 	}
-	api.RespondJSON(w, http.StatusOK, llmConfigResponse(settings))
+	api.RespondJSON(w, http.StatusOK, h.llmConfig(w, r, settings))
 }
 
 // deleteLLMConfig deletes an LLM configuration by ID.
@@ -336,12 +369,17 @@ func (h *APIHandler) deleteLLMConfig(w http.ResponseWriter, _ *http.Request, id 
 }
 
 // activateLLMConfig sets an LLM configuration as the globally active one.
-func (h *APIHandler) activateLLMConfig(w http.ResponseWriter, _ *http.Request, id uint) {
-	// All validation (existence, API key) happens inside the locked transaction
+func (h *APIHandler) activateLLMConfig(w http.ResponseWriter, r *http.Request, id uint) {
+	if !h.requireCodexConnection(w, r, id) {
+		return
+	}
+	// Saved settings are validated inside the locked transaction.
 	if err := database.SetActiveLLMConfig(id); err != nil {
 		errMsg := err.Error()
 		if containsString(errMsg, "not found") {
 			api.RespondError(w, http.StatusNotFound, "LLM configuration not found")
+		} else if errors.Is(err, database.ErrCodexModelRequired) {
+			api.RespondError(w, http.StatusBadRequest, err.Error())
 		} else if containsString(errMsg, "cannot activate") || containsString(errMsg, "API key") {
 			api.RespondError(w, http.StatusBadRequest, "Cannot activate a configuration without an API key")
 		} else {
@@ -356,15 +394,18 @@ func (h *APIHandler) activateLLMConfig(w http.ResponseWriter, _ *http.Request, i
 		api.RespondError(w, http.StatusInternalServerError, "Failed to retrieve activated configuration")
 		return
 	}
-	api.RespondJSON(w, http.StatusOK, llmConfigResponse(settings))
+	api.RespondJSON(w, http.StatusOK, h.llmConfig(w, r, settings))
 }
 
 // setFallbackLLMConfig marks a configuration as the fallback LLM: it answers
 // when the active configuration fails with a transient provider error.
-func (h *APIHandler) setFallbackLLMConfig(w http.ResponseWriter, _ *http.Request, id uint) {
+func (h *APIHandler) setFallbackLLMConfig(w http.ResponseWriter, r *http.Request, id uint) {
+	if !h.requireCodexConnection(w, r, id) {
+		return
+	}
 	if err := database.SetFallbackLLMConfig(id); err != nil {
 		switch {
-		case errors.Is(err, database.ErrFallbackIsActive), errors.Is(err, database.ErrFallbackNoAPIKey):
+		case errors.Is(err, database.ErrFallbackIsActive), errors.Is(err, database.ErrFallbackNoAPIKey), errors.Is(err, database.ErrCodexModelRequired):
 			api.RespondError(w, http.StatusBadRequest, err.Error())
 		case containsString(err.Error(), "not found"):
 			api.RespondError(w, http.StatusNotFound, "LLM configuration not found")
@@ -378,11 +419,11 @@ func (h *APIHandler) setFallbackLLMConfig(w http.ResponseWriter, _ *http.Request
 		api.RespondError(w, http.StatusInternalServerError, "Failed to retrieve fallback configuration")
 		return
 	}
-	api.RespondJSON(w, http.StatusOK, llmConfigResponse(settings))
+	api.RespondJSON(w, http.StatusOK, h.llmConfig(w, r, settings))
 }
 
 // clearFallbackLLMConfig removes the fallback flag from a configuration.
-func (h *APIHandler) clearFallbackLLMConfig(w http.ResponseWriter, _ *http.Request, id uint) {
+func (h *APIHandler) clearFallbackLLMConfig(w http.ResponseWriter, r *http.Request, id uint) {
 	if err := database.ClearFallbackLLMConfig(id); err != nil {
 		if containsString(err.Error(), "not found") {
 			api.RespondError(w, http.StatusNotFound, "LLM configuration not found")
@@ -396,11 +437,24 @@ func (h *APIHandler) clearFallbackLLMConfig(w http.ResponseWriter, _ *http.Reque
 		api.RespondError(w, http.StatusInternalServerError, "Failed to retrieve configuration")
 		return
 	}
-	api.RespondJSON(w, http.StatusOK, llmConfigResponse(settings))
+	api.RespondJSON(w, http.StatusOK, h.llmConfig(w, r, settings))
+}
+
+func (h *APIHandler) llmConfig(w http.ResponseWriter, r *http.Request, s *database.LLMSettings) map[string]interface{} {
+	codexConnected := false
+	if s.Provider == database.LLMProviderOpenAICodex {
+		w.Header().Set("Cache-Control", "no-store")
+		codexConnected = h.isCodexConnected(r.Context())
+	}
+	return llmConfigResponse(s, codexConnected)
 }
 
 // llmConfigResponse builds a standard response map for an LLM config, masking the API key.
-func llmConfigResponse(s *database.LLMSettings) map[string]interface{} {
+func llmConfigResponse(s *database.LLMSettings, codexConnected bool) map[string]interface{} {
+	configured := s.IsConfigured()
+	if s.Provider == database.LLMProviderOpenAICodex {
+		configured = configured && codexConnected
+	}
 	return map[string]interface{}{
 		"id":             s.ID,
 		"name":           s.Name,
@@ -409,7 +463,7 @@ func llmConfigResponse(s *database.LLMSettings) map[string]interface{} {
 		"thinking_level": s.ThinkingLevel,
 		"base_url":       s.BaseURL,
 		"api_key":        maskToken(s.APIKey),
-		"is_configured":  s.APIKey != "",
+		"is_configured":  configured,
 		"enabled":        s.Enabled,
 		"active":         s.Active,
 		"fallback":       s.Fallback,

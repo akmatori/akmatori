@@ -26,6 +26,15 @@ export const MODEL_SUGGESTIONS: Record<LLMProvider, { value: string; label: stri
     { value: 'gpt-5-mini', label: 'gpt-5-mini (Budget)' },
     { value: 'o4-mini', label: 'o4-mini (Reasoning)' },
   ],
+  'openai-codex': [
+    { value: 'gpt-6.1-sol', label: 'gpt-6.1-sol (Recommended)' },
+    { value: 'gpt-6-sol', label: 'gpt-6-sol' },
+    { value: 'gpt-6-astra', label: 'gpt-6-astra' },
+    { value: 'gpt-6-luna', label: 'gpt-6-luna' },
+    { value: 'gpt-5.6-sol', label: 'gpt-5.6-sol' },
+    { value: 'gpt-5.6-terra', label: 'gpt-5.6-terra' },
+    { value: 'gpt-5.6-luna', label: 'gpt-5.6-luna' },
+  ],
   anthropic: [
     // pi-ai 1.0.1 catalog. Opus 5.5 / Sonnet 5.5 carry a 1M context window
     // and adaptive thinking.

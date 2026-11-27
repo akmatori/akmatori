@@ -235,6 +235,7 @@ func (h *APIHandler) SetupRoutes(mux *http.ServeMux) {
 
 	// LLM settings
 	mux.HandleFunc("/api/settings/llm", h.handleLLMSettings)
+	mux.HandleFunc("/api/settings/llm/codex-auth", h.handleCodexAuth)
 	mux.HandleFunc("/api/settings/llm/", h.handleLLMSettingsByID)
 
 	// Runtime status for the UI status bar (worker connection)

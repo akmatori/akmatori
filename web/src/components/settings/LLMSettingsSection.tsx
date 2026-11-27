@@ -8,6 +8,7 @@ import { getErrorMessage } from '../../utils/errors';
 import { llmSettingsApi } from '../../api/client';
 import type { LLMConfig, LLMProvider, ThinkingLevel } from '../../types';
 import { MODEL_SUGGESTIONS } from './llmModelSuggestions';
+import CodexAccount from './CodexAccount';
 import {
   EMPTY_SAMPLING_FORM,
   SAMPLING_BOUNDS,
@@ -33,6 +34,7 @@ const THINKING_LEVELS: { value: ThinkingLevel; label: string }[] = [
 
 const PROVIDER_OPTIONS: { value: LLMProvider; label: string }[] = [
   { value: 'openai', label: 'OpenAI' },
+  { value: 'openai-codex', label: 'Codex Subscription' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'google', label: 'Google' },
   { value: 'openrouter', label: 'OpenRouter' },
@@ -97,9 +99,9 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
 
   const onStatusChangeRef = useLatestRef(onStatusChange);
 
-  const loadConfigs = useCallback(async () => {
+  const loadConfigs = useCallback(async (showSpinner = true) => {
     try {
-      setLoading(true);
+      if (showSpinner) setLoading(true);
       const data = await llmSettingsApi.list();
       setConfigs(data.configs || []);
       setActiveId(data.active_id);
@@ -111,12 +113,16 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
       setError('Failed to load LLM settings');
       console.error(err);
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   }, [onStatusChangeRef]);
 
   useEffect(() => {
     void loadConfigs();
+  }, [loadConfigs]);
+
+  const refreshCodexConfigs = useCallback(() => {
+    void loadConfigs(false);
   }, [loadConfigs]);
 
   const showSuccess = (msg: string) => {
@@ -169,7 +175,8 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
   };
 
   const handleSave = async () => {
-    const samplingError = validateSampling(form.sampling);
+    const isCodex = form.provider === 'openai-codex';
+    const samplingError = isCodex ? undefined : validateSampling(form.sampling);
     if (samplingError) {
       setError(samplingError);
       return;
@@ -182,26 +189,26 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
         await llmSettingsApi.create({
           provider: form.provider,
           name: form.name,
-          api_key: form.apiKey || undefined,
+          api_key: isCodex ? undefined : form.apiKey || undefined,
           model: form.model || undefined,
           thinking_level: form.thinkingLevel || undefined,
-          base_url: form.baseUrl || undefined,
-          ...dehydrateSamplingForCreate(form.sampling),
+          base_url: isCodex ? undefined : form.baseUrl || undefined,
+          ...(isCodex ? {} : dehydrateSamplingForCreate(form.sampling)),
         });
         showSuccess('Configuration created');
       } else if (formMode === 'edit' && editingId) {
         const updates: Record<string, string | number | null | undefined> = {
           // Blank boxes send explicit nulls so clearing an override sticks.
-          ...dehydrateSamplingForUpdate(form.sampling),
+          ...(isCodex ? {} : dehydrateSamplingForUpdate(form.sampling)),
         };
         updates.name = form.name;
         updates.model = form.model;
         updates.thinking_level = form.thinkingLevel;
-        updates.base_url = form.baseUrl;
-        // Blank → explicit null so clearing the override sticks. The thinking
-        // level only means something next to a model, so it is cleared with it.
-        if (form.apiKey && !form.apiKey.startsWith('****')) {
-          updates.api_key = form.apiKey;
+        if (!isCodex) {
+          updates.base_url = form.baseUrl;
+          if (form.apiKey && !form.apiKey.startsWith('****')) {
+            updates.api_key = form.apiKey;
+          }
         }
         await llmSettingsApi.update(editingId, updates);
         showSuccess('Configuration updated');
@@ -285,13 +292,14 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
   }
 
   const activeConfig = configs.find(c => c.id === activeId);
-  const otherConfigured = configs.filter(c => c.is_configured && c.id !== activeId);
+  const otherConfigs = configs.filter(c => (c.is_configured || c.provider === 'openai-codex') && c.id !== activeId);
   const fallbackConfig = configs.find(c => c.fallback && c.id !== activeId && c.is_configured);
   const hasConfigured = configs.some(c => c.is_configured);
 
   const renderForm = () => {
     const isCreate = formMode === 'create';
     const currentProvider = form.provider;
+    const isCodex = currentProvider === 'openai-codex';
     const suggestions = MODEL_SUGGESTIONS[currentProvider] || [];
 
     return (
@@ -346,7 +354,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
         </div>
 
         {/* API Key */}
-        <div>
+        {!isCodex && <div>
           <label className="block text-sm font-medium text-fg mb-1.5">
             API Key {isCreate && <span className="text-red-500">*</span>}
           </label>
@@ -365,7 +373,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
               Leave blank to keep existing key
             </p>
           )}
-        </div>
+        </div>}
 
         {/* Model Selection */}
         <div>
@@ -391,9 +399,9 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                 {!suggestions.some(s => s.value === form.model) && form.model && (
                   <option value="__custom__">Custom: {form.model}</option>
                 )}
-                <option value="__custom__">Other (enter manually)</option>
+                {!isCodex && <option value="__custom__">Other (enter manually)</option>}
               </select>
-              {(!suggestions.some(s => s.value === form.model) || form.model === '') && (
+              {!isCodex && (!suggestions.some(s => s.value === form.model) || form.model === '') && (
                 <input
                   type="text"
                   value={form.model}
@@ -422,7 +430,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
         >
           {showAdvanced ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
           Advanced settings
-          {(form.thinkingLevel !== 'medium' || form.baseUrl || hasSamplingOverrides(form.sampling)) && (
+          {(form.thinkingLevel !== 'medium' || (!isCodex && (form.baseUrl || hasSamplingOverrides(form.sampling)))) && (
             <span className="text-xs text-primary-600 dark:text-primary-400">(customized)</span>
           )}
         </button>
@@ -468,7 +476,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
             )}
 
             {/* Sampling parameters — every box is optional. */}
-            <div>
+            {!isCodex && <div>
               <div className="flex items-baseline justify-between mb-1.5">
                 <span className="text-sm font-medium text-fg">
                   Sampling parameters
@@ -516,7 +524,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                 extraction, correlation). Anthropic ignores temperature, Top P, and Top K while
                 extended thinking is enabled.
               </p>
-            </div>
+            </div>}
           </div>
         )}
 
@@ -527,7 +535,7 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
           </button>
           <button
             onClick={handleSave}
-            disabled={saving || !form.name.trim() || (isCreate && !form.apiKey)}
+            disabled={saving || !form.name.trim() || (isCreate && !isCodex && !form.apiKey)}
             className="btn btn-primary"
           >
             <Save className="w-4 h-4" />
@@ -542,6 +550,11 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
     <div className="space-y-5">
       {error && <ErrorMessage message={error} />}
       {success && <SuccessMessage message={success} />}
+
+      {((formMode !== 'closed' && form.provider === 'openai-codex')
+        || configs.some(c => c.provider === 'openai-codex')) && (
+        <CodexAccount onConnectionChange={refreshCodexConfigs} />
+      )}
 
       {/* Create/Edit Form */}
       {formMode !== 'closed' && renderForm()}
@@ -587,7 +600,9 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
       ) : activeConfig && !activeConfig.is_configured ? (
         <div className="rounded-lg border border-yellow-300 dark:border-yellow-600 bg-yellow-50 dark:bg-yellow-900/20 p-4">
           <p className="text-sm text-yellow-700 dark:text-yellow-400">
-            Your active LLM provider has no API key configured.
+            {activeConfig.provider === 'openai-codex'
+              ? 'Connect ChatGPT to use your active Codex configuration.'
+              : 'Your active LLM provider has no API key configured.'}
           </p>
           <button
             onClick={() => openEditForm(activeConfig)}
@@ -600,13 +615,13 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
       ) : null}
 
       {/* Other configured providers */}
-      {otherConfigured.length > 0 && (
+      {otherConfigs.length > 0 && (
         <div>
           <h3 className="text-xs font-semibold text-fg-subtler mb-2">
-            Other Configured Providers
+            Other LLM Configurations
           </h3>
           <div className="space-y-2">
-            {otherConfigured.map((config) => (
+            {otherConfigs.map((config) => (
               <div
                 key={config.id}
                 className="relative flex items-center justify-between p-4 rounded-lg border bg-surface border-line transition-colors"
@@ -635,14 +650,14 @@ export default function LLMSettingsSection({ onStatusChange }: LLMSettingsSectio
                 <div className="flex items-center gap-1 ml-3">
                   <button
                     onClick={() => handleActivate(config.id)}
-                    disabled={saving}
+                    disabled={saving || !config.is_configured}
                     className="px-2.5 py-1 rounded text-xs font-medium text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-colors"
                   >
                     Activate
                   </button>
                   <button
                     onClick={() => handleFallback(config.id, !config.fallback)}
-                    disabled={saving}
+                    disabled={saving || (!config.is_configured && !config.fallback)}
                     className="px-2.5 py-1 rounded text-xs font-medium text-fg-muted bg-surface-2 hover:text-fg transition-colors"
                     title={config.fallback
                       ? 'Stop using this configuration as the fallback'

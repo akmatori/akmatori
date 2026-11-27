@@ -191,9 +191,15 @@ export function applySamplingToPayload(
       break;
     }
 
-    case "openai-responses":
-    case "azure-openai-responses":
     case "openai-codex-responses": {
+      for (const key of ["temperature", "top_p", "top_k", "max_tokens"] as const) {
+        drop(key, "the Codex subscription endpoint does not support this parameter");
+      }
+      break;
+    }
+
+    case "openai-responses":
+    case "azure-openai-responses": {
       // Reasoning models on the Responses API reject sampling controls.
       if (next.reasoning !== undefined) {
         drop("temperature", "the Responses API rejects temperature while reasoning is enabled");
