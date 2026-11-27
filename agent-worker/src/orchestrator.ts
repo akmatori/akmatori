@@ -8,6 +8,7 @@
 import { WebSocketClient, type LLMUsedFields } from "./ws-client.js";
 import { AgentRunner, type ExecuteParams, type ResumeParams } from "./agent-runner.js";
 import { runOneshotWithFallback } from "./oneshot-llm.js";
+import { CodexAuth, CODEX_DEFAULT_MODEL, CODEX_PROVIDER } from "./codex-auth.js";
 import type {
   WebSocketMessage,
   LLMSettings,
@@ -44,6 +45,7 @@ export class Orchestrator {
   private readonly config: OrchestratorConfig;
   private readonly wsClient: WebSocketClient;
   private readonly runner: AgentRunner;
+  private readonly codexAuth = new CodexAuth();
   private readonly log: (msg: string) => void;
   private cachedProxyConfig: ProxyConfig | undefined;
   private stopped = false;
@@ -102,6 +104,7 @@ export class Orchestrator {
   async stop(): Promise<void> {
     this.log("Stopping orchestrator...");
     this.stopped = true;
+    await this.codexAuth.cancel();
     await this.runner.dispose();
     this.wsClient.close();
     this.log("Orchestrator stopped");
@@ -162,6 +165,10 @@ export class Orchestrator {
 
       case "oneshot_llm_request":
         this.handleOneshotLLM(msg);
+        break;
+
+      case "codex_auth_request":
+        void this.handleCodexAuth(msg);
         break;
 
       default:
@@ -355,6 +362,19 @@ export class Orchestrator {
     }
   }
 
+  private async handleCodexAuth(msg: WebSocketMessage): Promise<void> {
+    const { request_id, codex_auth_action } = msg;
+    if (!request_id || !codex_auth_action) return;
+
+    const response = { type: "codex_auth_response", request_id } as const;
+    try {
+      const status = await this.codexAuth.handle(codex_auth_action, msg.proxy_config ?? this.cachedProxyConfig);
+      this.wsClient.send({ ...response, codex_auth: status });
+    } catch {
+      this.wsClient.send({ ...response, error: "Could not access Codex credentials on the agent worker." });
+    }
+  }
+
   private handleOneshotLLM(msg: WebSocketMessage): void {
     const requestId = msg.request_id;
     if (!requestId) {
@@ -483,13 +503,13 @@ export class Orchestrator {
    * The Go API sends provider, api_key, model, thinking_level, and base_url fields.
    */
   private extractLLMSettings(msg: WebSocketMessage): LLMSettings | null {
-    const apiKey = msg.api_key;
-    if (!apiKey) return null;
+    const isCodex = msg.provider === CODEX_PROVIDER;
+    if (!msg.api_key && !isCodex) return null;
 
     return {
       provider: (msg.provider as LLMSettings["provider"]) ?? "openai",
-      api_key: apiKey,
-      model: msg.model ?? "gpt-5.5",
+      api_key: msg.api_key ?? "",
+      model: msg.model ?? (isCodex ? CODEX_DEFAULT_MODEL : "gpt-5.5"),
       thinking_level: this.mapThinkingLevel(msg.thinking_level),
       base_url: msg.base_url,
       name: msg.llm_name,
@@ -503,15 +523,14 @@ export class Orchestrator {
   }
 
   /**
-   * Fallback config from the frame's `fallback_llm`; undefined when absent or
-   * without an API key, so the run keeps its single-config behaviour.
+   * Fallback config from the frame's `fallback_llm`.
    */
   private extractFallbackSettings(cfg: WireLLMConfig | undefined): LLMSettings | undefined {
-    if (!cfg || !cfg.api_key || !cfg.provider) return undefined;
+    if (!cfg?.provider || (!cfg.api_key && cfg.provider !== CODEX_PROVIDER)) return undefined;
     return {
       provider: cfg.provider as LLMSettings["provider"],
-      api_key: cfg.api_key,
-      model: cfg.model ?? "gpt-5.5",
+      api_key: cfg.api_key ?? "",
+      model: cfg.model ?? (cfg.provider === CODEX_PROVIDER ? CODEX_DEFAULT_MODEL : "gpt-5.5"),
       thinking_level: this.mapThinkingLevel(cfg.thinking_level),
       base_url: cfg.base_url,
       name: cfg.name,

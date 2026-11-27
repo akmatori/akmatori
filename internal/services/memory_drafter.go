@@ -69,7 +69,7 @@ func (d *MemoryDrafter) draftWithLLM(ctx context.Context, text string) (MemoryDr
 	if err != nil {
 		return MemoryDraft{}, fmt.Errorf("load llm settings: %w", err)
 	}
-	if settings == nil || settings.APIKey == "" {
+	if settings == nil || !settings.IsConfigured() {
 		return MemoryDraft{}, ErrWorkerNotConnected
 	}
 	worker := BuildLLMSettingsForWorker(settings)

@@ -16,7 +16,8 @@ export type APIToWorkerMessageType =
   | "continue_incident"
   | "cancel_incident"
   | "proxy_config_update"
-  | "oneshot_llm_request";
+  | "oneshot_llm_request"
+  | "codex_auth_request";
 
 /** Messages from agent worker to API */
 export type WorkerToAPIMessageType =
@@ -25,9 +26,19 @@ export type WorkerToAPIMessageType =
   | "agent_error"
   | "heartbeat"
   | "status"
-  | "oneshot_llm_response";
+  | "oneshot_llm_response"
+  | "codex_auth_response";
 
 export type MessageType = APIToWorkerMessageType | WorkerToAPIMessageType;
+
+export type CodexAuthAction = "status" | "start" | "cancel" | "disconnect";
+
+export interface CodexAuthStatus {
+  connected: boolean;
+  pending: boolean;
+  user_code?: string;
+  error?: string;
+}
 
 // ---------------------------------------------------------------------------
 // Proxy configuration (matches Go ProxyConfig struct)
@@ -48,6 +59,7 @@ export interface ProxyConfig {
 
 export type LLMProvider =
   | "openai"
+  | "openai-codex"
   | "anthropic"
   | "google"
   | "openrouter"
@@ -125,6 +137,8 @@ export interface ToolAllowlistEntry {
  */
 export interface WebSocketMessage {
   type: MessageType;
+  codex_auth_action?: CodexAuthAction;
+  codex_auth?: CodexAuthStatus;
   incident_id?: string;
   task?: string;
   message?: string;

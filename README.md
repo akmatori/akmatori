@@ -32,7 +32,7 @@ infrastructure through real tools, and executes remediation behind approval gate
 
 ## Key Features
 
-- **Multi-LLM**: OpenAI, Anthropic, Google, OpenRouter, NVIDIA NIM, MiniMax, Ant Ling, or any OpenAI-compatible on-prem endpoint (GLM, Kimi, Mistral, LLaMA, …)
+- **Multi-LLM**: OpenAI, ChatGPT sign-in for Codex subscriptions, Anthropic, Google, OpenRouter, NVIDIA NIM, MiniMax, Ant Ling, or any OpenAI-compatible on-prem endpoint (GLM, Kimi, Mistral, LLaMA, …)
 - **Multi-source alert ingestion**: Alertmanager, PagerDuty, Grafana, Datadog, and Zabbix webhooks, plus Slack channel monitoring
 - **Agentic investigation**: every incident runs a full agent session that searches your runbooks and cross-incident memory before it touches infrastructure
 - **Approval-gated remediation**: risky actions become proposals you approve in the UI or Slack before anything executes
@@ -53,6 +53,7 @@ infrastructure through real tools, and executes remediation behind approval gate
 | Provider | Models |
 |----------|--------|
 | **OpenAI** | GPT-6.1 Sol, GPT-6 (Sol / Astra / Luna), GPT-5.6 (Terra / Sol / Luna), GPT-5.5, GPT-5.5 Pro, GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex, GPT-5 Mini, o4-mini |
+| **Codex Subscription** | GPT-6.1 Sol, GPT-6 (Sol / Astra / Luna), GPT-5.6 (Terra / Sol / Luna), subject to your ChatGPT account's access |
 | **Anthropic** | Claude Fable 5.1 / 5, Opus 5.5, Sonnet 5.5, Opus 5, Sonnet 5, Opus 4.8 / 4.7, Sonnet 4.6, Haiku 4.5 |
 | **Google** | Gemini 3.1 Pro Preview, Gemini 3.5 – 3.8 Flash, Gemini 3.1 Flash Lite, Gemini 3 Pro / Flash Preview, Gemini 2.5 Pro / Flash, 2.0 Flash |
 | **OpenRouter** | 100+ models from every major lab |
@@ -61,13 +62,13 @@ infrastructure through real tools, and executes remediation behind approval gate
 | **Ant Ling** | Ling-2.6-1T, Ling-2.6-flash, Ring-2.6-1T |
 | **Custom / On-prem** | Any OpenAI-compatible endpoint (GLM, Kimi, Mistral, LLaMA, vLLM, …) |
 
-Model lists track the in-app picker; the model field is free-text, so newer model IDs work without an upgrade.
+Model lists track the in-app picker. API-key providers also accept custom model IDs.
 
 ## Quick Start
 
 The recommended install pulls pre-built multi-arch images from GHCR — no `git clone`, no local build.
 
-**Prerequisites:** Docker with Compose v2+, an API key for any supported LLM provider (or an on-prem OpenAI-compatible endpoint), and optionally a Slack App.
+**Prerequisites:** Docker with Compose v2+, a supported LLM API key, a ChatGPT account with Codex access, or an OpenAI-compatible on-prem endpoint. A Slack App is optional.
 
 1. Download the release assets (compose file + nginx config):
 
@@ -100,13 +101,23 @@ The recommended install pulls pre-built multi-arch images from GHCR — no `git 
 
 4. Open the web dashboard at `http://localhost:8080` (username `admin`). The first visit runs a one-time setup wizard that lets you set the admin password.
 
-5. Configure your LLM provider in **Settings → LLM Provider**.
+5. Configure your LLM provider in **Settings → AI models**. For ChatGPT sign-in, follow [Use a Codex subscription](#use-a-codex-subscription).
 
 6. (Optional) Connect Slack:
    - **Connectors → Add → Browse connectors → Slack** to register your bot/signing/app tokens.
    - On the Slack connector, **Channels → New channel** to attach posting and listening destinations. Tick `is_default_post` on the channel that should receive alerts when an alert source does not pin one explicitly. `can_post` / `can_listen` decide whether the channel appears in the alert-source picker or is monitored for inbound mentions.
 
 7. (Optional) Schedule recurring runs in **Cron Jobs**: pick a schedule, write a prompt, choose whether the run may call your connector tools and which built-in tools it gets, and point it at one of your Channels. Every tick runs as a full agent investigation under the `cron-agent` system skill.
+
+### Use a Codex subscription
+
+1. Enable device code authorization in ChatGPT security settings or ask your workspace admin to enable it. [OpenAI authentication guide](https://developers.openai.com/codex/auth#preferred-device-code-authentication-beta)
+2. In **Settings → AI models**, click **Add Configuration**, select **Codex Subscription**, and click **Connect ChatGPT**. Open the device sign-in link and enter the displayed code.
+3. Choose a model, save the configuration, and click **Activate**. You can also use a connected Codex configuration as a fallback.
+
+Each Akmatori installation shares one ChatGPT account across its Codex configurations. The worker refreshes the OAuth credentials as needed. **Reconnect** replaces the account after successful approval and **Disconnect** removes its saved credentials from the worker.
+
+Docker Compose preserves the worker's credential file in the `agent_sessions` volume. The default Helm chart uses an ephemeral worker volume, so a replacement pod requires signing in again. The worker stores this file with owner-only permissions. Processes running as the worker user, including its shell tools, share that filesystem access.
 
 ### Upgrade
 

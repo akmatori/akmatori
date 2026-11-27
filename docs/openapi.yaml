@@ -481,7 +481,8 @@ components:
             answered instead; absent for a run on the active config.
         fallback_reason:
           type: string
-          description: The active config's error, or "primary skipped: circuit breaker open".
+          description: >-
+            The active config's error, or "primary skipped: circuit breaker open".
         status:
           type: string
           enum: [running, completed, failed, superseded]
@@ -1399,22 +1400,25 @@ paths:
       responses:
         '200':
           description: Per-provider LLM settings
-    put:
-      summary: Update LLM settings
-      operationId: updateLLMSettings
+    post:
+      summary: Create an LLM configuration
+      operationId: createLLMConfig
       tags: [Settings]
       requestBody:
         content:
           application/json:
             schema:
               type: object
-              required: [provider]
+              required: [provider, name]
               properties:
+                name:
+                  type: string
                 provider:
                   type: string
-                  enum: [openai, anthropic, google, openrouter, custom]
+                  enum: [openai, openai-codex, anthropic, google, openrouter, nvidia, minimax, ant-ling, custom]
                 api_key:
                   type: string
+                  description: Codex subscription uses ChatGPT device sign-in.
                 model:
                   type: string
                 thinking_level:
@@ -1452,10 +1456,52 @@ paths:
                   maximum: 1000000
                   description: Output token cap override; null clears it back to the model default.
       responses:
-        '200':
-          description: Updated settings
+        '201':
+          description: Created configuration
         '400':
           description: Validation error (sampling parameter out of range, invalid provider/thinking_level/base_url)
+
+  /settings/llm/codex-auth:
+    get:
+      summary: Read the shared Codex account and device sign-in status
+      operationId: getCodexAuth
+      tags: [Settings]
+      responses:
+        '200': &CodexAuthResponse
+          description: Codex sign-in status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connected, pending]
+                properties:
+                  connected: {type: boolean}
+                  pending: {type: boolean}
+                  user_code: {type: string, description: Temporary code for ChatGPT device sign-in}
+                  error: {type: string, description: Failure of the pending sign-in}
+        '424': &CodexAuthUnavailable
+          description: Agent worker sign-in unavailable
+    post:
+      summary: Start ChatGPT device sign-in
+      operationId: startCodexAuth
+      tags: [Settings]
+      responses:
+        '200': *CodexAuthResponse
+        '424': *CodexAuthUnavailable
+    patch:
+      summary: Cancel pending ChatGPT device sign-in
+      operationId: cancelCodexAuth
+      tags: [Settings]
+      responses:
+        '200': *CodexAuthResponse
+        '424': *CodexAuthUnavailable
+    delete:
+      summary: Disconnect the shared Codex account
+      operationId: disconnectCodexAuth
+      tags: [Settings]
+      responses:
+        '200': *CodexAuthResponse
+        '424': *CodexAuthUnavailable
 
   /settings/llm/{id}/fallback:
     parameters:
@@ -1479,7 +1525,7 @@ paths:
         '200':
           description: The configuration, with fallback true
         '400':
-          description: The configuration is active or has no API key
+          description: The configuration is active or missing provider credentials
         '404':
           description: Configuration not found
     delete:

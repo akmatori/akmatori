@@ -284,7 +284,7 @@ func (e *IncidentMemoryExtractor) callLLM(ctx context.Context, user string) (str
 	if err != nil {
 		return "", fmt.Errorf("load llm settings: %w", err)
 	}
-	if settings == nil || settings.APIKey == "" {
+	if settings == nil || !settings.IsConfigured() {
 		return "", ErrWorkerNotConnected
 	}
 	worker := BuildLLMSettingsForWorker(settings)

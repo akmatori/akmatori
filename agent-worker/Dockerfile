@@ -4,9 +4,10 @@
 # - Connects to API via WebSocket for incident orchestration
 # - Calls MCP Gateway over HTTP for tool execution (SSH, Zabbix)
 #
-# Security: This container has NO database access and NO direct secrets.
+# Security: This container has no database access.
 # Tool credentials are fetched by MCP Gateway at execution time.
-# LLM API keys are passed via WebSocket from API.
+# LLM API keys are passed via WebSocket from API. The optional Codex OAuth
+# account is stored in the worker's persistent agent directory.
 
 # Build stage. Node is pinned to a minor: pi >= 1.3.0 needs >= 22.19.0, and a
 # floating `22` tag would change the runtime under us on every rebuild.

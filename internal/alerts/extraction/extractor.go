@@ -151,7 +151,7 @@ func (e *AlertExtractor) extract(ctx context.Context, messageText, customPrompt 
 		return fail("LLM settings unavailable")
 	}
 
-	if settings == nil || settings.APIKey == "" {
+	if settings == nil || !settings.IsConfigured() {
 		slog.Info("LLM not configured, using fallback extraction")
 		return fail("LLM not configured")
 	}

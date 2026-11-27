@@ -21,10 +21,11 @@ import {
   getAgentDir,
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
-import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
+import { getBuiltinModel, getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import type { Model, ThinkingLevel as PiThinkingLevel } from "@earendil-works/pi-ai";
 import type { LLMSettings, ExecuteResult, ProxyConfig, ThinkingLevel, ToolAllowlistEntry } from "./types.js";
 import { applyProxyConfig } from "./proxy.js";
+import { CODEX_PROVIDER, createCodexRuntime, resolveCodexAccessToken } from "./codex-auth.js";
 import { createSamplingPayloadHook, pickSamplingParams } from "./sampling.js";
 import {
   isFallbackEligibleError,
@@ -348,6 +349,14 @@ function resolveModelSpec(
   modelId: string,
   baseUrl?: string,
 ): Model<any> {
+  if (provider === CODEX_PROVIDER) {
+    const model = getBuiltinModels(CODEX_PROVIDER).find((entry) => entry.id === modelId);
+    if (!model) {
+      throw new Error(`Unknown Codex subscription model "${modelId}". Choose a model from the Codex catalog.`);
+    }
+    // Subscription requests count toward the ChatGPT plan's Codex usage.
+    return { ...model, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  }
   try {
     const builtInModel = getBuiltinModel(provider as any, modelId as any);
     // pi-ai may return undefined for unknown/custom models instead of throwing.
@@ -822,40 +831,24 @@ export class AgentRunner {
     // object resolved below); `allowModelNetwork: false` keeps startup offline —
     // since pi 0.84.0 that flag is the *only* thing gating network access here,
     // because setRuntimeApiKey no longer accepts catalog-refresh options.
-    const modelRuntime = await ModelRuntime.create({
-      modelsPath: null,
-      allowModelNetwork: false,
-    });
-    // Key the credential by the runtime provider id, which is what the resolved
-    // model carries and therefore what pi looks up during auth.
-    await setRuntimeApiKeyTolerantly(
-      modelRuntime as unknown as ProviderRegisteringRuntime,
-      runtimeProviderId(params.llmSettings.provider),
-      params.llmSettings.api_key,
-    );
-
-    // Model
+    const { provider, api_key: apiKey } = params.llmSettings;
     const model = resolveModel(
-      params.llmSettings.provider,
+      provider,
       params.llmSettings.model,
       params.llmSettings.base_url,
     );
-
-    // `setRuntimeApiKey` above stores the credential but does not create a
-    // provider entry, and pi refuses to resolve auth for a provider it has no
-    // registry entry for. Register one for provider ids pi does not ship —
-    // in practice `custom`, the on-prem/OpenAI-compatible endpoint option.
-    if (
-      await ensureProviderAuthResolvable(
-        modelRuntime as unknown as ProviderRegisteringRuntime,
-        runtimeProviderId(params.llmSettings.provider),
-        params.llmSettings.api_key,
-        model,
-      )
-    ) {
-      console.log(
-        `[agent-runner] registered provider "${runtimeProviderId(params.llmSettings.provider)}" on the parent runtime (not a pi built-in)`,
-      );
+    const modelRuntime = provider === CODEX_PROVIDER
+      ? await createCodexRuntime(true)
+      : await ModelRuntime.create({ modelsPath: null, allowModelNetwork: false });
+    if (provider === CODEX_PROVIDER) {
+      await resolveCodexAccessToken(modelRuntime, model);
+    } else {
+      const runtime = modelRuntime as unknown as ProviderRegisteringRuntime;
+      const providerId = runtimeProviderId(provider);
+      await setRuntimeApiKeyTolerantly(runtime, providerId, apiKey);
+      if (await ensureProviderAuthResolvable(runtime, providerId, apiKey, model)) {
+        console.log(`[agent-runner] registered provider "${providerId}" on the parent runtime (not a pi built-in)`);
+      }
     }
 
     const thinkingLevel = mapThinkingLevel(params.llmSettings.thinking_level);

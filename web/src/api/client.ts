@@ -15,6 +15,7 @@ import type {
   UpdateChannelRequest,
   ListChannelsFilter,
   LLMConfig,
+  CodexAuthStatus,
   LLMSettingsListResponse,
   CreateLLMConfigRequest,
   UpdateLLMConfigRequest,
@@ -383,6 +384,13 @@ export const llmSettingsApi = {
     fetchApi<LLMConfig>(`/api/settings/llm/${id}/fallback`, {
       method: 'DELETE',
     }),
+};
+
+export const codexAuthApi = {
+  status: () => fetchApi<CodexAuthStatus>('/api/settings/llm/codex-auth'),
+  start: () => fetchApi<CodexAuthStatus>('/api/settings/llm/codex-auth', { method: 'POST' }),
+  cancel: () => fetchApi<CodexAuthStatus>('/api/settings/llm/codex-auth', { method: 'PATCH' }),
+  disconnect: () => fetchApi<CodexAuthStatus>('/api/settings/llm/codex-auth', { method: 'DELETE' }),
 };
 
 // Proxy Settings API

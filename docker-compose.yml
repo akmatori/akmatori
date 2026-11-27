@@ -7,7 +7,7 @@
 #
 # Security:
 # - Agent container has NO database access
-# - Agent container has NO direct secrets
+# - Agent container stores the optional Codex OAuth credentials in agent_sessions
 # - Tool credentials fetched by MCP Gateway at execution time
 #
 # First-Run Setup:

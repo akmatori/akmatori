@@ -201,7 +201,7 @@ func (s *ContextFileSummarizer) summarizeWithLLM(ctx context.Context, file *data
 		return "", "", fmt.Errorf("load llm settings: %w", err)
 	}
 	worker := BuildLLMSettingsForWorker(settings)
-	if worker == nil || worker.APIKey == "" {
+	if worker == nil {
 		return "", "", errors.New("no active LLM provider")
 	}
 
